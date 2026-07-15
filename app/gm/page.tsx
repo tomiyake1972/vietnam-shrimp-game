@@ -73,7 +73,10 @@ export default function GmPage() {
                     <span className="ml-3 text-sm text-gray-300">{game.title}</span>
                     <span className="ml-3 text-xs text-gray-500">{game.currentYear}年Q{game.currentQuarter}</span>
                   </div>
-                  <Link href={`/lobby/${game.gameCode}`} className="text-xs text-blue-400 hover:text-blue-300">開く →</Link>
+                  <div className="flex items-center gap-3">
+                    <Link href={`/gm/${game.gameCode}`} className="text-xs text-yellow-400 hover:text-yellow-300">管理 →</Link>
+                    <Link href={`/lobby/${game.gameCode}`} className="text-xs text-blue-400 hover:text-blue-300">開く →</Link>
+                  </div>
                 </div>
               ))}
             </div>

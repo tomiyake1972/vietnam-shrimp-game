@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { redis } from "../../lib/redis";
-import { GameSession } from "../../lib/gameTypes";
-import { COMPANIES, CompanyId } from "../../lib/gameData";
+import { redis, parseStored } from "../../lib/redis";
+import { CompanyState, ConfirmedOrder, GameSession, PlayerType } from "../../lib/gameTypes";
+import { CompanyId } from "../../lib/gameData";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { title, players } = body;
+  const { title, players } = body as { title?: string; players?: Record<CompanyId, PlayerType> };
   const gameCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-  const defaultOrders: Record<string, any[]> = {};
-  Object.keys(COMPANIES).forEach((id) => { defaultOrders[id] = []; });
+  const defaultOrders: Record<CompanyId, ConfirmedOrder[]> = { A: [], B: [], C: [], D: [], E: [] };
   const session: GameSession = {
     gameCode, title: title || `ゲーム ${gameCode}`, createdAt: new Date().toISOString(),
     currentYear: 2015, currentQuarter: 1, currentPhase: 0, status: "playing",
     players: players || { A: "human", B: "ai-b", C: "ai-b", D: "ai-b", E: "ai-b" },
-    confirmedOrders: defaultOrders as any,
+    confirmedOrders: defaultOrders,
+    history: [],
   };
-  const initialStates: Record<string, any> = {
+  const initialStates: Record<CompanyId, CompanyState> = {
     A: { cash: 20, totalAssets: 270, equity: 100, debtEquityRatio: 1.3, creditScore: 98, farmingArea: 1800, processingCapacity: 8000 },
     B: { cash: 20, totalAssets: 155, equity: 45, debtEquityRatio: 2.4, creditScore: 75, farmingArea: 1200, processingCapacity: 5000 },
     C: { cash: 6, totalAssets: 114, equity: 40, debtEquityRatio: 1.75, creditScore: 65, farmingArea: 800, processingCapacity: 3500 },
@@ -34,7 +34,7 @@ export async function GET() {
   const codes = await redis.lrange("games", 0, 19);
   const sessions = await Promise.all(codes.map(async (code) => {
     const data = await redis.get(`game:${code}`);
-    return data ? JSON.parse(data as string) : null;
+    return parseStored<GameSession>(data);
   }));
   return NextResponse.json(sessions.filter(Boolean));
 }
