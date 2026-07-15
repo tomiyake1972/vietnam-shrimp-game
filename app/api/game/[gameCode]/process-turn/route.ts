@@ -4,6 +4,7 @@ import { CompanyId } from "../../../../lib/gameData";
 import { CompanyDecision, CompanyState, GameSession, TurnResult } from "../../../../lib/gameTypes";
 import { nextQuarter, resolveCompanyTurn } from "../../../../lib/gameEngine";
 import { companyStateKey, decisionsKey, formatPeriod, gameKey, resultsKey } from "../../../../lib/redisKeys";
+import { normalizeGameSession } from "../../../../lib/gameSession";
 
 const COMPANY_IDS: CompanyId[] = ["A", "B", "C", "D", "E"];
 
@@ -11,8 +12,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ ga
   const { gameCode } = await params;
 
   const sessionData = await redis.get(gameKey(gameCode));
-  const session = parseStored<GameSession>(sessionData);
-  if (!session) return NextResponse.json({ error: "Game not found" }, { status: 404 });
+  const storedSession = parseStored<GameSession>(sessionData);
+  if (!storedSession) return NextResponse.json({ error: "Game not found" }, { status: 404 });
+  const session = normalizeGameSession(storedSession);
 
   const currentPeriod = formatPeriod(session.currentYear, session.currentQuarter);
 
@@ -53,7 +55,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ ga
     currentYear: nextYear,
     currentQuarter: nextQ,
     currentPhase: 0,
-    history: [...(session.history ?? []), currentPeriod],
+    history: [...session.history, currentPeriod],
+    updatedAt: new Date().toISOString(),
   };
   await redis.set(gameKey(gameCode), JSON.stringify(updatedSession));
 

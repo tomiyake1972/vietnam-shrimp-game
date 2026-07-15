@@ -3,6 +3,8 @@ import { redis, parseStored } from "../../lib/redis";
 import { CompanyState, ConfirmedOrder, GameSession, PlayerType } from "../../lib/gameTypes";
 import { CompanyId } from "../../lib/gameData";
 import { companyStateKey, gameKey, gamesListKey } from "../../lib/redisKeys";
+import { appEnvironment, isProduction } from "../../lib/env";
+import { generateRandomSeed, normalizeGameSession, sanitizeRandomSeed } from "../../lib/gameSession";
 
 const MAX_GAME_CODE_ATTEMPTS = 10;
 
@@ -25,7 +27,11 @@ async function generateUniqueGameCode(): Promise<string> {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { title, players } = body as { title?: string; players?: Record<CompanyId, PlayerType> };
+  const { title, players, randomSeed: requestedSeed } = body as {
+    title?: string;
+    players?: Record<CompanyId, PlayerType>;
+    randomSeed?: string;
+  };
 
   let gameCode: string;
   try {
@@ -35,13 +41,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
+  // isTestGameはクライアントからの入力を一切参照せず、サーバー側の環境判定のみで決定する
+  // （本番でリクエストボディを細工してもテストゲームを作成できない）。
+  const isTestGame = !isProduction;
+  const randomSeed = isTestGame ? (sanitizeRandomSeed(requestedSeed) ?? generateRandomSeed()) : "";
+
   const defaultOrders: Record<CompanyId, ConfirmedOrder[]> = { A: [], B: [], C: [], D: [], E: [] };
+  const now = new Date().toISOString();
   const session: GameSession = {
-    gameCode, title: title || `ゲーム ${gameCode}`, createdAt: new Date().toISOString(),
+    gameCode, title: title || `ゲーム ${gameCode}`, createdAt: now, updatedAt: now,
     currentYear: 2015, currentQuarter: 1, currentPhase: 0, status: "playing",
     players: players || { A: "human", B: "ai-b", C: "ai-b", D: "ai-b", E: "ai-b" },
     confirmedOrders: defaultOrders,
     history: [],
+    isTestGame,
+    environment: appEnvironment,
+    randomSeed,
   };
   const initialStates: Record<CompanyId, CompanyState> = {
     A: { cash: 20, totalAssets: 270, equity: 100, debtEquityRatio: 1.3, creditScore: 98, farmingArea: 1800, processingCapacity: 8000 },
@@ -62,7 +77,8 @@ export async function GET() {
   const codes = await redis.lrange(gamesListKey(), 0, 19);
   const sessions = await Promise.all(codes.map(async (code) => {
     const data = await redis.get(gameKey(code));
-    return parseStored<GameSession>(data);
+    const parsed = parseStored<GameSession>(data);
+    return parsed ? normalizeGameSession(parsed) : null;
   }));
   return NextResponse.json(sessions.filter(Boolean));
 }

@@ -3,11 +3,13 @@ import { redis, parseStored } from "../../../lib/redis";
 import { CompanyState, GameSession } from "../../../lib/gameTypes";
 import { CompanyId } from "../../../lib/gameData";
 import { companyStateKey, gameKey } from "../../../lib/redisKeys";
+import { normalizeGameSession } from "../../../lib/gameSession";
 export async function GET(_: NextRequest, { params }: { params: Promise<{ gameCode: string }> }) {
   const { gameCode } = await params;
   const data = await redis.get(gameKey(gameCode));
-  const session = parseStored<GameSession>(data);
-  if (!session) return NextResponse.json({ error: "Game not found" }, { status: 404 });
+  const stored = parseStored<GameSession>(data);
+  if (!stored) return NextResponse.json({ error: "Game not found" }, { status: 404 });
+  const session = normalizeGameSession(stored);
   const companyStates: Partial<Record<CompanyId, CompanyState>> = {};
   for (const id of ["A","B","C","D","E"] as CompanyId[]) {
     const state = await redis.get(companyStateKey(gameCode, id));
