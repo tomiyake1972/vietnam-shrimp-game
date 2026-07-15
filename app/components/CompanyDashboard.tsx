@@ -69,7 +69,7 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
   const handleSubmit = async () => {
     setSubmitting(true);
     if (gameCode) {
-      await fetch(`/api/game/${gameCode}/decisions`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ companyId: profile.id, phases: decisions }) });
+      await fetch(`/api/game/${gameCode}/decisions`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ companyId: profile.id, phases: decisions, isGmTestSubmission: Boolean(isGmTestMode) }) });
     }
     setSubmitted(true); setSubmitting(false);
   };
