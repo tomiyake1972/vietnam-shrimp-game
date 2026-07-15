@@ -2,41 +2,94 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { COMPANIES, CompanyId } from "../../lib/gameData";
-import { CompanyDecision, CompanyState, GameSession, TurnResult } from "../../lib/gameTypes";
+import { CompanyState, GameSession, PlayerType, SubmissionStatusResponse, SubmittedBy, TurnResult } from "../../lib/gameTypes";
 
 const COMPANY_IDS: CompanyId[] = ["A", "B", "C", "D", "E"];
+
+const PLAYER_TYPE_LABELS: Record<PlayerType, string> = {
+  human: "Human",
+  "ai-a": "AI-A",
+  "ai-b": "AI-B",
+  "ai-c": "AI-C",
+};
+
+const SUBMITTED_BY_LABELS: Record<SubmittedBy, string> = {
+  player: "Player",
+  "gm-test": "GM Test",
+  ai: "AI",
+  unknown: "Unknown",
+};
+
+// 保存値はUTCのISO文字列のまま。表示時にブラウザのタイムゾーン設定に依存せず、
+// 常に日本時間として読めるよう明示的にAsia/Tokyoへ変換する。
+function formatJST(iso: string | null): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+}
 
 interface Props { gameCode: string; isProduction: boolean; }
 
 export default function GmGameConsole({ gameCode, isProduction }: Props) {
   const [session, setSession] = useState<GameSession | null>(null);
   const [companyStates, setCompanyStates] = useState<Record<string, CompanyState>>({});
-  const [decisions, setDecisions] = useState<Record<string, CompanyDecision>>({});
+  const [submissionStatus, setSubmissionStatus] = useState<SubmissionStatusResponse | null>(null);
+  const [submissionError, setSubmissionError] = useState("");
+  const [refreshTick, setRefreshTick] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [lastResult, setLastResult] = useState<TurnResult | null>(null);
   const [error, setError] = useState("");
 
   async function load(code: string) {
-    const [gameRes, decisionsRes] = await Promise.all([
-      fetch(`/api/game/${code}`),
-      fetch(`/api/game/${code}/decisions`),
-    ]);
+    const gameRes = await fetch(`/api/game/${code}`);
     if (!gameRes.ok) { setError("ゲームが見つかりません"); return; }
     const gameData = await gameRes.json();
     setSession(gameData.session);
     setCompanyStates(gameData.companyStates);
-    setDecisions(await decisionsRes.json());
   }
 
+  // セッション・会社状態の読み込み（マウント時、ターン処理後）
   useEffect(() => {
-    Promise.all([fetch(`/api/game/${gameCode}`), fetch(`/api/game/${gameCode}/decisions`)]).then(async ([gameRes, decisionsRes]) => {
-      if (!gameRes.ok) { setError("ゲームが見つかりません"); return; }
-      const gameData = await gameRes.json();
-      setSession(gameData.session);
-      setCompanyStates(gameData.companyStates);
-      setDecisions(await decisionsRes.json());
+    fetch(`/api/game/${gameCode}`).then((r) => (r.ok ? r.json() : null)).then((data) => {
+      if (!data) { setError("ゲームが見つかりません"); return; }
+      setSession(data.session);
+      setCompanyStates(data.companyStates);
     });
   }, [gameCode]);
+
+  // 提出状況のポーリング（5秒間隔）。タブが非表示の間はスキップし、前回のリクエストが
+  // 完了していなければ次のポーリングを重ねない。手動更新（refreshTickの変化）でも
+  // 同じ処理を即時実行する。
+  useEffect(() => {
+    let cancelled = false;
+    let fetching = false;
+
+    async function poll() {
+      if (cancelled || fetching || document.hidden) return;
+      fetching = true;
+      try {
+        const res = await fetch(`/api/game/${gameCode}/submission-status`);
+        if (cancelled) return;
+        if (!res.ok) { setSubmissionError("提出状況の取得に失敗しました"); return; }
+        const data = await res.json();
+        setSubmissionStatus(data);
+        setSubmissionError("");
+      } catch {
+        if (!cancelled) setSubmissionError("提出状況の取得に失敗しました");
+      } finally {
+        fetching = false;
+      }
+    }
+
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [gameCode, refreshTick]);
 
   const processTurn = async () => {
     setProcessing(true);
@@ -47,6 +100,7 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
       const data = await res.json();
       setLastResult(data.result);
       await load(gameCode);
+      setRefreshTick((t) => t + 1);
     } finally {
       setProcessing(false);
     }
@@ -57,8 +111,9 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
   }
   if (!session) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center"><p>読み込み中...</p></div>;
 
-  const submittedCount = COMPANY_IDS.filter((id) => decisions[id]).length;
   const showGmTestOperations = !isProduction && session.isTestGame;
+  const submittedCount = submissionStatus?.submittedCount ?? 0;
+  const allSubmitted = submissionStatus?.allSubmitted ?? false;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
@@ -97,25 +152,50 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
         )}
 
         <div className="bg-gray-800 rounded-2xl p-6 mb-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold">意思決定の提出状況（{session.currentYear}年Q{session.currentQuarter}）</h2>
-            <span className="text-sm text-gray-400">{submittedCount} / {COMPANY_IDS.length} 社</span>
+          <div className="flex flex-wrap justify-between items-center gap-2 mb-1">
+            <h2 className="text-lg font-semibold">
+              意思決定の提出状況（{session.currentYear}年 第{session.currentQuarter}四半期）
+            </h2>
+            <div className="flex items-center gap-2">
+              <span className={`text-sm font-semibold ${allSubmitted ? "text-green-400" : "text-gray-400"}`}>
+                {submittedCount} / {COMPANY_IDS.length} 社提出済み
+              </span>
+              <button onClick={() => setRefreshTick((t) => t + 1)} className="text-xs text-gray-400 hover:text-white">🔄 更新</button>
+            </div>
           </div>
+          {allSubmitted && (
+            <div className="bg-green-900/40 border border-green-600 rounded-lg px-3 py-1.5 text-green-400 text-sm font-semibold mb-3">
+              ✅ 全社提出済みです。ターン処理を実行できます。
+            </div>
+          )}
+          {submissionError && <p className="text-yellow-400 text-xs mb-3">⚠️ {submissionError}（前回取得できた内容を表示しています）</p>}
+
           <div className="space-y-2 mb-5">
             {COMPANY_IDS.map((id) => {
               const state = companyStates[id];
-              const submitted = Boolean(decisions[id]);
+              const status = submissionStatus?.companies.find((c) => c.companyId === id);
+              const submitted = status?.submitted ?? false;
+              const isResubmission = status?.isResubmission ?? false;
+              const statusLabel = !submitted ? "⏳ 未提出" : isResubmission ? "🔁 再提出済み" : "✅ 提出済み";
+              const statusColor = !submitted ? "text-yellow-400" : isResubmission ? "text-blue-400" : "text-green-400";
               return (
-                <div key={id} className="flex items-center justify-between bg-gray-700/60 rounded-xl px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <span className="font-bold">{COMPANIES[id].name}</span>
-                    <span className="text-gray-400 text-sm">{COMPANIES[id].fullName}</span>
-                    <span className="text-xs text-gray-500">{session.players[id]}</span>
+                <div key={id} className="bg-gray-700/60 rounded-xl px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="font-bold">{COMPANIES[id].name}</span>
+                      <span className="text-gray-400 text-sm">{COMPANIES[id].fullName}</span>
+                      <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">{PLAYER_TYPE_LABELS[session.players[id]]}</span>
+                      {state && <span className="text-gray-300 text-xs">現金 ${state.cash}M ｜ 信用 {state.creditScore}</span>}
+                    </div>
+                    <span className={`text-sm font-semibold ${statusColor}`}>{statusLabel}</span>
                   </div>
-                  <div className="flex items-center gap-4 text-sm">
-                    {state && <span className="text-gray-300">現金 ${state.cash}M ｜ 信用 {state.creditScore}</span>}
-                    <span className={submitted ? "text-green-400" : "text-yellow-400"}>{submitted ? "✅ 提出済" : "⏳ 未提出"}</span>
-                  </div>
+                  {status && (
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+                      <span>操作者: {SUBMITTED_BY_LABELS[status.submittedBy]}</span>
+                      <span>提出回数: {status.submissionCount}</span>
+                      <span>最終提出: {formatJST(status.lastSubmittedAt)}</span>
+                    </div>
+                  )}
                 </div>
               );
             })}
