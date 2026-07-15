@@ -4,12 +4,12 @@ import Link from "next/link";
 import { CompanyProfile } from "../lib/gameData";
 import { CompanyState, CompanyTurnResult, GameSession } from "../lib/gameTypes";
 interface Phase { id: number; title: string; description: string; }
-interface Props { profile: CompanyProfile; phases: Phase[]; gameCode?: string; }
+interface Props { profile: CompanyProfile; phases: Phase[]; gameCode?: string; isGmTestMode?: boolean; }
 const colorBg: Record<string,string> = { blue:"bg-blue-600", green:"bg-green-600", purple:"bg-purple-600", orange:"bg-orange-500", red:"bg-red-600" };
 const colorBorder: Record<string,string> = { blue:"border-blue-500", green:"border-green-500", purple:"border-purple-500", orange:"border-orange-400", red:"border-red-500" };
 const colorText: Record<string,string> = { blue:"text-blue-400", green:"text-green-400", purple:"text-purple-400", orange:"text-orange-400", red:"text-red-400" };
 
-export default function CompanyDashboard({ profile, phases, gameCode }: Props) {
+export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMode }: Props) {
   const [currentPhase, setCurrentPhase] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -90,6 +90,11 @@ export default function CompanyDashboard({ profile, phases, gameCode }: Props) {
           </div>
         </div>
       </div>
+      {isGmTestMode && (
+        <div className="bg-purple-700/90 text-white text-center text-xs sm:text-sm font-semibold px-3 py-1.5">
+          🎮 GMテスト操作中 — {profile.name}（{profile.fullName}）を代理操作しています
+        </div>
+      )}
       <div className="max-w-5xl mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="space-y-4">
           <div className={`bg-gray-800 rounded-xl p-4 border-l-4 ${colorBorder[profile.color]}`}>
