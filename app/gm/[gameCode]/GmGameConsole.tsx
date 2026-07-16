@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { COMPANIES, CompanyId } from "../../lib/gameData";
 import { CompanyState, GameSession, PlayerType, SubmissionStatusResponse, SubmittedBy, TurnResult } from "../../lib/gameTypes";
+import TestGameManagement from "./TestGameManagement";
 
 const COMPANY_IDS: CompanyId[] = ["A", "B", "C", "D", "E"];
 
@@ -90,6 +91,11 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
     const interval = setInterval(poll, 5000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [gameCode, refreshTick]);
+
+  async function reloadAll() {
+    await load(gameCode);
+    setRefreshTick((t) => t + 1);
+  }
 
   const processTurn = async () => {
     setProcessing(true);
@@ -205,6 +211,10 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
           </button>
           {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
         </div>
+
+        {showGmTestOperations && (
+          <TestGameManagement gameCode={gameCode} onChanged={reloadAll} />
+        )}
 
         {lastResult && (
           <div className="bg-gray-800 rounded-2xl p-6">
