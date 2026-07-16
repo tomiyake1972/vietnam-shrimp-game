@@ -59,11 +59,23 @@ export async function POST(req: NextRequest) {
     updatedAt: now,
   });
   const initialStates = createInitialCompanyStates();
-  await redis.set(gameKey(gameCode), JSON.stringify(session));
-  for (const [id, state] of Object.entries(initialStates)) {
-    await redis.set(companyStateKey(gameCode, id), JSON.stringify(state));
+
+  // Redisへの書き込みが例外を投げた場合（接続エラー、環境変数の設定不備、
+  // assertStagingScopedKeysによる安全チェックの失敗など）も、必ずJSON形式の
+  // エラー応答を返す。ここで捕まえないと、クライアント側は生の例外（HTMLの
+  // エラーページ等）を受け取ってres.json()が失敗し、原因が分からないまま
+  // 「作成中...」の表示で止まって見えることがある。
+  try {
+    await redis.set(gameKey(gameCode), JSON.stringify(session));
+    for (const [id, state] of Object.entries(initialStates)) {
+      await redis.set(companyStateKey(gameCode, id), JSON.stringify(state));
+    }
+    await redis.lpush(gamesListKey(), gameCode);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "ゲームの作成中にRedisへの書き込みに失敗しました。";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-  await redis.lpush(gamesListKey(), gameCode);
+
   return NextResponse.json({ gameCode, session });
 }
 

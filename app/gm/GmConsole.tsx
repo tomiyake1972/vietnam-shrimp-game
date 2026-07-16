@@ -20,17 +20,28 @@ export default function GmConsole({ isProduction, appEnvironment }: Props) {
   const [players, setPlayers] = useState<Record<CompanyId, PlayerType>>({ A:"human", B:"ai-b", C:"ai-b", D:"ai-b", E:"ai-b" });
   const [randomSeed, setRandomSeed] = useState("");
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
   const [newGame, setNewGame] = useState<{ gameCode: string } | null>(null);
   useEffect(() => { fetch("/api/game").then(r => r.json()).then(setGames); }, []);
   const createGame = async () => {
     setCreating(true);
+    setCreateError("");
     const body: { title: string; players: Record<CompanyId, PlayerType>; randomSeed?: string } = { title, players };
     if (!isProduction && randomSeed.trim()) body.randomSeed = randomSeed.trim();
-    const res = await fetch("/api/game", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
-    const data = await res.json();
-    setNewGame(data);
-    setCreating(false);
-    fetch("/api/game").then(r => r.json()).then(setGames);
+    try {
+      const res = await fetch("/api/game", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        setCreateError((data && data.error) || `ゲームの作成に失敗しました（HTTP ${res.status}）`);
+        return;
+      }
+      setNewGame(data);
+      fetch("/api/game").then(r => r.json()).then(setGames);
+    } catch {
+      setCreateError("サーバーに接続できませんでした。ネットワークまたはVercelの設定を確認してください。");
+    } finally {
+      setCreating(false);
+    }
   };
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
@@ -71,6 +82,9 @@ export default function GmConsole({ isProduction, appEnvironment }: Props) {
           <button onClick={createGame} disabled={creating} className="w-full py-3 bg-yellow-500 hover:bg-yellow-400 text-black rounded-xl font-bold text-sm disabled:opacity-50">
             {creating ? "作成中..." : "ゲームを作成する"}
           </button>
+          {createError && (
+            <p className="text-red-400 text-sm mt-3">⚠️ {createError}</p>
+          )}
           {newGame && (
             <div className="mt-4 bg-green-900/40 border border-green-500 rounded-xl p-4 text-center">
               <p className="text-green-400 text-sm mb-1">ゲームが作成されました！</p>
