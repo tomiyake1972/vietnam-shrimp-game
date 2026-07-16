@@ -1,4 +1,4 @@
-import { isStaging } from "./env";
+import { isStaging, STAGING_KEY_PREFIX } from "./env";
 import { redis } from "./redis";
 import { CompanyId } from "./gameData";
 import { GameSession } from "./gameTypes";
@@ -6,11 +6,11 @@ import { GameSession } from "./gameTypes";
 // すべてのRedisキーはこのファイルの関数経由で生成する。直接テンプレートリテラルで
 // キー文字列を組み立てるコードを他の場所に書かないこと。
 //
-// 環境分離の一次防御は「別Upstash Redisデータベースへの接続」（app/lib/redis.ts）であり、
-// このプレフィックスは同一Redis内に万一データが混在した場合の二次防御（多層防御）として付与する。
+// 本番Redisとテスト環境は同一データベースを共有し、staging:プレフィックスによる論理分離が
+// 唯一の分離手段となる（別Upstashデータベースへの物理分離は行わない設計変更）。
 // 本番（isStaging=false）の場合、キー形式は既存の本番データと完全に一致させ、変更しない。
-const STAGING_KEY_PREFIX = "staging:";
-
+// プレフィックス自体の値は app/lib/env.ts を唯一の定義元とし（app/lib/redis.ts の
+// 書き込み前検証と共有するため）、ここでは再定義しない。
 function withEnvironmentPrefix(key: string): string {
   return isStaging ? `${STAGING_KEY_PREFIX}${key}` : key;
 }
