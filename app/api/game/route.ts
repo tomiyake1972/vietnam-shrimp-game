@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis, parseStored } from "../../lib/redis";
-import { CompanyState, ConfirmedOrder, GameSession, PlayerType } from "../../lib/gameTypes";
+import { GameSession, PlayerType } from "../../lib/gameTypes";
 import { CompanyId } from "../../lib/gameData";
 import { companyStateKey, gameKey, gamesListKey } from "../../lib/redisKeys";
 import { appEnvironment, isProduction } from "../../lib/env";
 import { generateRandomSeed, normalizeGameSession, sanitizeRandomSeed } from "../../lib/gameSession";
+import { createInitialCompanyStates, createInitialGameSession } from "../../lib/initialGameState";
 
 const MAX_GAME_CODE_ATTEMPTS = 10;
 
@@ -46,25 +47,18 @@ export async function POST(req: NextRequest) {
   const isTestGame = !isProduction;
   const randomSeed = isTestGame ? (sanitizeRandomSeed(requestedSeed) ?? generateRandomSeed()) : "";
 
-  const defaultOrders: Record<CompanyId, ConfirmedOrder[]> = { A: [], B: [], C: [], D: [], E: [] };
   const now = new Date().toISOString();
-  const session: GameSession = {
-    gameCode, title: title || `ゲーム ${gameCode}`, createdAt: now, updatedAt: now,
-    currentYear: 2015, currentQuarter: 1, currentPhase: 0, status: "playing",
+  const session: GameSession = createInitialGameSession({
+    gameCode,
+    title: title || `ゲーム ${gameCode}`,
     players: players || { A: "human", B: "ai-b", C: "ai-b", D: "ai-b", E: "ai-b" },
-    confirmedOrders: defaultOrders,
-    history: [],
     isTestGame,
     environment: appEnvironment,
     randomSeed,
-  };
-  const initialStates: Record<CompanyId, CompanyState> = {
-    A: { cash: 20, totalAssets: 270, equity: 100, debtEquityRatio: 1.3, creditScore: 98, farmingArea: 1800, processingCapacity: 8000 },
-    B: { cash: 20, totalAssets: 155, equity: 45, debtEquityRatio: 2.4, creditScore: 75, farmingArea: 1200, processingCapacity: 5000 },
-    C: { cash: 6, totalAssets: 114, equity: 40, debtEquityRatio: 1.75, creditScore: 65, farmingArea: 800, processingCapacity: 3500 },
-    D: { cash: 15, totalAssets: 270, equity: 90, debtEquityRatio: 2.0, creditScore: 85, farmingArea: 2200, processingCapacity: 9000 },
-    E: { cash: 5, totalAssets: 105, equity: 25, debtEquityRatio: 2.8, creditScore: 60, farmingArea: 700, processingCapacity: 3000 },
-  };
+    createdAt: now,
+    updatedAt: now,
+  });
+  const initialStates = createInitialCompanyStates();
   await redis.set(gameKey(gameCode), JSON.stringify(session));
   for (const [id, state] of Object.entries(initialStates)) {
     await redis.set(companyStateKey(gameCode, id), JSON.stringify(state));
