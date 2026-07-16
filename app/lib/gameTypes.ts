@@ -88,3 +88,26 @@ export interface TurnResult {
   processedAt: string;
   companies: Record<CompanyId, CompanyTurnResult>;
 }
+
+// テストゲームの状態を丸ごと保存・復元するためのスナップショット（Step 5）。
+// decisionsのキーは "{period}:{companyId}"（例 "2015Q1:A"）、resultsのキーは
+// "{period}"（例 "2015Q1"）とし、複数四半期分をまとめて1つのスナップショットに含める。
+export interface GameSnapshot {
+  id: string;
+  gameCode: string;
+  createdAt: string;
+  label: string;
+  session: GameSession;
+  companies: Record<CompanyId, CompanyState>;
+  decisions: Record<string, CompanyDecision>;
+  results: Record<string, TurnResult>;
+}
+
+export interface SnapshotSummary {
+  id: string;
+  label: string;
+  createdAt: string;
+  year: number;
+  quarter: number;
+  phase: number;
+}
