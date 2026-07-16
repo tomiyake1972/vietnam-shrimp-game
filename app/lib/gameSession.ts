@@ -36,3 +36,11 @@ export function normalizeGameSession(stored: LegacyGameSession): GameSession {
     history: stored.history ?? [],
   };
 }
+
+// Step 5の破壊的な管理操作（初期化・削除・複製・スナップショット）は、
+// isProduction===false であることに加えて、対象ゲーム自身がテストゲームである
+// ことも必ず確認すること。isTestGameだけでなくenvironmentも念のため二重に確認する
+// （通常は両者は一致するはずだが、防御的に両方見る）。
+export function isValidTestGameSession(session: GameSession): boolean {
+  return session.isTestGame === true && session.environment !== "production";
+}
