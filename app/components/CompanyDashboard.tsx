@@ -125,21 +125,22 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
             </div>
           </div>
           {lastResult && (() => {
-            const grossProfit = Math.round((lastResult.revenue - lastResult.cogs) * 100) / 100;
-            const sga = Math.round((lastResult.processingCost + lastResult.overhead) * 100) / 100;
-            const operatingIncome = Math.round((grossProfit - sga) * 100) / 100;
+            const totalCogs = Math.round((lastResult.cogs + lastResult.processingCost) * 100) / 100;
+            const grossProfit = Math.round((lastResult.revenue - totalCogs) * 100) / 100;
+            const operatingIncome = Math.round((grossProfit - lastResult.overhead) * 100) / 100;
             const fmt = (v: number) => `$${v}M`;
             const signFmt = (v: number) => `${v >= 0 ? "+" : ""}$${v}M`;
             return (
               <div className={`bg-gray-800 rounded-xl p-4 border-l-4 ${colorBorder[profile.color]}`}>
                 <h2 className="text-sm text-gray-400 mb-3 font-semibold uppercase tracking-wide">前期損益計算書（{lastResult.year}年Q{lastResult.quarter}）</h2>
                 <div className="space-y-1 text-sm">
-                  <PLRow label="売上高" value={fmt(lastResult.revenue)} />
-                  <PLRow label="売上原価" value={`−${fmt(lastResult.cogs)}`} indent />
+                  <PLRow label="売上高" value={fmt(lastResult.revenue)} bold />
+                  <PLRow label="売上原価" value={`−${fmt(totalCogs)}`} indent />
+                  <PLRow label="　原料費" value={`−${fmt(lastResult.cogs)}`} indent />
+                  <PLRow label="　加工費" value={`−${fmt(lastResult.processingCost)}`} indent />
                   <div className="border-t border-gray-600 my-1" />
                   <PLRow label="売上総利益" value={fmt(grossProfit)} bold highlight={grossProfit < 0} />
-                  <PLRow label="加工費" value={`−${fmt(lastResult.processingCost)}`} indent />
-                  <PLRow label="管理費" value={`−${fmt(lastResult.overhead)}`} indent />
+                  <PLRow label="販売費及び一般管理費" value={`−${fmt(lastResult.overhead)}`} indent />
                   <div className="border-t border-gray-600 my-1" />
                   <PLRow label="営業利益" value={signFmt(operatingIncome)} bold highlight={operatingIncome < 0} />
                   <PLRow label="支払利息（営業外費用）" value={`−${fmt(lastResult.interestExpense)}`} indent />
