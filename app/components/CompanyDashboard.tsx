@@ -124,16 +124,37 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
               <div className={`${colorBg[profile.color]} h-2 rounded-full`} style={{width:`${company.creditScore}%`}} />
             </div>
           </div>
-          {lastResult && (
-            <div className={`bg-gray-800 rounded-xl p-4 border-l-4 ${colorBorder[profile.color]}`}>
-              <h2 className="text-sm text-gray-400 mb-3 font-semibold uppercase tracking-wide">前回ターン結果（{lastResult.year}年Q{lastResult.quarter}）</h2>
-              <div className="space-y-2 text-sm">
-                <Row label="売上" value={`$${lastResult.revenue}M`} />
-                <Row label="純利益" value={`${lastResult.netIncome >= 0 ? "+" : ""}$${lastResult.netIncome}M`} highlight={lastResult.netIncome < 0} />
-                {!lastResult.submitted && <p className="text-yellow-400 text-xs mt-1">⚠️ 前回は意思決定が未提出のため既定値で処理されました</p>}
+          {lastResult && (() => {
+            const grossProfit = Math.round((lastResult.revenue - lastResult.cogs) * 100) / 100;
+            const sga = Math.round((lastResult.processingCost + lastResult.overhead) * 100) / 100;
+            const operatingIncome = Math.round((grossProfit - sga) * 100) / 100;
+            const fmt = (v: number) => `$${v}M`;
+            const signFmt = (v: number) => `${v >= 0 ? "+" : ""}$${v}M`;
+            return (
+              <div className={`bg-gray-800 rounded-xl p-4 border-l-4 ${colorBorder[profile.color]}`}>
+                <h2 className="text-sm text-gray-400 mb-3 font-semibold uppercase tracking-wide">前期損益計算書（{lastResult.year}年Q{lastResult.quarter}）</h2>
+                <div className="space-y-1 text-sm">
+                  <PLRow label="売上高" value={fmt(lastResult.revenue)} />
+                  <PLRow label="売上原価" value={`−${fmt(lastResult.cogs)}`} indent />
+                  <div className="border-t border-gray-600 my-1" />
+                  <PLRow label="売上総利益" value={fmt(grossProfit)} bold highlight={grossProfit < 0} />
+                  <PLRow label="加工費" value={`−${fmt(lastResult.processingCost)}`} indent />
+                  <PLRow label="管理費" value={`−${fmt(lastResult.overhead)}`} indent />
+                  <div className="border-t border-gray-600 my-1" />
+                  <PLRow label="営業利益" value={signFmt(operatingIncome)} bold highlight={operatingIncome < 0} />
+                  <PLRow label="支払利息（営業外費用）" value={`−${fmt(lastResult.interestExpense)}`} indent />
+                  <div className="border-t border-gray-600 my-1" />
+                  <PLRow label="経常利益" value={signFmt(lastResult.netIncome)} bold highlight={lastResult.netIncome < 0} />
+                </div>
+                {!lastResult.submitted && <p className="text-yellow-400 text-xs mt-2">⚠️ 前回は意思決定が未提出のため既定値で処理されました</p>}
+                {lastResult.notes?.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-gray-700 space-y-1">
+                    {lastResult.notes.map((note, i) => <p key={i} className="text-gray-400 text-xs">📝 {note}</p>)}
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
         <div className="lg:col-span-2">
           {submitted ? (
@@ -171,6 +192,14 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
 }
 function Row({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return <div className="flex justify-between"><span className="text-gray-400">{label}</span><span className={highlight ? "text-yellow-400 font-semibold" : "text-white"}>{value}</span></div>;
+}
+function PLRow({ label, value, highlight, bold, indent }: { label: string; value: string; highlight?: boolean; bold?: boolean; indent?: boolean }) {
+  return (
+    <div className="flex justify-between">
+      <span className={`${indent ? "pl-3 text-gray-500" : "text-gray-300"}`}>{label}</span>
+      <span className={`${highlight ? "text-red-400 font-semibold" : bold ? "text-white font-semibold" : "text-gray-300"}`}>{value}</span>
+    </div>
+  );
 }
 function PhaseForm({ phase, company, decisions, setDecisions }: { phase: Phase; company: CompanyProfile; decisions: Record<string,string>; setDecisions: (d: Record<string,string>) => void }) {
   const update = (key: string, val: string) => setDecisions({...decisions, [key]: val});
