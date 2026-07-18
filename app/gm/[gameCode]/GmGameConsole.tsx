@@ -193,7 +193,14 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
                       <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">{PLAYER_TYPE_LABELS[session.players[id]]}</span>
                       {state && <span className="text-gray-300 text-xs">現金 ${state.cash}M ｜ 信用 {state.creditScore}</span>}
                     </div>
-                    <span className={`text-sm font-semibold ${statusColor}`}>{statusLabel}</span>
+                    <div className="flex items-center gap-3">
+                      {showGmTestOperations && (
+                        <Link href={`/company/${id}?game=${gameCode}&mode=gm-test`} className="text-xs text-purple-400 hover:text-purple-300 underline">
+                          操作 →
+                        </Link>
+                      )}
+                      <span className={`text-sm font-semibold ${statusColor}`}>{statusLabel}</span>
+                    </div>
                   </div>
                   {status && (
                     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">

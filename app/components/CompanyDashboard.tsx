@@ -74,7 +74,9 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
     setSubmitted(true); setSubmitting(false);
   };
   const debt = company.totalAssets - company.equity;
-  const backUrl = gameCode ? `/lobby/${gameCode}` : "/";
+  const backUrl = gameCode
+    ? isGmTestMode ? `/gm/${gameCode}` : `/lobby/${gameCode}`
+    : "/";
   const periodLabel = session ? `${session.currentYear}年 第${session.currentQuarter}四半期` : "2015年 第1四半期";
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -162,7 +164,12 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
             <div className="bg-gray-800 rounded-xl p-8 text-center">
               <div className="text-5xl mb-4">✅</div>
               <h2 className="text-xl font-bold mb-2">意思決定を提出しました</h2>
-              <p className="text-gray-400">ゲームマスターがターンを処理するまでお待ちください。</p>
+              <p className="text-gray-400 mb-6">ゲームマスターがターンを処理するまでお待ちください。</p>
+              {isGmTestMode && gameCode && (
+                <Link href={`/gm/${gameCode}`} className="inline-block px-6 py-2 bg-purple-700 hover:bg-purple-600 rounded-lg text-sm font-semibold">
+                  ← GMコンソールに戻る
+                </Link>
+              )}
             </div>
           ) : (
             <div className="bg-gray-800 rounded-xl p-5">
