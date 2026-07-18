@@ -177,13 +177,18 @@ export async function restoreGameSnapshot(
     if (state) await redis.set(companyStateKey(gameCode, id), JSON.stringify(state));
   }
 
+  // snapshot.decisions / snapshot.results も旧スナップショット由来の場合、
+  // 欠損フィールド（submissionCount等、schemaVersion/engineVersion等）を持つ可能性があるため、
+  // Redisへ書き戻す前に必ず正規化を通す。
   for (const [mapKey, decision] of Object.entries(snapshot.decisions)) {
     const { period, companyId } = parseDecisionMapKey(mapKey);
-    await redis.set(decisionsKey(gameCode, period, companyId), JSON.stringify(decision));
+    const normalizedDecision = normalizeDecision(decision);
+    await redis.set(decisionsKey(gameCode, period, companyId), JSON.stringify(normalizedDecision));
   }
 
   for (const [period, result] of Object.entries(snapshot.results)) {
-    await redis.set(resultsKey(gameCode, period), JSON.stringify(result));
+    const normalizedResult = normalizeTurnResult(result);
+    await redis.set(resultsKey(gameCode, period), JSON.stringify(normalizedResult));
   }
 
   for (const key of extraKeysToDelete) {
