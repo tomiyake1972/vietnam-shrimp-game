@@ -23,17 +23,21 @@ export interface CompanyState {
   creditScore: number;
   farmingArea: number;
   processingCapacity: number;
+  // 在庫数量（トン）— エンジンが四半期ごとに更新。翌期の生産・販売に繰越。
+  rawInventoryQty?: number;       // 原料在庫（冷凍保管中の生エビ、トン）
+  bulkInventoryQty?: number;      // バルク製品在庫（トン）
+  vapInventoryQty?: number;       // VAP製品在庫（トン）
   // 貸借対照表詳細（オプション：旧データとの後方互換のため省略可）
-  accountsReceivable?: number;    // 売掛金
-  rawInventory?: number;          // 原料在庫
-  finishedInventory?: number;     // 製品在庫
-  buildingsNet?: number;          // 建物（純額）
-  equipmentGross?: number;        // 設備（総額）
-  accumulatedDepreciation?: number; // 減価償却累計額
-  accountsPayable?: number;       // 買掛金
-  shortTermLoans?: number;        // 短期借入金
-  longTermLoans?: number;         // 長期借入金
-  paidInCapital?: number;         // 資本金
+  accountsReceivable?: number;    // 売掛金（$M）
+  rawInventory?: number;          // 原料在庫（$M）
+  finishedInventory?: number;     // 製品在庫（$M）
+  buildingsNet?: number;          // 建物（純額、$M）
+  equipmentGross?: number;        // 設備（総額、$M）
+  accumulatedDepreciation?: number; // 減価償却累計額（$M）
+  accountsPayable?: number;       // 買掛金（$M）
+  shortTermLoans?: number;        // 短期借入金（$M）
+  longTermLoans?: number;         // 長期借入金（$M）
+  paidInCapital?: number;         // 資本金（$M）
 }
 
 // gm-test: 非本番環境でGMがテストゲームの会社画面を代理操作して提出した場合。
@@ -98,6 +102,10 @@ export interface CompanyTurnResult {
   stateBefore: CompanyState;
   stateAfter: CompanyState;
   notes: string[];
+  // 在庫（期末、トン）— Phase 0 の情報確認で表示
+  rawInventoryAfter?: number;
+  bulkInventoryAfter?: number;
+  vapInventoryAfter?: number;
 }
 
 export interface TurnResult {

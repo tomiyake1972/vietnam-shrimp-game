@@ -51,14 +51,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ gam
   await redis.set(gameKey(gameCode), JSON.stringify(updatedSession));
   return NextResponse.json({ success: true });
 }
-export async function GET(_: NextRequest, { params }: { params: Promise<{ gameCode: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ gameCode: string }> }) {
   const { gameCode } = await params;
   const gameData = await redis.get(gameKey(gameCode));
   const stored = parseStored<GameSession>(gameData);
   if (!stored) return NextResponse.json({ error: "Game not found" }, { status: 404 });
   const session = normalizeGameSession(stored);
   const decisions: Partial<Record<CompanyId, CompanyDecision>> = {};
-  const period = formatPeriod(session.currentYear, session.currentQuarter);
+  // ?quarter=2015Q1 のように四半期を指定できる（省略時は現在の四半期）
+  const quarterParam = req.nextUrl.searchParams.get("quarter");
+  const period = quarterParam ?? formatPeriod(session.currentYear, session.currentQuarter);
   for (const id of ["A","B","C","D","E"] as CompanyId[]) {
     const data = await redis.get(decisionsKey(gameCode, period, id));
     const parsed = parseStored<CompanyDecision>(data);

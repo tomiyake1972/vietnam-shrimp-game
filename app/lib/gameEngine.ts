@@ -61,10 +61,17 @@ export function resolveCompanyTurn(
   const procurementSource = phases["phase3_source"] === "contract" ? "contract" : "spot";
   const procurementPricePerKg = PROCUREMENT_PRICE_PER_KG[procurementSource];
 
-  const rawMaterialAvailable = farmingInput + procurementQty;
+  // 前期からの繰越在庫を含む原料計算
+  const prevRawInventory = state.rawInventoryQty ?? 0;
+  const prevBulkInventory = state.bulkInventoryQty ?? 0;
+  const prevVapInventory = state.vapInventoryQty ?? 0;
+
+  const rawMaterialAvailable = round2(farmingInput + procurementQty + prevRawInventory);
   const rawMaterialUsed = Math.min(rawMaterialAvailable, state.processingCapacity);
-  if (rawMaterialAvailable > state.processingCapacity) {
-    notes.push(`加工能力(${state.processingCapacity.toLocaleString()}t/Q)を超える原料は在庫繰越されず未加工のまま失われました。`);
+  // 加工能力を超えた原料は冷凍在庫として翌期に繰越（失わない）
+  const rawInventoryQtyAfter = round2(rawMaterialAvailable - rawMaterialUsed);
+  if (rawInventoryQtyAfter > 0.01) {
+    notes.push(`加工能力(${state.processingCapacity.toLocaleString()}t/Q)を超えた原料 ${rawInventoryQtyAfter.toFixed(0)}t は冷凍在庫として翌期に繰越されます。`);
   }
 
   const vapRatioPct = Math.min(100, Math.max(0, submitted ? num(phases["phase4_vap_ratio"], 30) : 30));
@@ -73,8 +80,9 @@ export function resolveCompanyTurn(
   const bulkOutput = rawToBulk / BULK_RAW_PER_PRODUCT_TON;
   const vapOutput = rawToVap / VAP_RAW_PER_PRODUCT_TON;
 
-  let bulkRemaining = bulkOutput;
-  let vapRemaining = vapOutput;
+  // 前期製品在庫 + 今期生産を販売可能数量とする
+  let bulkRemaining = round2(prevBulkInventory + bulkOutput);
+  let vapRemaining = round2(prevVapInventory + vapOutput);
   const salesByMarket: Record<string, number> = {};
   let revenue = 0;
   for (const market of Object.keys(MARKET_PRICE_PER_KG)) {
@@ -92,8 +100,11 @@ export function resolveCompanyTurn(
     salesByMarket[market] = round2(sold);
     revenue += tonsAtPricePerKgToM(sold, MARKET_PRICE_PER_KG[market]);
   }
-  if (bulkRemaining > 0.01 || vapRemaining > 0.01) {
-    notes.push(`未販売の製品（バルク${bulkRemaining.toFixed(0)}t / VAP${vapRemaining.toFixed(0)}t）は在庫繰越されず機会損失となりました。`);
+  // 未販売の製品は在庫として翌期に繰越（失わない）
+  const bulkInventoryQtyAfter = round2(bulkRemaining);
+  const vapInventoryQtyAfter = round2(vapRemaining);
+  if (bulkInventoryQtyAfter > 0.01 || vapInventoryQtyAfter > 0.01) {
+    notes.push(`未販売の製品（バルク${bulkInventoryQtyAfter.toFixed(0)}t / VAP${vapInventoryQtyAfter.toFixed(0)}t）は翌期に在庫繰越されます。`);
   }
 
   const farmingCost = tonsAtPricePerKgToM(farmingInput, FARMING_COST_PER_KG);
@@ -142,12 +153,16 @@ export function resolveCompanyTurn(
 
   // BS詳細の四半期更新（equipmentGrossが設定されている場合のみ）
   const bsDetail: Partial<CompanyState> = {};
+  // 在庫数量は常に更新（BS詳細の有無に関わらず翌期へ繰越）
+  bsDetail.rawInventoryQty = rawInventoryQtyAfter;
+  bsDetail.bulkInventoryQty = bulkInventoryQtyAfter;
+  bsDetail.vapInventoryQty = vapInventoryQtyAfter;
   if (state.equipmentGross !== undefined) {
     // 売掛金: 当期売上の1/3（30日回収サイト＝90日クォーターの1/3が未回収）
     const newAR = round2(revenue / 3);
-    // 原料・製品在庫: エンジン上は期末ゼロだがBSの連続性のため期首値を維持
-    const newRawInv = state.rawInventory ?? 0;
-    const newFinInv = state.finishedInventory ?? 0;
+    // 原料・製品在庫: 在庫数量から評価（原料$2.1/kg平均、バルク$2.5/kg、VAP$4.5/kg）
+    const newRawInv = round2(rawInventoryQtyAfter * 2.1 / 1000);
+    const newFinInv = round2((bulkInventoryQtyAfter * 2.5 + vapInventoryQtyAfter * 4.5) / 1000);
     // 建物: 年5%（四半期1.25%）の定額償却
     const newBldgNet = round2((state.buildingsNet ?? 0) * 0.9875);
     // 設備: 総額固定。純額はtotalAssetsからの逆算（BS恒等式を常に保証）
@@ -203,6 +218,9 @@ export function resolveCompanyTurn(
     salesByMarket,
     stateBefore: state,
     stateAfter,
+    rawInventoryAfter: rawInventoryQtyAfter,
+    bulkInventoryAfter: bulkInventoryQtyAfter,
+    vapInventoryAfter: vapInventoryQtyAfter,
     notes,
   };
 }

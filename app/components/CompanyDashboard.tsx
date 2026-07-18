@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CompanyProfile } from "../lib/gameData";
-import { CompanyState, CompanyTurnResult, GameSession } from "../lib/gameTypes";
+import { CompanyDecision, CompanyState, CompanyTurnResult, ConfirmedOrder, GameSession } from "../lib/gameTypes";
 interface Phase { id: number; title: string; description: string; }
 interface Props { profile: CompanyProfile; phases: Phase[]; gameCode?: string; isGmTestMode?: boolean; }
 const colorBg: Record<string,string> = { blue:"bg-blue-600", green:"bg-green-600", purple:"bg-purple-600", orange:"bg-orange-500", red:"bg-red-600" };
@@ -17,7 +17,25 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
   const [session, setSession] = useState<GameSession | null>(null);
   const [liveState, setLiveState] = useState<CompanyState | null>(null);
   const [lastResult, setLastResult] = useState<CompanyTurnResult | null>(null);
+  const [prevDecisions, setPrevDecisions] = useState<CompanyDecision | null>(null);
   const [loadedQuarterKey, setLoadedQuarterKey] = useState("");
+
+  // 前四半期のキーを返す（2015Q1の前は存在しないのでnull）
+  function calcPrevPeriod(year: number, quarter: number): string | null {
+    if (year === 2015 && quarter === 1) return null;
+    return quarter <= 1 ? `${year - 1}Q4` : `${year}Q${quarter - 1}`;
+  }
+
+  async function fetchPrevDecisions(gameSession: GameSession) {
+    if (!gameCode) return;
+    const prevPeriod = calcPrevPeriod(gameSession.currentYear, gameSession.currentQuarter);
+    if (!prevPeriod) { setPrevDecisions(null); return; }
+    const r = await fetch(`/api/game/${gameCode}/decisions?quarter=${prevPeriod}`);
+    if (r.ok) {
+      const data = await r.json();
+      setPrevDecisions(data[profile.id] ?? null);
+    }
+  }
 
   async function load() {
     if (!gameCode) return;
@@ -44,6 +62,7 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
         setLastResult(resultsData.result?.companies?.[profile.id] ?? null);
       }
     }
+    await fetchPrevDecisions(gameSession);
   }
 
   useEffect(() => {
@@ -60,6 +79,7 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
           if (resultsData) setLastResult(resultsData.result?.companies?.[profile.id] ?? null);
         });
       }
+      fetchPrevDecisions(gameSession);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameCode]);
@@ -83,6 +103,7 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
       <div className={`${colorBg[profile.color]} px-6 py-4`}>
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           <div>
+            <p className="text-white/55 text-xs font-semibold uppercase tracking-widest mb-0.5">企業経営画面</p>
             <h1 className="text-2xl font-bold">{profile.name} — {profile.fullName}</h1>
             <p className="text-white/80 text-sm">{periodLabel}{gameCode && ` | ゲーム: ${gameCode}`}</p>
           </div>
@@ -212,7 +233,7 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
                   </button>
                 ))}
               </div>
-              <PhaseForm phase={phases[currentPhase]} company={profile} decisions={decisions} setDecisions={setDecisions} />
+              <PhaseForm phase={phases[currentPhase]} company={profile} decisions={decisions} setDecisions={setDecisions} liveState={liveState} lastResult={lastResult} prevDecisions={prevDecisions} confirmedOrders={session?.confirmedOrders?.[profile.id] ?? []} />
               <div className="flex justify-between mt-5">
                 <button onClick={() => setCurrentPhase((p) => Math.max(0,p-1))} disabled={currentPhase===0} className="px-4 py-2 bg-gray-700 rounded-lg text-sm disabled:opacity-30 hover:bg-gray-600">← 前のフェーズ</button>
                 {currentPhase < phases.length-1 ? (
@@ -231,7 +252,7 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
   );
 }
 function BSRow({ label, value, highlight, bold, sub }: { label: string; value: number; highlight?: boolean; bold?: boolean; sub?: boolean }) {
-  const fmt = (v: number) => `$${Math.abs(v)}M`;
+  const fmt = (v: number) => `$${(Math.round(Math.abs(v) * 100) / 100).toFixed(2)}M`;
   const isNeg = value < 0;
   return (
     <div className="flex justify-between">
@@ -253,12 +274,134 @@ function PLRow({ label, value, highlight, bold, indent }: { label: string; value
     </div>
   );
 }
-function PhaseForm({ phase, company, decisions, setDecisions }: { phase: Phase; company: CompanyProfile; decisions: Record<string,string>; setDecisions: (d: Record<string,string>) => void }) {
+const MARKET_PRICES: Record<string, number> = { "EU（バルク）": 3.8, "日本（VAP）": 8.5, "米国（バルク）": 3.6, "国内（スポット）": 3.2 };
+const SOURCE_LABEL: Record<string, string> = { spot: "スポット市場", contract: "既存契約農家" };
+const MARKET_ORDER = ["EU（バルク）", "日本（VAP）", "米国（バルク）", "国内（スポット）"];
+
+function Phase0Panel({ liveState, lastResult, prevDecisions, confirmedOrders }: {
+  liveState: CompanyState | null;
+  lastResult: CompanyTurnResult | null;
+  prevDecisions: CompanyDecision | null;
+  confirmedOrders: ConfirmedOrder[];
+}) {
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  return (
+    <div className="space-y-4 text-sm">
+      {/* 在庫状況 */}
+      <div className="bg-gray-700/50 rounded-lg p-4">
+        <p className="text-yellow-400 font-semibold mb-3">📦 現在の在庫（期初）</p>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-gray-800/60 rounded-lg p-2 text-center">
+            <p className="text-gray-400 text-xs mb-1">原料在庫<br/><span className="text-gray-500">（冷凍生エビ）</span></p>
+            <p className="text-white font-bold text-base">{((liveState?.rawInventoryQty ?? 0)).toLocaleString()} t</p>
+          </div>
+          <div className="bg-gray-800/60 rounded-lg p-2 text-center">
+            <p className="text-gray-400 text-xs mb-1">バルク製品<br/>在庫</p>
+            <p className="text-white font-bold text-base">{((liveState?.bulkInventoryQty ?? 0)).toLocaleString()} t</p>
+          </div>
+          <div className="bg-gray-800/60 rounded-lg p-2 text-center">
+            <p className="text-gray-400 text-xs mb-1">VAP製品<br/>在庫</p>
+            <p className="text-white font-bold text-base">{((liveState?.vapInventoryQty ?? 0)).toLocaleString()} t</p>
+          </div>
+        </div>
+      </div>
+
+      {/* 確定受注残 */}
+      <div className="bg-gray-700/50 rounded-lg p-4">
+        <p className="text-yellow-400 font-semibold mb-2">📋 確定受注残（市場別）</p>
+        {confirmedOrders.length === 0 ? (
+          <p className="text-gray-400">現時点での確定受注なし</p>
+        ) : (
+          MARKET_ORDER.map((market) => {
+            const orders = confirmedOrders.filter((o) => o.destination === market);
+            if (orders.length === 0) return <p key={market} className="text-gray-500">・{market}: なし</p>;
+            return orders.map((o, i) => (
+              <p key={`${market}-${i}`} className="text-gray-300">・{market}: {o.quantity.toLocaleString()}t @ ${o.price}/kg（Q{o.deliveryQuarter}納品）</p>
+            ));
+          })
+        )}
+      </div>
+
+      {/* 前期実績 */}
+      {lastResult ? (
+        <div className="bg-gray-700/50 rounded-lg p-4 space-y-3">
+          <p className="text-yellow-400 font-semibold">📊 前期実績（{lastResult.year}年Q{lastResult.quarter}）</p>
+
+          <div>
+            <p className="text-gray-400 font-semibold text-xs mb-1">▍生産数量</p>
+            <p className="text-gray-300">バルク: {lastResult.productOutput.bulk.toFixed(0)} t　／　VAP: {lastResult.productOutput.vap.toFixed(0)} t</p>
+          </div>
+
+          <div>
+            <p className="text-gray-400 font-semibold text-xs mb-1">▍市場別 販売成約数量・デリバリー・売上高</p>
+            <div className="space-y-0.5">
+              {MARKET_ORDER.map((market) => {
+                const qty = lastResult.salesByMarket[market] ?? 0;
+                const rev = r2(qty * MARKET_PRICES[market] / 1000);
+                return (
+                  <div key={market} className="flex justify-between">
+                    <span className="text-gray-400">{market}</span>
+                    <span className={qty > 0 ? "text-gray-200" : "text-gray-600"}>
+                      {qty > 0 ? `${qty.toLocaleString()} t → $${rev}M` : "—"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-gray-700/50 rounded-lg p-4">
+          <p className="text-gray-400">前期実績なし（ゲーム開始初期）</p>
+        </div>
+      )}
+
+      {/* 前四半期の意思決定 */}
+      {prevDecisions ? (
+        <div className="bg-gray-700/50 rounded-lg p-4 space-y-2">
+          <p className="text-yellow-400 font-semibold mb-1">🗂 前四半期の意思決定（{prevDecisions.year}年Q{prevDecisions.quarter}）</p>
+          <div className="space-y-1 text-xs text-gray-300">
+            {prevDecisions.phases["phase2_farming"] && (
+              <p>・養殖投入量: {Number(prevDecisions.phases["phase2_farming"]).toLocaleString()} t</p>
+            )}
+            {prevDecisions.phases["phase3_procurement"] && (
+              <p>・外部調達: {Number(prevDecisions.phases["phase3_procurement"]).toLocaleString()} t（{SOURCE_LABEL[prevDecisions.phases["phase3_source"] ?? "spot"] ?? prevDecisions.phases["phase3_source"]}）</p>
+            )}
+            {prevDecisions.phases["phase4_vap_ratio"] && (
+              <p>・VAP比率: {prevDecisions.phases["phase4_vap_ratio"]} %</p>
+            )}
+            {MARKET_ORDER.map((market) => {
+              const qty = prevDecisions.phases[`phase5_${market}`];
+              return qty && Number(qty) > 0 ? (
+                <p key={market}>・販売 {market}: {Number(qty).toLocaleString()} t</p>
+              ) : null;
+            })}
+            {prevDecisions.phases["phase6_borrow"] && Number(prevDecisions.phases["phase6_borrow"]) > 0 && (
+              <p>・借入: ${prevDecisions.phases["phase6_borrow"]}M</p>
+            )}
+            {prevDecisions.phases["phase6_repay"] && Number(prevDecisions.phases["phase6_repay"]) > 0 && (
+              <p>・返済: ${prevDecisions.phases["phase6_repay"]}M</p>
+            )}
+            {prevDecisions.phases["phase6_equity"] && (
+              <p>・増資申請: {prevDecisions.phases["phase6_equity"]}</p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-gray-700/50 rounded-lg p-4">
+          <p className="text-gray-400 text-xs">前四半期の意思決定なし（ゲーム開始初期）</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PhaseForm({ phase, company, decisions, setDecisions, liveState, lastResult, prevDecisions, confirmedOrders }: { phase: Phase; company: CompanyProfile; decisions: Record<string,string>; setDecisions: (d: Record<string,string>) => void; liveState: CompanyState | null; lastResult: CompanyTurnResult | null; prevDecisions: CompanyDecision | null; confirmedOrders: ConfirmedOrder[] }) {
   const update = (key: string, val: string) => setDecisions({...decisions, [key]: val});
   return (
     <div>
       <div className="mb-4"><h3 className="text-lg font-bold">フェーズ{phase.id}: {phase.title}</h3><p className="text-gray-400 text-sm">{phase.description}</p></div>
-      {phase.id===0 && <div className="bg-gray-700/50 rounded-lg p-4 space-y-2 text-sm"><p className="text-yellow-400 font-semibold mb-2">📋 確定受注残（Q2以降）</p><p className="text-gray-300">・EU向けバルク: 850t @ $3.8/kg（Q2納品）</p><p className="text-gray-300">・日本向けVAP: 320t @ $8.5/kg（Q2納品）</p><p className="text-gray-400 text-xs mt-3">※ これが生産計画の下限になります</p></div>}
+      {phase.id===0 && <Phase0Panel liveState={liveState} lastResult={lastResult} prevDecisions={prevDecisions} confirmedOrders={confirmedOrders} />}
       {phase.id===1 && <label className="block text-sm"><span className="text-gray-300 mb-1 block">工場新設・拡張の検討申請</span><select value={decisions["phase1_factory"]||""} onChange={(e)=>update("phase1_factory",e.target.value)} className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm"><option value="">選択してください</option><option value="none">申請なし</option><option value="expand">既存工場の拡張を申請</option><option value="new">新工場の建設を申請</option></select></label>}
       {phase.id===2 && <label className="block text-sm"><span className="text-gray-300 mb-1 block">今期の養殖投入量（トン、生体重）</span><input type="number" placeholder={`最大 ${Math.round(company.farmingArea*5)} t`} value={decisions["phase2_farming"]||""} onChange={(e)=>update("phase2_farming",e.target.value)} className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm" /></label>}
       {phase.id===3 && <div className="space-y-3"><label className="block text-sm"><span className="text-gray-300 mb-1 block">外部調達量（トン）</span><input type="number" placeholder={`0〜${Math.max(0, company.processingCapacity - Math.min(Number(decisions["phase2_farming"]||0), company.farmingArea*5)).toLocaleString()} t`} value={decisions["phase3_procurement"]||""} onChange={(e)=>update("phase3_procurement",e.target.value)} className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm" /></label><label className="block text-sm"><span className="text-gray-300 mb-1 block">調達先</span><select value={decisions["phase3_source"]||""} onChange={(e)=>update("phase3_source",e.target.value)} className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm"><option value="">選択してください</option><option value="spot">スポット市場（$2.1〜2.5/kg）</option><option value="contract">既存契約農家（$1.9/kg）</option></select></label></div>}

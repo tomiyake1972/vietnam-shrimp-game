@@ -18,6 +18,10 @@ export function createInitialCompanyStates(): Record<CompanyId, CompanyState> {
       creditScore: c.creditScore,
       farmingArea: c.farmingArea,
       processingCapacity: c.processingCapacity,
+      // 在庫数量（期初ゼロ）
+      rawInventoryQty: 0,
+      bulkInventoryQty: 0,
+      vapInventoryQty: 0,
       // 貸借対照表詳細
       accountsReceivable: c.accountsReceivable,
       rawInventory: c.rawInventory,
