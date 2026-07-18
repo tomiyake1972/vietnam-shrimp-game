@@ -481,7 +481,7 @@ function CompanyDetailCard({ id, r, decision }: { id: CompanyId; r: CompanyTurnR
 
           {/* 意思決定内容 */}
           <div className="md:col-span-2">
-            <DecisionPanel decision={decision} submitted={r.submitted} />
+            <DecisionPanel decision={decision} submitted={r.submitted} result={r} />
           </div>
 
           {/* 注記 */}
@@ -502,12 +502,26 @@ const FACTORY_LABEL: Record<string, string> = { none: "申請なし", expand: "�
 const SOURCE_LABEL: Record<string, string> = { spot: "スポット市場 ($2.3/kg)", contract: "既存契約農家 ($1.9/kg)" };
 const EQUITY_LABEL: Record<string, string> = { swf: "中東SWF", sogo: "日本商社", asia: "アジア戦略投資家" };
 
-function DecisionPanel({ decision, submitted }: { decision?: CompanyDecision; submitted: boolean }) {
+function DecisionPanel({ decision, submitted, result }: { decision?: CompanyDecision; submitted: boolean; result: CompanyTurnResult }) {
   if (!submitted) {
+    const defaultFarming = (result.stateBefore.farmingArea ?? 0) * 3;
     return (
-      <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700/40">
-        <p className="text-yellow-400 font-semibold mb-1">🗂 意思決定</p>
-        <p className="text-yellow-300/70">⚠ 未提出 — 既定値（保守的な運用）で処理されました</p>
+      <div className="bg-gray-800/50 rounded-lg p-3 border border-amber-900/40">
+        <div className="flex items-center gap-2 mb-2">
+          <p className="text-yellow-400 font-semibold">🗂 意思決定（既定値で処理）</p>
+          <span className="text-xs text-gray-500">⚠ 意思決定未提出のためシステム既定値を適用</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1">
+          <DRow phase="F2 養殖投入（既定）" value={`${defaultFarming.toLocaleString()} t`} />
+          <DRow phase="F3 外部調達（既定）" value="0 t" />
+          <DRow phase="F4 VAP比率（既定）" value="30 %" />
+          {MARKETS.map((market) => {
+            const qty = result.salesByMarket[market] ?? 0;
+            return qty > 0 ? (
+              <DRow key={market} phase={`F5 ${market}`} value={`${qty.toLocaleString()} t`} />
+            ) : null;
+          })}
+        </div>
       </div>
     );
   }
