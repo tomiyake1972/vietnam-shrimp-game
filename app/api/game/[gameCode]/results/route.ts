@@ -3,6 +3,7 @@ import { redis, parseStored } from "../../../../lib/redis";
 import { GameSession, TurnResult } from "../../../../lib/gameTypes";
 import { gameKey, resultsKey } from "../../../../lib/redisKeys";
 import { normalizeGameSession } from "../../../../lib/gameSession";
+import { normalizeTurnResult } from "../../../../lib/turnResult";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ gameCode: string }> }) {
   const { gameCode } = await params;
@@ -15,14 +16,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ game
 
   if (quarterKey) {
     const raw = await redis.get(resultsKey(gameCode, quarterKey));
-    const result = parseStored<TurnResult>(raw);
-    if (!result) return NextResponse.json({ error: "Result not found" }, { status: 404 });
-    return NextResponse.json({ result });
+    const parsed = parseStored<TurnResult>(raw);
+    if (!parsed) return NextResponse.json({ error: "Result not found" }, { status: 404 });
+    return NextResponse.json({ result: normalizeTurnResult(parsed) });
   }
 
   const history = session.history;
   const results = await Promise.all(
-    history.map(async (key) => parseStored<TurnResult>(await redis.get(resultsKey(gameCode, key))))
+    history.map(async (key) => {
+      const parsed = parseStored<TurnResult>(await redis.get(resultsKey(gameCode, key)));
+      return parsed ? normalizeTurnResult(parsed) : null;
+    })
   );
   return NextResponse.json({ results: results.filter((r): r is TurnResult => r !== null) });
 }

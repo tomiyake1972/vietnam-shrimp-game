@@ -21,7 +21,7 @@ function requireEnv(name: string): string {
 // 環境変数名を分けたまま維持しているのは、「設定し忘れたら明確なエラーで停止する」という
 // 安全性を保つためであり、値そのもの（接続先）が同じであっても構わない。
 // このため、キーのプレフィックス（staging:）による論理分離が唯一の分離手段となり、
-// 下の書き込み前検証（assertStagingScopedKeys）がその最後の防波堤になる。
+// 下の書き込み前検証（assertAllowedKeys）がその最後の防波堤になる。
 function createRedisClient(): Redis {
   if (isProduction) {
     return new Redis({
@@ -37,22 +37,39 @@ function createRedisClient(): Redis {
 
 const rawRedis = createRedisClient();
 
-// 非本番環境でRedisへ書き込む対象キーが、必ずstaging:プレフィックスを持つことを検証する。
-// 本番Redisとテスト環境が同一データベースを共有するようになったため、これがプレフィックスに
-// よる論理分離を守る最後の砦になる。1件でも条件を満たさないキーがあれば、実際にRedisへ
-// 書き込み・削除を発行する前に例外で処理を中断する。
+// Redisへ書き込む対象キーが、環境ごとに許可されたキー形式に一致するかを検証する。
+// 本番Redisとテスト環境が同一データベースを共有するため、これがキー空間の混濁を防ぐ
+// 最後の砦になる。1件でも条件を満たさないキーがあれば、実際にRedisへ書き込み・削除を
+// 発行する前に例外で処理を中断する。
 //
-// 本番環境（isProduction）では、既存の本番キー形式（プレフィックスなし）をそのまま使う設計の
-// ため、このチェックの対象外とする。
-function assertStagingScopedKeys(keys: string[]): void {
-  if (isProduction) return;
+// 許可されるキー形式:
+//   本番（isProduction）      : "games"  または  "game:*"
+//   非本番（staging/dev）     : "staging:games"  または  "staging:game:*"
+//
+// これにより、staging:foo のような誤ったプレフィックスパターンも弾く。
+function assertAllowedKeys(keys: string[]): void {
+  if (isProduction) {
+    for (const key of keys) {
+      if (key !== "games" && !key.startsWith("game:")) {
+        throw new Error(
+          `[redis] 本番環境への書き込み対象キー ${JSON.stringify(key)} が` +
+            ` 許可されたキー形式（"games" または "game:*"）に一致しません。` +
+            ` app/lib/redisKeys.ts のキー生成関数を経由しているか確認してください。`
+        );
+      }
+    }
+    return;
+  }
+  // 非本番（staging/development）: staging:games または staging:game:* のみ許可
+  const allowedPrefix = `${STAGING_KEY_PREFIX}game:`;
+  const allowedList = `${STAGING_KEY_PREFIX}games`;
   for (const key of keys) {
-    if (!key.startsWith(STAGING_KEY_PREFIX)) {
+    if (key !== allowedList && !key.startsWith(allowedPrefix)) {
       throw new Error(
-        `[redis] 非本番環境からの書き込み対象キー ${JSON.stringify(key)} が ` +
-          `"${STAGING_KEY_PREFIX}" で始まっていません。本番Redisとテスト環境は同一データベースを` +
-          " 共有しているため、安全のためこの操作を中断しました。app/lib/redisKeys.ts の" +
-          " キー生成関数を経由しているか確認してください。"
+        `[redis] 非本番環境からの書き込み対象キー ${JSON.stringify(key)} が` +
+          ` 許可されたキー形式（"${allowedList}" または "${allowedPrefix}*"）に一致しません。` +
+          ` 本番Redisとテスト環境は同一データベースを共有しているため、安全のためこの操作を中断しました。` +
+          ` app/lib/redisKeys.ts のキー生成関数を経由しているか確認してください。`
       );
     }
   }
@@ -60,7 +77,7 @@ function assertStagingScopedKeys(keys: string[]): void {
 
 // アプリケーションのコードは、@upstash/redis のクライアントを直接使わず、必ずこの
 // facadeを経由すること。実際に使っている命令（get/set/del/lpush/lrem/lrange/exists/scan）
-// だけをここで公開し、書き込み系（set/del/lpush/lrem）は発行前に assertStagingScopedKeys
+// だけをここで公開し、書き込み系（set/del/lpush/lrem）は発行前に assertAllowedKeys
 // を必ず通す。検証ロジックをAPIごとに個別実装しないための一本化。
 export const redis = {
   // 読み取り専用の命令はそのまま素通しする（bindはオーバーロード付きの型定義を
@@ -71,19 +88,19 @@ export const redis = {
   scan: rawRedis.scan.bind(rawRedis),
 
   set: (...args: Parameters<typeof rawRedis.set>) => {
-    assertStagingScopedKeys([args[0]]);
+    assertAllowedKeys([args[0]]);
     return rawRedis.set(...args);
   },
   del: (...args: Parameters<typeof rawRedis.del>) => {
-    assertStagingScopedKeys(args);
+    assertAllowedKeys(args);
     return rawRedis.del(...args);
   },
   lpush: (...args: Parameters<typeof rawRedis.lpush>) => {
-    assertStagingScopedKeys([args[0]]);
+    assertAllowedKeys([args[0]]);
     return rawRedis.lpush(...args);
   },
   lrem: (...args: Parameters<typeof rawRedis.lrem>) => {
-    assertStagingScopedKeys([args[0]]);
+    assertAllowedKeys([args[0]]);
     return rawRedis.lrem(...args);
   },
 };

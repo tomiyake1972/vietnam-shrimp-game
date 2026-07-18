@@ -8,6 +8,12 @@ export interface GameSession {
   players: Record<CompanyId, PlayerType>;
   confirmedOrders: Record<CompanyId, ConfirmedOrder[]>;
   history: string[];
+  // データ構造の世代番号（破壊的な型変更を行うたびにインクリメント）。
+  // エンジンバージョンは計算ロジックの版数（セマンティックバージョニング）。
+  // 既存データには存在しないため、Redisから読み込む際は必ず
+  // app/lib/gameSession.ts の normalizeGameSession() を通して既定値を補うこと。
+  schemaVersion: number;
+  engineVersion: string;
   // テスト環境（Step 3）関連。既存データには存在しないため、Redisから読み込む際は
   // 必ず app/lib/gameSession.ts の normalizeGameSession() を通して既定値を補うこと。
   isTestGame: boolean;
@@ -113,6 +119,10 @@ export interface TurnResult {
   year: number;
   quarter: number;
   processedAt: string;
+  // データ構造の世代番号とエンジンの版数。既存データには存在しないため、
+  // Redisから読み込む際は必ず app/lib/turnResult.ts の normalizeTurnResult() を通すこと。
+  schemaVersion: number;
+  engineVersion: string;
   companies: Record<CompanyId, CompanyTurnResult>;
 }
 

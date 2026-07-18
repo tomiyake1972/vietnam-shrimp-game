@@ -65,6 +65,8 @@ export function createInitialGameSession(params: CreateGameSessionParams): GameS
     players: params.players,
     confirmedOrders: defaultOrders,
     history: [],
+    schemaVersion: 1,
+    engineVersion: "1.0.0",
     isTestGame: params.isTestGame,
     environment: params.environment,
     randomSeed: params.randomSeed,

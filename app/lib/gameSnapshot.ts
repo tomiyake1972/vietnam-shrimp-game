@@ -13,6 +13,8 @@ import {
   snapshotsListKey,
 } from "./redisKeys";
 import { normalizeDecision } from "./decision";
+import { normalizeGameSession } from "./gameSession";
+import { normalizeTurnResult } from "./turnResult";
 
 const COMPANY_IDS: CompanyId[] = ["A", "B", "C", "D", "E"];
 export const MAX_SNAPSHOTS_PER_GAME = 20;
@@ -60,8 +62,8 @@ async function captureCurrentGameData(gameCode: string, session: GameSession) {
   const results: Record<string, TurnResult> = {};
   for (const period of relevantPeriods(session)) {
     const resultRaw = await redis.get(resultsKey(gameCode, period));
-    const result = parseStored<TurnResult>(resultRaw);
-    if (result) results[period] = result;
+    const resultParsed = parseStored<TurnResult>(resultRaw);
+    if (resultParsed) results[period] = normalizeTurnResult(resultParsed);
     for (const id of COMPANY_IDS) {
       const raw = await redis.get(decisionsKey(gameCode, period, id));
       const stored = parseStored<CompanyDecision>(raw);
@@ -157,8 +159,11 @@ export async function restoreGameSnapshot(
   overrides: RestoreSafetyOverrides,
   extraKeysToDelete: string[]
 ): Promise<GameSession> {
+  // スナップショット内のsessionは旧形式（schemaVersion/engineVersionなし）の可能性があるため、
+  // 展開前に必ずnormalizeGameSessionを通して欠損フィールドを補う。
+  const baseSession = normalizeGameSession(snapshot.session);
   const restoredSession: GameSession = {
-    ...snapshot.session,
+    ...baseSession,
     gameCode,
     createdAt: overrides.createdAt,
     isTestGame: overrides.isTestGame,

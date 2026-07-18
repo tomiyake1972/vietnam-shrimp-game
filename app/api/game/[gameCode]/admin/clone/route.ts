@@ -7,6 +7,7 @@ import { normalizeGameSession, isValidTestGameSession, generateRandomSeed } from
 import { createInitialCompanyStates, createInitialGameSession } from "../../../../../lib/initialGameState";
 import { relevantPeriods } from "../../../../../lib/gameSnapshot";
 import { normalizeDecision } from "../../../../../lib/decision";
+import { normalizeTurnResult } from "../../../../../lib/turnResult";
 import { assertStagingAdmin } from "../../../../../lib/stagingAdmin";
 
 const COMPANY_IDS: CompanyId[] = ["A", "B", "C", "D", "E"];
@@ -99,8 +100,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ gam
   if (cloneMode === "current") {
     for (const period of relevantPeriods(sourceSession)) {
       const resultRaw = await redis.get(resultsKey(gameCode, period));
-      const result = parseStored<TurnResult>(resultRaw);
-      if (result) {
+      const resultParsed = parseStored<TurnResult>(resultRaw);
+      if (resultParsed) {
+        const result = normalizeTurnResult(resultParsed);
         const clonedResult: TurnResult = { ...result, gameCode: newGameCode };
         await redis.set(resultsKey(newGameCode, period), JSON.stringify(clonedResult));
       }

@@ -23,12 +23,17 @@ export function sanitizeRandomSeed(input: unknown): string | null {
 // Step 2で追加したhistoryは、それ以前に作成された既存データには存在しない。
 // Redisから読み込んだセッションは、画面やAPIで使う前に必ずこの関数を通して既定値を補うこと。
 // 本番の既存データそのものを書き換える必要はない（読み込み時にその場で補うだけ）。
-type LegacyGameSession = Omit<GameSession, "isTestGame" | "environment" | "randomSeed" | "updatedAt" | "history"> &
-  Partial<Pick<GameSession, "isTestGame" | "environment" | "randomSeed" | "updatedAt" | "history">>;
+type LegacyGameSession = Omit<
+  GameSession,
+  "isTestGame" | "environment" | "randomSeed" | "updatedAt" | "history" | "schemaVersion" | "engineVersion"
+> &
+  Partial<Pick<GameSession, "isTestGame" | "environment" | "randomSeed" | "updatedAt" | "history" | "schemaVersion" | "engineVersion">>;
 
 export function normalizeGameSession(stored: LegacyGameSession): GameSession {
   return {
     ...stored,
+    schemaVersion: stored.schemaVersion ?? 1,
+    engineVersion: stored.engineVersion ?? "1.0.0-legacy",
     isTestGame: stored.isTestGame ?? false,
     environment: stored.environment ?? "production",
     randomSeed: stored.randomSeed ?? "",

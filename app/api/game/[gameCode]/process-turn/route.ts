@@ -38,6 +38,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ ga
     year: session.currentYear,
     quarter: session.currentQuarter,
     processedAt: new Date().toISOString(),
+    schemaVersion: 1,
+    engineVersion: "1.0.0",
     companies: {} as TurnResult["companies"],
   };
 
