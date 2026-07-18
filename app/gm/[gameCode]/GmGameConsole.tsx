@@ -45,6 +45,25 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
   const [processing, setProcessing] = useState(false);
   const [lastResult, setLastResult] = useState<TurnResult | null>(null);
   const [error, setError] = useState("");
+  const [historyResults, setHistoryResults] = useState<Record<string, TurnResult>>({});
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  async function loadHistory(history: string[]) {
+    if (history.length === 0) return;
+    setHistoryLoading(true);
+    const results: Record<string, TurnResult> = {};
+    await Promise.all(
+      history.map(async (key) => {
+        const res = await fetch(`/api/game/${gameCode}/results?quarter=${key}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.result) results[key] = data.result;
+        }
+      })
+    );
+    setHistoryResults(results);
+    setHistoryLoading(false);
+  }
 
   async function load(code: string) {
     const gameRes = await fetch(`/api/game/${code}`);
@@ -52,6 +71,7 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
     const gameData = await gameRes.json();
     setSession(gameData.session);
     setCompanyStates(gameData.companyStates);
+    await loadHistory(gameData.session.history ?? []);
   }
 
   // セッション・会社状態の読み込み（マウント時、ターン処理後）
@@ -60,7 +80,9 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
       if (!data) { setError("ゲームが見つかりません"); return; }
       setSession(data.session);
       setCompanyStates(data.companyStates);
+      loadHistory(data.session.history ?? []);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameCode]);
 
   // 提出状況のポーリング（5秒間隔）。タブが非表示の間はスキップし、前回のリクエストが
@@ -223,6 +245,21 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
           <TestGameManagement gameCode={gameCode} onChanged={reloadAll} />
         )}
 
+        {/* ゲームログ：全ターンの履歴 */}
+        {session.history?.length > 0 && (
+          <div className="bg-gray-800 rounded-2xl p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">📜 ゲームログ</h2>
+              {historyLoading && <span className="text-xs text-gray-400">読み込み中...</span>}
+            </div>
+            <div className="space-y-3">
+              {[...session.history].reverse().map((key) => (
+                <GameLogEntry key={key} quarterKey={key} result={historyResults[key]} />
+              ))}
+            </div>
+          </div>
+        )}
+
         {lastResult && (
           <div className="bg-gray-800 rounded-2xl p-6">
             <h2 className="text-lg font-semibold mb-4">処理結果：{lastResult.year}年 第{lastResult.quarter}四半期</h2>
@@ -260,6 +297,80 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function GameLogEntry({ quarterKey, result }: { quarterKey: string; result: TurnResult | undefined }) {
+  const [open, setOpen] = useState(false);
+
+  if (!result) {
+    return (
+      <div className="bg-gray-700/30 rounded-xl px-4 py-3 text-gray-500 text-sm">
+        {quarterKey} — データ未取得
+      </div>
+    );
+  }
+
+  const totalRevenue = COMPANY_IDS.reduce((s, id) => s + (result.companies[id]?.revenue ?? 0), 0);
+  const alerts = COMPANY_IDS.filter((id) => {
+    const r = result.companies[id];
+    return r && (r.stateAfter.cash < 0 || r.notes.length > 0);
+  });
+
+  return (
+    <div className="bg-gray-700/30 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-700/50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="font-semibold">{result.year}年 第{result.quarter}四半期</span>
+          <span className="text-xs text-gray-400">市場合計売上 ${Math.round(totalRevenue * 100) / 100}M</span>
+          {alerts.length > 0 && (
+            <span className="text-xs text-yellow-400 bg-yellow-900/30 px-2 py-0.5 rounded">
+              ⚠ {alerts.length}社に注記あり
+            </span>
+          )}
+        </div>
+        <span className="text-gray-500 text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-700 px-4 pb-4 pt-3 space-y-2">
+          {COMPANY_IDS.map((id) => {
+            const r = result.companies[id];
+            if (!r) return null;
+            const cashNeg = r.stateAfter.cash < 0;
+            const hasNotes = r.notes.length > 0;
+            return (
+              <div key={id} className={`rounded-lg p-3 ${cashNeg ? "bg-red-900/20 border border-red-800/40" : "bg-gray-800/50"}`}>
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-sm font-semibold">{COMPANIES[id].name}
+                    <span className="text-gray-400 font-normal ml-1 text-xs">{COMPANIES[id].fullName}</span>
+                  </span>
+                  <span className={`text-sm font-bold ${r.netIncome >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {r.netIncome >= 0 ? "+" : ""}${r.netIncome}M
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-x-3 gap-y-0.5 text-xs text-gray-400 mb-1.5">
+                  <span>売上 <span className="text-white">${r.revenue}M</span></span>
+                  <span>現金 <span className={cashNeg ? "text-red-400 font-semibold" : "text-white"}>${r.stateAfter.cash}M</span></span>
+                  <span>純資産 <span className="text-white">${r.stateAfter.equity}M</span></span>
+                  <span>信用 <span className="text-white">{r.stateAfter.creditScore}</span></span>
+                </div>
+                {hasNotes && (
+                  <div className="space-y-0.5 mt-1">
+                    {r.notes.map((n, i) => (
+                      <p key={i} className="text-xs text-yellow-400/80">📝 {n}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
