@@ -328,10 +328,34 @@ function CompanyDetailCard({ id, r, decision }: { id: CompanyId; r: CompanyTurnR
   const cashChange = r2(r.stateAfter.cash - r.stateBefore.cash);
   const financingCF = r2(cashChange - r.netIncome);
 
-  // BS
+  // ── BS 導出値 ──
+  // stateAfter に個別フィールドが存在すればそれを使い、
+  // なければ当期の取引データ・stateBefore から再導出してフォールバック。
+  // （エンジン改修前に処理された旧ターン結果でも常に全行を表示するため）
   const s = r.stateAfter;
   const debt = r2(s.totalAssets - s.equity);
-  const retained = s.paidInCapital !== undefined ? r2(s.equity - s.paidInCapital) : null;
+
+  // 流動資産
+  const ar      = s.accountsReceivable ?? r2(r.revenue / 3);
+  const rawInvM = s.rawInventory        ?? r2((r.rawInventoryAfter  ?? 0) * 2.1 / 1000);
+  const finInvM = s.finishedInventory   ?? r2(
+    ((r.bulkInventoryAfter ?? 0) * 2.5 + (r.vapInventoryAfter ?? 0) * 4.5) / 1000,
+  );
+  // 固定資産（equipmentGrossはgameDataで全社定義済み。なければstateBefore参照）
+  const bldgNet  = s.buildingsNet   ?? r2((r.stateBefore.buildingsNet  ?? 0) * 0.9875);
+  const eqGross  = s.equipmentGross ?? r.stateBefore.equipmentGross ?? 0;
+  // 設備純額はplug（BS恒等式を保証: 資産合計 = 現金 + 売掛金 + 在庫 + 建物 + 設備純額）
+  const eqNet    = r2(s.totalAssets - s.cash - ar - rawInvM - finInvM - bldgNet);
+  const accumDepr = r2(eqGross - eqNet);
+
+  // 負債
+  const ap  = s.accountsPayable ?? 0;
+  const stl = s.shortTermLoans  ?? 0;
+  const ltl = s.longTermLoans   ?? 0;
+
+  // 純資産内訳
+  const pic      = s.paidInCapital ?? r.stateBefore.paidInCapital ?? 0;
+  const retained = r2(s.equity - pic);
 
   return (
     <div className={`rounded-xl overflow-hidden ${cashNeg ? "border border-red-700/50" : "border border-gray-700/40"}`}>
@@ -388,42 +412,46 @@ function CompanyDetailCard({ id, r, decision }: { id: CompanyId; r: CompanyTurnR
             </table>
           </div>
 
-          {/* 貸借対照表 */}
-          <div>
+          {/* 貸借対照表（全幅） */}
+          <div className="md:col-span-2">
             <p className="text-yellow-400 font-semibold mb-2">🏦 貸借対照表（期末）</p>
-            <div className="grid grid-cols-2 gap-x-4">
+            <div className="grid grid-cols-2 gap-x-6">
+
+              {/* ── 資産の部 ── */}
               <div>
-                <p className="text-gray-500 font-semibold mb-1">【資産】</p>
+                <p className="text-gray-400 font-semibold mb-1 text-xs">【資産の部】</p>
+                <p className="text-gray-600 text-xs mb-0.5">〈流動資産〉</p>
                 <BSRow label="現金・預金" value={money(s.cash)} alert={cashNeg} />
-                {s.accountsReceivable !== undefined && <BSRow label="売掛金" value={money(s.accountsReceivable)} />}
-                {s.rawInventory !== undefined && <BSRow label="原料在庫" value={money(s.rawInventory)} />}
-                {s.finishedInventory !== undefined && <BSRow label="製品在庫" value={money(s.finishedInventory)} />}
-                {s.buildingsNet !== undefined && <BSRow label="建物（純額）" value={money(s.buildingsNet)} />}
-                {s.equipmentGross !== undefined && <>
-                  <BSRow label="設備（総額）" value={money(s.equipmentGross)} />
-                  <BSRow label="△減価償却累計" value={money(s.accumulatedDepreciation ?? 0)} neg />
-                </>}
-                <div className="border-t border-gray-600 my-1" />
+                <BSRow label="売掛金" value={money(ar)} />
+                <BSRow label="原料在庫（評価額）" value={money(rawInvM)} />
+                <BSRow label="製品在庫（評価額）" value={money(finInvM)} />
+                <p className="text-gray-600 text-xs mt-2 mb-0.5">〈固定資産〉</p>
+                <BSRow label="建物（純額）" value={money(bldgNet)} />
+                <BSRow label="設備（総額）" value={money(eqGross)} />
+                <BSRow label="△減価償却累計" value={money(accumDepr)} neg />
+                <div className="border-t border-gray-500 my-1.5" />
                 <BSRow label="資産合計" value={money(s.totalAssets)} bold />
               </div>
+
+              {/* ── 負債・純資産の部 ── */}
               <div>
-                <p className="text-gray-500 font-semibold mb-1">【負債】</p>
-                {s.accountsPayable !== undefined && <BSRow label="買掛金" value={money(s.accountsPayable)} />}
-                {s.shortTermLoans !== undefined && <BSRow label="短期借入金" value={money(s.shortTermLoans)} />}
-                {s.longTermLoans !== undefined && <BSRow label="長期借入金" value={money(s.longTermLoans)} />}
-                {s.accountsPayable === undefined && <BSRow label="負債合計" value={money(debt)} />}
-                {s.accountsPayable !== undefined && <>
-                  <div className="border-t border-gray-600 my-1" />
-                  <BSRow label="負債合計" value={money(debt)} bold />
-                </>}
-                <p className="text-gray-500 font-semibold mt-2 mb-1">【純資産】</p>
-                {s.paidInCapital !== undefined && <BSRow label="資本金" value={money(s.paidInCapital)} />}
-                {retained !== null && <BSRow label="利益剰余金" value={money(retained)} alert={retained < 0} />}
-                <div className="border-t border-gray-600 my-1" />
+                <p className="text-gray-400 font-semibold mb-1 text-xs">【負債の部】</p>
+                <p className="text-gray-600 text-xs mb-0.5">〈流動負債〉</p>
+                <BSRow label="買掛金" value={money(ap)} />
+                <BSRow label="短期借入金" value={money(stl)} />
+                <p className="text-gray-600 text-xs mt-2 mb-0.5">〈固定負債〉</p>
+                <BSRow label="長期借入金" value={money(ltl)} />
+                <div className="border-t border-gray-600 my-1.5" />
+                <BSRow label="負債合計" value={money(debt)} bold />
+
+                <p className="text-gray-400 font-semibold mt-3 mb-1 text-xs">【純資産の部】</p>
+                <BSRow label="資本金（払込済）" value={money(pic)} />
+                <BSRow label="利益剰余金" value={money(retained)} alert={retained < 0} />
+                <div className="border-t border-gray-600 my-1.5" />
                 <BSRow label="純資産合計" value={money(s.equity)} bold />
-                <div className="border-t-2 border-gray-500 my-1" />
+                <div className="border-t-2 border-gray-400 my-1.5" />
                 <BSRow label="負債純資産合計" value={money(s.totalAssets)} bold />
-                <p className="text-gray-600 text-right pt-1">D/E {s.debtEquityRatio}x</p>
+                <p className="text-gray-600 text-right pt-1">D/E比率: {s.debtEquityRatio}x ｜ 信用スコア: {s.creditScore}</p>
               </div>
             </div>
           </div>
