@@ -312,7 +312,7 @@ function signed(v: number) { return `${v >= 0 ? "+" : "−"}${money(v)}`; }
 
 // ─── 各社詳細カード ──────────────────────────────────────────────────
 function CompanyDetailCard({ id, r }: { id: CompanyId; r: CompanyTurnResult }) {
-  const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const cashNeg = r.stateAfter.cash < 0;
 
   // 損益計算書の中間値
@@ -331,10 +331,10 @@ function CompanyDetailCard({ id, r }: { id: CompanyId; r: CompanyTurnResult }) {
 
   return (
     <div className={`rounded-xl overflow-hidden ${cashNeg ? "border border-red-700/50" : "border border-gray-700/40"}`}>
-      {/* ─ ヘッダ行（常時表示） ─ */}
+      {/* ─ ヘッダ行（クリックで折りたたみ） ─ */}
       <button
-        onClick={() => setOpen((o) => !o)}
-        className={`w-full px-4 py-3 flex items-center justify-between text-left transition-colors ${cashNeg ? "bg-red-900/20 hover:bg-red-900/30" : "bg-gray-800/60 hover:bg-gray-700/60"}`}
+        onClick={() => setCollapsed((c) => !c)}
+        className={`w-full px-4 py-2.5 flex items-center justify-between text-left transition-colors ${cashNeg ? "bg-red-900/20 hover:bg-red-900/30" : "bg-gray-800/60 hover:bg-gray-700/60"}`}
       >
         <div className="flex items-center gap-3 flex-wrap">
           <span className={`font-bold ${COMPANY_COLORS[id]}`}>{COMPANIES[id].name}</span>
@@ -344,11 +344,11 @@ function CompanyDetailCard({ id, r }: { id: CompanyId; r: CompanyTurnResult }) {
           <span className="text-gray-500 text-xs">現金 <span className={cashNeg ? "text-red-400 font-semibold" : "text-gray-200"}>{money(r.stateAfter.cash)}</span></span>
           <span className="text-gray-500 text-xs">信用 <span className="text-gray-200">{r.stateAfter.creditScore}</span></span>
         </div>
-        <span className="text-gray-500 text-xs ml-2">{open ? "▲" : "▼"}</span>
+        <span className="text-gray-500 text-xs ml-2">{collapsed ? "▼ 展開" : "▲ 閉じる"}</span>
       </button>
 
-      {/* ─ 詳細（展開時） ─ */}
-      {open && (
+      {/* ─ 詳細（デフォルト表示、クリックで折りたたみ可） ─ */}
+      {!collapsed && (
         <div className="bg-gray-900/40 px-4 pb-4 pt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
 
           {/* 損益計算書 */}
