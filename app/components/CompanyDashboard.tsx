@@ -100,14 +100,46 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
       <div className="max-w-5xl mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="space-y-4">
           <div className={`bg-gray-800 rounded-xl p-4 border-l-4 ${colorBorder[profile.color]}`}>
-            <h2 className="text-sm text-gray-400 mb-3 font-semibold uppercase tracking-wide">期初バランスシート</h2>
-            <div className="space-y-2 text-sm">
-              <Row label="現金" value={`$${company.cash}M`} highlight={company.cash < 8} />
-              <Row label="総資産" value={`$${company.totalAssets}M`} />
-              <Row label="負債" value={`$${debt}M`} />
-              <Row label="純資産" value={`$${company.equity}M`} />
-              <Row label="D/E比率" value={`${company.debtEquityRatio}x`} highlight={company.debtEquityRatio > 2.5} />
-            </div>
+            <h2 className="text-sm text-gray-400 mb-3 font-semibold uppercase tracking-wide">貸借対照表</h2>
+            {company.equipmentGross !== undefined ? (
+              <div className="text-xs space-y-0.5">
+                {/* 資産の部 */}
+                <p className="text-gray-500 font-semibold pt-0.5">【資産の部】</p>
+                <BSRow label="現金・預金" value={company.cash} highlight={company.cash < 8} />
+                <BSRow label="売掛金" value={company.accountsReceivable ?? 0} />
+                <BSRow label="原料在庫" value={company.rawInventory ?? 0} />
+                <BSRow label="製品在庫" value={company.finishedInventory ?? 0} />
+                <BSRow label="建物" value={company.buildingsNet ?? 0} sub />
+                <BSRow label="設備（総額）" value={company.equipmentGross} sub />
+                <BSRow label="　減価償却累計額" value={-(company.accumulatedDepreciation ?? 0)} sub />
+                <div className="border-t border-gray-600 my-1" />
+                <BSRow label="資産合計" value={company.totalAssets} bold />
+                {/* 負債の部 */}
+                <p className="text-gray-500 font-semibold pt-1.5">【負債の部】</p>
+                <BSRow label="買掛金" value={company.accountsPayable ?? 0} />
+                <BSRow label="短期借入金" value={company.shortTermLoans ?? 0} highlight={(company.shortTermLoans ?? 0) > 60} />
+                <BSRow label="長期借入金" value={company.longTermLoans ?? 0} />
+                <div className="border-t border-gray-600 my-1" />
+                <BSRow label="負債合計" value={debt} bold />
+                {/* 純資産の部 */}
+                <p className="text-gray-500 font-semibold pt-1.5">【純資産の部】</p>
+                <BSRow label="資本金" value={company.paidInCapital ?? 0} />
+                <BSRow label="利益剰余金" value={company.equity - (company.paidInCapital ?? 0)} highlight={company.equity - (company.paidInCapital ?? 0) < 0} />
+                <div className="border-t border-gray-600 my-1" />
+                <BSRow label="純資産合計" value={company.equity} bold />
+                <div className="border-t-2 border-gray-500 my-1" />
+                <BSRow label="負債純資産合計" value={company.totalAssets} bold />
+                <p className="text-gray-600 text-right pt-1">D/E {company.debtEquityRatio}x</p>
+              </div>
+            ) : (
+              <div className="space-y-2 text-sm">
+                <Row label="現金" value={`$${company.cash}M`} highlight={company.cash < 8} />
+                <Row label="総資産" value={`$${company.totalAssets}M`} />
+                <Row label="負債" value={`$${debt}M`} />
+                <Row label="純資産" value={`$${company.equity}M`} />
+                <Row label="D/E比率" value={`${company.debtEquityRatio}x`} highlight={company.debtEquityRatio > 2.5} />
+              </div>
+            )}
           </div>
           <div className={`bg-gray-800 rounded-xl p-4 border-l-4 ${colorBorder[profile.color]}`}>
             <h2 className="text-sm text-gray-400 mb-3 font-semibold uppercase tracking-wide">オペレーション</h2>
@@ -195,6 +227,18 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
           )}
         </div>
       </div>
+    </div>
+  );
+}
+function BSRow({ label, value, highlight, bold, sub }: { label: string; value: number; highlight?: boolean; bold?: boolean; sub?: boolean }) {
+  const fmt = (v: number) => `$${Math.abs(v)}M`;
+  const isNeg = value < 0;
+  return (
+    <div className="flex justify-between">
+      <span className={sub ? "text-gray-500 pl-2" : "text-gray-400"}>{label}</span>
+      <span className={`${highlight ? "text-yellow-400 font-semibold" : bold ? "text-white font-semibold" : "text-gray-300"} ${isNeg ? "text-orange-400" : ""}`}>
+        {isNeg ? `△${fmt(value)}` : fmt(value)}
+      </span>
     </div>
   );
 }

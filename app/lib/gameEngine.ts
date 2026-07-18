@@ -140,6 +140,41 @@ export function resolveCompanyTurn(
     notes.push("⚠️ 現金がマイナスになりました。資金繰りに注意してください。");
   }
 
+  // BS詳細の四半期更新（equipmentGrossが設定されている場合のみ）
+  const bsDetail: Partial<CompanyState> = {};
+  if (state.equipmentGross !== undefined) {
+    // 売掛金: 当期売上の1/3（30日回収サイト＝90日クォーターの1/3が未回収）
+    const newAR = round2(revenue / 3);
+    // 原料・製品在庫: エンジン上は期末ゼロだがBSの連続性のため期首値を維持
+    const newRawInv = state.rawInventory ?? 0;
+    const newFinInv = state.finishedInventory ?? 0;
+    // 建物: 年5%（四半期1.25%）の定額償却
+    const newBldgNet = round2((state.buildingsNet ?? 0) * 0.9875);
+    // 設備: 総額固定。純額はtotalAssetsからの逆算（BS恒等式を常に保証）
+    const equipGross = state.equipmentGross;
+    const plugEquipNet = round2(totalAssets - cash - newAR - newRawInv - newFinInv - newBldgNet);
+    const newAccumDepr = round2(equipGross - plugEquipNet);
+    // 買掛金: 農業費＋調達費の30%（30日支払サイト）
+    const newAP = round2((farmingCost + procurementCost) * 0.3);
+    // 短期・長期借入金: 買掛金控除後の負債を3:7に分割
+    const adjDebt = Math.max(0, round2(debtAfter - newAP));
+    const newSTL = round2(adjDebt * 0.3);
+    const newLTL = round2(adjDebt - newSTL);
+    // 資本金: 増資があれば増加
+    const newPIC = round2((state.paidInCapital ?? 0) + equityInjection);
+
+    bsDetail.accountsReceivable = newAR;
+    bsDetail.rawInventory = newRawInv;
+    bsDetail.finishedInventory = newFinInv;
+    bsDetail.buildingsNet = newBldgNet;
+    bsDetail.equipmentGross = equipGross;
+    bsDetail.accumulatedDepreciation = newAccumDepr;
+    bsDetail.accountsPayable = newAP;
+    bsDetail.shortTermLoans = newSTL;
+    bsDetail.longTermLoans = newLTL;
+    bsDetail.paidInCapital = newPIC;
+  }
+
   const stateAfter: CompanyState = {
     cash,
     totalAssets,
@@ -148,6 +183,7 @@ export function resolveCompanyTurn(
     creditScore,
     farmingArea: state.farmingArea,
     processingCapacity: state.processingCapacity,
+    ...bsDetail,
   };
 
   return {

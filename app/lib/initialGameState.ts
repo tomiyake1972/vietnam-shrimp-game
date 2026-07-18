@@ -18,6 +18,17 @@ export function createInitialCompanyStates(): Record<CompanyId, CompanyState> {
       creditScore: c.creditScore,
       farmingArea: c.farmingArea,
       processingCapacity: c.processingCapacity,
+      // 貸借対照表詳細
+      accountsReceivable: c.accountsReceivable,
+      rawInventory: c.rawInventory,
+      finishedInventory: c.finishedInventory,
+      buildingsNet: c.buildingsNet,
+      equipmentGross: c.equipmentGross,
+      accumulatedDepreciation: c.accumulatedDepreciation,
+      accountsPayable: c.accountsPayable,
+      shortTermLoans: c.shortTermLoans,
+      longTermLoans: c.longTermLoans,
+      paidInCapital: c.paidInCapital,
     };
   }
   return states;

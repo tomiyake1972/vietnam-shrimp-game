@@ -15,7 +15,26 @@ export interface GameSession {
   randomSeed: string;
 }
 export interface ConfirmedOrder { destination: string; product: string; quantity: number; price: number; deliveryQuarter: number; }
-export interface CompanyState { cash: number; totalAssets: number; equity: number; debtEquityRatio: number; creditScore: number; farmingArea: number; processingCapacity: number; }
+export interface CompanyState {
+  cash: number;
+  totalAssets: number;
+  equity: number;
+  debtEquityRatio: number;
+  creditScore: number;
+  farmingArea: number;
+  processingCapacity: number;
+  // 貸借対照表詳細（オプション：旧データとの後方互換のため省略可）
+  accountsReceivable?: number;    // 売掛金
+  rawInventory?: number;          // 原料在庫
+  finishedInventory?: number;     // 製品在庫
+  buildingsNet?: number;          // 建物（純額）
+  equipmentGross?: number;        // 設備（総額）
+  accumulatedDepreciation?: number; // 減価償却累計額
+  accountsPayable?: number;       // 買掛金
+  shortTermLoans?: number;        // 短期借入金
+  longTermLoans?: number;         // 長期借入金
+  paidInCapital?: number;         // 資本金
+}
 
 // gm-test: 非本番環境でGMがテストゲームの会社画面を代理操作して提出した場合。
 // ai: 将来のAI自動意思決定用に予約（Step 4時点では設定されない）。
