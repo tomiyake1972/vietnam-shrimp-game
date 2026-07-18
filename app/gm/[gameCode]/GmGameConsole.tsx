@@ -355,10 +355,14 @@ function CompanyDetailCard({ id, r, decision }: { id: CompanyId; r: CompanyTurnR
   const eqNet    = r2(s.totalAssets - s.cash - ar - rawInvM - finInvM - bldgNet);
   const accumDepr = r2(eqGross - eqNet);
 
-  // 負債
-  const ap  = s.accountsPayable ?? 0;
-  const stl = s.shortTermLoans  ?? 0;
-  const ltl = s.longTermLoans   ?? 0;
+  // 負債の内訳（旧データでフィールドがない場合はエンジンと同じ計算式で導出）
+  // 買掛金 = COGS×30%（農業費＋調達費の30日支払サイト）
+  // 短期:長期 = 3:7（買掛金控除後の負債を按分）
+  const apDerived  = r2(r.cogs * 0.3);
+  const adjDebt    = Math.max(0, r2(debt - apDerived));
+  const ap  = s.accountsPayable ?? apDerived;
+  const stl = s.shortTermLoans  ?? r2(adjDebt * 0.3);
+  const ltl = s.longTermLoans   ?? r2(adjDebt - r2(adjDebt * 0.3));
 
   // 純資産内訳
   const pic      = s.paidInCapital ?? r.stateBefore.paidInCapital ?? COMPANIES[id].paidInCapital;
