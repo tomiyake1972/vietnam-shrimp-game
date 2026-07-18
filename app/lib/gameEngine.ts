@@ -78,7 +78,12 @@ export function resolveCompanyTurn(
   const salesByMarket: Record<string, number> = {};
   let revenue = 0;
   for (const market of Object.keys(MARKET_PRICE_PER_KG)) {
-    const requested = submitted ? num(phases[`phase5_${market}`], 0) : 0;
+    // 未提出時の既定値：バルクは国内スポット市場で全量販売、VAPは日本市場で全量販売。
+    // （提出なし＝「保守的な継続運転」= 既存ルートで売り切る）
+    const defaultQty = !submitted
+      ? (market === "国内（スポット）" ? bulkRemaining : market === "日本（VAP）" ? vapRemaining : 0)
+      : 0;
+    const requested = submitted ? num(phases[`phase5_${market}`], 0) : defaultQty;
     const isVap = market.includes("VAP");
     const available = isVap ? vapRemaining : bulkRemaining;
     const sold = Math.min(requested, available);
