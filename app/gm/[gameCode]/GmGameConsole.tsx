@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { COMPANIES, CompanyId } from "../../lib/gameData";
-import { CompanyState, CompanyTurnResult, GameSession, PlayerType, SubmissionStatusResponse, SubmittedBy, TurnResult } from "../../lib/gameTypes";
+import { CompanyDecision, CompanyState, CompanyTurnResult, GameSession, PlayerType, SubmissionStatusResponse, SubmittedBy, TurnResult } from "../../lib/gameTypes";
 import TestGameManagement from "./TestGameManagement";
 
 const COMPANY_IDS: CompanyId[] = ["A", "B", "C", "D", "E"];
@@ -46,22 +46,26 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
   const [lastResult, setLastResult] = useState<TurnResult | null>(null);
   const [error, setError] = useState("");
   const [historyResults, setHistoryResults] = useState<Record<string, TurnResult>>({});
+  const [historyDecisions, setHistoryDecisions] = useState<Record<string, Partial<Record<CompanyId, CompanyDecision>>>>({});
   const [historyLoading, setHistoryLoading] = useState(false);
 
   async function loadHistory(history: string[]) {
     if (history.length === 0) return;
     setHistoryLoading(true);
     const results: Record<string, TurnResult> = {};
+    const decisions: Record<string, Partial<Record<CompanyId, CompanyDecision>>> = {};
     await Promise.all(
       history.map(async (key) => {
-        const res = await fetch(`/api/game/${gameCode}/results?quarter=${key}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.result) results[key] = data.result;
-        }
+        const [resRes, decRes] = await Promise.all([
+          fetch(`/api/game/${gameCode}/results?quarter=${key}`),
+          fetch(`/api/game/${gameCode}/decisions?quarter=${key}`),
+        ]);
+        if (resRes.ok) { const d = await resRes.json(); if (d.result) results[key] = d.result; }
+        if (decRes.ok) { decisions[key] = await decRes.json(); }
       })
     );
     setHistoryResults(results);
+    setHistoryDecisions(decisions);
     setHistoryLoading(false);
   }
 
@@ -254,7 +258,7 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
             </div>
             <div className="space-y-3">
               {[...session.history].reverse().map((key) => (
-                <GameLogEntry key={key} quarterKey={key} result={historyResults[key]} />
+                <GameLogEntry key={key} quarterKey={key} result={historyResults[key]} decisions={historyDecisions[key]} />
               ))}
             </div>
           </div>
@@ -311,7 +315,7 @@ function money(v: number) { return `$${r2(Math.abs(v)).toFixed(2)}M`; }
 function signed(v: number) { return `${v >= 0 ? "+" : "−"}${money(v)}`; }
 
 // ─── 各社詳細カード ──────────────────────────────────────────────────
-function CompanyDetailCard({ id, r }: { id: CompanyId; r: CompanyTurnResult }) {
+function CompanyDetailCard({ id, r, decision }: { id: CompanyId; r: CompanyTurnResult; decision?: CompanyDecision }) {
   const [collapsed, setCollapsed] = useState(false);
   const cashNeg = r.stateAfter.cash < 0;
 
@@ -475,6 +479,11 @@ function CompanyDetailCard({ id, r }: { id: CompanyId; r: CompanyTurnResult }) {
             </div>
           </div>
 
+          {/* 意思決定内容 */}
+          <div className="md:col-span-2">
+            <DecisionPanel decision={decision} submitted={r.submitted} />
+          </div>
+
           {/* 注記 */}
           {r.notes.length > 0 && (
             <div className="md:col-span-2 bg-yellow-900/20 rounded-lg p-3 space-y-1">
@@ -484,6 +493,86 @@ function CompanyDetailCard({ id, r }: { id: CompanyId; r: CompanyTurnResult }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── 意思決定パネル ──────────────────────────────────────────────────
+const FACTORY_LABEL: Record<string, string> = { none: "申請なし", expand: "既存工場の拡張を申請", new: "新工場の建設を申請" };
+const SOURCE_LABEL: Record<string, string> = { spot: "スポット市場 ($2.3/kg)", contract: "既存契約農家 ($1.9/kg)" };
+const EQUITY_LABEL: Record<string, string> = { swf: "中東SWF", sogo: "日本商社", asia: "アジア戦略投資家" };
+
+function DecisionPanel({ decision, submitted }: { decision?: CompanyDecision; submitted: boolean }) {
+  if (!submitted) {
+    return (
+      <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700/40">
+        <p className="text-yellow-400 font-semibold mb-1">🗂 意思決定</p>
+        <p className="text-yellow-300/70">⚠ 未提出 — 既定値（保守的な運用）で処理されました</p>
+      </div>
+    );
+  }
+  if (!decision) {
+    return (
+      <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700/40">
+        <p className="text-yellow-400 font-semibold mb-1">🗂 意思決定</p>
+        <p className="text-gray-500">データ取得中...</p>
+      </div>
+    );
+  }
+  const p = decision.phases;
+  const markets = ["EU（バルク）", "日本（VAP）", "米国（バルク）", "国内（スポット）"] as const;
+  return (
+    <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700/40">
+      <div className="flex items-center gap-3 mb-2">
+        <p className="text-yellow-400 font-semibold">🗂 意思決定</p>
+        <span className="text-gray-500 text-xs">提出回数: {decision.submissionCount} ｜ 最終提出: {formatJST(decision.lastSubmittedAt)} ｜ 操作者: {decision.submittedBy}</span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1">
+        {/* F1 設備投資 */}
+        {p["phase1_factory"] && p["phase1_factory"] !== "none" && (
+          <DRow phase="F1 設備投資" value={FACTORY_LABEL[p["phase1_factory"]] ?? p["phase1_factory"]} />
+        )}
+        {/* F2 生産計画 */}
+        {p["phase2_farming"] && (
+          <DRow phase="F2 養殖投入" value={`${Number(p["phase2_farming"]).toLocaleString()} t`} />
+        )}
+        {/* F3 調達 */}
+        {p["phase3_procurement"] && (
+          <DRow phase="F3 外部調達" value={`${Number(p["phase3_procurement"]).toLocaleString()} t`} />
+        )}
+        {p["phase3_source"] && (
+          <DRow phase="F3 調達先" value={SOURCE_LABEL[p["phase3_source"]] ?? p["phase3_source"]} />
+        )}
+        {/* F4 加工 */}
+        {p["phase4_vap_ratio"] !== undefined && p["phase4_vap_ratio"] !== "" && (
+          <DRow phase="F4 VAP比率" value={`${p["phase4_vap_ratio"]} %`} />
+        )}
+        {/* F5 販売 */}
+        {markets.map((m) => {
+          const qty = p[`phase5_${m}`];
+          return qty && Number(qty) > 0 ? (
+            <DRow key={m} phase={`F5 ${m}`} value={`${Number(qty).toLocaleString()} t`} />
+          ) : null;
+        })}
+        {/* F6 財務 */}
+        {p["phase6_borrow"] && Number(p["phase6_borrow"]) > 0 && (
+          <DRow phase="F6 借入" value={`$${p["phase6_borrow"]}M`} />
+        )}
+        {p["phase6_repay"] && Number(p["phase6_repay"]) > 0 && (
+          <DRow phase="F6 返済" value={`$${p["phase6_repay"]}M`} />
+        )}
+        {p["phase6_equity"] && p["phase6_equity"] !== "" && (
+          <DRow phase="F6 増資申請" value={EQUITY_LABEL[p["phase6_equity"]] ?? p["phase6_equity"]} />
+        )}
+      </div>
+    </div>
+  );
+}
+function DRow({ phase, value }: { phase: string; value: string }) {
+  return (
+    <div className="py-0.5">
+      <span className="text-gray-500">{phase}: </span>
+      <span className="text-gray-200">{value}</span>
     </div>
   );
 }
@@ -515,7 +604,7 @@ function QRow({ label, value, hl }: { label: string; value: string; hl?: boolean
 }
 
 // ─── 四半期ログエントリ ──────────────────────────────────────────────
-function GameLogEntry({ quarterKey, result }: { quarterKey: string; result: TurnResult | undefined }) {
+function GameLogEntry({ quarterKey, result, decisions }: { quarterKey: string; result: TurnResult | undefined; decisions?: Partial<Record<CompanyId, CompanyDecision>> }) {
   const [open, setOpen] = useState(false);
 
   if (!result) {
@@ -601,7 +690,7 @@ function GameLogEntry({ quarterKey, result }: { quarterKey: string; result: Turn
               {COMPANY_IDS.map((id) => {
                 const r = result.companies[id];
                 if (!r) return null;
-                return <CompanyDetailCard key={id} id={id} r={r} />;
+                return <CompanyDetailCard key={id} id={id} r={r} decision={decisions?.[id]} />;
               })}
             </div>
           </div>
