@@ -341,9 +341,16 @@ function CompanyDetailCard({ id, r, decision }: { id: CompanyId; r: CompanyTurnR
   const finInvM = s.finishedInventory   ?? r2(
     ((r.bulkInventoryAfter ?? 0) * 2.5 + (r.vapInventoryAfter ?? 0) * 4.5) / 1000,
   );
-  // 固定資産（equipmentGrossはgameDataで全社定義済み。なければstateBefore参照）
-  const bldgNet  = s.buildingsNet   ?? r2((r.stateBefore.buildingsNet  ?? 0) * 0.9875);
-  const eqGross  = s.equipmentGross ?? r.stateBefore.equipmentGross ?? 0;
+  // 固定資産
+  // 優先順位: stateAfter → stateBefore（建物は1Q分償却） → COMPANIES初期値
+  // equipmentGross（取得原価）はゲーム中に増減しないため COMPANIES 値が常に有効な最終FB
+  // buildingsNet は経過四半期数で推計（0.9875^処理済四半期数）
+  const quartersProcessed = (r.year - 2015) * 4 + r.quarter;
+  const bldgNet = s.buildingsNet
+    ?? (r.stateBefore.buildingsNet !== undefined
+      ? r2(r.stateBefore.buildingsNet * 0.9875)
+      : r2(COMPANIES[id].buildingsNet * Math.pow(0.9875, quartersProcessed)));
+  const eqGross = s.equipmentGross ?? r.stateBefore.equipmentGross ?? COMPANIES[id].equipmentGross;
   // 設備純額はplug（BS恒等式を保証: 資産合計 = 現金 + 売掛金 + 在庫 + 建物 + 設備純額）
   const eqNet    = r2(s.totalAssets - s.cash - ar - rawInvM - finInvM - bldgNet);
   const accumDepr = r2(eqGross - eqNet);
@@ -354,7 +361,7 @@ function CompanyDetailCard({ id, r, decision }: { id: CompanyId; r: CompanyTurnR
   const ltl = s.longTermLoans   ?? 0;
 
   // 純資産内訳
-  const pic      = s.paidInCapital ?? r.stateBefore.paidInCapital ?? 0;
+  const pic      = s.paidInCapital ?? r.stateBefore.paidInCapital ?? COMPANIES[id].paidInCapital;
   const retained = r2(s.equity - pic);
 
   return (
