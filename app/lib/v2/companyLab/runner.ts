@@ -640,6 +640,7 @@ export function advanceCompanyLabQuarter(
     turnDebug: turnResult.debug,
     qualityAdjustments: adjustments,
     qualityStateAfter,
+    deliveryObservations,
   };
 
   const canAdvanceWithinScenario = turn < definition.durationTurns;

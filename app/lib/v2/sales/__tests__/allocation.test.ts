@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { allocateMarketProduct } from "../allocation";
+import { allocateMarketProduct, computeCompetitivenessBreakdown, computeCompetitivenessWeight } from "../allocation";
 import { SALES_PARAMETERS_V1 } from "../parameters";
 import { CompanySalesPlanEntry, SalesValidationError } from "../types";
 import { hosoEqTons, unwrapUnit, usdPerHosoEqKg } from "../../core/units";
@@ -270,4 +270,59 @@ test("最大供給者シェア・承認済み取引枠を適用しても、入�
   const resultB = allocateMarketProduct("CN", "hoso", P1, shuffled, BASE_PRICE, hosoEqTons(4000), SALES_PARAMETERS_V1);
 
   assert.deepEqual(resultA, resultB);
+});
+
+// --- 【Phase 7B】competitivenessBreakdown（説明用データ）のテスト ---
+// UI（会社ラボ・成約競争力の説明）が読み取り専用で表示するためのデータであり、
+// 計算式自体はcomputeCompetitivenessWeightと完全に同一である（内訳への分解のみ）。
+
+test("受入確認D-1: competitivenessBreakdownの5つのcontribution合計はcompetitivenessWeightと厳密に一致する", () => {
+  const params = SALES_PARAMETERS_V1;
+  const entries = ["A", "B", "C", "D", "E"].map((id, i) =>
+    entry(id, {
+      priceAdjustmentUsdPerHosoEqKg: (i - 2) * 0.05 * unwrapUnit(BASE_PRICE),
+      salesForceHeadcount: i * 3,
+      customerRelationship: undefined,
+      qualityReputation: undefined,
+      deliveryReliability: undefined,
+    })
+  );
+  const result = allocateMarketProduct("CN", "hoso", P1, entries, BASE_PRICE, hosoEqTons(4000), params);
+  for (const c of result.companies) {
+    const b = c.competitivenessBreakdown;
+    const sum = b.priceContribution + b.coverageContribution + b.relationshipContribution + b.qualityContribution + b.deliveryReliabilityContribution;
+    assert.equal(sum, c.competitivenessWeight, `会社${c.companyId}: breakdown合計とcompetitivenessWeightが一致しない`);
+  }
+});
+
+test("受入確認D-2: computeCompetitivenessBreakdownとcomputeCompetitivenessWeightは同一入力に対し整合する（単体関数レベル）", () => {
+  const params = SALES_PARAMETERS_V1;
+  const e = entry("A", { customerRelationship: undefined, qualityReputation: undefined, deliveryReliability: undefined });
+  const askPrice = usdPerHosoEqKg(unwrapUnit(BASE_PRICE) * 0.8);
+  const b = computeCompetitivenessBreakdown(e, askPrice, BASE_PRICE, 0.7, params);
+  const w = computeCompetitivenessWeight(e, askPrice, BASE_PRICE, 0.7, params);
+  const sum = b.priceContribution + b.coverageContribution + b.relationshipContribution + b.qualityContribution + b.deliveryReliabilityContribution;
+  assert.equal(sum, w);
+});
+
+test("受入確認D-3: 価格競争力が上限(maximumPriceCompetitiveness)に到達した場合、isPriceScoreAtCeiling=trueになり、さらなる値引きでもpriceContributionが変化しない", () => {
+  const params = SALES_PARAMETERS_V1;
+  // 20%値引きで既に上限(1.6)に到達する設定（他のテストと同じ根拠）。
+  const moderate = entry("M", { priceAdjustmentUsdPerHosoEqKg: -0.2 * unwrapUnit(BASE_PRICE), desiredQuantity: hosoEqTons(1000000), salesForceHeadcount: 8 });
+  const deep = entry("F", { priceAdjustmentUsdPerHosoEqKg: -0.45 * unwrapUnit(BASE_PRICE), desiredQuantity: hosoEqTons(1000000), salesForceHeadcount: 8 });
+  const result = allocateMarketProduct("CN", "hoso", P1, [moderate, deep], BASE_PRICE, hosoEqTons(20000), params);
+  const m = result.companies.find((c) => c.companyId === "M")!;
+  const f = result.companies.find((c) => c.companyId === "F")!;
+  assert.equal(m.competitivenessBreakdown.isPriceScoreAtCeiling, true);
+  assert.equal(f.competitivenessBreakdown.isPriceScoreAtCeiling, true);
+  assert.equal(m.competitivenessBreakdown.priceContribution, f.competitivenessBreakdown.priceContribution);
+  assert.equal(m.competitivenessBreakdown.clampedPriceScore, params.maximumPriceCompetitiveness);
+});
+
+test("受入確認D-4: 価格競争力が上限未満の通常提示価格では、isPriceScoreAtCeiling=falseになる", () => {
+  const params = SALES_PARAMETERS_V1;
+  const normal = entry("N", { priceAdjustmentUsdPerHosoEqKg: 0, salesForceHeadcount: 5 });
+  const result = allocateMarketProduct("CN", "hoso", P1, [normal, entry("Z", { salesForceHeadcount: 5 })], BASE_PRICE, hosoEqTons(2000), params);
+  const n = result.companies.find((c) => c.companyId === "N")!;
+  assert.equal(n.competitivenessBreakdown.isPriceScoreAtCeiling, false);
 });

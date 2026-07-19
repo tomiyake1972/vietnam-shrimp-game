@@ -37,7 +37,7 @@ import {
   WorkerAssignment,
 } from "../production/types";
 import { TurnOrchestratorDebugInfo } from "../turn/types";
-import { BatchQualityAdjustment, QualityReliabilityState } from "../quality/types";
+import { BatchQualityAdjustment, MarketDeliveryObservation, QualityReliabilityState } from "../quality/types";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -259,6 +259,12 @@ export interface CompanyQuarterRecord {
   readonly qualityAdjustments: readonly BatchQualityAdjustment[];
   /** 【Phase 7A】当期の品質・信頼・納期信頼性・増産履歴の更新後状態。 */
   readonly qualityStateAfter: QualityReliabilityState;
+  /**
+   * 【Phase 7B】当期の会社×市場別の納期観測（quality/deliveryObservation.tsが
+   * 既に算出済みの値をそのまま保存するだけ。監査・会社ラボダッシュボードの
+   * 市場別納期遵守率表示用。新たな計算は一切行わない）。
+   */
+  readonly deliveryObservations: readonly MarketDeliveryObservation[];
 }
 
 export interface CompanyLabConfig {

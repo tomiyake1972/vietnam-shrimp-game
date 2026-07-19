@@ -19,7 +19,13 @@
 import { HosoEqTons, UsdPerHosoEqKg, hosoEqTons, roundHosoEqTons, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { processingCapacity, salesCoverageScore } from "./salesForce";
 import { SalesParameters } from "./parameters";
-import { CompanyAllocationEntry, CompanySalesPlanEntry, MarketProductAllocationResult, SalesValidationError } from "./types";
+import {
+  CompanyAllocationEntry,
+  CompanySalesPlanEntry,
+  CompetitivenessWeightBreakdown,
+  MarketProductAllocationResult,
+  SalesValidationError,
+} from "./types";
 import { DemandMarketId, Product } from "../market/types";
 import { PeriodV2 } from "../core/period";
 
@@ -45,6 +51,45 @@ function priceScore(askPrice: number, basePrice: number, params: SalesParameters
   return Math.exp(-params.priceSensitivity * deviation);
 }
 
+/**
+ * 5社それぞれの合成競争力ウェイトの内訳（5つのcontribution＋価格スコアの診断値）を
+ * 計算する。【Phase 7B】UI（会社ラボ・成約競争力の説明）がこの内訳を読み取り専用の
+ * 説明用データとしてそのまま表示できるよう、computeCompetitivenessWeightの計算式を
+ * 内訳付きの形へ分解しただけであり、計算式・パラメータ値は一切変更していない
+ * （5つのcontributionの合計は必ずcomputeCompetitivenessWeightの戻り値と一致する）。
+ */
+export function computeCompetitivenessBreakdown(
+  entry: CompanySalesPlanEntry,
+  askPrice: UsdPerHosoEqKg,
+  basePrice: UsdPerHosoEqKg,
+  coverageScore: number,
+  params: SalesParameters
+): CompetitivenessWeightBreakdown {
+  const w = params.competitivenessWeights;
+  const rawPriceScore = priceScore(unwrapUnit(askPrice), unwrapUnit(basePrice), params);
+  // 安値による過剰受注（値下げすればするほど際限なく成約力が伸びる「抜け道」）を防ぐため、
+  // priceScoreの結果に下限・上限を設ける（【暫定値・要校正】parameters.ts参照）。
+  const clampedPriceScore = Math.min(params.maximumPriceCompetitiveness, Math.max(params.minimumPriceCompetitiveness, rawPriceScore));
+  const priceContributionRatio = clampedPriceScore / params.maximumPriceCompetitiveness;
+
+  const relationship = (entry.customerRelationship !== undefined ? unwrapUnit(entry.customerRelationship) : unwrapUnit(params.neutralScore)) / 100;
+  const quality = (entry.qualityReputation !== undefined ? unwrapUnit(entry.qualityReputation) : unwrapUnit(params.neutralScore)) / 100;
+  const reliability =
+    (entry.deliveryReliability !== undefined ? unwrapUnit(entry.deliveryReliability) : unwrapUnit(params.neutralScore)) / 100;
+
+  return {
+    priceContribution: w.price * priceContributionRatio,
+    coverageContribution: w.coverage * coverageScore,
+    relationshipContribution: w.relationship * relationship,
+    qualityContribution: w.quality * quality,
+    deliveryReliabilityContribution: w.deliveryReliability * reliability,
+    rawPriceScore,
+    clampedPriceScore,
+    isPriceScoreAtCeiling: clampedPriceScore >= params.maximumPriceCompetitiveness - EPSILON,
+    isPriceScoreAtFloor: clampedPriceScore <= params.minimumPriceCompetitiveness + EPSILON,
+  };
+}
+
 /** 5社それぞれの合成競争力ウェイトを計算する（0〜1程度のスケール）。 */
 export function computeCompetitivenessWeight(
   entry: CompanySalesPlanEntry,
@@ -53,25 +98,8 @@ export function computeCompetitivenessWeight(
   coverageScore: number,
   params: SalesParameters
 ): number {
-  const w = params.competitivenessWeights;
-  const rawPriceScore = priceScore(unwrapUnit(askPrice), unwrapUnit(basePrice), params);
-  // 安値による過剰受注（値下げすればするほど際限なく成約力が伸びる「抜け道」）を防ぐため、
-  // priceScoreの結果に下限・上限を設ける（【暫定値・要校正】parameters.ts参照）。
-  const clampedPriceScore = Math.min(params.maximumPriceCompetitiveness, Math.max(params.minimumPriceCompetitiveness, rawPriceScore));
-  const priceContribution = clampedPriceScore / params.maximumPriceCompetitiveness;
-
-  const relationship = (entry.customerRelationship !== undefined ? unwrapUnit(entry.customerRelationship) : unwrapUnit(params.neutralScore)) / 100;
-  const quality = (entry.qualityReputation !== undefined ? unwrapUnit(entry.qualityReputation) : unwrapUnit(params.neutralScore)) / 100;
-  const reliability =
-    (entry.deliveryReliability !== undefined ? unwrapUnit(entry.deliveryReliability) : unwrapUnit(params.neutralScore)) / 100;
-
-  return (
-    w.price * priceContribution +
-    w.coverage * coverageScore +
-    w.relationship * relationship +
-    w.quality * quality +
-    w.deliveryReliability * reliability
-  );
+  const b = computeCompetitivenessBreakdown(entry, askPrice, basePrice, coverageScore, params);
+  return b.priceContribution + b.coverageContribution + b.relationshipContribution + b.qualityContribution + b.deliveryReliabilityContribution;
 }
 
 /**
@@ -175,7 +203,13 @@ export function allocateMarketProduct(
 
     const coverage = salesCoverageScore(entry.salesForceHeadcount, params);
     const capacity = processingCapacity(entry.salesForceHeadcount, params);
-    const weight = computeCompetitivenessWeight(entry, askPrice, basePrice, coverage, params);
+    const breakdown = computeCompetitivenessBreakdown(entry, askPrice, basePrice, coverage, params);
+    const weight =
+      breakdown.priceContribution +
+      breakdown.coverageContribution +
+      breakdown.relationshipContribution +
+      breakdown.qualityContribution +
+      breakdown.deliveryReliabilityContribution;
     // 個社成約上限 = min(販売希望量, 処理能力, 対象需要×最大供給者シェア, 承認済み取引枠[未指定ならInfinity])。
     // 極端な安値・大量の営業人員・大量の販売希望量を同時に満たしても、1社が対象需要を
     // 独占できないようにする（安売りによる過剰受注の防止）。
@@ -183,7 +217,7 @@ export function allocateMarketProduct(
     const approvedCap = entry.approvedAllocationCap !== undefined ? unwrapUnit(entry.approvedAllocationCap) : Number.POSITIVE_INFINITY;
     const cap = Math.min(unwrapUnit(entry.desiredQuantity), unwrapUnit(capacity), shareCap, approvedCap);
 
-    return { entry, askPrice, coverage, capacity, weight, cap };
+    return { entry, askPrice, coverage, capacity, weight, breakdown, cap };
   });
 
   const participants: WaterFillParticipant[] = [
@@ -199,6 +233,7 @@ export function allocateMarketProduct(
     coverageScore: p.coverage,
     processingCapacity: p.capacity,
     competitivenessWeight: p.weight,
+    competitivenessBreakdown: p.breakdown,
     allocatedQuantity: hosoEqTons(roundHosoEqTons(Math.max(0, allocated.get(p.entry.companyId) ?? 0))),
   }));
 

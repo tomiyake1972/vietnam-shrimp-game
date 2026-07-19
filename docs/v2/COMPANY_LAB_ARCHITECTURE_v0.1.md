@@ -122,3 +122,63 @@ npm run v2:company-simulate -- --scenario baseline --seed company-demo-001 --tur
 - 財務三表が未実装のため、保守的会社（CONSV）の「財務慎重さ」は行動抑制係数（`commitmentRestraint`）でのみ表現している。将来Phaseで財務三表を接続する際、この係数の意味づけを再校正する必要がある。
 - （Phase 6.3更新）調達処理能力は工場能力連動方式へ再校正済み（旧・約100倍一律補正は廃止）。残る暫定値（農家留保価格・外部需要・プレミアム経済性等）は`docs/v2/ECONOMIC_CALIBRATION_PHASE_6_3_v0.1.md` §11参照。
 - Phase9のAI会社実装時は、`CompanyDecisionProvider`型を満たす新しい生成器を追加するだけで、既存の自動方針（`generateAutoPolicyDecision`）と差し替え可能な設計になっている。
+
+## 13. Phase 7B: 品質・信頼・納期ダッシュボード（`feature/v2-quality-dashboard`）
+
+Phase 7A（`app/lib/v2/quality/`）が計算・保存した品質・操業リスク・顧客信頼・納期信頼性の実績値を、`/v2/company-lab`上で「なぜ今期の成約量がこうなったか」を経営者が理解できる形へ可視化する。**quality/・sales/の計算式は本Phaseでは一切変更しない**（唯一の計算元とし、UI側で経済計算・品質計算を再実装しない）。
+
+### 13.1 画面構成
+
+既存タブ（意思決定／結果／全社比較）に「品質ダッシュボード」タブを追加した（`page.tsx`）。既存の会社選択・シナリオ設定・四半期進行操作は変更していない。
+
+- **A. 当期経営サマリー**（`QualitySummaryCard.tsx`）: 総生産量・販売可能完成品数量・格落ち/再加工/廃棄量・納期遵守率・重大品質事故の有無、最も深刻な警告1件。
+- **B. 商品別品質**（`QualityProductTable.tsx`）: HOSO/PD/VAPごとの品質スコア・操業リスク・生産量・格落ち/再加工/廃棄量・販売可能回収率・重大品質事故。
+- **C. 市場別信頼**（`QualityMarketTrustTable.tsx`）: 市場（CN/US/EU/JP/OTHER、`market/types.ts`の既存`DEMAND_MARKET_IDS`をそのまま使用）ごとの顧客信頼・納期信頼性（前期比つき）・当期の納期遵守率。
+- **D. 成約競争力の説明**（`QualityCompetitivenessExplanation.tsx`）: 市場×商品ごとに、価格・営業カバレッジ・顧客関係・品質・納期信頼性の5要素の実際の寄与度（後述13.3）と、固定ルールによる日本語説明文（`dashboardExplanation.ts`、生成AI不使用）を表示。
+- **警告**（`QualityWarningsList.tsx`）: 急増産・高稼働率・残業負荷・臨時ワーカー依存・商品構成複雑化・原料滞留・品質事故・廃棄増加・信頼低下を、表示専用の「注意／警戒／重大」に区分（13.4）。
+- **5社比較**（`QualityCompanyComparison.tsx`、GM専用）: 既存`ComparisonPanel.tsx`と同じ「実プレイヤーは他社の非公開結果を見られない」規約に従い、GM全社表示モードでのみ表示。商品/市場フィルタ切替可能。
+- **推移**（`QualityTrendPanel.tsx`）: 8/32ターンを切替可能。品質スコア・操業リスク・数量損失・納期遵守率・信頼・成約量を、意味の近い指標ごとに分けたスパークライン（`QualitySparkline.tsx`、軽量SVG。新規グラフライブラリは追加していない）で表示。
+
+自社表示モードでは常にプレイヤー操作会社のみを対象にし（既存の情報分離規約を踏襲）、GM全社表示モードでのみ表示会社を切替可能にしている。
+
+### 13.2 表示用データ層（`dashboardViewModel.ts`・`dashboardWarnings.ts`・`dashboardExplanation.ts`）
+
+`app/v2/company-lab/dashboardViewModel.ts`が、`CompanyQuarterRecord`（`companySummaries`・`qualityAdjustments`・`deliveryObservations`・`salesRecord.allocations`・`decisions`）から表示用の行・カード・系列データを抽出する。ここで行ってよいのは「抽出・合計・平均・除算による比率表示・前期比較・丸め」だけであり、品質スコア・操業リスク・事故判定・信頼スコア・成約競争力/配分量の**再計算は一切行わない**（テストで直接検証、13.6参照）。`dashboardWarnings.ts`は表示専用の警告閾値判定、`dashboardExplanation.ts`は固定ルールによる日本語説明文生成（生成AI不使用）を担当し、いずれも経済ロジックには影響しない。
+
+### 13.3 エンジン側の最小限の型拡張（計算式・パラメータ値は変更なし）
+
+成約競争力の内訳（価格/カバレッジ/顧客関係/品質/納期信頼性の5要素それぞれの寄与度）は、既存の`CompanyAllocationEntry`（`sales/types.ts`）には合成後の`competitivenessWeight`しか保存されておらず、UI側で内訳を再現しようとすると計算式の再実装が必要になってしまう。これを避けるため、`sales/allocation.ts`の`computeCompetitivenessWeight`を「内訳を返す`computeCompetitivenessBreakdown`」＋「5つのcontributionを合計するだけの`computeCompetitivenessWeight`」へリファクタし、`CompanyAllocationEntry`へ`competitivenessBreakdown: CompetitivenessWeightBreakdown`（読み取り専用の説明用データ）を追加した。
+
+- 計算式・加算順序は変更していないため、`competitivenessWeight`の値はリファクタ前と完全に同一（既存テスト・新規テストの両方でビット単位一致を確認済み）。
+- `CompetitivenessWeightBreakdown`は5つのcontribution・clamp前後の価格スコア・価格競争力が上限/下限に到達しているかのフラグを持つ。5つのcontributionの合計は必ず`competitivenessWeight`と一致する（`allocation.test.ts`受入確認D-1〜D-4、`dashboardViewModel.test.ts`受入確認V-3で検証）。
+- 併せて、`CompanyQuarterRecord`へ`deliveryObservations`（`quality/deliveryObservation.ts`がrunner.ts内で既に算出していた、会社×市場の当期納期観測。従来は破棄されていた）を追加保存し、市場別の当期納期遵守率をUI側で再計算せずに表示できるようにした。
+
+いずれも既存の計算結果・配分結果・パラメータ値には一切影響しない、追加的な保存のみの変更である。
+
+### 13.4 警告の閾値校正（表示専用、経済ロジックに影響しない）
+
+`dashboardWarnings.ts`の`WARNING_THRESHOLDS`に閾値を集約している。実装当初の暫定値では、5シナリオ×canonical/variation×32ターン（1,600 company-turns）の実測で「商品構成の複雑化」が98.75%、「高い労働稼働率」が61%のターンで警告してしまう校正ミスがあり、実測分布（中央値・p90等）を踏まえて調整した。特に`complexityStress`は現行のcompany fixture設計（ほぼ全社が常に複数商品を生産）のもとではほぼ常に1.0に張り付き、レベル閾値では「異常」と「通常」を判別できないため、現行の生産構成では到達し得ない閾値に置いている（品質パラメータ自体の校正は対象外のため、Phase 8以降の校正時に要見直し）。回帰確認は`dashboardWarnings.test.ts`受入確認W-9（実エンジン出力を使い、単一の警告種別が異常な頻度で発生しないことを検証）。
+
+### 13.5 companyLabの永続化状態（QUALITY_RELIABILITY_ARCHITECTURE_v0.1.md §9と同一の前提）
+
+本Phaseでもこの前提は変わらない。companyLabはブラウザ内メモリ状態のみで保持され（リロード・再起動で消失）、Redis/APIへの実配線は行っていない。品質ダッシュボードが表示するデータもすべて同一セッション内のクライアントメモリ上の値であり、永続化・共有の対象ではない。
+
+### 13.6 テスト・検証結果
+
+- `app/v2/company-lab/__tests__/dashboardViewModel.test.ts`（13件）: 表示用データがPhase 7A保存結果とビット単位で一致すること（再計算していないことの直接証明）、HOSO/PD/VAP商品別表示、重大品質事故あり/なしの表示、生産ゼロ時に誤った事故検出をしないこと、5社比較の対応関係、8/32ターン推移の件数、同一シードでの完全再現性、NaN/Infinity不在（32ターン×5社の全表示データ走査）。
+- `app/v2/company-lab/__tests__/dashboardWarnings.test.ts`（9件）: 正常操業時に警告が出ないこと、生産ゼロ時に誤検出しないこと、急増産/高稼働率/品質事故/廃棄増加/信頼低下それぞれの閾値境界、警告の重大度ソート、実エンジン出力での校正回帰確認。
+- `app/v2/company-lab/__tests__/dashboardExplanation.test.ts`（9件）: 価格競争力上限到達時に「追加値下げ余地あり」と矛盾する文言を出さないこと、品質/信頼/納期評価の高低に応じた文言の整合性、前期比較コメントの断定回避。
+- `app/lib/v2/sales/__tests__/allocation.test.ts`に追加した4件（受入確認D-1〜D-4）: `competitivenessBreakdown`の合計と`competitivenessWeight`の厳密一致、価格競争力上限到達時の`isPriceScoreAtCeiling`判定。
+- 既存テスト753 - 35 = 718件（develop/v2マージ後時点）に、本Phaseの新規35件を加えた**合計753件、全件成功**（`npm test`）。
+- `npx tsc --noEmit`・`npm run lint`: いずれもエラー・警告0件。
+
+### 13.7 画面目視確認（Playwright）
+
+- PC相当（1440×900）・iPad横向き相当（1180×820）の両方で、初期化→8ターン一括実行→GM全社表示→品質ダッシュボードタブの一連の操作をスクリーンショットで確認。全セクション（当期経営サマリー・警告・商品別品質・市場別信頼・成約競争力の説明・推移・5社比較）が両解像度で正しく表示され、NaN/undefined等の異常表示は見られなかった。
+- 自社表示モードでは5社比較セクションが描画されないこと（既存の情報分離規約の踏襲）を確認。
+- 比較表・成約競争力の説明は横スクロール対応（`overflow-x-auto`）。警告・主要指標は横スクロールの外（先頭）に配置し、確認が隠れないようにしている。
+
+### 13.8 対象外・将来課題
+
+- 品質パラメータの本格校正（`complexityStress`が常に飽和する等の根本原因）、Phase 7B UI以外のQA人員/品質投資、再加工費/廃棄損/格落ち価格差の財務計上、ブランド価値、companyLab→Redis/API実配線、V2本番ゲーム画面への統合は、いずれも本Phaseの対象外。
+- 警告閾値（`WARNING_THRESHOLDS`）は表示専用の暫定値であり、Phase 8以降の品質パラメータ校正と合わせて再校正する余地がある。
