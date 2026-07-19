@@ -275,3 +275,73 @@ FIFO消費（`consumeRawMaterials`）は`advanceRawMaterialsQuarter`から独立
 **Phase5自身への副次的な変更**: `RawMaterialsQuarterRecord`（`rawMaterials/types.ts`）へ`harvestResults: readonly AquacultureHarvestResult[]`フィールドを追加した（`advanceRawMaterialsQuarter`が内部で捨てていた`harvestAquacultureLots`の詳細内訳を、そのまま記録として保持するようにした）。これは`TurnOrchestratorResult.aquacultureHarvestResults`（養殖処理結果の内訳）を、`advanceRawMaterialsQuarter`の重複実装なしにそのまま転記するための、Phase5自身への後方互換な加筆（既存フィールドの変更・削除なし）である。Phase1〜4・`GameSessionV2`プレースホルダ型には一切影響しない。
 
 **対象外（今回のスコープ外）**: V2 APIルート、Redisスキーマ・キー設計、V2 UI、`GameSessionV2`の完全な状態モデル化、V1 APIへの接続、V1意思決定型（`CompanyDecision`等）の再利用、Phase6以降のロジック、`develop/v2`へのマージ・PR作成。
+
+## 15. ターン状態遷移層（`app/lib/v2/turnState/`）【Phase 5.5】
+
+**なぜ必要か**: `runTurn`（§14）は「1ターン分の入力→1ターン分の結果」だけを扱う純粋関数であり、「結果から次ターンの入力を組み立てる」責務を意図的に持たない（そこまで持たせると、Phase1〜5の計算ロジックと状態引き継ぎロジックが同じ関数に混在してしまう）。しかし、`runTurn`を繰り返し呼んでゲームを進行させるには、「`TurnOrchestratorResult`のうち何を次ターンへ引き継ぎ、何を引き継がないか」を毎回同じルールで機械的に決める層が必要になる。これを`runTurn`の外・将来のRedis/API層の内側に置くことで、Redis保存・V2 API・`GameSessionV2`・Replay（過去ターンの再生）・Save/Load（途中終了・再開）のすべてが**同じ状態遷移ロジックを共有**できるようにする。この層を固定しないまま複数の呼び出し元（API・Replay・テスト等）がそれぞれ独自に「次ターン入力の組み立て方」を実装すると、「Replayでは養殖ロットの引き継ぎ漏れがある」「Save/Loadでは契約のステータスが欠落する」といった実装間の食い違いが将来発生しうる。
+
+**`runTurn`との責務分離**: `runTurn`はPhase1・4・5の計算そのもの（市場清算・成約配分・原料調達処理）を担い、`buildNextTurnInput`は計算を一切行わず、`TurnOrchestratorResult`の中身を「次ターンへ生きたまま持ち越すもの」と「毎ターン新規に決まるべきもの（提出計画等）」に仕分けるだけの、純粋なデータ変換関数である。`buildNextTurnInput`は`calculateMarketQuarter`・`advanceSalesQuarter`・`advanceRawMaterialsQuarter`のいずれも呼び出さない。
+
+```
+TurnOrchestratorInput（ターンN）
+        │
+        ▼
+    runTurn(...)
+        │
+        ▼
+TurnOrchestratorResult（ターンN）
+        │
+        ▼
+buildNextTurnInput(previousInput, turnResult)
+        │
+        ▼
+TurnOrchestratorInput（ターンN+1の骨格。marketInput本体・各種提出計画は
+呼び出し側が上書きしてからrunTurnへ渡す）
+```
+
+**新設モジュール**: `app/lib/v2/turnState/`に`types.ts`・`builder.ts`・`index.ts`を作成した。
+
+```
+buildNextTurnInput(previousInput, turnResult) → TurnOrchestratorInput
+  // turnResult.periodがpreviousInput.currentPeriodと一致しない場合は
+  // TurnStateValidationErrorを投げる（組み合わせ誤りの検出）
+```
+
+**builderの責務**: `TurnOrchestratorResult`から`TurnOrchestratorInput`を組み立てる、それだけ。API呼び出し・Redis読み書き・UI描画・Phase1〜5の計算ロジックの再実行は一切行わない。`previousInput`・`turnResult`のいずれも変更しない（deep mutation禁止。テストで`JSON.stringify`による不変性を確認済み）。
+
+**次ターンへ引き継ぐ情報一覧**:
+- **Period**: `turnResult.pendingState.nextPeriod`（Phase5の`advanceRawMaterialsQuarter`が`core/period.ts`の`nextPeriod()`で既に算出済みの値をそのまま使う。本層で独自にperiod計算をやり直さない）。
+- **販売契約（約定残）**: `turnResult.pendingState.contracts`を`existingContracts`へそのまま引き継ぐ。更新済み契約・未履行の契約残（open/partiallyFulfilled）・overdueをすべて含む、Phase4自身が管理する約定残の状態そのもの。ステータスによる取捨選択は行わない（fulfilled/cancelledも含め丸ごと引き継ぐ。理由は下記「今回の設計判断」参照）。
+- **原料ロット**: `turnResult.pendingState.lots`のうち、`status`が`"available"`・`"inTransitImport"`・`"growingAquaculture"`のものだけを`existingLots`へ引き継ぐ。
+
+**次ターンへ引き継がない情報一覧（意図的に空へ初期化）**:
+- `salesPlans`（空配列） — 販売計画は毎ターン会社が新規提出するもの。
+- `domesticPurchaseIntentSource`（`{ type: "companyPlans", plans: [] }`） — 国内買付計画も毎ターン提出制。「今のところ誰も提出していない」状態で初期化する（`phase3Fallback`へは切り替えない。理由は下記）。
+- `importOrders`（空配列） — 輸入注文も毎ターン提出制。
+- `aquacultureStockingPlans`（空配列） — 養殖池入れ計画も毎ターン提出制。
+- `scenarioVariables`（`undefined`） — 次期の疾病圧力等のシナリオ由来値。`runTurn`側の既定値（疾病なし）にフォールバックする。
+- `debug`（`TurnOrchestratorInput`にそもそもフィールドが存在しない） — 監査用の中間集計値であり、次ターンの入力には一切含まれない。
+
+**引き継がれるが、呼び出し側が明示的に上書きする必要があるもの**: `marketInput`（次期の市場入力本体。`period`フィールドだけは`nextPeriod`に機械的に合わせておくが、収穫量・需要成長率等の中身は前ターンの結果からは決まらない外生値であり、本層は生成しない）。`seed`・`parameters`は`previousInput`の値をそのまま踏襲する（ゲーム全体を通じて変えない想定の値のため）。
+
+**今回の設計判断（契約を全ステータスのまま引き継ぐ理由）**: 指示にある「更新済契約・契約残・overdueを引き継ぐ」を、契約配列を「生きている契約だけに絞り込む」という意味ではなく、「Phase4自身が管理する約定残の状態（ステータスがopen/partiallyFulfilled/overdue/fulfilled/cancelledのいずれであっても）をそのまま次ターンへ渡す」という意味で実装した。fulfilled/cancelledの契約を本層が独自に除外すると、Phase4の約定残管理（`updateContractStatusesForQuarterEnd`等）と二重管理になり、どちらが正であるかが曖昧になるため、フィルタは一切行わない。
+
+**今回の設計判断（`domesticPurchaseIntentSource`を`companyPlans`（空plans）にリセットする理由）**: 「引き継がない＝毎ターン提出制」という点では`salesPlans`・`importOrders`・`aquacultureStockingPlans`と同じ扱いにすべきと判断し、`phase3Fallback`（会社別データが一切ない場合の別モード）へ切り替えるのではなく、`companyPlans`モードのまま`plans`を空にする（＝今のところ誰も提出していない、として扱う）ことで、4つの「会社別提出計画」系フィールドの扱いを統一した。
+
+**原料ロットを`available`/`inTransitImport`/`growingAquaculture`だけに絞る理由（consumed/expiredを引き継がない）**: Phase5の`advanceRawMaterialsQuarter`自身は、`consumed`・`expired`になったロットも履歴として配列に保持し続ける設計だが（§8参照）、次ターンの「生きている在庫」としてはもはや意味を持たない（消費済み・廃棄済みのロットが再びavailableとして扱われることは物理的にありえない）。本層はこれらを次ターン入力から除外することで、①誤って復活する余地を完全に無くし、②`existingLots`がターンを重ねるごとに無限に肥大化することを防ぐ。除外されたロットの記録自体は、各ターンの`TurnOrchestratorResult.expiredLots`等に残るため失われない。
+
+**`pendingState`の扱い**: `runTurn`が既に返している`TurnOrchestratorResult.pendingState`（`nextPeriod`/`contracts`/`lots`）を、`buildNextTurnInput`が読み取る唯一の入力源とした。`pendingState.contracts`・`pendingState.lots`は`turnResult.contracts`・`turnResult.lots`と同じ値（`runTurn`内部で同一の変数を代入しているため）であり、`buildNextTurnInput`は`pendingState`経由でのみアクセスする（`turnResult.contracts`/`turnResult.lots`を直接読まない）ことで、「次ターンへの引き継ぎ専用の窓口は`pendingState`である」という規約を型・実装の両方で明確にしている。型自体の変更は不要だった（既存の`TurnOrchestratorPendingState`をそのまま利用）。
+
+**Replayとの関係**: 過去のゲームを最初から再生する（Replay）場合、各ターンの`TurnOrchestratorInput`の「毎ターン提出される部分」（`marketInput`・`salesPlans`・`domesticPurchaseIntentSource`・`importOrders`・`aquacultureStockingPlans`・`scenarioVariables`）さえ保存されていれば、`buildNextTurnInput`が「引き継ぐ部分」（Period・契約・在庫）を毎回同じルールで機械的に再構成するため、Replayエンジンは「保存された提出データ＋前ターンの`runTurn`結果」だけを追いかければよく、独自の状態引き継ぎロジックを別途実装する必要がない。
+
+**Save/Loadとの関係**: 途中セーブは「ある時点の`TurnOrchestratorResult`（または`pendingState`）を保存する」ことに相当し、ロードは「保存された`pendingState`を土台に`buildNextTurnInput`相当の処理で次ターン入力の骨格を作り、そこへ実際の次ターンの提出データを重ねてから`runTurn`を呼ぶ」ことに相当する。`buildNextTurnInput`がこの変換を1箇所に集約しているため、Save/Loadの実装（将来のRedis層）は「何を保存すべきか」を`TurnOrchestratorPendingState`の3フィールドだけに絞り込める。
+
+**永続化との責務分離**: `buildNextTurnInput`はメモリ上のオブジェクト変換のみを行い、Redisへの読み書き・JSON直列化・APIレスポンスの整形は一切行わない。「次ターン入力の骨格をどう組み立てるか」（本層）と「その骨格・提出データをどこにどう保存するか」（将来のRedis/API層）は完全に別の関心事として分離されている。
+
+**決定論**: `buildNextTurnInput`自体は乱数・時刻を一切使わない純粋なデータ変換であり、`runTurn`が担保する決定論（`createRandomStream(` `${seed}::${currentPeriod}` `)`のみに依存する乱数消費）をそのまま素通しする。`runTurn → buildNextTurnInput → runTurn`を同一`seed`で2回実行すると、1ターン目・2ターン目とも完全に同一の結果になることをテストで確認した。異なる`seed`では、乱数に依存する国際HOSO価格のショックにのみ差異が生じ、会社別計画から決定論的に導かれる国内配分の会社一覧等は変わらないことも確認した。
+
+**テスト**: `app/lib/v2/turnState/__tests__/builder.test.ts`に15件のテストを追加した（既存436件と合わせて451件）。Periodの前進、契約の引き継ぎ、available/inTransitImport/growingAquacultureロットの保持、consumed/expiredロットの非引き継ぎ（復活しないこと）、販売計画・国内買付計画・輸入計画・養殖計画の非コピー、debug情報の非引き継ぎ、builderの入力不変性、`runTurn→buildNextTurnInput→runTurn`の2ターン統合テスト、同一seedでの再現性、異なるseedでの差異範囲、`previousInput`と`turnResult`の組み合わせ誤り検出（`TurnStateValidationError`）を確認している。
+
+**`tsc`/ESLint/ビルド**: `npx tsc --noEmit`：0エラー。`npx eslint app/lib/v2 app/v2 scripts`：0エラー・0警告。`npm run build`：TypeScriptコンパイルは成功。ページデータ収集段階の既知の`/api/game/[gameCode]/admin/clone`エラー（§11参照）以外の新規エラーは発生していない。
+
+**対象外（今回のスコープ外）**: V2 APIルート、Redis、`GameSessionV2`の全面改修、V2 UI、Phase6以降のロジック、`develop/v2`へのマージ・PR作成。
