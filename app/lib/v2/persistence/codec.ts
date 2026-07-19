@@ -8,6 +8,7 @@
 import { unwrapUnit } from "../core/units";
 import { RawMaterialLot } from "../rawMaterials/types";
 import { SalesContract } from "../sales/types";
+import { CompanyFactoryProductRampState, CompanyMarketTrustState, CompanyProductQualityState, QualityReliabilityState } from "../quality/types";
 import { PersistedGameStateV2 } from "./types";
 import { PersistedStateParseError } from "./errors";
 import { validatePersistedGameState } from "./schema";
@@ -65,6 +66,44 @@ function lotToDto(lot: RawMaterialLot): Record<string, unknown> {
   return dto;
 }
 
+/** CompanyProductQualityStateを固定のキー順序を持つDTOへ変換する（Phase 7A、schemaVersion 3）。 */
+function qualityStateToDto(s: CompanyProductQualityState): Record<string, unknown> {
+  return {
+    companyId: s.companyId,
+    product: s.product,
+    qualityScore: unwrapUnit(s.qualityScore),
+  };
+}
+
+/** CompanyMarketTrustStateを固定のキー順序を持つDTOへ変換する（Phase 7A、schemaVersion 3）。 */
+function trustStateToDto(t: CompanyMarketTrustState): Record<string, unknown> {
+  return {
+    companyId: t.companyId,
+    market: t.market,
+    customerTrustScore: unwrapUnit(t.customerTrustScore),
+    deliveryReliabilityScore: unwrapUnit(t.deliveryReliabilityScore),
+  };
+}
+
+/** CompanyFactoryProductRampStateを固定のキー順序を持つDTOへ変換する（Phase 7A、schemaVersion 3）。 */
+function rampStateToDto(r: CompanyFactoryProductRampState): Record<string, unknown> {
+  return {
+    companyId: r.companyId,
+    factoryId: r.factoryId,
+    product: r.product,
+    lastQuarterProductionQuantity: unwrapUnit(r.lastQuarterProductionQuantity),
+  };
+}
+
+/** QualityReliabilityStateを固定のキー順序を持つDTOへ変換する（Phase 7A、schemaVersion 3）。 */
+function qualityReliabilityToDto(q: QualityReliabilityState): Record<string, unknown> {
+  return {
+    qualityByCompanyProduct: q.qualityByCompanyProduct.map(qualityStateToDto),
+    trustByCompanyMarket: q.trustByCompanyMarket.map(trustStateToDto),
+    rampHistory: q.rampHistory.map(rampStateToDto),
+  };
+}
+
 /**
  * PersistedGameStateV2を、トップレベル・ネストしたオブジェクトいずれも
  * 固定のキー順序を持つDTOへ変換する。契約・ロットの配列順序は一切
@@ -79,6 +118,7 @@ function toCanonicalDto(state: PersistedGameStateV2): Record<string, unknown> {
     seed: state.seed,
     contracts: state.contracts.map(contractToDto),
     rawMaterialLots: state.rawMaterialLots.map(lotToDto),
+    qualityReliability: qualityReliabilityToDto(state.qualityReliability),
     execution: {
       completedTurnCount: state.execution.completedTurnCount,
       ...(state.execution.lastCompletedPeriod !== undefined ? { lastCompletedPeriod: state.execution.lastCompletedPeriod } : {}),

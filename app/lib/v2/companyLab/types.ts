@@ -12,8 +12,8 @@
 // なく、統合テストのために交換可能な決定論的ルールベース生成器である。
 
 import { PeriodV2 } from "../core/period";
-import { HosoEqTons, Ratio } from "../core/units";
-import { CountryId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
+import { HosoEqTons, Ratio, Score0to100 } from "../core/units";
+import { CountryId, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import { ScenarioMode, ScenarioState } from "../scenario/types";
 import { CompanyId, CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
 import {
@@ -37,6 +37,7 @@ import {
   WorkerAssignment,
 } from "../production/types";
 import { TurnOrchestratorDebugInfo } from "../turn/types";
+import { BatchQualityAdjustment, QualityReliabilityState } from "../quality/types";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -132,6 +133,17 @@ export interface CompanyOwnState {
   readonly finishedGoodsLots: readonly FinishedGoodsLot[];
   readonly lastQuarterFactoryLoadMetrics: readonly FactoryLoadMetrics[];
   readonly lastQuarterActualProductionByProduct: Readonly<Partial<Record<Product, number>>>;
+  /**
+   * 【Phase 7A】前四半期末までの自社の商品別品質スコア（会社×商品）。
+   * 当四半期の販売計画がsales/types.tsのCompanySalesPlanEntry.qualityReputationへ
+   * 接続する（今期の品質結果を今期の成約へ遡及適用しないため、常に「前四半期末
+   * まで」の値を渡す）。
+   */
+  readonly qualityScoreByProduct: Readonly<Partial<Record<Product, Score0to100>>>;
+  /** 【Phase 7A】前四半期末までの自社の市場別顧客信頼（customerRelationshipへ接続）。 */
+  readonly customerTrustByMarket: Readonly<Partial<Record<DemandMarketId, Score0to100>>>;
+  /** 【Phase 7A】前四半期末までの自社の市場別納期信頼性（deliveryReliabilityへ接続）。 */
+  readonly deliveryReliabilityByMarket: Readonly<Partial<Record<DemandMarketId, Score0to100>>>;
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */
@@ -199,6 +211,25 @@ export interface CompanyQuarterSummary {
   readonly overtimeRate: Ratio;
   readonly temporaryWorkerShare: Ratio;
 
+  // --- 【Phase 7A】品質・顧客信頼・納期信頼性（会社ラボへの接続範囲） ---
+  /** 当期末時点（更新後）の商品別品質スコア。 */
+  readonly qualityScoreByProduct: Readonly<Partial<Record<Product, Score0to100>>>;
+  /** 当期の会社×工場×商品ぶんの操業リスク（商品別、複数工場ある場合は数量加重平均）。 */
+  readonly operationalRiskByProduct: Readonly<Partial<Record<Product, number>>>;
+  readonly downgradeQuantity: HosoEqTons;
+  readonly reworkQuantity: HosoEqTons;
+  readonly discardQuantity: HosoEqTons;
+  /** 当期発生した重大品質事故の件数（会社×工場×商品単位）。 */
+  readonly majorIncidentCount: number;
+  /** 当期dueQuantity>0だった市場だけの、数量加重平均納期遵守率（0〜100、評価対象がなければundefined）。 */
+  readonly onTimeDeliveryRate?: number;
+  /** 当期末時点（更新後）の市場別顧客信頼。 */
+  readonly customerTrustByMarket: Readonly<Partial<Record<DemandMarketId, Score0to100>>>;
+  /** 当期末時点（更新後）の市場別納期信頼性。 */
+  readonly deliveryReliabilityByMarket: Readonly<Partial<Record<DemandMarketId, Score0to100>>>;
+  /** 無理な増産の警告（productionRampStressが高水準の会社×工場×商品）。 */
+  readonly rampWarnings: readonly { readonly factoryId: string; readonly product: Product; readonly productionRampStress: number }[];
+
   readonly reasonCodes: readonly CompanyReasonEntry[];
 }
 
@@ -224,6 +255,10 @@ export interface CompanyQuarterRecord {
   readonly companySummaries: readonly CompanyQuarterSummary[];
   readonly globalReasonCodes: readonly CompanyReasonEntry[];
   readonly turnDebug: TurnOrchestratorDebugInfo;
+  /** 【Phase 7A】当期の生産バッチ品質調整結果（監査・テスト・CLI表示用）。 */
+  readonly qualityAdjustments: readonly BatchQualityAdjustment[];
+  /** 【Phase 7A】当期の品質・信頼・納期信頼性・増産履歴の更新後状態。 */
+  readonly qualityStateAfter: QualityReliabilityState;
 }
 
 export interface CompanyLabConfig {
@@ -242,6 +277,8 @@ export interface CompanyLabState {
   readonly productionState: ProductionState;
   /** 会社×商品の前四半期実績生産量（今期のPD/VAP供給シグナルのactualQuantityに使う）。 */
   readonly lastQuarterActualProduction: Readonly<Record<CompanyId, Readonly<Partial<Record<Product, number>>>>>;
+  /** 【Phase 7A】品質・顧客信頼・納期信頼性・増産履歴（ターンをまたいで保持）。 */
+  readonly qualityState: QualityReliabilityState;
   readonly history: readonly CompanyQuarterRecord[];
   readonly isComplete: boolean;
 }

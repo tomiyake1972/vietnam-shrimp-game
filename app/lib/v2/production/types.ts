@@ -23,7 +23,7 @@
 //   （§5「歩留まりと数量保存」参照）。これは仕様が明記していない箇所への
 //   実装判断であり、Phase8以降の校正フェーズで見直す余地がある。
 
-import { HosoEqTons, Ratio, UsdM, UsdPerHosoEqKg } from "../core/units";
+import { HosoEqTons, Ratio, Score0to100, UsdM, UsdPerHosoEqKg } from "../core/units";
 import { PeriodV2 } from "../core/period";
 import { CountryId, Product } from "../market/types";
 import type { CompanyId } from "../sales/types";
@@ -276,6 +276,25 @@ export type FinishedGoodsLotStatus =
   | "allocated" // 契約へ充当済み（remainingQuantity=0）
   | "expired"; // 期限切れ・廃棄
 
+/**
+ * 完成品ロットの品質情報（Phase 7A、オプショナル・後方互換）。後日出荷した
+ * 在庫の品質を契約充当時に商品・市場と結び付け、顧客信頼の算出に使うための
+ * 必要最小限の情報。quality/モジュール（app/lib/v2/quality/）が生成・付与する。
+ * 本フィールドが存在しないロット（Phase7A以前のデータ・quality/未接続の
+ * 呼び出し経路）は、中立値として扱われる想定（呼び出し側の責務）。
+ */
+export interface FinishedGoodsLotQualityInfo {
+  /** 生産時の観測品質スコア（0〜100）。 */
+  readonly qualityScore: Score0to100;
+  /** 格落ち率（0〜1、このロットの生産量に対する格落ち相当割合。記録用）。 */
+  readonly downgradeRatio: Ratio;
+  /** 重大品質事故が発生した場合の識別子（発生していなければ未設定）。 */
+  readonly majorIncidentId?: string;
+  /** 重大品質事故の重大度（0〜1、majorIncidentId設定時のみ）。顧客信頼算出の市場特定に使う。 */
+  readonly majorIncidentSeverity?: number;
+  readonly producedPeriod: PeriodV2;
+}
+
 /** 完成品1ロット。 */
 export interface FinishedGoodsLot {
   readonly lotId: string;
@@ -296,6 +315,8 @@ export interface FinishedGoodsLot {
   readonly availableFromPeriod: PeriodV2;
   readonly expiryPeriod?: PeriodV2;
   readonly status: FinishedGoodsLotStatus;
+  /** 品質情報（Phase 7A、オプショナル）。§FinishedGoodsLotQualityInfo参照。 */
+  readonly qualityInfo?: FinishedGoodsLotQualityInfo;
 }
 
 /** Phase6内部・将来の他Phaseから渡される完成品消費指示（会社×商品単位、FIFOで消費する）。 */

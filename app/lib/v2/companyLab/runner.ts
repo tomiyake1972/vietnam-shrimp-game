@@ -40,8 +40,8 @@
 // 必須の配線）。
 
 import { PeriodV2 } from "../core/period";
-import { hosoEqTons, ratio, unwrapUnit, usdPerHosoEqKg } from "../core/units";
-import { COUNTRY_IDS, CountryId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
+import { hosoEqTons, ratio, Score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
+import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import {
   advanceScenarioTurn,
   getScenarioTurnInput,
@@ -62,12 +62,17 @@ import { AquacultureHarvestResult, DomesticPurchaseAllocationResult, RawMaterial
 import {
   advanceProductionQuarter,
   aggregateProductionSupplySignals,
+  applyFinishedGoodsExpiryForQuarterEnd,
   applySupplySignalToCountrySupply,
   consumeFinishedGoods,
+  createFinishedGoodsLots,
   initializeProductionState,
+  planContractFulfillment,
+  PRODUCTION_PARAMETERS_V1,
 } from "../production";
 import {
   CompanyLoadMetrics,
+  ContractFulfillmentPlan,
   FinishedGoodsLot,
   FinishedGoodsUsageRecord,
   ProductionAllocationEntry,
@@ -75,6 +80,19 @@ import {
   ProductionQuarterInput,
   ProductionSupplySignalInput,
 } from "../production/types";
+import {
+  applyQualityToBatches,
+  adjustmentsByBatchId,
+  attachQualityInfoToFinishedGoodsLots,
+  computeMarketDeliveryObservations,
+  computeMarketTrustObservations,
+  initializeQualityReliabilityState,
+  updateQualityByCompanyProduct,
+  updateTrustByCompanyMarket,
+} from "../quality";
+import type { QualityAdjustmentInput } from "../quality";
+import type { QualityReliabilityState } from "../quality/types";
+import { buildCompanyQualitySummary } from "./qualitySummary";
 import { buildCompanyFixtures } from "./fixtures";
 import { calculateExternalProcessorIntent } from "./externalDemand";
 import { EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1, REFERENCE_WORLD_CONSUMPTION_TONS } from "./parameters";
@@ -229,6 +247,14 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
     rawMaterialLots: fixtures.flatMap((f) => f.initialRawMaterialLots),
     productionState: initializeProductionState(startPeriod),
     lastQuarterActualProduction: Object.fromEntries(fixtures.map((f) => [f.companyId, {}])),
+    // 【Phase 7A】品質・顧客信頼・納期信頼性の初期状態。全社×全商品・全社×全市場を
+    // 中立値（qualityはbaselineOperationalQuality、顧客信頼・納期信頼性はneutralScore）
+    // で初期化する。既存フィクスチャに品質能力・顧客関係の値がなかったため
+    // （調査結果、§完了報告参照）、アーキタイプ別の差別化は行わない。
+    qualityState: initializeQualityReliabilityState(
+      fixtures.map((f) => f.companyId),
+      ["hoso", "pd", "vap"]
+    ),
     history: [],
     isComplete: false,
   };
@@ -240,6 +266,23 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
 export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFixture): CompanyOwnState {
   const lastRecord = state.history[state.history.length - 1];
   const factoryIds = new Set(fixture.factories.map((f) => f.factoryId));
+
+  // 【Phase 7A】state.qualityStateは「前四半期末までの状態」（advanceCompanyLabQuarterが
+  // 当期処理の最後に更新するため、当期の意思決定を作る本関数呼び出し時点では常に
+  // 1つ前のターンの結果を指す）。今期の品質結果を今期の成約へ遡及適用しないという
+  // 実装指示を、この呼び出し順序だけで自然に満たす。
+  const qualityScoreByProduct: Record<string, Score0to100> = {};
+  for (const s of state.qualityState.qualityByCompanyProduct) {
+    if (s.companyId === fixture.companyId) qualityScoreByProduct[s.product] = s.qualityScore;
+  }
+  const customerTrustByMarket: Record<string, Score0to100> = {};
+  const deliveryReliabilityByMarket: Record<string, Score0to100> = {};
+  for (const t of state.qualityState.trustByCompanyMarket) {
+    if (t.companyId !== fixture.companyId) continue;
+    customerTrustByMarket[t.market] = t.customerTrustScore;
+    deliveryReliabilityByMarket[t.market] = t.deliveryReliabilityScore;
+  }
+
   return {
     companyId: fixture.companyId,
     contracts: state.contracts.filter((c) => c.companyId === fixture.companyId),
@@ -247,6 +290,9 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     finishedGoodsLots: state.productionState.finishedGoodsLots.filter((l) => l.companyId === fixture.companyId),
     lastQuarterFactoryLoadMetrics: lastRecord ? lastRecord.factoryLoadMetrics.filter((m) => factoryIds.has(m.factoryId)) : [],
     lastQuarterActualProductionByProduct: state.lastQuarterActualProduction[fixture.companyId] ?? {},
+    qualityScoreByProduct,
+    customerTrustByMarket,
+    deliveryReliabilityByMarket,
   };
 }
 
@@ -286,7 +332,24 @@ function buildCompanySummary(
   finishedGoodsLotsAfter: readonly FinishedGoodsLot[],
   companyLoadMetrics: CompanyLoadMetrics | undefined,
   aquacultureHarvestResults: readonly AquacultureHarvestResult[]
-): { readonly summary: CompanyQuarterSummary; readonly reasonCodes: readonly CompanyReasonEntry[] } {
+): {
+  // 【Phase 7A】品質・信頼フィールドはbuildCompanyQualitySummary（呼び出し側）が
+  // 別途算出しspreadで合成するため、本関数のsummaryはそれらを除いた形にする。
+  readonly summary: Omit<
+    CompanyQuarterSummary,
+    | "qualityScoreByProduct"
+    | "operationalRiskByProduct"
+    | "downgradeQuantity"
+    | "reworkQuantity"
+    | "discardQuantity"
+    | "majorIncidentCount"
+    | "onTimeDeliveryRate"
+    | "customerTrustByMarket"
+    | "deliveryReliabilityByMarket"
+    | "rampWarnings"
+  >;
+  readonly reasonCodes: readonly CompanyReasonEntry[];
+} {
   const companyId = fixture.companyId;
   const companyContracts = newContracts.filter((c) => c.companyId === companyId);
   const newContractedQuantity = companyContracts.reduce((sum, c) => sum + unwrapUnit(c.originalQuantity), 0);
@@ -352,7 +415,7 @@ function buildCompanySummary(
     ...reasonCodesFromOverdueContracts(companyId, beforeCompany, afterCompany),
   ];
 
-  const summary: CompanyQuarterSummary = {
+  const summary = {
     companyId,
     period,
     newContractedQuantity: hosoEqTons(Math.round(newContractedQuantity * 100) / 100),
@@ -468,19 +531,61 @@ export function advanceCompanyLabQuarter(
   );
   const productionRecord = productionStateAfter.history[productionStateAfter.history.length - 1];
 
+  // --- 【Phase 7A】品質調整: Phase6の生産バッチ（saleableRecoveryRatio=1.00基準）へ、
+  // 当期の操業リスク・重大品質事故から算出した品質結果を一度だけ適用する。
+  // production/allocation.ts・batches.ts自体は一切書き換えず、Phase6が既に出力した
+  // factoryLoadMetrics・batchesへの後段アダプターとして接続する（開発ルール
+  // 「既存公開関数を不必要に書き換えず、アダプターと状態遷移で接続する」に従う）。
+  const qualityAdjustmentInput: QualityAdjustmentInput = {
+    batches: productionRecord.batches,
+    factoryLoadMetrics: productionRecord.factoryLoadMetrics,
+    factories: productionInput.factories,
+    rampHistory: state.qualityState.rampHistory,
+    overtimeRateCap: PRODUCTION_PARAMETERS_V1.labor.overtimeRateCap,
+    period: state.currentPeriod,
+    turn,
+    gameSeed: state.config.seed,
+  };
+  const { adjustedBatches, adjustments, updatedRampHistory } = applyQualityToBatches(qualityAdjustmentInput);
+
+  // --- 品質調整後のバッチから完成品ロットを再生成する（createFinishedGoodsLotsを
+  // そのまま再利用。関数自体は書き換えない）。品質情報（観測品質スコア・格落ち率・
+  // 重大事故ID）をロットへ付与し、後日の契約充当時に市場別の顧客信頼算出へ使う。
+  const newFinishedGoodsLotsRaw = createFinishedGoodsLots(adjustedBatches, PRODUCTION_PARAMETERS_V1);
+  const newFinishedGoodsLots = attachQualityInfoToFinishedGoodsLots(newFinishedGoodsLotsRaw, adjustedBatches, adjustmentsByBatchId(adjustments));
+  const lotsAfterProduction = [...state.productionState.finishedGoodsLots, ...newFinishedGoodsLots];
+
+  // --- 契約充当計画・完成品期限切れ処理を、品質調整後のロットに対して
+  // 再計算する（planContractFulfillment・applyFinishedGoodsExpiryForQuarterEndを
+  // そのまま再利用。Phase6内部で計算済みの、品質調整前のfulfillmentPlanは使わない）。
+  const fulfillmentPlan: ContractFulfillmentPlan = planContractFulfillment(turnResult.contracts, lotsAfterProduction);
+  const lotsAfterExpiry = applyFinishedGoodsExpiryForQuarterEnd(lotsAfterProduction, state.currentPeriod);
+
   // --- 契約履行の実適用（Phase4既存関数applyFulfillmentsをそのまま呼び出す） ---
-  const contractsAfterFulfillment = applyFulfillments(turnResult.contracts, productionRecord.fulfillmentPlan.explicitInstructions);
+  const contractsAfterFulfillment = applyFulfillments(turnResult.contracts, fulfillmentPlan.explicitInstructions);
   const nextPeriodValue = turnResult.pendingState.nextPeriod;
   const contractsAfterOverdue = updateContractStatusesForQuarterEnd(contractsAfterFulfillment, nextPeriodValue);
 
   // --- 完成品ロットの実消費（Phase6既存関数consumeFinishedGoodsをそのまま呼び出す） ---
-  const finishedGoodsLotsAfterConsumption = consumeFinishedGoods(productionStateAfter.finishedGoodsLots, productionRecord.fulfillmentPlan.finishedGoodsConsumption);
+  const finishedGoodsLotsAfterConsumption = consumeFinishedGoods(lotsAfterExpiry, fulfillmentPlan.finishedGoodsConsumption);
 
-  // --- 次期のPD/VAP供給シグナル用に、当期の実績生産量を会社×商品で集計する ---
+  // --- 【Phase 7A】納期観測・顧客信頼観測 → 品質・信頼状態の更新 ---
+  const companyMarketPairs = fixtures.flatMap((f) => DEMAND_MARKET_IDS.map((market) => ({ companyId: f.companyId, market })));
+  const deliveryObservations = computeMarketDeliveryObservations(companyMarketPairs, contractsAfterOverdue, state.currentPeriod);
+  const contractsById = new Map(turnResult.contracts.map((c) => [c.contractId, c]));
+  const lotsById = new Map(lotsAfterExpiry.map((l) => [l.lotId, l]));
+  const trustObservations = computeMarketTrustObservations(fulfillmentPlan.usage, contractsById, lotsById, deliveryObservations);
+  const qualityStateAfter: QualityReliabilityState = {
+    qualityByCompanyProduct: updateQualityByCompanyProduct(state.qualityState.qualityByCompanyProduct, adjustments),
+    trustByCompanyMarket: updateTrustByCompanyMarket(state.qualityState.trustByCompanyMarket, deliveryObservations, trustObservations),
+    rampHistory: updatedRampHistory,
+  };
+
+  // --- 次期のPD/VAP供給シグナル用に、当期の実績生産量（品質調整後＝販売可能量）を会社×商品で集計する ---
   const lastQuarterActualProduction: Record<CompanyId, Record<Product, number>> = {};
   for (const f of fixtures) {
     const byProduct: Record<Product, number> = { hoso: 0, pd: 0, vap: 0 };
-    for (const b of productionRecord.batches.filter((b) => b.companyId === f.companyId)) {
+    for (const b of adjustedBatches.filter((b) => b.companyId === f.companyId)) {
       byProduct[b.product] += unwrapUnit(b.finishedGoodsQuantity);
     }
     lastQuarterActualProduction[f.companyId] = byProduct;
@@ -497,7 +602,7 @@ export function advanceCompanyLabQuarter(
       turnResult.salesRecord.newContracts,
       state.contracts,
       contractsAfterOverdue,
-      productionRecord.fulfillmentPlan.usage,
+      fulfillmentPlan.usage,
       turnResult.domesticAllocation,
       turnResult.salesRecord.allocations,
       turnResult.newImportLots,
@@ -506,12 +611,13 @@ export function advanceCompanyLabQuarter(
       turnResult.harvestedLots,
       updatedRawMaterialLots,
       productionRecord.allocation.entries,
-      productionRecord.batches,
+      adjustedBatches,
       finishedGoodsLotsAfterConsumption,
       companyLoadMetrics,
       turnResult.aquacultureHarvestResults
     );
-    return summary;
+    const qualityFields = buildCompanyQualitySummary(f.companyId, adjustments, qualityStateAfter, deliveryObservations);
+    return { ...summary, ...qualityFields };
   });
 
   const record: CompanyQuarterRecord = {
@@ -524,14 +630,16 @@ export function advanceCompanyLabQuarter(
     rawMaterialRequirements: turnResult.rawMaterialRequirements,
     domesticAllocation: turnResult.domesticAllocation,
     productionAllocation: productionRecord.allocation,
-    batches: productionRecord.batches,
-    newFinishedGoodsLots: productionRecord.newFinishedGoodsLots,
-    fulfillmentPlan: productionRecord.fulfillmentPlan,
+    batches: adjustedBatches,
+    newFinishedGoodsLots,
+    fulfillmentPlan,
     companyLoadMetrics: productionRecord.companyLoadMetrics,
     factoryLoadMetrics: productionRecord.factoryLoadMetrics,
     companySummaries,
     globalReasonCodes,
     turnDebug: turnResult.debug,
+    qualityAdjustments: adjustments,
+    qualityStateAfter,
   };
 
   const canAdvanceWithinScenario = turn < definition.durationTurns;
@@ -549,6 +657,7 @@ export function advanceCompanyLabQuarter(
     rawMaterialLots: updatedRawMaterialLots,
     productionState: { ...productionStateAfter, finishedGoodsLots: finishedGoodsLotsAfterConsumption },
     lastQuarterActualProduction,
+    qualityState: qualityStateAfter,
     history,
     isComplete,
   };
