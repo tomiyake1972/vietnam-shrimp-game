@@ -345,3 +345,57 @@ buildNextTurnInput(previousInput, turnResult) → TurnOrchestratorInput
 **`tsc`/ESLint/ビルド**: `npx tsc --noEmit`：0エラー。`npx eslint app/lib/v2 app/v2 scripts`：0エラー・0警告。`npm run build`：TypeScriptコンパイルは成功。ページデータ収集段階の既知の`/api/game/[gameCode]/admin/clone`エラー（§11参照）以外の新規エラーは発生していない。
 
 **対象外（今回のスコープ外）**: V2 APIルート、Redis、`GameSessionV2`の全面改修、V2 UI、Phase6以降のロジック、`develop/v2`へのマージ・PR作成。
+
+## 16. 永続化状態・シリアライズ契約（`app/lib/v2/persistence/`）【Phase 5.6】
+
+**`TurnOrchestratorInput`をそのまま保存しない理由**: `TurnOrchestratorInput`は「毎ターン新たに与える市場入力（`marketInput`）・シナリオ変数・会社別の提出計画（販売・国内買付・輸入・養殖）」を含んでいる。これらは（a）外部のシナリオエンジンや会社の意思決定によって毎ターン新規に決まるものであり、（b）そもそも「1ターン前の状態から再構成すべきもの」ではない（提出計画は毎ターン再送されるものであり、過去の提出計画を保存し続ける必然性がない）。`TurnOrchestratorInput`をまるごとRedisへ保存すると、「本来は毎ターン新規に決まる値」と「本当にターンをまたいで保存すべき値」が同じ器に混在してしまい、②Save/Load・Replayのたびに「古い提出計画がそのまま残ってしまう」「巨大な市場入力オブジェクトを毎ターン複製し続ける」といった不具合の温床になる。
+
+**保存状態と毎ターン入力の境界**: 本モジュールは、ターンをまたいで保存すべき最小限の状態だけを`PersistedGameStateV2`として定義し、それ以外を`ExternalTurnInput`（毎ターン外部から与えられる入力）として明確に分離した。
+
+```
+PersistedGameStateV2（保存する）          ExternalTurnInput（保存しない、毎ターン渡す）
+  schemaVersion                             marketInput
+  gameId / scenarioId                       scenarioVariables
+  currentPeriod                             salesPlans
+  seed                                      domesticPurchaseIntentSource
+  contracts                                 importOrders
+  rawMaterialLots                           aquacultureStockingPlans
+  execution（completedTurnCount等）          parameters
+  metadata（createdAt/updatedAt）
+```
+
+**保存するフィールド一覧**: `schemaVersion`（スキーマバージョン）、`gameId`（ゲーム識別子）、`scenarioId`（シナリオ識別子）、`currentPeriod`（現在期）、`seed`（決定論的乱数シード）、`contracts`（更新済み販売契約、Phase4の約定残そのもの）、`rawMaterialLots`（継続中の原料ロット。ただし本モジュール自体はロットの状態フィルタは行わない。`turnState`の`buildNextTurnInput`が既に`available`/`inTransitImport`/`growingAquaculture`へ絞り込んだ後の値がここに入る想定）、`execution.completedTurnCount`（完了ターン数）、`execution.lastCompletedPeriod`（最終完了期間、任意）、`execution.lastTurnExecutionId`（最終ターン実行識別子、任意）、`metadata.createdAt`/`metadata.updatedAt`（作成・更新日時、ISO 8601文字列）。
+
+**保存しないフィールド一覧**: 会社別の販売・国内買付・輸入・養殖の当該ターン提出計画、Phase1の当該ターン市場入力（`MarketQuarterInput`）・シナリオ変数、市場結果・販売結果・国内買付配分結果（いずれも`runTurn`から再計算可能な派生結果）、debug情報・一時的な原料要求量サマリー、関数・`RandomStream`インスタンス本体（シード文字列のみ保存し、`RandomStream`自体は`runTurn`が`createRandomStream(seed)`で毎回新規生成する）、RedisキーやAPI固有の情報。
+
+**`schemaVersion`の目的**: 将来`PersistedGameStateV2`のフィールド構成を変更する際の識別子。現行値は`CURRENT_PERSISTED_GAME_STATE_VERSION = 1`。decode時にバージョンを4通りに区別する。①欠落（フィールド自体が存在しない）→`PersistedStateValidationError`。②不正（非整数・0以下等）→`PersistedStateValidationError`。③未対応の将来バージョン（現行実装より大きい）→`UnsupportedPersistedStateVersionError`（専用の型で、単なる内容不正と区別できる）。④対応済みバージョンだが他のフィールドが壊れている→`PersistedStateValidationError`。本Phaseではマイグレーション自体は実装していないが、`validatePersistedGameState`（`schema.ts`）が「まずバージョンを見てから内容を検証する」構造になっているため、将来`schemaVersion`ごとに異なる検証・変換ロジックへ分岐する形でマイグレーションを追加できる（§「将来のスキーママイグレーション方針」参照）。
+
+**encode/decodeの方法**: `encodePersistedGameState(state): string`は、`PersistedGameStateV2`をトップレベル・ネストしたオブジェクト（`execution`・`metadata`・各契約・各ロット）いずれも固定のキー順序を持つDTO（`codec.ts`の`toCanonicalDto`/`contractToDto`/`lotToDto`）へ変換してから`JSON.stringify`する。オブジェクトの構築順序をコード側で明示的に固定しているため、同じ内容の状態からは常に同じ文字列が生成される（JSのオブジェクトプロパティの列挙順序に依存しない）。契約・ロットの配列順序は一切並べ替えない（`Array.prototype.map`は入力順序を保持する）。`decodePersistedGameState(serialized): string`は、まず`JSON.parse`し（失敗時は`PersistedStateParseError`）、次に`schema.ts`の`validatePersistedGameState`で必ずランタイム検証してから`PersistedGameStateV2`を返す（`as PersistedGameStateV2`のような型アサーションのみでは済ませていない）。
+
+**ランタイム検証の方法**（`schema.ts`）: オブジェクトであること・配列であること・非空文字列であること・有限数であること・0以上であることをチェックする最小限のヘルパー（`requireObject`/`requireArray`/`requireNonEmptyString`/`requireFiniteNumber`等）を用意し、フィールドごとに適用する。加えて、契約の`outstandingQuantity <= originalQuantity`、ロットの`remainingQuantity <= originalQuantity`、`completedTurnCount`が0以上の整数、`lastCompletedPeriod < currentPeriod`、`createdAt <= updatedAt`といった、単一フィールドの型だけでは検出できない整合性も検証する。ロットの`status`と`source`・`pendingAquacultureIntensity`等の組み合わせも検証する（`status="inTransitImport"`なら`source="import"`、`status="growingAquaculture"`なら`source="aquaculture"`かつ養殖の池入れ保留フィールドを3つとも保持、それ以外の`status`では保留フィールドを一切持たない）。エラーはすべて`PersistedStateValidationError`として、不正だったフィールドへのパス（例: `rawMaterialLots[2].remainingQuantity`）付きで投げる。
+
+**ブランド型を復元する方法**: `HosoEqTons`・`UsdPerHosoEqKg`・`Ratio`はJSON上ではただの`number`になる。decode時は、既存のスマートコンストラクタ（`core/units.ts`の`hosoEqTons()`・`usdPerHosoEqKg()`・`ratio()`）を必ず呼び出してブランド型を復元する（`wrapUnitConstructor`ヘルパーが、まず`requireFiniteNumber`でNaN/Infinity/非numberを弾いた上でこれらの関数を呼び、関数内部の検証（0以上等）が失敗した場合はそのエラーメッセージにフィールドパスを付けて`PersistedStateValidationError`として再送出する）。`PeriodV2`の復元も同様に、既存の`core/period.ts`の`parsePeriod()`を経由する。単なる`as HosoEqTons`等の型キャストでブランド型を「復元」している箇所は本モジュールに存在しない。
+
+**`buildNextTurnInput`（`turnState`）との役割の違い**: `buildNextTurnInput`は「メモリ上の`TurnOrchestratorResult`から、次にrunTurnへ渡せる`TurnOrchestratorInput`の骨格を組み立てる」層であり、JSON・文字列化・ランタイム検証には一切関与しない（§15参照）。本モジュール（`persistence`）は、その一段外側で「ターンをまたいで保存すべき最小限の状態（`PersistedGameStateV2`）をどう定義し、どう安全にJSON文字列と相互変換するか」だけを扱う。`applyTurnResultToPersistedState`は内部で`turnResult.pendingState`（`buildNextTurnInput`と同じ入力源）をそのまま読むため、`turnState`層のロジックを重複実装していない。`hydrateTurnInputFromPersistedState`は`buildNextTurnInput`の代わりではなく、「（Redisから読み込んだ）永続化状態＋（APIが受け取った）今回の外部入力」から`TurnOrchestratorInput`を組み立てる、永続化層専用の別ルートである（`ExternalTurnInput`という別の入力型を使う）。
+
+**`createInitialPersistedGameState`の仕様**: `gameId`・`scenarioId`・`initialPeriod`・`seed`・`initialContracts`・`initialRawMaterialLots`・`createdAt`を受け取り、`schemaVersion`を現行バージョンに、`execution.completedTurnCount`を0に、`execution.lastCompletedPeriod`・`execution.lastTurnExecutionId`を未設定に、`metadata.updatedAt`を`createdAt`と同じ値に設定した`PersistedGameStateV2`を返す（純粋関数、入力配列は複製してから保持するため、呼び出し側の配列を変更しない）。
+
+**`applyTurnResultToPersistedState`の仕様**: `previousState`・`turnResult`・`turnExecutionId`・`updatedAt`を受け取り、`turnResult.period`が`previousState.currentPeriod`と一致することを確認した上で、`currentPeriod`を`turnResult.pendingState.nextPeriod`へ、`contracts`/`rawMaterialLots`を`turnResult.pendingState.contracts`/`.lots`へ、`execution.completedTurnCount`を+1、`execution.lastCompletedPeriod`を`turnResult.period`、`execution.lastTurnExecutionId`を`turnExecutionId`へ更新した新しい`PersistedGameStateV2`を返す。`metadata.createdAt`は`previousState`のまま維持し、`metadata.updatedAt`だけを新しい値に置き換える。`updatedAt`はISO 8601として解釈可能であること・`createdAt`以降であることを検証する。純粋関数であり、`previousState`・`turnResult`のいずれも変更しない。
+
+**同一`turnExecutionId`再適用時の挙動**: `turnExecutionId`が空文字の場合、および`previousState.execution.lastTurnExecutionId`と同一の`turnExecutionId`を渡した場合は、いずれも`PersistedStateTransitionError`を投げて拒否する（「同じターンの結果を2回適用しようとしている」とみなす）。`turnResult.period`が`previousState.currentPeriod`と一致しない場合も同様に`PersistedStateTransitionError`を投げる（異なる`turnExecutionId`であっても、実行対象periodが一致しなければ拒否する）。Redis上のCAS（Compare-And-Swap）・分散ロック・トランザクションによる原子的な排他制御は本Phaseでは実装していない（下記「将来課題」参照）。純粋関数レベルでの以上の防御は、将来そのようなRedis層を実装する際の「最低限満たすべき不変条件」を先に固定する意味を持つ。
+
+**hydrationのデータフロー**: `hydrateTurnInputFromPersistedState(persistedState, externalTurnInput)`は、`currentPeriod`・`seed`・`existingContracts`（`persistedState.contracts`）・`existingLots`（`persistedState.rawMaterialLots`）を永続化状態からのみ注入し、`marketInput`・`scenarioVariables`・`salesPlans`・`domesticPurchaseIntentSource`・`importOrders`・`aquacultureStockingPlans`・`parameters`を`externalTurnInput`からのみ注入して、`TurnOrchestratorInput`を組み立てる。`ExternalTurnInput`型自体が`currentPeriod`・`seed`・`existingContracts`・`existingLots`を持たないため、外部入力側がこれらを上書きすることはそもそも型レベルでできない。debug情報や前回の`TurnOrchestratorResult`は、`ExternalTurnInput`・`PersistedGameStateV2`のいずれにも該当フィールドが存在しないため混入しない。
+
+**Replayとの関係**: 各ターンの`ExternalTurnInput`（保存しない側のデータ）を別途記録しておけば、Replayは「保存された`ExternalTurnInput`列＋初期`PersistedGameStateV2`」だけから、`hydrateTurnInputFromPersistedState → runTurn → applyTurnResultToPersistedState`を繰り返すことで、当時と同じ`seed`・同じ入力から完全に同一の結果を再生できる（§14の決定論の担保がそのまま効く）。`PersistedGameStateV2`自体を毎ターン保存しておく必要すらなく、初期状態と各ターンの`ExternalTurnInput`・`turnExecutionId`列だけで完全な再生が可能という設計になっている（ただし本Phaseでは「`ExternalTurnInput`列をどこに保存するか」自体はRedis/API層の課題として対象外）。
+
+**Save/Loadとの関係**: 途中セーブは「ある時点の`PersistedGameStateV2`を`encodePersistedGameState`でJSON文字列化して保存する」ことに相当し、ロードは「保存された文字列を`decodePersistedGameState`でランタイム検証付きに復元し、その時点からの`ExternalTurnInput`（次にプレイヤーが提出する計画等）と合わせて`hydrateTurnInputFromPersistedState`を呼ぶ」ことに相当する。`decodePersistedGameState`が必ずランタイム検証を行うため、破損したセーブデータ（手動編集・ストレージ破損等）を読み込んでもサイレントに壊れた状態でゲームが進行することはなく、明示的な例外（`PersistedStateParseError`/`PersistedStateValidationError`/`UnsupportedPersistedStateVersionError`）として検出できる。
+
+**将来のスキーママイグレーション方針**: 本Phaseではマイグレーション自体（旧バージョンのデータを新バージョンの形へ変換する処理）は実装していない。ただし、`validatePersistedGameState`が「まず`schemaVersion`を読み取り、対応範囲外なら`UnsupportedPersistedStateVersionError`を投げ、対応範囲内なら詳細検証へ進む」という構造に既になっているため、将来`schemaVersion`が2以上に上がった際は、`schema.ts`内で`schemaVersion`ごとに異なるフィールド読み取りロジック（旧バージョンのフィールド名・構造を新バージョンの`PersistedGameStateV2`へ変換する関数）へ分岐させる形で追加できる。`CURRENT_PERSISTED_GAME_STATE_VERSION`定数を1箇所に集約してあるのも、この将来の分岐先を見つけやすくするため。
+
+**RedisレベルのCAS・ロック・冪等性は未実装であること**: 本Phaseで実装した「同一`turnExecutionId`の再適用拒否」「period不一致の拒否」は、いずれもメモリ上の純粋関数（`applyTurnResultToPersistedState`）としての防御に留まる。実際にRedis等の外部ストレージへ保存する場合、複数のリクエストが同時に同じゲームの状態を読み書きしようとする競合（同時に2つのターン完了リクエストが来る、ネットワーク再送で同じリクエストが2回届く等）に対しては、Redisのトランザクション（`MULTI`/`EXEC`）・楽観的ロック（`WATCH`によるCAS）・分散ロックのいずれかを、将来のRedis/API層で別途実装する必要がある。本モジュールはその際に「何を排他制御すべきか（`PersistedGameStateV2`というひとまとまりの状態）」「適用前にどんな不変条件を確認すべきか（period一致・turnExecutionId未使用）」を先に固定しただけであり、実際の排他制御メカニズムそのものは今回のスコープ外である。
+
+**テスト**: `app/lib/v2/persistence/__tests__/persistence.test.ts`に35件のテストを追加した（既存451件と合わせて486件）。encode/decodeの往復一致（JSON化できない「キー有りでundefined」と「キー無し」の区別はJSON自体が表現できないため、往復判定は「再度encodeした文字列が最初のencode結果と一致するか」で行っている）、encode結果の決定論性、契約・ロットの配列順序保持、入力不変性、不正JSON・null・トップレベル配列の拒否、`schemaVersion`欠落・未対応バージョンの専用エラー、NaN・不正文字列・null・負値・整数制約等の数値検証、契約・ロットの列挙値検証、`status`とロット固有フィールドの整合性検証、日時の妥当性・前後関係検証、`applyTurnResultToPersistedState`のperiod前進・状態更新・`completedTurnCount`増分・タイムスタンプ更新・入力不変性・period不一致拒否・同一`turnExecutionId`再適用拒否、`hydrateTurnInputFromPersistedState`のデータソース分離・debug非混入、そして「初期状態作成→hydrate→runTurn→適用→encode→decode→次ターンhydrate→runTurn」という2ターンのSave/Load往復統合テスト（Phase1+4+5を通過し、同一seedでの2回実行結果が完全一致することを確認）を含む。
+
+**`tsc`/ESLint/ビルド**: `npx tsc --noEmit`：0エラー。`npx eslint app/lib/v2 app/v2 scripts`：0エラー・0警告。`npm run build`：TypeScriptコンパイルは成功。ページデータ収集段階の既知の`/api/game/[gameCode]/admin/clone`エラー（§11参照）以外の新規エラーは発生していない。
+
+**対象外（今回のスコープ外）**: Redisクライアント・キー設計・トランザクション・分散ロック、V2 APIルート・決定提出API、V2 UI、`GameSessionV2`の全面改修、Phase6以降のロジック、V1への接続、`develop/v2`へのマージ・PR作成。
