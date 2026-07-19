@@ -13,3 +13,4 @@ export * from "./core/scheduledEffects";
 export * from "./core/gameSession";
 export * from "./redis/redisKeys";
 export * from "./redis/redisKeyGuard";
+export * from "./market";
