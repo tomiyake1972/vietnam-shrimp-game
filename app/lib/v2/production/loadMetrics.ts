@@ -1,0 +1,146 @@
+// ShrimpX V2 — 工場・ワーカー・生産モジュール 操業負荷指標（Phase 6）
+//
+// Phase7（品質・信用の変動を扱う想定）へ渡すための、工場・会社別の操業負荷
+// 指標を集計する。本Phase自身はこれらの指標から品質・信用を一切変化させない
+// （集計・出力のみ）。
+
+import { PeriodV2, toYearQuarter } from "../core/period";
+import { ratio, roundRatio, unwrapUnit } from "../core/units";
+import { calculateFactoryEffectiveCapacity } from "./capacity";
+import { calculateEffectiveLaborCapacity, effectiveLaborCapacityForProduct } from "./labor";
+import { PRODUCTION_PARAMETERS_V1, ProductionParameters } from "./parameters";
+import {
+  CompanyLoadMetrics,
+  Factory,
+  FactoryLoadMetrics,
+  ProductionAllocationEntry,
+  ProductionBatch,
+  WorkerAssignment,
+} from "./types";
+
+const EPSILON = 1e-6;
+
+function quartersBetween(from: PeriodV2, to: PeriodV2): number {
+  const a = toYearQuarter(from);
+  const b = toYearQuarter(to);
+  return (b.year * 4 + b.quarter) - (a.year * 4 + a.quarter);
+}
+
+/** 原料ロットのlotId → 入庫四半期 を引けるようにするための最小限のルックアップ入力。 */
+export interface RawMaterialLotOrigin {
+  readonly lotId: string;
+  readonly inboundPeriod: PeriodV2;
+}
+
+/** 1工場ぶんの操業負荷指標を算出する。 */
+export function calculateFactoryLoadMetrics(
+  factory: Factory,
+  workerAssignments: readonly WorkerAssignment[],
+  entries: readonly ProductionAllocationEntry[],
+  batches: readonly ProductionBatch[],
+  rawMaterialLotOrigins: readonly RawMaterialLotOrigin[],
+  period: PeriodV2,
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+): FactoryLoadMetrics {
+  const factoryEntries = entries.filter((e) => e.factoryId === factory.factoryId);
+  const factoryBatches = batches.filter((b) => b.factoryId === factory.factoryId);
+
+  const totalProduced = factoryBatches.reduce((sum, b) => sum + unwrapUnit(b.finishedGoodsQuantity), 0);
+  const totalDesired = factoryEntries.reduce((sum, e) => sum + unwrapUnit(e.desiredQuantity), 0);
+  const totalShortfall = factoryEntries.reduce((sum, e) => sum + unwrapUnit(e.shortfallQuantity), 0);
+  const totalRawConsumed = factoryBatches.reduce((sum, b) => sum + unwrapUnit(b.rawMaterialConsumedTotal), 0);
+  const totalLoss = factoryBatches.reduce((sum, b) => sum + unwrapUnit(b.processingLoss), 0);
+
+  const capacity = calculateFactoryEffectiveCapacity(factory);
+  const equipmentUtilizationRate = unwrapUnit(capacity.commonProcessing) > EPSILON ? totalProduced / unwrapUnit(capacity.commonProcessing) : 0;
+
+  const assignment = workerAssignments.find((a) => a.factoryId === factory.factoryId && a.companyId === factory.companyId);
+  const productsProduced = Array.from(new Set(factoryBatches.filter((b) => unwrapUnit(b.finishedGoodsQuantity) > EPSILON).map((b) => b.product)));
+  const totalLaborCapacityForProducedMix = assignment
+    ? productsProduced.reduce((sum, product) => {
+        const laborResult = calculateEffectiveLaborCapacity(assignment, capacity, undefined, params);
+        return sum + effectiveLaborCapacityForProduct(laborResult, product);
+      }, 0)
+    : 0;
+  const laborUtilizationRate = totalLaborCapacityForProducedMix > EPSILON ? totalProduced / totalLaborCapacityForProducedMix : 0;
+
+  const laborResultForAssignment = assignment ? calculateEffectiveLaborCapacity(assignment, capacity, undefined, params) : undefined;
+
+  const productMixComplexity = productsProduced.length > 1 ? (productsProduced.length - 1) / 2 : 0;
+
+  const originByLotId = new Map(rawMaterialLotOrigins.map((o) => [o.lotId, o.inboundPeriod]));
+  let weightedAgeSum = 0;
+  let ageWeightTotal = 0;
+  for (const batch of factoryBatches) {
+    for (const c of batch.rawMaterialConsumed) {
+      const inboundPeriod = originByLotId.get(c.lotId);
+      if (!inboundPeriod) continue;
+      const age = Math.max(0, quartersBetween(inboundPeriod, period));
+      weightedAgeSum += age * unwrapUnit(c.quantity);
+      ageWeightTotal += unwrapUnit(c.quantity);
+    }
+  }
+  const averageRawMaterialAgeQuarters = ageWeightTotal > EPSILON ? weightedAgeSum / ageWeightTotal : 0;
+
+  return {
+    factoryId: factory.factoryId,
+    companyId: factory.companyId,
+    period,
+    equipmentUtilizationRate: ratio(roundRatio(Math.min(1, Math.max(0, equipmentUtilizationRate)))),
+    laborUtilizationRate: ratio(roundRatio(Math.min(1, Math.max(0, laborUtilizationRate)))),
+    overtimeRate: laborResultForAssignment ? laborResultForAssignment.appliedOvertimeRate : ratio(0),
+    temporaryWorkerShare: laborResultForAssignment ? laborResultForAssignment.temporaryWorkerShare : ratio(0),
+    productMixComplexity: ratio(roundRatio(productMixComplexity)),
+    averageRawMaterialAgeQuarters: Math.round(averageRawMaterialAgeQuarters * 100) / 100,
+    productionShortfallRate: ratio(roundRatio(totalDesired > EPSILON ? Math.min(1, Math.max(0, totalShortfall / totalDesired)) : 0)),
+    processingLossRate: ratio(roundRatio(totalRawConsumed > EPSILON ? Math.min(1, Math.max(0, totalLoss / totalRawConsumed)) : 0)),
+  };
+}
+
+/** 複数工場ぶんの操業負荷指標をまとめて算出する。 */
+export function calculateAllFactoryLoadMetrics(
+  factories: readonly Factory[],
+  workerAssignments: readonly WorkerAssignment[],
+  entries: readonly ProductionAllocationEntry[],
+  batches: readonly ProductionBatch[],
+  rawMaterialLotOrigins: readonly RawMaterialLotOrigin[],
+  period: PeriodV2,
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+): readonly FactoryLoadMetrics[] {
+  return factories.map((f) => calculateFactoryLoadMetrics(f, workerAssignments, entries, batches, rawMaterialLotOrigins, period, params));
+}
+
+/** 会社単位に、その会社の全工場のload指標をHOSO換算量で加重集計する。 */
+export function calculateCompanyLoadMetrics(factoryMetrics: readonly FactoryLoadMetrics[], batches: readonly ProductionBatch[]): readonly CompanyLoadMetrics[] {
+  const companyIds = Array.from(new Set(factoryMetrics.map((m) => m.companyId))).sort();
+
+  return companyIds.map((companyId) => {
+    const metrics = factoryMetrics.filter((m) => m.companyId === companyId);
+    const companyBatches = batches.filter((b) => b.companyId === companyId);
+    const weightByFactory = new Map<string, number>();
+    for (const b of companyBatches) {
+      weightByFactory.set(b.factoryId, (weightByFactory.get(b.factoryId) ?? 0) + unwrapUnit(b.finishedGoodsQuantity));
+    }
+    const totalWeight = Array.from(weightByFactory.values()).reduce((s, v) => s + v, 0);
+
+    function weightedAverage(selector: (m: FactoryLoadMetrics) => number): number {
+      if (totalWeight <= EPSILON) {
+        return metrics.length > 0 ? metrics.reduce((s, m) => s + selector(m), 0) / metrics.length : 0;
+      }
+      return metrics.reduce((sum, m) => sum + selector(m) * (weightByFactory.get(m.factoryId) ?? 0), 0) / totalWeight;
+    }
+
+    return {
+      companyId,
+      period: metrics[0].period,
+      equipmentUtilizationRate: ratio(roundRatio(weightedAverage((m) => unwrapUnit(m.equipmentUtilizationRate)))),
+      laborUtilizationRate: ratio(roundRatio(weightedAverage((m) => unwrapUnit(m.laborUtilizationRate)))),
+      overtimeRate: ratio(roundRatio(weightedAverage((m) => unwrapUnit(m.overtimeRate)))),
+      temporaryWorkerShare: ratio(roundRatio(weightedAverage((m) => unwrapUnit(m.temporaryWorkerShare)))),
+      productMixComplexity: ratio(roundRatio(weightedAverage((m) => unwrapUnit(m.productMixComplexity)))),
+      averageRawMaterialAgeQuarters: Math.round(weightedAverage((m) => m.averageRawMaterialAgeQuarters) * 100) / 100,
+      productionShortfallRate: ratio(roundRatio(weightedAverage((m) => unwrapUnit(m.productionShortfallRate)))),
+      processingLossRate: ratio(roundRatio(weightedAverage((m) => unwrapUnit(m.processingLossRate)))),
+    };
+  });
+}
