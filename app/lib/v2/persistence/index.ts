@@ -22,7 +22,7 @@
 export * from "./types";
 export * from "./errors";
 export { validatePersistedGameState } from "./schema";
-export { encodePersistedGameState, decodePersistedGameState } from "./codec";
+export { encodePersistedGameState, decodePersistedGameState, decodePersistedGameStateFromStored } from "./codec";
 export {
   createInitialPersistedGameState,
   applyTurnResultToPersistedState,

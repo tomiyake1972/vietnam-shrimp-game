@@ -108,3 +108,23 @@ export function decodePersistedGameState(serialized: string): PersistedGameState
   }
   return validatePersistedGameState(parsed);
 }
+
+/**
+ * KVストアから読み出した「保存済みの値」をPersistedGameStateV2へ変換する
+ * （Phase 5.7・app/lib/v2/redis/のRepositoryが利用する）。
+ *
+ * 一部のRedisクライアント（例: @upstash/redisはJSON文字列を自動でdeserialize
+ * して返すことがある）は、`get()`の戻り値がJSON文字列そのものではなく、
+ * 既にパース済みのプレーンオブジェクトになる場合がある。本関数はその両方の
+ * 形（文字列 / 既にパース済みの値）を受け付け、いずれの経路でも
+ * validatePersistedGameStateによるランタイム検証を必ず通す
+ * （文字列の場合はdecodePersistedGameStateと同じ経路、既にパース済みの場合も
+ * 検証を省略しない）。呼び出し側（Repository）がJSON.parse/JSON.stringifyを
+ * 直接書かずに済むようにするための、この1箇所への集約でもある。
+ */
+export function decodePersistedGameStateFromStored(raw: unknown): PersistedGameStateV2 {
+  if (typeof raw === "string") {
+    return decodePersistedGameState(raw);
+  }
+  return validatePersistedGameState(raw);
+}
