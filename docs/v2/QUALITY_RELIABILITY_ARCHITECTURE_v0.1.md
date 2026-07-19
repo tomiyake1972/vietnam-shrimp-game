@@ -169,6 +169,12 @@ deliveryReliabilityScore = 会社×市場の納期信頼性（同.deliveryReliab
 
 ただし、**この`qualityReliability`フィールドへ実際に非空の値が書き込まれることは現時点ではない**（無印`/v2`ゲームが品質ロジックを呼ばないため）。companyLabの計算結果をこの永続化状態へ実際に書き込む配線は、実装指示の明示的な対象外（「Redis/API実配線」）にあたるため本Phaseでは行っていない。Phase 7Bまたはそれ以降で、companyLabをRedis等へ接続する際に、①companyLab専用の永続化状態を新設するか、②本フィールドをcompanyLab用に転用するかを判断する必要がある——これは将来課題として報告する（ブロッカーではない）。
 
+**現状のまとめ（三宅さんの受入確認指示に対する明示的な回答）**:
+
+- `companyLab`は、四半期をまたぐ品質・信頼・納期状態を含め、現状は**ブラウザ内（呼び出し元プロセスのメモリ内）の状態としてのみ**四半期間で保持される。ページリロード・プロセス再起動で失われる（既存のcompanyLab全体の設計方針どおりで、Phase 7Aによる変更はない）。
+- `persistence/`のschemaVersion 3は、**将来「無印/v2ゲーム」をRedis/API経由で永続化する際に品質状態も保存できるようにするための型・codec・validationスキーマ**として用意した（`qualityReliability`フィールド、encode/decode、v1/v2後方互換、不正値拒否まで完成済み）。
+- `companyLab`の実行結果を、このRepository/API層（`app/lib/v2/redis/`）へ実際に書き込む配線は**未実装**（本Phaseの対象外）。V2 API整備時（companyLabをRedis等へ接続するタイミング）に実配線を行う想定。
+
 ## 10. 暫定係数（すべて`quality/parameters.ts`の`QUALITY_PARAMETERS_V1`に集約、要校正）
 
 三宅さんの実装指示に明示された数値（utilizationThreshold=0.80・band=0.20・exponent=2、操業リスクの重み、`maximumNonConformanceRatio`=0.08、downgrade/rework/discard按分（0.45/0.25/0.30）、`minimumSaleableRecoveryRatio`=0.90、重大事故の各確率係数、品質/納期/顧客信頼の更新alpha）はそのまま採用した。指示に具体的な数値がなかった箇所は次の暫定値を置いた（すべて「事故一発で会社が再起不能にならない」設計方針を満たす範囲での仮置き）。

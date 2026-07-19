@@ -99,6 +99,42 @@ test("1: 無負荷(稼働率50%・残業なし等)ではadjustedFinishedGoodsQua
   assert.equal(unwrapUnit(adj.discardQuantity), 0);
 });
 
+test("受入確認1: operationalRisk=0・事故なしでは、HOSO/PD/VAPいずれも厳密にsaleableRecoveryRatio=1.00・廃棄/格落ち/再加工=0になる（100トン投入→販売可能完成品100トン）", () => {
+  // 稼働率50%（閾値0.80未満）・残業/臨時ワーカー/複雑度/原料経過期間すべて0という、
+  // makeLoadMetrics()の既定値そのものが「純粋な無負荷」ケースに相当する
+  // （実際のcompanyLab実行時は工場稼働率が0.80近辺まで上がることが多く、その場合は
+  // わずかでもutilizationStressが生じるため、報告書の「≈0.99超」はその通常実行時の
+  // 非ゼロリスクを指しており、本テストの「純粋無負荷」ケースとは区別する）。
+  for (const product of ["hoso", "pd", "vap"] as const) {
+    const batch = makeBatch({
+      batchId: `zero-risk-${product}`,
+      product,
+      finishedGoodsQuantity: hosoEqTons(100),
+      rawMaterialConsumedTotal: hosoEqTons(100),
+      processingLoss: hosoEqTons(0),
+    });
+    const result = applyQualityToBatches(baseAdjustmentInput({ batches: [batch] }));
+    assert.equal(result.adjustments.length, 1, product);
+    const [adj] = result.adjustments;
+
+    assert.equal(adj.risk.operationalRisk, 0, `${product}: operationalRisk`);
+    assert.equal(adj.outcome.majorIncident.occurred, false, `${product}: majorIncident`);
+    assert.equal(adj.outcome.nonConformanceRatio, 0, `${product}: nonConformanceRatio`);
+    assert.equal(unwrapUnit(adj.downgradeQuantity), 0, `${product}: downgradeQuantity`);
+    assert.equal(unwrapUnit(adj.reworkQuantity), 0, `${product}: reworkQuantity`);
+    assert.equal(unwrapUnit(adj.discardQuantity), 0, `${product}: discardQuantity`);
+    // 浮動小数点誤差を除き厳密に1.00（丸め後の値でstrict equalが成立することを確認）。
+    assert.equal(unwrapUnit(adj.outcome.saleableRecoveryRatio), 1, `${product}: saleableRecoveryRatio`);
+    assert.equal(unwrapUnit(adj.adjustedFinishedGoodsQuantity), 100, `${product}: adjustedFinishedGoodsQuantity`);
+
+    const adjustedBatch = result.adjustedBatches[0];
+    assert.equal(unwrapUnit(adjustedBatch.finishedGoodsQuantity), 100, `${product}: 販売可能完成品=100`);
+    assert.equal(unwrapUnit(adjustedBatch.processingLoss), 0, `${product}: 廃棄=0`);
+    // 物理歩留まり（physicalYieldRatio）は品質モジュールでは一切参照・適用されない
+    // （HOSO/PD/VAPいずれも同じ100トン→100トンになることがその直接証拠）。
+  }
+});
+
 test("5: rampHistoryが空(初回ターン相当)ではproductionRampStress=0になる", () => {
   const result = applyQualityToBatches(baseAdjustmentInput({ rampHistory: [] }));
   assert.equal(result.adjustments[0].risk.productionRampStress, 0);
@@ -145,6 +181,52 @@ test("6: 原料消費量は変更されず、完成品数量+加工損失増分=
   );
 });
 
+test("受入確認3: 数量保存の実測例（基準完成品数量=販売可能完成品数量+廃棄数量、格落ち/再加工の二重計上なし、原料消費量は不変）", () => {
+  const highLoad = makeLoadMetrics({
+    equipmentUtilizationRate: ratio(0.9),
+    laborUtilizationRate: ratio(0.85),
+    overtimeRate: ratio(0),
+    temporaryWorkerShare: ratio(0),
+    productMixComplexity: ratio(0),
+    averageRawMaterialAgeQuarters: 0,
+  });
+  // Phase6由来の既存の物理歩留まり損失(50トン)を明示的に持たせ、品質調整がこれに加算される形で
+  // 追加の廃棄だけを載せる（物理歩留まりを品質モジュール側で書き換えないことも同時に確認する）。
+  const batch = makeBatch({
+    finishedGoodsQuantity: hosoEqTons(1000),
+    processingLoss: hosoEqTons(50),
+    rawMaterialConsumedTotal: hosoEqTons(1050),
+  });
+  const result = applyQualityToBatches(baseAdjustmentInput({ batches: [batch], factoryLoadMetrics: [highLoad] }));
+  const [adj] = result.adjustments;
+  const adjustedBatch = result.adjustedBatches[0];
+
+  // 事故なし・utilizationStress=((0.90-0.80)/0.20)^2=0.25 → operationalRisk=0.35*0.25=0.0875
+  assert.ok(Math.abs(adj.risk.operationalRisk - 0.0875) < 1e-9, `operationalRisk=${adj.risk.operationalRisk}`);
+  assert.equal(adj.outcome.majorIncident.occurred, false);
+
+  const originalFinished = unwrapUnit(adj.originalFinishedGoodsQuantity);
+  const adjustedFinished = unwrapUnit(adj.adjustedFinishedGoodsQuantity);
+  const discard = unwrapUnit(adj.discardQuantity);
+  const downgrade = unwrapUnit(adj.downgradeQuantity);
+  const rework = unwrapUnit(adj.reworkQuantity);
+
+  // 基準完成品数量 = 販売可能完成品数量 + 廃棄数量（格落ち・再加工は別途加算しない＝二重計上なし）。
+  assert.ok(Math.abs(originalFinished - (adjustedFinished + discard)) < 0.01, `original=${originalFinished} adjusted=${adjustedFinished} discard=${discard}`);
+  // 格落ち・再加工は販売可能完成品数量(adjustedFinished)に含まれたままであり、discardには含まれない。
+  assert.ok(downgrade > 0 && rework > 0, "格落ち・再加工が発生する負荷であることを確認");
+  assert.ok(Math.abs(originalFinished - (adjustedFinished + discard + downgrade + rework - downgrade - rework)) < 0.01);
+
+  // 原料消費量は品質調整によって一切変更されない。
+  assert.equal(unwrapUnit(adjustedBatch.rawMaterialConsumedTotal), unwrapUnit(batch.rawMaterialConsumedTotal));
+  // 加工損失(processingLoss)は「既存の物理歩留まり損失(50) + 追加の品質廃棄(discard)」。
+  assert.ok(Math.abs(unwrapUnit(adjustedBatch.processingLoss) - (50 + discard)) < 0.01);
+  // 原料消費 = 完成品(調整後) + 加工損失(調整後)。
+  assert.ok(
+    Math.abs(unwrapUnit(adjustedBatch.rawMaterialConsumedTotal) - (unwrapUnit(adjustedBatch.finishedGoodsQuantity) + unwrapUnit(adjustedBatch.processingLoss))) < 0.01
+  );
+});
+
 test("12: バッチ配列の入力順序を変えても、各バッチの品質調整結果は同じになる", () => {
   const factories: Factory[] = [makeFactory({ factoryId: "F1", companyId: "C1" }), makeFactory({ factoryId: "F2", companyId: "C2" })];
   const loadMetrics: FactoryLoadMetrics[] = [
@@ -182,6 +264,44 @@ test("14: 生産量0のバッチは品質調整をスキップする（adjustmen
   const ramp = result.updatedRampHistory.find((r) => r.companyId === "C1" && r.factoryId === "F1" && r.product === "hoso");
   assert.ok(ramp);
   assert.equal(unwrapUnit(ramp!.lastQuarterProductionQuantity), 0);
+});
+
+test("受入確認2: 生産量0の会社×工場×商品は、乱数値(シード)に関わらず重大事故を一切発生させない・品質スコアを変化させない・廃棄/格落ち/再加工を発生させない", () => {
+  // baseIncidentProbability=0.002は「発生確率」であって「発生量」ではないため、シード次第では
+  // 理論上いつでも発生しうる値に見えるが、applyQualityToBatchesの実装は
+  // currentProduction<=EPSILONの時点でdrawMajorIncident自体を一切呼ばずに次のバッチへ進む
+  // （continueが乱数消費より前にある）。これを多数のシード・ターンで横断的に確認する。
+  const zeroBatch = makeBatch({ finishedGoodsQuantity: hosoEqTons(0), rawMaterialConsumedTotal: hosoEqTons(0), processingLoss: hosoEqTons(0) });
+
+  for (let turn = 1; turn <= 50; turn++) {
+    const result = applyQualityToBatches(baseAdjustmentInput({ batches: [zeroBatch], turn, gameSeed: `zero-production-incident-check-${turn}` }));
+
+    // adjustments自体が生成されない = 重大事故・品質観測・廃棄/格落ち/再加工のいずれも発生しようがない。
+    assert.equal(result.adjustments.length, 0, `turn=${turn}: 生産量0のバッチは調整結果を持たないはず`);
+
+    // バッチ自体は完全に元のまま（廃棄・格落ち・再加工が一切適用されていない）。
+    const adjustedBatch = result.adjustedBatches[0];
+    assert.equal(unwrapUnit(adjustedBatch.finishedGoodsQuantity), 0, `turn=${turn}`);
+    assert.equal(unwrapUnit(adjustedBatch.processingLoss), 0, `turn=${turn}: 廃棄が発生していない`);
+    assert.deepEqual(adjustedBatch, zeroBatch, `turn=${turn}: バッチが完全に不変`);
+
+    // rampHistoryは「当期実績0」として記録されるが、品質スコア自体（quality/stateUpdate.ts側）は
+    // adjustmentsが空である限りweight=0となり、updateQualityByCompanyProductが据え置く
+    // （stateUpdate.test.tsの「14」で確認済み）。
+    const ramp = result.updatedRampHistory.find((r) => r.companyId === zeroBatch.companyId && r.factoryId === zeroBatch.factoryId && r.product === zeroBatch.product);
+    assert.ok(ramp);
+    assert.equal(unwrapUnit(ramp!.lastQuarterProductionQuantity), 0, `turn=${turn}`);
+  }
+});
+
+test("受入確認2b: 生産量0のバッチはcreateFinishedGoodsLots段階でロット自体が作られないため、事故対象ロットが存在せず顧客信頼への事故ペナルティも発生しえない", () => {
+  const zeroBatch = makeBatch({ finishedGoodsQuantity: hosoEqTons(0) });
+  const { adjustedBatches } = applyQualityToBatches(baseAdjustmentInput({ batches: [zeroBatch] }));
+  // production/finishedGoods.tsのcreateFinishedGoodsLotsは finishedGoodsQuantity>EPSILON でフィルタするため、
+  // 生産量0のバッチからはロットが1件も生成されない（quality/finishedGoodsQuality.tsの
+  // attachQualityInfoToFinishedGoodsLotsが対応付けるqualityInfo自体が存在し得ない）。
+  const producingBatches = adjustedBatches.filter((b) => unwrapUnit(b.finishedGoodsQuantity) > 1e-6);
+  assert.equal(producingBatches.length, 0);
 });
 
 test("factoryLoadMetricsが欠落している工場のバッチはQualityValidationErrorを投げる", () => {

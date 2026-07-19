@@ -13,7 +13,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { score0to100, unwrapUnit } from "../../core/units";
 import { generateAutoPolicyDecision } from "../autoPolicy";
-import { buildCompanyOwnState, initializeCompanyLab, runCompanyLabWithAutoPolicyForAllCompanies } from "../runner";
+import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab, runCompanyLabWithAutoPolicyForAllCompanies } from "../runner";
 import { CompanyLabConfig, CompanyLabState } from "../types";
 
 const EPSILON = 1e-6;
@@ -57,27 +57,52 @@ test("20: buildCompanyOwnStateはstate.qualityState（当期処理前=前期末�
   assert.equal(unwrapUnit(ownState.qualityScoreByProduct.hoso!), 33.3, "buildCompanyOwnStateはstate.qualityStateの値をそのまま(再計算せず)使う");
 });
 
-test("20b: advanceCompanyLabQuarter後のqualityStateAfterと、次ターンのownStateに使われる値は同一である（1ターン遅れて反映される）", () => {
-  const result = runAllAuto(baseConfig({ turns: 3 }));
-  const record1 = result.history[0];
-  const record2 = result.history[1];
+test("20b: turn2の意思決定に使われるownStateは、turn1終了時点(qualityStateAfter)の値と厳密に一致し、turn2自身のqualityStateAfterとは異なりうる（1ターン遅れて反映される）", () => {
+  // runCompanyLabWithAutoPolicyForAllCompaniesの内部ループ（buildCompanyOwnState→
+  // decisionProvider→advanceCompanyLabQuarterの順）を、本テストでも手動で1ステップずつ
+  // 再現し、「turn2の意思決定生成時に実際に渡されるownState」を直接捕捉する。
+  const { state: state0, fixtures } = initializeCompanyLab(baseConfig({ turns: 3 }));
+  const fixture = fixtures[0];
 
-  // record1完了直後のqualityStateAfter（=record2開始時点でbuildCompanyOwnStateが
-  // 参照する値と同じであるはず）と、record2のcompanySummariesにあるqualityScoreByProduct
-  // を比較する。record2の意思決定（sales plan）はrecord1終了時点の品質状態に基づいて
-  // 作られているはずであり、record2自身の（当期生産結果を反映した）qualityScoreByProduct
-  // とは異なる可能性がある。
-  const company = record1.companySummaries[0].companyId;
-  const qualityAfterTurn1 = record1.qualityStateAfter.qualityByCompanyProduct.find((s) => s.companyId === company && s.product === "hoso");
-  assert.ok(qualityAfterTurn1, "turn1終了時点の品質状態が存在する");
+  // turn1: 意思決定→適用
+  const publicInfo1 = buildPublicMarketInfo(state0);
+  const decisions1: Record<string, ReturnType<typeof generateAutoPolicyDecision>> = {};
+  for (const f of fixtures) {
+    decisions1[f.companyId] = generateAutoPolicyDecision(f, buildCompanyOwnState(state0, f), publicInfo1, state0.currentPeriod, state0.scenarioState.currentTurn);
+  }
+  const state1 = advanceCompanyLabQuarter(state0, fixtures, decisions1);
 
-  // record2のcompanySummaries（turn2終了時点の品質）はturn2の生産結果を反映済みのため、
-  // turn1終了時点の値とは独立している（更新が発生していれば必ず異なる、生産がなければ
-  // 同じでもよい）。ここでは「record2の意思決定がクラッシュせず、有限の値で成約している」
-  // ことまでを確認する（意思決定入力そのものはautoPolicy内部で完結しており外部から
-  // 直接観測できないため、間接的にrecord2が正常完了していることで確認する）。
-  assert.ok(record2.companySummaries.length > 0);
-  void qualityAfterTurn1;
+  // turn2の意思決定生成時に実際に使われるownStateを直接捕捉する。
+  const ownStateForTurn2 = buildCompanyOwnState(state1, fixture);
+
+  // 捕捉したownStateは、turn1完了直後のqualityStateAfter(=state1.qualityState)と厳密に一致する。
+  for (const [product, score] of Object.entries(ownStateForTurn2.qualityScoreByProduct)) {
+    const expected = state1.qualityState.qualityByCompanyProduct.find((s) => s.companyId === fixture.companyId && s.product === product);
+    assert.ok(expected);
+    assert.equal(unwrapUnit(score!), unwrapUnit(expected!.qualityScore), `product=${product}: turn2のownStateはturn1終了時点の値と一致するはず`);
+  }
+
+  // turn2を実際に進め、turn2終了時点のqualityStateAfterを取得する。
+  const publicInfo2 = buildPublicMarketInfo(state1);
+  const decisions2: Record<string, ReturnType<typeof generateAutoPolicyDecision>> = {};
+  for (const f of fixtures) {
+    decisions2[f.companyId] = generateAutoPolicyDecision(f, buildCompanyOwnState(state1, f), publicInfo2, state1.currentPeriod, state1.scenarioState.currentTurn);
+  }
+  const state2 = advanceCompanyLabQuarter(state1, fixtures, decisions2);
+
+  // turn2で実際に生産があった商品は品質スコアが更新されるため、ownStateForTurn2
+  // （turn1終了時点）とstate2.qualityState（turn2終了時点）は、生産があった商品については
+  // 一般に異なる値になる（「今期の品質結果を今期の成約へ遡及適用しない」の直接証拠——
+  // turn2の成約に使われたのはstate1由来の値であり、state2由来の値ではない）。
+  let foundDifference = false;
+  for (const s of state2.qualityState.qualityByCompanyProduct) {
+    if (s.companyId !== fixture.companyId) continue;
+    const before = ownStateForTurn2.qualityScoreByProduct[s.product];
+    if (before !== undefined && Math.abs(unwrapUnit(before) - unwrapUnit(s.qualityScore)) > 1e-6) {
+      foundDifference = true;
+    }
+  }
+  assert.ok(foundDifference, "turn2で生産・更新があった商品では、turn1終了時点の値とturn2終了時点の値が異なるはず（品質は毎期更新されている）");
 });
 
 // --- 24: 全スコア・比率・数量が有限かつ範囲内 ---

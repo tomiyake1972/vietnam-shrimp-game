@@ -137,6 +137,37 @@ test("22b: 極端な安値を提示しても、品質・信頼で劣る会社が
   );
 });
 
+test("受入確認4: 同一価格・同一販売希望量・同一営業カバレッジ・同一能力上限の5社構成で、品質/信頼/納期のみ高い会社Aの成約量が会社Bより多い（実測値を記録）", () => {
+  const A = makeEntry({ companyId: "A", priceAdjustmentUsdPerHosoEqKg: 0, qualityReputation: score0to100(90), customerRelationship: score0to100(90), deliveryReliability: score0to100(90) });
+  const B = makeEntry({ companyId: "B", priceAdjustmentUsdPerHosoEqKg: 0, qualityReputation: score0to100(40), customerRelationship: score0to100(40), deliveryReliability: score0to100(40) });
+  const neutrals = ["N1", "N2", "N3"].map((id) => makeEntry({ companyId: id, priceAdjustmentUsdPerHosoEqKg: 0 }));
+
+  const result = allocateMarketProduct("CN", "hoso", PERIOD, [A, B, ...neutrals], BASE_PRICE, hosoEqTons(2000), SALES_PARAMETERS_V1);
+  const aAlloc = result.companies.find((c) => c.companyId === "A")!;
+  const bAlloc = result.companies.find((c) => c.companyId === "B")!;
+
+  // 実測値（2026-07-19時点、SALES_PARAMETERS_V1固定）: weight A≈0.71284 B≈0.51284、
+  // allocatedQuantity A≈440.81 B≈317.14（品質/信頼/納期の差(90 vs 40)がそのまま約39%多い成約量に反映される）。
+  assert.ok(aAlloc.competitivenessWeight > bAlloc.competitivenessWeight);
+  assert.ok(unwrapUnit(aAlloc.allocatedQuantity) > unwrapUnit(bAlloc.allocatedQuantity));
+  const ratioAOverB = unwrapUnit(aAlloc.allocatedQuantity) / unwrapUnit(bAlloc.allocatedQuantity);
+  assert.ok(ratioAOverB > 1.2 && ratioAOverB < 1.6, `A/B成約量比=${ratioAOverB}（想定レンジ外）`);
+});
+
+test("受入確認4b: 価格競争力が許容下限（最大値下げ）に到達した後は、それ以上の値下げをしても競争力ウェイトが増えない（品質・信頼の差がそのまま配分に残る）", () => {
+  const params = SALES_PARAMETERS_V1;
+  const highQuality = makeEntry({ qualityReputation: score0to100(90), customerRelationship: score0to100(90), deliveryReliability: score0to100(90) });
+
+  const moderateDiscountPrice = usdPerHosoEqKg(unwrapUnit(BASE_PRICE) * 0.7); // 30%値下げ（既にpriceScore上限近辺）
+  const minAllowedPrice = usdPerHosoEqKg(unwrapUnit(BASE_PRICE) * params.minAskPriceRatioOfBase); // 許容下限まで値下げ
+
+  const weightModerate = computeCompetitivenessWeight(highQuality, moderateDiscountPrice, BASE_PRICE, 0.536, params);
+  const weightAtFloor = computeCompetitivenessWeight(highQuality, minAllowedPrice, BASE_PRICE, 0.536, params);
+  // 30%値下げの時点で既にpriceScoreがmaximumPriceCompetitiveness(1.6)に到達しているため、
+  // 許容下限まで追加で値下げしてもウェイトは全く変化しない（品質・信頼・納期の重みだけが差を生む）。
+  assert.equal(weightModerate, weightAtFloor);
+});
+
 test("未接続(qualityReputation等未指定)の場合は中立値(50)として扱われる", () => {
   const entry = makeEntry({ qualityReputation: undefined, customerRelationship: undefined, deliveryReliability: undefined });
   const withNeutral = computeCompetitivenessWeight(entry, BASE_PRICE, BASE_PRICE, 0.5, SALES_PARAMETERS_V1);
