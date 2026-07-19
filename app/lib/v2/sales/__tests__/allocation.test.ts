@@ -166,3 +166,108 @@ test("対象市場・商品区分に一致しない販売計画は無視され�
   assert.equal(result.companies.length, 1);
   assert.equal(result.companies[0].companyId, "C");
 });
+
+// --- 価格競争力の飽和（下限・上限）と個社の最大成約シェア（Task D差分） ---
+
+test("通常範囲の値下げ（10%程度）では、他条件一定なら成約量が増える", () => {
+  // 会社を2社だけにすると、いずれの成約量も対象需要に対する自然シェアが35%を
+  // 超えやすく、maximumSupplierShare由来の上限が先に効いて価格差が見えなくなる。
+  // そのため既存の「他条件一定で提示価格を上げると成約量が減少する」テストと同様、
+  // 5社構成にして個社の自然シェアを35%未満に抑え、価格競争力の純粋な効果を見る。
+  const entries = [
+    entry("Z", { priceAdjustmentUsdPerHosoEqKg: 0, desiredQuantity: hosoEqTons(1000000), salesForceHeadcount: 8 }),
+    entry("T", { priceAdjustmentUsdPerHosoEqKg: -0.1 * unwrapUnit(BASE_PRICE), desiredQuantity: hosoEqTons(1000000), salesForceHeadcount: 8 }),
+    entry("F1", { priceAdjustmentUsdPerHosoEqKg: 0, desiredQuantity: hosoEqTons(1000000), salesForceHeadcount: 8 }),
+    entry("F2", { priceAdjustmentUsdPerHosoEqKg: 0, desiredQuantity: hosoEqTons(1000000), salesForceHeadcount: 8 }),
+    entry("F3", { priceAdjustmentUsdPerHosoEqKg: 0, desiredQuantity: hosoEqTons(1000000), salesForceHeadcount: 8 }),
+  ];
+  const result = allocateMarketProduct("CN", "hoso", P1, entries, BASE_PRICE, hosoEqTons(3000), SALES_PARAMETERS_V1);
+  const z = result.companies.find((c) => c.companyId === "Z")!;
+  const t = result.companies.find((c) => c.companyId === "T")!;
+  assert.ok(unwrapUnit(t.allocatedQuantity) > unwrapUnit(z.allocatedQuantity), "10%値引きの方が成約量が多いはず");
+});
+
+test("大幅値下げでも価格競争力（competitivenessWeight由来のpriceScore）が設定上限を超えない", () => {
+  const params = SALES_PARAMETERS_V1;
+  // minAskPriceRatioOfBase=0.5により、値引き率は50%未満でなければならない。上限(1.6)は
+  // 約20%値引き（exp(3*0.2)=1.822）で既に到達するため、20%・30%・45%を比較する。
+  const discounts = [0.2, 0.3, 0.45];
+  const entries = discounts.map((d, i) =>
+    entry(`D${i}`, {
+      priceAdjustmentUsdPerHosoEqKg: -d * unwrapUnit(BASE_PRICE),
+      desiredQuantity: hosoEqTons(1000000),
+      salesForceHeadcount: 8,
+    })
+  );
+  const result = allocateMarketProduct("CN", "hoso", P1, entries, BASE_PRICE, hosoEqTons(20000), params);
+  // 上限到達後は価格効果が増えないため、20%・30%・45%の3社は同一のcompetitivenessWeight（＝同一allocatedQuantity）になるはず。
+  const weights = discounts.map((_, i) => result.companies.find((c) => c.companyId === `D${i}`)!.competitivenessWeight);
+  assert.ok(Math.abs(weights[0] - weights[1]) < 1e-9, "20%と30%値引きのcompetitivenessWeightは一致するはず（上限到達済み）");
+  assert.ok(Math.abs(weights[1] - weights[2]) < 1e-9, "30%と45%値引きのcompetitivenessWeightは一致するはず（上限到達済み）");
+
+  const quantities = discounts.map((_, i) => unwrapUnit(result.companies.find((c) => c.companyId === `D${i}`)!.allocatedQuantity));
+  assert.ok(Math.abs(quantities[0] - quantities[1]) < 0.1, "上限到達後は成約量も増えないはず（20% vs 30%）");
+  assert.ok(Math.abs(quantities[1] - quantities[2]) < 0.1, "上限到達後は成約量も増えないはず（30% vs 45%）");
+});
+
+test("極端な安値・高い営業人員・大きな販売希望量を同時に設定しても、個社成約量が最大供給者シェアを超えない", () => {
+  const params = SALES_PARAMETERS_V1;
+  const extreme = entry("X", {
+    priceAdjustmentUsdPerHosoEqKg: -0.45 * unwrapUnit(BASE_PRICE), // 45%値引き（許容範囲内の実質下限に近い極端な安値）
+    salesForceHeadcount: 1000, // 非常に高い営業人員
+    desiredQuantity: hosoEqTons(1000000), // 非常に大きい販売希望量
+  });
+  const others = ["B", "C", "D", "E"].map((id) => entry(id, { salesForceHeadcount: 5 }));
+  const targetDemand = hosoEqTons(10000);
+  const result = allocateMarketProduct("CN", "hoso", P1, [extreme, ...others], BASE_PRICE, targetDemand, params);
+
+  const x = result.companies.find((c) => c.companyId === "X")!;
+  const maxShareCap = unwrapUnit(targetDemand) * params.maximumSupplierShare;
+  assert.ok(
+    unwrapUnit(x.allocatedQuantity) <= maxShareCap + 0.1,
+    `会社Xの成約量(${unwrapUnit(x.allocatedQuantity)})が最大供給者シェア上限(${maxShareCap})を超えている`
+  );
+
+  // 残余需要は他社・外部選択肢へ再配分される（Xの上限超過分が消えていない）。
+  const totalOthers = result.companies.filter((c) => c.companyId !== "X").reduce((s, c) => s + unwrapUnit(c.allocatedQuantity), 0);
+  const total = unwrapUnit(x.allocatedQuantity) + totalOthers + unwrapUnit(result.externalOptionQuantity);
+  assert.ok(Math.abs(total - unwrapUnit(targetDemand)) < 0.1);
+  assert.ok(totalOthers > 0, "Xがシェア上限で打ち切られた分は他社にも再配分されるはず");
+});
+
+test("承認済み取引枠（approvedAllocationCap）を指定した場合、その数量を超えない", () => {
+  const params = SALES_PARAMETERS_V1;
+  const capped = entry("A", {
+    priceAdjustmentUsdPerHosoEqKg: -0.45 * unwrapUnit(BASE_PRICE),
+    salesForceHeadcount: 1000,
+    desiredQuantity: hosoEqTons(1000000),
+    approvedAllocationCap: hosoEqTons(50),
+  });
+  const others = ["B", "C", "D", "E"].map((id) => entry(id, { salesForceHeadcount: 5 }));
+  const targetDemand = hosoEqTons(10000);
+  const result = allocateMarketProduct("CN", "hoso", P1, [capped, ...others], BASE_PRICE, targetDemand, params);
+
+  const a = result.companies.find((c) => c.companyId === "A")!;
+  assert.ok(unwrapUnit(a.allocatedQuantity) <= 50 + 1e-6, `会社Aの成約量(${unwrapUnit(a.allocatedQuantity)})がapprovedAllocationCap(50)を超えている`);
+
+  // approvedAllocationCapは maximumSupplierShare由来の上限(10000*0.35=3500)より厳しいので、
+  // それが優先して効いているはず（=50近辺で打ち切られる）。
+  assert.ok(unwrapUnit(a.allocatedQuantity) > 0, "承認枠の範囲内では成約が発生するはず");
+});
+
+test("最大供給者シェア・承認済み取引枠を適用しても、入力順（配列の並び）を変えても結果が変わらない", () => {
+  const entries = ["A", "B", "C", "D", "E"].map((id, i) =>
+    entry(id, {
+      priceAdjustmentUsdPerHosoEqKg: -0.3 * unwrapUnit(BASE_PRICE),
+      salesForceHeadcount: i * 4,
+      desiredQuantity: hosoEqTons(1000000),
+      approvedAllocationCap: i === 0 ? hosoEqTons(100) : undefined,
+    })
+  );
+  const shuffled = [entries[3], entries[0], entries[4], entries[1], entries[2]];
+
+  const resultA = allocateMarketProduct("CN", "hoso", P1, entries, BASE_PRICE, hosoEqTons(4000), SALES_PARAMETERS_V1);
+  const resultB = allocateMarketProduct("CN", "hoso", P1, shuffled, BASE_PRICE, hosoEqTons(4000), SALES_PARAMETERS_V1);
+
+  assert.deepEqual(resultA, resultB);
+});

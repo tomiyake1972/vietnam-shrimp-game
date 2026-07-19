@@ -83,6 +83,21 @@ test("契約には売上・利益等の金額フィールドが一切含まれ�
   }
 });
 
+test("安値（大幅値引き）で獲得した契約は、提示価格のまま約定残（unitPrice）に記録され、basePriceや市場価格には改定されない", () => {
+  // 20%値引きで提示（priceCompetitivenessの上限に達する水準）。
+  const discountedAskAdjustment = -0.2 * unwrapUnit(BASE_PRICE);
+  const entries = [entry("A", { priceAdjustmentUsdPerHosoEqKg: discountedAskAdjustment, desiredQuantity: hosoEqTons(1000000), salesForceHeadcount: 8 })];
+  const allocation = allocateMarketProduct("CN", "hoso", P1, entries, BASE_PRICE, hosoEqTons(1000), SALES_PARAMETERS_V1);
+  const contracts = createContractsFromAllocation([allocation], entries, SALES_PARAMETERS_V1);
+
+  assert.equal(contracts.length, 1);
+  const expectedAskPrice = unwrapUnit(BASE_PRICE) + discountedAskAdjustment;
+  assert.ok(expectedAskPrice < unwrapUnit(BASE_PRICE), "この契約はbasePriceより安い提示価格であるはず");
+  assert.equal(unwrapUnit(contracts[0].unitPrice), expectedAskPrice);
+  // basePrice自体は変更されない（安値契約が基準価格に影響を与えない）。
+  assert.equal(unwrapUnit(allocation.basePrice), unwrapUnit(BASE_PRICE));
+});
+
 test("複数market×productにまたがる配分から、それぞれ独立した契約が生成される", () => {
   const cnEntries = [entry("A", { market: "CN", product: "hoso" })];
   const usEntries = [entry("A", { market: "US", product: "pd" })];

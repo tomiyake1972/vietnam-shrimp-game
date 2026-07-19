@@ -83,16 +83,25 @@ weight = w.price        * priceContribution
        + w.deliveryReliability * (deliveryReliability / 100)
 
 priceScore        = exp(-priceSensitivity * (askPrice - basePrice) / basePrice)
-priceContribution = clamp(priceScore, 0, priceScoreClampMax) / priceScoreClampMax
+priceContribution = clamp(priceScore, minimumPriceCompetitiveness, maximumPriceCompetitiveness) / maximumPriceCompetitiveness
 ```
 
 `priceSensitivity`（既定3.0）が大きいほど、基準価格からの乖離が競争力に強く影響する。askPriceがbasePriceを下回れば`priceScore`は1を超え（値引きが有利に働く）、上回れば1未満に近づく（トレードオフ）。
+
+#### 5.1.1 価格競争力の飽和（下限・上限）【Task D差分・暫定値・要校正】
+
+安値提示による過剰受注（値下げすればするほど際限なく成約力が伸びる「抜け道」）を防ぐため、`priceScore`の計算結果に設定可能な下限・上限を設ける。
+
+- `minimumPriceCompetitiveness`（既定 0.5）
+- `maximumPriceCompetitiveness`（既定 1.6）
+
+`priceSensitivity=3.0`の場合、約10%値下げで`priceScore≈1.35`まで上がるが、約20%を超える値下げ（`exp(3*0.2)=exp(0.6)≈1.82`）で概ね上限（1.6）に到達する。これにより、合理的な範囲の値下げには受注増加効果を残しつつ、50%・90%のような大幅値下げで価格スコアが際限なく増え続けることを防ぐ。**この2値は暫定値であり、ゲームバランス調整フェーズでの再校正を前提とする。**
 
 ### 5.2 水位法（water-filling）による配分
 
 市場×商品区分ごとに、5社＋「外部選択肢」（5社以外の供給者・非購入、`externalOptionWeight`で競争力を持つ仮想参加者）を1つの集合として扱い、対象需要（`targetDemand`）という固定予算を次のアルゴリズムで配分する。
 
-1. 各参加者に上限（5社は`min(desiredQuantity, processingCapacity)`、外部選択肢は無制限）を設定する。
+1. 各参加者に上限（5社は`min(desiredQuantity, processingCapacity, targetDemand * maximumSupplierShareFor(entry), approvedAllocationCap ?? Infinity)`、外部選択肢は無制限）を設定する。
 2. まだ上限に達していない参加者だけで、残り予算をウェイト比例で仮配分する。
 3. 仮配分が上限を超える参加者は、上限ちょうどで打ち切り、予算から除外する。
 4. 誰も打ち切られなくなるまで2〜3を繰り返す。
@@ -100,14 +109,34 @@ priceContribution = clamp(priceScore, 0, priceScoreClampMax) / priceScoreClampMa
 この方式は、実装指示の制約をすべて構造的に満たす。
 
 - 全社合計成約量（＋外部選択肢）は対象需要（＝予算総額）を超えない
-- 各社成約量は上限（販売希望量・処理能力）を超えない
+- 各社成約量は上限（販売希望量・処理能力・対象需要×最大供給者シェア・承認済み取引枠）を超えない
 - 配列の合計・比較のみで構成されているため、入力順（5社の並び順）に一切依存しない
 - 上限に達した会社の未配分需要は、まだ達していない会社（＋外部選択肢）へ自動的に再配分される
 - 外部選択肢が常に1参加者として競争するため、5社が必ず全需要を獲得するわけではない
 
-### 5.3 成約単価
+#### 5.2.1 個社の最大成約シェア【Task D差分・暫定値・要校正】
+
+市場×商品区分×四半期ごとに、1社が対象需要から成約できる量を`targetDemand * maximumSupplierShare`（既定 `maximumSupplierShare = 0.35`）以下に制限する。これにより、極端な安値・大量の営業人員・大量の販売希望量を同時に満たしても、1社が対象需要を独占できないようにする。
+
+個社成約上限は次の最小値とする。
+
+```
+cap = min(
+  desiredQuantity,
+  processingCapacity,
+  targetDemand * maximumSupplierShareFor(entry, params),
+  entry.approvedAllocationCap ?? Infinity
+)
+```
+
+- `entry.approvedAllocationCap`（`CompanySalesPlanEntry`の任意フィールド）は「承認済み取引枠・供給信認枠」を表す外部入力。将来Phase（与信・取引先管理等）から接続される想定で、未指定時は`maximumSupplierShare`由来の上限を使う。
+- `maximumSupplierShareFor(entry, params)`（`allocation.ts`内の関数）は、現段階では`params.maximumSupplierShare`を無条件に返すのみ。**将来、顧客関係・供給実績・納期信頼性に応じて会社別に最大シェアを変化させる拡張ポイントとして、あえて独立した関数にしている（現段階ではその動的計算は未実装）。**
+
+### 5.3 成約単価【安値契約の保持】
 
 原則どおり、各社の提示価格（askPrice）をそのまま成約単価とする。市場全体の基準価格を再計算する処理は一切ない。askPriceは`basePrice`の`minAskPriceRatioOfBase`〜`maxAskPriceRatioOfBase`倍（既定0.5〜2.0倍）の範囲外だと`SalesValidationError`を投げる（最低価格・異常値の入力検証）。
+
+安値で獲得した契約についても同様で、`contracts.ts`の`createContractsFromAllocation`は成約時点の`askPrice`をそのまま`SalesContract.unitPrice`に記録し、以降どの関数（`backlog.ts`の`applyFulfillments`・`updateContractStatusesForQuarterEnd`含む）もこの値を後から書き換えることはない。市場価格や原料価格が後の四半期で上昇しても、既存契約の`unitPrice`は不変であり自動改定されない。安値販売による低採算・原料不足・履行不能・信用低下といった帰結は、意図的にPhase 5〜8で接続する将来課題としており、本Phaseでは実装しない（PLや信用スコアは本モジュールの状態に一切登場しない）。
 
 ## 6. Phase3価格との接続（`marketAdapter.ts`）
 
@@ -160,16 +189,19 @@ runSalesQuartersForTesting(startPeriod, quarterInputs[]) → SalesState
 | 顧客関係・品質・納期信頼性が未接続の場合 | `SALES_PARAMETERS_V1.neutralScore`（50点、Score0to100の中央値）を使う |
 | 対象需要（市場×商品区分別） | §6のとおり、Phase1出力の比率按分（Phase4固有の暫定アダプター） |
 | 競争力の合成ウェイト・価格感度・営業人員の飽和曲線係数 | すべて`SALES_PARAMETERS_V1`に集約した「Phase4新規・要校正」の暫定値。ゲームバランス調整フェーズで再検討する前提（ChatGPT指示に具体的な数値指定はないため、要求された「効果の方向性」を満たす最小限の値を置いている） |
+| `minimumPriceCompetitiveness`（既定0.5）・`maximumPriceCompetitiveness`（既定1.6） | 【Task D差分・暫定値・要校正】価格競争力（priceScore）の下限・上限。ユーザー指定の目安値をそのまま採用（priceSensitivity=3.0のとき約10%値下げで≈1.35、約20%超の値下げで概ね上限到達）。ゲームバランス調整フェーズで再検討する前提 |
+| `maximumSupplierShare`（既定0.35） | 【Task D差分・暫定値・要校正】1社が対象需要から成約できる最大比率。固定ルールではなく、将来会社別（顧客関係・供給実績・納期信頼性）に変化させられる構造（`maximumSupplierShareFor()`）にしているが、動的計算自体は未実装。ゲームバランス調整フェーズで再検討する前提 |
+| `approvedAllocationCap`（`CompanySalesPlanEntry`の任意フィールド） | 【Task D差分】承認済み取引枠・供給信認枠の外部入力。未接続時は`maximumSupplierShare`由来の上限にフォールバックする。実際に値を供給する与信・取引先管理ロジックはPhase4の対象外（将来接続用のプレースホルダー） |
 | 海外生産者の価格反応・営業人員の異動コスト | 未実装（Phase4の対象外） |
 
 ## 10. テスト
 
-`app/lib/v2/sales/__tests__/`に6ファイル、合計60件のテストを追加した（既存287件と合わせて347件）。
+`app/lib/v2/sales/__tests__/`に6ファイル、合計66件のテストを追加した（既存287件と合わせて353件）。Task D差分（安値による過剰受注の防止）で`allocation.test.ts`に6件、`contracts.test.ts`に1件を追加した。
 
 - `salesForce.test.ts` — カバレッジ・処理能力の単調増加性、逓減性、baseline、上限漸近、入力検証。
 - `marketAdapter.test.ts` — Phase3の実際の`runIndustrySimulation`出力を使い、基準価格がVNの値と一致すること、対象需要が市場別消費量の比率どおりに按分されること、副作用がないこと。
-- `allocation.test.ts` — 全社合計が対象需要を超えないこと、個社上限（希望量・処理能力）、入力順不変性、価格↔数量トレードオフ、営業人員↔成約力トレードオフ（逓減込み）、無制限headcountでも需要超過しないこと、外部選択肢の存在、上限到達時の再配分、基準価格不変性、価格検証エラー、重複計画エラー。
-- `contracts.test.ts` — 契約IDの決定論性・非重複性、標準納期・カスタムリードタイム、成約量0は契約を作らない、金額フィールドの不在。
+- `allocation.test.ts` — 全社合計が対象需要を超えないこと、個社上限（希望量・処理能力）、入力順不変性、価格↔数量トレードオフ、営業人員↔成約力トレードオフ（逓減込み）、無制限headcountでも需要超過しないこと、外部選択肢の存在、上限到達時の再配分、基準価格不変性、価格検証エラー、重複計画エラー。**【Task D追加】** 通常範囲の値下げでの成約量増加、大幅値下げ時の価格競争力上限到達（20%/30%/45%値引きで頭打ち）、極端な安値＋高営業人員＋大量希望量でも`maximumSupplierShare`を超えないこと、`approvedAllocationCap`の遵守、新しい上限を適用した状態での入力順不変性。
+- `contracts.test.ts` — 契約IDの決定論性・非重複性、標準納期・カスタムリードタイム、成約量0は契約を作らない、金額フィールドの不在。**【Task D追加】** 安値（大幅値引き）契約の`unitPrice`が提示価格のまま保持され、`basePrice`にも影響しないことの回帰テスト。
 - `backlog.test.ts` — 部分/完全履行、過剰履行拒否、完了/キャンセル済みへの履行拒否、FIFOの順序・繰り越し・対象外契約への非影響、四半期末のoverdue判定。
 - `runner.test.ts` — Phase3の実出力を使った5社×5市場×3商品×複数四半期の完走、再現性（同一入力→完全一致）、Phase3データへの非破壊、履行が自動実行されないことの確認、金額フィールドの不在。
 
@@ -187,6 +219,9 @@ runSalesQuartersForTesting(startPeriod, quarterInputs[]) → SalesState
 - 売上・原価・売掛金・PL/BS/CF（未計上）
 - 営業人件費（異動コスト・人件費計算は将来、`salesForceHeadcount`を渡すだけで接続可能）
 - AI会社の販売判断・生成AI
+- 【Task D関連】安値販売による低採算・原料不足・履行不能・信用スコア低下の帰結（Phase5〜8で接続予定。本Phaseでは`unitPrice`が改定されないことのみを保証する）
+- 【Task D関連】`maximumSupplierShare`を会社別（顧客関係・供給実績・納期信頼性）に動的計算するロジック（`maximumSupplierShareFor()`は拡張ポイントとして用意済みだが、動的計算自体は未実装）
+- 【Task D関連】`approvedAllocationCap`（承認済み取引枠）の値を実際に算出・供給する与信・取引先管理ロジック（型・フォールバック挙動のみ用意）
 
 ## 13. 今後Phase5・6と接続する際の接点
 

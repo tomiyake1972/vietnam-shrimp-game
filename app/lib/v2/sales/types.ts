@@ -60,6 +60,14 @@ export interface CompanySalesPlanEntry {
   readonly qualityReputation?: Score0to100;
   /** 納期信頼性評価（0〜100）。未接続時は中立値。Phase7で実データに置き換える想定。 */
   readonly deliveryReliability?: Score0to100;
+  /**
+   * 承認済み取引枠・供給信認枠（外部から供給される任意の個社成約上限）。
+   * 将来Phase（与信・取引先管理等）から接続される想定の外部入力で、未指定時は
+   * SalesParameters.maximumSupplierShareに基づく上限（targetDemand×shareの下限）を
+   * そのまま使う。指定された場合は、他の上限（販売希望量・処理能力・
+   * maximumSupplierShare由来の上限）と合わせて、その最小値を個社成約上限とする。
+   */
+  readonly approvedAllocationCap?: HosoEqTons;
 }
 
 // ---------------------------------------------------------------------

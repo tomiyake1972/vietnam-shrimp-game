@@ -3,13 +3,15 @@
 // 市場×商品区分ごとに、5社の販売提案を同時に評価し、成約量を配分する。
 // 使用するアルゴリズムは「水位法（water-filling）」: 各参加者（5社＋外部選択肢）に
 // 競争力ウェイトを与え、対象需要という固定の予算をウェイト比例で仮配分し、
-// 上限（販売希望量・処理能力）を超える参加者はその上限で打ち切って予算から
-// 除外し、残った予算を「まだ上限に達していない参加者」だけで再度ウェイト比例
-// 配分し直す……という手順を、誰も打ち切られなくなるまで繰り返す。
+// 上限（販売希望量・処理能力・対象需要×最大供給者シェア・承認済み取引枠）を
+// 超える参加者はその上限で打ち切って予算から除外し、残った予算を「まだ上限に
+// 達していない参加者」だけで再度ウェイト比例配分し直す……という手順を、
+// 誰も打ち切られなくなるまで繰り返す。
 //
 // この方式は次の実装指示の要件をすべて構造的に満たす:
 //   - 全社合計成約量（＋外部選択肢）は対象需要（＝配分予算の総額）を超えない
-//   - 各社成約量は上限（min(販売希望量, 処理能力)）を超えない
+//   - 各社成約量は上限（min(販売希望量, 処理能力, 対象需要×最大供給者シェア,
+//     承認済み取引枠)）を超えない（安値による過剰受注の防止）
 //   - 入力順に依存しない（配列の合計・比較はすべて順序非依存の演算のみで構成）
 //   - 上限に達した会社の未配分需要は、まだ達していない会社へ自動的に再配分される
 //   - 5社以外の外部選択肢（他産地供給者・非購入）も1参加者として競争する
@@ -53,8 +55,10 @@ export function computeCompetitivenessWeight(
 ): number {
   const w = params.competitivenessWeights;
   const rawPriceScore = priceScore(unwrapUnit(askPrice), unwrapUnit(basePrice), params);
-  const clampedPriceScore = Math.min(params.priceScoreClampMax, Math.max(0, rawPriceScore));
-  const priceContribution = clampedPriceScore / params.priceScoreClampMax;
+  // 安値による過剰受注（値下げすればするほど際限なく成約力が伸びる「抜け道」）を防ぐため、
+  // priceScoreの結果に下限・上限を設ける（【暫定値・要校正】parameters.ts参照）。
+  const clampedPriceScore = Math.min(params.maximumPriceCompetitiveness, Math.max(params.minimumPriceCompetitiveness, rawPriceScore));
+  const priceContribution = clampedPriceScore / params.maximumPriceCompetitiveness;
 
   const relationship = (entry.customerRelationship !== undefined ? unwrapUnit(entry.customerRelationship) : unwrapUnit(params.neutralScore)) / 100;
   const quality = (entry.qualityReputation !== undefined ? unwrapUnit(entry.qualityReputation) : unwrapUnit(params.neutralScore)) / 100;
@@ -68,6 +72,17 @@ export function computeCompetitivenessWeight(
     w.quality * quality +
     w.deliveryReliability * reliability
   );
+}
+
+/**
+ * 1社あたりの最大供給者シェア（対象需要に対する比率）を返す。
+ * 現段階ではSalesParameters.maximumSupplierShareを固定で返すのみだが、将来
+ * 顧客関係・供給実績・納期信頼性に応じて会社別に変化させる拡張ポイントとして
+ * 独立した関数にしている（現段階ではその動的計算は未実装）。
+ */
+function maximumSupplierShareFor(entry: CompanySalesPlanEntry, params: SalesParameters): number {
+  void entry;
+  return params.maximumSupplierShare;
 }
 
 interface WaterFillParticipant {
@@ -161,7 +176,12 @@ export function allocateMarketProduct(
     const coverage = salesCoverageScore(entry.salesForceHeadcount, params);
     const capacity = processingCapacity(entry.salesForceHeadcount, params);
     const weight = computeCompetitivenessWeight(entry, askPrice, basePrice, coverage, params);
-    const cap = Math.min(unwrapUnit(entry.desiredQuantity), unwrapUnit(capacity));
+    // 個社成約上限 = min(販売希望量, 処理能力, 対象需要×最大供給者シェア, 承認済み取引枠[未指定ならInfinity])。
+    // 極端な安値・大量の営業人員・大量の販売希望量を同時に満たしても、1社が対象需要を
+    // 独占できないようにする（安売りによる過剰受注の防止）。
+    const shareCap = unwrapUnit(targetDemand) * maximumSupplierShareFor(entry, params);
+    const approvedCap = entry.approvedAllocationCap !== undefined ? unwrapUnit(entry.approvedAllocationCap) : Number.POSITIVE_INFINITY;
+    const cap = Math.min(unwrapUnit(entry.desiredQuantity), unwrapUnit(capacity), shareCap, approvedCap);
 
     return { entry, askPrice, coverage, capacity, weight, cap };
   });

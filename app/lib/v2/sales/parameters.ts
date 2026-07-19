@@ -42,8 +42,27 @@ export interface SalesParameters {
    * 大きいほど「基準価格からの乖離」が競争力に与える影響が強くなる。
    */
   readonly priceSensitivity: number;
-  /** priceScoreを[0, priceScoreClampMax]へclampしてから[0,1]へ正規化する（他ウェイトとスケールを揃えるため）。 */
-  readonly priceScoreClampMax: number;
+  /**
+   * priceScoreの結果（下限・上限）。安値による過剰受注（値下げすればするほど際限なく
+   * 成約力が伸びる「抜け道」）を防ぐため、priceScoreをこの範囲にclampしてから
+   * maximumPriceCompetitivenessで割って[0,1]程度へ正規化する。
+   * 【暫定値・要校正】priceSensitivity=3.0のとき、約10%値下げでpriceScore≈1.35、
+   * 約20%を超える値下げで概ね上限（1.6）に到達する設計。ゲームバランス調整
+   * フェーズで再検討する前提とする。
+   */
+  readonly minimumPriceCompetitiveness: number;
+  /** priceScoreの上限。【暫定値・要校正】 */
+  readonly maximumPriceCompetitiveness: number;
+
+  /**
+   * 市場×商品区分×四半期ごとに、1社が対象需要から成約できる最大比率（0〜1）。
+   * 「安値提示＋大量の営業人員＋大量の販売希望量」を同時に満たしても、1社が
+   * 対象需要を独占できないようにするための上限。
+   * 【暫定値・要校正】現段階では固定値だが、将来的に顧客関係・供給実績・
+   * 納期信頼性に応じて会社別に変化させられる構造にする想定（現段階では未実装、
+   * allocation.tsのmaximumSupplierShareFor()が将来の拡張ポイント）。
+   */
+  readonly maximumSupplierShare: number;
 
   /**
    * 5社以外の外部選択肢（他産地供給者・非購入）の競争力ウェイト。
@@ -84,7 +103,10 @@ export const SALES_PARAMETERS_V1: SalesParameters = {
   },
 
   priceSensitivity: 3.0,
-  priceScoreClampMax: 2.0,
+  minimumPriceCompetitiveness: 0.5,
+  maximumPriceCompetitiveness: 1.6,
+
+  maximumSupplierShare: 0.35,
 
   externalOptionWeight: 0.35,
 
