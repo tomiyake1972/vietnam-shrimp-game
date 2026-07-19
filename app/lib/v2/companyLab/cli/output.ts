@@ -1,0 +1,183 @@
+// ShrimpX V2 — 会社経営統合テスト環境（Phase 6.2） CLI 出力整形
+//
+// 「すでに計算済みの CompanyLabResult をどう表示するか」だけを扱う。
+// 価格・需給・生産計算は一切行わず、industryLab/ui/formatters.tsの数値
+// フォーマッタ（画面と共通の表記）をそのまま再利用する。
+//
+// JSON・CSV出力には説明文・ログを一切混入させない（標準出力に純粋な
+// JSON/CSVのみを書き込む。人間向けの注記はsummary形式にのみ含める）。
+
+import { unwrapUnit } from "../../core/units";
+import {
+  formatHosoEqTons,
+  formatRatioAsPercent,
+  formatUsdPerHosoEqKg,
+} from "../../industryLab/ui/formatters";
+import { CompanyFixture, CompanyLabResult, CompanyQuarterRecord, CompanyQuarterSummary } from "../types";
+
+function csvEscape(value: string | number): string {
+  const s = String(value);
+  if (/[",\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function toCsv(header: readonly string[], rows: ReadonlyArray<readonly (string | number)[]>): string {
+  const lines = [header.map(csvEscape).join(",")];
+  for (const row of rows) {
+    lines.push(row.map(csvEscape).join(","));
+  }
+  return lines.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------------
+// summary（人間向け）
+// ---------------------------------------------------------------------
+
+function summaryLineForCompany(s: CompanyQuarterSummary, fixtureName: string): string {
+  return [
+    `    ${s.companyId}（${fixtureName}）`,
+    `      成約: ${formatHosoEqTons(s.newContractedQuantity)} @ 平均$${s.newContractedAveragePrice.toFixed(4)}/kg / 履行: ${formatHosoEqTons(s.fulfilledQuantity)}`,
+    `      未履行残高: ${formatHosoEqTons(s.outstandingQuantity)}（うち納期超過 ${formatHosoEqTons(s.overdueQuantity)}）`,
+    `      国内買付: ${formatHosoEqTons(s.domesticPurchaseQuantity)} @ ${formatUsdPerHosoEqKg(s.domesticPurchasePrice)} / 輸入中: ${formatHosoEqTons(s.importInTransitQuantity)} / 輸入到着: ${formatHosoEqTons(s.importArrivedQuantity)}`,
+    `      養殖中: ${formatHosoEqTons(s.aquacultureGrowingQuantity)} / 収穫: ${formatHosoEqTons(s.aquacultureHarvestedQuantity)} / 原料在庫: ${formatHosoEqTons(s.rawMaterialInventory)}`,
+    `      生産: HOSO ${formatHosoEqTons(s.hosoProduced)} / PD ${formatHosoEqTons(s.pdProduced)} / VAP ${formatHosoEqTons(s.vapProduced)} / 完成品在庫: ${formatHosoEqTons(s.finishedGoodsInventory)}`,
+    `      未達: 原料 ${formatHosoEqTons(s.rawMaterialShortfall)} / 設備 ${formatHosoEqTons(s.equipmentShortfall)} / ワーカー ${formatHosoEqTons(s.laborShortfall)}`,
+    `      稼働率: 設備 ${formatRatioAsPercent(s.equipmentUtilizationRate)} / ワーカー ${formatRatioAsPercent(s.laborUtilizationRate)} / 残業率 ${formatRatioAsPercent(s.overtimeRate)} / 臨時比率 ${formatRatioAsPercent(s.temporaryWorkerShare)}`,
+    ...(s.reasonCodes.length > 0 ? [`      理由: ${s.reasonCodes.map((r) => r.message).join(" / ")}`] : []),
+  ].join("\n");
+}
+
+export function formatCompanyLabResultAsSummary(result: CompanyLabResult, scenarioTitle: string, companyFilter: string): string {
+  const nameById = new Map(result.companies.map((c) => [c.companyId, c.displayName]));
+  const lines: string[] = [];
+  lines.push("ShrimpX V2 会社経営統合テスト環境 CLI — summary");
+  lines.push(`シナリオ: ${scenarioTitle}（${result.config.scenarioId}）`);
+  lines.push(`モード: ${result.config.mode} / シード: ${result.config.seed} / 実行ターン数: ${result.history.length} / ${result.config.turns}`);
+  lines.push("");
+  lines.push(
+    "注記: 表示中の5社（BAL/MASS/JPQ/VAP/CONSV）はPhase 6.2の統合テスト用フィクスチャであり、本番会社設定・本番AI会社ではない。"
+  );
+  lines.push("");
+
+  for (const record of result.history) {
+    lines.push(`[turn ${record.turn}（${record.period}）]`);
+    lines.push(`  ベトナム国内原料価格: ${formatUsdPerHosoEqKg(record.marketResult.vietnamDomestic.price)} / HOSO(VN): ${formatUsdPerHosoEqKg(record.marketResult.hosoPrices.VN.price)}`);
+    lines.push(
+      `  PD/VAPプレミアム: PD ${formatUsdPerHosoEqKg(record.marketResult.pdPremium.basePremium)} / VAP ${formatUsdPerHosoEqKg(record.marketResult.vapPremium.basePremium)}`
+    );
+    const summaries = companyFilter === "all" ? record.companySummaries : record.companySummaries.filter((s) => s.companyId === companyFilter);
+    for (const s of summaries) {
+      lines.push(summaryLineForCompany(s, nameById.get(s.companyId) ?? s.companyId));
+    }
+    if (record.globalReasonCodes.length > 0) {
+      lines.push(`    [全体] ${record.globalReasonCodes.map((r) => r.message).join(" / ")}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------------
+// json（機械可読）
+// ---------------------------------------------------------------------
+
+export function formatCompanyLabResultAsJson(result: CompanyLabResult, scenarioTitle: string, companyFilter: string): string {
+  const filteredHistory = result.history.map((record) => ({
+    ...record,
+    companySummaries: companyFilter === "all" ? record.companySummaries : record.companySummaries.filter((s) => s.companyId === companyFilter),
+  }));
+  return (
+    JSON.stringify(
+      {
+        config: result.config,
+        scenarioTitle,
+        companies: result.companies.map((c) => ({ companyId: c.companyId, displayName: c.displayName, archetype: c.archetype, description: c.description })),
+        history: filteredHistory,
+      },
+      null,
+      2
+    ) + "\n"
+  );
+}
+
+// ---------------------------------------------------------------------
+// csv（表計算向け。会社×四半期の1行1レコード）
+// ---------------------------------------------------------------------
+
+const COMPANY_QUARTER_CSV_HEADER: readonly string[] = [
+  "turn",
+  "periodLabel",
+  "companyId",
+  "newContractedQuantity",
+  "newContractedAveragePrice",
+  "fulfilledQuantity",
+  "outstandingQuantity",
+  "overdueQuantity",
+  "domesticPurchaseQuantity",
+  "domesticPurchasePrice",
+  "importInTransitQuantity",
+  "importArrivedQuantity",
+  "aquacultureGrowingQuantity",
+  "aquacultureHarvestedQuantity",
+  "rawMaterialInventory",
+  "hosoProduced",
+  "pdProduced",
+  "vapProduced",
+  "finishedGoodsInventory",
+  "rawMaterialShortfall",
+  "equipmentShortfall",
+  "laborShortfall",
+  "equipmentUtilizationRate",
+  "laborUtilizationRate",
+  "overtimeRate",
+  "temporaryWorkerShare",
+];
+
+function summaryToCsvRow(record: CompanyQuarterRecord, s: CompanyQuarterSummary): readonly (string | number)[] {
+  return [
+    record.turn,
+    record.period,
+    s.companyId,
+    unwrapUnit(s.newContractedQuantity),
+    s.newContractedAveragePrice,
+    unwrapUnit(s.fulfilledQuantity),
+    unwrapUnit(s.outstandingQuantity),
+    unwrapUnit(s.overdueQuantity),
+    unwrapUnit(s.domesticPurchaseQuantity),
+    s.domesticPurchasePrice,
+    unwrapUnit(s.importInTransitQuantity),
+    unwrapUnit(s.importArrivedQuantity),
+    unwrapUnit(s.aquacultureGrowingQuantity),
+    unwrapUnit(s.aquacultureHarvestedQuantity),
+    unwrapUnit(s.rawMaterialInventory),
+    unwrapUnit(s.hosoProduced),
+    unwrapUnit(s.pdProduced),
+    unwrapUnit(s.vapProduced),
+    unwrapUnit(s.finishedGoodsInventory),
+    unwrapUnit(s.rawMaterialShortfall),
+    unwrapUnit(s.equipmentShortfall),
+    unwrapUnit(s.laborShortfall),
+    unwrapUnit(s.equipmentUtilizationRate),
+    unwrapUnit(s.laborUtilizationRate),
+    unwrapUnit(s.overtimeRate),
+    unwrapUnit(s.temporaryWorkerShare),
+  ];
+}
+
+export function formatCompanyLabResultAsCsv(result: CompanyLabResult, companyFilter: string): string {
+  const rows: (string | number)[][] = [];
+  for (const record of result.history) {
+    const summaries = companyFilter === "all" ? record.companySummaries : record.companySummaries.filter((s) => s.companyId === companyFilter);
+    for (const s of summaries) {
+      rows.push([...summaryToCsvRow(record, s)]);
+    }
+  }
+  return toCsv(COMPANY_QUARTER_CSV_HEADER, rows);
+}
+
+export function findFixture(companies: readonly CompanyFixture[], companyId: string): CompanyFixture | undefined {
+  return companies.find((c) => c.companyId === companyId);
+}

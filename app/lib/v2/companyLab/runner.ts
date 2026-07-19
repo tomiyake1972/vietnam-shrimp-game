@@ -1,0 +1,543 @@
+// ShrimpX V2 — 会社経営統合テスト環境（Phase 6.2） 統合四半期ランナー
+//
+// Phase1（市場・価格形成）・Phase2（長期シナリオ・イベント）・Phase4（販売・
+// 約定残）・Phase5（国内原料・輸入・養殖・原料在庫）・Phase6（工場・ワーカー・
+// 生産・完成品在庫・契約履行）を、1つの決定論的な純粋関数として連結する。
+// 既存の各Phaseの計算ロジックは一切複製・書き換えず、既存の公開関数
+// （runTurn・advanceProductionQuarter・applyFulfillments等）をそのまま呼び出す。
+// UI・API・Redis・生成AIには一切依存しない。
+//
+// 【既存ターン・オーケストレーター（app/lib/v2/turn/runner.ts）との関係】
+// turn/runner.ts の runTurn は、すでにPhase1・Phase4・Phase5を次の順序で
+// 実行する（turn/runner.ts冒頭コメントより）。
+//   1. 各社の有効買付意向を算出 → 2. 集計 → 3. 市場入力へ上書き適用
+//   → 4. calculateMarketQuarter → 5. Phase4販売処理 → 6. 必要原料量集計
+//   → 7. Phase5国内買付配分 → 8. 国内買付ロット生成 → 9. 輸入注文・到着処理
+//   → 10. 養殖池入れ・収穫処理 → 11. 期限切れ・在庫状態遷移処理
+// 本ランナーはこれをそのまま呼び出し、その前後にPhase2（シナリオ→市場入力
+// 変換、industryLab/simulationRunner.tsと同じ手順）とPhase6（生産・契約履行）
+// を追加する。
+//
+// 【実装指示の四半期順序との差異と理由】
+// 実装指示は「1. 前期からの輸入到着・養殖収穫・期限切れ」を最初の手順として
+// 挙げているが、既存のPhase5（advanceRawMaterialsQuarter）は新規輸入発注の
+// 着地価格計算に当期のHOSO FOB価格（calculateMarketQuarterの結果）を必要と
+// するため、「到着処理」と「新規発注」が同一関数呼び出し内で不可分に結合されて
+// いる（turn/runner.ts冒頭コメント参照）。既存モジュールの公開契約を書き換え
+// ないという開発ルールに従い、本ランナーは「輸入到着・養殖収穫・期限切れの
+// 処理」を独立した最初の手順として切り出さず、既存のPhase5実行順序
+// （四半期の市場計算の直後）をそのまま踏襲する。所有権・時系列上の実体（前期に
+// 池入れ・発注されたものが当期到着する）は変わらないため、数量・価格の計算
+// 結果には影響しない（テストの数量保存・決定論性で確認する）。
+//
+// 実装指示の「3. 国内買付意向とPD/VAP供給計画を集計」は、既存モジュールに
+// 欠けていた新規の統合ステップである（production/supplySignal.tsはPhase6
+// 実装時点で用意されていたが、Phase6はturn/へ未接続だった）。本ランナーは
+// calculateMarketQuarter（turn/runner内部）を呼ぶ前に、当期の各社生産計画
+// （plannedQuantity）からPD/VAP供給シグナルを集計し、市場入力
+// （CountrySupplyInput.pdProcessingCapacity/vapProcessingCapacity）へ適用する
+// （PD/VAP供給増加が当期のプレミアムを引き下げる、という受入条件を満たすために
+// 必須の配線）。
+
+import { PeriodV2 } from "../core/period";
+import { hosoEqTons, ratio, unwrapUnit, usdPerHosoEqKg } from "../core/units";
+import { COUNTRY_IDS, CountryId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
+import {
+  advanceScenarioTurn,
+  getScenarioTurnInput,
+  initializeScenario,
+  PreviousMarketContext,
+  ScenarioDefinition,
+  ScenarioTurnFeedback,
+  ScenarioTurnInput,
+  toMarketQuarterInput,
+} from "../scenario";
+import { listScenarioAliases, resolveScenarioDefinition } from "../industryLab/cli/scenarioAliases";
+import { INDUSTRY_LAB_ASSUMPTIONS_V1 } from "../industryLab/assumptions";
+import { runTurn } from "../turn/runner";
+import { TurnOrchestratorInput } from "../turn/types";
+import { applyFulfillments, updateContractStatusesForQuarterEnd } from "../sales/backlog";
+import { CompanyId, MarketProductAllocationResult, SalesContract } from "../sales/types";
+import { AquacultureHarvestResult, DomesticPurchaseAllocationResult, RawMaterialLot } from "../rawMaterials/types";
+import {
+  advanceProductionQuarter,
+  aggregateProductionSupplySignals,
+  applySupplySignalToCountrySupply,
+  consumeFinishedGoods,
+  initializeProductionState,
+} from "../production";
+import {
+  CompanyLoadMetrics,
+  FinishedGoodsLot,
+  ProductionAllocationEntry,
+  ProductionBatch,
+  ProductionQuarterInput,
+  ProductionSupplySignalInput,
+} from "../production/types";
+import { buildCompanyFixtures } from "./fixtures";
+import { COMPANY_LAB_RAW_MATERIALS_PARAMETERS } from "./parameters";
+import {
+  globalReasonCodesFromMarketDrivers,
+  reasonCodeFromDomesticCompetition,
+  reasonCodeFromImportInTransit,
+  reasonCodesFromAquacultureHarvest,
+  reasonCodesFromOverdueContracts,
+  reasonCodesFromProductionEntries,
+  reasonCodesFromSalesAllocation,
+} from "./reasonCodes";
+import {
+  CompanyDecisionInput,
+  CompanyFixture,
+  CompanyLabConfig,
+  CompanyLabError,
+  CompanyLabResult,
+  CompanyLabState,
+  CompanyOwnState,
+  CompanyQuarterRecord,
+  CompanyQuarterSummary,
+  CompanyReasonEntry,
+  PublicMarketInfo,
+} from "./types";
+
+const EPSILON = 1e-6;
+
+/**
+ * scenarioIdから ScenarioDefinition を解決する。完全ID（例: "baseline-v0.1"）と、
+ * industryLabのCLIがすでに採用しているバージョン接尾辞省略形（例: "baseline"）の
+ * どちらも受け付ける（resolveScenarioDefinition・industryLab/cli/scenarioAliases.ts
+ * をそのまま再利用し、ID解決ロジックを重複実装しない）。
+ */
+export function findScenarioDefinitionForCompanyLab(scenarioId: string): ScenarioDefinition {
+  const definition = resolveScenarioDefinition(scenarioId);
+  if (!definition) {
+    throw new CompanyLabError(
+      `scenarioId "${scenarioId}" に一致するシナリオ定義が見つかりません。利用可能なシナリオ: ${listScenarioAliases()
+        .map((e) => `${e.alias}（正式ID: ${e.definition.scenarioId}）`)
+        .join(", ")}`
+    );
+  }
+  return definition;
+}
+
+function priorHosoFobPriceFromPrehistory(definition: ScenarioDefinition): PreviousMarketContext["priorHosoFobPrice"] {
+  const result = {} as Record<CountryId, PreviousMarketContext["priorHosoFobPrice"][CountryId]>;
+  for (const c of COUNTRY_IDS) {
+    result[c] = usdPerHosoEqKg(definition.prehistory.priorHosoFobPriceUsdPerKg[c]);
+  }
+  return result;
+}
+
+function priorHosoFobPriceFromLastQuarter(lastResult: MarketQuarterResult): PreviousMarketContext["priorHosoFobPrice"] {
+  const result = {} as Record<CountryId, PreviousMarketContext["priorHosoFobPrice"][CountryId]>;
+  for (const c of COUNTRY_IDS) {
+    result[c] = lastResult.hosoPrices[c].price;
+  }
+  return result;
+}
+
+/**
+ * 当期のPreviousMarketContextを組み立てる（industryLab/simulationRunner.tsと同じ手順）。
+ * domesticProcurementIntentは「上書き前の参考値」であり、turn/runner.ts内部で
+ * 各社の実際の国内買付計画（DomesticPurchaseIntentSource.companyPlans）により
+ * 必ず上書きされるため、ここでの値そのものが最終結果へ影響することはない。
+ */
+function buildPreviousMarketContext(
+  definition: ScenarioDefinition,
+  turn: number,
+  scenarioTurnInput: ScenarioTurnInput,
+  lastQuarterMarketResult: MarketQuarterResult | undefined
+): PreviousMarketContext {
+  if (turn === 1 || !lastQuarterMarketResult) {
+    return {
+      priorHosoFobPrice: priorHosoFobPriceFromPrehistory(definition),
+      domesticProcurementIntent: hosoEqTons(Math.max(0, definition.initialStateOverrides.initialDomesticProcurementIntentHosoEqTons)),
+    };
+  }
+  return {
+    priorHosoFobPrice: priorHosoFobPriceFromLastQuarter(lastQuarterMarketResult),
+    domesticProcurementIntent: hosoEqTons(
+      Math.max(0, unwrapUnit(scenarioTurnInput.vietnamTrailingAverageDomesticPurchase) * INDUSTRY_LAB_ASSUMPTIONS_V1.domesticProcurementIntentToTrailingAverageRatio)
+    ),
+  };
+}
+
+function buildCompanyCountryMap(fixtures: readonly CompanyFixture[]): Readonly<Record<CompanyId, CountryId>> {
+  const result: Record<CompanyId, CountryId> = {};
+  for (const f of fixtures) result[f.companyId] = f.country;
+  return result;
+}
+
+/** 会社の生産計画（plannedQuantity）と前期実績（actualQuantity）から、PD/VAP供給シグナル入力を組み立てる。 */
+function buildSupplySignalInputs(
+  decisions: readonly CompanyDecisionInput[],
+  lastQuarterActualProduction: Readonly<Record<CompanyId, Readonly<Partial<Record<Product, number>>>>>
+): readonly ProductionSupplySignalInput[] {
+  const signals: ProductionSupplySignalInput[] = [];
+  for (const d of decisions) {
+    for (const product of ["pd", "vap"] as const) {
+      const planned = d.productionPlans.filter((p) => p.product === product).reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
+      const actual = lastQuarterActualProduction[d.companyId]?.[product] ?? 0;
+      if (planned <= EPSILON && actual <= EPSILON) continue;
+      signals.push({
+        companyId: d.companyId,
+        product,
+        plannedQuantity: hosoEqTons(Math.round(planned * 100) / 100),
+        actualQuantity: hosoEqTons(Math.round(actual * 100) / 100),
+      });
+    }
+  }
+  return signals;
+}
+
+function applyProductionSupplySignalsToMarketInput(
+  marketInput: MarketQuarterInput,
+  signals: readonly ProductionSupplySignalInput[],
+  companyCountry: Readonly<Record<CompanyId, CountryId>>
+): MarketQuarterInput {
+  const pdCountrySignals = aggregateProductionSupplySignals(signals, companyCountry, "pd");
+  const vapCountrySignals = aggregateProductionSupplySignals(signals, companyCountry, "vap");
+  const afterPd = applySupplySignalToCountrySupply(marketInput.countries, pdCountrySignals, "pd", false);
+  const afterVap = applySupplySignalToCountrySupply(afterPd, vapCountrySignals, "vap", false);
+  return { ...marketInput, countries: afterVap };
+}
+
+export interface CompanyLabInitResult {
+  readonly state: CompanyLabState;
+  readonly fixtures: readonly CompanyFixture[];
+}
+
+/** 会社経営統合テスト環境を初期化する（5社フィクスチャの初期原料在庫込み）。 */
+export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitResult {
+  const definition = findScenarioDefinitionForCompanyLab(config.scenarioId);
+  if (!Number.isInteger(config.turns) || config.turns < 1 || config.turns > definition.durationTurns) {
+    throw new CompanyLabError(
+      `turns は1〜${definition.durationTurns}（シナリオ"${definition.scenarioId}"のdurationTurns）の整数である必要があります。受け取った値: ${config.turns}`
+    );
+  }
+
+  const scenarioState = initializeScenario(definition, config.mode, config.seed);
+  const startPeriod = getScenarioTurnInput(scenarioState, 1).period;
+  const fixtures = buildCompanyFixtures(startPeriod);
+
+  const state: CompanyLabState = {
+    config,
+    currentPeriod: startPeriod,
+    scenarioState,
+    contracts: [],
+    rawMaterialLots: fixtures.flatMap((f) => f.initialRawMaterialLots),
+    productionState: initializeProductionState(startPeriod),
+    lastQuarterActualProduction: Object.fromEntries(fixtures.map((f) => [f.companyId, {}])),
+    history: [],
+    isComplete: false,
+  };
+
+  return { state, fixtures };
+}
+
+/** 自社ぶんに絞り込んだCompanyOwnStateを組み立てる（自動方針・プレイヤー入力編集の双方が使う）。 */
+export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFixture): CompanyOwnState {
+  const lastRecord = state.history[state.history.length - 1];
+  const factoryIds = new Set(fixture.factories.map((f) => f.factoryId));
+  return {
+    companyId: fixture.companyId,
+    contracts: state.contracts.filter((c) => c.companyId === fixture.companyId),
+    rawMaterialLots: state.rawMaterialLots.filter((l) => l.companyId === fixture.companyId),
+    finishedGoodsLots: state.productionState.finishedGoodsLots.filter((l) => l.companyId === fixture.companyId),
+    lastQuarterFactoryLoadMetrics: lastRecord ? lastRecord.factoryLoadMetrics.filter((m) => factoryIds.has(m.factoryId)) : [],
+    lastQuarterActualProductionByProduct: state.lastQuarterActualProduction[fixture.companyId] ?? {},
+  };
+}
+
+/** 自動方針・プレイヤー入力の双方が参照してよい公開市場情報を組み立てる。 */
+export function buildPublicMarketInfo(state: CompanyLabState): PublicMarketInfo {
+  const lastRecord = state.history[state.history.length - 1];
+  return {
+    lastMarketResult: lastRecord?.marketResult,
+    vietnamDomesticPriorPrice: lastRecord ? unwrapUnit(lastRecord.marketResult.vietnamDomestic.price) : 0,
+  };
+}
+
+function buildCompanySummary(
+  fixture: CompanyFixture,
+  period: PeriodV2,
+  decisions: readonly CompanyDecisionInput[],
+  newContracts: readonly SalesContract[],
+  contractsBefore: readonly SalesContract[],
+  contractsAfter: readonly SalesContract[],
+  domesticAllocation: DomesticPurchaseAllocationResult,
+  salesAllocations: readonly MarketProductAllocationResult[],
+  newImportLots: readonly RawMaterialLot[],
+  arrivedImportLots: readonly RawMaterialLot[],
+  newGrowingLots: readonly RawMaterialLot[],
+  harvestedLots: readonly RawMaterialLot[],
+  updatedRawMaterialLots: readonly RawMaterialLot[],
+  productionEntries: readonly ProductionAllocationEntry[],
+  batches: readonly ProductionBatch[],
+  finishedGoodsLotsAfter: readonly FinishedGoodsLot[],
+  companyLoadMetrics: CompanyLoadMetrics | undefined,
+  aquacultureHarvestResults: readonly AquacultureHarvestResult[]
+): { readonly summary: CompanyQuarterSummary; readonly reasonCodes: readonly CompanyReasonEntry[] } {
+  const companyId = fixture.companyId;
+  const companyContracts = newContracts.filter((c) => c.companyId === companyId);
+  const newContractedQuantity = companyContracts.reduce((sum, c) => sum + unwrapUnit(c.originalQuantity), 0);
+  const newContractedAveragePrice =
+    newContractedQuantity > EPSILON
+      ? companyContracts.reduce((sum, c) => sum + unwrapUnit(c.unitPrice) * unwrapUnit(c.originalQuantity), 0) / newContractedQuantity
+      : 0;
+
+  const afterCompany = contractsAfter.filter((c) => c.companyId === companyId);
+  const beforeCompany = contractsBefore.filter((c) => c.companyId === companyId);
+  const outstandingQuantity = afterCompany
+    .filter((c) => c.status !== "fulfilled" && c.status !== "cancelled")
+    .reduce((sum, c) => sum + unwrapUnit(c.outstandingQuantity), 0);
+  const overdueQuantity = afterCompany.filter((c) => c.status === "overdue").reduce((sum, c) => sum + unwrapUnit(c.outstandingQuantity), 0);
+  const fulfilledQuantity = beforeCompany.reduce((sum, before) => {
+    const after = afterCompany.find((c) => c.contractId === before.contractId);
+    if (!after) return sum;
+    return sum + Math.max(0, unwrapUnit(before.outstandingQuantity) - unwrapUnit(after.outstandingQuantity));
+  }, 0);
+
+  const domesticEntry = domesticAllocation.companies.find((c) => c.companyId === companyId);
+  const desiredDomesticQuantity = unwrapUnit(decisions.find((d) => d.companyId === companyId)?.domesticPurchasePlan.desiredQuantity ?? hosoEqTons(0));
+
+  const importInTransitQuantity = newImportLots.filter((l) => l.companyId === companyId).reduce((sum, l) => sum + unwrapUnit(l.originalQuantity), 0);
+  const importArrivedQuantity = arrivedImportLots.filter((l) => l.companyId === companyId).reduce((sum, l) => sum + unwrapUnit(l.originalQuantity), 0);
+  const aquacultureGrowingQuantity = newGrowingLots.filter((l) => l.companyId === companyId).reduce((sum, l) => sum + unwrapUnit(l.originalQuantity), 0);
+  const aquacultureHarvestedQuantity = harvestedLots.filter((l) => l.companyId === companyId).reduce((sum, l) => sum + unwrapUnit(l.originalQuantity), 0);
+  const rawMaterialInventory = updatedRawMaterialLots
+    .filter((l) => l.companyId === companyId && l.status === "available")
+    .reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
+
+  const companyEntries = productionEntries.filter((e) => e.companyId === companyId);
+  const hosoProduced = batches.filter((b) => b.companyId === companyId && b.product === "hoso").reduce((sum, b) => sum + unwrapUnit(b.finishedGoodsQuantity), 0);
+  const pdProduced = batches.filter((b) => b.companyId === companyId && b.product === "pd").reduce((sum, b) => sum + unwrapUnit(b.finishedGoodsQuantity), 0);
+  const vapProduced = batches.filter((b) => b.companyId === companyId && b.product === "vap").reduce((sum, b) => sum + unwrapUnit(b.finishedGoodsQuantity), 0);
+  const finishedGoodsInventory = finishedGoodsLotsAfter
+    .filter((l) => l.companyId === companyId && l.status === "available")
+    .reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
+
+  const rawMaterialShortfall = companyEntries.filter((e) => e.shortfallReasons.includes("rawMaterialShortage")).reduce((sum, e) => sum + unwrapUnit(e.shortfallQuantity), 0);
+  const equipmentShortfall = companyEntries
+    .filter((e) => e.shortfallReasons.some((r) => r === "commonCapacityShortage" || r === "productCapacityShortage" || r === "packagingCapacityShortage"))
+    .reduce((sum, e) => sum + unwrapUnit(e.shortfallQuantity), 0);
+  const laborShortfall = companyEntries.filter((e) => e.shortfallReasons.includes("laborShortage")).reduce((sum, e) => sum + unwrapUnit(e.shortfallQuantity), 0);
+
+  const salesReasonCodes = salesAllocations.flatMap((allocation) => {
+    const entry = allocation.companies.find((c) => c.companyId === companyId);
+    return entry ? reasonCodesFromSalesAllocation(companyId, entry, unwrapUnit(allocation.basePrice)) : [];
+  });
+
+  const reasonCodes: CompanyReasonEntry[] = [
+    ...reasonCodesFromProductionEntries(companyId, companyEntries),
+    ...salesReasonCodes,
+    ...(domesticEntry && desiredDomesticQuantity > EPSILON
+      ? reasonCodeFromDomesticCompetition(companyId, domesticEntry.coverageScore, unwrapUnit(domesticEntry.allocatedQuantity) / desiredDomesticQuantity)
+      : []),
+    ...reasonCodeFromImportInTransit(companyId, importInTransitQuantity),
+    ...reasonCodesFromAquacultureHarvest(
+      companyId,
+      aquacultureHarvestResults.filter((r) => r.companyId === companyId)
+    ),
+    ...reasonCodesFromOverdueContracts(companyId, beforeCompany, afterCompany),
+  ];
+
+  const summary: CompanyQuarterSummary = {
+    companyId,
+    period,
+    newContractedQuantity: hosoEqTons(Math.round(newContractedQuantity * 100) / 100),
+    newContractedAveragePrice: Math.round(newContractedAveragePrice * 100) / 100,
+    fulfilledQuantity: hosoEqTons(Math.round(Math.max(0, fulfilledQuantity) * 100) / 100),
+    outstandingQuantity: hosoEqTons(Math.round(outstandingQuantity * 100) / 100),
+    overdueQuantity: hosoEqTons(Math.round(overdueQuantity * 100) / 100),
+    domesticPurchaseQuantity: domesticEntry ? hosoEqTons(Math.round(unwrapUnit(domesticEntry.allocatedQuantity) * 100) / 100) : hosoEqTons(0),
+    domesticPurchasePrice: domesticEntry ? unwrapUnit(domesticEntry.bidPrice) : 0,
+    importInTransitQuantity: hosoEqTons(Math.round(importInTransitQuantity * 100) / 100),
+    importArrivedQuantity: hosoEqTons(Math.round(importArrivedQuantity * 100) / 100),
+    aquacultureGrowingQuantity: hosoEqTons(Math.round(aquacultureGrowingQuantity * 100) / 100),
+    aquacultureHarvestedQuantity: hosoEqTons(Math.round(aquacultureHarvestedQuantity * 100) / 100),
+    rawMaterialInventory: hosoEqTons(Math.round(rawMaterialInventory * 100) / 100),
+    hosoProduced: hosoEqTons(Math.round(hosoProduced * 100) / 100),
+    pdProduced: hosoEqTons(Math.round(pdProduced * 100) / 100),
+    vapProduced: hosoEqTons(Math.round(vapProduced * 100) / 100),
+    finishedGoodsInventory: hosoEqTons(Math.round(finishedGoodsInventory * 100) / 100),
+    rawMaterialShortfall: hosoEqTons(Math.round(rawMaterialShortfall * 100) / 100),
+    equipmentShortfall: hosoEqTons(Math.round(equipmentShortfall * 100) / 100),
+    laborShortfall: hosoEqTons(Math.round(laborShortfall * 100) / 100),
+    equipmentUtilizationRate: companyLoadMetrics ? companyLoadMetrics.equipmentUtilizationRate : ratio(0),
+    laborUtilizationRate: companyLoadMetrics ? companyLoadMetrics.laborUtilizationRate : ratio(0),
+    overtimeRate: companyLoadMetrics ? companyLoadMetrics.overtimeRate : ratio(0),
+    temporaryWorkerShare: companyLoadMetrics ? companyLoadMetrics.temporaryWorkerShare : ratio(0),
+    reasonCodes,
+  };
+
+  return { summary, reasonCodes };
+}
+
+/**
+ * 会社経営統合テスト環境を1四半期分だけ進める（純粋関数、入力stateは変更しない）。
+ * decisionsByCompanyId は、その四半期のfixturesに含まれる全社ぶんの意思決定
+ * （自動方針・プレイヤー入力編集のいずれか、または混在）を渡す。
+ */
+export function advanceCompanyLabQuarter(
+  state: CompanyLabState,
+  fixtures: readonly CompanyFixture[],
+  decisionsByCompanyId: Readonly<Record<CompanyId, CompanyDecisionInput>>
+): CompanyLabState {
+  if (state.isComplete) {
+    throw new CompanyLabError(`会社経営統合テスト環境はすでに完了しています（${state.history.length}四半期分の実績があります）。`);
+  }
+
+  const definition = findScenarioDefinitionForCompanyLab(state.config.scenarioId);
+  const turn = state.scenarioState.currentTurn;
+  const decisions = fixtures.map((f) => {
+    const d = decisionsByCompanyId[f.companyId];
+    if (!d) throw new CompanyLabError(`会社 "${f.companyId}" の当期意思決定が指定されていません。`);
+    return d;
+  });
+
+  // --- Phase2: シナリオ → 市場入力（industryLab/simulationRunner.tsと同じ手順） ---
+  const scenarioTurnInput = getScenarioTurnInput(state.scenarioState, turn);
+  const lastRecord = state.history[state.history.length - 1];
+  const previousMarketContext = buildPreviousMarketContext(definition, turn, scenarioTurnInput, lastRecord?.marketResult);
+  const baseMarketInput = toMarketQuarterInput(scenarioTurnInput, previousMarketContext);
+
+  // --- 実装指示 §3: PD/VAP供給計画（会社の生産計画）の集計 → 市場入力への適用 ---
+  const companyCountry = buildCompanyCountryMap(fixtures);
+  const supplySignals = buildSupplySignalInputs(decisions, state.lastQuarterActualProduction);
+  const marketInput = applyProductionSupplySignalsToMarketInput(baseMarketInput, supplySignals, companyCountry);
+
+  // --- Phase1・Phase4・Phase5（既存turn/runner.tsをそのまま呼び出す） ---
+  const turnInput: TurnOrchestratorInput = {
+    currentPeriod: state.currentPeriod,
+    marketInput,
+    scenarioVariables: { diseasePressure: scenarioTurnInput.countries.VN.diseasePressure },
+    salesPlans: decisions.flatMap((d) => d.salesPlans),
+    domesticPurchaseIntentSource: { type: "companyPlans", plans: decisions.map((d) => d.domesticPurchasePlan) },
+    importOrders: decisions.flatMap((d) => d.importOrders),
+    aquacultureStockingPlans: decisions.flatMap((d) => d.aquacultureStockingPlans),
+    existingContracts: state.contracts,
+    existingLots: state.rawMaterialLots,
+    seed: state.config.seed,
+    parameters: { rawMaterials: COMPANY_LAB_RAW_MATERIALS_PARAMETERS },
+  };
+  const turnResult = runTurn(turnInput);
+
+  // --- Phase6: 工場・ワーカー・生産・完成品在庫・契約履行 ---
+  const productionInput: ProductionQuarterInput = {
+    factories: fixtures.flatMap((f) => f.factories),
+    workerAssignments: decisions.flatMap((d) => d.workerAssignments),
+    plans: decisions.flatMap((d) => d.productionPlans),
+    companyCountry,
+  };
+  const { state: productionStateAfter, updatedRawMaterialLots } = advanceProductionQuarter(
+    state.productionState,
+    productionInput,
+    turnResult.contracts,
+    turnResult.lots,
+    supplySignals
+  );
+  const productionRecord = productionStateAfter.history[productionStateAfter.history.length - 1];
+
+  // --- 契約履行の実適用（Phase4既存関数applyFulfillmentsをそのまま呼び出す） ---
+  const contractsAfterFulfillment = applyFulfillments(turnResult.contracts, productionRecord.fulfillmentPlan.explicitInstructions);
+  const nextPeriodValue = turnResult.pendingState.nextPeriod;
+  const contractsAfterOverdue = updateContractStatusesForQuarterEnd(contractsAfterFulfillment, nextPeriodValue);
+
+  // --- 完成品ロットの実消費（Phase6既存関数consumeFinishedGoodsをそのまま呼び出す） ---
+  const finishedGoodsLotsAfterConsumption = consumeFinishedGoods(productionStateAfter.finishedGoodsLots, productionRecord.fulfillmentPlan.finishedGoodsConsumption);
+
+  // --- 次期のPD/VAP供給シグナル用に、当期の実績生産量を会社×商品で集計する ---
+  const lastQuarterActualProduction: Record<CompanyId, Record<Product, number>> = {};
+  for (const f of fixtures) {
+    const byProduct: Record<Product, number> = { hoso: 0, pd: 0, vap: 0 };
+    for (const b of productionRecord.batches.filter((b) => b.companyId === f.companyId)) {
+      byProduct[b.product] += unwrapUnit(b.finishedGoodsQuantity);
+    }
+    lastQuarterActualProduction[f.companyId] = byProduct;
+  }
+
+  // --- 会社別サマリー・理由コードの構築 ---
+  const globalReasonCodes = globalReasonCodesFromMarketDrivers(turnResult.marketResult.globalDrivers);
+  const companySummaries = fixtures.map((f) => {
+    const companyLoadMetrics = productionRecord.companyLoadMetrics.find((m) => m.companyId === f.companyId);
+    const { summary } = buildCompanySummary(
+      f,
+      state.currentPeriod,
+      decisions,
+      turnResult.contracts,
+      state.contracts,
+      contractsAfterOverdue,
+      turnResult.domesticAllocation,
+      turnResult.salesRecord.allocations,
+      turnResult.newImportLots,
+      turnResult.arrivedImportLots,
+      turnResult.newGrowingLots,
+      turnResult.harvestedLots,
+      updatedRawMaterialLots,
+      productionRecord.allocation.entries,
+      productionRecord.batches,
+      finishedGoodsLotsAfterConsumption,
+      companyLoadMetrics,
+      turnResult.aquacultureHarvestResults
+    );
+    return summary;
+  });
+
+  const record: CompanyQuarterRecord = {
+    turn,
+    period: state.currentPeriod,
+    decisions,
+    marketInput,
+    marketResult: turnResult.marketResult,
+    salesRecord: turnResult.salesRecord,
+    rawMaterialRequirements: turnResult.rawMaterialRequirements,
+    domesticAllocation: turnResult.domesticAllocation,
+    productionAllocation: productionRecord.allocation,
+    batches: productionRecord.batches,
+    newFinishedGoodsLots: productionRecord.newFinishedGoodsLots,
+    fulfillmentPlan: productionRecord.fulfillmentPlan,
+    companyLoadMetrics: productionRecord.companyLoadMetrics,
+    factoryLoadMetrics: productionRecord.factoryLoadMetrics,
+    companySummaries,
+    globalReasonCodes,
+    turnDebug: turnResult.debug,
+  };
+
+  const canAdvanceWithinScenario = turn < definition.durationTurns;
+  const feedback: ScenarioTurnFeedback = { realizedMarketResult: turnResult.marketResult };
+  const nextScenarioState = canAdvanceWithinScenario ? advanceScenarioTurn(state.scenarioState, feedback) : state.scenarioState;
+
+  const history = [...state.history, record];
+  const isComplete = turn >= state.config.turns || !canAdvanceWithinScenario;
+
+  return {
+    config: state.config,
+    currentPeriod: nextPeriodValue,
+    scenarioState: nextScenarioState,
+    contracts: contractsAfterOverdue,
+    rawMaterialLots: updatedRawMaterialLots,
+    productionState: { ...productionStateAfter, finishedGoodsLots: finishedGoodsLotsAfterConsumption },
+    lastQuarterActualProduction,
+    history,
+    isComplete,
+  };
+}
+
+/** 全社を暫定自動方針で動かして最後まで一括実行する。 */
+export function runCompanyLabWithAutoPolicyForAllCompanies(
+  config: CompanyLabConfig,
+  decisionProvider: (fixture: CompanyFixture, ownState: CompanyOwnState, publicInfo: PublicMarketInfo, period: PeriodV2, turn: number) => CompanyDecisionInput
+): CompanyLabResult {
+  const { state: initialState, fixtures } = initializeCompanyLab(config);
+  let state = initialState;
+  while (!state.isComplete) {
+    const publicInfo = buildPublicMarketInfo(state);
+    const decisionsByCompanyId: Record<CompanyId, CompanyDecisionInput> = {};
+    for (const f of fixtures) {
+      const ownState = buildCompanyOwnState(state, f);
+      decisionsByCompanyId[f.companyId] = decisionProvider(f, ownState, publicInfo, state.currentPeriod, state.scenarioState.currentTurn);
+    }
+    state = advanceCompanyLabQuarter(state, fixtures, decisionsByCompanyId);
+  }
+  return { config: state.config, companies: fixtures, history: state.history };
+}
