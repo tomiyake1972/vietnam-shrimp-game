@@ -14,3 +14,4 @@ export * from "./core/gameSession";
 export * from "./redis/redisKeys";
 export * from "./redis/redisKeyGuard";
 export * from "./market";
+export * from "./scenario";
