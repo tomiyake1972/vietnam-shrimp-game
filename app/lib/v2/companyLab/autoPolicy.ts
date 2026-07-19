@@ -269,11 +269,21 @@ function buildCostExpectation(
   };
 }
 
+/**
+ * 【Phase 7A】ownState.qualityScoreByProduct/customerTrustByMarket/
+ * deliveryReliabilityByMarketは、いずれも「前四半期末までの状態」
+ * （companyLab/runner.tsのbuildCompanyOwnStateが、当期の意思決定を作る前の
+ * stateから組み立てる）。今期の品質結果を今期の成約へ遡及適用しない、という
+ * 実装指示をこの経路で自然に満たす。値が未接続（初期化直後等）の場合は
+ * undefinedとなり、sales/allocation.tsのcomputeCompetitivenessWeightが
+ * 中立値（neutralScore）にフォールバックする。
+ */
 function buildSalesPlans(
   fixture: CompanyFixture,
   profile: ArchetypeProfile,
   totalDesiredByProduct: Readonly<Record<Product, number>>,
-  publicInfo: PublicMarketInfo
+  publicInfo: PublicMarketInfo,
+  ownState: CompanyOwnState
 ): readonly CompanySalesPlanEntry[] {
   const plans: CompanySalesPlanEntry[] = [];
   const markets = profile.preferredMarkets;
@@ -300,6 +310,9 @@ function buildSalesPlans(
         priceAdjustmentUsdPerHosoEqKg: ratioAdjustmentToUsd(profile.priceAdjustment[product], referencePriceByProduct[product]),
         salesForceHeadcount: headcountPerMarket,
         costExpectation,
+        qualityReputation: ownState.qualityScoreByProduct[product],
+        customerRelationship: ownState.customerTrustByMarket[market],
+        deliveryReliability: ownState.deliveryReliabilityByMarket[market],
       });
     });
   }
@@ -486,7 +499,7 @@ export function generateAutoPolicyDecision(
   };
 
   // --- 4. 販売計画（契約時予想原価つき）と生産計画（販売＋約定残−完成品在庫連動） ---
-  const salesPlans = buildSalesPlans(fixture, profile, salesDesiredByProduct, publicInfo);
+  const salesPlans = buildSalesPlans(fixture, profile, salesDesiredByProduct, publicInfo, ownState);
   const productionPlans = buildProductionPlans(fixture, profile, salesDesiredByProduct, ownState);
 
   // --- 5. 必要原料量（saleableRecoveryRatio=1.00基準。正常な加工はHOSO換算量を減らさない） ---

@@ -22,6 +22,7 @@ import { RawMaterialLot } from "../rawMaterials/types";
 import { AquacultureStockingPlanEntry, ImportOrderInput } from "../rawMaterials/types";
 import { CompanySalesPlanEntry } from "../sales/types";
 import { MarketQuarterInput } from "../market/types";
+import { QualityReliabilityState } from "../quality/types";
 import {
   DomesticPurchaseIntentSource,
   TurnOrchestratorParameters,
@@ -44,8 +45,30 @@ import {
  *   2: Phase 6.3。SalesContractへオプショナルなcostSnapshot（契約時予想原価
  *      スナップショット）を追加。バージョン1のデータは追加フィールドが無いだけで
  *      そのまま読める（マイグレーション不要の追加的変更）。
+ *   3: Phase 7A。品質・顧客信頼・納期信頼性・増産履歴（qualityReliability、
+ *      quality/types.tsのQualityReliabilityStateをそのまま再利用）を追加。
+ *      バージョン1・2のデータにはqualityReliabilityキー自体が存在しないため、
+ *      decode時にqualityByCompanyProduct/trustByCompanyMarket/rampHistoryが
+ *      いずれも空配列の安全な初期値を補う（schema.ts参照、マイグレーション
+ *      不要の追加的変更）。
+ *
+ *      【重要・アーキテクチャ上の既知の限界】本フィールドはPersistedGameStateV2
+ *      （app/lib/v2/turn・turnStateが扱う、無印/v2ゲームの永続化状態）の一部
+ *      として定義される。一方、Phase 7Aの品質・信頼・納期信頼性ロジック自体は
+ *      app/lib/v2/companyLab/（会社ラボ統合テスト環境）のターン処理
+ *      （advanceCompanyLabQuarter）でのみ計算されており、companyLab自体は
+ *      現時点でいかなる永続化層にも接続されていない（LabBanner等のUI上の
+ *      既存コメントの通り、ブラウザ内の決定論的計算のみ）。したがって本schema
+ *      v3は「無印/v2ゲームの永続化契約として品質状態を保存できる形を用意する」
+ *      という指示（仕様書§永続化）を満たすために追加したものであり、
+ *      無印/v2ゲーム自身のturn/runTurnはPhase 7Aの品質ロジックを一切呼ばず、
+ *      qualityReliabilityへ実際に値を書き込むことはない（常に安全な初期値の
+ *      ままとなる）。companyLabの計算結果をこのフィールドへ実際に書き込む
+ *      配線は本Phaseの対象外（Redis/API実配線は仕様書で明示的に対象外と
+ *      されている）。詳細はdocs/v2/QUALITY_RELIABILITY_ARCHITECTURE_v0.1.md
+ *      §永続化を参照。
  */
-export const CURRENT_PERSISTED_GAME_STATE_VERSION = 2;
+export const CURRENT_PERSISTED_GAME_STATE_VERSION = 3;
 
 // ---------------------------------------------------------------------
 // 2. 永続化状態
@@ -88,6 +111,12 @@ export interface PersistedGameStateV2 {
   readonly seed: string;
   readonly contracts: readonly SalesContract[];
   readonly rawMaterialLots: readonly RawMaterialLot[];
+  /**
+   * Phase 7A（schemaVersion 3）。品質・顧客信頼・納期信頼性・増産履歴。
+   * 常に存在する（v1/v2データをdecodeする際は安全な初期値＝空配列一式を補う。
+   * 上記バージョン履歴のコメント参照）。
+   */
+  readonly qualityReliability: QualityReliabilityState;
   readonly execution: PersistedGameStateExecution;
   readonly metadata: PersistedGameStateMetadata;
 }

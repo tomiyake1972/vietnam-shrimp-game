@@ -4,7 +4,7 @@ import { runIndustrySimulation } from "../../industryLab/simulationRunner";
 import { runTurn } from "../../turn/runner";
 import { TurnOrchestratorInput } from "../../turn/types";
 import { PeriodV2 } from "../../core/period";
-import { hosoEqTons, ratio, unwrapUnit, usdPerHosoEqKg } from "../../core/units";
+import { hosoEqTons, ratio, score0to100, unwrapUnit, usdPerHosoEqKg } from "../../core/units";
 import { DEMAND_MARKET_IDS, Product } from "../../market/types";
 import { CompanySalesPlanEntry, SalesContract } from "../../sales/types";
 import { DomesticPurchasePlanEntry, ImportOrderInput, AquacultureStockingPlanEntry, RawMaterialLot } from "../../rawMaterials/types";
@@ -22,6 +22,7 @@ import {
   PersistedStateValidationError,
   UnsupportedPersistedStateVersionError,
 } from "../errors";
+import { QualityReliabilityState } from "../../quality/types";
 
 const COMPANIES = ["C1", "C2", "C3", "C4", "C5"];
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
@@ -587,6 +588,148 @@ test("34: hydration後にrunTurnを実行できる", () => {
   const result = runTurn(turnInput);
   assert.equal(result.period, quarters[0].marketInput.period);
   assert.ok(result.contracts.length > 0);
+});
+
+// ===========================================================================
+// schemaVersion 3（Phase 7A: qualityReliability）
+// ===========================================================================
+
+function sampleQualityReliability(): QualityReliabilityState {
+  return {
+    qualityByCompanyProduct: [
+      { companyId: "C1", product: "hoso", qualityScore: score0to100(82.4) },
+      { companyId: "C1", product: "pd", qualityScore: score0to100(75) },
+      { companyId: "C2", product: "vap", qualityScore: score0to100(50) },
+    ],
+    trustByCompanyMarket: [
+      { companyId: "C1", market: "CN", customerTrustScore: score0to100(63.5), deliveryReliabilityScore: score0to100(72.1) },
+      { companyId: "C2", market: "US", customerTrustScore: score0to100(50), deliveryReliabilityScore: score0to100(50) },
+    ],
+    rampHistory: [
+      { companyId: "C1", factoryId: "C1-F1", product: "hoso", lastQuarterProductionQuantity: hosoEqTons(1234.5) },
+    ],
+  };
+}
+
+test("43: qualityReliability付きの状態がencode/decodeで往復一致する（schemaVersion 3）", () => {
+  const state = createInitialPersistedGameState({
+    gameId: "game-43",
+    scenarioId: "baseline-v0.1",
+    initialPeriod: "2015Q1" as PeriodV2,
+    seed: "seed-43",
+    initialContracts: [],
+    initialRawMaterialLots: [],
+    initialQualityReliability: sampleQualityReliability(),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  assert.equal(state.schemaVersion, 3);
+  const serialized = encodePersistedGameState(state);
+  const decoded = decodePersistedGameState(serialized);
+  assert.equal(encodePersistedGameState(decoded), serialized);
+  assert.deepEqual(decoded.qualityReliability, state.qualityReliability);
+});
+
+test("44: qualityReliabilityキーが存在しないv1/v2データは空の初期値で補われる（後方互換）", () => {
+  const state = initialStateWithData();
+  const dto = JSON.parse(encodePersistedGameState(state)) as Record<string, unknown>;
+  delete dto.qualityReliability;
+  dto.schemaVersion = 2;
+  const decoded = decodePersistedGameState(JSON.stringify(dto));
+  assert.equal(decoded.schemaVersion, 2);
+  assert.deepEqual(decoded.qualityReliability, { qualityByCompanyProduct: [], trustByCompanyMarket: [], rampHistory: [] });
+
+  const dto1 = JSON.parse(encodePersistedGameState(state)) as Record<string, unknown>;
+  delete dto1.qualityReliability;
+  dto1.schemaVersion = 1;
+  const decoded1 = decodePersistedGameState(JSON.stringify(dto1));
+  assert.deepEqual(decoded1.qualityReliability, { qualityByCompanyProduct: [], trustByCompanyMarket: [], rampHistory: [] });
+});
+
+test("45: qualityScoreが範囲外(>100)を拒否する", () => {
+  const state = createInitialPersistedGameState({
+    gameId: "game-45",
+    scenarioId: "baseline-v0.1",
+    initialPeriod: "2015Q1" as PeriodV2,
+    seed: "seed-45",
+    initialContracts: [],
+    initialRawMaterialLots: [],
+    initialQualityReliability: sampleQualityReliability(),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  const dto = JSON.parse(encodePersistedGameState(state));
+  dto.qualityReliability.qualityByCompanyProduct[0].qualityScore = 150;
+  assert.throws(() => validatePersistedGameState(dto), PersistedStateValidationError);
+});
+
+test("46: customerTrustScoreの負値・NaN・Infinityを拒否する", () => {
+  const state = createInitialPersistedGameState({
+    gameId: "game-46",
+    scenarioId: "baseline-v0.1",
+    initialPeriod: "2015Q1" as PeriodV2,
+    seed: "seed-46",
+    initialContracts: [],
+    initialRawMaterialLots: [],
+    initialQualityReliability: sampleQualityReliability(),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  for (const bad of [-1, NaN, Infinity]) {
+    const dto = JSON.parse(encodePersistedGameState(state));
+    dto.qualityReliability.trustByCompanyMarket[0].customerTrustScore = bad;
+    assert.throws(() => validatePersistedGameState(dto), PersistedStateValidationError);
+  }
+});
+
+test("47: rampHistoryの負のlastQuarterProductionQuantityを拒否する", () => {
+  const state = createInitialPersistedGameState({
+    gameId: "game-47",
+    scenarioId: "baseline-v0.1",
+    initialPeriod: "2015Q1" as PeriodV2,
+    seed: "seed-47",
+    initialContracts: [],
+    initialRawMaterialLots: [],
+    initialQualityReliability: sampleQualityReliability(),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  const dto = JSON.parse(encodePersistedGameState(state));
+  dto.qualityReliability.rampHistory[0].lastQuarterProductionQuantity = -5;
+  assert.throws(() => validatePersistedGameState(dto), PersistedStateValidationError);
+});
+
+test("48: 不正なproduct/market列挙値を拒否する", () => {
+  const state = createInitialPersistedGameState({
+    gameId: "game-48",
+    scenarioId: "baseline-v0.1",
+    initialPeriod: "2015Q1" as PeriodV2,
+    seed: "seed-48",
+    initialContracts: [],
+    initialRawMaterialLots: [],
+    initialQualityReliability: sampleQualityReliability(),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  const dtoA = JSON.parse(encodePersistedGameState(state));
+  dtoA.qualityReliability.qualityByCompanyProduct[0].product = "notAProduct";
+  assert.throws(() => validatePersistedGameState(dtoA), PersistedStateValidationError);
+
+  const dtoB = JSON.parse(encodePersistedGameState(state));
+  dtoB.qualityReliability.trustByCompanyMarket[0].market = "notAMarket";
+  assert.throws(() => validatePersistedGameState(dtoB), PersistedStateValidationError);
+});
+
+test("49: applyTurnResultToPersistedStateがqualityReliabilityをそのまま維持する", () => {
+  const quarters = industryQuarters(1, "persistence-q3");
+  const state0 = createInitialPersistedGameState({
+    gameId: "game-49",
+    scenarioId: "baseline-v0.1",
+    initialPeriod: quarters[0].marketInput.period,
+    seed: "seed-49",
+    initialContracts: [],
+    initialRawMaterialLots: [],
+    initialQualityReliability: sampleQualityReliability(),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  const result = runTurn(hydrateTurnInputFromPersistedState(state0, externalInput(quarters[0], 0)));
+  const state1 = applyTurnResultToPersistedState(state0, result, "exec-49", "2026-01-02T00:00:00.000Z");
+  assert.deepEqual(state1.qualityReliability, state0.qualityReliability);
 });
 
 // ===========================================================================

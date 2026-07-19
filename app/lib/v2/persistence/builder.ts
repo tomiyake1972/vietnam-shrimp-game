@@ -11,9 +11,23 @@
 import { PeriodV2 } from "../core/period";
 import { SalesContract } from "../sales/types";
 import { RawMaterialLot } from "../rawMaterials/types";
+import { QualityReliabilityState } from "../quality/types";
 import { TurnOrchestratorInput, TurnOrchestratorResult } from "../turn/types";
 import { CURRENT_PERSISTED_GAME_STATE_VERSION, ExternalTurnInput, PersistedGameStateV2 } from "./types";
 import { PersistedStateTransitionError, PersistedStateValidationError } from "./errors";
+
+/**
+ * qualityReliabilityが指定されなかった場合に使う安全な初期値（Phase 7A、
+ * schemaVersion 3）。schema.tsのEMPTY_QUALITY_RELIABILITY_STATEと同じ意味の値。
+ * 無印/v2ゲーム（app/lib/v2/turn・turnState）自体はPhase 7Aの品質ロジックを
+ * 呼ばないため、本builderからは常にこの空の初期値がそのまま使われる
+ * （types.tsのバージョン履歴コメント参照）。
+ */
+const EMPTY_QUALITY_RELIABILITY_STATE: QualityReliabilityState = {
+  qualityByCompanyProduct: [],
+  trustByCompanyMarket: [],
+  rampHistory: [],
+};
 
 function assertNonEmptyString(value: string, label: string): void {
   if (value.length === 0) {
@@ -39,6 +53,11 @@ export interface CreateInitialPersistedGameStateInput {
   readonly seed: string;
   readonly initialContracts: readonly SalesContract[];
   readonly initialRawMaterialLots: readonly RawMaterialLot[];
+  /**
+   * Phase 7A（schemaVersion 3）。省略時はEMPTY_QUALITY_RELIABILITY_STATE
+   * （品質・信頼・納期信頼性・増産履歴とも空）を使う。
+   */
+  readonly initialQualityReliability?: QualityReliabilityState;
   readonly createdAt: string;
 }
 
@@ -61,6 +80,7 @@ export function createInitialPersistedGameState(input: CreateInitialPersistedGam
     seed: input.seed,
     contracts: [...input.initialContracts],
     rawMaterialLots: [...input.initialRawMaterialLots],
+    qualityReliability: input.initialQualityReliability ?? EMPTY_QUALITY_RELIABILITY_STATE,
     execution: {
       completedTurnCount: 0,
     },

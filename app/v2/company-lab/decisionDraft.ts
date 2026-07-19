@@ -12,6 +12,7 @@ import { PeriodV2 } from "../../lib/v2/core/period";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../lib/v2/market/types";
 import { CompanyDecisionInput, CompanyFixture } from "../../lib/v2/companyLab";
 import { PlanCostExpectation } from "../../lib/v2/sales/types";
+import { Score0to100 } from "../../lib/v2/core/units";
 import { WorkerSkillEntry } from "../../lib/v2/production/types";
 
 export const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
@@ -40,6 +41,14 @@ export interface SalesPlanDraftRow {
    * プレイヤーが編集した販売計画から生成される契約にもスナップショットが残るようにする。
    */
   readonly costExpectation?: PlanCostExpectation;
+  /**
+   * 【Phase 7A】品質・顧客信頼・納期信頼性（前四半期末までの自社state由来）。
+   * 自動方針が算出した値を編集不可のまま引き継ぐ（本ドラフト層は計算ロジックを
+   * 持たないため、costExpectationと同じ扱いとする。本格的なUI表示はPhase 7B）。
+   */
+  readonly qualityReputation?: Score0to100;
+  readonly customerRelationship?: Score0to100;
+  readonly deliveryReliability?: Score0to100;
 }
 
 export interface DomesticPurchaseDraft {
@@ -103,6 +112,7 @@ export function buildInitialDraft(fixture: CompanyFixture, autoDecision: Company
       // 数量0の網羅行にも引き継ぐ（プレイヤーが新市場へ数量を入れた場合にも
       // 契約時予想原価スナップショットが残るようにする）。
       const sameProduct = autoDecision.salesPlans.find((p) => p.product === product);
+      const sameMarket = autoDecision.salesPlans.find((p) => p.market === market);
       return {
         market,
         product,
@@ -110,6 +120,9 @@ export function buildInitialDraft(fixture: CompanyFixture, autoDecision: Company
         priceAdjustmentUsdPerHosoEqKg: found ? found.priceAdjustmentUsdPerHosoEqKg : 0,
         salesForceHeadcount: found ? found.salesForceHeadcount : 0,
         costExpectation: found?.costExpectation ?? sameProduct?.costExpectation,
+        qualityReputation: found?.qualityReputation ?? sameProduct?.qualityReputation,
+        customerRelationship: found?.customerRelationship ?? sameMarket?.customerRelationship,
+        deliveryReliability: found?.deliveryReliability ?? sameMarket?.deliveryReliability,
       };
     })
   );
@@ -199,6 +212,9 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
       priceAdjustmentUsdPerHosoEqKg: Number.isFinite(p.priceAdjustmentUsdPerHosoEqKg) ? p.priceAdjustmentUsdPerHosoEqKg : 0,
       salesForceHeadcount: Math.round(safeNonNegative(p.salesForceHeadcount)),
       ...(p.costExpectation !== undefined ? { costExpectation: p.costExpectation } : {}),
+      ...(p.qualityReputation !== undefined ? { qualityReputation: p.qualityReputation } : {}),
+      ...(p.customerRelationship !== undefined ? { customerRelationship: p.customerRelationship } : {}),
+      ...(p.deliveryReliability !== undefined ? { deliveryReliability: p.deliveryReliability } : {}),
     }));
 
   const domesticPurchasePlan = {

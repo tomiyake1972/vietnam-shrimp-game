@@ -7,10 +7,11 @@
 // parsePeriod()を経由する。
 
 import { PeriodV2, parsePeriod } from "../core/period";
-import { HosoEqTons, Ratio, hosoEqTons, ratio, unwrapUnit, usdPerHosoEqKg } from "../core/units";
+import { HosoEqTons, Ratio, hosoEqTons, ratio, score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, Product } from "../market/types";
 import { ContractStatus, SalesContract } from "../sales/types";
 import { RawMaterialLot, RawMaterialLotStatus, RawMaterialSource } from "../rawMaterials/types";
+import { CompanyFactoryProductRampState, CompanyMarketTrustState, CompanyProductQualityState, QualityReliabilityState } from "../quality/types";
 import {
   CURRENT_PERSISTED_GAME_STATE_VERSION,
   PersistedGameStateExecution,
@@ -233,6 +234,74 @@ function validateLot(raw: unknown, path: string): RawMaterialLot {
 }
 
 // ---------------------------------------------------------------------
+// Quality / trust / reliability（Phase 7A、schemaVersion 3で追加）
+// ---------------------------------------------------------------------
+
+/**
+ * schemaVersion 1/2のデータ（qualityReliabilityキー自体が存在しない）を読む
+ * 際に補う安全な初期値。空配列一式＝「品質・信頼・納期信頼性・増産履歴に
+ * ついて何も蓄積されていない」状態であり、不正な値ではない
+ * （types.tsのバージョン履歴コメント参照）。
+ */
+const EMPTY_QUALITY_RELIABILITY_STATE: QualityReliabilityState = {
+  qualityByCompanyProduct: [],
+  trustByCompanyMarket: [],
+  rampHistory: [],
+};
+
+function validateCompanyProductQualityState(raw: unknown, path: string): CompanyProductQualityState {
+  const obj = requireObject(raw, path);
+  const companyId = requireNonEmptyString(obj.companyId, `${path}.companyId`);
+  const product: Product = requireEnum(obj.product, PRODUCTS, `${path}.product`);
+  const qualityScore = wrapUnitConstructor(score0to100, obj.qualityScore, `${path}.qualityScore`);
+  return { companyId, product, qualityScore };
+}
+
+function validateCompanyMarketTrustState(raw: unknown, path: string): CompanyMarketTrustState {
+  const obj = requireObject(raw, path);
+  const companyId = requireNonEmptyString(obj.companyId, `${path}.companyId`);
+  const market: DemandMarketId = requireEnum(obj.market, DEMAND_MARKET_IDS, `${path}.market`);
+  const customerTrustScore = wrapUnitConstructor(score0to100, obj.customerTrustScore, `${path}.customerTrustScore`);
+  const deliveryReliabilityScore = wrapUnitConstructor(score0to100, obj.deliveryReliabilityScore, `${path}.deliveryReliabilityScore`);
+  return { companyId, market, customerTrustScore, deliveryReliabilityScore };
+}
+
+function validateCompanyFactoryProductRampState(raw: unknown, path: string): CompanyFactoryProductRampState {
+  const obj = requireObject(raw, path);
+  const companyId = requireNonEmptyString(obj.companyId, `${path}.companyId`);
+  const factoryId = requireNonEmptyString(obj.factoryId, `${path}.factoryId`);
+  const product: Product = requireEnum(obj.product, PRODUCTS, `${path}.product`);
+  const lastQuarterProductionQuantity = wrapUnitConstructor(hosoEqTons, obj.lastQuarterProductionQuantity, `${path}.lastQuarterProductionQuantity`);
+  if (unwrapUnit(lastQuarterProductionQuantity) < 0) {
+    fail(`${path}.lastQuarterProductionQuantity`, "0以上である必要があります");
+  }
+  return { companyId, factoryId, product, lastQuarterProductionQuantity };
+}
+
+/**
+ * qualityReliabilityを検証する。obj.qualityReliability自体が存在しない場合
+ * （schemaVersion 1/2データ）はEMPTY_QUALITY_RELIABILITY_STATEを返す
+ * （安全な初期値を補う。types.tsのバージョン履歴コメント参照）。存在する場合は
+ * 内容を完全に検証し、不正なスコア・比率・数量（NaN・Infinity・範囲外）は
+ * すべて拒否する。
+ */
+function validateQualityReliability(raw: unknown, path: string): QualityReliabilityState {
+  if (raw === undefined) return EMPTY_QUALITY_RELIABILITY_STATE;
+  const obj = requireObject(raw, path);
+
+  const qualityRaw = requireArray(obj.qualityByCompanyProduct, `${path}.qualityByCompanyProduct`);
+  const qualityByCompanyProduct = qualityRaw.map((q, i) => validateCompanyProductQualityState(q, `${path}.qualityByCompanyProduct[${i}]`));
+
+  const trustRaw = requireArray(obj.trustByCompanyMarket, `${path}.trustByCompanyMarket`);
+  const trustByCompanyMarket = trustRaw.map((t, i) => validateCompanyMarketTrustState(t, `${path}.trustByCompanyMarket[${i}]`));
+
+  const rampRaw = requireArray(obj.rampHistory, `${path}.rampHistory`);
+  const rampHistory = rampRaw.map((r, i) => validateCompanyFactoryProductRampState(r, `${path}.rampHistory[${i}]`));
+
+  return { qualityByCompanyProduct, trustByCompanyMarket, rampHistory };
+}
+
+// ---------------------------------------------------------------------
 // Execution / Metadata
 // ---------------------------------------------------------------------
 
@@ -309,8 +378,13 @@ export function validatePersistedGameState(raw: unknown): PersistedGameStateV2 {
   const lotsRaw = requireArray(obj.rawMaterialLots, "$.rawMaterialLots");
   const rawMaterialLots = lotsRaw.map((l, i) => validateLot(l, `$.rawMaterialLots[${i}]`));
 
+  // Phase 7A（schemaVersion 3）。v1/v2データ（キー自体が存在しない）は
+  // 安全な初期値で補う（宣言されたschemaVersionの値に関わらず、キーの有無で
+  // 判定する。§バージョン履歴コメント参照）。
+  const qualityReliability = validateQualityReliability(obj.qualityReliability, "$.qualityReliability");
+
   const execution = validateExecution(obj.execution, currentPeriod, "$.execution");
   const metadata = validateMetadata(obj.metadata, "$.metadata");
 
-  return { schemaVersion, gameId, scenarioId, currentPeriod, seed, contracts, rawMaterialLots, execution, metadata };
+  return { schemaVersion, gameId, scenarioId, currentPeriod, seed, contracts, rawMaterialLots, qualityReliability, execution, metadata };
 }

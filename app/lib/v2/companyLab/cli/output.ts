@@ -11,6 +11,7 @@ import { unwrapUnit } from "../../core/units";
 import {
   formatHosoEqTons,
   formatRatioAsPercent,
+  formatScore,
   formatUsdPerHosoEqKg,
 } from "../../industryLab/ui/formatters";
 import { CompanyFixture, CompanyLabResult, CompanyQuarterRecord, CompanyQuarterSummary } from "../types";
@@ -45,8 +46,30 @@ function summaryLineForCompany(s: CompanyQuarterSummary, fixtureName: string): s
     `      生産: HOSO ${formatHosoEqTons(s.hosoProduced)} / PD ${formatHosoEqTons(s.pdProduced)} / VAP ${formatHosoEqTons(s.vapProduced)} / 完成品在庫: ${formatHosoEqTons(s.finishedGoodsInventory)}`,
     `      未達: 原料 ${formatHosoEqTons(s.rawMaterialShortfall)} / 設備 ${formatHosoEqTons(s.equipmentShortfall)} / ワーカー ${formatHosoEqTons(s.laborShortfall)}`,
     `      稼働率: 設備 ${formatRatioAsPercent(s.equipmentUtilizationRate)} / ワーカー ${formatRatioAsPercent(s.laborUtilizationRate)} / 残業率 ${formatRatioAsPercent(s.overtimeRate)} / 臨時比率 ${formatRatioAsPercent(s.temporaryWorkerShare)}`,
+    `      品質(Phase7A): ${formatQualityByProductMap(s.qualityScoreByProduct)} / 操業リスク: ${formatRiskByProductMap(s.operationalRiskByProduct)}`,
+    `      格落ち: ${formatHosoEqTons(s.downgradeQuantity)} / 再加工: ${formatHosoEqTons(s.reworkQuantity)} / 廃棄: ${formatHosoEqTons(s.discardQuantity)} / 重大事故: ${s.majorIncidentCount}件${
+      s.onTimeDeliveryRate !== undefined ? ` / 納期遵守率: ${s.onTimeDeliveryRate.toFixed(1)}%` : ""
+    }`,
+    `      顧客信頼: ${formatQualityByProductMap(s.customerTrustByMarket)} / 納期信頼性: ${formatQualityByProductMap(s.deliveryReliabilityByMarket)}`,
+    ...(s.rampWarnings.length > 0
+      ? [`      増産警告: ${s.rampWarnings.map((w) => `${w.factoryId}/${w.product} stress=${w.productionRampStress.toFixed(2)}`).join(" / ")}`]
+      : []),
     ...(s.reasonCodes.length > 0 ? [`      理由: ${s.reasonCodes.map((r) => r.message).join(" / ")}`] : []),
   ].join("\n");
+}
+
+/** {product/market -> Score0to100}形式のRecordを"key val / key val"形式へ整形する（品質・顧客信頼・納期信頼性で共用）。 */
+function formatQualityByProductMap(m: Readonly<Partial<Record<string, number>>>): string {
+  const entries = Object.entries(m).filter((e): e is [string, number] => e[1] !== undefined);
+  if (entries.length === 0) return "—";
+  return entries.map(([k, v]) => `${k} ${formatScore(v)}`).join(" / ");
+}
+
+/** {product -> operationalRisk(0-1)}形式のRecordを"key val%"形式へ整形する。 */
+function formatRiskByProductMap(m: Readonly<Partial<Record<string, number>>>): string {
+  const entries = Object.entries(m).filter((e): e is [string, number] => e[1] !== undefined);
+  if (entries.length === 0) return "—";
+  return entries.map(([k, v]) => `${k} ${formatRatioAsPercent(v)}`).join(" / ");
 }
 
 export function formatCompanyLabResultAsSummary(result: CompanyLabResult, scenarioTitle: string, companyFilter: string): string {
@@ -134,7 +157,24 @@ const COMPANY_QUARTER_CSV_HEADER: readonly string[] = [
   "laborUtilizationRate",
   "overtimeRate",
   "temporaryWorkerShare",
+  // Phase 7A（品質・顧客信頼・納期信頼性）。会社×商品/会社×市場のスコアは
+  // 列数が可変になるためCSVには集約値のみを出す（会社全体の平均・合計）。
+  // 商品別・市場別の内訳はjson出力を参照。
+  "qualityScoreAverage",
+  "operationalRiskAverage",
+  "downgradeQuantity",
+  "reworkQuantity",
+  "discardQuantity",
+  "majorIncidentCount",
+  "onTimeDeliveryRate",
+  "customerTrustScoreAverage",
+  "deliveryReliabilityScoreAverage",
 ];
+
+function average(values: readonly number[]): string {
+  if (values.length === 0) return "";
+  return String(values.reduce((a, b) => a + b, 0) / values.length);
+}
 
 function summaryToCsvRow(record: CompanyQuarterRecord, s: CompanyQuarterSummary): readonly (string | number)[] {
   return [
@@ -164,6 +204,15 @@ function summaryToCsvRow(record: CompanyQuarterRecord, s: CompanyQuarterSummary)
     unwrapUnit(s.laborUtilizationRate),
     unwrapUnit(s.overtimeRate),
     unwrapUnit(s.temporaryWorkerShare),
+    average(Object.values(s.qualityScoreByProduct).filter((v): v is NonNullable<typeof v> => v !== undefined).map((v) => unwrapUnit(v))),
+    average(Object.values(s.operationalRiskByProduct).filter((v): v is number => v !== undefined)),
+    unwrapUnit(s.downgradeQuantity),
+    unwrapUnit(s.reworkQuantity),
+    unwrapUnit(s.discardQuantity),
+    s.majorIncidentCount,
+    s.onTimeDeliveryRate !== undefined ? s.onTimeDeliveryRate : "",
+    average(Object.values(s.customerTrustByMarket).filter((v): v is NonNullable<typeof v> => v !== undefined).map((v) => unwrapUnit(v))),
+    average(Object.values(s.deliveryReliabilityByMarket).filter((v): v is NonNullable<typeof v> => v !== undefined).map((v) => unwrapUnit(v))),
   ];
 }
 
