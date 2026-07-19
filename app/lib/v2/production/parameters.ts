@@ -20,20 +20,32 @@ export interface ProductionParameters {
 
   readonly yield: {
     /**
-     * 商品別の物理歩留まり（原料の物理重量 → 完成品の物理重量、0〜1）。
+     * 商品別の物理歩留まり（HOSO原料の物理重量 → 完成品の物理重量、0〜1）。
      * 【参考値・非換算用】殻・頭の除去等による通常の物理的重量減少を表す。
      * HOSO換算トンは「HOSO換算」という単位変換の時点で既にこの物理的な
      * 重量減少を織り込んでいるため、本比率をHOSO換算数量（原料・完成品在庫・
      * 能力・供給シグナル・契約数量のいずれも）へ直接掛けてはならない
      * （二重減額になる。§「HOSO換算数量と物理歩留まりの分離」参照）。
      * yieldConversion.tsのcalculatePhysicalOutputTons（参考情報・非永続）でのみ使う。
+     *
+     * 【Phase 6.3修正・暫定換算基準】
+     *   HOSO原料100トン → 冷凍HOSO 約100物理トン（= 1.00）
+     *   HOSO原料100トン → HLSO    約 60物理トン（= 0.60。HLSOは現時点で商品enumに
+     *                      存在しないため値は持たず、参考基準としてのみ文書化する）
+     *   HOSO原料100トン → PD      約 54物理トン（= 0.54）
+     * VAPは衣・ソース・加熱等で仕様差が大きく一律の物理歩留まりを定義できないため
+     * 値を設定しない（undefined）。VAPの主数量は投入エビ原料のHOSO換算量で管理する。
+     * 物理重量換算は表示・仕様変換の境界で一度だけ使用し、契約・在庫のHOSO換算量へ
+     * 再適用しない。
      */
-    readonly physicalYieldRatio: Readonly<Record<Product, number>>;
+    readonly physicalYieldRatio: Readonly<Partial<Record<Product, number>>>;
     /**
      * 商品別の販売可能回収率（原料HosoEqTons → 完成品HosoEqTons、0〜1）。
-     * 不適合・破損・廃棄等、HOSO換算上でも実際に失われる真の歩留まりであり、
-     * 通常の殻・頭の除去による物理的重量減少（physicalYieldRatio）とは異なる、
-     * より1に近い値になるはずの暫定値（要校正）。原料消費量→完成品HOSO換算量の
+     * 不適合・破損・廃棄等、HOSO換算上でも実際に失われる真の損失のみを表す。
+     * 【Phase 6.3修正】正常な頭・殻の除去はHOSO換算量を減らさないため、
+     * 通常操業時はHOSO・PD・VAPとも原則1.00を基準とする。品質不良・加工ミス・
+     * 廃棄等の真の損失はPhase 7以降でこの比率を通じて変動させられる構造として
+     * 残す（構造は維持し、基準値のみ1.00へ是正）。原料消費量→完成品HOSO換算量の
      * 変換は、このモジュール内でこの比率を通じてのみ行う（二重適用を避けるため、
      * 他の比率を併用しない）。
      */
@@ -82,23 +94,23 @@ export interface ProductionParameters {
 }
 
 export const PRODUCTION_PARAMETERS_V1: ProductionParameters = {
-  parametersVersion: "production-v0.1",
+  parametersVersion: "production-v0.2", // Phase 6.3: 歩留まり定義是正（physicalYieldRatio基準変更・saleableRecoveryRatio=1.00基準）
 
   yield: {
-    // 従来のbaseYieldRatio（Phase6初版）の値をそのまま「物理歩留まり参考値」として
-    // 再利用する（要校正）。HOSO換算数量の計算には使わない。
+    // 【Phase 6.3修正】暫定換算基準（実装指示 §2）。HOSO換算数量の計算には使わない。
+    // HLSO（≈0.60）は商品enum未追加のため値を持たない。VAPは一律の物理歩留まりを
+    // 設定しない（HOSO換算量のみで管理する）。
     physicalYieldRatio: {
-      hoso: 0.92,
-      pd: 0.8,
-      vap: 0.7,
+      hoso: 1.0,
+      pd: 0.54,
     },
-    // 【要校正】暫定値。不適合・破損・廃棄によるHOSO換算上の真の損失は、通常の
-    // 殻・頭の除去（HOSO換算の定義に既に織り込み済み）よりずっと小さいはずという
-    // 前提の暫定出発点。
+    // 【Phase 6.3修正】正常な頭・殻の除去ではHOSO換算量を減らさないため、
+    // 通常操業時の基準は全品1.00。品質不良・加工ミス・廃棄等の真の損失は
+    // Phase 7からこの比率を通じて変動させる。
     saleableRecoveryRatio: {
-      hoso: 0.98,
-      pd: 0.97,
-      vap: 0.95,
+      hoso: 1.0,
+      pd: 1.0,
+      vap: 1.0,
     },
   },
 

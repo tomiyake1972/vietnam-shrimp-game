@@ -51,6 +51,39 @@ export class CompanyLabError extends Error {
 
 export type CompanyArchetype = "balanced" | "massMarket" | "japanQuality" | "vapSpecialist" | "conservative";
 
+/**
+ * 【Phase 6.3（実装指示 §9）】1社・1商品（PD/VAP）の受注判断プレミアム構成
+ * （すべてUSD/HOSO換算kg、HOSO基準価格に対するプレミアムとしての水準）。
+ * Phase 8の正式原価計算が未実装のため、会社・商品別の暫定予想加工費として
+ * フィクスチャから与える（将来、実原価計算へ交換可能な構造）。
+ *
+ *   targetPremium = expectedVariableProcessingCost + allocatedFixedCost
+ *                 + sellingAndLogisticsCost + targetMargin
+ *   minimumAcceptablePremium = avoidableVariableProcessingCost
+ *                 + incrementalSellingAndLogisticsCost + minimumContributionMargin
+ */
+export interface CompanyPremiumEconomics {
+  readonly expectedVariableProcessingCostUsdPerHosoEqKg: number;
+  readonly allocatedFixedCostUsdPerHosoEqKg: number;
+  readonly sellingAndLogisticsCostUsdPerHosoEqKg: number;
+  readonly targetMarginUsdPerHosoEqKg: number;
+  readonly avoidableVariableProcessingCostUsdPerHosoEqKg: number;
+  readonly incrementalSellingAndLogisticsCostUsdPerHosoEqKg: number;
+  readonly minimumContributionMarginUsdPerHosoEqKg: number;
+}
+
+/**
+ * 【Phase 6.3】会社別の商品経済性（テスト用フィクスチャの一部）。
+ * expectedProcessingCostUsdPerHosoEqKgは契約時予想原価スナップショット・診断用の
+ * 絶対額（変動費＋固定費配賦＋販売物流費の合計目安）。premiumEconomicsは
+ * PD/VAPの受注判断プレミアム構成（商品仕様別に交換可能。VAPの最低受注水準は
+ * 原則PDより高い）。
+ */
+export interface CompanyProductEconomics {
+  readonly expectedProcessingCostUsdPerHosoEqKg: Readonly<Record<Product, number>>;
+  readonly premiumEconomics: Readonly<Record<"pd" | "vap", CompanyPremiumEconomics>>;
+}
+
 /** 1社ぶんのテスト用フィクスチャ（工場・ワーカー基準・養殖能力・初期原料在庫等）。 */
 export interface CompanyFixture {
   readonly companyId: CompanyId;
@@ -66,6 +99,8 @@ export interface CompanyFixture {
   readonly salesForceHeadcountTotal: number;
   readonly procurementHeadcountTotal: number;
   readonly initialRawMaterialLots: readonly RawMaterialLot[];
+  /** 【Phase 6.3】会社別の商品経済性（受注判断・契約時予想原価スナップショット用）。 */
+  readonly productEconomics: CompanyProductEconomics;
 }
 
 // ---------------------------------------------------------------------

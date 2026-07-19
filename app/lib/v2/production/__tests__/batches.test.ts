@@ -97,7 +97,7 @@ test("HOSO換算と歩留まりを二重適用しない（理論値と一致す�
   assert.ok(Math.abs(unwrapUnit(b.rawMaterialConsumedTotal) - theoreticalRaw) < 0.5);
 });
 
-test("原料100トン(HOSO換算)からPD/VAPを生産しても、物理歩留まり(0.80/0.70)がHOSO換算完成品量へ" +
+test("原料100トン(HOSO換算)からPD/VAPを生産しても、物理歩留まり(PD 0.54等)がHOSO換算完成品量へ" +
   "直接適用されない（saleableRecoveryRatioのみが適用される）", () => {
   const pdPlan = makePlan({ product: "pd", factoryId: "F1", desiredQuantity: hosoEqTons(1000), priority: 1 });
   const vapPlan = makePlan({ product: "vap", factoryId: "F2", desiredQuantity: hosoEqTons(1000), priority: 1 });
@@ -114,21 +114,22 @@ test("原料100トン(HOSO換算)からPD/VAPを生産しても、物理歩留�
   const { batches: vapBatches } = buildProductionBatches([vapPlan], vapAllocation.entries, lotsVap, P1);
 
   // 原料100トン(HOSO換算)がすべて消費された場合、PD完成品(HOSO換算)は
-  // saleableRecoveryRatio.pd(0.97)倍の約97トンになるはずで、物理歩留まり
-  // physicalYieldRatio.pd(0.80)を直接掛けた80トンにはならない。
+  // saleableRecoveryRatio.pd(基準1.00)倍の約100トンになるはずで、物理歩留まり
+  // physicalYieldRatio.pd(0.54)を直接掛けた54トンにはならない。
   const pdFinished = unwrapUnit(pdBatches[0].finishedGoodsQuantity);
   const pdRecovery = PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio.pd;
-  const pdPhysical = PRODUCTION_PARAMETERS_V1.yield.physicalYieldRatio.pd;
+  const pdPhysical = PRODUCTION_PARAMETERS_V1.yield.physicalYieldRatio.pd!;
   assert.ok(pdFinished > 90, `PD完成品HOSO換算量が物理歩留まりで二重に減らされている: ${pdFinished}`);
   assert.ok(Math.abs(pdFinished - 100 * pdRecovery) < 1, `期待値: 100*${pdRecovery}=${100 * pdRecovery}, 実際: ${pdFinished}`);
   assert.notEqual(Math.round(pdFinished), Math.round(100 * pdPhysical));
 
+  // VAPは物理歩留まりを定義しない（HOSO換算量のみで管理）。完成品HOSO換算量は
+  // saleableRecoveryRatio.vap(基準1.00)倍の約100トン。
   const vapFinished = unwrapUnit(vapBatches[0].finishedGoodsQuantity);
   const vapRecovery = PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio.vap;
-  const vapPhysical = PRODUCTION_PARAMETERS_V1.yield.physicalYieldRatio.vap;
+  assert.equal(PRODUCTION_PARAMETERS_V1.yield.physicalYieldRatio.vap, undefined);
   assert.ok(vapFinished > 90, `VAP完成品HOSO換算量が物理歩留まりで二重に減らされている: ${vapFinished}`);
   assert.ok(Math.abs(vapFinished - 100 * vapRecovery) < 1, `期待値: 100*${vapRecovery}=${100 * vapRecovery}, 実際: ${vapFinished}`);
-  assert.notEqual(Math.round(vapFinished), Math.round(100 * vapPhysical));
 });
 
 test("原料ロットを二重消費しない（複数計画が同一会社の原料を取り合っても合計消費量が在庫を超えない）", () => {

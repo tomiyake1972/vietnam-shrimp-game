@@ -67,7 +67,7 @@ export function baseVietnamDomesticInput(overrides?: Partial<VietnamDomesticInpu
     domesticRawSupply: hosoEqTons(30000),
     domesticProcurementIntent: hosoEqTons(30000),
     trailingAverageDomesticPurchase: hosoEqTons(28000),
-    hosoYieldRatio: ratio(0.6),
+    hosoEqRecoveryRatio: ratio(1.0),
     processingExportCostUsdPerKg: usdPerHosoEqKg(0.8),
     requiredMarginUsdPerKg: usdPerHosoEqKg(0.3),
     ...overrides,

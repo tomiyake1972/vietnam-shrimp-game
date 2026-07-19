@@ -57,9 +57,14 @@ export function toMarketQuarterInput(
       domesticRawSupply: scenarioTurnInput.vietnamDomesticRawSupply,
       domesticProcurementIntent: previousMarketContext.domesticProcurementIntent,
       trailingAverageDomesticPurchase: scenarioTurnInput.vietnamTrailingAverageDomesticPurchase,
-      hosoYieldRatio: ratio(scenarioTurnInput.vietnamProcessingEconomics.hosoYieldRatio),
+      hosoEqRecoveryRatio: ratio(scenarioTurnInput.vietnamProcessingEconomics.hosoEqRecoveryRatio),
       processingExportCostUsdPerKg: usdPerHosoEqKg(scenarioTurnInput.vietnamProcessingEconomics.processingExportCostUsdPerKg),
       requiredMarginUsdPerKg: usdPerHosoEqKg(scenarioTurnInput.vietnamProcessingEconomics.requiredMarginUsdPerKg),
+      // シナリオが農家経済（留保価格の構成要素）を指定した場合のみ上書きする
+      // （未指定時は市場モジュール既定値。Phase 6.3、実装指示 §4）。
+      ...(scenarioTurnInput.vietnamFarmerEconomics !== undefined
+        ? { farmerEconomics: scenarioTurnInput.vietnamFarmerEconomics }
+        : {}),
     },
     pdVapDemand: scenarioTurnInput.pdVapDemand,
   };

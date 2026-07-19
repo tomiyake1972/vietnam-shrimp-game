@@ -230,6 +230,43 @@ test("8: 配列をトップレベル状態として拒否する", () => {
   assert.throws(() => decodePersistedGameState("[]"), PersistedStateValidationError);
 });
 
+test("8b: costSnapshot付き契約がラウンドトリップで保持される（schemaVersion 2、Phase 6.3）", () => {
+  const state = createInitialPersistedGameState({
+    gameId: "game-cs",
+    scenarioId: "baseline-v0.1",
+    initialPeriod: "2015Q1" as PeriodV2,
+    seed: "cs-seed",
+    initialContracts: [
+      makeContract({
+        contractId: "CT-CS",
+        costSnapshot: {
+          expectedRawMaterialPriceUsdPerHosoEqKg: 2.5,
+          expectedProcessingCostUsdPerHosoEqKg: 0.75,
+          minimumAcceptablePriceUsdPerHosoEqKg: 3.4,
+          expectedContributionMarginUsdPerHosoEqKg: 1.06,
+        },
+      }),
+    ],
+    initialRawMaterialLots: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  const decoded = decodePersistedGameState(encodePersistedGameState(state));
+  assert.deepEqual(decoded.contracts[0].costSnapshot, {
+    expectedRawMaterialPriceUsdPerHosoEqKg: 2.5,
+    expectedProcessingCostUsdPerHosoEqKg: 0.75,
+    minimumAcceptablePriceUsdPerHosoEqKg: 3.4,
+    expectedContributionMarginUsdPerHosoEqKg: 1.06,
+  });
+});
+
+test("8c: schemaVersion 1（costSnapshotなし）の旧データもそのまま読める（後方互換）", () => {
+  const dto = JSON.parse(encodePersistedGameState(initialStateWithData())) as Record<string, unknown>;
+  dto.schemaVersion = 1;
+  const decoded = decodePersistedGameState(JSON.stringify(dto));
+  assert.equal(decoded.schemaVersion, 1);
+  assert.equal(decoded.contracts[0].costSnapshot, undefined);
+});
+
 test("9: schemaVersion欠落を拒否する", () => {
   const state = initialStateWithData();
   const dto = JSON.parse(encodePersistedGameState(state));

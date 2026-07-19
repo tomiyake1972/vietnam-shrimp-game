@@ -69,13 +69,15 @@ import {
 import {
   CompanyLoadMetrics,
   FinishedGoodsLot,
+  FinishedGoodsUsageRecord,
   ProductionAllocationEntry,
   ProductionBatch,
   ProductionQuarterInput,
   ProductionSupplySignalInput,
 } from "../production/types";
 import { buildCompanyFixtures } from "./fixtures";
-import { COMPANY_LAB_RAW_MATERIALS_PARAMETERS } from "./parameters";
+import { calculateExternalProcessorIntent } from "./externalDemand";
+import { EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1, REFERENCE_WORLD_CONSUMPTION_TONS } from "./parameters";
 import {
   globalReasonCodesFromMarketDrivers,
   reasonCodeFromDomesticCompetition,
@@ -261,9 +263,17 @@ function buildCompanySummary(
   fixture: CompanyFixture,
   period: PeriodV2,
   decisions: readonly CompanyDecisionInput[],
+  // 【Phase 6.3修正】当期の新規契約のみ（turnResult.salesRecord.newContracts）を
+  // 受け取る。累積契約一覧（turnResult.contracts）を渡すと、新規成約量・成約単価が
+  // 「これまでの全契約の累積」になってしまう（Phase 6.2診断のバグA）。
   newContracts: readonly SalesContract[],
   contractsBefore: readonly SalesContract[],
   contractsAfter: readonly SalesContract[],
+  // 【Phase 6.3修正】当期の実際の完成品充当実績（fulfillmentPlan.usage）。
+  // 履行量は契約残高の前後差分ではなくこの実績から直接集計する（Phase 6.2診断の
+  // バグB: 差分方式は「当期に新規成約し、当期中に即時履行された契約」を
+  // contractsBeforeに存在しないため構造的に取りこぼしていた）。
+  fulfillmentUsage: readonly FinishedGoodsUsageRecord[],
   domesticAllocation: DomesticPurchaseAllocationResult,
   salesAllocations: readonly MarketProductAllocationResult[],
   newImportLots: readonly RawMaterialLot[],
@@ -291,11 +301,12 @@ function buildCompanySummary(
     .filter((c) => c.status !== "fulfilled" && c.status !== "cancelled")
     .reduce((sum, c) => sum + unwrapUnit(c.outstandingQuantity), 0);
   const overdueQuantity = afterCompany.filter((c) => c.status === "overdue").reduce((sum, c) => sum + unwrapUnit(c.outstandingQuantity), 0);
-  const fulfilledQuantity = beforeCompany.reduce((sum, before) => {
-    const after = afterCompany.find((c) => c.contractId === before.contractId);
-    if (!after) return sum;
-    return sum + Math.max(0, unwrapUnit(before.outstandingQuantity) - unwrapUnit(after.outstandingQuantity));
-  }, 0);
+  // 当期の実際の完成品充当実績を会社IDで絞り込んで直接合計する（契約別・商品別の
+  // 内訳はfulfillmentPlan.usage自体が契約ID・商品を保持しており、会社合計・全社合計と
+  // 整合する）。当期成約・当期即時履行の契約も必ず含まれる。
+  const fulfilledQuantity = fulfillmentUsage
+    .filter((u) => u.companyId === companyId)
+    .reduce((sum, u) => sum + unwrapUnit(u.quantity), 0);
 
   const domesticEntry = domesticAllocation.companies.find((c) => c.companyId === companyId);
   const desiredDomesticQuantity = unwrapUnit(decisions.find((d) => d.companyId === companyId)?.domesticPurchasePlan.desiredQuantity ?? hosoEqTons(0));
@@ -407,18 +418,37 @@ export function advanceCompanyLabQuarter(
   const marketInput = applyProductionSupplySignalsToMarketInput(baseMarketInput, supplySignals, companyCountry);
 
   // --- Phase1・Phase4・Phase5（既存turn/runner.tsをそのまま呼び出す） ---
+  // 【Phase 6.3（実装指示 §5）】外部加工業者需要。5社の買付意向だけで
+  // ベトナム国全体の加工需要を置き換えない。世界需要指数（需要市場の前期消費×
+  // 景気指数の合計 / 基準値）と前期国内価格に決定論的に反応する。
+  const worldDemandIndex =
+    Object.values(marketInput.demandMarkets).reduce(
+      (sum, m) => sum + unwrapUnit(m.priorPeriodConsumption) * m.economicIndex,
+      0
+    ) / REFERENCE_WORLD_CONSUMPTION_TONS;
+  const externalIntent = calculateExternalProcessorIntent(
+    {
+      priorVietnamDomesticPrice: lastRecord ? unwrapUnit(lastRecord.marketResult.vietnamDomestic.price) : undefined,
+      worldDemandIndex,
+    },
+    EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1
+  );
+
   const turnInput: TurnOrchestratorInput = {
     currentPeriod: state.currentPeriod,
     marketInput,
     scenarioVariables: { diseasePressure: scenarioTurnInput.countries.VN.diseasePressure },
     salesPlans: decisions.flatMap((d) => d.salesPlans),
-    domesticPurchaseIntentSource: { type: "companyPlans", plans: decisions.map((d) => d.domesticPurchasePlan) },
+    domesticPurchaseIntentSource: {
+      type: "companyPlans",
+      plans: decisions.map((d) => d.domesticPurchasePlan),
+      externalIntent,
+    },
     importOrders: decisions.flatMap((d) => d.importOrders),
     aquacultureStockingPlans: decisions.flatMap((d) => d.aquacultureStockingPlans),
     existingContracts: state.contracts,
     existingLots: state.rawMaterialLots,
     seed: state.config.seed,
-    parameters: { rawMaterials: COMPANY_LAB_RAW_MATERIALS_PARAMETERS },
   };
   const turnResult = runTurn(turnInput);
 
@@ -464,9 +494,10 @@ export function advanceCompanyLabQuarter(
       f,
       state.currentPeriod,
       decisions,
-      turnResult.contracts,
+      turnResult.salesRecord.newContracts,
       state.contracts,
       contractsAfterOverdue,
+      productionRecord.fulfillmentPlan.usage,
       turnResult.domesticAllocation,
       turnResult.salesRecord.allocations,
       turnResult.newImportLots,

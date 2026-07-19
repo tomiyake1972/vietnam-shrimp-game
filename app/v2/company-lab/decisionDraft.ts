@@ -11,6 +11,7 @@ import { hosoEqTons, ratio, unwrapUnit } from "../../lib/v2/core/units";
 import { PeriodV2 } from "../../lib/v2/core/period";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../lib/v2/market/types";
 import { CompanyDecisionInput, CompanyFixture } from "../../lib/v2/companyLab";
+import { PlanCostExpectation } from "../../lib/v2/sales/types";
 import { WorkerSkillEntry } from "../../lib/v2/production/types";
 
 export const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
@@ -34,6 +35,11 @@ export interface SalesPlanDraftRow {
   readonly desiredQuantity: number;
   readonly priceAdjustmentUsdPerHosoEqKg: number;
   readonly salesForceHeadcount: number;
+  /**
+   * 契約時予想原価（Phase 6.3）。自動方針が算出した値を編集不可のまま引き継ぎ、
+   * プレイヤーが編集した販売計画から生成される契約にもスナップショットが残るようにする。
+   */
+  readonly costExpectation?: PlanCostExpectation;
 }
 
 export interface DomesticPurchaseDraft {
@@ -93,12 +99,17 @@ export function buildInitialDraft(fixture: CompanyFixture, autoDecision: Company
   const salesPlans: SalesPlanDraftRow[] = DEMAND_MARKET_IDS.flatMap((market) =>
     PRODUCTS.map((product) => {
       const found = autoDecision.salesPlans.find((p) => p.market === market && p.product === product);
+      // 自動方針が同一商品の別市場向けに算出したcostExpectationがあれば、
+      // 数量0の網羅行にも引き継ぐ（プレイヤーが新市場へ数量を入れた場合にも
+      // 契約時予想原価スナップショットが残るようにする）。
+      const sameProduct = autoDecision.salesPlans.find((p) => p.product === product);
       return {
         market,
         product,
         desiredQuantity: found ? unwrapUnit(found.desiredQuantity) : 0,
         priceAdjustmentUsdPerHosoEqKg: found ? found.priceAdjustmentUsdPerHosoEqKg : 0,
         salesForceHeadcount: found ? found.salesForceHeadcount : 0,
+        costExpectation: found?.costExpectation ?? sameProduct?.costExpectation,
       };
     })
   );
@@ -187,6 +198,7 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
       desiredQuantity: hosoEqTons(safeNonNegative(p.desiredQuantity)),
       priceAdjustmentUsdPerHosoEqKg: Number.isFinite(p.priceAdjustmentUsdPerHosoEqKg) ? p.priceAdjustmentUsdPerHosoEqKg : 0,
       salesForceHeadcount: Math.round(safeNonNegative(p.salesForceHeadcount)),
+      ...(p.costExpectation !== undefined ? { costExpectation: p.costExpectation } : {}),
     }));
 
   const domesticPurchasePlan = {
@@ -196,6 +208,8 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
       ? draft.domesticPurchase.priceAdjustmentUsdPerHosoEqKg
       : 0,
     procurementHeadcount: Math.round(safeNonNegative(draft.domesticPurchase.procurementHeadcount)),
+    // Phase 6.3: 調達処理能力の工場能力連動方式（fixtureから決定論的に導出。編集対象外）。
+    factoryCommonProcessingCapacityTons: fixture.factories.reduce((sum, f) => sum + unwrapUnit(f.commonProcessingCapacity), 0),
   };
 
   const importOrders = draft.importOrders

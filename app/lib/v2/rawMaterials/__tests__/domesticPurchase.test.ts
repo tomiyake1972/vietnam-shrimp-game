@@ -43,7 +43,7 @@ test("applyDomesticPurchaseIntentOverrideはvietnamDomestic.domesticProcurementI
       domesticRawSupply: hosoEqTons(1000),
       domesticProcurementIntent: hosoEqTons(999),
       trailingAverageDomesticPurchase: hosoEqTons(500),
-      hosoYieldRatio: 0.9,
+      hosoEqRecoveryRatio: 0.9,
       processingExportCostUsdPerKg: 0.1,
       requiredMarginUsdPerKg: 0.2,
     },

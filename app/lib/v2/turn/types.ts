@@ -49,10 +49,21 @@ export class TurnOrchestratorValidationError extends Error {
  * - "companyPlans": 会社別の国内買付計画（0件を含む）から、Phase5の
  *   `aggregateDomesticPurchaseIntent`（信認上限付き）で集約した値で上書きする。
  *   計画を提出していない会社は、この配列に含まれない（＝希望量ゼロと同義）。
+ *
+ * 【Phase 6.3追加（実装指示 §5）】externalIntent は、プレイヤー系会社（plans）以外の
+ * 外部加工業者による国内買付意向（業界集計値）。国内価格形成用の総買付意向は
+ *   外部加工業者需要 + plans由来の信認済み買付意向の合計
+ * となる。プレイヤー系会社だけでベトナム国全体の加工需要を置き換えないための
+ * フィールドで、未指定時は従来どおり（外部需要0＝後方互換）。値の算出は
+ * 呼び出し側の責務（companyLabではcalculateExternalProcessorIntentが行う）。
  */
 export type DomesticPurchaseIntentSource =
   | { readonly type: "phase3Fallback" }
-  | { readonly type: "companyPlans"; readonly plans: readonly DomesticPurchasePlanEntry[] };
+  | {
+      readonly type: "companyPlans";
+      readonly plans: readonly DomesticPurchasePlanEntry[];
+      readonly externalIntent?: HosoEqTons;
+    };
 
 // ---------------------------------------------------------------------
 // 2. シナリオ変数（Phase2/3のフルScenarioTurnInputは再定義しない）
@@ -135,6 +146,10 @@ export interface TurnOrchestratorDebugInfo {
   readonly companyEffectivePurchaseIntents: readonly { readonly companyId: CompanyId; readonly effectiveIntent: HosoEqTons }[];
   /** 全社の有効買付意向の合計（"phase3Fallback"時は算出しない＝undefined）。 */
   readonly aggregatedPurchaseIntent?: HosoEqTons;
+  /** 外部加工業者の国内買付意向（Phase 6.3。externalIntent未指定時はundefined）。 */
+  readonly externalProcessorIntent?: HosoEqTons;
+  /** プレイヤー系会社が配分対象にできる国内原料量（取引成立量のうち会社意向比例分。Phase 6.3）。 */
+  readonly companyAvailableDomesticSupply?: HosoEqTons;
   /** override前のMarketQuarterInput.vietnamDomestic.domesticProcurementIntent。 */
   readonly domesticProcurementIntentBeforeOverride: HosoEqTons;
   /** override後（Phase1へ実際に渡した値）のdomesticProcurementIntent。 */

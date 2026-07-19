@@ -21,11 +21,34 @@ import { PRODUCTION_PARAMETERS_V1, ProductionParameters } from "./parameters";
  * 原料消費量（HOSO換算トン）から、商品の物理重量（トン）を参考値として算出する。
  * この値はHOSO換算上の完成品数量（saleableFinishedHosoEq）とは別の軸の情報であり、
  * 契約履行・在庫管理・能力判定のいずれにも使わない（参考情報専用）。
+ *
+ * 【Phase 6.3】物理歩留まりが定義されていない商品（VAP: 衣・ソース・加熱等で
+ * 仕様差が大きく一律の換算が成立しない）については undefined を返す。
+ * VAPの主数量は投入エビ原料のHOSO換算量で管理する。
  */
 export function calculatePhysicalOutputTons(
   rawMaterialConsumedHosoEqTons: number,
   product: Product,
   params: ProductionParameters = PRODUCTION_PARAMETERS_V1
-): number {
-  return rawMaterialConsumedHosoEqTons * params.yield.physicalYieldRatio[product];
+): number | undefined {
+  const ratio = params.yield.physicalYieldRatio[product];
+  if (ratio === undefined) return undefined;
+  return rawMaterialConsumedHosoEqTons * ratio;
+}
+
+/**
+ * 商品のHOSO換算kgあたり価格から、物理製品重量kgあたり価格を参考値として算出する
+ * （Phase 8の原料費比率校正・診断用。実装指示 §10）。
+ * 例: PDのHOSO換算価格 $5.32/kg → 物理kgあたり $5.32 / 0.54 ≈ $9.85/kg
+ * （PDはHOSO原料100トンから約54物理トンしか取れないため、物理kg単価はHOSO換算
+ * 単価より高くなる）。物理歩留まりが未定義の商品（VAP）は undefined を返す。
+ */
+export function toPhysicalWeightPrice(
+  hosoEqPriceUsdPerKg: number,
+  product: Product,
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+): number | undefined {
+  const ratio = params.yield.physicalYieldRatio[product];
+  if (ratio === undefined || ratio <= 0) return undefined;
+  return hosoEqPriceUsdPerKg / ratio;
 }

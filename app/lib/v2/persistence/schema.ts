@@ -127,7 +127,32 @@ function validateContract(raw: unknown, path: string): SalesContract {
   const unitPrice = wrapUnitConstructor(usdPerHosoEqKg, obj.unitPrice, `${path}.unitPrice`);
   const status = requireEnum(obj.status, CONTRACT_STATUSES, `${path}.status`);
 
-  return { contractId, companyId, market, product, contractedPeriod, dueDate, originalQuantity, outstandingQuantity, unitPrice, status };
+  // 【Phase 6.3（schemaVersion 2で追加）】契約時予想原価スナップショット（オプショナル）。
+  // schemaVersion 1のデータには存在しない（存在しなくても妥当）。
+  let costSnapshot: SalesContract["costSnapshot"];
+  if (obj.costSnapshot !== undefined) {
+    const cs = requireObject(obj.costSnapshot, `${path}.costSnapshot`);
+    costSnapshot = {
+      expectedRawMaterialPriceUsdPerHosoEqKg: requireFiniteNumber(cs.expectedRawMaterialPriceUsdPerHosoEqKg, `${path}.costSnapshot.expectedRawMaterialPriceUsdPerHosoEqKg`),
+      expectedProcessingCostUsdPerHosoEqKg: requireFiniteNumber(cs.expectedProcessingCostUsdPerHosoEqKg, `${path}.costSnapshot.expectedProcessingCostUsdPerHosoEqKg`),
+      minimumAcceptablePriceUsdPerHosoEqKg: requireFiniteNumber(cs.minimumAcceptablePriceUsdPerHosoEqKg, `${path}.costSnapshot.minimumAcceptablePriceUsdPerHosoEqKg`),
+      expectedContributionMarginUsdPerHosoEqKg: requireFiniteNumber(cs.expectedContributionMarginUsdPerHosoEqKg, `${path}.costSnapshot.expectedContributionMarginUsdPerHosoEqKg`),
+    };
+  }
+
+  return {
+    contractId,
+    companyId,
+    market,
+    product,
+    contractedPeriod,
+    dueDate,
+    originalQuantity,
+    outstandingQuantity,
+    unitPrice,
+    status,
+    ...(costSnapshot !== undefined ? { costSnapshot } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------

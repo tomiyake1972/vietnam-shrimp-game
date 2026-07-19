@@ -1,5 +1,9 @@
 # ShrimpX V2 — 会社経営統合テスト環境（Phase 6.2） アーキテクチャ v0.1
 
+> 【Phase 6.3追記】本文書の経済尺度に関する記述（国内原料価格・調達能力・自動方針の
+> 調達構成・成約/履行サマリー集計）はPhase 6.3で是正された。是正内容は
+> `docs/v2/ECONOMIC_CALIBRATION_PHASE_6_3_v0.1.md` を正とする。
+
 ## 0. 本モジュールの位置づけ
 
 `app/lib/v2/companyLab/` は、Phase 1〜6（市場価格・シナリオ・販売契約・国内原料/輸入/養殖・工場生産）の既存純粋関数を一切書き換えず・重複実装せずに統合し、「5社が契約を取る→原料を確保する→工場で作る→納品する」という会社経営の中核サイクルを1四半期ずつ決定論的に進められるようにする。UI（`/v2/company-lab`）・CLI（`npm run v2:company-simulate`）はどちらもこのモジュールの同じ純粋関数を呼び出すだけの薄い層であり、計算ロジックの複製は一切ない。
@@ -69,7 +73,7 @@
 
 1. **国内原料価格のフロア暴落はシナリオ自体に内在する挙動**（company-lab固有のバグではない）。industryLabの`runIndustrySimulation`をデフォルト設定（会社行動なし）で実行しても、turn1の国内原料価格0.96からturn5以降フロア値0.05まで暴落する（`VIETNAM_RAW_MATERIAL_SURPLUS`ドライバー）。5社の需要規模を国全体のtrailing平均（90,000トン程度）と同オーダーに合わせることで、この暴落を実運用上妥当な範囲に抑えた。
 
-2. **調達処理能力パラメータのスケール不整合**: `RAW_MATERIALS_PARAMETERS_V1.domesticPurchase`（Phase5、industryLabの小規模テスト会社向けに校正済み）は、調達処理能力の上限が`baselineCapacityTons + capacityMaxIncrementTons ≒ 3,750トン/社`に固定されている。5社フィクスチャの国内買付希望量（1万〜数万トン/四半期規模）に対してこの上限が常に最も厳しい制約として先に効いてしまい、希望量を増減させても「有効買付意向」（`calculateEffectivePurchaseIntent`）が変化しない、という受入条件「国内買付希望量の増加で国内原料価格が上がる」を満たせない状態になっていた。既存の`RAW_MATERIALS_PARAMETERS_V1`（industryLabの挙動）は一切変更せず、company-lab専用に調達処理能力だけをフィクスチャと同じ約100倍のスケールへ差し替えた`COMPANY_LAB_RAW_MATERIALS_PARAMETERS`（`companyLab/parameters.ts`）を新設し、`runTurn`呼び出し時の`parameters.rawMaterials`として渡す形にした。Phase5の計算式自体（`calculateEffectivePurchaseIntent`等）は一切変更していない。
+2. **調達処理能力パラメータのスケール不整合**: Phase 6.2当初は、company-lab専用に調達処理能力を約100倍へ一律補正した`COMPANY_LAB_RAW_MATERIALS_PARAMETERS`で対処していたが、**Phase 6.3でこの一律補正は廃止した**（経済的根拠がなく、補正後は調達能力が工場能力の7〜11倍と過大で、制約として一度も機能していなかったため）。現在は`rawMaterials/domesticPurchase.ts`の工場能力連動方式（`capacityFactoryLinked`: 調達能力 = 工場共通原料処理能力 × 人員曲線。通常時1.0〜1.5倍）へ置き換えている。詳細は`docs/v2/ECONOMIC_CALIBRATION_PHASE_6_3_v0.1.md` §6を参照。
 
 ## 6. 理由コード（`reasonCodes.ts`）
 
@@ -116,5 +120,5 @@ npm run v2:company-simulate -- --scenario baseline --seed company-demo-001 --tur
 ## 12. 既知の制約・将来課題
 
 - 財務三表が未実装のため、保守的会社（CONSV）の「財務慎重さ」は行動抑制係数（`commitmentRestraint`）でのみ表現している。将来Phaseで財務三表を接続する際、この係数の意味づけを再校正する必要がある。
-- `COMPANY_LAB_RAW_MATERIALS_PARAMETERS`の調達処理能力スケール（約100倍）は暫定値であり、ゲームバランス調整フェーズでの再校正を前提とする。
+- （Phase 6.3更新）調達処理能力は工場能力連動方式へ再校正済み（旧・約100倍一律補正は廃止）。残る暫定値（農家留保価格・外部需要・プレミアム経済性等）は`docs/v2/ECONOMIC_CALIBRATION_PHASE_6_3_v0.1.md` §11参照。
 - Phase9のAI会社実装時は、`CompanyDecisionProvider`型を満たす新しい生成器を追加するだけで、既存の自動方針（`generateAutoPolicyDecision`）と差し替え可能な設計になっている。

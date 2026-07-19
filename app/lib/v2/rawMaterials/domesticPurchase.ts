@@ -39,9 +39,31 @@ function assertNonNegativeIntegerHeadcount(headcount: number): void {
   }
 }
 
-/** 調達人員数から調達処理能力（HOSO換算トン、逓減曲線）を導出する。Phase4のprocessingCapacityと同じ形。 */
-export function procurementCapacity(headcount: number, params: RawMaterialsParameters): HosoEqTons {
+/**
+ * 調達人員数から調達処理能力（HOSO換算トン、逓減曲線）を導出する。
+ * 【Phase 6.3（実装指示 §6）】factoryCommonProcessingCapacityTons（会社の工場共通
+ * 原料処理能力）が指定された場合は工場能力連動方式を使う:
+ *   調達能力 = 工場能力 × (基準比率 + 増分比率 × 人員/(人員+飽和人数))
+ * 一律倍率補正を廃止し、工場能力と調達人員の双方を反映する。未指定時は従来の
+ * 絶対値カーブ（industryLabの小規模テスト会社向け）へフォールバックする。
+ */
+export function procurementCapacity(
+  headcount: number,
+  params: RawMaterialsParameters,
+  factoryCommonProcessingCapacityTons?: number
+): HosoEqTons {
   assertNonNegativeIntegerHeadcount(headcount);
+  if (factoryCommonProcessingCapacityTons !== undefined) {
+    if (!Number.isFinite(factoryCommonProcessingCapacityTons) || factoryCommonProcessingCapacityTons < 0) {
+      throw new RawMaterialsValidationError(
+        `factoryCommonProcessingCapacityTons は0以上の有限数である必要があります。受け取った値: ${factoryCommonProcessingCapacityTons}`
+      );
+    }
+    const fl = params.domesticPurchase.capacityFactoryLinked;
+    const growthRatio = headcount / (headcount + fl.saturationHeadcount);
+    const ratio = fl.baseRatioAtZeroHeadcount + fl.ratioMaxIncrement * growthRatio;
+    return hosoEqTons(roundHosoEqTons(factoryCommonProcessingCapacityTons * ratio));
+  }
   const { baselineCapacityTons, capacityMaxIncrementTons, capacitySaturationHeadcount } = params.domesticPurchase;
   const growth = headcount / (headcount + capacitySaturationHeadcount);
   return hosoEqTons(roundHosoEqTons(baselineCapacityTons + capacityMaxIncrementTons * growth));
@@ -61,7 +83,7 @@ export function calculateEffectivePurchaseIntent(
   referenceSupply: HosoEqTons,
   params: RawMaterialsParameters
 ): HosoEqTons {
-  const capacity = procurementCapacity(entry.procurementHeadcount, params);
+  const capacity = procurementCapacity(entry.procurementHeadcount, params, entry.factoryCommonProcessingCapacityTons);
   const shareCap = unwrapUnit(referenceSupply) * params.domesticPurchase.maximumPriceInfluenceShare;
   const approvedCap = entry.approvedPurchaseCap !== undefined ? unwrapUnit(entry.approvedPurchaseCap) : Number.POSITIVE_INFINITY;
   const capped = Math.min(unwrapUnit(entry.desiredQuantity), unwrapUnit(capacity), shareCap, approvedCap);
@@ -179,7 +201,11 @@ export function allocateDomesticPurchase(
   entries: readonly DomesticPurchasePlanEntry[],
   marketPrice: UsdPerHosoEqKg,
   availableSupply: HosoEqTons,
-  params: RawMaterialsParameters
+  params: RawMaterialsParameters,
+  // 【Phase 6.3】maximumBuyerShareの基準供給量。未指定時はavailableSupply（後方互換）。
+  // 外部加工業者需要の導入後、availableSupplyは「会社側の配分原資」に縮小されるため、
+  // 市場全体に対する買い占め防止上限の基準は別引数で渡せるようにする。
+  shareCapReferenceSupply: HosoEqTons = availableSupply
 ): DomesticPurchaseAllocationResult {
   const sorted = [...entries].sort((a, b) => a.companyId.localeCompare(b.companyId));
 
@@ -199,10 +225,10 @@ export function allocateDomesticPurchase(
     const bidPrice = usdPerHosoEqKg(rawBidPrice);
 
     const coverage = procurementCoverageScore(entry.procurementHeadcount, params);
-    const capacity = procurementCapacity(entry.procurementHeadcount, params);
+    const capacity = procurementCapacity(entry.procurementHeadcount, params, entry.factoryCommonProcessingCapacityTons);
     const weight = computeBuyerCompetitivenessWeight(entry, bidPrice, marketPrice, coverage, params);
 
-    const shareCap = unwrapUnit(availableSupply) * maximumBuyerShareFor(entry, params);
+    const shareCap = unwrapUnit(shareCapReferenceSupply) * maximumBuyerShareFor(entry, params);
     const approvedCap = entry.approvedPurchaseCap !== undefined ? unwrapUnit(entry.approvedPurchaseCap) : Number.POSITIVE_INFINITY;
     // 調達処理能力（procurementHeadcountに基づく実務上の上限）も個社配分上限へ反映する。
     // 調達人員がゼロ・少数の会社は、希望量だけを大きくしても実配分量が増えない。

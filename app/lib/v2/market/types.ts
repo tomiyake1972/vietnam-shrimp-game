@@ -54,10 +54,13 @@ export type MarketPriceDriver =
   | "DEMAND_GROWTH"
   | "DEMAND_CONTRACTION"
   | "PRICE_CHANGE_CAPPED"
+  | "COUNTRY_PRICE_SPREAD_BOUNDED"
   | "MARKET_SHOCK_APPLIED"
   | "VIETNAM_RAW_MATERIAL_SHORTAGE"
   | "VIETNAM_RAW_MATERIAL_SURPLUS"
   | "MINIMUM_OFFTAKE_RULE_APPLIED"
+  | "VIETNAM_FARMER_RESERVATION_PRICE_APPLIED"
+  | "VIETNAM_PROCUREMENT_QUANTITY_RATIONED"
   | "PROCESSING_CAPACITY_OVERSUPPLY"
   | "PD_CAPACITY_TIGHTNESS"
   | "VAP_CAPACITY_TIGHTNESS"
@@ -99,15 +102,27 @@ export interface CountrySupplyInput {
   readonly vapProcessingCapacity: HosoEqTons;
 }
 
-/** ベトナム国内未凍結原料市場の当期入力。 */
+/**
+ * 養殖農家の販売留保価格（集荷に応じる最低価格）の構成要素（Phase 6.3、実装指示 §4）。
+ * すべてHOSO換算kgあたりUSD。現段階では詳細原価計算を実装せず、シナリオ側から
+ * 変動可能な設定値として与える（未指定時はMarketParametersの既定値を使う）。
+ */
+export interface VietnamFarmerEconomicsInput {
+  /** 養殖原価（HOSO換算kgあたり、USD）。 */
+  readonly farmingCostUsdPerHosoEqKg: number;
+  /** 疾病リスク引当（同単位）。 */
+  readonly diseaseRiskAllowanceUsdPerHosoEqKg: number;
+  /** 農家の最低マージン（同単位）。 */
+  readonly minimumFarmerMarginUsdPerHosoEqKg: number;
+}
+
 export interface VietnamDomesticInput {
   /** 当期のベトナム国内未凍結原料の供給量（収穫量ベース）。 */
   readonly domesticRawSupply: HosoEqTons;
   /**
-   * 5社＋NPC合計の国内買付希望量（業界集計値）。今回のPhase 1では
-   * 各社個別の調達意思決定を実装しないため、将来の調達モジュールが
-   * 会社別に積み上げた値をこの1フィールドに集計して渡す想定
-   * （このモジュールの外側の責務。詳細はdocs参照）。
+   * 業界全体の国内買付希望量（業界集計値）。外部加工業者需要＋プレイヤー系
+   * 会社の信認済み買付意向の合計をこの1フィールドに集計して渡す
+   * （集計はこのモジュールの外側＝turn/runner等の責務。詳細はdocs参照）。
    */
   readonly domesticProcurementIntent: HosoEqTons;
   /**
@@ -116,12 +131,24 @@ export interface VietnamDomesticInput {
    * 基準とする」）の算出に用いる。
    */
   readonly trailingAverageDomesticPurchase: HosoEqTons;
-  /** 原料からHOSO換算製品への歩留まり。 */
-  readonly hosoYieldRatio: Ratio;
+  /**
+   * 国内原料（HOSO換算）→輸出製品（HOSO換算）の真の販売可能回収率。
+   * 【Phase 6.3修正】国内原料価格とVN HOSO輸出価格はどちらもHOSO換算kgあたり
+   * 価格であるため、旧実装のようなHLSO相当の物理歩留まり（0.62）をここへ
+   * 掛けてはならない。正常な頭・殻の除去はHOSO換算量を減らさないため、
+   * 通常操業時の基準は1.00（品質不良・廃棄等の真の損失のみをPhase 7以降で
+   * この比率を通じて反映する）。
+   */
+  readonly hosoEqRecoveryRatio: Ratio;
   /** 加工輸出費用（HOSO換算kgあたり、USD）。 */
   readonly processingExportCostUsdPerKg: UsdPerHosoEqKg;
   /** 加工会社が必要とする利益（同単位）。 */
   readonly requiredMarginUsdPerKg: UsdPerHosoEqKg;
+  /**
+   * 養殖農家の販売留保価格の構成要素（Phase 6.3、実装指示 §4）。
+   * 未指定時はMarketParameters.vietnamDomestic.farmerEconomicsDefaultsを使う。
+   */
+  readonly farmerEconomics?: VietnamFarmerEconomicsInput;
 }
 
 /** PD/VAP需要構成の当期入力（世界全体集計）。 */
@@ -170,15 +197,37 @@ export interface CountryHosoPriceResult {
 /** ベトナム国内未凍結原料市場の清算結果。 */
 export interface VietnamDomesticResult {
   readonly price: UsdPerHosoEqKg;
-  /** 理論原料支払上限（市場価格形成モジュール仕様書 v0.2 §10.2）。 */
+  /** 理論原料支払上限（市場価格形成モジュール仕様書 v0.2 §10.2、Phase 6.3で式修正）。 */
   readonly buyingCeiling: UsdPerHosoEqKg;
+  /**
+   * 養殖農家の販売留保価格（集荷に応じる最低価格。Phase 6.3、実装指示 §4）。
+   * 通常の市場計算で価格がこの水準を下回ることはない（下回る圧力は価格ではなく
+   * 取引数量の縮小として現れる）。
+   */
+  readonly farmerReservationPrice: UsdPerHosoEqKg;
   readonly supply: HosoEqTons;
   /** プロラタ最低引取ルール適用後の実効需要。 */
   readonly effectiveDemand: HosoEqTons;
+  /**
+   * 当期に実際に取引が成立した数量（Phase 6.3）。通常時は min(supply, effectiveDemand)。
+   * 買付上限が農家留保価格を下回る局面では、価格ではなく数量で市場が調整される
+   * ため、この値がさらに縮小する（加工会社側の調達未達の原資になる）。
+   */
+  readonly transactedVolume: HosoEqTons;
+  /**
+   * 農家が売却しなかった（できなかった）潜在供給量 = supply - transactedVolume。
+   * 会社在庫へは自動計上されず、次期の池入れ・供給減少の判断材料（シグナル）として
+   * 呼び出し側が参照できる。
+   */
+  readonly unsoldSupply: HosoEqTons;
   /** (effectiveDemand - supply) / supply。正で供給不足、負で供給過剰。 */
   readonly imbalance: number;
   /** 最低引取ルール（全体実装計画書 v0.1 §10.1）が発動したか。 */
   readonly minimumOfftakeApplied: boolean;
+  /** 需給による価格が農家留保価格を下回り、価格が留保価格で下支えされたか。 */
+  readonly reservationPriceApplied: boolean;
+  /** 買付上限が農家留保価格を下回り、取引数量の縮小（数量調整）が発動したか。 */
+  readonly quantityRationed: boolean;
   readonly drivers: readonly MarketPriceDriver[];
 }
 

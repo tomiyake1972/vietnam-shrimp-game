@@ -68,6 +68,11 @@ export interface CompanySalesPlanEntry {
    * maximumSupplierShare由来の上限）と合わせて、その最小値を個社成約上限とする。
    */
   readonly approvedAllocationCap?: HosoEqTons;
+  /**
+   * 販売計画時点の予想原価（Phase 6.3、実装指示 §9）。設定時は成約契約へ
+   * ContractCostSnapshotとして引き継がれる。
+   */
+  readonly costExpectation?: PlanCostExpectation;
 }
 
 // ---------------------------------------------------------------------
@@ -113,6 +118,31 @@ export type ContractStatus =
   | "overdue" // 納期超過
   | "cancelled"; // キャンセル
 
+/**
+ * 【Phase 6.3（実装指示 §9）】販売計画時点の予想原価（契約スナップショットの元）。
+ * 販売時点の予想原料価格・予想加工費で受注可否を判断し、契約後に実際の原料価格・
+ * 残業・加工費等が上昇しても契約単価を自動改定しないための記録。すべて
+ * USD/HOSO換算kg。
+ */
+export interface PlanCostExpectation {
+  /** 契約時予想原料価格。 */
+  readonly expectedRawMaterialPriceUsdPerHosoEqKg: number;
+  /** 契約時予想加工費。 */
+  readonly expectedProcessingCostUsdPerHosoEqKg: number;
+  /** 最低受注価格（これ未満では受注しない判断基準）。 */
+  readonly minimumAcceptablePriceUsdPerHosoEqKg: number;
+}
+
+/**
+ * 【Phase 6.3（実装指示 §9）】契約に保持する契約時スナップショット。
+ * Phase 8で実績原価と突き合わせて検証できるよう、成約単価確定時の
+ * 予想貢献利益（unitPrice − 予想原料価格 − 予想加工費）も保持する。
+ */
+export interface ContractCostSnapshot extends PlanCostExpectation {
+  /** 契約時予想貢献利益（USD/HOSO換算kg）。 */
+  readonly expectedContributionMarginUsdPerHosoEqKg: number;
+}
+
 export interface SalesContract {
   readonly contractId: string;
   readonly companyId: CompanyId;
@@ -129,6 +159,11 @@ export interface SalesContract {
   /** 成約単価（= 成約時点のaskPrice）。 */
   readonly unitPrice: UsdPerHosoEqKg;
   readonly status: ContractStatus;
+  /**
+   * 契約時予想原価スナップショット（Phase 6.3、実装指示 §9）。販売計画が
+   * costExpectationを持つ場合のみ設定される（後方互換のためオプショナル）。
+   */
+  readonly costSnapshot?: ContractCostSnapshot;
 }
 
 // ---------------------------------------------------------------------

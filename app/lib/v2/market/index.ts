@@ -46,11 +46,16 @@ export function calculateMarketQuarter(
     countrySupplySummary,
     worldDemand.totalWorldDemand,
     countryIds,
-    parameters
+    parameters,
+    input.priorHosoFobPrice // Phase 6.3: 安い原産国へ需要が移る価格応答配分
   );
 
-  // 4. Market Clearing（同 §9、手順8後半）
-  const hosoPrices = clearHosoMarket(opening, input.priorHosoFobPrice, countryIds, parameters, randomStream);
+  // 4. Market Clearing（同 §9、手順8後半。Phase 6.3: コスト連動アンカーへの
+  //    平均回帰と国別価格スプレッドの有限化を追加）
+  const costIndexByCountry = Object.fromEntries(
+    countryIds.map((c) => [c, input.countries[c].aquacultureCostIndex])
+  ) as Readonly<Record<(typeof countryIds)[number], number>>;
+  const hosoPrices = clearHosoMarket(opening, input.priorHosoFobPrice, countryIds, parameters, randomStream, costIndexByCountry);
 
   // 5. ベトナム国内未凍結原料市場（同 §10、手順9-11）
   const vietnamDomestic = clearVietnamRawMarket(hosoPrices.VN.price, input.vietnamDomestic, parameters);
@@ -111,5 +116,5 @@ export * from "./types";
 export { calculateWorldDemand, calculateMarketDemand } from "./globalDemand";
 export { calculateExportableSupply, calculateCostPressure, summarizeCountrySupply } from "./countrySupply";
 export { openHosoMarket, clearHosoMarket } from "./hosoPricing";
-export { calculateBuyingCeiling, applyMinimumOfftakeRule, clearVietnamRawMarket } from "./vietnamRawMarket";
+export { calculateBuyingCeiling, calculateFarmerReservationPrice, applyMinimumOfftakeRule, clearVietnamRawMarket } from "./vietnamRawMarket";
 export { calculateProductPremium } from "./productPremium";

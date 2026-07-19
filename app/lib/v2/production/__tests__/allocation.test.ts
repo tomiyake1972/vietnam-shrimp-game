@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { hosoEqTons, ratio, unwrapUnit, usdPerHosoEqKg } from "../../core/units";
 import { period } from "../../core/period";
 import { allocateProductionPlans } from "../allocation";
+import { PRODUCTION_PARAMETERS_V1 } from "../parameters";
 import { CompanyProductionPlanEntry, Factory, WorkerAssignment } from "../types";
 import { RawMaterialLot } from "../../rawMaterials/types";
 
@@ -182,18 +183,32 @@ test("いずれの制約も超えない（希望量・原料・共通設備・�
   assert.ok(unwrapUnit(e.allocatedQuantity) <= 40 + 0.02);
 });
 
-test("VAPやPDで異なる基準歩留まりが適用される（原料消費量が異なる）", () => {
+test("通常操業時（saleableRecoveryRatio=1.00基準）はPD/VAPとも必要原料量=完成品HOSO換算量となり、" +
+  "回収率を下げた場合のみ必要原料量が増える（Phase 7向けの構造フック）", () => {
   const factory = makeFactory();
   const lot = makeLot({ remainingQuantity: hosoEqTons(10000), originalQuantity: hosoEqTons(10000) });
   const plans = [
     makePlan({ product: "pd", desiredQuantity: hosoEqTons(80), priority: 1 }),
     makePlan({ product: "vap", desiredQuantity: hosoEqTons(80), priority: 1 }),
   ];
+  // 基準（1.00）: 正常な頭・殻の除去ではHOSO換算量を減らさないため、必要原料量=完成品量。
   const result = allocateProductionPlans(plans, [factory], [makeAssignment()], [lot], P1);
   const pd = result.entries.find((e) => e.product === "pd")!;
   const vap = result.entries.find((e) => e.product === "vap")!;
-  // vapの方が歩留まりが低いため、同じ完成品量でも必要原料量が多い
-  assert.ok(unwrapUnit(vap.requiredRawMaterialQuantity) > unwrapUnit(pd.requiredRawMaterialQuantity));
+  assert.ok(Math.abs(unwrapUnit(pd.requiredRawMaterialQuantity) - 80) < 0.5);
+  assert.ok(Math.abs(unwrapUnit(vap.requiredRawMaterialQuantity) - 80) < 0.5);
+
+  // Phase 7向け構造フック: 真の損失（品質不良・廃棄等）を回収率で与えると必要原料量が増える。
+  const lossyParams = {
+    ...PRODUCTION_PARAMETERS_V1,
+    yield: {
+      ...PRODUCTION_PARAMETERS_V1.yield,
+      saleableRecoveryRatio: { hoso: 1.0, pd: 1.0, vap: 0.9 },
+    },
+  };
+  const lossyResult = allocateProductionPlans(plans, [factory], [makeAssignment()], [lot], P1, lossyParams);
+  const lossyVap = lossyResult.entries.find((e) => e.product === "vap")!;
+  assert.ok(unwrapUnit(lossyVap.requiredRawMaterialQuantity) > unwrapUnit(vap.requiredRawMaterialQuantity));
 });
 
 test("100人しかいない工場でHOSO+PD+VAPの合計配分人数が100を超えない（Phase6.1: ワーカー共有プール）", () => {
