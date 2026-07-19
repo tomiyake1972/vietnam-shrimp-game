@@ -143,3 +143,34 @@ URL: **`/v2/industry-lab`**（V1画面とは衝突しないV2専用ルート）�
 - `PreviousMarketContext.domesticProcurementIntent`は、5社の実際の調達意思決定が実装された時点で、`IndustryLabAssumptions`の仮置きロジックを置き換えるだけで差し替えられるよう分離してある。
 - `ScenarioTurnFeedback.externalProducerResponses`は型としてはすでに用意されているため、海外生産者の価格反応ロジックが実装された際はここへ実際の値を渡すだけでよい（現状はundefinedのまま）。
 - `InformationRelease`の4レベル構造は、将来AI会社・プレイヤー会社ごとに異なる情報アクセス権を与える設計にそのまま利用できる。
+
+## 14. CLI（画面なしでの実行、Phase 3差分）
+
+`/v2/industry-lab`画面と全く同じ計算（`runIndustrySimulation`・`compareIndustrySimulations`）を、画面を開かずに実行できるコマンドラインツールを`app/lib/v2/industryLab/cli/`として追加した。
+
+```bash
+npm run v2:simulate -- --scenario baseline --mode canonical --seed demo-001 --turns 32 --format summary
+npm run v2:simulate -- --scenario baseline --seed demo-001 --turns 32 --format json > result.json
+npm run v2:simulate -- --scenario baseline --seed demo-001 --turns 32 --compare global-disease-crisis --format csv
+npm run v2:simulate -- --help
+```
+
+### 構成
+
+- `app/lib/v2/industryLab/cli/argParser.ts` — `process.argv`・`console`・`process.exit`に一切触れない純粋な引数解析（`parseCliArgs`）とヘルプテキスト生成（`buildUsageText`）。
+- `app/lib/v2/industryLab/cli/scenarioAliases.ts` — シナリオIDの解決のみを行う（`--scenario baseline`のような短縮形と、`ALL_SCENARIO_DEFINITIONS`が持つ正式ID`baseline-v0.1`の両方を受け付ける。新しいシナリオ内容・経済ロジックは一切追加していない）。
+- `app/lib/v2/industryLab/cli/output.ts` — 計算済みの`IndustrySimulationResult`/`ScenarioComparisonResult`をsummary/JSON/CSVへ整形するだけの純粋関数。summaryの数値表記は画面と同じ`app/lib/v2/industryLab/ui/formatters.ts`を再利用している。
+- `app/lib/v2/industryLab/cli/runCli.ts` — `runCli(argv): { stdout, stderr, exitCode }`。引数解析→`runIndustrySimulation`/`compareIndustrySimulations`呼び出し→整形、までを行う唯一のオーケストレーション層。副作用を持たないため、実際の標準出力・終了コードを介さずに直接ユニットテストできる。
+- `scripts/v2Simulate.ts` — `runCli`の戻り値を`process.stdout`/`process.stderr`へ書き込み、`process.exit`するだけの薄いエントリポイント。計算ロジックは一切持たない。
+
+### `npm run`の標準出力汚染への対処
+
+`npm run <script>`はデフォルトで`> package@version script`のような行を標準出力に前置するため、そのままでは`--format json`の出力が「機械可読な正当なJSONのみ」にならない。プロジェクト直下に`.npmrc`（`loglevel=silent`）を追加し、`npm run v2:simulate -- ...`をそのまま実行しても標準出力にはCLI自身の出力のみが乗るようにした（`npm test`・`npm run build`等、他スクリプトの出力には影響しない）。
+
+### 画面との同一性
+
+CLIも画面（`page.tsx`）も、同じ`runIndustrySimulation`/`compareIndustrySimulations`を直接呼び出すだけで、価格・需給計算のロジックを複製していない。そのため同一の`scenario`/`mode`/`seed`/`turns`を指定すれば、CLIのJSON出力の`quarters`と、画面が保持する`IndustrySimulationState.quarters`は必ず一致する（`runCli.test.ts`で、CLI経由の出力と`runIndustrySimulation`を直接呼んだ結果を突き合わせて検証済み）。
+
+### テスト
+
+`app/lib/v2/industryLab/cli/__tests__/`に4ファイル（`scenarioAliases.test.ts`・`argParser.test.ts`・`output.test.ts`・`runCli.test.ts`）を追加し、シナリオID解決・引数検証・出力整形・実行結果を検証している。特に`runCli.test.ts`では、5シナリオすべての32ターン完走、同一シードでの完全再現、Variationモードでのシード依存差異、Canonicalモードでのシード非依存なイベントスケジュール、CLI/画面間の結果一致、および不正な入力（存在しないシナリオ・不正なmode/format・turnsの範囲外・必須引数欠落・未知の引数）がいずれも非ゼロ終了コードになることを確認している。
