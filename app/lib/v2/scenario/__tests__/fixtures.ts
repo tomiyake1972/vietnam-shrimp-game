@@ -39,7 +39,7 @@ export function testInitialStateOverrides(
 ): ScenarioInitialStateOverrides {
   return {
     vietnamProcessingEconomics: {
-      hosoYieldRatio: 0.6,
+      hosoEqRecoveryRatio: 1.0,
       processingExportCostUsdPerKg: 0.8,
       requiredMarginUsdPerKg: 0.25,
     },

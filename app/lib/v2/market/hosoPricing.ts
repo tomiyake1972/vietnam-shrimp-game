@@ -54,26 +54,58 @@ export interface MarketOpeningResult {
  * まだ価格計算は行わない。
  *
  * 需要の国別配分は、仕様書§9.1の完全なsoftmax原産地シェア配分の代わりに、
- * §16「簡易世界影響度 EC45/IN25/VN18/ID12」を国別の世界需要シェアとして
- * 転用する（Phase1の簡易化。将来softmax配分へ置き換える際は本関数のみを
- * 差し替えればよい設計としている）。
+ * §16「簡易世界影響度 EC45/IN25/VN18/ID12」を国別の世界需要シェアの基準として
+ * 使う（Phase1の簡易化）。
+ *
+ * 【Phase 6.3修正（実装指示 §8）】priorPriceが与えられた場合、需要シェアを
+ * 前期価格に応答させる: share_i ∝ weight_i × exp(-感度 × (価格_i - 需要ウェイト
+ * 平均価格) / 平均価格)。安い原産国へ需要が移ることで、割安になった国の需給が
+ * 引き締まり、価格下落が自己修正される（同品質の国際商品の裁定の簡易表現）。
+ * priorPrice未指定・感度0では従来の固定シェア配分（後方互換）。
  */
 export function openHosoMarket(
   countrySupply: Readonly<Record<CountryId, CountrySupplySummary>>,
   worldDemand: HosoEqTons,
   countryIds: readonly CountryId[],
-  parameters: MarketParameters
+  parameters: MarketParameters,
+  priorPrice?: Readonly<Record<CountryId, UsdPerHosoEqKg>>
 ): MarketOpeningResult {
   const worldDemandValue = unwrapUnit(worldDemand);
   let worldSupplyValue = 0;
   const byCountry = {} as Record<CountryId, CountryMarketOpening>;
+
+  // --- 需要シェア（価格応答つき）の決定 ---
+  const sensitivity = parameters.hosoPriceSelfCorrection.demandReallocationPriceSensitivity;
+  const demandShares = {} as Record<CountryId, number>;
+  if (priorPrice !== undefined && sensitivity > 0) {
+    let referencePrice = 0;
+    for (const country of countryIds) {
+      referencePrice += parameters.worldInfluenceWeight[country] * unwrapUnit(priorPrice[country]);
+    }
+    let totalAdjusted = 0;
+    const adjusted = {} as Record<CountryId, number>;
+    for (const country of countryIds) {
+      const deviation = referencePrice > 0 ? (unwrapUnit(priorPrice[country]) - referencePrice) / referencePrice : 0;
+      const w = parameters.worldInfluenceWeight[country] * Math.exp(-sensitivity * deviation);
+      assertFinite(w, `demandShareWeight(${country})`);
+      adjusted[country] = w;
+      totalAdjusted += w;
+    }
+    for (const country of countryIds) {
+      demandShares[country] = totalAdjusted > 0 ? adjusted[country] / totalAdjusted : parameters.worldInfluenceWeight[country];
+    }
+  } else {
+    for (const country of countryIds) {
+      demandShares[country] = parameters.worldInfluenceWeight[country];
+    }
+  }
 
   for (const country of countryIds) {
     const supply = countrySupply[country];
     const exportableSupplyValue = unwrapUnit(supply.exportableSupply);
     worldSupplyValue += exportableSupplyValue;
 
-    const demandShare = parameters.worldInfluenceWeight[country];
+    const demandShare = demandShares[country];
     const allocatedDemandValue = worldDemandValue * demandShare;
     const utilizationRatio = safeDivide(allocatedDemandValue, exportableSupplyValue);
     const supplyDemandImbalance = safeDivide(
@@ -122,17 +154,32 @@ export function openHosoMarket(
  * 消費するため、消費順序は呼び出しごとに固定される（再現性の担保）。
  *
  * Rᵢ = localPressureWeight × L_i + worldPressureWeight × G + shock_i
+ *      − meanReversionRate × (価格ᵢ,ₜ₋₁ − アンカーᵢ,ₜ) / アンカーᵢ,ₜ 【Phase 6.3】
  * 価格ᵢ,ₜ = 価格ᵢ,ₜ₋₁ × (1 + clamp(Rᵢ, -上限, +上限))
+ * さらに国別価格をグローバル基準価格（需要ウェイト平均）±最大乖離比率へ
+ * クランプする【Phase 6.3】。
+ *
+ * アンカー価格ᵢ,ₜ = initialHosoFobPrice_i × 養殖コスト指数ᵢ,ₜ（コスト連動の
+ * 長期基準）。恒常的な需給圧力Pの下でも、価格はアンカー比 P/回帰率 の有限な
+ * ディスカウント/プレミアムへ収束し、絶対下限へ発散しない（積分器の暴走防止）。
+ * costIndexByCountry未指定時はコスト指数1.0（=アンカーは初期価格のまま）。
  */
 export function clearHosoMarket(
   opening: MarketOpeningResult,
   priorPrice: Readonly<Record<CountryId, UsdPerHosoEqKg>>,
   countryIds: readonly CountryId[],
   parameters: MarketParameters,
-  randomStream: RandomStream
+  randomStream: RandomStream,
+  costIndexByCountry?: Readonly<Record<CountryId, number>>
 ): Readonly<Record<CountryId, CountryHosoPriceResult>> {
   const result = {} as Record<CountryId, CountryHosoPriceResult>;
+  const sc = parameters.hosoPriceSelfCorrection;
 
+  // 第1パス: 変化率ベースの候補価格を国順に確定する（乱数消費順序は従来どおり）。
+  const candidates = {} as Record<
+    CountryId,
+    { priceValue: number; shock: number; wasCapped: boolean; priorPriceValue: number }
+  >;
   for (const country of countryIds) {
     const countryOpening = opening.byCountry[country];
     const priorPriceValue = unwrapUnit(priorPrice[country]);
@@ -141,9 +188,16 @@ export function clearHosoMarket(
     const shock =
       (randomStream.next() * 2 - 1) * parameters.marketShockMagnitude;
 
+    // 【Phase 6.3】コスト連動アンカーへの平均回帰項。
+    const costIndex = costIndexByCountry !== undefined ? costIndexByCountry[country] : 1.0;
+    const anchorPrice = parameters.initialHosoFobPriceUsdPerKg[country] * Math.max(costIndex, 1e-9);
+    const anchorDeviation = safeDivide(priorPriceValue - anchorPrice, anchorPrice);
+    const reversionTerm = -sc.meanReversionRate * anchorDeviation;
+
     const rawChangeRatio =
       parameters.localPressureWeight * countryOpening.localPressure +
       parameters.worldPressureWeight * opening.worldPressure +
+      reversionTerm +
       shock;
 
     const cap = parameters.maxQuarterlyPriceChangeRatio;
@@ -152,6 +206,32 @@ export function clearHosoMarket(
 
     let newPriceValue = priorPriceValue * (1 + changeRatio);
     newPriceValue = Math.max(newPriceValue, parameters.priceFloorUsdPerKg);
+    candidates[country] = { priceValue: newPriceValue, shock, wasCapped, priorPriceValue };
+  }
+
+  // 第2パス【Phase 6.3】: グローバル基準価格（需要ウェイト平均）に対する有限
+  // スプレッドへクランプする（同品質の国際商品の原産国価格が長期間極端に
+  // 乖離しない、という経済原則の下限・上限ガード）。
+  let referencePriceValue = 0;
+  for (const country of countryIds) {
+    referencePriceValue += parameters.worldInfluenceWeight[country] * candidates[country].priceValue;
+  }
+  const maxDev = sc.maxCountryDeviationRatioFromReference;
+
+  for (const country of countryIds) {
+    const countryOpening = opening.byCountry[country];
+    const c = candidates[country];
+
+    let newPriceValue = c.priceValue;
+    let spreadBounded = false;
+    if (maxDev > 0 && referencePriceValue > 0) {
+      const lower = referencePriceValue * (1 - maxDev);
+      const upper = referencePriceValue * (1 + maxDev);
+      const bounded = clamp(newPriceValue, lower, upper);
+      spreadBounded = Math.abs(bounded - newPriceValue) > 1e-12;
+      newPriceValue = bounded;
+    }
+    newPriceValue = Math.max(newPriceValue, parameters.priceFloorUsdPerKg);
 
     const drivers: MarketPriceDriver[] = [];
     const t = parameters.driverThresholds;
@@ -159,19 +239,20 @@ export function clearHosoMarket(
     if (countryOpening.localPressure < -t.supplyDemandImbalance) drivers.push("COUNTRY_SUPPLY_SURPLUS");
     if (opening.worldSupplyDemandBalance > t.supplyDemandImbalance) drivers.push("GLOBAL_SUPPLY_SHORTAGE");
     if (opening.worldSupplyDemandBalance < -t.supplyDemandImbalance) drivers.push("GLOBAL_SUPPLY_SURPLUS");
-    if (wasCapped) drivers.push("PRICE_CHANGE_CAPPED");
-    if (Math.abs(shock) > 1e-9) drivers.push("MARKET_SHOCK_APPLIED");
+    if (c.wasCapped) drivers.push("PRICE_CHANGE_CAPPED");
+    if (spreadBounded) drivers.push("COUNTRY_PRICE_SPREAD_BOUNDED");
+    if (Math.abs(c.shock) > 1e-9) drivers.push("MARKET_SHOCK_APPLIED");
 
-    const finalChangeRatio = safeDivide(newPriceValue - priorPriceValue, priorPriceValue);
+    const finalChangeRatio = safeDivide(newPriceValue - c.priorPriceValue, c.priorPriceValue);
 
     result[country] = {
       country,
       price: usdPerHosoEqKg(newPriceValue),
-      priorPrice: usdPerHosoEqKg(priorPriceValue),
+      priorPrice: usdPerHosoEqKg(c.priorPriceValue),
       changeRatio: finalChangeRatio,
       localPressure: countryOpening.localPressure,
       worldPressure: opening.worldPressure,
-      shockApplied: shock,
+      shockApplied: c.shock,
       exportableSupply: countryOpening.exportableSupply,
       allocatedDemand: countryOpening.allocatedDemand,
       utilizationRatio: countryOpening.utilizationRatio,

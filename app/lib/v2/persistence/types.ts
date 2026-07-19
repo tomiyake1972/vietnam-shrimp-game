@@ -38,7 +38,14 @@ import {
  * （マイグレーション）を追加できる構造にしてある（本Phaseではマイグレーション
  * 自体は未実装。§9「将来のスキーママイグレーション方針」参照）。
  */
-export const CURRENT_PERSISTED_GAME_STATE_VERSION = 1;
+/**
+ * 【バージョン履歴】
+ *   1: Phase 5.7 初版。
+ *   2: Phase 6.3。SalesContractへオプショナルなcostSnapshot（契約時予想原価
+ *      スナップショット）を追加。バージョン1のデータは追加フィールドが無いだけで
+ *      そのまま読める（マイグレーション不要の追加的変更）。
+ */
+export const CURRENT_PERSISTED_GAME_STATE_VERSION = 2;
 
 // ---------------------------------------------------------------------
 // 2. 永続化状態

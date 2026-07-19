@@ -20,7 +20,7 @@ import { validatePersistedGameState } from "./schema";
  * リテラルを組み立てる）。
  */
 function contractToDto(contract: SalesContract): Record<string, unknown> {
-  return {
+  const dto: Record<string, unknown> = {
     contractId: contract.contractId,
     companyId: contract.companyId,
     market: contract.market,
@@ -32,6 +32,16 @@ function contractToDto(contract: SalesContract): Record<string, unknown> {
     unitPrice: unwrapUnit(contract.unitPrice),
     status: contract.status,
   };
+  // Phase 6.3（schemaVersion 2）: 契約時予想原価スナップショット（オプショナル、固定キー順序）。
+  if (contract.costSnapshot !== undefined) {
+    dto.costSnapshot = {
+      expectedRawMaterialPriceUsdPerHosoEqKg: contract.costSnapshot.expectedRawMaterialPriceUsdPerHosoEqKg,
+      expectedProcessingCostUsdPerHosoEqKg: contract.costSnapshot.expectedProcessingCostUsdPerHosoEqKg,
+      minimumAcceptablePriceUsdPerHosoEqKg: contract.costSnapshot.minimumAcceptablePriceUsdPerHosoEqKg,
+      expectedContributionMarginUsdPerHosoEqKg: contract.costSnapshot.expectedContributionMarginUsdPerHosoEqKg,
+    };
+  }
+  return dto;
 }
 
 /** RawMaterialLotを、固定のキー順序を持つプレーンオブジェクト（DTO）へ変換する。 */

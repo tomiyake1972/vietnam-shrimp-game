@@ -24,7 +24,7 @@
 //   12. 統合結果を返す
 
 import { createRandomStream } from "../core/random";
-import { HosoEqTons, ratio } from "../core/units";
+import { HosoEqTons, hosoEqTons, ratio, unwrapUnit } from "../core/units";
 import { MARKET_PARAMETERS_V1 } from "../market/parameters";
 import { calculateMarketQuarter } from "../market/index";
 import { SALES_PARAMETERS_V1 } from "../sales/parameters";
@@ -58,6 +58,7 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
 
   let companyEffectivePurchaseIntents: readonly { readonly companyId: CompanyId; readonly effectiveIntent: HosoEqTons }[] = [];
   let aggregatedPurchaseIntent: HosoEqTons | undefined;
+  let externalProcessorIntent: HosoEqTons | undefined;
   let overriddenMarketInput = input.marketInput;
 
   if (input.domesticPurchaseIntentSource.type === "companyPlans") {
@@ -72,7 +73,15 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
       .sort((a, b) => a.companyId.localeCompare(b.companyId));
 
     aggregatedPurchaseIntent = aggregateDomesticPurchaseIntent(plans, referenceSupply, rawMaterialsParams);
-    overriddenMarketInput = applyDomesticPurchaseIntentOverride(input.marketInput, aggregatedPurchaseIntent);
+    // 【Phase 6.3（実装指示 §5）】国内価格形成用の総買付意向 =
+    // 外部加工業者需要 + プレイヤー系会社の信認済み買付意向。プレイヤー系会社の
+    // 行動は国内価格へ明確に影響するが、会社が買付を止めただけでベトナム全体の
+    // 需要がゼロになる構造にはしない（externalIntent未指定時は従来どおり0）。
+    externalProcessorIntent = input.domesticPurchaseIntentSource.externalIntent;
+    const totalIntent = hosoEqTons(
+      unwrapUnit(aggregatedPurchaseIntent) + (externalProcessorIntent !== undefined ? unwrapUnit(externalProcessorIntent) : 0)
+    );
+    overriddenMarketInput = applyDomesticPurchaseIntentOverride(input.marketInput, totalIntent);
   }
   // "phase3Fallback" の場合はinput.marketInputをそのまま使う（上書きしない）。
 
@@ -102,12 +111,30 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
     lots: input.existingLots,
     history: [],
   };
+  // 【Phase 6.3（実装指示 §4・§5）】プレイヤー系会社が配分対象にできる国内原料量。
+  // 当期の実際の取引成立量（transactedVolume。留保価格による数量調整後）のうち、
+  // 総買付意向に占める会社側意向の比率分だけを会社別配分の原資とする。
+  //   - 通常時（供給 >= 需要、数量調整なし）: transacted = 実効需要 → 原資 = 会社集計意向
+  //   - 供給不足・数量調整時: transacted < 実効需要 → 原資が比例的に縮小し、調達未達が発生
+  // 未売却の潜在供給（unsoldSupply）は会社在庫へ自動計上されない。
+  const effectiveDemandValue = unwrapUnit(marketResult.vietnamDomestic.effectiveDemand);
+  const companyAvailableDomesticSupply: HosoEqTons =
+    aggregatedPurchaseIntent !== undefined && effectiveDemandValue > 1e-9
+      ? hosoEqTons(
+          unwrapUnit(marketResult.vietnamDomestic.transactedVolume) *
+            Math.min(1, unwrapUnit(aggregatedPurchaseIntent) / effectiveDemandValue)
+        )
+      : marketResult.vietnamDomestic.transactedVolume;
+
   const rawMaterialsQuarterInput: RawMaterialsQuarterInput = {
     domesticPurchasePlans: input.domesticPurchaseIntentSource.type === "companyPlans" ? input.domesticPurchaseIntentSource.plans : [],
     importOrders: input.importOrders,
     aquacultureStockingPlans: input.aquacultureStockingPlans,
     vietnamDomesticPrice: marketResult.vietnamDomestic.price,
-    vietnamDomesticSupply: marketResult.vietnamDomestic.supply,
+    vietnamDomesticSupply: companyAvailableDomesticSupply,
+    // 1社あたりの最大買付シェア（maximumBuyerShare）の基準は、会社向け原資ではなく
+    // 国内市場全体の供給量のまま維持する（Phase 6.3）。
+    shareCapReferenceSupply: marketResult.vietnamDomestic.supply,
     originHosoFobPrice: Object.fromEntries(
       Object.entries(marketResult.hosoPrices).map(([country, r]) => [country, r.price])
     ) as RawMaterialsQuarterInput["originHosoFobPrice"],
@@ -147,6 +174,8 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
     debug: {
       companyEffectivePurchaseIntents,
       aggregatedPurchaseIntent,
+      externalProcessorIntent,
+      companyAvailableDomesticSupply,
       domesticProcurementIntentBeforeOverride,
       domesticProcurementIntentAfterOverride,
       domesticMarketPrice: marketResult.vietnamDomestic.price,

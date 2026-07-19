@@ -193,14 +193,20 @@ export function validateScenarioDefinition(definition: ScenarioDefinition): Scen
   }
 
   const econ = definition.initialStateOverrides.vietnamProcessingEconomics;
-  if (econ.hosoYieldRatio <= 0 || econ.hosoYieldRatio > 1) {
-    errors.push(`initialStateOverrides.vietnamProcessingEconomics.hosoYieldRatio は(0,1]の範囲である必要があります。`);
+  if (econ.hosoEqRecoveryRatio <= 0 || econ.hosoEqRecoveryRatio > 1) {
+    errors.push(`initialStateOverrides.vietnamProcessingEconomics.hosoEqRecoveryRatio は(0,1]の範囲である必要があります。`);
   }
   if (econ.processingExportCostUsdPerKg < 0) {
     errors.push(`initialStateOverrides.vietnamProcessingEconomics.processingExportCostUsdPerKg は0以上である必要があります。`);
   }
   if (econ.requiredMarginUsdPerKg < 0) {
     errors.push(`initialStateOverrides.vietnamProcessingEconomics.requiredMarginUsdPerKg は0以上である必要があります。`);
+  }
+  const farmerEcon = definition.initialStateOverrides.vietnamFarmerEconomics;
+  if (farmerEcon) {
+    if (farmerEcon.farmingCostUsdPerHosoEqKg < 0 || farmerEcon.diseaseRiskAllowanceUsdPerHosoEqKg < 0 || farmerEcon.minimumFarmerMarginUsdPerHosoEqKg < 0) {
+      errors.push(`initialStateOverrides.vietnamFarmerEconomics の各構成要素は0以上である必要があります。`);
+    }
   }
   if (definition.initialStateOverrides.vietnamTrailingAverageDomesticPurchaseHosoEqTons < 0) {
     errors.push(`initialStateOverrides.vietnamTrailingAverageDomesticPurchaseHosoEqTons は0以上である必要があります。`);

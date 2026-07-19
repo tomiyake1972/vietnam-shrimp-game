@@ -147,10 +147,14 @@ test("国内買付意向の増加は国際HOSO価格（各国FOB）を変えな�
       unwrapUnit(fallbackResult.marketResult.hosoPrices[country].price)
     );
   }
-  // 一方、国内原料価格には影響が及ぶはず（買付意向を無制限には認めないが、増加分は反映される）。
+  // 一方、国内原料市場の需給には影響が及ぶはず（買付意向を無制限には認めないが、
+  // 増加・変更分は実効需要へ反映される）。
+  // 【Phase 6.3】価格そのものは農家留保価格が下限として働くため、両ケースとも
+  // 留保価格に張り付いて同値になる場合がある（価格ではなく数量で調整される設計）。
+  // そのため実効需要の差で検証する。
   assert.notEqual(
-    unwrapUnit(largeIntentResult.marketResult.vietnamDomestic.price),
-    unwrapUnit(fallbackResult.marketResult.vietnamDomestic.price)
+    unwrapUnit(largeIntentResult.marketResult.vietnamDomestic.effectiveDemand),
+    unwrapUnit(fallbackResult.marketResult.vietnamDomestic.effectiveDemand)
   );
 });
 

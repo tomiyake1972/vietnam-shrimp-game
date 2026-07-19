@@ -52,6 +52,12 @@ export interface DomesticPurchasePlanEntry {
   readonly priceAdjustmentUsdPerHosoEqKg: number;
   /** 配置する調達人員数（0以上の整数）。市場カバレッジと同様の逓減曲線でカバレッジへ変換する。 */
   readonly procurementHeadcount: number;
+  /**
+   * 【Phase 6.3（実装指示 §6）】会社の工場共通原料処理能力の合計（HOSO換算トン/四半期）。
+   * 指定時は調達処理能力を工場能力連動方式（capacityFactoryLinked）で算出する。
+   * 未指定時は従来の絶対値カーブ（baselineCapacityTons等）へフォールバック（後方互換）。
+   */
+  readonly factoryCommonProcessingCapacityTons?: number;
   /** 養殖業者との関係スコア（0〜100）。未接続時は中立値。 */
   readonly farmerRelationship?: Score0to100;
   /** 支払・引取信頼性評価（0〜100）。未接続時は中立値。 */
@@ -219,7 +225,20 @@ export interface RawMaterialsQuarterInput {
   readonly aquacultureStockingPlans: readonly AquacultureStockingPlanEntry[];
   /** Phase3のベトナム国内原料市場清算結果（当期分。呼び出し側がPhase1/3から取得して渡す）。 */
   readonly vietnamDomesticPrice: UsdPerHosoEqKg;
+  /**
+   * プレイヤー系会社の配分原資となる国内原料量。
+   * 【Phase 6.3】外部加工業者需要の導入により、国内市場全体の供給量そのものではなく
+   * 「当期の実際の取引成立量のうち会社側意向に比例する分」を渡す想定
+   * （turn/runner.tsのcompanyAvailableDomesticSupply参照）。
+   */
   readonly vietnamDomesticSupply: HosoEqTons;
+  /**
+   * 1社あたりの最大買付シェア（maximumBuyerShare）の基準供給量（Phase 6.3）。
+   * 未指定時はvietnamDomesticSupplyを基準とする（後方互換）。外部需要導入後は
+   * 国内市場全体の供給量を渡し、シェア上限の意味（市場全体に対する買い占め防止）を
+   * 維持する。
+   */
+  readonly shareCapReferenceSupply?: HosoEqTons;
   /** Phase1の国別HOSO FOB価格（輸入着地価格の起点）。 */
   readonly originHosoFobPrice: Readonly<Record<CountryId, UsdPerHosoEqKg>>;
   /** Phase1の国別exportableSupply（輸入上限算出の起点）。 */

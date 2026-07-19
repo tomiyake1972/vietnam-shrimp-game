@@ -260,13 +260,31 @@ export interface ScenarioPrehistory {
 }
 
 export interface VietnamProcessingEconomics {
-  readonly hosoYieldRatio: number;
+  /**
+   * 国内原料（HOSO換算）→輸出製品（HOSO換算）の真の販売可能回収率。
+   * 【Phase 6.3修正】旧フィールド名hosoYieldRatio（0.62、HLSO相当の物理歩留まり）は
+   * HOSO換算価格どうしの買付上限計算に物理重量換算を混入させていたため廃止。
+   * 通常操業時の基準は1.00（正常な頭・殻の除去はHOSO換算量を減らさない）。
+   */
+  readonly hosoEqRecoveryRatio: number;
   readonly processingExportCostUsdPerKg: number;
   readonly requiredMarginUsdPerKg: number;
 }
 
+/**
+ * 養殖農家の販売留保価格の構成要素（Phase 6.3、実装指示 §4）。シナリオから
+ * 変動可能な設定値。未指定時は市場モジュール既定値（MarketParameters）を使う。
+ */
+export interface VietnamFarmerEconomics {
+  readonly farmingCostUsdPerHosoEqKg: number;
+  readonly diseaseRiskAllowanceUsdPerHosoEqKg: number;
+  readonly minimumFarmerMarginUsdPerHosoEqKg: number;
+}
+
 export interface ScenarioInitialStateOverrides {
   readonly vietnamProcessingEconomics: VietnamProcessingEconomics;
+  /** 未指定時は市場モジュール既定値（farmerEconomicsDefaults）を使う。 */
+  readonly vietnamFarmerEconomics?: VietnamFarmerEconomics;
   readonly vietnamTrailingAverageDomesticPurchaseHosoEqTons: number;
   /** PreviousMarketContextを呼び出し側がまだ持たないturn=1向けの参考初期値。 */
   readonly initialDomesticProcurementIntentHosoEqTons: number;
@@ -350,6 +368,8 @@ export interface ScenarioTurnInput {
   readonly vietnamDomesticRawSupply: HosoEqTons;
   readonly vietnamTrailingAverageDomesticPurchase: HosoEqTons;
   readonly vietnamProcessingEconomics: VietnamProcessingEconomics;
+  /** シナリオが指定した場合のみ設定される（未指定時は市場モジュール既定値）。 */
+  readonly vietnamFarmerEconomics?: VietnamFarmerEconomics;
   readonly pdVapDemand: { readonly pdDemand: HosoEqTons; readonly vapDemand: HosoEqTons };
   /** このターンに何らかの強度（0超）で影響しているイベントのID一覧。 */
   readonly activeEventIds: readonly string[];

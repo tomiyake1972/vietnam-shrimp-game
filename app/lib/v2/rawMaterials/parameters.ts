@@ -32,10 +32,31 @@ export interface RawMaterialsParameters {
      * processingCapacityと同じ形。会社の実際の買付実務能力の上限であり、
      * 「有効買付意向」（信認上限付きの買付意向。§1参照）の算出にも、実配分の
      * cap算出にも使う。
+     * 【Phase 6.3】工場能力情報が無い呼び出し（industryLabの小規模テスト会社等）
+     * 向けのフォールバック絶対値カーブ。工場能力を持つ会社
+     * （DomesticPurchasePlanEntry.factoryCommonProcessingCapacityTons指定時）は
+     * capacityFactoryLinked（工場能力連動方式）を優先する。
      */
     readonly baselineCapacityTons: number;
     readonly capacityMaxIncrementTons: number;
     readonly capacitySaturationHeadcount: number;
+
+    /**
+     * 【Phase 6.3新規（実装指示 §6）】工場能力連動の調達処理能力。
+     *   調達能力 = 工場共通原料処理能力 × (baseRatioAtZeroHeadcount
+     *              + ratioMaxIncrement × 人員/(人員+saturationHeadcount))
+     * 一律倍率（旧company-labの約100倍補正）を廃止し、会社別の工場能力と
+     * 調達人員の双方を上限計算へ反映する。通常時の調達能力が工場の共通原料
+     * 処理能力のおおむね1.0〜1.5倍になるよう校正した暫定値:
+     *   - 通常操業では頻繁に制約になりすぎない（調達構成6〜7割の国内買付は余裕内）
+     *   - 急増産・買い占め（工場能力を大きく超える買付）では制約になる
+     *   - 調達人員を増やす効果は残るが飽和する
+     */
+    readonly capacityFactoryLinked: {
+      readonly baseRatioAtZeroHeadcount: number;
+      readonly ratioMaxIncrement: number;
+      readonly saturationHeadcount: number;
+    };
 
     /** 競争力の合成ウェイト（合計1.0を推奨）。 */
     readonly competitivenessWeights: {
@@ -133,6 +154,14 @@ export const RAW_MATERIALS_PARAMETERS_V1: RawMaterialsParameters = {
     baselineCapacityTons: 150,
     capacityMaxIncrementTons: 3600,
     capacitySaturationHeadcount: 10,
+
+    // Phase 6.3新規・要校正: 5社フィクスチャの工場能力（1.5万〜3.6万トン/四半期）に
+    // 対し、人員8〜20人で調達能力が工場能力の約1.03〜1.30倍となる。
+    capacityFactoryLinked: {
+      baseRatioAtZeroHeadcount: 0.5,
+      ratioMaxIncrement: 1.2,
+      saturationHeadcount: 10,
+    },
 
     competitivenessWeights: {
       price: 0.4,

@@ -61,6 +61,21 @@ export function createContractsFromAllocation(
       }
       seenIds.add(contractId);
 
+      // 【Phase 6.3（実装指示 §9）】販売計画が予想原価を持つ場合、契約時
+      // スナップショットとして保持する（契約後の原料高でも契約単価は自動改定
+      // しない。Phase 8で実績原価との突き合わせに使う）。
+      const expectation = plan?.costExpectation;
+      const costSnapshot =
+        expectation !== undefined
+          ? {
+              ...expectation,
+              expectedContributionMarginUsdPerHosoEqKg:
+                unwrapUnit(company.askPrice) -
+                expectation.expectedRawMaterialPriceUsdPerHosoEqKg -
+                expectation.expectedProcessingCostUsdPerHosoEqKg,
+            }
+          : undefined;
+
       contracts.push({
         contractId,
         companyId: company.companyId,
@@ -72,6 +87,7 @@ export function createContractsFromAllocation(
         outstandingQuantity: hosoEqTons(unwrapUnit(company.allocatedQuantity)),
         unitPrice: company.askPrice,
         status: "open",
+        ...(costSnapshot !== undefined ? { costSnapshot } : {}),
       });
     }
   }

@@ -172,7 +172,10 @@ export const SCENARIO_PREHISTORY_BASELINE_V1: ScenarioPrehistory = {
 
 export const SCENARIO_INITIAL_STATE_OVERRIDES_V1: ScenarioInitialStateOverrides = {
   vietnamProcessingEconomics: {
-    hosoYieldRatio: 0.62,
+    // Phase 6.3修正: 旧hosoYieldRatio=0.62（HLSO相当の物理歩留まり）は買付上限の
+    // HOSO換算計算に物理重量換算を混入させていたため、HOSO換算上の真の回収率
+    // （通常操業基準1.00）へ是正した。
+    hosoEqRecoveryRatio: 1.0,
     processingExportCostUsdPerKg: 0.85,
     requiredMarginUsdPerKg: 0.25,
   },

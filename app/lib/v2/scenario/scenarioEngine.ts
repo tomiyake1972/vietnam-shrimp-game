@@ -437,6 +437,9 @@ export function getScenarioTurnInput(state: ScenarioState, turn: number): Scenar
     vietnamDomesticRawSupply: countries.VN.production,
     vietnamTrailingAverageDomesticPurchase: computeTrailingDomesticPurchase(state, turn, params),
     vietnamProcessingEconomics: definition.initialStateOverrides.vietnamProcessingEconomics,
+    ...(definition.initialStateOverrides.vietnamFarmerEconomics !== undefined
+      ? { vietnamFarmerEconomics: definition.initialStateOverrides.vietnamFarmerEconomics }
+      : {}),
     pdVapDemand: { pdDemand, vapDemand },
     activeEventIds: activeEventIdsAtTurn(state.resolvedEvents, turn),
   };
