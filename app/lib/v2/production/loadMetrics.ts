@@ -1,22 +1,18 @@
-// ShrimpX V2 — 工場・ワーカー・生産モジュール 操業負荷指標（Phase 6）
+// ShrimpX V2 — 工場・ワーカー・生産モジュール 操業負荷指標（Phase 6、Phase 6.1で実配分人数を使うよう修正）
 //
 // Phase7（品質・信用の変動を扱う想定）へ渡すための、工場・会社別の操業負荷
 // 指標を集計する。本Phase自身はこれらの指標から品質・信用を一切変化させない
 // （集計・出力のみ）。
+//
+// 【Phase 6.1修正】労働稼働率・残業率・臨時ワーカー比率は、labor.tsの
+// allocateWorkersToPlansが実際に配分した人数（ProductionAllocationEntry.labor）を
+// 使って算出する。Phase6初版はワーカーの奪い合いを解決せずに独立して労働能力を
+// 再計算していたため、実際の配分と乖離しうる欠陥があった。
 
 import { PeriodV2, toYearQuarter } from "../core/period";
 import { ratio, roundRatio, unwrapUnit } from "../core/units";
 import { calculateFactoryEffectiveCapacity } from "./capacity";
-import { calculateEffectiveLaborCapacity, effectiveLaborCapacityForProduct } from "./labor";
-import { PRODUCTION_PARAMETERS_V1, ProductionParameters } from "./parameters";
-import {
-  CompanyLoadMetrics,
-  Factory,
-  FactoryLoadMetrics,
-  ProductionAllocationEntry,
-  ProductionBatch,
-  WorkerAssignment,
-} from "./types";
+import { CompanyLoadMetrics, Factory, FactoryLoadMetrics, ProductionAllocationEntry, ProductionBatch } from "./types";
 
 const EPSILON = 1e-6;
 
@@ -32,15 +28,19 @@ export interface RawMaterialLotOrigin {
   readonly inboundPeriod: PeriodV2;
 }
 
-/** 1工場ぶんの操業負荷指標を算出する。 */
+/**
+ * 1工場ぶんの操業負荷指標を算出する。労働関連の指標（労働稼働率・残業率・
+ * 臨時ワーカー比率）は、entries（allocateProductionPlansの出力）が保持する
+ * 実際の配分結果（labor.assignedRegularHeadcount等・stages.laborLimited）を
+ * そのまま使う。ワーカー配分を本関数が独立に再計算することはしない
+ * （実際の配分と乖離させないため）。
+ */
 export function calculateFactoryLoadMetrics(
   factory: Factory,
-  workerAssignments: readonly WorkerAssignment[],
   entries: readonly ProductionAllocationEntry[],
   batches: readonly ProductionBatch[],
   rawMaterialLotOrigins: readonly RawMaterialLotOrigin[],
-  period: PeriodV2,
-  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+  period: PeriodV2
 ): FactoryLoadMetrics {
   const factoryEntries = entries.filter((e) => e.factoryId === factory.factoryId);
   const factoryBatches = batches.filter((b) => b.factoryId === factory.factoryId);
@@ -54,18 +54,27 @@ export function calculateFactoryLoadMetrics(
   const capacity = calculateFactoryEffectiveCapacity(factory);
   const equipmentUtilizationRate = unwrapUnit(capacity.commonProcessing) > EPSILON ? totalProduced / unwrapUnit(capacity.commonProcessing) : 0;
 
-  const assignment = workerAssignments.find((a) => a.factoryId === factory.factoryId && a.companyId === factory.companyId);
+  // 労働稼働率: 実際に生産された量 / 実際に配分された労働能力（stages.laborLimited）の合計。
+  const totalLaborCapacityAllocated = factoryEntries.reduce((sum, e) => sum + unwrapUnit(e.stages.laborLimited), 0);
+  const laborUtilizationRate = totalLaborCapacityAllocated > EPSILON ? totalProduced / totalLaborCapacityAllocated : 0;
+
+  // 残業率: 実際に配分された生産量（allocatedQuantity）で加重した、各計画の適用後残業率の平均。
+  const totalAllocated = factoryEntries.reduce((sum, e) => sum + unwrapUnit(e.allocatedQuantity), 0);
+  const overtimeRate =
+    totalAllocated > EPSILON
+      ? factoryEntries.reduce((sum, e) => sum + unwrapUnit(e.labor.appliedOvertimeRate) * unwrapUnit(e.allocatedQuantity), 0) / totalAllocated
+      : factoryEntries.length > 0
+        ? factoryEntries.reduce((sum, e) => sum + unwrapUnit(e.labor.appliedOvertimeRate), 0) / factoryEntries.length
+        : 0;
+
+  // 臨時ワーカー比率: 実際に配分された常用・臨時ワーカー人数の合計から算出する
+  // （工場全体で、同じ人数を複数商品へ重複計上していないため、単純合算でよい）。
+  const totalAssignedRegular = factoryEntries.reduce((sum, e) => sum + e.labor.assignedRegularHeadcount, 0);
+  const totalAssignedTemporary = factoryEntries.reduce((sum, e) => sum + e.labor.assignedTemporaryHeadcount, 0);
+  const totalAssignedHeadcount = totalAssignedRegular + totalAssignedTemporary;
+  const temporaryWorkerShare = totalAssignedHeadcount > EPSILON ? totalAssignedTemporary / totalAssignedHeadcount : 0;
+
   const productsProduced = Array.from(new Set(factoryBatches.filter((b) => unwrapUnit(b.finishedGoodsQuantity) > EPSILON).map((b) => b.product)));
-  const totalLaborCapacityForProducedMix = assignment
-    ? productsProduced.reduce((sum, product) => {
-        const laborResult = calculateEffectiveLaborCapacity(assignment, capacity, undefined, params);
-        return sum + effectiveLaborCapacityForProduct(laborResult, product);
-      }, 0)
-    : 0;
-  const laborUtilizationRate = totalLaborCapacityForProducedMix > EPSILON ? totalProduced / totalLaborCapacityForProducedMix : 0;
-
-  const laborResultForAssignment = assignment ? calculateEffectiveLaborCapacity(assignment, capacity, undefined, params) : undefined;
-
   const productMixComplexity = productsProduced.length > 1 ? (productsProduced.length - 1) / 2 : 0;
 
   const originByLotId = new Map(rawMaterialLotOrigins.map((o) => [o.lotId, o.inboundPeriod]));
@@ -88,8 +97,8 @@ export function calculateFactoryLoadMetrics(
     period,
     equipmentUtilizationRate: ratio(roundRatio(Math.min(1, Math.max(0, equipmentUtilizationRate)))),
     laborUtilizationRate: ratio(roundRatio(Math.min(1, Math.max(0, laborUtilizationRate)))),
-    overtimeRate: laborResultForAssignment ? laborResultForAssignment.appliedOvertimeRate : ratio(0),
-    temporaryWorkerShare: laborResultForAssignment ? laborResultForAssignment.temporaryWorkerShare : ratio(0),
+    overtimeRate: ratio(roundRatio(Math.min(1, Math.max(0, overtimeRate)))),
+    temporaryWorkerShare: ratio(roundRatio(Math.min(1, Math.max(0, temporaryWorkerShare)))),
     productMixComplexity: ratio(roundRatio(productMixComplexity)),
     averageRawMaterialAgeQuarters: Math.round(averageRawMaterialAgeQuarters * 100) / 100,
     productionShortfallRate: ratio(roundRatio(totalDesired > EPSILON ? Math.min(1, Math.max(0, totalShortfall / totalDesired)) : 0)),
@@ -100,14 +109,12 @@ export function calculateFactoryLoadMetrics(
 /** 複数工場ぶんの操業負荷指標をまとめて算出する。 */
 export function calculateAllFactoryLoadMetrics(
   factories: readonly Factory[],
-  workerAssignments: readonly WorkerAssignment[],
   entries: readonly ProductionAllocationEntry[],
   batches: readonly ProductionBatch[],
   rawMaterialLotOrigins: readonly RawMaterialLotOrigin[],
-  period: PeriodV2,
-  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+  period: PeriodV2
 ): readonly FactoryLoadMetrics[] {
-  return factories.map((f) => calculateFactoryLoadMetrics(f, workerAssignments, entries, batches, rawMaterialLotOrigins, period, params));
+  return factories.map((f) => calculateFactoryLoadMetrics(f, entries, batches, rawMaterialLotOrigins, period));
 }
 
 /** 会社単位に、その会社の全工場のload指標をHOSO換算量で加重集計する。 */

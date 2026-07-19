@@ -114,23 +114,37 @@ export interface WorkerAssignment {
   readonly lifecycleStatus?: WorkerLifecycleStatus;
 }
 
-/** 1工場・1商品区分の有効労働能力（HosoEqTons、完成品換算量ベース）。 */
-export interface EffectiveLaborCapacityEntry {
+/**
+ * 1つの生産計画に対して、工場共通のワーカープール（WorkerAssignment）から
+ * 実際に配分された常用・臨時ワーカー人数と、そこから算出した有効労働能力
+ * （HosoEqTons、完成品換算量ベース）。
+ *
+ * 【Phase 6.1修正】常用・臨時ワーカーは、工場全体で有限の共有プールとして
+ * 扱う。同じ人数を複数商品へ重複して割り当てることはできず、1工場内の
+ * 商品別配分（assignedRegularHeadcount・assignedTemporaryHeadcountの合計）は
+ * WorkerAssignment.regularHeadcount / .temporaryHeadcountをそれぞれ超えない
+ * （常用・臨時は別々に数量保存する。allocateWorkersToPlans参照）。
+ */
+export interface WorkerAllocationEntry {
   readonly factoryId: string;
   readonly companyId: CompanyId;
   readonly product: Product;
-  readonly capacity: HosoEqTons;
-}
-
-/** 有効労働能力の算出結果一式（工場全体、商品別の内訳つき）。 */
-export interface EffectiveLaborCapacityResult {
-  readonly factoryId: string;
-  readonly companyId: CompanyId;
-  readonly byProduct: readonly EffectiveLaborCapacityEntry[];
-  /** 臨時ワーカー比率（臨時 / (正社員+臨時)）。操業負荷指標へそのまま転記する。 */
-  readonly temporaryWorkerShare: Ratio;
+  /** この生産計画へ実際に配分された常用ワーカー人数（工場の共有プールから配分。他計画と重複しない）。 */
+  readonly assignedRegularHeadcount: number;
+  /** この生産計画へ実際に配分された臨時ワーカー人数。 */
+  readonly assignedTemporaryHeadcount: number;
   /** 適用後の残業率（overtimeRateCapで上限クリップ後の値）。 */
   readonly appliedOvertimeRate: Ratio;
+  /** 配分された人数（assignedRegularHeadcount・assignedTemporaryHeadcount）から算出した有効労働能力。 */
+  readonly laborCapacity: HosoEqTons;
+}
+
+/** 1工場ぶんの配分後・未配置ワーカー人数（優先順位配分後、資源不足等で余った人数）。 */
+export interface FactoryWorkerAllocationSummary {
+  readonly factoryId: string;
+  readonly companyId: CompanyId;
+  readonly unassignedRegularHeadcount: number;
+  readonly unassignedTemporaryHeadcount: number;
 }
 
 // ---------------------------------------------------------------------
@@ -187,9 +201,13 @@ export interface ProductionAllocationEntry {
   readonly shortfallQuantity: HosoEqTons;
   /** 生産できなかった理由（複数該当しうる。desiredQuantityと一致した場合は空配列）。 */
   readonly shortfallReasons: readonly ProductionShortfallReason[];
-  /** この配分が要求する原料消費量（allocatedQuantity / yieldRatio）。 */
+  /** この配分が要求する原料消費量（allocatedQuantity / saleableRecoveryRatio）。 */
   readonly requiredRawMaterialQuantity: HosoEqTons;
-  /** 各制約段階での中間値（監査・テスト用）。 */
+  /**
+   * 各制約段階での中間値（監査・テスト用）。すべて完成品HOSO換算量ベース
+   * （commonCapacityLimitedは、工場共通処理能力による原料投入側の制約を
+   * saleableRecoveryRatioで完成品換算量へ変換した値）。
+   */
   readonly stages: {
     readonly rawMaterialLimited: HosoEqTons;
     readonly commonCapacityLimited: HosoEqTons;
@@ -197,11 +215,19 @@ export interface ProductionAllocationEntry {
     readonly productCapacityLimited: HosoEqTons;
     readonly laborLimited: HosoEqTons;
   };
+  /** 工場共通ワーカープールから実際に配分された人数・有効労働能力（§2「ワーカーを工場共通資源にする」）。 */
+  readonly labor: {
+    readonly assignedRegularHeadcount: number;
+    readonly assignedTemporaryHeadcount: number;
+    readonly appliedOvertimeRate: Ratio;
+  };
 }
 
 export interface ProductionAllocationResult {
   readonly period: PeriodV2;
   readonly entries: readonly ProductionAllocationEntry[];
+  /** 工場ごとの配分後・未配置ワーカー人数（優先順位配分で使い切れなかった人数）。 */
+  readonly factoryWorkerSummaries: readonly FactoryWorkerAllocationSummary[];
 }
 
 // ---------------------------------------------------------------------

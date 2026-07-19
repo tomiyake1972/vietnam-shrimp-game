@@ -82,17 +82,53 @@ test("原料消費量 = 完成品数量 + 加工損失（数量保存）", () =>
   assert.ok(Math.abs(consumedTotal - (finished + loss)) < 0.02);
 });
 
-test("HOSO換算と歩留まりを二重適用しない（理論値と一致する）", () => {
-  const plans = [makePlan({ product: "hoso", desiredQuantity: hosoEqTons(92) })];
+test("HOSO換算と歩留まりを二重適用しない（理論値と一致する。saleableRecoveryRatio基準）", () => {
+  const recoveryRatio = PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio.hoso;
+  const desired = 90; // recoveryRatio(0.98)以下の値にして原料供給に余裕を持たせる
+  const plans = [makePlan({ product: "hoso", desiredQuantity: hosoEqTons(desired) })];
   const lots = [makeLot({ remainingQuantity: hosoEqTons(1000), originalQuantity: hosoEqTons(1000) })];
   const allocation = allocateProductionPlans(plans, [makeFactory()], [makeAssignment()], lots, P1);
   const { batches } = buildProductionBatches(plans, allocation.entries, lots, P1);
   const b = batches[0];
-  const yieldRatio = PRODUCTION_PARAMETERS_V1.yield.baseYieldRatio.hoso;
-  // 完成品92トンを作るための理論原料量 = 92 / yieldRatio。二重適用されていれば
-  // 92 / yieldRatio^2 のようなズレた値になる。
-  const theoreticalRaw = 92 / yieldRatio;
+  // 完成品(HOSO換算)desiredトンを作るための理論原料量 = desired / saleableRecoveryRatio。
+  // 二重適用（物理歩留まりを追加で掛ける）されていれば desired / recoveryRatio^2 の
+  // ようなズレた値、あるいは物理歩留まり(0.92)基準のズレた値になる。
+  const theoreticalRaw = desired / recoveryRatio;
   assert.ok(Math.abs(unwrapUnit(b.rawMaterialConsumedTotal) - theoreticalRaw) < 0.5);
+});
+
+test("原料100トン(HOSO換算)からPD/VAPを生産しても、物理歩留まり(0.80/0.70)がHOSO換算完成品量へ" +
+  "直接適用されない（saleableRecoveryRatioのみが適用される）", () => {
+  const pdPlan = makePlan({ product: "pd", factoryId: "F1", desiredQuantity: hosoEqTons(1000), priority: 1 });
+  const vapPlan = makePlan({ product: "vap", factoryId: "F2", desiredQuantity: hosoEqTons(1000), priority: 1 });
+  const lotsPd = [makeLot({ companyId: "C1", remainingQuantity: hosoEqTons(100), originalQuantity: hosoEqTons(100) })];
+  const lotsVap = [makeLot({ companyId: "C1", remainingQuantity: hosoEqTons(100), originalQuantity: hosoEqTons(100) })];
+
+  const pdFactory = makeFactory({ factoryId: "F1", pdCapacity: hosoEqTons(100000), commonProcessingCapacity: hosoEqTons(100000), freezingPackagingCapacity: hosoEqTons(100000) });
+  const vapFactory = makeFactory({ factoryId: "F2", vapCapacity: hosoEqTons(100000), commonProcessingCapacity: hosoEqTons(100000), freezingPackagingCapacity: hosoEqTons(100000) });
+
+  const pdAllocation = allocateProductionPlans([pdPlan], [pdFactory], [makeAssignment({ factoryId: "F1" })], lotsPd, P1);
+  const { batches: pdBatches } = buildProductionBatches([pdPlan], pdAllocation.entries, lotsPd, P1);
+
+  const vapAllocation = allocateProductionPlans([vapPlan], [vapFactory], [makeAssignment({ factoryId: "F2" })], lotsVap, P1);
+  const { batches: vapBatches } = buildProductionBatches([vapPlan], vapAllocation.entries, lotsVap, P1);
+
+  // 原料100トン(HOSO換算)がすべて消費された場合、PD完成品(HOSO換算)は
+  // saleableRecoveryRatio.pd(0.97)倍の約97トンになるはずで、物理歩留まり
+  // physicalYieldRatio.pd(0.80)を直接掛けた80トンにはならない。
+  const pdFinished = unwrapUnit(pdBatches[0].finishedGoodsQuantity);
+  const pdRecovery = PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio.pd;
+  const pdPhysical = PRODUCTION_PARAMETERS_V1.yield.physicalYieldRatio.pd;
+  assert.ok(pdFinished > 90, `PD完成品HOSO換算量が物理歩留まりで二重に減らされている: ${pdFinished}`);
+  assert.ok(Math.abs(pdFinished - 100 * pdRecovery) < 1, `期待値: 100*${pdRecovery}=${100 * pdRecovery}, 実際: ${pdFinished}`);
+  assert.notEqual(Math.round(pdFinished), Math.round(100 * pdPhysical));
+
+  const vapFinished = unwrapUnit(vapBatches[0].finishedGoodsQuantity);
+  const vapRecovery = PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio.vap;
+  const vapPhysical = PRODUCTION_PARAMETERS_V1.yield.physicalYieldRatio.vap;
+  assert.ok(vapFinished > 90, `VAP完成品HOSO換算量が物理歩留まりで二重に減らされている: ${vapFinished}`);
+  assert.ok(Math.abs(vapFinished - 100 * vapRecovery) < 1, `期待値: 100*${vapRecovery}=${100 * vapRecovery}, 実際: ${vapFinished}`);
+  assert.notEqual(Math.round(vapFinished), Math.round(100 * vapPhysical));
 });
 
 test("原料ロットを二重消費しない（複数計画が同一会社の原料を取り合っても合計消費量が在庫を超えない）", () => {

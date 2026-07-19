@@ -1,4 +1,12 @@
-# ShrimpX V2 — 工場・ワーカー・HOSO/PD/VAP生産・完成品在庫・契約履行モジュール アーキテクチャ v0.1（Phase 6）
+# ShrimpX V2 — 工場・ワーカー・HOSO/PD/VAP生産・完成品在庫・契約履行モジュール アーキテクチャ v0.1（Phase 6、Phase 6.1で経済ロジックを修正）
+
+## 0. Phase 6.1 修正の要約（本節を最初に読むこと）
+
+Phase 6初版には、マージ前に必ず修正すべき2つの根本的な経済ロジックの欠陥があった。以下のようにPhase 6.1で修正し、`feature/v2-production`ブランチへ反映済み（マージ・Phase7着手はまだ行っていない）。
+
+**欠陥1（歩留まりの二重適用）**: 契約・原料・完成品在庫・能力・供給シグナルはすべてHOSO換算トンという「共通単位」で管理されている。ところが初版は、この共通単位に対して「殻・頭の除去等による物理的重量減少」の比率（物理歩留まり、例: PD 0.80）をそのまま乗じており、原料100 HOSO換算トンからPD完成品を作ると「80 HOSO換算トン」に減ってしまっていた。しかしPDの物理重量80トンは、HOSO換算し直せばもとの100トンとほぼ同等の価値であり、物理的な重量減少をHOSO換算量の「加工損失」として二重に計上してしまう誤りだった。Phase 6.1では、参考値としての`physicalYieldRatio`（物理重量換算専用、HOSO換算量計算には一切使わない）と、真の回収率としての`saleableRecoveryRatio`（規格外品・破損・廃棄等によりHOSO換算ベースでも失われる、1に近い真の歩留まり。暫定値 HOSO 0.98 / PD 0.97 / VAP 0.95）を分離した。HOSO換算量の計算に使うのは`saleableRecoveryRatio`のみである。
+
+**欠陥2（ワーカーの重複計上）**: 初版は労働能力を商品ごとに独立したケイパビリティ上限として計算しており、同じ工場の同じ100人が、HOSO・PD・VAPの3商品すべてで独立に「100人ぶんの労働能力」として計上されてしまっていた。Phase 6.1では、常用・臨時ワーカーそれぞれを工場単位の有限な共有プールとして扱い、商品間の奪い合いを原料・設備と同じ優先順位階層＋水位法で解決するよう修正した（詳細は§4）。
 
 ## 1. 本モジュールの責務・非責務
 
@@ -27,20 +35,26 @@
 
 `Factory`は、工場ID・会社ID・稼働状態（`"active"|"idle"|"suspended"`）に加え、5つの能力プールを持つ。共通原料処理能力（全商品が共有）、HOSO/PD/VAP専用加工能力、冷凍・包装能力（全商品が共有）。すべてHOSO換算トンで管理する。
 
-**単位についての設計判断（暫定・要校正）**: 5つの能力プールはすべて「その四半期に生産できる完成品のHOSO換算トン」を単位とする（原料消費トンではない）。原料と完成品はいずれもHosoEqTonsという同じ基盤を共有しているため、歩留まり（yieldRatio）は「原料消費量→完成品数量」の変換で一度だけ適用し、能力側の単位換算では歩留まりを二度適用しない。これは仕様が明記していない箇所への実装判断であり、Phase8以降の校正フェーズで見直す余地がある。
+**単位についての設計判断（Phase 6.1で確定）**: 5つの能力プールのうち、`commonProcessingCapacity`（工場共通処理能力）は「原料投入側」のHOSO換算トンを単位とする。原料の受け入れ・下処理という工程自体が原料投入量に対して制約されるため、完成品側の単位で管理すると`saleableRecoveryRatio`の適用順序が曖昧になり、歩留まりの二重適用を招く（Phase 6初版の欠陥1の一因）。一方、`hosoCapacity`/`pdCapacity`/`vapCapacity`（商品別加工能力）・`freezingPackagingCapacity`（冷凍・包装能力）は、いずれも「その四半期に生産できる完成品のHOSO換算トン」を単位とする（従来どおり）。歩留まり（`saleableRecoveryRatio`）は、`commonProcessingCapacity`による原料投入側の制約を経た後に一度だけ適用し、それ以降のいずれの能力プールでも歩留まりを再適用しない（§5・§6参照）。
 
 `calculateFactoryEffectiveCapacity(factory)`は、各能力プールへ`baseUtilizationRate`（基準稼働率）×`equipmentAvailabilityRate`（設備利用可能率）を適用した有効能力を返す。`status !== "active"`の工場は全プールが0になる（idle/suspendedの工場は生産に参加しない）。設備増設・工場建設・減価償却は一切行わず、外部から与えられた`Factory`の名目能力をそのまま使う。
 
-## 4. 労働能力式（`types.ts`・`labor.ts`）
+## 4. 労働能力式・共有ワーカープール（`types.ts`・`labor.ts`、Phase 6.1で共有プール化）
 
-`WorkerAssignment`は工場・会社ごとに、正社員・常用ワーカー人数（`regularHeadcount`）、臨時ワーカー人数（`temporaryHeadcount`）、商品別技能水準（`skills`）、残業率（`overtimeRate`）、欠勤・稼働可能率（`attendanceRate`）を持つ。将来の採用・退職・教育中の状態を表せる`lifecycleStatus`フィールドを持つが、本Phaseでは`"active"`のみを使う。
+`WorkerAssignment`は工場・会社ごとに、正社員・常用ワーカー人数（`regularHeadcount`）、臨時ワーカー人数（`temporaryHeadcount`）、商品別技能水準（`skills`）、残業率（`overtimeRate`）、欠勤・稼働可能率（`attendanceRate`）を持つ。将来の採用・退職・教育中の状態を表せる`lifecycleStatus`フィールドを持つが、本Phaseでは`"active"`のみを使う。この`regularHeadcount`/`temporaryHeadcount`は工場に配置された実人数であり、複数商品へ独立に「使い回せる」数量ではない。
 
-`calculateEffectiveLaborCapacity(assignment, factoryCapacity, overtimeRateOverride?, params)`の算出式（商品ごと）:
+**Phase 6.1修正: ワーカーは工場単位の有限な共有プール**。初版は商品ごとに独立したケイパビリティ上限として労働能力を計算しており、同じ工場の同じ人数がHOSO・PD・VAPそれぞれで独立に「フル人数ぶんの労働能力」として計上されてしまう欠陥があった（100人の工場で3商品を同時生産すると、合計300人ぶんの労働能力が生まれてしまう）。Phase 6.1では`labor.ts`の`allocateWorkersToPlans(demands, assignments, factoryCapacities, params)`が、常用・臨時それぞれについて工場単位の実配置人数を予算とした優先順位階層＋水位法配分（`priorityAllocation.ts`の`allocateByPriorityTiers`、`rawMaterials/waterFill.ts`の水位法を再利用）を行い、商品間の奪い合いを解決する。
+
+配分の手順:
+
+1. 各生産計画（demand）について、労働以外の制約（原料・工場共通処理能力・冷凍包装能力・商品別設備能力）を経た後の候補完成品量（`candidateQuantity`）を、常用のみ・臨時のみでそれぞれ満たすために必要な人数（`headcountDemand`）へ逆算する: `headcountDemand = candidateQuantity / (efficiencyPerHead × attendanceRate × skillLevel(product) × overtimeMultiplier)`。
+2. 常用ワーカーの`headcountDemand`群を、その工場の`regularHeadcount`を予算として優先順位階層配分する。臨時ワーカーも`temporaryHeadcount`を予算として**別々に**同様の配分を行う（常用・臨時は別予算として独立に数量保存される。同じ人を両方でカウントしない）。
+3. 各計画の実際に配分された常用・臨時人数から、`calculateLaborCapacityFromAssignedHeadcount`（低レベル計算式、旧`calculateEffectiveLaborCapacity`相当）で有効労働能力を算出する:
 
 ```
-raw = (regularHeadcount × regularEfficiencyPerHeadTons + temporaryHeadcount × temporaryEfficiencyPerHeadTons)
+raw = (assignedRegularHeadcount × regularEfficiencyPerHeadTons + assignedTemporaryHeadcount × temporaryEfficiencyPerHeadTons)
       × attendanceRate × skillLevel(product) × (1 + min(overtimeRate, overtimeRateCap) × overtimeEfficiencyFactor)
-effectiveLaborCapacity(product) = min(raw, factoryCapacity[product])
+laborCapacity(product) = min(raw, factoryCapacity[product])
 ```
 
 - `regularEfficiencyPerHeadTons > temporaryEfficiencyPerHeadTons`（常用ワーカーの方が1人あたり効率が高い、暫定値）。
@@ -49,32 +63,42 @@ effectiveLaborCapacity(product) = min(raw, factoryCapacity[product])
 - スキルのない商品（`skills`に該当エントリが無い）は`skillLevel=0`扱いとなり、有効労働能力は0になる。人員が0でも同様に0（設備能力があっても生産できない、労働不足の表面化）。
 - 人件費（USD）は一切算出しない。記録すべき数量（配置人数・臨時ワーカー比率）のみを出力する。
 
-労働は「複数商品間で奪い合う共有プール」としては扱わず、商品ごとに独立したケイパビリティ上限として計算する設計判断を取った（§「単位についての設計判断」と同じく、仕様が明記していない箇所への実装判断。将来より精緻な「共有労働時間プール」モデルへ拡張する余地がある）。
+出力（`WorkerAllocationEntry`）は、各生産計画の実配分後の常用・臨時人数（`assignedRegularHeadcount`/`assignedTemporaryHeadcount`）・適用後残業率・有効労働能力を持つ。工場単位の集計（`FactoryWorkerAllocationSummary`）として、未配分の常用・臨時人数（`unassignedRegularHeadcount`/`unassignedTemporaryHeadcount`）も出力する。「配分済み合計＋未配分＝配置人数」の保存則は常用・臨時それぞれ独立に成立する（`labor.test.ts`・`allocation.test.ts`・`runner.test.ts`で検証）。同順位の計画間の配分は、水位法の順序非依存性により入力順に依存しない。
 
 ## 5. 生産制約の解決順序（`allocation.ts`・`priorityAllocation.ts`）
 
-`allocateProductionPlans(plans, factories, workerAssignments, rawMaterialLots, period, params)`は、次の順序で制約を適用する。
+`allocateProductionPlans(plans, factories, workerAssignments, rawMaterialLots, period, params)`は、次の順序で制約を適用する（Phase 6.1で段階2・5の単位・配分方式を修正）。
 
-1. **原料（会社単位の共有プール）**: 会社が保有する`status="available"`原料ロットの合計を予算とし、その会社の全計画（工場・商品を横断）へ優先順位階層で配分する。
-2. **工場共通処理能力（工場単位の共有プール）**: 段階1の結果を候補量とし、工場の有効共通処理能力を予算に、その工場の全計画へ優先順位階層で配分する。
-3. **冷凍・包装能力（工場単位の共有プール）**: 同様に工場単位で配分する。
-4. **商品別設備能力（工場×商品単位の専用プール）**: HOSO/PD/VAPそれぞれの専用能力を予算に、同一工場・同一商品の計画間で配分する（通常は1計画のみだが、複数計画が競合する場合も対応する）。
-5. **有効労働能力**: 商品ごとに独立したケイパビリティ上限として`min()`を取る（共有プールとしての優先順位配分は行わない。§4参照）。
+1. **原料（会社単位の共有プール、原料HOSO換算量）**: 会社が保有する`status="available"`原料ロットの合計を予算とし、その会社の全計画（工場・商品を横断）へ優先順位階層で配分する。
+2. **工場共通処理能力（工場単位の共有プール、原料投入HOSO換算量）**: 段階1で配分された「原料側」の数量をそのまま候補・重みとし、工場の有効共通処理能力（原料投入側の上限）を予算に優先順位階層で配分する。ここまでは一貫して原料側の単位で完結させ、`saleableRecoveryRatio`による完成品HOSO換算量への変換は、段階1・2を通過した後、この段階の最後で初めて一度だけ行う（歩留まりの適用箇所はここのみ。§6参照）。
+3. **冷凍・包装能力（工場単位の共有プール、完成品HOSO換算量）**: 段階2で完成品側へ変換済みの数量を、工場単位で配分する。
+4. **商品別設備能力（工場×商品単位の専用プール、完成品HOSO換算量）**: HOSO/PD/VAPそれぞれの専用能力を予算に、同一工場・同一商品の計画間で配分する（通常は1計画のみだが、複数計画が競合する場合も対応する）。
+5. **有効労働能力（工場単位の共有ワーカープール）**: `labor.ts`の`allocateWorkersToPlans`が、段階4を経た候補完成品量を基に、常用・臨時ワーカーそれぞれ工場単位の実配置人数を予算とした優先順位階層配分で、商品間の奪い合いを解決する（§4参照。Phase 6.1修正）。
 
 各段階は`priorityAllocation.ts`の`allocateByPriorityTiers`（`priority`昇順の階層ごとに`rawMaterials/waterFill.ts`の`waterFillAllocate`で比例配分）を使う。`waterFillAllocate`の実装は入力配列の順序に一切依存しない（合計・比較がすべて順序非依存の演算）ため、同順位の計画間の配分は入力順に依存しない決定論的な結果になる。
 
 生産できなかった量（`shortfallQuantity`）とその理由（`shortfallReasons`、5種類: `rawMaterialShortage`/`commonCapacityShortage`/`packagingCapacityShortage`/`productCapacityShortage`/`laborShortage`）は、各段階の候補量が直前の段階より減少したかどうかを比較して判定し、複数該当しうる形で出力する。
 
-## 6. 商品別歩留まり・数量保存（`allocation.ts`・`batches.ts`）
+## 6. 商品別歩留まり・数量保存（`allocation.ts`・`batches.ts`・`yieldConversion.ts`、Phase 6.1で歩留まりモデルを修正）
 
-`production/parameters.ts`の`yield.baseYieldRatio`に、商品別の基準歩留まり（暫定値: HOSO 0.92、PD 0.80、VAP 0.70）を集約している。歩留まりの適用は次の1箇所のみで、二重適用は発生しない。
+**Phase 6.1修正: 2種類の歩留まりを分離した。**
 
-- 希望量→必要原料量の逆算（配分計算時）: `rawMaterialRequired = desiredQuantity / yieldRatio`
-- 最終配分量→必要原料量の順算（バッチ生成時）: `requiredRawMaterialQuantity = allocatedQuantity / yieldRatio`
+- `physicalYieldRatio`（`production/parameters.ts`。旧値をそのまま引き継いだ参考値: HOSO 0.92 / PD 0.80 / VAP 0.70。要校正）: 殻・頭の除去等による**物理的重量**の減少比率。原料HOSO換算量から製品の物理重量（トン）を求める参考換算専用の値であり、HOSO換算数量（契約・在庫・能力等）の計算には一切使わない。`yieldConversion.ts`の`calculatePhysicalOutputTons(rawMaterialConsumedHosoEqTons, product)`という純粋関数としてのみ提供し、`allocation.ts`/`batches.ts`のいずれからも呼び出されない（永続状態へも persist しない、参考情報として必要になったときに呼び出す設計）。
+- `saleableRecoveryRatio`（暫定値: HOSO 0.98 / PD 0.97 / VAP 0.95。要校正）: 規格外品・破損・廃棄等により、**HOSO換算ベースでも失われる真の回収率**。1に近い値になる。HOSO換算量の計算（原料消費量↔完成品数量の変換）に使うのはこの比率のみであり、`allocation.ts`の全段階・`batches.ts`を通じて歩留まりの適用箇所は次の1回のみで、二重適用は発生しない。
+
+```
+saleableFinishedHosoEq = rawConsumedHosoEq × saleableRecoveryRatio
+trueProcessingLossHosoEq = rawConsumedHosoEq - saleableFinishedHosoEq
+```
+
+- 希望量→必要原料量の逆算（配分計算時）: `rawMaterialRequired = desiredQuantity / saleableRecoveryRatio`
+- 最終配分量→必要原料量の順算（バッチ生成時）: `requiredRawMaterialQuantity = allocatedQuantity / saleableRecoveryRatio`
+
+**具体例（原料100 HOSO換算トンからPD/VAPを生産する場合）**: 原料100トン(HOSO換算)を工場共通処理能力の制約なくすべて投入できたとすると、PD完成品(HOSO換算)は`100 × 0.97 ≈ 97トン`（真の加工損失 約3トン）になる。物理歩留まり0.80をそのまま乗じた「80 HOSO換算トン」にはならない（それは初版の欠陥そのものであり、PDの物理重量80トンをHOSO換算し直せばもとの100トンとほぼ同等になるはずの価値を、二重に目減りさせてしまっていた）。同様にVAP完成品(HOSO換算)は`100 × 0.95 = 95トン`になる。物理重量（例えばPDなら`100 × 0.92(=hosoの物理歩留まり ※参考) × ...`のような物理換算値）が必要な場合は、`calculatePhysicalOutputTons`を別途呼び出して参考値として得る（HOSO換算側の数量とは独立に扱う）。
 
 `buildProductionBatches`は、`rawMaterials/inventory.ts`の`consumeRawMaterials`をそのまま呼び出して原料を実消費し、呼び出し前後の`remainingQuantity`の差分から消費内訳（`rawMaterialConsumed`）を復元する（独自のFIFO実装を持たない）。`rawMaterialLotSelector`（産地・調達源による絞り込み）が指定された場合のみ、対象ロットを一時的に部分配列へ切り出して`consumeRawMaterials`へ渡し、結果を元の配列へマージし直す。
 
-数量保存: `原料消費量（rawMaterialConsumedTotal） = 完成品数量（finishedGoodsQuantity） + 加工損失（processingLoss）`。実際に消費できた原料量（原料不足で計画量より少なくなりうる）に基づいて完成品数量を再計算するため、原料が不足した場合でも保存則は常に成立する。
+数量保存: `原料消費量（rawMaterialConsumedTotal） = 販売可能完成品数量（finishedGoodsQuantity） + 真の加工損失（processingLoss）`。実際に消費できた原料量（原料不足で計画量より少なくなりうる）に基づいて完成品数量を再計算するため、原料が不足した場合でも保存則は常に成立する。ここで使う比率は、`allocation.ts`が`saleableRecoveryRatio`から導出した`allocatedQuantity/requiredRawMaterialQuantity`をそのまま使い、`batches.ts`が別の歩留まり（物理歩留まり等）を再適用することは一切ない。
 
 ## 7. 原料・完成品の数量保存
 
@@ -134,7 +158,8 @@ productionState = state;
 
 すべて「Phase6新規・要校正」の暫定値であり、ゲームバランス調整フェーズで再検討する前提。
 
-- `yield.baseYieldRatio`（HOSO 0.92 / PD 0.80 / VAP 0.70）: 商品別の基準歩留まり。
+- `yield.physicalYieldRatio`（HOSO 0.92 / PD 0.80 / VAP 0.70）: 商品別の物理重量歩留まり（参考値のみ。HOSO換算数量計算には使わない。§6参照）。
+- `yield.saleableRecoveryRatio`（HOSO 0.98 / PD 0.97 / VAP 0.95）: 商品別の真の販売可能回収率（HOSO換算量の計算に使う唯一の比率。§6参照）。
 - `labor.regularEfficiencyPerHeadTons`（6）/ `temporaryEfficiencyPerHeadTons`（3.5）: ワーカー1人あたりの基準有効生産能力。
 - `labor.overtimeRateCap`（0.3）/ `overtimeEfficiencyFactor`（0.5）: 残業の上限・効果係数。
 - `cost.baseProcessingCostUsdPerTon`（HOSO 350 / PD 520 / VAP 780）・`hosoEqKgPerTon`（1000）: 記録用の基準加工費・原料取得原価算出のためのトン→kg換算係数（非会計計上）。
@@ -144,17 +169,21 @@ productionState = state;
 
 ## 13. テスト・TypeScript・ESLint・build
 
-- 新規テスト: `app/lib/v2/production/__tests__/`に9ファイル・61件を追加（`capacity.test.ts` 4件、`labor.test.ts` 7件、`allocation.test.ts` 13件、`batches.test.ts` 7件、`finishedGoods.test.ts` 7件、`fulfillment.test.ts` 8件、`supplySignal.test.ts` 5件、`loadMetrics.test.ts` 6件、`runner.test.ts` 4件）。既存499件と合わせて**560件全てpass**。
+- Phase 6初版のテスト: `app/lib/v2/production/__tests__/`に9ファイル・61件（`capacity.test.ts` 4件、`labor.test.ts`、`allocation.test.ts`、`batches.test.ts`、`finishedGoods.test.ts` 7件、`fulfillment.test.ts` 8件、`supplySignal.test.ts` 5件、`loadMetrics.test.ts`、`runner.test.ts`）。
+- Phase 6.1での更新: `labor.test.ts`（旧`calculateEffectiveLaborCapacity`/`effectiveLaborCapacityForProduct`のテストを、新API`allocateWorkersToPlans`/`calculateLaborCapacityFromAssignedHeadcount`のテストへ全面書き換え。共有プールの保存則・優先順位・入力順非依存性・工場をまたぐ入出力対応順序を検証するテストを追加）、`allocation.test.ts`（工場単位ワーカー共有プールの合計超過なし・常用/臨時別々保存・原料投入側での共通処理能力制約のテストを追加）、`batches.test.ts`（旧`baseYieldRatio`を前提にしていた「HOSO換算と歩留まりを二重適用しない」テストを`saleableRecoveryRatio`基準へ修正し、原料100トンからPD/VAPを生産する具体例のテストを追加）、`loadMetrics.test.ts`（`calculateAllFactoryLoadMetrics`のシグネチャ変更に追従）、`runner.test.ts`（四半期ランナー全体を通した工場単位ワーカー共有プールの保存則テストを追加）。旧仕様（物理歩留まりをHOSO換算完成品へ直接乗じる前提）を固定していたテストは、正しい単位定義に合わせてすべて修正した。
+- 合計テスト数: 既存499件（Phase1-5）＋Phase6.1時点のProduction関連73件（capacity 4・labor 14・allocation 16・batches 8・finishedGoods 7・fulfillment 8・supplySignal 5・loadMetrics 6・runner 5）＝**572件全てpass**（`npm test`で確認）。
 - `npx tsc --noEmit`: 0エラー。
 - `npx eslint app/lib/v2 app/v2 scripts`: 0エラー・0警告。
-- `npm run build`: TypeScriptコンパイルは成功。ページデータ収集段階の既知の`/api/game/[gameCode]/admin/clone`エラー（`app/lib/redis.ts`の環境変数必須チェックが原因、本Phaseの変更とは無関係）以外の新規エラーは発生していない。
+- `npm run build`: TypeScriptコンパイルは成功。ページデータ収集段階の既知の`/api/game/[gameCode]/admin/clone`エラー（`app/lib/redis.ts`の環境変数必須チェックが原因、Phase6.1の変更とは無関係。Phase6初版でも同一の既知エラー）以外の新規エラーは発生していない。
 
 ## 14. 対象外・将来課題
 
 - 実際の設備投資・工場建設・能力増設・減価償却（Phase8）。
 - 人件費・製造原価・在庫評価の会計計上（`rawMaterialCost`・`baseProcessingCost`はPhase8へ渡せる記録情報として保持するのみ）。
 - 品質・顧客信頼の変動（操業負荷指標はPhase7へ出力するが、本Phase自身は品質・信用を一切変化させない）。
-- 労働を「複数商品間で奪い合う共有プール」として扱うより精緻なモデル（本Phaseでは商品ごとに独立したケイパビリティ上限として計算）。
+- 正社員の採用・退職・教育（`WorkerAssignment.lifecycleStatus`は将来Phaseのための予約フィールドで、本Phaseでは`"active"`のみを扱う）。
+- 労働・製造原価の会計計上、工場の資本投資判断。
+- `physicalYieldRatio`（物理重量歩留まり）・`saleableRecoveryRatio`（真の販売可能回収率）とも暫定値であり、要校正（ゲームバランス調整フェーズで再検討する前提）。
 - Phase5のターン・オーケストレーター（`app/lib/v2/turn/`）への実際の接続（本Phaseでは意図的に接続しない。次のPhaseでの課題）。
 - V2 API・UI・決定提出画面・認証・WebSocket・Redis配線。
-- `develop/v2`へのマージ・PR作成。
+- `develop/v2`へのマージ・PR作成（Phase 6.1は`feature/v2-production`ブランチへのコミット・pushまでで停止し、マージは行わない）。

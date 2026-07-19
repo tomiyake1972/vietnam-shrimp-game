@@ -78,15 +78,7 @@ export function advanceProductionQuarter(
   );
 
   const rawMaterialLotOrigins: RawMaterialLotOrigin[] = rawMaterialLots.map((l) => ({ lotId: l.lotId, inboundPeriod: l.inboundPeriod }));
-  const factoryLoadMetrics = calculateAllFactoryLoadMetrics(
-    input.factories,
-    input.workerAssignments,
-    allocation.entries,
-    batches,
-    rawMaterialLotOrigins,
-    period,
-    params
-  );
+  const factoryLoadMetrics = calculateAllFactoryLoadMetrics(input.factories, allocation.entries, batches, rawMaterialLotOrigins, period);
   const companyLoadMetrics = calculateCompanyLoadMetrics(factoryLoadMetrics, batches);
 
   const record: ProductionQuarterRecord = {

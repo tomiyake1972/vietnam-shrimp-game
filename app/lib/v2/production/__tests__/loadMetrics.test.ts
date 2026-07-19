@@ -63,7 +63,7 @@ function runOne(plans: CompanyProductionPlanEntry[], factory: Factory, assignmen
   const allocation = allocateProductionPlans(plans, [factory], [assignment], lots, P1);
   const { batches } = buildProductionBatches(plans, allocation.entries, lots, P1);
   const origins: RawMaterialLotOrigin[] = lots.map((l) => ({ lotId: l.lotId, inboundPeriod: l.inboundPeriod }));
-  const factoryMetrics = calculateAllFactoryLoadMetrics([factory], [assignment], allocation.entries, batches, origins, P1);
+  const factoryMetrics = calculateAllFactoryLoadMetrics([factory], allocation.entries, batches, origins, P1);
   const companyMetrics = calculateCompanyLoadMetrics(factoryMetrics, batches);
   return { factoryMetrics, companyMetrics };
 }

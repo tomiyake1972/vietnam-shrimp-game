@@ -172,6 +172,41 @@ test("いずれの四半期でも原料・設備・労働のいずれの制約�
   }
 });
 
+test("各工場でHOSO・PD・VAP合計の配分人数（常用・臨時それぞれ）が配置人数を超えない（Phase6.1: ワーカー共有プール）", () => {
+  const q1 = buildQuarterInput(INITIAL_PERIOD_V2, 5);
+  const { state } = runProductionQuartersForTesting(INITIAL_PERIOD_V2, [q1]);
+  const record = state.history[0];
+
+  const assignmentByFactory = new Map<string, WorkerAssignment>();
+  for (const c of COMPANIES) {
+    for (const a of assignmentsFor(c)) {
+      assignmentByFactory.set(a.factoryId, a);
+    }
+  }
+
+  const totalsByFactory = new Map<string, { regular: number; temporary: number }>();
+  for (const entry of record.allocation.entries) {
+    const t = totalsByFactory.get(entry.factoryId) ?? { regular: 0, temporary: 0 };
+    t.regular += entry.labor.assignedRegularHeadcount;
+    t.temporary += entry.labor.assignedTemporaryHeadcount;
+    totalsByFactory.set(entry.factoryId, t);
+  }
+
+  for (const [factoryId, totals] of totalsByFactory) {
+    const assignment = assignmentByFactory.get(factoryId)!;
+    assert.ok(totals.regular <= assignment.regularHeadcount + 1e-6, `工場${factoryId}: 常用配分合計${totals.regular}が配置人数${assignment.regularHeadcount}を超過`);
+    assert.ok(totals.temporary <= assignment.temporaryHeadcount + 1e-6, `工場${factoryId}: 臨時配分合計${totals.temporary}が配置人数${assignment.temporaryHeadcount}を超過`);
+  }
+
+  // 配分済み+未配分=配置人数の保存則（factoryWorkerSummaries）
+  for (const summary of record.allocation.factoryWorkerSummaries) {
+    const totals = totalsByFactory.get(summary.factoryId) ?? { regular: 0, temporary: 0 };
+    const assignment = assignmentByFactory.get(summary.factoryId)!;
+    assert.ok(Math.abs(totals.regular + summary.unassignedRegularHeadcount - assignment.regularHeadcount) < 1e-6);
+    assert.ok(Math.abs(totals.temporary + summary.unassignedTemporaryHeadcount - assignment.temporaryHeadcount) < 1e-6);
+  }
+});
+
 test("既存499テスト（他モジュール）に影響しない: Phase4のapplyFulfillmentsをそのまま呼び出せる", () => {
   const q1 = buildQuarterInput(INITIAL_PERIOD_V2, 4);
   const { state } = runProductionQuartersForTesting(INITIAL_PERIOD_V2, [q1]);

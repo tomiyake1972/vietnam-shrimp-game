@@ -1,4 +1,4 @@
-// ShrimpX V2 — 工場・ワーカー・生産モジュール 生産バッチ生成（Phase 6）
+// ShrimpX V2 — 工場・ワーカー・生産モジュール 生産バッチ生成（Phase 6、Phase 6.1で用語修正）
 //
 // allocateProductionPlans（allocation.ts）が算出した配分結果を実際の原料消費・
 // 生産バッチへ変換する。原料の実消費は、rawMaterials/inventory.ts の
@@ -9,9 +9,12 @@
 // ものをそのまま使う。呼び出し前後の差分から消費内訳を復元するため、
 // 独自のFIFO実装を持たない）。
 //
-// 原料消費量 = 完成品数量 + 加工損失（数量保存。歩留まりはallocation.tsで
-// 既に一度だけ適用済みのallocatedQuantity/requiredRawMaterialQuantityを
-// そのまま使うため、ここでは歩留まりを再適用しない）。
+// 原料消費量 = 販売可能完成品数量（finishedGoodsQuantity） + 真の加工損失
+// （processingLoss）。数量保存。歩留まり（販売可能回収率）はallocation.tsで
+// 既に一度だけ適用済みのallocatedQuantity/requiredRawMaterialQuantityから
+// 導出した比率（recoveryRatio）をそのまま使うため、ここで別の歩留まり
+// （物理歩留まりphysicalYieldRatio等）を再適用することは一切ない
+// （二重換算の防止。yieldConversion.ts参照）。
 
 import { hosoEqTons, ratio, roundHosoEqTons, roundUsdM, unwrapUnit, usdM } from "../core/units";
 import { PeriodV2 } from "../core/period";
@@ -147,12 +150,14 @@ export function buildProductionBatches(
     currentLots = updatedLots;
 
     const rawMaterialConsumedTotal = consumed.reduce((sum, c) => sum + unwrapUnit(c.quantity), 0);
-    // 完成品数量は、実際に消費できた原料量に基づいて再計算する（原料不足で
-    // clippedRequiredがrequiredRawより小さくなった場合、完成品数量もそれに応じて
-    // 減らす。歩留まりはここでも一度だけ、allocatedQuantity/requiredRawより
-    // 導出した比率で適用する）。
-    const yieldRatio = requiredRaw > EPSILON ? unwrapUnit(e.allocatedQuantity) / requiredRaw : 0;
-    const finishedGoodsQuantity = Math.max(0, roundHosoEqTons(rawMaterialConsumedTotal * yieldRatio));
+    // 販売可能完成品数量（HOSO換算）は、実際に消費できた原料量に基づいて再計算する
+    // （原料不足でclippedRequiredがrequiredRawより小さくなった場合、完成品数量も
+    // それに応じて減らす）。ここで使う比率（recoveryRatio）は、allocation.tsが
+    // saleableRecoveryRatioから導出したallocatedQuantity/requiredRawそのものであり、
+    // physicalYieldRatio（物理歩留まり参考値）を別途重ねて適用することはない
+    // （二重換算の防止）。
+    const recoveryRatio = requiredRaw > EPSILON ? unwrapUnit(e.allocatedQuantity) / requiredRaw : 0;
+    const finishedGoodsQuantity = Math.max(0, roundHosoEqTons(rawMaterialConsumedTotal * recoveryRatio));
     const processingLoss = Math.max(0, roundHosoEqTons(rawMaterialConsumedTotal - finishedGoodsQuantity));
 
     const rawMaterialCost = usdM(roundUsdM(weightedRawMaterialCost(consumed, params.cost.hosoEqKgPerTon)));

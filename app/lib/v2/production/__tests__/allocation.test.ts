@@ -196,6 +196,72 @@ test("VAPやPDで異なる基準歩留まりが適用される（原料消費量
   assert.ok(unwrapUnit(vap.requiredRawMaterialQuantity) > unwrapUnit(pd.requiredRawMaterialQuantity));
 });
 
+test("100人しかいない工場でHOSO+PD+VAPの合計配分人数が100を超えない（Phase6.1: ワーカー共有プール）", () => {
+  const factory = makeFactory({
+    commonProcessingCapacity: hosoEqTons(100000),
+    hosoCapacity: hosoEqTons(100000),
+    pdCapacity: hosoEqTons(100000),
+    vapCapacity: hosoEqTons(100000),
+    freezingPackagingCapacity: hosoEqTons(100000),
+  });
+  const assignment = makeAssignment({ regularHeadcount: 100, temporaryHeadcount: 0 });
+  const lot = makeLot({ remainingQuantity: hosoEqTons(100000), originalQuantity: hosoEqTons(100000) });
+  const plans = [
+    makePlan({ product: "hoso", desiredQuantity: hosoEqTons(10000), priority: 1 }),
+    makePlan({ product: "pd", desiredQuantity: hosoEqTons(10000), priority: 1 }),
+    makePlan({ product: "vap", desiredQuantity: hosoEqTons(10000), priority: 1 }),
+  ];
+  const result = allocateProductionPlans(plans, [factory], [assignment], [lot], P1);
+
+  const totalRegular = result.entries.reduce((sum, e) => sum + e.labor.assignedRegularHeadcount, 0);
+  const totalTemporary = result.entries.reduce((sum, e) => sum + e.labor.assignedTemporaryHeadcount, 0);
+  assert.ok(totalRegular <= 100 + 1e-6, `同じ100人が複数商品へ重複計上されている: ${totalRegular}`);
+  assert.equal(totalTemporary, 0);
+
+  assert.equal(result.factoryWorkerSummaries.length, 1);
+  const summary = result.factoryWorkerSummaries[0];
+  assert.ok(Math.abs(totalRegular + summary.unassignedRegularHeadcount - 100) < 1e-6, "配分済み+未配分=配置人数の保存則が崩れている");
+});
+
+test("常用・臨時ワーカーは別々に保存される（工場全体でのentries.labor集計）", () => {
+  const factory = makeFactory({
+    commonProcessingCapacity: hosoEqTons(100000),
+    hosoCapacity: hosoEqTons(100000),
+    pdCapacity: hosoEqTons(100000),
+    freezingPackagingCapacity: hosoEqTons(100000),
+  });
+  const assignment = makeAssignment({ regularHeadcount: 15, temporaryHeadcount: 8 });
+  const lot = makeLot({ remainingQuantity: hosoEqTons(100000), originalQuantity: hosoEqTons(100000) });
+  const plans = [
+    makePlan({ product: "hoso", desiredQuantity: hosoEqTons(10000), priority: 1 }),
+    makePlan({ product: "pd", desiredQuantity: hosoEqTons(10000), priority: 1 }),
+  ];
+  const result = allocateProductionPlans(plans, [factory], [assignment], [lot], P1);
+
+  const totalRegular = result.entries.reduce((sum, e) => sum + e.labor.assignedRegularHeadcount, 0);
+  const totalTemporary = result.entries.reduce((sum, e) => sum + e.labor.assignedTemporaryHeadcount, 0);
+  assert.ok(totalRegular <= 15 + 1e-6);
+  assert.ok(totalTemporary <= 8 + 1e-6);
+
+  const summary = result.factoryWorkerSummaries[0];
+  assert.ok(Math.abs(totalRegular + summary.unassignedRegularHeadcount - 15) < 1e-6);
+  assert.ok(Math.abs(totalTemporary + summary.unassignedTemporaryHeadcount - 8) < 1e-6);
+});
+
+test("工場共通処理能力は原料投入側の数量で制約される（完成品側の物理歩留まりを二重に掛けない）", () => {
+  // commonProcessingCapacity=100を原料投入HOSO換算量の上限として設定。PDの
+  // saleableRecoveryRatio(0.97)適用後の完成品量は、100 * 0.97 ≈ 97 に近い値に
+  // なるはずで、物理歩留まり(0.80)を掛けた80や、二重適用による80*0.97のような
+  // 値にはならない。
+  const factory = makeFactory({ commonProcessingCapacity: hosoEqTons(100), pdCapacity: hosoEqTons(100000), freezingPackagingCapacity: hosoEqTons(100000) });
+  const lot = makeLot({ remainingQuantity: hosoEqTons(100000), originalQuantity: hosoEqTons(100000) });
+  const plans = [makePlan({ product: "pd", desiredQuantity: hosoEqTons(1000), priority: 1 })];
+  const result = allocateProductionPlans(plans, [factory], [makeAssignment()], [lot], P1);
+  const e = result.entries[0];
+  assert.ok(unwrapUnit(e.stages.commonCapacityLimited) > 90, `commonCapacityLimitedが物理歩留まりで二重に減らされている: ${unwrapUnit(e.stages.commonCapacityLimited)}`);
+  assert.ok(unwrapUnit(e.stages.commonCapacityLimited) <= 100 + 0.02);
+});
+
 test("入力（plans/factories/workerAssignments/rawMaterialLots）を変更しない", () => {
   const plans = [makePlan()];
   const factories = [makeFactory()];
