@@ -228,3 +228,50 @@ FIFO消費（`consumeRawMaterials`）は`advanceRawMaterialsQuarter`から独立
 - `summarizeRawMaterialRequirements`の出力は、Phase6・プレイヤー画面がそのまま「今期あとどれだけ調達すべきか」の参考情報として表示できる（本モジュール自体はこの情報を使って何かを決定しない）。
 - 高値契約・高値取得原価は、いずれもロット・契約に保持されたまま自動改定されないため、Phase8のPL/BS/CF実装時に「安値契約×原料高騰」の低採算がそのまま損益へ反映できる。
 - `RawMaterialLot`の`status="expired"`一覧は、Phase8の廃棄損計上にそのまま使える形で保持している。
+
+## 14. ターン・オーケストレーター（`app/lib/v2/turn/`）【Phase 5後続差分】
+
+**背景（調査結果と方針転換）**: 当初の作業指示は「V2の実際のターン実行経路がある」ことを前提に、`applyDomesticPurchaseIntentOverride`をそこへ配線するというものだった。しかし調査の結果、**V2には本番ターン実行経路・意思決定保存スキーマ・APIルートが現時点で一切存在しない**ことが判明した（`calculateMarketQuarter`の唯一の呼び出し元は`industryLab/simulationRunner.ts`というPhase3の合成シナリオ・テスト環境であり、Phase4の販売モジュールも同様に本番配線を持たない。`app/api/`配下に`app/lib/v2/`をimportするファイルは1つも存在しない。`GameSessionV2`もPhase0のプレースホルダ型のままである）。この状態でPhase5だけを無理にV1のAPI/Redis/`CompanyDecision`型へ接続すると、V2の設計境界（永続化・API非依存の純粋ドメインモジュール群という一貫した設計）を崩しかねない。そのため、本番APIを新設する代わりに、**Phase1・Phase4・Phase5を接続する、永続化・API非依存の純粋なアプリケーション層**を新設する方針へ切り替えた。
+
+**位置づけ**: `app/lib/v2/turn/`（`types.ts`・`runner.ts`・`index.ts`）は、Phase1〜5のそれぞれの「1四半期分だけを進める」ランナー（`calculateMarketQuarter`・`advanceSalesQuarter`・`advanceRawMaterialsQuarter`）を、決定論的な順序で束ねて呼び出す合成関数`runTurn(input): TurnOrchestratorResult`のみを提供する。Redis・API Route・UIには一切依存しない。**将来のV2 API実装は、この`runTurn`を呼び出すことを想定している**（意思決定の永続化・会社別提出状態の管理・冪等性キー等は、将来のAPI/Redis層の責務として本モジュールの外側に置く）。
+
+**`industryLab/simulationRunner.ts`との役割の違い**: `simulationRunner.ts`はPhase3の「シナリオ駆動の合成テスト環境」であり、会社の実際の入力（販売計画・買付計画等）を一切扱わず、`ScenarioTurnInput`から機械的に導出した市場入力のみで`calculateMarketQuarter`を回す（Phase4・Phase5を呼び出さない）。対して`turn/runner.ts`の`runTurn`は、会社別の実際の計画（販売・国内買付・輸入・養殖）を入力として受け取り、Phase1・Phase4・Phase5を通しで実行する「ゲームの1ターン」を表す合成関数である。両者は独立しており、`runTurn`は`simulationRunner.ts`を呼び出さない（テストのフィクスチャ生成にのみ`runIndustrySimulation`を利用している）。
+
+**入力・結果の型**（`types.ts`）:
+- `TurnOrchestratorInput`: 当期`PeriodV2`、Phase1市場入力（`MarketQuarterInput`）、シナリオ変数（疾病圧力等、必要な値のみの最小限の型）、会社別販売計画、国内買付意向のソース（後述）、会社別輸入注文、会社別養殖池入れ計画、既存契約、既存原料ロット、決定論的乱数シード、各Phaseパラメータのオーバーライド。`GameSessionV2`へは埋め込まない。Phase0のプレースホルダ型は一切変更していない。
+- `DomesticPurchaseIntentSource`（判別可能型）: `{ type: "phase3Fallback" }`（会社別買付計画が一切取得できない場合。`marketInput.vietnamDomestic.domesticProcurementIntent`をそのまま使う＝一切上書きしない）と`{ type: "companyPlans"; plans: DomesticPurchasePlanEntry[] }`（会社別買付計画から`aggregateDomesticPurchaseIntent`で集計した値を使う。計画を提出していない会社はこの配列に含まれない＝希望量ゼロと同義）の2択。**「未提出の会社（companyPlans内で該当companyIdの要素がない）」と「会社別データが一切ない（phase3Fallback）」は明確に別の型として扱い、暗黙の推測はしない**。
+- `TurnOrchestratorResult`: 市場結果・販売記録・更新後契約一覧・必要原料量集計・国内買付配分結果・更新後ロット一覧・新規輸入ロット/到着輸入ロット/新規養殖ロット/収穫済みロット/期限切れロット・養殖収穫内訳（`AquacultureHarvestResult[]`）・次ターンへの`pendingState`（次期`PeriodV2`・契約・ロット）・監査用`debug`情報（会社別有効買付意向、集計買付意向、上書き前後の`domesticProcurementIntent`、清算後の国内価格・供給量、会社別配分量）。
+
+**実行順序**（`runner.ts`）:
+1. 各社の有効買付意向を算出（`calculateEffectivePurchaseIntent`。`companyPlans`モードのみ。`phase3Fallback`では空配列）
+2. 有効買付意向を集計（`aggregateDomesticPurchaseIntent`）
+3. `applyDomesticPurchaseIntentOverride`で市場入力へ上書き適用（`phase3Fallback`では上書きしない）
+4. 決定論的乱数ストリーム（シード = `` `${seed}::${currentPeriod}` ``）で`calculateMarketQuarter`を実行
+5. Phase4販売処理（`advanceSalesQuarter`）を実行し、当期契約を生成
+6. Phase4が生成した当期契約を含む最新の約定残から、Phase5`summarizeRawMaterialRequirements`で必要原料量を集計
+7. Phase5国内買付配分（`allocateDomesticPurchase`）を実行
+8. 国内買付ロットを生成
+9. 輸入注文・到着処理
+10. 養殖池入れ・収穫処理
+11. 期限切れ・在庫状態遷移処理
+12. `TurnOrchestratorResult`として統合結果を返す
+
+手順6〜11は、Phase5の`advanceRawMaterialsQuarter`（既存の四半期ランナー）へそのまま委譲している（手順7〜11の内部順序を`advanceRawMaterialsQuarter`が既に正しくエンコードしているため、二重実装・ロジックの乖離を避けた）。手順5（Phase4）を手順6（必要原料量集計）より先に置いているのは、**当期に新規成約した契約の未履行数量も、当期のうちに必要原料量として可視化するため**（Phase4の契約生成を後回しにすると、その四半期の新規契約分の必要量が1期遅れて見えることになり、「販売の裏付けとして必要な原料量を都度把握する」という設計意図とずれる）。
+
+**`phase3Fallback` / `companyPlans`の切り替え**: `TurnOrchestratorInput.domesticPurchaseIntentSource`の判別可能型で明示的に選ぶ。`phase3Fallback`を選ぶと、`marketInput.vietnamDomestic.domesticProcurementIntent`（Phase3の暫定買付量、`trailingAverageDomesticPurchase × domesticProcurementIntentToTrailingAverageRatio`）がそのまま`calculateMarketQuarter`へ渡る（`applyDomesticPurchaseIntentOverride`を一切呼ばない）。`companyPlans`を選ぶと、渡された`plans`から`aggregateDomesticPurchaseIntent`で信認上限付きの集計値を算出し、上書きしてから`calculateMarketQuarter`へ渡す。
+
+**国内買付意向→価格→配分→ロットのデータフロー**: `plans`（会社別`desiredQuantity`・`procurementHeadcount`・`approvedPurchaseCap`等）→（各社ごと）`calculateEffectivePurchaseIntent`で信認上限付きの有効買付意向→合計して`aggregateDomesticPurchaseIntent`→`applyDomesticPurchaseIntentOverride`で市場入力の`domesticProcurementIntent`を置換→`calculateMarketQuarter`が国内原料価格・供給量（`vietnamDomestic.price`/`.supply`）を清算→その価格・供給量を基準に`allocateDomesticPurchase`が会社別配分量を決定（提示価格・調達カバレッジ・関係スコア等の競争力ウェイトに基づく水位法配分、供給量を超えない）→`createDomesticPurchaseLots`が配分結果から国内買付ロットを生成（取得原価は`max(marketPrice, bidPrice)`で市場価格を下限とする）。
+
+**決定論の担保**: `runTurn`は純粋関数であり、`Math.random()`・`Date.now()`・グローバル可変状態を一切使わない。乱数はすべて`createRandomStream(` `${seed}::${currentPeriod}` `)`（文字列シードのみに依存する`RandomStream`）経由で消費する。入力オブジェクト（`marketInput`・`existingContracts`・`existingLots`・`salesPlans`等）はいずれも不変更新（スプレッド）でのみ扱い、破壊的変更は一切行わない。同一`input`（同一`seed`・同一`currentPeriod`を含む）を渡せば常に同一の`TurnOrchestratorResult`を返す（`assert.deepEqual`によるテストで確認済み）。
+
+**今回保証した重複防止と、永続化層の課題として残るもの**: `runTurn`自体は、渡された`existingContracts`/`existingLots`を土台に「この1ターン分の新規契約・新規ロットだけ」を追加した結果を返す。ターンを1つだけ進めるには、呼び出し側が**前回呼び出しの`pendingState`（`nextPeriod`/`contracts`/`lots`）だけ**を次の`currentPeriod`/`existingContracts`/`existingLots`として渡せばよい。同じ`input`を誤って2回呼び出しても、`runTurn`自身は同じ結果を返すだけで内部状態を進めない（副作用がないため、「同じターンの入力を再送すると契約・ロットが2重に増える」という事態はこの関数の外側、すなわち「同じ`TurnOrchestratorResult`を2回、状態へ反映してしまう」呼び出し側のミスでしか起こり得ない）。ロットIDは`buildLotId(source, companyId, period, originCountry, sequence)`（Phase5既存）に基づき、同一入力からは常に同一IDが決定論的に生成される。一方、**Redisの冪等性キー（同じAPIリクエストが再送されても二重反映しないための仕組み）・会社別の意思決定提出状態の管理・ターン進行のロック**は、いずれも将来の永続化・API層の責務として今回は実装していない（本モジュールが呼び出される前提でAPI層が設計されるべき、という設計指針を示すに留める）。
+
+**未提出会社の扱い**: 国内買付計画を提出していない会社は`companyPlans`の`plans`配列に含めない（＝希望量ゼロと同義）。輸入計画・養殖計画を提出していない会社は、それぞれ`importOrders`/`aquacultureStockingPlans`に含めない（＝新規注文・新規池入れゼロ）。販売計画がない会社の扱いはPhase4の既存`advanceSalesQuarter`の仕様に従う。これらは、**会社別データが一切取得できない場合の`phase3Fallback`モード**とは明確に別の状態であり、`DomesticPurchaseIntentSource`の判別可能型がこの区別を型レベルで強制する。
+
+**テスト**: `app/lib/v2/turn/__tests__/runner.test.ts`に18件のテストを追加した（既存418件と合わせて436件）。会社買付計画の国内価格への反映、`phase3Fallback`と直接呼び出しの一致、買付意向増加が国際価格へ波及しないこと、極端な希望量の頭打ち、取得原価の市場価格下限、供給量超過の禁止、個社上限の遵守、輸入のリードタイム、養殖の収穫タイミング、期限切れの翌ターン遷移、再現性、入力不変性、ターン間の計画非混入、Phase4→Phase5の必要量集計連携、`pendingState`の整合性、Phase1+4+5通しの複数ターン統合テスト（`companyPlans`・`phase3Fallback`の両モード）を確認している。
+
+**`tsc`/ESLint/ビルド**: `npx tsc --noEmit`：0エラー。`npx eslint app/lib/v2 app/v2 scripts`：0エラー・0警告。`npm run build`：TypeScriptコンパイルは成功。ページデータ収集段階の既知の`/api/game/[gameCode]/admin/clone`エラー（§11参照）以外の新規エラーは発生していない。
+
+**Phase5自身への副次的な変更**: `RawMaterialsQuarterRecord`（`rawMaterials/types.ts`）へ`harvestResults: readonly AquacultureHarvestResult[]`フィールドを追加した（`advanceRawMaterialsQuarter`が内部で捨てていた`harvestAquacultureLots`の詳細内訳を、そのまま記録として保持するようにした）。これは`TurnOrchestratorResult.aquacultureHarvestResults`（養殖処理結果の内訳）を、`advanceRawMaterialsQuarter`の重複実装なしにそのまま転記するための、Phase5自身への後方互換な加筆（既存フィールドの変更・削除なし）である。Phase1〜4・`GameSessionV2`プレースホルダ型には一切影響しない。
+
+**対象外（今回のスコープ外）**: V2 APIルート、Redisスキーマ・キー設計、V2 UI、`GameSessionV2`の完全な状態モデル化、V1 APIへの接続、V1意思決定型（`CompanyDecision`等）の再利用、Phase6以降のロジック、`develop/v2`へのマージ・PR作成。

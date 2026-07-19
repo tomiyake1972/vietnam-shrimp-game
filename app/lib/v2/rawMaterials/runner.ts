@@ -80,6 +80,7 @@ export function advanceRawMaterialsQuarter(
     arrivedImportLots,
     newGrowingLots,
     harvestedLots,
+    harvestResults,
     expiredLots,
   };
 

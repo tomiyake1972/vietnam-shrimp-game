@@ -236,6 +236,15 @@ export interface RawMaterialsQuarterRecord {
   readonly arrivedImportLots: readonly RawMaterialLot[];
   readonly newGrowingLots: readonly RawMaterialLot[];
   readonly harvestedLots: readonly RawMaterialLot[];
+  /**
+   * 当四半期に収穫処理（harvestAquacultureLots）が対象とした収穫の内訳
+   * （疾病圧力・生残率等、ロット化後には失われる情報を保持する）。
+   * ターン・オーケストレーター（app/lib/v2/turn/）がTurnOrchestratorResult.
+   * aquacultureHarvestResultsをそのまま転記できるよう、Phase5自身の記録として
+   * ここに追加する（Phase5開発中の自モジュール内での加筆であり、Phase1-4や
+   * GameSessionV2プレースホルダ型には影響しない）。
+   */
+  readonly harvestResults: readonly AquacultureHarvestResult[];
   readonly expiredLots: readonly RawMaterialLot[];
 }
 
