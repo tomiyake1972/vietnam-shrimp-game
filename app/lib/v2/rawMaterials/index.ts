@@ -20,7 +20,9 @@ export { summarizeRawMaterialRequirements } from "./requirements";
 export {
   aggregateDomesticPurchaseIntent,
   applyDomesticPurchaseIntentOverride,
+  calculateEffectivePurchaseIntent,
   procurementCoverageScore,
+  procurementCapacity,
   computeBuyerCompetitivenessWeight,
   allocateDomesticPurchase,
 } from "./domesticPurchase";

@@ -10,7 +10,7 @@
 // Phase8へ渡せる情報（expired状態のロット一覧）だけ保持し、本Phaseでは行わない。
 
 import { nextPeriod, PeriodV2 } from "../core/period";
-import { hosoEqTons, roundHosoEqTons, unwrapUnit } from "../core/units";
+import { hosoEqTons, roundHosoEqTons, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import {
   DomesticPurchaseAllocationResult,
   RawMaterialConsumptionInstruction,
@@ -43,6 +43,13 @@ function resolveExpiryPeriod(fromPeriod: PeriodV2, params: RawMaterialsParameter
 /**
  * 国内買付配分結果から、即時使用可能な（status="available"）原料ロットを
  * 会社ごとに1件ずつ生成する（配分量が0の会社にはロットを作らない）。
+ *
+ * ロットの単位取得原価（unitCost）は max(marketPrice, bidPrice) とする。
+ * 提示買付価格（bidPrice）はminBidPriceRatioOfMarket（既定0.5倍）まで市場価格を
+ * 下回ることを許容しているため、bidPriceをそのまま取得原価とすると「市場価格より
+ * 安く自動的に原料を確保できる」ことになってしまう。高値を提示して優先的に
+ * 確保した会社はその提示価格をそのまま取得原価として保持する一方、低い提示価格
+ * では市場価格を下回る取得原価にはならないようにする。
  */
 export function createDomesticPurchaseLots(
   allocation: DomesticPurchaseAllocationResult,
@@ -54,6 +61,7 @@ export function createDomesticPurchaseLots(
     .map((c) => {
       sequence += 1;
       const lotId = buildLotId("domestic", c.companyId, allocation.period, "VN", sequence);
+      const unitCost = usdPerHosoEqKg(Math.max(unwrapUnit(allocation.marketPrice), unwrapUnit(c.bidPrice)));
       return {
         lotId,
         companyId: c.companyId,
@@ -62,7 +70,7 @@ export function createDomesticPurchaseLots(
         inboundPeriod: allocation.period,
         originalQuantity: c.allocatedQuantity,
         remainingQuantity: c.allocatedQuantity,
-        unitCost: c.bidPrice,
+        unitCost,
         availableFromPeriod: allocation.period,
         expiryPeriod: resolveExpiryPeriod(allocation.period, params),
         status: "available" as const,

@@ -10,6 +10,14 @@
 // 国際HOSO基準価格は一切変更しない。会社行動が影響するのは、
 // domesticProcurementIntent経由でのベトナム国内原料価格のみ（Phase1/3の
 // 計算式自体は変更・再実装しない）。
+//
+// --- 「有効買付意向」による価格操作の防止（暫定値・要校正） ---
+// aggregateDomesticPurchaseIntentは、各社のdesiredQuantityをそのまま合計しない。
+// 実際には買えない・調達できない希望量だけを申告して国内価格（延いては競合他社の
+// 取得原価）を際限なく押し上げる抜け道を防ぐため、各社の希望量を
+// 「実際に買える量の目安」（調達処理能力・承認済み買付枠・基準供給量に対する
+// 最大価格影響シェア）で信認上限を掛けたうえで合計する
+// （calculateEffectivePurchaseIntent参照）。
 
 import { HosoEqTons, UsdPerHosoEqKg, hosoEqTons, roundHosoEqTons, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { PeriodV2 } from "../core/period";
@@ -20,18 +28,64 @@ import {
   DomesticPurchasePlanEntry,
   RawMaterialsValidationError,
 } from "./types";
-import { RawMaterialsParameters } from "./parameters";
+import { RAW_MATERIALS_PARAMETERS_V1, RawMaterialsParameters } from "./parameters";
 import { waterFillAllocate } from "./waterFill";
 
 const EPSILON = 1e-6;
 
+function assertNonNegativeIntegerHeadcount(headcount: number): void {
+  if (!Number.isInteger(headcount) || headcount < 0) {
+    throw new RawMaterialsValidationError(`procurementHeadcount は0以上の整数である必要があります。受け取った値: ${headcount}`);
+  }
+}
+
+/** 調達人員数から調達処理能力（HOSO換算トン、逓減曲線）を導出する。Phase4のprocessingCapacityと同じ形。 */
+export function procurementCapacity(headcount: number, params: RawMaterialsParameters): HosoEqTons {
+  assertNonNegativeIntegerHeadcount(headcount);
+  const { baselineCapacityTons, capacityMaxIncrementTons, capacitySaturationHeadcount } = params.domesticPurchase;
+  const growth = headcount / (headcount + capacitySaturationHeadcount);
+  return hosoEqTons(roundHosoEqTons(baselineCapacityTons + capacityMaxIncrementTons * growth));
+}
+
 /**
- * 5社の国内買付希望量を単純合計する（意思決定支援の積み上げのみ。新規経済
- * ロジックは追加しない）。Phase1の`VietnamDomesticInput.domesticProcurementIntent`
- * （業界集計値として1フィールドで受け取る設計）へそのまま渡せる形。
+ * 1社の「有効買付意向」（国内価格形成へ渡す買付意向として認める上限付き数量）を
+ * 算出する。実際には買えない・調達できない希望量だけを申告して国内価格を
+ * 際限なく押し上げる抜け道を防ぐため、次の最小値とする。
+ *   - desiredQuantity（国内買付希望量）
+ *   - procurementCapacity（調達人員・調達カバレッジによる処理能力）
+ *   - approvedPurchaseCap（未指定時はInfinity）
+ *   - referenceSupply × maximumPriceInfluenceShare（基準国内供給量×最大価格影響シェア）
  */
-export function aggregateDomesticPurchaseIntent(plans: readonly DomesticPurchasePlanEntry[]): HosoEqTons {
-  const total = plans.reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
+export function calculateEffectivePurchaseIntent(
+  entry: DomesticPurchasePlanEntry,
+  referenceSupply: HosoEqTons,
+  params: RawMaterialsParameters
+): HosoEqTons {
+  const capacity = procurementCapacity(entry.procurementHeadcount, params);
+  const shareCap = unwrapUnit(referenceSupply) * params.domesticPurchase.maximumPriceInfluenceShare;
+  const approvedCap = entry.approvedPurchaseCap !== undefined ? unwrapUnit(entry.approvedPurchaseCap) : Number.POSITIVE_INFINITY;
+  const capped = Math.min(unwrapUnit(entry.desiredQuantity), unwrapUnit(capacity), shareCap, approvedCap);
+  return hosoEqTons(roundHosoEqTons(Math.max(0, capped)));
+}
+
+/**
+ * 5社それぞれの「有効買付意向」（calculateEffectivePurchaseIntent）を合計する
+ * （意思決定支援の積み上げではあるが、各社の申告値をそのまま信用せず、実際に
+ * 買える量の目安で信認上限を掛けたうえでの合計。新規の価格・需給計算式自体は
+ * 追加しない）。Phase1の`VietnamDomesticInput.domesticProcurementIntent`
+ * （業界集計値として1フィールドで受け取る設計）へそのまま渡せる形。
+ *
+ * referenceSupplyには、当期のベトナム国内原料の基準供給量
+ * （`MarketQuarterInput.vietnamDomestic.domesticRawSupply`等、価格計算前に
+ * 既知の値）を渡す。これは収穫量ベースの外生値であり、価格計算の結果に
+ * 依存しないため、循環参照は生じない。
+ */
+export function aggregateDomesticPurchaseIntent(
+  plans: readonly DomesticPurchasePlanEntry[],
+  referenceSupply: HosoEqTons,
+  params: RawMaterialsParameters = RAW_MATERIALS_PARAMETERS_V1
+): HosoEqTons {
+  const total = plans.reduce((sum, p) => sum + unwrapUnit(calculateEffectivePurchaseIntent(p, referenceSupply, params)), 0);
   return hosoEqTons(roundHosoEqTons(Math.max(0, total)));
 }
 
@@ -74,9 +128,7 @@ function assertValidBidPrice(bidPrice: number, marketPrice: number, params: RawM
 
 /** 調達人員数から調達カバレッジ（0〜1）を導出する。Phase4のsalesCoverageScoreと同じ形。 */
 export function procurementCoverageScore(headcount: number, params: RawMaterialsParameters): number {
-  if (!Number.isInteger(headcount) || headcount < 0) {
-    throw new RawMaterialsValidationError(`procurementHeadcount は0以上の整数である必要があります。受け取った値: ${headcount}`);
-  }
+  assertNonNegativeIntegerHeadcount(headcount);
   const { baselineCoverageAtZeroHeadcount, coverageSaturationHeadcount } = params.domesticPurchase;
   const growth = headcount / (headcount + coverageSaturationHeadcount);
   return baselineCoverageAtZeroHeadcount + (1 - baselineCoverageAtZeroHeadcount) * growth;
@@ -147,11 +199,14 @@ export function allocateDomesticPurchase(
     const bidPrice = usdPerHosoEqKg(rawBidPrice);
 
     const coverage = procurementCoverageScore(entry.procurementHeadcount, params);
+    const capacity = procurementCapacity(entry.procurementHeadcount, params);
     const weight = computeBuyerCompetitivenessWeight(entry, bidPrice, marketPrice, coverage, params);
 
     const shareCap = unwrapUnit(availableSupply) * maximumBuyerShareFor(entry, params);
     const approvedCap = entry.approvedPurchaseCap !== undefined ? unwrapUnit(entry.approvedPurchaseCap) : Number.POSITIVE_INFINITY;
-    const cap = Math.min(unwrapUnit(entry.desiredQuantity), shareCap, approvedCap);
+    // 調達処理能力（procurementHeadcountに基づく実務上の上限）も個社配分上限へ反映する。
+    // 調達人員がゼロ・少数の会社は、希望量だけを大きくしても実配分量が増えない。
+    const cap = Math.min(unwrapUnit(entry.desiredQuantity), unwrapUnit(capacity), shareCap, approvedCap);
 
     return { entry, bidPrice, coverage, weight, cap };
   });

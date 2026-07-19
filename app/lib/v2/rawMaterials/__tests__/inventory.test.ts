@@ -129,6 +129,22 @@ test("高値で確保した会社の取得原価（bidPrice）がそのままロ
   assert.ok(unwrapUnit(lots[0].unitCost) > unwrapUnit(allocation.marketPrice), "高値提示分がunitCostに反映されているはず");
 });
 
+test("国内原料ロットの取得単価は市場価格を下回らない（低い提示価格でも市場価格未満では自動取得できない）", () => {
+  const allocation: DomesticPurchaseAllocationResult = {
+    period: P1,
+    marketPrice: usdPerHosoEqKg(3.0),
+    availableSupply: hosoEqTons(1000),
+    companies: [
+      // bidPriceが市場価格の半分（minBidPriceRatioOfMarket=0.5の下限に近い低い提示）でも配分自体は起こりうる。
+      { companyId: "A", bidPrice: usdPerHosoEqKg(1.6), coverageScore: 0.5, competitivenessWeight: 0.2, allocatedQuantity: hosoEqTons(30) },
+    ],
+    unallocatedSupply: hosoEqTons(970),
+  };
+  const lots = createDomesticPurchaseLots(allocation, RAW_MATERIALS_PARAMETERS_V1);
+  assert.ok(unwrapUnit(lots[0].unitCost) >= unwrapUnit(allocation.marketPrice) - 1e-9, "取得原価は市場価格を下回らないはず");
+  assert.equal(unwrapUnit(lots[0].unitCost), 3.0, "低い提示価格のときは市場価格そのものが取得原価になるはず");
+});
+
 test("国内・輸入・養殖の各ロットIDは重複しない", () => {
   const allocation: DomesticPurchaseAllocationResult = {
     period: P1,

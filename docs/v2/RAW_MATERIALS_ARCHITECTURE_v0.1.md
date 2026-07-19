@@ -39,17 +39,39 @@ Phase5「国内原料・輸入・養殖・原料在庫」は、Phase4の約定�
 
 ## 4. 国内原料買付（`domesticPurchase.ts`）
 
-### 4.1 希望量集計とPhase3への接続
+### 4.1 希望量集計とPhase3への接続 — 「有効買付意向」による価格操作防止【Task E差分】
 
-`aggregateDomesticPurchaseIntent(plans)` は5社の`desiredQuantity`を単純合計する（新規経済ロジックは追加しない）。`applyDomesticPurchaseIntentOverride(marketInput, aggregatedIntent)` は、`MarketQuarterInput.vietnamDomestic.domesticProcurementIntent`だけを置き換えた新しい`MarketQuarterInput`を返す純粋関数。
+`aggregateDomesticPurchaseIntent(plans, referenceSupply, params)` は5社の`desiredQuantity`をそのまま単純合計しない。実際には買えない・調達できない希望量だけを申告して国内価格（延いては競合他社の取得原価）を際限なく押し上げる「抜け道」を防ぐため、各社ごとに`calculateEffectivePurchaseIntent`で信認上限を掛けた「有効買付意向」を算出してから合計する。
 
-会社行動がない場合（単体テスト等）はこの関数を呼ばなければ、Phase3（industryLab）が使用している暫定買付量（trailingAverage×仮置き比率、`industryLab/simulationRunner.ts`の`buildPreviousMarketContext`が算出）がそのまま残る。会社行動がある統合ゲームでは、呼び出し側がこの関数で実際の5社希望量へ置き換えてから`calculateMarketQuarter`（Phase1）へ渡す。**この置き換えの配線自体は本Phaseの対象外**（画面・APIの実装はPhase5に含まない）で、純粋関数として用意するところまでが本Phaseの範囲。
+```
+procurementCapacity(headcount)   = baselineCapacityTons + capacityMaxIncrementTons * headcount / (headcount + capacitySaturationHeadcount)
+                                    （Phase4のprocessingCapacityと同じ逓減曲線）
+
+effectivePurchaseIntent = min(
+  desiredQuantity,
+  procurementCapacity(procurementHeadcount),
+  approvedPurchaseCap ?? Infinity,
+  referenceSupply * maximumPriceInfluenceShare
+)
+
+aggregatedIntent = Σ effectivePurchaseIntent（5社分）
+```
+
+`referenceSupply`には、当期のベトナム国内原料の基準供給量（`MarketQuarterInput.vietnamDomestic.domesticRawSupply`等、収穫量ベースの外生値で価格計算の結果に依存しない）を渡す。これにより、ある会社が実際には買えない100万トン等の希望量を入力しても、その会社の有効買付意向は「調達処理能力」「承認済み買付枠」「基準供給量×最大価格影響シェア」のうち最小のものを超えられない（極端な例：調達人員0の会社はbaselineCapacityTonsのみが上限になる）。一方、5社全体の有効買付意向（信認された需要）が正当に増えれば`aggregatedIntent`もそのぶん増えるため、「全社の信認された需要増加ではPhase3の国内価格が適切に上昇する」関係は維持される。
+
+`maximumPriceInfluenceShare`は、実配分の上限に使う`maximumBuyerShare`（§4.2）とは意図的に別係数にしている。実際に買える上限（配分cap）と、価格シグナルとして認める上限（意向cap）は将来別々に調整したい可能性があるための分離であり、現段階ではどちらも同じ暫定値（0.35）を置いている。
+
+`applyDomesticPurchaseIntentOverride(marketInput, aggregatedIntent)` は、`MarketQuarterInput.vietnamDomestic.domesticProcurementIntent`だけを置き換えた新しい`MarketQuarterInput`を返す純粋関数（信認上限適用後の`aggregatedIntent`を渡す）。
+
+会社行動がない場合（単体テスト等）はこの関数を呼ばなければ、Phase3（industryLab）が使用している暫定買付量（trailingAverage×仮置き比率、`industryLab/simulationRunner.ts`の`buildPreviousMarketContext`が算出）がそのまま残る。会社行動がある統合ゲームでは、呼び出し側がこの関数で実際の5社の有効買付意向合計へ置き換えてから`calculateMarketQuarter`（Phase1）へ渡す。**この置き換えの配線自体は本Phaseの対象外**（画面・APIの実装はPhase5に含まない）で、純粋関数として用意するところまでが本Phaseの範囲。
 
 ### 4.2 国内供給の配分（水位法）
 
 処理順は実装指示のとおり: 各社買付計画 → 希望量集計 → Phase3国内原料価格（呼び出し側の責務） → `allocateDomesticPurchase`による5社への配分 → `createDomesticPurchaseLots`による在庫追加。
 
 配分アルゴリズムはPhase4の`allocateMarketProduct`と同じ水位法（`rawMaterials/waterFill.ts`に切り出した独立実装。Phase4の内部非公開関数とは別実体だが、考え方は完全に同一の再利用）。
+
+競争力ウェイトは、提示買付価格・調達カバレッジ・養殖業者との関係・支払信頼性の4要素からなる加重和（実装済み。提示価格だけで配分が決まる構造にはなっていない）:
 
 ```
 weight = w.price * priceContribution
@@ -59,25 +81,37 @@ weight = w.price * priceContribution
 
 priceScore        = exp(purchasePriceSensitivity * (bidPrice - marketPrice) / marketPrice)
 priceContribution = clamp(priceScore, minimumBuyerPriceCompetitiveness, maximumBuyerPriceCompetitiveness) / maximumBuyerPriceCompetitiveness
+
+coverageScore    = procurementCoverageScore(procurementHeadcount)（0〜1の逓減曲線。Phase4のsalesCoverageScoreと同じ形）
+farmerRelationship・paymentReliability は entry未指定時 neutralScore（50点）を使う
 ```
 
-Phase4の価格競争力式と符号が逆（bidPriceがmarketPriceを上回るほど有利）だが、上限付き飽和型で「法外な高値提示による独占」を防ぐ構造はPhase4と同じ設計思想。
+Phase4の価格競争力式と符号が逆（bidPriceがmarketPriceを上回るほど有利）だが、上限付き飽和型で「法外な高値提示による独占」を防ぐ構造はPhase4と同じ設計思想。既定の重み配分は`price=0.4, coverage=0.25, farmerRelationship=0.2, paymentReliability=0.15`（合計1.0、暫定値・要校正）。
 
-個社配分上限:
+個社配分上限【Task E差分でprocurementCapacityを追加】:
 ```
 cap = min(
   desiredQuantity,
+  procurementCapacity(procurementHeadcount),
   availableSupply * maximumBuyerShareFor(entry, params),
   entry.approvedPurchaseCap ?? Infinity
 )
 ```
-`maximumBuyerShareFor()`は現段階では`params.domesticPurchase.maximumBuyerShare`を固定で返すのみだが、将来、養殖業者との関係・実績に応じて会社別に変化させる拡張ポイントとして独立した関数にしている（Phase4の`maximumSupplierShareFor`と対称。動的計算は未実装）。
+`procurementCapacity`（§4.1参照）を実配分の上限にも反映することで、調達人員がゼロ・少数の会社は希望量だけを大きくしても実配分量が増えない。`maximumBuyerShareFor()`は現段階では`params.domesticPurchase.maximumBuyerShare`を固定で返すのみだが、将来、養殖業者との関係・実績に応じて会社別に変化させる拡張ポイントとして独立した関数にしている（Phase4の`maximumSupplierShareFor`と対称。動的計算は未実装）。
 
 配分の合計は`availableSupply`（Phase3の`VietnamDomesticResult.supply`）を超えない。5社の希望量合計が供給を下回る場合は残余が`unallocatedSupply`として残る（外部の競合参加者は存在しない。国内供給市場は5社だけが競う閉じた市場という前提）。
 
-### 4.3 実際の買付単価・取得原価の保持
+### 4.3 実際の買付単価・取得原価の下限【Task E差分】
 
-実際の買付単価は会社の提示価格（`bidPrice = marketPrice + priceAdjustmentUsdPerHosoEqKg`）をそのまま使う。提示価格の入力検証（`minBidPriceRatioOfMarket`〜`maxBidPriceRatioOfMarket`、既定0.5〜2.0倍）により、市場価格を不自然に下回る提示は`RawMaterialsValidationError`で拒否する。`createDomesticPurchaseLots`が生成するロットの`unitCost`は`bidPrice`をそのまま保持するため、高値で確保した会社はその高い取得原価をロットへ持ち続ける（後の市場価格変動で自動改定されない。Phase4の安値契約保持と対称）。
+実際の買付単価（提示価格）は会社の入力（`bidPrice = marketPrice + priceAdjustmentUsdPerHosoEqKg`）をそのまま使う。提示価格の入力検証（`minBidPriceRatioOfMarket`〜`maxBidPriceRatioOfMarket`、既定0.5〜2.0倍）により、市場価格を著しく外れる提示（市場価格の0.5倍未満・2.0倍超）は`RawMaterialsValidationError`で拒否する。
+
+ただし、許容範囲内（市場価格の0.5〜1.0倍）の低い提示価格をそのままロットの取得原価にしてしまうと、「市場価格より安く自動的に原料を確保できる」ことになる。そこで`createDomesticPurchaseLots`が生成するロットの`unitCost`は、`bidPrice`をそのまま使うのではなく次の式で確定する。
+
+```
+unitCost = max(domesticMarketPrice, bidPrice)
+```
+
+高値を提示して優先的に確保した会社は、その提示価格をそのまま取得原価として保持する（後の市場価格変動で自動改定されない。Phase4の安値契約保持と対称）。一方、市場価格を下回る低い提示価格を入力しても、取得原価は市場価格そのものが下限になる。
 
 ## 5. 輸入原料（`imports.ts`）
 
@@ -151,8 +185,10 @@ FIFO消費（`consumeRawMaterials`）は`advanceRawMaterialsQuarter`から独立
 | 項目 | 扱い |
 |---|---|
 | `domesticPurchase.purchasePriceSensitivity`・`minimumBuyerPriceCompetitiveness`（0.5）・`maximumBuyerPriceCompetitiveness`（1.6） | 【暫定値・要校正】Phase4の価格競争力上下限と同じ考え方・同じ値をそのまま採用。ゲームバランス調整フェーズで再検討する前提 |
-| `domesticPurchase.maximumBuyerShare`（0.35） | 【暫定値・要校正】Phase4の`maximumSupplierShare`と対称。固定ルールではなく、将来会社別（養殖業者との関係・実績）に変化させられる構造（`maximumBuyerShareFor()`）にしているが、動的計算自体は未実装 |
-| `domesticPurchase.competitivenessWeights`・`coverageSaturationHeadcount`等 | 【暫定値・要校正】Phase4の営業人員係数と同じ形の逓減曲線・重み付けを踏襲した最小限の値 |
+| `domesticPurchase.maximumBuyerShare`（0.35） | 【暫定値・要校正】実配分（allocateDomesticPurchase）のcapに使う最大買付シェア。Phase4の`maximumSupplierShare`と対称。固定ルールではなく、将来会社別（養殖業者との関係・実績）に変化させられる構造（`maximumBuyerShareFor()`）にしているが、動的計算自体は未実装 |
+| `domesticPurchase.maximumPriceInfluenceShare`（0.35）【Task E新規】 | 【暫定値・要校正】有効買付意向（国内価格形成へ渡す値）の信認上限に使う最大価格影響シェア。`maximumBuyerShare`とは意図的に別係数（現段階では同値）。実際には買えない希望量だけで国内価格を操作する抜け道を防ぐ |
+| `domesticPurchase.baselineCapacityTons`（150）・`capacityMaxIncrementTons`（3600）・`capacitySaturationHeadcount`（10）【Task E新規】 | 【暫定値・要校正】調達人員から調達処理能力（HOSO換算トン）を導出する逓減曲線係数。Phase4のsalesForce係数と同じ形の最小限の値 |
+| `domesticPurchase.competitivenessWeights`（price=0.4, coverage=0.25, farmerRelationship=0.2, paymentReliability=0.15）・`coverageSaturationHeadcount`等 | 【暫定値・要校正】Phase4の営業人員係数と同じ形の逓減曲線・重み付けを踏襲した最小限の値 |
 | `imports.freightUsdPerHosoEqKg`・`dutyRatio`・`insuranceHandlingUsdPerHosoEqKg`・`originCountryAdjustmentUsdPerHosoEqKg` | 【暫定値・要校正】着地価格の内訳係数。すべて0（原産国別調整額）または小さな固定値を仮置き |
 | `imports.standardLeadTimeTurns`（2） | 【暫定値・要校正】発注から到着までの標準ターン数 |
 | `imports.importAvailableSupplyRatio`（0.1） | 【暫定値・要校正】原産国のexportableSupplyのうち5社が輸入で調達可能な比率。国際基準価格へ影響させないための、Phase5固有の切り出し比率 |
@@ -162,13 +198,13 @@ FIFO消費（`consumeRawMaterials`）は`advanceRawMaterialsQuarter`から独立
 
 ## 10. テスト
 
-`app/lib/v2/rawMaterials/__tests__/`に6ファイル、合計58件のテストを追加した（既存353件と合わせて411件）。
+`app/lib/v2/rawMaterials/__tests__/`に6ファイル、合計65件のテストを追加した（既存353件と合わせて418件）。Task E差分（有効買付意向の信認上限・調達処理能力・取得原価下限）で`domesticPurchase.test.ts`に7件、`inventory.test.ts`に1件を追加した。
 
 - `requirements.test.ts` — 会社×納期×商品区分ごとの集計、fulfilled/cancelledの除外、overdue/partiallyFulfilledの包含、副作用がないこと、決定論的なソート順。
-- `domesticPurchase.test.ts` — 希望量集計、Phase3入力への不変更新での接続、全社合計が供給を超えないこと、個社上限（希望量・最大買付シェア・承認済み買付枠）、入力順不変性、価格↔配分量トレードオフ、高値提示の飽和、価格検証エラー、重複計画エラー。
+- `domesticPurchase.test.ts` — 希望量集計、Phase3入力への不変更新での接続、全社合計が供給を超えないこと、個社上限（希望量・調達処理能力・最大買付シェア・承認済み買付枠）、入力順不変性、価格↔配分量トレードオフ、高値提示の飽和、価格検証エラー、重複計画エラー。**【Task E追加】** 有効買付意向が信認上限（調達処理能力・承認済み買付枠・基準供給量×最大価格影響シェア）を超えないこと、100万トン等の非現実的希望量でも価格操作に使える増加量が有界であること、調達人員ゼロの会社が大きな価格影響力を持てないこと、承認済み買付枠が有効買付意向にも適用されること、全社の信認された需要増加では有効買付意向合計が上昇すること、実配分量が調達処理能力を超えないこと。
 - `imports.test.ts` — 着地価格の内訳計算、輸送中→到着の状態遷移、標準/カスタムリードタイム、最大許容着地価格による注文拒否、原産国別供給上限の決定論的配分、入力順不変性、国際基準価格への非影響、複数原産国の独立上限。
 - `aquaculture.test.ts` — 養殖能力超過の拒否、強度による予定生産量増加、標準収穫四半期、疾病圧力による生残率低下、高強度養殖の疾病時損失拡大、バイオセキュリティによる緩和、収穫時期未到達時の非変化、収穫時の状態遷移・数量確定、会計フィールドの不在。
-- `inventory.test.ts` — 初期化、国内配分からのロット生成、FIFO消費順序、部分/完全消費、過剰消費拒否、他社ロットの非対象、輸送中/養殖中ロットの消費対象外、数量保存、期限切れ処理、高値取得原価の保持、ロットIDの非重複。
+- `inventory.test.ts` — 初期化、国内配分からのロット生成、FIFO消費順序、部分/完全消費、過剰消費拒否、他社ロットの非対象、輸送中/養殖中ロットの消費対象外、数量保存、期限切れ処理、高値取得原価の保持、ロットIDの非重複。**【Task E追加】** 国内原料ロットの取得単価が市場価格を下回らないこと（低い提示価格でも市場価格が下限になること）。
 - `runner.test.ts` — Phase3・Phase4の実出力を使った必要量集計の正確性、自動発注されないことの確認、5社×複数四半期の完走、再現性（同一入力→完全一致）、輸入/養殖の在庫化タイミング、金額フィールドの不在。
 
 ## 11. TypeScript・ESLint・ビルド

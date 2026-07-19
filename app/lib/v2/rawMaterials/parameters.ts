@@ -27,6 +27,16 @@ export interface RawMaterialsParameters {
     readonly baselineCoverageAtZeroHeadcount: number;
     readonly coverageSaturationHeadcount: number;
 
+    /**
+     * 調達人員 → 調達処理能力（HOSO換算トン、逓減曲線）。Phase4の
+     * processingCapacityと同じ形。会社の実際の買付実務能力の上限であり、
+     * 「有効買付意向」（信認上限付きの買付意向。§1参照）の算出にも、実配分の
+     * cap算出にも使う。
+     */
+    readonly baselineCapacityTons: number;
+    readonly capacityMaxIncrementTons: number;
+    readonly capacitySaturationHeadcount: number;
+
     /** 競争力の合成ウェイト（合計1.0を推奨）。 */
     readonly competitivenessWeights: {
       readonly price: number;
@@ -41,8 +51,21 @@ export interface RawMaterialsParameters {
     /**
      * 市場×四半期ごとに、1社が対象供給から買い付けられる最大比率（0〜1）。
      * Phase4のmaximumSupplierShareと対称の「最大買付シェア」（暫定値・要校正）。
+     * 実配分（allocateDomesticPurchase）のcapに使う。
      */
     readonly maximumBuyerShare: number;
+
+    /**
+     * 国内価格形成（Phase3）へ渡す「有効買付意向」の算出に使う、1社が
+     * 基準国内供給量に対して持てる最大価格影響シェア（0〜1）。
+     * 【暫定値・要校正・Task E差分】実配分のmaximumBuyerShareとは別の係数として
+     * 分離している（実際に買える上限と、価格シグナルとして認める上限は、将来
+     * 別々に調整したい場合があるため）。現段階では同値でもよい暫定値。
+     * これにより「実際には買えない希望量を過大申告して国内価格だけを押し上げる」
+     * 抜け道を防ぐ（会社の有効買付意向は、desiredQuantity・procurementCapacity・
+     * approvedPurchaseCap・基準供給量×このシェアのうち最小値に制限される）。
+     */
+    readonly maximumPriceInfluenceShare: number;
 
     /** 提示買付価格の入力検証（marketPriceに対する比率）。 */
     readonly minBidPriceRatioOfMarket: number;
@@ -107,6 +130,10 @@ export const RAW_MATERIALS_PARAMETERS_V1: RawMaterialsParameters = {
     baselineCoverageAtZeroHeadcount: 0.15,
     coverageSaturationHeadcount: 6,
 
+    baselineCapacityTons: 150,
+    capacityMaxIncrementTons: 3600,
+    capacitySaturationHeadcount: 10,
+
     competitivenessWeights: {
       price: 0.4,
       coverage: 0.25,
@@ -117,6 +144,7 @@ export const RAW_MATERIALS_PARAMETERS_V1: RawMaterialsParameters = {
     neutralScore: score0to100(50),
 
     maximumBuyerShare: 0.35,
+    maximumPriceInfluenceShare: 0.35,
 
     minBidPriceRatioOfMarket: 0.5,
     maxBidPriceRatioOfMarket: 2.0,
