@@ -11,6 +11,7 @@ import { SalesContract } from "../sales/types";
 import { CompanyFactoryProductRampState, CompanyMarketTrustState, CompanyProductQualityState, QualityReliabilityState } from "../quality/types";
 import { CompanyFinanceState, FinishedGoodsCostLedgerEntry, PayableRecord, ReceivableRecord } from "../finance/types";
 import { CompanyFinancingHistory, CompanyFinancingState, LoanPortfolio, LoanRecord } from "../financing/types";
+import { CapitalProject, CapitalProjectPortfolio, CompanyCapexState, FutureCapacityEffectPlaceholder, PaymentScheduleStage } from "../capex/types";
 import { PersistedGameStateV2 } from "./types";
 import { PersistedStateParseError } from "./errors";
 import { validatePersistedGameState } from "./schema";
@@ -227,6 +228,60 @@ function financingStateToDto(f: CompanyFinancingState): Record<string, unknown> 
   };
 }
 
+/** PaymentScheduleStageを固定のキー順序を持つDTOへ変換する（Phase 8B-2A、schemaVersion 6）。 */
+function paymentScheduleStageToDto(s: PaymentScheduleStage): Record<string, unknown> {
+  return { stageIndex: s.stageIndex, plannedRatio: s.plannedRatio };
+}
+
+/** FutureCapacityEffectPlaceholderを固定のキー順序を持つDTOへ変換する（Phase 8B-2A、schemaVersion 6）。 */
+function futureCapacityEffectToDto(f: FutureCapacityEffectPlaceholder): Record<string, unknown> {
+  const dto: Record<string, unknown> = {};
+  if (f.targetProduct !== undefined) dto.targetProduct = f.targetProduct;
+  if (f.capacityIncreaseTonsPerQuarter !== undefined) dto.capacityIncreaseTonsPerQuarter = f.capacityIncreaseTonsPerQuarter;
+  if (f.readinessQuartersAfterCompletion !== undefined) dto.readinessQuartersAfterCompletion = f.readinessQuartersAfterCompletion;
+  return dto;
+}
+
+/** CapitalProjectを固定のキー順序を持つDTOへ変換する（Phase 8B-2A、schemaVersion 6）。 */
+function capitalProjectToDto(p: CapitalProject): Record<string, unknown> {
+  const dto: Record<string, unknown> = {
+    projectId: p.projectId,
+    companyId: p.companyId,
+    projectType: p.projectType,
+    approvedBudgetUsd: p.approvedBudgetUsd,
+    paymentSchedule: p.paymentSchedule.map(paymentScheduleStageToDto),
+    completedPaymentStagesCount: p.completedPaymentStagesCount,
+    cumulativePaidUsd: p.cumulativePaidUsd,
+    elapsedConstructionQuartersWithPayment: p.elapsedConstructionQuartersWithPayment,
+    requiredConstructionQuarters: p.requiredConstructionQuarters,
+    status: p.status,
+    proposedPeriod: p.proposedPeriod,
+    approvedPeriod: p.approvedPeriod,
+  };
+  if (p.constructionStartedPeriod !== undefined) dto.constructionStartedPeriod = p.constructionStartedPeriod;
+  if (p.completedPeriod !== undefined) dto.completedPeriod = p.completedPeriod;
+  if (p.cancelledPeriod !== undefined) dto.cancelledPeriod = p.cancelledPeriod;
+  if (p.capitalizedAmountUsd !== undefined) dto.capitalizedAmountUsd = p.capitalizedAmountUsd;
+  dto.priority = p.priority;
+  if (p.futureCapacityEffect !== undefined) dto.futureCapacityEffect = futureCapacityEffectToDto(p.futureCapacityEffect);
+  dto.lastDiagnosticReasons = [...p.lastDiagnosticReasons];
+  return dto;
+}
+
+/** CapitalProjectPortfolioを固定のキー順序を持つDTOへ変換する（Phase 8B-2A、schemaVersion 6）。 */
+function capitalProjectPortfolioToDto(p: CapitalProjectPortfolio): Record<string, unknown> {
+  return { companyId: p.companyId, projects: p.projects.map(capitalProjectToDto) };
+}
+
+/** CompanyCapexStateを固定のキー順序を持つDTOへ変換する（Phase 8B-2A、schemaVersion 6）。 */
+function capexStateToDto(c: CompanyCapexState): Record<string, unknown> {
+  return {
+    companyId: c.companyId,
+    portfolio: capitalProjectPortfolioToDto(c.portfolio),
+    nextProjectSequence: c.nextProjectSequence,
+  };
+}
+
 /**
  * PersistedGameStateV2を、トップレベル・ネストしたオブジェクトいずれも
  * 固定のキー順序を持つDTOへ変換する。契約・ロットの配列順序は一切
@@ -244,6 +299,7 @@ function toCanonicalDto(state: PersistedGameStateV2): Record<string, unknown> {
     qualityReliability: qualityReliabilityToDto(state.qualityReliability),
     financeStates: state.financeStates.map(financeStateToDto),
     financingStates: state.financingStates.map(financingStateToDto),
+    capexStates: state.capexStates.map(capexStateToDto),
     execution: {
       completedTurnCount: state.execution.completedTurnCount,
       ...(state.execution.lastCompletedPeriod !== undefined ? { lastCompletedPeriod: state.execution.lastCompletedPeriod } : {}),

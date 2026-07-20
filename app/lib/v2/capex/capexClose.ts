@@ -1,0 +1,198 @@
+// ShrimpX V2 — 設備投資モジュール 四半期クローズ（Phase 8B-2A）
+//
+// 【全体の処理順序（実装指示§14・§28。既存companyLab runnerの構造に合わせ、
+// financing/liquidityClose.tsのclosseQuarterWithFinancingが確定させた
+// 「デットサービス後の確定現金」を起点に、設備投資の現金配分を決める）】
+//   1. closeQuarterWithFinancing（Phase 8B-1、既存・変更なし）が当四半期の
+//      最終的な財務結果（デットサービス後の確定現金を含む）を確定する。
+//   2. 設備投資可能額 = max(0, その確定現金 − 最低現金準備額)。
+//   3. 新規提案の承認判定 → 取消/再開要求の適用 → 支払優先順位付け →
+//      全額支払のみの分割払い試行（現金が尽きるまで、または全案件処理まで）。
+//   4. finance/のclosefinancialQuarterを「三段目」として呼び、financing側の
+//      数値（すでに確定済み・再計算しない）とcapex側の数値（当四半期支払・
+//      完成振替・期末CIP・非減価償却対象額）を同時に渡して最終PL/BS/CFを得る。
+//
+// 【financingロジックを複製しない設計】financing側の利息・元本・借入残高は
+// 一切再計算せず、closeQuarterWithFinancingがすでに返したFinancingQuarterResult
+// （公開フィールドのみ）からFinancingAdjustmentを再構成して三段目へそのまま
+// 渡す（三段目のclosefinancialQuarterは同じ入力から同じ計算をもう一度行うだけ
+// であり、accruedInterestPayable等の恒等式は崩れない）。
+
+import { PeriodV2 } from "../core/period";
+import { CompanyId } from "../sales/types";
+import { Product } from "../market/types";
+import {
+  CapexAdjustment,
+  CompanyFinanceState,
+  CompanyFinancialQuarterResult,
+  FinancingAdjustment,
+} from "../finance/types";
+import { closeFinancialQuarter, CompanyQuarterBusinessActuals } from "../finance/quarterClose";
+import { FinanceParameters } from "../finance/parameters";
+import { FinancingQuarterResult } from "../financing/types";
+import { CapexParameters } from "./parameters";
+import {
+  applyCancelRequest,
+  attemptPayment,
+  buildPaymentQueue,
+  evaluateProposal,
+  isActiveStatus,
+  ProposalApprovalGate,
+  replaceProject,
+  validateResumeRequest,
+} from "./projectLifecycle";
+import { CapexDecisionInput, CapexQuarterResult, CapexRejectedProposal, CapexValidationError, CapitalProject, CompanyCapexState } from "./types";
+
+export interface CloseQuarterWithCapexInput {
+  readonly companyId: CompanyId;
+  readonly period: PeriodV2;
+  readonly prevFinanceState: CompanyFinanceState;
+  readonly actuals: CompanyQuarterBusinessActuals;
+  /** closeQuarterWithFinancing（Phase 8B-1）が確定させた、資金繰り確定後・設備投資前の最終財務結果。 */
+  readonly financeResultBeforeCapex: CompanyFinancialQuarterResult;
+  /** 同じ呼び出しが返したFinancingQuarterResult（利息・元本・借入残高の再構成に使う。再計算はしない）。 */
+  readonly financingQuarterResult: FinancingQuarterResult;
+  /** 当四半期開始時点の未払利息残高（prevFinancingState.accruedInterestPayableUsd）。 */
+  readonly beginningAccruedInterestPayableUsd: number;
+  readonly prevCapexState: CompanyCapexState;
+  readonly decision: CapexDecisionInput;
+  readonly approvalGate: ProposalApprovalGate;
+}
+
+export interface CloseQuarterWithCapexOutput {
+  readonly financeResult: CompanyFinancialQuarterResult;
+  readonly nextFinanceState: CompanyFinanceState;
+  readonly nextCapexState: CompanyCapexState;
+  readonly capexQuarterResult: CapexQuarterResult;
+}
+
+function totalActiveProjects(projects: readonly CapitalProject[]): number {
+  return projects.filter((p) => isActiveStatus(p.status)).length;
+}
+
+/**
+ * 1社・1四半期ぶんの設備投資処理（提案評価・取消/再開・支払配分）と、
+ * finance/への三段目closeFinancialQuarter呼び出しをまとめて行う。
+ */
+export function closeQuarterWithCapex(
+  input: CloseQuarterWithCapexInput,
+  financeParams: FinanceParameters,
+  params: CapexParameters,
+  processingRateByProduct: Readonly<Record<Product, number>>
+): CloseQuarterWithCapexOutput {
+  const { companyId, period, prevCapexState, decision } = input;
+  if (prevCapexState.companyId !== companyId) {
+    throw new CapexValidationError(`設備投資状態と当期の会社IDが一致しません: ${prevCapexState.companyId} vs ${companyId}`);
+  }
+  if (decision.companyId !== companyId) {
+    throw new CapexValidationError(`設備投資の意思決定と当期の会社IDが一致しません: ${decision.companyId} vs ${companyId}`);
+  }
+
+  // --- 1. 取消要求の適用 ---
+  let projects: CapitalProject[] = [...prevCapexState.portfolio.projects];
+  for (const cancel of decision.cancelRequests) {
+    projects = applyCancelRequest(projects, cancel, period);
+  }
+
+  // --- 2. 再開要求の検証（statusは変更しない。対象IDだけ収集する） ---
+  const resumeProjectIds = new Set<string>();
+  for (const resume of decision.resumeRequests) {
+    validateResumeRequest(projects, resume);
+    resumeProjectIds.add(resume.projectId);
+  }
+
+  // --- 3. 新規提案の評価（承認/拒否。同時進行中案件数の上限は提案を処理するたびに再評価する） ---
+  const rejectedProposals: CapexRejectedProposal[] = [];
+  let nextProjectSequence = prevCapexState.nextProjectSequence;
+  decision.newProjectProposals.forEach((proposal, index) => {
+    const activeCount = totalActiveProjects(projects);
+    const projectId = `${companyId}-CAPEX-${nextProjectSequence}`;
+    const outcome = evaluateProposal(companyId, proposal, activeCount, input.approvalGate, params, period, projectId, index + 1);
+    if ("approved" in outcome) {
+      projects = [...projects, outcome.approved];
+      nextProjectSequence += 1;
+    } else {
+      rejectedProposals.push(outcome.rejected);
+    }
+  });
+
+  // --- 4. 設備投資可能額（実装指示§14） ---
+  const preCapexCashUsd = input.financeResultBeforeCapex.balanceSheet.cash as number;
+  const cashAvailableForCapexUsd = Math.max(0, preCapexCashUsd - params.minimumCashReserveUsd);
+
+  // --- 5. 支払優先順位付け → 全額支払のみの分割払い試行 ---
+  const queue = buildPaymentQueue(projects, resumeProjectIds);
+  let remainingCashUsd = cashAvailableForCapexUsd;
+  let totalPaidThisQuarterUsd = 0;
+  let completedProjectsTransferUsd = 0;
+  const events = queue.map((project) => {
+    const attempt = attemptPayment(project, remainingCashUsd, period, params);
+    remainingCashUsd -= attempt.cashSpentUsd;
+    totalPaidThisQuarterUsd += attempt.cashSpentUsd;
+    completedProjectsTransferUsd += attempt.completedTransferUsd;
+    projects = replaceProject(projects, attempt.updatedProject);
+    return attempt.event;
+  });
+
+  // --- 6. 期末建設中勘定・非減価償却対象額 ---
+  const endingConstructionInProgressUsd = projects.filter((p) => isActiveStatus(p.status)).reduce((s, p) => s + p.cumulativePaidUsd, 0);
+  const nonDepreciatingCapexGrossAtPeriodStartUsd = prevCapexState.portfolio.projects
+    .filter((p) => p.status === "completed")
+    .reduce((s, p) => s + (p.capitalizedAmountUsd ?? 0), 0);
+
+  const capexAdjustment: CapexAdjustment = {
+    capexPaymentCashUsd: totalPaidThisQuarterUsd,
+    completedProjectsTransferUsd,
+    endingConstructionInProgressUsd,
+    nonDepreciatingCapexGrossAtPeriodStartUsd,
+  };
+
+  // --- 7. financing側の数値を再構成（再計算しない。公開フィールドから組み立てるだけ） ---
+  const fr = input.financingQuarterResult;
+  const reconstructedFinancing: FinancingAdjustment = {
+    interestExpenseUsd: fr.interestAccrualUsd,
+    interestPaidCashUsd: fr.interestPaidCashUsd,
+    loanDrawUsd: fr.loanDrawUsd,
+    principalRepaymentCashUsd: fr.principalPaidCashUsd,
+    endingShortTermLoansUsd: fr.endingShortTermLoansUsd,
+    endingLongTermLoansUsd: fr.endingLongTermLoansUsd,
+    beginningAccruedInterestPayableUsd: input.beginningAccruedInterestPayableUsd,
+  };
+
+  // --- 8. 三段目のclosefinancialQuarter呼び出し（最終PL/BS/CF） ---
+  const passThree = closeFinancialQuarter(input.prevFinanceState, input.actuals, financeParams, processingRateByProduct, reconstructedFinancing, capexAdjustment);
+
+  const nextCapexState: CompanyCapexState = {
+    companyId,
+    portfolio: { companyId, projects },
+    nextProjectSequence,
+  };
+
+  const capexQuarterResult: CapexQuarterResult = {
+    companyId,
+    period,
+    rejectedProposals,
+    events,
+    cashAvailableForCapexUsd,
+    totalPaidThisQuarterUsd,
+    completedProjectsTransferUsd,
+    endingConstructionInProgressUsd,
+    nonDepreciatingCapexGrossAtPeriodStartUsd,
+  };
+
+  return {
+    financeResult: passThree.result,
+    nextFinanceState: passThree.nextState,
+    nextCapexState,
+    capexQuarterResult,
+  };
+}
+
+/** 会社の新規設備投資状態（案件なし）。companyLab/runner.tsの初期化から使う。 */
+export function buildInitialCompanyCapexState(companyId: CompanyId): CompanyCapexState {
+  return {
+    companyId,
+    portfolio: { companyId, projects: [] },
+    nextProjectSequence: 1,
+  };
+}

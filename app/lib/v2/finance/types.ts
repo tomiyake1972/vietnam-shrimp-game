@@ -346,6 +346,13 @@ export interface BalanceSheet {
   readonly otherCurrentAssets: Usd;
   /** 固定資産（純額 = 取得原価 - 減価償却累計額）。 */
   readonly fixedAssetsNet: Usd;
+  /**
+   * 建設中の設備投資案件の累計支払額（未完成、Phase 8B-2A）。まだ固定資産へ
+   * 振替えていない金額であり、完成した時点でfixedAssetsNet側へ移る（減価償却は
+   * 完成後も開始しない。finance/types.tsのCapexAdjustmentコメント参照）。
+   * capex未指定（Phase 8A/8B-1互換の呼び出し）では常に0。
+   */
+  readonly constructionInProgress: Usd;
   readonly totalAssets: Usd;
   readonly accountsPayable: Usd;
   readonly shortTermLoans: Usd;
@@ -615,4 +622,38 @@ export interface FinancingAdjustment {
   readonly endingLongTermLoansUsd: number;
   /** 期首未払利息残高（前期から繰り越し。financing側のCompanyFinancingState.accruedInterestPayableUsdと一致する）。 */
   readonly beginningAccruedInterestPayableUsd: number;
+}
+
+// ---------------------------------------------------------------------
+// 13. 設備投資調整（Phase 8B-2A）。closeFinancialQuarterへの追加的・任意の入力。
+// ---------------------------------------------------------------------
+
+/**
+ * capex/（Phase 8B-2A）が算出した、当期の設備投資案件の支払・完成振替の
+ * 会計三表への反映内容。closeFinancialQuarterの任意引数として渡す。
+ *
+ * 【後方互換の設計原則】この引数を渡さない場合、closeFinancialQuarterは
+ * Phase 8A/8B-1と完全に同一の計算を行う（investingCashFlow=0、
+ * constructionInProgress=0、fixedAssetsGrossは前期から不変）。既存テストは
+ * 一切この引数を渡さないため、挙動・数値は一切変化しない。
+ *
+ * 【新規完成設備が即時に減価償却されない設計】nonDepreciatingCapexGrossAtPeriodStartUsd
+ * は、prev.fixedAssetsGrossのうち「過去の四半期にcapex経由で完成振替された、
+ * まだ減価償却を開始していない金額」を表す。closeFinancialQuarterはこの値を
+ * prev.fixedAssetsGrossから除いた残り（レガシー資産分）だけに減価償却率を
+ * 適用する（実装指示「新規完成設備の減価償却が未開始であること」。Phase 8B-2Bで
+ * 新設備の減価償却開始・稼働開始を接続する前提の、意図的な暫定境界）。
+ */
+export interface CapexAdjustment {
+  /** 当期の設備投資案件への現金支払額合計（CFIのマイナス）。 */
+  readonly capexPaymentCashUsd: number;
+  /** 当期に完成し固定資産（fixedAssetsGross）へ振替えた金額合計（当期のCIPからの振替）。 */
+  readonly completedProjectsTransferUsd: number;
+  /** capexポートフォリオから算出した期末建設中勘定残高（BS constructionInProgressを置き換える）。 */
+  readonly endingConstructionInProgressUsd: number;
+  /**
+   * prev.fixedAssetsGrossのうち、capex経由で完成済みかつまだ減価償却対象と
+   * なっていない金額（当期の減価償却率計算のベースから除外する）。
+   */
+  readonly nonDepreciatingCapexGrossAtPeriodStartUsd: number;
 }

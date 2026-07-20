@@ -14,6 +14,7 @@ import { RawMaterialLot } from "../rawMaterials/types";
 import { QualityReliabilityState } from "../quality/types";
 import { CompanyFinanceState } from "../finance/types";
 import { CompanyFinancingState } from "../financing/types";
+import { CompanyCapexState } from "../capex/types";
 import { TurnOrchestratorInput, TurnOrchestratorResult } from "../turn/types";
 import { CURRENT_PERSISTED_GAME_STATE_VERSION, ExternalTurnInput, PersistedGameStateV2 } from "./types";
 import { PersistedStateTransitionError, PersistedStateValidationError } from "./errors";
@@ -72,6 +73,12 @@ export interface CreateInitialPersistedGameStateInput {
    * 通常は省略される（types.tsのバージョン履歴コメント参照）。
    */
   readonly initialFinancingStates?: readonly CompanyFinancingState[];
+  /**
+   * Phase 8B-2A（schemaVersion 6）。省略時は空配列（設備投資状態未初期化）を使う。
+   * 無印/v2ゲーム（turn/turnState）は現時点で設備投資ロジックを呼ばないため、
+   * 通常は省略される（types.tsのバージョン履歴コメント参照）。
+   */
+  readonly initialCapexStates?: readonly CompanyCapexState[];
   readonly createdAt: string;
 }
 
@@ -97,6 +104,7 @@ export function createInitialPersistedGameState(input: CreateInitialPersistedGam
     qualityReliability: input.initialQualityReliability ?? EMPTY_QUALITY_RELIABILITY_STATE,
     financeStates: input.initialFinanceStates !== undefined ? [...input.initialFinanceStates] : [],
     financingStates: input.initialFinancingStates !== undefined ? [...input.initialFinancingStates] : [],
+    capexStates: input.initialCapexStates !== undefined ? [...input.initialCapexStates] : [],
     execution: {
       completedTurnCount: 0,
     },

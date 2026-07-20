@@ -40,6 +40,7 @@ import { TurnOrchestratorDebugInfo } from "../turn/types";
 import { BatchQualityAdjustment, MarketDeliveryObservation, QualityReliabilityState } from "../quality/types";
 import { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { CompanyFinancingState, FinancingRequestInput, FinancingState, FinancingQuarterResult } from "../financing/types";
+import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -128,6 +129,13 @@ export interface CompanyDecisionInput {
    * この希望を銀行審査へ渡す）。
    */
   readonly financingRequest: FinancingRequestInput;
+  /**
+   * 【Phase 8B-2A】当期の設備投資に関する意思決定（新規案件提案・取消・再開の
+   * 希望）。financingRequestと同様、当期開始時点の情報だけで決めること。
+   * 5社自動方針（autoPolicy.ts）は常に空（新規提案なし）を返す（実装指示§11。
+   * 統合テスト・意思決定編集からの上書きは可能）。
+   */
+  readonly capexDecision: CapexDecisionInput;
 }
 
 // ---------------------------------------------------------------------
@@ -160,6 +168,8 @@ export interface CompanyOwnState {
    */
   readonly financeState: CompanyFinanceState;
   readonly financingState: CompanyFinancingState;
+  /** 【Phase 8B-2A】前期末までの自社設備投資状態（案件ポートフォリオ）。 */
+  readonly capexState: CompanyCapexState;
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */
@@ -293,6 +303,12 @@ export interface CompanyQuarterRecord {
    * が生成する（financeモジュールと同様、実績の再計算は一切行わない）。
    */
   readonly financingResults: readonly FinancingQuarterResult[];
+  /**
+   * 【Phase 8B-2A】当期の会社別設備投資結果（提案評価・取消/再開・分割払い・
+   * 完成振替・建設中勘定）。capex/capexClose.tsが生成する（finance/financingと
+   * 同様、実績の再計算は一切行わない）。
+   */
+  readonly capexResults: readonly CapexQuarterResult[];
 }
 
 export interface CompanyLabConfig {
@@ -317,6 +333,8 @@ export interface CompanyLabState {
   readonly financeState: FinanceState;
   /** 【Phase 8B-1】会社別の資金繰り状態（融資ポートフォリオ・未払利息・信用/延滞履歴。ターンをまたいで保持）。 */
   readonly financingState: FinancingState;
+  /** 【Phase 8B-2A】会社別の設備投資状態（案件ポートフォリオ。ターンをまたいで保持）。 */
+  readonly capexState: CapexState;
   readonly history: readonly CompanyQuarterRecord[];
   readonly isComplete: boolean;
 }

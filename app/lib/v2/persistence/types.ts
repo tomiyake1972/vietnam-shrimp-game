@@ -25,6 +25,7 @@ import { MarketQuarterInput } from "../market/types";
 import { QualityReliabilityState } from "../quality/types";
 import { CompanyFinanceState } from "../finance/types";
 import { CompanyFinancingState } from "../financing/types";
+import { CompanyCapexState } from "../capex/types";
 import {
   DomesticPurchaseIntentSource,
   TurnOrchestratorParameters,
@@ -87,8 +88,16 @@ import {
  *      変更）。schemaVersion 4までと同様、無印/v2ゲーム自身のrunTurnは資金繰り
  *      ロジックを呼ばないため、companyLab→Redis/API実配線（対象外）までは
  *      本フィールドへ実際に値が書き込まれることはない。
+ *   6: Phase 8B-2A。会社別の設備投資状態（capexStates、capex/types.tsの
+ *      CompanyCapexStateをそのまま再利用。投資案件ポートフォリオ・案件ID発行
+ *      連番）を追加。バージョン1〜5のデータにはcapexStatesキー自体が存在しない
+ *      ため、decode時に空配列（設備投資状態未初期化）の安全な初期値を補う
+ *      （financeStates/financingStatesと同じ、キーの有無で判定する追加的
+ *      変更）。schemaVersion 5までと同様、無印/v2ゲーム自身のrunTurnは設備投資
+ *      ロジックを呼ばないため、companyLab→Redis/API実配線（対象外）までは
+ *      本フィールドへ実際に値が書き込まれることはない。
  */
-export const CURRENT_PERSISTED_GAME_STATE_VERSION = 5;
+export const CURRENT_PERSISTED_GAME_STATE_VERSION = 6;
 
 // ---------------------------------------------------------------------
 // 2. 永続化状態
@@ -149,6 +158,12 @@ export interface PersistedGameStateV2 {
    * 利用側が必要時に整合する初期資金繰り状態を構築する。上記バージョン履歴参照）。
    */
   readonly financingStates: readonly CompanyFinancingState[];
+  /**
+   * Phase 8B-2A（schemaVersion 6）。会社別の設備投資状態。常に存在する
+   * （v1〜v5データをdecodeする際は空配列＝設備投資状態未初期化を補い、
+   * 利用側が必要時に整合する初期設備投資状態を構築する。上記バージョン履歴参照）。
+   */
+  readonly capexStates: readonly CompanyCapexState[];
   readonly execution: PersistedGameStateExecution;
   readonly metadata: PersistedGameStateMetadata;
 }

@@ -25,6 +25,7 @@ import { amountFromPlainTonsAndUsdPerKg } from "./money";
 import {
   AbsorptionVariableReconciliation,
   BalanceSheet,
+  CapexAdjustment,
   CashFlowStatement,
   CompanyFinanceState,
   CompanyFinancialQuarterResult,
@@ -348,13 +349,18 @@ export interface QuarterCloseOutput {
  * financing（Phase 8B-1、任意）: financing/liquidityClose.tsが算出した当期の
  * 借入・返済・利息の反映内容。省略時はPhase 8Aと完全に同一の計算になる
  * （後方互換。types.tsのFinancingAdjustmentコメント参照）。
+ *
+ * capex（Phase 8B-2A、任意）: capex/capexClose.tsが算出した当期の設備投資
+ * 案件の支払・完成振替の反映内容。省略時はPhase 8A/8B-1と完全に同一の計算に
+ * なる（後方互換。types.tsのCapexAdjustmentコメント参照）。
  */
 export function closeFinancialQuarter(
   prev: CompanyFinanceState,
   actuals: CompanyQuarterBusinessActuals,
   params: FinanceParameters,
   processingRateByProduct: Readonly<Record<Product, number>>,
-  financing?: FinancingAdjustment
+  financing?: FinancingAdjustment,
+  capex?: CapexAdjustment
 ): QuarterCloseOutput {
   if (prev.companyId !== actuals.companyId) {
     throw new FinanceValidationError(`財務状態と実績データの会社IDが一致しません: ${prev.companyId} vs ${actuals.companyId}`);
@@ -363,9 +369,16 @@ export function closeFinancialQuarter(
   const companyId = actuals.companyId;
 
   // --- 減価償却（定額法・純額フロア） ---
+  // 【Phase 8B-2A】capex指定時は、prev.fixedAssetsGrossのうち過去にcapex経由で
+  // 完成振替された未減価償却分（nonDepreciatingCapexGrossAtPeriodStartUsd）を
+  // 減価償却率の適用対象（レガシー資産分）から除外する（新規完成設備の減価償却が
+  // 未開始であることの構造的な保証。types.tsのCapexAdjustmentコメント参照）。
+  const legacyDepreciableGrossUsd = capex
+    ? Math.max(0, (prev.fixedAssetsGross as number) - capex.nonDepreciatingCapexGrossAtPeriodStartUsd)
+    : (prev.fixedAssetsGross as number);
   const fixedAssetsNetBefore = (prev.fixedAssetsGross as number) - (prev.accumulatedDepreciation as number);
   const depreciationUsd = Math.min(
-    (prev.fixedAssetsGross as number) * params.finance.depreciationRatePerQuarter,
+    legacyDepreciableGrossUsd * params.finance.depreciationRatePerQuarter,
     Math.max(0, fixedAssetsNetBefore)
   );
 
@@ -652,7 +665,12 @@ export function closeFinancialQuarter(
   // （financing省略時はinterestPaidCash===interestExpenseのためPhase 8Aと同一）。
   const operatingCashFlow =
     receiptsFromCustomers - paymentsForRawMaterials - paymentsForManufacturing - sgaTotal - interestPaidCash - incomeTax;
-  const investingCashFlow = 0;
+  // 【Phase 8B-2A】capex指定時は当期の設備投資現金支払額のマイナス。省略時は0（Phase 8A/8B-1同一）。
+  // capexPaymentCashUsd=0のとき"-0"（負のゼロ）にならないよう正規化する（-0===0だが、
+  // deepEqual等の厳密比較・CLI表示で"-0"となる紛らしさを避けるための数値衛生上の措置。
+  // 会計上の意味は一切変えない）。
+  const investingCashFlowRaw = capex ? -capex.capexPaymentCashUsd : 0;
+  const investingCashFlow = investingCashFlowRaw === 0 ? 0 : investingCashFlowRaw;
   // 【Phase 8B-1】financing指定時は借入実行(+)・元本返済(-)の純額。省略時は0（Phase 8A同一）。
   const financingCashFlow = financing ? financing.loanDrawUsd - financing.principalRepaymentCashUsd : 0;
   const netCashChange = operatingCashFlow + investingCashFlow + financingCashFlow;
@@ -664,7 +682,10 @@ export function closeFinancialQuarter(
   const apEnd = remainingPayables.reduce((s, p) => s + (p.amount as number), 0) + newPayables.reduce((s, p) => s + (p.amount as number), 0);
   const finishedGoodsInventoryEnd = nextLedger.reduce((s, e) => s + e.remainingQuantity * totalUnitCostPerTon(e.unitCost), 0);
   const accumulatedDepreciationEnd = (prev.accumulatedDepreciation as number) + depreciationUsd;
-  const fixedAssetsNet = (prev.fixedAssetsGross as number) - accumulatedDepreciationEnd;
+  // 【Phase 8B-2A】capex指定時は当期完成振替分をfixedAssetsGrossへ加算する。省略時はprevから不変（Phase 8A/8B-1同一）。
+  const fixedAssetsGrossEnd = (prev.fixedAssetsGross as number) + (capex ? capex.completedProjectsTransferUsd : 0);
+  const fixedAssetsNet = fixedAssetsGrossEnd - accumulatedDepreciationEnd;
+  const constructionInProgressEnd = capex ? capex.endingConstructionInProgressUsd : 0;
   const retainedEarningsEnd = (prev.retainedEarnings as number) + netIncome;
 
   // 【Phase 8B-1】financing指定時は融資ポートフォリオ由来の期末残高を使う。省略時はprevから不変（Phase 8A同一）。
@@ -672,7 +693,13 @@ export function closeFinancialQuarter(
   const endingLongTermLoans = financing ? financing.endingLongTermLoansUsd : (prev.longTermLoans as number);
 
   const totalAssets =
-    closingCash + arEnd + actuals.rawMaterialInventoryEndUsd + finishedGoodsInventoryEnd + (prev.otherCurrentAssets as number) + fixedAssetsNet;
+    closingCash +
+    arEnd +
+    actuals.rawMaterialInventoryEndUsd +
+    finishedGoodsInventoryEnd +
+    (prev.otherCurrentAssets as number) +
+    fixedAssetsNet +
+    constructionInProgressEnd;
   const totalLiabilities =
     apEnd + endingShortTermLoans + endingLongTermLoans + accruedInterestPayableEnd + (prev.otherLiabilities as number);
   const totalEquity = (prev.capitalStock as number) + retainedEarningsEnd;
@@ -687,6 +714,7 @@ export function closeFinancialQuarter(
     finishedGoodsInventory: usd(assertFiniteNonNegative(finishedGoodsInventoryEnd, "完成品在庫金額")),
     otherCurrentAssets: prev.otherCurrentAssets,
     fixedAssetsNet: usd(assertFiniteNonNegative(fixedAssetsNet, "固定資産純額")),
+    constructionInProgress: usd(assertFiniteNonNegative(constructionInProgressEnd, "建設中勘定残高")),
     totalAssets: usd(totalAssets),
     accountsPayable: usd(assertFiniteNonNegative(apEnd, "買掛金残高")),
     shortTermLoans: usd(assertFiniteNonNegative(endingShortTermLoans, "短期借入金残高")),
@@ -906,7 +934,7 @@ export function closeFinancialQuarter(
     receivables: [...remainingReceivables, ...newReceivables],
     payables: [...remainingPayables, ...newPayables],
     otherCurrentAssets: prev.otherCurrentAssets,
-    fixedAssetsGross: prev.fixedAssetsGross,
+    fixedAssetsGross: usd(fixedAssetsGrossEnd),
     accumulatedDepreciation: usd(accumulatedDepreciationEnd),
     shortTermLoans: usd(endingShortTermLoans),
     longTermLoans: usd(endingLongTermLoans),

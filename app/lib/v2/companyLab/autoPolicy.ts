@@ -32,6 +32,7 @@ import { AquacultureStockingPlanEntry, DomesticPurchasePlanEntry, ImportOrderInp
 import { CompanyProductionPlanEntry, WorkerAssignment } from "../production/types";
 import { unwrapUsd } from "../finance/types";
 import { FinancingRequestInput } from "../financing/types";
+import { CapexDecisionInput } from "../capex/types";
 import { orderQuantityFactor } from "./premiumPolicy";
 import { AUTO_FINANCING_POLICY_PARAMETERS_V1 } from "./parameters";
 import { CompanyDecisionInput, CompanyFixture, CompanyOwnState, PublicMarketInfo } from "./types";
@@ -497,6 +498,21 @@ function buildFinancingRequest(ownState: CompanyOwnState): FinancingRequestInput
 }
 
 /**
+ * 【Phase 8B-2A（実装指示§11）】5社自動方針は新規設備投資案件を一切提案しない
+ * （常に空。統合テスト・意思決定編集からの明示的な上書きのみが提案を行う）。
+ * 特定会社IDへのハードコードではなく、「自動方針は常にこれを返す」という
+ * 会社ID非依存の一様な規則である。
+ */
+function buildCapexDecision(companyId: CompanyOwnState["companyId"]): CapexDecisionInput {
+  return {
+    companyId,
+    newProjectProposals: [],
+    cancelRequests: [],
+    resumeRequests: [],
+  };
+}
+
+/**
  * 交換可能な決定論的ルールベース自動方針（CompanyDecisionProvider型）。
  * 公開情報（publicInfo）と自社状態（ownState）だけを使い、未来のシナリオ・他社の
  * 非公開計画は一切参照しない（関数シグネチャ上、受け取ることもできない）。
@@ -547,6 +563,7 @@ export function generateAutoPolicyDecision(
   const aquacultureStockingPlans = buildAquacultureStockingPlans(fixture, profile, requiredRawMaterial, period);
   const workerAssignments = buildWorkerAssignments(fixture, profile);
   const financingRequest = buildFinancingRequest(ownState);
+  const capexDecision = buildCapexDecision(fixture.companyId);
 
   return {
     companyId: fixture.companyId,
@@ -557,5 +574,6 @@ export function generateAutoPolicyDecision(
     productionPlans,
     workerAssignments,
     financingRequest,
+    capexDecision,
   };
 }

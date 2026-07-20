@@ -107,6 +107,9 @@ import {
 } from "../financing";
 import type { CompanyFinancingState, FinancingQuarterResult, FinancingState } from "../financing/types";
 import type { QuarterFinancingPlan } from "../financing/liquidityClose";
+import { CAPEX_PARAMETERS_V1, buildInitialCompanyCapexState, closeQuarterWithCapex } from "../capex";
+import type { CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
+import type { ProposalApprovalGate } from "../capex/projectLifecycle";
 import { calculateExternalProcessorIntent } from "./externalDemand";
 import { EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1, REFERENCE_WORLD_CONSUMPTION_TONS } from "./parameters";
 import {
@@ -280,6 +283,12 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
     financingState: {
       companies: initialFinanceCompanies.map((fs) => buildInitialCompanyFinancingState(fs, startPeriod)),
     },
+    // 【Phase 8B-2A】5社の初期設備投資状態（案件なし。過去分の合成は行わない。
+    // 初期fixedAssetsGross＝Phase 8Aの初期財務フィクスチャそのものであり、
+    // capex経由の完成振替はゲーム開始後にのみ発生する）。
+    capexState: {
+      companies: fixtures.map((f) => buildInitialCompanyCapexState(f.companyId)),
+    },
     history: [],
     isComplete: false,
   };
@@ -312,8 +321,9 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
   // 参照してよい唯一の財務情報。当期の市場・生産実績は含まれない）。
   const financeStateForCompany = state.financeState.companies.find((c) => c.companyId === fixture.companyId);
   const financingStateForCompany = state.financingState.companies.find((c) => c.companyId === fixture.companyId);
-  if (!financeStateForCompany || !financingStateForCompany) {
-    throw new CompanyLabError(`会社 "${fixture.companyId}" の財務・資金繰り状態が初期化されていません。`);
+  const capexStateForCompany = state.capexState.companies.find((c) => c.companyId === fixture.companyId);
+  if (!financeStateForCompany || !financingStateForCompany || !capexStateForCompany) {
+    throw new CompanyLabError(`会社 "${fixture.companyId}" の財務・資金繰り・設備投資状態が初期化されていません。`);
   }
 
   return {
@@ -328,6 +338,7 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     deliveryReliabilityByMarket,
     financeState: financeStateForCompany,
     financingState: financingStateForCompany,
+    capexState: capexStateForCompany,
   };
 }
 
@@ -542,6 +553,10 @@ export function advanceCompanyLabQuarter(
   const financingPlanByCompanyId = new Map<CompanyId, QuarterFinancingPlan>();
   const collateralByCompanyId = new Map<CompanyId, ReturnType<typeof buildCollateralInputFromCompanyLab>>();
   const procurementConstraintByCompanyId = new Map<CompanyId, ReturnType<typeof computeProcurementConstraint>>();
+  // 【Phase 8B-2A】新規設備投資案件の承認判定に使う与信ゲート（実装指示§12。
+  // 銀行の与信判断と同じ「前期末までの情報のみ」原則。当期のturnResultより前に
+  // 確定するplan.borrowingCapacity・前期末までのfinancingHistoryだけで決める）。
+  const capexApprovalGateByCompanyId = new Map<CompanyId, ProposalApprovalGate>();
   const fallbackExpectedDomesticPriceUsdPerKg = 2.5; // autoPolicy.tsのDEFAULT_EXPECTED_RAW_PRICE_USD_PER_KGと同じ暫定値（要校正）。
 
   for (const f of fixtures) {
@@ -574,6 +589,11 @@ export function advanceCompanyLabQuarter(
       FINANCING_PARAMETERS_V1
     );
     financingPlanByCompanyId.set(f.companyId, plan);
+    capexApprovalGateByCompanyId.set(f.companyId, {
+      borrowingCapacityFrozen: plan.borrowingCapacity.underwritingFrozen,
+      severelyDistressed:
+        prevFinancingState.history.lastFinancialHealth === "paymentDefault" || prevFinancingState.history.lastFinancialHealth === "insolvent",
+    });
 
     const expectedDomesticPriceUsdPerKg = lastRecord ? unwrapUnit(lastRecord.marketResult.vietnamDomestic.price) : fallbackExpectedDomesticPriceUsdPerKg;
     const procurementConstraint = computeProcurementConstraint(
@@ -738,11 +758,18 @@ export function advanceCompanyLabQuarter(
   // financeモジュールの会計処理を複製しない）。
   const nextFinancingCompanies: CompanyFinancingState[] = [];
   const financingResults: FinancingQuarterResult[] = [];
+  // 【Phase 8B-2A】設備投資: financing決算確定後の現金を起点に、当期の
+  // 案件承認・取消/再開・分割払いを処理し、finance/へ三段目のclosefinancialQuarter
+  // 呼び出しで最終PL/BS/CFを確定する（capex/capexClose.ts closeQuarterWithCapex。
+  // financingロジックは再計算せず、公開結果から再構成するだけ）。
+  const nextCapexCompanies: CompanyCapexState[] = [];
+  const capexResults: CapexQuarterResult[] = [];
   for (const f of fixtures) {
     const prevFinance = state.financeState.companies.find((c) => c.companyId === f.companyId);
     const prevFinancingState = state.financingState.companies.find((c) => c.companyId === f.companyId);
-    if (!prevFinance || !prevFinancingState) {
-      throw new CompanyLabError(`会社 ${f.companyId} の財務・資金繰り状態が初期化されていません。`);
+    const prevCapexState = state.capexState.companies.find((c) => c.companyId === f.companyId);
+    if (!prevFinance || !prevFinancingState || !prevCapexState) {
+      throw new CompanyLabError(`会社 ${f.companyId} の財務・資金繰り・設備投資状態が初期化されていません。`);
     }
     const companyLoad = productionRecord.companyLoadMetrics.find((m) => m.companyId === f.companyId);
     const companyDecision = decisions.find((d) => d.companyId === f.companyId);
@@ -770,7 +797,10 @@ export function advanceCompanyLabQuarter(
     const plan = financingPlanByCompanyId.get(f.companyId)!;
     const collateral = collateralByCompanyId.get(f.companyId)!;
     const procurementConstraint = procurementConstraintByCompanyId.get(f.companyId)!;
-    const { financeResult, nextFinanceState, financingQuarterResult, nextFinancingState } = closeQuarterWithFinancing(
+    // 【Phase 8B-2A】nextFinanceStateはfinancing決算確定後・設備投資前の中間状態
+    // であり、この後のcapex三段目クローズが最終nextFinanceStateを再確定するため
+    // 使わない（destructureしない。financeResultはcapexへの入力としてのみ使う）。
+    const { financeResult, financingQuarterResult, nextFinancingState } = closeQuarterWithFinancing(
       {
         companyId: f.companyId,
         period: state.currentPeriod,
@@ -785,16 +815,40 @@ export function advanceCompanyLabQuarter(
       FINANCING_PARAMETERS_V1,
       PRODUCTION_PARAMETERS_V1.cost.baseProcessingCostUsdPerTon
     );
-    financialResults.push(financeResult);
-    nextFinanceCompanies.push(nextFinanceState);
     // 調達制約（procurementConstraint）はrunner.ts側でのみ確定するため、
     // liquidityClose.tsが返すfinancingQuarterResultへ後付けで合成する
     // （closeQuarterWithFinancing自体は当期の国内買付縮小を知らない設計。§5.8参照）。
     financingResults.push({ ...financingQuarterResult, procurementConstraint });
     nextFinancingCompanies.push(nextFinancingState);
+
+    // 【Phase 8B-2A】設備投資の三段目クローズ。financeResult（financing決算確定後・
+    // 設備投資前の最終財務結果）を起点に、当期の案件処理と最終PL/BS/CFを確定する。
+    const capexApprovalGate = capexApprovalGateByCompanyId.get(f.companyId)!;
+    const { financeResult: finalFinanceResult, nextFinanceState: finalNextFinanceState, nextCapexState, capexQuarterResult } = closeQuarterWithCapex(
+      {
+        companyId: f.companyId,
+        period: state.currentPeriod,
+        prevFinanceState: prevFinance,
+        actuals,
+        financeResultBeforeCapex: financeResult,
+        financingQuarterResult,
+        beginningAccruedInterestPayableUsd: prevFinancingState.accruedInterestPayableUsd,
+        prevCapexState,
+        decision: companyDecision!.capexDecision,
+        approvalGate: capexApprovalGate,
+      },
+      FINANCE_PARAMETERS_V1,
+      CAPEX_PARAMETERS_V1,
+      PRODUCTION_PARAMETERS_V1.cost.baseProcessingCostUsdPerTon
+    );
+    financialResults.push(finalFinanceResult);
+    nextFinanceCompanies.push(finalNextFinanceState);
+    nextCapexCompanies.push(nextCapexState);
+    capexResults.push(capexQuarterResult);
   }
   const financeStateAfter: FinanceState = { companies: nextFinanceCompanies };
   const financingStateAfter: FinancingState = { companies: nextFinancingCompanies };
+  const capexStateAfter: CapexState = { companies: nextCapexCompanies };
 
   const record: CompanyQuarterRecord = {
     turn,
@@ -819,6 +873,7 @@ export function advanceCompanyLabQuarter(
     deliveryObservations,
     financialResults,
     financingResults,
+    capexResults,
   };
 
   const canAdvanceWithinScenario = turn < definition.durationTurns;
@@ -839,6 +894,7 @@ export function advanceCompanyLabQuarter(
     qualityState: qualityStateAfter,
     financeState: financeStateAfter,
     financingState: financingStateAfter,
+    capexState: capexStateAfter,
     history,
     isComplete,
   };

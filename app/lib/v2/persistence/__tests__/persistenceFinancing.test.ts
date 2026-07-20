@@ -92,8 +92,11 @@ function makeState(financingStates: readonly CompanyFinancingState[]): Persisted
   });
 }
 
-test("受入確認PF-1: schemaVersionは5で、資金繰り状態つき状態がencode→decodeで往復一致する", () => {
-  assert.equal(CURRENT_PERSISTED_GAME_STATE_VERSION, 5);
+test("受入確認PF-1: schemaVersionは6で、資金繰り状態つき状態がencode→decodeで往復一致する", () => {
+  // Phase 8B-2Aでschemaversion が5→6へ上がった（capexStates追加）。本テストの
+  // 意図（資金繰り状態つき状態の往復一致）自体は変わらないため、リテラルの
+  // 期待値のみを現行バージョンへ追随させる。
+  assert.equal(CURRENT_PERSISTED_GAME_STATE_VERSION, 6);
   const state = makeState([makeFinancingState()]);
   const decoded = decodePersistedGameState(encodePersistedGameState(state));
   assert.deepEqual(decoded, state);
