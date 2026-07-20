@@ -350,6 +350,12 @@ export interface BalanceSheet {
   readonly accountsPayable: Usd;
   readonly shortTermLoans: Usd;
   readonly longTermLoans: Usd;
+  /**
+   * 未払利息（Phase 8B-1）。当期発生した支払利息のうち、資金制約により
+   * 現金で支払えなかった分（次期以降に繰り越す負債）。financing未指定
+   * （Phase 8A互換の呼び出し）では常に0。
+   */
+  readonly accruedInterestPayable: Usd;
   readonly otherLiabilities: Usd;
   readonly totalLiabilities: Usd;
   readonly capitalStock: Usd;
@@ -390,7 +396,12 @@ export interface OperatingCashFlowIndirectReconciliation {
   readonly increaseInPayables: Usd;
   /** 在庫（原料＋完成品）の増加（マイナス要因を正の増加額として保持）。 */
   readonly increaseInInventory: Usd;
-  /** 間接法による営業CF（= netIncome + depreciation - ΔAR + ΔAP - ΔInventory）。 */
+  /**
+   * 未払利息の増加（Phase 8B-1。プラス要因を正の増加額として保持。
+   * financing未指定では常に0）。
+   */
+  readonly increaseInAccruedInterestPayable: Usd;
+  /** 間接法による営業CF（= netIncome + depreciation - ΔAR + ΔAP - ΔInventory + Δ未払利息）。 */
   readonly operatingCashFlowIndirect: Usd;
 }
 
@@ -565,4 +576,43 @@ export interface CompanyFinancialQuarterResult {
   readonly cashShortfallAmount: Usd;
   /** 債務超過（純資産がマイナス）の場合true。 */
   readonly negativeEquity: boolean;
+}
+
+// ---------------------------------------------------------------------
+// 12. 資金繰り調整（Phase 8B-1）。closeFinancialQuarterへの追加的・任意の入力。
+// ---------------------------------------------------------------------
+
+/**
+ * financing/（Phase 8B-1）が算出した、当期の借入・返済・利息の会計三表への
+ * 反映内容。closeFinancialQuarterの任意引数として渡す。
+ *
+ * 【後方互換の設計原則】この引数を渡さない場合、closeFinancialQuarterは
+ * Phase 8Aと完全に同一の計算（既存借入残高×固定利率の簡易利息、
+ * financingCashFlow=0、借入残高は前期から不変）を行う。既存830件超のテストは
+ * 一切この引数を渡さないため、挙動・数値は一切変化しない。
+ *
+ * 【二重計上防止の設計】元本の返済・借入実行はBSの借入残高（financing側の
+ * 融資ポートフォリオが唯一の真実）とCFのfinancingCashFlowだけに反映し、
+ * PLには一切計上しない（元本はPL費用にしない、という実装指示を型レベルで
+ * 強制する：本インターフェースに元本相当のPL項目を持たせていない）。
+ * 延滞元本は融資ポートフォリオ側（financing/types.tsのLoanRecord）で
+ * 「返済されなかった残高がそのまま残る」というnull-opとして表現され、
+ * BS側に別建ての残高として二重計上しない（docs/v2/FINANCIAL_ARCHITECTURE_v0.1.md
+ * 追記§資金繰り参照）。
+ */
+export interface FinancingAdjustment {
+  /** 当期発生した支払利息合計（通常融資＋緊急融資＋延滞加算。発生主義でPLへ計上）。 */
+  readonly interestExpenseUsd: number;
+  /** 当期に現金で実際に支払った利息（資金制約で全額を払えない場合はinterestExpenseUsdより小さい）。 */
+  readonly interestPaidCashUsd: number;
+  /** 当期の新規借入実行額（通常融資＋緊急融資の合計。CFFのプラス）。 */
+  readonly loanDrawUsd: number;
+  /** 当期に現金で実際に支払った元本返済額（CFFのマイナス。PLには計上しない）。 */
+  readonly principalRepaymentCashUsd: number;
+  /** 融資ポートフォリオから算出した期末短期借入金残高（BS shortTermLoansを置き換える）。 */
+  readonly endingShortTermLoansUsd: number;
+  /** 融資ポートフォリオから算出した期末長期借入金残高（BS longTermLoansを置き換える）。 */
+  readonly endingLongTermLoansUsd: number;
+  /** 期首未払利息残高（前期から繰り越し。financing側のCompanyFinancingState.accruedInterestPayableUsdと一致する）。 */
+  readonly beginningAccruedInterestPayableUsd: number;
 }

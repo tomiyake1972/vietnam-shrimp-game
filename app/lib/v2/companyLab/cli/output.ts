@@ -16,6 +16,7 @@ import {
 } from "../../industryLab/ui/formatters";
 import { CompanyFixture, CompanyLabResult, CompanyQuarterRecord, CompanyQuarterSummary } from "../types";
 import { CompanyFinancialQuarterResult } from "../../finance/types";
+import { FinancingQuarterResult } from "../../financing/types";
 
 function csvEscape(value: string | number): string {
   const s = String(value);
@@ -86,6 +87,35 @@ function financeLineForCompany(f: CompanyFinancialQuarterResult): string {
   ].join("\n");
 }
 
+/**
+ * 【Phase 8B-1】1社・1四半期ぶんの資金繰り結果のsummary行。
+ * 信用スコア・信用区分・借入申請/承認額・通常/緊急融資実行額・元本返済額・
+ * 支払利息・期末借入残高・借入限度額・未使用借入余力・財務制限条項違反・
+ * 延滞額・支払不能額・調達縮小・財務状態を1社ぶん要約する。
+ */
+function financingLineForCompany(fr: FinancingQuarterResult): string {
+  const cs = fr.creditScore;
+  const bc = fr.borrowingCapacity;
+  const uw = fr.underwriting;
+  const health = fr.financialHealth;
+  const arrearsTotalUsd = fr.arrearsEvents.reduce((s, e) => s + e.amountUsd, 0);
+  const healthFlags = [
+    health.insolvent ? "債務超過" : undefined,
+    health.covenantBreach ? "条項違反" : undefined,
+    health.paymentArrears ? "延滞" : undefined,
+    health.paymentDefault ? "支払不能" : undefined,
+    health.usedEmergencyLoanThisPeriod ? "緊急融資利用" : undefined,
+  ].filter((x): x is string => x !== undefined);
+  const procurement = fr.procurementConstraint;
+  return [
+    `      資金繰り(Phase 8B-1): 信用スコア ${cs.score0to100.toFixed(0)}（区分${cs.tier}） / 借入限度額 ${formatUsdMillions(bc.grossLimitUsd)} / 未使用借入余力 ${formatUsdMillions(bc.availableAdditionalCapacityUsd)}`,
+    `      融資: 申請 ${formatUsdMillions(uw.requestedAmountUsd)} / 承認 ${formatUsdMillions(uw.approvedAmountUsd)} / 緊急融資実行 ${formatUsdMillions(fr.emergencyLoan?.approvedUsd ?? 0)} / 元本返済 ${formatUsdMillions(fr.principalPaidCashUsd)} / 支払利息 ${formatUsdMillions(fr.interestPaidCashUsd)} / 期末借入残高 ${formatUsdMillions(fr.endingShortTermLoansUsd + fr.endingLongTermLoansUsd)}`,
+    `      財務状態: ${health.primary}${healthFlags.length > 0 ? `【${healthFlags.join("・")}】` : ""} / 延滞額 ${formatUsdMillions(arrearsTotalUsd)}${
+      procurement ? ` / 調達縮小: 国内買付 ${(procurement.scaleRatio * 100).toFixed(0)}%${procurement.importOrdersBlocked ? "（輸入停止）" : ""}` : ""
+    }`,
+  ].join("\n");
+}
+
 /** {product -> operationalRisk(0-1)}形式のRecordを"key val%"形式へ整形する。 */
 function formatRiskByProductMap(m: Readonly<Partial<Record<string, number>>>): string {
   const entries = Object.entries(m).filter((e): e is [string, number] => e[1] !== undefined);
@@ -117,6 +147,10 @@ export function formatCompanyLabResultAsSummary(result: CompanyLabResult, scenar
       const finance = record.financialResults.find((f) => f.companyId === s.companyId);
       if (finance) {
         lines.push(financeLineForCompany(finance));
+      }
+      const financing = record.financingResults.find((f) => f.companyId === s.companyId);
+      if (financing) {
+        lines.push(financingLineForCompany(financing));
       }
     }
     if (record.globalReasonCodes.length > 0) {
@@ -194,6 +228,27 @@ const COMPANY_QUARTER_CSV_HEADER: readonly string[] = [
   "onTimeDeliveryRate",
   "customerTrustScoreAverage",
   "deliveryReliabilityScoreAverage",
+  // 【Phase 8B-1】資金繰り（信用スコア・借入限度額・銀行審査・延滞・支払不能・
+  // 財務状態・調達縮小）。
+  "creditScore",
+  "creditTier",
+  "borrowingLimitUsd",
+  "unusedBorrowingCapacityUsd",
+  "loanRequestedUsd",
+  "loanApprovedUsd",
+  "emergencyLoanApprovedUsd",
+  "principalPaidUsd",
+  "interestPaidUsd",
+  "endingLoanBalanceUsd",
+  "arrearsAmountUsd",
+  "financialHealthPrimary",
+  "insolvent",
+  "covenantBreach",
+  "paymentArrears",
+  "paymentDefault",
+  "domesticPurchaseScaleRatio",
+  "importOrdersBlocked",
+  "endingCashUsd",
 ];
 
 function average(values: readonly number[]): string {
@@ -202,6 +257,9 @@ function average(values: readonly number[]): string {
 }
 
 function summaryToCsvRow(record: CompanyQuarterRecord, s: CompanyQuarterSummary): readonly (string | number)[] {
+  const fr = record.financingResults.find((f) => f.companyId === s.companyId);
+  const fin = record.financialResults.find((f) => f.companyId === s.companyId);
+  const arrearsTotalUsd = fr ? fr.arrearsEvents.reduce((sum, e) => sum + e.amountUsd, 0) : "";
   return [
     record.turn,
     record.period,
@@ -238,6 +296,25 @@ function summaryToCsvRow(record: CompanyQuarterRecord, s: CompanyQuarterSummary)
     s.onTimeDeliveryRate !== undefined ? s.onTimeDeliveryRate : "",
     average(Object.values(s.customerTrustByMarket).filter((v): v is NonNullable<typeof v> => v !== undefined).map((v) => unwrapUnit(v))),
     average(Object.values(s.deliveryReliabilityByMarket).filter((v): v is NonNullable<typeof v> => v !== undefined).map((v) => unwrapUnit(v))),
+    fr ? fr.creditScore.score0to100 : "",
+    fr ? fr.creditScore.tier : "",
+    fr ? fr.borrowingCapacity.grossLimitUsd : "",
+    fr ? fr.borrowingCapacity.availableAdditionalCapacityUsd : "",
+    fr ? fr.underwriting.requestedAmountUsd : "",
+    fr ? fr.underwriting.approvedAmountUsd : "",
+    fr ? fr.emergencyLoan?.approvedUsd ?? 0 : "",
+    fr ? fr.principalPaidCashUsd : "",
+    fr ? fr.interestPaidCashUsd : "",
+    fr ? fr.endingShortTermLoansUsd + fr.endingLongTermLoansUsd : "",
+    arrearsTotalUsd,
+    fr ? fr.financialHealth.primary : "",
+    fr ? (fr.financialHealth.insolvent ? 1 : 0) : "",
+    fr ? (fr.financialHealth.covenantBreach ? 1 : 0) : "",
+    fr ? (fr.financialHealth.paymentArrears ? 1 : 0) : "",
+    fr ? (fr.financialHealth.paymentDefault ? 1 : 0) : "",
+    fr?.procurementConstraint ? fr.procurementConstraint.scaleRatio : "",
+    fr?.procurementConstraint ? (fr.procurementConstraint.importOrdersBlocked ? 1 : 0) : "",
+    fin ? (fin.balanceSheet.cash as unknown as number) : "",
   ];
 }
 

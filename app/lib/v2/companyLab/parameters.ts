@@ -40,3 +40,31 @@ export const EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1: ExternalProcessorDemandAs
  * OTHER 150,000 = 1,200,000）。worldDemandIndex = Σ(前期消費×景気指数) / この値。
  */
 export const REFERENCE_WORLD_CONSUMPTION_TONS = 1200000;
+
+/**
+ * 【Phase 8B-1】5社自動方針の「単純な資金調達方針」の前提値（実装指示 §5.6。
+ * 会社ごとの高度な財務戦略はPhase 9対象。ここでは「最低必要現金を下回れば
+ * 借入申請、十分あれば借入しない、返済可能なら高金利借入を優先返済」という
+ * 単純なルールの閾値だけを持つ。将来校正対象・要校正）。
+ */
+export interface AutoFinancingPolicyParameters {
+  /** 現金がこれを下回れば通常融資を申請する（希望額はこの水準まで戻す額）。 */
+  readonly targetMinimumCashUsd: number;
+  /** 現金がこれを上回り、既存借入があれば、超過分を任意期限前返済として申請する。 */
+  readonly voluntaryPrepaymentThresholdCashUsd: number;
+  readonly desiredTermQuarters: number;
+  /** 通常融資が利用可能なら緊急融資を選ばない、という方針だが、通常融資が
+   * 不足した場合の最後の手段としては受け入れる（emergencyAcceptable=true固定）。 */
+  readonly emergencyAcceptable: boolean;
+}
+
+export const AUTO_FINANCING_POLICY_PARAMETERS_V1: AutoFinancingPolicyParameters = {
+  // 5社フィクスチャの1四半期あたりの国内買付必要現金は概ね1,000万〜7,000万USD
+  // 規模（診断結果より）であるため、最低現金目標をその規模に合わせる
+  // （15M等の小さすぎる目標では、四半期内の資金需要に対して早期の借入申請が
+  // 間に合わず、資金不足を防げない。要将来校正）。
+  targetMinimumCashUsd: 40_000_000,
+  voluntaryPrepaymentThresholdCashUsd: 100_000_000,
+  desiredTermQuarters: 4,
+  emergencyAcceptable: true,
+};

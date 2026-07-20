@@ -24,6 +24,7 @@ import { CompanySalesPlanEntry } from "../sales/types";
 import { MarketQuarterInput } from "../market/types";
 import { QualityReliabilityState } from "../quality/types";
 import { CompanyFinanceState } from "../finance/types";
+import { CompanyFinancingState } from "../financing/types";
 import {
   DomesticPurchaseIntentSource,
   TurnOrchestratorParameters,
@@ -78,8 +79,16 @@ import {
  *      する）。schemaVersion 3までと同様、無印/v2ゲーム自身のrunTurnは財務
  *      ロジックを呼ばないため、companyLab→Redis/API実配線（対象外）までは
  *      本フィールドへ実際に値が書き込まれることはない。
+ *   5: Phase 8B-1。会社別の資金繰り状態（financingStates、financing/types.ts
+ *      のCompanyFinancingStateをそのまま再利用。融資ポートフォリオ・未払利息・
+ *      信用/延滞/緊急融資履歴）を追加。バージョン1〜4のデータにはfinancingStates
+ *      キー自体が存在しないため、decode時に空配列（資金繰り状態未初期化）の
+ *      安全な初期値を補う（financeStatesと同じ、キーの有無で判定する追加的
+ *      変更）。schemaVersion 4までと同様、無印/v2ゲーム自身のrunTurnは資金繰り
+ *      ロジックを呼ばないため、companyLab→Redis/API実配線（対象外）までは
+ *      本フィールドへ実際に値が書き込まれることはない。
  */
-export const CURRENT_PERSISTED_GAME_STATE_VERSION = 4;
+export const CURRENT_PERSISTED_GAME_STATE_VERSION = 5;
 
 // ---------------------------------------------------------------------
 // 2. 永続化状態
@@ -134,6 +143,12 @@ export interface PersistedGameStateV2 {
    * 利用側が必要時に整合する初期財務状態を構築する。上記バージョン履歴参照）。
    */
   readonly financeStates: readonly CompanyFinanceState[];
+  /**
+   * Phase 8B-1（schemaVersion 5）。会社別の資金繰り状態。常に存在する
+   * （v1〜v4データをdecodeする際は空配列＝資金繰り状態未初期化を補い、
+   * 利用側が必要時に整合する初期資金繰り状態を構築する。上記バージョン履歴参照）。
+   */
+  readonly financingStates: readonly CompanyFinancingState[];
   readonly execution: PersistedGameStateExecution;
   readonly metadata: PersistedGameStateMetadata;
 }

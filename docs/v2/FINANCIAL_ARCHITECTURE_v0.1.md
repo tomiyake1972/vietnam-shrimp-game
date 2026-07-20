@@ -105,9 +105,105 @@ Phase 7Aの`BatchQualityAdjustment`（格落ち量・再加工量・廃棄量・
 
 新規61件: `finance/__tests__/money.test.ts`（6）、`finance/__tests__/quarterClose.test.ts`（29: 重要テスト2〜13,18,20＋追加テスト1〜15＋期限切れ補助）、`finance/__tests__/initialState.test.ts`（6）、`companyLab/__tests__/financeIntegration.test.ts`（14: 実ランでのBS/CF/RE/収益認識/会社分離/決定論/8vs32一致/全シナリオ32ターン有限値/資金不足記録/利益差異/事業実績非影響）、`persistence/__tests__/persistenceFinance.test.ts`（6: v4往復・v1/v2/v3後方互換・不正値拒否）。既存769件と合わせ**合計830件、全件成功**。既存テストの修正は1件のみ（`persistence.test.ts`のschemaVersionリテラル3→現行バージョン定数への置換。テスト意図は不変）。
 
-## 13. Phase 8Bへ送る課題
+## 13. Phase 8Bへ送る課題（Phase 8A時点、Phase 8B-1で着手済みの項目は§14以降参照）
 
-- 新規借入・返済・借換え・銀行信用・借入限度額（現金不足フラグ`cashShortfall`が入力になる）。
-- 設備投資・建設期間・稼働開始（`fixedAssetsGross`・減価償却・段階固定費の接続点は用意済み）。
-- 繰越欠損金・税金の期ずれ納付、売掛金の延滞・貸倒（信用リスク）、養殖育成中コストの期間按分。
-- MASSの資金破綻シナリオへの対応手段（借入・減産・在庫処分）と、CONSVの人員規模校正、暫定係数（賃率・工場固定費・物流費・値引率・回収/支払サイト・初期BS）の本格校正（Phase 8C）。
+- ~~新規借入・返済・借換え・銀行信用・借入限度額（現金不足フラグ`cashShortfall`が入力になる）。~~ → Phase 8B-1で実装済み（§14〜19）。
+- 設備投資・建設期間・稼働開始（`fixedAssetsGross`・減価償却・段階固定費の接続点は用意済み）。**Phase 8B-1でも対象外**（§20の対象外一覧参照）。
+- 繰越欠損金・税金の期ずれ納付、売掛金の延滞・貸倒（信用リスク）、養殖育成中コストの期間按分。Phase 8B-1でも対象外（借入・返済に伴う延滞は実装したが、売掛金側の貸倒は依然未実装）。
+- MASSの資金破綻シナリオへの対応手段（借入・減産・在庫処分）と、CONSVの人員規模校正、暫定係数（賃率・工場固定費・物流費・値引率・回収/支払サイト・初期BS）の本格校正（Phase 8C）。**MASSの資金破綻自体はPhase 8B-1が正しく検知・処理する（§19）。「対応手段」としての減産・在庫処分の自動方針側の高度化はPhase 8B-2以降へ継続して申し送る。**
+
+---
+
+# Phase 8B-1: 資金繰り・借入・銀行信用・支払不能（financing/モジュール）
+
+Phase 8Aの三表（PL/BS/CF）を実績の唯一の情報源としたまま、その外側に「銀行は会社の実績を承認時点までしか知らない」資金調達・信用・資金制約レイヤーを追加する。新規モジュール`app/lib/v2/financing/`はPhase 8Aの会計三表を再計算せず、`finance/quarterClose.ts`の`closeFinancialQuarter`へ単一の追加オプショナル引数`financing?: FinancingAdjustment`を渡すだけで接続する後方互換パターンを採用した（既存830件超のPhase 8Aテストは無改修・無回帰）。
+
+## 14. 融資ポートフォリオモデル（`types.ts`・`initialPortfolio.ts`）
+
+会社ごとに`LoanPortfolio`（`LoanRecord[]`）を保持する。1件の融資（`LoanRecord`）は`loanType`（`workingCapital`｜`termLoan`｜`emergency`）・`repaymentMethod`（`bulletAtMaturity`＝満期一括｜`equalPrincipal`＝元金均等）・原本/現在元本・実行期/満期・年率・信用スプレッド・状態（`current`｜`delinquent`｜`closed`）を持つ。
+
+**延滞のnull-op設計**: 返済されなかった元本は「別建ての延滞残高」を新設せず、`currentPrincipalUsd`がそのまま減らないことで表現する。`arrearsPrincipalUsd`/`arrearsInterestUsd`は診断用の累計メモに過ぎず、BS残高へ二重加算されることはない。これによりBS/CF/融資ポートフォリオ間の整合が構造的に破れない（統合テストFI-1〜3で検証）。
+
+**初期ポートフォリオの移行**: Phase 8Aの`shortTermLoans`/`longTermLoans`（単一残高のみ）は、`initialPortfolio.ts`でそれぞれ1件の合成`LoanRecord`（短期＝workingCapital/満期一括/4四半期後満期、長期＝termLoan/元金均等/20四半期後満期、いずれも信用区分Cの初期金利）へ1:1変換し、資金繰りモジュールの型で扱えるようにした。
+
+## 15. 銀行信用スコア（`creditScore.ts`）
+
+0〜100点、9要素の加重平均（合計重み1.0）: 現金ランウェイ0.15・営業CF比率0.15・収益性0.15・利払能力0.10・レバレッジ0.15・自己資本比率0.10・返済実績0.10・延滞履歴0.05・顧客信頼＋納期信頼性0.05。各要素は前四半期末までのデータのみを線形正規化する。**「銀行は未来を知らない」**という設計原則を関数シグネチャで強制しており、`CreditScoreInput`は当期の市場結果・生産実績を一切受け取れない。ゲーム開始直後（前期実績なし）は各要素とも中立値65点を補う。信用区分はA(≥80)/B(≥65)/C(≥50)/D(≥35)/E(<35)の5段階（`tierThresholds`）。
+
+## 16. 借入限度額（`borrowingCapacity.ts`）
+
+`grossLimitUsd = min(max(collateralBasedLimitUsd, earningsBasedLimitUsd), creditTierCapUsd)`、`availableAdditionalCapacityUsd = underwritingFrozen ? 0 : max(0, grossLimitUsd - existingLoanBalanceUsd)`。
+
+- **担保ベース**: 売掛金（掛目70%）＋使用可能原料在庫（掛目40%）＋未着輸入原料（掛目15%、到着前でも取得原価は確定済みだが流動性は低いため通常在庫より低い掛目）＋完成品在庫（掛目30%）。
+- **収益力ベース**: 直近のEBITDA相当（営業利益＋減価償却）×2.0倍。
+- **信用区分キャップ**: 自己資本×信用区分別倍率（A:1.5/B:1.1/C:0.75/D:0.4/E:0）。
+- **`underwritingFrozen`**: 信用区分E、または重大延滞（連続延滞四半期数が支払不能判定閾値=3以上）、または債務超過（自己資本<0）のいずれかで真になり、新規の通常融資を一切承認しない。
+
+## 17. 金利構成・返済スケジュール（`interestRate.ts`・`loanSchedule.ts`）
+
+`totalAnnualRate = baseRateAnnual(4%) + creditSpreadAnnualByTier[tier](A2%〜E9%) + emergencyLoanSurcharge(10%、緊急融資のみ) + covenantBreachSurcharge(1.5%) + arrearsHistorySurcharge(2%) + refinanceSurcharge(0.5%) + termLoanDurationSurcharge(0.5%、termLoanのみ)`。四半期利率は年率÷4（`annualToQuarterlyRate`）。
+
+満期一括返済は満期到達までは予定元本0、満期到達時に残元本全額が予定額になる。元金均等返済は毎期`equalPrincipalInstallmentUsd`（残元本を超えない）。
+
+**新規実行四半期は利息0（重要な設計上の修正）**: `computeLoanQuarterlyInterest(loan, period)`は`loan.originationPeriod === period`の場合に利息を0として返す。これは診断で発見した実際のバグ修正であり、理由は次の通り: 当期に新規実行された融資は「利息発生を見込んだ利息予算（`fullAccruedInterest`）」の算出時点ではまだ存在しないため、その融資を利息支払用ウォーターフォール（§19）へ含めて満額の四半期利息を即時発生させると、予算化されていなかった利息負担が生じ、借りた直後の現金（まだ何にも使っていない）に対して見かけ上の延滞が発生してしまう。実行四半期の利息を0にすることで、この構造的な誤判定を防いでいる（単体テストLS-3b）。
+
+## 18. 銀行審査・財務制限条項（`bankUnderwriting.ts`・`covenant.ts`）
+
+**審査**: 承認額は「要求額」「`availableAdditionalCapacityUsd`」の小さい方で、`underwritingFrozen`時は0。承認額・適用年率・返済方法・満期・拒否理由を返す（単体テストBU-1〜7）。
+
+**財務制限条項（covenant）**: 自己資本比率≥15%・負債/総資産比率≤85%・利払能力（EBITDA相当/支払利息発生額）≥1.0倍の3項目を独立にチェックし、いずれか1つでも違反すれば`anyBreach=true`。**支払不能（insolvent）・延滞（paymentArrears）とは独立に判定される別のフラグであり、3者は互いに包含関係にない**（単体テストCV-7）。違反は翌期の信用スコアへ影響し、連続違反四半期数が閾値(2)を超えると通常融資を停止する材料になる。
+
+## 19. 資金繰りクローズと支払ウォーターフォール（`liquidityClose.ts`）
+
+**処理順序（既存companyLab runnerの構造に合わせ、銀行の与信判断だけを前倒しする）**:
+
+1. `planQuarterFinancing`（期首）: 前期末の財務状態・融資履歴のみから信用スコア・借入限度額・財務制限条項・銀行審査を確定する。当期の市場結果・生産実績は一切参照しない。
+2. `computeProcurementConstraint`（期首）: 1の承認済み融資枠＋前期末現金（負なら0扱い）×`domesticPurchaseCashAllocationRatio`(0.6、残りは賃金等の最優先支払に確保)から「当期使える現金」を算出し、国内買付（即金払い）の希望数量をその比率で縮小する。重大延滞・支払不能の会社は輸入発注も`importOrdersBlocked=true`で抑制する。companyLab/runner.tsがこの結果で当期の`decisions[].domesticPurchasePlan`・`importOrders`を書き換えてから既存パイプラインへ渡す（元の意思決定計画自体は記録として保持し、実行値だけを制約する。§計画値と実行値の区別）。
+3. 既存パイプライン（市場・原料・生産・品質・契約履行）。資金繰りモジュールは一切関与しない。
+4. `closeQuarterWithFinancing`（期末）: 当期の事業実績確定後、実際に支払える利息・元本を算出し、緊急融資・延滞・支払不能判定を行い、最終的なPL/BS/CFと次期の財務・資金繰り状態を返す。
+
+**二段呼び出しで循環を避ける設計**: 「利息・元本をいくら現金で払えるか」は当期の営業キャッシュフロー（Phase 8Aの既存ロジック）に依存するが、そのロジック自体は二重実装しない。Pass1（予備、利息・元本の現金支払を0とした`FinancingAdjustment`で`closeFinancialQuarter`を呼ぶ）でデットサービス前に使える現金を取り出し、緊急融資の必要額を判定した上で、Pass2（確定、実際の利息・元本支払額を反映した`FinancingAdjustment`で`closeFinancialQuarter`を再度呼ぶ）で最終PL/BS/CFを確定する。
+
+**支払ウォーターフォール**: 融資ポートフォリオ全体（既存融資＋当期新規実行の通常/緊急融資）を年率降順（高コスト債務を優先）に並べ、利用可能現金を利息→必須元本の順に配分する。必須分を全額払えた場合のみ、残り現金から任意期限前返済（`desiredPrepaymentUsd`、高金利融資から優先）を追加で行う。払いきれなかった利息・元本は`ArrearsEvent`として記録し、当該融資の`currentPrincipalUsd`はそのまま残る（§14のnull-op延滞設計）。
+
+**緊急融資**: 通常融資の枠だけでは利息・必須元本を払いきれない場合の最後の手段。`emergencyAcceptable`が要求側で真の場合のみ検討し、上限は`min(絶対上限3,000万USD, 適格担保回収可能価値×0.5)`。年率は通常融資より高い緊急融資加算(+10%)を含む合成年率。
+
+**支払ウォーターフォールの適用範囲（意図的な設計上の選択、明示的に開示）**: 現金制約の対象は「デットサービス（利息・元本）」と「国内買付/輸入発注」のみである。賃金・SG&A・税金・既存の買掛金支払はPhase 8Aの既存動作どおり「常に全額払う」ままとし、現金がマイナスになることでその不足を表現する（既存の`cashShortfall`診断フラグがそのまま機能する）。これはPhase 8B-1の対象外（賃金・税金の期日繰延・部分支払は対象外と明記されている）に基づく範囲の選択であり、将来これらへ延滞・優先順位を拡張する余地は残しつつ、本Phaseでは融資と調達（現金即時性の高い2領域）に限定した。
+
+**財務状態分類**（`FinancialHealthTier`、複数フラグが同時に成立しうる中でのprimary判定優先順位）: `paymentDefault`（連続延滞四半期数が閾値3以上、または当期延滞比率が期日到来債務の50%以上）＞`insolvent`（自己資本<0）＞`paymentArrears`（当期に一部未払）＞`covenantBreach`＞`stressed`（緊急融資使用または信用区分E）＞`watch`（信用区分D）＞`healthy`。
+
+## 20. companyLab接続・持続化・対象外
+
+**companyLab接続**: `companyLab/autoPolicy.ts`の`buildFinancingRequest`が、各社の前期末現金が目標最低現金(4,000万USD、初期1,500万USDから診断で再校正)を下回れば運転資金融資（4四半期・満期一括）を要求し、目標を大きく上回れば（1億USD超）既存融資の任意期限前返済を要求する。`emergencyAcceptable`は常に真。`companyLab/runner.ts`の`advanceCompanyLabQuarter`が§19の4段処理を5社ぶん毎四半期実行し、`CompanyQuarterRecord.financingResults`へ保存する。
+
+**永続化（schemaVersion 5）**: `PersistedGameStateV2`へ`financingStates`（`CompanyFinancingState[]`、融資ポートフォリオ・未払利息・信用/延滞/緊急融資履歴）を追加し、`CURRENT_PERSISTED_GAME_STATE_VERSION`を5へ上げた。v1〜v4データ（キー自体が存在しない）はdecode時に空配列＝資金繰り状態未初期化を補う（`financeStates`と同じ、キーの有無で判定する追加的変更、マイグレーション不要）。検証は融資残高・利率のNaN/Infinity/負数拒否、`currentPrincipalUsd<=originalPrincipalUsd`、`maturityPeriod>=originationPeriod`、ポートフォリオ内融資の`companyId`が所属会社と一致することを含む。無印/v2ゲーム自身のrunTurnは資金繰りロジックを呼ばないため、companyLab→Redis/API実配線（対象外）までは本フィールドへ実際に値が書き込まれることはない。
+
+**対象外（本Phaseで意図的に扱わない）**: 設備投資・工場建設、増資、法的破産・清算手続、財務系UI/画面、V2 API/Redis実配線・Vercelステージング、Phase 8Aの係数・MASSの販売/生産方針そのものの全面校正。
+
+## 21. companyLab診断結果（5社×32ターン、5シナリオ）
+
+全5シナリオ（baseline / ecuador-early-expansion / ecuador-delayed-expansion / global-disease-crisis / global-demand-boom）×32ターンで、NaN/Infinity・BS貸借不一致・CF直接法/間接法不一致・融資ポートフォリオ残高とBS残高の不一致は**いずれも0件**。
+
+- **BAL**: 全シナリオ32/32ターンhealthy、緊急融資は一度も発生しない。
+- **CONSV**: 概ねhealthyだが、シナリオによって最大17/32ターンでcovenantBreach（自己資本比率・負債比率の悪化）が生じる。緊急融資は一度も発生しない。
+- **JPQ**: 約30/32ターンhealthy、短期間のdefault/breachから回復する。
+- **VAP**: 約25〜27/32ターンhealthy、少数のdefault/breach/arrears/stressed四半期があるが回復する。
+- **MASS**: turn1のみhealthy、turn3以降31/32ターンが恒常的に`paymentDefault`（信用区分E、国内買付はturn3以降ゼロが継続、緊急融資（毎期1,500万〜2,500万USD、絶対上限3,000万USDを超えない）を毎期引いても回復しない）。これはPhase 8A時点で確認済みの「MASSの構造的苦境」（過剰生産・安値戦略による恒常的な原価割れ）が、Phase 8B-1の資金繰り・信用・支払不能ロジックと正しく相互作用した結果として現れる、意図された経路の恒常的経営危機である（バグではない。§22参照）。
+
+## 22. 調達構成テストの受入前最終修正（旧テストの経済的前提の更新）
+
+`companyLab/__tests__/runner.test.ts`の旧テスト「調達構成: 全社が自社養殖だけで恒常的に完全自給しない（国内買付・輸入が実際に発生し続ける）」は、Phase 6.3時点（資金繰り・支払不能モデルが存在しない時代）に書かれ、「通常操業している会社が理由なく自社養殖だけへ依存し、外部原料市場が機能しなくなること」を防ぐ意図だった。Phase 8B-1導入後、MASS固有の支払不能連鎖（信用区分Eで新規融資停止＋現金枯渇により国内買付が構造的にゼロへ収束し、turn3以降ゼロが継続する）がこの前提と矛盾し失敗していた。
+
+受入前最終修正で、旧テストの意図を維持したまま「調達構成A」（資金制約のない会社は理由なく恒常的完全自給にならない）と「調達構成B」（支払不能・重大な資金制約下の会社は、財務診断（`financingResults`の`financialHealth`・`borrowingCapacity.underwritingFrozen`・`procurementConstraint`）で説明可能な場合のみ調達停止を許容する）の2テストへ分割した。判定は会社IDのハードコードではなく、対象四半期の財務診断結果だけに基づく（`isSeverelyConstrainedTurn`ヘルパー、判定基準: 支払不能/延滞/債務超過・銀行の新規融資停止・調達制約診断のスケール比率≤5%・輸入発注停止フラグ）。ゲームロジック（financing/モジュール・MASSの資金制約自体）は一切変更していない。MASSは特例としてハードコードされておらず、今回のテスト修正後も5社×32ターン×全5シナリオでの財務状態分類・NaN/Infinity・BS/CF/融資残高整合の結果は一切変化していない（§21のとおり）。
+
+## 23. テスト（Phase 8B-1新規、受入前最終修正を含む）
+
+新規: `financing/__tests__/creditScore.test.ts`・`borrowingCapacity.test.ts`・`interestRateAndSchedule.test.ts`（9、うちLS-3bは実行四半期利息0の回帰テスト）・`covenant.test.ts`（7）・`bankUnderwriting.test.ts`（7）・`liquidityClose.test.ts`（14: 調達制約4・三表整合3・財務状態分類4・緊急融資3）、`persistence/__tests__/persistenceFinancing.test.ts`（10: schema v5往復・複数融資・履歴save/restore・後方互換2・不正値拒否5）。既存テストの改修は2件: (1)`persistenceFinance.test.ts`のP-1、`CURRENT_PERSISTED_GAME_STATE_VERSION`のリテラル4→現行バージョン定数5への追随（テスト意図＝財務状態つき状態の往復一致は不変）。(2)`runner.test.ts`の「調達構成」テストを§22のとおり「調達構成A」「調達構成B」の2テストへ分割（旧テストの意図＝健全会社の異常な完全自給の検出は維持したまま、支払不能会社の説明可能な調達停止を新たに許容する受入意図の更新）。既存830件超のPhase 8Aテストは無改修・無回帰。全件（`npm test`）は**895件中895件成功（全件green）**。
+
+## 24. Phase 8B-2以降へ送る課題
+
+- MASSのような恒常的支払不能会社に対する自動方針側の対応手段（減産・在庫処分・値上げ等）の高度化。現行の自動方針（`buildFinancingRequest`）は「銀行は未来を知らない」原則を守るため前期末データのみで機械的に借入/返済を判断するのみで、事業側の意思決定（生産量・価格）を資金繰り状況に応じて調整する機能は持たない。
+- 売掛金の延滞・貸倒（信用リスク）は本Phaseでは対象外のまま（融資の延滞・支払不能のみ実装）。
+- 賃金・SG&A・税金・既存買掛金への支払優先順位付け（§19で明示した適用範囲の意図的な限定）。
+- 借換え（`refinancedFromLoanId`の型は用意済みだが、実際に借換えを発生させる自動方針・銀行側ロジックは未実装、`refinancedLoanIds`は現状常に空配列）。
+- 信用スコア・借入限度額・金利・条項閾値・支払不能判定条件・自動方針の目標現金水準など、本Phaseで導入したすべての係数（§14〜19に列挙）はPhase 8Cの経済校正フェーズでの本格的な再検討対象として明示的に申し送る。

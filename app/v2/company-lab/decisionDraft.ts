@@ -11,6 +11,7 @@ import { hosoEqTons, ratio, unwrapUnit } from "../../lib/v2/core/units";
 import { PeriodV2 } from "../../lib/v2/core/period";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../lib/v2/market/types";
 import { CompanyDecisionInput, CompanyFixture } from "../../lib/v2/companyLab";
+import { LoanType, RepaymentMethod } from "../../lib/v2/financing/types";
 import { PlanCostExpectation } from "../../lib/v2/sales/types";
 import { Score0to100 } from "../../lib/v2/core/units";
 import { WorkerSkillEntry } from "../../lib/v2/production/types";
@@ -85,6 +86,22 @@ export interface WorkerAssignmentDraftRow {
   readonly attendanceRate: number;
 }
 
+/**
+ * 【Phase 8B-1】資金調達希望のドラフト（プレーン値）。本ファイルは計算ロジックを
+ * 持たない型変換層のままであり、財務画面・借入UIの実装はPhase 8B-1の対象外だが、
+ * CompanyDecisionInput.financingRequestが必須フィールドになったため、既存の
+ * 網羅ドラフト往復（buildInitialDraft/buildDecisionInputFromDraft）の対象へ
+ * 機械的に追加する（自動方針の希望をそのまま編集不可で引き継ぐ扱いで十分）。
+ */
+export interface FinancingRequestDraft {
+  readonly desiredAmountUsd: number;
+  readonly desiredLoanType: LoanType;
+  readonly desiredTermQuarters: number;
+  readonly desiredRepaymentMethod: RepaymentMethod;
+  readonly desiredPrepaymentUsd: number;
+  readonly emergencyAcceptable: boolean;
+}
+
 export interface CompanyDecisionDraft {
   readonly companyId: string;
   readonly salesPlans: readonly SalesPlanDraftRow[];
@@ -93,6 +110,7 @@ export interface CompanyDecisionDraft {
   readonly aquacultureStockingPlans: readonly AquacultureStockingDraft[];
   readonly productionPlans: readonly ProductionPlanDraftRow[];
   readonly workerAssignments: readonly WorkerAssignmentDraftRow[];
+  readonly financingRequest: FinancingRequestDraft;
 }
 
 // ---------------------------------------------------------------------
@@ -178,6 +196,15 @@ export function buildInitialDraft(fixture: CompanyFixture, autoDecision: Company
     };
   });
 
+  const financingRequest: FinancingRequestDraft = {
+    desiredAmountUsd: autoDecision.financingRequest.desiredAmountUsd,
+    desiredLoanType: autoDecision.financingRequest.desiredLoanType,
+    desiredTermQuarters: autoDecision.financingRequest.desiredTermQuarters,
+    desiredRepaymentMethod: autoDecision.financingRequest.desiredRepaymentMethod,
+    desiredPrepaymentUsd: autoDecision.financingRequest.desiredPrepaymentUsd,
+    emergencyAcceptable: autoDecision.financingRequest.emergencyAcceptable,
+  };
+
   return {
     companyId: fixture.companyId,
     salesPlans,
@@ -186,6 +213,7 @@ export function buildInitialDraft(fixture: CompanyFixture, autoDecision: Company
     aquacultureStockingPlans,
     productionPlans,
     workerAssignments,
+    financingRequest,
   };
 }
 
@@ -267,6 +295,15 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
     attendanceRate: ratio(safeInRange01(w.attendanceRate)),
   }));
 
+  const financingRequest = {
+    desiredAmountUsd: safeNonNegative(draft.financingRequest.desiredAmountUsd),
+    desiredLoanType: draft.financingRequest.desiredLoanType,
+    desiredTermQuarters: Math.max(1, Math.round(safeNonNegative(draft.financingRequest.desiredTermQuarters))),
+    desiredRepaymentMethod: draft.financingRequest.desiredRepaymentMethod,
+    desiredPrepaymentUsd: safeNonNegative(draft.financingRequest.desiredPrepaymentUsd),
+    emergencyAcceptable: draft.financingRequest.emergencyAcceptable,
+  };
+
   return {
     companyId,
     salesPlans,
@@ -275,5 +312,6 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
     aquacultureStockingPlans,
     productionPlans,
     workerAssignments,
+    financingRequest,
   };
 }

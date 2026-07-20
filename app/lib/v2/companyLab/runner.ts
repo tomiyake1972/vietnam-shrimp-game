@@ -94,13 +94,19 @@ import type { QualityAdjustmentInput } from "../quality";
 import type { QualityReliabilityState } from "../quality/types";
 import { buildCompanyQualitySummary } from "./qualitySummary";
 import { buildCompanyFixtures } from "./fixtures";
-import {
-  FINANCE_PARAMETERS_V1,
-  buildCompanyQuarterBusinessActuals,
-  buildInitialCompanyFinanceState,
-  closeFinancialQuarter,
-} from "../finance";
+import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
+import { unwrapUsd } from "../finance/types";
+import {
+  FINANCING_PARAMETERS_V1,
+  buildCollateralInputFromCompanyLab,
+  buildInitialCompanyFinancingState,
+  closeQuarterWithFinancing,
+  computeProcurementConstraint,
+  planQuarterFinancing,
+} from "../financing";
+import type { CompanyFinancingState, FinancingQuarterResult, FinancingState } from "../financing/types";
+import type { QuarterFinancingPlan } from "../financing/liquidityClose";
 import { calculateExternalProcessorIntent } from "./externalDemand";
 import { EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1, REFERENCE_WORLD_CONSUMPTION_TONS } from "./parameters";
 import {
@@ -246,6 +252,10 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
   const startPeriod = getScenarioTurnInput(scenarioState, 1).period;
   const fixtures = buildCompanyFixtures(startPeriod);
 
+  // 【Phase 8A】5社の初期財務状態。原料在庫の初期金額は各社の初期原料ロット
+  // （実データ）から算出し、開始時点の貸借一致を構造的に保証する。
+  const initialFinanceCompanies = fixtures.map((f) => buildInitialCompanyFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod));
+
   const state: CompanyLabState = {
     config,
     currentPeriod: startPeriod,
@@ -262,10 +272,13 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
       fixtures.map((f) => f.companyId),
       ["hoso", "pd", "vap"]
     ),
-    // 【Phase 8A】5社の初期財務状態。原料在庫の初期金額は各社の初期原料ロット
-    // （実データ）から算出し、開始時点の貸借一致を構造的に保証する。
-    financeState: {
-      companies: fixtures.map((f) => buildInitialCompanyFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod)),
+    // 【Phase 8A】5社の初期財務状態。
+    financeState: { companies: initialFinanceCompanies },
+    // 【Phase 8B-1】5社の初期資金繰り状態。既存の初期短期/長期借入金（上記
+    // initialFinanceCompanies）を、二重計上を避けつつ合成融資として1:1で
+    // 接続する（financing/initialPortfolio.ts参照）。
+    financingState: {
+      companies: initialFinanceCompanies.map((fs) => buildInitialCompanyFinancingState(fs, startPeriod)),
     },
     history: [],
     isComplete: false,
@@ -295,6 +308,14 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     deliveryReliabilityByMarket[t.market] = t.deliveryReliabilityScore;
   }
 
+  // 【Phase 8B-1】前期末までの財務・資金繰り状態（自動方針の資金調達希望が
+  // 参照してよい唯一の財務情報。当期の市場・生産実績は含まれない）。
+  const financeStateForCompany = state.financeState.companies.find((c) => c.companyId === fixture.companyId);
+  const financingStateForCompany = state.financingState.companies.find((c) => c.companyId === fixture.companyId);
+  if (!financeStateForCompany || !financingStateForCompany) {
+    throw new CompanyLabError(`会社 "${fixture.companyId}" の財務・資金繰り状態が初期化されていません。`);
+  }
+
   return {
     companyId: fixture.companyId,
     contracts: state.contracts.filter((c) => c.companyId === fixture.companyId),
@@ -305,6 +326,8 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     qualityScoreByProduct,
     customerTrustByMarket,
     deliveryReliabilityByMarket,
+    financeState: financeStateForCompany,
+    financingState: financingStateForCompany,
   };
 }
 
@@ -509,6 +532,77 @@ export function advanceCompanyLabQuarter(
     EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1
   );
 
+  // --- 【Phase 8B-1 実装指示§5.8手順1〜3】期首の与信判断・調達制約 ---
+  // 当期のturnResult（市場・生産実績）が確定する前に、前期末までの財務・資金繰り
+  // 状態だけを使って、会社ごとに信用スコア・借入限度額・銀行審査を確定し
+  // （planQuarterFinancing）、その承認結果と期首現金から、国内買付（即金支払）の
+  // 希望数量・輸入発注可否を必要なら縮小する（computeProcurementConstraint）。
+  // 縮小した数量は、既存のproduction/allocation.ts側の原料不足ロジックへそのまま
+  // 渡すため、生産・在庫・契約履行・品質・会計への一貫した反映は既存構造にまかせる。
+  const financingPlanByCompanyId = new Map<CompanyId, QuarterFinancingPlan>();
+  const collateralByCompanyId = new Map<CompanyId, ReturnType<typeof buildCollateralInputFromCompanyLab>>();
+  const procurementConstraintByCompanyId = new Map<CompanyId, ReturnType<typeof computeProcurementConstraint>>();
+  const fallbackExpectedDomesticPriceUsdPerKg = 2.5; // autoPolicy.tsのDEFAULT_EXPECTED_RAW_PRICE_USD_PER_KGと同じ暫定値（要校正）。
+
+  for (const f of fixtures) {
+    const prevFinance = state.financeState.companies.find((c) => c.companyId === f.companyId);
+    const prevFinancingState = state.financingState.companies.find((c) => c.companyId === f.companyId);
+    if (!prevFinance || !prevFinancingState) {
+      throw new CompanyLabError(`会社 ${f.companyId} の財務・資金繰り状態が初期化されていません。`);
+    }
+    const decision = decisions.find((d) => d.companyId === f.companyId)!;
+    const priorQuarterResult = lastRecord?.financialResults.find((r) => r.companyId === f.companyId);
+    const collateral = buildCollateralInputFromCompanyLab({
+      companyId: f.companyId,
+      rawMaterialLotsAtStart: state.rawMaterialLots,
+      prevFinanceState: prevFinance,
+      priorQuarterResult,
+    });
+    collateralByCompanyId.set(f.companyId, collateral);
+
+    const plan = planQuarterFinancing(
+      {
+        companyId: f.companyId,
+        period: state.currentPeriod,
+        prevFinanceState: prevFinance,
+        prevFinancingState,
+        priorQuarterResult,
+        collateral,
+        financingRequest: decision.financingRequest,
+      },
+      FINANCE_PARAMETERS_V1,
+      FINANCING_PARAMETERS_V1
+    );
+    financingPlanByCompanyId.set(f.companyId, plan);
+
+    const expectedDomesticPriceUsdPerKg = lastRecord ? unwrapUnit(lastRecord.marketResult.vietnamDomestic.price) : fallbackExpectedDomesticPriceUsdPerKg;
+    const procurementConstraint = computeProcurementConstraint(
+      {
+        companyId: f.companyId,
+        period: state.currentPeriod,
+        originalDomesticPurchaseQuantityTons: unwrapUnit(decision.domesticPurchasePlan.desiredQuantity),
+        expectedDomesticPriceUsdPerKg,
+        prevCashUsd: unwrapUsd(prevFinance.cash),
+        approvedNormalLoanDrawUsd: plan.underwriting.approvedAmountUsd,
+        severeArrearsOrInsolvent: plan.borrowingCapacity.underwritingFrozen,
+      },
+      FINANCING_PARAMETERS_V1
+    );
+    procurementConstraintByCompanyId.set(f.companyId, procurementConstraint);
+  }
+
+  // --- 資金制約後の実行計画: 国内買付希望数量を縮小し、重大延滞・支払不能の会社は
+  // 輸入発注も止める（決定した希望自体=decisionsは変更せず、turnInputへ渡す実行値
+  // だけを別に作る。実装指示§5.11「計画値と実行値を区別」）。
+  const constrainedDecisions: CompanyDecisionInput[] = decisions.map((d) => {
+    const constraint = procurementConstraintByCompanyId.get(d.companyId)!;
+    return {
+      ...d,
+      domesticPurchasePlan: { ...d.domesticPurchasePlan, desiredQuantity: hosoEqTons(constraint.constrainedDomesticPurchaseQuantityTons) },
+      importOrders: constraint.importOrdersBlocked ? [] : d.importOrders,
+    };
+  });
+
   const turnInput: TurnOrchestratorInput = {
     currentPeriod: state.currentPeriod,
     marketInput,
@@ -516,10 +610,10 @@ export function advanceCompanyLabQuarter(
     salesPlans: decisions.flatMap((d) => d.salesPlans),
     domesticPurchaseIntentSource: {
       type: "companyPlans",
-      plans: decisions.map((d) => d.domesticPurchasePlan),
+      plans: constrainedDecisions.map((d) => d.domesticPurchasePlan),
       externalIntent,
     },
-    importOrders: decisions.flatMap((d) => d.importOrders),
+    importOrders: constrainedDecisions.flatMap((d) => d.importOrders),
     aquacultureStockingPlans: decisions.flatMap((d) => d.aquacultureStockingPlans),
     existingContracts: state.contracts,
     existingLots: state.rawMaterialLots,
@@ -638,10 +732,17 @@ export function advanceCompanyLabQuarter(
   // 販売量・生産量・廃棄量・価格の再計算は一切行わない。
   const nextFinanceCompanies: CompanyFinanceState[] = [];
   const financialResults: CompanyFinancialQuarterResult[] = [];
+  // 【Phase 8B-1】資金繰り: 当期の実績が確定した後、実際に支払える利息・元本を
+  // 算出し、緊急融資・延滞・支払不能判定を行う（financing/liquidityClose.ts
+  // closeQuarterWithFinancing。二段呼び出しでclosefinancialQuarterを呼ぶため、
+  // financeモジュールの会計処理を複製しない）。
+  const nextFinancingCompanies: CompanyFinancingState[] = [];
+  const financingResults: FinancingQuarterResult[] = [];
   for (const f of fixtures) {
     const prevFinance = state.financeState.companies.find((c) => c.companyId === f.companyId);
-    if (!prevFinance) {
-      throw new CompanyLabError(`会社 ${f.companyId} の財務状態が初期化されていません。`);
+    const prevFinancingState = state.financingState.companies.find((c) => c.companyId === f.companyId);
+    if (!prevFinance || !prevFinancingState) {
+      throw new CompanyLabError(`会社 ${f.companyId} の財務・資金繰り状態が初期化されていません。`);
     }
     const companyLoad = productionRecord.companyLoadMetrics.find((m) => m.companyId === f.companyId);
     const companyDecision = decisions.find((d) => d.companyId === f.companyId);
@@ -666,16 +767,34 @@ export function advanceCompanyLabQuarter(
       salesForceHeadcount: f.salesForceHeadcountTotal,
       procurementHeadcount: f.procurementHeadcountTotal,
     });
-    const { result: financialResult, nextState: nextFinance } = closeFinancialQuarter(
-      prevFinance,
-      actuals,
+    const plan = financingPlanByCompanyId.get(f.companyId)!;
+    const collateral = collateralByCompanyId.get(f.companyId)!;
+    const procurementConstraint = procurementConstraintByCompanyId.get(f.companyId)!;
+    const { financeResult, nextFinanceState, financingQuarterResult, nextFinancingState } = closeQuarterWithFinancing(
+      {
+        companyId: f.companyId,
+        period: state.currentPeriod,
+        prevFinanceState: prevFinance,
+        prevFinancingState,
+        actuals,
+        plan,
+        financingRequest: companyDecision!.financingRequest,
+        collateralForEmergency: collateral,
+      },
       FINANCE_PARAMETERS_V1,
+      FINANCING_PARAMETERS_V1,
       PRODUCTION_PARAMETERS_V1.cost.baseProcessingCostUsdPerTon
     );
-    financialResults.push(financialResult);
-    nextFinanceCompanies.push(nextFinance);
+    financialResults.push(financeResult);
+    nextFinanceCompanies.push(nextFinanceState);
+    // 調達制約（procurementConstraint）はrunner.ts側でのみ確定するため、
+    // liquidityClose.tsが返すfinancingQuarterResultへ後付けで合成する
+    // （closeQuarterWithFinancing自体は当期の国内買付縮小を知らない設計。§5.8参照）。
+    financingResults.push({ ...financingQuarterResult, procurementConstraint });
+    nextFinancingCompanies.push(nextFinancingState);
   }
   const financeStateAfter: FinanceState = { companies: nextFinanceCompanies };
+  const financingStateAfter: FinancingState = { companies: nextFinancingCompanies };
 
   const record: CompanyQuarterRecord = {
     turn,
@@ -699,6 +818,7 @@ export function advanceCompanyLabQuarter(
     qualityStateAfter,
     deliveryObservations,
     financialResults,
+    financingResults,
   };
 
   const canAdvanceWithinScenario = turn < definition.durationTurns;
@@ -718,6 +838,7 @@ export function advanceCompanyLabQuarter(
     lastQuarterActualProduction,
     qualityState: qualityStateAfter,
     financeState: financeStateAfter,
+    financingState: financingStateAfter,
     history,
     isComplete,
   };

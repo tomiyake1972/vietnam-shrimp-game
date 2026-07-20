@@ -10,6 +10,7 @@ import { RawMaterialLot } from "../rawMaterials/types";
 import { SalesContract } from "../sales/types";
 import { CompanyFactoryProductRampState, CompanyMarketTrustState, CompanyProductQualityState, QualityReliabilityState } from "../quality/types";
 import { CompanyFinanceState, FinishedGoodsCostLedgerEntry, PayableRecord, ReceivableRecord } from "../finance/types";
+import { CompanyFinancingHistory, CompanyFinancingState, LoanPortfolio, LoanRecord } from "../financing/types";
 import { PersistedGameStateV2 } from "./types";
 import { PersistedStateParseError } from "./errors";
 import { validatePersistedGameState } from "./schema";
@@ -172,6 +173,60 @@ function financeStateToDto(f: CompanyFinanceState): Record<string, unknown> {
   };
 }
 
+/** LoanRecordを固定のキー順序を持つDTOへ変換する（Phase 8B-1、schemaVersion 5）。 */
+function loanRecordToDto(l: LoanRecord): Record<string, unknown> {
+  const dto: Record<string, unknown> = {
+    loanId: l.loanId,
+    companyId: l.companyId,
+    loanType: l.loanType,
+    originalPrincipalUsd: l.originalPrincipalUsd,
+    currentPrincipalUsd: l.currentPrincipalUsd,
+    originationPeriod: l.originationPeriod,
+    maturityPeriod: l.maturityPeriod,
+    annualInterestRate: l.annualInterestRate,
+    creditSpreadAnnual: l.creditSpreadAnnual,
+    repaymentMethod: l.repaymentMethod,
+    equalPrincipalInstallmentUsd: l.equalPrincipalInstallmentUsd,
+    arrearsPrincipalUsd: l.arrearsPrincipalUsd,
+    arrearsInterestUsd: l.arrearsInterestUsd,
+    status: l.status,
+    isEmergency: l.isEmergency,
+  };
+  if (l.refinancedFromLoanId !== undefined) dto.refinancedFromLoanId = l.refinancedFromLoanId;
+  return dto;
+}
+
+/** LoanPortfolioを固定のキー順序を持つDTOへ変換する（Phase 8B-1、schemaVersion 5）。 */
+function loanPortfolioToDto(p: LoanPortfolio): Record<string, unknown> {
+  return {
+    companyId: p.companyId,
+    loans: p.loans.map(loanRecordToDto),
+  };
+}
+
+/** CompanyFinancingHistoryを固定のキー順序を持つDTOへ変換する（Phase 8B-1、schemaVersion 5）。 */
+function financingHistoryToDto(h: CompanyFinancingHistory): Record<string, unknown> {
+  const dto: Record<string, unknown> = {
+    consecutiveArrearsQuarters: h.consecutiveArrearsQuarters,
+    consecutiveCovenantBreachQuarters: h.consecutiveCovenantBreachQuarters,
+    totalOnTimeRepaymentEventsCount: h.totalOnTimeRepaymentEventsCount,
+    totalArrearsEventsCount: h.totalArrearsEventsCount,
+    totalEmergencyLoanDrawsCount: h.totalEmergencyLoanDrawsCount,
+  };
+  if (h.lastFinancialHealth !== undefined) dto.lastFinancialHealth = h.lastFinancialHealth;
+  return dto;
+}
+
+/** CompanyFinancingStateを固定のキー順序を持つDTOへ変換する（Phase 8B-1、schemaVersion 5）。 */
+function financingStateToDto(f: CompanyFinancingState): Record<string, unknown> {
+  return {
+    companyId: f.companyId,
+    loanPortfolio: loanPortfolioToDto(f.loanPortfolio),
+    accruedInterestPayableUsd: f.accruedInterestPayableUsd,
+    history: financingHistoryToDto(f.history),
+  };
+}
+
 /**
  * PersistedGameStateV2を、トップレベル・ネストしたオブジェクトいずれも
  * 固定のキー順序を持つDTOへ変換する。契約・ロットの配列順序は一切
@@ -188,6 +243,7 @@ function toCanonicalDto(state: PersistedGameStateV2): Record<string, unknown> {
     rawMaterialLots: state.rawMaterialLots.map(lotToDto),
     qualityReliability: qualityReliabilityToDto(state.qualityReliability),
     financeStates: state.financeStates.map(financeStateToDto),
+    financingStates: state.financingStates.map(financingStateToDto),
     execution: {
       completedTurnCount: state.execution.completedTurnCount,
       ...(state.execution.lastCompletedPeriod !== undefined ? { lastCompletedPeriod: state.execution.lastCompletedPeriod } : {}),
