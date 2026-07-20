@@ -12,6 +12,7 @@ import { PeriodV2 } from "../../lib/v2/core/period";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../lib/v2/market/types";
 import { CompanyDecisionInput, CompanyFixture } from "../../lib/v2/companyLab";
 import { LoanType, RepaymentMethod } from "../../lib/v2/financing/types";
+import { CapitalProjectType } from "../../lib/v2/capex/types";
 import { PlanCostExpectation } from "../../lib/v2/sales/types";
 import { Score0to100 } from "../../lib/v2/core/units";
 import { WorkerSkillEntry } from "../../lib/v2/production/types";
@@ -102,6 +103,30 @@ export interface FinancingRequestDraft {
   readonly emergencyAcceptable: boolean;
 }
 
+/**
+ * 【Phase 8B-2A】設備投資に関する意思決定のドラフト。プレイヤー入力UI（Phase
+ * 8B-2Aの対象外）は無いが、CompanyDecisionInput.capexDecisionが必須フィールドに
+ * なったため、既存の網羅ドラフト往復（buildInitialDraft/buildDecisionInputFromDraft）
+ * の対象へ機械的に追加する。フィールドはいずれもブランド型を持たないため
+ * （projectType・USD額・案件ID文字列はいずれもプレーン値）、hosoEqTons()等の
+ * スマートコンストラクタ変換は不要で、そのまま往復する。
+ */
+export interface CapexProjectProposalDraftRow {
+  readonly projectType: CapitalProjectType;
+  readonly requestedBudgetUsd?: number;
+  readonly priority?: number;
+}
+
+export interface CapexProjectReferenceDraftRow {
+  readonly projectId: string;
+}
+
+export interface CapexDecisionDraft {
+  readonly newProjectProposals: readonly CapexProjectProposalDraftRow[];
+  readonly cancelRequests: readonly CapexProjectReferenceDraftRow[];
+  readonly resumeRequests: readonly CapexProjectReferenceDraftRow[];
+}
+
 export interface CompanyDecisionDraft {
   readonly companyId: string;
   readonly salesPlans: readonly SalesPlanDraftRow[];
@@ -111,6 +136,7 @@ export interface CompanyDecisionDraft {
   readonly productionPlans: readonly ProductionPlanDraftRow[];
   readonly workerAssignments: readonly WorkerAssignmentDraftRow[];
   readonly financingRequest: FinancingRequestDraft;
+  readonly capexDecision: CapexDecisionDraft;
 }
 
 // ---------------------------------------------------------------------
@@ -205,6 +231,16 @@ export function buildInitialDraft(fixture: CompanyFixture, autoDecision: Company
     emergencyAcceptable: autoDecision.financingRequest.emergencyAcceptable,
   };
 
+  const capexDecision: CapexDecisionDraft = {
+    newProjectProposals: autoDecision.capexDecision.newProjectProposals.map((p) => ({
+      projectType: p.projectType,
+      ...(p.requestedBudgetUsd !== undefined ? { requestedBudgetUsd: p.requestedBudgetUsd } : {}),
+      ...(p.priority !== undefined ? { priority: p.priority } : {}),
+    })),
+    cancelRequests: autoDecision.capexDecision.cancelRequests.map((c) => ({ projectId: c.projectId })),
+    resumeRequests: autoDecision.capexDecision.resumeRequests.map((r) => ({ projectId: r.projectId })),
+  };
+
   return {
     companyId: fixture.companyId,
     salesPlans,
@@ -214,6 +250,7 @@ export function buildInitialDraft(fixture: CompanyFixture, autoDecision: Company
     productionPlans,
     workerAssignments,
     financingRequest,
+    capexDecision,
   };
 }
 
@@ -304,6 +341,17 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
     emergencyAcceptable: draft.financingRequest.emergencyAcceptable,
   };
 
+  const capexDecision = {
+    companyId,
+    newProjectProposals: draft.capexDecision.newProjectProposals.map((p) => ({
+      projectType: p.projectType,
+      ...(p.requestedBudgetUsd !== undefined && Number.isFinite(p.requestedBudgetUsd) ? { requestedBudgetUsd: p.requestedBudgetUsd } : {}),
+      ...(p.priority !== undefined && Number.isFinite(p.priority) ? { priority: p.priority } : {}),
+    })),
+    cancelRequests: draft.capexDecision.cancelRequests.map((c) => ({ projectId: c.projectId })),
+    resumeRequests: draft.capexDecision.resumeRequests.map((r) => ({ projectId: r.projectId })),
+  };
+
   return {
     companyId,
     salesPlans,
@@ -313,5 +361,6 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
     productionPlans,
     workerAssignments,
     financingRequest,
+    capexDecision,
   };
 }

@@ -17,6 +17,7 @@ import {
 import { CompanyFixture, CompanyLabResult, CompanyQuarterRecord, CompanyQuarterSummary } from "../types";
 import { CompanyFinancialQuarterResult } from "../../finance/types";
 import { FinancingQuarterResult } from "../../financing/types";
+import { CapexQuarterResult } from "../../capex/types";
 
 function csvEscape(value: string | number): string {
   const s = String(value);
@@ -116,6 +117,23 @@ function financingLineForCompany(fr: FinancingQuarterResult): string {
   ].join("\n");
 }
 
+/**
+ * 【Phase 8B-2A】1社・1四半期ぶんの設備投資結果のsummary行。
+ * 当四半期の投資可能額・支払額・完成振替額・期末CIP残高・当期のイベント
+ * （承認拒否・案件別の着工/完成/見送り）を1社ぶん要約する。
+ */
+function capexLineForCompany(cr: CapexQuarterResult): string {
+  const eventNotes = cr.events
+    .filter((e) => e.statusBefore !== e.statusAfter || e.paymentAttempted)
+    .map((e) => `${e.projectId}(${e.projectType}) ${e.statusBefore}→${e.statusAfter}${e.paymentAttempted ? ` 支払${formatUsdMillions(e.paymentSucceededUsd)}` : "見送り"}`);
+  const rejectedNotes = cr.rejectedProposals.map((r) => `${r.projectType}: ${r.reasons.join("・")}`);
+  return [
+    `      設備投資(Phase 8B-2A): 投資可能額 ${formatUsdMillions(cr.cashAvailableForCapexUsd)} / 当期支払 ${formatUsdMillions(cr.totalPaidThisQuarterUsd)} / 完成振替 ${formatUsdMillions(cr.completedProjectsTransferUsd)} / 期末建設中勘定 ${formatUsdMillions(cr.endingConstructionInProgressUsd)}`,
+    ...(eventNotes.length > 0 ? [`      案件動向: ${eventNotes.join(" / ")}`] : []),
+    ...(rejectedNotes.length > 0 ? [`      新規提案拒否: ${rejectedNotes.join(" / ")}`] : []),
+  ].join("\n");
+}
+
 /** {product -> operationalRisk(0-1)}形式のRecordを"key val%"形式へ整形する。 */
 function formatRiskByProductMap(m: Readonly<Partial<Record<string, number>>>): string {
   const entries = Object.entries(m).filter((e): e is [string, number] => e[1] !== undefined);
@@ -151,6 +169,10 @@ export function formatCompanyLabResultAsSummary(result: CompanyLabResult, scenar
       const financing = record.financingResults.find((f) => f.companyId === s.companyId);
       if (financing) {
         lines.push(financingLineForCompany(financing));
+      }
+      const capex = record.capexResults.find((c) => c.companyId === s.companyId);
+      if (capex) {
+        lines.push(capexLineForCompany(capex));
       }
     }
     if (record.globalReasonCodes.length > 0) {
@@ -249,6 +271,13 @@ const COMPANY_QUARTER_CSV_HEADER: readonly string[] = [
   "domesticPurchaseScaleRatio",
   "importOrdersBlocked",
   "endingCashUsd",
+  // 【Phase 8B-2A】設備投資（投資可能額・当期支払・完成振替・期末CIP・新規提案拒否件数）。
+  // 案件単位の詳細（種別・状態遷移・診断理由）はjson出力を参照。
+  "capexCashAvailableUsd",
+  "capexPaidUsd",
+  "capexCompletedTransferUsd",
+  "capexEndingConstructionInProgressUsd",
+  "capexRejectedProposalsCount",
 ];
 
 function average(values: readonly number[]): string {
@@ -259,6 +288,7 @@ function average(values: readonly number[]): string {
 function summaryToCsvRow(record: CompanyQuarterRecord, s: CompanyQuarterSummary): readonly (string | number)[] {
   const fr = record.financingResults.find((f) => f.companyId === s.companyId);
   const fin = record.financialResults.find((f) => f.companyId === s.companyId);
+  const cr = record.capexResults.find((c) => c.companyId === s.companyId);
   const arrearsTotalUsd = fr ? fr.arrearsEvents.reduce((sum, e) => sum + e.amountUsd, 0) : "";
   return [
     record.turn,
@@ -315,6 +345,11 @@ function summaryToCsvRow(record: CompanyQuarterRecord, s: CompanyQuarterSummary)
     fr?.procurementConstraint ? fr.procurementConstraint.scaleRatio : "",
     fr?.procurementConstraint ? (fr.procurementConstraint.importOrdersBlocked ? 1 : 0) : "",
     fin ? (fin.balanceSheet.cash as unknown as number) : "",
+    cr ? cr.cashAvailableForCapexUsd : "",
+    cr ? cr.totalPaidThisQuarterUsd : "",
+    cr ? cr.completedProjectsTransferUsd : "",
+    cr ? cr.endingConstructionInProgressUsd : "",
+    cr ? cr.rejectedProposals.length : "",
   ];
 }
 

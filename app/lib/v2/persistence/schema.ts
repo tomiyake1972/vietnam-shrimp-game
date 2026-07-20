@@ -33,6 +33,17 @@ import {
   RepaymentMethod,
 } from "../financing/types";
 import {
+  CAPITAL_PROJECT_STATUSES,
+  CAPITAL_PROJECT_TYPES,
+  CapitalProject,
+  CapitalProjectPortfolio,
+  CapitalProjectStatus,
+  CapitalProjectType,
+  CompanyCapexState,
+  FutureCapacityEffectPlaceholder,
+  PaymentScheduleStage,
+} from "../capex/types";
+import {
   CURRENT_PERSISTED_GAME_STATE_VERSION,
   PersistedGameStateExecution,
   PersistedGameStateMetadata,
@@ -558,6 +569,176 @@ function validateFinancingStates(raw: unknown, path: string): readonly CompanyFi
 }
 
 // ---------------------------------------------------------------------
+// 設備投資状態（Phase 8B-2A、schemaVersion 6）
+// ---------------------------------------------------------------------
+
+const FUTURE_CAPACITY_TARGET_PRODUCTS: readonly string[] = ["hoso", "pd", "vap", "common"];
+
+function validateFutureCapacityEffectPlaceholder(raw: unknown, path: string): FutureCapacityEffectPlaceholder {
+  const obj = requireObject(raw, path);
+  const targetProduct =
+    obj.targetProduct === undefined ? undefined : requireEnum(obj.targetProduct, FUTURE_CAPACITY_TARGET_PRODUCTS, `${path}.targetProduct`);
+  const capacityIncreaseTonsPerQuarter =
+    obj.capacityIncreaseTonsPerQuarter === undefined ? undefined : requireNonNegativeFiniteUsd(obj.capacityIncreaseTonsPerQuarter, `${path}.capacityIncreaseTonsPerQuarter`);
+  const readinessQuartersAfterCompletion =
+    obj.readinessQuartersAfterCompletion === undefined ? undefined : requireNonNegativeInteger(obj.readinessQuartersAfterCompletion, `${path}.readinessQuartersAfterCompletion`);
+  return {
+    ...(targetProduct !== undefined ? { targetProduct: targetProduct as FutureCapacityEffectPlaceholder["targetProduct"] } : {}),
+    ...(capacityIncreaseTonsPerQuarter !== undefined ? { capacityIncreaseTonsPerQuarter } : {}),
+    ...(readinessQuartersAfterCompletion !== undefined ? { readinessQuartersAfterCompletion } : {}),
+  };
+}
+
+function validatePaymentScheduleStage(raw: unknown, expectedIndex: number, path: string): PaymentScheduleStage {
+  const obj = requireObject(raw, path);
+  const stageIndex = requireNonNegativeInteger(obj.stageIndex, `${path}.stageIndex`);
+  if (stageIndex !== expectedIndex) {
+    fail(`${path}.stageIndex`, `配列上の位置(${expectedIndex})と一致しません（受け取った値: ${stageIndex}）`);
+  }
+  const plannedRatio = requireFiniteNumber(obj.plannedRatio, `${path}.plannedRatio`);
+  if (plannedRatio <= 0 || plannedRatio > 1 + EPSILON) {
+    fail(`${path}.plannedRatio`, "0より大きく1以下である必要があります");
+  }
+  return { stageIndex, plannedRatio };
+}
+
+function validateCapitalProject(raw: unknown, companyId: string, path: string): CapitalProject {
+  const obj = requireObject(raw, path);
+
+  const projectId = requireNonEmptyString(obj.projectId, `${path}.projectId`);
+  const projectCompanyId = requireNonEmptyString(obj.companyId, `${path}.companyId`);
+  if (projectCompanyId !== companyId) {
+    fail(`${path}.companyId`, `投資案件の会社ID(${projectCompanyId})が所属会社(${companyId})と一致しません`);
+  }
+  const projectType: CapitalProjectType = requireEnum(obj.projectType, CAPITAL_PROJECT_TYPES, `${path}.projectType`);
+  const approvedBudgetUsd = requireFiniteNumber(obj.approvedBudgetUsd, `${path}.approvedBudgetUsd`);
+  if (approvedBudgetUsd <= 0) fail(`${path}.approvedBudgetUsd`, "0より大きい必要があります");
+
+  const scheduleRaw = requireArray(obj.paymentSchedule, `${path}.paymentSchedule`);
+  const paymentSchedule = scheduleRaw.map((s, i) => validatePaymentScheduleStage(s, i, `${path}.paymentSchedule[${i}]`));
+  if (paymentSchedule.length === 0) fail(`${path}.paymentSchedule`, "1件以上である必要があります");
+  const ratioSum = paymentSchedule.reduce((s, st) => s + st.plannedRatio, 0);
+  if (Math.abs(ratioSum - 1) > 1e-4) {
+    fail(`${path}.paymentSchedule`, `予定支払比率の合計が1.0ではありません（${ratioSum}）`);
+  }
+
+  const completedPaymentStagesCount = requireNonNegativeInteger(obj.completedPaymentStagesCount, `${path}.completedPaymentStagesCount`);
+  if (completedPaymentStagesCount > paymentSchedule.length) {
+    fail(`${path}.completedPaymentStagesCount`, "paymentSchedule.lengthを超えてはなりません");
+  }
+  const cumulativePaidUsd = requireNonNegativeFiniteUsd(obj.cumulativePaidUsd, `${path}.cumulativePaidUsd`);
+  if (cumulativePaidUsd > approvedBudgetUsd + EPSILON) {
+    fail(`${path}.cumulativePaidUsd`, "approvedBudgetUsdを超えてはなりません");
+  }
+  const elapsedConstructionQuartersWithPayment = requireNonNegativeInteger(
+    obj.elapsedConstructionQuartersWithPayment,
+    `${path}.elapsedConstructionQuartersWithPayment`
+  );
+  const requiredConstructionQuarters = requireNonNegativeInteger(obj.requiredConstructionQuarters, `${path}.requiredConstructionQuarters`);
+  if (requiredConstructionQuarters <= 0) fail(`${path}.requiredConstructionQuarters`, "1以上の整数である必要があります");
+
+  const status: CapitalProjectStatus = requireEnum(obj.status, CAPITAL_PROJECT_STATUSES, `${path}.status`);
+  const proposedPeriod = requirePeriod(obj.proposedPeriod, `${path}.proposedPeriod`);
+  const approvedPeriod = requirePeriod(obj.approvedPeriod, `${path}.approvedPeriod`);
+  if (approvedPeriod < proposedPeriod) fail(`${path}.approvedPeriod`, "proposedPeriod以降である必要があります");
+  const constructionStartedPeriod = requireOptionalPeriod(obj.constructionStartedPeriod, `${path}.constructionStartedPeriod`);
+  if (constructionStartedPeriod !== undefined && constructionStartedPeriod < approvedPeriod) {
+    fail(`${path}.constructionStartedPeriod`, "approvedPeriod以降である必要があります");
+  }
+  const completedPeriod = requireOptionalPeriod(obj.completedPeriod, `${path}.completedPeriod`);
+  const cancelledPeriod = requireOptionalPeriod(obj.cancelledPeriod, `${path}.cancelledPeriod`);
+  const capitalizedAmountUsd =
+    obj.capitalizedAmountUsd === undefined ? undefined : requireNonNegativeFiniteUsd(obj.capitalizedAmountUsd, `${path}.capitalizedAmountUsd`);
+  const priority = requireFiniteNumber(obj.priority, `${path}.priority`);
+  const futureCapacityEffect =
+    obj.futureCapacityEffect === undefined ? undefined : validateFutureCapacityEffectPlaceholder(obj.futureCapacityEffect, `${path}.futureCapacityEffect`);
+  const reasonsRaw = requireArray(obj.lastDiagnosticReasons, `${path}.lastDiagnosticReasons`);
+  const lastDiagnosticReasons = reasonsRaw.map((r, i) => requireString(r, `${path}.lastDiagnosticReasons[${i}]`));
+
+  // status別の整合性チェック（実装指示§10・§25。statusと関連フィールドの矛盾を拒否する）。
+  if (status === "completed") {
+    if (completedPeriod === undefined) fail(path, 'status="completed"の案件はcompletedPeriodを保持している必要があります');
+    if (capitalizedAmountUsd === undefined) fail(path, 'status="completed"の案件はcapitalizedAmountUsdを保持している必要があります');
+    if (Math.abs(capitalizedAmountUsd - cumulativePaidUsd) > EPSILON) {
+      fail(`${path}.capitalizedAmountUsd`, "cumulativePaidUsdと一致する必要があります");
+    }
+    if (completedPaymentStagesCount !== paymentSchedule.length) {
+      fail(`${path}.completedPaymentStagesCount`, 'status="completed"の案件は全分割払いが完了している必要があります');
+    }
+  } else if (completedPeriod !== undefined || capitalizedAmountUsd !== undefined) {
+    fail(path, `status="${status}"の案件にcompletedPeriod・capitalizedAmountUsdが含まれています（completed以外では保持しません）`);
+  }
+  if (status === "cancelled") {
+    if (cancelledPeriod === undefined) fail(path, 'status="cancelled"の案件はcancelledPeriodを保持している必要があります');
+    if (cumulativePaidUsd > EPSILON) fail(path, 'status="cancelled"の案件は支払実績が無い（cumulativePaidUsd=0）はずです');
+  } else if (cancelledPeriod !== undefined) {
+    fail(path, `status="${status}"の案件にcancelledPeriodが含まれています（cancelled以外では保持しません）`);
+  }
+  if (status === "approved" && (completedPaymentStagesCount !== 0 || cumulativePaidUsd > EPSILON)) {
+    fail(path, 'status="approved"（未着工）の案件に支払実績が含まれています');
+  }
+
+  return {
+    projectId,
+    companyId: projectCompanyId,
+    projectType,
+    approvedBudgetUsd,
+    paymentSchedule,
+    completedPaymentStagesCount,
+    cumulativePaidUsd,
+    elapsedConstructionQuartersWithPayment,
+    requiredConstructionQuarters,
+    status,
+    proposedPeriod,
+    approvedPeriod,
+    ...(constructionStartedPeriod !== undefined ? { constructionStartedPeriod } : {}),
+    ...(completedPeriod !== undefined ? { completedPeriod } : {}),
+    ...(cancelledPeriod !== undefined ? { cancelledPeriod } : {}),
+    ...(capitalizedAmountUsd !== undefined ? { capitalizedAmountUsd } : {}),
+    priority,
+    ...(futureCapacityEffect !== undefined ? { futureCapacityEffect } : {}),
+    lastDiagnosticReasons,
+  };
+}
+
+function validateCapitalProjectPortfolio(raw: unknown, companyId: string, path: string): CapitalProjectPortfolio {
+  const obj = requireObject(raw, path);
+  const projectsRaw = requireArray(obj.projects, `${path}.projects`);
+  const projects = projectsRaw.map((p, i) => validateCapitalProject(p, companyId, `${path}.projects[${i}]`));
+  const seenIds = new Set<string>();
+  for (const p of projects) {
+    if (seenIds.has(p.projectId)) fail(`${path}.projects`, `投資案件ID(${p.projectId})が重複しています`);
+    seenIds.add(p.projectId);
+  }
+  return { companyId: requireNonEmptyString(obj.companyId, `${path}.companyId`), projects };
+}
+
+function validateCompanyCapexState(raw: unknown, path: string): CompanyCapexState {
+  const obj = requireObject(raw, path);
+  const companyId = requireNonEmptyString(obj.companyId, `${path}.companyId`);
+  const nextProjectSequence = requireFiniteNumber(obj.nextProjectSequence, `${path}.nextProjectSequence`);
+  if (!Number.isInteger(nextProjectSequence) || nextProjectSequence < 1) {
+    fail(`${path}.nextProjectSequence`, "1以上の整数である必要があります");
+  }
+  return {
+    companyId,
+    portfolio: validateCapitalProjectPortfolio(obj.portfolio, companyId, `${path}.portfolio`),
+    nextProjectSequence,
+  };
+}
+
+/**
+ * capexStatesを検証する。obj.capexStates自体が存在しない場合
+ * （schemaVersion 1〜5データ）は空配列＝設備投資状態未初期化を返す
+ * （安全な初期値を補う。types.tsのバージョン履歴コメント参照）。
+ */
+function validateCapexStates(raw: unknown, path: string): readonly CompanyCapexState[] {
+  if (raw === undefined) return [];
+  const arr = requireArray(raw, path);
+  return arr.map((c, i) => validateCompanyCapexState(c, `${path}[${i}]`));
+}
+
+// ---------------------------------------------------------------------
 // Execution / Metadata
 // ---------------------------------------------------------------------
 
@@ -647,6 +828,10 @@ export function validatePersistedGameState(raw: unknown): PersistedGameStateV2 {
   // 空配列＝資金繰り状態未初期化を補う（キーの有無で判定する）。
   const financingStates = validateFinancingStates(obj.financingStates, "$.financingStates");
 
+  // Phase 8B-2A（schemaVersion 6）。v1〜v5データ（キー自体が存在しない）は
+  // 空配列＝設備投資状態未初期化を補う（キーの有無で判定する）。
+  const capexStates = validateCapexStates(obj.capexStates, "$.capexStates");
+
   const execution = validateExecution(obj.execution, currentPeriod, "$.execution");
   const metadata = validateMetadata(obj.metadata, "$.metadata");
 
@@ -661,6 +846,7 @@ export function validatePersistedGameState(raw: unknown): PersistedGameStateV2 {
     qualityReliability,
     financeStates,
     financingStates,
+    capexStates,
     execution,
     metadata,
   };
