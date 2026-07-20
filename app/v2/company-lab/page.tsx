@@ -43,6 +43,7 @@ import DecisionEditor from "./components/DecisionEditor";
 import ResultsPanel from "./components/ResultsPanel";
 import MarketPanel from "./components/MarketPanel";
 import ComparisonPanel from "./components/ComparisonPanel";
+import QualityDashboardPanel from "./components/QualityDashboardPanel";
 
 const DEFAULT_SEED = "company-lab-seed-001";
 const MAX_TURNS = 40;
@@ -62,7 +63,7 @@ const COMPANY_OPTIONS: readonly CompanyOption[] = buildCompanyFixtures(INITIAL_P
   displayName: f.displayName,
 }));
 
-type ActiveTab = "decision" | "results" | "comparison";
+type ActiveTab = "decision" | "results" | "comparison" | "quality";
 type ViewMode = "self" | "gm";
 
 function describeError(e: unknown): string {
@@ -101,6 +102,8 @@ export default function CompanyLabPage() {
   // --- 表示切替 ---
   const [viewMode, setViewMode] = useState<ViewMode>("self");
   const [activeTab, setActiveTab] = useState<ActiveTab>("decision");
+  // --- 品質ダッシュボード（Phase 7B）が表示対象とする会社。GM表示時のみ切替可能（自社表示時は常にプレイヤー操作会社）。 ---
+  const [dashboardCompanyId, setDashboardCompanyId] = useState(COMPANY_OPTIONS[0].companyId);
 
   const handleInit = useCallback(() => {
     const definition = SCENARIO_OPTIONS.find((o) => o.scenarioId === draftScenarioId);
@@ -120,6 +123,7 @@ export default function CompanyLabPage() {
       setViewMode("self");
       setActiveTab("decision");
       setPlayerDraft(buildDraftForState(state, builtFixtures, draftPlayerCompanyId));
+      setDashboardCompanyId(draftPlayerCompanyId);
     } catch (e) {
       setRunError(describeError(e));
     }
@@ -181,6 +185,7 @@ export default function CompanyLabPage() {
     setPlayerDraft(null);
     setViewMode("self");
     setActiveTab("decision");
+    setDashboardCompanyId(COMPANY_OPTIONS[0].companyId);
   }, []);
 
   const scenarioTitle = SCENARIO_OPTIONS.find((o) => o.scenarioId === labState?.config.scenarioId)?.title ?? "—";
@@ -192,6 +197,14 @@ export default function CompanyLabPage() {
   }, [labState, selectedTurn]);
 
   const nameById = useMemo(() => new Map((fixtures ?? []).map((f) => [f.companyId, f.displayName])), [fixtures]);
+
+  // 品質ダッシュボード（Phase 7B）が表示対象とする会社。自社表示時は常にプレイヤー操作会社
+  // （実プレイヤーは他社の非公開結果を見られないという既存の規約を踏襲）、GM表示時のみ選択可能。
+  const effectiveDashboardCompanyId = viewMode === "self" ? draftPlayerCompanyId : dashboardCompanyId;
+  const previousRecordForDashboard = useMemo(() => {
+    if (!labState || !displayedRecord) return undefined;
+    return labState.history.find((r) => r.turn === displayedRecord.turn - 1);
+  }, [labState, displayedRecord]);
 
   const playerFixture = fixtures?.find((f) => f.companyId === draftPlayerCompanyId);
   const ownStateForEditor = labState && playerFixture ? buildCompanyOwnState(labState, playerFixture) : undefined;
@@ -278,8 +291,8 @@ export default function CompanyLabPage() {
             </div>
 
             <div className="flex flex-wrap gap-1 border-b border-gray-700">
-              {(["decision", "results", "comparison"] as const).map((tab) => {
-                const label = tab === "decision" ? "意思決定" : tab === "results" ? "結果" : "全社比較";
+              {(["decision", "results", "quality", "comparison"] as const).map((tab) => {
+                const label = tab === "decision" ? "意思決定" : tab === "results" ? "結果" : tab === "quality" ? "品質ダッシュボード" : "全社比較";
                 const disabled = tab === "comparison" && viewMode !== "gm";
                 return (
                   <button
@@ -335,6 +348,49 @@ export default function CompanyLabPage() {
                     {displayedRecord.companySummaries.map((s) => (
                       <ResultsPanel key={s.companyId} summary={s} displayName={nameById.get(s.companyId) ?? s.companyId} />
                     ))}
+                  </>
+                )}
+              </div>
+            )}
+
+            {activeTab === "quality" && (
+              <div className="space-y-5" data-testid="quality-tab-panel">
+                {!displayedRecord || !fixtures ? (
+                  <div className="bg-gray-800 rounded-2xl p-8 text-center text-gray-400 text-sm">
+                    まだ四半期の結果がありません。「1四半期進める」または一括実行を行ってください。
+                  </div>
+                ) : (
+                  <>
+                    {viewMode === "gm" && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] bg-amber-900/60 border border-amber-600/50 text-amber-200 rounded-full px-2 py-0.5">
+                          GM表示 — 表示会社を切り替えられます
+                        </span>
+                        <label className="flex items-center gap-1.5 text-xs text-gray-400">
+                          表示会社:
+                          <select
+                            value={dashboardCompanyId}
+                            onChange={(e) => setDashboardCompanyId(e.target.value)}
+                            className="bg-gray-700 rounded px-2 py-1 text-gray-100"
+                          >
+                            {COMPANY_OPTIONS.map((c) => (
+                              <option key={c.companyId} value={c.companyId}>
+                                {c.companyId}（{c.displayName}）
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    )}
+                    <QualityDashboardPanel
+                      record={displayedRecord}
+                      previousRecord={previousRecordForDashboard}
+                      history={labState.history}
+                      fixtures={fixtures}
+                      companyId={effectiveDashboardCompanyId}
+                      displayName={nameById.get(effectiveDashboardCompanyId) ?? effectiveDashboardCompanyId}
+                      showCompanyComparison={viewMode === "gm"}
+                    />
                   </>
                 )}
               </div>

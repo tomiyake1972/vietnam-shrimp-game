@@ -79,6 +79,34 @@ export interface CompanySalesPlanEntry {
 // 2. 成約配分（出力）
 // ---------------------------------------------------------------------
 
+/**
+ * 【Phase 7B】competitivenessWeightの内訳（読み取り専用の説明用データ）。
+ * computeCompetitivenessWeight（app/lib/v2/sales/allocation.ts）が実際に使う
+ * 計算式そのものから導出する（UI側では一切再計算しない）。5つの
+ * contributionの合計が必ずcompetitivenessWeightと厳密に一致する
+ * （同一の計算式・同一の加算順序）。
+ */
+export interface CompetitivenessWeightBreakdown {
+  /** 価格競争力のウェイト寄与分（w.price × 正規化した価格スコア）。 */
+  readonly priceContribution: number;
+  /** 営業カバレッジのウェイト寄与分。 */
+  readonly coverageContribution: number;
+  /** 顧客関係のウェイト寄与分。 */
+  readonly relationshipContribution: number;
+  /** 品質評価のウェイト寄与分。 */
+  readonly qualityContribution: number;
+  /** 納期信頼性のウェイト寄与分。 */
+  readonly deliveryReliabilityContribution: number;
+  /** clamp前の生の価格スコア（説明用、診断目的）。 */
+  readonly rawPriceScore: number;
+  /** clamp後の価格スコア（この値がmaximumPriceCompetitivenessに達していれば、追加値下げの効果はない）。 */
+  readonly clampedPriceScore: number;
+  /** 価格競争力が上限（maximumPriceCompetitiveness）に到達しているか。 */
+  readonly isPriceScoreAtCeiling: boolean;
+  /** 価格競争力が下限（minimumPriceCompetitiveness）に到達しているか。 */
+  readonly isPriceScoreAtFloor: boolean;
+}
+
 /** 1社・1市場・1商品区分の成約配分結果（内訳付き）。 */
 export interface CompanyAllocationEntry {
   readonly companyId: CompanyId;
@@ -90,6 +118,11 @@ export interface CompanyAllocationEntry {
   readonly processingCapacity: HosoEqTons;
   /** 配分アルゴリズムで用いた合成競争力ウェイト。 */
   readonly competitivenessWeight: number;
+  /**
+   * 【Phase 7B】competitivenessWeightの内訳（読み取り専用、説明用）。
+   * 5つのcontributionの合計が必ずcompetitivenessWeightと一致する。
+   */
+  readonly competitivenessBreakdown: CompetitivenessWeightBreakdown;
   /** 成約量（0 <= allocatedQuantity <= min(desiredQuantity, processingCapacity)）。 */
   readonly allocatedQuantity: HosoEqTons;
 }
