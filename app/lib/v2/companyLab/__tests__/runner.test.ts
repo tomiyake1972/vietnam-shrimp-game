@@ -350,18 +350,94 @@ test("契約に契約時予想原価スナップショットが保持され、�
   }
 });
 
-test("調達構成: 全社が自社養殖だけで恒常的に完全自給しない（国内買付・輸入が実際に発生し続ける）", () => {
+// 調達構成テストの受入意図（Phase 8B-1後）:
+//
+// 旧テスト「全社が自社養殖だけで恒常的に完全自給しない」は、Phase 6.3時点
+// （資金繰り・支払不能モデルが存在しない時代）に書かれ、「通常操業している
+// 会社が理由なく自社養殖だけへ依存し、外部原料市場（国内買付・輸入）が
+// 機能しなくなること」を防ぐ意図だった。Phase 8B-1導入後は、この意図を
+// 維持したまま、次の2状態を明示的に区別する。
+//
+//   A. 資金制約のない（健全・通常操業中の）会社: 理由なく恒常的完全自給に
+//      ならない。国内買付が機能し続ける（旧テストの元の判定をそのまま適用）。
+//   B. 支払不能・重大な資金制約下の会社: 国内買付ゼロ・輸入停止・自社養殖
+//      /既存在庫のみへの依存を許容する。ただし、調達停止に説明可能な財務上
+//      の理由（支払不能・延滞・銀行の新規融資停止・調達制約診断のスケール
+//      比率ゼロ・輸入発注停止フラグ等）が、対象四半期の全期間にわたって
+//      存在することを要求する。
+//
+// 判定はfinancing/liquidityClose.tsが生成した診断結果（financingResults、
+// financialHealth・borrowingCapacity・procurementConstraint）だけに基づき、
+// 会社IDのハードコード（例: "MASSは特別扱い"）は一切行わない。どの会社が
+// どちらの状態になるかは、当期の事業実績・資金繰り状態から機械的に決まる。
+function isSeverelyConstrainedTurn(fr: ReturnType<typeof runAllAuto>["history"][number]["financingResults"][number] | undefined): boolean {
+  if (!fr) return false;
+  const explainedByPaymentStatus = fr.financialHealth.paymentDefault || fr.financialHealth.paymentArrears || fr.financialHealth.insolvent;
+  const explainedByBank = fr.borrowingCapacity.underwritingFrozen;
+  const pc = fr.procurementConstraint;
+  const explainedByProcurementConstraint = pc !== undefined && (pc.scaleRatio <= 0.05 || pc.importOrdersBlocked);
+  return explainedByPaymentStatus || explainedByBank || explainedByProcurementConstraint;
+}
+
+test("調達構成A: 資金制約のない会社は理由なく恒常的完全自給にならない（国内買付が機能し続ける）", () => {
   const result = runAllAuto(baseConfig({ seed: "mix-001", turns: 12 }));
   const lastHalf = result.history.slice(6);
-  for (const s of ["BAL", "MASS", "JPQ", "VAP", "CONSV"]) {
-    const domestic = lastHalf.reduce((sum, r) => sum + unwrapUnit(r.companySummaries.find((x) => x.companyId === s)!.domesticPurchaseQuantity), 0);
-    const aqua = lastHalf.reduce((sum, r) => sum + unwrapUnit(r.companySummaries.find((x) => x.companyId === s)!.aquacultureHarvestedQuantity), 0);
-    const imports = lastHalf.reduce((sum, r) => sum + unwrapUnit(r.companySummaries.find((x) => x.companyId === s)!.importArrivedQuantity), 0);
+  for (const s of result.companies.map((c) => c.companyId)) {
+    const turnsForCompany = lastHalf.map((r) => ({
+      summary: r.companySummaries.find((x) => x.companyId === s)!,
+      financing: r.financingResults.find((x) => x.companyId === s),
+    }));
+    const allTurnsConstrained = turnsForCompany.every((t) => isSeverelyConstrainedTurn(t.financing));
+    // 対象期間の全ターンが財務診断上の重大な資金制約で説明できる会社
+    // （テストBの対象）は、本テストの健全会社向け判定から除外する。
+    if (allTurnsConstrained) continue;
+
+    const domestic = turnsForCompany.reduce((sum, t) => sum + unwrapUnit(t.summary.domesticPurchaseQuantity), 0);
+    const aqua = turnsForCompany.reduce((sum, t) => sum + unwrapUnit(t.summary.aquacultureHarvestedQuantity), 0);
+    const imports = turnsForCompany.reduce((sum, t) => sum + unwrapUnit(t.summary.importArrivedQuantity), 0);
     const total = domestic + aqua + imports;
     assert.ok(total > 0, `${s}: 調達実績が無い`);
     assert.ok(aqua / total < 0.6, `${s}: 自社養殖への依存が過大（${((aqua / total) * 100).toFixed(0)}%）`);
-    assert.ok(domestic > 0, `${s}: 国内買付が発生していない`);
+    assert.ok(domestic > 0, `${s}: 資金制約で説明できないまま国内買付が発生していない（異常な完全自給）`);
   }
+});
+
+test("調達構成B: 支払不能・重大な資金制約下の会社は、説明可能な理由がある場合のみ調達停止を許容する", () => {
+  const result = runAllAuto(baseConfig({ seed: "mix-001", turns: 12 }));
+  const lastHalf = result.history.slice(6);
+  let anyCompanyExercisedThisPath = false;
+
+  for (const s of result.companies.map((c) => c.companyId)) {
+    const turnsForCompany = lastHalf.map((r) => ({
+      summary: r.companySummaries.find((x) => x.companyId === s)!,
+      financing: r.financingResults.find((x) => x.companyId === s),
+    }));
+    const domesticByTurn = turnsForCompany.map((t) => unwrapUnit(t.summary.domesticPurchaseQuantity));
+    const domesticTotal = domesticByTurn.reduce((a, b) => a + b, 0);
+    if (domesticTotal > 1e-6) continue; // このテストは「国内買付が対象期間ゼロ」の会社のみを対象とする。
+
+    anyCompanyExercisedThisPath = true;
+    // 国内買付ゼロの各ターンで、財務診断が調達停止を説明できていることを
+    // 個別に検証する（1ターンでも説明できないゼロがあれば異常として失敗）。
+    turnsForCompany.forEach((t, i) => {
+      assert.ok(
+        domesticByTurn[i] <= 1e-6 ? isSeverelyConstrainedTurn(t.financing) : true,
+        `${s} turn${i + 7}: 国内買付ゼロだが、資金制約診断（支払不能・延滞・銀行融資停止・調達制約スケール比率・輸入停止）で説明できない`
+      );
+    });
+
+    const aqua = turnsForCompany.reduce((sum, t) => sum + unwrapUnit(t.summary.aquacultureHarvestedQuantity), 0);
+    const imports = turnsForCompany.reduce((sum, t) => sum + unwrapUnit(t.summary.importArrivedQuantity), 0);
+    const total = domesticTotal + aqua + imports;
+    // 資金制約下でも、自社養殖・既存在庫等により何らかの原料調達は継続している
+    // （完全に事業が停止しているわけではない、という最低限の健全性確認）。
+    assert.ok(total > 0, `${s}: 国内買付停止中に他の調達手段（自社養殖・輸入既着分）も一切無い（事業停止相当、想定外）`);
+  }
+
+  // このシード・設定では実際に少なくとも1社が資金制約下の調達停止を経験する
+  // ことを、テストB自体が意味のある検証を行っている証拠として確認する
+  // （0社が対象になった場合、テストBは何も検証していないことになるため）。
+  assert.ok(anyCompanyExercisedThisPath, "テストBの対象となる会社が1社も無い（本テストが意味のある検証を行っていない）");
 });
 
 test("自動方針は公開情報と自社状態だけを使う（関数シグネチャ上、他社の非公開計画・将来シナリオを受け取れない）", () => {

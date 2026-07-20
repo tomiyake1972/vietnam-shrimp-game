@@ -190,13 +190,15 @@ Phase 8Aの三表（PL/BS/CF）を実績の唯一の情報源としたまま、�
 - **VAP**: 約25〜27/32ターンhealthy、少数のdefault/breach/arrears/stressed四半期があるが回復する。
 - **MASS**: turn1のみhealthy、turn3以降31/32ターンが恒常的に`paymentDefault`（信用区分E、国内買付はturn3以降ゼロが継続、緊急融資（毎期1,500万〜2,500万USD、絶対上限3,000万USDを超えない）を毎期引いても回復しない）。これはPhase 8A時点で確認済みの「MASSの構造的苦境」（過剰生産・安値戦略による恒常的な原価割れ）が、Phase 8B-1の資金繰り・信用・支払不能ロジックと正しく相互作用した結果として現れる、意図された経路の恒常的経営危機である（バグではない。§22参照）。
 
-## 22. 既知の仕様/テスト間の矛盾（報告のみ、独断で修正していない）
+## 22. 調達構成テストの受入前最終修正（旧テストの経済的前提の更新）
 
-`companyLab/__tests__/runner.test.ts`の既存テスト「調達構成: 全社が自社養殖だけで恒常的に完全自給しない（国内買付・輸入が実際に発生し続ける）」は、Phase 6.3時点（資金繰り・支払不能モデルが存在しない時代）に書かれた前提（全社が恒常的に国内買付/輸入を行う）と、Phase 8B-1で正しく動作するMASS固有の支払不能連鎖（信用区分Eで新規融資停止＋現金枯渇により国内買付が構造的にゼロへ収束し、turn3以降ゼロが継続する）との間に生じた、具体的で説明可能な矛盾である。標準指示（「仕様書とコードが矛盾した場合、独断で直さず矛盾点を報告する」「現行テストの期待値を理由なく書き換えない」）に基づき、本テストは意図的に無改修のまま残し、ここで矛盾点として報告する。全件テスト実行結果は「894件中893件成功、この1件のみ失敗」で安定している。
+`companyLab/__tests__/runner.test.ts`の旧テスト「調達構成: 全社が自社養殖だけで恒常的に完全自給しない（国内買付・輸入が実際に発生し続ける）」は、Phase 6.3時点（資金繰り・支払不能モデルが存在しない時代）に書かれ、「通常操業している会社が理由なく自社養殖だけへ依存し、外部原料市場が機能しなくなること」を防ぐ意図だった。Phase 8B-1導入後、MASS固有の支払不能連鎖（信用区分Eで新規融資停止＋現金枯渇により国内買付が構造的にゼロへ収束し、turn3以降ゼロが継続する）がこの前提と矛盾し失敗していた。
 
-## 23. テスト（Phase 8B-1新規）
+受入前最終修正で、旧テストの意図を維持したまま「調達構成A」（資金制約のない会社は理由なく恒常的完全自給にならない）と「調達構成B」（支払不能・重大な資金制約下の会社は、財務診断（`financingResults`の`financialHealth`・`borrowingCapacity.underwritingFrozen`・`procurementConstraint`）で説明可能な場合のみ調達停止を許容する）の2テストへ分割した。判定は会社IDのハードコードではなく、対象四半期の財務診断結果だけに基づく（`isSeverelyConstrainedTurn`ヘルパー、判定基準: 支払不能/延滞/債務超過・銀行の新規融資停止・調達制約診断のスケール比率≤5%・輸入発注停止フラグ）。ゲームロジック（financing/モジュール・MASSの資金制約自体）は一切変更していない。MASSは特例としてハードコードされておらず、今回のテスト修正後も5社×32ターン×全5シナリオでの財務状態分類・NaN/Infinity・BS/CF/融資残高整合の結果は一切変化していない（§21のとおり）。
 
-新規: `financing/__tests__/creditScore.test.ts`・`borrowingCapacity.test.ts`・`interestRateAndSchedule.test.ts`（9、うちLS-3bは実行四半期利息0の回帰テスト）・`covenant.test.ts`（7）・`bankUnderwriting.test.ts`（7）・`liquidityClose.test.ts`（14: 調達制約4・三表整合3・財務状態分類4・緊急融資3）、`persistence/__tests__/persistenceFinancing.test.ts`（10: schema v5往復・複数融資・履歴save/restore・後方互換2・不正値拒否5）。既存テストの改修は1件のみ（`persistenceFinance.test.ts`のP-1、`CURRENT_PERSISTED_GAME_STATE_VERSION`のリテラル4→現行バージョン定数5への追随。テスト意図＝財務状態つき状態の往復一致は不変）。既存830件超のPhase 8Aテストは無改修・無回帰。全件（`npm test`）は894件中893件成功／1件失敗（§22の既知の矛盾のみ）。
+## 23. テスト（Phase 8B-1新規、受入前最終修正を含む）
+
+新規: `financing/__tests__/creditScore.test.ts`・`borrowingCapacity.test.ts`・`interestRateAndSchedule.test.ts`（9、うちLS-3bは実行四半期利息0の回帰テスト）・`covenant.test.ts`（7）・`bankUnderwriting.test.ts`（7）・`liquidityClose.test.ts`（14: 調達制約4・三表整合3・財務状態分類4・緊急融資3）、`persistence/__tests__/persistenceFinancing.test.ts`（10: schema v5往復・複数融資・履歴save/restore・後方互換2・不正値拒否5）。既存テストの改修は2件: (1)`persistenceFinance.test.ts`のP-1、`CURRENT_PERSISTED_GAME_STATE_VERSION`のリテラル4→現行バージョン定数5への追随（テスト意図＝財務状態つき状態の往復一致は不変）。(2)`runner.test.ts`の「調達構成」テストを§22のとおり「調達構成A」「調達構成B」の2テストへ分割（旧テストの意図＝健全会社の異常な完全自給の検出は維持したまま、支払不能会社の説明可能な調達停止を新たに許容する受入意図の更新）。既存830件超のPhase 8Aテストは無改修・無回帰。全件（`npm test`）は**895件中895件成功（全件green）**。
 
 ## 24. Phase 8B-2以降へ送る課題
 
