@@ -666,7 +666,11 @@ export function closeFinancialQuarter(
   const operatingCashFlow =
     receiptsFromCustomers - paymentsForRawMaterials - paymentsForManufacturing - sgaTotal - interestPaidCash - incomeTax;
   // 【Phase 8B-2A】capex指定時は当期の設備投資現金支払額のマイナス。省略時は0（Phase 8A/8B-1同一）。
-  const investingCashFlow = capex ? -capex.capexPaymentCashUsd : 0;
+  // capexPaymentCashUsd=0のとき"-0"（負のゼロ）にならないよう正規化する（-0===0だが、
+  // deepEqual等の厳密比較・CLI表示で"-0"となる紛らしさを避けるための数値衛生上の措置。
+  // 会計上の意味は一切変えない）。
+  const investingCashFlowRaw = capex ? -capex.capexPaymentCashUsd : 0;
+  const investingCashFlow = investingCashFlowRaw === 0 ? 0 : investingCashFlowRaw;
   // 【Phase 8B-1】financing指定時は借入実行(+)・元本返済(-)の純額。省略時は0（Phase 8A同一）。
   const financingCashFlow = financing ? financing.loanDrawUsd - financing.principalRepaymentCashUsd : 0;
   const netCashChange = operatingCashFlow + investingCashFlow + financingCashFlow;

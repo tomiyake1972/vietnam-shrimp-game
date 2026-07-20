@@ -307,6 +307,61 @@ test("受入確認CC-6: 完成直後の四半期でも、新規完成分は減�
 });
 
 // ---------------------------------------------------------------------
+// 後方互換性（設備投資活動ゼロ時、Phase 8B-1経路との数値完全一致）
+// ---------------------------------------------------------------------
+
+test("受入確認CC-9: 設備投資案件が0件・新規提案も0件の場合、closeQuarterWithCapexの結果はPhase 8B-1のcloseQuarterWithFinancing単独実行の結果とPL/BS/CF全項目で完全一致する（三段クローズの後方互換性）", () => {
+  const financeState = makeFinanceState({ cash: 30_000_000, fixedAssetsGross: 40_000_000, accumulatedDepreciation: 2_000_000 });
+  const financingState = makeFinancingState();
+  const emptyCapexState = buildInitialCompanyCapexState("TEST");
+  const decision = emptyCapexDecision(); // 新規提案・取消・再開いずれも0件
+
+  // 比較A: Phase 8B-1の既存経路（closeQuarterWithFinancing単独実行）。
+  const pathA = closeFinancingOnly(financeState, financingState);
+
+  // 比較B: Phase 8B-2Aのcapex統合経路（既存案件0件・新規提案0件・設備投資支払0・完成振替0）。
+  const pathB = closeWithCapex(financeState, financingState, emptyCapexState, decision);
+
+  // 設備投資活動が完全にゼロならPL/BS/CF・次期financeState全項目が厳密に一致する
+  // （深い構造比較。個別フィールドの選び漏れが無いことを保証する）。
+  assert.deepEqual(pathB.financeResult, pathA.financeResult, "financeResult(PL/BS/CF全項目)がPhase 8B-1単独経路と一致しない");
+  assert.deepEqual(pathB.nextFinanceState, pathA.nextFinanceState, "nextFinanceStateがPhase 8B-1単独経路と一致しない（二重処理の疑い）");
+
+  // 個別に明示確認（売掛金回収・買掛金支払・利息・元本返済・税金・減価償却・
+  // 利益剰余金ロールフォワードのいずれも二重処理されていないことの直接検証）。
+  assert.equal(pathB.financeResult.balanceSheet.cash as number, pathA.financeResult.balanceSheet.cash as number);
+  assert.equal(pathB.financeResult.balanceSheet.accountsReceivable as number, pathA.financeResult.balanceSheet.accountsReceivable as number);
+  assert.equal(pathB.financeResult.balanceSheet.accountsPayable as number, pathA.financeResult.balanceSheet.accountsPayable as number);
+  assert.equal(pathB.financeResult.balanceSheet.rawMaterialInventory as number, pathA.financeResult.balanceSheet.rawMaterialInventory as number);
+  assert.equal(pathB.financeResult.balanceSheet.finishedGoodsInventory as number, pathA.financeResult.balanceSheet.finishedGoodsInventory as number);
+  assert.equal(pathB.financeResult.balanceSheet.fixedAssetsNet as number, pathA.financeResult.balanceSheet.fixedAssetsNet as number);
+  assert.equal(pathB.financeResult.balanceSheet.constructionInProgress as number, 0);
+  assert.equal(pathA.financeResult.balanceSheet.constructionInProgress as number, 0);
+  assert.equal(pathB.financeResult.balanceSheet.shortTermLoans as number, pathA.financeResult.balanceSheet.shortTermLoans as number);
+  assert.equal(pathB.financeResult.balanceSheet.longTermLoans as number, pathA.financeResult.balanceSheet.longTermLoans as number);
+  assert.equal(pathB.financeResult.balanceSheet.accruedInterestPayable as number, pathA.financeResult.balanceSheet.accruedInterestPayable as number);
+  assert.equal(pathB.financeResult.balanceSheet.retainedEarnings as number, pathA.financeResult.balanceSheet.retainedEarnings as number);
+  assert.equal(pathB.financeResult.profitAndLoss.interestExpense as number, pathA.financeResult.profitAndLoss.interestExpense as number);
+  assert.equal(pathB.financeResult.profitAndLoss.incomeTax as number, pathA.financeResult.profitAndLoss.incomeTax as number);
+  assert.equal(pathB.financeResult.profitAndLoss.netIncome as number, pathA.financeResult.profitAndLoss.netIncome as number);
+  assert.equal(pathB.financeResult.manufacturingCost.depreciationCost as number, pathA.financeResult.manufacturingCost.depreciationCost as number);
+  assert.equal(pathB.financeResult.cashFlow.operatingCashFlow as number, pathA.financeResult.cashFlow.operatingCashFlow as number);
+  assert.equal(pathB.financeResult.cashFlow.investingCashFlow as number, pathA.financeResult.cashFlow.investingCashFlow as number);
+  assert.equal(pathB.financeResult.cashFlow.investingCashFlow as number, 0, "設備投資活動ゼロならCFIは0のはず");
+  assert.equal(pathB.financeResult.cashFlow.financingCashFlow as number, pathA.financeResult.cashFlow.financingCashFlow as number);
+  assert.equal(pathB.financeResult.cashFlow.closingCash as number, pathA.financeResult.cashFlow.closingCash as number);
+
+  // capexQuarterResult自体も活動ゼロを明示する。
+  assert.equal(pathB.capexQuarterResult.totalPaidThisQuarterUsd, 0);
+  assert.equal(pathB.capexQuarterResult.completedProjectsTransferUsd, 0);
+  assert.equal(pathB.capexQuarterResult.endingConstructionInProgressUsd, 0);
+  assert.deepEqual(pathB.capexQuarterResult.rejectedProposals, []);
+  assert.deepEqual(pathB.capexQuarterResult.events, []);
+
+  assertThreeStatementIdentities(pathB.financeResult);
+});
+
+// ---------------------------------------------------------------------
 // 複数案件（優先順位・提案上限の統合確認）
 // ---------------------------------------------------------------------
 
