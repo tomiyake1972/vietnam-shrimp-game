@@ -354,7 +354,7 @@ export default function CompanyLabPage() {
             )}
 
             {activeTab === "quality" && (
-              <div className="space-y-5">
+              <div className="space-y-5" data-testid="quality-tab-panel">
                 {!displayedRecord || !fixtures ? (
                   <div className="bg-gray-800 rounded-2xl p-8 text-center text-gray-400 text-sm">
                     まだ四半期の結果がありません。「1四半期進める」または一括実行を行ってください。
