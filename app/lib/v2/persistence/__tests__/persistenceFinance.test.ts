@@ -86,8 +86,11 @@ function makeState(financeStates: readonly CompanyFinanceState[]): PersistedGame
   });
 }
 
-test("受入確認P-1: schemaVersionは4で、財務状態つき状態がencode→decodeで往復一致する（繰越可能性）", () => {
-  assert.equal(CURRENT_PERSISTED_GAME_STATE_VERSION, 4);
+test("受入確認P-1: schemaVersionは5で、財務状態つき状態がencode→decodeで往復一致する（繰越可能性）", () => {
+  // Phase 8B-1でschemaVersionが4→5へ上がった（financingStates追加、types.tsの
+  // バージョン履歴コメント参照）。本テストの意図（財務状態つき状態の往復一致）
+  // 自体は変わらないため、リテラルの期待値のみを現行バージョンへ追随させる。
+  assert.equal(CURRENT_PERSISTED_GAME_STATE_VERSION, 5);
   const state = makeState([makeFinanceState()]);
   const decoded = decodePersistedGameState(encodePersistedGameState(state));
   assert.deepEqual(decoded, state);

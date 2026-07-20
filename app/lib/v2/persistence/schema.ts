@@ -23,6 +23,16 @@ import {
   usd,
 } from "../finance/types";
 import {
+  CompanyFinancingHistory,
+  CompanyFinancingState,
+  FinancialHealthTier,
+  LoanPortfolio,
+  LoanRecord,
+  LoanStatus,
+  LoanType,
+  RepaymentMethod,
+} from "../financing/types";
+import {
   CURRENT_PERSISTED_GAME_STATE_VERSION,
   PersistedGameStateExecution,
   PersistedGameStateMetadata,
@@ -316,6 +326,18 @@ function validateQualityReliability(raw: unknown, path: string): QualityReliabil
 // ---------------------------------------------------------------------
 
 const PAYABLE_SOURCES: readonly PayableSource[] = ["importRawMaterial"];
+const LOAN_TYPES: readonly LoanType[] = ["workingCapital", "termLoan", "emergency"];
+const REPAYMENT_METHODS: readonly RepaymentMethod[] = ["bulletAtMaturity", "equalPrincipal"];
+const LOAN_STATUSES: readonly LoanStatus[] = ["current", "delinquent", "closed"];
+const FINANCIAL_HEALTH_TIERS: readonly FinancialHealthTier[] = [
+  "healthy",
+  "watch",
+  "stressed",
+  "covenantBreach",
+  "paymentArrears",
+  "insolvent",
+  "paymentDefault",
+];
 
 /** USD金額（負数許容: 現金・利益剰余金）。NaN/Infinityはfinanceのusd()が拒否する。 */
 function requireUsd(value: unknown, path: string): Usd {
@@ -434,6 +456,108 @@ function validateFinanceStates(raw: unknown, path: string): readonly CompanyFina
 }
 
 // ---------------------------------------------------------------------
+// 資金繰り状態（Phase 8B-1、schemaVersion 5）
+// ---------------------------------------------------------------------
+
+/** 0以上の有限数（USD残高・年率等）。負数・NaN・Infinityはすべて拒否する。 */
+function requireNonNegativeFiniteUsd(value: unknown, path: string): number {
+  const n = requireFiniteNumber(value, path);
+  if (n < 0) fail(path, "0以上である必要があります（負の残高・負の利率・負の返済額は不正です）");
+  return n;
+}
+
+function validateLoanRecord(raw: unknown, path: string): LoanRecord {
+  const obj = requireObject(raw, path);
+
+  const originalPrincipalUsd = requireNonNegativeFiniteUsd(obj.originalPrincipalUsd, `${path}.originalPrincipalUsd`);
+  const currentPrincipalUsd = requireNonNegativeFiniteUsd(obj.currentPrincipalUsd, `${path}.currentPrincipalUsd`);
+  if (currentPrincipalUsd > originalPrincipalUsd + EPSILON) {
+    fail(`${path}.currentPrincipalUsd`, "originalPrincipalUsdを超えてはなりません（currentPrincipalUsd <= originalPrincipalUsdである必要があります）");
+  }
+  const originationPeriod = requirePeriod(obj.originationPeriod, `${path}.originationPeriod`);
+  const maturityPeriod = requirePeriod(obj.maturityPeriod, `${path}.maturityPeriod`);
+  if (maturityPeriod < originationPeriod) {
+    fail(`${path}.maturityPeriod`, "originationPeriod以降である必要があります");
+  }
+  const equalPrincipalInstallmentUsd = requireNonNegativeFiniteUsd(obj.equalPrincipalInstallmentUsd, `${path}.equalPrincipalInstallmentUsd`);
+  const refinancedFromLoanId =
+    obj.refinancedFromLoanId === undefined ? undefined : requireNonEmptyString(obj.refinancedFromLoanId, `${path}.refinancedFromLoanId`);
+
+  return {
+    loanId: requireNonEmptyString(obj.loanId, `${path}.loanId`),
+    companyId: requireNonEmptyString(obj.companyId, `${path}.companyId`),
+    loanType: requireEnum(obj.loanType, LOAN_TYPES, `${path}.loanType`),
+    originalPrincipalUsd,
+    currentPrincipalUsd,
+    originationPeriod,
+    maturityPeriod,
+    // 年率・信用スプレッドは負数を許容しない（0は許容: 免除等の将来拡張余地は残すが、負の金利は不正）。
+    annualInterestRate: requireNonNegativeFiniteUsd(obj.annualInterestRate, `${path}.annualInterestRate`),
+    creditSpreadAnnual: requireNonNegativeFiniteUsd(obj.creditSpreadAnnual, `${path}.creditSpreadAnnual`),
+    repaymentMethod: requireEnum(obj.repaymentMethod, REPAYMENT_METHODS, `${path}.repaymentMethod`),
+    equalPrincipalInstallmentUsd,
+    arrearsPrincipalUsd: requireNonNegativeFiniteUsd(obj.arrearsPrincipalUsd, `${path}.arrearsPrincipalUsd`),
+    arrearsInterestUsd: requireNonNegativeFiniteUsd(obj.arrearsInterestUsd, `${path}.arrearsInterestUsd`),
+    status: requireEnum(obj.status, LOAN_STATUSES, `${path}.status`),
+    isEmergency: requireBoolean(obj.isEmergency, `${path}.isEmergency`),
+    ...(refinancedFromLoanId !== undefined ? { refinancedFromLoanId } : {}),
+  };
+}
+
+function requireBoolean(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean") fail(path, "真偽値である必要があります");
+  return value;
+}
+
+function validateLoanPortfolio(raw: unknown, companyId: string, path: string): LoanPortfolio {
+  const obj = requireObject(raw, path);
+  const loansRaw = requireArray(obj.loans, `${path}.loans`);
+  const loans = loansRaw.map((l, i) => validateLoanRecord(l, `${path}.loans[${i}]`));
+  for (const loan of loans) {
+    if (loan.companyId !== companyId) {
+      fail(`${path}.loans`, `融資ポートフォリオの会社ID(${loan.companyId})が所属会社(${companyId})と一致しません`);
+    }
+  }
+  return { companyId: requireNonEmptyString(obj.companyId, `${path}.companyId`), loans };
+}
+
+function validateCompanyFinancingHistory(raw: unknown, path: string): CompanyFinancingHistory {
+  const obj = requireObject(raw, path);
+  const lastFinancialHealth =
+    obj.lastFinancialHealth === undefined ? undefined : requireEnum(obj.lastFinancialHealth, FINANCIAL_HEALTH_TIERS, `${path}.lastFinancialHealth`);
+  return {
+    consecutiveArrearsQuarters: requireNonNegativeInteger(obj.consecutiveArrearsQuarters, `${path}.consecutiveArrearsQuarters`),
+    consecutiveCovenantBreachQuarters: requireNonNegativeInteger(obj.consecutiveCovenantBreachQuarters, `${path}.consecutiveCovenantBreachQuarters`),
+    totalOnTimeRepaymentEventsCount: requireNonNegativeInteger(obj.totalOnTimeRepaymentEventsCount, `${path}.totalOnTimeRepaymentEventsCount`),
+    totalArrearsEventsCount: requireNonNegativeInteger(obj.totalArrearsEventsCount, `${path}.totalArrearsEventsCount`),
+    totalEmergencyLoanDrawsCount: requireNonNegativeInteger(obj.totalEmergencyLoanDrawsCount, `${path}.totalEmergencyLoanDrawsCount`),
+    ...(lastFinancialHealth !== undefined ? { lastFinancialHealth } : {}),
+  };
+}
+
+function validateCompanyFinancingState(raw: unknown, path: string): CompanyFinancingState {
+  const obj = requireObject(raw, path);
+  const companyId = requireNonEmptyString(obj.companyId, `${path}.companyId`);
+  return {
+    companyId,
+    loanPortfolio: validateLoanPortfolio(obj.loanPortfolio, companyId, `${path}.loanPortfolio`),
+    accruedInterestPayableUsd: requireNonNegativeFiniteUsd(obj.accruedInterestPayableUsd, `${path}.accruedInterestPayableUsd`),
+    history: validateCompanyFinancingHistory(obj.history, `${path}.history`),
+  };
+}
+
+/**
+ * financingStatesを検証する。obj.financingStates自体が存在しない場合
+ * （schemaVersion 1〜4データ）は空配列＝資金繰り状態未初期化を返す
+ * （安全な初期値を補う。types.tsのバージョン履歴コメント参照）。
+ */
+function validateFinancingStates(raw: unknown, path: string): readonly CompanyFinancingState[] {
+  if (raw === undefined) return [];
+  const arr = requireArray(raw, path);
+  return arr.map((f, i) => validateCompanyFinancingState(f, `${path}[${i}]`));
+}
+
+// ---------------------------------------------------------------------
 // Execution / Metadata
 // ---------------------------------------------------------------------
 
@@ -519,8 +643,25 @@ export function validatePersistedGameState(raw: unknown): PersistedGameStateV2 {
   // 空配列＝財務状態未初期化を補う（キーの有無で判定する）。
   const financeStates = validateFinanceStates(obj.financeStates, "$.financeStates");
 
+  // Phase 8B-1（schemaVersion 5）。v1〜v4データ（キー自体が存在しない）は
+  // 空配列＝資金繰り状態未初期化を補う（キーの有無で判定する）。
+  const financingStates = validateFinancingStates(obj.financingStates, "$.financingStates");
+
   const execution = validateExecution(obj.execution, currentPeriod, "$.execution");
   const metadata = validateMetadata(obj.metadata, "$.metadata");
 
-  return { schemaVersion, gameId, scenarioId, currentPeriod, seed, contracts, rawMaterialLots, qualityReliability, financeStates, execution, metadata };
+  return {
+    schemaVersion,
+    gameId,
+    scenarioId,
+    currentPeriod,
+    seed,
+    contracts,
+    rawMaterialLots,
+    qualityReliability,
+    financeStates,
+    financingStates,
+    execution,
+    metadata,
+  };
 }

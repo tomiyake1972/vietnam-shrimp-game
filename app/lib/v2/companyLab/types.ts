@@ -38,7 +38,8 @@ import {
 } from "../production/types";
 import { TurnOrchestratorDebugInfo } from "../turn/types";
 import { BatchQualityAdjustment, MarketDeliveryObservation, QualityReliabilityState } from "../quality/types";
-import { CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
+import { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
+import { CompanyFinancingState, FinancingRequestInput, FinancingState, FinancingQuarterResult } from "../financing/types";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -120,6 +121,13 @@ export interface CompanyDecisionInput {
   /** 工場ごとのワーカー配置（常用人数はworkerBaselineを踏襲し、臨時人数・残業率のみ意思決定で変える想定だが、
    * 検証のため全フィールドをこの意思決定側で確定させる）。 */
   readonly workerAssignments: readonly WorkerAssignment[];
+  /**
+   * 【Phase 8B-1】当期の資金調達希望（希望借入額・種別・期間・返済方式・
+   * 任意期限前返済額・緊急融資利用可否）。当期開始時点の情報だけで決めること
+   * （runner.tsのplanQuarterFinancingが、当期の市場・生産実績が確定する前に
+   * この希望を銀行審査へ渡す）。
+   */
+  readonly financingRequest: FinancingRequestInput;
 }
 
 // ---------------------------------------------------------------------
@@ -145,6 +153,13 @@ export interface CompanyOwnState {
   readonly customerTrustByMarket: Readonly<Partial<Record<DemandMarketId, Score0to100>>>;
   /** 【Phase 7A】前四半期末までの自社の市場別納期信頼性（deliveryReliabilityへ接続）。 */
   readonly deliveryReliabilityByMarket: Readonly<Partial<Record<DemandMarketId, Score0to100>>>;
+  /**
+   * 【Phase 8B-1】前期末までの自社財務状態・資金繰り状態（現金・借入残高・
+   * 信用履歴等）。自動方針の資金調達希望（financingRequest）はこれだけを参照する
+   * （当期の市場・生産実績は一切参照しない＝銀行と同じ「未来を知らない」制約）。
+   */
+  readonly financeState: CompanyFinanceState;
+  readonly financingState: CompanyFinancingState;
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */
@@ -272,6 +287,12 @@ export interface CompanyQuarterRecord {
    * （財務側で販売量・生産量・廃棄量・価格を再計算しない）。
    */
   readonly financialResults: readonly CompanyFinancialQuarterResult[];
+  /**
+   * 【Phase 8B-1】当期の会社別資金繰り結果（信用スコア・借入限度額・銀行審査・
+   * 財務制限条項・調達制約・緊急融資・延滞・財務状態分類）。financing/liquidityClose.ts
+   * が生成する（financeモジュールと同様、実績の再計算は一切行わない）。
+   */
+  readonly financingResults: readonly FinancingQuarterResult[];
 }
 
 export interface CompanyLabConfig {
@@ -294,6 +315,8 @@ export interface CompanyLabState {
   readonly qualityState: QualityReliabilityState;
   /** 【Phase 8A】会社別の財務状態（現金・売掛/買掛・借入・固定資産・完成品原価台帳等。ターンをまたいで保持）。 */
   readonly financeState: FinanceState;
+  /** 【Phase 8B-1】会社別の資金繰り状態（融資ポートフォリオ・未払利息・信用/延滞履歴。ターンをまたいで保持）。 */
+  readonly financingState: FinancingState;
   readonly history: readonly CompanyQuarterRecord[];
   readonly isComplete: boolean;
 }

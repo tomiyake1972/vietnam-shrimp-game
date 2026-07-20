@@ -30,7 +30,10 @@ import { CountryId, DemandMarketId, Product } from "../market/types";
 import { CompanySalesPlanEntry, PlanCostExpectation } from "../sales/types";
 import { AquacultureStockingPlanEntry, DomesticPurchasePlanEntry, ImportOrderInput } from "../rawMaterials/types";
 import { CompanyProductionPlanEntry, WorkerAssignment } from "../production/types";
+import { unwrapUsd } from "../finance/types";
+import { FinancingRequestInput } from "../financing/types";
 import { orderQuantityFactor } from "./premiumPolicy";
+import { AUTO_FINANCING_POLICY_PARAMETERS_V1 } from "./parameters";
 import { CompanyDecisionInput, CompanyFixture, CompanyOwnState, PublicMarketInfo } from "./types";
 
 const EPSILON = 1e-6;
@@ -461,6 +464,39 @@ function buildAquacultureStockingPlans(
 }
 
 /**
+ * 【Phase 8B-1（実装指示 §5.6）】5社自動方針への「単純な資金調達方針」。
+ *   - 現金が最低目標（targetMinimumCashUsd）を下回れば、その差額を通常融資として申請する。
+ *   - 現金が十分（voluntaryPrepaymentThresholdCashUsd超）で既存借入があれば、
+ *     超過分を任意期限前返済として申請する（applyWaterfallAcrossPortfolioが
+ *     高金利融資から優先的に返済するため、ここでは「返済したい総額」だけを渡せばよい）。
+ *   - 通常融資が利用可能なら緊急融資を選ばないという方針だが、通常融資が不足した
+ *     場合の最後の手段としては受け入れる（emergencyAcceptable=true固定）。
+ *   - 当期開始時点の情報（ownState.financeState・ownState.financingState、いずれも
+ *     前期末までの状態）だけを参照する。当期の市場・生産実績は一切参照しない
+ *     （関数シグネチャ上、そもそも受け取れない）。
+ */
+function buildFinancingRequest(ownState: CompanyOwnState): FinancingRequestInput {
+  const params = AUTO_FINANCING_POLICY_PARAMETERS_V1;
+  const cashUsd = unwrapUsd(ownState.financeState.cash);
+  const existingLoanBalanceUsd = ownState.financingState.loanPortfolio.loans.reduce((s, l) => s + l.currentPrincipalUsd, 0);
+
+  const desiredAmountUsd = cashUsd < params.targetMinimumCashUsd ? params.targetMinimumCashUsd - cashUsd : 0;
+  const desiredPrepaymentUsd =
+    cashUsd > params.voluntaryPrepaymentThresholdCashUsd && existingLoanBalanceUsd > 0
+      ? Math.min(cashUsd - params.voluntaryPrepaymentThresholdCashUsd, existingLoanBalanceUsd)
+      : 0;
+
+  return {
+    desiredAmountUsd,
+    desiredLoanType: "workingCapital",
+    desiredTermQuarters: params.desiredTermQuarters,
+    desiredRepaymentMethod: "bulletAtMaturity",
+    desiredPrepaymentUsd,
+    emergencyAcceptable: params.emergencyAcceptable,
+  };
+}
+
+/**
  * 交換可能な決定論的ルールベース自動方針（CompanyDecisionProvider型）。
  * 公開情報（publicInfo）と自社状態（ownState）だけを使い、未来のシナリオ・他社の
  * 非公開計画は一切参照しない（関数シグネチャ上、受け取ることもできない）。
@@ -510,6 +546,7 @@ export function generateAutoPolicyDecision(
   const importOrders = buildImportOrders(fixture, profile, requiredRawMaterial, period);
   const aquacultureStockingPlans = buildAquacultureStockingPlans(fixture, profile, requiredRawMaterial, period);
   const workerAssignments = buildWorkerAssignments(fixture, profile);
+  const financingRequest = buildFinancingRequest(ownState);
 
   return {
     companyId: fixture.companyId,
@@ -519,5 +556,6 @@ export function generateAutoPolicyDecision(
     aquacultureStockingPlans,
     productionPlans,
     workerAssignments,
+    financingRequest,
   };
 }

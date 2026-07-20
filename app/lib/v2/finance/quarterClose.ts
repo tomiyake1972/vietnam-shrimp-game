@@ -33,6 +33,7 @@ import {
   CostOfSalesBreakdown,
   CostRecord,
   FinanceValidationError,
+  FinancingAdjustment,
   FinishedGoodsCostLedgerEntry,
   FinishedGoodsUnitCostBreakdown,
   ManufacturingCostBreakdown,
@@ -343,12 +344,17 @@ export interface QuarterCloseOutput {
  * 1社・1四半期ぶんの財務決算を実行する純粋関数。
  * processingRateByProductはproduction/parameters.tsのbaseProcessingCostUsdPerTonを
  * そのまま渡す（加工費単価の情報源を重複定義しないため、引数で注入する）。
+ *
+ * financing（Phase 8B-1、任意）: financing/liquidityClose.tsが算出した当期の
+ * 借入・返済・利息の反映内容。省略時はPhase 8Aと完全に同一の計算になる
+ * （後方互換。types.tsのFinancingAdjustmentコメント参照）。
  */
 export function closeFinancialQuarter(
   prev: CompanyFinanceState,
   actuals: CompanyQuarterBusinessActuals,
   params: FinanceParameters,
-  processingRateByProduct: Readonly<Record<Product, number>>
+  processingRateByProduct: Readonly<Record<Product, number>>,
+  financing?: FinancingAdjustment
 ): QuarterCloseOutput {
   if (prev.companyId !== actuals.companyId) {
     throw new FinanceValidationError(`財務状態と実績データの会社IDが一致しません: ${prev.companyId} vs ${actuals.companyId}`);
@@ -550,9 +556,17 @@ export function closeFinancialQuarter(
   const sellingLogistics = soldTonsTotal * params.sellingGeneralAdmin.sellingLogisticsUsdPerTon;
   const sgaTotal = salesForceCost + procurementCost + adminFixed + sellingLogistics;
 
-  const interestExpense =
-    (prev.shortTermLoans as number) * params.finance.shortTermInterestRatePerQuarter +
-    (prev.longTermLoans as number) * params.finance.longTermInterestRatePerQuarter;
+  // 【Phase 8B-1】financingが指定されれば融資ポートフォリオ由来の実発生利息を使う。
+  // 省略時はPhase 8Aの簡易計算（既存借入残高×固定利率）のまま（後方互換）。
+  const interestExpense = financing
+    ? financing.interestExpenseUsd
+    : (prev.shortTermLoans as number) * params.finance.shortTermInterestRatePerQuarter +
+      (prev.longTermLoans as number) * params.finance.longTermInterestRatePerQuarter;
+  // 当期に現金で実際に支払った利息（資金制約で未払が生じる場合はinterestExpense未満）。
+  // financing省略時は常に全額現金払い（Phase 8Aと同一）。
+  const interestPaidCash = financing ? financing.interestPaidCashUsd : interestExpense;
+  const accruedInterestPayableBegin = financing ? financing.beginningAccruedInterestPayableUsd : 0;
+  const accruedInterestPayableEnd = accruedInterestPayableBegin + interestExpense - interestPaidCash;
 
   // --- PL ---
   const netRevenue = grossRevenue - qualitySalesDeduction;
@@ -634,10 +648,13 @@ export function closeFinancialQuarter(
   // --- 現金（直接法CFと完全一致する現金台帳） ---
   const paymentsForRawMaterials = actuals.domesticPurchasesUsd + actuals.aquacultureHarvestUsd + apSettlementsPaid;
   const paymentsForManufacturing = laborCashTotal + processingCashTotal + utilityCashTotal + factoryFixedCashTotal;
+  // 利息は発生額(interestExpense)ではなく実際の現金支払額(interestPaidCash)を減算する
+  // （financing省略時はinterestPaidCash===interestExpenseのためPhase 8Aと同一）。
   const operatingCashFlow =
-    receiptsFromCustomers - paymentsForRawMaterials - paymentsForManufacturing - sgaTotal - interestExpense - incomeTax;
+    receiptsFromCustomers - paymentsForRawMaterials - paymentsForManufacturing - sgaTotal - interestPaidCash - incomeTax;
   const investingCashFlow = 0;
-  const financingCashFlow = 0;
+  // 【Phase 8B-1】financing指定時は借入実行(+)・元本返済(-)の純額。省略時は0（Phase 8A同一）。
+  const financingCashFlow = financing ? financing.loanDrawUsd - financing.principalRepaymentCashUsd : 0;
   const netCashChange = operatingCashFlow + investingCashFlow + financingCashFlow;
   const openingCash = prev.cash as number;
   const closingCash = openingCash + netCashChange;
@@ -650,9 +667,14 @@ export function closeFinancialQuarter(
   const fixedAssetsNet = (prev.fixedAssetsGross as number) - accumulatedDepreciationEnd;
   const retainedEarningsEnd = (prev.retainedEarnings as number) + netIncome;
 
+  // 【Phase 8B-1】financing指定時は融資ポートフォリオ由来の期末残高を使う。省略時はprevから不変（Phase 8A同一）。
+  const endingShortTermLoans = financing ? financing.endingShortTermLoansUsd : (prev.shortTermLoans as number);
+  const endingLongTermLoans = financing ? financing.endingLongTermLoansUsd : (prev.longTermLoans as number);
+
   const totalAssets =
     closingCash + arEnd + actuals.rawMaterialInventoryEndUsd + finishedGoodsInventoryEnd + (prev.otherCurrentAssets as number) + fixedAssetsNet;
-  const totalLiabilities = apEnd + (prev.shortTermLoans as number) + (prev.longTermLoans as number) + (prev.otherLiabilities as number);
+  const totalLiabilities =
+    apEnd + endingShortTermLoans + endingLongTermLoans + accruedInterestPayableEnd + (prev.otherLiabilities as number);
   const totalEquity = (prev.capitalStock as number) + retainedEarningsEnd;
   const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
 
@@ -667,8 +689,9 @@ export function closeFinancialQuarter(
     fixedAssetsNet: usd(assertFiniteNonNegative(fixedAssetsNet, "固定資産純額")),
     totalAssets: usd(totalAssets),
     accountsPayable: usd(assertFiniteNonNegative(apEnd, "買掛金残高")),
-    shortTermLoans: prev.shortTermLoans,
-    longTermLoans: prev.longTermLoans,
+    shortTermLoans: usd(assertFiniteNonNegative(endingShortTermLoans, "短期借入金残高")),
+    longTermLoans: usd(assertFiniteNonNegative(endingLongTermLoans, "長期借入金残高")),
+    accruedInterestPayable: usd(assertFiniteNonNegative(accruedInterestPayableEnd, "未払利息残高")),
     otherLiabilities: prev.otherLiabilities,
     totalLiabilities: usd(totalLiabilities),
     capitalStock: prev.capitalStock,
@@ -686,7 +709,12 @@ export function closeFinancialQuarter(
   const increaseInPayables = apEnd - apBegin;
   const increaseInInventory =
     actuals.rawMaterialInventoryEndUsd + finishedGoodsInventoryEnd - actuals.rawMaterialInventoryBeginUsd - finishedGoodsInventoryBegin;
-  const operatingCashFlowIndirect = netIncome + depreciationUsd - increaseInReceivables + increaseInPayables - increaseInInventory;
+  // 未払利息の増加は、純利益が発生主義の全額利息を控除しているのに対し、
+  // 現金は実際の支払額しか減らしていない差額を足し戻す調整（増加したAPを
+  // 足し戻すのと同じ理屈）。financing省略時は常に0（Phase 8Aと同一の恒等式）。
+  const increaseInAccruedInterestPayable = accruedInterestPayableEnd - accruedInterestPayableBegin;
+  const operatingCashFlowIndirect =
+    netIncome + depreciationUsd - increaseInReceivables + increaseInPayables - increaseInInventory + increaseInAccruedInterestPayable;
 
   const cashFlow: CashFlowStatement = {
     companyId,
@@ -696,7 +724,7 @@ export function closeFinancialQuarter(
       paymentsForRawMaterials: usd(-paymentsForRawMaterials),
       paymentsForManufacturing: usd(-paymentsForManufacturing),
       paymentsForSellingGeneralAdmin: usd(-sgaTotal),
-      interestPaid: usd(-interestExpense),
+      interestPaid: usd(-interestPaidCash),
       incomeTaxPaid: usd(-incomeTax),
     },
     operatingCashFlow: usd(operatingCashFlow),
@@ -711,6 +739,7 @@ export function closeFinancialQuarter(
       increaseInReceivables: usd(increaseInReceivables),
       increaseInPayables: usd(increaseInPayables),
       increaseInInventory: usd(increaseInInventory),
+      increaseInAccruedInterestPayable: usd(increaseInAccruedInterestPayable),
       operatingCashFlowIndirect: usd(operatingCashFlowIndirect),
     },
     directIndirectDifference: usd(operatingCashFlow - operatingCashFlowIndirect),
@@ -862,11 +891,15 @@ export function closeFinancialQuarter(
     rawMaterialExpiryLoss,
     finishedGoodsWriteOffLoss,
     downgradeQuantitySoldTons,
-    loanBalance: (prev.shortTermLoans as number) + (prev.longTermLoans as number),
+    loanBalance: endingShortTermLoans + endingLongTermLoans,
     fixedAssetsGross: prev.fixedAssetsGross as number,
   });
 
   // --- 次期状態 ---
+  // shortTermLoans/longTermLoansは、financing指定時は融資ポートフォリオ由来の
+  // 期末残高（endingShortTermLoans/endingLongTermLoans、上のBSと同一値）を
+  // 引き継ぐ。これにより翌期のprev.shortTermLoans/longTermLoansは常に
+  // 融資ポートフォリオと一致する（BSの借入残高との二重管理を避ける）。
   const nextState: CompanyFinanceState = {
     companyId,
     cash: usd(closingCash),
@@ -875,8 +908,8 @@ export function closeFinancialQuarter(
     otherCurrentAssets: prev.otherCurrentAssets,
     fixedAssetsGross: prev.fixedAssetsGross,
     accumulatedDepreciation: usd(accumulatedDepreciationEnd),
-    shortTermLoans: prev.shortTermLoans,
-    longTermLoans: prev.longTermLoans,
+    shortTermLoans: usd(endingShortTermLoans),
+    longTermLoans: usd(endingLongTermLoans),
     otherLiabilities: prev.otherLiabilities,
     capitalStock: prev.capitalStock,
     retainedEarnings: usd(retainedEarningsEnd),
