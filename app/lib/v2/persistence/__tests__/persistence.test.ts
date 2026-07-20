@@ -15,7 +15,7 @@ import {
 } from "../builder";
 import { encodePersistedGameState, decodePersistedGameState } from "../codec";
 import { validatePersistedGameState } from "../schema";
-import { ExternalTurnInput, PersistedGameStateV2 } from "../types";
+import { CURRENT_PERSISTED_GAME_STATE_VERSION, ExternalTurnInput, PersistedGameStateV2 } from "../types";
 import {
   PersistedStateParseError,
   PersistedStateTransitionError,
@@ -622,7 +622,10 @@ test("43: qualityReliability付きの状態がencode/decodeで往復一致する
     initialQualityReliability: sampleQualityReliability(),
     createdAt: "2026-01-01T00:00:00.000Z",
   });
-  assert.equal(state.schemaVersion, 3);
+  // Phase 8A（schemaVersion 4）でバージョンが上がったため、リテラル3ではなく
+  // 現行バージョン定数と比較する（本テストの意図は「新規作成状態が現行バージョンを
+  // 持つ」ことの確認であり、qualityReliabilityの往復一致検証は下記で不変）。
+  assert.equal(state.schemaVersion, CURRENT_PERSISTED_GAME_STATE_VERSION);
   const serialized = encodePersistedGameState(state);
   const decoded = decodePersistedGameState(serialized);
   assert.equal(encodePersistedGameState(decoded), serialized);

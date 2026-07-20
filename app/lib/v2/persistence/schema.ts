@@ -13,6 +13,16 @@ import { ContractStatus, SalesContract } from "../sales/types";
 import { RawMaterialLot, RawMaterialLotStatus, RawMaterialSource } from "../rawMaterials/types";
 import { CompanyFactoryProductRampState, CompanyMarketTrustState, CompanyProductQualityState, QualityReliabilityState } from "../quality/types";
 import {
+  CompanyFinanceState,
+  FinishedGoodsCostLedgerEntry,
+  FinishedGoodsUnitCostBreakdown,
+  PayableRecord,
+  PayableSource,
+  ReceivableRecord,
+  Usd,
+  usd,
+} from "../finance/types";
+import {
   CURRENT_PERSISTED_GAME_STATE_VERSION,
   PersistedGameStateExecution,
   PersistedGameStateMetadata,
@@ -302,6 +312,128 @@ function validateQualityReliability(raw: unknown, path: string): QualityReliabil
 }
 
 // ---------------------------------------------------------------------
+// 財務状態（Phase 8A、schemaVersion 4）
+// ---------------------------------------------------------------------
+
+const PAYABLE_SOURCES: readonly PayableSource[] = ["importRawMaterial"];
+
+/** USD金額（負数許容: 現金・利益剰余金）。NaN/Infinityはfinanceのusd()が拒否する。 */
+function requireUsd(value: unknown, path: string): Usd {
+  const n = requireFiniteNumber(value, path);
+  try {
+    return usd(n);
+  } catch (e) {
+    return fail(path, e instanceof Error ? e.message : "USD金額として不正です");
+  }
+}
+
+/** 負数を許容しないUSD残高（在庫金額・売掛/買掛・借入金・資本金等）。 */
+function requireNonNegativeUsd(value: unknown, path: string): Usd {
+  const v = requireUsd(value, path);
+  if ((v as number) < 0) fail(path, "負数を許容しない残高です（0以上である必要があります）");
+  return v;
+}
+
+function requireNonNegativeFinite(value: unknown, path: string): number {
+  const n = requireFiniteNumber(value, path);
+  if (n < 0) fail(path, "0以上である必要があります");
+  return n;
+}
+
+function validateReceivable(raw: unknown, path: string): ReceivableRecord {
+  const obj = requireObject(raw, path);
+  return {
+    id: requireNonEmptyString(obj.id, `${path}.id`),
+    companyId: requireNonEmptyString(obj.companyId, `${path}.companyId`),
+    market: requireEnum(obj.market, DEMAND_MARKET_IDS, `${path}.market`),
+    amount: requireNonNegativeUsd(obj.amount, `${path}.amount`),
+    originPeriod: requirePeriod(obj.originPeriod, `${path}.originPeriod`),
+    dueSettlementPeriod: requirePeriod(obj.dueSettlementPeriod, `${path}.dueSettlementPeriod`),
+    sourceRef: requireString(obj.sourceRef, `${path}.sourceRef`),
+  };
+}
+
+function validatePayable(raw: unknown, path: string): PayableRecord {
+  const obj = requireObject(raw, path);
+  return {
+    id: requireNonEmptyString(obj.id, `${path}.id`),
+    companyId: requireNonEmptyString(obj.companyId, `${path}.companyId`),
+    source: requireEnum(obj.source, PAYABLE_SOURCES, `${path}.source`),
+    amount: requireNonNegativeUsd(obj.amount, `${path}.amount`),
+    originPeriod: requirePeriod(obj.originPeriod, `${path}.originPeriod`),
+    dueSettlementPeriod: requirePeriod(obj.dueSettlementPeriod, `${path}.dueSettlementPeriod`),
+    sourceRef: requireString(obj.sourceRef, `${path}.sourceRef`),
+  };
+}
+
+function validateUnitCostBreakdown(raw: unknown, path: string): FinishedGoodsUnitCostBreakdown {
+  const obj = requireObject(raw, path);
+  return {
+    rawMaterialPerTon: requireNonNegativeFinite(obj.rawMaterialPerTon, `${path}.rawMaterialPerTon`),
+    processingPerTon: requireNonNegativeFinite(obj.processingPerTon, `${path}.processingPerTon`),
+    laborVariablePerTon: requireNonNegativeFinite(obj.laborVariablePerTon, `${path}.laborVariablePerTon`),
+    utilityVariablePerTon: requireNonNegativeFinite(obj.utilityVariablePerTon, `${path}.utilityVariablePerTon`),
+    laborFixedPerTon: requireNonNegativeFinite(obj.laborFixedPerTon, `${path}.laborFixedPerTon`),
+    factoryFixedPerTon: requireNonNegativeFinite(obj.factoryFixedPerTon, `${path}.factoryFixedPerTon`),
+    utilityFixedPerTon: requireNonNegativeFinite(obj.utilityFixedPerTon, `${path}.utilityFixedPerTon`),
+    depreciationPerTon: requireNonNegativeFinite(obj.depreciationPerTon, `${path}.depreciationPerTon`),
+  };
+}
+
+function validateLedgerEntry(raw: unknown, path: string): FinishedGoodsCostLedgerEntry {
+  const obj = requireObject(raw, path);
+  const downgradeRatio = requireNonNegativeFinite(obj.downgradeRatio, `${path}.downgradeRatio`);
+  if (downgradeRatio > 1) fail(`${path}.downgradeRatio`, "0〜1である必要があります");
+  return {
+    lotId: requireNonEmptyString(obj.lotId, `${path}.lotId`),
+    companyId: requireNonEmptyString(obj.companyId, `${path}.companyId`),
+    product: requireEnum(obj.product, PRODUCTS, `${path}.product`),
+    remainingQuantity: requireNonNegativeFinite(obj.remainingQuantity, `${path}.remainingQuantity`),
+    unitCost: validateUnitCostBreakdown(obj.unitCost, `${path}.unitCost`),
+    downgradeRatio,
+    producedPeriod: requirePeriod(obj.producedPeriod, `${path}.producedPeriod`),
+  };
+}
+
+function validateCompanyFinanceState(raw: unknown, path: string): CompanyFinanceState {
+  const obj = requireObject(raw, path);
+  const fixedAssetsGross = requireNonNegativeUsd(obj.fixedAssetsGross, `${path}.fixedAssetsGross`);
+  const accumulatedDepreciation = requireNonNegativeUsd(obj.accumulatedDepreciation, `${path}.accumulatedDepreciation`);
+  if ((accumulatedDepreciation as number) > (fixedAssetsGross as number) + EPSILON) {
+    fail(`${path}.accumulatedDepreciation`, "固定資産の取得原価総額を超えてはなりません");
+  }
+  const receivablesRaw = requireArray(obj.receivables, `${path}.receivables`);
+  const payablesRaw = requireArray(obj.payables, `${path}.payables`);
+  const ledgerRaw = requireArray(obj.finishedGoodsCostLedger, `${path}.finishedGoodsCostLedger`);
+  return {
+    companyId: requireNonEmptyString(obj.companyId, `${path}.companyId`),
+    cash: requireUsd(obj.cash, `${path}.cash`), // 現金は負数許容（明示的な資金不足状態）
+    receivables: receivablesRaw.map((r, i) => validateReceivable(r, `${path}.receivables[${i}]`)),
+    payables: payablesRaw.map((p, i) => validatePayable(p, `${path}.payables[${i}]`)),
+    otherCurrentAssets: requireNonNegativeUsd(obj.otherCurrentAssets, `${path}.otherCurrentAssets`),
+    fixedAssetsGross,
+    accumulatedDepreciation,
+    shortTermLoans: requireNonNegativeUsd(obj.shortTermLoans, `${path}.shortTermLoans`),
+    longTermLoans: requireNonNegativeUsd(obj.longTermLoans, `${path}.longTermLoans`),
+    otherLiabilities: requireNonNegativeUsd(obj.otherLiabilities, `${path}.otherLiabilities`),
+    capitalStock: requireNonNegativeUsd(obj.capitalStock, `${path}.capitalStock`),
+    retainedEarnings: requireUsd(obj.retainedEarnings, `${path}.retainedEarnings`), // 負数許容
+    finishedGoodsCostLedger: ledgerRaw.map((e, i) => validateLedgerEntry(e, `${path}.finishedGoodsCostLedger[${i}]`)),
+  };
+}
+
+/**
+ * financeStatesを検証する。obj.financeStates自体が存在しない場合
+ * （schemaVersion 1/2/3データ）は空配列＝財務状態未初期化を返す
+ * （安全な初期値を補う。types.tsのバージョン履歴コメント参照）。
+ */
+function validateFinanceStates(raw: unknown, path: string): readonly CompanyFinanceState[] {
+  if (raw === undefined) return [];
+  const arr = requireArray(raw, path);
+  return arr.map((f, i) => validateCompanyFinanceState(f, `${path}[${i}]`));
+}
+
+// ---------------------------------------------------------------------
 // Execution / Metadata
 // ---------------------------------------------------------------------
 
@@ -383,8 +515,12 @@ export function validatePersistedGameState(raw: unknown): PersistedGameStateV2 {
   // 判定する。§バージョン履歴コメント参照）。
   const qualityReliability = validateQualityReliability(obj.qualityReliability, "$.qualityReliability");
 
+  // Phase 8A（schemaVersion 4）。v1/v2/v3データ（キー自体が存在しない）は
+  // 空配列＝財務状態未初期化を補う（キーの有無で判定する）。
+  const financeStates = validateFinanceStates(obj.financeStates, "$.financeStates");
+
   const execution = validateExecution(obj.execution, currentPeriod, "$.execution");
   const metadata = validateMetadata(obj.metadata, "$.metadata");
 
-  return { schemaVersion, gameId, scenarioId, currentPeriod, seed, contracts, rawMaterialLots, qualityReliability, execution, metadata };
+  return { schemaVersion, gameId, scenarioId, currentPeriod, seed, contracts, rawMaterialLots, qualityReliability, financeStates, execution, metadata };
 }

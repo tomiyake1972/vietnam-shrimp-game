@@ -9,6 +9,7 @@ import { unwrapUnit } from "../core/units";
 import { RawMaterialLot } from "../rawMaterials/types";
 import { SalesContract } from "../sales/types";
 import { CompanyFactoryProductRampState, CompanyMarketTrustState, CompanyProductQualityState, QualityReliabilityState } from "../quality/types";
+import { CompanyFinanceState, FinishedGoodsCostLedgerEntry, PayableRecord, ReceivableRecord } from "../finance/types";
 import { PersistedGameStateV2 } from "./types";
 import { PersistedStateParseError } from "./errors";
 import { validatePersistedGameState } from "./schema";
@@ -104,6 +105,73 @@ function qualityReliabilityToDto(q: QualityReliabilityState): Record<string, unk
   };
 }
 
+/** ReceivableRecordを固定のキー順序を持つDTOへ変換する（Phase 8A、schemaVersion 4）。 */
+function receivableToDto(r: ReceivableRecord): Record<string, unknown> {
+  return {
+    id: r.id,
+    companyId: r.companyId,
+    market: r.market,
+    amount: r.amount as number,
+    originPeriod: r.originPeriod,
+    dueSettlementPeriod: r.dueSettlementPeriod,
+    sourceRef: r.sourceRef,
+  };
+}
+
+/** PayableRecordを固定のキー順序を持つDTOへ変換する（Phase 8A、schemaVersion 4）。 */
+function payableToDto(p: PayableRecord): Record<string, unknown> {
+  return {
+    id: p.id,
+    companyId: p.companyId,
+    source: p.source,
+    amount: p.amount as number,
+    originPeriod: p.originPeriod,
+    dueSettlementPeriod: p.dueSettlementPeriod,
+    sourceRef: p.sourceRef,
+  };
+}
+
+/** FinishedGoodsCostLedgerEntryを固定のキー順序を持つDTOへ変換する（Phase 8A、schemaVersion 4）。 */
+function ledgerEntryToDto(e: FinishedGoodsCostLedgerEntry): Record<string, unknown> {
+  return {
+    lotId: e.lotId,
+    companyId: e.companyId,
+    product: e.product,
+    remainingQuantity: e.remainingQuantity,
+    unitCost: {
+      rawMaterialPerTon: e.unitCost.rawMaterialPerTon,
+      processingPerTon: e.unitCost.processingPerTon,
+      laborVariablePerTon: e.unitCost.laborVariablePerTon,
+      utilityVariablePerTon: e.unitCost.utilityVariablePerTon,
+      laborFixedPerTon: e.unitCost.laborFixedPerTon,
+      factoryFixedPerTon: e.unitCost.factoryFixedPerTon,
+      utilityFixedPerTon: e.unitCost.utilityFixedPerTon,
+      depreciationPerTon: e.unitCost.depreciationPerTon,
+    },
+    downgradeRatio: e.downgradeRatio,
+    producedPeriod: e.producedPeriod,
+  };
+}
+
+/** CompanyFinanceStateを固定のキー順序を持つDTOへ変換する（Phase 8A、schemaVersion 4）。 */
+function financeStateToDto(f: CompanyFinanceState): Record<string, unknown> {
+  return {
+    companyId: f.companyId,
+    cash: f.cash as number,
+    receivables: f.receivables.map(receivableToDto),
+    payables: f.payables.map(payableToDto),
+    otherCurrentAssets: f.otherCurrentAssets as number,
+    fixedAssetsGross: f.fixedAssetsGross as number,
+    accumulatedDepreciation: f.accumulatedDepreciation as number,
+    shortTermLoans: f.shortTermLoans as number,
+    longTermLoans: f.longTermLoans as number,
+    otherLiabilities: f.otherLiabilities as number,
+    capitalStock: f.capitalStock as number,
+    retainedEarnings: f.retainedEarnings as number,
+    finishedGoodsCostLedger: f.finishedGoodsCostLedger.map(ledgerEntryToDto),
+  };
+}
+
 /**
  * PersistedGameStateV2を、トップレベル・ネストしたオブジェクトいずれも
  * 固定のキー順序を持つDTOへ変換する。契約・ロットの配列順序は一切
@@ -119,6 +187,7 @@ function toCanonicalDto(state: PersistedGameStateV2): Record<string, unknown> {
     contracts: state.contracts.map(contractToDto),
     rawMaterialLots: state.rawMaterialLots.map(lotToDto),
     qualityReliability: qualityReliabilityToDto(state.qualityReliability),
+    financeStates: state.financeStates.map(financeStateToDto),
     execution: {
       completedTurnCount: state.execution.completedTurnCount,
       ...(state.execution.lastCompletedPeriod !== undefined ? { lastCompletedPeriod: state.execution.lastCompletedPeriod } : {}),

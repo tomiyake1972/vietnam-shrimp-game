@@ -12,6 +12,7 @@ import { PeriodV2 } from "../core/period";
 import { SalesContract } from "../sales/types";
 import { RawMaterialLot } from "../rawMaterials/types";
 import { QualityReliabilityState } from "../quality/types";
+import { CompanyFinanceState } from "../finance/types";
 import { TurnOrchestratorInput, TurnOrchestratorResult } from "../turn/types";
 import { CURRENT_PERSISTED_GAME_STATE_VERSION, ExternalTurnInput, PersistedGameStateV2 } from "./types";
 import { PersistedStateTransitionError, PersistedStateValidationError } from "./errors";
@@ -58,6 +59,12 @@ export interface CreateInitialPersistedGameStateInput {
    * （品質・信頼・納期信頼性・増産履歴とも空）を使う。
    */
   readonly initialQualityReliability?: QualityReliabilityState;
+  /**
+   * Phase 8A（schemaVersion 4）。省略時は空配列（財務状態未初期化）を使う。
+   * 無印/v2ゲーム（turn/turnState）は現時点で財務ロジックを呼ばないため、
+   * 通常は省略される（types.tsのバージョン履歴コメント参照）。
+   */
+  readonly initialFinanceStates?: readonly CompanyFinanceState[];
   readonly createdAt: string;
 }
 
@@ -81,6 +88,7 @@ export function createInitialPersistedGameState(input: CreateInitialPersistedGam
     contracts: [...input.initialContracts],
     rawMaterialLots: [...input.initialRawMaterialLots],
     qualityReliability: input.initialQualityReliability ?? EMPTY_QUALITY_RELIABILITY_STATE,
+    financeStates: input.initialFinanceStates !== undefined ? [...input.initialFinanceStates] : [],
     execution: {
       completedTurnCount: 0,
     },

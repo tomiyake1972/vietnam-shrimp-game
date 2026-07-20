@@ -15,6 +15,7 @@ import {
   formatUsdPerHosoEqKg,
 } from "../../industryLab/ui/formatters";
 import { CompanyFixture, CompanyLabResult, CompanyQuarterRecord, CompanyQuarterSummary } from "../types";
+import { CompanyFinancialQuarterResult } from "../../finance/types";
 
 function csvEscape(value: string | number): string {
   const s = String(value);
@@ -65,6 +66,26 @@ function formatQualityByProductMap(m: Readonly<Partial<Record<string, number>>>)
   return entries.map(([k, v]) => `${k} ${formatScore(v)}`).join(" / ");
 }
 
+/** USD金額をUSD百万の表示文字列へ整形する（表示用のみ。内部計算では丸めない）。 */
+function formatUsdMillions(v: number): string {
+  return `$${(v / 1_000_000).toFixed(1)}M`;
+}
+
+/** 1社・1四半期ぶんの財務結果（Phase 8A）のsummary行。 */
+function financeLineForCompany(f: CompanyFinancialQuarterResult): string {
+  const pl = f.profitAndLoss;
+  const bs = f.balanceSheet;
+  const cf = f.cashFlow;
+  const flags = [
+    ...(f.cashShortfall ? [`資金不足 ${formatUsdMillions(f.cashShortfallAmount as unknown as number)}`] : []),
+    ...(f.negativeEquity ? ["債務超過"] : []),
+  ];
+  return [
+    `      財務(Phase 8A): 売上高 ${formatUsdMillions(pl.netRevenue as unknown as number)} / 営業利益 ${formatUsdMillions(pl.operatingProfit as unknown as number)} / 純利益 ${formatUsdMillions(pl.netIncome as unknown as number)} / 営業CF ${formatUsdMillions(cf.operatingCashFlow as unknown as number)}`,
+    `      財務状態: 期末現金 ${formatUsdMillions(bs.cash as unknown as number)} / 総資産 ${formatUsdMillions(bs.totalAssets as unknown as number)} / 純資産 ${formatUsdMillions(bs.totalEquity as unknown as number)}${flags.length > 0 ? ` / 【${flags.join("・")}】` : ""}`,
+  ].join("\n");
+}
+
 /** {product -> operationalRisk(0-1)}形式のRecordを"key val%"形式へ整形する。 */
 function formatRiskByProductMap(m: Readonly<Partial<Record<string, number>>>): string {
   const entries = Object.entries(m).filter((e): e is [string, number] => e[1] !== undefined);
@@ -93,6 +114,10 @@ export function formatCompanyLabResultAsSummary(result: CompanyLabResult, scenar
     const summaries = companyFilter === "all" ? record.companySummaries : record.companySummaries.filter((s) => s.companyId === companyFilter);
     for (const s of summaries) {
       lines.push(summaryLineForCompany(s, nameById.get(s.companyId) ?? s.companyId));
+      const finance = record.financialResults.find((f) => f.companyId === s.companyId);
+      if (finance) {
+        lines.push(financeLineForCompany(finance));
+      }
     }
     if (record.globalReasonCodes.length > 0) {
       lines.push(`    [全体] ${record.globalReasonCodes.map((r) => r.message).join(" / ")}`);

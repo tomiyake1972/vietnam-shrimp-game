@@ -94,6 +94,13 @@ import type { QualityAdjustmentInput } from "../quality";
 import type { QualityReliabilityState } from "../quality/types";
 import { buildCompanyQualitySummary } from "./qualitySummary";
 import { buildCompanyFixtures } from "./fixtures";
+import {
+  FINANCE_PARAMETERS_V1,
+  buildCompanyQuarterBusinessActuals,
+  buildInitialCompanyFinanceState,
+  closeFinancialQuarter,
+} from "../finance";
+import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { calculateExternalProcessorIntent } from "./externalDemand";
 import { EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1, REFERENCE_WORLD_CONSUMPTION_TONS } from "./parameters";
 import {
@@ -255,6 +262,11 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
       fixtures.map((f) => f.companyId),
       ["hoso", "pd", "vap"]
     ),
+    // 【Phase 8A】5社の初期財務状態。原料在庫の初期金額は各社の初期原料ロット
+    // （実データ）から算出し、開始時点の貸借一致を構造的に保証する。
+    financeState: {
+      companies: fixtures.map((f) => buildInitialCompanyFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod)),
+    },
     history: [],
     isComplete: false,
   };
@@ -620,6 +632,51 @@ export function advanceCompanyLabQuarter(
     return { ...summary, ...qualityFields };
   });
 
+  // --- 【Phase 8A】財務決算: 当期の実績データ（履行・生産・品質・原料ロット・
+  // 意思決定）から、会社別のPL/BS/CF・原価内訳・管理会計を生成し、財務状態を
+  // 次期へ繰り越す。financeモジュールは実績の抽出・金額換算・会計処理のみを行い、
+  // 販売量・生産量・廃棄量・価格の再計算は一切行わない。
+  const nextFinanceCompanies: CompanyFinanceState[] = [];
+  const financialResults: CompanyFinancialQuarterResult[] = [];
+  for (const f of fixtures) {
+    const prevFinance = state.financeState.companies.find((c) => c.companyId === f.companyId);
+    if (!prevFinance) {
+      throw new CompanyLabError(`会社 ${f.companyId} の財務状態が初期化されていません。`);
+    }
+    const companyLoad = productionRecord.companyLoadMetrics.find((m) => m.companyId === f.companyId);
+    const companyDecision = decisions.find((d) => d.companyId === f.companyId);
+    const actuals = buildCompanyQuarterBusinessActuals({
+      companyId: f.companyId,
+      period: state.currentPeriod,
+      usage: fulfillmentPlan.usage,
+      contracts: turnResult.contracts,
+      adjustedBatches,
+      qualityAdjustments: adjustments,
+      newFinishedGoodsLots,
+      allRawMaterialLotsAfterTurn: turnResult.lots,
+      newImportLots: turnResult.newImportLots,
+      harvestedLots: turnResult.harvestedLots,
+      rawMaterialLotsAtStart: state.rawMaterialLots,
+      rawMaterialLotsAtEnd: updatedRawMaterialLots,
+      finishedGoodsLotsBeforeConsumption: lotsAfterExpiry,
+      finishedGoodsLotsAtEnd: finishedGoodsLotsAfterConsumption,
+      workerAssignments: companyDecision?.workerAssignments ?? [],
+      appliedOvertimeRate: companyLoad ? unwrapUnit(companyLoad.overtimeRate) : 0,
+      activeFactoryCount: f.factories.filter((factory) => factory.status === "active").length,
+      salesForceHeadcount: f.salesForceHeadcountTotal,
+      procurementHeadcount: f.procurementHeadcountTotal,
+    });
+    const { result: financialResult, nextState: nextFinance } = closeFinancialQuarter(
+      prevFinance,
+      actuals,
+      FINANCE_PARAMETERS_V1,
+      PRODUCTION_PARAMETERS_V1.cost.baseProcessingCostUsdPerTon
+    );
+    financialResults.push(financialResult);
+    nextFinanceCompanies.push(nextFinance);
+  }
+  const financeStateAfter: FinanceState = { companies: nextFinanceCompanies };
+
   const record: CompanyQuarterRecord = {
     turn,
     period: state.currentPeriod,
@@ -641,6 +698,7 @@ export function advanceCompanyLabQuarter(
     qualityAdjustments: adjustments,
     qualityStateAfter,
     deliveryObservations,
+    financialResults,
   };
 
   const canAdvanceWithinScenario = turn < definition.durationTurns;
@@ -659,6 +717,7 @@ export function advanceCompanyLabQuarter(
     productionState: { ...productionStateAfter, finishedGoodsLots: finishedGoodsLotsAfterConsumption },
     lastQuarterActualProduction,
     qualityState: qualityStateAfter,
+    financeState: financeStateAfter,
     history,
     isComplete,
   };
