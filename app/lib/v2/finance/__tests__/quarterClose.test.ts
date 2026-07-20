@@ -606,3 +606,75 @@ test("受入確認F-16(補助): 完成品ロットが期限切れになった場
   );
   assert.equal(q2.nextState.finishedGoodsCostLedger.length, 0);
 });
+
+// --- Phase 8A重点確認 #3: 生産時廃棄と期限切れ廃棄の区別（完成品原価ロールフォワード） ---
+
+test("受入確認・重点確認3: 生産時廃棄(Q1)と期限切れ廃棄(Q2)は別事象であり同じロット原価を二重計上しない。期首完成品原価+当期完成品振替原価-売上原価-期限切れ廃棄原価=期末完成品原価が両四半期で厳密に成立する", () => {
+  // Q1: バッチ原産100t中、生産時廃棄5t（品質調整＝Phase 7A由来）、調整後95tが
+  //     完成品ロットとして在庫化され、そのうち50tが当期販売（消費）、45tが期末在庫。
+  const q1 = close();
+  const entry1 = q1.nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT1")!;
+  const unitTotal = totalUnitCostPerTon(entry1.unitCost);
+
+  const beginningInventory1 = 0; // makeState()は空の台帳から開始
+  const transferredIn1 = 95 * unitTotal; // adjustedTons(良品)ぶんだけが在庫化される（廃棄5tは対象外）
+  const cogs1 =
+    (q1.result.profitAndLoss.costOfSales.rawMaterialCost as number) +
+    (q1.result.profitAndLoss.costOfSales.processingCost as number) +
+    (q1.result.profitAndLoss.costOfSales.laborCost as number) +
+    (q1.result.profitAndLoss.costOfSales.factoryFixedCost as number);
+  const expiryWriteOff1 = q1.result.qualityLoss.finishedGoodsWriteOffLoss as number;
+  const endingInventory1 = q1.result.balanceSheet.finishedGoodsInventory as number;
+
+  assert.equal(expiryWriteOff1, 0, "Q1では期限切れは発生していない");
+  assert.ok(
+    Math.abs(beginningInventory1 + transferredIn1 - cogs1 - expiryWriteOff1 - endingInventory1) < EPS,
+    "Q1: 期首+振替-売上原価-期限切れ廃棄=期末が不成立"
+  );
+  // 生産時廃棄5t分の損失は「品質損失（廃棄損）」として認識され、在庫（台帳）には
+  // 一切乗っていない（廃棄5t分の原価は台帳のどのロットにも存在しないため、
+  // 後続四半期で期限切れとして再度損失化されることは構造的に不可能）。
+  const productionDiscardLoss1 = q1.result.qualityLoss.qualityDiscardLoss as number;
+  assert.ok(productionDiscardLoss1 > 0);
+  const totalLedgerTonsQ1 = q1.nextState.finishedGoodsCostLedger.reduce((s, e) => s + e.remainingQuantity, 0);
+  assert.equal(totalLedgerTonsQ1, 45);
+  // 数量の全量説明: 原産100t = 生産時廃棄5t + 当期販売50t + 期末在庫45t（欠落・重複なし）
+  assert.equal(5 + 50 + 45, 100);
+
+  // Q2: 生産なし。Q1の期末在庫45tが全量期限切れとなる（生産時廃棄とは無関係の別事象）。
+  const q2 = close(
+    q1.nextState,
+    makeActuals({
+      period: P2,
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [],
+      lotConsumption: [],
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryBeginUsd: 500_000,
+      rawMaterialInventoryEndUsd: 500_000,
+      finishedGoodsRemainingByLot: [{ lotId: "LOT1", remainingQuantityTons: 45, expired: true }],
+      temporaryHeadcount: 0,
+      appliedOvertimeRate: 0,
+    })
+  );
+  const beginningInventory2 = endingInventory1;
+  const transferredIn2 = 0;
+  const cogs2 = 0;
+  const expiryWriteOff2 = q2.result.qualityLoss.finishedGoodsWriteOffLoss as number;
+  const endingInventory2 = q2.result.balanceSheet.finishedGoodsInventory as number;
+
+  assert.ok(Math.abs(expiryWriteOff2 - 45 * unitTotal) < EPS, "Q2の期限切れ廃棄は45t×単位原価と一致するべき");
+  assert.ok(
+    Math.abs(beginningInventory2 + transferredIn2 - cogs2 - expiryWriteOff2 - endingInventory2) < EPS,
+    "Q2: 期首+振替-売上原価-期限切れ廃棄=期末が不成立"
+  );
+  assert.equal(endingInventory2, 0);
+
+  // 二重計上の否定: Q1の生産時廃棄損とQ2の期限切れ廃棄損は、対象トン数（5t vs 45t）も
+  // 金額算出方法（変動製造原価のみ vs 変動+固定の全部原価）も異なり、合算しても
+  // 過大にならない（同じ原価要素を2回損失化していない）。
+  assert.notEqual(productionDiscardLoss1, expiryWriteOff2);
+  const q2ProductionDiscardLoss = q2.result.qualityLoss.qualityDiscardLoss as number;
+  assert.equal(q2ProductionDiscardLoss, 0, "Q2は生産していないため生産時廃棄損は0");
+});

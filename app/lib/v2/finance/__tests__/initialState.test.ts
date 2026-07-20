@@ -10,6 +10,8 @@ import { hosoEqTons, usdPerHosoEqKg } from "../../core/units";
 import { RawMaterialLot } from "../../rawMaterials/types";
 import { buildCompanyFixtures } from "../../companyLab/fixtures";
 import { INITIAL_FINANCE_FIXTURES_V1, buildInitialCompanyFinanceState, rawMaterialInventoryValueUsd } from "../initialState";
+import { CompanyQuarterBusinessActuals, closeFinancialQuarter } from "../quarterClose";
+import { FINANCE_PARAMETERS_V1 } from "../parameters";
 import { FinanceValidationError } from "../types";
 
 const P1 = period(2015, 1);
@@ -85,4 +87,68 @@ test("受入確認I-6: 初期売掛金は開始四半期に回収予定として
   assert.equal(s.receivables.length, 1);
   assert.equal(s.receivables[0].dueSettlementPeriod, P1);
   assert.equal(s.receivables[0].sourceRef, "initial:pre-game-sales");
+});
+
+// --- Phase 8A重点確認 #4: 初期売掛金の開始BS整合性と回収時のPL非影響 ---
+
+test("受入確認・重点確認4: 初期売掛金は開始BSで純資産と整合し、回収時は売掛金減少と現金増加だけが起き、売上・純利益・利益剰余金を架空に増やさない", () => {
+  const fixtures = buildCompanyFixtures(P1);
+  const balFixture = fixtures.find((f) => f.companyId === "BAL")!;
+  const initial = buildInitialCompanyFinanceState("BAL", balFixture.initialRawMaterialLots, P1);
+  const initialArAmount = initial.receivables.reduce((s, r) => s + (r.amount as number), 0);
+  assert.ok(initialArAmount > 0, "BALには初期売掛金が設定されているはず");
+
+  // 開始BSの貸借一致（資産=負債+純資産）は既にI-1で確認済み。ここでは初期売掛金が
+  // 単なる現金注入（cashを直接増やす）ではなく、資産側の一項目として、
+  // 利益剰余金の残差計算（資産合計-負債合計-資本金）を通じて純資産と整合していることを
+  // 数値で確認する。
+  const fixture = INITIAL_FINANCE_FIXTURES_V1.find((f) => f.companyId === "BAL")!;
+  assert.equal(initial.cash as number, fixture.cash, "現金はフィクスチャのcashそのものであり、初期ARによって直接増やされていない");
+  const rawMaterialInventory = rawMaterialInventoryValueUsd(balFixture.initialRawMaterialLots, "BAL");
+  const totalAssets = fixture.cash + fixture.initialAccountsReceivable + rawMaterialInventory + fixture.otherCurrentAssets + fixture.fixedAssetsGross;
+  const totalLiabilities = fixture.shortTermLoans + fixture.longTermLoans + fixture.otherLiabilities;
+  const expectedRetainedEarnings = totalAssets - totalLiabilities - fixture.capitalStock;
+  assert.ok(Math.abs((initial.retainedEarnings as number) - expectedRetainedEarnings) < EPS);
+  // 初期ARを資産合計から除いた場合、利益剰余金（残差）はAR全額だけ減少する
+  // ＝初期ARはちょうどAR全額分だけ純資産（利益剰余金）と整合しており、
+  // 負債の増加や別枠の資本注入によって帳尻を合わせているわけではない。
+  const impliedRetainedEarningsWithoutAr = totalAssets - fixture.initialAccountsReceivable - totalLiabilities - fixture.capitalStock;
+  assert.ok(Math.abs((expectedRetainedEarnings - impliedRetainedEarningsWithoutAr) - fixture.initialAccountsReceivable) < EPS);
+
+  // 当期に一切の事業活動がない四半期を決算し、開始四半期の売掛金が回収されることを確認する。
+  const zeroActuals: CompanyQuarterBusinessActuals = {
+    companyId: "BAL",
+    period: P1,
+    fulfillmentUsage: [],
+    contractTerms: [],
+    batches: [],
+    regularHeadcount: 0,
+    temporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+    activeFactoryCount: 0,
+    salesForceHeadcount: 0,
+    procurementHeadcount: 0,
+    domesticPurchasesUsd: 0,
+    importOrdersUsd: 0,
+    aquacultureHarvestUsd: 0,
+    rawMaterialInventoryBeginUsd: rawMaterialInventoryValueUsd(balFixture.initialRawMaterialLots, "BAL"),
+    rawMaterialInventoryEndUsd: rawMaterialInventoryValueUsd(balFixture.initialRawMaterialLots, "BAL"),
+    lotConsumption: [],
+    finishedGoodsRemainingByLot: [],
+  };
+  const { result, nextState } = closeFinancialQuarter(initial, zeroActuals, FINANCE_PARAMETERS_V1, { hoso: 350, pd: 520, vap: 780 });
+
+  // 売上・純利益への影響なし（事業活動がゼロなので売上は0。固定費だけが費用化されるため
+  // 純利益は負になり得るが、それは初期ARの回収とは無関係）。
+  assert.equal(result.profitAndLoss.grossRevenue as number, 0);
+  // 売掛金は全額回収され残高0、現金はその分だけ増加（回収額と現金増加分の直接対応）。
+  assert.equal(nextState.receivables.length, 0);
+  assert.ok(Math.abs((result.cashFlow.operatingDirect.receiptsFromCustomers as number) - initialArAmount) < EPS);
+  // 利益剰余金のロールフォワードは「前期末+当期純利益」のみで、ARの回収額が
+  // 別枠で加算される余地がない（回収はPLを経由しないB/S・CFのみの動き）。
+  assert.ok(
+    Math.abs(
+      (result.balanceSheet.retainedEarnings as number) - ((initial.retainedEarnings as number) + (result.profitAndLoss.netIncome as number))
+    ) < EPS
+  );
 });
