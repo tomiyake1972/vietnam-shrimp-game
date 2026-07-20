@@ -23,6 +23,7 @@ import { AquacultureStockingPlanEntry, ImportOrderInput } from "../rawMaterials/
 import { CompanySalesPlanEntry } from "../sales/types";
 import { MarketQuarterInput } from "../market/types";
 import { QualityReliabilityState } from "../quality/types";
+import { CompanyFinanceState } from "../finance/types";
 import {
   DomesticPurchaseIntentSource,
   TurnOrchestratorParameters,
@@ -67,8 +68,18 @@ import {
  *      配線は本Phaseの対象外（Redis/API実配線は仕様書で明示的に対象外と
  *      されている）。詳細はdocs/v2/QUALITY_RELIABILITY_ARCHITECTURE_v0.1.md
  *      §永続化を参照。
+ *   4: Phase 8A。会社別の財務状態（financeStates、finance/types.tsの
+ *      CompanyFinanceStateをそのまま再利用。現金・売掛/買掛・借入・固定資産・
+ *      利益剰余金・完成品原価台帳）を追加。バージョン1〜3のデータには
+ *      financeStatesキー自体が存在しないため、decode時に空配列（財務状態
+ *      未初期化）の安全な初期値を補う（キーの有無で判定する追加的変更。
+ *      旧schemaを読み込んだ場合は「財務未使用」として扱い、companyLab側が
+ *      必要時にbuildInitialCompanyFinanceStateで整合する初期財務状態を構築
+ *      する）。schemaVersion 3までと同様、無印/v2ゲーム自身のrunTurnは財務
+ *      ロジックを呼ばないため、companyLab→Redis/API実配線（対象外）までは
+ *      本フィールドへ実際に値が書き込まれることはない。
  */
-export const CURRENT_PERSISTED_GAME_STATE_VERSION = 3;
+export const CURRENT_PERSISTED_GAME_STATE_VERSION = 4;
 
 // ---------------------------------------------------------------------
 // 2. 永続化状態
@@ -117,6 +128,12 @@ export interface PersistedGameStateV2 {
    * 上記バージョン履歴のコメント参照）。
    */
   readonly qualityReliability: QualityReliabilityState;
+  /**
+   * Phase 8A（schemaVersion 4）。会社別の財務状態。常に存在する
+   * （v1/v2/v3データをdecodeする際は空配列＝財務状態未初期化を補い、
+   * 利用側が必要時に整合する初期財務状態を構築する。上記バージョン履歴参照）。
+   */
+  readonly financeStates: readonly CompanyFinanceState[];
   readonly execution: PersistedGameStateExecution;
   readonly metadata: PersistedGameStateMetadata;
 }

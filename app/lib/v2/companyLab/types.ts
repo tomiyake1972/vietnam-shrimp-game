@@ -38,6 +38,7 @@ import {
 } from "../production/types";
 import { TurnOrchestratorDebugInfo } from "../turn/types";
 import { BatchQualityAdjustment, MarketDeliveryObservation, QualityReliabilityState } from "../quality/types";
+import { CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -265,6 +266,12 @@ export interface CompanyQuarterRecord {
    * 市場別納期遵守率表示用。新たな計算は一切行わない）。
    */
   readonly deliveryObservations: readonly MarketDeliveryObservation[];
+  /**
+   * 【Phase 8A】当期の会社別財務結果（PL/BS/CF/原価内訳/品質損失/コスト記録/
+   * 管理会計）。既存Phaseの実績データから finance/quarterClose.ts が生成する
+   * （財務側で販売量・生産量・廃棄量・価格を再計算しない）。
+   */
+  readonly financialResults: readonly CompanyFinancialQuarterResult[];
 }
 
 export interface CompanyLabConfig {
@@ -285,6 +292,8 @@ export interface CompanyLabState {
   readonly lastQuarterActualProduction: Readonly<Record<CompanyId, Readonly<Partial<Record<Product, number>>>>>;
   /** 【Phase 7A】品質・顧客信頼・納期信頼性・増産履歴（ターンをまたいで保持）。 */
   readonly qualityState: QualityReliabilityState;
+  /** 【Phase 8A】会社別の財務状態（現金・売掛/買掛・借入・固定資産・完成品原価台帳等。ターンをまたいで保持）。 */
+  readonly financeState: FinanceState;
   readonly history: readonly CompanyQuarterRecord[];
   readonly isComplete: boolean;
 }
