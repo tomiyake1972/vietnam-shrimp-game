@@ -34,16 +34,41 @@
 
 import { HosoEqTons, UsdPerHosoEqKg, hosoEqTons, unwrapUnit } from "../core/units";
 import { DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
+import { deriveMarketReferencePrices } from "../market/destinationPricing";
+import {
+  CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS,
+  DestinationMarketPriceCoefficientTable,
+} from "../market/destinationPricingParameters";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
-/** ベトナム（5社の共通産地）の商品区分ごとの基準価格。Phase3のプレミアムを含む。 */
+/**
+ * ベトナム（5社の共通産地）の商品区分ごとの基準価格。Phase3のプレミアムを含む。
+ * 【Phase 8P-0A】この関数自体は変更していない（市場非依存・商品別のみの
+ * 基準価格を返す既存の意味を維持する。既存テスト
+ * sales/__tests__/marketAdapter.test.ts が検証）。成約配分の実際の基準価格には
+ * 代わりに deriveVietnamMarketReferencePrices（仕向市場別）を使う。
+ */
 export function deriveVietnamBasePrices(marketResult: MarketQuarterResult): Readonly<Record<Product, UsdPerHosoEqKg>> {
   return {
     hoso: marketResult.hosoPrices.VN.price,
     pd: marketResult.pdPremium.byCountry.VN.finalPrice,
     vap: marketResult.vapPremium.byCountry.VN.finalPrice,
   };
+}
+
+/**
+ * 【Phase 8P-0A】ベトナム（5社の共通産地）の商品×仕向市場ごとの参照価格。
+ * market/destinationPricing.ts の価格分解・係数適用をそのまま呼び出すだけの
+ * アダプター（新しい価格形成ロジックはここには実装しない）。
+ * coefficients省略時は CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS
+ * （現行運用中の係数セット）を使う。
+ */
+export function deriveVietnamMarketReferencePrices(
+  marketResult: MarketQuarterResult,
+  coefficients: DestinationMarketPriceCoefficientTable = CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS
+): Readonly<Record<DemandMarketId, Readonly<Record<Product, UsdPerHosoEqKg>>>> {
+  return deriveMarketReferencePrices(marketResult, coefficients);
 }
 
 /**

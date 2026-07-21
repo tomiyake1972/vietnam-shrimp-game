@@ -27,6 +27,7 @@ import { createRandomStream } from "../core/random";
 import { HosoEqTons, hosoEqTons, ratio, unwrapUnit } from "../core/units";
 import { MARKET_PARAMETERS_V1 } from "../market/parameters";
 import { calculateMarketQuarter } from "../market/index";
+import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS } from "../market/destinationPricingParameters";
 import { SALES_PARAMETERS_V1 } from "../sales/parameters";
 import { advanceSalesQuarter } from "../sales/runner";
 import { CompanyId, SalesState } from "../sales/types";
@@ -52,6 +53,7 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
   const marketParams = input.parameters?.market ?? MARKET_PARAMETERS_V1;
   const salesParams = input.parameters?.sales ?? SALES_PARAMETERS_V1;
   const rawMaterialsParams = input.parameters?.rawMaterials ?? RAW_MATERIALS_PARAMETERS_V1;
+  const destinationMarketPriceCoefficients = input.parameters?.destinationMarketPricing ?? CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS;
 
   // --- 1〜3. 国内買付意向の算出・集計・市場入力への上書き適用 ---
   const domesticProcurementIntentBeforeOverride = input.marketInput.vietnamDomestic.domesticProcurementIntent;
@@ -100,7 +102,8 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
   const salesStateAfter = advanceSalesQuarter(
     salesStateBefore,
     { plans: input.salesPlans, marketResult, marketInput: overriddenMarketInput },
-    salesParams
+    salesParams,
+    destinationMarketPriceCoefficients
   );
   const salesRecord = salesStateAfter.history[0];
   const contracts = salesStateAfter.contracts;

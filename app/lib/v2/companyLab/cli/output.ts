@@ -18,6 +18,14 @@ import { CompanyFixture, CompanyLabResult, CompanyQuarterRecord, CompanyQuarterS
 import { CompanyFinancialQuarterResult } from "../../finance/types";
 import { FinancingQuarterResult } from "../../financing/types";
 import { CapexQuarterResult } from "../../capex/types";
+import { DEMAND_MARKET_IDS, Product } from "../../market/types";
+import { deriveMarketReferencePriceBreakdowns } from "../../market/destinationPricing";
+import {
+  CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS,
+  DestinationMarketPriceCoefficientTable,
+} from "../../market/destinationPricingParameters";
+
+const PRICING_PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
 function csvEscape(value: string | number): string {
   const s = String(value);
@@ -59,6 +67,19 @@ function summaryLineForCompany(s: CompanyQuarterSummary, fixtureName: string): s
       : []),
     ...(s.reasonCodes.length > 0 ? [`      理由: ${s.reasonCodes.map((r) => r.message).join(" / ")}`] : []),
   ].join("\n");
+}
+
+/**
+ * 【Phase 8P-0A】商品×仕向市場の参照価格を1行に圧縮して表示する
+ * （HOSO/PD/VAPそれぞれ、CN/US/EU/JP/OTHERの参照価格を並べる）。
+ * 詳細な内訳（係数・分解値）は --format pricing-csv を参照。
+ */
+function formatMarketReferencePriceLine(marketResult: CompanyQuarterRecord["marketResult"]): string {
+  const breakdowns = deriveMarketReferencePriceBreakdowns(marketResult, CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS);
+  return PRICING_PRODUCTS.map((product) => {
+    const perMarket = DEMAND_MARKET_IDS.map((market) => `${market} ${formatUsdPerHosoEqKg(breakdowns[market][product].marketReferencePrice)}`).join(" / ");
+    return `${product.toUpperCase()}[${perMarket}]`;
+  }).join(" ");
 }
 
 /** {product/market -> Score0to100}形式のRecordを"key val / key val"形式へ整形する（品質・顧客信頼・納期信頼性で共用）。 */
@@ -159,6 +180,7 @@ export function formatCompanyLabResultAsSummary(result: CompanyLabResult, scenar
     lines.push(
       `  PD/VAPプレミアム: PD ${formatUsdPerHosoEqKg(record.marketResult.pdPremium.basePremium)} / VAP ${formatUsdPerHosoEqKg(record.marketResult.vapPremium.basePremium)}`
     );
+    lines.push(`  市場別参照価格(Phase 8P-0A): ${formatMarketReferencePriceLine(record.marketResult)}`);
     const summaries = companyFilter === "all" ? record.companySummaries : record.companySummaries.filter((s) => s.companyId === companyFilter);
     for (const s of summaries) {
       lines.push(summaryLineForCompany(s, nameById.get(s.companyId) ?? s.companyId));
@@ -366,4 +388,67 @@ export function formatCompanyLabResultAsCsv(result: CompanyLabResult, companyFil
 
 export function findFixture(companies: readonly CompanyFixture[], companyId: string): CompanyFixture | undefined {
   return companies.find((c) => c.companyId === companyId);
+}
+
+// ---------------------------------------------------------------------
+// pricing-csv（Phase 8P-0A。商品×仕向市場の参照価格診断専用の詳細CSV）
+// ---------------------------------------------------------------------
+//
+// 既存の "csv"（会社×四半期の集約サマリー、COMPANY_QUARTER_CSV_HEADER）とは
+// 独立した別出力。1行 = 1四半期×1仕向市場×1商品（5市場×3商品=15行/四半期）。
+// 会社別の成約数量・成約価格・契約価格自体は既存csv/jsonに既に含まれるため、
+// ここでは「市場参照価格がどう構成されているか」の説明可能性（実装指示 §8・§18）
+// に特化する。
+
+const DESTINATION_PRICING_CSV_HEADER: readonly string[] = [
+  "turn",
+  "periodLabel",
+  "market",
+  "product",
+  "hosoBasePrice",
+  "pdProcessingPremium",
+  "vapIncrementalPremium",
+  "baseValueCoefficient",
+  "pdPremiumCoefficient",
+  "vapPremiumCoefficient",
+  "hosoBaseValuePart",
+  "pdPremiumPart",
+  "vapPremiumPart",
+  "marketReferencePrice",
+];
+
+/**
+ * 商品×仕向市場の参照価格の詳細診断CSVを生成する（--format pricing-csv）。
+ * companyFilterは無視する（会社に依存しない、市場全体の価格構造の診断のため）。
+ */
+export function formatDestinationPricingDiagnosticCsv(
+  result: CompanyLabResult,
+  coefficients: DestinationMarketPriceCoefficientTable = CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS
+): string {
+  const rows: (string | number)[][] = [];
+  for (const record of result.history) {
+    const breakdowns = deriveMarketReferencePriceBreakdowns(record.marketResult, coefficients);
+    for (const market of DEMAND_MARKET_IDS) {
+      for (const product of PRICING_PRODUCTS) {
+        const b = breakdowns[market][product];
+        rows.push([
+          record.turn,
+          record.period,
+          market,
+          product,
+          unwrapUnit(b.hosoBasePrice),
+          unwrapUnit(b.pdProcessingPremium),
+          unwrapUnit(b.vapIncrementalPremium),
+          b.baseValueCoefficient,
+          b.pdPremiumCoefficient,
+          b.vapPremiumCoefficient,
+          unwrapUnit(b.hosoBaseValuePart),
+          unwrapUnit(b.pdPremiumPart),
+          unwrapUnit(b.vapPremiumPart),
+          unwrapUnit(b.marketReferencePrice),
+        ]);
+      }
+    }
+  }
+  return toCsv(DESTINATION_PRICING_CSV_HEADER, rows);
 }

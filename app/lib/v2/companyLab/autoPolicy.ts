@@ -26,7 +26,9 @@
 
 import { hosoEqTons, ratio, unwrapUnit } from "../core/units";
 import { PeriodV2 } from "../core/period";
-import { CountryId, DemandMarketId, Product } from "../market/types";
+import { CountryId, DemandMarketId, MarketQuarterResult, Product } from "../market/types";
+import { deriveMarketReferencePrices } from "../market/destinationPricing";
+import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS } from "../market/destinationPricingParameters";
 import { CompanySalesPlanEntry, PlanCostExpectation } from "../sales/types";
 import { AquacultureStockingPlanEntry, DomesticPurchasePlanEntry, ImportOrderInput } from "../rawMaterials/types";
 import { CompanyProductionPlanEntry, WorkerAssignment } from "../production/types";
@@ -222,6 +224,30 @@ function ratioAdjustmentToUsd(ratioAdjustment: number, referencePrice: number | 
   return clampedRatio * referencePrice;
 }
 
+/**
+ * 【Phase 8P-0A】前期公開情報から、商品×仕向市場ごとの参照価格（USD/HOSO換算kg）を
+ * 取り出す。未知（turn1等でlastMarketResultが無い場合）ならundefined。
+ * market/destinationPricing.ts の価格分解・係数適用をそのまま呼び出すだけで、
+ * 新しい価格形成ロジックはここには実装しない。CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS
+ * （現行運用中の係数セット）をそのまま使う。将来、会社ごとに異なる係数を試したい
+ * 場合の拡張点として、直接importせず関数化してある。
+ */
+function referencePricesByMarketProduct(
+  lastMarketResult: MarketQuarterResult | undefined
+): Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>> | undefined {
+  if (!lastMarketResult) return undefined;
+  const breakdown = deriveMarketReferencePrices(lastMarketResult, CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS);
+  const result = {} as Record<DemandMarketId, Record<Product, number>>;
+  for (const market of Object.keys(breakdown) as DemandMarketId[]) {
+    result[market] = {
+      hoso: unwrapUnit(breakdown[market].hoso),
+      pd: unwrapUnit(breakdown[market].pd),
+      vap: unwrapUnit(breakdown[market].vap),
+    };
+  }
+  return result;
+}
+
 /** 前期公開情報から商品別の市場プレミアム（VN、USD/HOSO換算kg）を取り出す。未知ならundefined。 */
 function marketPremiumsFromPublicInfo(publicInfo: PublicMarketInfo): Record<"pd" | "vap", number | undefined> {
   const last = publicInfo.lastMarketResult;
@@ -293,11 +319,10 @@ function buildSalesPlans(
   const markets = profile.preferredMarkets;
   const headcountPerMarket = Math.max(1, Math.floor(fixture.salesForceHeadcountTotal / markets.length));
   const lastMarketResult = publicInfo.lastMarketResult;
-  const referencePriceByProduct: Readonly<Record<Product, number | undefined>> = {
-    hoso: lastMarketResult ? unwrapUnit(lastMarketResult.hosoPrices.VN.price) : undefined,
-    pd: lastMarketResult ? unwrapUnit(lastMarketResult.hosoPrices.VN.price) + unwrapUnit(lastMarketResult.pdPremium.byCountry.VN.premium) : undefined,
-    vap: lastMarketResult ? unwrapUnit(lastMarketResult.hosoPrices.VN.price) + unwrapUnit(lastMarketResult.vapPremium.byCountry.VN.premium) : undefined,
-  };
+  // 【Phase 8P-0A】商品×市場ごとの参照価格（前期実績、1四半期分のラグは既存設計を踏襲）。
+  // これにより、市場係数導入後も各社の価格戦略（archetypeのpriceAdjustment比率）が
+  // 「商品×市場参照価格に対して同じ相対的価格ポジションを取る」（実装指示 §17）。
+  const referencePricesByMarket = referencePricesByMarketProduct(lastMarketResult);
   for (const product of ["hoso", "pd", "vap"] as const) {
     const totalDesired = totalDesiredByProduct[product];
     if (totalDesired <= EPSILON) continue;
@@ -306,12 +331,13 @@ function buildSalesPlans(
       const weight = idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1);
       const desiredQuantity = totalDesired * weight;
       if (desiredQuantity <= EPSILON) return;
+      const referencePrice = referencePricesByMarket ? referencePricesByMarket[market][product] : undefined;
       plans.push({
         companyId: fixture.companyId,
         market,
         product,
         desiredQuantity: hosoEqTons(Math.round(desiredQuantity * 100) / 100),
-        priceAdjustmentUsdPerHosoEqKg: ratioAdjustmentToUsd(profile.priceAdjustment[product], referencePriceByProduct[product]),
+        priceAdjustmentUsdPerHosoEqKg: ratioAdjustmentToUsd(profile.priceAdjustment[product], referencePrice),
         salesForceHeadcount: headcountPerMarket,
         costExpectation,
         qualityReputation: ownState.qualityScoreByProduct[product],

@@ -13,7 +13,7 @@
 
 export * from "./types";
 export * from "./parameters";
-export { deriveVietnamBasePrices, deriveTargetDemand } from "./marketAdapter";
+export { deriveVietnamBasePrices, deriveVietnamMarketReferencePrices, deriveTargetDemand } from "./marketAdapter";
 export { salesCoverageScore, processingCapacity } from "./salesForce";
 export { computeCompetitivenessWeight, computeCompetitivenessBreakdown, allocateMarketProduct } from "./allocation";
 export { buildContractId, createContractsFromAllocation } from "./contracts";

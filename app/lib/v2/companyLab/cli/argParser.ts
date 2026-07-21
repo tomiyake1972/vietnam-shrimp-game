@@ -181,14 +181,15 @@ export function buildCompanyLabUsageText(): string {
   return `ShrimpX V2 会社経営統合テスト環境 CLI（Phase 6.2）
 
 使い方:
-  npm run v2:company-simulate -- --scenario <id> --mode <canonical|variation> --seed <文字列> --turns <1以上の整数> --format <summary|json|csv> [--company <all|会社ID>]
+  npm run v2:company-simulate -- --scenario <id> --mode <canonical|variation> --seed <文字列> --turns <1以上の整数> --format <summary|json|csv|pricing-csv> [--company <all|会社ID>]
 
 引数:
   --scenario <id>   実行するシナリオ（必須）。短縮形または正式IDのどちらでも指定可。
   --mode <mode>     "canonical"（既定値、外生イベント固定）または "variation"（シードで揺らす）
   --seed <文字列>    乱数シード（必須）。同じ設定・同じシード・同じ意思決定なら常に同じ結果になる。
   --turns <数値>     実行ターン数（1以上。8または32を推奨）。
-  --format <形式>    "summary"（既定値、人間向け）/ "json"（機械可読）/ "csv"（表計算向け）
+  --format <形式>    "summary"（既定値、人間向け）/ "json"（機械可読）/ "csv"（表計算向け）/
+                     "pricing-csv"（Phase 8P-0A、商品×仕向市場の参照価格診断専用の詳細CSV）
   --company <対象>  "all"（既定値、5社比較）または特定の会社ID（個社詳細）
   --help, -h        この使用方法を表示して終了する
 
@@ -202,5 +203,6 @@ ${companyLines}
   npm run v2:company-simulate -- --scenario baseline --mode canonical --seed company-demo-001 --turns 8 --format summary
   npm run v2:company-simulate -- --scenario baseline --seed company-demo-001 --turns 32 --company BAL --format json > bal.json
   npm run v2:company-simulate -- --scenario baseline --seed company-demo-001 --turns 8 --format csv > result.csv
+  npm run v2:company-simulate -- --scenario baseline --seed company-demo-001 --turns 8 --format pricing-csv > pricing.csv
 `;
 }
