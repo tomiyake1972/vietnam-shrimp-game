@@ -10,9 +10,13 @@
 
 import { nextPeriod, PeriodV2 } from "../core/period";
 import { DEMAND_MARKET_IDS, DemandMarketId, Product } from "../market/types";
+import {
+  CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS,
+  DestinationMarketPriceCoefficientTable,
+} from "../market/destinationPricingParameters";
 import { allocateMarketProduct } from "./allocation";
 import { createContractsFromAllocation } from "./contracts";
-import { deriveTargetDemand, deriveVietnamBasePrices } from "./marketAdapter";
+import { deriveTargetDemand, deriveVietnamMarketReferencePrices } from "./marketAdapter";
 import { SALES_PARAMETERS_V1, SalesParameters } from "./parameters";
 import { SalesQuarterInput, SalesQuarterRecord, SalesState } from "./types";
 
@@ -36,10 +40,16 @@ export function initializeSalesState(startPeriod: PeriodV2): SalesState {
 export function advanceSalesQuarter(
   state: SalesState,
   input: SalesQuarterInput,
-  params: SalesParameters = SALES_PARAMETERS_V1
+  params: SalesParameters = SALES_PARAMETERS_V1,
+  destinationMarketPriceCoefficients: DestinationMarketPriceCoefficientTable = CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS
 ): SalesState {
   const period = state.currentPeriod;
-  const basePrices = deriveVietnamBasePrices(input.marketResult);
+  // 【Phase 8P-0A】成約配分の基準価格(basePrice)は、商品区分のみ（市場非依存）
+  // だった deriveVietnamBasePrices から、商品×仕向市場ごとの参照価格
+  // （deriveVietnamMarketReferencePrices）へ置き換える。中立係数（全市場係数=1.0）
+  // では両者は完全に一致する（market/__tests__/destinationPricing.test.ts・
+  // sales/__tests__/runner.test.ts で検証）。
+  const marketReferencePrices = deriveVietnamMarketReferencePrices(input.marketResult, destinationMarketPriceCoefficients);
   const targetDemandByMarketProduct = deriveTargetDemand(input.marketResult, input.marketInput);
 
   const combos: Array<{ market: DemandMarketId; product: Product }> = [];
@@ -57,7 +67,7 @@ export function advanceSalesQuarter(
         product,
         period,
         input.plans,
-        basePrices[product],
+        marketReferencePrices[market][product],
         targetDemandByMarketProduct[market][product],
         params
       )
@@ -82,11 +92,12 @@ export function advanceSalesQuarter(
 export function runSalesQuartersForTesting(
   startPeriod: PeriodV2,
   quarterInputs: readonly SalesQuarterInput[],
-  params: SalesParameters = SALES_PARAMETERS_V1
+  params: SalesParameters = SALES_PARAMETERS_V1,
+  destinationMarketPriceCoefficients: DestinationMarketPriceCoefficientTable = CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS
 ): SalesState {
   let state = initializeSalesState(startPeriod);
   for (const input of quarterInputs) {
-    state = advanceSalesQuarter(state, input, params);
+    state = advanceSalesQuarter(state, input, params, destinationMarketPriceCoefficients);
   }
   return state;
 }

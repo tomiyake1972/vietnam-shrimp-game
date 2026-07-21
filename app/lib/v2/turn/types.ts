@@ -14,6 +14,7 @@ import { PeriodV2 } from "../core/period";
 import { HosoEqTons, Ratio, UsdPerHosoEqKg } from "../core/units";
 import { CountryId, MarketQuarterInput, MarketQuarterResult } from "../market/types";
 import { MarketParameters } from "../market/parameters";
+import { DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
 import { CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
 import { SalesParameters } from "../sales/parameters";
 import {
@@ -87,6 +88,8 @@ export interface TurnOrchestratorParameters {
   readonly market?: MarketParameters;
   readonly sales?: SalesParameters;
   readonly rawMaterials?: RawMaterialsParameters;
+  /** 【Phase 8P-0A】商品×仕向市場の参照価格係数。省略時はCURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS。 */
+  readonly destinationMarketPricing?: DestinationMarketPriceCoefficientTable;
 }
 
 // ---------------------------------------------------------------------

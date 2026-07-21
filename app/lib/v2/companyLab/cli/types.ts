@@ -11,9 +11,16 @@ export class CliArgumentError extends Error {
   }
 }
 
-export type CliOutputFormat = "summary" | "json" | "csv";
+export type CliOutputFormat = "summary" | "json" | "csv" | "pricing-csv";
 
-export const CLI_OUTPUT_FORMATS: readonly CliOutputFormat[] = ["summary", "json", "csv"];
+/**
+ * 【Phase 8P-0A】"pricing-csv" は商品×仕向市場の参照価格診断専用の詳細CSV
+ * （companyLab/cli/output.ts の formatDestinationPricingDiagnosticCsv）。
+ * 既存の "csv"（会社×四半期の集約サマリー）とは別出力にすることで、通常の
+ * CSV出力の列数を増やさない（実装指示 §18「通常の出力を過度に巨大化させない。
+ * 必要なら詳細価格診断をオプション化する」に対応）。
+ */
+export const CLI_OUTPUT_FORMATS: readonly CliOutputFormat[] = ["summary", "json", "csv", "pricing-csv"];
 
 /** --company の特殊値。全社比較表示を意味する。 */
 export const ALL_COMPANIES = "all" as const;

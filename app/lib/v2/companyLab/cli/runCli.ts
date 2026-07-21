@@ -13,7 +13,12 @@ import { CompanyLabError, CompanyLabConfig } from "../types";
 import { runCompanyLabWithAutoPolicyForAllCompanies } from "../runner";
 import { parseCompanyLabCliArgs, buildCompanyLabUsageText } from "./argParser";
 import { CliArgumentError, CliInvocationResult } from "./types";
-import { formatCompanyLabResultAsCsv, formatCompanyLabResultAsJson, formatCompanyLabResultAsSummary } from "./output";
+import {
+  formatCompanyLabResultAsCsv,
+  formatCompanyLabResultAsJson,
+  formatCompanyLabResultAsSummary,
+  formatDestinationPricingDiagnosticCsv,
+} from "./output";
 
 function describeError(e: unknown): string {
   if (e instanceof CliArgumentError) return `引数エラー: ${e.message}`;
@@ -60,7 +65,9 @@ export function runCompanyLabCli(argv: readonly string[]): CliInvocationResult {
         ? formatCompanyLabResultAsJson(result, scenarioDefinition.title, args.company)
         : args.format === "csv"
           ? formatCompanyLabResultAsCsv(result, args.company)
-          : formatCompanyLabResultAsSummary(result, scenarioDefinition.title, args.company);
+          : args.format === "pricing-csv"
+            ? formatDestinationPricingDiagnosticCsv(result)
+            : formatCompanyLabResultAsSummary(result, scenarioDefinition.title, args.company);
 
     return { stdout, stderr: "", exitCode: 0 };
   } catch (e) {

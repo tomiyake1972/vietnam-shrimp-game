@@ -118,3 +118,18 @@ export { calculateExportableSupply, calculateCostPressure, summarizeCountrySuppl
 export { openHosoMarket, clearHosoMarket } from "./hosoPricing";
 export { calculateBuyingCeiling, calculateFarmerReservationPrice, applyMinimumOfftakeRule, clearVietnamRawMarket } from "./vietnamRawMarket";
 export { calculateProductPremium } from "./productPremium";
+export {
+  decomposeVietnamProductPrices,
+  computeMarketReferencePrice,
+  deriveMarketReferencePriceBreakdowns,
+  deriveMarketReferencePrices,
+} from "./destinationPricing";
+export type { ProductPriceDecomposition, ProductMarketReferencePriceBreakdown } from "./destinationPricing";
+export {
+  DESTINATION_MARKET_PRICE_COEFFICIENTS_NEUTRAL_V1,
+  DESTINATION_MARKET_PRICE_COEFFICIENTS_INITIAL_V1,
+  CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS,
+  DESTINATION_MARKET_DEMAND_WEIGHTS_V1,
+  weightedAverageCoefficient,
+} from "./destinationPricingParameters";
+export type { DestinationMarketPriceCoefficients, DestinationMarketPriceCoefficientTable } from "./destinationPricingParameters";
