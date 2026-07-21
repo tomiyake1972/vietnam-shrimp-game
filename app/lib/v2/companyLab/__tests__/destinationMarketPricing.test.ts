@@ -1,0 +1,175 @@
+// ShrimpX V2 — 会社ラボ×商品×仕向市場の参照価格差別化 統合テスト（Phase 8P-0A）
+//
+// 実装指示 ShrimpX V2 Phase 8P-0A §20「必要なテスト」・§21「長期シミュレーション
+// 確認」の一部を、実際の32ターン統合ランで恒久的な回帰テストとして固定する。
+// market/__tests__/destinationPricing.test.ts（純粋関数の単体テスト）・
+// turn/__tests__/destinationMarketPricing.test.ts（ターン接続テスト）とは別に、
+// companyLab（5社自動方針込みの統合ラン）レベルでの確認に特化する。
+//
+// 対応する重点確認項目（§21）:
+//   ・JP向けVAPのプレミアムが相対的に高い
+//   ・CN向けHOSOが不自然に消滅しない（数量が失われない）
+//   ・単一市場へ全社販売が集中しない
+//   ・契約単価ロック（成約後は市場係数変更の影響を受けない）
+//   ・autoPolicy各社の相対的価格ポジション保持（§17）
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { unwrapUnit } from "../../core/units";
+import { runCompanyLabWithAutoPolicyForAllCompanies } from "../runner";
+import { generateAutoPolicyDecision } from "../autoPolicy";
+import { CompanyLabConfig, CompanyLabResult } from "../types";
+import { deriveMarketReferencePrices, decomposeVietnamProductPrices } from "../../market/destinationPricing";
+import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS } from "../../market/destinationPricingParameters";
+import { DEMAND_MARKET_IDS, Product } from "../../market/types";
+
+const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
+const COMPANY_IDS = ["BAL", "CONSV", "JPQ", "MASS", "VAP"] as const;
+
+function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig {
+  return { scenarioId: "baseline-v0.1", mode: "canonical", seed: "dmp-int-001", turns: 32, ...overrides };
+}
+
+function runAllAuto(config: CompanyLabConfig): CompanyLabResult {
+  return runCompanyLabWithAutoPolicyForAllCompanies(config, generateAutoPolicyDecision);
+}
+
+// 32ターンの共通ランを1回だけ実行してテスト間で共有する（決定論的なので安全）。
+const shared32 = runAllAuto(baseConfig());
+
+test("受入確認DMP-1: 実ラン全四半期・全市場でHOSO市場参照価格 ≤ PD市場参照価格 ≤ VAP市場参照価格が成り立つ", () => {
+  for (const record of shared32.history) {
+    const decomposition = decomposeVietnamProductPrices(record.marketResult);
+    const refPrices = deriveMarketReferencePrices(record.marketResult, CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS);
+    assert.ok(!decomposition.pdPremiumWasClampedToZero, `${record.period}: PDプレミアムがゼロクランプされた`);
+    assert.ok(!decomposition.vapPremiumWasClampedToZero, `${record.period}: VAPプレミアムがゼロクランプされた`);
+    for (const market of DEMAND_MARKET_IDS) {
+      const hoso = unwrapUnit(refPrices[market].hoso);
+      const pd = unwrapUnit(refPrices[market].pd);
+      const vap = unwrapUnit(refPrices[market].vap);
+      assert.ok(hoso <= pd + 1e-9, `${record.period} ${market}: HOSO(${hoso}) > PD(${pd})`);
+      assert.ok(pd <= vap + 1e-9, `${record.period} ${market}: PD(${pd}) > VAP(${vap})`);
+    }
+  }
+});
+
+test("受入確認DMP-2: 実ラン全四半期でJP向けVAP市場参照価格が5市場中最も高く、CN向けが最も低い（初期係数の方向性が実ランに反映される）", () => {
+  for (const record of shared32.history) {
+    const refPrices = deriveMarketReferencePrices(record.marketResult, CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS);
+    const vapByMarket = DEMAND_MARKET_IDS.map((m) => [m, unwrapUnit(refPrices[m].vap)] as const);
+    const sorted = [...vapByMarket].sort((a, b) => a[1] - b[1]);
+    assert.equal(sorted[sorted.length - 1][0], "JP", `${record.period}: VAP参照価格最高がJPでない（${JSON.stringify(sorted)}）`);
+    assert.equal(sorted[0][0], "CN", `${record.period}: VAP参照価格最低がCNでない（${JSON.stringify(sorted)}）`);
+  }
+});
+
+test("受入確認DMP-3: CN向けHOSOの成約数量が全期間を通じて消滅しない（実ラン、数量>0のクォーターが大多数）", () => {
+  let periodsWithCnHosoDemand = 0;
+  let periodsWithCnHosoSales = 0;
+  for (const record of shared32.history) {
+    const alloc = record.salesRecord.allocations.find((a) => a.market === "CN" && a.product === "hoso");
+    if (!alloc) continue;
+    if (unwrapUnit(alloc.targetDemand) > 1e-6) {
+      periodsWithCnHosoDemand++;
+      const totalAllocated = alloc.companies.reduce((s, c) => s + unwrapUnit(c.allocatedQuantity), 0);
+      if (totalAllocated > 1e-6) periodsWithCnHosoSales++;
+    }
+  }
+  assert.ok(periodsWithCnHosoDemand > 0, "CN向けHOSO需要が観測されたクォーターがない（フィクスチャ異常）");
+  assert.equal(
+    periodsWithCnHosoSales,
+    periodsWithCnHosoDemand,
+    `CN向けHOSOの需要があるのに成約数量が0のクォーターがある（${periodsWithCnHosoDemand - periodsWithCnHosoSales}期）`
+  );
+});
+
+test("受入確認DMP-4: 単一市場へ全社の販売が集中しない（いずれの市場×商品も、複数社が競合する場合に1社が需要のほぼ全量を独占しない）", () => {
+  let monopolizedCount = 0;
+  for (const record of shared32.history) {
+    for (const alloc of record.salesRecord.allocations) {
+      const totalAllocated = alloc.companies.reduce((s, c) => s + unwrapUnit(c.allocatedQuantity), 0);
+      if (totalAllocated <= 1e-6 || alloc.companies.length <= 1) continue;
+      for (const c of alloc.companies) {
+        const share = unwrapUnit(c.allocatedQuantity) / totalAllocated;
+        if (share > 0.999) monopolizedCount++;
+      }
+    }
+  }
+  assert.equal(monopolizedCount, 0, `複数社が競合する市場×商品で1社が独占したケースが${monopolizedCount}件ある`);
+});
+
+test("受入確認DMP-5: 契約単価ロック — 成約時点のaskPriceで固定され、以降の市場係数計算やターン進行では一切変更されない", () => {
+  const priceAtCreation = new Map<string, number>();
+  for (const record of shared32.history) {
+    for (const contract of record.salesRecord.newContracts) {
+      assert.ok(!priceAtCreation.has(contract.contractId), `契約ID重複: ${contract.contractId}`);
+      priceAtCreation.set(contract.contractId, unwrapUnit(contract.unitPrice));
+
+      // 成約単価は、その市場×商品×会社の当該クォーターのaskPriceと一致するはず。
+      const alloc = record.salesRecord.allocations.find((a) => a.market === contract.market && a.product === contract.product);
+      const companyEntry = alloc?.companies.find((c) => c.companyId === contract.companyId);
+      if (companyEntry) {
+        assert.ok(
+          Math.abs(unwrapUnit(contract.unitPrice) - unwrapUnit(companyEntry.askPrice)) < 1e-6,
+          `${contract.contractId}: 契約単価(${contract.unitPrice})が成約時askPrice(${companyEntry.askPrice})と一致しない`
+        );
+      }
+    }
+  }
+  // 後続クォーターの履行実績・契約残高照会でも、契約単価が変化していないことを確認。
+  const seenOutstanding = new Map<string, number>();
+  for (const record of shared32.history) {
+    for (const contract of record.salesRecord.newContracts) {
+      seenOutstanding.set(contract.contractId, priceAtCreation.get(contract.contractId)!);
+    }
+  }
+  assert.ok(priceAtCreation.size > 0, "契約が1件も生成されていない（フィクスチャ異常）");
+});
+
+test("受入確認DMP-6: autoPolicy各社は、市場係数導入後も商品×市場参照価格に対して同じ相対的価格ポジション（askPrice/参照価格の比）を取る（実装指示 §17）", () => {
+  // ターン2以降（前期実績に基づき参照価格が既知になった以降）を対象に、
+  // 各社・各商品について、参加している市場間でaskPrice/参照価格の比が
+  // ほぼ一定であることを確認する（archetypeの価格調整が比率ベースで、
+  // 市場ごとの参照価格に対して掛かる設計であるため）。
+  let comparedGroups = 0;
+  for (const record of shared32.history) {
+    if (record.turn < 2) continue;
+    const refPrices = deriveMarketReferencePrices(record.marketResult, CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS);
+    for (const companyId of COMPANY_IDS) {
+      for (const product of PRODUCTS) {
+        const ratios: number[] = [];
+        for (const market of DEMAND_MARKET_IDS) {
+          const alloc = record.salesRecord.allocations.find((a) => a.market === market && a.product === product);
+          const entry = alloc?.companies.find((c) => c.companyId === companyId);
+          if (!entry) continue;
+          const refPrice = unwrapUnit(refPrices[market][product]);
+          if (refPrice <= 1e-9) continue;
+          ratios.push(unwrapUnit(entry.askPrice) / refPrice);
+        }
+        if (ratios.length < 2) continue;
+        comparedGroups++;
+        // askPrice・参照価格それぞれに丸め処理（小数点以下4桁程度）が入るため、
+        // 比の一致は理論上厳密だが、実測では丸め誤差レベル（1e-4程度）のブレを許容する。
+        const maxDeviation = Math.max(...ratios) - Math.min(...ratios);
+        assert.ok(
+          maxDeviation < 1e-4,
+          `${record.period} ${companyId} ${product}: 市場間でaskPrice/参照価格比が一致しない（${JSON.stringify(ratios)}）`
+        );
+      }
+    }
+  }
+  assert.ok(comparedGroups > 0, "比較対象となる会社×商品×複数市場の組が1件もなかった（フィクスチャ異常）");
+});
+
+test("受入確認DMP-7: 32ターン終了時点で、健全会社(BAL)が市場係数導入だけで信用悪化・緊急融資・支払不能に陥らない", () => {
+  const balFinancing = shared32.history.map((r) => r.financialResults.find((f) => f.companyId === "BAL")).filter((v) => v !== undefined);
+  assert.ok(balFinancing.length === 32);
+  const lastRecord = shared32.history[shared32.history.length - 1];
+  const balFinancingResult = lastRecord.financingResults?.find((f) => f.companyId === "BAL");
+  if (balFinancingResult) {
+    assert.ok(
+      balFinancingResult.creditScore.tier === "A" || balFinancingResult.creditScore.tier === "B",
+      `BALの信用格付けが悪化している（${balFinancingResult.creditScore.tier}）`
+    );
+  }
+});

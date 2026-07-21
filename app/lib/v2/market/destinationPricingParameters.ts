@@ -106,12 +106,14 @@ export const DESTINATION_MARKET_PRICE_COEFFICIENTS_INITIAL_V1: DestinationMarket
  * turn/runner.ts・companyLab/autoPolicy.ts はこの CURRENT_* だけを既定値として使う）。
  */
 /**
- * 【Commit A時点】構造実装のみを検証する段階のため、中立係数（NEUTRAL_V1）を指す。
- * Commit B（初期係数投入）でこの参照先を DESTINATION_MARKET_PRICE_COEFFICIENTS_INITIAL_V1
- * へ切り替える。
+ * 【Commit B】初期係数投入。Commit Aでは中立係数（NEUTRAL_V1、全係数1.0）を
+ * 指しており、develop/v2 HEAD 31f22fbとの後方互換性（baseline 8/32ターン・
+ * 全5シナリオ×32ターンの産業合計・会社別財務指標が完全一致）を検証済み
+ * （feature/v2-market-destination-pricing のコミット履歴参照）。
+ * ここでDESTINATION_MARKET_PRICE_COEFFICIENTS_INITIAL_V1へ切り替える。
  */
 export const CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS: DestinationMarketPriceCoefficientTable =
-  DESTINATION_MARKET_PRICE_COEFFICIENTS_NEUTRAL_V1;
+  DESTINATION_MARKET_PRICE_COEFFICIENTS_INITIAL_V1;
 
 /** 加重平均の中立化を検証するためのヘルパー（テスト・診断出力から利用）。 */
 export function weightedAverageCoefficient(

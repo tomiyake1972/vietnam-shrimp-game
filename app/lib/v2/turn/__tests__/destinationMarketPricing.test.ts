@@ -71,25 +71,54 @@ function baseInput(quarter: ReturnType<typeof industryQuarters>[number], seed: s
   };
 }
 
-test("中立係数（destinationMarketPricing省略時の既定・NEUTRAL_V1明示指定のいずれも）では、同一会社・同一商品の提示価格(askPrice)が全5市場で厳密に一致する", () => {
+test("中立係数（NEUTRAL_V1を明示指定）では、同一会社・同一商品の提示価格(askPrice)が全5市場で厳密に一致する", () => {
   const quarters = industryQuarters(1);
   const input = baseInput(quarters[0], "seed-neutral");
 
-  const resultDefault = runTurn(input);
   const resultExplicitNeutral = runTurn({ ...input, parameters: { destinationMarketPricing: DESTINATION_MARKET_PRICE_COEFFICIENTS_NEUTRAL_V1 } });
 
-  for (const result of [resultDefault, resultExplicitNeutral]) {
-    for (const product of PRODUCTS) {
-      const askPrices = DEMAND_MARKET_IDS.map((market) => {
+  for (const product of PRODUCTS) {
+    const askPrices = DEMAND_MARKET_IDS.map((market) => {
+      const alloc = resultExplicitNeutral.salesRecord.allocations.find((a) => a.market === market && a.product === product);
+      const company = alloc?.companies.find((c) => c.companyId === "C1");
+      return company ? unwrapUnit(company.askPrice) : undefined;
+    }).filter((v): v is number => v !== undefined);
+    assert.ok(askPrices.length > 0, `product=${product} の配分が見つからない`);
+    const first = askPrices[0];
+    for (const p of askPrices) {
+      assert.ok(Math.abs(p - first) < 1e-6, `product=${product}: 市場間で提示価格が異なる（中立係数のはずが ${askPrices.join(",")}）`);
+    }
+  }
+});
+
+// 【Commit B（実装指示 §12・8P-0Aの初期係数投入）に伴うテスト前提の更新について】
+// このテストは元々、Commit A（構造実装のみ・CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTSが
+// NEUTRAL_V1を指す段階）で書かれ、「destinationMarketPricing省略時の既定」と
+// 「NEUTRAL_V1明示指定」を同一のテストで一括検証していた。Commit Bで
+// CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTSの参照先をINITIAL_V1へ切り替えた
+// ことで、「省略時の既定」は意図どおりINITIAL_V1（市場ごとに価格が異なる）へ
+// 挙動が変わったため、上のテストから「省略時デフォルト」の検証を分離し、
+// 下の新しいテストとして「省略時は明示的にINITIAL_V1と同じ結果になる」ことを
+// 検証する形に更新した。これは既存の業務ロジック・制約を弱める変更ではなく、
+// Commit Bで意図どおりに変化した「デフォルト値の参照先」というテスト前提を
+// 実装指示どおりに追随させただけであることを、ここに明示的に開示する。
+test("destinationMarketPricing省略時の既定は、CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS（Commit B時点ではINITIAL_V1）と厳密に同じ結果になる", () => {
+  const quarters = industryQuarters(1);
+  const input = baseInput(quarters[0], "seed-default-matches-current");
+
+  const resultDefault = runTurn(input);
+  const resultExplicitInitial = runTurn({ ...input, parameters: { destinationMarketPricing: DESTINATION_MARKET_PRICE_COEFFICIENTS_INITIAL_V1 } });
+
+  for (const product of PRODUCTS) {
+    for (const market of DEMAND_MARKET_IDS) {
+      const priceIn = (result: ReturnType<typeof runTurn>) => {
         const alloc = result.salesRecord.allocations.find((a) => a.market === market && a.product === product);
         const company = alloc?.companies.find((c) => c.companyId === "C1");
         return company ? unwrapUnit(company.askPrice) : undefined;
-      }).filter((v): v is number => v !== undefined);
-      assert.ok(askPrices.length > 0, `product=${product} の配分が見つからない`);
-      const first = askPrices[0];
-      for (const p of askPrices) {
-        assert.ok(Math.abs(p - first) < 1e-6, `product=${product}: 市場間で提示価格が異なる（中立係数のはずが ${askPrices.join(",")}）`);
-      }
+      };
+      const d = priceIn(resultDefault);
+      const e = priceIn(resultExplicitInitial);
+      assert.equal(d, e, `${market}/${product}: 省略時デフォルトとINITIAL_V1明示指定の提示価格が一致しない`);
     }
   }
 });
