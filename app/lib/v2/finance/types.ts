@@ -315,6 +315,13 @@ export interface CostOfSalesBreakdown {
    * 算定できないため常に0（従来どおり正社員給与を全額商品原価へ配賦する）。
    */
   readonly idleLaborCost: Usd;
+  /**
+   * 【Phase 8B-2B】設備投資（capex/）による稼働中資産の固定保守費。
+   * idleLaborCostと同様に、完成品原価・単位原価台帳・完成品在庫へは一切
+   * 吸収せず、発生した四半期に全額を売上原価区分の独立項目として費用化し、
+   * 同時に現金支出へ反映する（capex未指定時は常に0。実装指示§5）。
+   */
+  readonly capexMaintenanceCost: Usd;
 }
 
 /** 財務会計PL（全部原価計算）。 */
@@ -674,8 +681,17 @@ export interface FinancingAdjustment {
  * は、prev.fixedAssetsGrossのうち「過去の四半期にcapex経由で完成振替された、
  * まだ減価償却を開始していない金額」を表す。closeFinancialQuarterはこの値を
  * prev.fixedAssetsGrossから除いた残り（レガシー資産分）だけに減価償却率を
- * 適用する（実装指示「新規完成設備の減価償却が未開始であること」。Phase 8B-2Bで
- * 新設備の減価償却開始・稼働開始を接続する前提の、意図的な暫定境界）。
+ * 適用する（実装指示「新規完成設備の減価償却が未開始であること」）。
+ *
+ * 【Phase 8B-2B】上記の除外構造の上に、capex/capacityEffect.tsが案件別に
+ * 算出した新規completed資産の定額法減価償却費（capexAssetsDepreciationUsd）を
+ * 当期減価償却費へ加算する。既存レガシー資産の定率法計算式自体は一切変更
+ * しない（レガシー分＋新規capex分＝合算してdepreciationCost/depreciationUsdと
+ * なる。両者の計算方法は明確に区別された別ロジックであり、除外構造
+ * （nonDepreciatingCapexGrossAtPeriodStartUsd）によって二重計上・混入しない）。
+ * capexMaintenanceCostUsdは稼働中capex資産の固定保守費合計で、idleLaborCostと
+ * 同様に完成品原価・在庫へは一切含めず、CostOfSalesBreakdown.capexMaintenanceCost
+ * として売上原価区分へ独立項目で計上する（発生と同時に現金支出）。
  */
 export interface CapexAdjustment {
   /** 当期の設備投資案件への現金支払額合計（CFIのマイナス）。 */
@@ -689,4 +705,17 @@ export interface CapexAdjustment {
    * なっていない金額（当期の減価償却率計算のベースから除外する）。
    */
   readonly nonDepreciatingCapexGrossAtPeriodStartUsd: number;
+  /**
+   * 【Phase 8B-2B】当期の稼働開始済み新規completed資産ぶんの定額法減価償却費
+   * 合計（capex/capacityEffect.tsのcomputeCapexAssetsDepreciationUsd）。
+   * 既存レガシー資産の減価償却（レート×レガシー粗取得原価）に加算される。
+   */
+  readonly capexAssetsDepreciationUsd: number;
+  /**
+   * 【Phase 8B-2B】当期の稼働中completed資産ぶんの固定保守費合計
+   * （capex/capacityEffect.tsのcomputeCapexMaintenanceCostUsd）。完成品原価・
+   * 在庫へは一切含めず、CostOfSalesBreakdown.capexMaintenanceCostとして
+   * 当期費用・現金支出へ直接計上する。
+   */
+  readonly capexMaintenanceCostUsd: number;
 }
