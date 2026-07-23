@@ -4,3 +4,4 @@ export * from "./types";
 export * from "./parameters";
 export * from "./projectLifecycle";
 export * from "./capexClose";
+export * from "./capacityEffect";
