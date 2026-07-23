@@ -10,9 +10,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { period } from "../../core/period";
+import { INITIAL_PERIOD_V2, period } from "../../core/period";
 import { Product } from "../../market/types";
 import { FINANCE_PARAMETERS_V1 } from "../../finance/parameters";
+import { computeExistingAssetDepreciationUsd } from "../../finance/depreciation";
 import { CompanyQuarterBusinessActuals } from "../../finance/quarterClose";
 import { CompanyFinanceState, usd } from "../../finance/types";
 import {
@@ -299,9 +300,17 @@ test("受入確認CC-6: 完成直後の四半期でも、新規完成分は減�
   // 完成の翌四半期（新規完成設備の減価償却が未開始であることを確認する四半期）。
   const third = closeWithCapex(finance, financingState, capexState, decision, HEALTHY_GATE, p);
   const legacyGross = (financeState.fixedAssetsGross as number) - (financeState.accumulatedDepreciation as number);
-  const expectedDepreciation = ((financeState.fixedAssetsGross as number)) * FINANCE_PARAMETERS_V1.finance.depreciationRatePerQuarter;
+  // 【Phase 8B-2C】既存資産2区分（建物35%/機械65%）を、それぞれの推定残存耐用年数
+  // （80四半期/32四半期）で定額償却した合計。
+  const expectedDepreciation = computeExistingAssetDepreciationUsd(
+    financeState.fixedAssetsGross as number,
+    INITIAL_PERIOD_V2,
+    p,
+    FINANCE_PARAMETERS_V1
+  ).totalUsd;
   const actualDepreciation = (third.financeResult.manufacturingCost.depreciationCost as number);
-  // レガシー資産分（当初のfixedAssetsGross、capex完成分を含まない）だけに減価償却率が適用される。
+  // 既存資産分（当初のfixedAssetsGross、capex完成分を含まない）だけに既存資産の
+  // 減価償却方式が適用される（新規completed資産はまだ稼働開始前で0）。
   assert.ok(Math.abs(actualDepreciation - Math.min(expectedDepreciation, legacyGross)) < EPS, `減価償却費 ${actualDepreciation} が期待値と不一致`);
   assertThreeStatementIdentities(third.financeResult);
 });
@@ -433,20 +442,27 @@ test("受入確認CC-10: 稼働開始四半期（operationalStartPeriod）に達
 
   const q4 = closeWithCapex(finance, financingState, capexState, decision, HEALTHY_GATE, p); // 稼働開始四半期
   const template = CAPEX_PARAMETERS_V1.templatesByType.coldStorageExpansion;
-  const expectedDepreciation = capitalizedAmountUsd / template.usefulLifeQuarters;
+  const { building, machinery } = CAPEX_PARAMETERS_V1.componentUsefulLifeQuarters;
+  // 【Phase 8B-2C】建物40%・機械60%（coldStorageExpansion）を、それぞれの
+  // コンポーネント別耐用年数（建物100四半期・機械40四半期）で定額償却した合計。
+  const expectedBuildingDepreciation = (capitalizedAmountUsd * template.buildingRatio) / building;
+  const expectedMachineryDepreciation = (capitalizedAmountUsd * template.machineryRatio) / machinery;
+  const expectedDepreciation = expectedBuildingDepreciation + expectedMachineryDepreciation;
   const expectedMaintenance = capitalizedAmountUsd * template.maintenanceRatePerQuarter;
   assert.ok(Math.abs(q4.capexQuarterResult.capexAssetsDepreciationUsd - expectedDepreciation) < EPS);
+  assert.ok(Math.abs(q4.capexQuarterResult.capexAssetsBuildingDepreciationUsd - expectedBuildingDepreciation) < EPS);
+  assert.ok(Math.abs(q4.capexQuarterResult.capexAssetsMachineryDepreciationUsd - expectedMachineryDepreciation) < EPS);
   assert.ok(Math.abs(q4.capexQuarterResult.capexMaintenanceCostUsd - expectedMaintenance) < EPS);
-  // finance/の合算減価償却費（レガシー＋新規capex）にも反映されている。
+  // finance/の合算減価償却費（既存資産2区分＋新規capex）にも反映されている。
   const legacyGross = (financeState.fixedAssetsGross as number) - (financeState.accumulatedDepreciation as number);
-  const legacyDepreciation = Math.min(
-    (financeState.fixedAssetsGross as number) * FINANCE_PARAMETERS_V1.finance.depreciationRatePerQuarter,
+  const existingAssetDepreciation = Math.min(
+    computeExistingAssetDepreciationUsd(financeState.fixedAssetsGross as number, INITIAL_PERIOD_V2, p, FINANCE_PARAMETERS_V1).totalUsd,
     legacyGross
   );
   const actualCombinedDepreciation = q4.financeResult.manufacturingCost.depreciationCost as number;
   assert.ok(
-    Math.abs(actualCombinedDepreciation - (legacyDepreciation + expectedDepreciation)) < EPS,
-    `合算減価償却費 ${actualCombinedDepreciation} が レガシー${legacyDepreciation}+新規${expectedDepreciation} と一致しない`
+    Math.abs(actualCombinedDepreciation - (existingAssetDepreciation + expectedDepreciation)) < EPS,
+    `合算減価償却費 ${actualCombinedDepreciation} が 既存資産${existingAssetDepreciation}+新規${expectedDepreciation} と一致しない`
   );
   // 固定保守費はcostOfSales.capexMaintenanceCostとして独立計上される。
   assert.ok(Math.abs((q4.financeResult.profitAndLoss.costOfSales.capexMaintenanceCost as number) - expectedMaintenance) < EPS);
