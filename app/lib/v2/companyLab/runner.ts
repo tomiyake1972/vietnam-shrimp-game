@@ -107,7 +107,7 @@ import {
 } from "../financing";
 import type { CompanyFinancingState, FinancingQuarterResult, FinancingState } from "../financing/types";
 import type { QuarterFinancingPlan } from "../financing/liquidityClose";
-import { CAPEX_PARAMETERS_V1, buildInitialCompanyCapexState, closeQuarterWithCapex } from "../capex";
+import { CAPEX_PARAMETERS_V1, applyCapexCapacityToFactories, buildInitialCompanyCapexState, closeQuarterWithCapex } from "../capex";
 import type { CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
 import type { ProposalApprovalGate } from "../capex/projectLifecycle";
 import { calculateExternalProcessorIntent } from "./externalDemand";
@@ -642,8 +642,15 @@ export function advanceCompanyLabQuarter(
   const turnResult = runTurn(turnInput);
 
   // --- Phase6: 工場・ワーカー・生産・完成品在庫・契約履行 ---
+  // 【Phase 8B-2B 実装指示§3.3】静的fixtureをmutation・蓄積せず、当該四半期の
+  // 生産開始時点で利用可能な「前期末までのcapex状態」（state.capexState。当期の
+  // capexクローズはこの後の§財務処理でまだ実行されていない）から、稼働開始済み
+  // 案件ぶんの累計能力増加だけを毎期再導出してFactoryへ加算する。能力増加残高を
+  // 別の永続状態として二重管理しない（capex/capacityEffect.ts参照）。
+  const baseFactories = fixtures.flatMap((f) => f.factories);
+  const factoriesWithCapexCapacity = applyCapexCapacityToFactories(baseFactories, state.capexState, state.currentPeriod);
   const productionInput: ProductionQuarterInput = {
-    factories: fixtures.flatMap((f) => f.factories),
+    factories: factoriesWithCapexCapacity,
     workerAssignments: decisions.flatMap((d) => d.workerAssignments),
     plans: decisions.flatMap((d) => d.productionPlans),
     companyCountry,
