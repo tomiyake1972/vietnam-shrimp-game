@@ -12,6 +12,8 @@ const USD_FORMATTER = new Intl.NumberFormat("ja-JP", { minimumFractionDigits: 2,
 const PERCENT_FORMATTER = new Intl.NumberFormat("ja-JP", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const SCORE_FORMATTER = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 1 });
 const INDEX_FORMATTER = new Intl.NumberFormat("ja-JP", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** 千円単位ではない、USD金額そのものの桁区切り表示用（小数点以下は表示しない。内部の保持精度は変更しない）。 */
+const USD_AMOUNT_FORMATTER = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 0 });
 
 /** HOSO換算トン量を「1,234 トン」のように桁区切り付きで表示する。 */
 export function formatHosoEqTons(value: HosoEqTons | number): string {
@@ -66,4 +68,15 @@ export function formatSupplyDemandBalance(balance: number): string {
   if (Math.abs(balance) < 1e-9) return "均衡";
   const label = balance > 0 ? "供給不足" : "供給過剰";
   return `${label} ${PERCENT_FORMATTER.format(Math.abs(balance) * 100)}%`;
+}
+
+/**
+ * 【Phase 8B-3】USD金額を「$2,500,000」のように桁区切り付きで表示する
+ * （設備投資UIの投資額・支払額・現金残高等の表示用。小数点以下は四捨五入して
+ * 表示するだけであり、保存されている内部値の精度そのものは一切変更しない）。
+ */
+export function formatUsd(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  const sign = value < 0 ? "-" : "";
+  return `${sign}$${USD_AMOUNT_FORMATTER.format(Math.abs(value))}`;
 }
