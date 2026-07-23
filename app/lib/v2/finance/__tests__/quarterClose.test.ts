@@ -1032,30 +1032,54 @@ test("労務配分V2-6: 商品別（正社員労務・臨時ワーカー・残�
   );
 
   // 会社全体の各費目総額（期待値）
-  const expectedRegularLaborCost = 1200 * SALARY; // 1,200,000（遊休200人ぶんも含む）
+  // 【feature/v2-idle-labor-cost】regularLaborCost(1,200,000)は会社全体の給与総額（遊休200人分を
+  // 含む）のまま変わらないが、商品原価・完成品在庫へ吸収されるのは実配属1,000人分
+  // （productiveRegularLaborCost = 1,000,000）だけであり、残り200人分（200,000）は
+  // idleLaborCostとして分離される。
+  const expectedRegularLaborCost = 1200 * SALARY; // 1,200,000（遊休200人ぶんも含む会社全体の給与総額）
+  const expectedProductiveRegularLaborCost = 1000 * SALARY; // 1,000,000（実配属1,000人分のみ）
+  const expectedIdleLaborCost = 200 * SALARY; // 200,000（遊休200人分）
   const expectedTemporaryWorkerCost = 300 * TEMP_RATE; // 240,000
   const expectedOvertimeCost = (200 * 0.05 + 300 * 0.1 + 500 * 0.2) * SALARY * OT_PREMIUM; // 140 × 1500 = 210,000
 
   assert.ok(Math.abs((result.manufacturingCost.regularLaborCost as number) - expectedRegularLaborCost) < EPS);
+  assert.ok(
+    Math.abs((result.manufacturingCost.productiveRegularLaborCost as number) - expectedProductiveRegularLaborCost) < EPS
+  );
+  assert.ok(Math.abs((result.manufacturingCost.idleLaborCost as number) - expectedIdleLaborCost) < EPS);
+  assert.ok(
+    Math.abs(
+      ((result.manufacturingCost.productiveRegularLaborCost as number) + (result.manufacturingCost.idleLaborCost as number)) -
+        (result.manufacturingCost.regularLaborCost as number)
+    ) < EPS
+  );
   assert.ok(Math.abs((result.manufacturingCost.temporaryWorkerCost as number) - expectedTemporaryWorkerCost) < EPS);
   assert.ok(Math.abs((result.manufacturingCost.overtimeCost as number) - expectedOvertimeCost) < EPS);
 
-  // 商品別配分（台帳のunitCost×adjustedTons）を積み上げて、会社全体の各費目総額と一致することを確認する
-  // （laborFixedPerTon×数量 = 常用労務費の商品別配分、laborVariablePerTon×数量 = 臨時ワーカー費+残業費の商品別配分）。
+  // 商品別配分（台帳のunitCost×adjustedTons）を積み上げて、会社全体の「productive」費目総額と
+  // 一致することを確認する（laborFixedPerTon×数量 = 実配属正社員労務費の商品別配分。遊休分は
+  // 台帳・在庫には一切含まれない）。laborVariablePerTon×数量 = 臨時ワーカー費+残業費の商品別配分。
   let sumLaborFixed = 0;
   let sumLaborVariable = 0;
   for (const entry of nextState.finishedGoodsCostLedger) {
     sumLaborFixed += (entry.unitCost.laborFixedPerTon as number) * entry.remainingQuantity;
     sumLaborVariable += (entry.unitCost.laborVariablePerTon as number) * entry.remainingQuantity;
   }
-  assert.ok(Math.abs(sumLaborFixed - expectedRegularLaborCost) < EPS, `Σ常用労務費配分 ${sumLaborFixed} ≠ ${expectedRegularLaborCost}`);
+  assert.ok(
+    Math.abs(sumLaborFixed - expectedProductiveRegularLaborCost) < EPS,
+    `Σ常用労務費配分 ${sumLaborFixed} ≠ ${expectedProductiveRegularLaborCost}`
+  );
   assert.ok(
     Math.abs(sumLaborVariable - (expectedTemporaryWorkerCost + expectedOvertimeCost)) < EPS,
     `Σ変動労務費配分 ${sumLaborVariable} ≠ ${expectedTemporaryWorkerCost + expectedOvertimeCost}`
   );
+
+  // costOfSales.idleLaborCostにも遊休労務費が独立項目として現れることを確認する
+  // （販売数量に関わらず当期全額費用化。この四半期は消費・販売がないため全額idleのまま）。
+  assert.ok(Math.abs((result.profitAndLoss.costOfSales.idleLaborCost as number) - expectedIdleLaborCost) < EPS);
 });
 
-test("労務配分V2-7: 実配属人数の合計が0（全バッチで常用/臨時とも未配属）の場合、按分は数量シェアへフォールバックし、NaN・Infinityは発生しない", () => {
+test("労務配分V2-7: 実配属人数の合計が0（全バッチで常用/臨時とも未配属）の場合、臨時ワーカー費は数量シェアへフォールバックするが、正社員労務費は0商品原価へも配分されず全額idleLaborCostとなる（NaN・Infinityは発生しない）", () => {
   const hosoBatch = makeBatch({
     batchId: "B-HOSO",
     product: "hoso",
@@ -1104,13 +1128,16 @@ test("労務配分V2-7: 実配属人数の合計が0（全バッチで常用/臨
     assert.ok(Number.isFinite(entry.unitCost.laborFixedPerTon as number), "laborFixedPerTonがNaN/Infinityではない");
     assert.ok(Number.isFinite(entry.unitCost.laborVariablePerTon as number), "laborVariablePerTonがNaN/Infinityではない");
   }
-  // 数量(originalTons/adjustedTons)シェアへフォールバックするので、HOSO(600t):VAP(400t) = 3:2の比で
-  // 常用労務費が配分される。
+  // 【feature/v2-idle-labor-cost】実配属人数の合計が0の場合、常用労務費はもはや数量シェアへ
+  // フォールバックしない（フォールバックしてしまうと、誰も配属されていないのに完成品在庫へ
+  // 正社員給与が入ってしまう）。会社全体の正社員給与500,000は全額idleLaborCostとなり、
+  // 台帳(laborFixedPerTon)へは一切入らない。
   const hosoEntry = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-HOSO")!;
   const vapEntry = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-VAP")!;
-  const hosoRegularLaborAlloc = (hosoEntry.unitCost.laborFixedPerTon as number) * hosoEntry.remainingQuantity;
-  const vapRegularLaborAlloc = (vapEntry.unitCost.laborFixedPerTon as number) * vapEntry.remainingQuantity;
-  assert.ok(Math.abs(hosoRegularLaborAlloc / vapRegularLaborAlloc - 600 / 400) < 0.01);
+  assert.equal(hosoEntry.unitCost.laborFixedPerTon as number, 0);
+  assert.equal(vapEntry.unitCost.laborFixedPerTon as number, 0);
+  assert.ok(Math.abs((result.manufacturingCost.idleLaborCost as number) - 500 * SALARY) < EPS);
+  assert.ok(Math.abs((result.manufacturingCost.productiveRegularLaborCost as number) - 0) < EPS);
 });
 
 test("労務配分V2-8: 労働集約度が商品ごとに異なる場合（HOSO基準・PD≈3倍・VAP≈7倍の配属人数原単位）、労務単価(laborFixedPerTon)はVAP>PD>HOSOとなる（総原価の順位は主張しない）", () => {
@@ -1308,4 +1335,405 @@ test("労務配分V2-9: 商品別の実労務単位原価がFinishedGoodsCostLed
       EPS
   );
   assert.ok(Math.abs(cf.directIndirectDifference as number) < EPS, `直接法と間接法の差: ${cf.directIndirectDifference}`);
+});
+
+// =====================================================================
+// feature/v2-idle-labor-cost:
+// 未配属正社員給与（遊休労務費）を製品原価・完成品在庫から分離し、
+// 発生四半期の売上原価区分・独立項目（idleLaborCost）として即時費用化する。
+// =====================================================================
+
+test("遊休労務費I-1(A): 一部未配属シナリオ（会社全体6,000人・実配属合計3,196.01人・単価$1,000）で、productiveRegularLaborCost/idleLaborCostが期待どおりに算定され、商品別吸収額も実配属人数×単価と一致する", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 1000,
+    adjustedTons: 1000,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 1196.01,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 2000,
+    adjustedTons: 2000,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 2000,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const { result, nextState } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [hosoBatch, vapBatch],
+      regularHeadcount: 6000,
+      temporaryHeadcount: 0,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 1000, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 2000, expired: false },
+      ],
+    })
+  );
+
+  const expectedProductive = 3196.01 * SALARY; // 3,196,010
+  const expectedIdle = (6000 - 3196.01) * SALARY; // 2,803,990
+  assert.ok(Math.abs((result.manufacturingCost.productiveRegularLaborCost as number) - expectedProductive) < EPS);
+  assert.ok(Math.abs((result.manufacturingCost.idleLaborCost as number) - expectedIdle) < EPS);
+  assert.ok(
+    Math.abs(
+      ((result.manufacturingCost.productiveRegularLaborCost as number) + (result.manufacturingCost.idleLaborCost as number)) -
+        (result.manufacturingCost.regularLaborCost as number)
+    ) < EPS
+  );
+  assert.ok(Math.abs((result.manufacturingCost.regularLaborCost as number) - 6_000_000) < EPS);
+
+  // 商品別吸収額 = 実配属人数×単価
+  const hosoEntry = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-HOSO")!;
+  const vapEntry = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-VAP")!;
+  assert.ok(Math.abs((hosoEntry.unitCost.laborFixedPerTon as number) * 1000 - 1196.01 * SALARY) < EPS);
+  assert.ok(Math.abs((vapEntry.unitCost.laborFixedPerTon as number) * 2000 - 2000 * SALARY) < EPS);
+
+  // PLのidleLaborCostにも同額が独立項目として現れる
+  assert.ok(Math.abs((result.profitAndLoss.costOfSales.idleLaborCost as number) - expectedIdle) < EPS);
+});
+
+test("遊休労務費I-2(B): 全員配属シナリオ（実配属合計=会社全体人数）では、idleLaborCostは0となり、常用労務費の商品原価吸収総額は本機能導入前と変わらない（=会社全体給与総額のまま）", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 300,
+    adjustedTons: 300,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 300,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 700,
+    adjustedTons: 700,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 700,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const { result, nextState } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [hosoBatch, vapBatch],
+      regularHeadcount: 1000, // 300+700 = 1000、遊休なし
+      temporaryHeadcount: 0,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 300, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 700, expired: false },
+      ],
+    })
+  );
+  assert.equal(result.manufacturingCost.idleLaborCost as number, 0);
+  assert.ok(Math.abs((result.manufacturingCost.productiveRegularLaborCost as number) - 1_000_000) < EPS);
+  let sumLaborFixed = 0;
+  for (const entry of nextState.finishedGoodsCostLedger) {
+    sumLaborFixed += (entry.unitCost.laborFixedPerTon as number) * entry.remainingQuantity;
+  }
+  assert.ok(Math.abs(sumLaborFixed - (result.manufacturingCost.regularLaborCost as number)) < EPS);
+  assert.equal(result.profitAndLoss.costOfSales.idleLaborCost as number, 0);
+});
+
+test("遊休労務費I-3(D): 実配属正社員数合計が会社全体人数を上回る（過剰配属）とFinanceValidationError。微小な浮動小数点誤差は許容する", () => {
+  const overAssigned = makeBatch({ assignedRegularHeadcount: 700, assignedTemporaryHeadcount: 0, appliedOvertimeRate: 0 });
+  assert.throws(
+    () => close(makeState(), makeActuals({ batches: [overAssigned], regularHeadcount: 500 })),
+    FinanceValidationError
+  );
+
+  // 許容差(HEADCOUNT_EPSILON)以内の超過は許容される
+  const barelyOver = makeBatch({ assignedRegularHeadcount: 500.0000001, assignedTemporaryHeadcount: 0, appliedOvertimeRate: 0 });
+  assert.doesNotThrow(() => close(makeState(), makeActuals({ batches: [barelyOver], regularHeadcount: 500 })));
+
+  // 許容差を明確に超える超過は拒否される
+  const slightlyOver = makeBatch({ assignedRegularHeadcount: 500.01, assignedTemporaryHeadcount: 0, appliedOvertimeRate: 0 });
+  assert.throws(
+    () => close(makeState(), makeActuals({ batches: [slightlyOver], regularHeadcount: 500 })),
+    FinanceValidationError
+  );
+});
+
+test("遊休労務費I-4(E): 労働集約度の異なる2商品で、商品別正社員労務費は実配属人数基準、臨時ワーカー費・残業費は従来どおり実配属先へ、unitCostにも未販売の完成品在庫にも遊休労務費は一切含まれない", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 1000,
+    adjustedTons: 1000,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 100,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 500,
+    adjustedTons: 500,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 350,
+    assignedTemporaryHeadcount: 100,
+    appliedOvertimeRate: 0.2,
+  });
+  const { result, nextState } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [
+        { contractId: "C-HOSO", lotId: "LOT-HOSO", product: "hoso", quantityTons: 600 },
+        { contractId: "C-VAP", lotId: "LOT-VAP", product: "vap", quantityTons: 300 },
+      ],
+      contractTerms: [
+        { contractId: "C-HOSO", market: "US", product: "hoso", unitPriceUsdPerKg: 5.0 },
+        { contractId: "C-VAP", market: "US", product: "vap", unitPriceUsdPerKg: 8.0 },
+      ],
+      batches: [hosoBatch, vapBatch],
+      regularHeadcount: 900, // 配属合計450 + 遊休450
+      temporaryHeadcount: 100,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [
+        { lotId: "LOT-HOSO", quantityTons: 600 },
+        { lotId: "LOT-VAP", quantityTons: 300 },
+      ],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 400, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 200, expired: false },
+      ],
+    })
+  );
+
+  const hosoEntry = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-HOSO")!;
+  const vapEntry = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-VAP")!;
+
+  // 商品別正社員労務費 = 実配属人数×単価（遊休分は一切含まれない）
+  assert.ok(Math.abs((hosoEntry.unitCost.laborFixedPerTon as number) - (100 * SALARY) / 1000) < EPS);
+  assert.ok(Math.abs((vapEntry.unitCost.laborFixedPerTon as number) - (350 * SALARY) / 500) < EPS);
+
+  // 臨時ワーカー費・残業費は従来どおり実配属先(VAPのみ)へ計上される
+  const expectedVapVariable = (100 * FINANCE_PARAMETERS_V1.labor.temporaryWorkerCostUsdPerQuarter + 350 * 0.2 * SALARY * OT_PREMIUM) / 500;
+  assert.ok(Math.abs((vapEntry.unitCost.laborVariablePerTon as number) - expectedVapVariable) < EPS);
+  assert.equal(hosoEntry.unitCost.laborVariablePerTon as number, 0);
+
+  // 未販売の完成品在庫（HOSO400t・VAP200t）にも、同じunitCostのまま遊休労務費は含まれない
+  assert.equal(hosoEntry.remainingQuantity, 400);
+  assert.equal(vapEntry.remainingQuantity, 200);
+  const idleLaborCost = result.manufacturingCost.idleLaborCost as number;
+  assert.ok(idleLaborCost > 0, "遊休労務費が正であることを前提とする検証");
+  // 在庫金額（労務相当分）には遊休労務費が全く混ざっていないことを、
+  // 台帳の労務単価×在庫数量の合計が「productiveRegularLaborCostの未販売持分」とだけ
+  // 一致することで確認する（idleLaborCostぶんは在庫のどこにも現れない）。
+  const endingLaborFixed =
+    (hosoEntry.unitCost.laborFixedPerTon as number) * hosoEntry.remainingQuantity +
+    (vapEntry.unitCost.laborFixedPerTon as number) * vapEntry.remainingQuantity;
+  assert.ok(endingLaborFixed < (result.manufacturingCost.productiveRegularLaborCost as number) + EPS);
+});
+
+test("遊休労務費I-5(F): 遊休労務費は発生四半期に全額費用化され、翌四半期以降に在庫を販売しても再度COGSへ計上されない", () => {
+  // Q1: 会社全体1,000人のうち700人のみ配属（300人遊休）。1,000t生産し、当期は販売なし。
+  const q1Batch = makeBatch({
+    batchId: "B-HOSO-Q1",
+    product: "hoso",
+    originalTons: 1000,
+    adjustedTons: 1000,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-Q1",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 700,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const q1 = close(
+    makeState(),
+    makeActuals({
+      period: P1,
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [q1Batch],
+      regularHeadcount: 1000,
+      temporaryHeadcount: 0,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [{ lotId: "LOT-Q1", remainingQuantityTons: 1000, expired: false }],
+    })
+  );
+  const expectedIdleQ1 = 300 * SALARY; // 300,000
+  assert.ok(Math.abs((q1.result.profitAndLoss.costOfSales.idleLaborCost as number) - expectedIdleQ1) < EPS);
+  const q1LaborFixedPerTon = q1.nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-Q1")!.unitCost.laborFixedPerTon as number;
+  assert.ok(Math.abs(q1LaborFixedPerTon - (700 * SALARY) / 1000) < EPS);
+
+  // Q2: 生産なし（従業員データも供給しない=legacyモード）。Q1の在庫のうち400tを販売。
+  const q2 = close(
+    q1.nextState,
+    makeActuals({
+      period: P2,
+      fulfillmentUsage: [{ contractId: "C-Q2", lotId: "LOT-Q1", product: "hoso", quantityTons: 400 }],
+      contractTerms: [{ contractId: "C-Q2", market: "US", product: "hoso", unitPriceUsdPerKg: 5.0 }],
+      batches: [],
+      regularHeadcount: 0,
+      temporaryHeadcount: 0,
+      appliedOvertimeRate: 0,
+      activeFactoryCount: 0,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryBeginUsd: 500_000,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [{ lotId: "LOT-Q1", quantityTons: 400 }],
+      finishedGoodsRemainingByLot: [{ lotId: "LOT-Q1", remainingQuantityTons: 600, expired: false }],
+    })
+  );
+  // Q2はQ1の遊休人員データを引き継がない（新たな遊休労務費は発生しない）
+  assert.equal(q2.result.profitAndLoss.costOfSales.idleLaborCost as number, 0);
+  // Q2のCOGS労務費は、Q1で台帳に記録された単価(productive分のみ)×販売数量とだけ一致し、
+  // Q1のidleLaborCost(300,000)がここへ再計上されることはない。
+  const expectedQ2LaborCogs = q1LaborFixedPerTon * 400;
+  assert.ok(Math.abs((q2.result.profitAndLoss.costOfSales.laborCost as number) - expectedQ2LaborCogs) < EPS);
+});
+
+test("遊休労務費I-6(G): 遊休労務費導入後も、BS貸借一致・CF直接法/間接法一致・利益剰余金ロールフォワード・正社員給与現金支出総額の不変・二重計上/計上漏れ無しが成立する", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 1000,
+    adjustedTons: 1000,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 200,
+    assignedTemporaryHeadcount: 20,
+    appliedOvertimeRate: 0,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 300,
+    adjustedTons: 300,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 300_000,
+    rawMaterialCostBySourceUsd: { domestic: 300_000, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 500,
+    assignedTemporaryHeadcount: 80,
+    appliedOvertimeRate: 0.3,
+  });
+  const state = makeState();
+  const actuals = makeActuals({
+    fulfillmentUsage: [{ contractId: "C1", lotId: "LOT-HOSO", product: "hoso", quantityTons: 100 }],
+    contractTerms: [{ contractId: "C1", market: "US", product: "hoso", unitPriceUsdPerKg: 5.0 }],
+    batches: [hosoBatch, vapBatch],
+    regularHeadcount: 1000, // 配属合計700 + 遊休300
+    temporaryHeadcount: 100,
+    domesticPurchasesUsd: 300_000,
+    rawMaterialInventoryEndUsd: 500_000,
+    lotConsumption: [{ lotId: "LOT-HOSO", quantityTons: 100 }],
+    finishedGoodsRemainingByLot: [
+      { lotId: "LOT-HOSO", remainingQuantityTons: 900, expired: false },
+      { lotId: "LOT-VAP", remainingQuantityTons: 300, expired: false },
+    ],
+  });
+  const { result, nextState } = close(state, actuals);
+
+  // BS貸借一致
+  assert.ok(Math.abs(result.balanceSheet.balanceDifference as number) < EPS, `貸借差額: ${result.balanceSheet.balanceDifference}`);
+  // CF直接法/間接法一致
+  const cf = result.cashFlow;
+  assert.ok(
+    Math.abs((cf.netCashChange as number) - ((cf.operatingCashFlow as number) + (cf.investingCashFlow as number) + (cf.financingCashFlow as number))) <
+      EPS
+  );
+  assert.ok(Math.abs(cf.directIndirectDifference as number) < EPS, `直接法と間接法の差: ${cf.directIndirectDifference}`);
+  // 利益剰余金ロールフォワード
+  assert.ok(
+    Math.abs((nextState.retainedEarnings as number) - ((state.retainedEarnings as number) + (result.profitAndLoss.netIncome as number))) < EPS
+  );
+  // 正社員給与の現金支出総額は不変（会社全体regularHeadcount×単価。遊休分も全額現金支給される）
+  assert.ok(Math.abs((result.manufacturingCost.regularLaborCost as number) - 1000 * SALARY) < EPS);
+
+  // 二重計上・計上漏れ無し: Σ商品別吸収額(productive) + idleLaborCost = regularLaborCost総額
+  let sumLaborFixed = 0;
+  for (const entry of nextState.finishedGoodsCostLedger) {
+    sumLaborFixed += (entry.unitCost.laborFixedPerTon as number) * entry.remainingQuantity;
+  }
+  // 販売済み100t分もCOGS側で吸収されているため、Σ(在庫+COGS)で全量を捕捉する
+  const soldLaborFixed = 100 * ((nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-HOSO")?.unitCost.laborFixedPerTon as number) ?? 0);
+  assert.ok(
+    Math.abs(
+      sumLaborFixed + soldLaborFixed + (result.manufacturingCost.idleLaborCost as number) - (result.manufacturingCost.regularLaborCost as number)
+    ) < EPS
+  );
+});
+
+test("遊休労務費I-7(H): actualモードでは遊休労務費を算定し、legacyモードでは常に0（従来どおり全額を商品原価へ配賦）となる", () => {
+  const actualBatch = makeBatch({ assignedRegularHeadcount: 60, assignedTemporaryHeadcount: 0, appliedOvertimeRate: 0 });
+  const actualResult = close(makeState(), makeActuals({ batches: [actualBatch], regularHeadcount: 100 }));
+  assert.ok((actualResult.result.manufacturingCost.idleLaborCost as number) > 0, "actualモードでは遊休労務費が算定される");
+  assert.ok(Math.abs((actualResult.result.manufacturingCost.idleLaborCost as number) - 40 * SALARY) < EPS);
+
+  const legacyBatch = makeBatch({}); // assignedRegularHeadcount等を指定しない
+  const legacyResult = close(makeState(), makeActuals({ batches: [legacyBatch], regularHeadcount: 100 }));
+  assert.equal(legacyResult.result.manufacturingCost.idleLaborCost as number, 0, "legacyモードではidleLaborCostは常に0");
+  assert.ok(Math.abs((legacyResult.result.manufacturingCost.productiveRegularLaborCost as number) - 100 * SALARY) < EPS);
 });
