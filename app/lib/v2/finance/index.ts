@@ -21,3 +21,5 @@ export type {
 } from "./quarterClose";
 export { buildCompanyQuarterBusinessActuals } from "./companyLabAdapter";
 export type { CompanyActualsSource } from "./companyLabAdapter";
+export { computeExistingAssetDepreciationUsd } from "./depreciation";
+export type { ExistingAssetDepreciation } from "./depreciation";
