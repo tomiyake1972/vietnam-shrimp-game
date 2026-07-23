@@ -334,3 +334,65 @@ test("受入確認PC-5e: nextProjectSequenceが1未満・非整数の場合を�
   (dto2.capexStates as Array<Record<string, unknown>>)[0].nextProjectSequence = 1.5;
   assert.throws(() => validatePersistedGameState(dto2), PersistedStateValidationError);
 });
+
+// ---------------------------------------------------------------------
+// Phase 8B-2B: 新規投資案件種別（commonProcessingExpansion）・targetProduct拡張
+// ---------------------------------------------------------------------
+
+test("受入確認PC-6: 新規追加のcommonProcessingExpansion案件がencode→decodeで往復一致し、schemaVersionは6のまま据え置かれる（互換フィールド追加のみ）", () => {
+  assert.equal(CURRENT_PERSISTED_GAME_STATE_VERSION, 6, "Phase 8B-2Bはcapexスキーマの形自体を変更しないためschemaVersion据え置きのはず");
+  const project = makeProject({
+    projectId: "BAL-CAPEX-2",
+    projectType: "commonProcessingExpansion",
+    approvedBudgetUsd: 5_000_000,
+    paymentSchedule: [
+      { stageIndex: 0, plannedRatio: 0.3 },
+      { stageIndex: 1, plannedRatio: 0.4 },
+      { stageIndex: 2, plannedRatio: 0.3 },
+    ],
+    requiredConstructionQuarters: 3,
+    status: "completed",
+    completedPaymentStagesCount: 3,
+    cumulativePaidUsd: 5_000_000,
+    elapsedConstructionQuartersWithPayment: 3,
+    completedPeriod: P2,
+    capitalizedAmountUsd: 5_000_000,
+    futureCapacityEffect: { targetProduct: "commonProcessing", capacityIncreaseTonsPerQuarter: 700, readinessQuartersAfterCompletion: 1 },
+  });
+  const state = makeState([makeCapexState({ portfolio: { companyId: "BAL", projects: [project] } })]);
+  const decoded = decodePersistedGameState(encodePersistedGameState(state));
+  assert.deepEqual(decoded, state);
+  assert.equal(decoded.capexStates[0].portfolio.projects[0].projectType, "commonProcessingExpansion");
+  assert.equal(decoded.capexStates[0].portfolio.projects[0].futureCapacityEffect?.targetProduct, "commonProcessing");
+});
+
+test("受入確認PC-7: coldStorageExpansionのfutureCapacityEffect.targetProduct=\"freezingPackaging\"がencode→decodeで往復一致する", () => {
+  const project = makeProject({
+    projectType: "coldStorageExpansion",
+    futureCapacityEffect: { targetProduct: "freezingPackaging", capacityIncreaseTonsPerQuarter: 500, readinessQuartersAfterCompletion: 1 },
+  });
+  const state = makeState([makeCapexState({ portfolio: { companyId: "BAL", projects: [project] } })]);
+  const decoded = decodePersistedGameState(encodePersistedGameState(state));
+  assert.equal(decoded.capexStates[0].portfolio.projects[0].futureCapacityEffect?.targetProduct, "freezingPackaging");
+});
+
+test("受入確認PC-8: 旧targetProduct=\"common\"の生データ（Phase 8B-2A時点の値。実際にはどの保存データにも書き込まれたことがないが、万一の後方互換として）を引き続きdecodeできる", () => {
+  const state = makeState([makeCapexState()]);
+  const dto = JSON.parse(encodePersistedGameState(state)) as Record<string, unknown>;
+  const projects = ((dto.capexStates as Array<Record<string, unknown>>)[0].portfolio as Record<string, unknown>).projects as Array<
+    Record<string, unknown>
+  >;
+  projects[0].futureCapacityEffect = { targetProduct: "common", capacityIncreaseTonsPerQuarter: 0, readinessQuartersAfterCompletion: 0 };
+  const decoded = decodePersistedGameState(JSON.stringify(dto));
+  assert.equal((decoded.capexStates[0].portfolio.projects[0].futureCapacityEffect as { targetProduct?: string })?.targetProduct, "common");
+});
+
+test("受入確認PC-9: 未知のtargetProduct値（新旧いずれの許容リストにも無い文字列）は拒否される（構造的な破損データの検出）", () => {
+  const state = makeState([makeCapexState()]);
+  const dto = JSON.parse(encodePersistedGameState(state)) as Record<string, unknown>;
+  const projects = ((dto.capexStates as Array<Record<string, unknown>>)[0].portfolio as Record<string, unknown>).projects as Array<
+    Record<string, unknown>
+  >;
+  projects[0].futureCapacityEffect = { targetProduct: "nonexistentProduct", capacityIncreaseTonsPerQuarter: 0, readinessQuartersAfterCompletion: 0 };
+  assert.throws(() => validatePersistedGameState(dto), PersistedStateValidationError);
+});

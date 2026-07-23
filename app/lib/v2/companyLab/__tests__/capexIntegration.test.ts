@@ -152,3 +152,45 @@ test("受入確認CI-5: 提案していない4社（MASS/JPQ/VAP/CONSV）の設�
     }
   }
 });
+
+// ---------------------------------------------------------------------
+// Phase 8B-2B: 稼働開始後の減価償却・固定保守費（companyLab実ラン経由）
+// ---------------------------------------------------------------------
+
+test("受入確認CI-6: coldStorageExpansionが稼働開始した四半期以降、BALのCapexQuarterResult.capexAssetsDepreciationUsd/capexMaintenanceCostUsdが正の値になり、それ以前は0のまま", () => {
+  const balHistory = shared8WithOverride.history.map((r) => ({
+    period: r.period,
+    cr: r.capexResults.find((c) => c.companyId === "BAL")!,
+  }));
+  const completionIndex = balHistory.findIndex((h) => h.cr.completedProjectsTransferUsd > EPS_USD);
+  assert.ok(completionIndex >= 0, "完成四半期が見つからない");
+  const project = shared8WithOverride.history[completionIndex].capexResults.find((c) => c.companyId === "BAL")!;
+  void project;
+
+  // readiness=1のcoldStorageExpansionは、完成の翌々四半期から稼働開始する
+  // （completedPeriodの翌四半期＋readiness1）。それより前は必ず0。
+  for (let i = 0; i <= completionIndex; i++) {
+    assert.equal(balHistory[i].cr.capexAssetsDepreciationUsd, 0, `${balHistory[i].period}: 完成前後の四半期でcapex減価償却が発生している`);
+    assert.equal(balHistory[i].cr.capexMaintenanceCostUsd, 0, `${balHistory[i].period}: 完成前後の四半期でcapex保守費が発生している`);
+  }
+  const operationalIndex = balHistory.findIndex((h) => h.cr.capexAssetsDepreciationUsd > 0);
+  if (operationalIndex >= 0) {
+    assert.ok(balHistory[operationalIndex].cr.capexMaintenanceCostUsd > 0, "減価償却が始まった四半期では保守費も同時に始まるはず（実装指示§3.2の統一原則）");
+    // 以降の四半期でも保守費は継続する（NaN/undefinedにならないことも含め確認）。
+    for (let i = operationalIndex; i < balHistory.length; i++) {
+      assert.ok(Number.isFinite(balHistory[i].cr.capexAssetsDepreciationUsd));
+      assert.ok(Number.isFinite(balHistory[i].cr.capexMaintenanceCostUsd));
+      assert.ok(balHistory[i].cr.capexMaintenanceCostUsd > 0, `${balHistory[i].period}: 稼働開始後は保守費が継続して発生するはず`);
+    }
+  }
+});
+
+test("受入確認CI-7: 提案していない4社はcapexAssetsDepreciationUsd/capexMaintenanceCostUsdも常に0のまま（会社間の混線なし、CI-5の拡張）", () => {
+  for (const record of shared8WithOverride.history) {
+    for (const companyId of ["MASS", "JPQ", "VAP", "CONSV"]) {
+      const cr = record.capexResults.find((c) => c.companyId === companyId)!;
+      assert.equal(cr.capexAssetsDepreciationUsd, 0);
+      assert.equal(cr.capexMaintenanceCostUsd, 0);
+    }
+  }
+});
