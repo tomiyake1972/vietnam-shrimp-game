@@ -214,6 +214,10 @@ export default function CompanyLabPage() {
   // （設備投資ポートフォリオ自体はlabState.currentPeriod時点の状態を表示するため）。
   const latestHistoryRecord = labState && labState.history.length > 0 ? labState.history[labState.history.length - 1] : undefined;
   const lastQuarterCapexEventsForPlayer = latestHistoryRecord?.capexResults.find((r) => r.companyId === draftPlayerCompanyId)?.events;
+  // 【Phase 8B-3補足確認】前四半期に却下された新規投資案件（同時進行中案件数の上限超過等）。
+  // エンジンは例外を投げず理由つきで却下結果を返すため、これを表示しないと「見送られたのに
+  // 画面上は何も起きなかったように見える」という分かりにくさが残る（今回の確認で発見・修正）。
+  const lastQuarterRejectedCapexProposalsForPlayer = latestHistoryRecord?.capexResults.find((r) => r.companyId === draftPlayerCompanyId)?.rejectedProposals;
 
   const progressLabel = labState ? `${labState.history.length} / ${labState.config.turns} 四半期` : "—";
 
@@ -328,6 +332,7 @@ export default function CompanyLabPage() {
                     disabled={labState.isComplete}
                     period={labState.currentPeriod}
                     lastQuarterCapexEvents={lastQuarterCapexEventsForPlayer}
+                    lastQuarterRejectedCapexProposals={lastQuarterRejectedCapexProposalsForPlayer}
                   />
                 ) : (
                   <div className="text-sm text-gray-400">このシナリオはすでに完了しています。</div>

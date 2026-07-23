@@ -11,7 +11,7 @@
 import { unwrapUnit } from "../../../lib/v2/core/units";
 import { PeriodV2 } from "../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab";
-import { CAPEX_PARAMETERS_V1, CapexProjectQuarterEvent } from "../../../lib/v2/capex";
+import { CAPEX_PARAMETERS_V1, CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../lib/v2/capex";
 import { formatHosoEqTons } from "../../../lib/v2/industryLab/ui/formatters";
 import { CompanyDecisionDraft } from "../decisionDraft";
 import {
@@ -36,6 +36,13 @@ interface DecisionEditorProps {
   readonly period: PeriodV2;
   /** 【Phase 8B-3】直近確定四半期の設備投資イベント（今期の実際の支払額表示用、参考情報）。未実行なら省略可。 */
   readonly lastQuarterCapexEvents?: readonly CapexProjectQuarterEvent[];
+  /**
+   * 【Phase 8B-3補足確認】直近確定四半期に却下された新規投資案件（同時進行中案件数の
+   * 上限超過・資金繰り理由等）。エンジンは例外を投げず、理由つきで却下結果を返す設計
+   * （CapexQuarterResult.rejectedProposals）のため、画面が落ちることはないが、これまで
+   * 何も表示していなかった（発見された不具合。今回の補足確認で追加）。
+   */
+  readonly lastQuarterRejectedCapexProposals?: readonly CapexRejectedProposal[];
 }
 
 function toSafeNumber(raw: string): number {
@@ -96,7 +103,7 @@ function PriceAdjustmentCell(props: { readonly value: number; readonly onChange:
 }
 
 export default function DecisionEditor(props: DecisionEditorProps) {
-  const { fixture, ownState, draft, onChange, disabled, period, lastQuarterCapexEvents } = props;
+  const { fixture, ownState, draft, onChange, disabled, period, lastQuarterCapexEvents, lastQuarterRejectedCapexProposals } = props;
 
   const rawMaterialInventory = ownState.rawMaterialLots
     .filter((l) => l.status === "available")
@@ -142,6 +149,21 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             <p className="text-[11px] text-gray-400 mt-1">{CAPEX_EXPLANATION_DETAIL_TEXT}</p>
           </details>
         </div>
+
+        {lastQuarterRejectedCapexProposals && lastQuarterRejectedCapexProposals.length > 0 && (
+          <div className="bg-amber-950/40 border border-amber-700/50 rounded-lg px-3 py-2 space-y-1">
+            <div className="text-[11px] font-semibold text-amber-300">
+              前四半期、承認されなかった新規投資案件があります（{lastQuarterRejectedCapexProposals.length}件）
+            </div>
+            <ul className="space-y-0.5">
+              {lastQuarterRejectedCapexProposals.map((r, idx) => (
+                <li key={idx} className="text-[11px] text-amber-200">
+                  {CAPEX_PARAMETERS_V1.templatesByType[r.projectType].displayName}: {r.reasons.join(" ")}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="space-y-1.5">
           <h4 className="text-xs font-semibold text-gray-300">投資案件候補（7種類）</h4>

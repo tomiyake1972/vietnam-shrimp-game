@@ -204,6 +204,47 @@ test("INT-2（実装指示§9の取消フロー）: 支払実績のない案件�
   assert.equal(cancelledProject.status, "cancelled", "UIドラフト経由の取消要求が、実際のエンジン状態遷移として反映される");
 });
 
+test("INT-4（補足確認§3「エンジンのvalidation error/却下が画面を落とさず理解可能に表示される」）: 同時進行中案件数の上限(3件)を超える新規申請は、例外を投げずに理由つきで却下され、UIが参照するCapexQuarterResult.rejectedProposalsへ現れる", () => {
+  const { state: initialState, fixtures } = initializeCompanyLab(baseConfig("capex-ui-integration-004"));
+  const playerFixture = fixtures.find((f) => f.companyId === PLAYER)!;
+
+  // 実際にUI上で「今期の意思決定へ追加」を4回（4種類）クリックした状況を再現する。
+  // maxConcurrentActiveProjectsPerCompany=3のため、4件目は同一四半期内での承認処理順で
+  // 上限に達し却下されるはず（evaluateProposalは例外を投げず、rejected結果を返す設計）。
+  const ownState0 = buildCompanyOwnState(initialState, playerFixture);
+  const publicInfo0 = buildPublicMarketInfo(initialState);
+  const auto0 = generateAutoPolicyDecision(playerFixture, ownState0, publicInfo0, initialState.currentPeriod, 1);
+  let draft = buildInitialDraft(playerFixture, auto0);
+  draft = addCapexProposalToDraft(draft, "hosoLineExpansion");
+  draft = addCapexProposalToDraft(draft, "pdLineExpansion");
+  draft = addCapexProposalToDraft(draft, "vapLineExpansion");
+  draft = addCapexProposalToDraft(draft, "coldStorageExpansion");
+  assert.equal(draft.capexDecision.newProjectProposals.length, 4);
+
+  const decisionsByCompanyId: Record<string, CompanyDecisionInput> = {};
+  for (const f of fixtures) {
+    if (f.companyId === PLAYER) {
+      decisionsByCompanyId[f.companyId] = buildDecisionInputFromDraft(draft, f, initialState.currentPeriod);
+    } else {
+      const os = buildCompanyOwnState(initialState, f);
+      decisionsByCompanyId[f.companyId] = generateAutoPolicyDecision(f, os, publicInfo0, initialState.currentPeriod, 1);
+    }
+  }
+
+  let nextState: CompanyLabState | undefined;
+  assert.doesNotThrow(() => {
+    nextState = advanceCompanyLabQuarter(initialState, fixtures, decisionsByCompanyId);
+  }, "上限超過の新規申請が混ざっていても、advanceCompanyLabQuarterは例外を投げない（画面が落ちないことの直接的な保証）");
+
+  const capexResult = nextState!.history[nextState!.history.length - 1].capexResults.find((r) => r.companyId === PLAYER)!;
+  assert.equal(capexResult.rejectedProposals.length, 1, "4件中1件が同時進行上限超過で却下されるはず");
+  assert.equal(capexResult.rejectedProposals[0].projectType, "coldStorageExpansion", "最後に追加した案件が却下されるはず（承認順に上限へ到達するため）");
+  assert.match(capexResult.rejectedProposals[0].reasons[0], /上限/, "却下理由が日本語で理解可能な文言であること");
+
+  const ownStateAfter = buildCompanyOwnState(nextState!, playerFixture);
+  assert.equal(ownStateAfter.capexState.portfolio.projects.length, 3, "却下された案件はポートフォリオへ登録されない（3件のみ登録）");
+});
+
 test("INT-3（8ターン一括実行の安定性）: 設備投資の意思決定を挟んでも、8ターンのcompanyLab実行が例外なく完走する（回帰防止）", () => {
   const { state: initialState, fixtures } = initializeCompanyLab(baseConfig("capex-ui-integration-003"));
   const playerFixture = fixtures.find((f) => f.companyId === PLAYER)!;
