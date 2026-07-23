@@ -50,6 +50,13 @@ import {
 } from "./types";
 
 const QUANTITY_EPSILON = 1e-9;
+/**
+ * 【feature/v2-idle-labor-cost】配属人数（headcount）の集計・比較に使う許容差。
+ * 実配属人数は商品×バッチ別の小数（例: 612.282183人）を複数合計するため、
+ * QUANTITY_EPSILON(1e-9)では浮動小数点の丸め誤差を僅かに超えて誤検知しうる。
+ * 人数スケールの丸め誤差を安全に吸収しつつ、実質的な過剰配属は確実に検出できる値とする。
+ */
+const HEADCOUNT_EPSILON = 1e-6;
 
 // ---------------------------------------------------------------------
 // 1. 入力（会社ラボのアダプターが既存実績データから抽出する）
@@ -263,8 +270,29 @@ function computeProductionCosting(
   // 会社全体平均残業率×全社regularHeadcountの式をそのまま使う。
   const laborMode = resolveLaborAllocationMode(actuals.batches);
 
+  // regularLaborCostは会社全体の正社員給与総額（会社全体regularHeadcount×1人当たり四半期給与）。
+  // 未配属・遊休ぶんも含む会社全体の現金支出・コミットメント総額であり、CF（労務費現金支出）や
+  // コスト記録（directLaborRegular、stepFixed、driverQuantity=actuals.regularHeadcount）は
+  // 引き続きこの総額をそのまま使う（【feature/v2-idle-labor-cost】給与支出総額自体は変更しない）。
   const regularLaborCost = actuals.regularHeadcount * params.labor.regularWorkerSalaryUsdPerQuarter;
   const temporaryWorkerCost = actuals.temporaryHeadcount * params.labor.temporaryWorkerCostUsdPerQuarter;
+
+  // 【feature/v2-idle-labor-cost】"actual"モードでは、regularLaborCostのうち実際に商品・生産
+  // バッチへ配属された（productiveな）人数ぶんだけを商品原価へ吸収し、残り（未配属・遊休人員の
+  // 給与）は商品原価・完成品在庫へは一切含めず、発生四半期の「遊休労務費」として即時費用化する。
+  // "legacy"モードでは未配属人数を信頼できる形で算定できないため、後方互換として全額を
+  // productiveとみなす（idleLaborCost=0、従来どおり全額を商品原価へ配賦）。
+  const totalAssignedRegular =
+    laborMode === "actual" ? actuals.batches.reduce((s, b) => s + (b.assignedRegularHeadcount as number), 0) : 0;
+  if (laborMode === "actual" && totalAssignedRegular > actuals.regularHeadcount + HEADCOUNT_EPSILON) {
+    throw new FinanceValidationError(
+      `商品・生産バッチへの実配属正社員数合計(${totalAssignedRegular})が、会社全体の正社員数(${actuals.regularHeadcount})を上回っています。過剰配属です: ${actuals.companyId} ${actuals.period}`
+    );
+  }
+  const productiveRegularHeadcount = laborMode === "actual" ? Math.min(totalAssignedRegular, actuals.regularHeadcount) : actuals.regularHeadcount;
+  const productiveRegularLaborCost = productiveRegularHeadcount * params.labor.regularWorkerSalaryUsdPerQuarter;
+  const idleRegularHeadcount = Math.max(0, actuals.regularHeadcount - productiveRegularHeadcount);
+  const idleLaborCost = idleRegularHeadcount * params.labor.regularWorkerSalaryUsdPerQuarter;
 
   // バッチ別の残業労務相当量（overtimeWeight）。"legacy"モードでは使わないため0にしておく
   // （後段のallocOvertimeCost算出はlaborModeで明示的に分岐するので、ここが0でも legacy側の
@@ -285,12 +313,13 @@ function computeProductionCosting(
   const utilityVariableCost = totalOriginalTons * params.manufacturing.factoryUtilityVariableUsdPerTon;
 
   const variableLaborTotal = temporaryWorkerCost + overtimeCost;
-  // 固定製造費のうち、常用労務費（regularLaborCost）は実配属人数ベースで、それ以外
-  // （工場固定費・固定ユーティリティ・減価償却＝nonLaborFixedManufacturingTotal）は
-  // 従来どおり数量調整後シェア（adjustedShare）で配賦する（固定製造費の按分基準を
-  // 労務部分とそれ以外で明示的に分離する）。
+  // 固定製造費のうち、常用労務費（productiveRegularLaborCost。遊休分を除く）は実配属人数
+  // ベースで、それ以外（工場固定費・固定ユーティリティ・減価償却＝nonLaborFixedManufacturingTotal）
+  // は従来どおり数量調整後シェア（adjustedShare）で配賦する（固定製造費の按分基準を
+  // 労務部分とそれ以外で明示的に分離する）。遊休労務費(idleLaborCost)はここに含めず、
+  // 常に当期の期間費用（CostOfSalesBreakdown.idleLaborCost）として別建てで認識する。
   const nonLaborFixedManufacturingTotal = factoryFixedCost + utilityFixedCost + depreciationUsd;
-  const fixedManufacturingTotal = regularLaborCost + nonLaborFixedManufacturingTotal;
+  const fixedManufacturingTotal = productiveRegularLaborCost + nonLaborFixedManufacturingTotal;
 
   // --- 加工費（商品別・変動費）。基準（HOSO水準）＋PD/VAP追加分に分解して記録する ---
   const hosoRate = processingRateByProduct.hoso;
@@ -336,11 +365,9 @@ function computeProductionCosting(
   }
 
   // --- バッチ別の配賦シェア ---
-  // 常用労務費（固定費のうち労務部分）: "actual"モードでは実配属人数の比、
-  // 実配属人数の合計が0（全バッチ未配属）の場合は数量調整後シェア(adjustedShare)へフォールバック。
-  const totalAssignedRegular =
-    laborMode === "actual" ? actuals.batches.reduce((s, b) => s + (b.assignedRegularHeadcount as number), 0) : 0;
-  // 臨時ワーカー費（変動費の一部）: 同様に実配属人数の比、フォールバックは品質調整前数量シェア(originalShare)。
+  // 常用労務費（固定費のうち労務部分）は、"actual"モードでは下のループ内で
+  // assignedRegularHeadcount_b×単価を直接計算する（totalAssignedRegularは上で計算済み）。
+  // 臨時ワーカー費（変動費の一部）: 実配属人数の比、フォールバックは品質調整前数量シェア(originalShare)。
   const totalAssignedTemporary =
     laborMode === "actual" ? actuals.batches.reduce((s, b) => s + (b.assignedTemporaryHeadcount as number), 0) : 0;
 
@@ -374,11 +401,16 @@ function computeProductionCosting(
     // 在庫化される変動費 = batchVariableTotal − batchDiscardLoss（廃棄分を除いた残り）。
     // 下のunitCostは各構成要素へ良品率(goodRatio)を掛けることで、この合計を
     // adjustedTonsあたりへ厳密に展開している。
-    const regularLaborShare =
-      laborMode === "actual" && totalAssignedRegular > QUANTITY_EPSILON
-        ? (b.assignedRegularHeadcount as number) / totalAssignedRegular
-        : adjustedShare;
-    const allocRegularLaborCost = regularLaborCost * regularLaborShare;
+    // 【feature/v2-idle-labor-cost】"actual"モードでは、このバッチへ実際に配属された正社員
+    // 人数×単価を直接計算する（productiveRegularLaborCostをシェアで割ってから掛け直すのでは
+    // なく直接積み上げることで、Σ allocRegularLaborCost_b = productiveRegularLaborCost が
+    // 計算誤差なく保証される。未配属人員の給与はここに一切含まれない＝idleLaborCostへ分離済み）。
+    // "legacy"モードではproductiveRegularLaborCost(===regularLaborCost)を数量調整後シェアで
+    // 配賦する従来どおりの計算（この場合、遊休の概念自体が無いため変更なし）。
+    const allocRegularLaborCost =
+      laborMode === "actual"
+        ? (b.assignedRegularHeadcount as number) * params.labor.regularWorkerSalaryUsdPerQuarter
+        : productiveRegularLaborCost * adjustedShare;
     const allocNonLaborFixed = nonLaborFixedManufacturingTotal * adjustedShare;
     const allocFixed = allocRegularLaborCost + allocNonLaborFixed;
 
@@ -425,6 +457,8 @@ function computeProductionCosting(
     importedRawMaterialCost: usd(rawImported),
     aquacultureRawMaterialCost: usd(rawAquaculture),
     regularLaborCost: usd(regularLaborCost),
+    productiveRegularLaborCost: usd(productiveRegularLaborCost),
+    idleLaborCost: usd(idleLaborCost),
     temporaryWorkerCost: usd(temporaryWorkerCost),
     overtimeCost: usd(overtimeCost),
     hosoProcessingCost: usd(hosoProcessingCost),
@@ -704,6 +738,11 @@ export function closeFinancialQuarter(
   // --- PL ---
   const netRevenue = grossRevenue - qualitySalesDeduction;
   const discardLossTotal = costing.qualityDiscardLoss + rawMaterialExpiryLoss + finishedGoodsWriteOffLoss;
+  // 【feature/v2-idle-labor-cost】未配属・遊休正社員給与は、販売数量や在庫の有無に関わらず
+  // 発生四半期に全額を売上原価区分の独立項目として費用化する（製品原価・完成品在庫には
+  // 一切含めない。costing.manufacturing.idleLaborCostは既にlaborFixedPerTon等の商品別単位
+  // 原価には含まれていない、完全に別建ての金額）。
+  const idleLaborCost = costing.manufacturing.idleLaborCost as number;
   const costOfSales: CostOfSalesBreakdown = {
     rawMaterialCost: usd(cogsRawMaterial),
     processingCost: usd(cogsProcessing),
@@ -712,9 +751,18 @@ export function closeFinancialQuarter(
     reworkCost: usd(costing.reworkCost),
     discardLoss: usd(discardLossTotal),
     unabsorbedFixedManufacturingCost: usd(costing.unabsorbedManufacturingCost),
+    idleLaborCost: usd(idleLaborCost),
   };
   const totalCostOfSales =
-    cogsRawMaterial + cogsProcessing + cogsLaborVariable + cogsLaborFixed + cogsFactoryFixedGroup + costing.reworkCost + discardLossTotal + costing.unabsorbedManufacturingCost;
+    cogsRawMaterial +
+    cogsProcessing +
+    cogsLaborVariable +
+    cogsLaborFixed +
+    cogsFactoryFixedGroup +
+    costing.reworkCost +
+    discardLossTotal +
+    costing.unabsorbedManufacturingCost +
+    idleLaborCost;
   const grossProfit = netRevenue - totalCostOfSales;
   const operatingProfit = grossProfit - sgaTotal;
   const profitBeforeTax = operatingProfit - interestExpense;

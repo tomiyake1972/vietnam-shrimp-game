@@ -290,7 +290,12 @@ export interface CostOfSalesBreakdown {
   readonly rawMaterialCost: Usd;
   /** 販売分に含まれる加工費（基準＋PD/VAP追加、変動ユーティリティ含む）。 */
   readonly processingCost: Usd;
-  /** 販売分に含まれる人件費（変動労務＋固定労務の配賦）。 */
+  /**
+   * 販売分に含まれる人件費（変動労務＋固定労務の配賦）。
+   * 【feature/v2-idle-labor-cost】正社員の固定労務費については、実際に商品・生産バッチへ
+   * 配属された（productiveな）人数ぶんのみが含まれる。未配属・遊休の正社員給与は
+   * ここには一切含まれず、下のidleLaborCostへ分離して当期費用として認識する。
+   */
   readonly laborCost: Usd;
   /** 販売分に含まれる工場固定費（固定ユーティリティ・減価償却の配賦を含む）。 */
   readonly factoryFixedCost: Usd;
@@ -300,6 +305,16 @@ export interface CostOfSalesBreakdown {
   readonly discardLoss: Usd;
   /** 生産ゼロ等で在庫へ配賦されなかった固定製造費（当期の期間費用として認識）。 */
   readonly unabsorbedFixedManufacturingCost: Usd;
+  /**
+   * 【feature/v2-idle-labor-cost】遊休労務費（未吸収固定製造費の一種）。
+   * (会社全体の正社員数 − 実際に商品・生産バッチへ配属された正社員数) × 正社員1人当たり
+   * 四半期給与。未配属正社員の給与は発生しているが製造原価（商品別単位原価・完成品在庫）へは
+   * 一切吸収せず、発生した四半期に全額を売上原価区分の独立項目として費用化する。
+   * 販売数量に関わらず当期全額を認識するため、後の四半期に在庫を販売してもここへは
+   * 再計上されない。実労務データが無い"legacy"モードでは、未配属人数を信頼できる形で
+   * 算定できないため常に0（従来どおり正社員給与を全額商品原価へ配賦する）。
+   */
+  readonly idleLaborCost: Usd;
 }
 
 /** 財務会計PL（全部原価計算）。 */
@@ -457,7 +472,25 @@ export interface ManufacturingCostBreakdown {
   readonly domesticRawMaterialCost: Usd;
   readonly importedRawMaterialCost: Usd;
   readonly aquacultureRawMaterialCost: Usd;
+  /**
+   * 当期の正社員給与総額（会社全体のregularHeadcount×1人当たり四半期給与。未配属・遊休分を
+   * 含む会社全体の現金支出・コミットメント総額）。CF（労務費現金支出）やコスト記録
+   * （directLaborRegular、stepFixed）はこの総額ベースのまま変更しない。
+   * 【feature/v2-idle-labor-cost】常に productiveRegularLaborCost + idleLaborCost と一致する。
+   */
   readonly regularLaborCost: Usd;
+  /**
+   * 【feature/v2-idle-labor-cost】regularLaborCostのうち、実際に商品・生産バッチへ配属された
+   * （productiveな）正社員ぶんのみ。商品別製造原価・完成品在庫へ配賦されるのはこの金額のみ。
+   * "legacy"モードではregularLaborCostと完全に一致する（後方互換、未配属人数を算定しないため）。
+   */
+  readonly productiveRegularLaborCost: Usd;
+  /**
+   * 【feature/v2-idle-labor-cost】regularLaborCostのうち、未配属・遊休の正社員ぶん
+   * （= regularLaborCost − productiveRegularLaborCost）。製品原価・完成品在庫へは一切含めず、
+   * 発生四半期にCostOfSalesBreakdown.idleLaborCostとして全額費用化する。"legacy"モードでは常に0。
+   */
+  readonly idleLaborCost: Usd;
   readonly temporaryWorkerCost: Usd;
   readonly overtimeCost: Usd;
   readonly hosoProcessingCost: Usd;
