@@ -31,7 +31,8 @@ import { closeFinancialQuarter, CompanyQuarterBusinessActuals } from "../finance
 import { FinanceParameters } from "../finance/parameters";
 import { FinancingQuarterResult } from "../financing/types";
 import { CapexParameters } from "./parameters";
-import { computeCapexAssetsDepreciationUsd, computeCapexMaintenanceCostUsd } from "./capacityEffect";
+import { computeCapexMaintenanceCostUsd } from "./capacityEffect";
+import { computeCapexComponentDepreciationUsd } from "./depreciation";
 import {
   applyCancelRequest,
   attemptPayment,
@@ -141,11 +142,15 @@ export function closeQuarterWithCapex(
     .filter((p) => p.status === "completed")
     .reduce((s, p) => s + (p.capitalizedAmountUsd ?? 0), 0);
 
-  // --- 6.5. 【Phase 8B-2B】当期の新規capex資産減価償却費・固定保守費 ---
+  // --- 6.5. 【Phase 8B-2B、Phase 8B-2Cでコンポーネント別に変更】当期の新規capex
+  //          資産の建物・機械別減価償却費・固定保守費 ---
   // 当四半期に完成した案件はoperationalStartPeriodが必ず翌四半期以降になるため
   // （completedPeriodの翌四半期＋readiness）、支払処理後のprojects（=completed
   // 判定済み）を使っても、当期完成分がここで誤って計上されることはない。
-  const capexAssetsDepreciationUsd = computeCapexAssetsDepreciationUsd(projects, params, period);
+  const capexDepreciation = computeCapexComponentDepreciationUsd(projects, params, period);
+  const capexAssetsDepreciationUsd = capexDepreciation.totalUsd;
+  const capexAssetsBuildingDepreciationUsd = capexDepreciation.buildingUsd;
+  const capexAssetsMachineryDepreciationUsd = capexDepreciation.machineryUsd;
   const capexMaintenanceCostUsd = computeCapexMaintenanceCostUsd(projects, params, period);
 
   const capexAdjustment: CapexAdjustment = {
@@ -154,6 +159,8 @@ export function closeQuarterWithCapex(
     endingConstructionInProgressUsd,
     nonDepreciatingCapexGrossAtPeriodStartUsd,
     capexAssetsDepreciationUsd,
+    capexAssetsBuildingDepreciationUsd,
+    capexAssetsMachineryDepreciationUsd,
     capexMaintenanceCostUsd,
   };
 
@@ -189,6 +196,8 @@ export function closeQuarterWithCapex(
     endingConstructionInProgressUsd,
     nonDepreciatingCapexGrossAtPeriodStartUsd,
     capexAssetsDepreciationUsd,
+    capexAssetsBuildingDepreciationUsd,
+    capexAssetsMachineryDepreciationUsd,
     capexMaintenanceCostUsd,
   };
 
