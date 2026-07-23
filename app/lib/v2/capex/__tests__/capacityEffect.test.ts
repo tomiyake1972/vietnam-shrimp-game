@@ -1,10 +1,10 @@
-// ShrimpX V2 — 設備投資モジュール 操業効果（能力増加・新規資産減価償却・固定保守費）
-// 単体テスト（Phase 8B-2B）
+// ShrimpX V2 — 設備投資モジュール 操業効果（能力増加・固定保守費）単体テスト
+// （Phase 8B-2B新設、Phase 8B-2Cで減価償却テストをcapex/__tests__/depreciation.test.tsへ分離）
 //
 // capex/capacityEffect.tsの純粋関数群を、finance/quarterClose.tsやcompanyLab/
 // runner.tsを経由せず直接検証する。実装指示§10の必須テスト項目のうち、能力・
-// 減価償却・保守費の単体レベルの検証をここでまとめて行う（三表統合レベルの
-// 検証はcapexClose.test.tsで別途行う）。
+// 保守費の単体レベルの検証をここでまとめて行う（新規capex資産の減価償却は
+// depreciation.test.ts、三表統合レベルの検証はcapexClose.test.tsで別途行う）。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +16,6 @@ import { CapitalProject, CapitalProjectType, CapexState, CompanyCapexState, Futu
 import {
   applyCapexCapacityToFactories,
   computeCapacityEffectForCompany,
-  computeCapexAssetsDepreciationUsd,
   computeCapexMaintenanceCostUsd,
   computeOperationalStartPeriod,
 } from "../capacityEffect";
@@ -225,13 +224,12 @@ test("FAC-4: 複数プールへの効果が同時に正しく反映される（�
 });
 
 // ---------------------------------------------------------------------
-// 4. 新規capex資産の定額法減価償却（computeCapexAssetsDepreciationUsd）
+// 4. 固定保守費（computeCapexMaintenanceCostUsd）
 // ---------------------------------------------------------------------
-// 実テンプレート（耐用年数40四半期等）は検証に長い期間を要するため、単体テスト
-// では小さな耐用年数を持つ独立のCapexParametersフィクスチャを使う（純粋関数の
-// 引数として渡すだけなので、実パラメータと切り離して検証できる）。
+// 新規capex資産の減価償却（建物・機械コンポーネント別定額法）の単体テストは
+// capex/__tests__/depreciation.test.tsへ分離した（Phase 8B-2C）。
 
-function testParams(usefulLifeQuarters: number, maintenanceRatePerQuarter: number, readinessQuartersAfterCompletion = 0): CapexParameters {
+function testParams(maintenanceRatePerQuarter: number, readinessQuartersAfterCompletion = 0): CapexParameters {
   const tmpl = (projectType: CapitalProjectType): CapexProjectTemplate => ({
     projectType,
     displayName: "test",
@@ -240,7 +238,8 @@ function testParams(usefulLifeQuarters: number, maintenanceRatePerQuarter: numbe
     paymentRatios: [1],
     assetCategory: "productionEquipment",
     postCompletionReadinessQuarters: readinessQuartersAfterCompletion,
-    usefulLifeQuarters,
+    buildingRatio: 0.5,
+    machineryRatio: 0.5,
     maintenanceRatePerQuarter,
     futureCapacityEffect: { readinessQuartersAfterCompletion },
   });
@@ -254,91 +253,38 @@ function testParams(usefulLifeQuarters: number, maintenanceRatePerQuarter: numbe
     "commonProcessingExpansion",
   ];
   const templatesByType = Object.fromEntries(types.map((t) => [t, tmpl(t)])) as Record<CapitalProjectType, CapexProjectTemplate>;
-  return { parametersVersion: "test", templatesByType, minimumCashReserveUsd: 0, maxConcurrentActiveProjectsPerCompany: 99, epsilonUsd: 0.01 };
+  return {
+    parametersVersion: "test",
+    templatesByType,
+    minimumCashReserveUsd: 0,
+    maxConcurrentActiveProjectsPerCompany: 99,
+    epsilonUsd: 0.01,
+    componentUsefulLifeQuarters: { building: 100, machinery: 40 },
+  };
 }
 
-test("DEP-1: 建設中（underConstruction）の資産は減価償却費0", () => {
-  const params = testParams(4, 0);
-  const p = makeProject({ projectType: "hosoLineExpansion", status: "underConstruction", completedPeriod: undefined, capitalizedAmountUsd: undefined, futureCapacityEffect: effect() });
-  assert.equal(computeCapexAssetsDepreciationUsd([p], params, period(2016, 1)), 0);
-});
-
-test("DEP-2: 完成四半期そのものは減価償却費0（稼働開始は必ず翌期以降）", () => {
-  const params = testParams(4, 0);
-  const p = makeProject({ projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), capitalizedAmountUsd: 1_000_000, futureCapacityEffect: effect() });
-  assert.equal(computeCapexAssetsDepreciationUsd([p], params, period(2015, 1)), 0);
-});
-
-test("DEP-3: 稼働開始四半期から耐用年数の四半期数だけ定額法で計上され、その後は0", () => {
-  const usefulLife = 4;
-  const params = testParams(usefulLife, 0);
-  const p = makeProject({ projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), capitalizedAmountUsd: 4_000_000, futureCapacityEffect: effect() });
-  const opStart = period(2015, 2); // readiness=0 → completedPeriodの翌四半期
-  const expectedPerQuarter = 4_000_000 / usefulLife; // = 1,000,000
-  // 稼働開始から4四半期ぶん、定額で計上される。
-  assert.ok(Math.abs(computeCapexAssetsDepreciationUsd([p], params, opStart) - expectedPerQuarter) < EPS);
-  assert.ok(Math.abs(computeCapexAssetsDepreciationUsd([p], params, period(2015, 3)) - expectedPerQuarter) < EPS);
-  assert.ok(Math.abs(computeCapexAssetsDepreciationUsd([p], params, period(2015, 4)) - expectedPerQuarter) < EPS);
-  assert.ok(Math.abs(computeCapexAssetsDepreciationUsd([p], params, period(2016, 1)) - expectedPerQuarter) < EPS); // 4四半期目（耐用年数最終期）
-  // 耐用年数終了後（5四半期目）は0。
-  assert.equal(computeCapexAssetsDepreciationUsd([p], params, period(2016, 2)), 0);
-});
-
-test("DEP-4: 累計減価償却額は取得原価(capitalizedAmountUsd)を厳密に超えない（4四半期合計=取得原価）", () => {
-  const usefulLife = 4;
-  const params = testParams(usefulLife, 0);
-  const capitalized = 4_000_000;
-  const p = makeProject({ projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), capitalizedAmountUsd: capitalized, futureCapacityEffect: effect() });
-  // 稼働開始（2015Q2）から耐用年数4四半期ぶん＝2015Q2〜2016Q1を直接列挙して集計する。
-  const quarters = [period(2015, 2), period(2015, 3), period(2015, 4), period(2016, 1)];
-  const total = quarters.reduce((s, q) => s + computeCapexAssetsDepreciationUsd([p], params, q), 0);
-  assert.ok(Math.abs(total - capitalized) < EPS, `4四半期合計 ${total} が取得原価 ${capitalized} と一致しない`);
-  assert.ok(total <= capitalized + EPS);
-});
-
-test("DEP-5: 複数案件の減価償却費は案件ごとに計算して合算される", () => {
-  const params = testParams(4, 0);
-  const a = makeProject({ projectId: "A", projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), capitalizedAmountUsd: 4_000_000, futureCapacityEffect: effect() });
-  const b = makeProject({ projectId: "B", projectType: "pdLineExpansion", completedPeriod: period(2015, 1), capitalizedAmountUsd: 2_000_000, futureCapacityEffect: effect() });
-  const total = computeCapexAssetsDepreciationUsd([a, b], params, period(2015, 2));
-  assert.ok(Math.abs(total - (4_000_000 / 4 + 2_000_000 / 4)) < EPS);
-});
-
-test("DEP-6: 取消済み（cancelled）・支払未完了の資産は減価償却費0", () => {
-  const params = testParams(4, 0);
-  const p = makeProject({ projectType: "hosoLineExpansion", status: "cancelled", completedPeriod: undefined, capitalizedAmountUsd: undefined, cumulativePaidUsd: 0, cancelledPeriod: period(2015, 1), futureCapacityEffect: effect() });
-  assert.equal(computeCapexAssetsDepreciationUsd([p], params, period(2020, 1)), 0);
-});
-
-// ---------------------------------------------------------------------
-// 5. 固定保守費（computeCapexMaintenanceCostUsd）
-// ---------------------------------------------------------------------
-
 test("MAINT-1: 稼働開始前は保守費0", () => {
-  const params = testParams(4, 0.01);
+  const params = testParams(0.01);
   const p = makeProject({ projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), capitalizedAmountUsd: 1_000_000, futureCapacityEffect: effect() });
   assert.equal(computeCapexMaintenanceCostUsd([p], params, period(2015, 1)), 0);
 });
 
 test("MAINT-2: 稼働開始後は capitalizedAmountUsd × maintenanceRatePerQuarter が発生する", () => {
-  const params = testParams(4, 0.01);
+  const params = testParams(0.01);
   const p = makeProject({ projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), capitalizedAmountUsd: 1_000_000, futureCapacityEffect: effect() });
   const m = computeCapexMaintenanceCostUsd([p], params, period(2015, 2));
   assert.ok(Math.abs(m - 10_000) < EPS);
 });
 
-test("MAINT-3: 耐用年数（useful life）を超えても保守費は継続して発生する（減価償却とは異なり打ち切られない）", () => {
-  const usefulLife = 2;
-  const params = testParams(usefulLife, 0.01);
+test("MAINT-3: 減価償却の耐用年数を超えた遠い将来でも保守費は継続して発生する（減価償却とは異なり打ち切られない。減価償却自体の打ち切り検証はdepreciation.test.tsのDEP-*が担う）", () => {
+  const params = testParams(0.01);
   const p = makeProject({ projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), capitalizedAmountUsd: 1_000_000, futureCapacityEffect: effect() });
-  // 耐用年数(2四半期)経過後は減価償却は0になるはずだが、保守費は継続する。
-  const farFuture = period(2020, 1);
-  assert.equal(computeCapexAssetsDepreciationUsd([p], params, farFuture), 0, "耐用年数超過後は減価償却0のはず");
+  const farFuture = period(2035, 1); // componentUsefulLifeQuarters.building(100)を超えるほど遠い将来
   assert.ok(Math.abs(computeCapexMaintenanceCostUsd([p], params, farFuture) - 10_000) < EPS, "保守費は耐用年数を超えても継続するはず");
 });
 
 test("MAINT-4: 複数案件の保守費は合算される", () => {
-  const params = testParams(4, 0.01);
+  const params = testParams(0.01);
   const a = makeProject({ projectId: "A", projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), capitalizedAmountUsd: 1_000_000, futureCapacityEffect: effect() });
   const b = makeProject({ projectId: "B", projectType: "vapLineExpansion", completedPeriod: period(2015, 1), capitalizedAmountUsd: 2_000_000, futureCapacityEffect: effect() });
   const total = computeCapexMaintenanceCostUsd([a, b], params, period(2015, 2));
@@ -346,7 +292,7 @@ test("MAINT-4: 複数案件の保守費は合算される", () => {
 });
 
 test("MAINT-5: 建設中・取消済みは保守費0", () => {
-  const params = testParams(4, 0.01);
+  const params = testParams(0.01);
   const underConstruction = makeProject({ projectType: "hosoLineExpansion", status: "underConstruction", completedPeriod: undefined, capitalizedAmountUsd: undefined, futureCapacityEffect: effect() });
   const cancelled = makeProject({ projectType: "vapLineExpansion", status: "cancelled", completedPeriod: undefined, capitalizedAmountUsd: undefined, cumulativePaidUsd: 0, cancelledPeriod: period(2015, 1), futureCapacityEffect: effect() });
   assert.equal(computeCapexMaintenanceCostUsd([underConstruction, cancelled], params, period(2020, 1)), 0);

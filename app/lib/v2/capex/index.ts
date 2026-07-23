@@ -5,3 +5,4 @@ export * from "./parameters";
 export * from "./projectLifecycle";
 export * from "./capexClose";
 export * from "./capacityEffect";
+export * from "./depreciation";

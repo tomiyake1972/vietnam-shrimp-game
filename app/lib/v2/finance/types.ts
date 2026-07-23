@@ -506,7 +506,20 @@ export interface ManufacturingCostBreakdown {
   readonly factoryFixedCost: Usd;
   readonly utilityFixedCost: Usd;
   readonly utilityVariableCost: Usd;
+  /**
+   * 当期減価償却費の合計（既存資産2区分＋新規capex資産2区分の合算。
+   * = existingAssetBuildingDepreciationCost + existingAssetMachineryDepreciationCost
+   *   + capexAssetsBuildingDepreciationCost + capexAssetsMachineryDepreciationCost）。
+   */
   readonly depreciationCost: Usd;
+  /** 【Phase 8B-2C診断用】既存資産のうち建物・構築物コンポーネント分。 */
+  readonly existingAssetBuildingDepreciationCost: Usd;
+  /** 【Phase 8B-2C診断用】既存資産のうち機械・設備コンポーネント分。 */
+  readonly existingAssetMachineryDepreciationCost: Usd;
+  /** 【Phase 8B-2C診断用】新規capex資産のうち建物・構築物コンポーネント分。 */
+  readonly capexAssetsBuildingDepreciationCost: Usd;
+  /** 【Phase 8B-2C診断用】新規capex資産のうち機械・設備コンポーネント分。 */
+  readonly capexAssetsMachineryDepreciationCost: Usd;
   readonly reworkCost: Usd;
 }
 
@@ -706,16 +719,22 @@ export interface CapexAdjustment {
    */
   readonly nonDepreciatingCapexGrossAtPeriodStartUsd: number;
   /**
-   * 【Phase 8B-2B】当期の稼働開始済み新規completed資産ぶんの定額法減価償却費
-   * 合計（capex/capacityEffect.tsのcomputeCapexAssetsDepreciationUsd）。
-   * 既存レガシー資産の減価償却（レート×レガシー粗取得原価）に加算される。
+   * 【Phase 8B-2B、Phase 8B-2Cでコンポーネント別合算に変更】当期の稼働開始済み
+   * 新規completed資産ぶんの定額法減価償却費合計（建物＋機械。
+   * capex/depreciation.tsのcomputeCapexComponentDepreciationUsd.totalUsd）。
+   * 既存資産2区分の減価償却（finance/depreciation.tsのcomputeExistingAssetDepreciationUsd）
+   * に加算される。
    */
   readonly capexAssetsDepreciationUsd: number;
+  /** 【Phase 8B-2C】上記のうち建物・構築物コンポーネント分のみ（診断用）。 */
+  readonly capexAssetsBuildingDepreciationUsd: number;
+  /** 【Phase 8B-2C】上記のうち機械・設備コンポーネント分のみ（診断用）。 */
+  readonly capexAssetsMachineryDepreciationUsd: number;
   /**
    * 【Phase 8B-2B】当期の稼働中completed資産ぶんの固定保守費合計
    * （capex/capacityEffect.tsのcomputeCapexMaintenanceCostUsd）。完成品原価・
    * 在庫へは一切含めず、CostOfSalesBreakdown.capexMaintenanceCostとして
-   * 当期費用・現金支出へ直接計上する。
+   * 当期費用・現金支出へ直接計上する。Phase 8B-2Cでも計算式は変更していない。
    */
   readonly capexMaintenanceCostUsd: number;
 }

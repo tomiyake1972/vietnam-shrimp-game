@@ -9,9 +9,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { period } from "../../core/period";
+import { INITIAL_PERIOD_V2, period } from "../../core/period";
 import { Product } from "../../market/types";
 import { FINANCE_PARAMETERS_V1 } from "../parameters";
+import { computeExistingAssetDepreciationUsd } from "../depreciation";
 import { CompanyQuarterBusinessActuals, ProductionBatchActual, closeFinancialQuarter, resolveLaborAllocationMode } from "../quarterClose";
 import { CapexAdjustment, CompanyFinanceState, FinanceValidationError, fixedUnitCostPerTon, totalUnitCostPerTon, usd } from "../types";
 
@@ -327,12 +328,16 @@ test("受入確認F-1: 生産・販売ゼロの四半期でも固定費（正社
   const cm = result.contributionMargin;
   assert.equal(cm.netRevenue as number, 0);
   assert.ok((cm.totalFixedCost as number) > 0, "生産ゼロでも固定費合計が正");
+  // 【Phase 8B-2C】既存資産2区分（建物35%/機械65%）を、それぞれの推定残存
+  // 耐用年数（80四半期/32四半期）で定額償却した合計（旧・取得原価一律2.5%/四半期
+  // から変更。デフォルトのfixedAssetsGross=40Mに対する新方式の値）。
+  const existingAssetDepreciationUsd = computeExistingAssetDepreciationUsd(40_000_000, INITIAL_PERIOD_V2, P1, FINANCE_PARAMETERS_V1).totalUsd;
   assert.equal(
     cm.fixedManufacturingCost as number,
     100 * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter +
       FINANCE_PARAMETERS_V1.manufacturing.factoryFixedCostUsdPerQuarter +
       FINANCE_PARAMETERS_V1.manufacturing.factoryUtilityFixedUsdPerQuarter +
-      40_000_000 * FINANCE_PARAMETERS_V1.finance.depreciationRatePerQuarter
+      existingAssetDepreciationUsd
   );
   // 全部原価計算では未配賦固定費として当期費用化される
   assert.ok((result.profitAndLoss.costOfSales.unabsorbedFixedManufacturingCost as number) > 0);
@@ -1755,22 +1760,28 @@ function makeCapexAdjustment(overrides: Partial<CapexAdjustment> = {}): CapexAdj
     endingConstructionInProgressUsd: 0,
     nonDepreciatingCapexGrossAtPeriodStartUsd: 0,
     capexAssetsDepreciationUsd: 0,
+    capexAssetsBuildingDepreciationUsd: 0,
+    capexAssetsMachineryDepreciationUsd: 0,
     capexMaintenanceCostUsd: 0,
     ...overrides,
   };
 }
 
-test("capex操作-1: 新規completed資産の減価償却費は、既存レガシー定率法の結果へ単純加算される（両者は明確に区別された別計算式）", () => {
+test("capex操作-1: 新規completed資産の減価償却費は、既存資産2区分の減価償却結果へ単純加算される（両者は明確に区別された別計算式）", () => {
   const state = makeState({ fixedAssetsGross: usd(40_000_000), accumulatedDepreciation: usd(0) });
   const actuals = makeActuals();
-  const legacyOnly = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES);
-  const legacyDepreciation = legacyOnly.result.manufacturingCost.depreciationCost as number;
-  assert.ok(Math.abs(legacyDepreciation - 40_000_000 * FINANCE_PARAMETERS_V1.finance.depreciationRatePerQuarter) < EPS);
+  const existingOnly = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES);
+  const existingAssetDepreciation = existingOnly.result.manufacturingCost.depreciationCost as number;
+  const expectedExistingAssetDepreciation = computeExistingAssetDepreciationUsd(40_000_000, INITIAL_PERIOD_V2, actuals.period, FINANCE_PARAMETERS_V1).totalUsd;
+  assert.ok(Math.abs(existingAssetDepreciation - expectedExistingAssetDepreciation) < EPS);
 
   const capex = makeCapexAdjustment({ capexAssetsDepreciationUsd: 200_000 });
   const withCapex = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES, undefined, capex);
   const combinedDepreciation = withCapex.result.manufacturingCost.depreciationCost as number;
-  assert.ok(Math.abs(combinedDepreciation - (legacyDepreciation + 200_000)) < EPS, `合算後 ${combinedDepreciation} が レガシー${legacyDepreciation}+capex200000 と一致しない`);
+  assert.ok(
+    Math.abs(combinedDepreciation - (existingAssetDepreciation + 200_000)) < EPS,
+    `合算後 ${combinedDepreciation} が 既存資産${existingAssetDepreciation}+capex200000 と一致しない`
+  );
 });
 
 test("capex操作-2: 固定保守費（capexMaintenanceCost）は生産量に関わらず売上原価区分の独立項目として計上され、totalCostOfSalesへ一度だけ含まれる", () => {

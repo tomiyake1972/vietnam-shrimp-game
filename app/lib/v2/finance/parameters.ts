@@ -1,4 +1,5 @@
-// ShrimpX V2 — 財務モジュール パラメータ定義（Phase 8A）
+// ShrimpX V2 — 財務モジュール パラメータ定義（Phase 8A、Phase 8B-2Cで既存資産の
+// 減価償却方式を拡張）
 //
 // production/quality/salesの各parameters.tsと同じ方針で、計算ロジックに
 // マジックナンバーを直接書かず、すべての係数をこの1ファイルへ集約する。
@@ -11,6 +12,15 @@
 // 売上原価の60〜70%、営業利益率一桁%台）へ収まるよう設定した。
 // ベトナム加工業の給与水準（工場ワーカー月給$250〜400相当＋社会保険等）を
 // 四半期換算した値を基礎とする。
+//
+// 【Phase 8B-2C】depreciationRatePerQuarter（取得原価一律2.5%/四半期）を廃止し、
+// existingAssetDepreciationへ置き換えた。旧計算は「定率法」とコメントされていたが、
+// 実際の計算内容（取得原価に対する一定率を毎期定額で控除する方式。純額フロアで
+// 頭打ち）は定率法ではなく実質的には定額法（10年均等）だったため、ユーザー指示に
+// 従い正しい実装内容（既存資産を建物・機械2区分へ簡便配分し、区分ごとの推定残存
+// 耐用年数で定額償却する）へ改め、コメント上の呼称の誤りも解消した。
+
+import { FinanceValidationError } from "./types";
 
 export interface FinanceParameters {
   readonly parametersVersion: string;
@@ -72,8 +82,24 @@ export interface FinanceParameters {
     readonly longTermInterestRatePerQuarter: number;
     /** 法人税率（ベトナムCIT 20%を暫定採用。税引前利益が正の場合のみ課税、繰越欠損金はPhase 8B以降）。 */
     readonly incomeTaxRate: number;
-    /** 固定資産の四半期減価償却率（取得原価に対する定額法。年10%相当）。 */
-    readonly depreciationRatePerQuarter: number;
+    /**
+     * 【Phase 8B-2C】ゲーム開始時点で保有している既存固定資産（capex経由の
+     * 新規completed資産を除く）の減価償却方針。個別の取得履歴・取得時期が
+     * 存在しないため、精密な固定資産台帳は新設せず、ゲーム開始時点の帳簿価額
+     * （=各社の初期fixedAssetsGross）を建物・機械の2区分へ共通比率で簡便配分し、
+     * それぞれゲーム開始時点で残っているとみなす耐用年数で定額償却する
+     * 簡略モデル（finance/depreciation.tsのcomputeExistingAssetDepreciationUsd参照）。
+     */
+    readonly existingAssetDepreciation: {
+      /** ゲーム開始時点帳簿価額のうち建物・構築物への配分比率。machineryOpeningRatioとの合計は1。 */
+      readonly buildingOpeningRatio: number;
+      /** ゲーム開始時点帳簿価額のうち機械・設備への配分比率。 */
+      readonly machineryOpeningRatio: number;
+      /** ゲーム開始時点で建物区分に残っているとみなす耐用年数（四半期数）。 */
+      readonly buildingRemainingLifeQuartersAtGameStart: number;
+      /** ゲーム開始時点で機械区分に残っているとみなす耐用年数（四半期数）。 */
+      readonly machineryRemainingLifeQuartersAtGameStart: number;
+    };
   };
 
   readonly quality: {
@@ -121,7 +147,15 @@ export const FINANCE_PARAMETERS_V1: FinanceParameters = {
     shortTermInterestRatePerQuarter: 0.022,
     longTermInterestRatePerQuarter: 0.018,
     incomeTaxRate: 0.2,
-    depreciationRatePerQuarter: 0.025,
+    existingAssetDepreciation: {
+      // 実装指示の暫定値: 既存資産の35%を建物・65%を機械とみなす。
+      buildingOpeningRatio: 0.35,
+      machineryOpeningRatio: 0.65,
+      // 建物25年（100四半期）のうち20年（80四半期）が残存、
+      // 機械10年（40四半期）のうち8年（32四半期）が残存、という想定。
+      buildingRemainingLifeQuartersAtGameStart: 80,
+      machineryRemainingLifeQuartersAtGameStart: 32,
+    },
   },
 
   quality: {
@@ -130,3 +164,21 @@ export const FINANCE_PARAMETERS_V1: FinanceParameters = {
 
   epsilonUsd: 0.01,
 };
+
+/**
+ * 【Phase 8B-2C】既存資産のbuildingOpeningRatio + machineryOpeningRatioが厳密に1に
+ * なっていることを検証する（浮動小数点誤差を許容するepsilon比較）。
+ * FINANCE_PARAMETERS_V1定義直後にモジュール読み込み時点で実行し、値の校正ミスを
+ * 即座に検知する（capex/parameters.tsのassertValidComponentRatiosと同じ方針）。
+ */
+const EXISTING_ASSET_RATIO_EPSILON = 1e-9;
+function assertValidExistingAssetRatios(p: FinanceParameters): void {
+  const { buildingOpeningRatio, machineryOpeningRatio } = p.finance.existingAssetDepreciation;
+  const sum = buildingOpeningRatio + machineryOpeningRatio;
+  if (Math.abs(sum - 1) > EXISTING_ASSET_RATIO_EPSILON) {
+    throw new FinanceValidationError(
+      `finance/parameters.ts: existingAssetDepreciation.buildingOpeningRatio(${buildingOpeningRatio}) + machineryOpeningRatio(${machineryOpeningRatio}) が1になりません（実際の合計: ${sum}）。`
+    );
+  }
+}
+assertValidExistingAssetRatios(FINANCE_PARAMETERS_V1);

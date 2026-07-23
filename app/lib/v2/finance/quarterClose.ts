@@ -17,11 +17,12 @@
 //   - 契約単価は契約後の原料価格変動で変更しない（契約実績のunitPriceをそのまま使う）。
 //   - 現金増減はCF（直接法）と完全に整合し、間接法照合も補助内訳として生成する。
 
-import { PeriodV2, nextPeriod } from "../core/period";
+import { PeriodV2, nextPeriod, INITIAL_PERIOD_V2 } from "../core/period";
 import { Product, DemandMarketId } from "../market/types";
 import { CompanyId } from "../sales/types";
 import { FinanceParameters } from "./parameters";
 import { amountFromPlainTonsAndUsdPerKg } from "./money";
+import { computeExistingAssetDepreciationUsd } from "./depreciation";
 import {
   AbsorptionVariableReconciliation,
   BalanceSheet,
@@ -243,11 +244,25 @@ interface ProductionCostingResult {
  *     （生産量が減っただけで固定費が消えない＝段階固定費の性質を保持）。
  *   - 廃棄損: バッチ別の変動製造原価単価 × 廃棄数量（固定費は含めない）。
  */
+/**
+ * 【Phase 8B-2C】当期減価償却費の4区分内訳（既存資産2区分＋新規capex資産2区分）。
+ * depreciationUsd引数（合計値）とは別に、ManufacturingCostBreakdownへ診断用の
+ * 内訳フィールドとして転記するためだけに渡す（生産原価の按分ロジック自体は
+ * 従来どおりdepreciationUsd合計値だけを使い、内訳では一切分岐しない）。
+ */
+interface DepreciationBreakdownUsd {
+  readonly existingAssetBuildingUsd: number;
+  readonly existingAssetMachineryUsd: number;
+  readonly capexAssetsBuildingUsd: number;
+  readonly capexAssetsMachineryUsd: number;
+}
+
 function computeProductionCosting(
   actuals: CompanyQuarterBusinessActuals,
   params: FinanceParameters,
   depreciationUsd: number,
-  processingRateByProduct: Readonly<Record<Product, number>>
+  processingRateByProduct: Readonly<Record<Product, number>>,
+  depreciationBreakdown: DepreciationBreakdownUsd
 ): ProductionCostingResult {
   const totalOriginalTons = actuals.batches.reduce((s, b) => s + b.originalTons, 0);
   const totalAdjustedTons = actuals.batches.reduce((s, b) => s + b.adjustedTons, 0);
@@ -468,6 +483,10 @@ function computeProductionCosting(
     utilityFixedCost: usd(utilityFixedCost),
     utilityVariableCost: usd(utilityVariableCost),
     depreciationCost: usd(depreciationUsd),
+    existingAssetBuildingDepreciationCost: usd(depreciationBreakdown.existingAssetBuildingUsd),
+    existingAssetMachineryDepreciationCost: usd(depreciationBreakdown.existingAssetMachineryUsd),
+    capexAssetsBuildingDepreciationCost: usd(depreciationBreakdown.capexAssetsBuildingUsd),
+    capexAssetsMachineryDepreciationCost: usd(depreciationBreakdown.capexAssetsMachineryUsd),
     reworkCost: usd(reworkCost),
   };
 
@@ -522,29 +541,52 @@ export function closeFinancialQuarter(
   const period = actuals.period;
   const companyId = actuals.companyId;
 
-  // --- 減価償却（定額法・純額フロア） ---
-  // 【Phase 8B-2A】capex指定時は、prev.fixedAssetsGrossのうち過去にcapex経由で
-  // 完成振替された未減価償却分（nonDepreciatingCapexGrossAtPeriodStartUsd）を
-  // 減価償却率の適用対象（レガシー資産分）から除外する（新規完成設備の減価償却が
-  // 未開始であることの構造的な保証。types.tsのCapexAdjustmentコメント参照）。
-  const legacyDepreciableGrossUsd = capex
+  // --- 減価償却（Phase 8B-2C: 既存資産2区分定額法＋新規capex資産2区分定額法） ---
+  // 【Phase 8B-2A由来の仕組みをそのまま流用】prev.fixedAssetsGrossのうち、capex
+  // 経由で完成済みの金額（nonDepreciatingCapexGrossAtPeriodStartUsd。全期間の
+  // 完成済み案件のcapitalizedAmountUsd合計）を除外すると、常に「ゲーム開始時点の
+  // 帳簿価額（＝各社の初期fixedAssetsGross）」そのものが復元される（capexの完成
+  // 振替がfixedAssetsGrossへ加算する額と、この除外額が恒等的に相殺するため）。
+  // これを既存資産2区分の配分基準額として使う（新規完成設備の減価償却が既存資産
+  // 側の計算に混入しないことの構造的な保証。types.tsのCapexAdjustmentコメント参照）。
+  const existingAssetOpeningGrossUsd = capex
     ? Math.max(0, (prev.fixedAssetsGross as number) - capex.nonDepreciatingCapexGrossAtPeriodStartUsd)
     : (prev.fixedAssetsGross as number);
   const fixedAssetsNetBefore = (prev.fixedAssetsGross as number) - (prev.accumulatedDepreciation as number);
-  const legacyDepreciationUsd = Math.min(
-    legacyDepreciableGrossUsd * params.finance.depreciationRatePerQuarter,
-    Math.max(0, fixedAssetsNetBefore)
-  );
-  // 【Phase 8B-2B】新規completed資産の定額法減価償却費（capex/capacityEffect.tsの
-  // computeCapexAssetsDepreciationUsdが算出済み。案件別にcapitalizedAmountUsd÷
-  // usefulLifeQuartersを稼働開始四半期から耐用年数分だけ計上する構造のため、
-  // 単独でも取得原価を超えない）。既存レガシー資産の定率法計算式（上記）は
-  // 一切変更せず、その計算結果へ単純加算するだけで両者を混在させない。
+  // 【重要】ゲーム開始四半期はどのシナリオでも共通の定数（scenario/scenarioEngine.ts
+  // のturnToPeriod(1)が常に2015Q1を返す。core/period.tsのINITIAL_PERIOD_V2と同一）。
+  // 会社別・セーブ別の開始四半期を別途永続化する必要はない。
+  const existingAssetDepreciation = computeExistingAssetDepreciationUsd(existingAssetOpeningGrossUsd, INITIAL_PERIOD_V2, period, params);
+  // 既存資産2区分の合計に対してのみ、旧来からの純額フロア（会社全体の期首純額を
+  // 超えて償却しない安全策）を適用する。新方式は建物・機械それぞれの配分額を
+  // 各コンポーネントの残存耐用年数でちょうど使い切る構造のため、通常はこのフロアが
+  // 効くことはない（極端なデータ不整合に対する防御としてのみ残す）。フロアが
+  // 効いた場合でも、建物・機械の診断内訳が常に合計値と一致するよう同じ比率で
+  // 按分する。
+  const existingAssetDepreciationUsd = Math.min(existingAssetDepreciation.totalUsd, Math.max(0, fixedAssetsNetBefore));
+  const existingAssetDepreciationScale =
+    existingAssetDepreciation.totalUsd > 0 ? existingAssetDepreciationUsd / existingAssetDepreciation.totalUsd : 0;
+  const existingAssetBuildingDepreciationUsd = existingAssetDepreciation.buildingUsd * existingAssetDepreciationScale;
+  const existingAssetMachineryDepreciationUsd = existingAssetDepreciation.machineryUsd * existingAssetDepreciationScale;
+  // 【Phase 8B-2C】新規completed資産の建物・機械コンポーネント別定額法減価償却費
+  // （capex/depreciation.tsのcomputeCapexComponentDepreciationUsdが算出済み。
+  // capitalizedAmountUsd×buildingRatio÷建物耐用年数、×machineryRatio÷機械耐用年数を
+  // 稼働開始四半期からそれぞれの耐用年数分だけ計上する構造のため、単独でも
+  // 取得原価の配分額を超えない）。既存資産2区分の計算式（上記）は一切変更せず、
+  // その計算結果へ単純加算するだけで両者を混在させない。
   const capexAssetsDepreciationUsd = capex ? capex.capexAssetsDepreciationUsd : 0;
-  const depreciationUsd = legacyDepreciationUsd + capexAssetsDepreciationUsd;
+  const capexAssetsBuildingDepreciationUsd = capex ? capex.capexAssetsBuildingDepreciationUsd : 0;
+  const capexAssetsMachineryDepreciationUsd = capex ? capex.capexAssetsMachineryDepreciationUsd : 0;
+  const depreciationUsd = existingAssetDepreciationUsd + capexAssetsDepreciationUsd;
+  const depreciationBreakdown: DepreciationBreakdownUsd = {
+    existingAssetBuildingUsd: existingAssetBuildingDepreciationUsd,
+    existingAssetMachineryUsd: existingAssetMachineryDepreciationUsd,
+    capexAssetsBuildingUsd: capexAssetsBuildingDepreciationUsd,
+    capexAssetsMachineryUsd: capexAssetsMachineryDepreciationUsd,
+  };
 
   // --- 生産原価計算 ---
-  const costing = computeProductionCosting(actuals, params, depreciationUsd, processingRateByProduct);
+  const costing = computeProductionCosting(actuals, params, depreciationUsd, processingRateByProduct, depreciationBreakdown);
 
   // --- 台帳の準備（前期繰越＋当期新規ロット） ---
   const contractById = new Map(actuals.contractTerms.map((c) => [c.contractId, c]));
