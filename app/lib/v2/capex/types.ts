@@ -240,10 +240,15 @@ export interface CapexQuarterResult {
   /** 当四半期の減価償却対象から除外するprev.fixedAssetsGrossの金額（前四半期までの完成済み分）。 */
   readonly nonDepreciatingCapexGrossAtPeriodStartUsd: number;
   /**
-   * 【Phase 8B-2B】当期の稼働開始済み新規completed資産ぶんの定額法減価償却費
-   * 合計（診断用。finance/のdepreciationCostは既存レガシー分とこの値の合算）。
+   * 【Phase 8B-2B、Phase 8B-2Cでコンポーネント別合算に変更】当期の稼働開始済み
+   * 新規completed資産ぶんの定額法減価償却費合計（建物＋機械。診断用。finance/の
+   * depreciationCostは既存資産2区分分とこの値の合算）。
    */
   readonly capexAssetsDepreciationUsd: number;
+  /** 【Phase 8B-2C】上記のうち建物・構築物コンポーネント分のみ（診断用）。 */
+  readonly capexAssetsBuildingDepreciationUsd: number;
+  /** 【Phase 8B-2C】上記のうち機械・設備コンポーネント分のみ（診断用）。 */
+  readonly capexAssetsMachineryDepreciationUsd: number;
   /** 【Phase 8B-2B】当期の稼働中completed資産ぶんの固定保守費合計（診断用）。 */
   readonly capexMaintenanceCostUsd: number;
 }
