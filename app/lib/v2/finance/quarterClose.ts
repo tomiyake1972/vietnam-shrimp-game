@@ -91,6 +91,20 @@ export interface ProductionBatchActual {
   readonly lotId?: string;
   /** ロットの格落ち率（Phase 7AのFinishedGoodsLotQualityInfo.downgradeRatio）。ロットがない場合は0。 */
   readonly downgradeRatio: number;
+  /**
+   * 【商品別実労務配分（feature/v2-labor-cost-allocation-bridge）】
+   * このバッチ（会社×工場×商品）へ実際に配分された常用ワーカー人数
+   * （production/allocation.tsのProductionAllocationEntry.labor.assignedRegularHeadcountに対応）。
+   * 単位：人。assignedTemporaryHeadcount・appliedOvertimeRateと3項目セットで、
+   * 指定するなら3つとも指定し、省略するなら3つとも省略する（一部のみの指定は
+   * computeProductionCostingがFinanceValidationErrorとして拒否する）。
+   * 3項目とも省略した場合は、後方互換のため従来の数量シェア按分にフォールバックする。
+   */
+  readonly assignedRegularHeadcount?: number;
+  /** このバッチへ実際に配分された臨時ワーカー人数（単位：人）。上記3項目セットの一部。 */
+  readonly assignedTemporaryHeadcount?: number;
+  /** このバッチへの適用後残業率（単位：比率、0以上。上限クリップは生産層で適用済み）。上記3項目セットの一部。 */
+  readonly appliedOvertimeRate?: number;
 }
 
 /** 1社・1四半期ぶんの事業実績（財務決算への入力）。 */
@@ -149,6 +163,39 @@ function assertFiniteNonNegative(n: number, label: string): number {
   return Math.max(0, n);
 }
 
+/**
+ * 【商品別実労務配分】assignedRegularHeadcount/assignedTemporaryHeadcount/appliedOvertimeRateの
+ * 実データが使えるかどうかを判定する。3項目は必ずセットで指定されている必要があり
+ * （バッチごとに3つとも存在するか、3つとも存在しないかのいずれか）、一部のみの指定は
+ * 不完全な実績データとして拒否する。全バッチが3項目とも省略していれば、既存呼び出し元
+ * との後方互換のため"legacy"（従来の数量シェア按分）を返す。
+ */
+export function resolveLaborAllocationMode(batches: readonly ProductionBatchActual[]): "actual" | "legacy" {
+  let anyComplete = false;
+  let anyMissing = false;
+  for (const b of batches) {
+    const present = [b.assignedRegularHeadcount, b.assignedTemporaryHeadcount, b.appliedOvertimeRate].filter((v) => v !== undefined).length;
+    if (present === 3) {
+      anyComplete = true;
+      assertFiniteNonNegative(b.assignedRegularHeadcount as number, `バッチ ${b.batchId} の assignedRegularHeadcount`);
+      assertFiniteNonNegative(b.assignedTemporaryHeadcount as number, `バッチ ${b.batchId} の assignedTemporaryHeadcount`);
+      assertFiniteNonNegative(b.appliedOvertimeRate as number, `バッチ ${b.batchId} の appliedOvertimeRate`);
+    } else if (present === 0) {
+      anyMissing = true;
+    } else {
+      throw new FinanceValidationError(
+        `バッチ ${b.batchId}: assignedRegularHeadcount/assignedTemporaryHeadcount/appliedOvertimeRateは3項目すべて指定するか、すべて省略する必要があります（実際の指定数: ${present}）。`
+      );
+    }
+  }
+  if (anyComplete && anyMissing) {
+    throw new FinanceValidationError(
+      "一部の生産バッチにのみ実労務配分データ（assignedRegularHeadcount等）が存在します。会社×四半期の全バッチで一貫している必要があります。"
+    );
+  }
+  return anyComplete ? "actual" : "legacy";
+}
+
 interface ProductionCostingResult {
   readonly newLedgerEntries: readonly FinishedGoodsCostLedgerEntry[];
   /** 廃棄数量の変動製造原価相当（品質廃棄損）。 */
@@ -166,6 +213,14 @@ interface ProductionCostingResult {
   readonly reworkTonsTotal: number;
   /** 商品別の当期発生変動品質費（再加工費＋品質廃棄損。商品別限界利益の帰属用）。 */
   readonly variableQualityCostByProduct: ReadonlyMap<Product, number>;
+  /**
+   * 【商品別実労務配分】当期のovertimeCost算定に実際に使われた「労務相当量」。
+   * "actual"モード: Σ_b(assignedRegularHeadcount_b × appliedOvertimeRate_b)。
+   * "legacy"モード: actuals.appliedOvertimeRate × actuals.regularHeadcount（従来どおり）。
+   * overtimeCost = overtimeLaborEquivalent × regularWorkerSalaryUsdPerQuarter × overtimePremiumFactor
+   * が両モードで厳密に成り立つ（管理会計コスト記録のdriverQuantity/driverUnitRateに使う）。
+   */
+  readonly overtimeLaborEquivalent: number;
 }
 
 /**
@@ -191,16 +246,51 @@ function computeProductionCosting(
   const totalAdjustedTons = actuals.batches.reduce((s, b) => s + b.adjustedTons, 0);
 
   // --- 会社レベルの当期発生製造費 ---
+  // 【商品別実労務配分（feature/v2-labor-cost-allocation-bridge, 2コミット目）】
+  // assignedRegularHeadcount/assignedTemporaryHeadcount/appliedOvertimeRateが全バッチで
+  // 揃っている場合（"actual"モード）、残業費総額はバッチ別の実配属人数×適用残業率を
+  // 直接積み上げて算出する：
+  //   overtimeWeight_b = assignedRegularHeadcount_b × appliedOvertimeRate_b
+  //   overtimeLaborEquivalent = Σ_b overtimeWeight_b
+  //   overtimeCost_total = overtimeLaborEquivalent × regularWorkerSalaryUsdPerQuarter × overtimePremiumFactor
+  // 「会社全体の残業率（生産量加重平均）×全社regularHeadcount」という従来式は、
+  // 生産量加重平均だった残業率を人員数ベースの総額へ掛け合わせる際に単位が不整合になり、
+  // 商品別残業率が乖離するケース（overtimeRateOverride）で残業費総額を誤らせるため採用しない。
+  // 未配属・遊休の常用人員には残業は発生しない、という前提をバッチ別の実配属人数を
+  // 直接使うことで保証する（一方、正社員給与そのものは全常用人員（遊休含む）に対して
+  // 発生するため、regularLaborCostは従来どおりactuals.regularHeadcount基準のまま変更しない）。
+  // 3項目が全バッチで欠落している場合（"legacy"モード）は、後方互換のため従来の
+  // 会社全体平均残業率×全社regularHeadcountの式をそのまま使う。
+  const laborMode = resolveLaborAllocationMode(actuals.batches);
+
   const regularLaborCost = actuals.regularHeadcount * params.labor.regularWorkerSalaryUsdPerQuarter;
   const temporaryWorkerCost = actuals.temporaryHeadcount * params.labor.temporaryWorkerCostUsdPerQuarter;
-  const overtimeCost =
-    actuals.regularHeadcount * params.labor.regularWorkerSalaryUsdPerQuarter * actuals.appliedOvertimeRate * params.labor.overtimePremiumFactor;
+
+  // バッチ別の残業労務相当量（overtimeWeight）。"legacy"モードでは使わないため0にしておく
+  // （後段のallocOvertimeCost算出はlaborModeで明示的に分岐するので、ここが0でも legacy側の
+  // 計算には影響しない）。
+  const overtimeWeightByBatch = actuals.batches.map((b) =>
+    laborMode === "actual" ? (b.assignedRegularHeadcount as number) * (b.appliedOvertimeRate as number) : 0
+  );
+  const actualModeOvertimeLaborEquivalent = overtimeWeightByBatch.reduce((s, w) => s + w, 0);
+  // 管理会計コスト記録（driverQuantity等）向けに、実際にovertimeCostの算定へ使った
+  // 労務相当量を両モードで統一的に持つ（overtimeCost = これ×単価×割増率 が常に成り立つ）。
+  const overtimeLaborEquivalent =
+    laborMode === "actual" ? actualModeOvertimeLaborEquivalent : actuals.appliedOvertimeRate * actuals.regularHeadcount;
+
+  const overtimeCost = overtimeLaborEquivalent * params.labor.regularWorkerSalaryUsdPerQuarter * params.labor.overtimePremiumFactor;
+
   const factoryFixedCost = actuals.activeFactoryCount * params.manufacturing.factoryFixedCostUsdPerQuarter;
   const utilityFixedCost = actuals.activeFactoryCount * params.manufacturing.factoryUtilityFixedUsdPerQuarter;
   const utilityVariableCost = totalOriginalTons * params.manufacturing.factoryUtilityVariableUsdPerTon;
 
   const variableLaborTotal = temporaryWorkerCost + overtimeCost;
-  const fixedManufacturingTotal = regularLaborCost + factoryFixedCost + utilityFixedCost + depreciationUsd;
+  // 固定製造費のうち、常用労務費（regularLaborCost）は実配属人数ベースで、それ以外
+  // （工場固定費・固定ユーティリティ・減価償却＝nonLaborFixedManufacturingTotal）は
+  // 従来どおり数量調整後シェア（adjustedShare）で配賦する（固定製造費の按分基準を
+  // 労務部分とそれ以外で明示的に分離する）。
+  const nonLaborFixedManufacturingTotal = factoryFixedCost + utilityFixedCost + depreciationUsd;
+  const fixedManufacturingTotal = regularLaborCost + nonLaborFixedManufacturingTotal;
 
   // --- 加工費（商品別・変動費）。基準（HOSO水準）＋PD/VAP追加分に分解して記録する ---
   const hosoRate = processingRateByProduct.hoso;
@@ -245,9 +335,33 @@ function computeProductionCosting(
     unabsorbedVariable = variableLaborTotal + utilityVariableCost;
   }
 
-  for (const b of actuals.batches) {
+  // --- バッチ別の配賦シェア ---
+  // 常用労務費（固定費のうち労務部分）: "actual"モードでは実配属人数の比、
+  // 実配属人数の合計が0（全バッチ未配属）の場合は数量調整後シェア(adjustedShare)へフォールバック。
+  const totalAssignedRegular =
+    laborMode === "actual" ? actuals.batches.reduce((s, b) => s + (b.assignedRegularHeadcount as number), 0) : 0;
+  // 臨時ワーカー費（変動費の一部）: 同様に実配属人数の比、フォールバックは品質調整前数量シェア(originalShare)。
+  const totalAssignedTemporary =
+    laborMode === "actual" ? actuals.batches.reduce((s, b) => s + (b.assignedTemporaryHeadcount as number), 0) : 0;
+
+  for (let batchIndex = 0; batchIndex < actuals.batches.length; batchIndex++) {
+    const b = actuals.batches[batchIndex];
     const originalShare = totalOriginalTons > QUANTITY_EPSILON ? b.originalTons / totalOriginalTons : 0;
-    const allocVariableLabor = variableLaborTotal * originalShare;
+    const adjustedShare = totalAdjustedTons > QUANTITY_EPSILON ? b.adjustedTons / totalAdjustedTons : 0;
+
+    const temporaryWorkerShare =
+      laborMode === "actual" && totalAssignedTemporary > QUANTITY_EPSILON
+        ? (b.assignedTemporaryHeadcount as number) / totalAssignedTemporary
+        : originalShare;
+    const allocTemporaryWorkerCost = temporaryWorkerCost * temporaryWorkerShare;
+    // 残業費はバッチ別overtimeWeightから直接計算する（総額をΣ overtimeWeightで割ってから
+    // 掛け直すのではなく、各バッチのoverwtimeWeight_b×単価×割増率を直接積み上げることで、
+    // Σ allocOvertimeCost_b = overtimeCost_total（会社全体の残業費総額）を計算誤差なく保証する）。
+    const allocOvertimeCost =
+      laborMode === "actual"
+        ? overtimeWeightByBatch[batchIndex] * params.labor.regularWorkerSalaryUsdPerQuarter * params.labor.overtimePremiumFactor
+        : overtimeCost * originalShare;
+    const allocVariableLabor = allocTemporaryWorkerCost + allocOvertimeCost;
     const allocVariableUtility = utilityVariableCost * originalShare;
     const processingCost = b.originalTons * processingRateByProduct[b.product];
     const batchVariableTotal = b.rawMaterialCostUsd + processingCost + allocVariableLabor + allocVariableUtility;
@@ -260,8 +374,13 @@ function computeProductionCosting(
     // 在庫化される変動費 = batchVariableTotal − batchDiscardLoss（廃棄分を除いた残り）。
     // 下のunitCostは各構成要素へ良品率(goodRatio)を掛けることで、この合計を
     // adjustedTonsあたりへ厳密に展開している。
-    const adjustedShare = totalAdjustedTons > QUANTITY_EPSILON ? b.adjustedTons / totalAdjustedTons : 0;
-    const allocFixed = fixedManufacturingTotal * adjustedShare;
+    const regularLaborShare =
+      laborMode === "actual" && totalAssignedRegular > QUANTITY_EPSILON
+        ? (b.assignedRegularHeadcount as number) / totalAssignedRegular
+        : adjustedShare;
+    const allocRegularLaborCost = regularLaborCost * regularLaborShare;
+    const allocNonLaborFixed = nonLaborFixedManufacturingTotal * adjustedShare;
+    const allocFixed = allocRegularLaborCost + allocNonLaborFixed;
 
     if (b.adjustedTons > QUANTITY_EPSILON && b.lotId !== undefined) {
       const perTon = (v: number) => v / b.adjustedTons;
@@ -272,10 +391,10 @@ function computeProductionCosting(
         processingPerTon: perTon(processingCost * goodRatio),
         laborVariablePerTon: perTon(allocVariableLabor * goodRatio),
         utilityVariablePerTon: perTon(allocVariableUtility * goodRatio),
-        laborFixedPerTon: perTon(allocFixed * (fixedManufacturingTotal > 0 ? regularLaborCost / fixedManufacturingTotal : 0)),
-        factoryFixedPerTon: perTon(allocFixed * (fixedManufacturingTotal > 0 ? factoryFixedCost / fixedManufacturingTotal : 0)),
-        utilityFixedPerTon: perTon(allocFixed * (fixedManufacturingTotal > 0 ? utilityFixedCost / fixedManufacturingTotal : 0)),
-        depreciationPerTon: perTon(allocFixed * (fixedManufacturingTotal > 0 ? depreciationUsd / fixedManufacturingTotal : 0)),
+        laborFixedPerTon: perTon(allocRegularLaborCost),
+        factoryFixedPerTon: perTon(allocNonLaborFixed * (nonLaborFixedManufacturingTotal > 0 ? factoryFixedCost / nonLaborFixedManufacturingTotal : 0)),
+        utilityFixedPerTon: perTon(allocNonLaborFixed * (nonLaborFixedManufacturingTotal > 0 ? utilityFixedCost / nonLaborFixedManufacturingTotal : 0)),
+        depreciationPerTon: perTon(allocNonLaborFixed * (nonLaborFixedManufacturingTotal > 0 ? depreciationUsd / nonLaborFixedManufacturingTotal : 0)),
       };
       fixedAbsorbedIntoInventory += allocFixed;
       newLedgerEntries.push({
@@ -329,6 +448,7 @@ function computeProductionCosting(
     discardTonsTotal,
     reworkTonsTotal,
     variableQualityCostByProduct,
+    overtimeLaborEquivalent,
   };
 }
 
@@ -1064,8 +1184,11 @@ function buildCostRecords(
       fixedPortion: zero,
       variablePortion: m.overtimeCost,
       driver: "overtimeHours",
-      driverQuantity: actuals.appliedOvertimeRate * actuals.regularHeadcount,
-      driverUnitRate: rate(m.overtimeCost as number, actuals.appliedOvertimeRate * actuals.regularHeadcount),
+      // 【商品別実労務配分】"actual"モードでは実配属人数×適用残業率の合計（労務相当量）、
+      // "legacy"モードでは従来どおり会社全体平均残業率×全社regularHeadcountを使う。
+      // いずれのモードでも m.overtimeCost = driverQuantity × 単価 × 割増率 が厳密に成り立つ。
+      driverQuantity: costing.overtimeLaborEquivalent,
+      driverUnitRate: rate(m.overtimeCost as number, costing.overtimeLaborEquivalent),
       period,
       shortTermReducibility: "reducible",
       sourceRef: `companyLoadMetrics.overtimeRate:${period}`,

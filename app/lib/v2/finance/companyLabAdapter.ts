@@ -13,10 +13,16 @@ import { unwrapUnit } from "../core/units";
 import { BatchQualityAdjustment } from "../quality/types";
 import { RawMaterialLot } from "../rawMaterials/types";
 import { CompanyId, SalesContract } from "../sales/types";
-import { FinishedGoodsLot, FinishedGoodsUsageRecord, ProductionBatch, WorkerAssignment } from "../production/types";
+import { FinishedGoodsLot, FinishedGoodsUsageRecord, ProductionAllocationEntry, ProductionBatch, WorkerAssignment } from "../production/types";
 import { amountFromTonsAndUnitPrice } from "./money";
 import { rawMaterialInventoryValueUsd } from "./initialState";
-import { CompanyQuarterBusinessActuals, ContractTermActual, FulfillmentUsageActual, ProductionBatchActual } from "./quarterClose";
+import {
+  CompanyQuarterBusinessActuals,
+  ContractTermActual,
+  FulfillmentUsageActual,
+  ProductionBatchActual,
+  resolveLaborAllocationMode,
+} from "./quarterClose";
 import { FinanceValidationError } from "./types";
 
 /** アダプターへの入力（会社ラボの1四半期処理内で入手可能な実績データの参照一式）。 */
@@ -29,6 +35,15 @@ export interface CompanyActualsSource {
   readonly contracts: readonly SalesContract[];
   /** 当期の品質調整後バッチ（record.batches）。 */
   readonly adjustedBatches: readonly ProductionBatch[];
+  /**
+   * 【商品別実労務配分（feature/v2-labor-cost-allocation-bridge）】
+   * 当期の生産配分結果（productionRecord.allocation.entries、全社ぶんでよい）。
+   * companyId+factoryId+productで対応するadjustedBatchesの各要素へ、実配分常用/臨時ワーカー
+   * 人数・適用残業率を結合するために使う。省略時（undefined）は既存呼び出し元との後方互換のため、
+   * ProductionBatchActualの労務3項目を一切付与せず、finance層は従来の数量シェア按分へ
+   * フォールバックする。
+   */
+  readonly productionAllocationEntries?: readonly ProductionAllocationEntry[];
   /** 当期の品質調整結果（record.qualityAdjustments）。 */
   readonly qualityAdjustments: readonly BatchQualityAdjustment[];
   /** 当期の新規完成品ロット（品質情報つき）。 */
@@ -99,6 +114,45 @@ export function buildCompanyQuarterBusinessActuals(src: CompanyActualsSource): C
     lotByFactoryProduct.set(`${lot.factoryId}::${lot.product}`, lot);
   }
 
+  // --- 【商品別実労務配分】productionAllocationEntriesを当社ぶんへ絞り込み、factoryId::product
+  // をキーとする参照テーブルを作る。現行の意思決定仕様では1社1商品につき生産計画は1件のみのため
+  // このキーは一意になるはずだが、将来複数工場・複数計画対応が入った場合に黙って先頭要素を使う
+  // ことのないよう、重複キーは明示的にエラーとする。
+  const laborEntryByFactoryProduct = new Map<string, ProductionAllocationEntry>();
+  if (src.productionAllocationEntries !== undefined) {
+    for (const e of src.productionAllocationEntries) {
+      if (e.companyId !== companyId) continue;
+      const key = `${e.factoryId}::${e.product}`;
+      if (laborEntryByFactoryProduct.has(key)) {
+        throw new FinanceValidationError(
+          `会社 ${companyId} の生産配分エントリに factoryId+product の重複があります（${key}）。1社1商品につき生産計画は1件である前提が崩れています。`
+        );
+      }
+      laborEntryByFactoryProduct.set(key, e);
+    }
+  }
+
+  // 【商品別実労務配分】productionAllocationEntriesを結合する場合、adjustedBatches側に
+  // factoryId+productが重複するバッチが2件以上あると、両方が同じlaborEntryByFactoryProduct
+  // の1エントリを参照してしまい、同じ実配属人数が2バッチぶん二重に計上される
+  // （resolveLaborAllocationMode/computeProductionCostingの合計配属人数が水増しされ、
+  // 商品別配分シェアの分母が狂う）。現行の意思決定仕様では1社1商品につき生産バッチは
+  // 1件のみのはずだが、これも将来の複数工場・複数計画対応や上流の不具合に備え、
+  // 労務データを結合する経路でのみ明示的に検出する。
+  if (src.productionAllocationEntries !== undefined) {
+    const seenBatchKeys = new Set<string>();
+    for (const b of src.adjustedBatches) {
+      if (b.companyId !== companyId) continue;
+      const key = `${b.factoryId}::${b.product}`;
+      if (seenBatchKeys.has(key)) {
+        throw new FinanceValidationError(
+          `会社 ${companyId} の生産バッチに factoryId+product の重複があります（${key}）。1社1商品につき生産バッチは1件である前提が崩れており、同じ生産配分エントリの実労務データが複数バッチへ二重に結合されてしまいます。`
+        );
+      }
+      seenBatchKeys.add(key);
+    }
+  }
+
   const batches: ProductionBatchActual[] = src.adjustedBatches
     .filter((b) => b.companyId === companyId)
     .map((b) => {
@@ -132,6 +186,25 @@ export function buildCompanyQuarterBusinessActuals(src: CompanyActualsSource): C
             ? downgradeTons / adjustedTons
             : 0;
 
+      // 【商品別実労務配分】productionAllocationEntriesが渡されている場合のみ、対応する
+      // labor情報（実配分常用/臨時ワーカー人数・適用残業率）を結合する。省略時は3項目とも
+      // 付与せず、finance層側のフォールバック（従来の数量シェア按分）に委ねる。
+      let laborFields: Pick<ProductionBatchActual, "assignedRegularHeadcount" | "assignedTemporaryHeadcount" | "appliedOvertimeRate"> = {};
+      if (src.productionAllocationEntries !== undefined) {
+        const key = `${b.factoryId}::${b.product}`;
+        const entry = laborEntryByFactoryProduct.get(key);
+        if (!entry) {
+          throw new FinanceValidationError(
+            `生産バッチ ${b.batchId}（${key}）に対応する生産配分エントリ（productionAllocationEntries）が見つかりません。productionRecord.allocation.entriesをそのまま渡してください。`
+          );
+        }
+        laborFields = {
+          assignedRegularHeadcount: entry.labor.assignedRegularHeadcount,
+          assignedTemporaryHeadcount: entry.labor.assignedTemporaryHeadcount,
+          appliedOvertimeRate: unwrapUnit(entry.labor.appliedOvertimeRate),
+        };
+      }
+
       return {
         batchId: b.batchId,
         factoryId: b.factoryId,
@@ -145,8 +218,17 @@ export function buildCompanyQuarterBusinessActuals(src: CompanyActualsSource): C
         rawMaterialCostBySourceUsd: { domestic, imported, aquaculture },
         lotId: lot?.lotId,
         downgradeRatio,
+        ...laborFields,
       };
     });
+
+  // 【商品別実労務配分】組み立てた labor 3項目（assignedRegularHeadcount等）が
+  // 「全バッチで3つとも揃っているか、3つとも無いか」の一貫した状態であることを、
+  // ここで検証しておく（quarterClose.ts側の会計計算がこのデータを使う前に、アダプター
+  // 自身の組み立てミスを早期に検出するため。resolveLaborAllocationModeは純粋関数で
+  // 副作用を持たず、ここでの呼び出しはvalidationのみが目的。戻り値のmodeはまだ
+  // 会計計算には使われない）。
+  resolveLaborAllocationMode(batches);
 
   // --- 当期の原料購買（実ロット準拠） ---
   // 初期フィクスチャの原料ロットはsource="domestic"・inboundPeriod=開始四半期で
