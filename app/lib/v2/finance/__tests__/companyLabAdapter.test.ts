@@ -165,6 +165,25 @@ test("validation B: factoryId+productが重複するproductionAllocationEntryが
   );
 });
 
+test("validation C: factoryId+productが重複する生産バッチ（adjustedBatches）が2件あるとFinanceValidationError（同じ配分エントリが二重結合されるのを防ぐ）", () => {
+  const dup1 = makeProductionBatch({ batchId: "b-hoso-1", factoryId: "BAL-F1", product: "hoso" });
+  const dup2 = makeProductionBatch({ batchId: "b-hoso-2", factoryId: "BAL-F1", product: "hoso" });
+  const entry = makeAllocationEntry({ product: "hoso" });
+  assert.throws(
+    () => buildCompanyQuarterBusinessActuals(makeSource({ adjustedBatches: [dup1, dup2], productionAllocationEntries: [entry] })),
+    FinanceValidationError
+  );
+});
+
+test("validation C(補): productionAllocationEntriesを渡さない経路では、重複バッチがあってもこのチェックは発生しない（労務結合が起きないため対象外）", () => {
+  const dup1 = makeProductionBatch({ batchId: "b-hoso-1", factoryId: "BAL-F1", product: "hoso" });
+  const dup2 = makeProductionBatch({ batchId: "b-hoso-2", factoryId: "BAL-F1", product: "hoso" });
+  const actuals = buildCompanyQuarterBusinessActuals(
+    makeSource({ adjustedBatches: [dup1, dup2], productionAllocationEntries: undefined })
+  );
+  assert.equal(actuals.batches.length, 2);
+});
+
 // --- 統合確認: 実際のcompanyLab実行経路（runner.ts）を模したケースが常に'actual'モードへ解決されること ---
 //
 // runner.tsはproductionRecord.allocation.entries（型上、常に存在しoptionalではない。各エントリの

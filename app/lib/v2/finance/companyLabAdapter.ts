@@ -132,6 +132,27 @@ export function buildCompanyQuarterBusinessActuals(src: CompanyActualsSource): C
     }
   }
 
+  // 【商品別実労務配分】productionAllocationEntriesを結合する場合、adjustedBatches側に
+  // factoryId+productが重複するバッチが2件以上あると、両方が同じlaborEntryByFactoryProduct
+  // の1エントリを参照してしまい、同じ実配属人数が2バッチぶん二重に計上される
+  // （resolveLaborAllocationMode/computeProductionCostingの合計配属人数が水増しされ、
+  // 商品別配分シェアの分母が狂う）。現行の意思決定仕様では1社1商品につき生産バッチは
+  // 1件のみのはずだが、これも将来の複数工場・複数計画対応や上流の不具合に備え、
+  // 労務データを結合する経路でのみ明示的に検出する。
+  if (src.productionAllocationEntries !== undefined) {
+    const seenBatchKeys = new Set<string>();
+    for (const b of src.adjustedBatches) {
+      if (b.companyId !== companyId) continue;
+      const key = `${b.factoryId}::${b.product}`;
+      if (seenBatchKeys.has(key)) {
+        throw new FinanceValidationError(
+          `会社 ${companyId} の生産バッチに factoryId+product の重複があります（${key}）。1社1商品につき生産バッチは1件である前提が崩れており、同じ生産配分エントリの実労務データが複数バッチへ二重に結合されてしまいます。`
+        );
+      }
+      seenBatchKeys.add(key);
+    }
+  }
+
   const batches: ProductionBatchActual[] = src.adjustedBatches
     .filter((b) => b.companyId === companyId)
     .map((b) => {

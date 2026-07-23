@@ -703,6 +703,30 @@ test("労務橋渡しV-3: 一部のバッチのみ3項目が揃い、他のバ�
   assert.throws(() => resolveLaborAllocationMode([complete, missing]), FinanceValidationError);
 });
 
+test("労務橋渡しV-3b: 3項目とも有限値・非負値でなければFinanceValidationError（NaN・Infinity・負値を個別に拒否する）", () => {
+  const nanRegular = makeBatch({ assignedRegularHeadcount: NaN, assignedTemporaryHeadcount: 0, appliedOvertimeRate: 0.09 });
+  assert.throws(() => resolveLaborAllocationMode([nanRegular]), FinanceValidationError);
+
+  const infiniteTemporary = makeBatch({ assignedRegularHeadcount: 600, assignedTemporaryHeadcount: Infinity, appliedOvertimeRate: 0.09 });
+  assert.throws(() => resolveLaborAllocationMode([infiniteTemporary]), FinanceValidationError);
+
+  const negativeOvertimeRate = makeBatch({ assignedRegularHeadcount: 600, assignedTemporaryHeadcount: 0, appliedOvertimeRate: -0.01 });
+  assert.throws(() => resolveLaborAllocationMode([negativeOvertimeRate]), FinanceValidationError);
+
+  const negativeRegular = makeBatch({ assignedRegularHeadcount: -1, assignedTemporaryHeadcount: 0, appliedOvertimeRate: 0.09 });
+  assert.throws(() => resolveLaborAllocationMode([negativeRegular]), FinanceValidationError);
+});
+
+test("労務橋渡しV-3c: 残業率（appliedOvertimeRate）自体の上限値は財務層では検証しない（生産層で既にクリップ済みという設計を踏襲し、有限・非負であれば大きな値もそのまま受理する）", () => {
+  // production/loadMetrics.ts等の生産層で残業率の上限クリップは既に適用済みという設計
+  // （ProductionBatchActual.appliedOvertimeRateのJSDoc「上限クリップは生産層で適用済み」）
+  // のため、財務層(resolveLaborAllocationMode/assertFiniteNonNegative)はここでは上限を
+  // 設けない。有限・非負である限り、たとえ非現実的に大きい値でもエラーにはならないことを
+  // 明示的に固定する（財務層が誤って独自の上限を持ち込んでいないことの確認）。
+  const largeRate = makeBatch({ assignedRegularHeadcount: 600, assignedTemporaryHeadcount: 0, appliedOvertimeRate: 5.0 });
+  assert.doesNotThrow(() => resolveLaborAllocationMode([largeRate]));
+});
+
 test("労務橋渡しV-4: 実労務データ（assignedRegularHeadcount等）を渡しても、このコミット時点ではcloseFinancialQuarterの計算結果は従来と完全に同一（配賦式はまだ未変更）", () => {
   const legacyResult = close(makeState(), makeActuals());
   const withLaborData = close(
@@ -1155,4 +1179,133 @@ test("労務配分V2-8: 労働集約度が商品ごとに異なる場合（HOSO�
   assert.ok(Math.abs(pd / hoso - 3) < 0.01, `PD/HOSO比 ${pd / hoso} ≠ 3`);
   assert.ok(Math.abs(vap / hoso - 7) < 0.01, `VAP/HOSO比 ${vap / hoso} ≠ 7`);
   // 総原価（rawMaterialPerTon等を含むtotalUnitCostPerTon）の順位はここでは主張しない。
+});
+
+test("労務配分V2-9: 商品別の実労務単位原価がFinishedGoodsCostLedgerEntry.unitCostへ正しく入り、販売分はCOGSへ・未販売分は同じ単価のまま期末完成品在庫へ、それぞれ新方式どおりに流れる", () => {
+  // HOSO: 0.1人/t（1000t生産に100人配属、臨時0、残業0%）
+  // VAP : 0.7人/t（500t生産に350人配属、臨時100人全員配属、残業率20%）→ HOSOの7倍の労働集約度
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 1000,
+    adjustedTons: 1000,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 100,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 500,
+    adjustedTons: 500,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 350,
+    assignedTemporaryHeadcount: 100,
+    appliedOvertimeRate: 0.2,
+  });
+
+  const { result, nextState } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [
+        { contractId: "C-HOSO", lotId: "LOT-HOSO", product: "hoso", quantityTons: 600 },
+        { contractId: "C-VAP", lotId: "LOT-VAP", product: "vap", quantityTons: 300 },
+      ],
+      contractTerms: [
+        { contractId: "C-HOSO", market: "US", product: "hoso", unitPriceUsdPerKg: 5.0 },
+        { contractId: "C-VAP", market: "US", product: "vap", unitPriceUsdPerKg: 8.0 },
+      ],
+      batches: [hosoBatch, vapBatch],
+      regularHeadcount: 450, // 100+350、遊休なし
+      temporaryHeadcount: 100, // 配属合計と一致、遊休なし
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [
+        { lotId: "LOT-HOSO", quantityTons: 600 },
+        { lotId: "LOT-VAP", quantityTons: 300 },
+      ],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 400, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 200, expired: false },
+      ],
+    })
+  );
+
+  // --- 1. 新方式どおりの期待単位原価（労務部分）を手計算し、台帳(unitCost)と一致することを確認 ---
+  // regularLaborCost_total = 450×1000 = 450,000。配属人数シェア: HOSO 100/450, VAP 350/450。
+  const expectedRegularLaborHoso = 450_000 * (100 / 450); // = 100,000
+  const expectedRegularLaborVap = 450_000 * (350 / 450); // = 350,000
+  // temporaryWorkerCost_total = 100×800 = 80,000。配属人数シェア: HOSO 0/100, VAP 100/100。
+  const expectedTempVap = 80_000; // HOSOは0
+  // overtimeWeight: HOSO=100×0=0, VAP=350×0.2=70 → overtimeCost_total=70×1000×1.5=105,000。
+  const expectedOvertimeVap = 70 * SALARY * OT_PREMIUM; // = 105,000
+
+  const expectedLaborFixedHoso = expectedRegularLaborHoso / 1000; // 100
+  const expectedLaborFixedVap = expectedRegularLaborVap / 500; // 700
+  const expectedLaborVariableHoso = 0;
+  const expectedLaborVariableVap = (expectedTempVap + expectedOvertimeVap) / 500; // (80,000+105,000)/500 = 370
+
+  const hosoEntry = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-HOSO")!;
+  const vapEntry = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-VAP")!;
+  assert.ok(Math.abs((hosoEntry.unitCost.laborFixedPerTon as number) - expectedLaborFixedHoso) < EPS);
+  assert.ok(Math.abs((hosoEntry.unitCost.laborVariablePerTon as number) - expectedLaborVariableHoso) < EPS);
+  assert.ok(Math.abs((vapEntry.unitCost.laborFixedPerTon as number) - expectedLaborFixedVap) < EPS);
+  assert.ok(Math.abs((vapEntry.unitCost.laborVariablePerTon as number) - expectedLaborVariableVap) < EPS);
+
+  // --- 2. 販売分（HOSO 600t、VAP 300t）のCOGSが、期待単位原価×販売数量と一致することを確認 ---
+  // costOfSales.laborCostは全社合算値（販売分の変動労務＋固定労務の配賦）。
+  const expectedSoldLaborHoso = (expectedLaborFixedHoso + expectedLaborVariableHoso) * 600; // 60,000
+  const expectedSoldLaborVap = (expectedLaborFixedVap + expectedLaborVariableVap) * 300; // 321,000
+  const expectedSoldLaborTotal = expectedSoldLaborHoso + expectedSoldLaborVap; // 381,000
+  assert.ok(
+    Math.abs((result.profitAndLoss.costOfSales.laborCost as number) - expectedSoldLaborTotal) < EPS,
+    `COGS労務費 ${result.profitAndLoss.costOfSales.laborCost} ≠ 期待値 ${expectedSoldLaborTotal}`
+  );
+
+  // --- 3. 未販売分（HOSO 400t、VAP 200t）が、同じ単位原価のまま期末完成品在庫に残ることを確認 ---
+  assert.equal(hosoEntry.remainingQuantity, 400);
+  assert.equal(vapEntry.remainingQuantity, 200);
+  const expectedEndingLaborHoso = (expectedLaborFixedHoso + expectedLaborVariableHoso) * 400; // 40,000
+  const expectedEndingLaborVap = (expectedLaborFixedVap + expectedLaborVariableVap) * 200; // 214,000
+  const expectedEndingLaborTotal = expectedEndingLaborHoso + expectedEndingLaborVap; // 254,000
+  // 会社全体の完成品在庫金額（result.balanceSheet.finishedGoodsInventory）は原料費等も含むため、
+  // 台帳から労務相当分だけを取り出して照合する。
+  const actualEndingLaborTotal =
+    (hosoEntry.unitCost.laborFixedPerTon as number) * hosoEntry.remainingQuantity +
+    (hosoEntry.unitCost.laborVariablePerTon as number) * hosoEntry.remainingQuantity +
+    (vapEntry.unitCost.laborFixedPerTon as number) * vapEntry.remainingQuantity +
+    (vapEntry.unitCost.laborVariablePerTon as number) * vapEntry.remainingQuantity;
+  assert.ok(Math.abs(actualEndingLaborTotal - expectedEndingLaborTotal) < EPS);
+
+  // --- 4. 売上原価(labor)＋期末在庫(labor) = 当期発生労務費合計（二重計上・計上漏れがない） ---
+  const totalLaborIncurred =
+    (result.manufacturingCost.regularLaborCost as number) +
+    (result.manufacturingCost.temporaryWorkerCost as number) +
+    (result.manufacturingCost.overtimeCost as number);
+  assert.ok(
+    Math.abs((expectedSoldLaborTotal + expectedEndingLaborTotal) - totalLaborIncurred) < EPS,
+    `COGS労務費+期末在庫労務費 ${expectedSoldLaborTotal + expectedEndingLaborTotal} ≠ 当期発生労務費合計 ${totalLaborIncurred}`
+  );
+
+  // --- 5. PL/BS/CFの整合性が維持されている ---
+  assert.ok(Math.abs(result.balanceSheet.balanceDifference as number) < EPS, `貸借差額: ${result.balanceSheet.balanceDifference}`);
+  const cf = result.cashFlow;
+  assert.ok(
+    Math.abs((cf.netCashChange as number) - ((cf.operatingCashFlow as number) + (cf.investingCashFlow as number) + (cf.financingCashFlow as number))) <
+      EPS
+  );
+  assert.ok(Math.abs(cf.directIndirectDifference as number) < EPS, `直接法と間接法の差: ${cf.directIndirectDifference}`);
 });
