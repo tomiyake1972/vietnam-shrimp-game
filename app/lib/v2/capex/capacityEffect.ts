@@ -1,22 +1,27 @@
-// ShrimpX V2 — 設備投資モジュール 操業効果（能力増加・新規資産減価償却・固定保守費）
-// （Phase 8B-2B）
+// ShrimpX V2 — 設備投資モジュール 操業効果（能力増加・固定保守費）
+// （Phase 8B-2B新設、Phase 8B-2Cで責務を整理）
 //
-// 完成した設備投資案件を、実際の生産能力・PL（減価償却・固定保守費）へ接続する
-// 純粋関数群。実装指示§8「累計能力増加・当期減価償却費・累計capex減価償却の
-// 別台帳・当期保守費・操業中フラグは永続化しない」に従い、以下だけを唯一の
-// 真実として毎期再導出する:
+// 完成した設備投資案件を、実際の生産能力・固定保守費へ接続する純粋関数群。
+// 新規capex資産の減価償却（建物・機械コンポーネント別定額法）は、Phase 8B-2Cで
+// capex/depreciation.tsへ分離した（本ファイルはcomputeOperationalStartPeriod・
+// isCapexProjectOperationalAtという共通の「稼働開始判定」ロジックだけを提供し、
+// depreciation.tsはそれをそのまま再利用する。判定ロジックを2箇所に複製しない）。
+//
+// 実装指示§8「累計能力増加・当期減価償却費・累計capex減価償却の別台帳・当期
+// 保守費・操業中フラグは永続化しない」に従い、以下だけを唯一の真実として
+// 毎期再導出する:
 //   - CapitalProject.projectType（テンプレート参照キー）
 //   - CapitalProject.status（"completed"のみ対象）
 //   - CapitalProject.completedPeriod（稼働開始四半期の算出起点）
-//   - CapitalProject.capitalizedAmountUsd（減価償却・保守費の算出基準額）
+//   - CapitalProject.capitalizedAmountUsd（保守費の算出基準額）
 //   - CapitalProject.futureCapacityEffect（承認時スナップショット。targetProduct・
 //     capacityIncreaseTonsPerQuarter・readinessQuartersAfterCompletion）
-//   - capex/parameters.tsの案件種別別テンプレート（usefulLifeQuarters・
-//     maintenanceRatePerQuarter。実装指示§4「耐用年数は案件固有の永続
-//     フィールドにはせず、テンプレート値から導出」）
+//   - capex/parameters.tsの案件種別別テンプレート（maintenanceRatePerQuarter。
+//     実装指示§4「耐用年数は案件固有の永続フィールドにはせず、テンプレート値
+//     から導出」と同じ方針を保守費率にも適用）
 //   - 現在四半期（period引数）
 // 能力増加・新規資産減価償却・固定保守費の開始四半期はすべて同一の
-// operationalStartPeriodへ統一する（実装指示§3.2）。
+// operationalStartPeriodへ統一する（実装指示§3.2、Phase 8B-2Cでも変更なし）。
 
 import { nextPeriod, PeriodV2, toYearQuarter } from "../core/period";
 import { hosoEqTons, unwrapUnit } from "../core/units";
@@ -52,8 +57,13 @@ export function computeOperationalStartPeriod(completedPeriod: PeriodV2, readine
   return addQuarters(nextPeriod(completedPeriod), readinessQuartersAfterCompletion);
 }
 
-/** period時点でこの案件がすでに稼働開始しているか（period >= operationalStartPeriod）。 */
-function isOperationalAt(project: CapitalProject, period: PeriodV2): boolean {
+/**
+ * period時点でこの案件がすでに稼働開始しているか（period >= operationalStartPeriod）。
+ * 能力増加・固定保守費（本ファイル）・新規capex資産の減価償却（capex/depreciation.ts）
+ * のすべてが、この同一の判定関数を共有する（実装指示§3.2の「同一のoperationalStartPeriod
+ * へ統一する」を、判定ロジックの重複を作らずに保証する）。
+ */
+export function isCapexProjectOperationalAt(project: CapitalProject, period: PeriodV2): boolean {
   if (project.status !== "completed" || project.completedPeriod === undefined) return false;
   const readiness = project.futureCapacityEffect?.readinessQuartersAfterCompletion ?? 0;
   const opStart = computeOperationalStartPeriod(project.completedPeriod, readiness);
@@ -77,9 +87,9 @@ export interface CapexCapacityEffect {
  * 1社の投資案件ポートフォリオから、period時点で稼働開始済みの案件ぶんだけを
  * 対象に、targetProduct別の累計能力増加を算出する（実装指示§3.3の要件を
  * すべて満たす）:
- *   - 建設中・停止・取消案件は加算しない（isOperationalAtがstatus==="completed"
- *     以外を除外）。
- *   - completedでも操業開始前なら加算しない（isOperationalAtの期間判定）。
+ *   - 建設中・停止・取消案件は加算しない（isCapexProjectOperationalAtが
+ *     status==="completed"以外を除外）。
+ *   - completedでも操業開始前なら加算しない（isCapexProjectOperationalAtの期間判定）。
  *   - 複数案件は累積する（reduce）。
  *   - HOSO/PD/VAPライン増設はcommonProcessingCapacityを増加させない
  *     （targetProductがそれぞれ独立しており、hosoLineExpansion等の
@@ -97,7 +107,7 @@ export function computeCapacityEffectForCompany(
   let freezingPackaging = 0;
 
   for (const project of projects) {
-    if (!isOperationalAt(project, period)) continue;
+    if (!isCapexProjectOperationalAt(project, period)) continue;
     const effect = project.futureCapacityEffect;
     if (!effect || effect.targetProduct === undefined || effect.capacityIncreaseTonsPerQuarter === undefined) continue;
     const amount = effect.capacityIncreaseTonsPerQuarter;
@@ -173,44 +183,7 @@ export function applyCapexCapacityToFactories(
 }
 
 // ---------------------------------------------------------------------
-// 2. 新規capex資産の定額法減価償却（実装指示§4）
-// ---------------------------------------------------------------------
-
-/**
- * 1社の投資案件ポートフォリオから、period当期の新規completed資産の定額法
- * 減価償却費合計を算出する（実装指示§4の要件をすべて満たす）:
- *   - 稼働前は0（isOperationalAtの期間判定）。
- *   - operationalStartPeriodから開始。
- *   - 耐用年数の四半期数だけ計上（elapsedOperationalQuarters > usefulLifeQuarters
- *     で打ち切り）。
- *   - 耐用年数終了後は0。
- *   - cancelled案件は0（status!=="completed"で除外）。
- *   - 複数案件は案件ごとに計算して合算。
- *   - 残存価額は0、累計減価償却が取得原価を超えない（capitalizedAmountUsd ÷
- *     usefulLifeQuartersをusefulLifeQuarters回だけ計上するため、合計は
- *     厳密にcapitalizedAmountUsdに一致する）。
- */
-export function computeCapexAssetsDepreciationUsd(
-  projects: readonly CapitalProject[],
-  params: CapexParameters,
-  period: PeriodV2
-): number {
-  let total = 0;
-  for (const project of projects) {
-    if (project.status !== "completed" || project.completedPeriod === undefined || project.capitalizedAmountUsd === undefined) continue;
-    if (!isOperationalAt(project, period)) continue;
-    const template = params.templatesByType[project.projectType];
-    const readiness = project.futureCapacityEffect?.readinessQuartersAfterCompletion ?? 0;
-    const opStart = computeOperationalStartPeriod(project.completedPeriod, readiness);
-    const elapsedOperationalQuarters = quartersBetween(opStart, period) + 1;
-    if (elapsedOperationalQuarters > template.usefulLifeQuarters) continue;
-    total += project.capitalizedAmountUsd / template.usefulLifeQuarters;
-  }
-  return total;
-}
-
-// ---------------------------------------------------------------------
-// 3. 固定保守費（実装指示§5）
+// 2. 固定保守費（実装指示§5。Phase 8B-2Cでも計算式は変更していない）
 // ---------------------------------------------------------------------
 
 /**
@@ -229,7 +202,7 @@ export function computeCapexMaintenanceCostUsd(
   let total = 0;
   for (const project of projects) {
     if (project.status !== "completed" || project.completedPeriod === undefined || project.capitalizedAmountUsd === undefined) continue;
-    if (!isOperationalAt(project, period)) continue;
+    if (!isCapexProjectOperationalAt(project, period)) continue;
     const template = params.templatesByType[project.projectType];
     total += project.capitalizedAmountUsd * template.maintenanceRatePerQuarter;
   }
