@@ -718,3 +718,441 @@ test("労務橋渡しV-4: 実労務データ（assignedRegularHeadcount等）を
     legacyResult.result.balanceSheet.finishedGoodsInventory
   );
 });
+
+// =====================================================================
+// feature/v2-labor-cost-allocation-bridge, 2コミット目:
+// 残業費総額の人数ベース算定＋商品別実労務配分（本配賦式の変更）
+// =====================================================================
+
+const SALARY = FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter; // 1000
+const TEMP_RATE = FINANCE_PARAMETERS_V1.labor.temporaryWorkerCostUsdPerQuarter; // 800
+const OT_PREMIUM = FINANCE_PARAMETERS_V1.labor.overtimePremiumFactor; // 1.5
+
+test("労務配分V2-1: 数量×人数が逆転するシナリオ（HOSO:200人/1000t/0%、VAP:800人/300t/30%）で、残業費総額はΣ(配属人数×残業率)基準となり、生産量加重平均残業率(≈0.069)は使われない", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 1000,
+    adjustedTons: 1000,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 200,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 300,
+    adjustedTons: 300,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 800,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0.3,
+  });
+  const quantityWeightedAvgRate = (1000 * 0 + 300 * 0.3) / (1000 + 300); // 旧式が使っていた生産量加重平均（≈0.0692）
+
+  const { result } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [hosoBatch, vapBatch],
+      regularHeadcount: 1000,
+      temporaryHeadcount: 0,
+      appliedOvertimeRate: quantityWeightedAvgRate,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 1000, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 300, expired: false },
+      ],
+    })
+  );
+
+  const expectedNewOvertimeCost = 800 * 0.3 * SALARY * OT_PREMIUM; // = 360,000
+  assert.ok(
+    Math.abs((result.manufacturingCost.overtimeCost as number) - expectedNewOvertimeCost) < EPS,
+    `残業費総額 ${result.manufacturingCost.overtimeCost} ≠ 期待値 ${expectedNewOvertimeCost}`
+  );
+
+  const oldStyleOvertimeCost = 1000 * SALARY * quantityWeightedAvgRate * OT_PREMIUM; // ≈103,846（旧式・生産量加重平均ベース）
+  assert.ok(
+    Math.abs((result.manufacturingCost.overtimeCost as number) - oldStyleOvertimeCost) > 100_000,
+    "新方式（人数ベース）は旧方式（生産量加重平均ベース）と大きく異なるはず"
+  );
+});
+
+test("労務配分V2-2: 未配属（遊休）人員シナリオ（全社1000人のうち800人のみ配属・残業率10%）で、残業費は配属済み800人のみを基準に算定され、全社1000人は使われない", () => {
+  const batch = makeBatch({
+    assignedRegularHeadcount: 800,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0.1,
+  });
+  const { result } = close(makeState(), makeActuals({ batches: [batch], regularHeadcount: 1000 }));
+
+  const expectedOvertimeCost = 800 * 0.1 * SALARY * OT_PREMIUM; // = 120,000（配属済み800人基準）
+  const wrongIfUsingTotalHeadcount = 1000 * 0.1 * SALARY * OT_PREMIUM; // = 150,000（全社1000人を使った場合の誤り）
+  assert.ok(Math.abs((result.manufacturingCost.overtimeCost as number) - expectedOvertimeCost) < EPS);
+  assert.ok(Math.abs((result.manufacturingCost.overtimeCost as number) - wrongIfUsingTotalHeadcount) > EPS);
+
+  // 一方、正社員給与そのものは遊休200人ぶんも含めた全社1000人ベースのまま（遊休人員にも給与は発生する）
+  assert.equal(result.manufacturingCost.regularLaborCost as number, 1000 * SALARY);
+});
+
+test("労務配分V2-3: 遊休なし・全商品で残業率が同一の場合、新方式（人数ベース）と旧方式（会社全体平均×全社人数）の残業費総額は一致する", () => {
+  const rate = 0.12;
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 600,
+    adjustedTons: 600,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 400,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: rate,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 200,
+    adjustedTons: 200,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 600,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: rate,
+  });
+  // 配属合計(400+600=1000) = 全社regularHeadcount(1000) → 遊休ゼロ
+  const { result } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [hosoBatch, vapBatch],
+      regularHeadcount: 1000,
+      temporaryHeadcount: 0,
+      appliedOvertimeRate: rate,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 600, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 200, expired: false },
+      ],
+    })
+  );
+  const oldStyleOvertimeCost = 1000 * SALARY * rate * OT_PREMIUM;
+  assert.ok(Math.abs((result.manufacturingCost.overtimeCost as number) - oldStyleOvertimeCost) < EPS);
+});
+
+test("労務配分V2-4: 全商品の適用残業率が0の場合、残業費総額は0となり、NaN・Infinityは発生しない", () => {
+  const batch = makeBatch({
+    assignedRegularHeadcount: 500,
+    assignedTemporaryHeadcount: 50,
+    appliedOvertimeRate: 0,
+  });
+  const { result } = close(makeState(), makeActuals({ batches: [batch], regularHeadcount: 500, temporaryHeadcount: 50 }));
+  assert.equal(result.manufacturingCost.overtimeCost as number, 0);
+  assert.ok(Number.isFinite(result.manufacturingCost.overtimeCost as number));
+  assert.ok(Number.isFinite(result.balanceSheet.finishedGoodsInventory as number));
+  assert.ok(Number.isFinite(result.profitAndLoss.netIncome as number));
+});
+
+test("労務配分V2-5: 残業費総額算定式の変更後も、BS貸借・CF直接法/間接法・利益剰余金ロールフォワードの恒等式が成立する（三表整合性）", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 1000,
+    adjustedTons: 1000,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 300_000,
+    rawMaterialCostBySourceUsd: { domestic: 300_000, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 200,
+    assignedTemporaryHeadcount: 20,
+    appliedOvertimeRate: 0,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 300,
+    adjustedTons: 300,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 800,
+    assignedTemporaryHeadcount: 80,
+    appliedOvertimeRate: 0.3,
+  });
+  const state = makeState();
+  const actuals = makeActuals({
+    fulfillmentUsage: [{ contractId: "C1", lotId: "LOT-HOSO", product: "hoso", quantityTons: 100 }],
+    contractTerms: [{ contractId: "C1", market: "US", product: "hoso", unitPriceUsdPerKg: 5.0 }],
+    batches: [hosoBatch, vapBatch],
+    regularHeadcount: 1000,
+    temporaryHeadcount: 100,
+    domesticPurchasesUsd: 300_000,
+    rawMaterialInventoryEndUsd: 500_000,
+    lotConsumption: [{ lotId: "LOT-HOSO", quantityTons: 100 }],
+    finishedGoodsRemainingByLot: [
+      { lotId: "LOT-HOSO", remainingQuantityTons: 900, expired: false },
+      { lotId: "LOT-VAP", remainingQuantityTons: 300, expired: false },
+    ],
+  });
+  const { result, nextState } = close(state, actuals);
+
+  assert.ok(Math.abs(result.balanceSheet.balanceDifference as number) < EPS, `貸借差額: ${result.balanceSheet.balanceDifference}`);
+  const cf = result.cashFlow;
+  assert.ok(
+    Math.abs((cf.netCashChange as number) - ((cf.operatingCashFlow as number) + (cf.investingCashFlow as number) + (cf.financingCashFlow as number))) <
+      EPS
+  );
+  assert.ok(Math.abs((cf.closingCash as number) - ((cf.openingCash as number) + (cf.netCashChange as number))) < EPS);
+  assert.ok(Math.abs(cf.directIndirectDifference as number) < EPS, `直接法と間接法の差: ${cf.directIndirectDifference}`);
+  assert.ok(
+    Math.abs((nextState.retainedEarnings as number) - ((state.retainedEarnings as number) + (result.profitAndLoss.netIncome as number))) < EPS
+  );
+});
+
+test("労務配分V2-6: 商品別（正社員労務・臨時ワーカー・残業）配分の合計は会社全体の各費目総額と一致し、二重計上・計上漏れがない", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 500,
+    adjustedTons: 500,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 200,
+    assignedTemporaryHeadcount: 50,
+    appliedOvertimeRate: 0.05,
+  });
+  const pdBatch = makeBatch({
+    batchId: "B-PD",
+    product: "pd",
+    originalTons: 400,
+    adjustedTons: 400,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-PD",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 300,
+    assignedTemporaryHeadcount: 100,
+    appliedOvertimeRate: 0.1,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 300,
+    adjustedTons: 300,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 500,
+    assignedTemporaryHeadcount: 150,
+    appliedOvertimeRate: 0.2,
+  });
+  const { result, nextState } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [hosoBatch, pdBatch, vapBatch],
+      regularHeadcount: 1200, // 配属合計1000 + 遊休200
+      temporaryHeadcount: 300, // 配属合計300（遊休なし）
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 500, expired: false },
+        { lotId: "LOT-PD", remainingQuantityTons: 400, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 300, expired: false },
+      ],
+    })
+  );
+
+  // 会社全体の各費目総額（期待値）
+  const expectedRegularLaborCost = 1200 * SALARY; // 1,200,000（遊休200人ぶんも含む）
+  const expectedTemporaryWorkerCost = 300 * TEMP_RATE; // 240,000
+  const expectedOvertimeCost = (200 * 0.05 + 300 * 0.1 + 500 * 0.2) * SALARY * OT_PREMIUM; // 140 × 1500 = 210,000
+
+  assert.ok(Math.abs((result.manufacturingCost.regularLaborCost as number) - expectedRegularLaborCost) < EPS);
+  assert.ok(Math.abs((result.manufacturingCost.temporaryWorkerCost as number) - expectedTemporaryWorkerCost) < EPS);
+  assert.ok(Math.abs((result.manufacturingCost.overtimeCost as number) - expectedOvertimeCost) < EPS);
+
+  // 商品別配分（台帳のunitCost×adjustedTons）を積み上げて、会社全体の各費目総額と一致することを確認する
+  // （laborFixedPerTon×数量 = 常用労務費の商品別配分、laborVariablePerTon×数量 = 臨時ワーカー費+残業費の商品別配分）。
+  let sumLaborFixed = 0;
+  let sumLaborVariable = 0;
+  for (const entry of nextState.finishedGoodsCostLedger) {
+    sumLaborFixed += (entry.unitCost.laborFixedPerTon as number) * entry.remainingQuantity;
+    sumLaborVariable += (entry.unitCost.laborVariablePerTon as number) * entry.remainingQuantity;
+  }
+  assert.ok(Math.abs(sumLaborFixed - expectedRegularLaborCost) < EPS, `Σ常用労務費配分 ${sumLaborFixed} ≠ ${expectedRegularLaborCost}`);
+  assert.ok(
+    Math.abs(sumLaborVariable - (expectedTemporaryWorkerCost + expectedOvertimeCost)) < EPS,
+    `Σ変動労務費配分 ${sumLaborVariable} ≠ ${expectedTemporaryWorkerCost + expectedOvertimeCost}`
+  );
+});
+
+test("労務配分V2-7: 実配属人数の合計が0（全バッチで常用/臨時とも未配属）の場合、按分は数量シェアへフォールバックし、NaN・Infinityは発生しない", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 600,
+    adjustedTons: 600,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 0,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 400,
+    adjustedTons: 400,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 0,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const { result, nextState } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [hosoBatch, vapBatch],
+      regularHeadcount: 500,
+      temporaryHeadcount: 100,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 600, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 400, expired: false },
+      ],
+    })
+  );
+  assert.equal(result.manufacturingCost.overtimeCost as number, 0);
+  for (const entry of nextState.finishedGoodsCostLedger) {
+    assert.ok(Number.isFinite(entry.unitCost.laborFixedPerTon as number), "laborFixedPerTonがNaN/Infinityではない");
+    assert.ok(Number.isFinite(entry.unitCost.laborVariablePerTon as number), "laborVariablePerTonがNaN/Infinityではない");
+  }
+  // 数量(originalTons/adjustedTons)シェアへフォールバックするので、HOSO(600t):VAP(400t) = 3:2の比で
+  // 常用労務費が配分される。
+  const hosoEntry = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-HOSO")!;
+  const vapEntry = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-VAP")!;
+  const hosoRegularLaborAlloc = (hosoEntry.unitCost.laborFixedPerTon as number) * hosoEntry.remainingQuantity;
+  const vapRegularLaborAlloc = (vapEntry.unitCost.laborFixedPerTon as number) * vapEntry.remainingQuantity;
+  assert.ok(Math.abs(hosoRegularLaborAlloc / vapRegularLaborAlloc - 600 / 400) < 0.01);
+});
+
+test("労務配分V2-8: 労働集約度が商品ごとに異なる場合（HOSO基準・PD≈3倍・VAP≈7倍の配属人数原単位）、労務単価(laborFixedPerTon)はVAP>PD>HOSOとなる（総原価の順位は主張しない）", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 1000,
+    adjustedTons: 1000,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 100, // 0.1人/t
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const pdBatch = makeBatch({
+    batchId: "B-PD",
+    product: "pd",
+    originalTons: 400,
+    adjustedTons: 400,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-PD",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 120, // 0.3人/t = HOSOの3倍の原単位
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 200,
+    adjustedTons: 200,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 140, // 0.7人/t = HOSOの7倍の原単位
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const { nextState } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [hosoBatch, pdBatch, vapBatch],
+      regularHeadcount: 360, // 100+120+140、遊休なし
+      temporaryHeadcount: 0,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 1000, expired: false },
+        { lotId: "LOT-PD", remainingQuantityTons: 400, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 200, expired: false },
+      ],
+    })
+  );
+  const hoso = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-HOSO")!.unitCost.laborFixedPerTon as number;
+  const pd = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-PD")!.unitCost.laborFixedPerTon as number;
+  const vap = nextState.finishedGoodsCostLedger.find((e) => e.lotId === "LOT-VAP")!.unitCost.laborFixedPerTon as number;
+
+  assert.ok(vap > pd && pd > hoso, `労務単価の順序が想定と異なる: hoso=${hoso}, pd=${pd}, vap=${vap}`);
+  assert.ok(Math.abs(pd / hoso - 3) < 0.01, `PD/HOSO比 ${pd / hoso} ≠ 3`);
+  assert.ok(Math.abs(vap / hoso - 7) < 0.01, `VAP/HOSO比 ${vap / hoso} ≠ 7`);
+  // 総原価（rawMaterialPerTon等を含むtotalUnitCostPerTon）の順位はここでは主張しない。
+});

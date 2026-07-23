@@ -13,6 +13,7 @@ import { period } from "../../core/period";
 import { hosoEqTons, ratio, usdM } from "../../core/units";
 import { ProductionAllocationEntry, ProductionBatch, WorkerAssignment } from "../../production/types";
 import { buildCompanyQuarterBusinessActuals, CompanyActualsSource } from "../companyLabAdapter";
+import { resolveLaborAllocationMode } from "../quarterClose";
 import { FinanceValidationError } from "../types";
 
 const P1 = period(2015, 3);
@@ -162,4 +163,32 @@ test("validation B: factoryId+productが重複するproductionAllocationEntryが
     () => buildCompanyQuarterBusinessActuals(makeSource({ productionAllocationEntries: [e1, e2] })),
     FinanceValidationError
   );
+});
+
+// --- 統合確認: 実際のcompanyLab実行経路（runner.ts）を模したケースが常に'actual'モードへ解決されること ---
+//
+// runner.tsはproductionRecord.allocation.entries（型上、常に存在しoptionalではない。各エントリの
+// labor.assignedRegularHeadcount等も型上必須）をそのままproductionAllocationEntriesへ渡す。
+// つまり実行経路では「省略」というケース自体が型システム上あり得ず、resolveLaborAllocationMode
+// は常に'actual'を返すはずである。'legacy'フォールバックは、productionAllocationEntriesを
+// 渡さない後方互換の旧テスト経路でのみ発生する。この境界を明示的に固定する。
+
+test("統合確認A: 実行経路どおりproductionAllocationEntriesを（全バッチぶん漏れなく）渡すと、resolveLaborAllocationModeは常に'actual'を返す", () => {
+  const hosoBatch = makeProductionBatch({ batchId: "b-hoso", factoryId: "BAL-F1", product: "hoso" });
+  const pdBatch = makeProductionBatch({ batchId: "b-pd", factoryId: "BAL-F1", product: "pd" });
+  const vapBatch = makeProductionBatch({ batchId: "b-vap", factoryId: "BAL-F1", product: "vap" });
+  const entries = [
+    makeAllocationEntry({ product: "hoso", labor: { assignedRegularHeadcount: 612.28, assignedTemporaryHeadcount: 0, appliedOvertimeRate: ratio(0.09) } }),
+    makeAllocationEntry({ product: "pd", labor: { assignedRegularHeadcount: 1435.41, assignedTemporaryHeadcount: 0, appliedOvertimeRate: ratio(0.09) } }),
+    makeAllocationEntry({ product: "vap", labor: { assignedRegularHeadcount: 1148.33, assignedTemporaryHeadcount: 540, appliedOvertimeRate: ratio(0.09) } }),
+  ];
+  const actuals = buildCompanyQuarterBusinessActuals(
+    makeSource({ adjustedBatches: [hosoBatch, pdBatch, vapBatch], productionAllocationEntries: entries })
+  );
+  assert.equal(resolveLaborAllocationMode(actuals.batches), "actual");
+});
+
+test("統合確認B: productionAllocationEntriesを渡さない（旧テスト経路を模した）場合のみ、resolveLaborAllocationModeは'legacy'を返す", () => {
+  const actuals = buildCompanyQuarterBusinessActuals(makeSource({ productionAllocationEntries: undefined }));
+  assert.equal(resolveLaborAllocationMode(actuals.batches), "legacy");
 });
