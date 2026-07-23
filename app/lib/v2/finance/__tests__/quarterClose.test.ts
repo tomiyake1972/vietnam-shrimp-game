@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { period } from "../../core/period";
 import { Product } from "../../market/types";
 import { FINANCE_PARAMETERS_V1 } from "../parameters";
-import { CompanyQuarterBusinessActuals, ProductionBatchActual, closeFinancialQuarter } from "../quarterClose";
+import { CompanyQuarterBusinessActuals, ProductionBatchActual, closeFinancialQuarter, resolveLaborAllocationMode } from "../quarterClose";
 import { CompanyFinanceState, FinanceValidationError, fixedUnitCostPerTon, totalUnitCostPerTon, usd } from "../types";
 
 const P1 = period(2015, 1);
@@ -677,4 +677,44 @@ test("受入確認・重点確認3: 生産時廃棄(Q1)と期限切れ廃棄(Q2)
   assert.notEqual(productionDiscardLoss1, expiryWriteOff2);
   const q2ProductionDiscardLoss = q2.result.qualityLoss.qualityDiscardLoss as number;
   assert.equal(q2ProductionDiscardLoss, 0, "Q2は生産していないため生産時廃棄損は0");
+});
+
+// --- 【商品別実労務配分の橋渡し（feature/v2-labor-cost-allocation-bridge, 1コミット目）】 ---
+// resolveLaborAllocationModeのvalidation・後方互換の単体テスト。この時点ではまだ
+// computeProductionCosting自体の配賦式は変更していないため、実労務データを渡しても
+// 計算結果（labor関連の按分値）が従来と同一であることも合わせて確認する。
+
+test("労務橋渡しV-1: assignedRegularHeadcount等3項目が全バッチで揃っていれば'actual'、全バッチで無ければ'legacy'を返す", () => {
+  const withData = makeBatch({ assignedRegularHeadcount: 600, assignedTemporaryHeadcount: 0, appliedOvertimeRate: 0.09 });
+  const withoutData = makeBatch();
+  assert.equal(resolveLaborAllocationMode([withData]), "actual");
+  assert.equal(resolveLaborAllocationMode([withoutData]), "legacy");
+  assert.equal(resolveLaborAllocationMode([]), "legacy");
+});
+
+test("労務橋渡しV-2: 3項目のうち一部だけ指定されたバッチがあるとFinanceValidationError", () => {
+  const partial = makeBatch({ assignedRegularHeadcount: 600 }); // temporaryHeadcount/appliedOvertimeRateは省略
+  assert.throws(() => resolveLaborAllocationMode([partial]), FinanceValidationError);
+});
+
+test("労務橋渡しV-3: 一部のバッチのみ3項目が揃い、他のバッチは3項目とも無い場合もFinanceValidationError", () => {
+  const complete = makeBatch({ batchId: "B1", assignedRegularHeadcount: 600, assignedTemporaryHeadcount: 0, appliedOvertimeRate: 0.09 });
+  const missing = makeBatch({ batchId: "B2", product: "vap" });
+  assert.throws(() => resolveLaborAllocationMode([complete, missing]), FinanceValidationError);
+});
+
+test("労務橋渡しV-4: 実労務データ（assignedRegularHeadcount等）を渡しても、このコミット時点ではcloseFinancialQuarterの計算結果は従来と完全に同一（配賦式はまだ未変更）", () => {
+  const legacyResult = close(makeState(), makeActuals());
+  const withLaborData = close(
+    makeState(),
+    makeActuals({ batches: [makeBatch({ assignedRegularHeadcount: 100, assignedTemporaryHeadcount: 10, appliedOvertimeRate: 0.1 })] })
+  );
+  assert.equal(
+    withLaborData.result.manufacturingCost.overtimeCost as number,
+    legacyResult.result.manufacturingCost.overtimeCost as number
+  );
+  assert.deepEqual(
+    withLaborData.result.balanceSheet.finishedGoodsInventory,
+    legacyResult.result.balanceSheet.finishedGoodsInventory
+  );
 });

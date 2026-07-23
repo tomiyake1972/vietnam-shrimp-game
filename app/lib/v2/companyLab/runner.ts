@@ -779,6 +779,10 @@ export function advanceCompanyLabQuarter(
       usage: fulfillmentPlan.usage,
       contracts: turnResult.contracts,
       adjustedBatches,
+      // 【商品別実労務配分】productionRecord.allocation.entries（労働配分の実データ、
+      // labor.assignedRegularHeadcount等）をfinance層へ橋渡しする。全社ぶんそのまま渡し、
+      // companyLabAdapter.ts側でcompanyIdによる絞り込みとfactoryId+productの対応付けを行う。
+      productionAllocationEntries: productionRecord.allocation.entries,
       qualityAdjustments: adjustments,
       newFinishedGoodsLots,
       allRawMaterialLotsAfterTurn: turnResult.lots,

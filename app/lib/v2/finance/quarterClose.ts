@@ -91,6 +91,20 @@ export interface ProductionBatchActual {
   readonly lotId?: string;
   /** ロットの格落ち率（Phase 7AのFinishedGoodsLotQualityInfo.downgradeRatio）。ロットがない場合は0。 */
   readonly downgradeRatio: number;
+  /**
+   * 【商品別実労務配分（feature/v2-labor-cost-allocation-bridge）】
+   * このバッチ（会社×工場×商品）へ実際に配分された常用ワーカー人数
+   * （production/allocation.tsのProductionAllocationEntry.labor.assignedRegularHeadcountに対応）。
+   * 単位：人。assignedTemporaryHeadcount・appliedOvertimeRateと3項目セットで、
+   * 指定するなら3つとも指定し、省略するなら3つとも省略する（一部のみの指定は
+   * computeProductionCostingがFinanceValidationErrorとして拒否する）。
+   * 3項目とも省略した場合は、後方互換のため従来の数量シェア按分にフォールバックする。
+   */
+  readonly assignedRegularHeadcount?: number;
+  /** このバッチへ実際に配分された臨時ワーカー人数（単位：人）。上記3項目セットの一部。 */
+  readonly assignedTemporaryHeadcount?: number;
+  /** このバッチへの適用後残業率（単位：比率、0以上。上限クリップは生産層で適用済み）。上記3項目セットの一部。 */
+  readonly appliedOvertimeRate?: number;
 }
 
 /** 1社・1四半期ぶんの事業実績（財務決算への入力）。 */
@@ -149,6 +163,39 @@ function assertFiniteNonNegative(n: number, label: string): number {
   return Math.max(0, n);
 }
 
+/**
+ * 【商品別実労務配分】assignedRegularHeadcount/assignedTemporaryHeadcount/appliedOvertimeRateの
+ * 実データが使えるかどうかを判定する。3項目は必ずセットで指定されている必要があり
+ * （バッチごとに3つとも存在するか、3つとも存在しないかのいずれか）、一部のみの指定は
+ * 不完全な実績データとして拒否する。全バッチが3項目とも省略していれば、既存呼び出し元
+ * との後方互換のため"legacy"（従来の数量シェア按分）を返す。
+ */
+export function resolveLaborAllocationMode(batches: readonly ProductionBatchActual[]): "actual" | "legacy" {
+  let anyComplete = false;
+  let anyMissing = false;
+  for (const b of batches) {
+    const present = [b.assignedRegularHeadcount, b.assignedTemporaryHeadcount, b.appliedOvertimeRate].filter((v) => v !== undefined).length;
+    if (present === 3) {
+      anyComplete = true;
+      assertFiniteNonNegative(b.assignedRegularHeadcount as number, `バッチ ${b.batchId} の assignedRegularHeadcount`);
+      assertFiniteNonNegative(b.assignedTemporaryHeadcount as number, `バッチ ${b.batchId} の assignedTemporaryHeadcount`);
+      assertFiniteNonNegative(b.appliedOvertimeRate as number, `バッチ ${b.batchId} の appliedOvertimeRate`);
+    } else if (present === 0) {
+      anyMissing = true;
+    } else {
+      throw new FinanceValidationError(
+        `バッチ ${b.batchId}: assignedRegularHeadcount/assignedTemporaryHeadcount/appliedOvertimeRateは3項目すべて指定するか、すべて省略する必要があります（実際の指定数: ${present}）。`
+      );
+    }
+  }
+  if (anyComplete && anyMissing) {
+    throw new FinanceValidationError(
+      "一部の生産バッチにのみ実労務配分データ（assignedRegularHeadcount等）が存在します。会社×四半期の全バッチで一貫している必要があります。"
+    );
+  }
+  return anyComplete ? "actual" : "legacy";
+}
+
 interface ProductionCostingResult {
   readonly newLedgerEntries: readonly FinishedGoodsCostLedgerEntry[];
   /** 廃棄数量の変動製造原価相当（品質廃棄損）。 */
@@ -191,6 +238,11 @@ function computeProductionCosting(
   const totalAdjustedTons = actuals.batches.reduce((s, b) => s + b.adjustedTons, 0);
 
   // --- 会社レベルの当期発生製造費 ---
+  // 【商品別実労務配分の橋渡し（feature/v2-labor-cost-allocation-bridge, 1コミット目）】
+  // このコミット時点では、ProductionBatchActualへ実労務データ（assignedRegularHeadcount等）を
+  // 受け取れるようにする配線・validationのみを追加し、以下の算定式・按分方法はまだ変更しない
+  // （resolveLaborAllocationMode自体はcompanyLabAdapter.ts側で呼び出し、データの整合性のみを
+  // 検証する。実際の計算式への反映は次コミットで行う）。
   const regularLaborCost = actuals.regularHeadcount * params.labor.regularWorkerSalaryUsdPerQuarter;
   const temporaryWorkerCost = actuals.temporaryHeadcount * params.labor.temporaryWorkerCostUsdPerQuarter;
   const overtimeCost =
