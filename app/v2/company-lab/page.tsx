@@ -209,6 +209,11 @@ export default function CompanyLabPage() {
   const playerFixture = fixtures?.find((f) => f.companyId === draftPlayerCompanyId);
   const ownStateForEditor = labState && playerFixture ? buildCompanyOwnState(labState, playerFixture) : undefined;
   const playerSummary = displayedRecord?.companySummaries.find((s) => s.companyId === draftPlayerCompanyId);
+  // 【Phase 8B-3】設備投資ポートフォリオ表示の「直近四半期の実際の支払額」参考情報用。
+  // 選択中の表示四半期（displayedRecord）ではなく、常に「実際に最後に確定した四半期」を使う
+  // （設備投資ポートフォリオ自体はlabState.currentPeriod時点の状態を表示するため）。
+  const latestHistoryRecord = labState && labState.history.length > 0 ? labState.history[labState.history.length - 1] : undefined;
+  const lastQuarterCapexEventsForPlayer = latestHistoryRecord?.capexResults.find((r) => r.companyId === draftPlayerCompanyId)?.events;
 
   const progressLabel = labState ? `${labState.history.length} / ${labState.config.turns} 四半期` : "—";
 
@@ -321,6 +326,8 @@ export default function CompanyLabPage() {
                     draft={playerDraft}
                     onChange={setPlayerDraft}
                     disabled={labState.isComplete}
+                    period={labState.currentPeriod}
+                    lastQuarterCapexEvents={lastQuarterCapexEventsForPlayer}
                   />
                 ) : (
                   <div className="text-sm text-gray-400">このシナリオはすでに完了しています。</div>

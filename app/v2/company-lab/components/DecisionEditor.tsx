@@ -9,9 +9,22 @@
 // 一切持たない（表示・編集のみ）。
 
 import { unwrapUnit } from "../../../lib/v2/core/units";
+import { PeriodV2 } from "../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab";
+import { CAPEX_PARAMETERS_V1, CapexProjectQuarterEvent } from "../../../lib/v2/capex";
 import { formatHosoEqTons } from "../../../lib/v2/industryLab/ui/formatters";
 import { CompanyDecisionDraft } from "../decisionDraft";
+import {
+  addCapexCancelRequestToDraft,
+  addCapexProposalToDraft,
+  isDuplicateProjectTypeInDraft,
+  removeCapexCancelRequestFromDraft,
+  removeCapexProposalFromDraft,
+} from "../capexDraftActions";
+import { buildAllCapexCandidateViewModels, buildCapexPortfolioViewModel, CAPEX_EXPLANATION_DETAIL_TEXT, CAPEX_EXPLANATION_TEXT } from "../capexViewModel";
+import CapexCandidateList from "./CapexCandidateList";
+import CapexDraftList from "./CapexDraftList";
+import CapexPortfolioList from "./CapexPortfolioList";
 
 interface DecisionEditorProps {
   readonly fixture: CompanyFixture;
@@ -19,6 +32,10 @@ interface DecisionEditorProps {
   readonly draft: CompanyDecisionDraft;
   readonly onChange: (next: CompanyDecisionDraft) => void;
   readonly disabled: boolean;
+  /** 【Phase 8B-3】設備投資セクション用の当四半期（プレビュー・稼働開始判定の基準）。 */
+  readonly period: PeriodV2;
+  /** 【Phase 8B-3】直近確定四半期の設備投資イベント（今期の実際の支払額表示用、参考情報）。未実行なら省略可。 */
+  readonly lastQuarterCapexEvents?: readonly CapexProjectQuarterEvent[];
 }
 
 function toSafeNumber(raw: string): number {
@@ -79,7 +96,7 @@ function PriceAdjustmentCell(props: { readonly value: number; readonly onChange:
 }
 
 export default function DecisionEditor(props: DecisionEditorProps) {
-  const { fixture, ownState, draft, onChange, disabled } = props;
+  const { fixture, ownState, draft, onChange, disabled, period, lastQuarterCapexEvents } = props;
 
   const rawMaterialInventory = ownState.rawMaterialLots
     .filter((l) => l.status === "available")
@@ -90,12 +107,78 @@ export default function DecisionEditor(props: DecisionEditorProps) {
 
   const factoryById = new Map(fixture.factories.map((f) => [f.factoryId, f]));
 
+  // --- 【Phase 8B-3】設備投資セクション用の派生値 ---
+  const capexCandidates = buildAllCapexCandidateViewModels(period, CAPEX_PARAMETERS_V1);
+  const lastQuarterCapexEventsByProjectId = new Map((lastQuarterCapexEvents ?? []).map((e) => [e.projectId, e]));
+  const capexPortfolioRows = buildCapexPortfolioViewModel(
+    ownState.capexState.portfolio.projects,
+    CAPEX_PARAMETERS_V1,
+    period,
+    lastQuarterCapexEventsByProjectId
+  );
+  const capexCandidateBudgetByType = (projectType: (typeof capexCandidates)[number]["projectType"], requestedBudgetUsd: number | undefined) =>
+    requestedBudgetUsd ?? CAPEX_PARAMETERS_V1.templatesByType[projectType].standardBudgetUsd;
+  const capexDraftThisQuarterPaymentUsd = draft.capexDecision.newProjectProposals.reduce((sum, p) => {
+    const template = CAPEX_PARAMETERS_V1.templatesByType[p.projectType];
+    const budget = capexCandidateBudgetByType(p.projectType, p.requestedBudgetUsd);
+    return sum + budget * (template.paymentRatios[0] ?? 0);
+  }, 0);
+  const currentCashUsd = ownState.financeState.cash as number;
+
   return (
     <div className="space-y-5">
       <div className="text-xs text-gray-400 bg-gray-900/60 rounded-lg px-3 py-2">
         参考情報: 原料在庫（利用可能） {formatHosoEqTons(rawMaterialInventory)} / 未履行契約残高 {formatHosoEqTons(outstandingBacklog)}
         {disabled && <span className="ml-2 text-amber-400">この四半期はすでに進行済みです。編集内容は次の四半期に反映されます。</span>}
       </div>
+
+      {/* 【Phase 8B-3】設備投資 */}
+      <section className="space-y-3 bg-gray-900/30 rounded-xl p-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">設備投資</h3>
+          <p className="text-[11px] text-gray-400 mt-1">{CAPEX_EXPLANATION_TEXT}</p>
+          <details className="mt-1">
+            <summary className="text-[11px] text-teal-400 hover:text-teal-300 cursor-pointer">建物・機械の償却期間の違いについて</summary>
+            <p className="text-[11px] text-gray-400 mt-1">{CAPEX_EXPLANATION_DETAIL_TEXT}</p>
+          </details>
+        </div>
+
+        <div className="space-y-1.5">
+          <h4 className="text-xs font-semibold text-gray-300">投資案件候補（7種類）</h4>
+          <CapexCandidateList
+            candidates={capexCandidates}
+            currentCashUsd={currentCashUsd}
+            draftPaymentThisQuarterUsd={capexDraftThisQuarterPaymentUsd}
+            isDuplicate={(projectType) => isDuplicateProjectTypeInDraft(draft, projectType)}
+            onAdd={(projectType) => onChange(addCapexProposalToDraft(draft, projectType))}
+            disabled={disabled}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <h4 className="text-xs font-semibold text-gray-300">今期の設備投資ドラフト（提出内容の確認）</h4>
+          <CapexDraftList
+            newProjectProposals={draft.capexDecision.newProjectProposals}
+            cancelRequestProjectIds={draft.capexDecision.cancelRequests.map((c) => c.projectId)}
+            displayNameByType={(projectType) => CAPEX_PARAMETERS_V1.templatesByType[projectType].displayName}
+            budgetByType={capexCandidateBudgetByType}
+            onRemoveProposal={(index) => onChange(removeCapexProposalFromDraft(draft, index))}
+            onRemoveCancelRequest={(projectId) => onChange(removeCapexCancelRequestFromDraft(draft, projectId))}
+            disabled={disabled}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <h4 className="text-xs font-semibold text-gray-300">投資案件ポートフォリオ（この会社の全案件）</h4>
+          <CapexPortfolioList
+            rows={capexPortfolioRows}
+            cancelRequestedProjectIds={new Set(draft.capexDecision.cancelRequests.map((c) => c.projectId))}
+            onRequestCancel={(projectId) => onChange(addCapexCancelRequestToDraft(draft, projectId))}
+            onUndoCancelRequest={(projectId) => onChange(removeCapexCancelRequestFromDraft(draft, projectId))}
+            disabled={disabled}
+          />
+        </div>
+      </section>
 
       {/* 販売計画 */}
       <section className="space-y-2">
