@@ -572,7 +572,13 @@ function validateFinancingStates(raw: unknown, path: string): readonly CompanyFi
 // 設備投資状態（Phase 8B-2A、schemaVersion 6）
 // ---------------------------------------------------------------------
 
-const FUTURE_CAPACITY_TARGET_PRODUCTS: readonly string[] = ["hoso", "pd", "vap", "common"];
+// 【Phase 8B-2B】"commonProcessing"（共通前処理能力）・"freezingPackaging"
+// （冷凍・包装能力）を追加。旧"common"（Phase 8B-2Aでは常にcapacityIncreaseTons
+// PerQuarter=0とペアの無効値としてのみ存在し、companyLab→Redis/API実配線が
+// 対象外だった当時、実際にどの保存データへも書き込まれたことがない）は、
+// 万一の後方互換のためdecode側では引き続き許容し続ける（新規書き込みはもう
+// 発生しない。書き込み側はtargetProductを省略するか新値のみを使う）。
+const FUTURE_CAPACITY_TARGET_PRODUCTS: readonly string[] = ["hoso", "pd", "vap", "common", "commonProcessing", "freezingPackaging"];
 
 function validateFutureCapacityEffectPlaceholder(raw: unknown, path: string): FutureCapacityEffectPlaceholder {
   const obj = requireObject(raw, path);

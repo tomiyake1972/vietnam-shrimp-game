@@ -35,14 +35,20 @@ export class CapexValidationError extends Error {
 // 1. 投資案件の種類・状態
 // ---------------------------------------------------------------------
 
-/** 最低6種類の投資案件種別（実装指示§8）。 */
+/**
+ * 最低6種類（実装指示§8）＋Phase 8B-2Bで追加した共通前処理能力増設の7種類。
+ * 【Phase 8B-2B】commonProcessingExpansionを追加。HOSO/PD/VAPライン増設は
+ * 前処理能力（commonProcessingCapacity）を自動的に増加させない（意図的にボトルネック
+ * 管理を独立させる設計。capacityEffect.tsのターゲット対応表を参照）。
+ */
 export type CapitalProjectType =
   | "hosoLineExpansion" // HOSO加工ライン増設
   | "pdLineExpansion" // PD加工ライン増設
   | "vapLineExpansion" // VAP加工ライン増設
   | "coldStorageExpansion" // 冷凍・冷蔵保管庫増設
   | "qualityControlEquipment" // 品質管理設備
-  | "environmentalEquipment"; // 排水・環境設備
+  | "environmentalEquipment" // 排水・環境設備
+  | "commonProcessingExpansion"; // 【Phase 8B-2B】共通前処理能力増設
 
 export const CAPITAL_PROJECT_TYPES: readonly CapitalProjectType[] = [
   "hosoLineExpansion",
@@ -51,6 +57,7 @@ export const CAPITAL_PROJECT_TYPES: readonly CapitalProjectType[] = [
   "coldStorageExpansion",
   "qualityControlEquipment",
   "environmentalEquipment",
+  "commonProcessingExpansion",
 ];
 
 /** 最低6状態（実装指示§10）。 */
@@ -85,12 +92,23 @@ export interface PaymentScheduleStage {
 }
 
 /**
- * 将来のPhase 8B-2B（能力増設）で使う予定の能力効果メタデータ。8B-2Aでは
- * 生成時にテンプレートから機械的にコピーするだけで、一切参照・使用しない
- * （実装指示§30。生産能力・工場capacityへの接続はPhase 8B-2Bで実装する）。
+ * 能力効果メタデータ。承認時にテンプレート（capex/parameters.ts）から機械的に
+ * コピーされ、案件のライフサイクル全体を通じて不変（後からテンプレートを校正
+ * しても、すでに承認済みの案件の効果は変わらない。paymentSchedule等と同じ
+ * 「承認時スナップショット」設計）。
+ *
+ * 【Phase 8B-2B】capex/capacityEffect.tsが、status==="completed"かつ
+ * 稼働開始四半期（operationalStartPeriod）に達した案件についてのみ、
+ * targetProductに応じてFactoryの対応する能力フィールドへcapacityIncreaseTonsPerQuarterを
+ * 加算する。対応表: hoso→hosoCapacity、pd→pdCapacity、vap→vapCapacity、
+ * commonProcessing→commonProcessingCapacity（前処理・共通工程）、
+ * freezingPackaging→freezingPackagingCapacity（冷凍・包装）。
+ * qualityControlEquipment・environmentalEquipmentはtargetProduct省略・
+ * capacityIncreaseTonsPerQuarter=0（生産能力を増加させない。品質・環境上の
+ * 実効果はPhase 8B-2Bの対象外）。
  */
 export interface FutureCapacityEffectPlaceholder {
-  readonly targetProduct?: "hoso" | "pd" | "vap" | "common";
+  readonly targetProduct?: "hoso" | "pd" | "vap" | "commonProcessing" | "freezingPackaging";
   readonly capacityIncreaseTonsPerQuarter?: number;
   readonly readinessQuartersAfterCompletion?: number;
 }
@@ -221,4 +239,11 @@ export interface CapexQuarterResult {
   readonly endingConstructionInProgressUsd: number;
   /** 当四半期の減価償却対象から除外するprev.fixedAssetsGrossの金額（前四半期までの完成済み分）。 */
   readonly nonDepreciatingCapexGrossAtPeriodStartUsd: number;
+  /**
+   * 【Phase 8B-2B】当期の稼働開始済み新規completed資産ぶんの定額法減価償却費
+   * 合計（診断用。finance/のdepreciationCostは既存レガシー分とこの値の合算）。
+   */
+  readonly capexAssetsDepreciationUsd: number;
+  /** 【Phase 8B-2B】当期の稼働中completed資産ぶんの固定保守費合計（診断用）。 */
+  readonly capexMaintenanceCostUsd: number;
 }

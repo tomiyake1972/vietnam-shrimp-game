@@ -13,7 +13,7 @@ import { period } from "../../core/period";
 import { Product } from "../../market/types";
 import { FINANCE_PARAMETERS_V1 } from "../parameters";
 import { CompanyQuarterBusinessActuals, ProductionBatchActual, closeFinancialQuarter, resolveLaborAllocationMode } from "../quarterClose";
-import { CompanyFinanceState, FinanceValidationError, fixedUnitCostPerTon, totalUnitCostPerTon, usd } from "../types";
+import { CapexAdjustment, CompanyFinanceState, FinanceValidationError, fixedUnitCostPerTon, totalUnitCostPerTon, usd } from "../types";
 
 const P1 = period(2015, 1);
 const P2 = period(2015, 2);
@@ -1736,4 +1736,118 @@ test("遊休労務費I-7(H): actualモードでは遊休労務費を算定し、
   const legacyResult = close(makeState(), makeActuals({ batches: [legacyBatch], regularHeadcount: 100 }));
   assert.equal(legacyResult.result.manufacturingCost.idleLaborCost as number, 0, "legacyモードではidleLaborCostは常に0");
   assert.ok(Math.abs((legacyResult.result.manufacturingCost.productiveRegularLaborCost as number) - 100 * SALARY) < EPS);
+});
+
+// ---------------------------------------------------------------------
+// Phase 8B-2B: 設備投資の操業・会計接続（capexAssetsDepreciationUsd・capexMaintenanceCostUsd）
+// ---------------------------------------------------------------------
+//
+// capex/capexClose.tsを経由せず、closeFinancialQuarterへCapexAdjustmentを直接
+// 手組みして渡すことで、finance/側の接続（既存レガシー定率法への加算・
+// 売上原価区分への独立項目としての計上・在庫への非混入・現金支出・三表整合）
+// だけを切り分けて検証する（capex/portfolio自体の状態遷移・支払処理は
+// capex/__tests__/capexClose.test.tsが別途担う）。
+
+function makeCapexAdjustment(overrides: Partial<CapexAdjustment> = {}): CapexAdjustment {
+  return {
+    capexPaymentCashUsd: 0,
+    completedProjectsTransferUsd: 0,
+    endingConstructionInProgressUsd: 0,
+    nonDepreciatingCapexGrossAtPeriodStartUsd: 0,
+    capexAssetsDepreciationUsd: 0,
+    capexMaintenanceCostUsd: 0,
+    ...overrides,
+  };
+}
+
+test("capex操作-1: 新規completed資産の減価償却費は、既存レガシー定率法の結果へ単純加算される（両者は明確に区別された別計算式）", () => {
+  const state = makeState({ fixedAssetsGross: usd(40_000_000), accumulatedDepreciation: usd(0) });
+  const actuals = makeActuals();
+  const legacyOnly = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES);
+  const legacyDepreciation = legacyOnly.result.manufacturingCost.depreciationCost as number;
+  assert.ok(Math.abs(legacyDepreciation - 40_000_000 * FINANCE_PARAMETERS_V1.finance.depreciationRatePerQuarter) < EPS);
+
+  const capex = makeCapexAdjustment({ capexAssetsDepreciationUsd: 200_000 });
+  const withCapex = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES, undefined, capex);
+  const combinedDepreciation = withCapex.result.manufacturingCost.depreciationCost as number;
+  assert.ok(Math.abs(combinedDepreciation - (legacyDepreciation + 200_000)) < EPS, `合算後 ${combinedDepreciation} が レガシー${legacyDepreciation}+capex200000 と一致しない`);
+});
+
+test("capex操作-2: 固定保守費（capexMaintenanceCost）は生産量に関わらず売上原価区分の独立項目として計上され、totalCostOfSalesへ一度だけ含まれる", () => {
+  const state = makeState();
+  const zeroProductionActuals = makeActuals({ batches: [], fulfillmentUsage: [], lotConsumption: [], finishedGoodsRemainingByLot: [] });
+  const capex = makeCapexAdjustment({ capexMaintenanceCostUsd: 75_000 });
+  const withCapex = closeFinancialQuarter(state, zeroProductionActuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES, undefined, capex);
+  assert.ok(Math.abs((withCapex.result.profitAndLoss.costOfSales.capexMaintenanceCost as number) - 75_000) < EPS);
+
+  const withoutCapex = closeFinancialQuarter(state, zeroProductionActuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES);
+  const totalCostOfSalesDelta =
+    (withCapex.result.profitAndLoss.totalCostOfSales as number) - (withoutCapex.result.profitAndLoss.totalCostOfSales as number);
+  assert.ok(Math.abs(totalCostOfSalesDelta - 75_000) < EPS, "totalCostOfSalesの差がcapexMaintenanceCostちょうど1回ぶんではない（二重計上または欠落の疑い）");
+});
+
+test("capex操作-3: 固定保守費は完成品原価・単位原価台帳・完成品在庫へ一切含まれない（idleLaborCostと同じ非混入パターン）", () => {
+  const state = makeState();
+  const actuals = makeActuals(); // makeBatch()による通常生産（HOSO、45t在庫残）
+  const withoutCapex = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES);
+  const capex = makeCapexAdjustment({ capexMaintenanceCostUsd: 500_000 }); // 意図的に大きい額
+  const withCapex = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES, undefined, capex);
+
+  // 完成品在庫評価額（BS finishedGoodsInventory）は、固定保守費の有無で一切変化しないはず
+  // （減価償却と異なり、capexMaintenanceCostは単位原価計算に一切関与しないため）。
+  assert.ok(
+    Math.abs((withCapex.result.balanceSheet.finishedGoodsInventory as number) - (withoutCapex.result.balanceSheet.finishedGoodsInventory as number)) < EPS
+  );
+  // 台帳の各ロットのunitCost内訳にも変化がないことを直接確認する。
+  for (const entry of withCapex.nextState.finishedGoodsCostLedger) {
+    const before = withoutCapex.nextState.finishedGoodsCostLedger.find((e) => e.lotId === entry.lotId)!;
+    assert.deepEqual(entry.unitCost, before.unitCost, `ロット${entry.lotId}のunitCostがcapexMaintenanceCostの影響を受けている`);
+  }
+});
+
+test("capex操作-4: 固定保守費は現金支出（営業CF）へ反映され、翌四半期へ再計上されない（当期一回のみ）", () => {
+  const state = makeState();
+  const actuals = makeActuals();
+  const withoutCapex = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES);
+  const capex = makeCapexAdjustment({ capexMaintenanceCostUsd: 60_000 });
+  const withCapex = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES, undefined, capex);
+  const cfoDelta =
+    (withoutCapex.result.cashFlow.operatingCashFlow as number) - (withCapex.result.cashFlow.operatingCashFlow as number);
+  assert.ok(Math.abs(cfoDelta - 60_000) < EPS, "固定保守費ぶん営業CFが減少していない");
+  // 直接法・間接法の差は許容誤差内で0（idleLaborCost同様、非資産計上の現金費用は特別な間接法調整項目を要さない）。
+  assert.ok(Math.abs(withCapex.result.cashFlow.directIndirectDifference as number) < EPS);
+});
+
+test("capex操作-5: 新規capex減価償却・固定保守費を含めても、BS貸借一致・CF直接法間接法一致・利益剰余金ロールフォワードが崩れない（三表整合）", () => {
+  const state = makeState();
+  const actuals = makeActuals();
+  // CIPは「ending値」接続方式のため、この単発テストでは期首CIP=0という前提のもと
+  // 内部整合的な値（期末CIP = 当期支払 − 当期完成振替）を選ぶ必要がある
+  // （期首CIPを持たないこの単体テストの都合であり、capex/capexClose.ts自体は
+  // 実際のportfolio状態から常に整合した値を算出する）。
+  const capex = makeCapexAdjustment({
+    capexPaymentCashUsd: 1_000_000,
+    completedProjectsTransferUsd: 0,
+    endingConstructionInProgressUsd: 1_000_000,
+    nonDepreciatingCapexGrossAtPeriodStartUsd: 2_000_000,
+    capexAssetsDepreciationUsd: 50_000,
+    capexMaintenanceCostUsd: 30_000,
+  });
+  const { result, nextState } = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES, undefined, capex);
+  assert.ok(Math.abs(result.balanceSheet.balanceDifference as number) < EPS, `貸借差額: ${result.balanceSheet.balanceDifference}`);
+  assert.ok(Math.abs(result.cashFlow.directIndirectDifference as number) < EPS, `直接法/間接法差: ${result.cashFlow.directIndirectDifference}`);
+  assert.ok(
+    Math.abs((nextState.retainedEarnings as number) - ((state.retainedEarnings as number) + (result.profitAndLoss.netIncome as number))) < EPS
+  );
+  // 累計減価償却は取得原価（fixedAssetsGross）を超えない。
+  assert.ok((nextState.accumulatedDepreciation as number) <= (nextState.fixedAssetsGross as number) + EPS);
+});
+
+test("capex省略時（undefined）はcapexAssetsDepreciationUsd/capexMaintenanceCostUsdの影響が一切なく、Phase 8A/8B-1と完全に同一の結果になる（後方互換）", () => {
+  const state = makeState();
+  const actuals = makeActuals();
+  const withoutCapexArg = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES);
+  const withZeroCapex = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES, undefined, makeCapexAdjustment());
+  assert.deepEqual(withZeroCapex.result, withoutCapexArg.result);
+  assert.deepEqual(withZeroCapex.nextState, withoutCapexArg.nextState);
 });

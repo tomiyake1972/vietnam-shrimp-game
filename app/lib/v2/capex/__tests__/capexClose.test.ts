@@ -387,3 +387,79 @@ test("受入確認CC-8: 会社の資金繰り状態が重大な悪化（severely
   assert.equal(output.capexQuarterResult.totalPaidThisQuarterUsd, 0);
   assertThreeStatementIdentities(output.financeResult);
 });
+
+// ---------------------------------------------------------------------
+// Phase 8B-2B: 稼働開始後の減価償却・固定保守費（closeQuarterWithCapexを通した統合確認）
+// ---------------------------------------------------------------------
+//
+// CC-6の続き（coldStorageExpansion、標準予算$2.5M・2段階・readiness=1）を、
+// 稼働開始四半期（2015Q4 = completedPeriod 2015Q2の翌期2015Q3 + readiness1）まで
+// 進め、新規capex資産の減価償却・固定保守費が実際にfinance/へ接続されることを
+// closeQuarterWithCapexの実行結果（CapexQuarterResult診断フィールド、finance
+// 三表）の両方で確認する。
+
+test("受入確認CC-10: 稼働開始四半期（operationalStartPeriod）に達すると、新規completed資産の定額法減価償却費・固定保守費が発生し、CapexQuarterResultにも反映される", () => {
+  const financeState = makeFinanceState({ cash: 30_000_000, fixedAssetsGross: 40_000_000 });
+  let capexState = buildInitialCompanyCapexState("TEST");
+  const financingState = makeFinancingState();
+  let decision = emptyCapexDecision({ newProjectProposals: [{ projectType: "coldStorageExpansion" }] });
+  let finance = financeState;
+  let p = P1; // 2015Q1: 提案・承認・初回支払
+
+  const q1 = closeWithCapex(finance, financingState, capexState, decision, HEALTHY_GATE, p);
+  finance = q1.nextFinanceState;
+  capexState = q1.nextCapexState;
+  p = period(2015, 2);
+  decision = emptyCapexDecision();
+
+  const q2 = closeWithCapex(finance, financingState, capexState, decision, HEALTHY_GATE, p); // 完成（completedPeriod=2015Q2）
+  const completedProject = q2.nextCapexState.portfolio.projects[0];
+  assert.equal(completedProject.status, "completed");
+  assert.equal(completedProject.completedPeriod, period(2015, 2));
+  const capitalizedAmountUsd = completedProject.capitalizedAmountUsd as number;
+  assert.ok(Math.abs(capitalizedAmountUsd - 2_500_000) < EPS);
+  finance = q2.nextFinanceState;
+  capexState = q2.nextCapexState;
+  p = period(2015, 3);
+  decision = emptyCapexDecision();
+
+  const q3 = closeWithCapex(finance, financingState, capexState, decision, HEALTHY_GATE, p); // まだ稼働開始前（readiness=1）
+  assert.equal(q3.capexQuarterResult.capexAssetsDepreciationUsd, 0);
+  assert.equal(q3.capexQuarterResult.capexMaintenanceCostUsd, 0);
+  finance = q3.nextFinanceState;
+  capexState = q3.nextCapexState;
+  p = period(2015, 4);
+  decision = emptyCapexDecision();
+
+  const q4 = closeWithCapex(finance, financingState, capexState, decision, HEALTHY_GATE, p); // 稼働開始四半期
+  const template = CAPEX_PARAMETERS_V1.templatesByType.coldStorageExpansion;
+  const expectedDepreciation = capitalizedAmountUsd / template.usefulLifeQuarters;
+  const expectedMaintenance = capitalizedAmountUsd * template.maintenanceRatePerQuarter;
+  assert.ok(Math.abs(q4.capexQuarterResult.capexAssetsDepreciationUsd - expectedDepreciation) < EPS);
+  assert.ok(Math.abs(q4.capexQuarterResult.capexMaintenanceCostUsd - expectedMaintenance) < EPS);
+  // finance/の合算減価償却費（レガシー＋新規capex）にも反映されている。
+  const legacyGross = (financeState.fixedAssetsGross as number) - (financeState.accumulatedDepreciation as number);
+  const legacyDepreciation = Math.min(
+    (financeState.fixedAssetsGross as number) * FINANCE_PARAMETERS_V1.finance.depreciationRatePerQuarter,
+    legacyGross
+  );
+  const actualCombinedDepreciation = q4.financeResult.manufacturingCost.depreciationCost as number;
+  assert.ok(
+    Math.abs(actualCombinedDepreciation - (legacyDepreciation + expectedDepreciation)) < EPS,
+    `合算減価償却費 ${actualCombinedDepreciation} が レガシー${legacyDepreciation}+新規${expectedDepreciation} と一致しない`
+  );
+  // 固定保守費はcostOfSales.capexMaintenanceCostとして独立計上される。
+  assert.ok(Math.abs((q4.financeResult.profitAndLoss.costOfSales.capexMaintenanceCost as number) - expectedMaintenance) < EPS);
+  assertThreeStatementIdentities(q4.financeResult);
+});
+
+test("受入確認CC-11: 建設中・停止中の案件は稼働開始効果を一切持たない（vapLineExpansion、4段階で1回目は資金不足によりsuspended）", () => {
+  const financeState = makeFinanceState({ cash: 2_000_000 }); // 最低現金準備額を大きく下回るため支払は一切発生しない
+  const capexState = buildInitialCompanyCapexState("TEST");
+  const decision = emptyCapexDecision({ newProjectProposals: [{ projectType: "vapLineExpansion" }] });
+  const output = closeWithCapex(financeState, makeFinancingState(), capexState, decision);
+  const project = output.nextCapexState.portfolio.projects[0];
+  assert.equal(project.status, "approved"); // 初回支払すら成功していないため着工前のまま
+  assert.equal(output.capexQuarterResult.capexAssetsDepreciationUsd, 0);
+  assert.equal(output.capexQuarterResult.capexMaintenanceCostUsd, 0);
+});

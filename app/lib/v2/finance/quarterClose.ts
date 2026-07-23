@@ -531,10 +531,17 @@ export function closeFinancialQuarter(
     ? Math.max(0, (prev.fixedAssetsGross as number) - capex.nonDepreciatingCapexGrossAtPeriodStartUsd)
     : (prev.fixedAssetsGross as number);
   const fixedAssetsNetBefore = (prev.fixedAssetsGross as number) - (prev.accumulatedDepreciation as number);
-  const depreciationUsd = Math.min(
+  const legacyDepreciationUsd = Math.min(
     legacyDepreciableGrossUsd * params.finance.depreciationRatePerQuarter,
     Math.max(0, fixedAssetsNetBefore)
   );
+  // 【Phase 8B-2B】新規completed資産の定額法減価償却費（capex/capacityEffect.tsの
+  // computeCapexAssetsDepreciationUsdが算出済み。案件別にcapitalizedAmountUsd÷
+  // usefulLifeQuartersを稼働開始四半期から耐用年数分だけ計上する構造のため、
+  // 単独でも取得原価を超えない）。既存レガシー資産の定率法計算式（上記）は
+  // 一切変更せず、その計算結果へ単純加算するだけで両者を混在させない。
+  const capexAssetsDepreciationUsd = capex ? capex.capexAssetsDepreciationUsd : 0;
+  const depreciationUsd = legacyDepreciationUsd + capexAssetsDepreciationUsd;
 
   // --- 生産原価計算 ---
   const costing = computeProductionCosting(actuals, params, depreciationUsd, processingRateByProduct);
@@ -716,6 +723,11 @@ export function closeFinancialQuarter(
     (costing.manufacturing.reworkCost as number);
   const utilityCashTotal = (costing.manufacturing.utilityFixedCost as number) + (costing.manufacturing.utilityVariableCost as number);
   const factoryFixedCashTotal = costing.manufacturing.factoryFixedCost as number;
+  // 【Phase 8B-2B】稼働中capex資産の固定保守費（発生と同時に全額現金支出。
+  // capex未指定時は常に0）。完成品原価・在庫を経由しないため、
+  // computeProductionCosting/costing.manufacturing側には存在しない独立の
+  // 現金支出項目として直接ここへ加算する。
+  const capexMaintenanceCostUsd = capex ? capex.capexMaintenanceCostUsd : 0;
 
   const salesForceCost = actuals.salesForceHeadcount * params.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter;
   const procurementCost = actuals.procurementHeadcount * params.sellingGeneralAdmin.procurementSalaryUsdPerQuarter;
@@ -743,6 +755,9 @@ export function closeFinancialQuarter(
   // 一切含めない。costing.manufacturing.idleLaborCostは既にlaborFixedPerTon等の商品別単位
   // 原価には含まれていない、完全に別建ての金額）。
   const idleLaborCost = costing.manufacturing.idleLaborCost as number;
+  // 【Phase 8B-2B】稼働中capex資産の固定保守費。idleLaborCostと同様、販売数量・
+  // 在庫の有無に関わらず発生四半期に全額を売上原価区分の独立項目として費用化
+  // する（完成品原価・単位原価台帳・完成品在庫には一切含めない）。
   const costOfSales: CostOfSalesBreakdown = {
     rawMaterialCost: usd(cogsRawMaterial),
     processingCost: usd(cogsProcessing),
@@ -752,6 +767,7 @@ export function closeFinancialQuarter(
     discardLoss: usd(discardLossTotal),
     unabsorbedFixedManufacturingCost: usd(costing.unabsorbedManufacturingCost),
     idleLaborCost: usd(idleLaborCost),
+    capexMaintenanceCost: usd(capexMaintenanceCostUsd),
   };
   const totalCostOfSales =
     cogsRawMaterial +
@@ -762,7 +778,8 @@ export function closeFinancialQuarter(
     costing.reworkCost +
     discardLossTotal +
     costing.unabsorbedManufacturingCost +
-    idleLaborCost;
+    idleLaborCost +
+    capexMaintenanceCostUsd;
   const grossProfit = netRevenue - totalCostOfSales;
   const operatingProfit = grossProfit - sgaTotal;
   const profitBeforeTax = operatingProfit - interestExpense;
@@ -828,7 +845,10 @@ export function closeFinancialQuarter(
 
   // --- 現金（直接法CFと完全一致する現金台帳） ---
   const paymentsForRawMaterials = actuals.domesticPurchasesUsd + actuals.aquacultureHarvestUsd + apSettlementsPaid;
-  const paymentsForManufacturing = laborCashTotal + processingCashTotal + utilityCashTotal + factoryFixedCashTotal;
+  // 【Phase 8B-2B】稼働中capex資産の固定保守費は、発生と同時に全額現金支出される
+  // 独立の製造関連キャッシュアウトとして加算する（営業CF区分。実装指示§5
+  // 「営業CF...へ接続」）。
+  const paymentsForManufacturing = laborCashTotal + processingCashTotal + utilityCashTotal + factoryFixedCashTotal + capexMaintenanceCostUsd;
   // 利息は発生額(interestExpense)ではなく実際の現金支払額(interestPaidCash)を減算する
   // （financing省略時はinterestPaidCash===interestExpenseのためPhase 8Aと同一）。
   const operatingCashFlow =
