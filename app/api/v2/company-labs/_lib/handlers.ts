@@ -15,8 +15,6 @@
 // （saveDraft/submitDraft/processQuarter）が改めて正規の検証・原子コミットを行う。
 
 import { randomUUID } from "crypto";
-import { CompanyId } from "../../../../lib/v2/sales/types";
-import { COMPANY_LAB_COMPANY_IDS } from "../../../../lib/v2/companyLab/fixtures";
 import { CompanyLabApiDependencies } from "./dependencies";
 import { ApiErrorResponse, mapDomainErrorToHttp } from "./errorResponse";
 import {
@@ -39,8 +37,6 @@ function badRequest(message: string): ApiResult {
   return { status: 400, body: { error: { code: "INVALID_REQUEST", message } } };
 }
 
-const DEFAULT_PLAYER_COMPANY_ID: CompanyId = COMPANY_LAB_COMPANY_IDS[0];
-
 // ---------------------------------------------------------------------
 // POST /api/v2/company-labs — ラボ作成（§6.1）
 // ---------------------------------------------------------------------
@@ -48,7 +44,7 @@ const DEFAULT_PLAYER_COMPANY_ID: CompanyId = COMPANY_LAB_COMPANY_IDS[0];
 export async function handleCreateLab(deps: CompanyLabApiDependencies, rawBody: unknown, now: string): Promise<ApiResult> {
   const bodyResult = validateCreateLabRequestBody(rawBody);
   if (!bodyResult.ok) return badRequest(bodyResult.message);
-  const { scenarioId, mode, seed, turns } = bodyResult.value;
+  const { scenarioId, mode, seed, turns, playerCompanyId } = bodyResult.value;
 
   let labId: string;
   if (bodyResult.value.labId !== undefined) {
@@ -62,7 +58,9 @@ export async function handleCreateLab(deps: CompanyLabApiDependencies, rawBody: 
   }
 
   try {
-    const result = await deps.service.createLab({ labId, config: { scenarioId, mode, seed, turns }, now });
+    // 【Phase 8C-3B】playerCompanyIdはvalidation.tsで既知の5社IDであることを検証済み。
+    // Application Service層（createLab）がさらにfixturesとの整合性を防御的に確認する。
+    const result = await deps.service.createLab({ labId, config: { scenarioId, mode, seed, turns }, playerCompanyId, now });
     return { status: 201, body: { lab: toLabSummaryDto(result.stored) } };
   } catch (e) {
     return mapDomainErrorToHttp(e);
@@ -201,13 +199,11 @@ export async function handleProcessQuarter(deps: CompanyLabApiDependencies, labI
   if (!bodyResult.ok) return badRequest(bodyResult.message);
 
   let currentTurn: number;
-  let fixtureCompanyIds: readonly string[];
   let existingDraftTurnId: string | null;
   let lastProcessedTurnId: string | null;
   try {
     const stored = await deps.repository.loadCurrentState(labId);
     currentTurn = stored.currentState.runtime.scenarioState.currentTurn;
-    fixtureCompanyIds = stored.fixtures.map((f) => f.companyId);
     lastProcessedTurnId = stored.currentState.lastProcessedTurnId ?? null;
     const existingDraft = await deps.repository.loadDraft(labId);
     existingDraftTurnId = existingDraft?.turnId ?? null;
@@ -235,20 +231,21 @@ export async function handleProcessQuarter(deps: CompanyLabApiDependencies, labI
     };
   }
 
-  const playerCompanyId: CompanyId = fixtureCompanyIds.includes(DEFAULT_PLAYER_COMPANY_ID) ? DEFAULT_PLAYER_COMPANY_ID : fixtureCompanyIds[0];
-
   try {
     // lockTokenはリクエスト（試行）ごとに新規生成する。turnIdによる冪等性
     // （§6.1・processQuarter内部の判定）は、リクエストごとに異なるlockTokenを
     // 使っても損なわれない（同一turnIdの再試行は、ロック取得より前に冪等判定
     // されるため。companyLabQuarterFlowService.ts step 2参照）。
+    // 【Phase 8C-3B】playerCompanyIdはここでは一切指定しない。Application Service
+    // 層がラボ作成時に保存されたstored.playerCompanyIdを唯一の正として使う
+    // （8C-3A時点のBAL固定/先頭会社fallbackを廃止。指示§6「処理requestごとに
+    // 別会社へ差し替えられない」）。
     const result = await deps.service.processQuarter({
       labId,
       turnId: derivedTurnId,
       lockToken: randomUUID(),
       now,
       lockTtlMilliseconds: DEFAULT_PROCESSING_LOCK_TTL_MS,
-      playerCompanyId,
       decisionsProvider: buildApiDecisionsProvider(labId),
     });
     // §6.5「冪等再試行時にalreadyProcessedを正常応答として返す」: statusが

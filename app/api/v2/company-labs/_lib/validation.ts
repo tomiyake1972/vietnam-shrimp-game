@@ -1,8 +1,11 @@
-// ShrimpX V2 — 会社ラボ API 入力検証（Phase 8C-3A §8）
+// ShrimpX V2 — 会社ラボ API 入力検証（Phase 8C-3A §8・Phase 8C-3B §6）
 //
 // フレームワーク（NextRequest等）に一切依存しない、純粋な検証関数群。
 // 検証に失敗した場合は例外を投げず、判定結果（ApiValidationResult）を返す
 // （呼び出し側がhandlers.ts内でHTTP 400応答へ変換する）。
+
+import { CompanyId } from "../../../../lib/v2/sales/types";
+import { COMPANY_LAB_COMPANY_IDS } from "../../../../lib/v2/companyLab/fixtures";
 
 const MAX_LAB_ID_LENGTH = 200;
 const MAX_TURN_ID_LENGTH = 200;
@@ -49,9 +52,17 @@ export interface CreateLabRequestBody {
   readonly mode: "canonical" | "variation";
   readonly seed: string;
   readonly turns: number;
+  readonly playerCompanyId: CompanyId;
 }
 
-/** POST /api/v2/company-labs のリクエストボディ検証。scenarioId自体の妥当性（実在するシナリオか・turnsがdurationTurns内か）はApplication Service（initializeCompanyLab）に委ね、ここでは形の検証のみ行う。 */
+/**
+ * POST /api/v2/company-labs のリクエストボディ検証。scenarioId自体の妥当性（実在するシナリオか・
+ * turnsがdurationTurns内か）はApplication Service（initializeCompanyLab）に委ね、ここでは形の検証のみ行う。
+ *
+ * 【Phase 8C-3B §6】playerCompanyIdは必須（省略不可）。8C-3A時点の「BAL固定・先頭会社への
+ * サイレントfallback」を廃止し、既知の5社ID（COMPANY_LAB_COMPANY_IDS）のいずれかを明示的に
+ * 指定しない限り400で拒否する。曖昧なデフォルト値は設けない。
+ */
 export function validateCreateLabRequestBody(body: unknown): ApiValidationResult<CreateLabRequestBody> {
   if (typeof body !== "object" || body === null) {
     return fail("リクエストボディはJSONオブジェクトである必要があります。");
@@ -73,12 +84,16 @@ export function validateCreateLabRequestBody(body: unknown): ApiValidationResult
   if (typeof b.turns !== "number" || !Number.isInteger(b.turns) || b.turns < 1) {
     return fail("turns は1以上の整数である必要があります。");
   }
+  if (typeof b.playerCompanyId !== "string" || !(COMPANY_LAB_COMPANY_IDS as readonly string[]).includes(b.playerCompanyId)) {
+    return fail(`playerCompanyId は必須で、次のいずれかである必要があります: ${COMPANY_LAB_COMPANY_IDS.join(", ")}`);
+  }
   return ok({
     ...(typeof b.labId === "string" ? { labId: b.labId } : {}),
     scenarioId: b.scenarioId,
     mode: b.mode,
     seed: b.seed,
     turns: b.turns,
+    playerCompanyId: b.playerCompanyId as CompanyId,
   });
 }
 

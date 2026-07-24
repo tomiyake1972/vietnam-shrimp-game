@@ -14,6 +14,8 @@ export interface CompanyLabSummaryDto {
   readonly scenarioId: string;
   readonly mode: string;
   readonly totalTurns: number;
+  /** 【Phase 8C-3B】このラボでプレイヤーが操作する会社（作成時に確定、以後不変）。 */
+  readonly playerCompanyId: string;
   readonly currentTurn: number;
   readonly revision: number;
   readonly lastProcessedTurnId: string | null;
@@ -28,6 +30,7 @@ export function toLabSummaryDto(stored: CompanyLabPersistedStateV1): CompanyLabS
     scenarioId: stored.config.scenarioId,
     mode: stored.config.mode,
     totalTurns: stored.config.turns,
+    playerCompanyId: stored.playerCompanyId,
     currentTurn: stored.currentState.runtime.scenarioState.currentTurn,
     revision: stored.currentState.revision,
     lastProcessedTurnId: stored.currentState.lastProcessedTurnId ?? null,

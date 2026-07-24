@@ -86,7 +86,6 @@ async function runOneQuarter(ctx: TestContext, labId: string, turnId: string, lo
     turnId,
     lockToken,
     now: NOW,
-    playerCompanyId: PLAYER_COMPANY_ID,
     decisionsProvider: autoPolicyProvider,
   });
 }
@@ -98,7 +97,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] 新規ラボを作成でき、labs一覧・revision 0・完全な初期状態が保存される`, async () => {
     const ctx = create();
-    const result = await ctx.service.createLab({ labId: "lab-create", config: baseConfig(), now: NOW });
+    const result = await ctx.service.createLab({ labId: "lab-create", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     assert.equal(result.labId, "lab-create");
     assert.equal(result.fixtures.length, 5);
     assert.equal(result.stored.currentState.revision, 0);
@@ -110,9 +109,9 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] 重複labIdのラボ作成はAlreadyExistsエラーになり、既存ラボが破壊されない`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-dup", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-dup", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     await runOneQuarter(ctx, "lab-dup", "turn-1", "lock-1");
-    await assert.rejects(() => ctx.service.createLab({ labId: "lab-dup", config: baseConfig({ seed: "another" }), now: NOW }), CompanyLabAlreadyExistsError);
+    await assert.rejects(() => ctx.service.createLab({ labId: "lab-dup", config: baseConfig({ seed: "another" }), playerCompanyId: PLAYER_COMPANY_ID, now: NOW }), CompanyLabAlreadyExistsError);
     const current = await ctx.repo.loadCurrentState("lab-dup");
     assert.equal(current.currentState.revision, 1, "重複作成により既存ラボのrevisionが巻き戻されている");
     assert.deepEqual(await ctx.repo.loadHistoryIndex("lab-dup"), [1]);
@@ -120,7 +119,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] draftの保存・提出ライフサイクル（未保存→未提出→提出済み→再提出は冪等→提出後の編集拒否）`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-draft", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-draft", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     assert.equal(await ctx.repo.loadDraft("lab-draft"), null);
 
     const saved = await ctx.service.saveDraft({ labId: "lab-draft", turnId: "turn-1", draftBody: { a: 1 }, now: NOW });
@@ -146,7 +145,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] turn 1を処理すると、current・history・index・revision・draftのすべてが正しく更新される`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-t1", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-t1", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     const result = await runOneQuarter(ctx, "lab-t1", "turn-1", "lock-1");
     assert.equal(result.status, "processed");
     assert.equal(result.revision, 1);
@@ -168,7 +167,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] turn 2以降は直近履歴が復元時に注入され、連続して処理できる`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-t2", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-t2", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     await runOneQuarter(ctx, "lab-t2", "turn-1", "lock-1");
     const result2 = await runOneQuarter(ctx, "lab-t2", "turn-2", "lock-2");
     assert.equal(result2.status, "processed");
@@ -185,7 +184,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] 同一turnIdの再試行（commit成功後の応答消失を想定）は再計算・二重保存せず、保存済み結果を返す`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-retry", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-retry", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     const first = await runOneQuarter(ctx, "lab-retry", "turn-1", "lock-1");
     assert.equal(first.status, "processed");
 
@@ -196,7 +195,6 @@ for (const { label, create } of makeContexts()) {
       turnId: "turn-1",
       lockToken: "lock-retry",
       now: NOW,
-      playerCompanyId: PLAYER_COMPANY_ID,
       decisionsProvider: autoPolicyProvider,
     });
     assert.equal(retry.status, "alreadyProcessed");
@@ -210,7 +208,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] 異なるturnIdによる同一turnの処理は拒否され、履歴が二重作成されない`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-turn-conflict", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-turn-conflict", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
 
     // ケース1（通常経路）: 処理B（turnId=turn-1-B）が完了した後、別のturnId（turn-1-A）で
     // 同じturnを処理しようとしても、draftは確定時に削除済みのためDraftNotFoundで拒否される。
@@ -222,7 +220,6 @@ for (const { label, create } of makeContexts()) {
           turnId: "turn-1-A",
           lockToken: "lock-A",
           now: NOW,
-          playerCompanyId: PLAYER_COMPANY_ID,
           decisionsProvider: autoPolicyProvider,
         }),
       CompanyLabDraftNotFoundError
@@ -239,7 +236,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] コミット時のhistoryConflict・revisionConflict・lockConflictはそれぞれ型付きエラーへ変換される（Repositoryラッパーによる結果注入）`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-map", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-map", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     await ctx.service.saveDraft({ labId: "lab-map", turnId: "turn-1", draftBody: {}, now: NOW });
     await ctx.service.submitDraft({ labId: "lab-map", turnId: "turn-1", now: NOW });
 
@@ -264,7 +261,6 @@ for (const { label, create } of makeContexts()) {
             turnId: "turn-1",
             lockToken: `lock-${injected.status}`,
             now: NOW,
-            playerCompanyId: PLAYER_COMPANY_ID,
             decisionsProvider: autoPolicyProvider,
           }),
         expectedError
@@ -280,7 +276,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] ロックが他の処理に保持されている間はLockUnavailableになり、状態・draftは変更されない`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-locked", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-locked", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     await ctx.service.saveDraft({ labId: "lab-locked", turnId: "turn-1", draftBody: {}, now: NOW });
     await ctx.service.submitDraft({ labId: "lab-locked", turnId: "turn-1", now: NOW });
     // 他の処理がロックを保持
@@ -292,7 +288,6 @@ for (const { label, create } of makeContexts()) {
           turnId: "turn-1",
           lockToken: "my-token",
           now: NOW,
-          playerCompanyId: PLAYER_COMPANY_ID,
           decisionsProvider: autoPolicyProvider,
         }),
       CompanyLabLockUnavailableError
@@ -306,7 +301,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] 処理成功後・処理失敗後のいずれもロックが解放される（自トークンのみ）`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-release", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-release", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     await runOneQuarter(ctx, "lab-release", "turn-1", "lock-1");
     // 成功後: ロックは解放済みで、すぐ再取得できる
     assert.equal(await ctx.repo.acquireProcessingLock({ labId: "lab-release", token: "after-success", ttlMilliseconds: 60_000, now: NOW }), true);
@@ -327,7 +322,6 @@ for (const { label, create } of makeContexts()) {
           turnId: "turn-2",
           lockToken: "lock-2",
           now: NOW,
-          playerCompanyId: PLAYER_COMPANY_ID,
           decisionsProvider: brokenProvider,
         }),
       CompanyLabQuarterProcessingError
@@ -344,19 +338,19 @@ for (const { label, create } of makeContexts()) {
     await assert.rejects(() => ctx.service.saveDraft({ labId: "no-lab", turnId: "t", draftBody: {}, now: NOW }), CompanyLabNotFoundError);
     await assert.rejects(() => ctx.service.submitDraft({ labId: "no-lab", turnId: "t", now: NOW }), CompanyLabNotFoundError);
     await assert.rejects(
-      () => ctx.service.processQuarter({ labId: "no-lab", turnId: "t", lockToken: "l", now: NOW, playerCompanyId: PLAYER_COMPANY_ID, decisionsProvider: autoPolicyProvider }),
+      () => ctx.service.processQuarter({ labId: "no-lab", turnId: "t", lockToken: "l", now: NOW, decisionsProvider: autoPolicyProvider }),
       CompanyLabNotFoundError
     );
   });
 
   test(`[${label}] draftなし・未提出draft・turnId不一致draftでの四半期処理はそれぞれ型付きエラーになり、状態は変更されない`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-draft-guard", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-draft-guard", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
 
     // draftなし
     await assert.rejects(
       () =>
-        ctx.service.processQuarter({ labId: "lab-draft-guard", turnId: "turn-1", lockToken: "l1", now: NOW, playerCompanyId: PLAYER_COMPANY_ID, decisionsProvider: autoPolicyProvider }),
+        ctx.service.processQuarter({ labId: "lab-draft-guard", turnId: "turn-1", lockToken: "l1", now: NOW, decisionsProvider: autoPolicyProvider }),
       CompanyLabDraftNotFoundError
     );
 
@@ -364,7 +358,7 @@ for (const { label, create } of makeContexts()) {
     await ctx.service.saveDraft({ labId: "lab-draft-guard", turnId: "turn-1", draftBody: {}, now: NOW });
     await assert.rejects(
       () =>
-        ctx.service.processQuarter({ labId: "lab-draft-guard", turnId: "turn-1", lockToken: "l2", now: NOW, playerCompanyId: PLAYER_COMPANY_ID, decisionsProvider: autoPolicyProvider }),
+        ctx.service.processQuarter({ labId: "lab-draft-guard", turnId: "turn-1", lockToken: "l2", now: NOW, decisionsProvider: autoPolicyProvider }),
       CompanyLabDraftNotSubmittedError
     );
 
@@ -372,7 +366,7 @@ for (const { label, create } of makeContexts()) {
     await ctx.service.submitDraft({ labId: "lab-draft-guard", turnId: "turn-1", now: NOW });
     await assert.rejects(
       () =>
-        ctx.service.processQuarter({ labId: "lab-draft-guard", turnId: "turn-OTHER", lockToken: "l3", now: NOW, playerCompanyId: PLAYER_COMPANY_ID, decisionsProvider: autoPolicyProvider }),
+        ctx.service.processQuarter({ labId: "lab-draft-guard", turnId: "turn-OTHER", lockToken: "l3", now: NOW, decisionsProvider: autoPolicyProvider }),
       CompanyLabDraftTurnMismatchError
     );
 
@@ -386,7 +380,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] 履歴エントリ検証に失敗した場合、コミットは呼び出されず、current・history・index・draftのいずれも変更されない`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-invalid-entry", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-invalid-entry", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     await ctx.service.saveDraft({ labId: "lab-invalid-entry", turnId: "turn-1", draftBody: {}, now: NOW });
     await ctx.service.submitDraft({ labId: "lab-invalid-entry", turnId: "turn-1", now: NOW });
 
@@ -416,7 +410,6 @@ for (const { label, create } of makeContexts()) {
           turnId: "turn-1",
           lockToken: "lock-1",
           now: NOW,
-          playerCompanyId: PLAYER_COMPANY_ID,
           decisionsProvider: autoPolicyProvider,
         }),
       CompanyLabPersistedStateValidationError
@@ -430,7 +423,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] エンジン実行（コミット前）の失敗では確定状態が変更されず、draftは提出済みのまま再試行できる`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-engine-fail", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-engine-fail", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     await ctx.service.saveDraft({ labId: "lab-engine-fail", turnId: "turn-1", draftBody: {}, now: NOW });
     await ctx.service.submitDraft({ labId: "lab-engine-fail", turnId: "turn-1", now: NOW });
 
@@ -447,7 +440,6 @@ for (const { label, create } of makeContexts()) {
           turnId: "turn-1",
           lockToken: "lock-1",
           now: NOW,
-          playerCompanyId: PLAYER_COMPANY_ID,
           decisionsProvider: crashingProvider,
         }),
       CompanyLabQuarterProcessingError
@@ -464,7 +456,6 @@ for (const { label, create } of makeContexts()) {
       turnId: "turn-1",
       lockToken: "lock-2",
       now: NOW,
-      playerCompanyId: PLAYER_COMPANY_ID,
       decisionsProvider: autoPolicyProvider,
     });
     assert.equal(retried.status, "processed");
@@ -473,7 +464,7 @@ for (const { label, create } of makeContexts()) {
   test(`[${label}] 完了済みラボの四半期処理・draft保存は拒否され、current・history・draftは変更されない`, async () => {
     const ctx = create();
     // turns=1のラボはturn 1の処理で完了する
-    await ctx.service.createLab({ labId: "lab-done", config: baseConfig({ turns: 1 }), now: NOW });
+    await ctx.service.createLab({ labId: "lab-done", config: baseConfig({ turns: 1 }), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     const result = await runOneQuarter(ctx, "lab-done", "turn-1", "lock-1");
     assert.equal(result.status, "processed");
     const currentAfter = await ctx.repo.loadCurrentState("lab-done");
@@ -482,7 +473,7 @@ for (const { label, create } of makeContexts()) {
     // これ以上の処理は拒否
     await assert.rejects(
       () =>
-        ctx.service.processQuarter({ labId: "lab-done", turnId: "turn-2", lockToken: "lock-2", now: NOW, playerCompanyId: PLAYER_COMPANY_ID, decisionsProvider: autoPolicyProvider }),
+        ctx.service.processQuarter({ labId: "lab-done", turnId: "turn-2", lockToken: "lock-2", now: NOW, decisionsProvider: autoPolicyProvider }),
       CompanyLabCompletedError
     );
     await assert.rejects(() => ctx.service.saveDraft({ labId: "lab-done", turnId: "turn-2", draftBody: {}, now: NOW }), CompanyLabCompletedError);
@@ -493,7 +484,6 @@ for (const { label, create } of makeContexts()) {
       turnId: "turn-1",
       lockToken: "lock-3",
       now: NOW,
-      playerCompanyId: PLAYER_COMPANY_ID,
       decisionsProvider: autoPolicyProvider,
     });
     assert.equal(retry.status, "alreadyProcessed");
@@ -509,7 +499,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] Minor-1: 提出済みだが未処理の別turnのdraftが存在する場合、異なるturnIdでのsaveDraftはDraftConflictになり、既存draftは変更されない`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-draft-conflict", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-draft-conflict", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     const submitted = await ctx.service.saveDraft({ labId: "lab-draft-conflict", turnId: "turn-1", draftBody: { note: "original" }, now: NOW });
     await ctx.service.submitDraft({ labId: "lab-draft-conflict", turnId: "turn-1", now: NOW });
 
@@ -528,7 +518,7 @@ for (const { label, create } of makeContexts()) {
 
   test(`[${label}] Minor-1: 同じturnIdでの再保存（提出後編集）は引き続きDraftAlreadySubmittedになる（Minor-1対応が既存動作を壊していないことの確認）`, async () => {
     const ctx = create();
-    await ctx.service.createLab({ labId: "lab-same-turn-resubmit", config: baseConfig(), now: NOW });
+    await ctx.service.createLab({ labId: "lab-same-turn-resubmit", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     await ctx.service.saveDraft({ labId: "lab-same-turn-resubmit", turnId: "turn-1", draftBody: {}, now: NOW });
     await ctx.service.submitDraft({ labId: "lab-same-turn-resubmit", turnId: "turn-1", now: NOW });
     await assert.rejects(
@@ -540,7 +530,7 @@ for (const { label, create } of makeContexts()) {
   test(`[${label}] Minor-2: 完了済みラボへのsubmitDraftは明示的にCompanyLabCompletedErrorで拒否され、current・draftは変更されない`, async () => {
     const ctx = create();
     // turns=1のラボはturn 1の処理で完了する
-    await ctx.service.createLab({ labId: "lab-done-submit-guard", config: baseConfig({ turns: 1 }), now: NOW });
+    await ctx.service.createLab({ labId: "lab-done-submit-guard", config: baseConfig({ turns: 1 }), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
     await runOneQuarter(ctx, "lab-done-submit-guard", "turn-1", "lock-1");
     const currentAfter = await ctx.repo.loadCurrentState("lab-done-submit-guard");
     assert.equal(currentAfter.currentState.runtime.isComplete, true);

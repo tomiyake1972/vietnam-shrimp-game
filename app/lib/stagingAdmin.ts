@@ -24,11 +24,14 @@ function safeCompare(a: string, b: string): boolean {
 
 const GENERIC_AUTH_ERROR = "管理操作の認証に失敗しました。";
 
-// 正しいトークンが設定されているかどうかを、エラー内容から推測できないようにする。
-// 「本番環境である」ことだけは環境の話であり、トークンの正当性とは無関係なので
-// 別のメッセージにしている。それ以外（トークン未設定／ヘッダーなし／トークン不一致）は
-// すべて同一のメッセージ・ステータスにする。
-export function assertStagingAdmin(request: NextRequest): StagingAdminCheckResult {
+/**
+ * 【Phase 8C-3B】生のトークン文字列（Bearerヘッダーから取り出した値でも、ログイン
+ * フォームの入力値でも構わない）をSTAGING_ADMIN_TOKENと比較する、リクエストに
+ * 依存しない共通ロジック。assertStagingAdmin（既存のBearerヘッダー方式）と、
+ * 新しいCompany Lab UIのセッションログイン（app/lib/companyLabUiSession.ts）の
+ * 両方がこれを再利用し、本番判定・トークン比較ロジックを重複実装しない。
+ */
+export function checkStagingAdminToken(provided: string | null | undefined): StagingAdminCheckResult {
   if (isProduction) {
     return { ok: false, status: 403, error: "この操作は本番環境では利用できません。" };
   }
@@ -38,11 +41,19 @@ export function assertStagingAdmin(request: NextRequest): StagingAdminCheckResul
     return { ok: false, status: 403, error: GENERIC_AUTH_ERROR };
   }
 
-  const header = request.headers.get("authorization") ?? "";
-  const provided = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
   if (!provided || !safeCompare(provided, expected)) {
     return { ok: false, status: 403, error: GENERIC_AUTH_ERROR };
   }
 
   return { ok: true, status: 200 };
+}
+
+// 正しいトークンが設定されているかどうかを、エラー内容から推測できないようにする。
+// 「本番環境である」ことだけは環境の話であり、トークンの正当性とは無関係なので
+// 別のメッセージにしている。それ以外（トークン未設定／ヘッダーなし／トークン不一致）は
+// すべて同一のメッセージ・ステータスにする。
+export function assertStagingAdmin(request: NextRequest): StagingAdminCheckResult {
+  const header = request.headers.get("authorization") ?? "";
+  const provided = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+  return checkStagingAdminToken(provided);
 }

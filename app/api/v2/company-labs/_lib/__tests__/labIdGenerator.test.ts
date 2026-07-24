@@ -21,6 +21,7 @@ test("generateUniqueLabId: 既存labIdとは異なる値を生成する（衝突
     engineVersion: "test-engine",
     config: { scenarioId: "baseline", mode: "canonical", seed: "s", turns: 4 },
     fixtures: [],
+    playerCompanyId: "TEST-PLAYER" as never,
     runtime: {
       currentPeriod: "2026Q1" as never,
       scenarioState: { definition: {}, mode: "canonical", randomSeed: "s", currentTurn: 1, resolvedEvents: [], turnHistory: [] } as never,

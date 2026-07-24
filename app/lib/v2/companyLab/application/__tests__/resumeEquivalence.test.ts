@@ -72,7 +72,7 @@ async function runEquivalence(label: string, repo: CompanyLabStateRepository) {
   }
 
   // --- 経路B: 毎四半期ごとに保存・復元（Application Service経由） ---
-  await service.createLab({ labId, config: config(), now: NOW });
+  await service.createLab({ labId, config: config(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
   for (let turn = 1; turn <= TURNS; turn++) {
     const turnId = `turn-${turn}`;
     await service.saveDraft({ labId, turnId, draftBody: { note: turnId }, now: NOW });
@@ -82,7 +82,6 @@ async function runEquivalence(label: string, repo: CompanyLabStateRepository) {
       turnId,
       lockToken: `lock-${turn}`,
       now: NOW,
-      playerCompanyId: PLAYER_COMPANY_ID,
       decisionsProvider: providerForServicePath,
     });
     assert.equal(result.status, "processed");
@@ -114,7 +113,6 @@ async function runEquivalence(label: string, repo: CompanyLabStateRepository) {
         turnId: "turn-5",
         lockToken: "lock-5",
         now: NOW,
-        playerCompanyId: PLAYER_COMPANY_ID,
         decisionsProvider: providerForServicePath,
       }),
     CompanyLabCompletedError

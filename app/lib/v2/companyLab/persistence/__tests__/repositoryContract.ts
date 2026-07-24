@@ -55,6 +55,10 @@ function minimalCreateInput(labId: string, overrides: Partial<CreateCompanyLabIn
     engineVersion: "test-engine",
     config: { scenarioId: "baseline", mode: "canonical", seed: "seed", turns: 32 },
     fixtures: [],
+    // 【Phase 8C-3B】Repository契約テストはfixturesを空配列のまま扱う（契約テストの
+    // 関心はfixtures内容ではないため）。playerCompanyIdはApplication Service層でのみ
+    // fixtures整合性を検証する設計のため、ここでは任意の非空文字列で構わない。
+    playerCompanyId: "TEST-PLAYER" as CreateCompanyLabInput["playerCompanyId"],
     runtime: minimalRuntime(),
     now: "2026-01-01T00:00:00.000Z",
     ...overrides,

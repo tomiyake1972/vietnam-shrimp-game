@@ -34,7 +34,7 @@
 import { PeriodV2, parsePeriod } from "../../core/period";
 import { HosoEqTons, Ratio, hosoEqTons, ratio, score0to100, unwrapUnit, usdPerHosoEqKg } from "../../core/units";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../market/types";
-import { ContractStatus, SalesContract } from "../../sales/types";
+import { CompanyId, ContractStatus, SalesContract } from "../../sales/types";
 import { RawMaterialLot, RawMaterialLotStatus, RawMaterialSource } from "../../rawMaterials/types";
 import { FinishedGoodsLot, FinishedGoodsLotStatus, ProductionBatchRawMaterialConsumption } from "../../production/types";
 import {
@@ -928,6 +928,12 @@ export function validateCompanyLabPersistedState(raw: unknown): CompanyLabPersis
   const config = validateCompanyLabConfig(obj.config, "$.config");
   const fixturesRaw = requireArray(obj.fixtures, "$.fixtures");
   const fixtures = fixturesRaw.map((f, i) => validateCompanyFixture(f, `$.fixtures[${i}]`));
+  // 【Phase 8C-3B】playerCompanyIdは必須（8C-3Bで廃止したBAL固定/先頭会社
+  // fallbackの再発を防ぐ）。「fixturesに実在する会社であること」の保証は
+  // Application Service層のcreateLab（呼び出し契約違反を防ぐ層）が担う
+  // （このスキーマ検証層は、テスト用の最小限fixtures（空配列等）でも
+  // 汎用的に使えるよう、構造検証のみに留める）。
+  const playerCompanyId = requireNonEmptyString(obj.playerCompanyId, "$.playerCompanyId") as CompanyId;
   const currentState = validateCompanyLabPersistedCurrentState(obj.currentState, "$.currentState");
   const draft = obj.draft === null || obj.draft === undefined ? null : validateCompanyLabDraftEnvelope(obj.draft, "$.draft");
   if (draft !== null && draft.labId !== labId) {
@@ -935,5 +941,5 @@ export function validateCompanyLabPersistedState(raw: unknown): CompanyLabPersis
   }
   const metadata = validateCompanyLabPersistedStateMetadata(obj.metadata, "$.metadata");
 
-  return { schemaVersion, engineVersion, labId, config, fixtures, currentState, draft, metadata };
+  return { schemaVersion, engineVersion, labId, config, fixtures, playerCompanyId, currentState, draft, metadata };
 }

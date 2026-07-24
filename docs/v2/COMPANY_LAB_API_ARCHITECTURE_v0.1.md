@@ -51,10 +51,12 @@ Company Labの全route（GETを含む）に一律で適用した。V1のスナ�
 いずれも応答は`Content-Type: application/json`。エラー応答の形式は §6 を参照。
 
 ### 3.1 `POST /api/v2/company-labs` — ラボ作成
-- リクエスト: `{ labId?: string, scenarioId: string, mode: "canonical"|"variation", seed: string, turns: number }`
+- リクエスト: `{ labId?: string, scenarioId: string, mode: "canonical"|"variation", seed: string, turns: number, playerCompanyId: CompanyId }`
 - `labId`省略時はサーバーが`labIdGenerator.ts`で衝突検査つき生成する（`lab-` + base36ランダム6文字、Redis上の既存labIdと衝突すれば最大10回まで再試行。V1の`app/api/game/route.ts`と同じ「生成→存在確認→再試行」パターンを踏襲）。
-- 成功: `201 { lab: CompanyLabSummaryDto }`
+- **`playerCompanyId`は必須**（Phase 8C-3Bで変更。§13参照）。既知の5社ID（`COMPANY_LAB_COMPANY_IDS`）のいずれかを明示的に指定しない限り`400`で拒否する。省略時に`"BAL"`や先頭のフィクスチャへサイレントにfallbackする挙動は廃止した。
+- 成功: `201 { lab: CompanyLabSummaryDto }`（`playerCompanyId`を含む。§13参照）
 - 重複labId: `409 LAB_ALREADY_EXISTS`
+- 未知の`playerCompanyId`・省略: `400 INVALID_REQUEST`
 
 ### 3.2 `GET /api/v2/company-labs` — ラボ一覧
 - 成功: `200 { labs: CompanyLabSummaryDto[] }`（各labIdの現在状態を要約で返す。巨大な内部snapshotは含まない）
@@ -77,7 +79,7 @@ Company Labの全route（GETを含む）に一律で適用した。V1のスナ�
 - 完了済みラボ: `409 LAB_COMPLETED`（Fable Minor-2対応。§7参照）
 
 ### 3.6 `POST /api/v2/company-labs/[labId]/process-quarter` — 四半期処理
-- リクエスト: `{ turnId?: string }`（省略可。§4参照）
+- リクエスト: `{ turnId?: string }`（省略可。§4参照）。**`playerCompanyId`はリクエストで一切受け付けない**（Phase 8C-3Bで廃止。§13参照）。処理対象の会社は常にラボ作成時に確定・永続化された`playerCompanyId`のみを使う。
 - 成功: `200 { status: "processed"|"alreadyProcessed", revision: number, turn: number, turnId: string, processedAt: string }`
   - `alreadyProcessed`も200（エラーではない）で返す。同一turnIdの再試行が安全であることの外部的な現れ。
 - draft未提出: `409 DRAFT_NOT_FOUND` / `409 DRAFT_NOT_SUBMITTED`
@@ -112,7 +114,7 @@ Company Labの全route（GETを含む）に一律で適用した。V1のスナ�
 
 Phase 8C-2の`companyLabQuarterFlowService.ts`は、`CompanyLabDecisionsProvider`という注入点を通じて「全社ぶんの意思決定（`CompanyDecisionInput`）をどう組み立てるか」を呼び出し側に委ねる設計になっている（lib層はUI型の`CompanyDecisionDraft`に依存しないため）。本Phaseでこれを実装した：
 
-- **プレイヤー会社**（`playerCompanyId`と一致する会社。デフォルトは`COMPANY_LAB_COMPANY_IDS[0]`＝`"BAL"`、フィクスチャに存在しなければ先頭のフィクスチャ）: 提出済みdraft本体（`unknown`）を、まず構造検証（`isPlausibleCompanyDecisionDraft`。companyId一致・必須フィールドの配列/オブジェクト存在チェック）してから、既存の`app/v2/company-lab/decisionDraft.ts`の`buildDecisionInputFromDraft`で`CompanyDecisionInput`へ変換する。構造検証・変換のいずれかが失敗した場合は`CompanyLabQuarterProcessingError`（HTTP 422）として扱い、型変換中の生の例外がAPI応答へ漏れないようにしている。
+- **プレイヤー会社**（`stored.playerCompanyId`と一致する会社。**Phase 8C-3Bで、リクエストごとに指定するフィールドから、ラボ作成時に確定・永続化された不変フィールドへ変更した**。§13参照）: 提出済みdraft本体（`unknown`）を、まず構造検証（`isPlausibleCompanyDecisionDraft`。companyId一致・必須フィールドの配列/オブジェクト存在チェック。Phase 8C-3BでUI層（`app/v2/company-lab/play/_lib/viewModel.ts`）からも再利用するためexport済み）してから、既存の`app/v2/company-lab/decisionDraft.ts`の`buildDecisionInputFromDraft`で`CompanyDecisionInput`へ変換する。構造検証・変換のいずれかが失敗した場合は`CompanyLabQuarterProcessingError`（HTTP 422）として扱い、型変換中の生の例外がAPI応答へ漏れないようにしている。
 - **AI会社**（プレイヤー以外の4社）: 既存の決定論的`generateAutoPolicyDecision`をそのまま呼ぶ。**新しいAI API呼び出しは本Phaseでは一切導入していない**。同一入力・同一ロジックであれば常に同じ結果になることをテスト（`decisionsProvider.test.ts`）で確認済み。
 - 全社ぶんの意思決定が揃わない場合（フィクスチャに存在しない会社を`playerCompanyId`に指定する等）や、companyIdの重複・範囲外は、既存のApplication Service側の検証にそのまま委ねる。
 
@@ -167,14 +169,39 @@ Phase 8C-2の`companyLabQuarterFlowService.ts`は、`CompanyLabDecisionsProvider
 
 `CompanyLabPersistedStateV1.currentState.runtime`（内部snapshot、turn32時点で実測約1.04MB）と`CompanyLabQuarterHistoryEntry`（1件あたり最大約2.5MB）は、通常の一覧・状態取得・履歴ページング応答には一切含めない。`responseDto.ts`の`toLabSummaryDto`/`toDraftSummaryDto`/`toLabStateDto`/`toHistoryEntrySummaryDto`が、revision・turn・完了状態等の軽量な値のみへ変換する。フル内部snapshotが必要な診断用途は`GET .../history/[turn]`だけに分離してある（§3.8）。
 
-## 11. Phase 8C-3BのUI統合に向けた申し送り
+## 11. Phase 8C-3BのUI統合に向けた申し送り（8C-3A時点。§13で実際の対応を記録）
 
 - 呼び出し順序の想定: `POST /company-labs`（作成）→ `GET /company-labs/[labId]`（画面初期表示、`draft`欄で編集再開状態を復元）→ `PUT .../draft`（編集の都度保存、`turnId`は省略してサーバー解決に任せてよい）→ `POST .../draft/submit`（提出）→ `POST .../process-quarter`（処理実行。応答が届かなかった場合はクライアント側で同一リクエストを再送してよい＝冪等）→ `GET .../history?afterTurn=...&limit=...`（結果の一覧・ページング）。
-- `playerCompanyId`は現状APIが`"BAL"`固定（フィクスチャに存在しなければ先頭の会社）。UIが5社の中からプレイヤー会社を選べるようにする場合、`decisionsProvider.ts`の`DEFAULT_PLAYER_COMPANY_ID`をリクエストパラメータ化する対応がPhase 8C-3B以降で必要になる。
+- ~~`playerCompanyId`は現状APIが`"BAL"`固定（フィクスチャに存在しなければ先頭の会社）。UIが5社の中からプレイヤー会社を選べるようにする場合、`decisionsProvider.ts`の`DEFAULT_PLAYER_COMPANY_ID`をリクエストパラメータ化する対応がPhase 8C-3B以降で必要になる。~~ → Phase 8C-3Bで対応済み（§13）。
 - `draft`本体のスキーマはAPI層では深く検証していない（サイズ上限のみ）。UIは`app/v2/company-lab/decisionDraft.ts`の`CompanyDecisionDraft`型をそのまま使ってdraftを組み立てること。
-- 認証（`Authorization: Bearer`）は現状すべてのroute（GET含む）に必須。UIから直接叩く場合、トークンの扱い（サーバーコンポーネント経由にする等、クライアントへ露出させない設計）をPhase 8C-3Bで検討する必要がある。
-- 全route診断専用の`GET .../history/[turn]`は、通常のプレイ画面からは呼ばない想定（デバッグ・GM用途）。
+- ~~認証（`Authorization: Bearer`）は現状すべてのroute（GET含む）に必須。UIから直接叩く場合、トークンの扱い（サーバーコンポーネント経由にする等、クライアントへ露出させない設計）をPhase 8C-3Bで検討する必要がある。~~ → Phase 8C-3Bで対応済み（§13）。このJSON API自体の認証方式（Bearerトークン必須）は変更していない。UIはこのAPIをブラウザから直接叩かず、サーバー側から`handlers.ts`を直接呼ぶ（§13.3）。
+- 全route診断専用の`GET .../history/[turn]`は、通常のプレイ画面からは呼ばない想定（デバッグ・GM用途）。Phase 8C-3BのUIでもこの方針を継続し、呼び出していない。
 
 ## 12. 対象外（このPhaseでは実装していない）
 
 プレイヤー画面の再構築、5社UIの完成、AI生成API方式での意思決定、Vercel本番デプロイ、Redis Cluster対応、非同期ジョブ基盤、ロック自動延長、古い履歴の圧縮、スナップショット差分保存、ラボ削除/リセット機能、V1側の変更、他worktreeの作業との統合。UIとの接続はPhase 8C-3Bで行う。
+
+## 13. Phase 8C-3B追記 — UI接続時にこのAPI層自体へ加えた変更
+
+Phase 8C-3B（`feature/v2-company-lab-ui`）でUIをこのAPIへ接続するにあたり、API層・Application Service層・永続化層自体にも以下の変更を加えた。UI側の設計（認証境界・画面構成等）の詳細は新設した `docs/v2/COMPANY_LAB_UI_ARCHITECTURE_v0.1.md` を参照。ここでは、この文書（8C-3A時点のAPI仕様）に対する差分だけを記録する。
+
+### 13.1 `playerCompanyId`をリクエストパラメータからラボの永続フィールドへ移動（指示§6）
+
+- **変更前（8C-3A）**: `playerCompanyId`はどこにも保存されず、`processQuarter`呼び出しのたびに`ProcessQuarterInput.playerCompanyId`として渡していた。API層は常に`"BAL"`（フィクスチャに存在しなければ先頭の会社）を固定で渡していた（`decisionsProvider.ts`の`DEFAULT_PLAYER_COMPANY_ID`）。
+- **変更後（8C-3B）**: `playerCompanyId`は`CreateLabInput`の必須フィールドとなり、`createLab`時に`CompanyLabPersistedStateV1.playerCompanyId`として永続化される（`app/lib/v2/companyLab/persistence/types.ts`）。以後は不変（作成後にこの値を変更するAPIは存在しない）。
+- **`ProcessQuarterInput`から`playerCompanyId`フィールドを完全に削除した**（`app/lib/v2/companyLab/application/companyLabQuarterFlowService.ts`）。`processQuarter()`は内部で`stored.playerCompanyId`だけを参照する。これにより「処理requestごとに別会社へ差し替える」ことが型レベル・実装レベルの両方で構造的に不可能になった（フィールド自体が存在しないため、渡しようがない）。
+- `createLab()`は`playerCompanyId`がそのシナリオのfixturesに実在することを防御的に検証し（`CompanyLabError`）、`app/api/v2/company-labs/_lib/validation.ts`はAPI境界でも既知の5社ID（`COMPANY_LAB_COMPANY_IDS`）であることを検証する（二重の検証。API層は「形として妥当な入力か」、Application Service層は「このシナリオのfixturesとして実在するか」という異なる責務）。
+- `app/lib/v2/companyLab/persistence/schema.ts`の永続化状態バリデータは、`playerCompanyId`の構造的な検証（空でない文字列）のみ行い、fixturesとの整合性チェックはあえて入れていない（既存の多くのテストフィクスチャが`fixtures: []`を使うため、ここでクロスチェックすると既存テストが軒並み壊れる。fixturesとの整合性保証は`createLab()`だけが持つ、という責務分離を維持した）。
+- 影響範囲: `persistence/types.ts`・`persistence/repository.ts`（in-memory実装・`CreateCompanyLabInput`）・`persistence/redisRepository.ts`・`persistence/schema.ts`・`application/companyLabQuarterFlowService.ts`・`api/_lib/validation.ts`・`api/_lib/handlers.ts`（`DEFAULT_PLAYER_COMPANY_ID`定数を削除）・`api/_lib/responseDto.ts`（`CompanyLabSummaryDto.playerCompanyId`を追加）。既存テストのフィクスチャ・直接構築している`CompanyLabPersistedStateV1`リテラルにはすべて`playerCompanyId`を追加済み（§13.4のテスト集計参照）。
+
+### 13.2 `isPlausibleCompanyDecisionDraft`をexport化
+
+UIの`app/v2/company-lab/play/_lib/viewModel.ts`が「保存済みdraftが壊れていないか」を判定する必要があり、`decisionsProvider.ts`内の同名ロジックをそのまま再利用する（重複実装しない）ため、`function`宣言に`export`を付けた。ふるまいの変更は無い。
+
+### 13.3 このAPI自体はブラウザから直接呼ばれない
+
+Phase 8C-3BのUIは、ブラウザから本APIへHTTPで直接アクセスする構成を採らなかった（§7「gratuitous self-HTTP-fetchingを避ける」）。UIのServer Component・Server Actionは、`app/api/v2/company-labs/_lib/handlers.ts`の`handle*`関数と`dependencies.ts`の`createCompanyLabApiDependencies()`を**サーバー側から直接呼び出す**。JSON API（本ドキュメントが記述するroute群）自体は変更しておらず、依然として`Authorization: Bearer`認証つきで独立に動作する（診断・スクリプト実行・将来の別クライアントからの利用のために温存）。詳細は `docs/v2/COMPANY_LAB_UI_ARCHITECTURE_v0.1.md` §2を参照。
+
+### 13.4 テストへの影響
+
+`playerCompanyId`の追加により、Application Service層・永続化層・API層それぞれの既存テストで`createLab`系の呼び出しに`playerCompanyId`を追加し、`processQuarter`系の呼び出しから削除する機械的な修正が必要になった（`companyLabQuarterFlowService.test.ts`・`resumeEquivalence.test.ts`・`repositoryContract.ts`・`atomicCommit.test.ts`・`labIdGenerator.test.ts`・`responseDto.test.ts`・`roundtrip.test.ts`・`storageMeasurement.test.ts`）。加えて`handlers.test.ts`・`validation.test.ts`に、5社それぞれでの作成・未知の会社IDの拒否・省略時の拒否・decisionsProviderの正しい配線・他社draftとの取り違え拒否・リクエストボディでの`playerCompanyId`上書きが無視されることを確認する新規テストを追加した（詳細は8C-3B最終報告を参照）。

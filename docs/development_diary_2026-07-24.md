@@ -51,3 +51,43 @@ Phase 8C-2完了後、独立監査（Fable、結論: 監査十分に合格・dev
 品質確認は、TypeScript（エラー0）、ESLint（エラー0・警告0）、全体テスト1,280件全pass、V1差分なし、メイン作業ディレクトリ完全不変を確認。ビルドは既知の`STAGING_KV_REST_API_URL`環境変数未設定エラー（V1の`/api/game/[gameCode]/admin/clone`route、本Phaseと無関係）のみが再現し、コンパイル・型チェック自体は成功した。
 
 Phase 8C-3Aの成果物は`origin/feature/v2-company-lab-api`へpushし、**develop/v2へのマージは本Phaseでは行わない**（Phase 8C-3BでUIを接続したうえで、あらためて統合判断を行う）。
+
+## 5. Phase 8C-3B: 会社Labプレイヤー画面接続・ブラウザE2E
+
+Phase 8C-3A受入後、Fable監査を今回は省略し（指示により明示的に許可）、(A) Phase 8C-3Aの`develop/v2`統合、(B) プレイヤー画面のUI接続、を続けて実施した。
+
+### 5.1 Phase 8C-3Aの統合
+
+`origin/feature/v2-company-lab-api`（`87ec965`）が`origin/develop/v2`（`51326231740fab97081ecf8658e8827bb5b0768d`）上でfast-forward可能であることを確認したうえで、専用worktree（`/tmp/shrimpx_company_lab_api`）から`git push origin 87ec965...:develop/v2`を実行し、`develop/v2`のHEADを`87ec965`へ更新した。メイン作業ディレクトリ（`/root/shrimpx`）には一切触れておらず、統合前後で`git status --short`が完全に不変であることをスナップショット比較で確認した。続けて、更新後の`origin/develop/v2`から新規worktree（`/tmp/shrimpx_company_lab_ui`）・新規ブランチ`feature/v2-company-lab-ui`を作成した。
+
+### 5.2 `playerCompanyId`のBAL固定fallback廃止
+
+8C-3A時点では、`playerCompanyId`はどこにも永続化されず、四半期処理のたびにAPI層が`"BAL"`固定（フィクスチャに存在しなければ先頭の会社）で渡していた。本Phaseでこれを廃止し、`playerCompanyId`をラボ作成時の必須パラメータ・`CompanyLabPersistedStateV1`の不変フィールドへ変更した。**最も強い保証を選んだ設計判断として、`ProcessQuarterInput`から`playerCompanyId`フィールド自体を完全に削除**し、`processQuarter()`は内部で`stored.playerCompanyId`のみを参照するようにした。これにより「処理requestごとに別会社へ差し替える」ことが実装上そもそも不可能になる（フィールドが存在しないため、悪意・バグのいずれによっても渡しようがない）。詳細な設計判断は`docs/v2/COMPANY_LAB_API_ARCHITECTURE_v0.1.md` §13.1に記録した。
+
+この変更は永続化層（`persistence/types.ts`・`repository.ts`・`redisRepository.ts`・`schema.ts`）・Application Service層・API層（`validation.ts`・`handlers.ts`・`responseDto.ts`）に波及し、既存テストの多くの`createLab`呼び出しに`playerCompanyId`を追加し、`processQuarter`呼び出しから削除する機械的な修正が必要になった。永続化状態バリデータ（`schema.ts`）では、当初`playerCompanyId`をfixturesとクロスチェックする実装を試みたが、既存の多くのテストフィクスチャが`fixtures: []`（空配列）を使っているため常に失敗することに気づき、クロスチェックは`createLab()`側だけの責務とし、バリデータ側は構造検証（空でない文字列であること）のみに留める設計へ修正した（テストを実行する前に自己発見・修正）。
+
+### 5.3 ブラウザ/サーバー境界（`STAGING_ADMIN_TOKEN`の非露出）
+
+既存の`assertStagingAdmin`（Bearerヘッダー認証、8C-3A JSON APIが使用）から、リクエストに依存しない比較ロジック本体`checkStagingAdminToken`を抽出・export化した。新設した`app/lib/companyLabUiSession.ts`は、この共通ロジックを使ってログイン時に一度だけトークンを検証し、成功したら**トークン自体を含まない署名付きopaqueセッション値**をHttpOnly・Secure・SameSite=Laxのcookieへ書き込む。署名鍵はSTAGING_ADMIN_TOKENから都度導出する（ドメイン分離文字列を前置。ローテーションで全セッションが自動失効する）。以後の画面・操作はこのセッションCookieだけを検証し、STAGING_ADMIN_TOKEN自体を読み返すことは一切ない。
+
+ブラウザ→永続化状態への呼び出し経路は、同一Next.jsアプリ内での自己HTTP fetchを避け、Server Component・Server Actionから8C-3Aの`app/api/v2/company-labs/_lib/handlers.ts`の`handle*`関数を**サーバー側から直接呼ぶ**構成にした（8C-3AのJSON API route群自体は変更せず、独立して動作し続ける）。状態変更を伴う全Server Actionには、Next.js組み込みのOrigin検証に加えて、アプリケーション層でも`Origin`/`Host`一致を確認する`assertSameOriginRequest`を多重防御として追加した。
+
+実Upstash認証情報がこの開発環境には無いため、非本番環境限定・明示的な環境変数（`COMPANY_LAB_UI_E2E_IN_MEMORY=1`）でのみ有効になる、既存のin-memory Repository実装へのフォールバック（`uiDependencies.ts`）を追加した。本番環境ではこのフラグは常に無視される。詳細設計は新設した`docs/v2/COMPANY_LAB_UI_ARCHITECTURE_v0.1.md`にまとめた。
+
+### 5.4 画面構成・状態遷移
+
+ラボ一覧・作成・プレイヤー画面（意思決定編集・下書き保存・提出・四半期処理確認・結果表示・履歴要約）を実装した。既存の`DecisionEditor`・`ResultsPanel`・`MarketPanel`・`LabBanner`・`CompanyDecisionDraft`型をすべて再利用し、新規UIコンポーネントはページ・Server Action・ビューモデル組み立て層（`viewModel.ts`）のみに限定した。
+
+`viewModel.ts`では、Phase 8C-2で確立した「turn 2以降はruntime snapshotに加えて直近確定履歴のrecordを注入して復元しないと、前四半期の市場価格等が静かにprehistory値へフォールバックする」という復元ロジック（`restoreCompanyLabStateFromRuntimeSnapshot`）を、実装前の設計段階で意識的に再適用した（重複実装せず、既存関数をそのまま呼ぶ）。
+
+状態はサーバー側永続状態（Redis or in-memoryフォールバック）を唯一の正とし、Client Component側のReact local stateは編集中の一時的な値としてのみ使う。保存・提出・処理いずれかの操作成功後は、`revision`・`currentTurn`・`phase`・`draftUpdatedAt`を結合したkeyでClient Componentを再マウントし、常にサーバーの最新値を初期値にする（Reactの定石パターン）。
+
+### 5.5 テスト・ブラウザE2E
+
+新規ユニットテスト37件を追加した（`stagingAdmin.test.ts` 12件、`companyLabUiSession.test.ts` 18件、`uiDependencies.test.ts` 7件）。`next/headers`のcookies()/headers()に依存する関数（`attemptStagingLogin`等）はNext.jsのリクエストスコープ外から呼ぶと例外になるため直接ユニットテストできないことを確認したうえで、署名検証・有効期限・CSRF判定等の**セキュリティ上重要なロジックはすべてリクエストスコープに依存しない純粋関数として切り出し**（`createSessionToken`/`verifySessionToken`/`deriveSessionSecret`/`isSameOriginHost`をexport化）、そちらを直接テストした。本番環境判定（`isProduction`）はモジュール読込時に一度だけ確定するトップレベルconstであるため、`APP_ENV=production`を設定した別プロセス（`execFileSync`で`npx tsx -e`を起動）でのみ検証した。全体テストは1,325件全pass（8C-3A時点の1,288件＋今回の37件）。
+
+ブラウザE2E（Playwright、Chromium）は`COMPANY_LAB_UI_E2E_IN_MEMORY=1`のNext.js開発サーバーに対して実施し、ログイン（成功・失敗）・セッションCookie属性・管理トークン非露出・ラボ作成（5社選択）・意思決定入力・下書き保存・リロード後の復元・提出・四半期処理・turn2以降への遷移・二重クリックでの多重処理防止（`revision`・`turn`が正確に1回分だけ進むことを確認）・一覧からの再開・存在しないラボの404・ログアウト後の再アクセス拒否・全ターン処理後の完了表示、をすべて確認した（全項目PASS）。詳細は`docs/v2/COMPANY_LAB_UI_ARCHITECTURE_v0.1.md` §8。
+
+品質確認は、TypeScript（エラー0）、ESLint（エラー0・警告0、`<a>`タグを`next/link`の`<Link>`へ修正した1件のみ発生・即修正）、全体テスト1,325件全pass、`npm run build`成功（既知の`STAGING_KV_REST_API_URL`未設定エラーはV1の`/api/game/[gameCode]/admin/clone`routeで従来どおり再現するのみで本Phaseと無関係。ダミー環境変数を与えたビルドでは新規routeを含め全routeが正常に生成されることを確認）、本番ビルドの client bundle（`.next/static`）に管理トークンの値が一切含まれないことをgrepで確認、V1差分なし、メイン作業ディレクトリ完全不変。
+
+成果物は`origin/feature/v2-company-lab-ui`へpushし、**develop/v2へのマージは本Phaseでは行わない**。詳細な設計判断は`docs/v2/COMPANY_LAB_UI_ARCHITECTURE_v0.1.md`、API層への差分は`docs/v2/COMPANY_LAB_API_ARCHITECTURE_v0.1.md` §13を参照。

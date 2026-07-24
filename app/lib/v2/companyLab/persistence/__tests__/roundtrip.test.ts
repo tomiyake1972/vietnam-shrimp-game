@@ -99,6 +99,7 @@ test("CompanyLabPersistedStateV1（現在状態、draftなし）をencode→deco
     labId: "lab-roundtrip-001",
     config: last.stateAfter.config,
     fixtures,
+    playerCompanyId: "BAL" as never,
     currentState: { runtime: runtimeWithCapex, lastProcessedTurnId: "turn-14", revision: 14 },
     draft: null,
     metadata: { createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-15T00:00:00.000Z" },
@@ -168,6 +169,7 @@ test("進行中ドラフト（submittedAt=null）を含むCompanyLabPersistedSta
     labId: "lab-roundtrip-002",
     config: last.stateAfter.config,
     fixtures,
+    playerCompanyId: "BAL" as never,
     currentState: {
       runtime: {
         currentPeriod: last.stateAfter.currentPeriod,

@@ -26,17 +26,18 @@ test("validateLabId: 空文字・非文字列・':'を含む・長すぎる場�
 });
 
 test("validateCreateLabRequestBody: 最小限の妥当な入力を受理する（labId省略可）", () => {
-  const result = validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "seed-1", turns: 4 });
+  const result = validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "seed-1", turns: 4, playerCompanyId: "BAL" });
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.value.labId, undefined);
     assert.equal(result.value.scenarioId, "baseline");
     assert.equal(result.value.turns, 4);
+    assert.equal(result.value.playerCompanyId, "BAL");
   }
 });
 
 test("validateCreateLabRequestBody: labIdを指定した場合はそのまま受理する", () => {
-  const result = validateCreateLabRequestBody({ labId: "my-lab", scenarioId: "baseline", mode: "canonical", seed: "seed-1", turns: 4 });
+  const result = validateCreateLabRequestBody({ labId: "my-lab", scenarioId: "baseline", mode: "canonical", seed: "seed-1", turns: 4, playerCompanyId: "MASS" });
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.value.labId, "my-lab");
 });
@@ -44,12 +45,27 @@ test("validateCreateLabRequestBody: labIdを指定した場合はそのまま受
 test("validateCreateLabRequestBody: 不正なmode・turns・scenarioId・非オブジェクトはいずれも拒否する", () => {
   assert.equal(validateCreateLabRequestBody(null).ok, false);
   assert.equal(validateCreateLabRequestBody("not-an-object").ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "", mode: "canonical", seed: "s", turns: 1 }).ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "invalid-mode", seed: "s", turns: 1 }).ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "", turns: 1 }).ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 0 }).ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 1.5 }).ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: "4" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "", mode: "canonical", seed: "s", turns: 1, playerCompanyId: "BAL" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "invalid-mode", seed: "s", turns: 1, playerCompanyId: "BAL" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "", turns: 1, playerCompanyId: "BAL" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 0, playerCompanyId: "BAL" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 1.5, playerCompanyId: "BAL" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: "4", playerCompanyId: "BAL" }).ok, false);
+});
+
+test("validateCreateLabRequestBody: playerCompanyIdが未知の値・省略・非文字列の場合はいずれも拒否する（Phase 8C-3B §6）", () => {
+  const base = { scenarioId: "baseline", mode: "canonical" as const, seed: "s", turns: 1 };
+  assert.equal(validateCreateLabRequestBody({ ...base, playerCompanyId: "NO-SUCH-CO" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ ...base }).ok, false, "playerCompanyId省略はサイレントなfallbackをせず拒否する");
+  assert.equal(validateCreateLabRequestBody({ ...base, playerCompanyId: 123 }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ ...base, playerCompanyId: "" }).ok, false);
+});
+
+test("validateCreateLabRequestBody: 既知の5社IDはすべて受理する", () => {
+  for (const companyId of ["BAL", "MASS", "JPQ", "VAP", "CONSV"]) {
+    const result = validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 1, playerCompanyId: companyId });
+    assert.equal(result.ok, true, `playerCompanyId=${companyId}が拒否された`);
+  }
 });
 
 test("validateSaveDraftRequestBody: draftフィールドが必須", () => {

@@ -81,6 +81,7 @@ test("40四半期分の保存容量を実測し、増加傾向が線形である
     labId: "lab-storage-measurement",
     config: realQuarters[0].stateBefore.config,
     fixtures,
+    playerCompanyId: "BAL" as never,
     currentState: { runtime: initialRuntimeSnapshot, revision: 0 },
     draft: null,
     metadata: { createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
@@ -192,6 +193,7 @@ test("40四半期分の保存容量を実測し、増加傾向が線形である
     labId: "lab-storage-measurement",
     config: lastRealQuarter.stateAfter.config,
     fixtures,
+    playerCompanyId: "BAL" as never,
     currentState: {
       runtime: createCompanyLabRuntimeSnapshot(lastRealQuarter.stateAfter),
       lastProcessedTurnId: `turn-${MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO}`,
