@@ -13,7 +13,19 @@ export type CompanyLabPersistenceErrorCode =
   | "DRAFT_NOT_FOUND"
   | "HISTORY_ENTRY_NOT_FOUND"
   | "REPOSITORY_ERROR"
-  | "SERIALIZATION_ERROR";
+  | "SERIALIZATION_ERROR"
+  // --- Phase 8C-2で追加（Application Service・Repository契約統一） ---
+  | "LAB_ALREADY_EXISTS"
+  | "LAB_COMPLETED"
+  | "DRAFT_NOT_SUBMITTED"
+  | "DRAFT_ALREADY_SUBMITTED"
+  | "DRAFT_TURN_MISMATCH"
+  | "LOCK_UNAVAILABLE"
+  | "LOCK_CONFLICT"
+  | "REVISION_CONFLICT"
+  | "TURN_CONFLICT"
+  | "INTEGRITY_ERROR"
+  | "QUARTER_PROCESSING_FAILED";
 
 abstract class CompanyLabPersistenceErrorBase extends Error {
   abstract readonly code: CompanyLabPersistenceErrorCode;
@@ -104,5 +116,151 @@ export class CompanyLabSerializationError extends CompanyLabPersistenceErrorBase
   constructor(message: string) {
     super(message);
     this.name = "CompanyLabSerializationError";
+  }
+}
+
+// ---------------------------------------------------------------------
+// Phase 8C-2で追加されたエラー型（Application Service・Repository契約統一）
+// ---------------------------------------------------------------------
+
+/** 既に存在するlabIdでラボを作成しようとした場合（上書き禁止。Phase 8C-2指示§3.1）。 */
+export class CompanyLabAlreadyExistsError extends CompanyLabPersistenceErrorBase {
+  readonly code = "LAB_ALREADY_EXISTS" as const;
+  readonly labId: string;
+  constructor(labId: string) {
+    super(`会社ラボ "${labId}" は既に存在します。既存ラボの上書き作成は許可されていません。`);
+    this.name = "CompanyLabAlreadyExistsError";
+    this.labId = labId;
+  }
+}
+
+/** 完了済み（isComplete=true）のラボをさらに進めようとした場合（Phase 8C-2指示§10）。 */
+export class CompanyLabCompletedError extends CompanyLabPersistenceErrorBase {
+  readonly code = "LAB_COMPLETED" as const;
+  readonly labId: string;
+  constructor(labId: string) {
+    super(`会社ラボ "${labId}" はシナリオの最終四半期まで処理済みです。これ以上四半期を進めることはできません。`);
+    this.name = "CompanyLabCompletedError";
+    this.labId = labId;
+  }
+}
+
+/** ドラフトが存在するが正式提出されていない（submittedAt=null）状態で四半期処理を要求された場合。 */
+export class CompanyLabDraftNotSubmittedError extends CompanyLabPersistenceErrorBase {
+  readonly code = "DRAFT_NOT_SUBMITTED" as const;
+  readonly labId: string;
+  constructor(labId: string) {
+    super(`会社ラボ "${labId}" のドラフトはまだ正式提出されていません。四半期処理には提出済みドラフトが必要です。`);
+    this.name = "CompanyLabDraftNotSubmittedError";
+    this.labId = labId;
+  }
+}
+
+/** 正式提出済みドラフトを編集（上書き保存）しようとした場合（提出後の編集防止。Phase 8C-1指示§3-2の8C-2持ち越し分）。 */
+export class CompanyLabDraftAlreadySubmittedError extends CompanyLabPersistenceErrorBase {
+  readonly code = "DRAFT_ALREADY_SUBMITTED" as const;
+  readonly labId: string;
+  constructor(labId: string) {
+    super(`会社ラボ "${labId}" のドラフトは既に正式提出済みです。提出後のドラフト編集は許可されていません。`);
+    this.name = "CompanyLabDraftAlreadySubmittedError";
+    this.labId = labId;
+  }
+}
+
+/** ドラフトのturnIdが処理要求のturnIdと一致しない場合。 */
+export class CompanyLabDraftTurnMismatchError extends CompanyLabPersistenceErrorBase {
+  readonly code = "DRAFT_TURN_MISMATCH" as const;
+  readonly labId: string;
+  readonly requestedTurnId: string;
+  readonly actualTurnId: string;
+  constructor(labId: string, requestedTurnId: string, actualTurnId: string) {
+    super(`会社ラボ "${labId}" のドラフトのturnId(${actualTurnId})が、処理要求のturnId(${requestedTurnId})と一致しません。`);
+    this.name = "CompanyLabDraftTurnMismatchError";
+    this.labId = labId;
+    this.requestedTurnId = requestedTurnId;
+    this.actualTurnId = actualTurnId;
+  }
+}
+
+/** 四半期処理ロックが他の処理に取得されており、取得できなかった場合。 */
+export class CompanyLabLockUnavailableError extends CompanyLabPersistenceErrorBase {
+  readonly code = "LOCK_UNAVAILABLE" as const;
+  readonly labId: string;
+  constructor(labId: string) {
+    super(`会社ラボ "${labId}" の四半期処理ロックを取得できませんでした（別の処理が進行中の可能性があります）。`);
+    this.name = "CompanyLabLockUnavailableError";
+    this.labId = labId;
+  }
+}
+
+/** 原子コミット時点でロックトークンが一致しなかった場合（TTL切れ・他処理による取得等）。 */
+export class CompanyLabLockConflictError extends CompanyLabPersistenceErrorBase {
+  readonly code = "LOCK_CONFLICT" as const;
+  readonly labId: string;
+  constructor(labId: string) {
+    super(
+      `会社ラボ "${labId}" の原子コミット時点でロックトークンが一致しませんでした` +
+        `（処理中にロックTTLが切れたか、別の処理がロックを取得した可能性があります）。確定状態は変更されていません。`
+    );
+    this.name = "CompanyLabLockConflictError";
+    this.labId = labId;
+  }
+}
+
+/** 原子コミット時点でrevisionが一致しなかった場合（楽観的排他制御の競合）。 */
+export class CompanyLabRevisionConflictError extends CompanyLabPersistenceErrorBase {
+  readonly code = "REVISION_CONFLICT" as const;
+  readonly labId: string;
+  readonly expectedRevision: number;
+  readonly actualRevision: number;
+  constructor(labId: string, expectedRevision: number, actualRevision: number) {
+    super(
+      `会社ラボ "${labId}" のrevisionが競合しました（期待: ${expectedRevision}、実際: ${actualRevision}）。` +
+        `別の処理が先に状態を進めています。確定状態は変更されていません。`
+    );
+    this.name = "CompanyLabRevisionConflictError";
+    this.labId = labId;
+    this.expectedRevision = expectedRevision;
+    this.actualRevision = actualRevision;
+  }
+}
+
+/** 同じturnに対して異なるturnIdの履歴が既に確定している場合（同一四半期の二重処理防止）。 */
+export class CompanyLabTurnConflictError extends CompanyLabPersistenceErrorBase {
+  readonly code = "TURN_CONFLICT" as const;
+  readonly labId: string;
+  readonly turn: number;
+  readonly existingTurnId: string;
+  constructor(labId: string, turn: number, existingTurnId: string) {
+    super(
+      `会社ラボ "${labId}" の四半期${turn}は、既に別のturnId(${existingTurnId})で確定済みです。` +
+        `同一四半期を異なるturnIdで二重に処理することはできません。`
+    );
+    this.name = "CompanyLabTurnConflictError";
+    this.labId = labId;
+    this.turn = turn;
+    this.existingTurnId = existingTurnId;
+  }
+}
+
+/** 保存されているcurrent・履歴・indexの間に矛盾が検出された場合（本来起きてはならない整合性違反）。 */
+export class CompanyLabIntegrityError extends CompanyLabPersistenceErrorBase {
+  readonly code = "INTEGRITY_ERROR" as const;
+  readonly labId: string;
+  constructor(labId: string, message: string) {
+    super(`会社ラボ "${labId}" の保存状態に整合性違反が検出されました: ${message}`);
+    this.name = "CompanyLabIntegrityError";
+    this.labId = labId;
+  }
+}
+
+/** 四半期処理エンジン（advanceCompanyLabQuarter等）の実行が失敗した場合（コミット前。確定状態は変更されない）。 */
+export class CompanyLabQuarterProcessingError extends CompanyLabPersistenceErrorBase {
+  readonly code = "QUARTER_PROCESSING_FAILED" as const;
+  readonly labId: string;
+  constructor(labId: string, message: string) {
+    super(`会社ラボ "${labId}" の四半期処理に失敗しました（確定状態は変更されていません）: ${message}`);
+    this.name = "CompanyLabQuarterProcessingError";
+    this.labId = labId;
   }
 }

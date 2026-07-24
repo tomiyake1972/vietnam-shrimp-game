@@ -23,6 +23,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { period as makePeriod } from "../../../core/period";
 import { encodeCompanyLabPersistedState } from "../codec";
+import { buildAtomicCommitEvalArgs, COMPANY_LAB_QUARTER_COMMIT_LUA_SCRIPT } from "../atomicCommit";
 import { CompanyLabPersistedStateV1, CompanyLabQuarterHistoryEntry, CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION } from "../types";
 import { createCompanyLabRuntimeSnapshot } from "../snapshot";
 import { runRealQuartersWithAutoPolicy, buildHistoryEntryFromQuarter, baseTestConfig, MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO, TEST_ENGINE_VERSION } from "./testHelpers";
@@ -172,4 +173,86 @@ test("40四半期分の保存容量を実測し、増加傾向が線形である
   // Q40エントリ自体のサイズが、それ以前の全履歴を埋め込んだ場合に予想される規模
   // （目安として、Q1エントリのサイズ×turn番号）よりはるかに小さいこと。
   assert.ok(q40 < q1 * 10, `Q40エントリのサイズがQ1×10を超えている（turn番号に比例した増大の疑い）`);
+
+  // -------------------------------------------------------------------
+  // Phase 8C-2追加（指示§11）: 実運用の入出力単位でのサイズ実測
+  //   - 処理後current全体（最終実ターン＝turn 32時点）
+  //   - 原子コミットのEVAL要求全体（Luaスクリプト＋KEYS＋ARGV）
+  //   - Upstash REST送信時のJSON化・エスケープを反映した要求ボディ
+  //   - 単一history entryの読取り応答（REST応答の{"result": "<エスケープ済みJSON>"}形）
+  // いずれもUTF-8バイト数で測定する。値は環境・シリアライズ順序で多少変動しうる
+  // ため、狭い完全一致ではなく「Upstashの単一リクエスト上限10MBに対する余裕」を
+  // 確認する診断とする。
+  // -------------------------------------------------------------------
+  const lastRealQuarter = realQuarters[realQuarters.length - 1];
+  const lastRealEntry = historyEntries[MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO - 1];
+  const currentAfterQ32: CompanyLabPersistedStateV1 = {
+    schemaVersion: CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION,
+    engineVersion: TEST_ENGINE_VERSION,
+    labId: "lab-storage-measurement",
+    config: lastRealQuarter.stateAfter.config,
+    fixtures,
+    currentState: {
+      runtime: createCompanyLabRuntimeSnapshot(lastRealQuarter.stateAfter),
+      lastProcessedTurnId: `turn-${MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO}`,
+      revision: MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO,
+    },
+    draft: null,
+    metadata: { createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+  };
+  const currentAfterQ32Json = encodeCompanyLabPersistedState(currentAfterQ32);
+  const currentAfterQ32Bytes = Buffer.byteLength(currentAfterQ32Json, "utf8");
+  const lastEntryJson = JSON.stringify(lastRealEntry);
+  const lastEntryBytes = Buffer.byteLength(lastEntryJson, "utf8");
+
+  // 原子コミットのEVAL要求全体（実際のexecuteAtomicQuarterCommitと同じ形の引数を組み立てる）
+  const { keys: evalKeys, args: evalArgs } = buildAtomicCommitEvalArgs({
+    currentKey: "staging:v2:companyLab:lab-storage-measurement:current",
+    historyEntryKey: `staging:v2:companyLab:lab-storage-measurement:history:${MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO}`,
+    historyIndexKey: "staging:v2:companyLab:lab-storage-measurement:history:index",
+    draftKey: "staging:v2:companyLab:lab-storage-measurement:draft",
+    lockKey: "staging:v2:companyLab:lab-storage-measurement:lock",
+    turnId: `turn-${MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO}`,
+    turn: MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO,
+    expectedRevision: MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO - 1,
+    newRevision: MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO,
+    nextStoredStateJson: currentAfterQ32Json,
+    historyEntryJson: lastEntryJson,
+    expectedLockToken: "lock-token-storage-measurement",
+  });
+  const rawEvalRequestBytes =
+    Buffer.byteLength(COMPANY_LAB_QUARTER_COMMIT_LUA_SCRIPT, "utf8") +
+    evalKeys.reduce((sum, k) => sum + Buffer.byteLength(k, "utf8"), 0) +
+    evalArgs.reduce((sum, a) => sum + Buffer.byteLength(a, "utf8"), 0);
+  // Upstash RESTは["EVAL", script, numkeys, ...keys, ...args]をJSON配列としてPOSTする。
+  // JSON文字列を再度JSON文字列内へ埋め込むため、引用符等のエスケープでサイズが膨らむ。
+  const restRequestBody = JSON.stringify(["EVAL", COMPANY_LAB_QUARTER_COMMIT_LUA_SCRIPT, String(evalKeys.length), ...evalKeys, ...evalArgs]);
+  const restRequestBytes = Buffer.byteLength(restRequestBody, "utf8");
+  // 単一history entryの読取り応答（Upstash RESTのGET応答は{"result": "<値>"}の形）
+  const readResponseBody = JSON.stringify({ result: lastEntryJson });
+  const readResponseBytes = Buffer.byteLength(readResponseBody, "utf8");
+
+  const UPSTASH_SINGLE_REQUEST_LIMIT_BYTES = 10 * 1024 * 1024;
+
+  console.log(
+    [
+      "=== Phase 8C-2 §11 実運用入出力単位のサイズ実測（診断専用） ===",
+      `対象 | UTF-8バイト数`,
+      `処理後current全体（実turn ${MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO}） | ${currentAfterQ32Bytes}`,
+      `最大実history entry（実turn ${MAX_REAL_ENGINE_TURNS_FOR_BASELINE_SCENARIO}） | ${lastEntryBytes}`,
+      `原子コミットEVAL要求（script+KEYS+ARGV、生） | ${rawEvalRequestBytes}`,
+      `Upstash REST要求ボディ（JSON化・エスケープ込み） | ${restRequestBytes}（10MB上限の${((restRequestBytes / UPSTASH_SINGLE_REQUEST_LIMIT_BYTES) * 100).toFixed(1)}%）`,
+      `単一history entry読取り応答（REST形） | ${readResponseBytes}`,
+      "",
+    ].join("\n")
+  );
+
+  // 10MB上限に対して十分な余裕（少なくとも2倍＝50%未満）があることを確認する。
+  // ここが逼迫し始めたら、圧縮・剪定・分割保存（8C-2指示§13で将来課題とされた対策）の
+  // 前倒しを検討するシグナルとする。
+  assert.ok(
+    restRequestBytes < UPSTASH_SINGLE_REQUEST_LIMIT_BYTES * 0.5,
+    `原子コミットのREST要求（${restRequestBytes}バイト）がUpstash単一リクエスト上限10MBの50%を超えています。圧縮・剪定等の対策を前倒しで検討してください。`
+  );
+  assert.ok(readResponseBytes < UPSTASH_SINGLE_REQUEST_LIMIT_BYTES * 0.5, `単一history entryの読取り応答（${readResponseBytes}バイト）が10MB上限の50%を超えています。`);
 });

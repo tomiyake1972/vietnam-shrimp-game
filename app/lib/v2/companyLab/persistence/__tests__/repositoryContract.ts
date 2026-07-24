@@ -23,7 +23,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CompanyLabPersistedStateV1, CompanyLabQuarterHistoryEntry, CompanyLabRuntimeSnapshot } from "../types";
 import { CompanyLabStateRepository, CompanyLabQuarterCommitInput, CreateCompanyLabInput } from "../repository";
-import { CompanyLabNotFoundError } from "../errors";
+import { CompanyLabAlreadyExistsError, CompanyLabNotFoundError } from "../errors";
 
 function minimalRuntime(overrides: Partial<CompanyLabRuntimeSnapshot> = {}): CompanyLabRuntimeSnapshot {
   return {
@@ -114,18 +114,25 @@ function minimalRecord(turn: number, period: string): CompanyLabQuarterHistoryEn
   } as unknown as CompanyLabQuarterHistoryEntry["record"];
 }
 
+/** turn番号（1始まり）から妥当な"YYYYQn"形式のperiodを作る（Qは必ず1〜4。turn 5以降は年を繰り上げる）。 */
+function periodForTurn(turn: number): string {
+  const year = 2026 + Math.floor((turn - 1) / 4);
+  const quarter = ((turn - 1) % 4) + 1;
+  return `${year}Q${quarter}`;
+}
+
 function minimalHistoryEntry(turn: number, turnId: string, overrides: Partial<CompanyLabQuarterHistoryEntry> = {}): CompanyLabQuarterHistoryEntry {
   return {
     turnId,
     turn,
-    period: `2026Q${turn}` as CompanyLabQuarterHistoryEntry["period"],
+    period: periodForTurn(turn) as CompanyLabQuarterHistoryEntry["period"],
     engineVersion: "test-engine",
     schemaVersion: 1,
     preProcessingStateSnapshot: minimalRuntime(),
     postProcessingStateSnapshot: minimalRuntime({ isComplete: false }),
     playerSubmission: minimalDecisionInput("TESTCO"),
     otherCompaniesDecisions: [],
-    record: minimalRecord(turn, `2026Q${turn}`),
+    record: minimalRecord(turn, periodForTurn(turn)),
     processedAt: "2026-01-01T00:00:01.000Z",
     ...overrides,
   };
@@ -526,5 +533,197 @@ export function runCompanyLabStateRepositoryContractTests(label: string, createR
     assert.deepEqual(index, [1]);
     const history = await repo.loadFullHistory("lab-concurrent");
     assert.equal(history.length, 1, "同時実行によって履歴が二重保存されている");
+  });
+
+  // -------------------------------------------------------------------
+  // Phase 8C-2追加: Repository契約の統一（§7）・labs一覧（§8）・
+  // ページング（§9）・ロック（§6.4）
+  // -------------------------------------------------------------------
+
+  /** turnをひとつ確定させるテスト用ヘルパー（draft保存→提出済み化→原子コミット）。 */
+  async function commitOneTurn(repo: CompanyLabStateRepository, labId: string, turn: number, turnId: string): Promise<void> {
+    const current = await repo.loadCurrentState(labId);
+    await repo.saveDraft({
+      labId,
+      period: periodForTurn(turn) as never,
+      turnId,
+      revision: current.currentState.revision,
+      draft: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      submittedAt: "2026-01-01T00:05:00.000Z",
+    });
+    const result = await repo.commitQuarterAtomically({
+      labId,
+      turn,
+      turnId,
+      expectedRevision: current.currentState.revision,
+      nextStoredState: nextStoredStateFor(current, turnId, current.currentState.revision + 1),
+      historyEntry: minimalHistoryEntry(turn, turnId),
+    });
+    assert.equal(result.status, "committed");
+  }
+
+  test(`[${label}] 重複labIdのcreateLabはAlreadyExistsになり、既存のcurrent・history・labs一覧を破壊しない`, async () => {
+    const repo = createRepo();
+    await repo.createLab(minimalCreateInput("lab-dup"));
+    await commitOneTurn(repo, "lab-dup", 1, "turn-1");
+    const before = await snapshotAllKeys(repo, "lab-dup");
+    await assert.rejects(() => repo.createLab(minimalCreateInput("lab-dup", { now: "2026-06-01T00:00:00.000Z" })), CompanyLabAlreadyExistsError);
+    const after = await snapshotAllKeys(repo, "lab-dup");
+    assert.equal(after, before, "重複createLabによって既存ラボの状態が変化してしまっている");
+    const labs = await repo.listLabs();
+    assert.deepEqual(
+      labs.filter((id) => id === "lab-dup"),
+      ["lab-dup"],
+      "labs一覧にlabIdが重複登録されている"
+    );
+    // revisionが0へ巻き戻されていない（上書き作成が起きていない）ことを明示的に確認する。
+    const current = await repo.loadCurrentState("lab-dup");
+    assert.equal(current.currentState.revision, 1);
+  });
+
+  test(`[${label}] 存在しないlabIdへの各操作はすべてCompanyLabNotFoundErrorを投げる（契約統一）`, async () => {
+    const repo = createRepo();
+    const missing = "lab-does-not-exist";
+    await assert.rejects(() => repo.loadCurrentState(missing), CompanyLabNotFoundError);
+    await assert.rejects(
+      () =>
+        repo.saveDraft({
+          labId: missing,
+          period: "2026Q1" as never,
+          turnId: "t",
+          revision: 0,
+          draft: {},
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          submittedAt: null,
+        }),
+      CompanyLabNotFoundError
+    );
+    await assert.rejects(() => repo.loadDraft(missing), CompanyLabNotFoundError);
+    await assert.rejects(() => repo.loadHistoryEntry(missing, 1), CompanyLabNotFoundError);
+    await assert.rejects(() => repo.loadHistoryIndex(missing), CompanyLabNotFoundError);
+    await assert.rejects(() => repo.loadFullHistory(missing), CompanyLabNotFoundError);
+    await assert.rejects(() => repo.loadLatestHistoryEntry(missing), CompanyLabNotFoundError);
+    await assert.rejects(() => repo.loadHistoryPage(missing, { limit: 10 }), CompanyLabNotFoundError);
+    await assert.rejects(() => repo.acquireProcessingLock({ labId: missing, token: "t", ttlMilliseconds: 1000, now: "2026-01-01T00:00:00.000Z" }), CompanyLabNotFoundError);
+  });
+
+  test(`[${label}] labs一覧: 空→作成順に列挙され、存在するラボのhistoryなしは空配列・draftなしはnull`, async () => {
+    const repo = createRepo();
+    assert.deepEqual(await repo.listLabs(), []);
+    await repo.createLab(minimalCreateInput("lab-list-b"));
+    await repo.createLab(minimalCreateInput("lab-list-a"));
+    await repo.createLab(minimalCreateInput("lab-list-c"));
+    assert.deepEqual(await repo.listLabs(), ["lab-list-b", "lab-list-a", "lab-list-c"], "labs一覧は辞書順ではなく作成順で列挙されるべき");
+    // 存在するラボの「まだ何もない」状態の契約
+    assert.deepEqual(await repo.loadHistoryIndex("lab-list-a"), []);
+    assert.deepEqual(await repo.loadFullHistory("lab-list-a"), []);
+    assert.equal(await repo.loadLatestHistoryEntry("lab-list-a"), null);
+    assert.equal(await repo.loadDraft("lab-list-a"), null);
+    const emptyPage = await repo.loadHistoryPage("lab-list-a", { limit: 5 });
+    assert.deepEqual(emptyPage, { entries: [], nextAfterTurn: null });
+  });
+
+  test(`[${label}] loadLatestHistoryEntryは最大turnのエントリを返す`, async () => {
+    const repo = createRepo();
+    await repo.createLab(minimalCreateInput("lab-latest"));
+    for (const turn of [1, 2, 3]) {
+      await commitOneTurn(repo, "lab-latest", turn, `turn-${turn}`);
+    }
+    const latest = await repo.loadLatestHistoryEntry("lab-latest");
+    assert.equal(latest?.turn, 3);
+    assert.equal(latest?.turnId, "turn-3");
+  });
+
+  test(`[${label}] loadHistoryPage: limit・afterTurnによるページングが正しく機能する`, async () => {
+    const repo = createRepo();
+    await repo.createLab(minimalCreateInput("lab-page"));
+    for (const turn of [1, 2, 3, 4, 5]) {
+      await commitOneTurn(repo, "lab-page", turn, `turn-${turn}`);
+    }
+    const page1 = await repo.loadHistoryPage("lab-page", { limit: 2 });
+    assert.deepEqual(
+      page1.entries.map((e) => e.turn),
+      [1, 2]
+    );
+    assert.equal(page1.nextAfterTurn, 2);
+    const page2 = await repo.loadHistoryPage("lab-page", { afterTurn: page1.nextAfterTurn as number, limit: 2 });
+    assert.deepEqual(
+      page2.entries.map((e) => e.turn),
+      [3, 4]
+    );
+    assert.equal(page2.nextAfterTurn, 4);
+    const page3 = await repo.loadHistoryPage("lab-page", { afterTurn: page2.nextAfterTurn as number, limit: 2 });
+    assert.deepEqual(
+      page3.entries.map((e) => e.turn),
+      [5]
+    );
+    assert.equal(page3.nextAfterTurn, null, "最終ページのnextAfterTurnはnullであるべき");
+    // ちょうど末尾で切れる場合も、続きがなければnull
+    const exactEnd = await repo.loadHistoryPage("lab-page", { afterTurn: 3, limit: 2 });
+    assert.deepEqual(
+      exactEnd.entries.map((e) => e.turn),
+      [4, 5]
+    );
+    assert.equal(exactEnd.nextAfterTurn, null);
+    // 不正なlimitは拒否される
+    await assert.rejects(() => repo.loadHistoryPage("lab-page", { limit: 0 }));
+  });
+
+  test(`[${label}] ロック: 取得・競合・自トークンのみ解放`, async () => {
+    const repo = createRepo();
+    await repo.createLab(minimalCreateInput("lab-lock"));
+    const now = "2026-01-01T00:00:00.000Z";
+    assert.equal(await repo.acquireProcessingLock({ labId: "lab-lock", token: "tokenA", ttlMilliseconds: 60_000, now }), true);
+    // 有効なロックがある間は、別トークンでの取得は失敗する
+    assert.equal(await repo.acquireProcessingLock({ labId: "lab-lock", token: "tokenB", ttlMilliseconds: 60_000, now }), false);
+    // 他トークンでの解放は失敗し、ロックは保持されたまま
+    assert.equal(await repo.releaseProcessingLock("lab-lock", "tokenB"), false);
+    assert.equal(await repo.acquireProcessingLock({ labId: "lab-lock", token: "tokenB", ttlMilliseconds: 60_000, now }), false, "他トークンによる解放でロックが失われている");
+    // 自トークンでの解放は成功し、その後は再取得できる
+    assert.equal(await repo.releaseProcessingLock("lab-lock", "tokenA"), true);
+    assert.equal(await repo.acquireProcessingLock({ labId: "lab-lock", token: "tokenB", ttlMilliseconds: 60_000, now }), true);
+  });
+
+  test(`[${label}] 原子コミット: expectedLockTokenが実際のロックと一致しない場合はlockConflictになり、全キー無変更`, async () => {
+    const repo = createRepo();
+    const created = await repo.createLab(minimalCreateInput("lab-lock-commit"));
+    await repo.saveDraft({
+      labId: "lab-lock-commit",
+      period: "2026Q1" as never,
+      turnId: "turn-1",
+      revision: 0,
+      draft: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      submittedAt: "2026-01-01T00:05:00.000Z",
+    });
+    await repo.acquireProcessingLock({ labId: "lab-lock-commit", token: "holder-token", ttlMilliseconds: 60_000, now: "2026-01-01T00:00:00.000Z" });
+    const before = await snapshotAllKeys(repo, "lab-lock-commit");
+    const result = await repo.commitQuarterAtomically({
+      labId: "lab-lock-commit",
+      turn: 1,
+      turnId: "turn-1",
+      expectedRevision: 0,
+      expectedLockToken: "stale-token", // 実際のロックはholder-token
+      nextStoredState: nextStoredStateFor(created, "turn-1", 1),
+      historyEntry: minimalHistoryEntry(1, "turn-1"),
+    });
+    assert.equal(result.status, "lockConflict");
+    const after = await snapshotAllKeys(repo, "lab-lock-commit");
+    assert.equal(after, before, "lockConflict時に何らかのキーが変化してしまっている");
+    // 正しいトークンならコミットできる
+    const ok = await repo.commitQuarterAtomically({
+      labId: "lab-lock-commit",
+      turn: 1,
+      turnId: "turn-1",
+      expectedRevision: 0,
+      expectedLockToken: "holder-token",
+      nextStoredState: nextStoredStateFor(created, "turn-1", 1),
+      historyEntry: minimalHistoryEntry(1, "turn-1"),
+    });
+    assert.equal(ok.status, "committed");
   });
 }

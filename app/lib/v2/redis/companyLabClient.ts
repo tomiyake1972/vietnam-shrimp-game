@@ -13,7 +13,7 @@
 // 読み取りロジックは本ファイル内で完結する。
 
 import { AppEnvV2 } from "../core/version";
-import { CompanyLabRedisClient } from "./companyLabTypes";
+import { CompanyLabRedisClient, CompanyLabRedisSetOptions } from "./companyLabTypes";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -42,7 +42,15 @@ export async function createDefaultCompanyLabRedisClient(appEnv: AppEnvV2): Prom
   const client = new Redis({ url, token });
   return {
     get: (key: string) => client.get(key),
-    set: (key: string, value: string) => client.set(key, value),
+    set: (key: string, value: string, options?: CompanyLabRedisSetOptions) => {
+      // @upstash/redisのset()はオプションオブジェクトの形（{nx, px}）が実際の
+      // SETコマンド引数（NX/PX）へ変換される。オプション未指定時は従来どおり無条件SET。
+      if (options === undefined) return client.set(key, value);
+      const upstashOptions: { nx?: true; px?: number } = {};
+      if (options.nx) upstashOptions.nx = true;
+      if (options.pxMilliseconds !== undefined) upstashOptions.px = options.pxMilliseconds;
+      return client.set(key, value, upstashOptions as never);
+    },
     exists: (key: string) => client.exists(key),
     del: (key: string) => client.del(key),
     eval: <TArgs extends unknown[], TData = unknown>(script: string, keys: string[], args: TArgs) =>
