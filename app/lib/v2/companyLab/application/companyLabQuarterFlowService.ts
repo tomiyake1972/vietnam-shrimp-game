@@ -45,6 +45,7 @@ import { CompanyLabStateRepository } from "../persistence/repository";
 import {
   CompanyLabCompletedError,
   CompanyLabDraftAlreadySubmittedError,
+  CompanyLabDraftConflictError,
   CompanyLabDraftNotFoundError,
   CompanyLabDraftNotSubmittedError,
   CompanyLabDraftTurnMismatchError,
@@ -180,9 +181,19 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
       throw new CompanyLabCompletedError(input.labId);
     }
     const existing = await repository.loadDraft(input.labId);
-    if (existing !== null && existing.turnId === input.turnId && existing.submittedAt !== null) {
-      // 正式提出後の編集防止（8C-1指示§3-2の8C-2持ち越し分）。
-      throw new CompanyLabDraftAlreadySubmittedError(input.labId);
+    if (existing !== null && existing.submittedAt !== null) {
+      if (existing.turnId === input.turnId) {
+        // 正式提出後の編集防止（8C-1指示§3-2の8C-2持ち越し分）。
+        throw new CompanyLabDraftAlreadySubmittedError(input.labId);
+      }
+      // 【Phase 8C-3A、Fable監査Minor-1対応】提出済みだが未処理の別turnのdraftが
+      // 既に存在する場合、異なるturnIdの新しいdraftで静かに上書きしない。turnIdの
+      // シーケンス管理は呼び出し側の責務だが（8C-2指示§7）、呼び出し側が誤って
+      // 処理待ちの提出済みdraftと異なるturnIdを送った場合に備え、Application
+      // Service層で構造的に防ぐ（Repository/契約テストではなく、ここで検出する
+      // 理由は、この判定がdraft単体の状態だけで完結し、Redis側の原子コミットの
+      // 対象外＝読み取り専用の事前ガードとして安全に実装できるため）。
+      throw new CompanyLabDraftConflictError(input.labId, existing.turnId, input.turnId);
     }
     const isSameTurnUpdate = existing !== null && existing.turnId === input.turnId;
     const envelope: CompanyLabDraftEnvelope = {
@@ -200,7 +211,13 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
   }
 
   async function submitDraft(input: SubmitDraftInput): Promise<CompanyLabDraftEnvelope> {
-    await repository.loadCurrentState(input.labId); // 不存在ならCompanyLabNotFoundError
+    const stored = await repository.loadCurrentState(input.labId); // 不存在ならCompanyLabNotFoundError
+    // 【Phase 8C-3A、Fable監査Minor-2対応】saveDraft・processQuarterと同様、完了済み
+    // ラボでのdraft提出を明示的に拒否する（既存の到達可能な状態遷移だけを辿る限り
+    // 実害はなかったが、一貫性・将来の呼び出し経路追加への防御のため追加する）。
+    if (stored.currentState.runtime.isComplete) {
+      throw new CompanyLabCompletedError(input.labId);
+    }
     const existing = await repository.loadDraft(input.labId);
     if (existing === null) {
       throw new CompanyLabDraftNotFoundError(input.labId);

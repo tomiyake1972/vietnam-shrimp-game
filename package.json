@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test \"app/lib/**/__tests__/**/*.test.ts\" \"app/v2/**/__tests__/**/*.test.ts\"",
+    "test": "tsx --test \"app/lib/**/__tests__/**/*.test.ts\" \"app/v2/**/__tests__/**/*.test.ts\" \"app/api/**/__tests__/**/*.test.ts\"",
     "v2:simulate": "tsx scripts/v2Simulate.ts",
     "v2:company-simulate": "tsx scripts/v2CompanySimulate.ts"
   },

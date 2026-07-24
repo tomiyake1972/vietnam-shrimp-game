@@ -18,6 +18,7 @@ import {
   CompanyLabAlreadyExistsError,
   CompanyLabCompletedError,
   CompanyLabDraftAlreadySubmittedError,
+  CompanyLabDraftConflictError,
   CompanyLabDraftNotFoundError,
   CompanyLabDraftNotSubmittedError,
   CompanyLabDraftTurnMismatchError,
@@ -500,5 +501,66 @@ for (const { label, create } of makeContexts()) {
     const current = await ctx.repo.loadCurrentState("lab-done");
     assert.equal(current.currentState.revision, 1);
     assert.deepEqual(await ctx.repo.loadHistoryIndex("lab-done"), [1]);
+  });
+
+  // -------------------------------------------------------------------
+  // Phase 8C-3A追加: Fable監査Minor-1・Minor-2対応の回帰テスト
+  // -------------------------------------------------------------------
+
+  test(`[${label}] Minor-1: 提出済みだが未処理の別turnのdraftが存在する場合、異なるturnIdでのsaveDraftはDraftConflictになり、既存draftは変更されない`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-draft-conflict", config: baseConfig(), now: NOW });
+    const submitted = await ctx.service.saveDraft({ labId: "lab-draft-conflict", turnId: "turn-1", draftBody: { note: "original" }, now: NOW });
+    await ctx.service.submitDraft({ labId: "lab-draft-conflict", turnId: "turn-1", now: NOW });
+
+    await assert.rejects(
+      () => ctx.service.saveDraft({ labId: "lab-draft-conflict", turnId: "turn-2", draftBody: { note: "overwrite-attempt" }, now: NOW }),
+      CompanyLabDraftConflictError
+    );
+
+    // 既存の提出済みdraft（turn-1）が変更されていないことを確認する
+    const draftAfter = await ctx.repo.loadDraft("lab-draft-conflict");
+    assert.equal(draftAfter?.turnId, "turn-1");
+    assert.notEqual(draftAfter?.submittedAt, null);
+    assert.deepEqual(draftAfter?.draft, { note: "original" });
+    void submitted;
+  });
+
+  test(`[${label}] Minor-1: 同じturnIdでの再保存（提出後編集）は引き続きDraftAlreadySubmittedになる（Minor-1対応が既存動作を壊していないことの確認）`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-same-turn-resubmit", config: baseConfig(), now: NOW });
+    await ctx.service.saveDraft({ labId: "lab-same-turn-resubmit", turnId: "turn-1", draftBody: {}, now: NOW });
+    await ctx.service.submitDraft({ labId: "lab-same-turn-resubmit", turnId: "turn-1", now: NOW });
+    await assert.rejects(
+      () => ctx.service.saveDraft({ labId: "lab-same-turn-resubmit", turnId: "turn-1", draftBody: { note: "edit-attempt" }, now: NOW }),
+      CompanyLabDraftAlreadySubmittedError
+    );
+  });
+
+  test(`[${label}] Minor-2: 完了済みラボへのsubmitDraftは明示的にCompanyLabCompletedErrorで拒否され、current・draftは変更されない`, async () => {
+    const ctx = create();
+    // turns=1のラボはturn 1の処理で完了する
+    await ctx.service.createLab({ labId: "lab-done-submit-guard", config: baseConfig({ turns: 1 }), now: NOW });
+    await runOneQuarter(ctx, "lab-done-submit-guard", "turn-1", "lock-1");
+    const currentAfter = await ctx.repo.loadCurrentState("lab-done-submit-guard");
+    assert.equal(currentAfter.currentState.runtime.isComplete, true);
+
+    // 完了後にturn-2ぶんのdraftを直接Repositoryへ差し込み（saveDraft自体は既にisComplete
+    // ガードで拒否されるため、submitDraft単体のガードを検証するには直接注入する必要がある）、
+    // submitDraftが明示的に完了済みラボを拒否することを確認する。
+    await ctx.repo.saveDraft({
+      labId: "lab-done-submit-guard",
+      period: currentAfter.currentState.runtime.currentPeriod,
+      turnId: "turn-2",
+      revision: currentAfter.currentState.revision,
+      draft: {},
+      createdAt: NOW,
+      updatedAt: NOW,
+      submittedAt: null,
+    });
+    await assert.rejects(() => ctx.service.submitDraft({ labId: "lab-done-submit-guard", turnId: "turn-2", now: NOW }), CompanyLabCompletedError);
+
+    const draftAfter = await ctx.repo.loadDraft("lab-done-submit-guard");
+    assert.equal(draftAfter?.submittedAt, null, "完了済みラボでsubmitDraftが誤って成功し、draftが提出済みになっている");
   });
 }

@@ -19,6 +19,7 @@ export type CompanyLabPersistenceErrorCode =
   | "LAB_COMPLETED"
   | "DRAFT_NOT_SUBMITTED"
   | "DRAFT_ALREADY_SUBMITTED"
+  | "DRAFT_CONFLICT"
   | "DRAFT_TURN_MISMATCH"
   | "LOCK_UNAVAILABLE"
   | "LOCK_CONFLICT"
@@ -164,6 +165,30 @@ export class CompanyLabDraftAlreadySubmittedError extends CompanyLabPersistenceE
     super(`会社ラボ "${labId}" のドラフトは既に正式提出済みです。提出後のドラフト編集は許可されていません。`);
     this.name = "CompanyLabDraftAlreadySubmittedError";
     this.labId = labId;
+  }
+}
+
+/**
+ * 提出済みだが未処理の別turnのドラフトが既に存在する状態で、異なるturnIdのドラフトを
+ * 保存しようとした場合（Phase 8C-3A、Fable監査Minor-1対応）。turnIdが一致する場合の
+ * 「提出後編集」はCompanyLabDraftAlreadySubmittedErrorが担い、本エラーは「turnIdが
+ * 異なる」場合専用（＝提出済みドラフトを、対象外turnの新しいドラフトで静かに
+ * 上書きすることを防ぐ）。
+ */
+export class CompanyLabDraftConflictError extends CompanyLabPersistenceErrorBase {
+  readonly code = "DRAFT_CONFLICT" as const;
+  readonly labId: string;
+  readonly submittedTurnId: string;
+  readonly requestedTurnId: string;
+  constructor(labId: string, submittedTurnId: string, requestedTurnId: string) {
+    super(
+      `会社ラボ "${labId}" には既にturnId(${submittedTurnId})の提出済みドラフトが存在するため、` +
+        `turnId(${requestedTurnId})の新しいドラフトを保存できません。提出済みドラフトの四半期処理を先に完了してください。`
+    );
+    this.name = "CompanyLabDraftConflictError";
+    this.labId = labId;
+    this.submittedTurnId = submittedTurnId;
+    this.requestedTurnId = requestedTurnId;
   }
 }
 
