@@ -57,6 +57,7 @@ import { INDUSTRY_LAB_ASSUMPTIONS_V1 } from "../industryLab/assumptions";
 import { runTurn } from "../turn/runner";
 import { TurnOrchestratorInput } from "../turn/types";
 import { applyFulfillments, updateContractStatusesForQuarterEnd } from "../sales/backlog";
+import { validateSalesForceHeadcountBudget } from "../sales/salesForce";
 import { CompanyId, MarketProductAllocationResult, SalesContract } from "../sales/types";
 import { AquacultureHarvestResult, DomesticPurchaseAllocationResult, RawMaterialLot } from "../rawMaterials/types";
 import {
@@ -517,6 +518,12 @@ export function advanceCompanyLabQuarter(
   const decisions = fixtures.map((f) => {
     const d = decisionsByCompanyId[f.companyId];
     if (!d) throw new CompanyLabError(`会社 "${f.companyId}" の当期意思決定が指定されていません。`);
+    try {
+      validateSalesForceHeadcountBudget(d.salesPlans, f.salesForceHeadcountTotal);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new CompanyLabError(`会社 "${f.companyId}" の意思決定が不正です: ${message}`);
+    }
     return d;
   });
 

@@ -317,12 +317,34 @@ function buildSalesPlans(
 ): readonly CompanySalesPlanEntry[] {
   const plans: CompanySalesPlanEntry[] = [];
   const markets = profile.preferredMarkets;
-  const headcountPerMarket = Math.max(1, Math.floor(fixture.salesForceHeadcountTotal / markets.length));
   const lastMarketResult = publicInfo.lastMarketResult;
   // 【Phase 8P-0A】商品×市場ごとの参照価格（前期実績、1四半期分のラグは既存設計を踏襲）。
   // これにより、市場係数導入後も各社の価格戦略（archetypeのpriceAdjustment比率）が
   // 「商品×市場参照価格に対して同じ相対的価格ポジションを取る」（実装指示 §17）。
   const referencePricesByMarket = referencePricesByMarketProduct(lastMarketResult);
+
+  // 【営業人員バジェット修正】以前は「市場数」でのみ均等割りした人数(headcountPerMarket)を
+  // 商品×市場の各行へ同じ値のまま重複して割り当てていたため、AIの標準案自体が
+  // salesForceHeadcountTotal（実在する営業人員数）を大きく超えてしまっていた
+  // （例：BALは18人だが、3市場×3商品=9行×6人=54人ぶんを計上）。
+  // sales/salesForce.tsのvalidateSalesForceHeadcountBudget()による検証を、AIの
+  // 標準案自体が必ず満たすよう、先に生成される行数を数えてから
+  // 「実在する人数 ÷ 行数」で均等割りする（端数は最初の行に寄せる）。
+  const plannedRows: { market: (typeof markets)[number]; product: Product }[] = [];
+  for (const product of ["hoso", "pd", "vap"] as const) {
+    const totalDesired = totalDesiredByProduct[product];
+    if (totalDesired <= EPSILON) continue;
+    markets.forEach((market, idx) => {
+      const weight = idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1);
+      if (totalDesired * weight <= EPSILON) return;
+      plannedRows.push({ market, product });
+    });
+  }
+  const rowCount = plannedRows.length;
+  const headcountPerRowBase = rowCount > 0 ? Math.floor(fixture.salesForceHeadcountTotal / rowCount) : 0;
+  const headcountRemainder = rowCount > 0 ? fixture.salesForceHeadcountTotal - headcountPerRowBase * rowCount : 0;
+  let rowIndex = 0;
+
   for (const product of ["hoso", "pd", "vap"] as const) {
     const totalDesired = totalDesiredByProduct[product];
     if (totalDesired <= EPSILON) continue;
@@ -332,13 +354,16 @@ function buildSalesPlans(
       const desiredQuantity = totalDesired * weight;
       if (desiredQuantity <= EPSILON) return;
       const referencePrice = referencePricesByMarket ? referencePricesByMarket[market][product] : undefined;
+      // 端数(headcountRemainder)は最初の1行だけに寄せる（合計が実在人数を超えないことを保証）。
+      const rowHeadcount = headcountPerRowBase + (rowIndex === 0 ? headcountRemainder : 0);
+      rowIndex += 1;
       plans.push({
         companyId: fixture.companyId,
         market,
         product,
         desiredQuantity: hosoEqTons(Math.round(desiredQuantity * 100) / 100),
         priceAdjustmentUsdPerHosoEqKg: ratioAdjustmentToUsd(profile.priceAdjustment[product], referencePrice),
-        salesForceHeadcount: headcountPerMarket,
+        salesForceHeadcount: rowHeadcount,
         costExpectation,
         qualityReputation: ownState.qualityScoreByProduct[product],
         customerRelationship: ownState.customerTrustByMarket[market],

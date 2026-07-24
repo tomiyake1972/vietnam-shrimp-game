@@ -33,7 +33,18 @@ function baseConfig(seed: string): CompanyLabConfig {
   return { scenarioId: "baseline-v0.1", mode: "canonical", seed, turns: 12 };
 }
 
-/** 1ターンぶん、プレイヤー会社は指定decisionOverride（無ければ自動方針そのまま）、他社は自動方針で進める。 */
+/**
+ * 1ターンぶん、プレイヤー会社は指定decisionOverride（無ければ自動方針そのまま）、他社は自動方針で進める。
+ *
+ * 【営業人員バジェット修正に伴う調整】案件は現金不足の四半期があると"suspended"になり、
+ * 明示的な再開要求(resumeRequests)がない限り二度と支払対象に戻らない設計
+ * （projectLifecycle.tsのbuildPaymentQueue、実装指示§15）。自動方針
+ * (generateAutoPolicyDecision)はcapexの再開要求を一切出さないため、このテスト用
+ * ヘルパーでは「一度提出した投資はキャンセルしない限りいずれ完成させたい」という
+ * プレイヤーの意図を表現し、プレイヤー自身のsuspended案件は毎期自動的に再開要求を出す
+ * （decisionOverrideForPlayerが指定されている場合は、その戻り値にさらにこの再開要求を
+ * 合成する）。
+ */
 function stepOnce(
   state: CompanyLabState,
   fixtures: readonly CompanyFixture[],
@@ -44,7 +55,24 @@ function stepOnce(
   for (const f of fixtures) {
     const ownState = buildCompanyOwnState(state, f);
     const auto = generateAutoPolicyDecision(f, ownState, publicInfo, state.currentPeriod, state.scenarioState.currentTurn);
-    decisionsByCompanyId[f.companyId] = f.companyId === PLAYER && decisionOverrideForPlayer ? decisionOverrideForPlayer(auto) : auto;
+    if (f.companyId === PLAYER) {
+      const withOverride = decisionOverrideForPlayer ? decisionOverrideForPlayer(auto) : auto;
+      const suspendedProjectIds = ownState.capexState.portfolio.projects
+        .filter((p) => p.status === "suspended")
+        .map((p) => p.projectId);
+      decisionsByCompanyId[f.companyId] =
+        suspendedProjectIds.length === 0
+          ? withOverride
+          : {
+              ...withOverride,
+              capexDecision: {
+                ...withOverride.capexDecision,
+                resumeRequests: suspendedProjectIds.map((projectId) => ({ projectId })),
+              },
+            };
+    } else {
+      decisionsByCompanyId[f.companyId] = auto;
+    }
   }
   return advanceCompanyLabQuarter(state, fixtures, decisionsByCompanyId);
 }

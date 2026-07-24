@@ -61,12 +61,30 @@ function decisionProviderWithBalCapexProposal(
   turn: number
 ): CompanyDecisionInput {
   const base = generateAutoPolicyDecision(fixture, ownState, publicInfo, period, turn);
-  if (fixture.companyId !== "BAL" || turn !== 1) return base;
+  if (fixture.companyId !== "BAL") return base;
+  if (turn === 1) {
+    const capexDecision: CapexDecisionInput = {
+      companyId: fixture.companyId,
+      newProjectProposals: [{ projectType: "coldStorageExpansion" }],
+      cancelRequests: [],
+      resumeRequests: [],
+    };
+    return { ...base, capexDecision };
+  }
+  // 【営業人員バジェット修正に伴う調整】案件は現金不足の四半期があると
+  // "suspended"になり、明示的な再開要求(resumeRequests)がない限り
+  // 二度と支払対象に戻らない設計（projectLifecycle.tsのbuildPaymentQueue）。
+  // 自動方針(generateAutoPolicyDecision)はcapexの再開要求を一切出さないため、
+  // 「一度提案した投資はキャンセルしない限りいずれ完成させたい」という
+  // プレイヤーの意図をこのテストの意思決定プロバイダーで表現し、suspended状態の
+  // 自社案件は毎期再開要求を出し続ける。
+  const suspendedProjectIds = ownState.capexState.portfolio.projects
+    .filter((p) => p.status === "suspended")
+    .map((p) => p.projectId);
+  if (suspendedProjectIds.length === 0) return base;
   const capexDecision: CapexDecisionInput = {
-    companyId: fixture.companyId,
-    newProjectProposals: [{ projectType: "coldStorageExpansion" }],
-    cancelRequests: [],
-    resumeRequests: [],
+    ...base.capexDecision,
+    resumeRequests: suspendedProjectIds.map((projectId) => ({ projectId })),
   };
   return { ...base, capexDecision };
 }
@@ -75,7 +93,14 @@ function runWithBalCapexOverride(turns: number, seed = "capex-int-override-001")
   return runCompanyLabWithAutoPolicyForAllCompanies(baseConfig({ turns, seed }), decisionProviderWithBalCapexProposal);
 }
 
-const shared8WithOverride = runWithBalCapexOverride(8);
+// 【営業人員バジェット修正に伴う調整】以前はautoPolicyのsalesForceHeadcountが
+// 市場×商品の各行へ重複割り当てされていたため（バグ）、BALの売上・現金が実態より
+// 大きく、8ターンで完成していた。バグ修正（1社の合計配置人数が実在人数を超えない）
+// により、AIの標準案の売上・現金水準がより現実的な（小さい）値になり、8ターンでは
+// 完成しなくなったため、余裕を持たせて16ターンに変更（承認→着工→分割払い→完成→
+// 固定資産振替という一連の流れを検証すること自体が目的で、特定ターン数での完成を
+// 要求するテストではないため、ターン数を増やすことは趣旨に反しない）。
+const shared8WithOverride = runWithBalCapexOverride(16);
 
 test("受入確認CI-2: 明示的に提案した投資案件が、companyLabの実ランで承認→着工→分割払い→完成→固定資産振替まで一貫して進む", () => {
   const balCapexHistory = shared8WithOverride.history.map((r) => ({
@@ -130,7 +155,7 @@ test("受入確認CI-3: capexResultsが毎四半期・5社分生成され、既�
 });
 
 test("受入確認CI-4: 同一シード・同一意思決定（capexDecisionの上書きを含む）で完全再現する", () => {
-  const again = runWithBalCapexOverride(8);
+  const again = runWithBalCapexOverride(16);
   assert.equal(
     JSON.stringify(shared8WithOverride.history.map((r) => r.capexResults)),
     JSON.stringify(again.history.map((r) => r.capexResults))
