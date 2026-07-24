@@ -10,8 +10,21 @@
 //
 // 【Period設定】
 //   - contractedPeriod: 2014Q4（前期に営業活動で獲得した成約）
-//   - dueDate: 2015Q2以降（当期Q1には未出荷）←★重要：初期売掛金と別時期
-//   - status: "open"（未履行、Q2以降に売上実現予定）
+//   - dueDate: 2015Q2以降（名目上の納期。初期売掛金の回収期＝Q1とは別時期に設定してある）
+//   - status: "open"（生成直後は未履行）
+//
+// 【2026-07-24追記：前倒し履行についての確認済み仕様】
+// 契約履行はcontractedPeriod→dueDate→contractIdの順のFIFOで決まり（sales/backlog.ts）、
+// dueDateは「これを過ぎたら延滞（overdue）扱いにする」閾値であって、「これより前は
+// 履行できない」という下限ゲートではない（この挙動は初期成約固有ではなく、既存の
+// 履行エンジン全体の既存仕様であり、通常のQ1契約でもdueDate=Q2の契約が同じQ1中に
+// 履行されることがある）。初期成約はcontractedPeriodが全社中最古（前期）のため、
+// 在庫が用意でき次第、上記FIFOにより優先的に――dueDateより前倒しで――履行される
+// ことがある。現実の商取引では前倒し出荷には通常ディスカウント等の調整が伴うが、
+// 三宅さんの判断により、本ゲームではそのような前倒し履行（無調整）を許容仕様として
+// 受け入れている。将来、前倒し履行にディスカウントを設ける、または履行エンジンへ
+// dueDate下限ゲートを追加する場合は、初期成約に限らず全契約へ影響する設計変更に
+// なるため、別途の検討課題とする。
 
 import { hosoEqTons, usdPerHosoEqKg, unwrapUnit } from "../core/units";
 import { PeriodV2, previousPeriod, parsePeriod } from "../core/period";
