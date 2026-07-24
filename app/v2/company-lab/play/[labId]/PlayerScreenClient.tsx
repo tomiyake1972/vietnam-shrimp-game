@@ -26,7 +26,7 @@ import { useRouter } from "next/navigation";
 import DecisionEditor from "../../components/DecisionEditor";
 import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
-import LabBanner from "../../components/LabBanner";
+import PlayLabBanner from "../components/PlayLabBanner";
 import { CompanyDecisionDraft } from "../../decisionDraft";
 import { PlayerScreenViewModel } from "../_lib/viewModel";
 import { processQuarterAction, saveDraftAction, submitDraftAction } from "./actions";
@@ -97,7 +97,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 pb-16">
-      <LabBanner />
+      <PlayLabBanner />
       <div className="max-w-6xl mx-auto px-3 sm:px-6 py-5 space-y-5">
         <div className="bg-gray-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
           <div>

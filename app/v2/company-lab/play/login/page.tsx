@@ -8,7 +8,7 @@
 import { redirect } from "next/navigation";
 import { hasValidStagingSession, COMPANY_LAB_UI_HOME_PATH } from "../../../../lib/companyLabUiSession";
 import { loginAction } from "./actions";
-import LabBanner from "../../components/LabBanner";
+import PlayLabBanner from "../components/PlayLabBanner";
 
 interface LoginPageProps {
   readonly searchParams: Promise<{ readonly error?: string }>;
@@ -23,7 +23,7 @@ export default async function CompanyLabLoginPage({ searchParams }: LoginPagePro
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center px-4">
       <div className="w-full max-w-sm space-y-5">
-        <LabBanner />
+        <PlayLabBanner />
         <div className="bg-gray-800 rounded-2xl p-6 space-y-4">
           <h1 className="text-base font-semibold">Company Lab ログイン</h1>
           <p className="text-xs text-gray-400">

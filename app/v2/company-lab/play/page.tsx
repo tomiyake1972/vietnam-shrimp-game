@@ -10,7 +10,7 @@ import { resolveCompanyLabUiDependencies, isCompanyLabUiRunningInMemoryForE2e } 
 import { handleListLabs } from "../../../api/v2/company-labs/_lib/handlers";
 import type { CompanyLabSummaryDto } from "../../../api/v2/company-labs/_lib/responseDto";
 import { listCompanyOptionsForUi } from "./_lib/companyOptions";
-import LabBanner from "../components/LabBanner";
+import PlayLabBanner from "./components/PlayLabBanner";
 import { logoutAction } from "./actions";
 
 export default async function CompanyLabListPage() {
@@ -24,7 +24,7 @@ export default async function CompanyLabListPage() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 pb-16">
-      <LabBanner />
+      <PlayLabBanner />
       <div className="max-w-4xl mx-auto px-3 sm:px-6 py-5 space-y-5">
         {isCompanyLabUiRunningInMemoryForE2e() && (
           <div className="bg-amber-950/50 border border-amber-700/60 rounded-lg px-4 py-2 text-xs text-amber-200">

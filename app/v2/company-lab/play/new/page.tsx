@@ -11,7 +11,7 @@ import { requireStagingSession } from "../../../../lib/companyLabUiSession";
 import { ALL_SCENARIO_DEFINITIONS } from "../../../../lib/v2/scenario";
 import { listCompanyOptionsForUi } from "../_lib/companyOptions";
 import { createLabAction } from "./actions";
-import LabBanner from "../../components/LabBanner";
+import PlayLabBanner from "../components/PlayLabBanner";
 
 const MAX_TURNS = 40;
 const DEFAULT_SEED = "company-lab-ui-seed-001";
@@ -29,7 +29,7 @@ export default async function NewCompanyLabPage({ searchParams }: NewLabPageProp
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 pb-16">
-      <LabBanner />
+      <PlayLabBanner />
       <div className="max-w-2xl mx-auto px-3 sm:px-6 py-8 space-y-6">
         <h1 className="text-lg font-semibold">新しいCompany Labを作成</h1>
 
