@@ -45,6 +45,21 @@ interface DecisionEditorProps {
   readonly lastQuarterRejectedCapexProposals?: readonly CapexRejectedProposal[];
 }
 
+const LOAN_TYPE_LABELS: Record<CompanyDecisionDraft["financingRequest"]["desiredLoanType"], string> = {
+  workingCapital: "運転資金",
+  termLoan: "設備・長期資金",
+  emergency: "緊急融資",
+};
+
+const REPAYMENT_METHOD_LABELS: Record<CompanyDecisionDraft["financingRequest"]["desiredRepaymentMethod"], string> = {
+  bulletAtMaturity: "満期一括",
+  equalPrincipal: "元金均等",
+};
+
+function formatUsd(value: number): string {
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
 function toSafeNumber(raw: string): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return 0;
@@ -131,6 +146,11 @@ export default function DecisionEditor(props: DecisionEditorProps) {
     return sum + budget * (template.paymentRatios[0] ?? 0);
   }, 0);
   const currentCashUsd = ownState.financeState.cash as number;
+
+  // --- 【営業人員バジェット修正と合わせて発見・対応】資金調達セクション用の派生値 ---
+  const existingLoans = ownState.financingState.loanPortfolio.loans.filter((l) => l.status !== "closed");
+  const existingLoanBalanceUsd = existingLoans.reduce((sum, l) => sum + l.currentPrincipalUsd, 0);
+  const accruedInterestPayableUsd = ownState.financingState.accruedInterestPayableUsd;
 
   return (
     <div className="space-y-5">
@@ -505,6 +525,115 @@ export default function DecisionEditor(props: DecisionEditorProps) {
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      {/* 【営業人員バジェット修正と合わせて発見・対応】資金調達（追加借入・任意期限前返済） */}
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-gray-200">資金調達（借入・返済）</h3>
+        <div className="text-xs text-gray-400">
+          既存借入残高合計 {formatUsd(existingLoanBalanceUsd)}
+          {accruedInterestPayableUsd > 0 && <span className="ml-2">未払利息 {formatUsd(accruedInterestPayableUsd)}</span>}
+        </div>
+        {existingLoans.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs text-gray-300">
+              <thead>
+                <tr className="text-gray-400 text-left">
+                  <th className="pr-3 py-1">借入ID</th>
+                  <th className="pr-3 py-1">種別</th>
+                  <th className="pr-3 py-1">残高</th>
+                  <th className="pr-3 py-1">年率</th>
+                  <th className="pr-3 py-1">返済方式</th>
+                  <th className="pr-3 py-1">満期</th>
+                </tr>
+              </thead>
+              <tbody>
+                {existingLoans.map((loan) => (
+                  <tr key={loan.loanId} className="border-t border-gray-700/60">
+                    <td className="pr-3 py-1">{loan.loanId}</td>
+                    <td className="pr-3 py-1">{LOAN_TYPE_LABELS[loan.loanType]}</td>
+                    <td className="pr-3 py-1">{formatUsd(loan.currentPrincipalUsd)}</td>
+                    <td className="pr-3 py-1">{(loan.annualInterestRate * 100).toFixed(2)}%</td>
+                    <td className="pr-3 py-1">{REPAYMENT_METHOD_LABELS[loan.repaymentMethod]}</td>
+                    <td className="pr-3 py-1">{loan.maturityPeriod}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-4 text-xs text-gray-300">
+          <label className="flex flex-col gap-1">
+            追加希望借入額(USD)
+            <NumberCell
+              value={draft.financingRequest.desiredAmountUsd}
+              disabled={disabled}
+              step={100000}
+              onChange={(n) => onChange({ ...draft, financingRequest: { ...draft.financingRequest, desiredAmountUsd: n } })}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            借入種別
+            <select
+              value={draft.financingRequest.desiredLoanType}
+              disabled={disabled}
+              onChange={(e) =>
+                onChange({ ...draft, financingRequest: { ...draft.financingRequest, desiredLoanType: e.target.value as CompanyDecisionDraft["financingRequest"]["desiredLoanType"] } })
+              }
+              className="bg-gray-700 rounded px-2 py-1 text-sm text-gray-100 disabled:opacity-50"
+            >
+              <option value="workingCapital">運転資金</option>
+              <option value="termLoan">設備・長期資金</option>
+              <option value="emergency">緊急融資</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            希望期間(四半期)
+            <NumberCell
+              value={draft.financingRequest.desiredTermQuarters}
+              disabled={disabled}
+              onChange={(n) => onChange({ ...draft, financingRequest: { ...draft.financingRequest, desiredTermQuarters: Math.max(1, Math.round(n)) } })}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            返済方式
+            <select
+              value={draft.financingRequest.desiredRepaymentMethod}
+              disabled={disabled}
+              onChange={(e) =>
+                onChange({
+                  ...draft,
+                  financingRequest: { ...draft.financingRequest, desiredRepaymentMethod: e.target.value as CompanyDecisionDraft["financingRequest"]["desiredRepaymentMethod"] },
+                })
+              }
+              className="bg-gray-700 rounded px-2 py-1 text-sm text-gray-100 disabled:opacity-50"
+            >
+              <option value="bulletAtMaturity">満期一括</option>
+              <option value="equalPrincipal">元金均等</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            任意期限前返済希望額(USD)
+            <NumberCell
+              value={draft.financingRequest.desiredPrepaymentUsd}
+              disabled={disabled}
+              step={100000}
+              warn={draft.financingRequest.desiredPrepaymentUsd > existingLoanBalanceUsd}
+              onChange={(n) => onChange({ ...draft, financingRequest: { ...draft.financingRequest, desiredPrepaymentUsd: n } })}
+            />
+          </label>
+          <label className="flex flex-col gap-1 justify-end">
+            <span className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={draft.financingRequest.emergencyAcceptable}
+                disabled={disabled}
+                onChange={(e) => onChange({ ...draft, financingRequest: { ...draft.financingRequest, emergencyAcceptable: e.target.checked } })}
+              />
+              緊急融資も許容する
+            </span>
+          </label>
         </div>
       </section>
     </div>
