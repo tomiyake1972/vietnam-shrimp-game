@@ -27,6 +27,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { checkStagingAdminToken } from "./stagingAdmin";
+import { isProduction } from "./env";
 
 export const COMPANY_LAB_UI_SESSION_COOKIE_NAME = "shrimpx_company_lab_ui_session";
 const SESSION_TTL_MILLISECONDS = 8 * 60 * 60 * 1000; // 8時間（staging用の短命セッション）
@@ -43,6 +44,14 @@ interface SessionPayload {
 
 /** 【Phase 8C-3B §13.2】STAGING_ADMIN_TOKENから毎回導出する（キャッシュしない）。exportはテスト専用（次項参照）。 */
 export function deriveSessionSecret(): Buffer | null {
+  // 【本番環境防御】本番（APP_ENV=production）ではセッション署名鍵自体を導出しない。
+  // これによりcreateSessionToken（発行）だけでなくverifySessionToken（検証）も本番では
+  // 必ず失敗し、仮に本番環境にSTAGING_ADMIN_TOKENが誤って設定されていて、かつ
+  // 非本番環境で正しく署名されたCookie値を持ち込まれても、決して有効と判定されない。
+  // ログイン経路はcheckStagingAdminToken（stagingAdmin.ts）が既に本番で常に403を返すが、
+  // 「発行済みCookieの検証」はログイン経路を通らないため、検証側にも同じisProduction
+  // 判定（app/lib/env.ts、判定源を一元化）を置く多重防御が必要になる。
+  if (isProduction) return null;
   const token = process.env.STAGING_ADMIN_TOKEN;
   if (!token) return null;
   return createHash("sha256").update(SESSION_SECRET_DOMAIN_PREFIX + token, "utf8").digest();

@@ -139,3 +139,42 @@ test("validateTurnParam: 正の整数文字列のみ受理する", () => {
   assert.equal(validateTurnParam("abc").ok, false);
   assert.equal(validateTurnParam("1.5").ok, false);
 });
+
+// --- 【ターン数整合性修正】turnsとシナリオdurationTurnsの整合性 ---
+
+test("validateCreateLabRequestBody: turns=durationTurns（baseline=32）ちょうどは受理する", () => {
+  const result = validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 32, playerCompanyId: "BAL" });
+  assert.equal(result.ok, true);
+});
+
+test("validateCreateLabRequestBody: turnsが選択シナリオのdurationTurnsを超える場合は拒否する（baselineで33）", () => {
+  const result = validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 33, playerCompanyId: "BAL" });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.message, /durationTurns/);
+  assert.match(result.message, /32/);
+});
+
+test("validateCreateLabRequestBody: 完全ID（baseline-v0.1）でもdurationTurns超過を検出する", () => {
+  const result = validateCreateLabRequestBody({ scenarioId: "baseline-v0.1", mode: "canonical", seed: "s", turns: 40, playerCompanyId: "BAL" });
+  assert.equal(result.ok, false);
+});
+
+test("validateCreateLabRequestBody: 将来の40ターンシナリオ（テスト用resolver注入）では40を受理し、41を拒否する", () => {
+  const resolver = (scenarioId: string) => (scenarioId === "future-10year-v0.1" ? 40 : null);
+  const accepted = validateCreateLabRequestBody(
+    { scenarioId: "future-10year-v0.1", mode: "canonical", seed: "s", turns: 40, playerCompanyId: "BAL" },
+    resolver
+  );
+  assert.equal(accepted.ok, true);
+  const rejected = validateCreateLabRequestBody(
+    { scenarioId: "future-10year-v0.1", mode: "canonical", seed: "s", turns: 41, playerCompanyId: "BAL" },
+    resolver
+  );
+  assert.equal(rejected.ok, false);
+});
+
+test("validateCreateLabRequestBody: 未知のscenarioIdは形式検証を通過させ、詳細エラーはApplication Service側に委ねる（従来契約の維持）", () => {
+  const result = validateCreateLabRequestBody({ scenarioId: "no-such-scenario", mode: "canonical", seed: "s", turns: 4, playerCompanyId: "BAL" });
+  assert.equal(result.ok, true);
+});

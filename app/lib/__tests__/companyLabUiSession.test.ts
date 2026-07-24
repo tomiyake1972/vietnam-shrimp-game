@@ -13,6 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { createSessionToken, verifySessionToken, deriveSessionSecret, isSameOriginHost, COMPANY_LAB_UI_SESSION_COOKIE_NAME } from "../companyLabUiSession";
 
 const ORIGINAL_TOKEN_ENV = process.env.STAGING_ADMIN_TOKEN;
@@ -189,4 +190,48 @@ test("isSameOriginHost: Originが不正なURL文字列でも例外を投げずfa
 
 test("companyLabUiSessionモジュール自体の定数は、Redis・環境変数アクセス無しで参照できる", () => {
   assert.equal(COMPANY_LAB_UI_SESSION_COOKIE_NAME, "shrimpx_company_lab_ui_session");
+});
+
+// --- 本番環境防御（別プロセスで検証。isProductionがapp/lib/env.tsのトップレベルconstのため、
+//     stagingAdmin.test.tsの本番拒否テストと同じexecFileSync手法を使う） ---
+
+test("verifySessionToken: 本番環境（APP_ENV=production）では、非本番環境で有効に署名されたCookie値でも必ず無効と判定される", () => {
+  // このプロセス（APP_ENV未設定＝development扱い）で正規のセッション値を発行する。
+  const sessionToken = withStagingAdminToken("prod-defense-secret-xyz", () => createSessionToken());
+  assert.ok(sessionToken);
+  // 同じSTAGING_ADMIN_TOKENを持つ「本番環境」プロセスでは、署名検証自体が成立してはならない。
+  const script = `
+    import { createSessionToken, verifySessionToken, deriveSessionSecret } from "./app/lib/companyLabUiSession";
+    const result = {
+      verified: verifySessionToken(process.env.TEST_SESSION_TOKEN),
+      created: createSessionToken(),
+      secretIsNull: deriveSessionSecret() === null,
+    };
+    console.log(JSON.stringify(result));
+  `;
+  const out = execFileSync("npx", ["tsx", "-e", script], {
+    cwd: process.cwd(),
+    env: { ...process.env, APP_ENV: "production", STAGING_ADMIN_TOKEN: "prod-defense-secret-xyz", TEST_SESSION_TOKEN: sessionToken as string },
+    encoding: "utf8",
+  });
+  const result = JSON.parse(out.trim().split("\n").pop() ?? "{}");
+  assert.equal(result.verified, false, "本番環境では有効署名のCookieも無効でなければならない");
+  assert.equal(result.created, null, "本番環境ではセッションを発行できてはならない");
+  assert.equal(result.secretIsNull, true, "本番環境ではセッション署名鍵自体が導出されてはならない");
+});
+
+test("verifySessionToken: 非本番環境（staging）では、同じCookie値が引き続き有効と判定される（本番防御のregressionが無いこと）", () => {
+  const sessionToken = withStagingAdminToken("prod-defense-secret-xyz", () => createSessionToken());
+  assert.ok(sessionToken);
+  const script = `
+    import { verifySessionToken } from "./app/lib/companyLabUiSession";
+    console.log(JSON.stringify({ verified: verifySessionToken(process.env.TEST_SESSION_TOKEN) }));
+  `;
+  const out = execFileSync("npx", ["tsx", "-e", script], {
+    cwd: process.cwd(),
+    env: { ...process.env, APP_ENV: "staging", STAGING_ADMIN_TOKEN: "prod-defense-secret-xyz", TEST_SESSION_TOKEN: sessionToken as string },
+    encoding: "utf8",
+  });
+  const result = JSON.parse(out.trim().split("\n").pop() ?? "{}");
+  assert.equal(result.verified, true);
 });
