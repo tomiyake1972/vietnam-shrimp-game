@@ -26,17 +26,18 @@ test("validateLabId: 空文字・非文字列・':'を含む・長すぎる場�
 });
 
 test("validateCreateLabRequestBody: 最小限の妥当な入力を受理する（labId省略可）", () => {
-  const result = validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "seed-1", turns: 4 });
+  const result = validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "seed-1", turns: 4, playerCompanyId: "BAL" });
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.value.labId, undefined);
     assert.equal(result.value.scenarioId, "baseline");
     assert.equal(result.value.turns, 4);
+    assert.equal(result.value.playerCompanyId, "BAL");
   }
 });
 
 test("validateCreateLabRequestBody: labIdを指定した場合はそのまま受理する", () => {
-  const result = validateCreateLabRequestBody({ labId: "my-lab", scenarioId: "baseline", mode: "canonical", seed: "seed-1", turns: 4 });
+  const result = validateCreateLabRequestBody({ labId: "my-lab", scenarioId: "baseline", mode: "canonical", seed: "seed-1", turns: 4, playerCompanyId: "MASS" });
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.value.labId, "my-lab");
 });
@@ -44,12 +45,27 @@ test("validateCreateLabRequestBody: labIdを指定した場合はそのまま受
 test("validateCreateLabRequestBody: 不正なmode・turns・scenarioId・非オブジェクトはいずれも拒否する", () => {
   assert.equal(validateCreateLabRequestBody(null).ok, false);
   assert.equal(validateCreateLabRequestBody("not-an-object").ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "", mode: "canonical", seed: "s", turns: 1 }).ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "invalid-mode", seed: "s", turns: 1 }).ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "", turns: 1 }).ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 0 }).ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 1.5 }).ok, false);
-  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: "4" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "", mode: "canonical", seed: "s", turns: 1, playerCompanyId: "BAL" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "invalid-mode", seed: "s", turns: 1, playerCompanyId: "BAL" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "", turns: 1, playerCompanyId: "BAL" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 0, playerCompanyId: "BAL" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 1.5, playerCompanyId: "BAL" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: "4", playerCompanyId: "BAL" }).ok, false);
+});
+
+test("validateCreateLabRequestBody: playerCompanyIdが未知の値・省略・非文字列の場合はいずれも拒否する（Phase 8C-3B §6）", () => {
+  const base = { scenarioId: "baseline", mode: "canonical" as const, seed: "s", turns: 1 };
+  assert.equal(validateCreateLabRequestBody({ ...base, playerCompanyId: "NO-SUCH-CO" }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ ...base }).ok, false, "playerCompanyId省略はサイレントなfallbackをせず拒否する");
+  assert.equal(validateCreateLabRequestBody({ ...base, playerCompanyId: 123 }).ok, false);
+  assert.equal(validateCreateLabRequestBody({ ...base, playerCompanyId: "" }).ok, false);
+});
+
+test("validateCreateLabRequestBody: 既知の5社IDはすべて受理する", () => {
+  for (const companyId of ["BAL", "MASS", "JPQ", "VAP", "CONSV"]) {
+    const result = validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 1, playerCompanyId: companyId });
+    assert.equal(result.ok, true, `playerCompanyId=${companyId}が拒否された`);
+  }
 });
 
 test("validateSaveDraftRequestBody: draftフィールドが必須", () => {
@@ -122,4 +138,43 @@ test("validateTurnParam: 正の整数文字列のみ受理する", () => {
   assert.equal(validateTurnParam("-1").ok, false);
   assert.equal(validateTurnParam("abc").ok, false);
   assert.equal(validateTurnParam("1.5").ok, false);
+});
+
+// --- 【ターン数整合性修正】turnsとシナリオdurationTurnsの整合性 ---
+
+test("validateCreateLabRequestBody: turns=durationTurns（baseline=32）ちょうどは受理する", () => {
+  const result = validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 32, playerCompanyId: "BAL" });
+  assert.equal(result.ok, true);
+});
+
+test("validateCreateLabRequestBody: turnsが選択シナリオのdurationTurnsを超える場合は拒否する（baselineで33）", () => {
+  const result = validateCreateLabRequestBody({ scenarioId: "baseline", mode: "canonical", seed: "s", turns: 33, playerCompanyId: "BAL" });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.message, /durationTurns/);
+  assert.match(result.message, /32/);
+});
+
+test("validateCreateLabRequestBody: 完全ID（baseline-v0.1）でもdurationTurns超過を検出する", () => {
+  const result = validateCreateLabRequestBody({ scenarioId: "baseline-v0.1", mode: "canonical", seed: "s", turns: 40, playerCompanyId: "BAL" });
+  assert.equal(result.ok, false);
+});
+
+test("validateCreateLabRequestBody: 将来の40ターンシナリオ（テスト用resolver注入）では40を受理し、41を拒否する", () => {
+  const resolver = (scenarioId: string) => (scenarioId === "future-10year-v0.1" ? 40 : null);
+  const accepted = validateCreateLabRequestBody(
+    { scenarioId: "future-10year-v0.1", mode: "canonical", seed: "s", turns: 40, playerCompanyId: "BAL" },
+    resolver
+  );
+  assert.equal(accepted.ok, true);
+  const rejected = validateCreateLabRequestBody(
+    { scenarioId: "future-10year-v0.1", mode: "canonical", seed: "s", turns: 41, playerCompanyId: "BAL" },
+    resolver
+  );
+  assert.equal(rejected.ok, false);
+});
+
+test("validateCreateLabRequestBody: 未知のscenarioIdは形式検証を通過させ、詳細エラーはApplication Service側に委ねる（従来契約の維持）", () => {
+  const result = validateCreateLabRequestBody({ scenarioId: "no-such-scenario", mode: "canonical", seed: "s", turns: 4, playerCompanyId: "BAL" });
+  assert.equal(result.ok, true);
 });

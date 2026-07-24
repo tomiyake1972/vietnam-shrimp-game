@@ -199,6 +199,14 @@ export interface CompanyLabPersistedStateV1 {
    * そのため明示的に保存する。
    */
   readonly fixtures: readonly CompanyFixture[];
+  /**
+   * 【Phase 8C-3B】このラボでプレイヤーが操作する会社。作成時に必須で指定され、
+   * 以後変更されない（fixturesと同様、作成時に確定し永続化される値）。必ず
+   * fixturesに含まれる会社のいずれかと一致する。曖昧なfallback（未指定時に
+   * 特定の会社へ暗黙に決める等）は行わない — 8C-3A時点のBAL固定/先頭会社
+   * fallbackを廃止した8C-3Bでの変更（指示§6）。
+   */
+  readonly playerCompanyId: CompanyId;
   readonly currentState: CompanyLabPersistedCurrentState;
   readonly draft: CompanyLabDraftEnvelope | null;
   readonly metadata: CompanyLabPersistedStateMetadata;

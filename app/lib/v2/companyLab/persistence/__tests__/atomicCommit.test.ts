@@ -199,6 +199,7 @@ async function setupLabWithSubmittedDraft(repo: CompanyLabStateRepository, labId
     engineVersion: "test-engine",
     config: { scenarioId: "baseline", mode: "canonical", seed: "seed", turns: 32 },
     fixtures: [],
+    playerCompanyId: "TEST-PLAYER" as never,
     runtime: {
       currentPeriod: "2026Q1" as never,
       scenarioState: { definition: {}, mode: "canonical", randomSeed: "seed", currentTurn: 1, resolvedEvents: [], turnHistory: [] } as never,

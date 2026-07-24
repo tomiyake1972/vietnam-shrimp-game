@@ -28,6 +28,7 @@ test("toLabSummaryDto / toLabStateDto / toDraftSummaryDto: 巨大なruntime snap
     engineVersion: "test-engine",
     config: { scenarioId: "baseline", mode: "canonical", seed: "s", turns: 4 },
     fixtures: [],
+    playerCompanyId: "TEST-PLAYER" as never,
     runtime: minimalRuntime(),
     now: "2026-01-01T00:00:00.000Z",
   });
@@ -37,6 +38,8 @@ test("toLabSummaryDto / toLabStateDto / toDraftSummaryDto: 巨大なruntime snap
   assert.equal(summary.revision, 0);
   assert.equal(summary.currentTurn, 1);
   assert.equal(summary.isComplete, false);
+  // 【Phase 8C-3B §6】state取得DTOでプレイヤー会社を取得できることの確認。
+  assert.equal(summary.playerCompanyId, "TEST-PLAYER");
   assert.ok(!("runtime" in summary), "要約DTOに内部runtime snapshotがそのまま含まれている");
 
   await repo.saveDraft({

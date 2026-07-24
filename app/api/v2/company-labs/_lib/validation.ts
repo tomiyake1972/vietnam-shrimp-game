@@ -1,8 +1,12 @@
-// ShrimpX V2 — 会社ラボ API 入力検証（Phase 8C-3A §8）
+// ShrimpX V2 — 会社ラボ API 入力検証（Phase 8C-3A §8・Phase 8C-3B §6）
 //
 // フレームワーク（NextRequest等）に一切依存しない、純粋な検証関数群。
 // 検証に失敗した場合は例外を投げず、判定結果（ApiValidationResult）を返す
 // （呼び出し側がhandlers.ts内でHTTP 400応答へ変換する）。
+
+import { CompanyId } from "../../../../lib/v2/sales/types";
+import { COMPANY_LAB_COMPANY_IDS } from "../../../../lib/v2/companyLab/fixtures";
+import { resolveScenarioDefinition } from "../../../../lib/v2/industryLab/cli/scenarioAliases";
 
 const MAX_LAB_ID_LENGTH = 200;
 const MAX_TURN_ID_LENGTH = 200;
@@ -49,10 +53,44 @@ export interface CreateLabRequestBody {
   readonly mode: "canonical" | "variation";
   readonly seed: string;
   readonly turns: number;
+  readonly playerCompanyId: CompanyId;
 }
 
-/** POST /api/v2/company-labs のリクエストボディ検証。scenarioId自体の妥当性（実在するシナリオか・turnsがdurationTurns内か）はApplication Service（initializeCompanyLab）に委ね、ここでは形の検証のみ行う。 */
-export function validateCreateLabRequestBody(body: unknown): ApiValidationResult<CreateLabRequestBody> {
+/**
+ * 【ターン数整合性修正】scenarioIdからdurationTurns（そのシナリオで許される最大ターン数）を
+ * 解決する関数型。既定実装は既存のresolveScenarioDefinition（industryLab/cli/scenarioAliases.ts。
+ * companyLab runnerのfindScenarioDefinitionForCompanyLabと同じ解決源）を使い、完全ID
+ * （"baseline-v0.1"）とエイリアス（"baseline"）の両方を受け付ける。未知のscenarioIdはnullを
+ * 返し、その場合の詳細エラー（利用可能なシナリオ一覧付き）は従来どおりApplication Service側
+ * （findScenarioDefinitionForCompanyLab）に委ねる（エラー文言の定義元を増やさない）。
+ *
+ * 注入可能にしてあるのは、実在の全シナリオが現在32ターンであるため、「将来の10年間＝40四半期
+ * シナリオでも同じ仕組みで上限が追随する」ことをテストで検証できるようにするため（テスト専用。
+ * 本番経路は常に既定実装が使われる）。
+ */
+export type ScenarioDurationTurnsResolver = (scenarioId: string) => number | null;
+
+export function defaultScenarioDurationTurnsResolver(scenarioId: string): number | null {
+  return resolveScenarioDefinition(scenarioId)?.durationTurns ?? null;
+}
+
+/**
+ * POST /api/v2/company-labs のリクエストボディ検証。
+ *
+ * 【ターン数整合性修正】turnsの上限は「選択中シナリオのdurationTurns」を唯一の正として、
+ * この入力検証層でも確認する（クライアント側の表示・入力制限には依存しない）。scenarioIdが
+ * 解決できない場合の詳細エラーと、durationTurns上限の最終的な強制はApplication Service
+ * （initializeCompanyLab）が引き続き独立に行う（多層防御。ここで拒否するのは
+ * 「知っている限り確実に不正」なリクエストだけ）。
+ *
+ * 【Phase 8C-3B §6】playerCompanyIdは必須（省略不可）。8C-3A時点の「BAL固定・先頭会社への
+ * サイレントfallback」を廃止し、既知の5社ID（COMPANY_LAB_COMPANY_IDS）のいずれかを明示的に
+ * 指定しない限り400で拒否する。曖昧なデフォルト値は設けない。
+ */
+export function validateCreateLabRequestBody(
+  body: unknown,
+  resolveDurationTurns: ScenarioDurationTurnsResolver = defaultScenarioDurationTurnsResolver
+): ApiValidationResult<CreateLabRequestBody> {
   if (typeof body !== "object" || body === null) {
     return fail("リクエストボディはJSONオブジェクトである必要があります。");
   }
@@ -73,12 +111,22 @@ export function validateCreateLabRequestBody(body: unknown): ApiValidationResult
   if (typeof b.turns !== "number" || !Number.isInteger(b.turns) || b.turns < 1) {
     return fail("turns は1以上の整数である必要があります。");
   }
+  // 【ターン数整合性修正】選択シナリオのdurationTurnsを超えるターン数はこの境界でも拒否する。
+  // 32や40といった数値はハードコードせず、常にシナリオ定義のdurationTurnsを参照する。
+  const durationTurns = resolveDurationTurns(b.scenarioId);
+  if (durationTurns !== null && b.turns > durationTurns) {
+    return fail(`turns は1〜${durationTurns}（シナリオ"${b.scenarioId}"のdurationTurns）の整数である必要があります。受け取った値: ${b.turns}`);
+  }
+  if (typeof b.playerCompanyId !== "string" || !(COMPANY_LAB_COMPANY_IDS as readonly string[]).includes(b.playerCompanyId)) {
+    return fail(`playerCompanyId は必須で、次のいずれかである必要があります: ${COMPANY_LAB_COMPANY_IDS.join(", ")}`);
+  }
   return ok({
     ...(typeof b.labId === "string" ? { labId: b.labId } : {}),
     scenarioId: b.scenarioId,
     mode: b.mode,
     seed: b.seed,
     turns: b.turns,
+    playerCompanyId: b.playerCompanyId as CompanyId,
   });
 }
 

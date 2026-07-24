@@ -30,7 +30,7 @@
 import { ENGINE_VERSION_V2 } from "../../core/version";
 import { PeriodV2 } from "../../core/period";
 import { CompanyId } from "../../sales/types";
-import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState } from "../types";
+import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabError, CompanyLabState } from "../types";
 import { advanceCompanyLabQuarter, buildPublicMarketInfo, initializeCompanyLab } from "../runner";
 import { PublicMarketInfo } from "../types";
 import { createCompanyLabRuntimeSnapshot, restoreCompanyLabStateFromRuntimeSnapshot } from "../persistence/snapshot";
@@ -85,6 +85,13 @@ export type CompanyLabDecisionsProvider = (context: CompanyLabDecisionContext) =
 export interface CreateLabInput {
   readonly labId: string;
   readonly config: CompanyLabConfig;
+  /**
+   * 【Phase 8C-3B】このラボでプレイヤーが操作する会社。作成時に必須で指定し、
+   * ラボの永続状態（stored.playerCompanyId）へ保存する。以後の四半期処理は
+   * 常にこの保存済み値を使い、リクエストごとに差し替えることはできない
+   * （8C-3B指示§6）。存在しない会社IDを指定した場合はCompanyLabErrorを投げる。
+   */
+  readonly playerCompanyId: CompanyId;
   readonly now: string;
 }
 
@@ -116,7 +123,13 @@ export interface ProcessQuarterInput {
   readonly now: string;
   /** ロックTTL（ミリ秒）。省略時はDEFAULT_PROCESSING_LOCK_TTL_MS。 */
   readonly lockTtlMilliseconds?: number;
-  readonly playerCompanyId: CompanyId;
+  /**
+   * 【Phase 8C-3B】playerCompanyIdは意図的にこの入力から削除してある。作成時に
+   * ラボへ保存された`stored.playerCompanyId`を唯一の正とし、処理requestごとに
+   * 別会社へ差し替えられないようにするため（8C-3B指示§6「処理requestごとに
+   * 別会社へ差し替えられない」）。呼び出し側（API/UI層）は、この値を指定する
+   * 手段を持たない。
+   */
   readonly decisionsProvider: CompanyLabDecisionsProvider;
 }
 
@@ -161,6 +174,16 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
   async function createLab(input: CreateLabInput): Promise<CreateLabResult> {
     // 初期状態の生成は既存のinitializeCompanyLabをそのまま使う（重複実装しない）。
     const { state, fixtures } = initializeCompanyLab(input.config);
+    // 【Phase 8C-3B】playerCompanyIdはこのラボのfixturesに実在する会社でなければ
+    // ならない。API層（validation.ts）も既知の5社IDに対して事前検証するが、
+    // ここでも防御的に確認する（直接Application Serviceを呼ぶ将来の呼び出し元・
+    // API検証をバイパスする経路からも同じ不変条件を守るため）。
+    if (!fixtures.some((f) => f.companyId === input.playerCompanyId)) {
+      throw new CompanyLabError(
+        `playerCompanyId "${input.playerCompanyId}" はこのシナリオのfixturesに存在しません。` +
+          `有効な会社ID: ${fixtures.map((f) => f.companyId).join(", ")}`
+      );
+    }
     const runtime = createCompanyLabRuntimeSnapshot(state);
     // Repositoryが存在確認・current作成・labs一覧追加を原子的に行い、
     // 重複labIdはCompanyLabAlreadyExistsErrorになる（§3.1）。
@@ -169,6 +192,7 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
       engineVersion: ENGINE_VERSION_V2,
       config: input.config,
       fixtures,
+      playerCompanyId: input.playerCompanyId,
       runtime,
       now: input.now,
     });
@@ -320,7 +344,10 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
         publicInfo,
         period: restoredState.currentPeriod,
         turn,
-        playerCompanyId: input.playerCompanyId,
+        // 【Phase 8C-3B】playerCompanyIdは呼び出し元の入力ではなく、常にラボ作成時に
+        // 保存されたstored.playerCompanyIdを使う（処理requestごとに別会社へ
+        // 差し替えられないようにするため。8C-3B指示§6）。
+        playerCompanyId: stored.playerCompanyId,
         submittedDraftBody: draft.draft,
       });
       for (const fixture of stored.fixtures) {
@@ -328,8 +355,10 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
           throw new CompanyLabQuarterProcessingError(input.labId, `decisionsProviderが会社 "${fixture.companyId}" の意思決定を返しませんでした。`);
         }
       }
-      if (!stored.fixtures.some((f) => f.companyId === input.playerCompanyId)) {
-        throw new CompanyLabQuarterProcessingError(input.labId, `playerCompanyId "${input.playerCompanyId}" はこのラボのfixturesに存在しません。`);
+      // createLab側でplayerCompanyIdがfixturesに存在することを保証済みのため、
+      // ここで再現するとすれば保存データの破損に限られる（防御的にIntegrityErrorとする）。
+      if (!stored.fixtures.some((f) => f.companyId === stored.playerCompanyId)) {
+        throw new CompanyLabIntegrityError(input.labId, `保存済みplayerCompanyId "${stored.playerCompanyId}" がこのラボのfixturesに存在しません。`);
       }
 
       // --- 9-10. 処理前スナップショット確定＋エンジン実行＋処理後スナップショット生成 ---
@@ -356,8 +385,8 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
         schemaVersion: CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION,
         preProcessingStateSnapshot,
         postProcessingStateSnapshot,
-        playerSubmission: decisions[input.playerCompanyId],
-        otherCompaniesDecisions: stored.fixtures.filter((f) => f.companyId !== input.playerCompanyId).map((f) => decisions[f.companyId]),
+        playerSubmission: decisions[stored.playerCompanyId],
+        otherCompaniesDecisions: stored.fixtures.filter((f) => f.companyId !== stored.playerCompanyId).map((f) => decisions[f.companyId]),
         record,
         processedAt: input.now,
       };

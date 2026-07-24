@@ -31,7 +31,10 @@ import { CompanyLabQuarterProcessingError } from "../../../../lib/v2/companyLab/
 import { CompanyDecisionDraft, buildDecisionInputFromDraft } from "../../../../v2/company-lab/decisionDraft";
 
 /** submittedDraftBodyが最低限CompanyDecisionDraftとして解釈可能な形かどうかの構造検証（深い内容までは見ない）。 */
-function isPlausibleCompanyDecisionDraft(value: unknown, expectedCompanyId: CompanyId): value is CompanyDecisionDraft {
+// 【Phase 8C-3B】UI層のviewModel.ts（app/v2/company-lab/play/_lib/viewModel.ts）が
+// 「保存済みdraftが壊れていないか」を判定するために再利用する（同じ構造検証ロジックを
+// UI層へ重複実装しないため、exportする）。
+export function isPlausibleCompanyDecisionDraft(value: unknown, expectedCompanyId: CompanyId): value is CompanyDecisionDraft {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   return (

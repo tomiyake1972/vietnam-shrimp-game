@@ -99,6 +99,7 @@ export function createCompanyLabStateRepository(deps: CompanyLabStateRepositoryD
       labId: input.labId,
       config: input.config,
       fixtures: input.fixtures,
+      playerCompanyId: input.playerCompanyId,
       currentState: { runtime: input.runtime, revision: 0 },
       draft: null,
       metadata: { createdAt: input.now, updatedAt: input.now },

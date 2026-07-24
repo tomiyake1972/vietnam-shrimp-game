@@ -27,6 +27,7 @@
 //     列挙できる。作成失敗（重複）時は追加されない。
 
 import { CompanyFixture, CompanyLabConfig } from "../types";
+import { CompanyId } from "../../sales/types";
 import {
   CompanyLabDraftEnvelope,
   CompanyLabPersistedStateV1,
@@ -46,6 +47,8 @@ export interface CreateCompanyLabInput {
   readonly engineVersion: string;
   readonly config: CompanyLabConfig;
   readonly fixtures: readonly CompanyFixture[];
+  /** 【Phase 8C-3B】fixturesに含まれる会社のいずれか。Application Service層で事前検証済み。 */
+  readonly playerCompanyId: CompanyId;
   readonly runtime: CompanyLabRuntimeSnapshot;
   readonly now: string;
 }
@@ -244,6 +247,7 @@ export function createInMemoryCompanyLabStateRepository(): CompanyLabStateReposi
       labId: input.labId,
       config: input.config,
       fixtures: input.fixtures,
+      playerCompanyId: input.playerCompanyId,
       currentState: { runtime: input.runtime, revision: 0 },
       metadata: { createdAt: input.now, updatedAt: input.now },
     };

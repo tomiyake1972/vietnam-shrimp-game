@@ -13,6 +13,7 @@ import { createInMemoryCompanyLabStateRepository } from "../../../../../lib/v2/c
 import { createCompanyLabQuarterFlowService } from "../../../../../lib/v2/companyLab/application/companyLabQuarterFlowService";
 import { buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../../../../../lib/v2/companyLab/runner";
 import { generateAutoPolicyDecision } from "../../../../../lib/v2/companyLab/autoPolicy";
+import { COMPANY_LAB_COMPANY_IDS } from "../../../../../lib/v2/companyLab/fixtures";
 import { buildInitialDraft } from "../../../../../v2/company-lab/decisionDraft";
 import { CompanyLabApiDependencies } from "../dependencies";
 import {
@@ -34,8 +35,10 @@ function makeDeps(): CompanyLabApiDependencies {
   return { repository, service };
 }
 
-function baseCreateBody(overrides: Partial<{ labId: string; turns: number; seed: string }> = {}) {
-  return { scenarioId: "baseline", mode: "canonical", seed: "handlers-test-001", turns: 4, ...overrides };
+function baseCreateBody(overrides: Partial<{ labId: string; turns: number; seed: string; playerCompanyId: string }> = {}) {
+  // 【Phase 8C-3B §6】playerCompanyIdは必須。VALID_PLAYER_DRAFT_BODY（下記）が
+  // "BAL"向けに組み立てられているため、既定値もBALに揃える。
+  return { scenarioId: "baseline", mode: "canonical", seed: "handlers-test-001", turns: 4, playerCompanyId: "BAL", ...overrides };
 }
 
 /**
@@ -45,14 +48,18 @@ function baseCreateBody(overrides: Partial<{ labId: string; turns: number; seed:
  * である必要がある。turn・periodに依存しない構造のため、1回だけ生成して使い回す
  * （どのturnで使っても構造検証・エンジン実行には成功する。値の意味は問わない）。
  */
-function buildValidPlayerDraftBody(): unknown {
+function buildValidPlayerDraftBodyFor(companyId: string): unknown {
   const { state, fixtures } = initializeCompanyLab({ scenarioId: "baseline", mode: "canonical", seed: "draft-fixture-seed", turns: 4 });
   const publicInfo = buildPublicMarketInfo(state);
-  const fixture = fixtures.find((f) => f.companyId === "BAL");
-  if (!fixture) throw new Error("テスト用フィクスチャにBALが見つかりません");
+  const fixture = fixtures.find((f) => f.companyId === companyId);
+  if (!fixture) throw new Error(`テスト用フィクスチャに${companyId}が見つかりません`);
   const ownState = buildCompanyOwnState(state, fixture);
   const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
   return buildInitialDraft(fixture, autoDecision);
+}
+
+function buildValidPlayerDraftBody(): unknown {
+  return buildValidPlayerDraftBodyFor("BAL");
 }
 
 const VALID_PLAYER_DRAFT_BODY = buildValidPlayerDraftBody();
@@ -344,4 +351,98 @@ test("内部エラー応答はRedisキー・スタックトレース等の内部
   assert.equal(result.status, 500);
   const body = result.body as { error: { message: string } };
   assert.ok(!body.error.message.includes("secret"), "内部エラー詳細がAPI応答に漏れている");
+});
+
+// -------------------------------------------------------------------
+// playerCompanyId（Phase 8C-3B §6・§13.1）
+// -------------------------------------------------------------------
+
+test("handleCreateLab: 5社それぞれをplayerCompanyIdに指定して作成でき、state DTOへ正しく反映される", async () => {
+  for (const companyId of COMPANY_LAB_COMPANY_IDS) {
+    const deps = makeDeps();
+    const labId = `lab-player-${companyId}`;
+    const created = await handleCreateLab(deps, baseCreateBody({ labId, playerCompanyId: companyId }), NOW);
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const createdBody = created.body as { lab: { playerCompanyId: string } };
+    assert.equal(createdBody.lab.playerCompanyId, companyId);
+
+    // reload相当（別のGET呼び出し）でも維持されている
+    const stateResult = await handleGetLabState(deps, labId);
+    assert.equal(stateResult.status, 200);
+    const stateBody = stateResult.body as { lab: { playerCompanyId: string } };
+    assert.equal(stateBody.lab.playerCompanyId, companyId);
+  }
+});
+
+test("handleCreateLab: 未知のplayerCompanyIdは400で拒否される", async () => {
+  const deps = makeDeps();
+  const result = await handleCreateLab(deps, baseCreateBody({ labId: "lab-unknown-company", playerCompanyId: "NO-SUCH-CO" }), NOW);
+  assert.equal(result.status, 400);
+});
+
+test("handleCreateLab: playerCompanyId省略は400で拒否される（サイレントなBAL/先頭会社fallbackはしない）", async () => {
+  const deps = makeDeps();
+  const bodyWithoutPlayerCompanyId: Record<string, unknown> = { ...baseCreateBody({ labId: "lab-no-player-company" }) };
+  delete bodyWithoutPlayerCompanyId.playerCompanyId;
+  const result = await handleCreateLab(deps, bodyWithoutPlayerCompanyId, NOW);
+  assert.equal(result.status, 400);
+});
+
+test("decisionsProvider配線: playerCompanyIdにMASSを指定すると、提出済みdraftはMASSの意思決定として処理され、BALはAI自動方針になる", async () => {
+  const deps = makeDeps();
+  const labId = "lab-player-mass";
+  await handleCreateLab(deps, baseCreateBody({ labId, playerCompanyId: "MASS" }), NOW);
+
+  const massDraft = buildValidPlayerDraftBodyFor("MASS");
+  const saveResult = await handleSaveDraft(deps, labId, { draft: massDraft }, NOW);
+  assert.equal(saveResult.status, 200, JSON.stringify(saveResult.body));
+  await handleSubmitDraft(deps, labId, NOW);
+
+  const processResult = await handleProcessQuarter(deps, labId, {}, NOW);
+  assert.equal(processResult.status, 200, JSON.stringify(processResult.body));
+
+  const entryResult = await handleGetHistoryEntry(deps, labId, "1");
+  assert.equal(entryResult.status, 200);
+  const entryBody = entryResult.body as { entry: { playerSubmission: { companyId: string }; otherCompaniesDecisions: { companyId: string }[] } };
+  assert.equal(entryBody.entry.playerSubmission.companyId, "MASS", "playerSubmissionはstored.playerCompanyId（MASS）の意思決定であるべき");
+  assert.ok(
+    !entryBody.entry.otherCompaniesDecisions.some((d) => d.companyId === "MASS"),
+    "MASSがplayerSubmissionとotherCompaniesDecisionsの両方に重複して現れている"
+  );
+  assert.ok(
+    entryBody.entry.otherCompaniesDecisions.some((d) => d.companyId === "BAL"),
+    "プレイヤー以外のBALはAI自動方針としてotherCompaniesDecisionsに含まれるべき"
+  );
+});
+
+test("decisionsProvider配線: playerCompanyId(MASS)と異なる会社(BAL)向けのdraftを提出すると、companyId不一致として422になる", async () => {
+  const deps = makeDeps();
+  const labId = "lab-player-company-mismatch";
+  await handleCreateLab(deps, baseCreateBody({ labId, playerCompanyId: "MASS" }), NOW);
+
+  const balDraft = buildValidPlayerDraftBodyFor("BAL"); // 誤って別会社向けのdraftを提出
+  await handleSaveDraft(deps, labId, { draft: balDraft }, NOW);
+  await handleSubmitDraft(deps, labId, NOW);
+
+  const processResult = await handleProcessQuarter(deps, labId, {}, NOW);
+  assert.equal(processResult.status, 422, JSON.stringify(processResult.body));
+});
+
+test("process-quarterリクエストにplayerCompanyIdを紛れ込ませても無視され、作成時に保存された会社のまま処理される", async () => {
+  const deps = makeDeps();
+  const labId = "lab-player-no-override";
+  await handleCreateLab(deps, baseCreateBody({ labId, playerCompanyId: "MASS" }), NOW);
+
+  const massDraft = buildValidPlayerDraftBodyFor("MASS");
+  await handleSaveDraft(deps, labId, { draft: massDraft }, NOW);
+  await handleSubmitDraft(deps, labId, NOW);
+
+  // process-quarterのリクエストボディはturnIdしか受け付けないため、余分なplayerCompanyIdフィールドは
+  // validateProcessQuarterRequestBodyの時点で無視される（差し替え手段が存在しないことの確認）。
+  const processResult = await handleProcessQuarter(deps, labId, { playerCompanyId: "BAL" } as unknown, NOW);
+  assert.equal(processResult.status, 200, JSON.stringify(processResult.body));
+
+  const entryResult = await handleGetHistoryEntry(deps, labId, "1");
+  const entryBody = entryResult.body as { entry: { playerSubmission: { companyId: string } } };
+  assert.equal(entryBody.entry.playerSubmission.companyId, "MASS", "リクエストボディのplayerCompanyIdによって差し替えられてはならない");
 });
