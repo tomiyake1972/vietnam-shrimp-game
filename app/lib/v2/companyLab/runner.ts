@@ -121,6 +121,7 @@ import {
   reasonCodesFromProductionEntries,
   reasonCodesFromSalesAllocation,
 } from "./reasonCodes";
+import { generateInitialContracts } from "./initialContracts";
 import {
   CompanyDecisionInput,
   CompanyFixture,
@@ -259,11 +260,15 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
   // （実データ）から算出し、開始時点の貸借一致を構造的に保証する。
   const initialFinanceCompanies = fixtures.map((f) => buildInitialCompanyFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod));
 
+  // 【初期成約】初期売掛金に対応する「前期営業成約」を配置し、
+  // 「当期にデリバリーされる契約」として明示的に定義する。
+  const initialContracts = generateInitialContracts(startPeriod);
+
   const state: CompanyLabState = {
     config,
     currentPeriod: startPeriod,
     scenarioState,
-    contracts: [],
+    contracts: initialContracts,
     rawMaterialLots: fixtures.flatMap((f) => f.initialRawMaterialLots),
     productionState: initializeProductionState(startPeriod),
     lastQuarterActualProduction: Object.fromEntries(fixtures.map((f) => [f.companyId, {}])),

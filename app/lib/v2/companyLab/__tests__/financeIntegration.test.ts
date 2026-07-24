@@ -18,7 +18,9 @@ import { unwrapUnit } from "../../core/units";
 import { runCompanyLabWithAutoPolicyForAllCompanies } from "../runner";
 import { generateAutoPolicyDecision } from "../autoPolicy";
 import { CompanyLabConfig, CompanyLabResult } from "../types";
-import { ALL_SCENARIO_DEFINITIONS } from "../../scenario";
+import { ALL_SCENARIO_DEFINITIONS, getScenarioTurnInput, initializeScenario } from "../../scenario";
+import { generateInitialContracts } from "../initialContracts";
+import { resolveScenarioDefinition } from "../../industryLab/cli/scenarioAliases";
 
 const EPS_USD = 0.01;
 
@@ -77,6 +79,20 @@ test("受入確認FI-3: 利益剰余金のロールフォワードが当期純�
 test("受入確認FI-4: 売上は履行時認識で、履行数量×成約時契約単価×1,000の合計と厳密に一致する（重要テスト2・3）", () => {
   // 全契約の成約時単価を記録（成約後は変更されないことの検証を兼ねる）
   const contractPriceAtCreation = new Map<string, number>();
+
+  // 【初期成約】 初期状態に配置された前期成約の単価を事前に登録
+  const scenarioDefinition = resolveScenarioDefinition("baseline");
+  if (!scenarioDefinition) {
+    throw new Error("baseline scenario not found");
+  }
+  const scenarioState = initializeScenario(scenarioDefinition, "canonical", "finance-int-001");
+  const startPeriod = getScenarioTurnInput(scenarioState, 1).period;
+  const initialContracts = generateInitialContracts(startPeriod);
+  for (const c of initialContracts) {
+    contractPriceAtCreation.set(c.contractId, unwrapUnit(c.unitPrice));
+  }
+
+  // 当期生成の契約も登録
   for (const record of shared8.history) {
     for (const c of record.salesRecord.newContracts) {
       contractPriceAtCreation.set(c.contractId, unwrapUnit(c.unitPrice));
