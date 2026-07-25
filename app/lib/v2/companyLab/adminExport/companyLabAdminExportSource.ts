@@ -103,7 +103,15 @@ async function fetchExportJson<T>(origin: string, path: string): Promise<Company
     // ネットワークエラー等。トークン値・Authorizationヘッダーの値は例外オブジェクトにも
     // 含まれないため、そのままログへ出しても安全だが、ユーザー向けメッセージは定型文にする。
     // 一時的な調査用ログ（URL・エラーメッセージのみ。トークン値は含まない）。
-    console.error("[companyLabAdminExportSource] self-fetch failed", { targetUrl, errorName: err instanceof Error ? err.name : typeof err, errorMessage: err instanceof Error ? err.message : String(err) });
+    const cause = err instanceof Error ? (err as Error & { cause?: unknown }).cause : undefined;
+    console.error("[companyLabAdminExportSource] self-fetch failed", {
+      targetUrl,
+      errorName: err instanceof Error ? err.name : typeof err,
+      errorMessage: err instanceof Error ? err.message : String(err),
+      causeName: cause instanceof Error ? cause.name : typeof cause,
+      causeMessage: cause instanceof Error ? cause.message : cause === undefined ? undefined : String(cause),
+      causeCode: cause && typeof cause === "object" && "code" in cause ? (cause as { code?: unknown }).code : undefined,
+    });
     return failure("upstreamError", "Export APIへの接続に失敗しました。時間をおいて再度お試しください。");
   }
 
