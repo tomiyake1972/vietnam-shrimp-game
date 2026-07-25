@@ -61,7 +61,7 @@ function addQuarters(p: PeriodV2, quarters: number): PeriodV2 {
 //    UI文言としてこのファイルが持つのが適切な定数）
 // ---------------------------------------------------------------------
 
-const TARGET_PRODUCT_LABELS: Record<string, string> = {
+export const TARGET_PRODUCT_LABELS: Record<string, string> = {
   hoso: "HOSO加工能力",
   pd: "PD加工能力",
   vap: "VAP加工能力",

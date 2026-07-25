@@ -422,6 +422,66 @@ test("handleExportCompanyTurn: 市場結果に国別HOSO価格・PD/VAPプレミ
   assert.deepEqual(body.market.globalDrivers, [...rawMarket.globalDrivers]);
 });
 
+// --- 工場の加工能力（現時点の能力・現在追加中の能力） ---
+
+test("handleExportCompanyTurn: 工場の現時点の加工能力と現在追加中の能力が出力され、対象会社ぶんだけへ絞り込まれる", async () => {
+  const labId = "export-processing-capacity-lab";
+  const writableDeps = await setUpProcessedTurn1Lab(labId);
+  const { deps } = makeExportDeps(writableDeps);
+
+  const result = await handleExportCompanyTurn(deps, labId, "1", "BAL", GENERATED_AT);
+  assert.equal(result.status, 200);
+  const body = result.body as {
+    processingCapacity: {
+      companyId: string;
+      asOfPeriod: string;
+      factories: { factoryId: string; companyId: string; pools: { poolKey: string; baseNominalTons: number; addedByOperationalCapexTons: number; currentNominalTons: number; currentEffectiveTons: number }[] }[];
+      companyTotals: { poolKey: string; baseNominalTons: number; addedByOperationalCapexTons: number; currentNominalTons: number }[];
+      pendingProjects: { projectId: string; targetPoolKey: string | null; capacityIncreaseTonsPerQuarter: number }[];
+    } | null;
+  };
+
+  const capacity = body.processingCapacity;
+  assert.ok(capacity !== null, "processingCapacityがnullです（fixturesがハンドラーから渡されていません）");
+  assert.equal(capacity.companyId, "BAL");
+  assert.ok(capacity.factories.length > 0, "工場別の能力が空です");
+  // §6 他社の工場は一切含めない。
+  assert.ok(
+    capacity.factories.every((f) => f.companyId === "BAL"),
+    `他社の工場が混入しています: ${JSON.stringify(capacity.factories.map((f) => f.companyId))}`,
+  );
+
+  // 能力プールは5種すべてが揃い、当初の能力は0でない（fixturesが実際に読まれている証拠）。
+  assert.deepEqual(
+    capacity.companyTotals.map((p) => p.poolKey),
+    ["commonProcessing", "hoso", "pd", "vap", "freezingPackaging"],
+  );
+  assert.ok(capacity.companyTotals.every((p) => p.baseNominalTons > 0), "当初の能力が0です");
+
+  // 「当初＋稼働開始済みの増加＝現時点の能力」がDTOの値として整合していること
+  // （Excel側の検算式が0になることの前提。DTOには検算結果フィールドを持たせない）。
+  for (const pool of capacity.companyTotals) {
+    assert.equal(
+      pool.baseNominalTons + pool.addedByOperationalCapexTons,
+      pool.currentNominalTons,
+      `${pool.poolKey}: 当初＋増加が現時点の能力と一致しません`,
+    );
+  }
+
+  // 実効能力は名目以下（名目×稼働率×設備利用可能率であるため）。
+  for (const factory of capacity.factories) {
+    for (const pool of factory.pools) {
+      assert.ok(pool.currentEffectiveTons <= pool.currentNominalTons, `${factory.factoryId}/${pool.poolKey}: 実効能力が名目能力を超えています`);
+    }
+  }
+
+  // 現在追加中の案件は、対象能力と増加量が必ず埋まっている（能力を増やさない案件は含めない）。
+  for (const project of capacity.pendingProjects) {
+    assert.ok(project.targetPoolKey !== null, `${project.projectId}: 対象能力がnullの案件が「現在追加中」に含まれています`);
+    assert.ok(project.capacityIncreaseTonsPerQuarter > 0, `${project.projectId}: 増加量が0の案件が「現在追加中」に含まれています`);
+  }
+});
+
 // --- 【§5】品質・生産・原料の明細 ---
 
 test("handleExportCompanyTurn: 商品別品質スコア・市場別顧客信頼・生産バッチ・原料ロットが出力され、対象会社ぶんだけへ絞り込まれる", async () => {

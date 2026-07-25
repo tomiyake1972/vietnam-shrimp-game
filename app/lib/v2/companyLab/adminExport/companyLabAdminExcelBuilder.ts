@@ -491,8 +491,157 @@ function writeMarketSheet(wb: ExcelJS.Workbook, market: CompanyExportPayload["ma
 }
 
 /**
+ * 工場の加工能力シート。プレイヤーからの指摘「頂いているエクセルの中には、工場の
+ * 現時点の加工能力が入っていません。各加工能力と、現在追加中（つまり設備投資を
+ * 意思決定してこれから加わる能力）がわかるように出力してください」への対応。
+ *
+ * 【再計算しない】APIの保存済み確定値（当初の能力・稼働開始済み投資による増加・
+ * 現時点の能力・実効能力・案件別の増加量）をそのまま書き写す。
+ *   - 「当初＋増加＝現時点」の検算はE列のExcel数式（=B+C-D、0になるべき値）で行う。
+ *   - 能力プール別の「現在追加中」合計は、下の案件明細に対するSUMIFで求める
+ *     （TypeScript側で合計を作り込まず、プレイヤーが明細と突き合わせられるようにする）。
+ */
+function writeProcessingCapacitySheet(wb: ExcelJS.Workbook, capacity: CompanyExportPayload["processingCapacity"]): void {
+  const ws = wb.addWorksheet("Processing Capacity");
+  ws.columns = [{ width: 20 }, { width: 16 }, { width: 22 }, { width: 20 }, { width: 14 }, { width: 20 }, { width: 16 }, { width: 54 }];
+
+  if (!capacity) {
+    const row = ws.addRow(["工場の加工能力はこのExport JSONに含まれていません（fixturesを渡さない経路で生成されたJSONです）"]);
+    row.getCell(1).font = LABEL_FONT;
+    return;
+  }
+
+  const sectionRow = (title: string): void => {
+    const row = ws.addRow([title]);
+    row.getCell(1).font = CHECK_FONT;
+  };
+
+  const asOf = ws.addRow(["対象四半期（当期処理直後・次期の意思決定が前提とする能力）", capacity.asOfPeriod]);
+  asOf.getCell(1).font = LABEL_FONT;
+  asOf.getCell(2).font = VALUE_FONT;
+  const companyRow = ws.addRow(["会社", capacity.companyId]);
+  companyRow.getCell(1).font = LABEL_FONT;
+  companyRow.getCell(2).font = VALUE_FONT;
+  ws.addRow([]);
+
+  // --- 1. 能力プール別（会社合計） ---
+  sectionRow("能力プール別（会社合計・トン/四半期）");
+  writeHeaderRow(ws, [
+    "能力",
+    "当初の能力",
+    "稼働開始済み投資による増加",
+    "現時点の能力（名目）",
+    "検算(B+C-D)",
+    "現時点の能力（実効）",
+    "現在追加中",
+    "能力の説明",
+  ]);
+  const totalRowNumbers: { readonly poolKey: string; readonly rowNumber: number }[] = [];
+  for (const pool of capacity.companyTotals) {
+    const row = ws.addRow([
+      pool.poolLabel,
+      pool.baseNominalTons,
+      pool.addedByOperationalCapexTons,
+      pool.currentNominalTons,
+      { formula: `B${ws.rowCount + 1}+C${ws.rowCount + 1}-D${ws.rowCount + 1}` },
+      pool.currentEffectiveTons,
+      null,
+      pool.poolDescription,
+    ]);
+    row.eachCell((cell) => {
+      if (!cell.font) cell.font = VALUE_FONT;
+    });
+    for (const col of [2, 3, 4, 5, 6, 7]) row.getCell(col).numFmt = "#,##0.00";
+    totalRowNumbers.push({ poolKey: pool.poolKey, rowNumber: row.number });
+  }
+  const noteRow1 = ws.addRow([
+    "「名目」は工場の設計能力、「実効」は名目×基準稼働率×設備利用可能率です。「現在追加中」はまだ現時点の能力に含まれていません（稼働開始四半期に達した時点でC列へ移ります）。",
+  ]);
+  noteRow1.getCell(1).font = LABEL_FONT;
+  ws.addRow([]);
+
+  // --- 2. 工場別（現時点の名目能力） ---
+  sectionRow("工場別の現時点の能力（名目・トン/四半期）");
+  const poolLabels = capacity.companyTotals.map((p) => p.poolLabel);
+  writeHeaderRow(ws, ["工場", "状態", ...poolLabels, "基準稼働率", "設備利用可能率", "投資反映先"]);
+  for (const factory of capacity.factories) {
+    const row = ws.addRow([
+      factory.factoryId,
+      factory.status,
+      ...factory.pools.map((p) => p.currentNominalTons),
+      factory.baseUtilizationRate,
+      factory.equipmentAvailabilityRate,
+      factory.receivesCapexCapacity ? "反映先" : "－",
+    ]);
+    row.eachCell((cell) => {
+      if (!cell.font) cell.font = VALUE_FONT;
+    });
+    for (let col = 3; col < 3 + factory.pools.length; col++) row.getCell(col).numFmt = "#,##0.00";
+    row.getCell(3 + factory.pools.length).numFmt = "0.0000";
+    row.getCell(4 + factory.pools.length).numFmt = "0.0000";
+  }
+  ws.addRow([]);
+
+  // --- 3. 現在追加中の案件明細 ---
+  sectionRow("現在追加中の能力（設備投資を意思決定済み・まだ能力へ未反映）");
+  writeHeaderRow(ws, [
+    "案件",
+    "対象能力",
+    "増加量(t/四半期)",
+    "状態",
+    "工期(四半期)",
+    "支払を伴う経過四半期",
+    "完成四半期",
+    "能力へ反映される四半期 / 承認額 / 支払済 / 未払予定",
+  ]);
+  const pendingFirstRow = ws.rowCount + 1;
+  for (const project of capacity.pendingProjects) {
+    const row = ws.addRow([
+      project.projectTypeDisplayName,
+      project.targetPoolLabel ?? "－",
+      project.capacityIncreaseTonsPerQuarter,
+      project.displayStatusLabel,
+      project.requiredConstructionQuarters,
+      project.elapsedConstructionQuartersWithPayment,
+      project.completionPeriod === null ? "－" : project.isCompletionEstimate ? `${project.completionPeriod}（見込）` : project.completionPeriod,
+      `${project.operationalStartPeriod ?? "完成後に確定"} / ${formatUsdText(project.approvedBudgetUsd)} / ${formatUsdText(project.cumulativePaidUsd)} / ${formatUsdText(project.remainingScheduledPaymentUsd)}`,
+    ]);
+    row.eachCell((cell) => {
+      if (!cell.font) cell.font = VALUE_FONT;
+    });
+    row.getCell(3).numFmt = "#,##0.00";
+  }
+  const pendingLastRow = ws.rowCount;
+
+  // 能力プール別の「現在追加中」合計をSUMIFで埋める（明細が0件のときは0）。
+  for (const { poolKey, rowNumber } of totalRowNumbers) {
+    const label = capacity.companyTotals.find((p) => p.poolKey === poolKey)?.poolLabel ?? poolKey;
+    const cell = ws.getRow(rowNumber).getCell(7);
+    cell.value =
+      capacity.pendingProjects.length === 0
+        ? 0
+        : { formula: `SUMIF($B$${pendingFirstRow}:$B$${pendingLastRow},"${label}",$C$${pendingFirstRow}:$C$${pendingLastRow})` };
+    cell.numFmt = "#,##0.00";
+    cell.font = VALUE_FONT;
+  }
+
+  if (capacity.pendingProjects.length === 0) {
+    const row = ws.addRow(["現在追加中の加工能力はありません（能力を増やす設備投資が進行中でない状態です）"]);
+    row.getCell(1).font = LABEL_FONT;
+  }
+  const noteRow2 = ws.addRow([
+    "能力が増えるのは「完成した四半期」ではなく「能力へ反映される四半期（稼働開始四半期）」からです。完成前の案件は完成時期そのものが確定していないため、反映四半期は完成後に確定します。",
+  ]);
+  noteRow2.getCell(1).font = LABEL_FONT;
+}
+
+function formatUsdText(value: number): string {
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+/**
  * Export API（会社スコープ）JSONだけを入力として、Meta/PL/BS/CF/Financing/Capex/
- * Sales Contracts/Sales Detail/Marketの9シート構成のExcelワークブックを組み立て、
+ * Processing Capacity/Sales Contracts/Sales Detail/Marketの10シート構成のExcelワークブックを組み立て、
  * Bufferとして返す。会社スコープのペイロードだけを入力とするため、他社の非公開情報は
  * 構造上ここへ入り得ない。
  */
@@ -514,6 +663,7 @@ export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayl
   }
   writeFinancingSheet(wb, payload.financingResult);
   writeCapexSheet(wb, payload.capexResult);
+  writeProcessingCapacitySheet(wb, payload.processingCapacity);
   writeSalesContractsSheet(wb, payload.salesContracts);
   writeSalesDetailSheet(wb, payload);
   writeMarketSheet(wb, payload.market);

@@ -24,6 +24,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DecisionEditor from "../../components/DecisionEditor";
+import CollapsibleSection from "../../components/CollapsibleSection";
 import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
 import FinancialResultsSection from "../../components/financial/FinancialResultsSection";
@@ -201,15 +202,20 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
         {viewModel.lastQuarterResult && (
           <div className="space-y-5">
             <h2 className="text-base font-semibold">直近の四半期結果（turn {viewModel.lastQuarterResult.turn}）</h2>
-            <MarketPanel
-              marketResult={viewModel.lastQuarterResult.marketResult}
-              globalReasonCodes={viewModel.lastQuarterResult.globalReasonCodes}
-              previousMarketResult={viewModel.previousQuarterMarket?.marketResult ?? null}
-              previousPeriodLabel={viewModel.previousQuarterMarket?.period ?? null}
-            />
+            <CollapsibleSection title="市場情報" tone="info" testId="market-section">
+              <MarketPanel
+                marketResult={viewModel.lastQuarterResult.marketResult}
+                globalReasonCodes={viewModel.lastQuarterResult.globalReasonCodes}
+                previousMarketResult={viewModel.previousQuarterMarket?.marketResult ?? null}
+                previousPeriodLabel={viewModel.previousQuarterMarket?.period ?? null}
+              />
+            </CollapsibleSection>
             {viewModel.lastQuarterResult.playerSummary && (
-              <ResultsPanel summary={viewModel.lastQuarterResult.playerSummary} displayName={viewModel.playerDisplayName} />
+              <CollapsibleSection title="自社の四半期結果" tone="info" testId="player-results-section">
+                <ResultsPanel summary={viewModel.lastQuarterResult.playerSummary} displayName={viewModel.playerDisplayName} />
+              </CollapsibleSection>
             )}
+            <CollapsibleSection title="財務結果" tone="info" testId="financial-results-section">
             <FinancialResultsSection
               displayName={viewModel.playerDisplayName}
               companyId={viewModel.playerCompanyId}
@@ -225,12 +231,17 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               previousFinancingResult={viewModel.previousQuarterFinancials?.financingResult ?? null}
               previousCapexResult={viewModel.previousQuarterFinancials?.capexResult ?? null}
             />
+            </CollapsibleSection>
           </div>
         )}
 
         {viewModel.recentHistory.length > 0 && (
-          <div className="bg-gray-800 rounded-2xl p-4 sm:p-5">
-            <h2 className="text-base font-semibold mb-3">履歴（直近{viewModel.recentHistory.length}件）</h2>
+          <CollapsibleSection
+            title={`履歴（直近${viewModel.recentHistory.length}件）`}
+            tone="info"
+            defaultOpen={false}
+            testId="history-section"
+          >
             <ul className="text-xs text-gray-400 space-y-1">
               {viewModel.recentHistory.map((h) => (
                 <li key={h.turnId}>
@@ -238,7 +249,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
                 </li>
               ))}
             </ul>
-          </div>
+          </CollapsibleSection>
         )}
 
         <div className="text-[11px] text-gray-500">

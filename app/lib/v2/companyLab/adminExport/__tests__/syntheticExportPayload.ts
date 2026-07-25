@@ -32,6 +32,7 @@ import type {
   ExportSalesContract,
   ExportSalesPlanEntry,
 } from "../../../../../api/v2/exports/_lib/exportDto";
+import type { ExportProcessingCapacity } from "../../../../../api/v2/exports/_lib/exportDto";
 import { COUNTRY_IDS } from "../../../market/types";
 import type { PeriodV2 } from "../../../core/period";
 
@@ -457,6 +458,103 @@ const SYNTHETIC_DECISION_INFO: ExportCompanyDecisionInfo = {
 };
 
 /**
+ * 工場の加工能力（当期末時点の各能力＋現在追加中の能力）。
+ * 「当初の能力＋稼働開始済みの増加＝現時点の能力」がExcel側の数式で検算できる値と、
+ * 現在追加中の案件が1件ある状態（PD能力+500t/四半期・完成前で反映四半期は未確定）を
+ * 含める。実効能力は名目×0.9×0.8。
+ */
+const SYNTHETIC_PROCESSING_CAPACITY: ExportProcessingCapacity = {
+  companyId: "BAL",
+  asOfPeriod: SYNTHETIC_PERIOD,
+  factories: [
+    {
+      factoryId: "BAL-F1",
+      companyId: "BAL",
+      status: "active",
+      baseUtilizationRate: 0.9,
+      equipmentAvailabilityRate: 0.8,
+      receivesCapexCapacity: true,
+      pools: [
+        {
+          poolKey: "commonProcessing",
+          poolLabel: "共通一次加工",
+          poolDescription: "原料投入ベースの一次加工能力（全商品が通る工程）。",
+          baseNominalTons: 12000,
+          addedByOperationalCapexTons: 0,
+          currentNominalTons: 12000,
+          currentEffectiveTons: 8640,
+        },
+        {
+          poolKey: "hoso",
+          poolLabel: "HOSO",
+          poolDescription: "HOSO（殻付き）の完成品ベース能力。",
+          baseNominalTons: 6000,
+          addedByOperationalCapexTons: 500,
+          currentNominalTons: 6500,
+          currentEffectiveTons: 4680,
+        },
+        {
+          poolKey: "pd",
+          poolLabel: "PD",
+          poolDescription: "PD（殻むき）の完成品ベース能力。",
+          baseNominalTons: 4000,
+          addedByOperationalCapexTons: 0,
+          currentNominalTons: 4000,
+          currentEffectiveTons: 2880,
+        },
+        {
+          poolKey: "vap",
+          poolLabel: "VAP",
+          poolDescription: "VAP（付加価値加工品）の完成品ベース能力。",
+          baseNominalTons: 2000,
+          addedByOperationalCapexTons: 0,
+          currentNominalTons: 2000,
+          currentEffectiveTons: 1440,
+        },
+        {
+          poolKey: "freezingPackaging",
+          poolLabel: "凍結・包装",
+          poolDescription: "凍結・包装工程の完成品ベース能力。",
+          baseNominalTons: 10000,
+          addedByOperationalCapexTons: 0,
+          currentNominalTons: 10000,
+          currentEffectiveTons: 7200,
+        },
+      ],
+    },
+  ],
+  // 1工場のみなので会社合計は工場の内訳と同一（ビルダーの実際の出力もそうなる）。
+  companyTotals: [
+    { poolKey: "commonProcessing", poolLabel: "共通一次加工", poolDescription: "原料投入ベースの一次加工能力（全商品が通る工程）。", baseNominalTons: 12000, addedByOperationalCapexTons: 0, currentNominalTons: 12000, currentEffectiveTons: 8640 },
+    { poolKey: "hoso", poolLabel: "HOSO", poolDescription: "HOSO（殻付き）の完成品ベース能力。", baseNominalTons: 6000, addedByOperationalCapexTons: 500, currentNominalTons: 6500, currentEffectiveTons: 4680 },
+    { poolKey: "pd", poolLabel: "PD", poolDescription: "PD（殻むき）の完成品ベース能力。", baseNominalTons: 4000, addedByOperationalCapexTons: 0, currentNominalTons: 4000, currentEffectiveTons: 2880 },
+    { poolKey: "vap", poolLabel: "VAP", poolDescription: "VAP（付加価値加工品）の完成品ベース能力。", baseNominalTons: 2000, addedByOperationalCapexTons: 0, currentNominalTons: 2000, currentEffectiveTons: 1440 },
+    { poolKey: "freezingPackaging", poolLabel: "凍結・包装", poolDescription: "凍結・包装工程の完成品ベース能力。", baseNominalTons: 10000, addedByOperationalCapexTons: 0, currentNominalTons: 10000, currentEffectiveTons: 7200 },
+  ],
+  pendingProjects: [
+    {
+      projectId: "capex-pd-1",
+      projectType: "pdLineExpansion",
+      projectTypeDisplayName: "PDライン増設",
+      displayStatus: "underConstruction",
+      displayStatusLabel: "建設中",
+      targetPoolKey: "pd",
+      targetPoolLabel: "PD",
+      capacityIncreaseTonsPerQuarter: 500,
+      approvedPeriod: SYNTHETIC_PERIOD,
+      completionPeriod: null,
+      isCompletionEstimate: true,
+      operationalStartPeriod: null,
+      requiredConstructionQuarters: 3,
+      elapsedConstructionQuartersWithPayment: 1,
+      approvedBudgetUsd: 4000000,
+      cumulativePaidUsd: 1200000,
+      remainingScheduledPaymentUsd: 2800000,
+    },
+  ],
+};
+
+/**
  * 合成CompanyExportPayloadを組み立てる。overridesで任意のフィールドを差し替えられる
  * （例: salesContracts: [] で0件時の表示を確認する）。
  */
@@ -562,6 +660,7 @@ export function buildSyntheticCompanyExportPayload(
     capexResult: null,
     companySummary: null,
     salesContracts: [],
+    processingCapacity: SYNTHETIC_PROCESSING_CAPACITY,
     contractFulfillmentUsage: SYNTHETIC_FULFILLMENT_USAGE,
     salesPlans: SYNTHETIC_SALES_PLANS,
     marketProductAllocations: SYNTHETIC_MARKET_PRODUCT_ALLOCATIONS,

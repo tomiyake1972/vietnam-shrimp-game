@@ -110,6 +110,8 @@ import {
   buildExportRawMaterialLotStates,
   buildExportRawMaterialRequirements,
 } from "./dto/operationsDto";
+import { CompanyFixture } from "../../../../lib/v2/companyLab/types";
+import { ExportProcessingCapacity, buildExportProcessingCapacity } from "./dto/processingCapacityDto";
 import {
   ExportAllCompaniesDecisionInfo,
   ExportCompanyDecisionInfo,
@@ -125,6 +127,7 @@ export * from "./dto/salesDto";
 export * from "./dto/marketDto";
 export * from "./dto/operationsDto";
 export * from "./dto/decisionDto";
+export * from "./dto/processingCapacityDto";
 
 /** 現在サポートしているExport DTOのスキーマバージョン。破壊的変更時のみ増分する。 */
 export const EXPORT_SCHEMA_VERSION = 1;
@@ -795,6 +798,12 @@ export interface CompanyExportPayload {
   readonly companySummary: ExportCompanySummary | null;
   /** §2 この会社の契約ロールフォワード明細（期首・新規・履行・期末）。 */
   readonly salesContracts: readonly ExportSalesContract[];
+  /**
+   * 工場の加工能力（当期末時点の各能力＋現在追加中の能力）。
+   * fixtures（ラボ作成時に確定した静的な工場能力）が取得できない呼び出し経路では
+   * nullになる。値が無いことを0や推測値で埋めない方針のためnullを許容する。
+   */
+  readonly processingCapacity: ExportProcessingCapacity | null;
   /** §2 この会社の契約×完成品ロット単位の履行内訳。 */
   readonly contractFulfillmentUsage: readonly ExportContractFulfillmentUsage[];
   /** §3 この会社の市場別×商品別の販売計画。 */
@@ -817,6 +826,12 @@ export interface BuildCompanyExportPayloadInput {
   readonly companyId: CompanyId;
   readonly entry: CompanyLabQuarterHistoryEntry;
   readonly generatedAt: string;
+  /**
+   * ラボ作成時に確定・永続化された会社fixture（工場の当初能力の唯一の出所）。
+   * 履歴エントリーには含まれないため、呼び出し元がloadCurrentStateから渡す。
+   * 省略された場合 processingCapacity は null になる。
+   */
+  readonly fixtures?: readonly CompanyFixture[];
 }
 
 export function buildCompanyExportPayload(input: BuildCompanyExportPayloadInput): CompanyExportPayload {
@@ -839,6 +854,15 @@ export function buildCompanyExportPayload(input: BuildCompanyExportPayloadInput)
     capexResult: capex ? buildExportCapexResult(capex) : null,
     companySummary: summary ? buildExportCompanySummary(summary) : null,
     salesContracts: buildExportSalesContractRollforward(entry, companyId),
+    processingCapacity:
+      input.fixtures === undefined
+        ? null
+        : buildExportProcessingCapacity({
+            companyId,
+            fixtures: input.fixtures,
+            capexState: entry.postProcessingStateSnapshot.capexState,
+            asOfPeriod: entry.postProcessingStateSnapshot.currentPeriod,
+          }),
     contractFulfillmentUsage: buildExportContractFulfillmentUsageForCompany(entry, companyId),
     salesPlans: buildExportSalesPlansForCompany(entry, companyId),
     marketProductAllocations: buildExportMarketProductAllocations(entry, companyId),
@@ -857,6 +881,8 @@ export interface AllCompaniesExportCompanyEntry {
   readonly companySummary: ExportCompanySummary | null;
   /** §2 この会社の契約ロールフォワード明細（期首・新規・履行・期末）。 */
   readonly salesContracts: readonly ExportSalesContract[];
+  /** 工場の加工能力（当期末時点の各能力＋現在追加中の能力）。fixtures未指定時はnull。 */
+  readonly processingCapacity: ExportProcessingCapacity | null;
 }
 
 /**
@@ -885,6 +911,8 @@ export interface BuildAllCompaniesExportPayloadInput {
   readonly entry: CompanyLabQuarterHistoryEntry;
   readonly companyIds: readonly CompanyId[];
   readonly generatedAt: string;
+  /** ラボ作成時に確定・永続化された会社fixture。省略時 processingCapacity は null。 */
+  readonly fixtures?: readonly CompanyFixture[];
 }
 
 /**
@@ -915,6 +943,15 @@ export function buildAllCompaniesExportPayload(input: BuildAllCompaniesExportPay
         capexResult: capex ? buildExportCapexResult(capex) : null,
         companySummary: summary ? buildExportCompanySummary(summary) : null,
         salesContracts: buildExportSalesContractRollforward(entry, companyId),
+        processingCapacity:
+          input.fixtures === undefined
+            ? null
+            : buildExportProcessingCapacity({
+                companyId,
+                fixtures: input.fixtures,
+                capexState: entry.postProcessingStateSnapshot.capexState,
+                asOfPeriod: entry.postProcessingStateSnapshot.currentPeriod,
+              }),
       };
     }),
     contractFulfillmentUsage: buildExportContractFulfillmentUsageAllCompanies(entry),

@@ -20,6 +20,7 @@ const EXPECTED_SHEET_NAMES = [
   "CF",
   "Financing",
   "Capex",
+  "Processing Capacity",
   "Sales Contracts",
   "Sales Detail",
   "Market",
@@ -32,12 +33,57 @@ async function loadWorkbook(payload: Parameters<typeof buildCompanyExportExcelWo
   return wb;
 }
 
-test("buildCompanyExportExcelWorkbook: Meta/PL/BS/CF/Financing/Capex/Sales Contracts/Sales Detail/Marketの9シートを生成する", async () => {
+test("buildCompanyExportExcelWorkbook: Meta/PL/BS/CF/Financing/Capex/Sales Contracts/Processing Capacity/Sales Detail/Marketの10シートを生成する", async () => {
   const wb = await loadWorkbook(buildSyntheticCompanyExportPayload());
   assert.deepEqual(
     wb.worksheets.map((ws) => ws.name),
     EXPECTED_SHEET_NAMES,
   );
+});
+
+test("buildCompanyExportExcelWorkbook: Processing Capacityシートは現時点の能力・現在追加中の能力を転記し、検算はExcel数式で行う", async () => {
+  const wb = await loadWorkbook(buildSyntheticCompanyExportPayload());
+  const sheet = wb.getWorksheet("Processing Capacity");
+  assert.ok(sheet);
+  const ws = sheet!;
+
+  // 会社合計セクションの見出し行を探し、そこから5行が能力プール別の内訳になっている。
+  let headerRowNumber = 0;
+  ws.eachRow((row, rowNumber) => {
+    if (headerRowNumber === 0 && row.getCell(1).value === "能力" && row.getCell(2).value === "当初の能力") headerRowNumber = rowNumber;
+  });
+  assert.ok(headerRowNumber > 0, "能力プール別の見出し行が見つかりません");
+
+  const hosoRow = ws.getRow(headerRowNumber + 2);
+  assert.equal(hosoRow.getCell(1).value, "HOSO");
+  assert.equal(hosoRow.getCell(2).value, 6000, "当初の能力が転記されていません");
+  assert.equal(hosoRow.getCell(3).value, 500, "稼働開始済み投資による増加が転記されていません");
+  assert.equal(hosoRow.getCell(4).value, 6500, "現時点の能力（名目）が転記されていません");
+  // 「当初＋増加＝現時点」の検算はDTOのフィールドではなくExcel数式で行う。
+  const checkCell = hosoRow.getCell(5).value as { formula?: string } | null;
+  assert.ok(checkCell !== null && typeof checkCell === "object" && typeof checkCell.formula === "string", "検算セルがExcel数式ではありません");
+  assert.equal(checkCell!.formula, `B${headerRowNumber + 2}+C${headerRowNumber + 2}-D${headerRowNumber + 2}`);
+  assert.equal(hosoRow.getCell(6).value, 4680, "実効能力が転記されていません");
+
+  // 能力プール別の「現在追加中」合計は案件明細に対するSUMIF（TypeScript側で合計を作らない）。
+  const pdRow = ws.getRow(headerRowNumber + 3);
+  assert.equal(pdRow.getCell(1).value, "PD");
+  const pendingCell = pdRow.getCell(7).value as { formula?: string } | null;
+  assert.ok(pendingCell !== null && typeof pendingCell === "object" && typeof pendingCell!.formula === "string", "現在追加中セルがSUMIF数式ではありません");
+  assert.ok(pendingCell!.formula!.startsWith('SUMIF('), `SUMIFではありません: ${pendingCell!.formula}`);
+  assert.ok(pendingCell!.formula!.includes('"PD"'), `対象能力ラベルでの絞り込みがありません: ${pendingCell!.formula}`);
+
+  // 現在追加中の案件明細が実際に展開されている（空データ説明だけのシートにしない）。
+  const allText = JSON.stringify(ws.getSheetValues());
+  assert.ok(allText.includes("PDライン増設"), "現在追加中の案件明細が展開されていません");
+  assert.ok(allText.includes("完成後に確定"), "完成前の案件で反映四半期が未確定であることが示されていません");
+});
+
+test("buildCompanyExportExcelWorkbook: 加工能力が含まれないJSONではProcessing Capacityシートにその旨を明記する（0で埋めない）", async () => {
+  const wb = await loadWorkbook(buildSyntheticCompanyExportPayload({ processingCapacity: null }));
+  const ws = wb.getWorksheet("Processing Capacity");
+  assert.ok(ws);
+  assert.ok(String(ws!.getRow(1).getCell(1).value).includes("含まれていません"));
 });
 
 test("buildCompanyExportExcelWorkbook: Sales Contractsシートは契約明細をそのまま転記し、0件時はその旨を表示する", async () => {

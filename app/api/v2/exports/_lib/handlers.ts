@@ -63,7 +63,18 @@ export async function handleExportCompanyTurn(
 
   try {
     const entry = await deps.readOnlyRepository.loadHistoryEntry(labId, turn);
-    const body = buildCompanyExportPayload({ labId, companyId: companyId as CompanyId, entry, generatedAt: now });
+    // 工場の当初能力（fixtures）は履歴エントリーではなく永続化状態のトップレベルに
+    // 保存されている（ラボ作成時に確定し以後変化しない静的値）。加工能力セクションの
+    // 「当初の能力」を出すために追加で読む。turnごとに値が変わらないため、
+    // 同じ確定履歴からの再生成で結果は一致する。
+    const state = await deps.readOnlyRepository.loadCurrentState(labId);
+    const body = buildCompanyExportPayload({
+      labId,
+      companyId: companyId as CompanyId,
+      entry,
+      generatedAt: now,
+      fixtures: state.fixtures,
+    });
     return { status: 200, body };
   } catch (e) {
     return mapDomainErrorToHttp(e);
@@ -86,7 +97,8 @@ export async function handleExportAllCompaniesTurn(
   try {
     const entry = await deps.readOnlyRepository.loadHistoryEntry(labId, turn);
     const companyIds = entry.record.companySummaries.map((s) => s.companyId);
-    const body = buildAllCompaniesExportPayload({ labId, entry, companyIds, generatedAt: now });
+    const state = await deps.readOnlyRepository.loadCurrentState(labId);
+    const body = buildAllCompaniesExportPayload({ labId, entry, companyIds, generatedAt: now, fixtures: state.fixtures });
     return { status: 200, body };
   } catch (e) {
     return mapDomainErrorToHttp(e);

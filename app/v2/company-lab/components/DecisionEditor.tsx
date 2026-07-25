@@ -22,9 +22,13 @@ import {
   removeCapexProposalFromDraft,
 } from "../capexDraftActions";
 import { buildAllCapexCandidateViewModels, buildCapexPortfolioViewModel, CAPEX_EXPLANATION_DETAIL_TEXT, CAPEX_EXPLANATION_TEXT } from "../capexViewModel";
+import { buildCompanyProcessingCapacityViewModel, CapacityPoolKey } from "../processingCapacityViewModel";
 import CapexCandidateList from "./CapexCandidateList";
 import CapexDraftList from "./CapexDraftList";
 import CapexPortfolioList from "./CapexPortfolioList";
+import CollapsibleSection, { AreaToneLegend } from "./CollapsibleSection";
+import ProcessingCapacityPanel from "./ProcessingCapacityPanel";
+import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INFO_VALUE_CLASS, INPUT_CONTROL_CLASS, INPUT_CONTROL_WARN_CLASS, NO_VALUE_TEXT } from "./panelStyles";
 
 interface DecisionEditorProps {
   readonly fixture: CompanyFixture;
@@ -81,7 +85,7 @@ function NumberCell(props: { readonly value: number; readonly onChange: (n: numb
       value={props.value}
       disabled={props.disabled}
       onChange={(e) => props.onChange(toSafeNumber(e.target.value))}
-      className={`w-24 bg-gray-700 rounded px-2 py-1 text-sm text-gray-100 disabled:opacity-50 ${props.warn ? "ring-1 ring-amber-500" : ""}`}
+      className={`w-24 ${INPUT_CONTROL_CLASS} ${props.warn ? INPUT_CONTROL_WARN_CLASS : ""}`}
     />
   );
 }
@@ -96,7 +100,7 @@ function RatioCell(props: { readonly value: number; readonly onChange: (n: numbe
       value={props.value}
       disabled={props.disabled}
       onChange={(e) => props.onChange(toSafeRatioNumber(e.target.value))}
-      className="w-20 bg-gray-700 rounded px-2 py-1 text-sm text-gray-100 disabled:opacity-50"
+      className={`w-20 ${INPUT_CONTROL_CLASS}`}
     />
   );
 }
@@ -112,7 +116,7 @@ function PriceAdjustmentCell(props: { readonly value: number; readonly onChange:
         const n = Number(e.target.value);
         props.onChange(Number.isFinite(n) ? n : 0);
       }}
-      className="w-24 bg-gray-700 rounded px-2 py-1 text-sm text-gray-100 disabled:opacity-50"
+      className={`w-24 ${INPUT_CONTROL_CLASS}`}
     />
   );
 }
@@ -127,7 +131,24 @@ export default function DecisionEditor(props: DecisionEditorProps) {
     .filter((c) => c.status === "open" || c.status === "partiallyFulfilled" || c.status === "overdue")
     .reduce((sum, c) => sum + unwrapUnit(c.outstandingQuantity), 0);
 
-  const factoryById = new Map(fixture.factories.map((f) => [f.factoryId, f]));
+  // --- 加工能力（現時点の能力＋現在追加中）---
+  // 生産計画セクションの「商品別能力」は、以前はfixture.factoriesの静的値だけを
+  // 表示していたため、完成・稼働開始済みの設備投資による増加ぶんが画面に出ず、
+  // エンジンが実際に上限として使う能力と食い違っていた（発見された不具合）。
+  // processingCapacityViewModelはrunner.tsと同一の導出を行うため、以後は画面と
+  // エンジンで同じ値を見ることになる。
+  const capacityViewModel = buildCompanyProcessingCapacityViewModel({
+    companyId: fixture.companyId,
+    baseFactories: fixture.factories,
+    capexState: { companies: [ownState.capexState] },
+    period,
+    params: CAPEX_PARAMETERS_V1,
+  });
+  const currentCapacityTons = (factoryId: string, pool: CapacityPoolKey): number | undefined => {
+    const factory = capacityViewModel.factories.find((f) => f.factoryId === factoryId);
+    return factory?.pools.find((p) => p.poolKey === pool)?.currentNominalTons;
+  };
+  const pendingCapacityTotalTons = Object.values(capacityViewModel.pendingTotalsByPool).reduce((sum, n) => sum + n, 0);
 
   // --- 【Phase 8B-3】設備投資セクション用の派生値 ---
   const capexCandidates = buildAllCapexCandidateViewModels(period, CAPEX_PARAMETERS_V1);
@@ -153,22 +174,35 @@ export default function DecisionEditor(props: DecisionEditorProps) {
   const accruedInterestPayableUsd = ownState.financingState.accruedInterestPayableUsd;
 
   return (
-    <div className="space-y-5">
-      <div className="text-xs text-gray-400 bg-gray-900/60 rounded-lg px-3 py-2">
-        参考情報: 原料在庫（利用可能） {formatHosoEqTons(rawMaterialInventory)} / 未履行契約残高 {formatHosoEqTons(outstandingBacklog)}
-        {disabled && <span className="ml-2 text-amber-400">この四半期はすでに進行済みです。編集内容は次の四半期に反映されます。</span>}
+    <div className="space-y-3">
+      <div className="space-y-2 bg-gray-900/60 rounded-lg px-3 py-2">
+        <AreaToneLegend />
+        <div className="text-xs text-gray-400">
+          参考情報: 原料在庫（利用可能） {formatHosoEqTons(rawMaterialInventory)} / 未履行契約残高 {formatHosoEqTons(outstandingBacklog)}
+          {disabled && <span className="ml-2 text-amber-400">この四半期はすでに進行済みです。編集内容は次の四半期に反映されます。</span>}
+        </div>
       </div>
 
+      {/* 工場加工能力（現時点＋現在追加中） */}
+      <CollapsibleSection
+        title="工場の加工能力（現時点・現在追加中）"
+        tone="info"
+        testId="processing-capacity-section"
+        summaryRight={
+          pendingCapacityTotalTons > 0
+            ? `現在追加中 合計 +${formatHosoEqTons(pendingCapacityTotalTons)} t/四半期`
+            : "現在追加中の能力なし"
+        }
+      >
+        <ProcessingCapacityPanel viewModel={capacityViewModel} />
+      </CollapsibleSection>
+
       {/* 【Phase 8B-3】設備投資 */}
-      <section className="space-y-3 bg-gray-900/30 rounded-xl p-3">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-200">設備投資</h3>
-          <p className="text-[11px] text-gray-400 mt-1">{CAPEX_EXPLANATION_TEXT}</p>
-          <details className="mt-1">
-            <summary className="text-[11px] text-teal-400 hover:text-teal-300 cursor-pointer">建物・機械の償却期間の違いについて</summary>
-            <p className="text-[11px] text-gray-400 mt-1">{CAPEX_EXPLANATION_DETAIL_TEXT}</p>
-          </details>
-        </div>
+      <CollapsibleSection title="設備投資" tone="input" description={CAPEX_EXPLANATION_TEXT} testId="capex-section">
+        <details className="mt-1">
+          <summary className="text-[11px] text-teal-400 hover:text-teal-300 cursor-pointer">建物・機械の償却期間の違いについて</summary>
+          <p className="text-[11px] text-gray-400 mt-1">{CAPEX_EXPLANATION_DETAIL_TEXT}</p>
+        </details>
 
         {lastQuarterRejectedCapexProposals && lastQuarterRejectedCapexProposals.length > 0 && (
           <div className="bg-amber-950/40 border border-amber-700/50 rounded-lg px-3 py-2 space-y-1">
@@ -220,15 +254,14 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             disabled={disabled}
           />
         </div>
-      </section>
+      </CollapsibleSection>
 
       {/* 販売計画 */}
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold text-gray-200">販売計画（市場×商品）</h3>
+      <CollapsibleSection title="販売計画（市場×商品）" tone="input" testId="sales-plan-section">
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs text-gray-300">
             <thead>
-              <tr className="text-gray-400 text-left">
+              <tr className={INFO_TABLE_HEAD_CLASS}>
                 <th className="pr-3 py-1">市場</th>
                 <th className="pr-3 py-1">商品</th>
                 <th className="pr-3 py-1">販売希望量(t)</th>
@@ -280,11 +313,10 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             </tbody>
           </table>
         </div>
-      </section>
+      </CollapsibleSection>
 
       {/* 国内原料買付 */}
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold text-gray-200">国内原料買付</h3>
+      <CollapsibleSection title="国内原料買付" tone="input" testId="domestic-purchase-section">
         <div className="flex flex-wrap gap-4 text-xs text-gray-300">
           <label className="flex flex-col gap-1">
             買付希望量(t)
@@ -312,15 +344,14 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             />
           </label>
         </div>
-      </section>
+      </CollapsibleSection>
 
       {/* 輸入 */}
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold text-gray-200">輸入（原産国別）</h3>
+      <CollapsibleSection title="輸入（原産国別）" tone="input" testId="import-section">
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs text-gray-300">
             <thead>
-              <tr className="text-gray-400 text-left">
+              <tr className={INFO_TABLE_HEAD_CLASS}>
                 <th className="pr-3 py-1">原産国</th>
                 <th className="pr-3 py-1">発注量(t)</th>
                 <th className="pr-3 py-1">リードタイム(ターン)</th>
@@ -355,7 +386,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                         next[idx] = { ...row, leadTimeTurns: raw === "" ? undefined : Math.max(1, Math.round(Number(raw) || 1)) };
                         onChange({ ...draft, importOrders: next });
                       }}
-                      className="w-20 bg-gray-700 rounded px-2 py-1 text-sm text-gray-100 disabled:opacity-50"
+                      className={`w-20 ${INPUT_CONTROL_CLASS}`}
                     />
                   </td>
                 </tr>
@@ -363,14 +394,16 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             </tbody>
           </table>
         </div>
-      </section>
+      </CollapsibleSection>
 
       {/* 養殖 */}
       {draft.aquacultureStockingPlans.length > 0 && (
-        <section className="space-y-2">
-          <h3 className="text-sm font-semibold text-gray-200">
-            養殖（自社養殖能力上限: {formatHosoEqTons(fixture.aquacultureCapacity)}）
-          </h3>
+        <CollapsibleSection
+          title="養殖"
+          tone="input"
+          testId="aquaculture-section"
+          summaryRight={`自社養殖能力上限 ${formatHosoEqTons(fixture.aquacultureCapacity)}`}
+        >
           <div className="flex flex-wrap gap-4 text-xs text-gray-300">
             <label className="flex flex-col gap-1">
               池入れ予定量(t)
@@ -413,16 +446,20 @@ export default function DecisionEditor(props: DecisionEditorProps) {
               />
             </label>
           </div>
-        </section>
+        </CollapsibleSection>
       )}
 
       {/* 生産計画 */}
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold text-gray-200">生産計画（工場×商品）</h3>
+      <CollapsibleSection
+        title="生産計画（工場×商品）"
+        tone="input"
+        testId="production-plan-section"
+        description="「商品別能力」は、稼働開始済みの設備投資による増加ぶんを含んだ現時点の名目能力です（工場の加工能力セクションの内訳と同じ値）。"
+      >
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs text-gray-300">
             <thead>
-              <tr className="text-gray-400 text-left">
+              <tr className={INFO_TABLE_HEAD_CLASS}>
                 <th className="pr-3 py-1">工場</th>
                 <th className="pr-3 py-1">商品</th>
                 <th className="pr-3 py-1">商品別能力(t)</th>
@@ -432,19 +469,17 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             </thead>
             <tbody>
               {draft.productionPlans.map((row, idx) => {
-                const f = factoryById.get(row.factoryId);
-                const capacity = f ? (row.product === "hoso" ? f.hosoCapacity : row.product === "pd" ? f.pdCapacity : f.vapCapacity) : undefined;
-                const capacityNum = capacity ? unwrapUnit(capacity) : 0;
+                const capacityNum = currentCapacityTons(row.factoryId, row.product as CapacityPoolKey);
                 return (
-                  <tr key={`${row.factoryId}-${row.product}`} className="border-t border-gray-700/60">
+                  <tr key={`${row.factoryId}-${row.product}`} className={INFO_TABLE_ROW_CLASS}>
                     <td className="pr-3 py-1">{row.factoryId}</td>
                     <td className="pr-3 py-1 uppercase">{row.product}</td>
-                    <td className="pr-3 py-1 text-gray-500">{capacity ? formatHosoEqTons(capacity) : "—"}</td>
+                    <td className={`pr-3 py-1 ${INFO_VALUE_CLASS}`}>{capacityNum !== undefined ? formatHosoEqTons(capacityNum) : NO_VALUE_TEXT}</td>
                     <td className="pr-3 py-1">
                       <NumberCell
                         value={row.desiredQuantity}
                         disabled={disabled}
-                        warn={row.desiredQuantity > capacityNum * 1.5}
+                        warn={capacityNum !== undefined && row.desiredQuantity > capacityNum * 1.5}
                         onChange={(n) => {
                           const next = [...draft.productionPlans];
                           next[idx] = { ...row, desiredQuantity: n };
@@ -469,15 +504,14 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             </tbody>
           </table>
         </div>
-      </section>
+      </CollapsibleSection>
 
       {/* ワーカー配置 */}
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold text-gray-200">ワーカー配置（工場ごと）</h3>
+      <CollapsibleSection title="ワーカー配置（工場ごと）" tone="input" testId="worker-assignment-section">
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs text-gray-300">
             <thead>
-              <tr className="text-gray-400 text-left">
+              <tr className={INFO_TABLE_HEAD_CLASS}>
                 <th className="pr-3 py-1">工場</th>
                 <th className="pr-3 py-1">常用人数</th>
                 <th className="pr-3 py-1">臨時人数</th>
@@ -486,7 +520,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             </thead>
             <tbody>
               {draft.workerAssignments.map((row, idx) => (
-                <tr key={row.factoryId} className="border-t border-gray-700/60">
+                <tr key={row.factoryId} className={INFO_TABLE_ROW_CLASS}>
                   <td className="pr-3 py-1">{row.factoryId}</td>
                   <td className="pr-3 py-1">
                     <NumberCell
@@ -526,11 +560,15 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             </tbody>
           </table>
         </div>
-      </section>
+      </CollapsibleSection>
 
       {/* 【営業人員バジェット修正と合わせて発見・対応】資金調達（追加借入・任意期限前返済） */}
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold text-gray-200">資金調達（借入・返済）</h3>
+      <CollapsibleSection
+        title="資金調達（借入・返済）"
+        tone="input"
+        testId="financing-section"
+        summaryRight={`既存借入残高合計 ${formatUsd(existingLoanBalanceUsd)}`}
+      >
         <div className="text-xs text-gray-400">
           既存借入残高合計 {formatUsd(existingLoanBalanceUsd)}
           {accruedInterestPayableUsd > 0 && <span className="ml-2">未払利息 {formatUsd(accruedInterestPayableUsd)}</span>}
@@ -539,7 +577,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs text-gray-300">
               <thead>
-                <tr className="text-gray-400 text-left">
+                <tr className={INFO_TABLE_HEAD_CLASS}>
                   <th className="pr-3 py-1">借入ID</th>
                   <th className="pr-3 py-1">種別</th>
                   <th className="pr-3 py-1">残高</th>
@@ -550,7 +588,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
               </thead>
               <tbody>
                 {existingLoans.map((loan) => (
-                  <tr key={loan.loanId} className="border-t border-gray-700/60">
+                  <tr key={loan.loanId} className={INFO_TABLE_ROW_CLASS}>
                     <td className="pr-3 py-1">{loan.loanId}</td>
                     <td className="pr-3 py-1">{LOAN_TYPE_LABELS[loan.loanType]}</td>
                     <td className="pr-3 py-1">{formatUsd(loan.currentPrincipalUsd)}</td>
@@ -581,7 +619,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
               onChange={(e) =>
                 onChange({ ...draft, financingRequest: { ...draft.financingRequest, desiredLoanType: e.target.value as CompanyDecisionDraft["financingRequest"]["desiredLoanType"] } })
               }
-              className="bg-gray-700 rounded px-2 py-1 text-sm text-gray-100 disabled:opacity-50"
+              className={INPUT_CONTROL_CLASS}
             >
               <option value="workingCapital">運転資金</option>
               <option value="termLoan">設備・長期資金</option>
@@ -607,7 +645,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                   financingRequest: { ...draft.financingRequest, desiredRepaymentMethod: e.target.value as CompanyDecisionDraft["financingRequest"]["desiredRepaymentMethod"] },
                 })
               }
-              className="bg-gray-700 rounded px-2 py-1 text-sm text-gray-100 disabled:opacity-50"
+              className={INPUT_CONTROL_CLASS}
             >
               <option value="bulletAtMaturity">満期一括</option>
               <option value="equalPrincipal">元金均等</option>
@@ -630,12 +668,13 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                 checked={draft.financingRequest.emergencyAcceptable}
                 disabled={disabled}
                 onChange={(e) => onChange({ ...draft, financingRequest: { ...draft.financingRequest, emergencyAcceptable: e.target.checked } })}
+                className="accent-sky-500"
               />
               緊急融資も許容する
             </span>
           </label>
         </div>
-      </section>
+      </CollapsibleSection>
     </div>
   );
 }
