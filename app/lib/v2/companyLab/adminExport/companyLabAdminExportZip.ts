@@ -8,8 +8,8 @@
 // 明示的に列挙している）。
 
 import JSZip from "jszip";
-import type { CompanyExportPayload } from "../../../../api/v2/exports/_lib/exportDto";
-import { buildCompanyExportExcelWorkbook } from "./companyLabAdminExcelBuilder";
+import type { AllCompaniesExportPayload, CompanyExportPayload } from "../../../../api/v2/exports/_lib/exportDto";
+import { buildAllCompaniesExportExcelWorkbook, buildCompanyExportExcelWorkbook } from "./companyLabAdminExcelBuilder";
 
 export interface CompanyLabAdminExportManifestEntry {
   readonly file: string;
@@ -35,6 +35,12 @@ export interface BuildExportZipInput {
   readonly labIndexJson: unknown;
   readonly companyJson: CompanyExportPayload;
   readonly allCompaniesJson: unknown;
+  /**
+   * GMブック（全社Excel）の入力。会社別ブックとは入力型・出力ファイルが別で、混在させない。
+   * 型が確定していない呼び出し経路では省略でき、その場合GMブックを生成しない
+   * （推測値で埋めたGMブックを作らないため）。
+   */
+  readonly gmExcelPayload?: AllCompaniesExportPayload;
   readonly marketJson: unknown;
   readonly includeExcel: boolean;
 }
@@ -72,6 +78,18 @@ export async function buildCompanyLabAdminExportZip(input: BuildExportZipInput):
     const excelBuffer = await buildCompanyExportExcelWorkbook(input.companyJson);
     zip.file(excelFile, excelBuffer);
     entries.push({ file: excelFile, sourceApiPath: null, description: `${companyFile}のみを入力として生成した経営データブック（Meta/PL/BS/CF/Financing/Capexの6シート）` });
+
+    // GMブックは会社別ブックと別ファイルとして出力する（1冊に混ぜない）。
+    if (input.gmExcelPayload) {
+      const gmExcelFile = `${input.labId}_turn${input.turn}_gm_databook.xlsx`;
+      const gmBuffer = await buildAllCompaniesExportExcelWorkbook(input.gmExcelPayload);
+      zip.file(gmExcelFile, gmBuffer);
+      entries.push({
+        file: gmExcelFile,
+        sourceApiPath: null,
+        description: `${allCompaniesFile}のみを入力として生成したGM用データブック（全社の加工能力と処理見込み）`,
+      });
+    }
   }
 
   const manifest: CompanyLabAdminExportManifest = {

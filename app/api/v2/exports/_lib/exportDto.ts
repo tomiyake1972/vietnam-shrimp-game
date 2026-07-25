@@ -112,6 +112,8 @@ import {
 } from "./dto/operationsDto";
 import { CompanyFixture } from "../../../../lib/v2/companyLab/types";
 import { ExportProcessingCapacity, buildExportProcessingCapacity } from "./dto/processingCapacityDto";
+import { CompanyProductionPlanEntry, WorkerAssignment } from "../../../../lib/v2/production/types";
+import { RawMaterialLot } from "../../../../lib/v2/rawMaterials/types";
 import {
   ExportAllCompaniesDecisionInfo,
   ExportCompanyDecisionInfo,
@@ -821,6 +823,36 @@ export interface CompanyExportPayload {
   readonly decisionInfo: ExportCompanyDecisionInfo;
 }
 
+/**
+ * 処理見込みの入力（対象会社ぶんの生産計画・ワーカー配置・原料ロット）を取り出す。
+ *
+ * 【スコープ隔離】必ず companyId で絞り込んだものだけを返す。プレイヤー会社の
+ * 提出意思決定（playerSubmission）と他社の意思決定（otherCompaniesDecisions）は
+ * どちらも「その会社自身のデータ」なので、対象会社と一致するものだけを使う。
+ * 会社別ブックへ他社の非公開意思決定が混入しないのはこの絞り込みによる。
+ *
+ * 【再計算しない】ここでは値を選ぶだけで、配分計算は buildExportProcessingCapacity
+ * が呼ぶ processingForecastViewModel（＝生産処理エンジンの純粋関数）が行う。
+ */
+function pickCompanyForecastInputs(
+  entry: CompanyLabQuarterHistoryEntry,
+  companyId: CompanyId
+): {
+  readonly productionPlans: readonly CompanyProductionPlanEntry[];
+  readonly workerAssignments: readonly WorkerAssignment[];
+  readonly rawMaterialLots: readonly RawMaterialLot[];
+} {
+  const decision =
+    entry.playerSubmission.companyId === companyId
+      ? entry.playerSubmission
+      : entry.otherCompaniesDecisions.find((d) => d.companyId === companyId);
+  return {
+    productionPlans: (decision?.productionPlans ?? []).filter((p) => p.companyId === companyId),
+    workerAssignments: (decision?.workerAssignments ?? []).filter((w) => w.companyId === companyId),
+    rawMaterialLots: entry.postProcessingStateSnapshot.rawMaterialLots.filter((l) => l.companyId === companyId),
+  };
+}
+
 export interface BuildCompanyExportPayloadInput {
   readonly labId: string;
   readonly companyId: CompanyId;
@@ -862,6 +894,7 @@ export function buildCompanyExportPayload(input: BuildCompanyExportPayloadInput)
             fixtures: input.fixtures,
             capexState: entry.postProcessingStateSnapshot.capexState,
             asOfPeriod: entry.postProcessingStateSnapshot.currentPeriod,
+            ...pickCompanyForecastInputs(entry, companyId),
           }),
     contractFulfillmentUsage: buildExportContractFulfillmentUsageForCompany(entry, companyId),
     salesPlans: buildExportSalesPlansForCompany(entry, companyId),

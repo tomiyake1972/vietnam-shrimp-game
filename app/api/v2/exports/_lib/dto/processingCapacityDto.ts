@@ -39,6 +39,15 @@ import {
   CAPACITY_POOL_DESCRIPTIONS,
   CapacityPoolKey,
 } from "../../../../../v2/company-lab/processingCapacityViewModel";
+import { CompanyProductionPlanEntry, WorkerAssignment } from "../../../../../lib/v2/production/types";
+import { RawMaterialLot } from "../../../../../lib/v2/rawMaterials/types";
+import {
+  buildCompanyProcessingForecast,
+  CONSTRAINT_ORDER_TEXTS,
+  EFFECTIVE_CAPACITY_FORMULA_TEXT,
+  PRIORITY_RULE_TEXT,
+  YIELD_APPLICATION_TEXT,
+} from "../../../../../v2/company-lab/processingForecastViewModel";
 
 /** 能力プール（商品別加工能力）1つぶんの内訳。 */
 export interface ExportCapacityPool {
@@ -91,6 +100,78 @@ export interface ExportPendingCapacityProject {
   readonly remainingScheduledPaymentUsd: number;
 }
 
+// ---------------------------------------------------------------------
+// 名目→実効の計算過程と、現在の生産計画に基づく処理見込み
+//
+// 【重要】以下はすべて processingForecastViewModel.buildCompanyProcessingForecast
+// （内部で生産処理エンジンの純粋関数 allocateProductionPlans と
+// calculateFactoryEffectiveCapacity を呼ぶ）から書き写すだけである。
+// 意思決定画面もまったく同じ関数を呼ぶため、画面とExcelで値が食い違わない。
+// このDTOに独自の配分計算・実効率計算を書いてはならない。
+// ---------------------------------------------------------------------
+
+/** 実効率を構成する補正要因（コード上に実在する2つだけ）。 */
+export interface ExportCapacityRateFactor {
+  readonly key: string;
+  readonly label: string;
+  readonly value: number;
+}
+
+/** 「名目能力 → 実効能力」1行ぶん。 */
+export interface ExportCapacityEffectiveRateRow {
+  readonly poolKey: CapacityPoolKey;
+  readonly poolLabel: string;
+  readonly nominalTons: number;
+  /** 名目が0のときはnull（0で埋めない）。 */
+  readonly effectiveRate: number | null;
+  readonly effectiveTons: number;
+  readonly factors: readonly ExportCapacityRateFactor[];
+  readonly factorsProduct: number | null;
+  readonly correctionNote: string;
+}
+
+export interface ExportCapacityEffectiveRateTable {
+  /** 会社合計の場合はnull。 */
+  readonly factoryId: string | null;
+  readonly rows: readonly ExportCapacityEffectiveRateRow[];
+}
+
+/** 商品1行ぶんの処理見込み。 */
+export interface ExportProcessingForecastRow {
+  readonly factoryId: string;
+  readonly product: string;
+  readonly priority: number;
+  readonly desiredTons: number;
+  readonly productNominalCapacityTons: number;
+  readonly productEffectiveCapacityTons: number;
+  readonly forecastProcessedTons: number;
+  readonly forecastUnprocessedTons: number;
+  /** 制約となった能力（主因が先頭）。制約なしなら空配列。 */
+  readonly constraintLabels: readonly string[];
+  readonly primaryConstraintLabel: string | null;
+  readonly constraintSummary: string;
+  /** 主因・補足要因を区別した具体的な不足の説明文（エンジンの返した順序どおり）。 */
+  readonly constraintSentences: readonly string[];
+  readonly priorityNote: string | null;
+}
+
+export interface ExportProcessingForecast {
+  /** 確定結果ではないことを明示する見出し。 */
+  readonly headingText: string;
+  /** 常にtrue。 */
+  readonly isForecast: true;
+  readonly effectiveCapacityFormulaText: string;
+  readonly priorityRuleText: string;
+  readonly constraintOrderTexts: readonly string[];
+  readonly yieldApplicationText: string;
+  readonly companyRateTable: ExportCapacityEffectiveRateTable;
+  readonly factoryRateTables: readonly ExportCapacityEffectiveRateTable[];
+  /** 現在の生産計画（希望量・優先度）と、そこから導いた処理見込み。 */
+  readonly rows: readonly ExportProcessingForecastRow[];
+  readonly availableRawMaterialTons: number;
+  readonly caveatTexts: readonly string[];
+}
+
 export interface ExportProcessingCapacity {
   readonly companyId: CompanyId;
   /** どの四半期時点の能力か（当期処理直後＝次期の意思決定が前提とする能力）。 */
@@ -99,6 +180,8 @@ export interface ExportProcessingCapacity {
   /** 会社合計（能力プール別）。 */
   readonly companyTotals: readonly ExportCapacityPool[];
   readonly pendingProjects: readonly ExportPendingCapacityProject[];
+  /** 名目→実効の計算過程と、現在の生産計画に基づく処理見込み。 */
+  readonly forecast: ExportProcessingForecast;
 }
 
 export interface BuildExportProcessingCapacityInput {
@@ -109,6 +192,15 @@ export interface BuildExportProcessingCapacityInput {
   readonly capexState: CapexState;
   /** 当期処理直後の四半期。 */
   readonly asOfPeriod: PeriodV2;
+  /**
+   * この会社の生産計画（当期の提出意思決定）。処理見込みの入力。
+   * 【スコープ隔離】呼び出し元は必ず「対象会社ぶんだけ」を渡す。
+   * 未指定なら見込み行は空になる（0で埋めない）。
+   */
+  readonly productionPlans?: readonly CompanyProductionPlanEntry[];
+  readonly workerAssignments?: readonly WorkerAssignment[];
+  /** 見込み計算に使う原料ロット（対象会社ぶん）。 */
+  readonly rawMaterialLots?: readonly RawMaterialLot[];
 }
 
 /**
@@ -123,6 +215,16 @@ export function buildExportProcessingCapacity(input: BuildExportProcessingCapaci
     baseFactories,
     capexState: input.capexState,
     period: input.asOfPeriod,
+  });
+  // 画面（DecisionEditor）とまったく同じ純粋関数を呼ぶ。ここで別計算をしない。
+  const forecastVm = buildCompanyProcessingForecast({
+    companyId: input.companyId,
+    baseFactories,
+    capexState: input.capexState,
+    period: input.asOfPeriod,
+    productionPlans: input.productionPlans ?? [],
+    workerAssignments: input.workerAssignments ?? [],
+    rawMaterialLots: input.rawMaterialLots ?? [],
   });
   return {
     companyId: vm.companyId,
@@ -155,6 +257,61 @@ export function buildExportProcessingCapacity(input: BuildExportProcessingCapaci
       approvedBudgetUsd: p.approvedBudgetUsd,
       cumulativePaidUsd: p.cumulativePaidUsd,
       remainingScheduledPaymentUsd: p.remainingScheduledPaymentUsd,
+    })),
+    forecast: {
+      headingText: forecastVm.headingText,
+      isForecast: true,
+      effectiveCapacityFormulaText: EFFECTIVE_CAPACITY_FORMULA_TEXT,
+      priorityRuleText: PRIORITY_RULE_TEXT,
+      constraintOrderTexts: CONSTRAINT_ORDER_TEXTS,
+      yieldApplicationText: YIELD_APPLICATION_TEXT,
+      companyRateTable: toExportRateTable(forecastVm.companyRateTable),
+      factoryRateTables: forecastVm.factoryRateTables.map(toExportRateTable),
+      rows: forecastVm.rows.map((row) => ({
+        factoryId: row.factoryId,
+        product: row.product,
+        priority: row.priority,
+        desiredTons: row.desiredTons,
+        productNominalCapacityTons: row.productNominalCapacityTons,
+        productEffectiveCapacityTons: row.productEffectiveCapacityTons,
+        forecastProcessedTons: row.forecastProcessedTons,
+        forecastUnprocessedTons: row.forecastUnprocessedTons,
+        constraintLabels: row.constraints.map((c) => c.label),
+        primaryConstraintLabel: row.primaryConstraint?.label ?? null,
+        constraintSummary: row.constraintSummary,
+        constraintSentences: row.constraints.map((c) => c.sentence),
+        priorityNote: row.priorityNote ?? null,
+      })),
+      availableRawMaterialTons: forecastVm.availableRawMaterialTons,
+      caveatTexts: forecastVm.caveatTexts,
+    },
+  };
+}
+
+function toExportRateTable(table: {
+  readonly factoryId: string | null;
+  readonly rows: readonly {
+    readonly poolKey: CapacityPoolKey;
+    readonly poolLabel: string;
+    readonly nominalTons: number;
+    readonly effectiveRate: number | undefined;
+    readonly effectiveTons: number;
+    readonly factors: readonly { readonly key: string; readonly label: string; readonly value: number }[];
+    readonly factorsProduct: number | undefined;
+    readonly correctionNote: string;
+  }[];
+}): ExportCapacityEffectiveRateTable {
+  return {
+    factoryId: table.factoryId,
+    rows: table.rows.map((row) => ({
+      poolKey: row.poolKey,
+      poolLabel: row.poolLabel,
+      nominalTons: row.nominalTons,
+      effectiveRate: row.effectiveRate ?? null,
+      effectiveTons: row.effectiveTons,
+      factors: row.factors.map((f) => ({ key: f.key, label: f.label, value: f.value })),
+      factorsProduct: row.factorsProduct ?? null,
+      correctionNote: row.correctionNote,
     })),
   };
 }

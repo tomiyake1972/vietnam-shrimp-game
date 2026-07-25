@@ -29,7 +29,7 @@ import {
 } from "../../../../../../lib/v2/companyLab/adminExport/companyLabAdminExportSource";
 import { buildCompanyLabAdminExportZip } from "../../../../../../lib/v2/companyLab/adminExport/companyLabAdminExportZip";
 import { listCompanyOptionsForUi } from "../../../../../../v2/company-lab/play/_lib/companyOptions";
-import type { CompanyExportPayload } from "../../../../../v2/exports/_lib/exportDto";
+import type { AllCompaniesExportPayload, CompanyExportPayload } from "../../../../../v2/exports/_lib/exportDto";
 
 type ExportMode = "bundle" | "company" | "all" | "market";
 
@@ -121,6 +121,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ labI
       labIndexJson: indexResult.data,
       companyJson: companyResult.data as CompanyExportPayload,
       allCompaniesJson: allResult.data,
+      gmExcelPayload: allResult.data as AllCompaniesExportPayload,
       marketJson: marketResult.data,
       includeExcel: true,
     });

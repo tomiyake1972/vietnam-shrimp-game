@@ -9,7 +9,7 @@
 // 検算式のロジックをexceljsへ移植したもの。
 
 import ExcelJS from "exceljs";
-import type { CompanyExportPayload } from "../../../../api/v2/exports/_lib/exportDto";
+import type { AllCompaniesExportPayload, CompanyExportPayload } from "../../../../api/v2/exports/_lib/exportDto";
 
 const FONT_NAME = "Arial";
 const HEADER_FONT: Partial<ExcelJS.Font> = { name: FONT_NAME, bold: true, color: { argb: "FFFFFFFF" } };
@@ -501,8 +501,12 @@ function writeMarketSheet(wb: ExcelJS.Workbook, market: CompanyExportPayload["ma
  *   - 能力プール別の「現在追加中」合計は、下の案件明細に対するSUMIFで求める
  *     （TypeScript側で合計を作り込まず、プレイヤーが明細と突き合わせられるようにする）。
  */
-function writeProcessingCapacitySheet(wb: ExcelJS.Workbook, capacity: CompanyExportPayload["processingCapacity"]): void {
-  const ws = wb.addWorksheet("Processing Capacity");
+function writeProcessingCapacitySheet(
+  wb: ExcelJS.Workbook,
+  capacity: CompanyExportPayload["processingCapacity"],
+  sheetName: string = "Processing Capacity"
+): void {
+  const ws = wb.addWorksheet(sheetName);
   ws.columns = [{ width: 20 }, { width: 16 }, { width: 22 }, { width: 20 }, { width: 14 }, { width: 20 }, { width: 16 }, { width: 54 }];
 
   if (!capacity) {
@@ -633,6 +637,163 @@ function writeProcessingCapacitySheet(wb: ExcelJS.Workbook, capacity: CompanyExp
     "能力が増えるのは「完成した四半期」ではなく「能力へ反映される四半期（稼働開始四半期）」からです。完成前の案件は完成時期そのものが確定していないため、反映四半期は完成後に確定します。",
   ]);
   noteRow2.getCell(1).font = LABEL_FONT;
+
+  ws.addRow([]);
+  writeCapacityRateAndForecastSections(ws, capacity);
+}
+
+/**
+ * 「名目能力 → 実効能力」の計算過程と、現在の生産計画・優先度に基づく処理見込みを書く。
+ *
+ * 【再計算しない】値はすべてExport JSONのforecastブロック（＝意思決定画面と同じ
+ * processingForecastViewModel＝生産処理エンジンの純粋関数 allocateProductionPlans /
+ * calculateFactoryEffectiveCapacity の出力）をそのまま書き写す。ここで配分計算や
+ * 実効率の計算をしない（画面とExcelで値が食い違わないようにするため）。
+ *   - 「名目×実効率＝実効能力」の検算はE列のExcel数式で行う。
+ *   - 「希望量−処理見込み＝未処理見込み」の検算もExcel数式で行う。
+ *
+ * 【禁止事項】
+ *   - 全プールが一律85.5%等と決め打ちしない（プールごとのeffectiveRateを書く）。
+ *   - コードに存在しない補正要因を追加しない（factorsに入っているものだけを書く）。
+ *   - 見込みを確定結果として書かない（見出しと注意書きを必ず出す）。
+ *   - 値が無い箇所を0で埋めない（nullは「－」）。
+ */
+function writeCapacityRateAndForecastSections(ws: ExcelJS.Worksheet, capacity: NonNullable<CompanyExportPayload["processingCapacity"]>): void {
+  const forecast = capacity.forecast;
+  const sectionRow = (title: string): void => {
+    const row = ws.addRow([title]);
+    row.getCell(1).font = CHECK_FONT;
+  };
+
+  // --- 4. 名目能力 → 実効能力の計算過程 ---
+  sectionRow(`名目能力 → 実効能力の計算（会社合計）: ${forecast.effectiveCapacityFormulaText}`);
+  writeHeaderRow(ws, ["能力プール", "名目能力", "実効率", "実効能力", "検算(B*C-D)", "主な補正理由", "", ""]);
+  for (const row of forecast.companyRateTable.rows) {
+    const r = ws.addRow([
+      row.poolLabel,
+      row.nominalTons,
+      row.effectiveRate ?? "－",
+      row.effectiveTons,
+      { formula: `B${ws.rowCount + 1}*C${ws.rowCount + 1}-D${ws.rowCount + 1}` },
+      row.correctionNote,
+      null,
+      null,
+    ]);
+    r.eachCell((cell) => {
+      if (!cell.font) cell.font = VALUE_FONT;
+    });
+    for (const col of [2, 4, 5]) r.getCell(col).numFmt = "#,##0.00";
+    r.getCell(3).numFmt = "0.0000";
+  }
+  const factors = forecast.companyRateTable.rows[0]?.factors ?? [];
+  if (factors.length > 0) {
+    sectionRow("実効率を構成する補正要因（生産処理エンジンに実在するものだけ）");
+    writeHeaderRow(ws, ["補正要因", "値", "", "", "", "", "", ""]);
+    for (const factor of factors) {
+      const r = ws.addRow([factor.label, factor.value]);
+      r.getCell(1).font = LABEL_FONT;
+      r.getCell(2).font = VALUE_FONT;
+      r.getCell(2).numFmt = "0.0000";
+    }
+    const productRow = ws.addRow([
+      "積（＝実効率）",
+      forecast.companyRateTable.rows[0]?.factorsProduct ?? "－",
+    ]);
+    productRow.getCell(1).font = CHECK_FONT;
+    productRow.getCell(2).font = VALUE_FONT;
+    productRow.getCell(2).numFmt = "0.0000";
+    const noteRow = ws.addRow([
+      "実効率を構成する補正要因はこの2つだけです（人員充足率・保守状態・設備立ち上がり・品質リスクといった補正は現在のエンジンに存在しません）。人員の制約は実効能力ではなく、処理見込みの段階⑤（有効労働能力）で別に効きます。実効能力はエンジン側で小数2桁へ丸められるため、C列の実効率は「実効能力÷名目能力」として書き出しています。",
+    ]);
+    noteRow.getCell(1).font = LABEL_FONT;
+  }
+  ws.addRow([]);
+
+  // --- 5. 現在の入力に基づく処理見込み ---
+  sectionRow(`${forecast.headingText}（確定結果ではありません）`);
+  const priorityNote = ws.addRow([forecast.priorityRuleText]);
+  priorityNote.getCell(1).font = LABEL_FONT;
+  const orderNote = ws.addRow([`能力が適用される順序: ${forecast.constraintOrderTexts.join(" → ")}`]);
+  orderNote.getCell(1).font = LABEL_FONT;
+  const yieldNote = ws.addRow([forecast.yieldApplicationText]);
+  yieldNote.getCell(1).font = LABEL_FONT;
+  const rawRow = ws.addRow(["見込み計算に使った利用可能原料在庫(t)", forecast.availableRawMaterialTons]);
+  rawRow.getCell(1).font = LABEL_FONT;
+  rawRow.getCell(2).font = VALUE_FONT;
+  rawRow.getCell(2).numFmt = "#,##0.00";
+
+  writeHeaderRow(ws, [
+    "工場 / 商品",
+    "生産希望量(t)",
+    "優先度",
+    "商品別名目能力(t)",
+    "商品別実効能力(t)",
+    "処理見込み量(t)",
+    "未処理見込み量(t)",
+    "制約となった能力（主因＋補足要因）",
+  ]);
+  if (forecast.rows.length === 0) {
+    const row = ws.addRow(["この会社の当期の生産計画には、生産希望量が0より大きい行がありません（0で埋めていません）"]);
+    row.getCell(1).font = LABEL_FONT;
+  }
+  for (const row of forecast.rows) {
+    const r = ws.addRow([
+      `${row.factoryId} / ${row.product.toUpperCase()}`,
+      row.desiredTons,
+      row.priority,
+      row.productNominalCapacityTons,
+      row.productEffectiveCapacityTons,
+      row.forecastProcessedTons,
+      row.forecastUnprocessedTons,
+      row.constraintSummary,
+    ]);
+    r.eachCell((cell) => {
+      if (!cell.font) cell.font = VALUE_FONT;
+    });
+    for (const col of [2, 4, 5, 6, 7]) r.getCell(col).numFmt = "#,##0.00";
+  }
+  const checkRow = ws.addRow(["検算: 希望量合計 − 処理見込み合計 − 未処理見込み合計（0になるべき値）"]);
+  checkRow.getCell(1).font = CHECK_FONT;
+  if (forecast.rows.length > 0) {
+    // checkRow を追加した直後なので ws.rowCount は checkRow の行番号。
+    // 明細行は (checkRow - 件数) 〜 (checkRow - 1)。
+    const first = ws.rowCount - forecast.rows.length;
+    const last = ws.rowCount - 1;
+    const cell = checkRow.getCell(2);
+    cell.value = { formula: `SUM(B${first}:B${last})-SUM(F${first}:F${last})-SUM(G${first}:G${last})` };
+    cell.numFmt = "#,##0.00";
+    cell.font = VALUE_FONT;
+  }
+
+  // 不足の内訳（主因と補足要因を区別した文章。エンジンが返した順序どおり）。
+  const rowsWithConstraints = forecast.rows.filter((r) => r.constraintSentences.length > 0 || r.priorityNote !== null);
+  if (rowsWithConstraints.length > 0) {
+    sectionRow("能力不足の内訳（主因と補足要因）");
+    writeHeaderRow(ws, ["工場 / 商品", "区分", "説明", "", "", "", "", ""]);
+    for (const row of rowsWithConstraints) {
+      row.constraintSentences.forEach((sentence, idx) => {
+        const r = ws.addRow([`${row.factoryId} / ${row.product.toUpperCase()}`, idx === 0 ? "主因" : "補足要因", sentence]);
+        r.eachCell((cell) => {
+          if (!cell.font) cell.font = VALUE_FONT;
+        });
+      });
+      if (row.priorityNote !== null) {
+        const r = ws.addRow([`${row.factoryId} / ${row.product.toUpperCase()}`, "優先度の影響", row.priorityNote]);
+        r.eachCell((cell) => {
+          if (!cell.font) cell.font = VALUE_FONT;
+        });
+      }
+    }
+  }
+
+  for (const text of forecast.caveatTexts) {
+    const r = ws.addRow([text]);
+    r.getCell(1).font = LABEL_FONT;
+  }
+  const forecastNote = ws.addRow([
+    "この表の処理見込みは、優先度を変えると変わります（優先度を上げた商品は商品別実効能力まで先に処理され、その結果として他商品の処理見込みが減ります）。固定値ではありません。",
+  ]);
+  forecastNote.getCell(1).font = LABEL_FONT;
 }
 
 function formatUsdText(value: number): string {
@@ -667,6 +828,54 @@ export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayl
   writeSalesContractsSheet(wb, payload.salesContracts);
   writeSalesDetailSheet(wb, payload);
   writeMarketSheet(wb, payload.market);
+
+  const arrayBuffer = await wb.xlsx.writeBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+/**
+ * GMブック（全社スコープ）。全5社の加工能力と、各社の「現在の入力に基づく処理見込み」を
+ * 1冊で確認できるようにする（三宅さんの指示：会社別ブックでは自社のみ、GMブックでは全5社）。
+ *
+ * 【スコープ隔離】本関数の入力は AllCompaniesExportPayload（GMフルスコープでのみ生成される
+ * ペイロード）だけ。会社別ブック（buildCompanyExportExcelWorkbook）とは入力型が別で、
+ * 会社別ブック側からは全社ペイロードへ到達できない（型上、混在し得ない）。
+ * ファイルとしても別名で出力し、1冊に混ぜない。
+ *
+ * 【再計算しない】各社の値は Export JSON の processingCapacity（＝意思決定画面と同じ
+ * processingForecastViewModel の出力）をそのまま書き写す。ここで配分計算をしない。
+ */
+export async function buildAllCompaniesExportExcelWorkbook(payload: AllCompaniesExportPayload): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "ShrimpX V2 Company Lab — Export API (自動生成・GM用)";
+  wb.created = new Date(payload.meta.generatedAt);
+
+  const ws = wb.addWorksheet("Meta");
+  ws.columns = [{ width: 34 }, { width: 60 }];
+  writeHeaderRow(ws, ["項目", "値"]);
+  const metaRows: readonly [string, string | number][] = [
+    ["schemaVersion", payload.meta.schemaVersion],
+    ["generatedAt（このExcelを生成した時刻）", payload.meta.generatedAt],
+    ["labId", payload.meta.labId],
+    ["turn", payload.meta.turn],
+    ["period", payload.meta.period],
+    ["engineVersion", payload.meta.engineVersion],
+    ["dataStatus", payload.meta.dataStatus],
+    ["scope", JSON.stringify(payload.meta.scope)],
+    ["収録会社", payload.companies.map((c) => c.companyId).join(", ")],
+    ["用途", "GM用。全社の加工能力と処理見込みを確認するためのブックです（会社別ブックとは別ファイルです）"],
+    ["データ入力元", "Export API JSON（全社スコープ）のみ。Redis・Repository・画面表示値は参照していません"],
+  ];
+  for (const [label, value] of metaRows) {
+    const row = ws.addRow([label, value]);
+    row.getCell(1).font = LABEL_FONT;
+    row.getCell(2).font = VALUE_FONT;
+  }
+
+  // 会社ごとに独立したシートを作る（1シートへ混ぜると、どの社の行かが読み取りにくいため）。
+  for (const company of payload.companies) {
+    writeProcessingCapacitySheet(wb, company.processingCapacity, `Capacity_${company.companyId}`);
+  }
 
   const arrayBuffer = await wb.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);

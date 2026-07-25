@@ -463,6 +463,13 @@ const SYNTHETIC_DECISION_INFO: ExportCompanyDecisionInfo = {
  * 現在追加中の案件が1件ある状態（PD能力+500t/四半期・完成前で反映四半期は未確定）を
  * 含める。実効能力は名目×0.9×0.8。
  */
+/** 実効率を構成する補正要因（コード上に実在する2つだけ）。 */
+const SYNTHETIC_RATE_FACTORS = [
+  { key: "baseUtilizationRate", label: "基準稼働率（計画上の標準操業度）", value: 0.9 },
+  { key: "equipmentAvailabilityRate", label: "設備利用可能率（故障・保全による可用性）", value: 0.8 },
+];
+const SYNTHETIC_RATE_NOTE = "基準稼働率 90.0% × 設備利用可能率 80.0% ＝ 72.0%（この2つ以外の補正はエンジンに存在しません）";
+
 const SYNTHETIC_PROCESSING_CAPACITY: ExportProcessingCapacity = {
   companyId: "BAL",
   asOfPeriod: SYNTHETIC_PERIOD,
@@ -552,6 +559,85 @@ const SYNTHETIC_PROCESSING_CAPACITY: ExportProcessingCapacity = {
       remainingScheduledPaymentUsd: 2800000,
     },
   ],
+  // 名目→実効の計算過程（実効率は 0.9 × 0.8 ＝ 0.72）と、優先度つき生産計画に
+  // 基づく処理見込み。VAPが優先度3のため共通能力配分後に未処理が残る形を再現する。
+  forecast: {
+    headingText: "現在の入力に基づく処理見込み",
+    isForecast: true,
+    effectiveCapacityFormulaText: "実効能力 ＝ 名目能力 × 基準稼働率 × 設備利用可能率",
+    priorityRuleText: "優先度は数字が小さいほど優先されます。同じ優先度の商品は先着順ではなく、希望量に比例して配分されます（水位法）。",
+    constraintOrderTexts: [
+      "① 原料在庫（会社単位の共有・原料投入量ベース）",
+      "② 工場共通処理能力（工場単位の共有・原料投入量ベース）",
+      "③ 冷凍・包装能力（工場単位の共有・完成品量ベース）",
+      "④ 商品別設備能力（工場×商品単位の専用・完成品量ベース）",
+      "⑤ 有効労働能力（工場単位の共有ワーカープール）",
+    ],
+    yieldApplicationText: "歩留まり（販売可能回収率）は②と③の間で一度だけ適用されます。",
+    companyRateTable: {
+      factoryId: null,
+      rows: [
+        { poolKey: "commonProcessing", poolLabel: "共通一次加工", nominalTons: 12000, effectiveRate: 0.72, effectiveTons: 8640, factors: SYNTHETIC_RATE_FACTORS, factorsProduct: 0.72, correctionNote: SYNTHETIC_RATE_NOTE },
+        { poolKey: "hoso", poolLabel: "HOSO", nominalTons: 6500, effectiveRate: 0.72, effectiveTons: 4680, factors: SYNTHETIC_RATE_FACTORS, factorsProduct: 0.72, correctionNote: SYNTHETIC_RATE_NOTE },
+        { poolKey: "pd", poolLabel: "PD", nominalTons: 4000, effectiveRate: 0.72, effectiveTons: 2880, factors: SYNTHETIC_RATE_FACTORS, factorsProduct: 0.72, correctionNote: SYNTHETIC_RATE_NOTE },
+        { poolKey: "vap", poolLabel: "VAP", nominalTons: 2000, effectiveRate: 0.72, effectiveTons: 1440, factors: SYNTHETIC_RATE_FACTORS, factorsProduct: 0.72, correctionNote: SYNTHETIC_RATE_NOTE },
+        { poolKey: "freezingPackaging", poolLabel: "凍結・包装", nominalTons: 10000, effectiveRate: 0.72, effectiveTons: 7200, factors: SYNTHETIC_RATE_FACTORS, factorsProduct: 0.72, correctionNote: SYNTHETIC_RATE_NOTE },
+      ],
+    },
+    factoryRateTables: [],
+    rows: [
+      {
+        factoryId: "BAL-F1",
+        product: "hoso",
+        priority: 1,
+        desiredTons: 4000,
+        productNominalCapacityTons: 6500,
+        productEffectiveCapacityTons: 4680,
+        forecastProcessedTons: 4000,
+        forecastUnprocessedTons: 0,
+        constraintLabels: [],
+        primaryConstraintLabel: null,
+        constraintSummary: "制約なし（希望量どおり処理見込み）",
+        constraintSentences: [],
+        priorityNote: null,
+      },
+      {
+        factoryId: "BAL-F1",
+        product: "pd",
+        priority: 2,
+        desiredTons: 3000,
+        productNominalCapacityTons: 4000,
+        productEffectiveCapacityTons: 2880,
+        forecastProcessedTons: 2880,
+        forecastUnprocessedTons: 120,
+        constraintLabels: ["商品別設備能力"],
+        primaryConstraintLabel: "商品別設備能力",
+        constraintSummary: "商品別設備能力",
+        constraintSentences: ["主因: 商品別実効能力（2,880 トン）により 120 トン 不足"],
+        priorityNote: null,
+      },
+      {
+        factoryId: "BAL-F1",
+        product: "vap",
+        priority: 3,
+        desiredTons: 2000,
+        productNominalCapacityTons: 2000,
+        productEffectiveCapacityTons: 1440,
+        forecastProcessedTons: 810,
+        forecastUnprocessedTons: 1190,
+        constraintLabels: ["共通処理能力", "商品別設備能力"],
+        primaryConstraintLabel: "共通処理能力",
+        constraintSummary: "共通処理能力（主因）＋ 商品別設備能力",
+        constraintSentences: [
+          "主因: 共通処理能力の配分が 810 トン までのため、1,190 トン 不足（優先度3のため、より優先度の高い商品の配分後の残りを使用します）",
+        ],
+        priorityNote:
+          "優先度3のため、優先度1の商品が共有能力（原料・共通処理・冷凍包装・ワーカー）を先に使用します。優先度を上げるとこの商品の処理見込みは増え、他商品の処理見込みは減ります。",
+      },
+    ],
+    availableRawMaterialTons: 15000,
+    caveatTexts: ["この表は確定結果ではありません。現在の入力値をそのまま生産処理エンジンへ渡した場合の見込みです。"],
+  },
 };
 
 /**

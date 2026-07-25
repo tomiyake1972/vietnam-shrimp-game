@@ -13,7 +13,7 @@ import { PeriodV2 } from "../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab";
 import { CAPEX_PARAMETERS_V1, CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../lib/v2/capex";
 import { formatHosoEqTons } from "../../../lib/v2/industryLab/ui/formatters";
-import { CompanyDecisionDraft } from "../decisionDraft";
+import { buildDecisionInputFromDraft, CompanyDecisionDraft } from "../decisionDraft";
 import {
   addCapexCancelRequestToDraft,
   addCapexProposalToDraft,
@@ -23,6 +23,9 @@ import {
 } from "../capexDraftActions";
 import { buildAllCapexCandidateViewModels, buildCapexPortfolioViewModel, CAPEX_EXPLANATION_DETAIL_TEXT, CAPEX_EXPLANATION_TEXT } from "../capexViewModel";
 import { buildCompanyProcessingCapacityViewModel, CapacityPoolKey } from "../processingCapacityViewModel";
+import { buildCompanyProcessingForecast } from "../processingForecastViewModel";
+import CapacityEffectiveRatePanel from "./CapacityEffectiveRatePanel";
+import ProcessingForecastPanel from "./ProcessingForecastPanel";
 import CapexCandidateList from "./CapexCandidateList";
 import CapexDraftList from "./CapexDraftList";
 import CapexPortfolioList from "./CapexPortfolioList";
@@ -150,6 +153,22 @@ export default function DecisionEditor(props: DecisionEditorProps) {
   };
   const pendingCapacityTotalTons = Object.values(capacityViewModel.pendingTotalsByPool).reduce((sum, n) => sum + n, 0);
 
+  // --- 現在の入力に基づく処理見込み（優先度を変えると即時に更新される）---
+  // 【重要】ここでUI用の簡易計算は行わない。draftを既存の buildDecisionInputFromDraft で
+  // エンジン入力へ変換し、その生産計画・ワーカー配置をそのまま
+  // buildCompanyProcessingForecast（内部で allocateProductionPlans を呼ぶ純粋関数）へ渡す。
+  // レンダーのたびに再計算されるため、優先度・希望量の入力変更が即座に反映される。
+  const decisionInputForForecast = buildDecisionInputFromDraft(draft, fixture, period);
+  const processingForecast = buildCompanyProcessingForecast({
+    companyId: fixture.companyId,
+    baseFactories: fixture.factories,
+    capexState: { companies: [ownState.capexState] },
+    period,
+    productionPlans: decisionInputForForecast.productionPlans,
+    workerAssignments: decisionInputForForecast.workerAssignments,
+    rawMaterialLots: ownState.rawMaterialLots,
+  });
+
   // --- 【Phase 8B-3】設備投資セクション用の派生値 ---
   const capexCandidates = buildAllCapexCandidateViewModels(period, CAPEX_PARAMETERS_V1);
   const lastQuarterCapexEventsByProjectId = new Map((lastQuarterCapexEvents ?? []).map((e) => [e.projectId, e]));
@@ -195,6 +214,13 @@ export default function DecisionEditor(props: DecisionEditorProps) {
         }
       >
         <ProcessingCapacityPanel viewModel={capacityViewModel} />
+        <div className="mt-4 space-y-4">
+          <CapacityEffectiveRatePanel table={processingForecast.companyRateTable} title="名目能力 → 実効能力の計算（会社合計・トン/四半期）" />
+          {processingForecast.factoryRateTables.length > 1 &&
+            processingForecast.factoryRateTables.map((table) => (
+              <CapacityEffectiveRatePanel key={table.factoryId ?? "company"} table={table} title={`名目能力 → 実効能力の計算（${table.factoryId}）`} />
+            ))}
+        </div>
       </CollapsibleSection>
 
       {/* 【Phase 8B-3】設備投資 */}
@@ -503,6 +529,10 @@ export default function DecisionEditor(props: DecisionEditorProps) {
               })}
             </tbody>
           </table>
+        </div>
+
+        <div className="mt-4 bg-gray-900/50 border border-gray-700/60 rounded-lg px-3 py-2">
+          <ProcessingForecastPanel forecast={processingForecast} />
         </div>
       </CollapsibleSection>
 
