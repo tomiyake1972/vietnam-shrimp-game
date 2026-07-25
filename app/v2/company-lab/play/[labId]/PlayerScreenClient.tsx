@@ -26,6 +26,7 @@ import { useRouter } from "next/navigation";
 import DecisionEditor from "../../components/DecisionEditor";
 import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
+import FinancialResultsSection from "../../components/financial/FinancialResultsSection";
 import PlayLabBanner from "../components/PlayLabBanner";
 import { CompanyDecisionDraft } from "../../decisionDraft";
 import { PlayerScreenViewModel } from "../_lib/viewModel";
@@ -204,6 +205,21 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
             {viewModel.lastQuarterResult.playerSummary && (
               <ResultsPanel summary={viewModel.lastQuarterResult.playerSummary} displayName={viewModel.playerDisplayName} />
             )}
+            <FinancialResultsSection
+              displayName={viewModel.playerDisplayName}
+              companyId={viewModel.playerCompanyId}
+              currentTurn={viewModel.lastQuarterResult.turn}
+              currentPeriod={viewModel.lastQuarterResult.period}
+              financialResult={viewModel.lastQuarterResult.financialResult}
+              financingResult={viewModel.lastQuarterResult.financingResult}
+              capexResult={viewModel.lastQuarterResult.capexResult}
+              ownFinancingState={viewModel.ownState.financingState}
+              previousTurn={viewModel.previousQuarterFinancials?.turn ?? null}
+              previousPeriod={viewModel.previousQuarterFinancials?.period ?? null}
+              previousFinancialResult={viewModel.previousQuarterFinancials?.financialResult ?? null}
+              previousFinancingResult={viewModel.previousQuarterFinancials?.financingResult ?? null}
+              previousCapexResult={viewModel.previousQuarterFinancials?.capexResult ?? null}
+            />
           </div>
         )}
 

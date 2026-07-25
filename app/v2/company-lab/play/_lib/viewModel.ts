@@ -22,20 +22,49 @@ import { generateAutoPolicyDecision } from "../../../../lib/v2/companyLab/autoPo
 import { restoreCompanyLabStateFromRuntimeSnapshot } from "../../../../lib/v2/companyLab/persistence/snapshot";
 import { CompanyLabPersistedStateV1, CompanyLabDraftEnvelope } from "../../../../lib/v2/companyLab/persistence/types";
 import { MarketQuarterResult } from "../../../../lib/v2/market/types";
-import { CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../../lib/v2/capex";
+import { CapexProjectQuarterEvent, CapexQuarterResult, CapexRejectedProposal } from "../../../../lib/v2/capex";
+import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
+import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
 import { CompanyLabApiDependencies } from "../../../../api/v2/company-labs/_lib/dependencies";
 import { toHistoryEntrySummaryDto, CompanyLabHistoryEntrySummaryDto } from "../../../../api/v2/company-labs/_lib/responseDto";
 import { isPlausibleCompanyDecisionDraft } from "../../../../api/v2/company-labs/_lib/decisionsProvider";
+import { extractCompanyCapexResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "./financialViewSelectors";
 
 export type PlayerScreenPhase = "editing" | "submitted" | "completed";
 
 export interface PlayerLastQuarterResult {
   readonly turn: number;
   readonly turnId: string;
+  readonly period: string;
   readonly processedAt: string;
   readonly marketResult: MarketQuarterResult;
   readonly globalReasonCodes: readonly CompanyReasonEntry[];
   readonly playerSummary: CompanyQuarterSummary | null;
+  /**
+   * 【Phase 8C-3C想定・財務表示追加】当期のプレイヤー会社ぶんのPL/BS/CF結果。
+   * finance/quarterClose.tsが既に計算・永続化済みの値をcompanyIdで抽出するだけで、
+   * ここでは一切再計算しない。該当データがなければnull（=「未作成」として画面側で表示）。
+   */
+  readonly financialResult: CompanyFinancialQuarterResult | null;
+  /** 当期のプレイヤー会社ぶんの資金繰り結果（信用スコア・借入審査・延滞等）。抽出のみ、再計算なし。 */
+  readonly financingResult: FinancingQuarterResult | null;
+  /** 当期のプレイヤー会社ぶんの設備投資結果（全体。既存のlastQuarterCapexEvents等はDecisionEditor向けに従来通り残す）。 */
+  readonly capexResult: CapexQuarterResult | null;
+}
+
+/**
+ * 前期（turn-1）ぶんの、財務・資金・設備投資の比較用データ。
+ * 【当期・前期・増減表示のための最小限のデータ】重い内部snapshotは一切含めず、
+ * companyId抽出後のPL/BS/CF・資金繰り・設備投資結果だけをクライアントへ渡す。
+ * 初回四半期（turn===1）や取得に失敗した場合はnull（画面側は「データなし」として
+ * 正常表示する。捏造しない）。
+ */
+export interface PlayerPreviousQuarterFinancials {
+  readonly turn: number;
+  readonly period: string;
+  readonly financialResult: CompanyFinancialQuarterResult | null;
+  readonly financingResult: FinancingQuarterResult | null;
+  readonly capexResult: CapexQuarterResult | null;
 }
 
 export interface PlayerScreenViewModel {
@@ -60,6 +89,8 @@ export interface PlayerScreenViewModel {
   readonly lastQuarterResult: PlayerLastQuarterResult | null;
   readonly lastQuarterCapexEvents: readonly CapexProjectQuarterEvent[] | undefined;
   readonly lastQuarterRejectedCapexProposals: readonly CapexRejectedProposal[] | undefined;
+  /** 前期（turn-1）ぶんの財務・資金・設備投資（当期・前期・増減表示用）。前期が存在しなければnull。 */
+  readonly previousQuarterFinancials: PlayerPreviousQuarterFinancials | null;
   /** 履歴要約（診断用のhistory/[turn]は使わない。§6.6・§8.2）。最新10件まで。 */
   readonly recentHistory: readonly CompanyLabHistoryEntrySummaryDto[];
 }
@@ -123,19 +154,45 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
     draft = coerceDraftOrRebuild(draftEnvelope, fixture, restoredState, publicInfo, turn);
   }
 
+  const lastQuarterCapexResult = latestEntry !== null ? extractCompanyCapexResult(latestEntry.record, stored.playerCompanyId) : null;
+
   const lastQuarterResult: PlayerLastQuarterResult | null =
     latestEntry !== null
       ? {
           turn: latestEntry.turn,
           turnId: latestEntry.turnId,
+          period: String(latestEntry.record.period),
           processedAt: latestEntry.processedAt,
           marketResult: latestEntry.record.marketResult,
           globalReasonCodes: latestEntry.record.globalReasonCodes,
           playerSummary: latestEntry.record.companySummaries.find((s) => s.companyId === stored.playerCompanyId) ?? null,
+          financialResult: extractCompanyFinancialResult(latestEntry.record, stored.playerCompanyId),
+          financingResult: extractCompanyFinancingResult(latestEntry.record, stored.playerCompanyId),
+          capexResult: lastQuarterCapexResult,
         }
       : null;
 
-  const lastQuarterCapexResult = latestEntry?.record.capexResults.find((r) => r.companyId === stored.playerCompanyId);
+  // 【前期（turn-1）ぶんの財務・資金・設備投資を、当期・前期・増減表示のために取得する】
+  // loadHistoryEntryは単一turn分のみの取得であり、全履歴を読むloadFullHistory
+  // （診断用・数十MB規模）とは性質が異なるため、Repository契約上「通常の
+  // Application Service層から使ってよい」対象（§9）。取得できない・存在しない
+  // （初回四半期turn===1、または何らかの理由で前期データが欠落）場合はnullとし、
+  // 値を捏造せず「データなし」として画面側で正常表示する。
+  let previousQuarterFinancials: PlayerPreviousQuarterFinancials | null = null;
+  if (latestEntry !== null && latestEntry.turn > 1) {
+    try {
+      const previousEntry = await deps.repository.loadHistoryEntry(labId, latestEntry.turn - 1);
+      previousQuarterFinancials = {
+        turn: previousEntry.turn,
+        period: String(previousEntry.period),
+        financialResult: extractCompanyFinancialResult(previousEntry.record, stored.playerCompanyId),
+        financingResult: extractCompanyFinancingResult(previousEntry.record, stored.playerCompanyId),
+        capexResult: extractCompanyCapexResult(previousEntry.record, stored.playerCompanyId),
+      };
+    } catch {
+      previousQuarterFinancials = null;
+    }
+  }
 
   const historyPage = await deps.repository.loadHistoryPage(labId, { limit: 10 });
 
@@ -162,6 +219,7 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       lastQuarterResult,
       lastQuarterCapexEvents: lastQuarterCapexResult?.events,
       lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,
+      previousQuarterFinancials,
       recentHistory: historyPage.entries.map(toHistoryEntrySummaryDto),
     },
   };
