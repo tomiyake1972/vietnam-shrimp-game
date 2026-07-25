@@ -69,6 +69,17 @@ export function companyLabLockKeyV2(appEnv: AppEnvV2, labId: string): string {
   return `${prefixFor(appEnv)}${labId}:lock`;
 }
 
+/**
+ * 読み取り専用エクスポートAPI（/api/v2/exports/**）の監査ログキー（追記専用リスト）。
+ * ゲーム状態キー（current/draft/history/lock）とは完全に別のキーであり、
+ * エクスポートAPIはこのキーへのLPUSH+LTRIM（件数上限つき追記）以外の書き込みを
+ * 一切行わない（companyLabExportAuditLog.ts参照）。
+ */
+export function companyLabExportLogKeyV2(appEnv: AppEnvV2, labId: string): string {
+  requireNonEmptyLabId(labId);
+  return `${prefixFor(appEnv)}${labId}:exportLog`;
+}
+
 /** 指定labIdに属する全キー（存在確認・原子コミットの引数組み立て等で使う）。 */
 export function companyLabAllKeysForLabV2(appEnv: AppEnvV2, labId: string): readonly string[] {
   return [
