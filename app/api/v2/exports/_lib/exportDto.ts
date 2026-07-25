@@ -15,12 +15,21 @@
 //   - CompanyFinancialQuarterResult.contributionMargin（ContributionMarginReport）
 //   - CompanyFinancialQuarterResult.absorptionVariableReconciliation
 //   - CompanyLabQuarterHistoryEntry.preProcessingStateSnapshot / postProcessingStateSnapshot
-//     （ランタイム内部スナップショット。財務・資金・設備投資の確定結果は
-//     record側から個別に抽出するため、スナップショット自体を丸ごと出す必要がない）
+//     を丸ごと出すことはしない（ランタイム内部スナップショット全体を出すと、財務・資金・
+//     設備投資の確定結果が二重に出てしまう上、内部専用フィールドが自動的に漏れる）。
+//     ただし postProcessingStateSnapshot.contracts（会社別の成約明細）だけは、
+//     v1.1でExportSalesContractとして個別に許可項目化して出力する（下記§3.5）。
+//     フィールドを1つずつ列挙して組み立てる本ファイルの設計方針は維持している。
 //   - CompanyLabQuarterHistoryEntry.otherCompaniesDecisions（他社の非公開意思決定。
 //     会社スコープAPIにも全社スコープAPIにも一切含めない＝設計上の理由で永久に対象外）
 //   - CompanyLabQuarterHistoryEntry.aiProposal / diffFromAiProposal（AI提案案との差分。
-//     今回のスコープ外）
+//     今回のスコープ外。プレイヤー自身の実際の決定内容(playerSubmission)も同様に
+//     今回のスコープ外のまま）
+//   - CompanyQuarterRecord.salesRecord.allocations（市場×商品単位の配分計算内訳。
+//     成約に至らなかった需要や競争力ウェイトの内訳まで含み、現時点のExcel経営データ
+//     ブックでの分析には成約結果(contracts)で足りるため、v1.1では対象外）
+//   - CompanyQuarterRecord.deliveryObservations / companyLoadMetrics / factoryLoadMetrics
+//     （市場別納期観測・工場負荷指標。v1.1では対象外、将来の拡張候補）
 // これらは完了報告の「保存データに存在するが出力できなかった項目」としてそのまま列挙する。
 
 import {
@@ -34,7 +43,7 @@ import { CapexQuarterResult } from "../../../../lib/v2/capex";
 import { CompanyQuarterSummary } from "../../../../lib/v2/companyLab/types";
 import { MarketQuarterResult } from "../../../../lib/v2/market/types";
 import { CompanyLabQuarterHistoryEntry, CompanyLabPersistedStateV1 } from "../../../../lib/v2/companyLab/persistence/types";
-import { CompanyId } from "../../../../lib/v2/sales/types";
+import { CompanyId, SalesContract } from "../../../../lib/v2/sales/types";
 import { PeriodV2 } from "../../../../lib/v2/core/period";
 import {
   extractCompanyCapexResult,
@@ -583,6 +592,62 @@ export function buildExportCompanySummary(summary: CompanyQuarterSummary): Expor
 }
 
 // ---------------------------------------------------------------------
+// 5.5 販売契約（成約明細） 【v1.1で追加】
+// ---------------------------------------------------------------------
+//
+// companySummaryは会社単位の集計値（新規成約数量の合計等）のみを提供しており、
+// 個々の契約（どの市場・どの商品区分に・いつ・いくらで・何トン成約したか）は
+// v1では出力対象外だった。この契約明細自体はpostProcessingStateSnapshot.contracts
+// （SalesContract[]、app/lib/v2/sales/types.ts）として既に永続化されているため、
+// スナップショット全体ではなく本セクションの許可項目だけを個別に抽出して追加する。
+
+export interface ExportSalesContract {
+  readonly contractId: string;
+  readonly companyId: CompanyId;
+  readonly market: string;
+  readonly product: string;
+  /** 成約四半期。 */
+  readonly contractedPeriod: PeriodV2;
+  /** 納期。 */
+  readonly dueDate: PeriodV2;
+  /** 当初契約数量（HOSO換算トン）。 */
+  readonly originalQuantity: number;
+  /** 未履行数量（HOSO換算トン、0 <= outstandingQuantity <= originalQuantity）。 */
+  readonly outstandingQuantity: number;
+  /** 成約単価（USD/HOSO換算kg）。 */
+  readonly unitPrice: number;
+  readonly status: string;
+}
+
+export function buildExportSalesContract(contract: SalesContract): ExportSalesContract {
+  return {
+    contractId: contract.contractId,
+    companyId: contract.companyId,
+    market: contract.market,
+    product: contract.product,
+    contractedPeriod: contract.contractedPeriod,
+    dueDate: contract.dueDate,
+    originalQuantity: contract.originalQuantity,
+    outstandingQuantity: contract.outstandingQuantity,
+    unitPrice: contract.unitPrice,
+    status: contract.status,
+  };
+}
+
+/**
+ * 指定した会社の契約一覧を、当該四半期処理後時点（postProcessingStateSnapshot）の
+ * 状態で抽出する。ステータス（open/partiallyFulfilled/fulfilled/overdue/cancelled）を
+ * 問わず、その会社の契約はすべて含める（費消済み・キャンセル済みも含む「その時点の
+ * 全件」を返すことで、成約から履行・延滞・キャンセルまでの経緯を追える形にする）。
+ */
+export function buildExportSalesContractsForCompany(
+  entry: CompanyLabQuarterHistoryEntry,
+  companyId: CompanyId,
+): readonly ExportSalesContract[] {
+  return entry.postProcessingStateSnapshot.contracts.filter((c) => c.companyId === companyId).map(buildExportSalesContract);
+}
+
+// ---------------------------------------------------------------------
 // 6. 市場結果（会社非公開情報を含まない公開データ）
 // ---------------------------------------------------------------------
 
@@ -614,6 +679,8 @@ export interface CompanyExportPayload {
   readonly financingResult: ExportFinancingResult | null;
   readonly capexResult: ExportCapexResult | null;
   readonly companySummary: ExportCompanySummary | null;
+  /** 【v1.1で追加】当該四半期処理後時点の、この会社の契約一覧（成約明細）。 */
+  readonly salesContracts: readonly ExportSalesContract[];
 }
 
 export interface BuildCompanyExportPayloadInput {
@@ -642,6 +709,7 @@ export function buildCompanyExportPayload(input: BuildCompanyExportPayloadInput)
     financingResult: financing ? buildExportFinancingResult(financing) : null,
     capexResult: capex ? buildExportCapexResult(capex) : null,
     companySummary: summary ? buildExportCompanySummary(summary) : null,
+    salesContracts: buildExportSalesContractsForCompany(entry, companyId),
   };
 }
 
@@ -653,6 +721,8 @@ export interface AllCompaniesExportPayload {
     readonly financingResult: ExportFinancingResult | null;
     readonly capexResult: ExportCapexResult | null;
     readonly companySummary: ExportCompanySummary | null;
+    /** 【v1.1で追加】当該四半期処理後時点の、この会社の契約一覧（成約明細）。 */
+    readonly salesContracts: readonly ExportSalesContract[];
   }[];
   readonly market: ExportMarketResult;
 }
@@ -691,6 +761,7 @@ export function buildAllCompaniesExportPayload(input: BuildAllCompaniesExportPay
         financingResult: financing ? buildExportFinancingResult(financing) : null,
         capexResult: capex ? buildExportCapexResult(capex) : null,
         companySummary: summary ? buildExportCompanySummary(summary) : null,
+        salesContracts: buildExportSalesContractsForCompany(entry, companyId),
       };
     }),
     market: buildExportMarketResult(entry.record.marketResult),

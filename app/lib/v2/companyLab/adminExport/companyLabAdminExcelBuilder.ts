@@ -266,9 +266,27 @@ function writeCapexSheet(wb: ExcelJS.Workbook, capex: CompanyExportPayload["cape
   }
 }
 
+function writeSalesContractsSheet(wb: ExcelJS.Workbook, salesContracts: CompanyExportPayload["salesContracts"]): void {
+  const ws = wb.addWorksheet("Sales Contracts");
+  ws.columns = [{ width: 22 }, { width: 10 }, { width: 10 }, { width: 12 }, { width: 12 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 16 }];
+  writeHeaderRow(ws, ["契約ID", "市場", "商品", "成約四半期", "納期", "当初数量", "未履行数量", "単価(USD/kg)", "ステータス"]);
+  if (salesContracts.length === 0) {
+    const row = ws.addRow(["このターン・会社の契約は0件です（成約なし、またはAPI未対応バージョン）"]);
+    row.getCell(1).font = LABEL_FONT;
+    return;
+  }
+  for (const c of salesContracts) {
+    const row = ws.addRow([c.contractId, c.market, c.product, c.contractedPeriod, c.dueDate, c.originalQuantity, c.outstandingQuantity, c.unitPrice, c.status]);
+    row.getCell(1).font = VALUE_FONT;
+    row.getCell(6).numFmt = "#,##0.00";
+    row.getCell(7).numFmt = "#,##0.00";
+    row.getCell(8).numFmt = "$#,##0.0000";
+  }
+}
+
 /**
- * Export API（会社スコープ）JSONだけを入力として、Meta/PL/BS/CF/Financing/Capexの
- * 6シート構成のExcelワークブックを組み立て、Bufferとして返す。
+ * Export API（会社スコープ）JSONだけを入力として、Meta/PL/BS/CF/Financing/Capex/
+ * Sales Contractsの7シート構成のExcelワークブックを組み立て、Bufferとして返す。
  */
 export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayload): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
@@ -288,6 +306,7 @@ export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayl
   }
   writeFinancingSheet(wb, payload.financingResult);
   writeCapexSheet(wb, payload.capexResult);
+  writeSalesContractsSheet(wb, payload.salesContracts);
 
   const arrayBuffer = await wb.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);

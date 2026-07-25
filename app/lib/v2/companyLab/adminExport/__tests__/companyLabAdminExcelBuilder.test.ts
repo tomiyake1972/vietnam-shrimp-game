@@ -113,19 +113,58 @@ function buildSyntheticPayload(overrides: Partial<CompanyExportPayload> = {}): C
     financingResult: null,
     capexResult: null,
     companySummary: null,
+    salesContracts: [],
   };
   return { ...base, ...overrides };
 }
 
-test("buildCompanyExportExcelWorkbook: Meta/PL/BS/CF/Financing/Capexの6シートを生成する", async () => {
+test("buildCompanyExportExcelWorkbook: Meta/PL/BS/CF/Financing/Capex/Sales Contractsの7シートを生成する", async () => {
   const payload = buildSyntheticPayload();
   const buffer = await buildCompanyExportExcelWorkbook(payload);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer);
   assert.deepEqual(
     wb.worksheets.map((ws) => ws.name),
-    ["Meta", "PL", "BS", "CF", "Financing", "Capex"],
+    ["Meta", "PL", "BS", "CF", "Financing", "Capex", "Sales Contracts"],
   );
+});
+
+test("buildCompanyExportExcelWorkbook: Sales Contractsシートは契約明細をそのまま転記し、0件時はその旨を表示する", async () => {
+  const emptyPayload = buildSyntheticPayload({ salesContracts: [] });
+  const emptyBuffer = await buildCompanyExportExcelWorkbook(emptyPayload);
+  const emptyWb = new ExcelJS.Workbook();
+  await emptyWb.xlsx.load(emptyBuffer as unknown as ExcelJS.Buffer);
+  const emptySheet = emptyWb.getWorksheet("Sales Contracts");
+  assert.ok(emptySheet);
+  assert.ok(String(emptySheet!.getRow(2).getCell(1).value).includes("0件"));
+
+  const withContracts = buildSyntheticPayload({
+    salesContracts: [
+      {
+        contractId: "BAL-2015Q1-CN-hoso-001",
+        companyId: "BAL",
+        market: "CN",
+        product: "hoso",
+        contractedPeriod: PERIOD_2015Q1,
+        dueDate: PERIOD_2015Q1,
+        originalQuantity: 500,
+        outstandingQuantity: 200,
+        unitPrice: 5.5,
+        status: "partiallyFulfilled",
+      },
+    ],
+  });
+  const buffer = await buildCompanyExportExcelWorkbook(withContracts);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+  const sheet = wb.getWorksheet("Sales Contracts");
+  assert.ok(sheet);
+  const row = sheet!.getRow(2);
+  assert.equal(row.getCell(1).value, "BAL-2015Q1-CN-hoso-001");
+  assert.equal(row.getCell(2).value, "CN");
+  assert.equal(row.getCell(6).value, 500);
+  assert.equal(row.getCell(7).value, 200);
+  assert.equal(row.getCell(9).value, "partiallyFulfilled");
 });
 
 test("buildCompanyExportExcelWorkbook: PLシートは入力値をそのまま転記し、合計行は数式で組み立てる（ハードコードしない）", async () => {

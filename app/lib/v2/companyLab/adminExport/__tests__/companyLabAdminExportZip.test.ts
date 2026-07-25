@@ -18,6 +18,7 @@ const SYNTHETIC_COMPANY_JSON: CompanyExportPayload = {
   financingResult: null,
   capexResult: null,
   companySummary: null,
+  salesContracts: [],
 };
 
 const SYNTHETIC_LAB_INDEX = { schemaVersion: 1, generatedAt: "x", labId: "zip-test-lab", engineVersion: "test-engine", dataStatus: "confirmed", playerCompanyId: "BAL", availableTurns: [1], latestProcessedTurn: 1 };

@@ -197,11 +197,63 @@ test("handleExportCompanyTurn: 存在しない会社IDはnull項目を返す（4
 
   const result = await handleExportCompanyTurn(deps, labId, "1", "__no_such_company__", GENERATED_AT);
   assert.equal(result.status, 200);
-  const body = result.body as { financialResult: unknown; financingResult: unknown; capexResult: unknown; companySummary: unknown };
+  const body = result.body as { financialResult: unknown; financingResult: unknown; capexResult: unknown; companySummary: unknown; salesContracts: unknown[] };
   assert.equal(body.financialResult, null);
   assert.equal(body.financingResult, null);
   assert.equal(body.capexResult, null);
   assert.equal(body.companySummary, null);
+  assert.deepEqual(body.salesContracts, []);
+});
+
+// --- 【v1.1追加】成約明細(salesContracts)テスト ---
+
+test("handleExportCompanyTurn: BAL社の成約明細(salesContracts)が、Repositoryの生データ(postProcessingStateSnapshot.contracts)と数値・件数が一致する", async () => {
+  const labId = "export-company-contracts-lab";
+  const writableDeps = await setUpProcessedTurn1Lab(labId);
+  const { deps } = makeExportDeps(writableDeps);
+
+  const result = await handleExportCompanyTurn(deps, labId, "1", "BAL", GENERATED_AT);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  const body = result.body as {
+    salesContracts: { contractId: string; companyId: string; market: string; product: string; originalQuantity: number; outstandingQuantity: number; unitPrice: number; status: string }[];
+  };
+  assert.ok(Array.isArray(body.salesContracts));
+
+  const rawEntry = await writableDeps.repository.loadHistoryEntry(labId, 1);
+  const rawContracts = rawEntry.postProcessingStateSnapshot.contracts.filter((c) => c.companyId === "BAL");
+  assert.equal(body.salesContracts.length, rawContracts.length);
+  assert.ok(rawContracts.length > 0, "BAL社の契約が1件も生成されていない（テストシナリオの前提が崩れている）");
+
+  for (const rawContract of rawContracts) {
+    const dtoContract = body.salesContracts.find((c) => c.contractId === rawContract.contractId);
+    assert.ok(dtoContract, `契約${rawContract.contractId}がDTOに見つからない`);
+    assert.equal(dtoContract?.companyId, rawContract.companyId);
+    assert.equal(dtoContract?.market, rawContract.market);
+    assert.equal(dtoContract?.product, rawContract.product);
+    assert.equal(dtoContract?.originalQuantity, rawContract.originalQuantity);
+    assert.equal(dtoContract?.outstandingQuantity, rawContract.outstandingQuantity);
+    assert.equal(dtoContract?.unitPrice, rawContract.unitPrice);
+    assert.equal(dtoContract?.status, rawContract.status);
+  }
+});
+
+test("handleExportCompanyTurn: BAL社スコープのsalesContractsに他社の契約が一切含まれない", async () => {
+  const labId = "export-company-contracts-leak-lab";
+  const writableDeps = await setUpProcessedTurn1Lab(labId);
+  const { deps } = makeExportDeps(writableDeps);
+
+  const rawEntry = await writableDeps.repository.loadHistoryEntry(labId, 1);
+  const otherCompanyContract = rawEntry.postProcessingStateSnapshot.contracts.find((c) => c.companyId !== "BAL");
+  assert.ok(otherCompanyContract, "BAL以外の会社の契約が存在するはず（比較対象として必要）");
+
+  const result = await handleExportCompanyTurn(deps, labId, "1", "BAL", GENERATED_AT);
+  assert.equal(result.status, 200);
+  const body = result.body as { salesContracts: { contractId: string; companyId: string }[] };
+  assert.equal(
+    body.salesContracts.some((c) => c.contractId === otherCompanyContract?.contractId),
+    false,
+  );
+  assert.ok(body.salesContracts.every((c) => c.companyId === "BAL"));
 });
 
 test("handleExportCompanyTurn: 存在しないturnは404（HISTORY_ENTRY_NOT_FOUND）を返す", async () => {
@@ -238,12 +290,14 @@ test("handleExportAllCompaniesTurn: 全社ぶんの結果と市場結果を返�
 
   const result = await handleExportAllCompaniesTurn(deps, labId, "1", GENERATED_AT);
   assert.equal(result.status, 200, JSON.stringify(result.body));
-  const body = result.body as { meta: { scope: { kind: string } }; companies: { companyId: string }[]; market: unknown };
+  const body = result.body as { meta: { scope: { kind: string } }; companies: { companyId: string; salesContracts: { contractId: string; companyId: string }[] }[]; market: unknown };
   assert.equal(body.meta.scope.kind, "allCompanies");
   assert.equal(body.companies.length, expectedCompanyCount);
   assert.ok(body.market);
   const balEntry = body.companies.find((c) => c.companyId === "BAL");
   assert.ok(balEntry);
+  assert.ok(Array.isArray(balEntry?.salesContracts));
+  assert.ok(balEntry?.salesContracts.every((c) => c.companyId === "BAL"));
 });
 
 // -------------------------------------------------------------------
