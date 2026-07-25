@@ -83,7 +83,12 @@ export function checkAdminExportPreconditions(): CompanyLabAdminExportFailure | 
 function buildProtectionBypassHeaders(): Record<string, string> {
   const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
   if (!bypassSecret) return {};
-  return { "x-vercel-protection-bypass": bypassSecret, "x-vercel-set-bypass-cookie": "true" };
+  // x-vercel-set-bypass-cookieは付けない: このヘッダーを付けるとVercelがCookie設定用の
+  // リダイレクトを返すことがあり、Cookieを保持しない一回限りのサーバー間fetchでは
+  // そのリダイレクトが解消されず「redirect count exceeded」で失敗する（実機検証で確認）。
+  // このモジュールは1リクエストごとにbypassヘッダーを毎回付け直すため、Cookieによる
+  // 継続は不要。
+  return { "x-vercel-protection-bypass": bypassSecret };
 }
 
 async function fetchExportJson<T>(origin: string, path: string): Promise<CompanyLabAdminExportResult<T>> {
@@ -102,7 +107,8 @@ async function fetchExportJson<T>(origin: string, path: string): Promise<Company
   } catch (err) {
     // ネットワークエラー等。トークン値・Authorizationヘッダーの値は例外オブジェクトにも
     // 含まれないため、そのままログへ出しても安全だが、ユーザー向けメッセージは定型文にする。
-    // 一時的な調査用ログ（URL・エラーメッセージのみ。トークン値は含まない）。
+    // 運用調査用ログ（URL・エラーメッセージ・causeのみ。トークン値は含まない）。将来の
+    // 自己fetch障害（例: リダイレクトループ、DNS等）の切り分けに使う。
     const cause = err instanceof Error ? (err as Error & { cause?: unknown }).cause : undefined;
     console.error("[companyLabAdminExportSource] self-fetch failed", {
       targetUrl,

@@ -115,7 +115,8 @@ test("fetchLabIndex: VERCEL_AUTOMATION_BYPASS_SECRETが設定されていれば�
       const result = await fetchLabIndex("http://example.test", "lab1");
       assert.equal(result.ok, true);
       assert.equal(capturedHeaders?.get("x-vercel-protection-bypass"), "captured-bypass-secret-xyz");
-      assert.equal(capturedHeaders?.get("x-vercel-set-bypass-cookie"), "true");
+      // x-vercel-set-bypass-cookieは付けない（実機検証でリダイレクトループの原因と判明したため）。
+      assert.equal(capturedHeaders?.has("x-vercel-set-bypass-cookie"), false);
 
       const serialized = JSON.stringify(result);
       assert.equal(serialized.includes("captured-bypass-secret-xyz"), false, "戻り値にbypass secretの値が含まれてはならない");
