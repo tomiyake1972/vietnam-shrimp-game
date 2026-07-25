@@ -66,6 +66,26 @@ export function checkAdminExportPreconditions(): CompanyLabAdminExportFailure | 
   return null;
 }
 
+/**
+ * Vercelの「Deployment Protection」は、Preview環境の全ルート（このRoute Handler自身が
+ * 発行するサーバー→サーバーの自己fetchも含む）を対象に認証を要求する。ブラウザ側は
+ * 三宅さんが一度SSO/共有リンクで認証すればCookieにより通過できるが、サーバー内部で
+ * 発行するfetch（このモジュール）は別リクエストとして扱われ、そのままではVercel側の
+ * 認証ページ（HTML）が返り、Export APIのJSONとして解析できずに失敗する。
+ *
+ * Vercelが公式に提供する回避策が「Protection Bypass for Automation」で、有効化すると
+ * VERCEL_AUTOMATION_BYPASS_SECRETが環境変数として自動的に払い出される。このモジュールは
+ * その値をサーバー側だけで読み取り、x-vercel-protection-bypassヘッダーとして自己fetchへ
+ * 添付する。STAGING_EXPORT_TOKENと同じ扱い（ブラウザ・URL・ログへは一切出さない）。
+ * 未設定の場合は単にヘッダーを付けない（Deployment Protectionが無効な環境、または
+ * まだ有効化されていない環境でも従来通り動作する）。
+ */
+function buildProtectionBypassHeaders(): Record<string, string> {
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (!bypassSecret) return {};
+  return { "x-vercel-protection-bypass": bypassSecret, "x-vercel-set-bypass-cookie": "true" };
+}
+
 async function fetchExportJson<T>(origin: string, path: string): Promise<CompanyLabAdminExportResult<T>> {
   const precondition = checkAdminExportPreconditions();
   if (precondition) return precondition;
@@ -75,7 +95,7 @@ async function fetchExportJson<T>(origin: string, path: string): Promise<Company
   try {
     response = await fetch(`${origin}${path}`, {
       method: "GET",
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, ...buildProtectionBypassHeaders() },
       cache: "no-store",
     });
   } catch {
@@ -84,6 +104,13 @@ async function fetchExportJson<T>(origin: string, path: string): Promise<Company
     return failure("upstreamError", "Export APIへの接続に失敗しました。時間をおいて再度お試しください。");
   }
 
+  if (response.status === 401) {
+    // Vercelの Deployment Protection がこの自己fetch自体を認証要求ページ（HTML）で
+    // ブロックしている可能性が高い（Export API自体はSTAGING_EXPORT_TOKENのみで認証する
+    // 設計であり、401を自ら返すことはない）。VERCEL_AUTOMATION_BYPASS_SECRETが未設定・
+    // 無効な場合にここに到達する。
+    return failure("upstreamError", "この環境のデプロイ保護（Deployment Protection）により、サーバー内部からのデータ取得がブロックされています。Vercelプロジェクト設定の「Protection Bypass for Automation」を有効にしてください。");
+  }
   if (response.status === 404) {
     // このAPI設計では、ラボ不存在・turn未確定のいずれも404（LAB_NOT_FOUND / HISTORY_ENTRY_NOT_FOUND）。
     // 呼び出し側（route.ts）が、どちらの404かを文脈で判断してより具体的なメッセージへ差し替える。

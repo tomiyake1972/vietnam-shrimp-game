@@ -89,8 +89,80 @@ test("fetchLabIndex: Authorizationヘッダーへ正しくBearerトークンを�
       assert.equal(capturedUrl, "http://example.test/api/v2/exports/company-labs/lab1");
       assert.equal(capturedHeaders?.get("authorization"), "Bearer captured-token-value-xyz");
 
-      const serialized = JSON.stringify(result);
+  const serialized = JSON.stringify(result);
       assert.equal(serialized.includes("captured-token-value-xyz"), false, "戻り値にトークン値が含まれてはならない");
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fetchLabIndex: VERCEL_AUTOMATION_BYPASS_SECRETが設定されていれば、x-vercel-protection-bypassヘッダーを付けて自己fetchする（値は戻り値に含まれない）", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalBypassEnv = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  let capturedHeaders: Headers | undefined;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    capturedHeaders = new Headers(init?.headers);
+    return new Response(JSON.stringify({ schemaVersion: 1, generatedAt: "x", labId: "lab1", engineVersion: "e", dataStatus: "confirmed", playerCompanyId: "BAL", availableTurns: [1], latestProcessedTurn: 1 }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  process.env.VERCEL_AUTOMATION_BYPASS_SECRET = "captured-bypass-secret-xyz";
+
+  try {
+    await withExportToken("token-for-bypass-test", async () => {
+      const result = await fetchLabIndex("http://example.test", "lab1");
+      assert.equal(result.ok, true);
+      assert.equal(capturedHeaders?.get("x-vercel-protection-bypass"), "captured-bypass-secret-xyz");
+      assert.equal(capturedHeaders?.get("x-vercel-set-bypass-cookie"), "true");
+
+      const serialized = JSON.stringify(result);
+      assert.equal(serialized.includes("captured-bypass-secret-xyz"), false, "戻り値にbypass secretの値が含まれてはならない");
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalBypassEnv === undefined) delete process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+    else process.env.VERCEL_AUTOMATION_BYPASS_SECRET = originalBypassEnv;
+  }
+});
+
+test("fetchLabIndex: VERCEL_AUTOMATION_BYPASS_SECRET未設定でも、x-vercel-protection-bypassヘッダーを付けずに従来通り動作する", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalBypassEnv = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  let capturedHeaders: Headers | undefined;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    capturedHeaders = new Headers(init?.headers);
+    return new Response(JSON.stringify({ schemaVersion: 1, generatedAt: "x", labId: "lab1", engineVersion: "e", dataStatus: "confirmed", playerCompanyId: "BAL", availableTurns: [1], latestProcessedTurn: 1 }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  delete process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+
+  try {
+    await withExportToken("token-for-no-bypass-test", async () => {
+      const result = await fetchLabIndex("http://example.test", "lab1");
+      assert.equal(result.ok, true);
+      assert.equal(capturedHeaders?.has("x-vercel-protection-bypass"), false);
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalBypassEnv === undefined) delete process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+    else process.env.VERCEL_AUTOMATION_BYPASS_SECRET = originalBypassEnv;
+  }
+});
+
+test("fetchLabIndex: Export APIが401(Vercel Deployment Protectionによるブロックの想定)を返した場合、分かりやすいメッセージを返す", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("<html>Authentication Required</html>", { status: 401, headers: { "content-type": "text/html" } })) as typeof fetch;
+  try {
+    await withExportToken("token-for-401-test", async () => {
+      const result = await fetchLabIndex("http://example.test", "lab1");
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.match(result.userMessage, /デプロイ保護|Deployment Protection/);
+      }
     });
   } finally {
     globalThis.fetch = originalFetch;
