@@ -91,16 +91,19 @@ async function fetchExportJson<T>(origin: string, path: string): Promise<Company
   if (precondition) return precondition;
 
   const token = process.env.STAGING_EXPORT_TOKEN as string; // checkAdminExportPreconditionsで存在確認済み
+  const targetUrl = `${origin}${path}`;
   let response: Response;
   try {
-    response = await fetch(`${origin}${path}`, {
+    response = await fetch(targetUrl, {
       method: "GET",
       headers: { authorization: `Bearer ${token}`, ...buildProtectionBypassHeaders() },
       cache: "no-store",
     });
-  } catch {
+  } catch (err) {
     // ネットワークエラー等。トークン値・Authorizationヘッダーの値は例外オブジェクトにも
     // 含まれないため、そのままログへ出しても安全だが、ユーザー向けメッセージは定型文にする。
+    // 一時的な調査用ログ（URL・エラーメッセージのみ。トークン値は含まない）。
+    console.error("[companyLabAdminExportSource] self-fetch failed", { targetUrl, errorName: err instanceof Error ? err.name : typeof err, errorMessage: err instanceof Error ? err.message : String(err) });
     return failure("upstreamError", "Export APIへの接続に失敗しました。時間をおいて再度お試しください。");
   }
 
