@@ -201,7 +201,12 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
         {viewModel.lastQuarterResult && (
           <div className="space-y-5">
             <h2 className="text-base font-semibold">直近の四半期結果（turn {viewModel.lastQuarterResult.turn}）</h2>
-            <MarketPanel marketResult={viewModel.lastQuarterResult.marketResult} globalReasonCodes={viewModel.lastQuarterResult.globalReasonCodes} />
+            <MarketPanel
+              marketResult={viewModel.lastQuarterResult.marketResult}
+              globalReasonCodes={viewModel.lastQuarterResult.globalReasonCodes}
+              previousMarketResult={viewModel.previousQuarterMarket?.marketResult ?? null}
+              previousPeriodLabel={viewModel.previousQuarterMarket?.period ?? null}
+            />
             {viewModel.lastQuarterResult.playerSummary && (
               <ResultsPanel summary={viewModel.lastQuarterResult.playerSummary} displayName={viewModel.playerDisplayName} />
             )}

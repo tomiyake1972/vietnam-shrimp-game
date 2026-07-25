@@ -67,6 +67,18 @@ export interface PlayerPreviousQuarterFinancials {
   readonly capexResult: CapexQuarterResult | null;
 }
 
+/**
+ * 前期（turn-1）ぶんの公開市場結果（市場情報パネルの前四半期比表示用）。
+ * 会社別の非公開情報は一切含まない（marketResultは全社共通・公開情報）。
+ * 前期が存在しない（初回四半期）・取得に失敗した場合はnullとし、画面側は
+ * 前期比を「-」と表示する（0で埋めない・値を捏造しない）。
+ */
+export interface PlayerPreviousQuarterMarket {
+  readonly turn: number;
+  readonly period: string;
+  readonly marketResult: MarketQuarterResult;
+}
+
 export interface PlayerScreenViewModel {
   readonly labId: string;
   readonly playerCompanyId: string;
@@ -91,6 +103,8 @@ export interface PlayerScreenViewModel {
   readonly lastQuarterRejectedCapexProposals: readonly CapexRejectedProposal[] | undefined;
   /** 前期（turn-1）ぶんの財務・資金・設備投資（当期・前期・増減表示用）。前期が存在しなければnull。 */
   readonly previousQuarterFinancials: PlayerPreviousQuarterFinancials | null;
+  /** 前期（turn-1）ぶんの公開市場結果（市場情報パネルの前四半期比表示用）。前期が存在しなければnull。 */
+  readonly previousQuarterMarket: PlayerPreviousQuarterMarket | null;
   /** 履歴要約（診断用のhistory/[turn]は使わない。§6.6・§8.2）。最新10件まで。 */
   readonly recentHistory: readonly CompanyLabHistoryEntrySummaryDto[];
 }
@@ -178,7 +192,12 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
   // Application Service層から使ってよい」対象（§9）。取得できない・存在しない
   // （初回四半期turn===1、または何らかの理由で前期データが欠落）場合はnullとし、
   // 値を捏造せず「データなし」として画面側で正常表示する。
+  //
+  // 【市場情報パネルの前四半期比についても同じ1回の取得を使い回す】前期の公開市場結果
+  // （marketResult）は同じ履歴エントリに含まれているため、追加のRepositoryアクセスは
+  // 発生させない（前期比のために履歴を二度読まない）。
   let previousQuarterFinancials: PlayerPreviousQuarterFinancials | null = null;
+  let previousQuarterMarket: PlayerPreviousQuarterMarket | null = null;
   if (latestEntry !== null && latestEntry.turn > 1) {
     try {
       const previousEntry = await deps.repository.loadHistoryEntry(labId, latestEntry.turn - 1);
@@ -189,8 +208,14 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
         financingResult: extractCompanyFinancingResult(previousEntry.record, stored.playerCompanyId),
         capexResult: extractCompanyCapexResult(previousEntry.record, stored.playerCompanyId),
       };
+      previousQuarterMarket = {
+        turn: previousEntry.turn,
+        period: String(previousEntry.period),
+        marketResult: previousEntry.record.marketResult,
+      };
     } catch {
       previousQuarterFinancials = null;
+      previousQuarterMarket = null;
     }
   }
 
@@ -220,6 +245,7 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       lastQuarterCapexEvents: lastQuarterCapexResult?.events,
       lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,
       previousQuarterFinancials,
+      previousQuarterMarket,
       recentHistory: historyPage.entries.map(toHistoryEntrySummaryDto),
     },
   };

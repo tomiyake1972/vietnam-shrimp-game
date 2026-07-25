@@ -201,7 +201,9 @@ export default function CompanyLabPage() {
   // 品質ダッシュボード（Phase 7B）が表示対象とする会社。自社表示時は常にプレイヤー操作会社
   // （実プレイヤーは他社の非公開結果を見られないという既存の規約を踏襲）、GM表示時のみ選択可能。
   const effectiveDashboardCompanyId = viewMode === "self" ? draftPlayerCompanyId : dashboardCompanyId;
-  const previousRecordForDashboard = useMemo(() => {
+  // 表示中の四半期の1つ前の確定記録。品質ダッシュボード（Phase 7B）の前期比較と、
+  // 市場情報パネル（Phase 8C-3D）の前四半期比の両方で同じものを使う。
+  const previousDisplayedRecord = useMemo(() => {
     if (!labState || !displayedRecord) return undefined;
     return labState.history.find((r) => r.turn === displayedRecord.turn - 1);
   }, [labState, displayedRecord]);
@@ -348,12 +350,22 @@ export default function CompanyLabPage() {
                   </div>
                 ) : viewMode === "self" ? (
                   <>
-                    <MarketPanel marketResult={displayedRecord.marketResult} globalReasonCodes={displayedRecord.globalReasonCodes} />
+                    <MarketPanel
+                      marketResult={displayedRecord.marketResult}
+                      globalReasonCodes={displayedRecord.globalReasonCodes}
+                      previousMarketResult={previousDisplayedRecord?.marketResult ?? null}
+                      previousPeriodLabel={previousDisplayedRecord !== undefined ? String(previousDisplayedRecord.period) : null}
+                    />
                     {playerSummary && <ResultsPanel summary={playerSummary} displayName={nameById.get(draftPlayerCompanyId) ?? draftPlayerCompanyId} />}
                   </>
                 ) : (
                   <>
-                    <MarketPanel marketResult={displayedRecord.marketResult} globalReasonCodes={displayedRecord.globalReasonCodes} />
+                    <MarketPanel
+                      marketResult={displayedRecord.marketResult}
+                      globalReasonCodes={displayedRecord.globalReasonCodes}
+                      previousMarketResult={previousDisplayedRecord?.marketResult ?? null}
+                      previousPeriodLabel={previousDisplayedRecord !== undefined ? String(previousDisplayedRecord.period) : null}
+                    />
                     <div className="text-[11px] bg-amber-900/60 border border-amber-600/50 text-amber-200 rounded-lg px-3 py-2 inline-block">
                       GM全社表示 — 実際のプレイヤーには見えない他社の結果を含みます
                     </div>
@@ -396,7 +408,7 @@ export default function CompanyLabPage() {
                     )}
                     <QualityDashboardPanel
                       record={displayedRecord}
-                      previousRecord={previousRecordForDashboard}
+                      previousRecord={previousDisplayedRecord}
                       history={labState.history}
                       fixtures={fixtures}
                       companyId={effectiveDashboardCompanyId}
