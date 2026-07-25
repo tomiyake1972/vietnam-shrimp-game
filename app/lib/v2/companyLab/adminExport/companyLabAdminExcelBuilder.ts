@@ -266,27 +266,235 @@ function writeCapexSheet(wb: ExcelJS.Workbook, capex: CompanyExportPayload["cape
   }
 }
 
+/**
+ * 契約ロールフォワード明細（期首残高＋当期新規－当期履行＝期末残高）。
+ *
+ * 期首・新規・履行・期末はいずれも確定履歴の別々の保存値をそのまま転記したもので
+ * あり（preProcessingStateSnapshot.contracts / salesRecord.newContracts /
+ * fulfillmentPlan.explicitInstructions / postProcessingStateSnapshot.contracts）、
+ * 検算差異列と金額列はExcel数式で組む＝JSON側の値を再計算しない。
+ */
 function writeSalesContractsSheet(wb: ExcelJS.Workbook, salesContracts: CompanyExportPayload["salesContracts"]): void {
   const ws = wb.addWorksheet("Sales Contracts");
-  ws.columns = [{ width: 22 }, { width: 10 }, { width: 10 }, { width: 12 }, { width: 12 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 16 }];
-  writeHeaderRow(ws, ["契約ID", "市場", "商品", "成約四半期", "納期", "当初数量", "未履行数量", "単価(USD/kg)", "ステータス"]);
+  ws.columns = [
+    { width: 24 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 12 }, { width: 10 },
+    { width: 13 }, { width: 13 }, { width: 13 }, { width: 13 }, { width: 13 }, { width: 15 },
+    { width: 14 }, { width: 18 }, { width: 17 }, { width: 15 }, { width: 10 }, { width: 10 },
+    { width: 17 }, { width: 17 }, { width: 17 }, { width: 17 },
+  ];
+  writeHeaderRow(ws, [
+    "契約ID", "会社", "市場", "商品", "成約四半期", "納期",
+    "当初数量(t)", "期首残(t)", "当期新規(t)", "当期履行(t)", "期末残(t)", "検算差異(=0)",
+    "単価(USD/kg)", "期末残金額相当(USD)", "期末ステータス", "期首ステータス", "当期新規", "期末延滞",
+    "契約時想定原料単価", "契約時想定加工費", "最低許容価格", "契約時想定限界利益",
+  ]);
   if (salesContracts.length === 0) {
-    const row = ws.addRow(["このターン・会社の契約は0件です（成約なし、またはAPI未対応バージョン）"]);
+    const row = ws.addRow(["このターン・会社の契約は0件です（期首残高・当期新規成約ともにありません）"]);
     row.getCell(1).font = LABEL_FONT;
     return;
   }
+  const firstDataRowNumber = ws.rowCount + 1;
   for (const c of salesContracts) {
-    const row = ws.addRow([c.contractId, c.market, c.product, c.contractedPeriod, c.dueDate, c.originalQuantity, c.outstandingQuantity, c.unitPrice, c.status]);
-    row.getCell(1).font = VALUE_FONT;
-    row.getCell(6).numFmt = "#,##0.00";
-    row.getCell(7).numFmt = "#,##0.00";
-    row.getCell(8).numFmt = "$#,##0.0000";
+    const row = ws.addRow([
+      c.contractId, c.companyId, c.market, c.product, c.contractedPeriod, c.dueDate,
+      c.originalQuantity, c.beginningOutstandingQuantity, c.newContractedQuantity, c.fulfilledQuantity, c.endingOutstandingQuantity, null,
+      c.unitPrice, null, c.status, c.statusAtBeginning ?? "－", c.isNewThisQuarter ? "はい" : "－", c.isOverdueAtEnd ? "延滞" : "－",
+      c.costSnapshot ? c.costSnapshot.expectedRawMaterialPriceUsdPerHosoEqKg : null,
+      c.costSnapshot ? c.costSnapshot.expectedProcessingCostUsdPerHosoEqKg : null,
+      c.costSnapshot ? c.costSnapshot.minimumAcceptablePriceUsdPerHosoEqKg : null,
+      c.costSnapshot ? c.costSnapshot.expectedContributionMarginUsdPerHosoEqKg : null,
+    ]);
+    const r = row.number;
+    // 期首 + 新規 - 履行 - 期末 = 0（契約ID単位のロールフォワード検算）。
+    row.getCell(12).value = { formula: `H${r}+I${r}-J${r}-K${r}` };
+    // 期末残数量(HOSO換算トン) × 単価(USD/kg) × 1000kg/t。
+    row.getCell(14).value = { formula: `K${r}*M${r}*1000` };
+    row.eachCell((cell) => {
+      if (!cell.font) cell.font = VALUE_FONT;
+    });
+    for (const col of [7, 8, 9, 10, 11, 12]) row.getCell(col).numFmt = "#,##0.00";
+    row.getCell(13).numFmt = "$#,##0.0000";
+    row.getCell(14).numFmt = USD_FORMAT;
+    for (const col of [19, 20, 21, 22]) row.getCell(col).numFmt = "$#,##0.0000";
+  }
+  const lastDataRowNumber = ws.rowCount;
+
+  const totalRow = ws.addRow(["合計"]);
+  totalRow.getCell(1).font = CHECK_FONT;
+  for (const col of ["G", "H", "I", "J", "K", "N"]) {
+    const cell = totalRow.getCell(col);
+    cell.value = { formula: `SUM(${col}${firstDataRowNumber}:${col}${lastDataRowNumber})` };
+    cell.font = CHECK_FONT;
+    cell.numFmt = col === "N" ? USD_FORMAT : "#,##0.00";
+  }
+  const checkRow = ws.addRow(["検算差異の絶対値合計（0であること）"]);
+  checkRow.getCell(1).font = CHECK_FONT;
+  checkRow.getCell(2).value = { formula: `SUMPRODUCT(ABS(L${firstDataRowNumber}:L${lastDataRowNumber}))` };
+  checkRow.getCell(2).font = CHECK_FONT;
+  checkRow.getCell(2).numFmt = "#,##0.0000";
+}
+
+/**
+ * 市場別×商品別の販売明細（§3）。販売計画（希望量・提示価格調整・営業人員）と
+ * 成約配分結果（基準価格・対象需要・成約量）を突き合わせ、成約できなかった数量と
+ * 成約金額はExcel数式で算出する。
+ */
+function writeSalesDetailSheet(wb: ExcelJS.Workbook, payload: CompanyExportPayload): void {
+  const ws = wb.addWorksheet("Sales Detail");
+  ws.columns = [
+    { width: 8 }, { width: 8 }, { width: 14 }, { width: 15 }, { width: 15 }, { width: 15 },
+    { width: 13 }, { width: 15 }, { width: 15 }, { width: 13 }, { width: 15 }, { width: 18 },
+    { width: 14 }, { width: 17 },
+  ];
+  writeHeaderRow(ws, [
+    "市場", "商品", "基準価格(USD/kg)", "対象需要(t)", "外部流出(t)", "販売希望量(t)",
+    "価格調整(USD/kg)", "提示価格(USD/kg)", "営業人員(人)", "成約量(t)", "未成約量(t)", "成約金額相当(USD)",
+    "カバレッジ", "競争力ウェイト",
+  ]);
+  const planKey = (market: string, product: string): string => `${market} ${product}`;
+  const planByKey = new Map(payload.salesPlans.map((p) => [planKey(p.market, p.product), p]));
+  let rowCount = 0;
+  for (const allocation of payload.marketProductAllocations) {
+    // 会社スコープのペイロードでは companies[] は対象会社1件のみへ絞り込まれている。
+    const own = allocation.companies[0] ?? null;
+    const plan = planByKey.get(planKey(allocation.market, allocation.product)) ?? null;
+    if (!own && !plan) continue;
+    const row = ws.addRow([
+      allocation.market, allocation.product, allocation.basePrice, allocation.targetDemand, allocation.externalOptionQuantity,
+      plan ? plan.desiredQuantity : null,
+      plan ? plan.priceAdjustmentUsdPerHosoEqKg : null,
+      own ? own.askPrice : null,
+      plan ? plan.salesForceHeadcount : null,
+      own ? own.allocatedQuantity : null,
+      null, null,
+      own ? own.coverageScore : null,
+      own ? own.competitivenessWeight : null,
+    ]);
+    const r = row.number;
+    // 未成約量 = 販売希望量 - 成約量。成約金額相当 = 成約量(t) × 提示価格(USD/kg) × 1000。
+    row.getCell(11).value = { formula: `IF(F${r}="","",F${r}-J${r})` };
+    row.getCell(12).value = { formula: `IF(OR(H${r}="",J${r}=""),"",J${r}*H${r}*1000)` };
+    row.eachCell((cell) => {
+      if (!cell.font) cell.font = VALUE_FONT;
+    });
+    for (const col of [3, 7, 8]) row.getCell(col).numFmt = "$#,##0.0000";
+    for (const col of [4, 5, 6, 10, 11]) row.getCell(col).numFmt = "#,##0.00";
+    row.getCell(12).numFmt = USD_FORMAT;
+    for (const col of [13, 14]) row.getCell(col).numFmt = "0.0000";
+    rowCount += 1;
+  }
+  if (rowCount === 0) {
+    const row = ws.addRow(["このターン・会社の販売計画および成約配分は0件です"]);
+    row.getCell(1).font = LABEL_FONT;
+  }
+}
+
+/** 公開市場情報（§4）。会社別の非公開情報を一切含まない。 */
+function writeMarketSheet(wb: ExcelJS.Workbook, market: CompanyExportPayload["market"]): void {
+  const ws = wb.addWorksheet("Market");
+  ws.columns = [{ width: 36 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 60 }];
+
+  const sectionRow = (label: string): void => {
+    const row = ws.addRow([label]);
+    row.getCell(1).font = CHECK_FONT;
+  };
+
+  writeHeaderRow(ws, ["項目", "値", "", "", "", "", "備考"]);
+  for (const [label, value] of [
+    ["期(period)", market.period],
+    ["パラメータ版(parametersVersion)", market.parametersVersion],
+    ["世界供給量(HOSO換算t)", market.worldSupply],
+    ["世界需要量(HOSO換算t)", market.worldDemand],
+    ["世界需給バランス", market.worldSupplyDemandBalance],
+    ["世界共通の価格ドライバー", market.globalDrivers.join("; ") || "－"],
+  ] as readonly [string, string | number][]) {
+    const row = ws.addRow([label, value]);
+    row.getCell(1).font = LABEL_FONT;
+    row.getCell(2).font = VALUE_FONT;
+    if (typeof value === "number") row.getCell(2).numFmt = "#,##0.0000";
+  }
+
+  ws.addRow([]);
+  sectionRow("国別HOSO価格（FOB, USD/HOSO換算kg）");
+  writeHeaderRow(ws, ["国", "当期価格", "前期価格", "価格変化率", "国内需給圧力", "世界需給圧力", "ドライバー"]);
+  for (const hp of market.hosoPricesByCountry) {
+    const row = ws.addRow([hp.country, hp.price, hp.priorPrice, hp.changeRatio, hp.localPressure, hp.worldPressure, hp.drivers.join("; ") || "－"]);
+    row.eachCell((cell) => {
+      if (!cell.font) cell.font = VALUE_FONT;
+    });
+    for (const col of [2, 3]) row.getCell(col).numFmt = "$#,##0.0000";
+    for (const col of [4, 5, 6]) row.getCell(col).numFmt = "0.0000";
+  }
+  writeHeaderRow(ws, ["国", "輸出可能供給量(t)", "配分需要(t)", "稼働率", "適用ショック", "", ""]);
+  for (const hp of market.hosoPricesByCountry) {
+    const row = ws.addRow([hp.country, hp.exportableSupply, hp.allocatedDemand, hp.utilizationRatio, hp.shockApplied]);
+    row.eachCell((cell) => {
+      if (!cell.font) cell.font = VALUE_FONT;
+    });
+    for (const col of [2, 3]) row.getCell(col).numFmt = "#,##0.00";
+    for (const col of [4, 5]) row.getCell(col).numFmt = "0.0000";
+  }
+
+  ws.addRow([]);
+  sectionRow("ベトナム国内未凍結原料市場");
+  const vd = market.vietnamDomestic;
+  for (const [label, value, fmt] of [
+    ["国内原料価格(USD/HOSO換算kg)", vd.price, "$#,##0.0000"],
+    ["理論買付上限(USD/HOSO換算kg)", vd.buyingCeiling, "$#,##0.0000"],
+    ["農家留保価格(USD/HOSO換算kg)", vd.farmerReservationPrice, "$#,##0.0000"],
+    ["国内供給量(t)", vd.supply, "#,##0.00"],
+    ["実効需要(t)", vd.effectiveDemand, "#,##0.00"],
+    ["取引成立量(t)", vd.transactedVolume, "#,##0.00"],
+    ["未販売供給量(t)", vd.unsoldSupply, "#,##0.00"],
+    ["国内需給バランス", vd.imbalance, "0.0000"],
+  ] as readonly [string, number, string][]) {
+    const row = ws.addRow([label, value]);
+    row.getCell(1).font = LABEL_FONT;
+    row.getCell(2).font = VALUE_FONT;
+    row.getCell(2).numFmt = fmt;
+  }
+  for (const [label, value] of [
+    ["最低引取ルール適用", vd.minimumOfftakeApplied ? "適用" : "－"],
+    ["留保価格適用", vd.reservationPriceApplied ? "適用" : "－"],
+    ["数量割当発生", vd.quantityRationed ? "発生" : "－"],
+    ["国内市場ドライバー", vd.drivers.join("; ") || "－"],
+  ] as readonly [string, string][]) {
+    const row = ws.addRow([label, value]);
+    row.getCell(1).font = LABEL_FONT;
+    row.getCell(2).font = VALUE_FONT;
+  }
+
+  for (const premium of [market.pdPremium, market.vapPremium]) {
+    ws.addRow([]);
+    sectionRow(`${premium.product.toUpperCase()}プレミアム`);
+    for (const [label, value, fmt] of [
+      ["世界需要(t)", premium.globalDemand, "#,##0.00"],
+      ["世界加工能力(t)", premium.globalCapacity, "#,##0.00"],
+      ["世界稼働率", premium.globalUtilization, "0.0000"],
+      ["ベースプレミアム(USD/HOSO換算kg)", premium.basePremium, "$#,##0.0000"],
+    ] as readonly [string, number, string][]) {
+      const row = ws.addRow([label, value]);
+      row.getCell(1).font = LABEL_FONT;
+      row.getCell(2).font = VALUE_FONT;
+      row.getCell(2).numFmt = fmt;
+    }
+    writeHeaderRow(ws, ["国", "プレミアム", "最終価格", "品質調整", "能力稼働率", "", "ドライバー"]);
+    for (const bc of premium.byCountry) {
+      const row = ws.addRow([bc.country, bc.premium, bc.finalPrice, bc.qualityAdjustment, bc.capacityUtilization, "", premium.drivers.join("; ") || "－"]);
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = VALUE_FONT;
+      });
+      for (const col of [2, 3, 4]) row.getCell(col).numFmt = "$#,##0.0000";
+      row.getCell(5).numFmt = "0.0000";
+    }
   }
 }
 
 /**
  * Export API（会社スコープ）JSONだけを入力として、Meta/PL/BS/CF/Financing/Capex/
- * Sales Contractsの7シート構成のExcelワークブックを組み立て、Bufferとして返す。
+ * Sales Contracts/Sales Detail/Marketの9シート構成のExcelワークブックを組み立て、
+ * Bufferとして返す。会社スコープのペイロードだけを入力とするため、他社の非公開情報は
+ * 構造上ここへ入り得ない。
  */
 export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayload): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
@@ -307,6 +515,8 @@ export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayl
   writeFinancingSheet(wb, payload.financingResult);
   writeCapexSheet(wb, payload.capexResult);
   writeSalesContractsSheet(wb, payload.salesContracts);
+  writeSalesDetailSheet(wb, payload);
+  writeMarketSheet(wb, payload.market);
 
   const arrayBuffer = await wb.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);

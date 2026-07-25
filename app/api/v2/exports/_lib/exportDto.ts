@@ -8,29 +8,48 @@
 // （三宅さんの指示：「許可した項目だけを明示的に組み立て、内部型への項目追加が
 // 自動露出しないようにする」）。
 //
-// 【intentionally NOT included in v1 scope（保存データには存在するが今回は出力しない）】
+// 【v1.2（Phase 8C-3B）での出力範囲拡大】
+// 経営判断に必要な明細（契約ロールフォワード・市場別×商品別の販売明細・市場結果の
+// 全項目・品質／生産／原料の明細・意思決定内容）は、いずれもゲームエンジンや
+// 確定履歴には保存済みであり、このファイルが出力対象から除外していただけだった。
+// v1.2では以下5系統を `./dto/` 配下の個別モジュールとして許可項目化し、本ファイルが
+// import して re-export する（利用側のimportパスは従来どおり本ファイルのままで良い）。
+//   §2 契約ロールフォワード         → ./dto/contractDto.ts
+//   §3 市場別×商品別の販売明細      → ./dto/salesDto.ts
+//   §4 市場結果（全17項目）         → ./dto/marketDto.ts
+//   §5 品質・生産・原料の明細       → ./dto/operationsDto.ts
+//   §6 意思決定内容                 → ./dto/decisionDto.ts
+// 各モジュールも本ファイルと同じ方針（内部型をそのままspreadせず、許可フィールドを
+// 1つずつ列挙して組み立てる）を守っている。
+//
+// 【スコープ隔離（三宅さんの指示 §6・§8）】
+// 会社スコープ（CompanyExportPayload）は「対象会社の自社情報＋公開市場情報」だけを
+// 収録し、他社の非公開意思決定・他社の提示価格・他社の競争力内訳・他社の財務結果を
+// 一切含めない。全社スコープ（AllCompaniesExportPayload、GMのみ）は全社の詳細・
+// 意思決定・処理結果・市場全体を収録する。両者を混在させない。
+//
+// 【intentionally NOT included（保存データには存在するが出力しない）】
 //   - CompanyFinancialQuarterResult.manufacturingCost（ManufacturingCostBreakdown）
 //   - CompanyFinancialQuarterResult.qualityLoss（QualityLossBreakdown）
 //   - CompanyFinancialQuarterResult.costRecords（readonly CostRecord[]）
 //   - CompanyFinancialQuarterResult.contributionMargin（ContributionMarginReport）
 //   - CompanyFinancialQuarterResult.absorptionVariableReconciliation
+//     （以上は製造原価計算書・限界利益計算書として将来の拡張候補）
 //   - CompanyLabQuarterHistoryEntry.preProcessingStateSnapshot / postProcessingStateSnapshot
 //     を丸ごと出すことはしない（ランタイム内部スナップショット全体を出すと、財務・資金・
 //     設備投資の確定結果が二重に出てしまう上、内部専用フィールドが自動的に漏れる）。
-//     ただし postProcessingStateSnapshot.contracts（会社別の成約明細）だけは、
-//     v1.1でExportSalesContractとして個別に許可項目化して出力する（下記§3.5）。
-//     フィールドを1つずつ列挙して組み立てる本ファイルの設計方針は維持している。
-//   - CompanyLabQuarterHistoryEntry.otherCompaniesDecisions（他社の非公開意思決定。
-//     会社スコープAPIにも全社スコープAPIにも一切含めない＝設計上の理由で永久に対象外）
-//   - CompanyLabQuarterHistoryEntry.aiProposal / diffFromAiProposal（AI提案案との差分。
-//     今回のスコープ外。プレイヤー自身の実際の決定内容(playerSubmission)も同様に
-//     今回のスコープ外のまま）
-//   - CompanyQuarterRecord.salesRecord.allocations（市場×商品単位の配分計算内訳。
-//     成約に至らなかった需要や競争力ウェイトの内訳まで含み、現時点のExcel経営データ
-//     ブックでの分析には成約結果(contracts)で足りるため、v1.1では対象外）
-//   - CompanyQuarterRecord.deliveryObservations / companyLoadMetrics / factoryLoadMetrics
-//     （市場別納期観測・工場負荷指標。v1.1では対象外、将来の拡張候補）
-// これらは完了報告の「保存データに存在するが出力できなかった項目」としてそのまま列挙する。
+//     必要な部分（contracts・rawMaterialLots・productionState.finishedGoodsLots）は
+//     ./dto/ 配下で個別に許可項目化し、期首／期末の対比として出力している。
+//   - CompanyQuarterRecord.marketInput（国別生産量・経済指数等の市場入力パラメータ。
+//     §4は市場「結果」を対象としているため今回は出力しない）
+// 【保存されていないことを確認した項目（完了報告で型名・フィールド名・処理地点を明示）】
+//   - CompanyLabQuarterHistoryEntry.aiProposal / diffFromAiProposal
+//     → 型定義は存在するが四半期確定処理が代入していないため既存履歴では未保存。
+//       詳細は ./dto/decisionDto.ts の AI_PROPOSAL_UNAVAILABLE_REASON を参照。
+//   - RawMaterialsQuarterRecord.harvestResults（AquacultureHarvestResult。疾病圧力・
+//     生残率・実収穫量・単位原価）が CompanyQuarterRecord へ引き継がれていないため、
+//     養殖結果の個別内訳は出力できない（会社サマリーの集計値と原料ロットの
+//     pendingAquaculture* からの部分的な再構成のみ可能）。
 
 import {
   BalanceSheet,
@@ -41,15 +60,71 @@ import {
 import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
 import { CapexQuarterResult } from "../../../../lib/v2/capex";
 import { CompanyQuarterSummary } from "../../../../lib/v2/companyLab/types";
-import { MarketQuarterResult } from "../../../../lib/v2/market/types";
+import { DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../../../lib/v2/market/types";
 import { CompanyLabQuarterHistoryEntry, CompanyLabPersistedStateV1 } from "../../../../lib/v2/companyLab/persistence/types";
-import { CompanyId, SalesContract } from "../../../../lib/v2/sales/types";
+import { CompanyId } from "../../../../lib/v2/sales/types";
 import { PeriodV2 } from "../../../../lib/v2/core/period";
 import {
   extractCompanyCapexResult,
   extractCompanyFinancialResult,
   extractCompanyFinancingResult,
 } from "../../../../v2/company-lab/play/_lib/financialViewSelectors";
+
+// --- §2〜§6の許可項目DTO（./dto/ 配下の個別モジュール） ---
+import {
+  ExportContractFulfillmentUsage,
+  ExportSalesContract,
+  buildExportContractFulfillmentUsageAllCompanies,
+  buildExportContractFulfillmentUsageForCompany,
+  buildExportSalesContractRollforward,
+} from "./dto/contractDto";
+import {
+  ExportMarketProductAllocation,
+  ExportSalesPlanEntry,
+  buildExportMarketProductAllocations,
+  buildExportSalesPlansAllCompanies,
+  buildExportSalesPlansForCompany,
+} from "./dto/salesDto";
+import { ExportMarketResult, buildExportMarketResult } from "./dto/marketDto";
+import {
+  ExportBatchQualityAdjustment,
+  ExportCompanyLoadMetrics,
+  ExportDeliveryObservation,
+  ExportDomesticPurchaseAllocation,
+  ExportFactoryLoadMetrics,
+  ExportFinishedGoodsLotStates,
+  ExportProductionAllocation,
+  ExportProductionBatch,
+  ExportQualityState,
+  ExportRawMaterialLotStates,
+  ExportRawMaterialRequirement,
+  buildExportCompanyLoadMetricsList,
+  buildExportDeliveryObservations,
+  buildExportDomesticPurchaseAllocation,
+  buildExportFactoryLoadMetricsList,
+  buildExportFinishedGoodsLotStates,
+  buildExportProductionAllocation,
+  buildExportProductionBatches,
+  buildExportQualityAdjustments,
+  buildExportQualityState,
+  buildExportRawMaterialLotStates,
+  buildExportRawMaterialRequirements,
+} from "./dto/operationsDto";
+import {
+  ExportAllCompaniesDecisionInfo,
+  ExportCompanyDecisionInfo,
+  buildExportAllCompaniesDecisionInfo,
+  buildExportCompanyDecisionInfo,
+} from "./dto/decisionDto";
+
+// 利用側（Excelビルダー・ZIPビルダー・APIルート・テスト）のimportパスを
+// `app/api/v2/exports/_lib/exportDto` のまま維持するため、./dto/ 配下の型と
+// builderをすべて本ファイルから再公開する。
+export * from "./dto/contractDto";
+export * from "./dto/salesDto";
+export * from "./dto/marketDto";
+export * from "./dto/operationsDto";
+export * from "./dto/decisionDto";
 
 /** 現在サポートしているExport DTOのスキーマバージョン。破壊的変更時のみ増分する。 */
 export const EXPORT_SCHEMA_VERSION = 1;
@@ -521,6 +596,42 @@ export function buildExportCapexResult(result: CapexQuarterResult): ExportCapexR
 // 5. 会社サマリー（生産・販売・品質等の事前集計）
 // ---------------------------------------------------------------------
 
+/**
+ * 商品区分（hoso/pd/vap）の固定出力順。
+ * CompanyQuarterSummary の商品別フィールドは Readonly<Partial<Record<Product, ...>>> で
+ * あり、JSONのキー順序が保存順に依存するため、配列へ変換して固定順で出力する
+ * （同じ確定履歴から再生成して結果が一致すること＝完了条件）。
+ */
+const EXPORT_PRODUCT_ORDER: readonly Product[] = ["hoso", "pd", "vap"];
+
+/** 商品別の単一指標（未設定の商品は value: null）。 */
+export interface ExportProductValue {
+  readonly product: string;
+  readonly value: number | null;
+}
+
+/** 市場別の単一指標（未設定の市場は value: null）。 */
+export interface ExportMarketValue {
+  readonly market: string;
+  readonly value: number | null;
+}
+
+/** 無理な増産の警告（工場×商品単位）。 */
+export interface ExportRampWarning {
+  readonly factoryId: string;
+  readonly product: string;
+  /** 増産ストレス（0〜1目安。高いほど直前四半期比の増産幅が大きい）。 */
+  readonly productionRampStress: number;
+}
+
+function buildExportProductValues(record: Readonly<Partial<Record<Product, number>>>): readonly ExportProductValue[] {
+  return EXPORT_PRODUCT_ORDER.map((product) => ({ product, value: record[product] ?? null }));
+}
+
+function buildExportMarketValues(record: Readonly<Partial<Record<DemandMarketId, number>>>): readonly ExportMarketValue[] {
+  return DEMAND_MARKET_IDS.map((market) => ({ market, value: record[market] ?? null }));
+}
+
 export interface ExportCompanySummary {
   readonly companyId: CompanyId;
   readonly period: PeriodV2;
@@ -552,6 +663,16 @@ export interface ExportCompanySummary {
   readonly discardQuantity: number;
   readonly majorIncidentCount: number;
   readonly onTimeDeliveryRate: number | null;
+  /** 【Phase 7A】当期末時点（更新後）の商品別品質スコア（0〜100）。 */
+  readonly qualityScoreByProduct: readonly ExportProductValue[];
+  /** 【Phase 7A】当期の商品別操業リスク（複数工場ある場合は数量加重平均）。 */
+  readonly operationalRiskByProduct: readonly ExportProductValue[];
+  /** 【Phase 7A】当期末時点（更新後）の市場別顧客信頼（0〜100）。 */
+  readonly customerTrustByMarket: readonly ExportMarketValue[];
+  /** 【Phase 7A】当期末時点（更新後）の市場別納期信頼性（0〜100）。 */
+  readonly deliveryReliabilityByMarket: readonly ExportMarketValue[];
+  /** 【Phase 7A】無理な増産の警告（工場×商品、factoryId→product順）。 */
+  readonly rampWarnings: readonly ExportRampWarning[];
   readonly reasonCodes: readonly { readonly code: string; readonly companyId: CompanyId; readonly message: string }[];
 }
 
@@ -587,85 +708,73 @@ export function buildExportCompanySummary(summary: CompanyQuarterSummary): Expor
     discardQuantity: summary.discardQuantity,
     majorIncidentCount: summary.majorIncidentCount,
     onTimeDeliveryRate: summary.onTimeDeliveryRate ?? null,
+    qualityScoreByProduct: buildExportProductValues(summary.qualityScoreByProduct),
+    operationalRiskByProduct: buildExportProductValues(summary.operationalRiskByProduct),
+    customerTrustByMarket: buildExportMarketValues(summary.customerTrustByMarket),
+    deliveryReliabilityByMarket: buildExportMarketValues(summary.deliveryReliabilityByMarket),
+    rampWarnings: summary.rampWarnings
+      .map((w) => ({ factoryId: w.factoryId, product: w.product, productionRampStress: w.productionRampStress }))
+      .sort((a, b) => (a.factoryId !== b.factoryId ? a.factoryId.localeCompare(b.factoryId) : a.product.localeCompare(b.product))),
     reasonCodes: summary.reasonCodes.map((r) => ({ code: r.code, companyId: r.companyId, message: r.message })),
   };
 }
 
 // ---------------------------------------------------------------------
-// 5.5 販売契約（成約明細） 【v1.1で追加】
+// 5.5 §5 品質・生産・原料の明細（operationsDto.ts の各builderの集約）
 // ---------------------------------------------------------------------
 //
-// companySummaryは会社単位の集計値（新規成約数量の合計等）のみを提供しており、
-// 個々の契約（どの市場・どの商品区分に・いつ・いくらで・何トン成約したか）は
-// v1では出力対象外だった。この契約明細自体はpostProcessingStateSnapshot.contracts
-// （SalesContract[]、app/lib/v2/sales/types.ts）として既に永続化されているため、
-// スナップショット全体ではなく本セクションの許可項目だけを個別に抽出して追加する。
+// §2 契約ロールフォワードは ./dto/contractDto.ts、§3 販売明細は ./dto/salesDto.ts、
+// §4 市場結果は ./dto/marketDto.ts、§6 意思決定は ./dto/decisionDto.ts に定義され、
+// 本ファイル冒頭で re-export している。本セクションは §5（12項目）の各builderを
+// 1つのサブオブジェクトへ集約し、会社スコープ／GMスコープの両ペイロードから
+// 同じ形で使えるようにするだけで、値の再計算は一切行わない。
 
-export interface ExportSalesContract {
-  readonly contractId: string;
-  readonly companyId: CompanyId;
-  readonly market: string;
-  readonly product: string;
-  /** 成約四半期。 */
-  readonly contractedPeriod: PeriodV2;
-  /** 納期。 */
-  readonly dueDate: PeriodV2;
-  /** 当初契約数量（HOSO換算トン）。 */
-  readonly originalQuantity: number;
-  /** 未履行数量（HOSO換算トン、0 <= outstandingQuantity <= originalQuantity）。 */
-  readonly outstandingQuantity: number;
-  /** 成約単価（USD/HOSO換算kg）。 */
-  readonly unitPrice: number;
-  readonly status: string;
-}
-
-export function buildExportSalesContract(contract: SalesContract): ExportSalesContract {
-  return {
-    contractId: contract.contractId,
-    companyId: contract.companyId,
-    market: contract.market,
-    product: contract.product,
-    contractedPeriod: contract.contractedPeriod,
-    dueDate: contract.dueDate,
-    originalQuantity: contract.originalQuantity,
-    outstandingQuantity: contract.outstandingQuantity,
-    unitPrice: contract.unitPrice,
-    status: contract.status,
-  };
+export interface ExportOperationsSection {
+  /** §5-1〜5: 当期末時点の品質・顧客信頼・納期信頼性・ランプ履歴。 */
+  readonly qualityState: ExportQualityState;
+  /** §5-1,2,5: バッチ単位の操業リスクと品質結果（重大事故の抽選結果を含む）。 */
+  readonly qualityAdjustments: readonly ExportBatchQualityAdjustment[];
+  /** §5-4: 市場別の納期観測（当期到来量・期限内履行量・新規／継続延滞量）。 */
+  readonly deliveryObservations: readonly ExportDeliveryObservation[];
+  /** §5-6: 生産バッチ明細（投入原料ロット・産出量・不足理由）。 */
+  readonly productionBatches: readonly ExportProductionBatch[];
+  /** §5-7: 工場別・商品別の生産配分と工場別の人員サマリー。 */
+  readonly productionAllocation: ExportProductionAllocation;
+  /** §5-8: 工場別稼働実績。 */
+  readonly factoryLoadMetrics: readonly ExportFactoryLoadMetrics[];
+  /** §5-8: 会社別稼働実績。 */
+  readonly companyLoadMetrics: readonly ExportCompanyLoadMetrics[];
+  /** §5-9: 納期別・商品別の原料要求量。 */
+  readonly rawMaterialRequirements: readonly ExportRawMaterialRequirement[];
+  /** §5-10: 国内買付の市場清算結果と会社別配分（希望量は意思決定側に含まれる）。 */
+  readonly domesticPurchaseAllocation: ExportDomesticPurchaseAllocation;
+  /** §5-11: 原料ロットの期首・期末状態。 */
+  readonly rawMaterialLots: ExportRawMaterialLotStates;
+  /** §5-12: 完成品ロットの期首・当期生産・期末状態（消費は契約履行内訳側）。 */
+  readonly finishedGoodsLots: ExportFinishedGoodsLotStates;
 }
 
 /**
- * 指定した会社の契約一覧を、当該四半期処理後時点（postProcessingStateSnapshot）の
- * 状態で抽出する。ステータス（open/partiallyFulfilled/fulfilled/overdue/cancelled）を
- * 問わず、その会社の契約はすべて含める（費消済み・キャンセル済みも含む「その時点の
- * 全件」を返すことで、成約から履行・延滞・キャンセルまでの経緯を追える形にする）。
+ * §5の12項目を組み立てる。scopedCompanyId を渡すと会社別の行を対象会社のみへ
+ * 絞り込み、市場レベルの公開情報（国内買付の市場価格・供給量・未配分供給量）は
+ * そのまま保持する。GMスコープでは undefined を渡して全社ぶんを得る。
  */
-export function buildExportSalesContractsForCompany(
+export function buildExportOperationsSection(
   entry: CompanyLabQuarterHistoryEntry,
-  companyId: CompanyId,
-): readonly ExportSalesContract[] {
-  return entry.postProcessingStateSnapshot.contracts.filter((c) => c.companyId === companyId).map(buildExportSalesContract);
-}
-
-// ---------------------------------------------------------------------
-// 6. 市場結果（会社非公開情報を含まない公開データ）
-// ---------------------------------------------------------------------
-
-export interface ExportMarketResult {
-  readonly period: PeriodV2;
-  readonly parametersVersion: string;
-  readonly worldSupply: number;
-  readonly worldDemand: number;
-  readonly worldSupplyDemandBalance: number;
-}
-
-export function buildExportMarketResult(market: MarketQuarterResult): ExportMarketResult {
+  scopedCompanyId?: CompanyId,
+): ExportOperationsSection {
   return {
-    period: market.period,
-    parametersVersion: market.parametersVersion,
-    worldSupply: market.worldSupply,
-    worldDemand: market.worldDemand,
-    worldSupplyDemandBalance: market.worldSupplyDemandBalance,
+    qualityState: buildExportQualityState(entry, scopedCompanyId),
+    qualityAdjustments: buildExportQualityAdjustments(entry, scopedCompanyId),
+    deliveryObservations: buildExportDeliveryObservations(entry, scopedCompanyId),
+    productionBatches: buildExportProductionBatches(entry, scopedCompanyId),
+    productionAllocation: buildExportProductionAllocation(entry, scopedCompanyId),
+    factoryLoadMetrics: buildExportFactoryLoadMetricsList(entry, scopedCompanyId),
+    companyLoadMetrics: buildExportCompanyLoadMetricsList(entry, scopedCompanyId),
+    rawMaterialRequirements: buildExportRawMaterialRequirements(entry, scopedCompanyId),
+    domesticPurchaseAllocation: buildExportDomesticPurchaseAllocation(entry, scopedCompanyId),
+    rawMaterialLots: buildExportRawMaterialLotStates(entry, scopedCompanyId),
+    finishedGoodsLots: buildExportFinishedGoodsLotStates(entry, scopedCompanyId),
   };
 }
 
@@ -673,14 +782,34 @@ export function buildExportMarketResult(market: MarketQuarterResult): ExportMark
 // 7. 会社スコープ／全社スコープ ペイロード
 // ---------------------------------------------------------------------
 
+/**
+ * 会社スコープのペイロード。「対象会社の自社情報＋公開市場情報」のみを収録し、
+ * 他社の非公開情報（意思決定・提示価格・競争力内訳・財務結果）を一切含まない
+ * （三宅さんの指示 §6・§8）。GM向けの情報は AllCompaniesExportPayload 側に置く。
+ */
 export interface CompanyExportPayload {
   readonly meta: ExportMeta;
   readonly financialResult: ExportFinancialResult | null;
   readonly financingResult: ExportFinancingResult | null;
   readonly capexResult: ExportCapexResult | null;
   readonly companySummary: ExportCompanySummary | null;
-  /** 【v1.1で追加】当該四半期処理後時点の、この会社の契約一覧（成約明細）。 */
+  /** §2 この会社の契約ロールフォワード明細（期首・新規・履行・期末）。 */
   readonly salesContracts: readonly ExportSalesContract[];
+  /** §2 この会社の契約×完成品ロット単位の履行内訳。 */
+  readonly contractFulfillmentUsage: readonly ExportContractFulfillmentUsage[];
+  /** §3 この会社の市場別×商品別の販売計画。 */
+  readonly salesPlans: readonly ExportSalesPlanEntry[];
+  /**
+   * §3 市場別×商品別の成約配分。市場レベルの公開情報（基準価格・対象需要・
+   * 外部流出量）は全件収録し、companies[] はこの会社1件のみへ絞り込む。
+   */
+  readonly marketProductAllocations: readonly ExportMarketProductAllocation[];
+  /** §4 公開市場情報（全社共通、17項目）。 */
+  readonly market: ExportMarketResult;
+  /** §5 この会社の品質・生産・原料の明細。 */
+  readonly operations: ExportOperationsSection;
+  /** §6 この会社の提出意思決定とAI提案（他社の意思決定は含まない）。 */
+  readonly decisionInfo: ExportCompanyDecisionInfo;
 }
 
 export interface BuildCompanyExportPayloadInput {
@@ -709,22 +838,46 @@ export function buildCompanyExportPayload(input: BuildCompanyExportPayloadInput)
     financingResult: financing ? buildExportFinancingResult(financing) : null,
     capexResult: capex ? buildExportCapexResult(capex) : null,
     companySummary: summary ? buildExportCompanySummary(summary) : null,
-    salesContracts: buildExportSalesContractsForCompany(entry, companyId),
+    salesContracts: buildExportSalesContractRollforward(entry, companyId),
+    contractFulfillmentUsage: buildExportContractFulfillmentUsageForCompany(entry, companyId),
+    salesPlans: buildExportSalesPlansForCompany(entry, companyId),
+    marketProductAllocations: buildExportMarketProductAllocations(entry, companyId),
+    market: buildExportMarketResult(entry.record.marketResult),
+    operations: buildExportOperationsSection(entry, companyId),
+    decisionInfo: buildExportCompanyDecisionInfo(entry, companyId),
   };
 }
 
+/** 全社スコープの、1社ぶんの財務・サマリー・契約明細。 */
+export interface AllCompaniesExportCompanyEntry {
+  readonly companyId: CompanyId;
+  readonly financialResult: ExportFinancialResult | null;
+  readonly financingResult: ExportFinancingResult | null;
+  readonly capexResult: ExportCapexResult | null;
+  readonly companySummary: ExportCompanySummary | null;
+  /** §2 この会社の契約ロールフォワード明細（期首・新規・履行・期末）。 */
+  readonly salesContracts: readonly ExportSalesContract[];
+}
+
+/**
+ * 全社スコープ（GM専用）のペイロード。全5社の詳細・意思決定・処理結果・市場全体を
+ * 収録する（三宅さんの指示 §6・§8）。会社スコープのペイロードとは混在させない。
+ */
 export interface AllCompaniesExportPayload {
   readonly meta: ExportMeta;
-  readonly companies: readonly {
-    readonly companyId: CompanyId;
-    readonly financialResult: ExportFinancialResult | null;
-    readonly financingResult: ExportFinancingResult | null;
-    readonly capexResult: ExportCapexResult | null;
-    readonly companySummary: ExportCompanySummary | null;
-    /** 【v1.1で追加】当該四半期処理後時点の、この会社の契約一覧（成約明細）。 */
-    readonly salesContracts: readonly ExportSalesContract[];
-  }[];
+  readonly companies: readonly AllCompaniesExportCompanyEntry[];
+  /** §2 全社の契約×完成品ロット単位の履行内訳。 */
+  readonly contractFulfillmentUsage: readonly ExportContractFulfillmentUsage[];
+  /** §3 全社の市場別×商品別の販売計画。 */
+  readonly salesPlans: readonly ExportSalesPlanEntry[];
+  /** §3 市場別×商品別の成約配分（全社の提示価格・競争力内訳を含む）。 */
+  readonly marketProductAllocations: readonly ExportMarketProductAllocation[];
+  /** §4 公開市場情報（17項目）。 */
   readonly market: ExportMarketResult;
+  /** §5 全社の品質・生産・原料の明細。 */
+  readonly operations: ExportOperationsSection;
+  /** §6 全社の提出意思決定・他社意思決定・AI提案・全社の警告。 */
+  readonly decisionInfo: ExportAllCompaniesDecisionInfo;
 }
 
 export interface BuildAllCompaniesExportPayloadInput {
@@ -761,10 +914,15 @@ export function buildAllCompaniesExportPayload(input: BuildAllCompaniesExportPay
         financingResult: financing ? buildExportFinancingResult(financing) : null,
         capexResult: capex ? buildExportCapexResult(capex) : null,
         companySummary: summary ? buildExportCompanySummary(summary) : null,
-        salesContracts: buildExportSalesContractsForCompany(entry, companyId),
+        salesContracts: buildExportSalesContractRollforward(entry, companyId),
       };
     }),
+    contractFulfillmentUsage: buildExportContractFulfillmentUsageAllCompanies(entry),
+    salesPlans: buildExportSalesPlansAllCompanies(entry),
+    marketProductAllocations: buildExportMarketProductAllocations(entry),
     market: buildExportMarketResult(entry.record.marketResult),
+    operations: buildExportOperationsSection(entry),
+    decisionInfo: buildExportAllCompaniesDecisionInfo(entry),
   };
 }
 

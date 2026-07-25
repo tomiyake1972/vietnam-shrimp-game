@@ -10,16 +10,24 @@ import assert from "node:assert/strict";
 import JSZip from "jszip";
 import { buildCompanyLabAdminExportZip } from "../companyLabAdminExportZip";
 import type { CompanyExportPayload } from "../../../../../api/v2/exports/_lib/exportDto";
-import type { PeriodV2 } from "../../../core/period";
+import { buildSyntheticCompanyExportPayload } from "./syntheticExportPayload";
 
-const SYNTHETIC_COMPANY_JSON: CompanyExportPayload = {
-  meta: { schemaVersion: 1, generatedAt: "2026-07-26T00:00:00.000Z", labId: "zip-test-lab", turn: 1, period: "2015Q1" as PeriodV2, engineVersion: "test-engine", dataStatus: "confirmed", scope: { kind: "company", companyId: "BAL" } },
+// Phase 8C-3B（三宅さんの指示 §2〜§6）で CompanyExportPayload の必須フィールドが増えたため、
+// companyLabAdminExcelBuilder.test.ts と同じ合成ペイロードヘルパーを共有する。
+// labId・financialResult はこのテストの既存前提（zip-test-lab／財務結果なし）へ合わせて上書きする。
+const SYNTHETIC_COMPANY_JSON: CompanyExportPayload = buildSyntheticCompanyExportPayload({
+  meta: {
+    schemaVersion: 1,
+    generatedAt: "2026-07-26T00:00:00.000Z",
+    labId: "zip-test-lab",
+    turn: 1,
+    period: "2015Q1" as CompanyExportPayload["meta"]["period"],
+    engineVersion: "test-engine",
+    dataStatus: "confirmed",
+    scope: { kind: "company", companyId: "BAL" },
+  },
   financialResult: null,
-  financingResult: null,
-  capexResult: null,
-  companySummary: null,
-  salesContracts: [],
-};
+});
 
 const SYNTHETIC_LAB_INDEX = { schemaVersion: 1, generatedAt: "x", labId: "zip-test-lab", engineVersion: "test-engine", dataStatus: "confirmed", playerCompanyId: "BAL", availableTurns: [1], latestProcessedTurn: 1 };
 const SYNTHETIC_ALL_COMPANIES = { meta: { scope: { kind: "allCompanies" } }, companies: [], market: {} };
