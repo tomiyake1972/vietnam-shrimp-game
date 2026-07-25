@@ -92,7 +92,7 @@ function lot(tons: number, lotId = "L-1"): RawMaterialLot {
   return {
     lotId,
     companyId: "BAL",
-    source: "domesticPurchase",
+    source: "domestic",
     originCountry: "VN",
     inboundPeriod: period(2015, 1),
     originalQuantity: hosoEqTons(tons),

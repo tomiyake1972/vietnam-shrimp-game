@@ -67,6 +67,7 @@ import { CapexState } from "../../lib/v2/capex";
 import { applyCapexCapacityToFactories } from "../../lib/v2/capex/capacityEffect";
 import { formatHosoEqTons } from "../../lib/v2/industryLab/ui/formatters";
 import { CAPACITY_POOL_DESCRIPTIONS, CAPACITY_POOL_LABELS, CAPACITY_POOL_KEYS, CapacityPoolKey } from "./processingCapacityViewModel";
+import { PRODUCT_LABELS } from "./marketPriceViewModel";
 
 // ---------------------------------------------------------------------
 // 1. 見出し・注記の文言（画面とExcelで同じ文言を使う）
@@ -445,7 +446,9 @@ export function buildCompanyProcessingForecast(input: BuildCompanyProcessingFore
     return {
       factoryId: entry.factoryId,
       product: entry.product,
-      productLabel: CAPACITY_POOL_LABELS[poolKey],
+      // 見込み表の「商品」列は商品名そのもの（HOSO/PD/VAP）。
+      // 能力プール名（「HOSO加工能力」等）は実効率テーブル側で使う別ラベル。
+      productLabel: PRODUCT_LABELS[entry.product],
       priority: entry.priority,
       desiredTons,
       productNominalCapacityTons: poolNominalTons(factory, poolKey),

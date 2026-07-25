@@ -42,7 +42,7 @@ const LOTS: readonly RawMaterialLot[] = [
   {
     lotId: "L-BAL",
     companyId: "BAL",
-    source: "domesticPurchase",
+    source: "domestic",
     originCountry: "VN",
     inboundPeriod: START,
     originalQuantity: hosoEqTons(20_000),
