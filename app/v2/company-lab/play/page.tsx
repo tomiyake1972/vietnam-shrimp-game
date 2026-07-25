@@ -35,6 +35,9 @@ export default async function CompanyLabListPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-lg font-semibold">Company Lab（テストプレイ）</h1>
           <div className="flex items-center gap-3">
+            <Link href="/v2/company-lab/play/export" className="bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg px-4 py-2 text-sm">
+              分析データをエクスポート
+            </Link>
             <Link href="/v2/company-lab/play/new" className="bg-teal-600 hover:bg-teal-500 text-white font-semibold rounded-lg px-4 py-2 text-sm">
               新しいラボを作成
             </Link>
