@@ -22,6 +22,7 @@ import { generateAutoPolicyDecision } from "../../../../lib/v2/companyLab/autoPo
 import { restoreCompanyLabStateFromRuntimeSnapshot } from "../../../../lib/v2/companyLab/persistence/snapshot";
 import { CompanyLabPersistedStateV1, CompanyLabDraftEnvelope } from "../../../../lib/v2/companyLab/persistence/types";
 import { MarketQuarterResult } from "../../../../lib/v2/market/types";
+import { ConsumerMarketQuarterRecord } from "../../../../lib/v2/market/consumerInventory";
 import { CapexProjectQuarterEvent, CapexQuarterResult, CapexRejectedProposal } from "../../../../lib/v2/capex";
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
 import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
@@ -50,6 +51,13 @@ export interface PlayerLastQuarterResult {
   readonly financingResult: FinancingQuarterResult | null;
   /** 当期のプレイヤー会社ぶんの設備投資結果（全体。既存のlastQuarterCapexEvents等はDecisionEditor向けに従来通り残す）。 */
   readonly capexResult: CapexQuarterResult | null;
+  /**
+   * 【Phase 8F-1】当期の消費国別・在庫循環（消費／在庫／購買）確定結果。全社共通・公開情報であり、
+   * 個社の非公開計画は含まない。CompanyQuarterRecord.consumerMarketRecordsが未設定
+   * （Phase 8F-1導入前の古い保存データ）の場合はundefinedのままとし、画面側は
+   * 「データなし」として捏造せず表示する。
+   */
+  readonly consumerMarketRecords: readonly ConsumerMarketQuarterRecord[] | undefined;
 }
 
 /**
@@ -186,6 +194,7 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
           financialResult: extractCompanyFinancialResult(latestEntry.record, stored.playerCompanyId),
           financingResult: extractCompanyFinancingResult(latestEntry.record, stored.playerCompanyId),
           capexResult: lastQuarterCapexResult,
+          consumerMarketRecords: latestEntry.record.consumerMarketRecords,
         }
       : null;
 
