@@ -29,9 +29,9 @@ import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
 import FinancialResultsSection from "../../components/financial/FinancialResultsSection";
 import PlayLabBanner from "../components/PlayLabBanner";
-import { CompanyDecisionDraft } from "../../decisionDraft";
+import { CompanyDecisionDraft, summarizeSalesForceAllocation } from "../../decisionDraft";
 import { PlayerScreenViewModel } from "../_lib/viewModel";
-import { processQuarterAction, saveDraftAction, submitDraftAction } from "./actions";
+import { processQuarterAction, saveDraftAction, submitDraftAction, withdrawDraftAction } from "./actions";
 
 interface PlayerScreenClientProps {
   readonly viewModel: PlayerScreenViewModel;
@@ -43,15 +43,32 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
   const [savePending, startSaveTransition] = useTransition();
   const [submitPending, startSubmitTransition] = useTransition();
   const [processPending, startProcessTransition] = useTransition();
+  const [withdrawPending, startWithdrawTransition] = useTransition();
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [processMessage, setProcessMessage] = useState<string | null>(null);
+  const [withdrawMessage, setWithdrawMessage] = useState<string | null>(null);
   const [confirmingProcess, setConfirmingProcess] = useState(false);
 
   const isEditing = viewModel.phase === "editing";
   const isSubmitted = viewModel.phase === "submitted";
   const isCompleted = viewModel.phase === "completed";
-  const busy = savePending || submitPending || processPending;
+  const busy = savePending || submitPending || processPending || withdrawPending;
+
+  // 【Phase 8G】営業人員の配分合計チェック。draft.salesPlansが存在する（=完了済みでない）
+  // ときだけ意味を持つ。validateSalesForceHeadcountBudget（エンジン側）と同じ
+  // 「全社合計」判定をここで先読みし、提出前に警告・提出ボタンの無効化に使う
+  // （入力欄自体は無効化しない — 上限超過中も編集は必ず可能）。
+  const salesForceAllocation = draft ? summarizeSalesForceAllocation(draft.salesPlans, viewModel.fixture.salesForceHeadcountTotal) : null;
+
+  function handleWithdrawSubmission() {
+    setWithdrawMessage(null);
+    startWithdrawTransition(async () => {
+      const result = await withdrawDraftAction(viewModel.labId);
+      setWithdrawMessage(result.ok ? "提出を取り消しました。入力を編集して再提出できます。" : `取り消しできませんでした: ${result.message ?? ""}`);
+      router.refresh();
+    });
+  }
 
   function handleSaveDraft() {
     if (!draft) return;
@@ -139,23 +156,32 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
             />
 
             {isEditing && (
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <button
-                  onClick={handleSaveDraft}
-                  disabled={busy}
-                  className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-2 text-sm"
-                >
-                  {savePending ? "保存中…" : "下書きを保存"}
-                </button>
-                <button
-                  onClick={handleSubmitDraft}
-                  disabled={busy}
-                  className="bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-2 text-sm"
-                >
-                  {submitPending ? "提出中…" : "この内容で提出する"}
-                </button>
-                {saveMessage && <span className="text-xs text-gray-300">{saveMessage}</span>}
-                {submitMessage && <span className="text-xs text-gray-300">{submitMessage}</span>}
+              <div className="mt-4 space-y-2">
+                {salesForceAllocation?.isOverAllocated && (
+                  <div className="bg-rose-950/50 border border-rose-700/60 text-rose-200 rounded-lg px-3 py-2 text-xs">
+                    営業人員の配分合計が実在人数を{salesForceAllocation.overBy}人超えています（配分済み {salesForceAllocation.assignedTotal}
+                    人 / 配分可能 {salesForceAllocation.availableTotal}人）。現在の人員数に収まるように再編集してください。この状態では提出できません。
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={handleSaveDraft}
+                    disabled={busy}
+                    className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-2 text-sm"
+                  >
+                    {savePending ? "保存中…" : "下書きを保存"}
+                  </button>
+                  <button
+                    onClick={handleSubmitDraft}
+                    disabled={busy || Boolean(salesForceAllocation?.isOverAllocated)}
+                    title={salesForceAllocation?.isOverAllocated ? "営業人員の配分合計が実在人数を超えているため提出できません。" : undefined}
+                    className="bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-2 text-sm"
+                  >
+                    {submitPending ? "提出中…" : "この内容で提出する"}
+                  </button>
+                  {saveMessage && <span className="text-xs text-gray-300">{saveMessage}</span>}
+                  {submitMessage && <span className="text-xs text-gray-300">{submitMessage}</span>}
+                </div>
               </div>
             )}
           </div>
@@ -197,6 +223,24 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               </div>
             )}
             {processMessage && <div className="text-xs text-gray-300">{processMessage}</div>}
+
+            {/* 【Phase 8G】提出取り消し。四半期処理が失敗した場合（例：営業人員の配分合計が
+                実在人数を超えているエラー）でも、ここから入力へ戻って再提出できる。
+                処理失敗直後に限らず、提出済みの間は常に使えるようにしてある
+                （提出内容を見直したくなった場合にも同じ経路で戻れるようにするため）。 */}
+            <div className="border-t border-gray-700/60 pt-3">
+              <p className="text-xs text-gray-500 mb-2">
+                入力内容を見直したい場合や、処理が失敗した場合は、提出を取り消して編集に戻ることができます（提出内容はそのまま残ります）。
+              </p>
+              <button
+                onClick={handleWithdrawSubmission}
+                disabled={busy}
+                className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-2 text-sm"
+              >
+                {withdrawPending ? "取り消し中…" : "編集に戻す（提出を取り消す）"}
+              </button>
+              {withdrawMessage && <div className="text-xs text-gray-300 mt-1">{withdrawMessage}</div>}
+            </div>
           </div>
         )}
 

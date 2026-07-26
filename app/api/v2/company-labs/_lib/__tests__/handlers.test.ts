@@ -25,6 +25,7 @@ import {
   handleProcessQuarter,
   handleSaveDraft,
   handleSubmitDraft,
+  handleWithdrawDraft,
 } from "../handlers";
 
 const NOW = "2026-01-01T00:00:00.000Z";
@@ -351,6 +352,102 @@ test("内部エラー応答はRedisキー・スタックトレース等の内部
   assert.equal(result.status, 500);
   const body = result.body as { error: { message: string } };
   assert.ok(!body.error.message.includes("secret"), "内部エラー詳細がAPI応答に漏れている");
+});
+
+// -------------------------------------------------------------------
+// draft提出取り消し（withdrawDraft）（Phase 8G §1・Test13の詰み状態対応）
+// -------------------------------------------------------------------
+
+test("handleWithdrawDraft: 提出済みdraftを取り消すとsubmittedAtがnullに戻り、draft本体は変わらない", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-withdraw-basic" }), NOW);
+  await handleSaveDraft(deps, "lab-withdraw-basic", { draft: VALID_PLAYER_DRAFT_BODY }, NOW);
+  const submitResult = await handleSubmitDraft(deps, "lab-withdraw-basic", NOW);
+  assert.equal(submitResult.status, 200);
+  const submitBody = submitResult.body as { draft: { submittedAt: string | null } };
+  assert.notEqual(submitBody.draft.submittedAt, null);
+
+  const withdrawResult = await handleWithdrawDraft(deps, "lab-withdraw-basic", NOW);
+  assert.equal(withdrawResult.status, 200, JSON.stringify(withdrawResult.body));
+  const withdrawBody = withdrawResult.body as { draft: { submittedAt: string | null; draft: unknown } };
+  assert.equal(withdrawBody.draft.submittedAt, null, "取り消し後はsubmittedAtがnullへ戻るべき");
+  assert.deepEqual(withdrawBody.draft.draft, VALID_PLAYER_DRAFT_BODY, "取り消しはdraft本体を変更しない");
+
+  // 取り消し後は再編集・再提出・処理まで到達できる
+  const submitAgain = await handleSubmitDraft(deps, "lab-withdraw-basic", NOW);
+  assert.equal(submitAgain.status, 200);
+  const processResult = await handleProcessQuarter(deps, "lab-withdraw-basic", {}, NOW);
+  assert.equal(processResult.status, 200, JSON.stringify(processResult.body));
+});
+
+test("handleWithdrawDraft: 未提出draftに対する取り消しは冪等に成功する（submittedAtは既にnull）", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-withdraw-unsubmitted" }), NOW);
+  await handleSaveDraft(deps, "lab-withdraw-unsubmitted", { draft: VALID_PLAYER_DRAFT_BODY }, NOW);
+
+  const withdrawResult = await handleWithdrawDraft(deps, "lab-withdraw-unsubmitted", NOW);
+  assert.equal(withdrawResult.status, 200, JSON.stringify(withdrawResult.body));
+  const withdrawBody = withdrawResult.body as { draft: { submittedAt: string | null } };
+  assert.equal(withdrawBody.draft.submittedAt, null);
+});
+
+test("handleWithdrawDraft: draftが存在しないラボへの取り消しは409になる", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-withdraw-no-draft" }), NOW);
+  const withdrawResult = await handleWithdrawDraft(deps, "lab-withdraw-no-draft", NOW);
+  assert.equal(withdrawResult.status, 409, JSON.stringify(withdrawResult.body));
+});
+
+test("handleWithdrawDraft: 存在しないlabIdへの取り消しは404になる", async () => {
+  const deps = makeDeps();
+  const withdrawResult = await handleWithdrawDraft(deps, "no-such-lab", NOW);
+  assert.equal(withdrawResult.status, 404);
+});
+
+test("handleWithdrawDraft: 完了済みラボへの取り消しは409になり、状態は変更されない", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-withdraw-done", turns: 1 }), NOW);
+  await saveAndSubmitDraft(deps, "lab-withdraw-done");
+  const processResult = await handleProcessQuarter(deps, "lab-withdraw-done", {}, NOW);
+  assert.equal(processResult.status, 200);
+
+  const withdrawResult = await handleWithdrawDraft(deps, "lab-withdraw-done", NOW);
+  assert.equal(withdrawResult.status, 409, JSON.stringify(withdrawResult.body));
+});
+
+test("回帰: 四半期処理失敗（営業配分超過）でも、handleWithdrawDraft経由で編集に戻り修正・再提出・処理できる", async () => {
+  const deps = makeDeps();
+  const labId = "lab-withdraw-over-allocation";
+  await handleCreateLab(deps, baseCreateBody({ labId }), NOW);
+
+  // BAL向けの妥当なdraftを、営業人員配分だけ実在人数を超えるよう改変する
+  const overBudgetDraft = VALID_PLAYER_DRAFT_BODY as { salesPlans: { salesForceHeadcount: number }[] };
+  const overloaded = {
+    ...overBudgetDraft,
+    salesPlans: overBudgetDraft.salesPlans.map((p) => ({ ...p, salesForceHeadcount: p.salesForceHeadcount + 1000 })),
+  };
+
+  await handleSaveDraft(deps, labId, { draft: overloaded }, NOW);
+  await handleSubmitDraft(deps, labId, NOW);
+
+  const failedProcess = await handleProcessQuarter(deps, labId, {}, NOW);
+  assert.equal(failedProcess.status, 422, JSON.stringify(failedProcess.body));
+
+  // 失敗後もsubmittedAtは残ったまま（handlers.ts側では戻さない設計）
+  const stateAfterFailure = await handleGetLabState(deps, labId);
+  const stateAfterFailureBody = stateAfterFailure.body as { lab: { draft: { submittedAt: string | null } | null } };
+  assert.notEqual(stateAfterFailureBody.lab.draft?.submittedAt, null, "処理失敗後もdraftはsubmitted状態のまま残る");
+
+  const withdrawResult = await handleWithdrawDraft(deps, labId, NOW);
+  assert.equal(withdrawResult.status, 200, JSON.stringify(withdrawResult.body));
+  const withdrawBody = withdrawResult.body as { draft: { submittedAt: string | null } };
+  assert.equal(withdrawBody.draft.submittedAt, null);
+
+  // 修正した正しいdraftへ差し替えて再提出・再処理
+  await handleSaveDraft(deps, labId, { draft: VALID_PLAYER_DRAFT_BODY }, NOW);
+  await handleSubmitDraft(deps, labId, NOW);
+  const retryProcess = await handleProcessQuarter(deps, labId, {}, NOW);
+  assert.equal(retryProcess.status, 200, JSON.stringify(retryProcess.body));
 });
 
 // -------------------------------------------------------------------

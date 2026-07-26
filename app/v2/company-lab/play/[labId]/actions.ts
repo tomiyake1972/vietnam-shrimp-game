@@ -21,7 +21,7 @@
 import { revalidatePath } from "next/cache";
 import { requireStagingSession, assertSameOriginRequest } from "../../../../lib/companyLabUiSession";
 import { resolveCompanyLabUiDependencies } from "../_lib/uiDependencies";
-import { ApiResult, handleProcessQuarter, handleSaveDraft, handleSubmitDraft } from "../../../../api/v2/company-labs/_lib/handlers";
+import { ApiResult, handleProcessQuarter, handleSaveDraft, handleSubmitDraft, handleWithdrawDraft } from "../../../../api/v2/company-labs/_lib/handlers";
 
 export interface PlayerActionResult {
   readonly ok: boolean;
@@ -95,6 +95,21 @@ export async function submitDraftAction(labId: string): Promise<PlayerActionResu
 
   const deps = await resolveCompanyLabUiDependencies();
   const result = await handleSubmitDraft(deps, labId, new Date().toISOString());
+  revalidatePath(`/v2/company-lab/play/${labId}`);
+  return toActionResult(result);
+}
+
+/**
+ * 【Phase 8G】提出取り消し。submitDraftActionのちょうど逆で、ドラフト本体は
+ * 変更せずsubmittedAtだけをnullへ戻す。四半期処理が失敗した後（例：営業人員の
+ * 配分合計が実在人数を超えているエラー）に、プレイヤーが入力へ戻れるようにする。
+ */
+export async function withdrawDraftAction(labId: string): Promise<PlayerActionResult> {
+  const g = await guard();
+  if (!g.ok) return g.result;
+
+  const deps = await resolveCompanyLabUiDependencies();
+  const result = await handleWithdrawDraft(deps, labId, new Date().toISOString());
   revalidatePath(`/v2/company-lab/play/${labId}`);
   return toActionResult(result);
 }

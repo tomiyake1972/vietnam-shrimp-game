@@ -190,6 +190,36 @@ test("前期比なし: 初回四半期ではPD・VAPの前期比が0ではなく
   }
 });
 
+// 【Phase 8G】§B-1〜§B-2: 消費国別（仕向市場）HOSO価格の初回四半期・回帰テスト。
+// 以前は「VNの前期HOSO価格 × 市場係数」という代理値を前期比の分母に使っており、
+// 市場係数が分子分母で相殺されるため「(price-prior)/prior」がVN自身の変化率と
+// 数式的に一致してしまい、5市場すべてが同一の前期比を表示する誤表示（実例：
+// Test13 Turn1で全市場一律-20.0%）を引き起こしていた。本テストはこの誤表示が
+// 再発しないことを確認する。
+test("§B-1: 初回四半期の消費国別HOSO・PD・VAPは、代理値を使わず前期比「なし」（unavailable）になる", () => {
+  const marketResult = marketResultFor("turn1-destination-hoso");
+  const rows = buildDestinationMarketPriceRows(marketResult, null);
+  for (const row of rows) {
+    for (const product of ["hoso", "pd", "vap"] as const) {
+      assert.equal(row[product].source, "unavailable", `${row.market}/${product}: 初回四半期は前期比のデータ源が無いはず`);
+      assert.equal(row[product].changeRatio, null, `${row.market}/${product}: 初回四半期の前期比はnullのはず（捏造した%を出さない）`);
+      assert.equal(row[product].priorPrice, null, `${row.market}/${product}: 初回四半期の前期価格はnullのはず`);
+      assert.ok(Number.isFinite(row[product].price), `${row.market}/${product}: 当期価格自体は有限数のまま`);
+    }
+  }
+});
+
+test("§B-2回帰: 初回四半期に、消費国別HOSOの前期比が全市場で同一の値になることはない（VN自身のchangeRatioをそのまま echo しない）", () => {
+  const marketResult = marketResultFor("turn1-destination-hoso");
+  const rows = buildDestinationMarketPriceRows(marketResult, null);
+  const changeRatios = rows.map((r) => r.hoso.changeRatio);
+  // 修正後は全市場nullのはず（= 全市場が「同一の非nullな値」になる、という
+  // 以前のバグの再発を確実に検知するため、nullであることまで明示的に確認する）。
+  for (const cr of changeRatios) {
+    assert.equal(cr, null, "消費国別HOSOの前期比は初回四半期はnullであるべき（VNのchangeRatioを代理表示しない）");
+  }
+});
+
 test("前期比なし: 初回四半期でも産地国HOSOは確定結果に保存済みのpriorPriceから前期比が出る", () => {
   const marketResult = marketResultFor("turn1-hoso");
   for (const row of buildOriginCountryPriceRows(marketResult, null)) {
@@ -199,21 +229,6 @@ test("前期比なし: 初回四半期でも産地国HOSOは確定結果に保�
     assert.ok(row.hoso.changeRatio !== null);
     // 確定結果に保存されているchangeRatioと一致する（独自に別の式で出していない）。
     assert.ok(Math.abs((row.hoso.changeRatio as number) - marketResult.hosoPrices[row.country].changeRatio) < 1e-9);
-  }
-});
-
-test("前期比なし: 初回四半期の消費国別HOSOは、保存済みVN前期価格×同じ市場係数から出る（VNのchangeRatioと一致する）", () => {
-  const marketResult = marketResultFor("turn1-destination-hoso");
-  const rows = buildDestinationMarketPriceRows(marketResult, null);
-  const vnStoredChangeRatio = marketResult.hosoPrices.VN.changeRatio;
-  for (const row of rows) {
-    assert.equal(row.hoso.source, "storedPriorPrice");
-    assert.ok(row.hoso.changeRatio !== null);
-    // baseValueCoefficientは四半期によらない固定値なので、係数は前期比では打ち消える。
-    assert.ok(
-      Math.abs((row.hoso.changeRatio as number) - vnStoredChangeRatio) < 1e-9,
-      `${row.market}: 消費国別HOSOの前期比がVNの保存済みchangeRatioと一致しない`
-    );
   }
 });
 

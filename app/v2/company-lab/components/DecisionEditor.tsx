@@ -13,7 +13,12 @@ import { PeriodV2 } from "../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab";
 import { CAPEX_PARAMETERS_V1, CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../lib/v2/capex";
 import { formatHosoEqTons } from "../../../lib/v2/industryLab/ui/formatters";
-import { buildDecisionInputFromDraft, CompanyDecisionDraft } from "../decisionDraft";
+import {
+  buildDecisionInputFromDraft,
+  CompanyDecisionDraft,
+  resetAllSalesForceHeadcountToZero,
+  summarizeSalesForceAllocation,
+} from "../decisionDraft";
 import {
   addCapexCancelRequestToDraft,
   addCapexProposalToDraft,
@@ -149,6 +154,11 @@ export default function DecisionEditor(props: DecisionEditorProps) {
     lastQuarterRejectedCapexProposals,
     lastQuarterFinancialResult,
   } = props;
+
+  // --- 【Phase 8G】営業人員配分の集計。「配分済み/配分可能/未配分（or 超過）」の
+  // 常時表示と、提出前の警告・全0リセットに使う唯一の情報源（合計判定ロジックを
+  // ここと validateSalesForceHeadcountBudget で二重実装しない）。
+  const salesForceAllocation = summarizeSalesForceAllocation(draft.salesPlans, fixture.salesForceHeadcountTotal);
 
   const rawMaterialInventory = ownState.rawMaterialLots
     .filter((l) => l.status === "available")
@@ -379,7 +389,38 @@ export default function DecisionEditor(props: DecisionEditorProps) {
       </CollapsibleSection>
 
       {/* 販売計画 */}
-      <CollapsibleSection title="販売計画（市場×商品）" tone="input" testId="sales-plan-section">
+      <CollapsibleSection
+        title="販売計画（市場×商品）"
+        tone="input"
+        testId="sales-plan-section"
+        summaryRight={
+          salesForceAllocation.isOverAllocated
+            ? `営業人員 ${salesForceAllocation.overBy}人超過`
+            : `営業人員 配分済み ${salesForceAllocation.assignedTotal}人 / 配分可能 ${salesForceAllocation.availableTotal}人`
+        }
+      >
+        <div
+          data-testid="sales-force-allocation-summary"
+          className={`flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs ${
+            salesForceAllocation.isOverAllocated
+              ? "bg-rose-950/50 border border-rose-700/60 text-rose-200"
+              : "bg-gray-900/60 border border-gray-700/60 text-gray-300"
+          }`}
+        >
+          <span>
+            {salesForceAllocation.isOverAllocated
+              ? `配分済み ${salesForceAllocation.assignedTotal}人 / 配分可能 ${salesForceAllocation.availableTotal}人 / ${salesForceAllocation.overBy}人超過 — 現在の人員数に収まるように再編集してください。`
+              : `配分済み ${salesForceAllocation.assignedTotal}人 / 配分可能 ${salesForceAllocation.availableTotal}人 / 未配分 ${salesForceAllocation.remaining}人`}
+          </span>
+          <button
+            type="button"
+            onClick={() => onChange(resetAllSalesForceHeadcountToZero(draft))}
+            disabled={disabled}
+            className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-gray-100 rounded-md px-2 py-1 text-[11px] whitespace-nowrap"
+          >
+            営業配分をすべて0に戻す
+          </button>
+        </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs text-gray-300">
             <thead>
@@ -423,6 +464,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                     <NumberCell
                       value={row.salesForceHeadcount}
                       disabled={disabled}
+                      warn={salesForceAllocation.isOverAllocated}
                       onChange={(n) => {
                         const next = [...draft.salesPlans];
                         next[idx] = { ...row, salesForceHeadcount: Math.round(n) };
