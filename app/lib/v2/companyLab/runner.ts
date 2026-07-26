@@ -881,6 +881,14 @@ export function advanceCompanyLabQuarter(
         // 「稼働中設備の使用量」の基準にし、まだ稼働開始していない案件を予約量として
         // 数える。稼働中と予約が二重に数えられることはない（判定は
         // isCapexProjectOperationalAt へ一元化されているため）。
+        //
+        // 【Phase 8D監査L-1・安全側の仕様（意図的、修正不要）】このスペース枠は
+        // state.capexState（＝当四半期のcloseQuarterWithCapex呼び出しより前、
+        // すなわち当四半期の取消要求がまだ適用されていない状態）から算出する。
+        // そのため、同一四半期に取り消した案件のスペースは、その四半期の新規案件
+        // 承認には反映されず（再利用できず）、翌四半期のこの算出からはじめて
+        // 反映される。取消と新規承認を同時に行っても案件を過剰承認しない
+        // 安全側の挙動であり、意図した仕様である（Phase 8D監査L-1）。
         factorySpaceBudget: buildFactorySpaceApprovalBudget(
           buildCompanyFactorySpaceState({
             companyId: f.companyId,
