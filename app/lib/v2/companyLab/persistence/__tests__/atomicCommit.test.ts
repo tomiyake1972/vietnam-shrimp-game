@@ -211,6 +211,7 @@ async function setupLabWithSubmittedDraft(repo: CompanyLabStateRepository, labId
       financeState: { companies: [] },
       financingState: { companies: [] },
       capexState: { companies: [] },
+      workforceState: { companies: [] },
       isComplete: false,
     },
     now: "2026-01-01T00:00:00.000Z",

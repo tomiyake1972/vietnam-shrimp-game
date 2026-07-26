@@ -126,7 +126,10 @@ function coerceDraftOrRebuild(
   // （page.tsx）と同じ手順で自動方針の出力から初期値を組み立てる。
   const ownState = buildCompanyOwnState(restoredState, fixture);
   const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, restoredState.currentPeriod, turn);
-  return buildInitialDraft(fixture, autoDecision);
+  // 【Phase 8D-4】ワーカー人数の出発点は、fixtureの初期値ではなく会社状態として
+  // 保持されている前期末の総人数。これを渡さないと、四半期をまたぐたびに人数が
+  // 初期値へ戻るというテストプレイで見つかった不具合が再発する。
+  return buildInitialDraft(fixture, autoDecision, ownState.workforceState);
 }
 
 export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies, labId: string): Promise<PlayerScreenLoadResult> {

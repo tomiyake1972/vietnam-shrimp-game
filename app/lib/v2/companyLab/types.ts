@@ -41,6 +41,8 @@ import { BatchQualityAdjustment, MarketDeliveryObservation, QualityReliabilitySt
 import { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { CompanyFinancingState, FinancingRequestInput, FinancingState, FinancingQuarterResult } from "../financing/types";
 import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
+// 【Phase 8D-4】型のみの参照（workforce.ts 側も CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
+import type { CompanyWorkforceState, WorkforceState } from "./workforce";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -170,6 +172,11 @@ export interface CompanyOwnState {
   readonly financingState: CompanyFinancingState;
   /** 【Phase 8B-2A】前期末までの自社設備投資状態（案件ポートフォリオ）。 */
   readonly capexState: CompanyCapexState;
+  /**
+   * 【Phase 8D-4】前期末までの自社Worker総人数（工場別）。
+   * 意思決定画面はこれを出発点として増減差分を入力する。
+   */
+  readonly workforceState: CompanyWorkforceState;
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */
@@ -335,6 +342,12 @@ export interface CompanyLabState {
   readonly financingState: FinancingState;
   /** 【Phase 8B-2A】会社別の設備投資状態（案件ポートフォリオ。ターンをまたいで保持）。 */
   readonly capexState: CapexState;
+  /**
+   * 【Phase 8D-4】会社別・工場別のWorker総人数（ターンをまたいで保持）。
+   * Phase 8D以前は人員規模がどこにも保持されず、毎四半期fixtureの初期値へ戻っていた。
+   * 意思決定では増減差分を入力し、ここには「変更後の総人数」を保存する。
+   */
+  readonly workforceState: WorkforceState;
   readonly history: readonly CompanyQuarterRecord[];
   readonly isComplete: boolean;
 }

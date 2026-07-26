@@ -24,13 +24,20 @@ import {
 import { buildAllCapexCandidateViewModels, buildCapexPortfolioViewModel, CAPEX_EXPLANATION_DETAIL_TEXT, CAPEX_EXPLANATION_TEXT } from "../capexViewModel";
 import { buildCompanyProcessingCapacityViewModel, CapacityPoolKey } from "../processingCapacityViewModel";
 import { buildCompanyProcessingForecast } from "../processingForecastViewModel";
+import { buildCompanyInvestmentPlanningViewModel } from "../investmentPlanningViewModel";
+import { applyHeadcountChange, WORKFORCE_EXPLANATION_TEXT } from "../../../lib/v2/companyLab/workforce";
+import { CompanyFinancialQuarterResult } from "../../../lib/v2/finance/types";
 import CapacityEffectiveRatePanel from "./CapacityEffectiveRatePanel";
 import ProcessingForecastPanel from "./ProcessingForecastPanel";
-import CapexCandidateList from "./CapexCandidateList";
 import CapexDraftList from "./CapexDraftList";
 import CapexPortfolioList from "./CapexPortfolioList";
 import CollapsibleSection, { AreaToneLegend } from "./CollapsibleSection";
+import ColdStoragePanel from "./ColdStoragePanel";
+import FactorySpacePanel from "./FactorySpacePanel";
+import InvestmentCardList from "./InvestmentCardList";
+import PlanningWarningsPanel from "./PlanningWarningsPanel";
 import ProcessingCapacityPanel from "./ProcessingCapacityPanel";
+import WorkforcePanel from "./WorkforcePanel";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INFO_VALUE_CLASS, INPUT_CONTROL_CLASS, INPUT_CONTROL_WARN_CLASS, NO_VALUE_TEXT } from "./panelStyles";
 
 interface DecisionEditorProps {
@@ -50,6 +57,12 @@ interface DecisionEditorProps {
    * 何も表示していなかった（発見された不具合。今回の補足確認で追加）。
    */
   readonly lastQuarterRejectedCapexProposals?: readonly CapexRejectedProposal[];
+  /**
+   * 【Phase 8D-2】直近確定四半期のプレイヤー会社ぶんの財務結果。
+   * 投資回収の「1トンあたり限界利益」を実績から求めるためだけに使う。
+   * 無ければ（初回四半期など）回収年数は「算定対象外」と表示される。
+   */
+  readonly lastQuarterFinancialResult?: CompanyFinancialQuarterResult | null;
 }
 
 const LOAN_TYPE_LABELS: Record<CompanyDecisionDraft["financingRequest"]["desiredLoanType"], string> = {
@@ -125,7 +138,17 @@ function PriceAdjustmentCell(props: { readonly value: number; readonly onChange:
 }
 
 export default function DecisionEditor(props: DecisionEditorProps) {
-  const { fixture, ownState, draft, onChange, disabled, period, lastQuarterCapexEvents, lastQuarterRejectedCapexProposals } = props;
+  const {
+    fixture,
+    ownState,
+    draft,
+    onChange,
+    disabled,
+    period,
+    lastQuarterCapexEvents,
+    lastQuarterRejectedCapexProposals,
+    lastQuarterFinancialResult,
+  } = props;
 
   const rawMaterialInventory = ownState.rawMaterialLots
     .filter((l) => l.status === "available")
@@ -169,6 +192,30 @@ export default function DecisionEditor(props: DecisionEditorProps) {
     rawMaterialLots: ownState.rawMaterialLots,
   });
 
+  // --- 【Phase 8D-1】設備投資・Worker・工場スペース・保管・投資採算の共通view-model ---
+  // 【重要】この1つの関数呼び出しが、能力・処理見込み・必要Worker・スペース・保管・
+  // 投資カード・警告のすべての数字の出どころである。画面側では一切再計算しない。
+  const planning = buildCompanyInvestmentPlanningViewModel({
+    companyId: fixture.companyId,
+    baseFactories: fixture.factories,
+    capexState: { companies: [ownState.capexState] },
+    period,
+    productionPlans: decisionInputForForecast.productionPlans,
+    workerAssignments: decisionInputForForecast.workerAssignments,
+    workforceState: ownState.workforceState,
+    rawMaterialLots: ownState.rawMaterialLots,
+    finishedGoodsLots: ownState.finishedGoodsLots,
+    lastQuarterFinancialResult,
+    capexParams: CAPEX_PARAMETERS_V1,
+  });
+  const workforceRows = planning.workforceRows;
+  const freezingPackagingPool = capacityViewModel.companyTotals.find((p) => p.poolKey === "freezingPackaging");
+  const plannedFreezingProcessingTons = planning.forecast.rows.reduce((sum, r) => sum + r.forecastProcessedTons, 0);
+  const coldStorageTemplate = CAPEX_PARAMETERS_V1.templatesByType.coldStorageExpansion;
+  const coldStorageTonsPerProject = coldStorageTemplate.futureCapacityEffect.capacityIncreaseTonsPerQuarter ?? 0;
+  const coldStorageInvestmentUsdPerTon =
+    coldStorageTonsPerProject > 0 ? coldStorageTemplate.standardBudgetUsd / coldStorageTonsPerProject : undefined;
+
   // --- 【Phase 8B-3】設備投資セクション用の派生値 ---
   const capexCandidates = buildAllCapexCandidateViewModels(period, CAPEX_PARAMETERS_V1);
   const lastQuarterCapexEventsByProjectId = new Map((lastQuarterCapexEvents ?? []).map((e) => [e.projectId, e]));
@@ -201,6 +248,48 @@ export default function DecisionEditor(props: DecisionEditorProps) {
           {disabled && <span className="ml-2 text-amber-400">この四半期はすでに進行済みです。編集内容は次の四半期に反映されます。</span>}
         </div>
       </div>
+
+      {/* 【Phase 8D】現在の入力に対する警告（不足量と理由を文章でも示す） */}
+      <CollapsibleSection
+        title="現在の入力に対する警告"
+        tone="info"
+        testId="planning-warnings-section"
+        summaryRight={planning.warnings.length > 0 ? `${planning.warnings.length}件` : "なし"}
+      >
+        <PlanningWarningsPanel warnings={planning.warnings} />
+        <details className="mt-2">
+          <summary className="text-[11px] text-teal-400 hover:text-teal-300 cursor-pointer">
+            生産計画 → 必要能力 → 必要Worker → 必要スペース → 不足 → 投資 のつながり
+          </summary>
+          <ol className="mt-1 space-y-0.5">
+            {planning.chainExplanationSteps.map((s, i) => (
+              <li key={i} className="text-[11px] text-gray-400">
+                {s}
+              </li>
+            ))}
+          </ol>
+        </details>
+      </CollapsibleSection>
+
+      {/* 【Phase 8D-5】凍結・包装処理能力（フロー）と冷凍・冷蔵保管能力（ストック） */}
+      <CollapsibleSection
+        title="凍結・包装処理能力（フロー）と冷凍・冷蔵保管能力（ストック）"
+        tone="info"
+        testId="cold-storage-section"
+        summaryRight={
+          planning.coldStorage.utilizationRate !== undefined
+            ? `保管使用率 ${(planning.coldStorage.utilizationRate * 100).toFixed(1)}%`
+            : undefined
+        }
+      >
+        <ColdStoragePanel
+          state={planning.coldStorage}
+          freezingPackagingPool={freezingPackagingPool}
+          plannedProcessingTons={plannedFreezingProcessingTons}
+          investmentUsdPerStorageTon={coldStorageInvestmentUsdPerTon}
+          explanationText={planning.freezingVsStorageExplanation}
+        />
+      </CollapsibleSection>
 
       {/* 工場加工能力（現時点＋現在追加中） */}
       <CollapsibleSection
@@ -245,10 +334,17 @@ export default function DecisionEditor(props: DecisionEditorProps) {
           </div>
         )}
 
+        {/* 【Phase 8D-3】工場スペース（投資判断の物理的な制約） */}
         <div className="space-y-1.5">
-          <h4 className="text-xs font-semibold text-gray-300">投資案件候補（7種類）</h4>
-          <CapexCandidateList
-            candidates={capexCandidates}
+          <h4 className="text-xs font-semibold text-gray-300">工場スペース</h4>
+          <FactorySpacePanel state={planning.factorySpace} />
+        </div>
+
+        {/* 【Phase 8D-2】投資カード（再設計版） */}
+        <div className="space-y-1.5">
+          <h4 className="text-xs font-semibold text-gray-300">投資案件候補（{capexCandidates.length}種類）</h4>
+          <InvestmentCardList
+            cards={planning.investmentCards}
             currentCashUsd={currentCashUsd}
             draftPaymentThisQuarterUsd={capexDraftThisQuarterPaymentUsd}
             isDuplicate={(projectType) => isDuplicateProjectTypeInDraft(draft, projectType)}
@@ -536,60 +632,54 @@ export default function DecisionEditor(props: DecisionEditorProps) {
         </div>
       </CollapsibleSection>
 
-      {/* ワーカー配置 */}
-      <CollapsibleSection title="ワーカー配置（工場ごと）" tone="input" testId="worker-assignment-section">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-xs text-gray-300">
-            <thead>
-              <tr className={INFO_TABLE_HEAD_CLASS}>
-                <th className="pr-3 py-1">工場</th>
-                <th className="pr-3 py-1">常用人数</th>
-                <th className="pr-3 py-1">臨時人数</th>
-                <th className="pr-3 py-1">残業率(0〜1)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {draft.workerAssignments.map((row, idx) => (
-                <tr key={row.factoryId} className={INFO_TABLE_ROW_CLASS}>
-                  <td className="pr-3 py-1">{row.factoryId}</td>
-                  <td className="pr-3 py-1">
-                    <NumberCell
-                      value={row.regularHeadcount}
-                      disabled={disabled}
-                      onChange={(n) => {
-                        const next = [...draft.workerAssignments];
-                        next[idx] = { ...row, regularHeadcount: Math.round(n) };
-                        onChange({ ...draft, workerAssignments: next });
-                      }}
-                    />
-                  </td>
-                  <td className="pr-3 py-1">
-                    <NumberCell
-                      value={row.temporaryHeadcount}
-                      disabled={disabled}
-                      onChange={(n) => {
-                        const next = [...draft.workerAssignments];
-                        next[idx] = { ...row, temporaryHeadcount: Math.round(n) };
-                        onChange({ ...draft, workerAssignments: next });
-                      }}
-                    />
-                  </td>
-                  <td className="pr-3 py-1">
-                    <RatioCell
-                      value={row.overtimeRate}
-                      disabled={disabled}
-                      onChange={(n) => {
-                        const next = [...draft.workerAssignments];
-                        next[idx] = { ...row, overtimeRate: n };
-                        onChange({ ...draft, workerAssignments: next });
-                      }}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {/* 【Phase 8D-4】Worker増減 */}
+      <CollapsibleSection
+        title="Worker（工場作業者）の増減"
+        tone="input"
+        testId="worker-assignment-section"
+        description={WORKFORCE_EXPLANATION_TEXT}
+        summaryRight={
+          workforceRows.length > 0
+            ? `変更後 合計 ${workforceRows.reduce((s, r) => s + r.headcountAfter, 0).toLocaleString("en-US")}人 / 四半期人件費 ${formatUsd(
+                workforceRows.reduce((s, r) => s + r.costAfter.totalCostUsd, 0)
+              )}`
+            : undefined
+        }
+      >
+        <WorkforcePanel
+          rows={workforceRows}
+          disabled={disabled}
+          onChangeHeadcountDelta={(factoryId, delta) => {
+            const idx = draft.workerAssignments.findIndex((w) => w.factoryId === factoryId);
+            if (idx < 0) return;
+            const row = draft.workerAssignments[idx];
+            const before = row.regularHeadcountBefore ?? row.regularHeadcount;
+            const next = [...draft.workerAssignments];
+            next[idx] = {
+              ...row,
+              regularHeadcountBefore: before,
+              regularHeadcountChange: delta,
+              // 総人数（＝エンジンへ渡す絶対人数）は増減差分と同時に更新する。
+              // 逆算式は applyHeadcountChange に一元化し、画面側で別計算をしない。
+              regularHeadcount: applyHeadcountChange(before, delta),
+            };
+            onChange({ ...draft, workerAssignments: next });
+          }}
+          onChangeTemporaryHeadcount={(factoryId, value) => {
+            const idx = draft.workerAssignments.findIndex((w) => w.factoryId === factoryId);
+            if (idx < 0) return;
+            const next = [...draft.workerAssignments];
+            next[idx] = { ...next[idx], temporaryHeadcount: Math.round(value) };
+            onChange({ ...draft, workerAssignments: next });
+          }}
+          onChangeOvertimeRate={(factoryId, value) => {
+            const idx = draft.workerAssignments.findIndex((w) => w.factoryId === factoryId);
+            if (idx < 0) return;
+            const next = [...draft.workerAssignments];
+            next[idx] = { ...next[idx], overtimeRate: value };
+            onChange({ ...draft, workerAssignments: next });
+          }}
+        />
       </CollapsibleSection>
 
       {/* 【営業人員バジェット修正と合わせて発見・対応】資金調達（追加借入・任意期限前返済） */}

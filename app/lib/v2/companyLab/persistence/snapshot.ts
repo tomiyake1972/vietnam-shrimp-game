@@ -7,6 +7,7 @@
 // （types.ts冒頭コメント・CompanyLabProductionRuntimeSnapshotのコメント参照）。
 
 import { CompanyLabState } from "../types";
+import { deriveWorkforceStateFromDecisions, isWorkforceStateEmpty, WorkforceState } from "../workforce";
 import { CompanyLabRuntimeSnapshot } from "./types";
 
 /**
@@ -35,6 +36,8 @@ export function createCompanyLabRuntimeSnapshot(state: CompanyLabState): Company
     financeState: state.financeState,
     financingState: state.financingState,
     capexState: state.capexState,
+    // 【Phase 8D-4】Worker総人数（ターンをまたいで保持する会社状態）。
+    workforceState: state.workforceState,
     isComplete: state.isComplete,
   };
 }
@@ -73,9 +76,25 @@ export function restoreCompanyLabStateFromRuntimeSnapshot(
     financeState: snapshot.financeState,
     financingState: snapshot.financingState,
     capexState: snapshot.capexState,
+    // 【Phase 8D-4 後方互換】Phase 8D以前に保存されたスナップショットには
+    // workforceState が存在しない（schema側で空として復元される）。その場合は、
+    // 確定履歴に保存済みの意思決定（decisions[].workerAssignments）から
+    // 「実際にその四半期を動かした人数」をそのまま復元する。推測値は作らない。
+    // 履歴も無ければ空のままとし、会社単位のフォールバック
+    // （runner.ts buildCompanyOwnState）が fixture の基準人数を使う。
+    workforceState: isWorkforceStateEmpty(snapshot.workforceState)
+      ? restoreWorkforceStateFromHistory(history)
+      : snapshot.workforceState,
     history,
     isComplete: snapshot.isComplete,
   };
+}
+
+/** 確定履歴の最後のエントリの意思決定からWorker総人数を復元する（無ければ空）。 */
+function restoreWorkforceStateFromHistory(history: CompanyLabState["history"]): WorkforceState {
+  const last = history[history.length - 1];
+  if (!last) return { companies: [] };
+  return deriveWorkforceStateFromDecisions(last.decisions);
 }
 
 /**

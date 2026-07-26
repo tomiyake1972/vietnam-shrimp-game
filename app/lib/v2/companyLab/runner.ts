@@ -95,6 +95,7 @@ import type { QualityAdjustmentInput } from "../quality";
 import type { QualityReliabilityState } from "../quality/types";
 import { buildCompanyQualitySummary } from "./qualitySummary";
 import { buildCompanyFixtures } from "./fixtures";
+import { buildInitialWorkforceState, deriveNextWorkforceState } from "./workforce";
 import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { unwrapUsd } from "../finance/types";
@@ -302,6 +303,9 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
     capexState: {
       companies: fixtures.map((f) => buildInitialCompanyCapexState(f.companyId)),
     },
+    // 【Phase 8D-4】Worker総人数の初期状態。fixture.workerBaselineの常用人数を
+    // そのまま初期値とするため、Phase 8D以前と初期人数は完全に同じ。
+    workforceState: buildInitialWorkforceState(fixtures),
     history: [],
     isComplete: false,
   };
@@ -338,6 +342,11 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
   if (!financeStateForCompany || !financingStateForCompany || !capexStateForCompany) {
     throw new CompanyLabError(`会社 "${fixture.companyId}" の財務・資金繰り・設備投資状態が初期化されていません。`);
   }
+  // 【Phase 8D-4】前期末までの自社Worker総人数。旧保存データから復元した場合など、
+  // 万一この会社ぶんが欠けていれば fixture の基準人数から組み立て直す（0で埋めない）。
+  const workforceStateForCompany =
+    state.workforceState?.companies.find((c) => c.companyId === fixture.companyId) ??
+    buildInitialWorkforceState([fixture]).companies[0];
 
   return {
     companyId: fixture.companyId,
@@ -352,6 +361,7 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     financeState: financeStateForCompany,
     financingState: financingStateForCompany,
     capexState: capexStateForCompany,
+    workforceState: workforceStateForCompany,
   };
 }
 
@@ -939,6 +949,14 @@ export function advanceCompanyLabQuarter(
     financeState: financeStateAfter,
     financingState: financingStateAfter,
     capexState: capexStateAfter,
+    // 【Phase 8D-4】次期へ繰り越すWorker総人数は、当期にエンジンが実際に使った
+    // WorkerAssignment の絶対人数そのもの。UI側の増減計算とずれないよう、
+    // 差分を足し直すのではなく「実際に動かした人数」を保存する。
+    workforceState: deriveNextWorkforceState(
+      state.workforceState ?? buildInitialWorkforceState(fixtures),
+      fixtures,
+      new Map(decisions.map((d) => [d.companyId, d.workerAssignments]))
+    ),
     history,
     isComplete,
   };
