@@ -148,3 +148,106 @@ test("§A-4: 描画結果にNaN・Infinity・undefinedという文字列がそ�
   assert.ok(!html.includes("Infinity"), "出力にInfinityという文字列が含まれないこと");
   assert.ok(!html.includes("undefined"), "出力にundefinedという文字列が含まれないこと");
 });
+
+// 【ここから、表示名・説明文の改善（在庫状況4段階表示）の回帰テスト】
+// 消費国別・在庫循環の節内の表示専用の改善であり、内部フィールド名・計算ロジックには
+// 一切手を加えていないことを、描画結果から機械的に確認する。
+
+test('§C-1: 消費国別・在庫循環の節に「目標」という語が一切表示されない（プレイヤー向け表示では目標という語を使わない指示への準拠）', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(MarketPanel, {
+      marketResult: latestRecord.marketResult,
+      globalReasonCodes: latestRecord.globalReasonCodes,
+      consumerMarketRecords: latestRecord.consumerMarketRecords,
+    })
+  );
+
+  // 節全体を抽出し、その範囲内だけで「目標」という文字列が出ないことを確認する
+  // （節の外側・他の表には影響がないため、ファイル全体ではなく節の範囲で見る）。
+  const sectionStart = html.indexOf("消費国別・在庫循環");
+  assert.ok(sectionStart >= 0, "節の見出しが描画されていること（前提条件）");
+  const section = html.slice(sectionStart);
+  assert.ok(!section.includes("目標"), "「消費国別・在庫循環」節の表示テキストに「目標」という語が含まれないこと");
+});
+
+test("§C-2: 「現在」の在庫水準と「安心水準」がそれぞれ区別できる形で表示され、在庫状況の4段階ラベルのいずれかが各市場で表示される", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(MarketPanel, {
+      marketResult: latestRecord.marketResult,
+      globalReasonCodes: latestRecord.globalReasonCodes,
+      consumerMarketRecords: latestRecord.consumerMarketRecords,
+    })
+  );
+
+  assert.ok(html.includes("現在 "), "「現在」の在庫水準（月数）が描画されていること");
+  assert.ok(html.includes("安心水準 "), "「安心水準」（目標在庫月数の言い換え）が描画されていること");
+  assert.ok(html.includes("在庫状況："), "「在庫状況：」ラベルが描画されていること");
+
+  const validLabels = ["逼迫", "やや不足", "安心圏", "在庫過多"];
+  const occurrences = validLabels.filter((label) => html.includes(`在庫状況：${label}`));
+  assert.ok(occurrences.length > 0, "在庫状況の4段階のいずれかのラベルが実際に描画されていること");
+
+  // 5市場すべてに「在庫状況：」が1つずつ出ること（局面は市場ごとに異なりうるため、
+  // ラベルの内訳までは固定せず、出現回数だけを見る）。
+  const count = (html.match(/在庫状況：/g) ?? []).length;
+  assert.equal(count, Object.keys(DEMAND_MARKET_NAMES).length, "在庫状況ラベルは5市場ぶん、1つずつ描画されること");
+});
+
+test("§C-3: 在庫状況のラベルには既存の4色分けクラス（rose/amber/emerald/sky）のいずれかが必ず付与されている", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(MarketPanel, {
+      marketResult: latestRecord.marketResult,
+      globalReasonCodes: latestRecord.globalReasonCodes,
+      consumerMarketRecords: latestRecord.consumerMarketRecords,
+    })
+  );
+
+  const colorClassPattern = /bg-(rose|amber|emerald|sky)-950\/60 border border-(rose|amber|emerald|sky)-700\/50 text-(rose|amber|emerald|sky)-200/g;
+  const colorMatches = html.match(colorClassPattern) ?? [];
+  assert.equal(
+    colorMatches.length,
+    Object.keys(DEMAND_MARKET_NAMES).length,
+    "5市場ぶんの在庫状況バッジに、既存の色分け規則に沿ったクラスが付与されていること"
+  );
+});
+
+test("§C-4: 期末在庫量セルに「安心水準に必要な在庫量」という補足行が表示される（目標在庫量の言い換え）", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(MarketPanel, {
+      marketResult: latestRecord.marketResult,
+      globalReasonCodes: latestRecord.globalReasonCodes,
+      consumerMarketRecords: latestRecord.consumerMarketRecords,
+    })
+  );
+
+  assert.ok(html.includes("安心水準に必要な在庫量"), "「安心水準に必要な在庫量」という補足テキストが描画されていること");
+});
+
+test("§C-5: 在庫状況の4段階ラベルは、各市場のmarketPhaseと1対1で対応している（新しい閾値を導入していないことの確認）", () => {
+  // 表示層に新しい判定ロジックを追加していないことを、実際のconsumerMarketRecordsの
+  // marketPhaseから期待されるラベルを算出し、描画結果と突き合わせて確認する。
+  const PHASE_TO_LABEL: Record<string, string> = {
+    tight: "逼迫",
+    restocking: "やや不足",
+    balanced: "安心圏",
+    destocking: "在庫過多",
+  };
+
+  const html = renderToStaticMarkup(
+    React.createElement(MarketPanel, {
+      marketResult: latestRecord.marketResult,
+      globalReasonCodes: latestRecord.globalReasonCodes,
+      consumerMarketRecords: latestRecord.consumerMarketRecords,
+    })
+  );
+
+  assert.ok(latestRecord.consumerMarketRecords, "前提条件：consumerMarketRecordsが存在すること");
+  for (const record of latestRecord.consumerMarketRecords ?? []) {
+    const expectedLabel = PHASE_TO_LABEL[record.marketPhase];
+    assert.ok(expectedLabel, `未知のmarketPhase: ${record.marketPhase}`);
+    assert.ok(
+      html.includes(`在庫状況：${expectedLabel}`),
+      `${record.market}: marketPhase=${record.marketPhase}に対応する在庫状況ラベル「${expectedLabel}」が描画されていること`
+    );
+  }
+});
