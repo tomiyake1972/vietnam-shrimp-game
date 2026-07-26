@@ -94,7 +94,7 @@ export default function InvestmentCardList(props: InvestmentCardListProps) {
               />
               <Field
                 label="追加で必要なWorker"
-                value={card.additionalRequiredHeadcount > 0 ? `${Math.ceil(card.additionalRequiredHeadcount).toLocaleString("en-US")}人` : NO_VALUE_TEXT}
+                value={card.additionalRequiredHeadcount > 0 ? `${card.additionalRequiredHeadcount.toLocaleString("en-US")}人` : NO_VALUE_TEXT}
               />
 
               <Field
@@ -169,8 +169,14 @@ export default function InvestmentCardList(props: InvestmentCardListProps) {
                         増分限界利益: {usd(card.payback.incrementalContributionUsdPerQuarter ?? 0)} / 四半期
                       </li>
                       <li className="text-[10px] text-gray-500">
-                        増分キャッシュフロー: {usd(card.payback.incrementalCashFlowUsdPerQuarter ?? 0)} / 四半期（増分保守費{" "}
-                        {usd(card.payback.incrementalMaintenanceUsdPerQuarter)} を控除後）
+                        増分Worker人件費: −{usd(card.payback.incrementalLaborCostUsdPerQuarter)} / 四半期（
+                        {card.payback.incrementalRegularHeadcount.toLocaleString("en-US")}人）
+                      </li>
+                      <li className="text-[10px] text-gray-500">
+                        増分保守費: −{usd(card.payback.incrementalMaintenanceUsdPerQuarter)} / 四半期
+                      </li>
+                      <li className="text-[10px] text-gray-500">
+                        増分キャッシュフロー: {usd(card.payback.incrementalCashFlowUsdPerQuarter ?? 0)} / 四半期
                       </li>
                     </ul>
                   ) : (
@@ -183,6 +189,7 @@ export default function InvestmentCardList(props: InvestmentCardListProps) {
                       </li>
                     ))}
                   </ul>
+                  <p className="text-[10px] text-teal-400/90 mt-1">{card.payback.doubleCountingNote}</p>
                 </div>
 
                 <div>

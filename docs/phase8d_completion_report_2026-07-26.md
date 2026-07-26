@@ -297,7 +297,21 @@ Phase 8D以前、工場の能力は `Factory.freezingPackagingCapacity` とい�
 
 投資案件の増強対象は**承認時にスナップショット**される既存設計のため、
 **Phase 8D以前に承認済みの `coldStorageExpansion` は、これまでどおり凍結・包装処理能力を増やします。**
-確定済みの履歴が遡って変わることはありません（`CS-10` テストで固定）。
+確定済みの履歴が遡って変わることはありません。
+
+これを固定しているテストは次の3本です（うち2本は**保存・復元を経た**回帰確認）。
+
+| テスト | 検証経路 |
+|---|---|
+| `CS-10`（`phase8dCapacitySeparation.test.ts`） | 旧スナップショット（`targetProduct: "freezingPackaging"`）を持つ案件 → `applyCapexCapacityToFactories` → 凍結・包装処理能力が+500t |
+| **`PS-7`**（`phase8dPersistence.test.ts`） | 旧案件を含む状態 → **schemaVersion:1・workforceStateキー無しのJSONへ保存 → `decodeCompanyLabPersistedState` → `restoreCompanyLabStateFromRuntimeSnapshot`** → 完成四半期では増えず、稼働開始四半期から凍結・包装処理能力が+500t、保管能力は不変 |
+| **`PS-9`**（`phase8dPersistence.test.ts`） | 旧案件と新案件が同一会社に併存 → encode/decode/restore → それぞれの対象能力だけが増える |
+
+新規案件についても同様に確認しています。
+
+| テスト | 検証経路 |
+|---|---|
+| **`PS-8`**（`phase8dPersistence.test.ts`） | 現行テンプレート由来の新規案件 → encode/decode/restore → **保管能力のみ +1,250t、凍結・包装処理能力は不変** |
 
 ### 保管能力について今回**行っていない**こと（指示どおり）
 
@@ -369,7 +383,11 @@ PLにも反映されています（`rework` / `discardLoss` / `downgradeSalesDed
 
 ## 12. 投資回収計算の式と前提
 
-### 式
+> 【2026-07-26 追補】条件付き承認の指摘を受け、**追加Workerの四半期人件費を
+> 増分キャッシュフローから控除する**よう修正しました。二重控除にならない根拠は
+> 本節末尾の「二重控除にならないことの確認」を参照してください。
+
+### 式（修正後）
 
 ```
 1トンあたり限界利益 ＝ 直近確定四半期の実績限界利益額 ÷ 同四半期の実績販売トン
@@ -380,8 +398,13 @@ PLにも反映されています（`rework` / `discardLoss` / `downgradeSalesDed
                       − 「現在の処理見込み」
                       （見積り式ではなく、エンジン出力の差）
 
+増分Worker人数     ＝ ceil( 増分処理可能量を常用Workerだけで処理するのに必要な人数 )
+                      （production/labor.ts の requiredHeadcountForQuantity。
+                       エンジン内部の配分計算と同じ関数）
+増分Worker人件費   ＝ 増分Worker人数 × regularWorkerSalaryUsdPerQuarter（$1,000/四半期）
+
 増分限界利益       ＝ 増分処理可能量 × 1トンあたり限界利益
-増分キャッシュフロー ＝ 増分限界利益 − 増分四半期保守費
+増分キャッシュフロー ＝ 増分限界利益 − 増分四半期保守費 − 増分Worker四半期人件費
 概算投資回収年数   ＝ 投資総額 ÷ （増分キャッシュフロー × 4四半期）
 ```
 
@@ -390,8 +413,46 @@ PLにも反映されています（`rework` / `discardLoss` / `downgradeSalesDed
 - 限界利益は**直近の確定四半期の実績**をそのまま使用。将来の価格・原料費の変化は織り込まない
 - 増分処理可能量はエンジンの再実行結果の差（推測式ではない）
 - **減価償却費は非現金支出のため差し引かない**（増分キャッシュフロー基準）
-- 追加Workerの人件費は、増産をどこまで行うかで変わるため回収計算には含めず、カードに別途表示
+- **追加Workerの人件費は増分キャッシュフローから控除する**
+- 追加Worker人数は「増えた処理量をすべて常用Workerで処理する」前提。残業・臨時ワーカーで
+  吸収する場合の費用は**限界利益側ですでに控除済み**なので重ねて引かない
+- カードに表示する追加Worker人数・追加人件費と、回収計算で控除する金額は**同一の値**
+  （人数は整数へ切り上げ。表示と計算で人数が食い違わないようにするため）
 - **売上増加そのものは根拠にしていない**（販売できるかは営業の成約次第）
+
+### 追加Worker人件費の扱い
+
+| 項目 | 扱い | 理由 |
+|---|---|---|
+| 常用Worker（正社員）の増員人件費 | **増分CFから控除する** | 限界利益に含まれていない（固定製造費側） |
+| 臨時ワーカー費 | 控除しない | 限界利益ですでに控除済み（変動労務費） |
+| 残業費 | 控除しない | 同上 |
+| 減価償却費 | 控除しない | 非現金支出 |
+| 固定保守費 | 控除する | 現金支出であり、限界利益にも含まれない |
+
+### 二重控除にならないことの確認（コードで確認した費用構成）
+
+`app/lib/v2/finance/quarterClose.ts` を読み、次を確認しました。
+
+| 確認点 | 位置 | 内容 |
+|---|---|---|
+| 限界利益の定義 | `quarterClose.ts:1026` | `contributionMargin = netRevenue − totalVariableCost` |
+| 変動費の内訳 | `quarterClose.ts:1025` | 原料費＋加工費＋**変動労務費**＋品質費＋販売費 |
+| 変動労務費の中身 | `quarterClose.ts:1022` | `cogsLaborVariable` ＋（生産ゼロ時の臨時ワーカー費・残業費） |
+| `cogsLaborVariable` の元 | `quarterClose.ts:689`／`439` | `laborVariablePerTon` の積み上げ |
+| `laborVariablePerTon` の定義 | `finance/types.ts:162` | **「変動労務費（臨時ワーカー費＋残業費の配賦）」** |
+| 正社員給与の置き場所 | `finance/types.ts:166`／`quarterClose.ts:441` | **`laborFixedPerTon`（固定労務費＝正社員直接労務費の配賦）** |
+| 固定製造費の定義 | `quarterClose.ts:1029-1033` | `regularLaborCost` ＋ 工場固定費 ＋ 固定ユーティリティ ＋ 減価償却 |
+
+**結論：常用Worker（正社員）の給与は `fixedManufacturingCost` に入っており、
+限界利益の計算には一切含まれていません。** したがって、増分キャッシュフローから
+追加常用Workerの人件費を差し引くことは二重控除ではありません。
+
+逆に、増産を残業や臨時ワーカーで吸収する場合の費用は限界利益側ですでに控除済みであるため、
+そちらを重ねて引いてはいけません。本計算では追加人員を**すべて常用Worker**として数え、
+臨時ワーカー0人で算出しています（`computeRequiredRegularHeadcount` に `temporaryHeadcount: 0` を渡す）。
+
+この根拠は `PAYBACK_DOUBLE_COUNTING_NOTE` として文字列でも保持し、投資カードの詳細欄に表示します。
 
 ### 算定できない場合に数値を作らない
 
@@ -399,10 +460,16 @@ PLにも反映されています（`rework` / `discardLoss` / `downgradeSalesDed
 
 1. 増分処理可能量が0（＝別の制約が先に効いている、または能力を増やさない案件）
 2. 直近確定四半期の販売実績が無い（初回四半期など）
-3. 増分限界利益が増分保守費を上回らない
+3. **増分限界利益が「増分保守費 ＋ 増分Worker人件費」の合計を上回らない**
 
-`IP-10` テストが、式が売上ではなく限界利益・増分CFであることを数値で固定しています
-（限界利益/トン＜売上単価/トンであることも確認）。
+### 固定しているテスト
+
+| テスト | 内容 |
+|---|---|
+| `IP-10` | 式が売上ではなく限界利益・増分CFであること（限界利益/トン＜売上単価/トンも確認）。表示人数と控除人数が一致すること |
+| `IP-13` | 追加Worker人件費を控除すると増分CFが減り、回収年数が伸びること |
+| `IP-14` | 増分限界利益が保守費＋Worker人件費を下回るとき、回収年数を算定しないこと |
+| `IP-15` | **エンジンの実データ**で、限界利益に正社員給与が含まれず固定製造費側にあること |
 
 ---
 
@@ -449,15 +516,15 @@ PLにも反映されています（`rework` / `discardLoss` / `downgradeSalesDed
 
 ## 14. 追加・変更したテスト
 
-### 新規（計 50 件）
+### 新規（計 56 件）
 
 | ファイル | 件数 | 内容 |
 |---|---|---|
 | `companyLab/__tests__/phase8dBaseline.test.ts` | 5 | 32ターン完走・決定論性・NaN無し・自動方針は投資提案ゼロ・負値無し |
 | `production/__tests__/phase8dFactorySpace.test.ts` | 15 | 係数・総量導出・案件所要量・**二重計上防止**・不足判定・承認枠・不正値無し |
 | `companyLab/__tests__/phase8dCapacitySeparation.test.ts` | 11 | **凍結包装が生産上限**・保管は上限でない・**保管超過でも廃棄なし**・完成前は加算されない・完成後のみ増える・**スペース不足で承認拒否**・保管単価・旧案件の後方互換 |
-| `company-lab/__tests__/phase8dInvestmentPlanning.test.ts` | 12 | **Worker減で人数と人件費が減る**・**Worker不足で処理量減と未処理見込み**・**Worker増でも設備能力を超えない**・**見込みと実績が一致**・決定論性・不正値無し・**未実装効果を数値化しない**・**回収は限界利益/増分CF** |
-| `companyLab/persistence/__tests__/phase8dPersistence.test.ts` | 6 | **round-trip保持**（Worker・スペース・保管・能力・建設中案件）・**旧schema読み込み**・履歴からの復元 |
+| `company-lab/__tests__/phase8dInvestmentPlanning.test.ts` | 15 | **Worker減で人数と人件費が減る**・**Worker不足で処理量減と未処理見込み**・**Worker増でも設備能力を超えない**・**見込みと実績が一致**・決定論性・不正値無し・**未実装効果を数値化しない**・**回収は限界利益/増分CF** |
+| `companyLab/persistence/__tests__/phase8dPersistence.test.ts` | 9 | **round-trip保持**（Worker・スペース・保管・能力・建設中案件）・**旧schema読み込み**・履歴からの復元・**旧/新 coldStorageExpansion の効果が保存復元後も保たれること** |
 
 ### 変更（既存テストの期待値更新）
 

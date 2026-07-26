@@ -12,6 +12,8 @@ import assert from "node:assert/strict";
 import { unwrapUnit } from "../../../core/units";
 import { resolveFactoryColdStorageCapacityTons } from "../../../production/coldStorage";
 import { resolveFactoryTotalSpaceUnits } from "../../../production/factorySpace";
+import { applyCapexCapacityToFactories, computeOperationalStartPeriod } from "../../../capex/capacityEffect";
+import { CAPEX_PARAMETERS_V1 } from "../../../capex/parameters";
 import { encodeCompanyLabPersistedState, decodeCompanyLabPersistedState } from "../codec";
 import { createCompanyLabRuntimeSnapshot, restoreCompanyLabStateFromRuntimeSnapshot } from "../snapshot";
 import { CompanyLabPersistedStateV1, CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION } from "../types";
@@ -217,4 +219,225 @@ test("PS-5（必須14）: 履歴も無い旧データでも例外にならず、
 
 test("PS-6: 現行スキーマのバージョン番号が2へ上がっており、1のデータも受け付ける", () => {
   assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 2);
+});
+
+// ---------------------------------------------------------------------
+// 追補（指示4・5）: coldStorageExpansion の新旧効果が、保存・復元を経ても保たれる
+// ---------------------------------------------------------------------
+
+/**
+ * 保存された案件を1件だけ差し込んだランタイムスナップショットを作る。
+ * 完成済み・readiness=1 の設定にし、稼働開始四半期がスナップショットの
+ * 現在四半期より後になるようにして「完成しても稼働前」から検証を始められるようにする。
+ */
+function withStoredProject(
+  runtime: ReturnType<typeof createCompanyLabRuntimeSnapshot>,
+  companyId: string,
+  project: Record<string, unknown>
+) {
+  return {
+    ...runtime,
+    capexState: {
+      companies: runtime.capexState.companies.map((c) =>
+        c.companyId === companyId ? { ...c, portfolio: { ...c.portfolio, projects: [...c.portfolio.projects, project] } } : c
+      ),
+    },
+  } as unknown as ReturnType<typeof createCompanyLabRuntimeSnapshot>;
+}
+
+test("PS-7（追補4）: Phase 8D以前に承認された coldStorageExpansion は、旧保存形式（schemaVersion:1）からの読込み・復元を経ても、稼働開始時に従来どおり凍結・包装処理能力を増やす", () => {
+  const { fixtures, quarters } = runRealQuartersWithAutoPolicy(baseTestConfig({ turns: TURNS }), TURNS);
+  const last = quarters[quarters.length - 1];
+  const runtime = createCompanyLabRuntimeSnapshot(last.stateAfter);
+  const companyId = runtime.capexState.companies[0].companyId;
+  const completedPeriod = runtime.currentPeriod;
+
+  // Phase 8D以前に承認された案件は、承認時スナップショットとして
+  // targetProduct: "freezingPackaging" / 500t を保持している。
+  const legacyProject = {
+    projectId: "legacy-cold-storage-1",
+    companyId,
+    projectType: "coldStorageExpansion",
+    approvedBudgetUsd: 2_500_000,
+    paymentSchedule: [
+      { stageIndex: 0, plannedRatio: 0.5 },
+      { stageIndex: 1, plannedRatio: 0.5 },
+    ],
+    completedPaymentStagesCount: 2,
+    cumulativePaidUsd: 2_500_000,
+    elapsedConstructionQuartersWithPayment: 2,
+    requiredConstructionQuarters: 2,
+    status: "completed",
+    proposedPeriod: completedPeriod,
+    approvedPeriod: completedPeriod,
+    constructionStartedPeriod: completedPeriod,
+    completedPeriod,
+    capitalizedAmountUsd: 2_500_000,
+    priority: 1,
+    futureCapacityEffect: { targetProduct: "freezingPackaging", capacityIncreaseTonsPerQuarter: 500, readinessQuartersAfterCompletion: 1 },
+    lastDiagnosticReasons: ["legacy fixture: approved before Phase 8D"],
+  };
+
+  // 旧保存形式を再現する: schemaVersion:1、workforceStateキーごと無し。
+  const stored = buildStored(withStoredProject(runtime, companyId, legacyProject), fixtures, 1) as unknown as Record<string, unknown>;
+  const current = { ...(stored.currentState as Record<string, unknown>) };
+  const runtimeObj = { ...(current.runtime as Record<string, unknown>) };
+  delete runtimeObj.workforceState;
+  current.runtime = runtimeObj;
+  stored.currentState = current;
+  const json = JSON.stringify(stored);
+  assert.ok(!json.includes("workforceState"), "テスト前提: 旧データにworkforceStateが無いこと");
+
+  // 保存 → 読込み → 復元。
+  const decoded = decodeCompanyLabPersistedState(json);
+  const restored = restoreCompanyLabStateFromRuntimeSnapshot(decoded.config, decoded.currentState.runtime, [last.record]);
+
+  const project = restored.capexState.companies
+    .find((c) => c.companyId === companyId)!
+    .portfolio.projects.find((p) => p.projectId === "legacy-cold-storage-1")!;
+  assert.ok(project, "旧案件が復元されていません");
+  assert.equal(project.futureCapacityEffect?.targetProduct, "freezingPackaging", "承認時スナップショットが書き換わっています");
+  assert.equal(project.futureCapacityEffect?.capacityIncreaseTonsPerQuarter, 500);
+
+  const baseFactories = fixtures.find((f) => f.companyId === companyId)!.factories;
+  const baseFactory = baseFactories[0];
+
+  // 完成四半期時点ではまだ稼働前（readiness=1）。
+  const atCompletion = applyCapexCapacityToFactories(baseFactories, restored.capexState, completedPeriod);
+  assert.equal(
+    unwrapUnit(atCompletion[0].freezingPackagingCapacity),
+    unwrapUnit(baseFactory.freezingPackagingCapacity),
+    "完成四半期そのものでは、まだ能力は増えないはず"
+  );
+
+  // 稼働開始四半期（完成の翌四半期 ＋ readiness 1 ＝ 2四半期後）から増える。
+  const operationalStart = computeOperationalStartPeriod(completedPeriod, 1);
+  const atOperationalStart = applyCapexCapacityToFactories(baseFactories, restored.capexState, operationalStart);
+  assert.ok(
+    Math.abs(unwrapUnit(atOperationalStart[0].freezingPackagingCapacity) - (unwrapUnit(baseFactory.freezingPackagingCapacity) + 500)) < 1e-6,
+    `旧案件は従来どおり凍結・包装処理能力を+500t/四半期するはず（実際: ${unwrapUnit(atOperationalStart[0].freezingPackagingCapacity)}）`
+  );
+  // 保管能力のほうは増えない（旧案件の効果はフロー側のみ）。
+  assert.equal(
+    resolveFactoryColdStorageCapacityTons(atOperationalStart[0]),
+    resolveFactoryColdStorageCapacityTons(baseFactory),
+    "旧案件が保管能力まで増やしてしまっています"
+  );
+});
+
+test("PS-8（追補5）: Phase 8D以降の新規 coldStorageExpansion は、保存・復元後も冷凍・冷蔵保管能力だけを増やし、凍結・包装処理能力を増やさない", () => {
+  const { fixtures, quarters } = runRealQuartersWithAutoPolicy(baseTestConfig({ turns: TURNS }), TURNS);
+  const last = quarters[quarters.length - 1];
+  const runtime = createCompanyLabRuntimeSnapshot(last.stateAfter);
+  const companyId = runtime.capexState.companies[0].companyId;
+  const completedPeriod = runtime.currentPeriod;
+
+  // 新規案件は、現行テンプレートの承認時スナップショット（保管1,250t）を持つ。
+  const template = CAPEX_PARAMETERS_V1.templatesByType.coldStorageExpansion;
+  assert.equal(template.futureCapacityEffect.targetProduct, "coldStorage", "前提: 現行テンプレートは保管を対象とすること");
+  const newProject = {
+    projectId: "new-cold-storage-1",
+    companyId,
+    projectType: "coldStorageExpansion",
+    approvedBudgetUsd: template.standardBudgetUsd,
+    paymentSchedule: template.paymentRatios.map((plannedRatio, stageIndex) => ({ stageIndex, plannedRatio })),
+    completedPaymentStagesCount: template.paymentRatios.length,
+    cumulativePaidUsd: template.standardBudgetUsd,
+    elapsedConstructionQuartersWithPayment: template.standardConstructionQuarters,
+    requiredConstructionQuarters: template.standardConstructionQuarters,
+    status: "completed",
+    proposedPeriod: completedPeriod,
+    approvedPeriod: completedPeriod,
+    constructionStartedPeriod: completedPeriod,
+    completedPeriod,
+    capitalizedAmountUsd: template.standardBudgetUsd,
+    priority: 1,
+    futureCapacityEffect: template.futureCapacityEffect,
+    lastDiagnosticReasons: ["phase8d fixture: approved after Phase 8D"],
+  };
+
+  const stored = buildStored(withStoredProject(runtime, companyId, newProject), fixtures, CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION);
+  const decoded = decodeCompanyLabPersistedState(encodeCompanyLabPersistedState(stored));
+  const restored = restoreCompanyLabStateFromRuntimeSnapshot(decoded.config, decoded.currentState.runtime, [last.record]);
+
+  const project = restored.capexState.companies
+    .find((c) => c.companyId === companyId)!
+    .portfolio.projects.find((p) => p.projectId === "new-cold-storage-1")!;
+  assert.equal(project.futureCapacityEffect?.targetProduct, "coldStorage");
+  assert.equal(project.futureCapacityEffect?.capacityIncreaseTonsPerQuarter, 1_250);
+
+  const baseFactories = fixtures.find((f) => f.companyId === companyId)!.factories;
+  const baseFactory = baseFactories[0];
+
+  const operationalStart = computeOperationalStartPeriod(completedPeriod, template.postCompletionReadinessQuarters);
+  const atOperationalStart = applyCapexCapacityToFactories(baseFactories, restored.capexState, operationalStart);
+
+  assert.ok(
+    Math.abs(resolveFactoryColdStorageCapacityTons(atOperationalStart[0]) - (resolveFactoryColdStorageCapacityTons(baseFactory) + 1_250)) < 1e-6,
+    `新規案件は保管能力を+1,250t（同時保管量）するはず（実際: ${resolveFactoryColdStorageCapacityTons(atOperationalStart[0])}）`
+  );
+  assert.equal(
+    unwrapUnit(atOperationalStart[0].freezingPackagingCapacity),
+    unwrapUnit(baseFactory.freezingPackagingCapacity),
+    "新規案件が凍結・包装処理能力（フロー）まで増やしてしまっています"
+  );
+});
+
+test("PS-9（追補4・5）: 旧案件と新案件が同じ会社に併存しても、保存・復元後にそれぞれの対象能力だけが増える", () => {
+  const { fixtures, quarters } = runRealQuartersWithAutoPolicy(baseTestConfig({ turns: TURNS }), TURNS);
+  const last = quarters[quarters.length - 1];
+  const runtime = createCompanyLabRuntimeSnapshot(last.stateAfter);
+  const companyId = runtime.capexState.companies[0].companyId;
+  const completedPeriod = runtime.currentPeriod;
+
+  const common = {
+    companyId,
+    projectType: "coldStorageExpansion",
+    approvedBudgetUsd: 2_500_000,
+    paymentSchedule: [
+      { stageIndex: 0, plannedRatio: 0.5 },
+      { stageIndex: 1, plannedRatio: 0.5 },
+    ],
+    completedPaymentStagesCount: 2,
+    cumulativePaidUsd: 2_500_000,
+    elapsedConstructionQuartersWithPayment: 2,
+    requiredConstructionQuarters: 2,
+    status: "completed",
+    proposedPeriod: completedPeriod,
+    approvedPeriod: completedPeriod,
+    constructionStartedPeriod: completedPeriod,
+    completedPeriod,
+    capitalizedAmountUsd: 2_500_000,
+    priority: 1,
+    lastDiagnosticReasons: [],
+  };
+
+  let withProjects = withStoredProject(runtime, companyId, {
+    ...common,
+    projectId: "mixed-legacy",
+    futureCapacityEffect: { targetProduct: "freezingPackaging", capacityIncreaseTonsPerQuarter: 500, readinessQuartersAfterCompletion: 1 },
+  });
+  withProjects = withStoredProject(withProjects, companyId, {
+    ...common,
+    projectId: "mixed-new",
+    futureCapacityEffect: { targetProduct: "coldStorage", capacityIncreaseTonsPerQuarter: 1_250, readinessQuartersAfterCompletion: 1 },
+  });
+
+  const stored = buildStored(withProjects, fixtures, CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION);
+  const decoded = decodeCompanyLabPersistedState(encodeCompanyLabPersistedState(stored));
+  const restored = restoreCompanyLabStateFromRuntimeSnapshot(decoded.config, decoded.currentState.runtime, [last.record]);
+
+  const baseFactories = fixtures.find((f) => f.companyId === companyId)!.factories;
+  const baseFactory = baseFactories[0];
+  const operationalStart = computeOperationalStartPeriod(completedPeriod, 1);
+  const after = applyCapexCapacityToFactories(baseFactories, restored.capexState, operationalStart);
+
+  assert.ok(
+    Math.abs(unwrapUnit(after[0].freezingPackagingCapacity) - (unwrapUnit(baseFactory.freezingPackagingCapacity) + 500)) < 1e-6,
+    "旧案件ぶんの凍結・包装処理能力の増加が正しくありません"
+  );
+  assert.ok(
+    Math.abs(resolveFactoryColdStorageCapacityTons(after[0]) - (resolveFactoryColdStorageCapacityTons(baseFactory) + 1_250)) < 1e-6,
+    "新案件ぶんの保管能力の増加が正しくありません"
+  );
 });

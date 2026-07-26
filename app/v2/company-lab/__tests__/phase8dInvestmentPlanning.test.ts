@@ -28,7 +28,13 @@ import {
 } from "../../../lib/v2/companyLab";
 import { CAPEX_PARAMETERS_V1 } from "../../../lib/v2/capex";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "../decisionDraft";
-import { buildCompanyInvestmentPlanningViewModel, PROJECT_EFFECT_DISCLOSURES } from "../investmentPlanningViewModel";
+import { FINANCE_PARAMETERS_V1 } from "../../../lib/v2/finance/parameters";
+import {
+  buildCompanyInvestmentPlanningViewModel,
+  buildPaybackEstimate,
+  PAYBACK_DOUBLE_COUNTING_NOTE,
+  PROJECT_EFFECT_DISCLOSURES,
+} from "../investmentPlanningViewModel";
 
 const PLAYER = "BAL";
 
@@ -350,11 +356,18 @@ test("IP-10（必須12）: 投資回収は、売上ではなく実績の限界�
       Math.abs(p.incrementalContributionUsdPerQuarter! - p.incrementalProcessableTonsPerQuarter * p.contributionMarginUsdPerTon!) < 1e-6,
       "増分限界利益が「増分処理量 × 限界利益/トン」になっていません"
     );
-    // 増分CF ＝ 増分限界利益 − 増分保守費（減価償却は非現金なので引かない）。
+    // 増分CF ＝ 増分限界利益 − 増分保守費 − 増分Worker人件費
+    // （減価償却は非現金なので引かない）。
     assert.ok(
-      Math.abs(p.incrementalCashFlowUsdPerQuarter! - (p.incrementalContributionUsdPerQuarter! - p.incrementalMaintenanceUsdPerQuarter)) < 1e-6,
-      "増分キャッシュフローが「増分限界利益 − 増分保守費」になっていません"
+      Math.abs(
+        p.incrementalCashFlowUsdPerQuarter! -
+          (p.incrementalContributionUsdPerQuarter! - p.incrementalMaintenanceUsdPerQuarter - p.incrementalLaborCostUsdPerQuarter)
+      ) < 1e-6,
+      "増分キャッシュフローが「増分限界利益 − 増分保守費 − 増分Worker人件費」になっていません"
     );
+    // 追加Worker人件費は、カードに表示している人数と同じ人数から算出されている。
+    assert.equal(p.incrementalRegularHeadcount, card.additionalRequiredHeadcount);
+    assert.equal(p.incrementalLaborCostUsdPerQuarter, card.additionalQuarterlyLaborCostUsd);
     // 回収年数 ＝ 投資総額 ÷ (増分CF × 4四半期)。
     assert.ok(
       Math.abs(p.paybackYears! - card.candidate.totalInvestmentUsd / (p.incrementalCashFlowUsdPerQuarter! * 4)) < 1e-6,
@@ -373,6 +386,112 @@ test("IP-10（必須12）: 投資回収は、売上ではなく実績の限界�
 // ---------------------------------------------------------------------
 // 補足: 「投資は完成するまで当期能力を増やさない」ことがカード上でも明示される
 // ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// 追補: 追加Worker人件費の控除と、二重控除でないことの確認
+// ---------------------------------------------------------------------
+
+test("IP-13（追補1）: 増分処理量に追加Workerが必要な場合、その四半期人件費が増分キャッシュフローから控除される", () => {
+  // 純粋関数として直接検証する（実データでは原料がボトルネックになり増分0になる場合があるため、
+  // 「人件費が確かに引かれること」を式のレベルで固定する）。
+  const withoutLabor = buildPaybackEstimate({
+    totalInvestmentUsd: 3_000_000,
+    incrementalProcessableTonsPerQuarter: 500,
+    contributionMarginUsdPerTon: 1_000,
+    incrementalMaintenanceUsdPerQuarter: 22_500,
+    incrementalRegularHeadcount: 0,
+    incrementalLaborCostUsdPerQuarter: 0,
+    hasLastQuarterResult: true,
+    noEffectReason: undefined,
+  });
+  const withLabor = buildPaybackEstimate({
+    totalInvestmentUsd: 3_000_000,
+    incrementalProcessableTonsPerQuarter: 500,
+    contributionMarginUsdPerTon: 1_000,
+    incrementalMaintenanceUsdPerQuarter: 22_500,
+    incrementalRegularHeadcount: 110,
+    incrementalLaborCostUsdPerQuarter: 110_000,
+    hasLastQuarterResult: true,
+    noEffectReason: undefined,
+  });
+
+  assert.equal(withoutLabor.incrementalContributionUsdPerQuarter, 500_000);
+  assert.equal(withoutLabor.incrementalCashFlowUsdPerQuarter, 500_000 - 22_500);
+  assert.equal(withLabor.incrementalCashFlowUsdPerQuarter, 500_000 - 22_500 - 110_000);
+  assert.ok(
+    withLabor.paybackYears! > withoutLabor.paybackYears!,
+    "追加Worker人件費を控除したのに回収年数が伸びていません"
+  );
+  assert.ok(withLabor.formulaText.includes("増分Worker四半期人件費"), "式に増分Worker人件費が明記されていません");
+});
+
+test("IP-14（追補1）: 増分限界利益が保守費＋Worker人件費を上回らない場合、回収年数を算定しない", () => {
+  const result = buildPaybackEstimate({
+    totalInvestmentUsd: 3_000_000,
+    incrementalProcessableTonsPerQuarter: 100,
+    contributionMarginUsdPerTon: 500, // 増分限界利益 50,000
+    incrementalMaintenanceUsdPerQuarter: 22_500,
+    incrementalRegularHeadcount: 40,
+    incrementalLaborCostUsdPerQuarter: 40_000, // 合計 62,500 > 50,000
+    hasLastQuarterResult: true,
+    noEffectReason: undefined,
+  });
+  assert.equal(result.isComputable, false);
+  assert.equal(result.paybackYears, undefined);
+  assert.ok(result.notComputableReason!.includes("Worker人件費"), "理由に追加Worker人件費が触れられていません");
+  assert.ok(result.incrementalCashFlowUsdPerQuarter! < 0);
+});
+
+test("IP-15（追補2）: 実績限界利益に常用Workerの給与が含まれておらず、二重控除にならないことをエンジンの実データで確認する", () => {
+  const { state: initialState, fixtures } = initializeCompanyLab(baseConfig("phase8d-ip-015"));
+  const publicInfo = buildPublicMarketInfo(initialState);
+  const decisions: Record<string, CompanyDecisionInput> = {};
+  for (const f of fixtures) {
+    const ownState = buildCompanyOwnState(initialState, f);
+    decisions[f.companyId] = generateAutoPolicyDecision(f, ownState, publicInfo, initialState.currentPeriod, 1);
+  }
+  const state = advanceCompanyLabQuarter(initialState, fixtures, decisions);
+  const report = state.history[state.history.length - 1].financialResults.find((r) => r.companyId === PLAYER)!.contributionMargin;
+
+  // 限界利益 ＝ 純売上高 − 変動費合計。この恒等式が成り立つことをまず確認する。
+  const netRevenue = report.netRevenue as unknown as number;
+  const totalVariableCost = report.totalVariableCost as unknown as number;
+  assert.ok(
+    Math.abs((report.contributionMargin as unknown as number) - (netRevenue - totalVariableCost)) < 1e-6,
+    "限界利益＝純売上高−変動費合計 が成り立っていません"
+  );
+
+  // 変動費合計の内訳に、正社員給与の項目が存在しないこと（労務費は変動労務費のみ）。
+  const variableParts =
+    (report.variableRawMaterialCost as unknown as number) +
+    (report.variableProcessingCost as unknown as number) +
+    (report.variableLaborCost as unknown as number) +
+    (report.variableQualityCost as unknown as number) +
+    (report.variableSellingCost as unknown as number);
+  assert.ok(Math.abs(variableParts - totalVariableCost) < 1e-6, "変動費の内訳合計が totalVariableCost と一致しません");
+
+  // 正社員給与は固定製造費の側にあり、その金額は「正社員数 × 単価」以上である
+  // （固定製造費＝正社員労務費＋工場固定費＋固定ユーティリティ＋減価償却）。
+  const summary = state.history[state.history.length - 1].companySummaries.find((s) => s.companyId === PLAYER)!;
+  void summary;
+  const regularHeadcount = state.workforceState.companies.find((c) => c.companyId === PLAYER)!.factories[0].regularHeadcount;
+  const regularSalaryTotal = regularHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter;
+  assert.ok(regularSalaryTotal > 0, "前提: 常用Workerが存在すること");
+  assert.ok(
+    (report.fixedManufacturingCost as unknown as number) >= regularSalaryTotal - 1e-6,
+    "正社員給与総額が固定製造費に含まれていません（含まれていれば固定製造費はこれ以上になる）"
+  );
+
+  // 変動労務費は、正社員給与総額よりはるかに小さい（＝正社員給与が変動費側に紛れ込んでいない）。
+  assert.ok(
+    (report.variableLaborCost as unknown as number) < regularSalaryTotal,
+    "変動労務費に正社員給与が含まれている可能性があります（二重控除の危険）"
+  );
+
+  // 説明文が、この費用構成をそのまま述べていること。
+  assert.ok(PAYBACK_DOUBLE_COUNTING_NOTE.includes("固定製造費"));
+  assert.ok(PAYBACK_DOUBLE_COUNTING_NOTE.includes("臨時ワーカー費＋残業費"));
+});
 
 test("IP-11: すべての投資カードに、当期には利用できないことの注記が付く", () => {
   const { state, fixture, draft } = setup("phase8d-ip-011");

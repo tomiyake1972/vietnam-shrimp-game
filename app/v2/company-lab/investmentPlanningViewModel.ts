@@ -183,6 +183,35 @@ export interface WorkforcePlanRow {
 // 3. 投資カード
 // ---------------------------------------------------------------------
 
+/**
+ * 【Phase 8D 追補】追加Worker人件費を増分キャッシュフローから控除しても
+ * 二重控除にならないことの根拠。コードで確認した費用構成をそのまま記述する。
+ *
+ * finance/quarterClose.ts を確認した結果:
+ *   - 限界利益 ＝ 純売上高 − totalVariableCost（quarterClose.ts:1026）
+ *   - totalVariableCost の労務費部分は variableLaborCost だけであり、
+ *     その中身は cogsLaborVariable ＋（生産ゼロ時の臨時ワーカー費・残業費）
+ *     （quarterClose.ts:1022, 1025）
+ *   - cogsLaborVariable は laborVariablePerTon の積み上げであり、
+ *     laborVariablePerTon の定義は「変動労務費（**臨時ワーカー費＋残業費**の配賦）」
+ *     （finance/types.ts:162、quarterClose.ts:439）
+ *   - **正社員（常用Worker）の給与は laborFixedPerTon（固定労務費）として分離**され
+ *     （finance/types.ts:166、quarterClose.ts:441）、
+ *     fixedManufacturingCost ＝ regularLaborCost ＋ 工場固定費 ＋ 固定ユーティリティ ＋ 減価償却
+ *     として**限界利益の外側**に置かれている（quarterClose.ts:1029-1033）
+ *
+ * したがって「実績限界利益／販売トン」には常用Workerの給与が一切含まれておらず、
+ * 増分キャッシュフローから追加常用Workerの人件費を差し引くことは二重控除ではない。
+ * 逆に、残業・臨時ワーカーで増産を吸収する場合の費用は限界利益側ですでに
+ * 控除済みであるため、こちらを重ねて引いてはいけない（本計算では追加人員を
+ * すべて常用Workerとして数え、臨時ワーカー0人で算出している）。
+ */
+export const PAYBACK_DOUBLE_COUNTING_NOTE =
+  "追加Workerの人件費は、限界利益と二重に控除されていません。" +
+  "エンジンの限界利益（ContributionMarginReport）に含まれる労務費は「変動労務費＝臨時ワーカー費＋残業費」だけであり、" +
+  "常用Worker（正社員）の給与は固定製造費（fixedManufacturingCost）として限界利益の外側に置かれているためです。" +
+  "そのため、増産のために常用Workerを増やす場合の人件費は、増分キャッシュフローから別途差し引く必要があります。";
+
 /** 投資回収の算定結果。算定できない場合は理由を返し、数値を作らない。 */
 export interface PaybackEstimate {
   readonly isComputable: boolean;
@@ -196,13 +225,28 @@ export interface PaybackEstimate {
   readonly incrementalContributionUsdPerQuarter?: number;
   /** 稼働開始後に増える四半期固定保守費（USD/四半期）。 */
   readonly incrementalMaintenanceUsdPerQuarter: number;
-  /** 増分キャッシュフロー（USD/四半期）＝増分限界利益 − 増分保守費。減価償却は非現金なので含めない。 */
+  /**
+   * 【Phase 8D 追補】増分処理量を実際に処理するために追加で必要になる
+   * 常用Workerの四半期人件費（USD/四半期）。
+   * 正社員給与は限界利益の計算に含まれていない（固定費側）ため、ここで控除しても
+   * 二重控除にはならない。根拠は doubleCountingNote を参照。
+   */
+  readonly incrementalLaborCostUsdPerQuarter: number;
+  /** 上記の人件費に対応する追加常用Worker人数（整数。1人未満は切り上げ）。 */
+  readonly incrementalRegularHeadcount: number;
+  /**
+   * 増分キャッシュフロー（USD/四半期）
+   *   ＝ 増分限界利益 − 増分保守費 − 増分Worker人件費
+   * 減価償却は非現金支出なので含めない。
+   */
   readonly incrementalCashFlowUsdPerQuarter?: number;
   /** 概算投資回収年数（投資総額 ÷ 年間増分キャッシュフロー）。 */
   readonly paybackYears?: number;
   /** 算定式と前提の説明（画面・Excelに必ず併記する）。 */
   readonly formulaText: string;
   readonly assumptionTexts: readonly string[];
+  /** 追加Worker人件費が二重控除にならない根拠（コードで確認した費用構成）。 */
+  readonly doubleCountingNote: string;
 }
 
 export interface InvestmentCardViewModel {
@@ -574,7 +618,10 @@ export function buildCompanyInvestmentPlanningViewModel(
         appliedOvertimeRate: representative?.overtimeRate ?? 0,
         temporaryHeadcount: 0,
       });
-      additionalRequiredHeadcount = extra.requiredRegularHeadcount;
+      // 採用は人単位でしか行えないため、切り上げた整数人数を採用する。
+      // カードの表示人数と、投資回収から控除する人件費が必ず同じ人数に基づくようにする
+      // （表示と計算で人数が食い違わないようにするため）。
+      additionalRequiredHeadcount = Math.ceil(extra.requiredRegularHeadcount);
     }
     const additionalQuarterlyLaborCostUsd = additionalRequiredHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter;
 
@@ -590,6 +637,10 @@ export function buildCompanyInvestmentPlanningViewModel(
       incrementalProcessableTonsPerQuarter,
       contributionMarginUsdPerTon,
       incrementalMaintenanceUsdPerQuarter,
+      // 【Phase 8D 追補】増分処理量を実現するために必要な追加Workerの人件費を控除する。
+      // カードに表示している人数・金額と同一の値をそのまま渡す。
+      incrementalRegularHeadcount: additionalRequiredHeadcount,
+      incrementalLaborCostUsdPerQuarter: additionalQuarterlyLaborCostUsd,
       hasLastQuarterResult: Boolean(input.lastQuarterFinancialResult),
       noEffectReason,
     });
@@ -751,24 +802,32 @@ export function buildPaybackEstimate(input: {
   readonly incrementalProcessableTonsPerQuarter: number;
   readonly contributionMarginUsdPerTon: number | undefined;
   readonly incrementalMaintenanceUsdPerQuarter: number;
+  /** 増分処理量を処理するために追加で必要になる常用Worker人数（整数）。 */
+  readonly incrementalRegularHeadcount: number;
+  /** 上記の四半期人件費（USD/四半期）。 */
+  readonly incrementalLaborCostUsdPerQuarter: number;
   readonly hasLastQuarterResult: boolean;
   readonly noEffectReason: string | undefined;
 }): PaybackEstimate {
   const formulaText =
-    "概算投資回収年数 ＝ 投資総額 ÷ （増分処理可能量 × 実績限界利益/販売トン − 増分四半期保守費） ÷ 4四半期";
+    "概算投資回収年数 ＝ 投資総額 ÷ （増分処理可能量 × 実績限界利益/販売トン − 増分四半期保守費 − 増分Worker四半期人件費） ÷ 4四半期";
   const assumptionTexts: readonly string[] = [
     "限界利益は、直近の確定四半期の実績（限界利益額 ÷ 販売トン）をそのまま使っています。将来の価格・原料費の変化は織り込んでいません。",
     "増分処理可能量は、現在の入力のまま能力だけを増やして生産エンジンへ再度渡した結果の差です（推測式ではありません）。",
     "減価償却費は現金の支出ではないため、増分キャッシュフローから差し引いていません。",
-    "追加Workerの人件費は、増産をどこまで行うかによって変わるため、この回収計算には含めていません（投資カードに別途表示しています）。",
+    "増分処理量を処理するために追加で必要になる常用Workerの人件費は、増分キャッシュフローから差し引いています（下記の二重控除の確認を参照）。",
+    "追加Worker人数は、増えた処理量をすべて常用Workerで処理する前提で算出しています。残業や臨時ワーカーで吸収する場合、その費用はすでに限界利益側で控除済みです。",
     "売上増加そのものを根拠にはしていません。販売できるかどうかは営業の成約次第です。",
   ];
 
   const base = {
     incrementalProcessableTonsPerQuarter: input.incrementalProcessableTonsPerQuarter,
     incrementalMaintenanceUsdPerQuarter: input.incrementalMaintenanceUsdPerQuarter,
+    incrementalLaborCostUsdPerQuarter: input.incrementalLaborCostUsdPerQuarter,
+    incrementalRegularHeadcount: input.incrementalRegularHeadcount,
     formulaText,
     assumptionTexts,
+    doubleCountingNote: PAYBACK_DOUBLE_COUNTING_NOTE,
   };
 
   if (input.incrementalProcessableTonsPerQuarter <= 0) {
@@ -789,7 +848,8 @@ export function buildPaybackEstimate(input: {
   }
 
   const incrementalContributionUsdPerQuarter = input.incrementalProcessableTonsPerQuarter * input.contributionMarginUsdPerTon;
-  const incrementalCashFlowUsdPerQuarter = incrementalContributionUsdPerQuarter - input.incrementalMaintenanceUsdPerQuarter;
+  const incrementalCashFlowUsdPerQuarter =
+    incrementalContributionUsdPerQuarter - input.incrementalMaintenanceUsdPerQuarter - input.incrementalLaborCostUsdPerQuarter;
 
   if (!(incrementalCashFlowUsdPerQuarter > 0)) {
     return {
@@ -799,7 +859,7 @@ export function buildPaybackEstimate(input: {
       incrementalContributionUsdPerQuarter,
       incrementalCashFlowUsdPerQuarter,
       notComputableReason:
-        "増分の限界利益が増分保守費を上回らないため、この前提では投資を回収できません（回収年数は算定できません）。",
+        "増分の限界利益が、増分保守費と増分Worker人件費の合計を上回らないため、この前提では投資を回収できません（回収年数は算定できません）。",
     };
   }
 
