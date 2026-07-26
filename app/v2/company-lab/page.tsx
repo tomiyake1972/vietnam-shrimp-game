@@ -41,6 +41,8 @@ import LabBanner from "./components/LabBanner";
 import ScenarioControls, { CompanyOption, ScenarioOption } from "./components/ScenarioControls";
 import DecisionEditor from "./components/DecisionEditor";
 import ResultsPanel from "./components/ResultsPanel";
+import QuarterlyResultsSpreadsheet from "./components/QuarterlyResultsSpreadsheet";
+import { buildQuarterlyResultsSpreadsheetRows } from "./quarterlyResultsSpreadsheetViewModel";
 import MarketPanel from "./components/MarketPanel";
 import ComparisonPanel from "./components/ComparisonPanel";
 import QualityDashboardPanel from "./components/QualityDashboardPanel";
@@ -212,6 +214,10 @@ export default function CompanyLabPage() {
   const playerFixture = fixtures?.find((f) => f.companyId === draftPlayerCompanyId);
   const ownStateForEditor = labState && playerFixture ? buildCompanyOwnState(labState, playerFixture) : undefined;
   const playerSummary = displayedRecord?.companySummaries.find((s) => s.companyId === draftPlayerCompanyId);
+  // 【Phase 8G §6】四半期結果のスプレッドシート型UI。labState.history（既にこの画面が
+  // メモリ上に保持している全確定四半期）から自社ぶんだけを抽出するだけで、追加の
+  // 計算・取得は発生しない（quarterlyResultsSpreadsheetViewModel.ts参照）。
+  const quarterlyResultsSpreadsheetRows = labState ? buildQuarterlyResultsSpreadsheetRows(labState.history, draftPlayerCompanyId) : [];
   // 【Phase 8B-3】設備投資ポートフォリオ表示の「直近四半期の実際の支払額」参考情報用。
   // 選択中の表示四半期（displayedRecord）ではなく、常に「実際に最後に確定した四半期」を使う
   // （設備投資ポートフォリオ自体はlabState.currentPeriod時点の状態を表示するため）。
@@ -364,6 +370,14 @@ export default function CompanyLabPage() {
                       previousConsumerMarketRecords={previousDisplayedRecord?.consumerMarketRecords ?? null}
                     />
                     {playerSummary && <ResultsPanel summary={playerSummary} displayName={nameById.get(draftPlayerCompanyId) ?? draftPlayerCompanyId} />}
+                    {quarterlyResultsSpreadsheetRows.length > 0 && (
+                      <div className="bg-gray-800 rounded-2xl p-4 sm:p-5 space-y-2">
+                        <h3 className="text-base font-semibold text-gray-100">
+                          四半期結果（表形式・自社{quarterlyResultsSpreadsheetRows.length}件）
+                        </h3>
+                        <QuarterlyResultsSpreadsheet rows={quarterlyResultsSpreadsheetRows} />
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>

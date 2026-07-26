@@ -27,6 +27,7 @@ import DecisionEditor from "../../components/DecisionEditor";
 import CollapsibleSection from "../../components/CollapsibleSection";
 import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
+import QuarterlyResultsSpreadsheet from "../../components/QuarterlyResultsSpreadsheet";
 import FinancialResultsSection from "../../components/financial/FinancialResultsSection";
 import PlayLabBanner from "../components/PlayLabBanner";
 import { CompanyDecisionDraft, summarizeSalesForceAllocation } from "../../decisionDraft";
@@ -285,6 +286,17 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
             />
             </CollapsibleSection>
           </div>
+        )}
+
+        {viewModel.quarterlyResultsSpreadsheet.length > 0 && (
+          <CollapsibleSection
+            title={`四半期結果（直近${viewModel.quarterlyResultsSpreadsheet.length}件・表形式）`}
+            tone="info"
+            defaultOpen={false}
+            testId="quarterly-results-spreadsheet-section"
+          >
+            <QuarterlyResultsSpreadsheet rows={viewModel.quarterlyResultsSpreadsheet} />
+          </CollapsibleSection>
         )}
 
         {viewModel.recentHistory.length > 0 && (

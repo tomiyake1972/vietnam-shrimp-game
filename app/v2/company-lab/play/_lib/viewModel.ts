@@ -30,6 +30,7 @@ import { CompanyLabApiDependencies } from "../../../../api/v2/company-labs/_lib/
 import { toHistoryEntrySummaryDto, CompanyLabHistoryEntrySummaryDto } from "../../../../api/v2/company-labs/_lib/responseDto";
 import { isPlausibleCompanyDecisionDraft } from "../../../../api/v2/company-labs/_lib/decisionsProvider";
 import { extractCompanyCapexResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "./financialViewSelectors";
+import { buildQuarterlyResultsSpreadsheetRows, QuarterlyResultsSpreadsheetRow } from "../../quarterlyResultsSpreadsheetViewModel";
 
 export type PlayerScreenPhase = "editing" | "submitted" | "completed";
 
@@ -122,6 +123,12 @@ export interface PlayerScreenViewModel {
   readonly previousQuarterMarket: PlayerPreviousQuarterMarket | null;
   /** 履歴要約（診断用のhistory/[turn]は使わない。§6.6・§8.2）。最新10件まで。 */
   readonly recentHistory: readonly CompanyLabHistoryEntrySummaryDto[];
+  /**
+   * 【Phase 8G §6】四半期結果のスプレッドシート型UI用データ。recentHistoryと同じ
+   * loadHistoryPage呼び出し結果（追加のRepositoryアクセスなし）から、自社ぶんの
+   * 既存確定値だけを抽出した行の配列。新しい指標・係数はここでも一切計算しない。
+   */
+  readonly quarterlyResultsSpreadsheet: readonly QuarterlyResultsSpreadsheetRow[];
 }
 
 export type PlayerScreenLoadResult = { readonly kind: "ok"; readonly viewModel: PlayerScreenViewModel } | { readonly kind: "notFound" };
@@ -267,6 +274,10 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       previousQuarterFinancials,
       previousQuarterMarket,
       recentHistory: historyPage.entries.map(toHistoryEntrySummaryDto),
+      quarterlyResultsSpreadsheet: buildQuarterlyResultsSpreadsheetRows(
+        historyPage.entries.map((e) => e.record),
+        stored.playerCompanyId
+      ),
     },
   };
 }
