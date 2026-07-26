@@ -20,19 +20,28 @@
 // 従来この画面に出ていた「HOSO FOB（EC）」等は前者、改善要望①の「各消費国」は
 // 後者を指す。両方を別の表として並べ、混同しないよう見出しで明示する。
 //
-// 【前四半期比のデータ源（推測値を作らないための三段階）】
+// 【前四半期比のデータ源（推測値を作らないための二段階）】
 //   1. previousQuarter … 前四半期の確定 marketResult がある場合。最も正確で、
 //      HOSO・PD・VAP・仕向市場別・国内原料価格のすべてに使える。
-//   2. storedPriorPrice … 前四半期の確定 marketResult が無い（初回四半期）場合の、
-//      HOSO限定の代替。CountryHosoPriceResult.priorPrice / changeRatio は当期の
-//      確定結果そのものに保存されている値であり、推測ではない。
-//      仕向市場別のHOSO参照価格については、destinationPricing.ts §7 の式より
-//      「HOSO市場参照価格 = hosoBasePrice × baseValueCoefficient」であり、
-//      baseValueCoefficient は四半期によらない固定パラメータなので、
-//      前期のHOSO市場参照価格は「保存済み priorPrice × 同じ係数」に一致する
-//      （新しい価格ロジックではなく、既存の同じ式を保存済み前期価格へ適用するだけ）。
-//   3. unavailable … 上のいずれも使えない場合（初回四半期のPD/VAP・国内原料価格）。
+//   2. unavailable … 前四半期の確定 marketResult が無い（初回四半期）場合。
 //      changeRatio を null のままにし、画面では0で埋めずに「-」と表示する。
+//
+// 【Phase 8G・重要な訂正】仕向市場（消費国）別のHOSO参照価格については、以前
+// 「前期のHOSO市場参照価格 = 保存済みVNのpriorPrice × baseValueCoefficient」という
+// 代理値を初回四半期の前期比の分母として使っていた（storedPriorPriceという3段階目）。
+// これは一見「既存の式を保存済み前期価格へ適用しているだけ」に見えるが、実際には
+// 「当期のVNのHOSO基礎価格 × 市場係数」と「代理の前期価格（VNの前期HOSO基礎価格 ×
+// 同じ市場係数）」の比を取っているため、市場係数が分子分母で相殺され、
+// (price-prior)/prior が「その市場自身の変化率」ではなく「VN自身のchangeRatio」に
+// 数式的に一致してしまう。結果として初回四半期は5市場すべてが同一の前期比
+// （実例：全市場一律-20.0%）を表示するという誤表示を引き起こしていた。
+// 仕向市場ごとの「前四半期に確定した、その市場自身の参照価格」は存在しない
+// （初回四半期は定義上、前四半期の仕向市場別確定結果そのものがない）ため、
+// 捏造した比較値を出すのではなく、他の項目と同じ原則（unavailable→「-」表示）に
+// 統一する。HOSO・PD・VAPのいずれについても同じ扱いとする。
+// なお産地国（EC/IN/ID/VN）別FOB価格のstoredPriorPrice（buildOriginCountryPriceRows）
+// は、市場係数を介さず「その産地国自身の確定結果に保存されているpriorPrice」を
+// そのまま使うものであり、上記の代理値問題とは無関係（正しい実データ）のため変更しない。
 
 import { UsdPerHosoEqKg, unwrapUnit } from "../../lib/v2/core/units";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterResult, Product } from "../../lib/v2/market/types";
@@ -124,20 +133,18 @@ export function buildDestinationMarketPriceRows(
   const current = deriveMarketReferencePrices(marketResult, coefficients);
   const previous = previousMarketResult !== null ? deriveMarketReferencePrices(previousMarketResult, coefficients) : null;
 
-  // 【初回四半期のHOSO限定の代替源】前期の確定marketResultが無い場合だけ使う。
-  // destinationPricing.ts §7 より HOSO市場参照価格 = hosoBasePrice × baseValueCoefficient
-  // であり、hosoBasePrice の前期値（priorPrice）は当期の確定結果に保存されている。
-  const storedPriorVietnamHoso = previous === null ? unwrapUnit(marketResult.hosoPrices.VN.priorPrice) : null;
-
   return DEMAND_MARKET_IDS.map((market) => {
     const cell = (product: Product): PriceWithQoq => {
       const price = unwrapUnit(current[market][product]);
       if (previous !== null) {
         return priceWithQoq(price, unwrapUnit(previous[market][product]), "previousQuarter");
       }
-      if (product === "hoso" && storedPriorVietnamHoso !== null && Number.isFinite(storedPriorVietnamHoso)) {
-        return priceWithQoq(price, storedPriorVietnamHoso * coefficients[market].baseValueCoefficient, "storedPriorPrice");
-      }
+      // 【Phase 8G】前四半期の仕向市場別確定結果が無い場合（初回四半期）、この市場
+      // 自身の前期確定価格は存在しない。以前はVNの前期HOSO価格に市場係数を掛けた
+      // 代理値を分母に使っていたが、市場係数が約分されてVN自身の変化率をそのまま
+      // 表示する結果になり、5市場すべてが同一の（誤解を招く）前期比を示す誤表示の
+      // 原因になっていた。捏造した比較値は出さず、他の欠損時と同じ「-」表示にする
+      // （HOSO・PD・VAPすべて同じ扱い）。
       return unavailable(price);
     };
     return { market, hoso: cell("hoso"), pd: cell("pd"), vap: cell("vap") };

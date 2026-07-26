@@ -156,6 +156,45 @@ export interface CompanyDecisionDraft {
 }
 
 // ---------------------------------------------------------------------
+// 【Phase 8G】営業人員配分の集計（表示・提出前チェックの両方で共有する単一ソース）
+//
+// validateSalesForceHeadcountBudget（app/lib/v2/sales/salesForce.ts）と同じ
+// 「全社合計」の考え方をそのままUI側で先読みするだけで、判定ロジックを二重実装
+// しない（合計超過ならエンジン側が投げるのと同じ理由でエラーになる、という
+// 事実を画面が「先に」伝えるだけ）。
+// ---------------------------------------------------------------------
+
+export interface SalesForceAllocationSummary {
+  readonly assignedTotal: number;
+  readonly availableTotal: number;
+  /** 超過していない場合の残り人数（0以上）。超過時は0。 */
+  readonly remaining: number;
+  /** 超過している場合の超過人数（0より大きい）。超過していなければ0。 */
+  readonly overBy: number;
+  readonly isOverAllocated: boolean;
+}
+
+export function summarizeSalesForceAllocation(
+  salesPlans: readonly { readonly salesForceHeadcount: number }[],
+  availableTotal: number
+): SalesForceAllocationSummary {
+  const assignedTotal = salesPlans.reduce((sum, p) => sum + (Number.isFinite(p.salesForceHeadcount) ? p.salesForceHeadcount : 0), 0);
+  const isOverAllocated = assignedTotal > availableTotal;
+  return {
+    assignedTotal,
+    availableTotal,
+    remaining: isOverAllocated ? 0 : availableTotal - assignedTotal,
+    overBy: isOverAllocated ? assignedTotal - availableTotal : 0,
+    isOverAllocated,
+  };
+}
+
+/** 「営業配分をすべて0に戻す」操作。他のドラフト項目には一切触れない。 */
+export function resetAllSalesForceHeadcountToZero(draft: CompanyDecisionDraft): CompanyDecisionDraft {
+  return { ...draft, salesPlans: draft.salesPlans.map((row) => ({ ...row, salesForceHeadcount: 0 })) };
+}
+
+// ---------------------------------------------------------------------
 // generateAutoPolicyDecision の結果 → 網羅グリッドドラフトへの変換
 // ---------------------------------------------------------------------
 

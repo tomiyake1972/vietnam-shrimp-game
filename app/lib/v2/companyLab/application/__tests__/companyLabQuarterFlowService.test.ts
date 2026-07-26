@@ -143,6 +143,120 @@ for (const { label, create } of makeContexts()) {
     await assert.rejects(() => ctx.service.saveDraft({ labId: "lab-draft", turnId: "turn-1", draftBody: { a: 3 }, now: NOW }), CompanyLabDraftAlreadySubmittedError);
   });
 
+  // -------------------------------------------------------------------
+  // 【Phase 8G】withdrawDraft（提出取り消し）
+  // -------------------------------------------------------------------
+
+  test(`[${label}] withdrawDraft: 提出済みドラフトをsubmittedAt=nullへ戻す（ドラフト本体は変更しない）。以後、編集・再提出・処理ができる`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-withdraw", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
+    await ctx.service.saveDraft({ labId: "lab-withdraw", turnId: "turn-1", draftBody: { a: 1 }, now: NOW });
+    await ctx.service.submitDraft({ labId: "lab-withdraw", turnId: "turn-1", now: NOW });
+
+    const withdrawn = await ctx.service.withdrawDraft({ labId: "lab-withdraw", turnId: "turn-1", now: "2026-01-01T04:00:00.000Z" });
+    assert.equal(withdrawn.submittedAt, null, "取り消し後はsubmittedAtがnullに戻るはず");
+    assert.deepEqual(withdrawn.draft, { a: 1 }, "ドラフト本体は取り消しで変更されないはず");
+
+    const reloaded = await ctx.repo.loadDraft("lab-withdraw");
+    assert.equal(reloaded?.submittedAt, null);
+    assert.deepEqual(reloaded?.draft, { a: 1 });
+
+    // 取り消し後は編集（上書き保存）ができる（提出後の編集拒否には引っかからない）。
+    const edited = await ctx.service.saveDraft({ labId: "lab-withdraw", turnId: "turn-1", draftBody: { a: 2 }, now: "2026-01-01T05:00:00.000Z" });
+    assert.deepEqual(edited.draft, { a: 2 });
+
+    // 再提出→処理まで正常に完了する。
+    await ctx.service.submitDraft({ labId: "lab-withdraw", turnId: "turn-1", now: "2026-01-01T06:00:00.000Z" });
+    const result = await ctx.service.processQuarter({ labId: "lab-withdraw", turnId: "turn-1", lockToken: "lock-w1", now: NOW, decisionsProvider: autoPolicyProvider });
+    assert.equal(result.status, "processed");
+  });
+
+  test(`[${label}] withdrawDraft: 未提出のドラフトへの取り消しは冪等（何も変更せずそのまま返す）`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-withdraw-idem", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
+    await ctx.service.saveDraft({ labId: "lab-withdraw-idem", turnId: "turn-1", draftBody: { a: 1 }, now: NOW });
+
+    const result = await ctx.service.withdrawDraft({ labId: "lab-withdraw-idem", turnId: "turn-1", now: "2026-01-01T04:00:00.000Z" });
+    assert.equal(result.submittedAt, null);
+    assert.deepEqual(result.draft, { a: 1 });
+  });
+
+  test(`[${label}] withdrawDraft: ドラフトが存在しない・turnIdが一致しない場合はそれぞれ型付きエラーになる`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-withdraw-err", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
+
+    await assert.rejects(() => ctx.service.withdrawDraft({ labId: "lab-withdraw-err", turnId: "turn-1", now: NOW }), CompanyLabDraftNotFoundError);
+
+    await ctx.service.saveDraft({ labId: "lab-withdraw-err", turnId: "turn-1", draftBody: { a: 1 }, now: NOW });
+    await ctx.service.submitDraft({ labId: "lab-withdraw-err", turnId: "turn-1", now: NOW });
+    await assert.rejects(
+      () => ctx.service.withdrawDraft({ labId: "lab-withdraw-err", turnId: "turn-9-does-not-match", now: NOW }),
+      CompanyLabDraftTurnMismatchError
+    );
+  });
+
+  test(`[${label}] 回帰: 営業人員の配分超過で四半期処理が失敗した後も、withdrawDraftで編集に戻り、修正して再提出・処理できる（Test13で発生した詰み状態の再現と解消）`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-sales-overbudget", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
+
+    // 実在する営業人員数を超える配分を含むprovider（エンジン側のvalidateSalesForceHeadcountBudgetが
+    // 例外を投げる状況を再現する）。
+    const overBudgetProvider: CompanyLabDecisionsProvider = ({ restoredState, fixtures, publicInfo, period, turn }) => {
+      const decisions: Record<CompanyId, CompanyDecisionInput> = {};
+      for (const fixture of fixtures) {
+        const ownState = buildCompanyOwnState(restoredState, fixture);
+        const auto = generateAutoPolicyDecision(fixture, ownState, publicInfo, period, turn);
+        if (fixture.companyId === PLAYER_COMPANY_ID) {
+          // 全行に実在人員数を超える人数を割り当てる（Test13の「24人 > 18人」相当）。
+          const overAssigned = fixture.salesForceHeadcountTotal + 6;
+          decisions[fixture.companyId] = {
+            ...auto,
+            salesPlans: auto.salesPlans.map((p) => ({ ...p, salesForceHeadcount: overAssigned })),
+          };
+        } else {
+          decisions[fixture.companyId] = auto;
+        }
+      }
+      return decisions;
+    };
+
+    await ctx.service.saveDraft({ labId: "lab-sales-overbudget", turnId: "turn-1", draftBody: { note: "over-budget-draft" }, now: NOW });
+    await ctx.service.submitDraft({ labId: "lab-sales-overbudget", turnId: "turn-1", now: NOW });
+
+    await assert.rejects(
+      () =>
+        ctx.service.processQuarter({
+          labId: "lab-sales-overbudget",
+          turnId: "turn-1",
+          lockToken: "lock-over-1",
+          now: NOW,
+          decisionsProvider: overBudgetProvider,
+        }),
+      CompanyLabQuarterProcessingError
+    );
+
+    // 処理失敗後もdraftは提出済みのまま残っている（既存の仕様どおり）。
+    const stillSubmitted = await ctx.repo.loadDraft("lab-sales-overbudget");
+    assert.notEqual(stillSubmitted?.submittedAt, null, "処理失敗後もdraftは提出済みのまま残るはず");
+
+    // withdrawDraftで編集に戻せる。
+    const withdrawn = await ctx.service.withdrawDraft({ labId: "lab-sales-overbudget", turnId: "turn-1", now: "2026-01-01T07:00:00.000Z" });
+    assert.equal(withdrawn.submittedAt, null);
+    assert.deepEqual(withdrawn.draft, { note: "over-budget-draft" }, "取り消し後もドラフト本体（プレイヤーの入力）はそのまま残る");
+
+    // 修正して（正常なprovider・自動方針で）再提出→処理すれば成功する。
+    await ctx.service.saveDraft({ labId: "lab-sales-overbudget", turnId: "turn-1", draftBody: { note: "fixed-draft" }, now: "2026-01-01T08:00:00.000Z" });
+    await ctx.service.submitDraft({ labId: "lab-sales-overbudget", turnId: "turn-1", now: "2026-01-01T09:00:00.000Z" });
+    const result = await ctx.service.processQuarter({
+      labId: "lab-sales-overbudget",
+      turnId: "turn-1",
+      lockToken: "lock-over-2",
+      now: NOW,
+      decisionsProvider: autoPolicyProvider,
+    });
+    assert.equal(result.status, "processed", "配分を修正して再提出した後は正常に処理が完了するはず");
+  });
+
   test(`[${label}] turn 1を処理すると、current・history・index・revision・draftのすべてが正しく更新される`, async () => {
     const ctx = create();
     await ctx.service.createLab({ labId: "lab-t1", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });

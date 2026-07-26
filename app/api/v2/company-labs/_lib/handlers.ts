@@ -189,6 +189,44 @@ export async function handleSubmitDraft(deps: CompanyLabApiDependencies, labId: 
 }
 
 // ---------------------------------------------------------------------
+// POST /api/v2/company-labs/[labId]/draft/withdraw — 提出取り消し（Phase 8G）
+//
+// 【背景】提出済みドラフトで四半期処理が失敗した場合（例：営業人員の配分合計が
+// 実在人数を超えているエラー）、既存の実装では「提出済みドラフトの編集禁止」
+// （CompanyLabDraftAlreadySubmittedError）により、プレイヤーが入力を修正して
+// 再提出する経路が存在しなかった（Test13で実際に発生した詰み状態）。本ハンドラーは
+// submitDraftの逆操作として、ドラフト本体を変更せずsubmittedAtだけをnullへ戻す。
+// ---------------------------------------------------------------------
+
+export async function handleWithdrawDraft(deps: CompanyLabApiDependencies, labId: string, now: string): Promise<ApiResult> {
+  const labIdResult = validateLabId(labId);
+  if (!labIdResult.ok) return badRequest(labIdResult.message);
+
+  let currentTurn: number;
+  let existingDraftTurnId: string | null;
+  let lastProcessedTurnId: string | null;
+  try {
+    const stored = await deps.repository.loadCurrentState(labId);
+    currentTurn = stored.currentState.runtime.scenarioState.currentTurn;
+    lastProcessedTurnId = stored.currentState.lastProcessedTurnId ?? null;
+    const existingDraft = await deps.repository.loadDraft(labId);
+    existingDraftTurnId = existingDraft?.turnId ?? null;
+  } catch (e) {
+    return mapDomainErrorToHttp(e);
+  }
+  // submitDraftと同じ導出（提出・取り消しは対になる操作であり、対象turnIdの
+  // 決定方法を分けない）。
+  const derivedTurnId = resolveInFlightTurnId({ currentTurn, draftTurnId: existingDraftTurnId, lastProcessedTurnId });
+
+  try {
+    const envelope = await deps.service.withdrawDraft({ labId, turnId: derivedTurnId, now });
+    return { status: 200, body: { draft: toDraftSummaryDto(envelope) } };
+  } catch (e) {
+    return mapDomainErrorToHttp(e);
+  }
+}
+
+// ---------------------------------------------------------------------
 // POST /api/v2/company-labs/[labId]/process-quarter — 四半期処理（§6.5）
 // ---------------------------------------------------------------------
 

@@ -114,6 +114,21 @@ export interface SubmitDraftInput {
   readonly now: string;
 }
 
+/**
+ * 【Phase 8G】提出取り消し（withdraw）の入力。submitDraftの逆操作で、ドラフト本体は
+ * 一切変更せず（プレイヤーが入力した値をそのまま残す）、submittedAtだけをnullへ戻す。
+ * これにより、提出後に四半期処理が失敗した場合（例：営業人員の配分合計が実在人数を
+ * 超えているエラー）でも、ドラフトを編集して再提出できる経路を用意する
+ * （Phase 8C-1時点の「正式提出後の編集防止」は維持しつつ、取り消し操作を新設して
+ * 両立させる。新しいdraftライフサイクルの状態は追加しない — 既存の
+ * "存在しない/未提出/提出済み"の3状態のうち、"提出済み"→"未提出"の遷移を許可するだけ）。
+ */
+export interface WithdrawDraftInput {
+  readonly labId: string;
+  readonly turnId: string;
+  readonly now: string;
+}
+
 export interface ProcessQuarterInput {
   readonly labId: string;
   /** この四半期処理の一意ID。同じturnIdでの再試行は冪等（§6.1）。 */
@@ -165,6 +180,7 @@ export interface CompanyLabQuarterFlowService {
   createLab(input: CreateLabInput): Promise<CreateLabResult>;
   saveDraft(input: SaveDraftInput): Promise<CompanyLabDraftEnvelope>;
   submitDraft(input: SubmitDraftInput): Promise<CompanyLabDraftEnvelope>;
+  withdrawDraft(input: WithdrawDraftInput): Promise<CompanyLabDraftEnvelope>;
   processQuarter(input: ProcessQuarterInput): Promise<ProcessQuarterResult>;
 }
 
@@ -256,6 +272,32 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
     const submitted: CompanyLabDraftEnvelope = { ...existing, submittedAt: input.now, updatedAt: input.now };
     await repository.saveDraft(submitted);
     return submitted;
+  }
+
+  async function withdrawDraft(input: WithdrawDraftInput): Promise<CompanyLabDraftEnvelope> {
+    const stored = await repository.loadCurrentState(input.labId); // 不存在ならCompanyLabNotFoundError
+    if (stored.currentState.runtime.isComplete) {
+      throw new CompanyLabCompletedError(input.labId);
+    }
+    const existing = await repository.loadDraft(input.labId);
+    if (existing === null) {
+      throw new CompanyLabDraftNotFoundError(input.labId);
+    }
+    if (existing.turnId !== input.turnId) {
+      throw new CompanyLabDraftTurnMismatchError(input.labId, input.turnId, existing.turnId);
+    }
+    if (existing.submittedAt === null) {
+      // 既に未提出（編集中）のdraftへの取り消し要求は、四半期処理と同様に冪等に扱う
+      // （二重クリック・再送でエラーにしない。何も変更せずそのまま返す）。
+      return existing;
+    }
+    // 【重要】draft本体（プレイヤーが入力した値）には一切触れない。submittedAtだけを
+    // nullへ戻すことで、次回読み込み時にphaseが"submitted"→"editing"へ戻り、
+    // かつ同じ内容のまま編集を再開できる（coerceDraftOrRebuildが提出時の値を
+    // そのまま返す。viewModel.tsのisPlausibleCompanyDecisionDraftチェック経由）。
+    const withdrawn: CompanyLabDraftEnvelope = { ...existing, submittedAt: null, updatedAt: input.now };
+    await repository.saveDraft(withdrawn);
+    return withdrawn;
   }
 
   async function processQuarter(input: ProcessQuarterInput): Promise<ProcessQuarterResult> {
@@ -460,5 +502,5 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
     }
   }
 
-  return { createLab, saveDraft, submitDraft, processQuarter };
+  return { createLab, saveDraft, submitDraft, withdrawDraft, processQuarter };
 }
