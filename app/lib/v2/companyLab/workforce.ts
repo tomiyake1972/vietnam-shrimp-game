@@ -257,6 +257,58 @@ export function computeRequiredRegularHeadcount(input: RequiredHeadcountInput): 
 }
 
 // ---------------------------------------------------------------------
+// 3.5. 設備投資によって「新たに発生する」採用人数
+// ---------------------------------------------------------------------
+
+export interface IncrementalRegularHiresInput {
+  /** 投資前の生産量を処理するために必要な常用Worker人数（小数可）。 */
+  readonly requiredHeadcountBefore: number;
+  /** 投資後の生産量を処理するために必要な常用Worker人数（小数可）。 */
+  readonly requiredHeadcountAfter: number;
+  /** 現在の常用Worker総人数（当期の意思決定を反映した変更後人数）。 */
+  readonly currentRegularHeadcount: number;
+}
+
+export interface IncrementalRegularHiresResult {
+  /** 投資前の時点ですでに不足している採用人数（＝投資とは無関係に必要な採用）。 */
+  readonly hiresBefore: number;
+  /** 投資後に必要になる採用人数の総数。 */
+  readonly hiresAfter: number;
+  /** **設備投資によって新たに発生する**採用人数（＝ hiresAfter − hiresBefore、0未満にはしない）。 */
+  readonly incrementalHires: number;
+}
+
+/**
+ * 【Phase 8D 追補2】設備投資によって**新たに発生する**採用人数だけを求める。
+ *
+ * 【なぜ「増分処理量に必要な人数」をそのまま使ってはいけないか】
+ *   増分処理量に必要な人数をそのまま採用人数とすると、次の2つの理由で過大計上になる。
+ *     (a) **現在の人員に余力がある場合**（遊休Workerがいる場合）、増えた処理量は
+ *         いま給与を払っている人員でそのまま処理できる。追加採用は発生しない。
+ *         遊休労務費はすでに当期の固定費として発生しており、設備投資の増分費用ではない。
+ *     (b) **1人未満の端数を単独で切り上げる**と、投資を分割するほど人数が増えてしまう。
+ *         切り上げは「投資前の総必要人数」と「投資後の総必要人数」のそれぞれに対して
+ *         行い、その差を取らなければならない。
+ *
+ * 【投資前から存在する不足を含めない】
+ *   投資前の時点ですでに人員が不足している場合、その不足は設備投資をしなくても
+ *   存在する。したがって hiresAfter からそのまま引き、投資に起因する増加分だけを返す。
+ *
+ * 式:
+ *   hiresBefore      = max(0, ceil(requiredBefore) − 現在人数)
+ *   hiresAfter       = max(0, ceil(requiredAfter)  − 現在人数)
+ *   incrementalHires = max(0, hiresAfter − hiresBefore)
+ */
+export function computeIncrementalRegularHires(input: IncrementalRegularHiresInput): IncrementalRegularHiresResult {
+  const current = Number.isFinite(input.currentRegularHeadcount) && input.currentRegularHeadcount > 0 ? input.currentRegularHeadcount : 0;
+  const safeRequired = (v: number): number => (Number.isFinite(v) && v > 0 ? v : 0);
+
+  const hiresBefore = Math.max(0, Math.ceil(safeRequired(input.requiredHeadcountBefore)) - current);
+  const hiresAfter = Math.max(0, Math.ceil(safeRequired(input.requiredHeadcountAfter)) - current);
+  return { hiresBefore, hiresAfter, incrementalHires: Math.max(0, hiresAfter - hiresBefore) };
+}
+
+// ---------------------------------------------------------------------
 // 4. 人件費の試算（finance/parameters.ts の単価をそのまま使う）
 // ---------------------------------------------------------------------
 

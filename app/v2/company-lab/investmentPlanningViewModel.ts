@@ -45,6 +45,7 @@ import { buildCompanyFactorySpaceState, computeCandidateProjectSpaceUnits } from
 import { CompanyFinancialQuarterResult } from "../../lib/v2/finance/types";
 import { FINANCE_PARAMETERS_V1 } from "../../lib/v2/finance/parameters";
 import {
+  computeIncrementalRegularHires,
   computeQuarterlyLaborCost,
   computeRequiredRegularHeadcount,
   CompanyWorkforceState,
@@ -232,7 +233,12 @@ export interface PaybackEstimate {
    * 二重控除にはならない。根拠は doubleCountingNote を参照。
    */
   readonly incrementalLaborCostUsdPerQuarter: number;
-  /** 上記の人件費に対応する追加常用Worker人数（整数。1人未満は切り上げ）。 */
+  /**
+   * 上記の人件費に対応する追加常用Worker人数（整数）。
+   * **設備投資によって新たに発生する採用人数**であり、現在の人員余力（遊休Worker）で
+   * 吸収できるぶんと、投資前からすでに存在する不足人数は含まれない
+   * （companyLab/workforce.ts の computeIncrementalRegularHires を参照）。
+   */
   readonly incrementalRegularHeadcount: number;
   /**
    * 増分キャッシュフロー（USD/四半期）
@@ -271,9 +277,13 @@ export interface InvestmentCardViewModel {
   readonly fitsInFactorySpace: boolean;
   readonly spaceShortfallUnits: number;
   // --- Worker ---
-  /** 追加で必要になる常用Worker人数（増えた処理量を処理するために必要な人数）。 */
+  /**
+   * 追加で必要になる常用Worker人数。
+   * **設備投資によって新たに発生する採用人数だけ**であり、現在の人員余力で吸収できる場合は0、
+   * 投資前から存在する不足人数も含まない（`computeIncrementalRegularHires`）。
+   */
   readonly additionalRequiredHeadcount: number;
-  /** 追加四半期人件費（追加Worker × 正社員単価）。 */
+  /** 追加四半期人件費（追加Worker × 常用Worker給与単価。単価は finance/parameters.ts）。 */
   readonly additionalQuarterlyLaborCostUsd: number;
   // --- 効果 ---
   /** 現在の生産計画に対する効果（投資完成後に追加で処理できる見込み量）。 */
@@ -400,6 +410,16 @@ function withHypotheticalCapacityIncrease(factory: Factory, pool: SpaceConsuming
 
 function totalForecastTons(forecast: CompanyProcessingForecast): number {
   return forecast.rows.reduce((sum, r) => sum + r.forecastProcessedTons, 0);
+}
+
+/** 処理見込みを商品別に合計する（必要Worker人数は商品別の技能で決まるため商品別に分ける）。 */
+function processedTonsByProduct(forecast: CompanyProcessingForecast): Readonly<Partial<Record<Product, number>>> {
+  const byProduct: Partial<Record<Product, number>> = {};
+  for (const row of forecast.rows) {
+    if (row.forecastProcessedTons <= 0) continue;
+    byProduct[row.product] = (byProduct[row.product] ?? 0) + row.forecastProcessedTons;
+  }
+  return byProduct;
 }
 
 /**
@@ -564,6 +584,32 @@ export function buildCompanyInvestmentPlanningViewModel(
 
   const contributionMarginUsdPerTon = computeRealizedContributionMarginUsdPerTon(input.lastQuarterFinancialResult);
 
+  // --- 【Phase 8D 追補2】投資前の必要人数と現在人数（全カード共通。カードごとに再計算しない） ---
+  //
+  // 【複数工場について】投資案件は factoryId を持たず、能力は主工場（先頭）へ加算される
+  // （capex/capacityEffect.ts の規則）。したがって技能・出勤率・残業率は主工場のワーカー
+  // 配置を代表値として使い、人数は会社合計で比較する。現行フィクスチャは全社1工場のため、
+  // 実質的な差は生じない。
+  const representativeRow = workforceRows[0];
+  const representativeWorkerProfile = {
+    skillByProduct: representativeRow?.skillByProduct ?? {},
+    attendanceRate: representativeRow?.attendanceRate ?? 0,
+    overtimeRate: representativeRow?.overtimeRate ?? 0,
+    temporaryHeadcount: representativeRow?.temporaryHeadcount ?? 0,
+  };
+  /** 現在の常用Worker総人数（当期の意思決定を反映した変更後人数）。 */
+  const currentRegularHeadcountTotal = workforceRows.reduce((sum, r) => sum + r.headcountAfter, 0);
+  /** 投資前の処理見込み量（商品別）。必要人数の基準はこの「実際に処理される量」とする。 */
+  const currentProcessedByProduct = processedTonsByProduct(forecast);
+  /** 投資前の生産量を処理するために必要な常用Worker人数。 */
+  const requiredHeadcountBeforeInvestment = computeRequiredRegularHeadcount({
+    quantityByProduct: currentProcessedByProduct,
+    skillByProduct: representativeWorkerProfile.skillByProduct,
+    attendanceRate: representativeWorkerProfile.attendanceRate,
+    appliedOvertimeRate: representativeWorkerProfile.overtimeRate,
+    temporaryHeadcount: representativeWorkerProfile.temporaryHeadcount,
+  }).requiredRegularHeadcount;
+
   // --- 投資カード ---
   const investmentCards: InvestmentCardViewModel[] = CAPITAL_PROJECT_TYPES.map((projectType) => {
     const template = capexParams.templatesByType[projectType];
@@ -577,6 +623,8 @@ export function buildCompanyInvestmentPlanningViewModel(
     // --- 投資完成後の処理見込み（同じ生産エンジンへ、能力を増やしたFactoryで再度渡す） ---
     let incrementalProcessableTonsPerQuarter = 0;
     let noEffectReason: string | undefined;
+    /** 投資後の商品別処理見込み量（無投資なら現在と同じ）。必要人数の算出に使う。 */
+    let processedByProductAfter: Readonly<Partial<Record<Product, number>>> = currentProcessedByProduct;
     if (targetPoolKey !== undefined && capacityIncreaseTons > 0 && targetPoolKey !== "coldStorage") {
       const primaryFactoryId = currentFactories[0]?.factoryId;
       const hypotheticalFactories = currentFactories.map((f) =>
@@ -593,6 +641,7 @@ export function buildCompanyInvestmentPlanningViewModel(
         rawMaterialLots: input.rawMaterialLots,
       });
       incrementalProcessableTonsPerQuarter = Math.max(0, totalForecastTons(afterForecast) - currentTotalTons);
+      processedByProductAfter = processedTonsByProduct(afterForecast);
       if (incrementalProcessableTonsPerQuarter <= 0) {
         noEffectReason =
           primaryBottleneckLabel !== undefined
@@ -606,24 +655,34 @@ export function buildCompanyInvestmentPlanningViewModel(
       noEffectReason = "この投資は生産能力を増加させません。";
     }
 
-    // --- 追加で必要になるWorker（増えた処理量を処理するために必要な人数） ---
-    let additionalRequiredHeadcount = 0;
-    if (incrementalProcessableTonsPerQuarter > 0) {
-      const representative = workforceRows[0];
-      const product: Product = targetPoolKey === "pd" || targetPoolKey === "vap" || targetPoolKey === "hoso" ? targetPoolKey : "hoso";
-      const extra = computeRequiredRegularHeadcount({
-        quantityByProduct: { [product]: incrementalProcessableTonsPerQuarter },
-        skillByProduct: representative?.skillByProduct ?? {},
-        attendanceRate: representative?.attendanceRate ?? 0,
-        appliedOvertimeRate: representative?.overtimeRate ?? 0,
-        temporaryHeadcount: 0,
-      });
-      // 採用は人単位でしか行えないため、切り上げた整数人数を採用する。
-      // カードの表示人数と、投資回収から控除する人件費が必ず同じ人数に基づくようにする
-      // （表示と計算で人数が食い違わないようにするため）。
-      additionalRequiredHeadcount = Math.ceil(extra.requiredRegularHeadcount);
-    }
-    const additionalQuarterlyLaborCostUsd = additionalRequiredHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter;
+    // --- 【Phase 8D 追補2】設備投資によって「新たに発生する」採用人数だけを求める ---
+    //
+    // 「増分処理量に必要な人数」をそのまま採用人数にすると、
+    //   (a) 現在の人員に余力（遊休Worker）がある場合、
+    //   (b) 1人未満の端数を単独で切り上げる場合、
+    //   (c) 投資前からすでに人員が不足している場合
+    // のいずれでも過大計上になる。そこで **投資前の総必要人数** と **投資後の総必要人数** を
+    // それぞれ現在人数と突き合わせ、その採用人数の差だけを増分として扱う
+    // （計算式は companyLab/workforce.ts の computeIncrementalRegularHires に一元化。
+    //  UI側に別の式を作らない）。
+    const requiredHeadcountAfterInvestment = computeRequiredRegularHeadcount({
+      quantityByProduct: processedByProductAfter,
+      skillByProduct: representativeWorkerProfile.skillByProduct,
+      attendanceRate: representativeWorkerProfile.attendanceRate,
+      appliedOvertimeRate: representativeWorkerProfile.overtimeRate,
+      temporaryHeadcount: representativeWorkerProfile.temporaryHeadcount,
+    }).requiredRegularHeadcount;
+
+    const hires = computeIncrementalRegularHires({
+      requiredHeadcountBefore: requiredHeadcountBeforeInvestment,
+      requiredHeadcountAfter: requiredHeadcountAfterInvestment,
+      currentRegularHeadcount: currentRegularHeadcountTotal,
+    });
+    const additionalRequiredHeadcount = hires.incrementalHires;
+    // 単価は finance/parameters.ts の常用Worker給与（Worker増減パネルの人件費試算と同一）。
+    // ここに金額をハードコードしない。
+    const additionalQuarterlyLaborCostUsd =
+      computeQuarterlyLaborCost(additionalRequiredHeadcount, 0, FINANCE_PARAMETERS_V1).regularCostUsd;
 
     // --- 工場スペース ---
     const requiredSpaceUnits = computeCandidateProjectSpaceUnits(projectType, capexParams, FACTORY_SPACE_PARAMETERS_V1);
@@ -816,7 +875,8 @@ export function buildPaybackEstimate(input: {
     "増分処理可能量は、現在の入力のまま能力だけを増やして生産エンジンへ再度渡した結果の差です（推測式ではありません）。",
     "減価償却費は現金の支出ではないため、増分キャッシュフローから差し引いていません。",
     "増分処理量を処理するために追加で必要になる常用Workerの人件費は、増分キャッシュフローから差し引いています（下記の二重控除の確認を参照）。",
-    "追加Worker人数は、増えた処理量をすべて常用Workerで処理する前提で算出しています。残業や臨時ワーカーで吸収する場合、その費用はすでに限界利益側で控除済みです。",
+    "追加Worker人数は「投資後に必要な人数 − 現在人数」と「投資前に必要な人数 − 現在の人数」の差であり、設備投資によって新たに発生する採用人数だけです。現在の人員に余力がある場合は0人、投資前から存在する不足人数も含めません。",
+    "増えた処理量は常用Workerで処理する前提で人数を算出しています。残業や臨時ワーカーで吸収する場合、その費用はすでに限界利益側で控除済みです。",
     "売上増加そのものを根拠にはしていません。販売できるかどうかは営業の成約次第です。",
   ];
 

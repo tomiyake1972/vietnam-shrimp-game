@@ -29,6 +29,7 @@ import {
 import { CAPEX_PARAMETERS_V1 } from "../../../lib/v2/capex";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "../decisionDraft";
 import { FINANCE_PARAMETERS_V1 } from "../../../lib/v2/finance/parameters";
+import { computeIncrementalRegularHires, computeQuarterlyLaborCost } from "../../../lib/v2/companyLab/workforce";
 import {
   buildCompanyInvestmentPlanningViewModel,
   buildPaybackEstimate,
@@ -491,6 +492,172 @@ test("IP-15（追補2）: 実績限界利益に常用Workerの給与が含まれ
   // 説明文が、この費用構成をそのまま述べていること。
   assert.ok(PAYBACK_DOUBLE_COUNTING_NOTE.includes("固定製造費"));
   assert.ok(PAYBACK_DOUBLE_COUNTING_NOTE.includes("臨時ワーカー費＋残業費"));
+});
+
+// ---------------------------------------------------------------------
+// 追補2: 増分Worker人数は「設備投資によって新たに発生する不足人数」だけ
+// ---------------------------------------------------------------------
+
+test("IP-16（追補2-1）: 投資前後で必要人数が同じなら、増分Workerは0人", () => {
+  const r = computeIncrementalRegularHires({
+    requiredHeadcountBefore: 4_204.3,
+    requiredHeadcountAfter: 4_204.3,
+    currentRegularHeadcount: 1_000, // 大幅に不足していても、投資による「増分」は0
+  });
+  assert.equal(r.incrementalHires, 0, "必要人数が変わらないのに採用が発生しています");
+});
+
+test("IP-17（追補2-2）: 現在人員に余力があれば、余力を使い切るまで増分Workerは0人", () => {
+  // 現在6,000人。投資前4,204人必要 → 余力1,796人。
+  // 投資で必要人数が5,000人へ増えても、まだ余力の範囲内なので採用は不要。
+  const withinSlack = computeIncrementalRegularHires({
+    requiredHeadcountBefore: 4_204,
+    requiredHeadcountAfter: 5_000,
+    currentRegularHeadcount: 6_000,
+  });
+  assert.equal(withinSlack.hiresBefore, 0);
+  assert.equal(withinSlack.hiresAfter, 0);
+  assert.equal(withinSlack.incrementalHires, 0, "人員余力があるのに採用が計上されています");
+
+  // ちょうど使い切る（6,000人必要）ところまでは0人。
+  const exactlyAtSlack = computeIncrementalRegularHires({
+    requiredHeadcountBefore: 4_204,
+    requiredHeadcountAfter: 6_000,
+    currentRegularHeadcount: 6_000,
+  });
+  assert.equal(exactlyAtSlack.incrementalHires, 0, "必要人数が現在人数と同じなら採用は不要");
+
+  // 余力を超えた瞬間から採用が発生する。
+  const beyondSlack = computeIncrementalRegularHires({
+    requiredHeadcountBefore: 4_204,
+    requiredHeadcountAfter: 6_300,
+    currentRegularHeadcount: 6_000,
+  });
+  assert.equal(beyondSlack.incrementalHires, 300);
+});
+
+test("IP-18（追補2-3）: 必要人数が整数境界を越えたときだけ1人増える", () => {
+  const current = 100;
+  // 100.0 まではちょうど足りている → 0人
+  assert.equal(
+    computeIncrementalRegularHires({ requiredHeadcountBefore: 99.2, requiredHeadcountAfter: 100.0, currentRegularHeadcount: current }).incrementalHires,
+    0
+  );
+  // 100 をわずかに超えた瞬間に1人（切り上げは「総必要人数」に対して行う）
+  assert.equal(
+    computeIncrementalRegularHires({ requiredHeadcountBefore: 99.2, requiredHeadcountAfter: 100.01, currentRegularHeadcount: current }).incrementalHires,
+    1
+  );
+  // 101.0 までは1人のまま
+  assert.equal(
+    computeIncrementalRegularHires({ requiredHeadcountBefore: 99.2, requiredHeadcountAfter: 101.0, currentRegularHeadcount: current }).incrementalHires,
+    1
+  );
+  // 101 を超えると2人
+  assert.equal(
+    computeIncrementalRegularHires({ requiredHeadcountBefore: 99.2, requiredHeadcountAfter: 101.01, currentRegularHeadcount: current }).incrementalHires,
+    2
+  );
+
+  // 【過大計上の回帰防止】増分量を単独で切り上げる旧実装なら、
+  // 増分0.81人（99.2→100.01）でも1人、さらに小さな増分でも常に1人になってしまう。
+  // 現在の実装では、現在人数を超えない限り0人であることを確認する。
+  assert.equal(
+    computeIncrementalRegularHires({ requiredHeadcountBefore: 10.2, requiredHeadcountAfter: 11.01, currentRegularHeadcount: 100 }).incrementalHires,
+    0,
+    "増分だけを単独で切り上げる過大計上に戻っています"
+  );
+});
+
+test("IP-19（追補2-4）: 投資前から存在する人員不足は、増分人数に含めない", () => {
+  // 現在100人。投資前からすでに150人必要（50人不足）。
+  // 投資で必要人数が160人になる → 投資に起因する採用は10人だけ。
+  const r = computeIncrementalRegularHires({
+    requiredHeadcountBefore: 150,
+    requiredHeadcountAfter: 160,
+    currentRegularHeadcount: 100,
+  });
+  assert.equal(r.hiresBefore, 50, "投資前から存在する不足人数");
+  assert.equal(r.hiresAfter, 60);
+  assert.equal(r.incrementalHires, 10, "投資前から存在する不足が増分に混入しています");
+
+  // 投資しても必要人数が変わらなければ、既存の不足50人は増分に含まれない。
+  const noChange = computeIncrementalRegularHires({
+    requiredHeadcountBefore: 150,
+    requiredHeadcountAfter: 150,
+    currentRegularHeadcount: 100,
+  });
+  assert.equal(noChange.hiresBefore, 50);
+  assert.equal(noChange.incrementalHires, 0);
+});
+
+test("IP-20（追補2）: 実データでも、人員に余力がある間は投資カードの追加Workerが0人になる", () => {
+  const { state, fixture, draft } = setup("phase8d-ip-020");
+  // fixtureの初期人数（BAL 6,000人）は現在の生産計画に対して余力がある状態。
+  const planning = buildPlanning(state, fixture, draft);
+  const surplus = planning.workforceRows[0].headcountSurplus;
+  assert.ok(surplus > 0, "前提: 現在の人員に余力があること");
+
+  for (const card of planning.investmentCards) {
+    assert.equal(
+      card.additionalRequiredHeadcount,
+      0,
+      `${card.projectType}: 人員余力があるのに追加Workerが計上されています（${card.additionalRequiredHeadcount}人）`
+    );
+    assert.equal(card.additionalQuarterlyLaborCostUsd, 0);
+    assert.equal(card.payback.incrementalLaborCostUsdPerQuarter, 0);
+  }
+});
+
+test("IP-21（追補2）: 人員を必要ぎりぎりまで削ると、増産を伴う投資カードで追加Workerが計上される", () => {
+  const { state, fixture, draft } = setup("phase8d-ip-021");
+  const before = buildPlanning(state, fixture, draft);
+  // 必要人数ちょうどまで削り、余力を無くす。
+  const tight = Math.ceil(before.workforceRows[0].requiredRegularHeadcount);
+  const planning = buildPlanning(state, fixture, withHeadcount(draft, tight));
+
+  // 増産効果がある案件があれば、そこには追加Workerが計上されるはず。
+  const growing = planning.investmentCards.filter((c) => c.incrementalProcessableTonsPerQuarter > 0);
+  for (const card of growing) {
+    assert.ok(
+      card.additionalRequiredHeadcount > 0,
+      `${card.projectType}: 余力が無いのに追加Workerが0人です`
+    );
+    assert.equal(
+      card.additionalQuarterlyLaborCostUsd,
+      card.additionalRequiredHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter
+    );
+  }
+  // 増産効果が無い案件には、追加Workerは計上されない。
+  for (const card of planning.investmentCards.filter((c) => c.incrementalProcessableTonsPerQuarter <= 0)) {
+    assert.equal(card.additionalRequiredHeadcount, 0, `${card.projectType}: 増産しないのに追加Workerが計上されています`);
+  }
+});
+
+test("IP-22（追補2）: 追加Worker人件費の単価は、常用Worker給与の共通パラメータを参照している（ハードコードでない）", () => {
+  // Worker増減パネルの人件費試算と、投資カードの追加人件費が、
+  // どちらも finance/parameters.ts の同じ単価を使っていることを確認する。
+  const headcount = 37;
+  const viaCommonHelper = computeQuarterlyLaborCost(headcount, 0, FINANCE_PARAMETERS_V1).regularCostUsd;
+  assert.equal(viaCommonHelper, headcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter);
+
+  // 単価を差し替えると金額も追随する（＝リテラルが埋め込まれていない）。
+  const doubled = computeQuarterlyLaborCost(headcount, 0, {
+    ...FINANCE_PARAMETERS_V1,
+    labor: { ...FINANCE_PARAMETERS_V1.labor, regularWorkerSalaryUsdPerQuarter: FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter * 2 },
+  }).regularCostUsd;
+  assert.equal(doubled, viaCommonHelper * 2, "給与単価がハードコードされている可能性があります");
+
+  // 実際のview-modelの追加人件費も同じ単価で算出されている。
+  const { state, fixture, draft } = setup("phase8d-ip-022");
+  const planning = buildPlanning(state, fixture, draft);
+  for (const card of planning.investmentCards) {
+    assert.equal(
+      card.additionalQuarterlyLaborCostUsd,
+      card.additionalRequiredHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter,
+      `${card.projectType}: 追加人件費が共通単価と一致しません`
+    );
+  }
 });
 
 test("IP-11: すべての投資カードに、当期には利用できないことの注記が付く", () => {
