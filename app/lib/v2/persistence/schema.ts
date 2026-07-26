@@ -578,7 +578,21 @@ function validateFinancingStates(raw: unknown, path: string): readonly CompanyFi
 // 対象外だった当時、実際にどの保存データへも書き込まれたことがない）は、
 // 万一の後方互換のためdecode側では引き続き許容し続ける（新規書き込みはもう
 // 発生しない。書き込み側はtargetProductを省略するか新値のみを使う）。
-const FUTURE_CAPACITY_TARGET_PRODUCTS: readonly string[] = ["hoso", "pd", "vap", "common", "commonProcessing", "freezingPackaging"];
+// 【Phase 8D-5→Phase 8D監査M-2修正】"coldStorage"（冷凍・冷蔵保管能力＝ストック）を
+// 追加。capex/types.tsのFutureCapacityEffectPlaceholder.targetProductにはPhase 8D-5で
+// 既に追加済みだったが、無印/v2側のこの許容リストへの追加が漏れていた
+// （companyLab側の永続化はtargetProductを列挙値ではなく自由文字列として検証しており
+// この種の列挙漏れが構造的に起きない。無印/v2側だけがこの列挙リスト方式のため、
+// この漏れは無印/v2経路にのみ存在した）。
+const FUTURE_CAPACITY_TARGET_PRODUCTS: readonly string[] = [
+  "hoso",
+  "pd",
+  "vap",
+  "common",
+  "commonProcessing",
+  "freezingPackaging",
+  "coldStorage",
+];
 
 function validateFutureCapacityEffectPlaceholder(raw: unknown, path: string): FutureCapacityEffectPlaceholder {
   const obj = requireObject(raw, path);
