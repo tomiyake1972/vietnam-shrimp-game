@@ -259,6 +259,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
                 previousMarketResult={viewModel.previousQuarterMarket?.marketResult ?? null}
                 previousPeriodLabel={viewModel.previousQuarterMarket?.period ?? null}
                 consumerMarketRecords={viewModel.lastQuarterResult.consumerMarketRecords}
+                previousConsumerMarketRecords={viewModel.previousQuarterMarket?.consumerMarketRecords ?? null}
               />
             </CollapsibleSection>
             {viewModel.lastQuarterResult.playerSummary && (

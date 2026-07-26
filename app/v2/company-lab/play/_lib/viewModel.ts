@@ -85,6 +85,13 @@ export interface PlayerPreviousQuarterMarket {
   readonly turn: number;
   readonly period: string;
   readonly marketResult: MarketQuarterResult;
+  /**
+   * 【Phase 8G §4】前四半期の消費国別・在庫循環確定結果。市場情報パネルの
+   * 「前期からの増減方向」列の算出だけに使う（全社共通・公開情報）。
+   * Phase 8F-1導入前の古い保存データにはこの項目が無いため、undefinedの場合は
+   * 増減方向を「-」と表示する（0で埋めない・捏造しない）。
+   */
+  readonly consumerMarketRecords: readonly ConsumerMarketQuarterRecord[] | undefined;
 }
 
 export interface PlayerScreenViewModel {
@@ -224,6 +231,7 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
         turn: previousEntry.turn,
         period: String(previousEntry.period),
         marketResult: previousEntry.record.marketResult,
+        consumerMarketRecords: previousEntry.record.consumerMarketRecords,
       };
     } catch {
       previousQuarterFinancials = null;

@@ -15,6 +15,7 @@
 //      0で埋めず「-」と表示する。
 
 import { COUNTRY_NAMES, DEMAND_MARKET_NAMES } from "../../industry-lab/components/chartColors";
+import { unwrapUnit } from "../../../lib/v2/core/units";
 import { MarketQuarterResult } from "../../../lib/v2/market/types";
 import { CompanyReasonEntry } from "../../../lib/v2/companyLab";
 import { ConsumerMarketQuarterRecord, MarketPhase } from "../../../lib/v2/market/consumerInventory";
@@ -22,6 +23,7 @@ import {
   formatHosoEqTons,
   formatIndex,
   formatRatioAsPercent,
+  formatSignedHosoEqTons,
   formatSignedPercent,
   formatSupplyDemandBalance,
   formatUsdPerHosoEqKg,
@@ -53,6 +55,13 @@ interface MarketPanelProps {
    * この節自体を表示しない（0で埋めない・捏造しない）。
    */
   readonly consumerMarketRecords?: readonly ConsumerMarketQuarterRecord[];
+  /**
+   * 【Phase 8G §4】前四半期の消費国別・在庫循環確定結果。「前期からの増減方向」列の
+   * 算出だけに使う（全社共通・公開情報。個社の非公開情報は含まない）。前四半期が
+   * 存在しない（初回四半期）・取得できない場合はnull/undefinedのままでよく、
+   * その場合は増減方向を「-」と表示する（0で埋めない・捏造しない）。
+   */
+  readonly previousConsumerMarketRecords?: readonly ConsumerMarketQuarterRecord[] | null;
 }
 
 interface StockStatusDisplay {
@@ -105,6 +114,44 @@ function changeStyle(changeRatio: number | null): string {
   if (changeRatio === null) return "text-gray-500";
   if (Math.abs(changeRatio) < FLAT_THRESHOLD) return "text-gray-400";
   return changeRatio > 0 ? "text-teal-300" : "text-rose-300";
+}
+
+/**
+ * 【Phase 8G §4「前期からの増減方向」】期末在庫量（endingInventoryTons、既存の
+ * ConsumerMarketQuarterRecord既存フィールド）を前四半期の同じ市場の値と比較する
+ * だけであり、新しいゲーム経済係数・しきい値を導入するものではない
+ * （既存のPriceCellの前期比表示と同じ「符号だけを見る・僅少差は横ばい扱い」という
+ * 表示層の閾値のみ。この閾値はエンジンの計算結果には一切影響しない）。
+ */
+const INVENTORY_FLAT_THRESHOLD_TONS = 1;
+
+function inventoryChangeLabel(current: number, previous: number | undefined): string {
+  if (previous === undefined) return "-";
+  const diff = current - previous;
+  if (Math.abs(diff) < INVENTORY_FLAT_THRESHOLD_TONS) return "横ばい";
+  return diff > 0 ? "▲ 増加" : "▼ 減少";
+}
+
+function inventoryChangeStyle(current: number, previous: number | undefined): string {
+  if (previous === undefined) return "text-gray-500";
+  const diff = current - previous;
+  if (Math.abs(diff) < INVENTORY_FLAT_THRESHOLD_TONS) return "text-gray-400";
+  return diff > 0 ? "text-teal-300" : "text-rose-300";
+}
+
+/** 「前期からの増減方向」セル。主要な向き（▲／▼／横ばい／-）＋補足のトン差分の2行スタック。 */
+function InventoryChangeCell(props: { readonly current: ConsumerMarketQuarterRecord; readonly previous: ConsumerMarketQuarterRecord | undefined }) {
+  const { current, previous } = props;
+  const prevValue = previous?.endingInventoryTons !== undefined ? unwrapUnit(previous.endingInventoryTons) : undefined;
+  const currentValue = unwrapUnit(current.endingInventoryTons);
+  return (
+    <td className="pr-3 py-1.5 whitespace-nowrap align-top">
+      <div className={inventoryChangeStyle(currentValue, prevValue)}>{inventoryChangeLabel(currentValue, prevValue)}</div>
+      {prevValue !== undefined && (
+        <div className="text-[10px] text-gray-500">{formatSignedHosoEqTons(currentValue - prevValue)}</div>
+      )}
+    </td>
+  );
 }
 
 function PriceCell(props: { readonly cell: PriceWithQoq }) {
@@ -181,13 +228,22 @@ function IndicatorChangeCell(props: { readonly row: MarketIndicatorRow }) {
 }
 
 export default function MarketPanel(props: MarketPanelProps) {
-  const { marketResult, globalReasonCodes, previousMarketResult = null, previousPeriodLabel = null, consumerMarketRecords } = props;
+  const {
+    marketResult,
+    globalReasonCodes,
+    previousMarketResult = null,
+    previousPeriodLabel = null,
+    consumerMarketRecords,
+    previousConsumerMarketRecords,
+  } = props;
 
   const destinationRows = buildDestinationMarketPriceRows(marketResult, previousMarketResult);
   const originRows = buildOriginCountryPriceRows(marketResult, previousMarketResult);
   const indicatorRows = buildMarketIndicatorRows(marketResult, previousMarketResult);
   const explanation = buildDestinationPriceExplanation(marketResult);
   const hasPreviousQuarter = previousMarketResult !== null;
+  // 【Phase 8G §4】市場IDで前四半期の消費国在庫レコードを引けるようにする（無ければ"-"表示）。
+  const previousConsumerMarketRecordByMarket = new Map((previousConsumerMarketRecords ?? []).map((r) => [r.market, r]));
 
   return (
     <div className="bg-gray-800 rounded-2xl p-4 sm:p-5 space-y-5" data-testid="market-panel">
@@ -309,6 +365,7 @@ export default function MarketPanel(props: MarketPanelProps) {
                   <th className="pr-3 py-1 font-medium">希望購買</th>
                   <th className="pr-3 py-1 font-medium">実購買</th>
                   <th className="pr-3 py-1 font-medium">期末在庫量</th>
+                  <th className="pr-3 py-1 font-medium">前期からの増減方向</th>
                   <th className="pr-3 py-1 font-medium">在庫状況</th>
                   <th className="pr-3 py-1 font-medium">購買圧力指数</th>
                 </tr>
@@ -327,6 +384,7 @@ export default function MarketPanel(props: MarketPanelProps) {
                       <div>{formatHosoEqTons(r.endingInventoryTons)}</div>
                       <div className="text-[10px] text-gray-500">安心水準に必要な在庫量 {formatHosoEqTons(r.targetInventoryTons)}</div>
                     </td>
+                    <InventoryChangeCell current={r} previous={previousConsumerMarketRecordByMarket.get(r.market)} />
                     <StockStatusCell record={r} />
                     <td className="pr-3 py-1.5 whitespace-nowrap">{formatIndex(r.purchasePressureIndex)}</td>
                   </tr>
@@ -337,10 +395,11 @@ export default function MarketPanel(props: MarketPanelProps) {
           <p className="text-[10px] text-gray-500 leading-relaxed">
             「希望購買」は在庫・消費から見て市場が購入したい量、「実購買」は世界全体の需給調整後に実際に確保できた量です
             （実購買が希望購買を下回る場合、供給不足が起きています）。「市場の安心在庫水準」は、輸入業者や流通業者が
-            供給途絶や需要変動に不安を感じずに取引できる在庫水準の目安です。「在庫状況」は、現在の在庫水準と
-            この安心水準との関係を4段階（逼迫／やや不足／安心圏／在庫過多）で示したものです。「購買圧力指数」は
-            正の値ほど積み増し（購買増）圧力、負の値ほど取り崩し圧力が強いことを示し、翌四半期の消費国別価格に
-            反映されます。
+            供給途絶や需要変動に不安を感じずに取引できる在庫水準の目安です。「前期からの増減方向」は、期末在庫量を
+            前四半期の同じ市場の期末在庫量と比較した向きだけを示します（良し悪しの判定ではなく、前四半期の確定データが
+            無い場合は「-」と表示します）。「在庫状況」は、現在の在庫水準とこの安心水準との関係を4段階（逼迫／やや不足／
+            安心圏／在庫過多）で示したものです。「購買圧力指数」は正の値ほど積み増し（購買増）圧力、負の値ほど
+            取り崩し圧力が強いことを示し、翌四半期の消費国別価格に反映されます。
           </p>
         </div>
       )}

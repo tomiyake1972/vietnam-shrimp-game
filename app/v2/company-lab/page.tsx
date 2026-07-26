@@ -361,6 +361,7 @@ export default function CompanyLabPage() {
                       previousMarketResult={previousDisplayedRecord?.marketResult ?? null}
                       previousPeriodLabel={previousDisplayedRecord !== undefined ? String(previousDisplayedRecord.period) : null}
                       consumerMarketRecords={displayedRecord.consumerMarketRecords}
+                      previousConsumerMarketRecords={previousDisplayedRecord?.consumerMarketRecords ?? null}
                     />
                     {playerSummary && <ResultsPanel summary={playerSummary} displayName={nameById.get(draftPlayerCompanyId) ?? draftPlayerCompanyId} />}
                   </>
@@ -372,6 +373,7 @@ export default function CompanyLabPage() {
                       previousMarketResult={previousDisplayedRecord?.marketResult ?? null}
                       previousPeriodLabel={previousDisplayedRecord !== undefined ? String(previousDisplayedRecord.period) : null}
                       consumerMarketRecords={displayedRecord.consumerMarketRecords}
+                      previousConsumerMarketRecords={previousDisplayedRecord?.consumerMarketRecords ?? null}
                     />
                     <div className="text-[11px] bg-amber-900/60 border border-amber-600/50 text-amber-200 rounded-lg px-3 py-2 inline-block">
                       GM全社表示 — 実際のプレイヤーには見えない他社の結果を含みます

@@ -35,6 +35,7 @@ import path from "node:path";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import MarketPanel from "../components/MarketPanel";
+import { unwrapUnit } from "../../../lib/v2/core/units";
 import { runCompanyLabWithAutoPolicyForAllCompanies } from "../../../lib/v2/companyLab/runner";
 import { generateAutoPolicyDecision } from "../../../lib/v2/companyLab/autoPolicy";
 import { CompanyLabConfig } from "../../../lib/v2/companyLab/types";
@@ -249,5 +250,102 @@ test("§C-5: 在庫状況の4段階ラベルは、各市場のmarketPhaseと1対
       html.includes(`在庫状況：${expectedLabel}`),
       `${record.market}: marketPhase=${record.marketPhase}に対応する在庫状況ラベル「${expectedLabel}」が描画されていること`
     );
+  }
+});
+
+// 【ここから、Phase 8G §4「前期からの増減方向」列の追加ぶんの回帰テスト】
+// 既存フィールド（endingInventoryTons）の前四半期比較だけであり、新しい経済係数・
+// 判定ロジックを追加していないことを、実際の2四半期分の確定データで確認する。
+
+const previousRecord = shared.history[shared.history.length - 2];
+
+test("§D-1: previousConsumerMarketRecordsを渡すと「前期からの増減方向」列が描画され、5市場ぶん出る", () => {
+  assert.ok(previousRecord.consumerMarketRecords, "前提条件：前四半期のconsumerMarketRecordsが存在すること");
+
+  const html = renderToStaticMarkup(
+    React.createElement(MarketPanel, {
+      marketResult: latestRecord.marketResult,
+      globalReasonCodes: latestRecord.globalReasonCodes,
+      consumerMarketRecords: latestRecord.consumerMarketRecords,
+      previousConsumerMarketRecords: previousRecord.consumerMarketRecords,
+    })
+  );
+
+  assert.ok(html.includes("前期からの増減方向"), "「前期からの増減方向」列見出しが描画されていること");
+  const directionCount = (html.match(/▲ 増加|▼ 減少|横ばい/g) ?? []).length;
+  assert.equal(directionCount, Object.keys(DEMAND_MARKET_NAMES).length, "5市場ぶん、増減方向のラベルが1つずつ描画されること");
+});
+
+test("§D-2: 増減方向のラベルは、実際のendingInventoryTonsの前期比較（符号）と一致する（新しい閾値・係数を導入していないことの確認）", () => {
+  assert.ok(latestRecord.consumerMarketRecords && previousRecord.consumerMarketRecords);
+
+  const previousByMarket = new Map((previousRecord.consumerMarketRecords ?? []).map((r) => [r.market, r]));
+  // 市場ごとに1件だけのconsumerMarketRecordsを渡して個別に描画し、他市場の行と
+  // 混ざらない形で「その市場の増減方向ラベル」だけを取り出す。
+  for (const record of latestRecord.consumerMarketRecords ?? []) {
+    const prev = previousByMarket.get(record.market)!;
+    const diff = unwrapUnit(record.endingInventoryTons) - unwrapUnit(prev.endingInventoryTons);
+    const expectedLabel = Math.abs(diff) < 1 ? "横ばい" : diff > 0 ? "▲ 増加" : "▼ 減少";
+
+    const html = renderToStaticMarkup(
+      React.createElement(MarketPanel, {
+        marketResult: latestRecord.marketResult,
+        globalReasonCodes: latestRecord.globalReasonCodes,
+        consumerMarketRecords: [record],
+        previousConsumerMarketRecords: [prev],
+      })
+    );
+
+    assert.ok(html.includes(expectedLabel), `${record.market}: 期待した増減方向「${expectedLabel}」（差分${diff}トン）が描画結果に見つからない`);
+  }
+});
+
+test("§D-3: previousConsumerMarketRecordsを渡さない（初回四半期相当）場合は「-」と表示され、エラーにも0埋めにもならない", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(MarketPanel, {
+      marketResult: latestRecord.marketResult,
+      globalReasonCodes: latestRecord.globalReasonCodes,
+      consumerMarketRecords: latestRecord.consumerMarketRecords,
+      // previousConsumerMarketRecordsを意図的に渡さない＝初回四半期・前期データ取得失敗の再現
+    })
+  );
+
+  assert.ok(html.includes("前期からの増減方向"), "列見出し自体は表示されること（表自体は消えない）");
+  assert.ok(!html.includes("NaN"), "出力にNaNという文字列が含まれないこと");
+  assert.ok(!html.includes("Infinity"), "出力にInfinityという文字列が含まれないこと");
+  assert.ok(!html.includes("undefined"), "出力にundefinedという文字列が含まれないこと");
+});
+
+test("§D-4: 同一の入力を2回描画しても、増減方向を含めて完全に同じHTMLになる（再読込で変化しないことの確認）", () => {
+  const propsInput = {
+    marketResult: latestRecord.marketResult,
+    globalReasonCodes: latestRecord.globalReasonCodes,
+    consumerMarketRecords: latestRecord.consumerMarketRecords,
+    previousConsumerMarketRecords: previousRecord.consumerMarketRecords,
+  };
+
+  const htmlA = renderToStaticMarkup(React.createElement(MarketPanel, propsInput));
+  const htmlB = renderToStaticMarkup(React.createElement(MarketPanel, propsInput));
+
+  assert.equal(htmlA, htmlB, "同じ確定済み市場状態を渡す限り、描画結果は再読込（再描画）によって変化しないこと");
+});
+
+test("§D-5: <MarketPanel>の呼び出しは、page.tsx・PlayerScreenClient.tsxのすべての箇所でpreviousConsumerMarketRecordsも渡している", () => {
+  const pageTsxPath = path.join(__dirname, "..", "page.tsx");
+  const playerScreenClientPath = path.join(__dirname, "..", "play", "[labId]", "PlayerScreenClient.tsx");
+
+  for (const [label, filePath] of [
+    ["page.tsx", pageTsxPath],
+    ["PlayerScreenClient.tsx", playerScreenClientPath],
+  ] as const) {
+    const source = readFileSync(filePath, "utf8");
+    const callBlocks = source.match(/<MarketPanel\b[\s\S]*?\/>/g) ?? [];
+    assert.ok(callBlocks.length > 0, `${label}: <MarketPanel>の呼び出しが見つからない`);
+    for (const [index, block] of callBlocks.entries()) {
+      assert.ok(
+        block.includes("previousConsumerMarketRecords="),
+        `${label}: ${index + 1}番目の<MarketPanel>呼び出しにpreviousConsumerMarketRecordsが渡されていない\n${block}`
+      );
+    }
   }
 });
