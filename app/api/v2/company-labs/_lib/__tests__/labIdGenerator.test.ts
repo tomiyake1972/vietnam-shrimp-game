@@ -34,6 +34,7 @@ test("generateUniqueLabId: 既存labIdとは異なる値を生成する（衝突
       financingState: { companies: [] },
       capexState: { companies: [] },
       workforceState: { companies: [] },
+      consumerMarketState: {} as never,
       isComplete: false,
     },
     now: "2026-01-01T00:00:00.000Z",

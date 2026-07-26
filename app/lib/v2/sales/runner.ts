@@ -50,7 +50,7 @@ export function advanceSalesQuarter(
   // では両者は完全に一致する（market/__tests__/destinationPricing.test.ts・
   // sales/__tests__/runner.test.ts で検証）。
   const marketReferencePrices = deriveVietnamMarketReferencePrices(input.marketResult, destinationMarketPriceCoefficients);
-  const targetDemandByMarketProduct = deriveTargetDemand(input.marketResult, input.marketInput);
+  const targetDemandByMarketProduct = deriveTargetDemand(input.marketResult, input.marketInput, input.marketWeights);
 
   const combos: Array<{ market: DemandMarketId; product: Product }> = [];
   for (const market of DEMAND_MARKET_IDS) {

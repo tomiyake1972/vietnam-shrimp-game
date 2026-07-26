@@ -17,7 +17,10 @@
 import { COUNTRY_NAMES, DEMAND_MARKET_NAMES } from "../../industry-lab/components/chartColors";
 import { MarketQuarterResult } from "../../../lib/v2/market/types";
 import { CompanyReasonEntry } from "../../../lib/v2/companyLab";
+import { ConsumerMarketQuarterRecord, MarketPhase } from "../../../lib/v2/market/consumerInventory";
 import {
+  formatHosoEqTons,
+  formatIndex,
   formatRatioAsPercent,
   formatSignedPercent,
   formatSupplyDemandBalance,
@@ -44,6 +47,32 @@ interface MarketPanelProps {
   readonly previousMarketResult?: MarketQuarterResult | null;
   /** 前四半期の期表示（"2015Q1"等）。見出しの注記に出すだけで、計算には使わない。 */
   readonly previousPeriodLabel?: string | null;
+  /**
+   * 【Phase 8F-1】当期の消費国別・在庫循環（消費／在庫／購買）確定結果。全社共通・公開情報。
+   * Phase 8F-1導入前の古い保存データにはこの項目が無いため、undefinedの場合は
+   * この節自体を表示しない（0で埋めない・捏造しない）。
+   */
+  readonly consumerMarketRecords?: readonly ConsumerMarketQuarterRecord[];
+}
+
+/** 在庫循環の局面（marketPhase）の日本語表示。 */
+const MARKET_PHASE_LABELS: Record<MarketPhase, string> = {
+  restocking: "復元購買（積み増し）",
+  balanced: "均衡",
+  destocking: "在庫調整（取り崩し）",
+  tight: "在庫逼迫",
+};
+
+const MARKET_PHASE_STYLES: Record<MarketPhase, string> = {
+  restocking: "bg-teal-950/60 border border-teal-700/50 text-teal-200",
+  balanced: "bg-gray-700/60 border border-gray-600/50 text-gray-300",
+  destocking: "bg-amber-950/60 border border-amber-700/50 text-amber-200",
+  tight: "bg-rose-950/60 border border-rose-700/50 text-rose-200",
+};
+
+/** 在庫月数（ヶ月）の表示。既存formattersに月数専用の関数が無いため、この表示用途に限定してここで整形する。 */
+function formatCoverageMonths(months: number): string {
+  return `${months.toFixed(1)}ヶ月`;
 }
 
 /** 前期比が僅少（±0.05%未満）なら「横ばい」扱いにして、符号のちらつきを見せない。 */
@@ -112,7 +141,7 @@ function IndicatorChangeCell(props: { readonly row: MarketIndicatorRow }) {
 }
 
 export default function MarketPanel(props: MarketPanelProps) {
-  const { marketResult, globalReasonCodes, previousMarketResult = null, previousPeriodLabel = null } = props;
+  const { marketResult, globalReasonCodes, previousMarketResult = null, previousPeriodLabel = null, consumerMarketRecords } = props;
 
   const destinationRows = buildDestinationMarketPriceRows(marketResult, previousMarketResult);
   const originRows = buildOriginCountryPriceRows(marketResult, previousMarketResult);
@@ -221,6 +250,62 @@ export default function MarketPanel(props: MarketPanelProps) {
           </table>
         </div>
       </div>
+
+      {/* 【Phase 8F-1】消費国別・在庫循環（消費／在庫／購買）。古い保存データにはconsumerMarketRecordsが
+          無いため、その場合はこの節自体を表示しない（0で埋めない・捏造しない）。 */}
+      {consumerMarketRecords && consumerMarketRecords.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <h4 className="text-sm font-semibold text-gray-200">消費国別・在庫循環（消費・在庫・購買）</h4>
+            <span className="text-[11px] text-gray-500">単位：トン（HOSO換算）／在庫月数はヶ月</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs text-gray-300">
+              <thead>
+                <tr className="text-gray-400 text-left">
+                  <th className="pr-3 py-1 font-medium">消費国（仕向市場）</th>
+                  <th className="pr-3 py-1 font-medium">期首在庫</th>
+                  <th className="pr-3 py-1 font-medium">実消費</th>
+                  <th className="pr-3 py-1 font-medium">希望購買</th>
+                  <th className="pr-3 py-1 font-medium">実購買</th>
+                  <th className="pr-3 py-1 font-medium">期末在庫</th>
+                  <th className="pr-3 py-1 font-medium">在庫月数</th>
+                  <th className="pr-3 py-1 font-medium">目標月数</th>
+                  <th className="pr-3 py-1 font-medium">購買圧力指数</th>
+                  <th className="pr-3 py-1 font-medium">局面</th>
+                </tr>
+              </thead>
+              <tbody>
+                {consumerMarketRecords.map((r) => (
+                  <tr key={r.market} className="border-t border-gray-700/60">
+                    <td className="pr-3 py-1.5 font-semibold text-gray-100 whitespace-nowrap">
+                      {DEMAND_MARKET_NAMES[r.market]}（{r.market}）
+                    </td>
+                    <td className="pr-3 py-1.5 whitespace-nowrap">{formatHosoEqTons(r.openingInventoryTons)}</td>
+                    <td className="pr-3 py-1.5 whitespace-nowrap">{formatHosoEqTons(r.realizedConsumptionTons)}</td>
+                    <td className="pr-3 py-1.5 whitespace-nowrap">{formatHosoEqTons(r.desiredPurchaseTons)}</td>
+                    <td className="pr-3 py-1.5 whitespace-nowrap">{formatHosoEqTons(r.actualPurchaseTons)}</td>
+                    <td className="pr-3 py-1.5 whitespace-nowrap">{formatHosoEqTons(r.endingInventoryTons)}</td>
+                    <td className="pr-3 py-1.5 whitespace-nowrap">{formatCoverageMonths(r.inventoryCoverageMonths)}</td>
+                    <td className="pr-3 py-1.5 whitespace-nowrap">{formatCoverageMonths(r.targetCoverageMonths)}</td>
+                    <td className="pr-3 py-1.5 whitespace-nowrap">{formatIndex(r.purchasePressureIndex)}</td>
+                    <td className="pr-3 py-1.5 whitespace-nowrap">
+                      <span className={`text-[10px] rounded-full px-2 py-0.5 ${MARKET_PHASE_STYLES[r.marketPhase]}`}>
+                        {MARKET_PHASE_LABELS[r.marketPhase]}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[10px] text-gray-500 leading-relaxed">
+            「希望購買」は在庫・消費から見て市場が購入したい量、「実購買」は世界全体の需給調整後に実際に確保できた量です
+            （実購買が希望購買を下回る場合、供給不足が起きています）。「購買圧力指数」は正の値ほど積み増し（購買増）圧力、
+            負の値ほど取り崩し圧力が強いことを示し、翌四半期の消費国別価格に反映されます。
+          </p>
+        </div>
+      )}
 
       {globalReasonCodes.length > 0 && (
         <div className="flex flex-wrap gap-1.5">

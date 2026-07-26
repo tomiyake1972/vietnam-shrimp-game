@@ -12,7 +12,7 @@
 import { RandomStream } from "../core/random";
 import { PeriodV2 } from "../core/period";
 import { HosoEqTons, Ratio, UsdPerHosoEqKg } from "../core/units";
-import { CountryId, MarketQuarterInput, MarketQuarterResult } from "../market/types";
+import { CountryId, DemandMarketId, MarketQuarterInput, MarketQuarterResult } from "../market/types";
 import { MarketParameters } from "../market/parameters";
 import { DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
 import { CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
@@ -128,6 +128,16 @@ export interface TurnOrchestratorInput {
 
   /** 直前ターンまでの原料ロット在庫（Phase5）。このターンの新規ロットが追加される。 */
   readonly existingLots: readonly RawMaterialLot[];
+
+  /**
+   * 【Phase 8F-1】対象需要（targetDemand）を市場ごとへ按分する構成比の上書き。
+   * sales/types.ts の SalesQuarterInput.marketWeights へそのまま渡すだけ
+   * （このオーケストレーター自身は在庫・購買循環モデルの計算を行わない）。
+   * market/consumerInventory.ts の deriveMarketWeightsFromDesiredPurchase が
+   * 算出した値を渡す想定。省略時は sales側の既存の按分（priorPeriodConsumption
+   * ベース）にフォールバックする（後方互換）。
+   */
+  readonly marketWeights?: Readonly<Record<DemandMarketId, number>>;
 
   /**
    * 決定論的乱数のシード（Phase1のHOSO価格ショック等に使う）。同じseed・同じ

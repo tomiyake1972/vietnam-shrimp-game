@@ -14,6 +14,7 @@
 import { PeriodV2 } from "../core/period";
 import { HosoEqTons, Ratio, Score0to100 } from "../core/units";
 import { CountryId, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
+import { ConsumerMarketCarryStateTable, ConsumerMarketQuarterRecord } from "../market/consumerInventory";
 import { ScenarioMode, ScenarioState } from "../scenario/types";
 import { CompanyId, CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
 import {
@@ -316,6 +317,15 @@ export interface CompanyQuarterRecord {
    * 同様、実績の再計算は一切行わない）。
    */
   readonly capexResults: readonly CapexQuarterResult[];
+  /**
+   * 【Phase 8F-1】当期の市場別・消費国在庫・購買循環モデルの確定記録
+   * （market/consumerInventory.ts の settleConsumerMarketQuarter の出力を
+   * そのまま保存するだけ。監査・テスト・診断表示用。財務・成約等の既存計算を
+   * 再実装しない）。Phase 8F-1より前に確定した既存の永続化済み履歴には
+   * このフィールドが存在しないため、後方互換のためoptionalとする
+   * （SalesContract.costSnapshot等、既存の後発フィールドと同じ扱い）。
+   */
+  readonly consumerMarketRecords?: readonly ConsumerMarketQuarterRecord[];
 }
 
 export interface CompanyLabConfig {
@@ -348,6 +358,14 @@ export interface CompanyLabState {
    * 意思決定では増減差分を入力し、ここには「変更後の総人数」を保存する。
    */
   readonly workforceState: WorkforceState;
+  /**
+   * 【Phase 8F-1】市場別（CN/US/EU/JP/OTHER）の消費国在庫・購買循環モデルの
+   * carry state（期首在庫・前期消費実績・価格履歴。ターンをまたいで保持）。
+   * 市場価格形成（globalDemand.ts・hosoPricing.ts）は一切変更せず、この状態は
+   * sales/marketAdapter.ts の市場別按分ウェイトと、次四半期の仕向市場価格係数
+   * （destinationMarketPricing）の算出だけに使う。
+   */
+  readonly consumerMarketState: ConsumerMarketCarryStateTable;
   readonly history: readonly CompanyQuarterRecord[];
   readonly isComplete: boolean;
 }

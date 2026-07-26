@@ -209,6 +209,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
                 globalReasonCodes={viewModel.lastQuarterResult.globalReasonCodes}
                 previousMarketResult={viewModel.previousQuarterMarket?.marketResult ?? null}
                 previousPeriodLabel={viewModel.previousQuarterMarket?.period ?? null}
+                consumerMarketRecords={viewModel.lastQuarterResult.consumerMarketRecords}
               />
             </CollapsibleSection>
             {viewModel.lastQuarterResult.playerSummary && (

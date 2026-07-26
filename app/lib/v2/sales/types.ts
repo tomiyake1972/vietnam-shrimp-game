@@ -235,6 +235,14 @@ export interface SalesQuarterInput {
    * 市場ごとへ按分する相対ウェイトとして読むだけに使う。需要成長式の再計算はしない）。
    */
   readonly marketInput: MarketQuarterInput;
+  /**
+   * 【Phase 8F-1】対象需要（targetDemand）を市場ごとへ按分する構成比の上書き。
+   * market/consumerInventory.ts の deriveMarketWeightsFromDesiredPurchase が
+   * 算出した「希望購買量ベースの市場別ウェイト」を渡す想定。省略時は
+   * deriveTargetDemand が既存の priorPeriodConsumption ベースの按分へ
+   * フォールバックする（後方互換）。
+   */
+  readonly marketWeights?: Readonly<Record<DemandMarketId, number>>;
 }
 
 /** 1四半期分の成約計算・契約生成の記録。 */

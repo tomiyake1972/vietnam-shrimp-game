@@ -18,6 +18,7 @@ function minimalRuntime() {
     financingState: { companies: [] },
     capexState: { companies: [] },
     workforceState: { companies: [] },
+    consumerMarketState: {} as never,
     isComplete: false,
   };
 }
