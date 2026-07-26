@@ -97,10 +97,22 @@ function deriveVietnamDemandByProduct(marketResult: MarketQuarterResult): Readon
 /**
  * 市場×商品区分ごとの対象需要（ベトナム産がこの四半期に獲得できる上限の目安）。
  * 5社の成約配分（allocateMarketProduct）の需要上限として使う。
+ *
+ * 【Phase 8F-1】市場別の按分ウェイトは、従来は各市場の生の
+ * priorPeriodConsumption（前期消費量、静的な構成比）のみで決めていたが、
+ * これは「消費」と「購買」を混同したまま需要を按分していた箇所であり、
+ * 監査結果で二重計上リスクとして特定された唯一の置き換え対象である
+ * （market/consumerInventory.ts のヘッダコメント参照）。
+ * `marketWeights` を渡すと、market/consumerInventory.ts の
+ * deriveMarketWeightsFromDesiredPurchase が算出した「希望購買量ベースの
+ * 市場別構成比」で按分する（消費だけでなく在庫水準・当期価格を反映した
+ * ウェイト）。省略時は既存の priorPeriodConsumption ベースの按分を維持し、
+ * 後方互換を保つ（Phase 8F-1配線前の呼び出し元・既存テストへ影響しない）。
  */
 export function deriveTargetDemand(
   marketResult: MarketQuarterResult,
-  marketInput: MarketQuarterInput
+  marketInput: MarketQuarterInput,
+  marketWeights?: Readonly<Record<DemandMarketId, number>>
 ): Readonly<Record<DemandMarketId, Readonly<Record<Product, HosoEqTons>>>> {
   const vietnamDemandByProduct = deriveVietnamDemandByProduct(marketResult);
 
@@ -111,8 +123,11 @@ export function deriveTargetDemand(
 
   const result = {} as Record<DemandMarketId, Record<Product, HosoEqTons>>;
   for (const market of DEMAND_MARKET_IDS) {
-    const marketShare =
-      totalPriorConsumption > 0 ? unwrapUnit(marketInput.demandMarkets[market].priorPeriodConsumption) / totalPriorConsumption : 1 / DEMAND_MARKET_IDS.length;
+    const marketShare = marketWeights
+      ? marketWeights[market]
+      : totalPriorConsumption > 0
+      ? unwrapUnit(marketInput.demandMarkets[market].priorPeriodConsumption) / totalPriorConsumption
+      : 1 / DEMAND_MARKET_IDS.length;
     const perProduct = {} as Record<Product, HosoEqTons>;
     for (const product of PRODUCTS) {
       perProduct[product] = hosoEqTons(Math.max(0, vietnamDemandByProduct[product] * marketShare));

@@ -21,6 +21,7 @@ import { generateAutoPolicyDecision } from "../autoPolicy";
 import { CompanyLabConfig, CompanyLabResult } from "../types";
 import { deriveMarketReferencePrices, decomposeVietnamProductPrices } from "../../market/destinationPricing";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS } from "../../market/destinationPricingParameters";
+import { deriveNextQuarterDestinationPriceCoefficients } from "../../market/consumerInventory";
 import { DEMAND_MARKET_IDS, Product } from "../../market/types";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
@@ -131,10 +132,28 @@ test("受入確認DMP-6: autoPolicy各社は、市場係数導入後も商品×�
   // 各社・各商品について、参加している市場間でaskPrice/参照価格の比が
   // ほぼ一定であることを確認する（archetypeの価格調整が比率ベースで、
   // 市場ごとの参照価格に対して掛かる設計であるため）。
+  //
+  // 【Phase 8F-1】市場ごとの仕向市場価格係数は、前四半期の消費国在庫・購買循環
+  // モデルの購買圧力・在庫逼迫度により四半期ごとに動的へ変わる（実装指示§11
+  // 「市場間の価格差は純粋な固定係数でなくなる」）。そのため、askPriceとの
+  // 比較対象となる参照価格は、静的なCURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS
+  // ではなく、その四半期に実際に使われた（前四半期のconsumerMarketRecordsから
+  // 導出された）係数で計算する必要がある（そうしないと、動的調整そのものが
+  // 「市場間の比が一致しない」という誤検出を生む）。
   let comparedGroups = 0;
-  for (const record of shared32.history) {
+  for (let i = 0; i < shared32.history.length; i++) {
+    const record = shared32.history[i];
     if (record.turn < 2) continue;
-    const refPrices = deriveMarketReferencePrices(record.marketResult, CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS);
+    const previousRecord = shared32.history[i - 1];
+    const previousConsumerMarketRecords = previousRecord?.consumerMarketRecords;
+    const coefficientsUsedThisQuarter =
+      previousConsumerMarketRecords && previousConsumerMarketRecords.length > 0
+        ? deriveNextQuarterDestinationPriceCoefficients(
+            Object.fromEntries(previousConsumerMarketRecords.map((r) => [r.market, r])) as Readonly<Record<(typeof DEMAND_MARKET_IDS)[number], (typeof previousConsumerMarketRecords)[number]>>,
+            CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS
+          )
+        : CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS;
+    const refPrices = deriveMarketReferencePrices(record.marketResult, coefficientsUsedThisQuarter);
     for (const companyId of COMPANY_IDS) {
       for (const product of PRODUCTS) {
         const ratios: number[] = [];
@@ -148,12 +167,27 @@ test("受入確認DMP-6: autoPolicy各社は、市場係数導入後も商品×�
         }
         if (ratios.length < 2) continue;
         comparedGroups++;
-        // askPrice・参照価格それぞれに丸め処理（小数点以下4桁程度）が入るため、
-        // 比の一致は理論上厳密だが、実測では丸め誤差レベル（1e-4程度）のブレを許容する。
+        // 【Phase 8F-1によるトレランス改定】autoPolicy（companyLab/autoPolicy.ts
+        // buildSalesPlans）は、priceAdjustmentUsdPerHosoEqKgを「前四半期の
+        // 実績市場結果に静的係数（CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS）
+        // を適用した参照価格」を基準に決定する（autoPolicy.ts
+        // referencePricesByMarketProduct）。一方、実際の当四半期askPriceは
+        // 「当四半期の動的係数（本テストがcoefficientsUsedThisQuarterとして
+        // 再現している、consumerMarketRecords由来の係数）」を適用した参照価格に
+        // 対して計算される。Phase 8F-1以前は係数が四半期を通じて静的だった
+        // ため両者は事実上一致し、比の一致は丸め誤差（1e-4程度）に収まっていたが、
+        // Phase 8F-1で係数が四半期ごとに動的へ変わったことにより
+        // （実装指示§11「市場間の価格差は純粋な固定係数でなくなる」という
+        // 意図どおりの挙動）、autoPolicyの価格決定時点の想定と実際の当期価格との
+        // 間に、四半期あたり最大でmaxQuarterlyPriceAdjustmentRatio程度
+        // （パラメータ上は市場ごとに6〜9%）のズレが生じ得る。実測では
+        // baseline-v0.1シナリオ32ターンを通じた最大乖離は約1.3%（turn2、CN以外の
+        // 市場間）であり、明確な閾値として2%を採用する（丸め誤差ではなく、
+        // 動的価格差別化という新機能そのものが生む、想定内で有界な乖離）。
         const maxDeviation = Math.max(...ratios) - Math.min(...ratios);
         assert.ok(
-          maxDeviation < 1e-4,
-          `${record.period} ${companyId} ${product}: 市場間でaskPrice/参照価格比が一致しない（${JSON.stringify(ratios)}）`
+          maxDeviation < 0.02,
+          `${record.period} ${companyId} ${product}: 市場間でaskPrice/参照価格比が想定を超えて乖離している（${JSON.stringify(ratios)}）`
         );
       }
     }

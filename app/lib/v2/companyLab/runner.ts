@@ -40,8 +40,22 @@
 // 必須の配線）。
 
 import { PeriodV2 } from "../core/period";
-import { hosoEqTons, ratio, Score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
-import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
+import { HosoEqTons, hosoEqTons, ratio, Score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
+import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
+import {
+  CONSUMER_MARKET_INVENTORY_PARAMETERS_V1,
+  ConsumerMarketCarryState,
+  ConsumerMarketQuarterRecord,
+  buildInitialConsumerMarketCarryStateTable,
+  computeActualPurchaseByMarket,
+  deriveMarketWeightsFromDesiredPurchase,
+  deriveNextQuarterDestinationPriceCoefficients,
+  planConsumerMarketQuarterTable,
+  rollCarryStateForward,
+  settleConsumerMarketQuarter,
+} from "../market/consumerInventory";
+import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
+import { deriveVietnamMarketReferencePrices } from "../sales/marketAdapter";
 import {
   advanceScenarioTurn,
   getScenarioTurnInput,
@@ -207,6 +221,21 @@ function buildPreviousMarketContext(
   };
 }
 
+/**
+ * 【Phase 8F-1】市場別配列（1市場1件、DEMAND_MARKET_IDS全件を含む前提）を
+ * DemandMarketId をキーとするRecordへ変換する（deriveNextQuarterDestinationPriceCoefficients
+ * が要求する入力形へ、保存形式（配列）を合わせるだけの小さなアダプター）。
+ */
+function consumerMarketRecordsToTable(
+  records: readonly ConsumerMarketQuarterRecord[]
+): Readonly<Record<DemandMarketId, ConsumerMarketQuarterRecord>> {
+  const result = {} as Record<DemandMarketId, ConsumerMarketQuarterRecord>;
+  for (const record of records) {
+    result[record.market] = record;
+  }
+  return result;
+}
+
 function buildCompanyCountryMap(fixtures: readonly CompanyFixture[]): Readonly<Record<CompanyId, CountryId>> {
   const result: Record<CompanyId, CountryId> = {};
   for (const f of fixtures) result[f.companyId] = f.country;
@@ -273,6 +302,15 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
   // 「当期にデリバリーされる契約」として明示的に定義する。
   const initialContracts = generateInitialContracts(startPeriod);
 
+  // 【Phase 8F-1】初期の消費国在庫carry state。ターン1のdemandMarkets入力
+  // （Phase2のシナリオ→市場入力変換。advanceCompanyLabQuarterのターン1が
+  // 実際に使うものと完全に同じ決定論的な手順・入力で、副作用も乱数も無いため
+  // ここで再計算しても結果は一致する）から、市場別の初期在庫を構築する
+  // （実装指示§13「初期在庫は目標在庫付近から開始する」）。
+  const initialScenarioTurnInput = getScenarioTurnInput(scenarioState, 1);
+  const initialPreviousMarketContext = buildPreviousMarketContext(definition, 1, initialScenarioTurnInput, undefined);
+  const initialMarketInput = toMarketQuarterInput(initialScenarioTurnInput, initialPreviousMarketContext);
+
   const state: CompanyLabState = {
     config,
     currentPeriod: startPeriod,
@@ -306,6 +344,9 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
     // 【Phase 8D-4】Worker総人数の初期状態。fixture.workerBaselineの常用人数を
     // そのまま初期値とするため、Phase 8D以前と初期人数は完全に同じ。
     workforceState: buildInitialWorkforceState(fixtures),
+    // 【Phase 8F-1】市場別（CN/US/EU/JP/OTHER）の消費国在庫・購買循環モデルの
+    // 初期carry state。
+    consumerMarketState: buildInitialConsumerMarketCarryStateTable(initialMarketInput.demandMarkets),
     history: [],
     isComplete: false,
   };
@@ -555,6 +596,24 @@ export function advanceCompanyLabQuarter(
   const supplySignals = buildSupplySignalInputs(decisions, state.lastQuarterActualProduction);
   const marketInput = applyProductionSupplySignalsToMarketInput(baseMarketInput, supplySignals, companyCountry);
 
+  // --- 【Phase 8F-1】消費国在庫・購買循環モデル: 当期の計画(実購買量が確定する前) ---
+  // 市場価格形成（globalDemand.ts・hosoPricing.ts）は一切変更しない。ここで計算する
+  // のは、(a) 対象需要を市場別に按分するウェイト（sales/marketAdapter.ts
+  // deriveTargetDemandの既存priorPeriodConsumptionベース按分の置き換え）と、
+  // (b) 前四半期の購買圧力・在庫逼迫度から導く当四半期の仕向市場価格係数
+  // （既存のTurnOrchestratorParameters.destinationMarketPricingスロットへ渡すだけ。
+  // 新しいスロットは追加しない）の2つだけである。
+  const consumerMarketPlanning = planConsumerMarketQuarterTable(state.currentPeriod, state.consumerMarketState, marketInput.demandMarkets);
+  const consumerMarketWeights = deriveMarketWeightsFromDesiredPurchase(consumerMarketPlanning);
+  const lastConsumerMarketRecords = lastRecord?.consumerMarketRecords;
+  const destinationMarketPricingForThisQuarter: DestinationMarketPriceCoefficientTable =
+    lastConsumerMarketRecords && lastConsumerMarketRecords.length > 0
+      ? deriveNextQuarterDestinationPriceCoefficients(
+          consumerMarketRecordsToTable(lastConsumerMarketRecords),
+          CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS
+        )
+      : CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS;
+
   // --- Phase1・Phase4・Phase5（既存turn/runner.tsをそのまま呼び出す） ---
   // 【Phase 6.3（実装指示 §5）】外部加工業者需要。5社の買付意向だけで
   // ベトナム国全体の加工需要を置き換えない。世界需要指数（需要市場の前期消費×
@@ -667,6 +726,10 @@ export function advanceCompanyLabQuarter(
     existingContracts: state.contracts,
     existingLots: state.rawMaterialLots,
     seed: state.config.seed,
+    // 【Phase 8F-1】対象需要の市場別按分ウェイト（希望購買量ベース）と、
+    // 前四半期の購買圧力・在庫逼迫度から導いた当四半期の仕向市場価格係数。
+    marketWeights: consumerMarketWeights,
+    parameters: { destinationMarketPricing: destinationMarketPricingForThisQuarter },
   };
   const turnResult = runTurn(turnInput);
 
@@ -912,6 +975,52 @@ export function advanceCompanyLabQuarter(
   const financingStateAfter: FinancingState = { companies: nextFinancingCompanies };
   const capexStateAfter: CapexState = { companies: nextCapexCompanies };
 
+  // --- 【Phase 8F-1】消費国在庫・購買循環モデル: 実購買量確定後の決算 ---
+  // (a) VNの実購買量＝5社の当期成約配分の実績合計（市場別、商品を問わず合算。
+  //     本モデルは全商品合計のHOSO換算トンのみを扱う＝実装指示§4のスコープ）。
+  const vnActualPurchaseByMarket = {} as Record<DemandMarketId, HosoEqTons>;
+  for (const market of DEMAND_MARKET_IDS) {
+    const totalForMarket = turnResult.salesRecord.allocations
+      .filter((allocation) => allocation.market === market)
+      .reduce((sum, allocation) => sum + allocation.companies.reduce((s, c) => s + unwrapUnit(c.allocatedQuantity), 0), 0);
+    vnActualPurchaseByMarket[market] = hosoEqTons(totalForMarket);
+  }
+  // (b) 非VN原産国（EC/IN/ID）の世界配分需要・輸出可能供給量（既存のPhase1
+  //     国際HOSO市場結果からそのまま読むだけ。新規の原産国別・市場別内訳は作らない。
+  //     監査結果で特定したギャップへの最小限の設計判断、market/consumerInventory.ts
+  //     computeActualPurchaseByMarketのコメント参照）。
+  const nonVnOrigins = COUNTRY_IDS.filter((c) => c !== "VN").map((countryId) => ({
+    allocatedDemandTons: unwrapUnit(turnResult.marketResult.hosoPrices[countryId].allocatedDemand),
+    exportableSupplyTons: unwrapUnit(turnResult.marketResult.hosoPrices[countryId].exportableSupply),
+  }));
+  const desiredPurchaseByMarket = Object.fromEntries(
+    DEMAND_MARKET_IDS.map((market) => [market, consumerMarketPlanning[market].desiredPurchaseTons])
+  ) as Readonly<Record<DemandMarketId, HosoEqTons>>;
+  const consumerMarketActualPurchase = computeActualPurchaseByMarket(
+    consumerMarketWeights,
+    desiredPurchaseByMarket,
+    vnActualPurchaseByMarket,
+    nonVnOrigins
+  );
+  const consumerMarketRecords: readonly ConsumerMarketQuarterRecord[] = DEMAND_MARKET_IDS.map((market) =>
+    settleConsumerMarketQuarter(
+      consumerMarketPlanning[market],
+      consumerMarketActualPurchase[market],
+      CONSUMER_MARKET_INVENTORY_PARAMETERS_V1[market]
+    )
+  );
+  // 当四半期に確定した仕向市場参照価格（HOSOベース）を、次期のcarry stateの
+  // 価格履歴へ追記する。全商品合計モデルのため、HOSO価格を市場ごとの単一の
+  // 価格指標として使う（商品ミックスの重みは既存モデルに存在しないため、
+  // 新規に架空の重みを作らずHOSOを代表値とする簡略化。実装指示§7「架空の複雑な
+  // マクロモジュールは作らない」に沿う判断）。
+  const marketReferencePricesThisQuarter = deriveVietnamMarketReferencePrices(turnResult.marketResult, destinationMarketPricingForThisQuarter);
+  const consumerMarketStateAfter = {} as Record<DemandMarketId, ConsumerMarketCarryState>;
+  for (const record of consumerMarketRecords) {
+    const currentQuarterPrice = unwrapUnit(marketReferencePricesThisQuarter[record.market].hoso);
+    consumerMarketStateAfter[record.market] = rollCarryStateForward(state.consumerMarketState[record.market], record, currentQuarterPrice);
+  }
+
   const record: CompanyQuarterRecord = {
     turn,
     period: state.currentPeriod,
@@ -936,6 +1045,7 @@ export function advanceCompanyLabQuarter(
     financialResults,
     financingResults,
     capexResults,
+    consumerMarketRecords,
   };
 
   const canAdvanceWithinScenario = turn < definition.durationTurns;
@@ -965,6 +1075,8 @@ export function advanceCompanyLabQuarter(
       fixtures,
       new Map(decisions.map((d) => [d.companyId, d.workerAssignments]))
     ),
+    // 【Phase 8F-1】次期へ繰り越す市場別の消費国在庫carry state。
+    consumerMarketState: consumerMarketStateAfter,
     history,
     isComplete,
   };
