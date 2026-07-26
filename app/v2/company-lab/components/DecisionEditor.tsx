@@ -39,6 +39,7 @@ import CapexDraftList from "./CapexDraftList";
 import CapexPortfolioList from "./CapexPortfolioList";
 import CollapsibleSection, { AreaToneLegend } from "./CollapsibleSection";
 import ColdStoragePanel from "./ColdStoragePanel";
+import ImportLotsPanel from "./ImportLotsPanel";
 import FactorySpacePanel from "./FactorySpacePanel";
 import InvestmentCardList from "./InvestmentCardList";
 import PlanningWarningsPanel from "./PlanningWarningsPanel";
@@ -622,6 +623,14 @@ export default function DecisionEditor(props: DecisionEditorProps) {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* 【Phase 8G §5】発注済み・輸送中・到着済みの輸入原料の状況（原価・到着時期）。
+            発注入力欄のすぐ下に置き、「今回いくら発注するか」と「これまでの発注がいつ・
+            いくらで届くか」を同じセクション内で確認できるようにする。 */}
+        <div className="mt-4">
+          <h4 className="text-xs font-semibold text-gray-300 mb-1.5">輸入原料の状況（輸送中・到着済み）</h4>
+          <ImportLotsPanel rawMaterialLots={ownState.rawMaterialLots} currentPeriod={period} />
         </div>
       </CollapsibleSection>
 
