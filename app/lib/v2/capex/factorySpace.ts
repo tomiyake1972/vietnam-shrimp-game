@@ -89,6 +89,41 @@ export function buildPendingSpaceReservations(
     .filter((r) => r.requiredSpaceUnits > 0);
 }
 
+/**
+ * 案件が「能力増加を伴わない固定スペース案件」（品質管理設備・排水環境設備等）か。
+ * 承認時スナップショット（futureCapacityEffect）に増強対象・増加量がどちらも
+ * 揃っていなければ、能力プールを一切増やさない案件とみなす
+ * （capacityEffect.ts の computeCapacityEffectForCompany と同じ判定条件を使い、
+ * 「能力を増やすか否か」の判定ロジックを2箇所で食い違わせない）。
+ */
+function isFixedSpaceOnlyProject(project: CapitalProject): boolean {
+  const effect = project.futureCapacityEffect;
+  if (!effect || effect.targetProduct === undefined || effect.capacityIncreaseTonsPerQuarter === undefined) return true;
+  return effect.capacityIncreaseTonsPerQuarter <= 0;
+}
+
+/**
+ * period 時点で稼働開始済み・取消以外の「固定スペース案件」が占有している
+ * スペースの合計（スペース単位）。
+ *
+ * 【Phase 8D監査M-1】品質管理設備・排水環境設備等は能力プールを増やさないため、
+ * 稼働開始した瞬間に buildPendingSpaceReservations の対象（予約）から外れる一方、
+ * computeFactoryUsedSpaceUnits（能力プール由来）にも決して現れず、占有スペースが
+ * 消失してしまうバグがあった。これを防ぐため、稼働開始済みの固定スペース案件
+ * ぶんを別途合算し、buildFactorySpaceState の operationalFixedSpaceUnits へ渡す。
+ * 能力増設案件（isFixedSpaceOnlyProjectがfalse）はここに含めない
+ * （能力プール経由で既に数えられており、含めると二重計上になる）。
+ */
+export function computeOperationalFixedSpaceUnits(
+  projects: readonly CapitalProject[],
+  period: PeriodV2,
+  spaceParams: FactorySpaceParameters = FACTORY_SPACE_PARAMETERS_V1
+): number {
+  return projects
+    .filter((p) => p.status !== "cancelled" && isCapexProjectOperationalAt(p, period) && isFixedSpaceOnlyProject(p))
+    .reduce((sum, p) => sum + Math.max(0, computeApprovedProjectSpaceUnits(p, spaceParams)), 0);
+}
+
 export interface BuildCompanyFactorySpaceStateInput {
   readonly companyId: CompanyId;
   /** 基礎Factory（CompanyFixture.factories。capex加算前）。 */
@@ -116,6 +151,12 @@ export function buildCompanyFactorySpaceState(input: BuildCompanyFactorySpaceSta
 
   const companyCapex = input.capexState.companies.find((c) => c.companyId === input.companyId);
   const reservations = companyCapex ? buildPendingSpaceReservations(companyCapex.portfolio.projects, input.period, spaceParams) : [];
+  // 【Phase 8D監査M-1】稼働開始済みの固定スペース案件（品質管理設備・排水環境設備等）は
+  // 予約(reservations)からは外れるが能力プールにも現れないため、別途合算して主工場の
+  // usedByOperationalSpaceUnitsへ計上する（予約と同じ主工場へ寄せる規則で一致させる）。
+  const operationalFixedSpaceUnits = companyCapex
+    ? computeOperationalFixedSpaceUnits(companyCapex.portfolio.projects, input.period, spaceParams)
+    : 0;
   const primaryFactoryId = base.length > 0 ? base[0].factoryId : undefined;
 
   const factoryStates = base.map((baseFactory) =>
@@ -123,6 +164,7 @@ export function buildCompanyFactorySpaceState(input: BuildCompanyFactorySpaceSta
       baseFactory,
       currentFactory: currentById.get(baseFactory.factoryId) ?? baseFactory,
       pendingReservations: baseFactory.factoryId === primaryFactoryId ? reservations : [],
+      operationalFixedSpaceUnits: baseFactory.factoryId === primaryFactoryId ? operationalFixedSpaceUnits : 0,
       params: spaceParams,
     })
   );

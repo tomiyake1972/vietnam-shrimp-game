@@ -230,15 +230,28 @@ export interface FactorySpaceState {
   readonly companyId: CompanyId;
   /** 工場スペース総量。 */
   readonly totalSpaceUnits: number;
-  /** 稼働中設備が使用しているスペース。 */
+  /**
+   * 稼働中設備が使用しているスペース。能力プール由来のスペース（currentFactoryの
+   * 能力から算出）に加え、稼働開始済みの「能力増加を伴わない固定スペース案件」
+   * （品質管理設備・排水環境設備等）の固定スペースも含む（Phase 8D監査M-1修正。
+   * buildCompanyFactorySpaceStateがcomputeOperationalFixedSpaceUnitsで算出して渡す）。
+   */
   readonly usedByOperationalSpaceUnits: number;
   /** 建設中・完成準備中の案件が予約しているスペース。 */
   readonly reservedByPendingSpaceUnits: number;
-  /** 現在の空きスペース（総量 − 稼働中 − 予約。負にはしない）。 */
+  /**
+   * 現在の空きスペース（＝総量 − 稼働中設備の使用スペースのみ。建設中案件の予約は
+   * 含めない。負にはしない）。「今すぐ他の用途に転用できる余地」ではなく
+   * 「現時点で物理的に空いている床面積」を表す（Phase 8D監査L-2修正）。
+   */
   readonly freeSpaceUnits: number;
   /** 投資完成後の使用量（稼働中 ＋ 予約）。 */
   readonly usedAfterPendingSpaceUnits: number;
-  /** 投資完成後の空きスペース。 */
+  /**
+   * 投資完成後の空きスペース（＝総量 − 稼働中設備の使用スペース − 建設中案件の
+   * 予約スペース。負にはしない）。新規案件の承認判定はこちら（＝usedAfterPendingSpaceUnits
+   * 経由）を使う。表示上は freeSpaceUnits と区別すること（Phase 8D監査L-2修正）。
+   */
   readonly freeAfterPendingSpaceUnits: number;
   /** 使用率（総量が0のときはundefined。0で埋めない）。 */
   readonly utilizationRate: number | undefined;
@@ -258,6 +271,21 @@ export interface BuildFactorySpaceStateInput {
   readonly currentFactory: Factory;
   /** この工場に紐づく、建設中・完成準備中の案件の予約一覧。 */
   readonly pendingReservations: readonly PendingSpaceReservation[];
+  /**
+   * 稼働開始済みの「能力増加を伴わない固定スペース案件」（品質管理設備・排水環境
+   * 設備等）が占有している固定スペースの合計（スペース単位）。
+   *
+   * 【Phase 8D監査M-1】computeFactoryUsedSpaceUnits(currentFactory) は能力プール由来の
+   * スペースしか合算できない。能力を増やさない案件は、稼働開始した瞬間に
+   * pendingReservations から外れる（isCapexProjectOperationalAtがtrueになるため）
+   * 一方で、能力プールにも反映されないため、何もしなければ占有スペースが消失する。
+   * これを防ぐため、呼び出し側（capex/factorySpace.tsのbuildCompanyFactorySpaceState）
+   * が稼働開始済み・取消以外の固定スペース案件の所要量を合算してここへ渡し、
+   * usedByOperationalSpaceUnits へ加算する。能力増設案件はこの値に含めない
+   * （能力プール経由で既に数えられているため、含めると二重計上になる）。
+   * 省略時は0（Phase 8D以前の呼び出し元との後方互換）。
+   */
+  readonly operationalFixedSpaceUnits?: number;
   readonly params?: FactorySpaceParameters;
 }
 
@@ -274,11 +302,15 @@ export interface BuildFactorySpaceStateInput {
 export function buildFactorySpaceState(input: BuildFactorySpaceStateInput): FactorySpaceState {
   const params = input.params ?? FACTORY_SPACE_PARAMETERS_V1;
   const totalSpaceUnits = resolveFactoryTotalSpaceUnits(input.baseFactory, params);
-  const usedByOperationalSpaceUnits = computeFactoryUsedSpaceUnits(input.currentFactory, params);
+  const operationalFixedSpaceUnits = Math.max(0, input.operationalFixedSpaceUnits ?? 0);
+  const usedByOperationalSpaceUnits = computeFactoryUsedSpaceUnits(input.currentFactory, params) + operationalFixedSpaceUnits;
   const reservedByPendingSpaceUnits = input.pendingReservations.reduce((sum, r) => sum + Math.max(0, r.requiredSpaceUnits), 0);
 
   const usedAfterPendingSpaceUnits = usedByOperationalSpaceUnits + reservedByPendingSpaceUnits;
-  const freeSpaceUnits = Math.max(0, totalSpaceUnits - usedAfterPendingSpaceUnits);
+  // 【Phase 8D監査L-2修正】freeSpaceUnits（現在の空き）は予約を差し引かない。
+  // 予約まで差し引いた値は freeAfterPendingSpaceUnits として別に持つ。
+  const freeSpaceUnits = Math.max(0, totalSpaceUnits - usedByOperationalSpaceUnits);
+  const freeAfterPendingSpaceUnits = Math.max(0, totalSpaceUnits - usedAfterPendingSpaceUnits);
   const shortfallSpaceUnits = Math.max(0, usedAfterPendingSpaceUnits - totalSpaceUnits);
 
   return {
@@ -289,7 +321,7 @@ export function buildFactorySpaceState(input: BuildFactorySpaceStateInput): Fact
     reservedByPendingSpaceUnits,
     freeSpaceUnits,
     usedAfterPendingSpaceUnits,
-    freeAfterPendingSpaceUnits: freeSpaceUnits,
+    freeAfterPendingSpaceUnits,
     utilizationRate: totalSpaceUnits > 0 ? usedByOperationalSpaceUnits / totalSpaceUnits : undefined,
     utilizationRateAfterPending: totalSpaceUnits > 0 ? usedAfterPendingSpaceUnits / totalSpaceUnits : undefined,
     shortfallSpaceUnits,
@@ -306,8 +338,11 @@ export interface CompanyFactorySpaceState {
   readonly totalSpaceUnits: number;
   readonly usedByOperationalSpaceUnits: number;
   readonly reservedByPendingSpaceUnits: number;
+  /** 現在の空き（総量 − 稼働中設備の使用スペースのみ）を全工場合計したもの。 */
   readonly freeSpaceUnits: number;
   readonly usedAfterPendingSpaceUnits: number;
+  /** 投資完成後の空き（総量 − 稼働中 − 予約）を全工場合計したもの。 */
+  readonly freeAfterPendingSpaceUnits: number;
   readonly utilizationRate: number | undefined;
   readonly utilizationRateAfterPending: number | undefined;
   readonly shortfallSpaceUnits: number;
@@ -336,6 +371,7 @@ export function aggregateCompanyFactorySpaceState(
     reservedByPendingSpaceUnits,
     freeSpaceUnits: factories.reduce((s, f) => s + f.freeSpaceUnits, 0),
     usedAfterPendingSpaceUnits,
+    freeAfterPendingSpaceUnits: factories.reduce((s, f) => s + f.freeAfterPendingSpaceUnits, 0),
     utilizationRate: totalSpaceUnits > 0 ? usedByOperationalSpaceUnits / totalSpaceUnits : undefined,
     utilizationRateAfterPending: totalSpaceUnits > 0 ? usedAfterPendingSpaceUnits / totalSpaceUnits : undefined,
     shortfallSpaceUnits,

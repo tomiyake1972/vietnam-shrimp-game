@@ -31,6 +31,8 @@ import {
 } from "../../capex/factorySpace";
 import { CAPEX_PARAMETERS_V1 } from "../../capex/parameters";
 import { CapexState, CapitalProject, FutureCapacityEffectPlaceholder } from "../../capex/types";
+import { createInitialPersistedGameState } from "../../persistence/builder";
+import { encodePersistedGameState, decodePersistedGameState } from "../../persistence/codec";
 
 const EPS = 1e-6;
 
@@ -277,4 +279,246 @@ test("SP-15: スペース関連の数値に NaN・Infinity・不正な負値が�
   assert.ok(state.reservedByPendingSpaceUnits >= 0);
   assert.ok(state.freeSpaceUnits >= 0);
   assert.ok(state.shortfallSpaceUnits >= 0);
+});
+
+// ---------------------------------------------------------------------
+// 6. 固定スペース案件の稼働後占有（Phase 8D監査M-1修正）
+//
+// 品質管理設備（600）・排水環境設備（900）は能力プールを増やさないため、
+// 稼働開始した瞬間にbuildPendingSpaceReservationsの予約からは外れる一方、
+// computeFactoryUsedSpaceUnits（能力プール由来）にも現れず、占有スペースが
+// 消失していたバグの回帰テスト。
+// ---------------------------------------------------------------------
+
+test("SP-16（M-1a）: 品質管理設備600が建設中から稼働開始へ移っても、総使用スペース（稼働中＋予約）は減らない", () => {
+  const base = makeFactory({ totalFactorySpaceUnits: 200_000 });
+  const now = period(2016, 1);
+  const qcTemplate = CAPEX_PARAMETERS_V1.templatesByType.qualityControlEquipment;
+
+  const building = makeProject({
+    projectId: "P-QC",
+    projectType: "qualityControlEquipment",
+    status: "underConstruction",
+    futureCapacityEffect: qcTemplate.futureCapacityEffect,
+  });
+  const capexStateBefore = capexStateOf([building]);
+  const stateBefore = buildCompanyFactorySpaceState({
+    companyId: "TEST",
+    baseFactories: [base],
+    currentFactories: applyCapexCapacityToFactories([base], capexStateBefore, now),
+    capexState: capexStateBefore,
+    period: now,
+  });
+  assert.ok(
+    Math.abs(stateBefore.reservedByPendingSpaceUnits - FACTORY_SPACE_PARAMETERS_V1.fixedSpaceUnitsByProjectType.qualityControlEquipment) < EPS,
+    "建設中は予約(usedByPending相当)へ計上されるはず"
+  );
+
+  const operational: CapitalProject = { ...building, status: "completed", completedPeriod: period(2015, 4), capitalizedAmountUsd: 1_200_000 };
+  const capexStateAfter = capexStateOf([operational]);
+  const stateAfter = buildCompanyFactorySpaceState({
+    companyId: "TEST",
+    baseFactories: [base],
+    currentFactories: applyCapexCapacityToFactories([base], capexStateAfter, now),
+    capexState: capexStateAfter,
+    period: now,
+  });
+
+  assert.equal(stateAfter.reservedByPendingSpaceUnits, 0, "稼働開始済みなので、もう予約には現れないはず");
+  assert.ok(
+    Math.abs(
+      stateAfter.usedByOperationalSpaceUnits - stateBefore.usedByOperationalSpaceUnits - FACTORY_SPACE_PARAMETERS_V1.fixedSpaceUnitsByProjectType.qualityControlEquipment
+    ) < EPS,
+    "稼働開始後、品質管理設備600が稼働中使用量(usedByOperational)へ計上されるはず"
+  );
+  assert.ok(
+    stateAfter.usedAfterPendingSpaceUnits >= stateBefore.usedAfterPendingSpaceUnits - EPS,
+    "稼働開始の前後で総使用スペース（稼働中＋予約）が減ってはいけない"
+  );
+});
+
+test("SP-17（M-1b）: 排水環境設備900は、稼働開始後の複数四半期にわたって使用スペースへ計上され続ける", () => {
+  const base = makeFactory({ totalFactorySpaceUnits: 200_000 });
+  const envTemplate = CAPEX_PARAMETERS_V1.templatesByType.environmentalEquipment;
+
+  const operational = makeProject({
+    projectId: "P-ENV",
+    projectType: "environmentalEquipment",
+    status: "completed",
+    completedPeriod: period(2015, 1),
+    capitalizedAmountUsd: 1_800_000,
+    futureCapacityEffect: envTemplate.futureCapacityEffect,
+  });
+  const capexState = capexStateOf([operational]);
+
+  for (const q of [period(2015, 2), period(2015, 4), period(2017, 3)]) {
+    const state = buildCompanyFactorySpaceState({
+      companyId: "TEST",
+      baseFactories: [base],
+      currentFactories: applyCapexCapacityToFactories([base], capexState, q),
+      capexState,
+      period: q,
+    });
+    assert.ok(
+      Math.abs(state.usedByOperationalSpaceUnits - computeFactoryUsedSpaceUnits(base) - FACTORY_SPACE_PARAMETERS_V1.fixedSpaceUnitsByProjectType.environmentalEquipment) <
+        EPS,
+      `${q}: 排水環境設備900が占有し続けるはず`
+    );
+    assert.equal(state.reservedByPendingSpaceUnits, 0);
+  }
+});
+
+test("SP-18（M-1c）: 稼働中の能力増設案件と固定スペース案件が混在しても、能力増設案件のスペースは二重計上されない", () => {
+  const base = makeFactory({ totalFactorySpaceUnits: 200_000 });
+  const now = period(2016, 1);
+  const envTemplate = CAPEX_PARAMETERS_V1.templatesByType.environmentalEquipment;
+
+  const fixedSpaceProject = makeProject({
+    projectId: "P-ENV",
+    projectType: "environmentalEquipment",
+    status: "completed",
+    completedPeriod: period(2015, 1),
+    capitalizedAmountUsd: 1_800_000,
+    futureCapacityEffect: envTemplate.futureCapacityEffect,
+  });
+  const capacityProject = makeProject({
+    projectId: "P-HOSO",
+    projectType: "hosoLineExpansion",
+    status: "completed",
+    completedPeriod: period(2015, 1),
+    capitalizedAmountUsd: 3_000_000,
+    futureCapacityEffect: effect({ targetProduct: "hoso", capacityIncreaseTonsPerQuarter: 500 }),
+  });
+
+  const capexState = capexStateOf([fixedSpaceProject, capacityProject]);
+  const currentFactories = applyCapexCapacityToFactories([base], capexState, now);
+  const state = buildCompanyFactorySpaceState({
+    companyId: "TEST",
+    baseFactories: [base],
+    currentFactories,
+    capexState,
+    period: now,
+  });
+
+  const expected =
+    computeFactoryUsedSpaceUnits(base) +
+    500 * FACTORY_SPACE_PARAMETERS_V1.spaceUnitsPerCapacityTon.hoso + // 能力増設ぶん（能力プール経由で一度だけ）
+    FACTORY_SPACE_PARAMETERS_V1.fixedSpaceUnitsByProjectType.environmentalEquipment; // 固定スペースぶん（一度だけ）
+  assert.ok(
+    Math.abs(state.usedByOperationalSpaceUnits - expected) < EPS,
+    "能力増設案件のスペースは能力プール経由の1回だけ、固定スペース案件の900は別枠で1回だけ計上されるはず（二重計上なし）"
+  );
+});
+
+test("SP-19（M-1d）: encode→decode→restore後も、稼働開始済み品質管理設備600の占有スペースが維持される", () => {
+  const base = makeFactory({ totalFactorySpaceUnits: 200_000 });
+  const now = period(2016, 1);
+  const qcTemplate = CAPEX_PARAMETERS_V1.templatesByType.qualityControlEquipment;
+
+  const operational = makeProject({
+    projectId: "P-QC",
+    projectType: "qualityControlEquipment",
+    approvedBudgetUsd: 1_200_000,
+    status: "completed",
+    completedPaymentStagesCount: 1,
+    cumulativePaidUsd: 1_200_000,
+    elapsedConstructionQuartersWithPayment: 1,
+    completedPeriod: period(2015, 1),
+    capitalizedAmountUsd: 1_200_000,
+    futureCapacityEffect: qcTemplate.futureCapacityEffect,
+  });
+  const capexState = capexStateOf([operational]);
+
+  const persisted = createInitialPersistedGameState({
+    gameId: "game-sp19",
+    scenarioId: "baseline-v0.1",
+    initialPeriod: period(2015, 1),
+    seed: "sp19-seed",
+    initialContracts: [],
+    initialRawMaterialLots: [],
+    initialCapexStates: capexState.companies,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  const decoded = decodePersistedGameState(encodePersistedGameState(persisted));
+  const restoredCapexState: CapexState = { companies: decoded.capexStates };
+
+  const stateAfterRestore = buildCompanyFactorySpaceState({
+    companyId: "TEST",
+    baseFactories: [base],
+    currentFactories: applyCapexCapacityToFactories([base], restoredCapexState, now),
+    capexState: restoredCapexState,
+    period: now,
+  });
+
+  assert.ok(
+    Math.abs(
+      stateAfterRestore.usedByOperationalSpaceUnits - computeFactoryUsedSpaceUnits(base) - FACTORY_SPACE_PARAMETERS_V1.fixedSpaceUnitsByProjectType.qualityControlEquipment
+    ) < EPS,
+    "保存・復元後も、稼働開始済み品質管理設備600の占有スペースが維持されるはず"
+  );
+  assert.equal(stateAfterRestore.reservedByPendingSpaceUnits, 0, "稼働開始済みなので復元後も予約には現れないはず");
+});
+
+test("SP-20: 取消済みの固定スペース案件は、稼働開始条件を満たしていても占有しない", () => {
+  const base = makeFactory({ totalFactorySpaceUnits: 200_000 });
+  const now = period(2016, 1);
+  const qcTemplate = CAPEX_PARAMETERS_V1.templatesByType.qualityControlEquipment;
+
+  // ステータスがcancelledの案件（completedPeriod自体を持たないのが通常だが、
+  // ここでは「取消済みは占有しない」というフィルタ条件そのものを検証するため、
+  // あえてcompletedPeriodも設定した不自然なデータで確認する）。
+  const cancelled = makeProject({
+    projectId: "P-QC-CANCEL",
+    projectType: "qualityControlEquipment",
+    status: "cancelled",
+    cancelledPeriod: period(2015, 3),
+    futureCapacityEffect: qcTemplate.futureCapacityEffect,
+  });
+  const capexState = capexStateOf([cancelled]);
+  const state = buildCompanyFactorySpaceState({
+    companyId: "TEST",
+    baseFactories: [base],
+    currentFactories: applyCapexCapacityToFactories([base], capexState, now),
+    capexState,
+    period: now,
+  });
+
+  assert.equal(state.reservedByPendingSpaceUnits, 0);
+  assert.ok(Math.abs(state.usedByOperationalSpaceUnits - computeFactoryUsedSpaceUnits(base)) < EPS, "取消済み案件は稼働中使用量にも計上されないはず");
+});
+
+// ---------------------------------------------------------------------
+// 7. 「現在の空き」と「投資完成後の空き」の区別（Phase 8D監査L-2修正）
+//
+// FactorySpacePanel.tsxの表示値が、次の2つの意味で明確に区別されることを確認する。
+//   現在の空き　　　　＝ 総スペース − 稼働中設備の使用スペース
+//   投資完成後の空き　＝ 総スペース − 稼働中設備の使用スペース − 建設中案件の予約スペース
+// 承認判定（buildFactorySpaceApprovalBudget）は usedAfterPendingSpaceUnits を
+// そのまま使っており、この修正で変更しない（SP-14で別途確認済み）。
+// ---------------------------------------------------------------------
+
+test("SP-21（L-2）: 建設中案件があるとき、「現在の空き」と「投資完成後の空き」は異なる値になる", () => {
+  const base = makeFactory({ totalFactorySpaceUnits: 200_000 });
+  const building = { projectId: "P-BUILD", projectType: "vapLineExpansion", requiredSpaceUnits: 5_000 };
+
+  const state = buildFactorySpaceState({
+    baseFactory: base,
+    currentFactory: base,
+    pendingReservations: [building],
+  });
+
+  // 現在の空き＝総量−稼働中使用量のみ（予約は差し引かない）。
+  assert.ok(Math.abs(state.freeSpaceUnits - (state.totalSpaceUnits - state.usedByOperationalSpaceUnits)) < EPS);
+  // 投資完成後の空き＝総量−（稼働中＋予約）。
+  assert.ok(Math.abs(state.freeAfterPendingSpaceUnits - (state.totalSpaceUnits - state.usedAfterPendingSpaceUnits)) < EPS);
+  // 建設中案件（予約>0）があるので、2つの値は一致しない。
+  assert.ok(state.freeSpaceUnits > state.freeAfterPendingSpaceUnits, "建設中案件がある場合、現在の空きは投資完成後の空きより大きいはず");
+  assert.ok(Math.abs(state.freeSpaceUnits - state.freeAfterPendingSpaceUnits - building.requiredSpaceUnits) < EPS, "差は建設中案件の予約スペースぶんに一致するはず");
+});
+
+test("SP-22（L-2）: 建設中案件が無ければ、「現在の空き」と「投資完成後の空き」は一致する", () => {
+  const base = makeFactory({ totalFactorySpaceUnits: 200_000 });
+  const state = buildFactorySpaceState({ baseFactory: base, currentFactory: base, pendingReservations: [] });
+  assert.equal(state.reservedByPendingSpaceUnits, 0);
+  assert.ok(Math.abs(state.freeSpaceUnits - state.freeAfterPendingSpaceUnits) < EPS);
 });
