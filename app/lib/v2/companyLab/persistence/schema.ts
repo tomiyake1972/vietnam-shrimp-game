@@ -65,6 +65,7 @@ import {
 } from "../../capex/types";
 import { ScenarioMode, ScenarioState } from "../../scenario/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
+import type { WorkforceState } from "../workforce";
 import {
   CompanyLabDraftEnvelope,
   CompanyLabPersistedCurrentState,
@@ -677,6 +678,7 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
   const capexStateObj = requireObject(obj.capexState, `${path}.capexState`);
   const capexCompaniesRaw = requireArray(capexStateObj.companies, `${path}.capexState.companies`);
   const capexState = { companies: capexCompaniesRaw.map((c, i) => validateCompanyCapexState(c, `${path}.capexState.companies[${i}]`)) };
+  const workforceState = validateWorkforceState(obj.workforceState, `${path}.workforceState`);
   const isComplete = requireBoolean(obj.isComplete, `${path}.isComplete`);
 
   return {
@@ -690,7 +692,43 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
     financeState,
     financingState,
     capexState,
+    workforceState,
     isComplete,
+  };
+}
+
+/**
+ * 【Phase 8D-4・schemaVersion 2】Worker総人数の検証。
+ *
+ * 【後方互換】キー自体が存在しない schemaVersion:1 のデータでは空を返す
+ * （app/lib/v2/persistence/schema.ts の validateFinanceStates 等で確立済みの
+ * 「キーの有無で判定し、無ければ安全な既定値を補う」方式をそのまま踏襲する。
+ * バージョン番号で分岐しないため、マイグレーション処理は不要）。
+ * 空で返した場合、実際の人数は restoreCompanyLabStateFromRuntimeSnapshot が
+ * 確定履歴の decisions[].workerAssignments から復元する（推測値は作らない）。
+ */
+function validateWorkforceState(raw: unknown, path: string): WorkforceState {
+  if (raw === undefined || raw === null) return { companies: [] };
+  const obj = requireObject(raw, path);
+  const companiesRaw = requireArray(obj.companies, `${path}.companies`);
+  return {
+    companies: companiesRaw.map((c, i) => {
+      const companyPath = `${path}.companies[${i}]`;
+      const companyObj = requireObject(c, companyPath);
+      const companyId = requireNonEmptyString(companyObj.companyId, `${companyPath}.companyId`);
+      const factoriesRaw = requireArray(companyObj.factories, `${companyPath}.factories`);
+      return {
+        companyId,
+        factories: factoriesRaw.map((f, j) => {
+          const factoryPath = `${companyPath}.factories[${j}]`;
+          const factoryObj = requireObject(f, factoryPath);
+          return {
+            factoryId: requireNonEmptyString(factoryObj.factoryId, `${factoryPath}.factoryId`),
+            regularHeadcount: requireNonNegativeInteger(factoryObj.regularHeadcount, `${factoryPath}.regularHeadcount`),
+          };
+        }),
+      };
+    }),
   };
 }
 

@@ -17,6 +17,7 @@ function minimalRuntime() {
     financeState: { companies: [] },
     financingState: { companies: [] },
     capexState: { companies: [] },
+    workforceState: { companies: [] },
     isComplete: false,
   };
 }

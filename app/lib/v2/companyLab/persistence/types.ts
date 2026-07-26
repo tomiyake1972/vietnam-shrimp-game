@@ -30,6 +30,7 @@ import { FinanceState } from "../../finance/types";
 import { FinancingState } from "../../financing/types";
 import { CapexState } from "../../capex/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
+import type { WorkforceState } from "../workforce";
 
 // ---------------------------------------------------------------------
 // 0. バージョン定数
@@ -45,7 +46,18 @@ import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterR
  *   - app/lib/v2/persistence/types.ts の CURRENT_PERSISTED_GAME_STATE_VERSION
  *     （無印/v2本番ゲームの永続化状態スキーマ、現行値6）
  */
-export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 1;
+/**
+ * バージョン履歴:
+ *   v1 … Phase 8C-1 初版。
+ *   v2 … 【Phase 8D-4】CompanyLabRuntimeSnapshot へ workforceState（Worker総人数）を追加。
+ *        **追加的変更のみで、マイグレーション処理は不要**。
+ *        validateCompanyLabPersistedState は「現行より新しいバージョン」だけを拒否するため、
+ *        schemaVersion:1 の既存データはそのまま読み込める。workforceState キーが
+ *        存在しない場合は空（{ companies: [] }）として復元し、
+ *        restoreCompanyLabStateFromRuntimeSnapshot が確定履歴の
+ *        decisions[].workerAssignments から実際の人数を復元する（推測値は作らない）。
+ */
+export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 2;
 
 // ---------------------------------------------------------------------
 // 1. ランタイムスナップショット（history非包含。§2-1・§2-2）
@@ -100,6 +112,13 @@ export interface CompanyLabRuntimeSnapshot {
   readonly financeState: FinanceState;
   readonly financingState: FinancingState;
   readonly capexState: CapexState;
+  /**
+   * 【Phase 8D-4・schemaVersion 2で追加】会社別・工場別のWorker総人数。
+   * 会社数×工場数ぶんの小さなスカラー集合であり、四半期ごとに増え続けることはない
+   * （履歴エントリへ2回複製されても保存量への影響は無視できる）。
+   * schemaVersion:1 のデータにはこのキーが無いため、schema側で空として復元する。
+   */
+  readonly workforceState: WorkforceState;
   readonly isComplete: boolean;
 }
 

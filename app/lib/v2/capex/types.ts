@@ -45,19 +45,21 @@ export type CapitalProjectType =
   | "hosoLineExpansion" // HOSO加工ライン増設
   | "pdLineExpansion" // PD加工ライン増設
   | "vapLineExpansion" // VAP加工ライン増設
-  | "coldStorageExpansion" // 冷凍・冷蔵保管庫増設
+  | "coldStorageExpansion" // 冷凍・冷蔵保管庫増設（【Phase 8D-5】保管能力＝ストック側へ再接続）
   | "qualityControlEquipment" // 品質管理設備
   | "environmentalEquipment" // 排水・環境設備
-  | "commonProcessingExpansion"; // 【Phase 8B-2B】共通前処理能力増設
+  | "commonProcessingExpansion" // 【Phase 8B-2B】共通前処理能力増設
+  | "freezingPackagingExpansion"; // 【Phase 8D-5】凍結・包装処理能力増設（フロー側）
 
 export const CAPITAL_PROJECT_TYPES: readonly CapitalProjectType[] = [
   "hosoLineExpansion",
   "pdLineExpansion",
   "vapLineExpansion",
+  "commonProcessingExpansion",
+  "freezingPackagingExpansion",
   "coldStorageExpansion",
   "qualityControlEquipment",
   "environmentalEquipment",
-  "commonProcessingExpansion",
 ];
 
 /** 最低6状態（実装指示§10）。 */
@@ -108,7 +110,19 @@ export interface PaymentScheduleStage {
  * 実効果はPhase 8B-2Bの対象外）。
  */
 export interface FutureCapacityEffectPlaceholder {
-  readonly targetProduct?: "hoso" | "pd" | "vap" | "commonProcessing" | "freezingPackaging";
+  /**
+   * 増強対象の能力プール。
+   * 【Phase 8D-5】"coldStorage"（冷凍・冷蔵保管能力＝ストック）を追加した。
+   * "freezingPackaging" は凍結・包装処理能力（フロー、トン/四半期）であり、
+   * "coldStorage" は同時保管可能量（ストック、トン）である。両者は別物なので
+   * 混同しないこと。
+   *
+   * 【後方互換】この値は案件の承認時にスナップショットされるため、Phase 8D以前に
+   * 承認済みの coldStorageExpansion 案件は "freezingPackaging" を保持したままであり、
+   * 稼働開始時にはこれまでどおり凍結・包装処理能力を増加させる（既存の確定挙動を
+   * 遡って変えない）。
+   */
+  readonly targetProduct?: "hoso" | "pd" | "vap" | "commonProcessing" | "freezingPackaging" | "coldStorage";
   readonly capacityIncreaseTonsPerQuarter?: number;
   readonly readinessQuartersAfterCompletion?: number;
 }

@@ -20,9 +20,10 @@ import {
 
 const P0 = period(2016, 1);
 
-test("VM-1: 7種類すべての候補が、正しい日本語表示名で得られる", () => {
+test("VM-1: 全案件種別の候補が、正しい日本語表示名で得られる（Phase 8D-5で凍結・包装処理能力増設を追加し8種類）", () => {
   const candidates = buildAllCapexCandidateViewModels(P0);
-  assert.equal(candidates.length, 7);
+  assert.equal(candidates.length, CAPITAL_PROJECT_TYPES.length);
+  assert.equal(CAPITAL_PROJECT_TYPES.length, 8);
   for (const t of CAPITAL_PROJECT_TYPES) {
     const c = candidates.find((x) => x.projectType === t);
     assert.ok(c, `${t}の候補が存在する`);

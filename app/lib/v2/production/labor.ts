@@ -59,6 +59,33 @@ export function calculateLaborCapacityFromAssignedHeadcount(
   return Math.min(Math.max(0, raw), Math.max(0, factoryCapacityForProduct));
 }
 
+/**
+ * 【Phase 8D-4】ある数量を1人あたり効率だけで満たすために必要な人数。
+ *
+ * これは calculateLaborCapacityFromAssignedHeadcount の逆算であり、
+ * allocateWorkersToPlans の内部（headcountDemandFor）と、意思決定画面が表示する
+ * 「必要Worker人数」の**両方がこの1つの関数を共有する**。UI側に別の逆算式を
+ * 作らないことで、「画面では足りると出たのに実際は足りない」という食い違いを
+ * 構造的に防ぐ。
+ *
+ * 分母（1人あたり効率 × 出勤率 × 技能 × 残業係数）が0以下のときは、
+ * どれだけ人を増やしても生産できないため 0 を返す（無限大を返さない）。
+ */
+export function requiredHeadcountForQuantity(
+  quantity: number,
+  efficiencyPerHead: number,
+  attendanceRate: number,
+  skillLevel: number,
+  appliedOvertimeRate: number,
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+): number {
+  const overtimeMultiplier = 1 + appliedOvertimeRate * params.labor.overtimeEfficiencyFactor;
+  const denom = efficiencyPerHead * attendanceRate * skillLevel * overtimeMultiplier;
+  if (!(denom > 0)) return 0;
+  const required = quantity / denom;
+  return Number.isFinite(required) && required > 0 ? required : 0;
+}
+
 export interface WorkerDemandItem {
   readonly id: string;
   readonly factoryId: string;
@@ -116,12 +143,17 @@ export function allocateWorkersToPlans(
 
     // 各計画が「常用ワーカーのみ」「臨時ワーカーのみ」で候補量を満たすために
     // 必要な人数を、水位法配分の重み・capとして使う。
+    // 【Phase 8D-4】逆算式は requiredHeadcountForQuantity に一元化した。
+    // 意思決定画面の「必要Worker人数」も同じ関数を呼ぶ。
     function headcountDemandFor(d: (typeof factoryDemands)[number], efficiencyPerHead: number): number {
-      const overtimeMultiplier = 1 + (appliedOvertimeByDemand.get(d.id) ?? 0) * params.labor.overtimeEfficiencyFactor;
-      const skill = skillByDemand.get(d.id) ?? 0;
-      const denom = efficiencyPerHead * attendanceRate * skill * overtimeMultiplier;
-      if (denom <= 0) return 0;
-      return d.candidateQuantity / denom;
+      return requiredHeadcountForQuantity(
+        d.candidateQuantity,
+        efficiencyPerHead,
+        attendanceRate,
+        skillByDemand.get(d.id) ?? 0,
+        appliedOvertimeByDemand.get(d.id) ?? 0,
+        params
+      );
     }
 
     const regularItems: PriorityAllocationItem[] = factoryDemands.map((d) => ({

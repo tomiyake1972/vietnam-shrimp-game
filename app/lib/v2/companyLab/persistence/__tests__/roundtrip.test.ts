@@ -90,6 +90,7 @@ test("CompanyLabPersistedStateV1（現在状態、draftなし）をencode→deco
     financeState: last.stateAfter.financeState,
     financingState: last.stateAfter.financingState,
     capexState: last.stateAfter.capexState,
+    workforceState: last.stateAfter.workforceState,
     isComplete: last.stateAfter.isComplete,
   });
 
@@ -182,6 +183,7 @@ test("進行中ドラフト（submittedAt=null）を含むCompanyLabPersistedSta
         financeState: last.stateAfter.financeState,
         financingState: last.stateAfter.financingState,
         capexState: last.stateAfter.capexState,
+        workforceState: last.stateAfter.workforceState,
         isComplete: last.stateAfter.isComplete,
       },
       revision: 14,

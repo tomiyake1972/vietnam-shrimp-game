@@ -174,6 +174,11 @@ export const CAPEX_PARAMETERS_V1: CapexParameters = {
       0.01, // 4%/年（VAPは高付加価値・高複雑度の設備のため、保守費率をやや高めに設定）
       { targetProduct: "vap", capacityIncreaseTonsPerQuarter: 250, readinessQuartersAfterCompletion: 2 }
     ),
+    // 【Phase 8D-5】保管（ストック）側へ再接続。Phase 8D以前は誤って
+    // targetProduct: "freezingPackaging"（＝四半期あたりの処理量）を増やしていたため、
+    // 「冷凍能力」がフローなのかストックなのか画面上で判別できなかった。
+    // 投資額は実装指示の目安（保管1トンあたり USD 1,500〜2,500）の中央付近になるよう
+    // 校正した: 2,500,000 USD ÷ 1,250 t = **2,000 USD/保管トン**。
     coldStorageExpansion: template(
       "coldStorageExpansion",
       "冷凍・冷蔵保管庫増設",
@@ -184,7 +189,23 @@ export const CAPEX_PARAMETERS_V1: CapexParameters = {
       0.4, // 建物40%（倉庫・保管庫は建屋比率が加工ラインより高いという一般的な想定）
       0.6, // 機械60%（冷凍・冷却設備）
       0.005, // 2%/年（保管インフラは加工ラインより保守費率が低い一般的な想定）
-      { targetProduct: "freezingPackaging", capacityIncreaseTonsPerQuarter: 500, readinessQuartersAfterCompletion: 1 }
+      { targetProduct: "coldStorage", capacityIncreaseTonsPerQuarter: 1_250, readinessQuartersAfterCompletion: 1 }
+    ),
+    // 【Phase 8D-5新規】凍結・包装処理能力（フロー、トン/四半期）専用の投資案件。
+    // coldStorageExpansionが保管（ストック）側へ移ったため、生産エンジンの段階3が
+    // 使う上限（allocation.tsのfreezingPackaging）を増やす手段としてこちらを新設する。
+    // 予算・工期・構成比・保守費率はhosoLineExpansion（同種の加工設備）と同水準。
+    freezingPackagingExpansion: template(
+      "freezingPackagingExpansion",
+      "凍結・包装処理能力増設",
+      2_800_000,
+      [0.4, 0.6],
+      "productionEquipment",
+      1,
+      0.25, // 建物25%（凍結トンネル・包装ラインは建屋要件がやや高い）
+      0.75,
+      0.0075, // 3%/年（生産ラインと同水準）
+      { targetProduct: "freezingPackaging", capacityIncreaseTonsPerQuarter: 800, readinessQuartersAfterCompletion: 1 }
     ),
     qualityControlEquipment: template(
       "qualityControlEquipment",

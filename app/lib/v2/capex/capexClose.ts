@@ -33,6 +33,8 @@ import { FinancingQuarterResult } from "../financing/types";
 import { CapexParameters } from "./parameters";
 import { computeCapexMaintenanceCostUsd } from "./capacityEffect";
 import { computeCapexComponentDepreciationUsd } from "./depreciation";
+import { FACTORY_SPACE_PARAMETERS_V1, FactorySpaceParameters } from "../production/factorySpace";
+import { computeCandidateProjectSpaceUnits, FactorySpaceApprovalBudget } from "./factorySpace";
 import {
   applyCancelRequest,
   attemptPayment,
@@ -40,6 +42,7 @@ import {
   evaluateProposal,
   isActiveStatus,
   ProposalApprovalGate,
+  ProposalSpaceGate,
   replaceProject,
   validateResumeRequest,
 } from "./projectLifecycle";
@@ -59,6 +62,13 @@ export interface CloseQuarterWithCapexInput {
   readonly prevCapexState: CompanyCapexState;
   readonly decision: CapexDecisionInput;
   readonly approvalGate: ProposalApprovalGate;
+  /**
+   * 【Phase 8D-3】当四半期の新規承認に使える工場スペース枠。
+   * 省略時はスペース判定を行わない（Phase 8D以前の呼び出し元・既存テストとの後方互換）。
+   */
+  readonly factorySpaceBudget?: FactorySpaceApprovalBudget;
+  /** スペース係数（省略時は FACTORY_SPACE_PARAMETERS_V1）。 */
+  readonly factorySpaceParams?: FactorySpaceParameters;
 }
 
 export interface CloseQuarterWithCapexOutput {
@@ -104,15 +114,38 @@ export function closeQuarterWithCapex(
   }
 
   // --- 3. 新規提案の評価（承認/拒否。同時進行中案件数の上限は提案を処理するたびに再評価する） ---
+  // 【Phase 8D-3】工場スペースの残枠も、承認するたびに減らしながら評価する。
+  // これにより、同一四半期に複数案件を提案した場合でもスペースが二重に使われない。
+  //
+  // 【Phase 8D監査L-1・安全側の仕様（意図的、修正不要）】input.factorySpaceBudgetは
+  // 呼び出し元（companyLab/runner.ts）が当四半期のこの関数呼び出しより前の
+  // 状態から算出して渡す値であり、直前のステップ1（取消要求の適用）で当四半期に
+  // 取り消した案件のスペースは、このremainingSpaceUnitsにはまだ反映されていない。
+  // つまり「同一四半期に取り消した案件のスペースは、同じ四半期の新規案件承認には
+  // 再利用できず、翌四半期から解放される」。過剰承認を避ける安全側の挙動であり、
+  // 意図した仕様である。
+  const spaceParams = input.factorySpaceParams ?? FACTORY_SPACE_PARAMETERS_V1;
+  let remainingSpaceUnits = input.factorySpaceBudget?.remainingSpaceUnits ?? 0;
   const rejectedProposals: CapexRejectedProposal[] = [];
   let nextProjectSequence = prevCapexState.nextProjectSequence;
   decision.newProjectProposals.forEach((proposal, index) => {
     const activeCount = totalActiveProjects(projects);
     const projectId = `${companyId}-CAPEX-${nextProjectSequence}`;
-    const outcome = evaluateProposal(companyId, proposal, activeCount, input.approvalGate, params, period, projectId, index + 1);
+    const requiredSpaceUnits = computeCandidateProjectSpaceUnits(proposal.projectType, params, spaceParams);
+    const spaceGate: ProposalSpaceGate | undefined =
+      input.factorySpaceBudget !== undefined
+        ? {
+            requiredSpaceUnits,
+            remainingSpaceUnits,
+            totalSpaceUnits: input.factorySpaceBudget.totalSpaceUnits,
+            epsilonSpaceUnits: spaceParams.epsilonSpaceUnits,
+          }
+        : undefined;
+    const outcome = evaluateProposal(companyId, proposal, activeCount, input.approvalGate, params, period, projectId, index + 1, spaceGate);
     if ("approved" in outcome) {
       projects = [...projects, outcome.approved];
       nextProjectSequence += 1;
+      remainingSpaceUnits -= requiredSpaceUnits;
     } else {
       rejectedProposals.push(outcome.rejected);
     }

@@ -135,6 +135,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               period={viewModel.period}
               lastQuarterCapexEvents={viewModel.lastQuarterCapexEvents}
               lastQuarterRejectedCapexProposals={viewModel.lastQuarterRejectedCapexProposals}
+              lastQuarterFinancialResult={viewModel.lastQuarterResult?.financialResult ?? null}
             />
 
             {isEditing && (

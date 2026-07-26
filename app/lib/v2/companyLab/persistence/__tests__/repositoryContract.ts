@@ -44,6 +44,7 @@ function minimalRuntime(overrides: Partial<CompanyLabRuntimeSnapshot> = {}): Com
     financeState: { companies: [] },
     financingState: { companies: [] },
     capexState: { companies: [] },
+    workforceState: { companies: [] },
     isComplete: false,
     ...overrides,
   };

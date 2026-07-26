@@ -33,6 +33,33 @@ export interface ProposalApprovalGate {
 }
 
 /**
+ * 【Phase 8D-3】工場スペースによる承認ゲート。
+ * 呼び出し側（capexClose.ts）が、提案を1件評価するたびに残枠を減らしながら渡すことで、
+ * 同一四半期に複数案件を提案した場合の重複承認（＝スペースの二重予約）を防ぐ。
+ * 省略された場合はスペース判定を行わない（Phase 8D以前の呼び出し元との後方互換）。
+ */
+export interface ProposalSpaceGate {
+  /** この案件が必要とするスペース（スペース単位）。 */
+  readonly requiredSpaceUnits: number;
+  /** この案件を評価する時点で残っているスペース（スペース単位）。 */
+  readonly remainingSpaceUnits: number;
+  /** 工場スペース総量（拒否理由の説明文に使う）。 */
+  readonly totalSpaceUnits: number;
+  /** 面積比較の許容誤差。 */
+  readonly epsilonSpaceUnits: number;
+}
+
+/** スペース不足による拒否理由の文言（画面のプレビュー警告と同じ言い回しにする）。 */
+export function formatSpaceShortageReason(gate: ProposalSpaceGate): string {
+  const shortage = gate.requiredSpaceUnits - gate.remainingSpaceUnits;
+  return (
+    `工場スペースが不足しているため新規承認を見送り。` +
+    `必要スペース ${Math.round(gate.requiredSpaceUnits)} / 空き ${Math.round(Math.max(0, gate.remainingSpaceUnits))}` +
+    `（総量 ${Math.round(gate.totalSpaceUnits)}、不足 ${Math.round(Math.max(0, shortage))} スペース単位）。`
+  );
+}
+
+/**
  * 1件の新規提案を評価する。承認条件（実装指示§12。会社IDでの特殊扱いは
  * 一切行わない。財務・信用診断だけで判定する）:
  *   - 銀行引受停止・重大資金繰り不安（前期末までの情報のみ）の会社は新規承認しない。
@@ -52,7 +79,8 @@ export function evaluateProposal(
   params: CapexParameters,
   period: PeriodV2,
   projectId: string,
-  priority: number
+  priority: number,
+  spaceGate?: ProposalSpaceGate
 ): { readonly approved: CapitalProject } | { readonly rejected: CapexRejectedProposal } {
   const template: CapexProjectTemplate | undefined = params.templatesByType[proposal.projectType];
   if (!template) {
@@ -72,6 +100,12 @@ export function evaluateProposal(
   }
   if (!Number.isFinite(requestedBudgetUsd) || requestedBudgetUsd <= 0) {
     reasons.push(`要求予算が不正です（有限の正数である必要があります。受け取った値: ${requestedBudgetUsd}）。`);
+  }
+  // 【Phase 8D-3】工場スペース不足は「不可能な案件を正常な案件として確定しない」ための
+  // 承認拒否である。例外ではなく理由つきの拒否として返す（既存の資金繰り・案件数上限と
+  // 同じ扱い。docs/v2/CAPITAL_INVESTMENT_ARCHITECTURE_v0.1.md §エラー処理方針）。
+  if (spaceGate !== undefined && spaceGate.requiredSpaceUnits > spaceGate.remainingSpaceUnits + spaceGate.epsilonSpaceUnits) {
+    reasons.push(formatSpaceShortageReason(spaceGate));
   }
 
   if (reasons.length > 0) {

@@ -11,6 +11,7 @@ import { hosoEqTons, ratio, unwrapUnit } from "../../lib/v2/core/units";
 import { PeriodV2 } from "../../lib/v2/core/period";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../lib/v2/market/types";
 import { CompanyDecisionInput, CompanyFixture } from "../../lib/v2/companyLab";
+import type { CompanyWorkforceState } from "../../lib/v2/companyLab/workforce";
 import { LoanType, RepaymentMethod } from "../../lib/v2/financing/types";
 import { CapitalProjectType } from "../../lib/v2/capex/types";
 import { PlanCostExpectation } from "../../lib/v2/sales/types";
@@ -80,7 +81,22 @@ export interface ProductionPlanDraftRow {
 
 export interface WorkerAssignmentDraftRow {
   readonly factoryId: string;
+  /**
+   * 当期エンジンへ渡す常用ワーカーの**総人数**（＝変更後人数）。
+   * 【Phase 8D-4】プレイヤーが直接編集するのは regularHeadcountChange（増減差分）であり、
+   * この値は「前期末の総人数 ＋ 増減差分」として画面側が同時に更新する。
+   * エンジンの入力契約（WorkerAssignment.regularHeadcount＝絶対人数）は変更しないため、
+   * buildDecisionInputFromDraft は従来どおりこの値をそのまま使う。
+   */
   readonly regularHeadcount: number;
+  /**
+   * 【Phase 8D-4】前期末時点の常用ワーカー総人数（会社状態から引き継いだ出発点）。
+   * 省略可能なのは、Phase 8D以前に保存された下書きにこのフィールドが無いため
+   * （読み込み側は `?? regularHeadcount` として扱う。0で埋めない）。
+   */
+  readonly regularHeadcountBefore?: number;
+  /** 【Phase 8D-4】当期の増減差分（増員は正、減員は負）。省略時は0として扱う。 */
+  readonly regularHeadcountChange?: number;
   readonly temporaryHeadcount: number;
   readonly overtimeRate: number;
   readonly skills: readonly WorkerSkillEntry[];
@@ -148,7 +164,17 @@ export interface CompanyDecisionDraft {
  * 網羅グリッドを持つ編集用ドラフトへ変換する。自動方針が生成しなかった組合せは
  * 数量0の行として補い、プレイヤーが新しい市場・商品組合せへも入力できるようにする。
  */
-export function buildInitialDraft(fixture: CompanyFixture, autoDecision: CompanyDecisionInput): CompanyDecisionDraft {
+export function buildInitialDraft(
+  fixture: CompanyFixture,
+  autoDecision: CompanyDecisionInput,
+  /**
+   * 【Phase 8D-4】前期末までのWorker総人数（会社状態）。渡された場合、ワーカー行の
+   * 出発点はこの総人数になり、増減差分は0から始まる。
+   * 省略された場合は従来どおり自動方針／fixtureの基準人数を出発点とする
+   * （Phase 8D以前の呼び出し元・既存テストとの後方互換）。
+   */
+  workforceState?: CompanyWorkforceState
+): CompanyDecisionDraft {
   const salesPlans: SalesPlanDraftRow[] = DEMAND_MARKET_IDS.flatMap((market) =>
     PRODUCTS.map((product) => {
       const found = autoDecision.salesPlans.find((p) => p.market === market && p.product === product);
@@ -212,9 +238,15 @@ export function buildInitialDraft(fixture: CompanyFixture, autoDecision: Company
 
   const workerAssignments: WorkerAssignmentDraftRow[] = fixture.workerBaseline.map((base) => {
     const found = autoDecision.workerAssignments.find((w) => w.factoryId === base.factoryId);
+    // 【Phase 8D-4】出発点は「会社状態として保持されている前期末の総人数」。
+    // これが無い場合にかぎり、従来どおり自動方針／fixtureの基準人数へフォールバックする。
+    const persisted = workforceState?.factories.find((f) => f.factoryId === base.factoryId)?.regularHeadcount;
+    const regularHeadcountBefore = persisted ?? (found ? found.regularHeadcount : base.regularHeadcount);
     return {
       factoryId: base.factoryId,
-      regularHeadcount: found ? found.regularHeadcount : base.regularHeadcount,
+      regularHeadcount: regularHeadcountBefore,
+      regularHeadcountBefore,
+      regularHeadcountChange: 0,
       temporaryHeadcount: found ? found.temporaryHeadcount : 0,
       overtimeRate: found ? unwrapUnit(found.overtimeRate) : 0,
       skills: base.skills,

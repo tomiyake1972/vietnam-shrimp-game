@@ -396,3 +396,43 @@ test("受入確認PC-9: 未知のtargetProduct値（新旧いずれの許容リ�
   projects[0].futureCapacityEffect = { targetProduct: "nonexistentProduct", capacityIncreaseTonsPerQuarter: 0, readinessQuartersAfterCompletion: 0 };
   assert.throws(() => validatePersistedGameState(dto), PersistedStateValidationError);
 });
+
+// ---------------------------------------------------------------------
+// Phase 8D監査M-2修正: 無印/v2スキーマのFUTURE_CAPACITY_TARGET_PRODUCTSに
+// "coldStorage"を追加（companyLab側は既に対応済みだが、無印/v2側の列挙リストへの
+// 追加が漏れていた）
+// ---------------------------------------------------------------------
+
+test('受入確認PC-10: 新規coldStorageExpansionのfutureCapacityEffect.targetProduct="coldStorage"が無印/v2schemaのencode→decodeで往復一致し、値が失われたり別の値へ変換されたりしない', () => {
+  const project = makeProject({
+    projectId: "BAL-CAPEX-COLDSTORAGE",
+    projectType: "coldStorageExpansion",
+    approvedBudgetUsd: 2_500_000,
+    paymentSchedule: [
+      { stageIndex: 0, plannedRatio: 0.5 },
+      { stageIndex: 1, plannedRatio: 0.5 },
+    ],
+    requiredConstructionQuarters: 2,
+    status: "completed",
+    completedPaymentStagesCount: 2,
+    cumulativePaidUsd: 2_500_000,
+    elapsedConstructionQuartersWithPayment: 2,
+    completedPeriod: P2,
+    capitalizedAmountUsd: 2_500_000,
+    futureCapacityEffect: { targetProduct: "coldStorage", capacityIncreaseTonsPerQuarter: 1_250, readinessQuartersAfterCompletion: 1 },
+  });
+  const state = makeState([makeCapexState({ portfolio: { companyId: "BAL", projects: [project] } })]);
+
+  // encode→decode（PersistedGameStateV2としての完全往復一致）
+  const decoded = decodePersistedGameState(encodePersistedGameState(state));
+  assert.deepEqual(decoded, state, "coldStorageを含む状態全体がencode→decodeで完全一致するはず");
+  assert.equal(decoded.capexStates[0].portfolio.projects[0].futureCapacityEffect?.targetProduct, "coldStorage");
+  assert.equal(decoded.capexStates[0].portfolio.projects[0].futureCapacityEffect?.capacityIncreaseTonsPerQuarter, 1_250);
+
+  // 生JSONを経由したrestore相当（validatePersistedGameStateを直接通す）でも
+  // "coldStorage"のまま validate を通過し、他の値へ変換されないことを確認する。
+  const dto = JSON.parse(encodePersistedGameState(state)) as Record<string, unknown>;
+  const restored = validatePersistedGameState(dto);
+  assert.equal(restored.capexStates[0].portfolio.projects[0].futureCapacityEffect?.targetProduct, "coldStorage");
+  assert.deepEqual(restored, state);
+});
