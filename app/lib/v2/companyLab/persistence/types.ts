@@ -31,6 +31,7 @@ import { FinancingState } from "../../financing/types";
 import { CapexState } from "../../capex/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
 import type { WorkforceState } from "../workforce";
+import type { ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 
 // ---------------------------------------------------------------------
 // 0. バージョン定数
@@ -56,8 +57,18 @@ import type { WorkforceState } from "../workforce";
  *        存在しない場合は空（{ companies: [] }）として復元し、
  *        restoreCompanyLabStateFromRuntimeSnapshot が確定履歴の
  *        decisions[].workerAssignments から実際の人数を復元する（推測値は作らない）。
+ *   v3 … 【Phase 8F-1】CompanyLabRuntimeSnapshot へ consumerMarketState
+ *        （市場別・消費国在庫・購買循環モデルのcarry state）を追加。
+ *        **追加的変更のみで、マイグレーション処理は不要**（workforceStateと同じ方式）。
+ *        schemaVersion:1〜2 の既存データには consumerMarketState キーが存在しない
+ *        ため、schema側で全市場ゼロ値（market/consumerInventory.ts の
+ *        isConsumerMarketStateEmptyがtrueと判定する組み合わせ）として復元し、
+ *        restoreCompanyLabStateFromRuntimeSnapshot が確定履歴の直近四半期の
+ *        marketInput.demandMarketsから決定論的に再構築する（推測値は作らない）。
+ *        併せてCompanyQuarterRecord.consumerMarketRecordsもoptionalとして追加した
+ *        （既存の確定履歴エントリにはこのキーが無いため）。
  */
-export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 2;
+export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 3;
 
 // ---------------------------------------------------------------------
 // 1. ランタイムスナップショット（history非包含。§2-1・§2-2）
@@ -119,6 +130,13 @@ export interface CompanyLabRuntimeSnapshot {
    * schemaVersion:1 のデータにはこのキーが無いため、schema側で空として復元する。
    */
   readonly workforceState: WorkforceState;
+  /**
+   * 【Phase 8F-1・schemaVersion 3で追加】市場別（CN/US/EU/JP/OTHER）の
+   * 消費国在庫・購買循環モデルのcarry state（期首在庫・前期消費実績・価格履歴）。
+   * schemaVersion:1〜2 のデータにはこのキーが無いため、schema側で全市場ゼロ値
+   * として復元する（market/consumerInventory.ts isConsumerMarketStateEmpty参照）。
+   */
+  readonly consumerMarketState: ConsumerMarketCarryStateTable;
   readonly isComplete: boolean;
 }
 

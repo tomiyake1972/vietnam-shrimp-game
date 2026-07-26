@@ -9,6 +9,9 @@
 import { CompanyLabState } from "../types";
 import { deriveWorkforceStateFromDecisions, isWorkforceStateEmpty, WorkforceState } from "../workforce";
 import { CompanyLabRuntimeSnapshot } from "./types";
+import { hosoEqTons } from "../../core/units";
+import { DEMAND_MARKET_IDS, DemandMarketId, DemandMarketInput } from "../../market/types";
+import { buildInitialConsumerMarketCarryStateTable, ConsumerMarketCarryStateTable, isConsumerMarketStateEmpty } from "../../market/consumerInventory";
 
 /**
  * CompanyLabStateから、再開に必要な現在状態だけを持つCompanyLabRuntimeSnapshotを
@@ -38,6 +41,8 @@ export function createCompanyLabRuntimeSnapshot(state: CompanyLabState): Company
     capexState: state.capexState,
     // 【Phase 8D-4】Worker総人数（ターンをまたいで保持する会社状態）。
     workforceState: state.workforceState,
+    // 【Phase 8F-1】市場別・消費国在庫・購買循環モデルのcarry state。
+    consumerMarketState: state.consumerMarketState,
     isComplete: state.isComplete,
   };
 }
@@ -85,6 +90,14 @@ export function restoreCompanyLabStateFromRuntimeSnapshot(
     workforceState: isWorkforceStateEmpty(snapshot.workforceState)
       ? restoreWorkforceStateFromHistory(history)
       : snapshot.workforceState,
+    // 【Phase 8F-1 後方互換】Phase 8F-1以前に保存されたスナップショットには
+    // consumerMarketState が存在しない（schema側で全市場ゼロ値として復元される。
+    // isConsumerMarketStateEmptyがtrueと判定する）。その場合は、確定履歴の
+    // 直近四半期のmarketInput.demandMarketsから決定論的に再構築する
+    // （推測値は作らない。workforceStateと同じ方式）。
+    consumerMarketState: isConsumerMarketStateEmpty(snapshot.consumerMarketState)
+      ? restoreConsumerMarketStateFromHistory(history)
+      : snapshot.consumerMarketState,
     history,
     isComplete: snapshot.isComplete,
   };
@@ -95,6 +108,24 @@ function restoreWorkforceStateFromHistory(history: CompanyLabState["history"]): 
   const last = history[history.length - 1];
   if (!last) return { companies: [] };
   return deriveWorkforceStateFromDecisions(last.decisions);
+}
+
+/**
+ * 確定履歴の最後のエントリのmarketInput.demandMarketsから、市場別・消費国在庫
+ * carry stateを決定論的に再構築する（実装指示§13「初期化は決定論的に、直近の
+ * 消費実績と市場別目標在庫月数から行う」）。確定履歴が一件も無い場合
+ * （Phase 8F-1より前に初期化され、まだ一四半期も処理されていないラボ）は、
+ * 既知の消費実績が無いため、前期消費量ゼロからの決定論的な初期化にフォールバック
+ * する（次の四半期の計画で実需要へ追従するため、影響は初回のみ）。
+ */
+function restoreConsumerMarketStateFromHistory(history: CompanyLabState["history"]): ConsumerMarketCarryStateTable {
+  const last = history[history.length - 1];
+  if (last) {
+    return buildInitialConsumerMarketCarryStateTable(last.marketInput.demandMarkets);
+  }
+  const zeroDemand: DemandMarketInput = { priorPeriodConsumption: hosoEqTons(0), economicIndex: 1, populationGrowthRate: 0 };
+  const zeroDemandMarkets = Object.fromEntries(DEMAND_MARKET_IDS.map((m) => [m, zeroDemand])) as Record<DemandMarketId, DemandMarketInput>;
+  return buildInitialConsumerMarketCarryStateTable(zeroDemandMarkets);
 }
 
 /**

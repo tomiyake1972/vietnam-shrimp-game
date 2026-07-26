@@ -66,6 +66,7 @@ import {
 import { ScenarioMode, ScenarioState } from "../../scenario/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
 import type { WorkforceState } from "../workforce";
+import type { ConsumerMarketCarryState, ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 import {
   CompanyLabDraftEnvelope,
   CompanyLabPersistedCurrentState,
@@ -679,6 +680,7 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
   const capexCompaniesRaw = requireArray(capexStateObj.companies, `${path}.capexState.companies`);
   const capexState = { companies: capexCompaniesRaw.map((c, i) => validateCompanyCapexState(c, `${path}.capexState.companies[${i}]`)) };
   const workforceState = validateWorkforceState(obj.workforceState, `${path}.workforceState`);
+  const consumerMarketState = validateConsumerMarketState(obj.consumerMarketState, `${path}.consumerMarketState`);
   const isComplete = requireBoolean(obj.isComplete, `${path}.isComplete`);
 
   return {
@@ -693,6 +695,7 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
     financingState,
     capexState,
     workforceState,
+    consumerMarketState,
     isComplete,
   };
 }
@@ -730,6 +733,42 @@ function validateWorkforceState(raw: unknown, path: string): WorkforceState {
       };
     }),
   };
+}
+
+/**
+ * 【Phase 8F-1・schemaVersion 3】市場別・消費国在庫carry stateの検証。
+ *
+ * 【後方互換】キー自体が存在しない schemaVersion:1〜2 のデータでは、全市場を
+ * 「未初期化」を表すゼロ値のcarry state（market/consumerInventory.ts の
+ * isConsumerMarketStateEmptyがtrueと判定する組み合わせ）で埋めて返す。
+ * 実際の初期化は restoreCompanyLabStateFromRuntimeSnapshot が、確定履歴の
+ * 直近四半期のdemandMarkets入力から決定論的に再構築する（workforceStateと
+ * 同じ「キーの有無で判定し、無ければ安全な既定値を補う」方式。マイグレーション
+ * 処理は不要）。
+ */
+function validateConsumerMarketState(raw: unknown, path: string): ConsumerMarketCarryStateTable {
+  if (raw === undefined || raw === null) return emptyConsumerMarketState();
+  const obj = requireObject(raw, path);
+  const result = {} as Record<DemandMarketId, ConsumerMarketCarryState>;
+  for (const market of DEMAND_MARKET_IDS) {
+    const marketPath = `${path}.${market}`;
+    const marketObj = requireObject(obj[market], marketPath);
+    const marketId = requireEnum(marketObj.market, DEMAND_MARKET_IDS, `${marketPath}.market`);
+    const openingInventoryTons = wrapUnitConstructor(hosoEqTons, marketObj.openingInventoryTons, `${marketPath}.openingInventoryTons`);
+    const priorConsumptionTons = wrapUnitConstructor(hosoEqTons, marketObj.priorConsumptionTons, `${marketPath}.priorConsumptionTons`);
+    const priceHistoryRaw = requireArray(marketObj.priceHistoryUsdPerHosoEqKg, `${marketPath}.priceHistoryUsdPerHosoEqKg`);
+    const priceHistoryUsdPerHosoEqKg = priceHistoryRaw.map((p, i) => requireFiniteNumber(p, `${marketPath}.priceHistoryUsdPerHosoEqKg[${i}]`));
+    result[market] = { market: marketId, openingInventoryTons, priorConsumptionTons, priceHistoryUsdPerHosoEqKg };
+  }
+  return result;
+}
+
+function emptyConsumerMarketState(): ConsumerMarketCarryStateTable {
+  const result = {} as Record<DemandMarketId, ConsumerMarketCarryState>;
+  for (const market of DEMAND_MARKET_IDS) {
+    result[market] = { market, openingInventoryTons: hosoEqTons(0), priorConsumptionTons: hosoEqTons(0), priceHistoryUsdPerHosoEqKg: [] };
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------

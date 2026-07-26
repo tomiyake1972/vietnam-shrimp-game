@@ -24,6 +24,23 @@ import assert from "node:assert/strict";
 import { CompanyLabPersistedStateV1, CompanyLabQuarterHistoryEntry, CompanyLabRuntimeSnapshot } from "../types";
 import { CompanyLabStateRepository, CompanyLabQuarterCommitInput, CreateCompanyLabInput } from "../repository";
 import { CompanyLabAlreadyExistsError, CompanyLabNotFoundError } from "../errors";
+import { DEMAND_MARKET_IDS, DemandMarketId } from "../../../market/types";
+import { hosoEqTons } from "../../../core/units";
+import { ConsumerMarketCarryStateTable } from "../../../market/consumerInventory";
+
+/**
+ * 【Phase 8F-1】未初期化を表す、全市場ゼロ値のconsumerMarketState（本物の
+ * 型どおりの形を持つ最小フィクスチャ。schema.tsのemptyConsumerMarketState()と
+ * 同じ形。JSONエンコード・デコードを経由するRepository契約テストのため、
+ * `{} as never`のような形状の合わない値は使えない）。
+ */
+function emptyConsumerMarketStateFixture(): ConsumerMarketCarryStateTable {
+  const result = {} as Record<DemandMarketId, ConsumerMarketCarryStateTable[DemandMarketId]>;
+  for (const market of DEMAND_MARKET_IDS) {
+    result[market] = { market, openingInventoryTons: hosoEqTons(0), priorConsumptionTons: hosoEqTons(0), priceHistoryUsdPerHosoEqKg: [] };
+  }
+  return result;
+}
 
 function minimalRuntime(overrides: Partial<CompanyLabRuntimeSnapshot> = {}): CompanyLabRuntimeSnapshot {
   return {
@@ -45,6 +62,7 @@ function minimalRuntime(overrides: Partial<CompanyLabRuntimeSnapshot> = {}): Com
     financingState: { companies: [] },
     capexState: { companies: [] },
     workforceState: { companies: [] },
+    consumerMarketState: emptyConsumerMarketStateFixture(),
     isComplete: false,
     ...overrides,
   };
