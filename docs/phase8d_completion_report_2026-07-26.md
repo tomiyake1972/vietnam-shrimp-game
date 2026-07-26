@@ -714,3 +714,146 @@ Phase 8D で投資回収を増分キャッシュフロー基準にしてある�
 - `/root/shrimpx` はこの実行環境に存在せず、触れていません
   （作業ディレクトリは `/tmp/year1_clone` のみ）
 - V1 のテストは全テストスイート（1,523件）の中で従来どおり成功しています
+
+---
+
+## 21. Phase 8D監査指摘の修正（2026-07-26 追補3: M-1・M-2・L-2修正、L-1文書化）
+
+Phase 8Dは、独立監査（対象HEAD `e5cf6e3`、比較起点 `bfeebb5`）で**「軽微修正後承認」**の判定を受けました。
+本追補は、その指摘のうち M-1（Medium）・M-2（Medium）・L-2（Low）を修正し、L-1（Low）は
+仕様として意図的なものであることをコード上に明記した記録です。大規模な再設計は行っていません。
+
+### 21.1 M-1: 固定スペース案件（品質管理設備・排水環境設備）の稼働後占有スペース消失を修正
+
+**問題**：`computeFactoryUsedSpaceUnits`（`production/factorySpace.ts`）は能力プール由来のスペースしか
+合算できなかった。品質管理設備（600）・排水環境設備（900）は能力を一切増やさないため、稼働開始した
+瞬間に `buildPendingSpaceReservations` の予約一覧からは外れる（`isCapexProjectOperationalAt` が true になるため）
+一方、能力プールにも反映されず、占有スペースがどこにも計上されないまま消えていた。
+
+**修正**：
+- `production/factorySpace.ts`：`BuildFactorySpaceStateInput` に `operationalFixedSpaceUnits?: number` を追加し、
+  `buildFactorySpaceState` の `usedByOperationalSpaceUnits` へ加算するようにした。
+- `capex/factorySpace.ts`：新規関数 `computeOperationalFixedSpaceUnits(projects, period, spaceParams)` を追加。
+  「稼働開始済み・取消以外・かつ能力増加を伴わない案件（`isFixedSpaceOnlyProject`。判定条件は
+  `capacityEffect.ts` の `computeCapacityEffectForCompany` が能力プールへ加算するか否かの判定条件と同一）」
+  ぶんの固定スペースだけを合算し、`buildCompanyFactorySpaceState` が主工場（予約と同じ振り分け規則）へ渡す。
+  能力増設案件は `isFixedSpaceOnlyProject` が false になるためここには含まれず、
+  引き続き能力プール経由の1回だけで計上される（二重計上なし）。
+
+**満たしていること**：
+- 建設中 → `usedByPending`（`reservedByPendingSpaceUnits`）へ計上（従来どおり）
+- 稼働開始後 → `usedByOperational`（`usedByOperationalSpaceUnits`）へ計上（今回追加）
+- 稼働開始の前後で総使用スペース（`usedAfterPendingSpaceUnits`）は減らない
+- 能力増設案件は二重計上されない（能力プール経由の1回のみ）
+- 取消済み案件は占有しない（`status !== "cancelled"` フィルタは予約側・稼働後側の双方に適用）
+- 保存・復元後も占有が維持される
+
+**追加テスト**（`production/__tests__/phase8dFactorySpace.test.ts`）：
+
+| テスト | 内容 |
+|---|---|
+| SP-16（M-1a） | 品質管理設備600が建設中→稼働開始へ移っても、総使用スペースが減らない |
+| SP-17（M-1b） | 排水環境設備900が、稼働開始後の複数四半期（2015Q2・2015Q4・2017Q3）にわたって占有し続ける |
+| SP-18（M-1c） | 稼働中の能力増設案件（HOSO増設500）と固定スペース案件（環境設備900）が混在しても二重計上されない |
+| SP-19（M-1d） | `createInitialPersistedGameState`→`encodePersistedGameState`→`decodePersistedGameState` の実際の永続化経路を通した後も、稼働開始済み品質管理設備600の占有が維持される |
+| SP-20 | 取消済みの固定スペース案件は占有しない（回帰確認） |
+
+**修正前後のスペース数値例**（BAL相当の工場フィクスチャ、品質管理設備1件、総量91,770スペース単位）：
+
+```
+                          建設中           稼働開始後（修正後）    稼働開始後（修正前＝バグ）
+usedByOperationalSpaceUnits   87,400.0         88,000.0                87,400.0 ← 600消失
+reservedByPendingSpaceUnits      600.0              0.0                     0.0
+usedAfterPendingSpaceUnits    88,000.0         88,000.0                87,400.0 ← 総量が600減った
+freeSpaceUnits(現在の空き)     4,370.0          3,770.0                 4,370.0 ← 誤って回復して見えた
+```
+
+修正前は、稼働開始した瞬間に総使用スペースが600減り、あたかもスペースが戻ってきたかのように
+表示されてしまう不具合だった。修正後は稼働開始の前後で総使用スペースが変わらない。
+
+**案件履歴の保持について（確認結果）**：現在の実装では、`completed` になった `CapitalProject` は
+`capex/capexClose.ts` の `projects` 配列から一切削除・剪定されない（`applyCancelRequest` は状態を
+`cancelled` に変えるだけ、支払処理は `replaceProject` で同じ配列内の要素を置き換えるだけで、
+配列から要素を取り除く処理は存在しない）。したがって、この固定スペース占有は「完成済み案件の
+履歴が保持され続けること」に依存している。**将来、案件履歴を整理・削除する機能を追加する場合、
+削除された案件の固定スペース占有もその時点で失われる**ため、その際は本修正（M-1）と同様に
+「削除されても占有だけは別途保持する」設計上の手当てが必要になる。これはリスクとして記録するのみで、
+今回は履歴削除機能自体が存在しないため対応不要。
+
+### 21.2 M-2: 無印/v2永続化スキーマへ `coldStorage` を追加
+
+**問題**：`capex/types.ts` の `FutureCapacityEffectPlaceholder.targetProduct` にはPhase 8D-5で
+`"coldStorage"` が追加済みだったが、`app/lib/v2/persistence/schema.ts` の
+`FUTURE_CAPACITY_TARGET_PRODUCTS`（無印/v2永続化スキーマの列挙値許容リスト）への追加が漏れていた。
+companyLab側の永続化は `targetProduct` を自由文字列として検証するためこの種の漏れが起きず、
+無印/v2経路にのみ存在する不具合だった（現状、無印/v2の `capexStates` への実際の書き込み経路は
+無いため未顕在化だが、「書けるが読めない」構造上のリスクだった）。
+
+**修正**：`app/lib/v2/persistence/schema.ts` の `FUTURE_CAPACITY_TARGET_PRODUCTS` へ `"coldStorage"` を追加。
+
+**追加テスト**（`persistence/__tests__/persistenceCapex.test.ts`）：
+
+| テスト | 内容 |
+|---|---|
+| PC-10 | `targetProduct: "coldStorage"`（新規coldStorageExpansion想定、`capacityIncreaseTonsPerQuarter: 1_250`）を含む `PersistedGameStateV2` が、無印/v2の `encodePersistedGameState`→`decodePersistedGameState` の完全往復（`assert.deepEqual`）で一致し、かつ `validatePersistedGameState` を生JSON経由でも通過し値が変換されないことを確認 |
+
+### 21.3 L-2: `FactorySpacePanel` の「現在の空き」「投資完成後の空き」を意味どおりに区別
+
+**問題**：`production/factorySpace.ts` の `buildFactorySpaceState` が、`freeSpaceUnits`（現在の空き）を
+`総量 − usedAfterPendingSpaceUnits`（＝すでに予約を差し引いた値）として計算し、
+`freeAfterPendingSpaceUnits`（投資完成後の空き）は同じ値をそのままエイリアスしていた。
+そのため画面の2列は常に同じ数値を表示していた。
+
+**修正**：`buildFactorySpaceState` を次のとおり変更（`production/factorySpace.ts`）。
+
+```
+現在の空き（freeSpaceUnits）        = 総量 − usedByOperationalSpaceUnits（稼働中設備の使用スペースのみ）
+投資完成後の空き（freeAfterPendingSpaceUnits） = 総量 − usedAfterPendingSpaceUnits（稼働中＋建設中案件の予約）
+```
+
+`FactorySpacePanel.tsx` 自体はこの2フィールドをそのまま描画しているだけなので**コード変更は不要**だった。
+承認判定（`buildFactorySpaceApprovalBudget`）は従来どおり `usedAfterPendingSpaceUnits` を直接使っており、
+**変更していない**（`investmentPlanningViewModel.ts` の承認可否判定も同様に独自に
+`totalSpaceUnits − usedAfterPendingSpaceUnits` を計算しており、今回の表示修正の影響を受けない）。
+
+**追加テスト**（`production/__tests__/phase8dFactorySpace.test.ts`）：
+
+| テスト | 内容 |
+|---|---|
+| SP-21（L-2） | 建設中案件がある場合、「現在の空き」＞「投資完成後の空き」となり、差が建設中案件の予約スペースぶんに一致する |
+| SP-22（L-2） | 建設中案件が無い場合、両者は一致する |
+
+**修正前後の数値例**（前掲21.1の「建設中」列を参照）：修正前は `freeSpaceUnits` も `freeAfterPendingSpaceUnits` も
+どちらも 3,770.0（予約600ぶんを差し引いた値）だったが、修正後は `freeSpaceUnits = 4,370.0`（現在の空き。
+予約を差し引かない）、`freeAfterPendingSpaceUnits = 3,770.0`（投資完成後の空き）と、明確に異なる値になる。
+
+### 21.4 L-1: 同一四半期の取消と新規提案（仕様として明記。ロジック変更なし）
+
+指示どおりロジックは変更していない。次の安全側の仕様を、該当箇所へコードコメントとして明記した。
+
+- `app/lib/v2/companyLab/runner.ts`（`factorySpaceBudget` を組み立てる箇所）
+- `app/lib/v2/capex/capexClose.ts`（新規提案評価ループの直前）
+
+**仕様**：`factorySpaceBudget` は当四半期の `closeQuarterWithCapex` 呼び出しより前の状態
+（`state.capexState`）から算出されるため、その関数内のステップ1（取消要求の適用）で
+**同一四半期に取り消した案件のスペースは、同じ四半期の新規案件承認には反映されない**。
+解放されたスペースは翌四半期の `factorySpaceBudget` 算出からはじめて反映される。
+取消と新規承認を同時に行っても過剰承認しない安全側の挙動であり、意図した仕様である。
+
+### 21.5 検証結果
+
+- TypeScript: `npx tsc --noEmit -p .` エラー0件
+- ESLint: `npx eslint app/` エラー0件（既存の警告2件のみ。Phase 8D以前から存在するもので、
+  今回の変更ファイルには含まれない）
+- 関連テスト（`phase8dFactorySpace.test.ts` 39件・`phase8dCapacitySeparation.test.ts` 11件・
+  `phase8dBaseline.test.ts` 5件・`phase8dInvestmentPlanning.test.ts` 22件・
+  `phase8dPersistence.test.ts` 9件・`persistenceCapex.test.ts` 10件・`persistence.test.ts`・
+  `capacityEffect.test.ts`・`capexViewModel.test.ts`・`capexIntegration.test.ts`）：174件すべて成功
+- 全テストスイート：1,544件すべて成功（監査時点の1,536件 ＋ 今回追加8件 ＝ SP-16〜SP-22の7件、PC-10の1件）
+- `npm run build`：成功
+
+### 21.6 最終状態
+
+- 最終HEAD・ローカル/リモートHEAD一致・作業ツリーcleanの確認結果は、本追補をコミットした際の
+  作業報告（チャット上の最終報告メッセージ）に記載する
+- `develop/v2` へはマージしていません。ブランチは削除していません。既存ゲームの再実行・初期化は行っていません
