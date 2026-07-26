@@ -61,12 +61,19 @@ function addQuarters(p: PeriodV2, quarters: number): PeriodV2 {
 //    UI文言としてこのファイルが持つのが適切な定数）
 // ---------------------------------------------------------------------
 
+/**
+ * 【Phase 8D-5】freezingPackaging のラベルを「冷凍・保管能力」から
+ * 「凍結・包装処理能力」へ改めた。旧ラベルは、四半期あたりの処理量（フロー）に
+ * 対して「保管」という語を含んでいたため、同時保管可能量（ストック）と
+ * 混同されるおそれがあった。保管側は coldStorage として別に用意している。
+ */
 export const TARGET_PRODUCT_LABELS: Record<string, string> = {
   hoso: "HOSO加工能力",
   pd: "PD加工能力",
   vap: "VAP加工能力",
   commonProcessing: "共通前処理能力",
-  freezingPackaging: "冷凍・保管能力",
+  freezingPackaging: "凍結・包装処理能力",
+  coldStorage: "冷凍・冷蔵保管能力",
 };
 
 /** 案件種別ごとの短い説明文（テンプレートにdescriptionフィールドが無いため、UI文言としてここで持つ）。 */
@@ -74,10 +81,13 @@ const CAPEX_PROJECT_DESCRIPTIONS: Readonly<Record<CapitalProjectType, string>> =
   hosoLineExpansion: "HOSO（無頭エビ）の加工ラインを増設し、HOSO生産能力を高めます。",
   pdLineExpansion: "PD（殻剥き）加工ラインを増設し、PD生産能力を高めます。",
   vapLineExpansion: "VAP（付加価値加工）ラインを増設し、VAP生産能力を高めます。",
-  coldStorageExpansion: "冷凍・冷蔵保管庫を増設し、完成品の保管・出荷能力を高めます。",
+  coldStorageExpansion:
+    "冷凍・冷蔵保管庫を増設し、同時に保管しておける在庫量（ストック）を増やします。四半期あたりの処理量は増えません。",
   qualityControlEquipment: "品質検査・計測機器を導入します。生産能力は増加しません。",
   environmentalEquipment: "排水処理等の環境対応設備を導入します。生産能力は増加しません。",
   commonProcessingExpansion: "HOSO/PD/VAP共通の前処理（一次加工）能力を増設します。",
+  freezingPackagingExpansion:
+    "凍結・包装ラインを増設し、四半期あたりに凍結・包装できる数量（フロー）の上限を引き上げます。生産量の上限として実際に働くのはこちらです。",
 };
 
 export type CapexDisplayStatus = "planned" | "underConstruction" | "suspended" | "completedPreparing" | "operating" | "cancelled";

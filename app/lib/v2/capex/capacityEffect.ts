@@ -27,6 +27,7 @@ import { nextPeriod, PeriodV2, toYearQuarter } from "../core/period";
 import { hosoEqTons, unwrapUnit } from "../core/units";
 import { CompanyId } from "../sales/types";
 import { Factory } from "../production/types";
+import { resolveFactoryColdStorageCapacityTons } from "../production/coldStorage";
 import { CapexParameters } from "./parameters";
 import { CapexState, CapitalProject } from "./types";
 
@@ -74,13 +75,21 @@ export function isCapexProjectOperationalAt(project: CapitalProject, period: Per
 // 1. 能力増加（実装指示§3.1・§3.3・§3.4）
 // ---------------------------------------------------------------------
 
-/** 会社1社ぶんの、稼働開始済み案件による累計能力増加（Factoryの各能力プールへの加算量）。 */
+/**
+ * 会社1社ぶんの、稼働開始済み案件による累計能力増加（Factoryの各能力プールへの加算量）。
+ *
+ * 【Phase 8D-5】coldStorage を追加した。freezingPackaging は「凍結・包装処理能力」
+ * （フロー、トン/四半期）、coldStorage は「冷凍・冷蔵保管能力」（ストック、同時保管
+ * 可能トン）であり、単位も意味も異なる。生産エンジンの上限として使われるのは
+ * freezingPackaging だけである（coldStorage は強制制約未接続）。
+ */
 export interface CapexCapacityEffect {
   readonly commonProcessing: number;
   readonly hoso: number;
   readonly pd: number;
   readonly vap: number;
   readonly freezingPackaging: number;
+  readonly coldStorage: number;
 }
 
 /**
@@ -105,6 +114,7 @@ export function computeCapacityEffectForCompany(
   let pd = 0;
   let vap = 0;
   let freezingPackaging = 0;
+  let coldStorage = 0;
 
   for (const project of projects) {
     if (!isCapexProjectOperationalAt(project, period)) continue;
@@ -128,10 +138,13 @@ export function computeCapacityEffectForCompany(
       case "freezingPackaging":
         freezingPackaging += amount;
         break;
+      case "coldStorage":
+        coldStorage += amount;
+        break;
     }
   }
 
-  return { commonProcessing, hoso, pd, vap, freezingPackaging };
+  return { commonProcessing, hoso, pd, vap, freezingPackaging, coldStorage };
 }
 
 /**
@@ -168,7 +181,14 @@ export function applyCapexCapacityToFactories(
     if (!effect) return f;
     const isPrimary = primaryFactoryIdByCompany.get(f.companyId) === f.factoryId;
     if (!isPrimary) return f;
-    if (effect.commonProcessing === 0 && effect.hoso === 0 && effect.pd === 0 && effect.vap === 0 && effect.freezingPackaging === 0) {
+    if (
+      effect.commonProcessing === 0 &&
+      effect.hoso === 0 &&
+      effect.pd === 0 &&
+      effect.vap === 0 &&
+      effect.freezingPackaging === 0 &&
+      effect.coldStorage === 0
+    ) {
       return f;
     }
     return {
@@ -178,6 +198,12 @@ export function applyCapexCapacityToFactories(
       pdCapacity: hosoEqTons(unwrapUnit(f.pdCapacity) + effect.pd),
       vapCapacity: hosoEqTons(unwrapUnit(f.vapCapacity) + effect.vap),
       freezingPackagingCapacity: hosoEqTons(unwrapUnit(f.freezingPackagingCapacity) + effect.freezingPackaging),
+      // 【Phase 8D-5】保管能力（ストック）。基礎値はFactoryに明示されていない場合が
+      // あるため（Phase 8D以前に作られたラボ）、必ず resolveFactoryColdStorageCapacityTons
+      // を経由して基礎値を解決してから加算する。基礎値の導出は決定論的なので、
+      // 「当期の値 − 基礎Factoryの値」で増加ぶんを分解する既存の表示層の方法も
+      // そのまま成立する。
+      coldStorageCapacity: hosoEqTons(resolveFactoryColdStorageCapacityTons(f) + effect.coldStorage),
     };
   });
 }

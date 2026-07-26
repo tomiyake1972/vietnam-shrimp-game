@@ -22,6 +22,7 @@ import {
   initializeCompanyLab,
 } from "../../../lib/v2/companyLab";
 import { CAPEX_PARAMETERS_V1, applyCapexCapacityToFactories } from "../../../lib/v2/capex";
+import { resolveFactoryColdStorageCapacityTons } from "../../../lib/v2/production/coldStorage";
 import { computeOperationalStartPeriod } from "../../../lib/v2/capex/capacityEffect";
 import { buildDecisionInputFromDraft, buildInitialDraft } from "../decisionDraft";
 import { addCapexCancelRequestToDraft, addCapexProposalToDraft } from "../capexDraftActions";
@@ -163,10 +164,21 @@ test("INT-1（実装指示§2の縦断フロー）: coldStorageExpansionを提�
   assert.ok(Math.abs(rowAtOperationalStart.quarterlyMaintenanceCostUsd - 2_500_000 * template.maintenanceRatePerQuarter) < 1e-6);
 
   // --- 8. 実際にfactoriesへ能力増加が反映されているか（applyCapexCapacityToFactories、実際のエンジン関数を直接使って確認） ---
+  // 【Phase 8D-5で意味が変わった箇所】coldStorageExpansion は、以前は
+  // freezingPackagingCapacity（＝四半期あたりの凍結・包装処理量＝フロー）を
+  // 増やしていたが、案件名と実際の効果が食い違っていた。現在は
+  // coldStorageCapacity（＝同時に保管できる量＝ストック）を増やす。
+  // 凍結・包装処理能力（フロー）を増やすのは freezingPackagingExpansion である。
   const effectiveFactories = applyCapexCapacityToFactories(playerFixture.factories, state.capexState, state.currentPeriod);
   const originalFactory = playerFixture.factories.find((f) => f.factoryId === effectiveFactories[0].factoryId)!;
-  const capacityIncrease = (effectiveFactories[0].freezingPackagingCapacity as unknown as number) - (originalFactory.freezingPackagingCapacity as unknown as number);
-  assert.ok(Math.abs(capacityIncrease - 500) < 1e-6, `冷凍保管能力が500トン/四半期増加しているはず（実際の増分: ${capacityIncrease}）`);
+  const storageIncrease =
+    resolveFactoryColdStorageCapacityTons(effectiveFactories[0]) - resolveFactoryColdStorageCapacityTons(originalFactory);
+  assert.ok(
+    Math.abs(storageIncrease - 1_250) < 1e-6,
+    `冷凍・冷蔵保管能力が1,250トン（同時保管量）増加しているはず（実際の増分: ${storageIncrease}）`
+  );
+  const flowIncrease = (effectiveFactories[0].freezingPackagingCapacity as unknown as number) - (originalFactory.freezingPackagingCapacity as unknown as number);
+  assert.equal(flowIncrease, 0, "保管庫の増設では、凍結・包装処理能力（フロー、トン/四半期）は増えない");
 
   // --- 9. 稼働開始四半期そのものを実際に確定させ（もう1ターン進める）、その実績値がUIプレビューと
   //        一致することを確認する（実装指示§12「プレビューと実績が同一ロジック」）。

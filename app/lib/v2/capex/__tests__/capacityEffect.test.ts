@@ -136,7 +136,8 @@ test("CAP-10: QC・環境設備は完成・稼働開始済みでも生産能力�
   const qc = makeProject({ projectId: "P-QC", projectType: "qualityControlEquipment", completedPeriod: period(2015, 1), futureCapacityEffect: effect({ capacityIncreaseTonsPerQuarter: 0 }) });
   const env = makeProject({ projectId: "P-ENV", projectType: "environmentalEquipment", completedPeriod: period(2015, 1), futureCapacityEffect: effect({ capacityIncreaseTonsPerQuarter: 0 }) });
   const r = computeCapacityEffectForCompany([qc, env], period(2020, 1));
-  assert.deepEqual(r, { commonProcessing: 0, hoso: 0, pd: 0, vap: 0, freezingPackaging: 0 });
+  // 【Phase 8D-5】coldStorage（冷凍・冷蔵保管能力＝ストック）をプールへ追加したため、期待値にも含める。
+  assert.deepEqual(r, { commonProcessing: 0, hoso: 0, pd: 0, vap: 0, freezingPackaging: 0, coldStorage: 0 });
 });
 
 test("CAP-11: 複数案件の効果は累積する（同一プールへの2件のHOSO投資）", () => {

@@ -108,7 +108,14 @@ import {
 } from "../financing";
 import type { CompanyFinancingState, FinancingQuarterResult, FinancingState } from "../financing/types";
 import type { QuarterFinancingPlan } from "../financing/liquidityClose";
-import { CAPEX_PARAMETERS_V1, applyCapexCapacityToFactories, buildInitialCompanyCapexState, closeQuarterWithCapex } from "../capex";
+import {
+  CAPEX_PARAMETERS_V1,
+  applyCapexCapacityToFactories,
+  buildCompanyFactorySpaceState,
+  buildFactorySpaceApprovalBudget,
+  buildInitialCompanyCapexState,
+  closeQuarterWithCapex,
+} from "../capex";
 import type { CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
 import type { ProposalApprovalGate } from "../capex/projectLifecycle";
 import { calculateExternalProcessorIntent } from "./externalDemand";
@@ -859,6 +866,20 @@ export function advanceCompanyLabQuarter(
         prevCapexState,
         decision: companyDecision!.capexDecision,
         approvalGate: capexApprovalGate,
+        // 【Phase 8D-3】工場スペースによる承認ゲート。当期の生産で実際に使った
+        // factoriesWithCapexCapacity（＝稼働開始済み投資を反映済みのFactory）を
+        // 「稼働中設備の使用量」の基準にし、まだ稼働開始していない案件を予約量として
+        // 数える。稼働中と予約が二重に数えられることはない（判定は
+        // isCapexProjectOperationalAt へ一元化されているため）。
+        factorySpaceBudget: buildFactorySpaceApprovalBudget(
+          buildCompanyFactorySpaceState({
+            companyId: f.companyId,
+            baseFactories,
+            currentFactories: factoriesWithCapexCapacity,
+            capexState: state.capexState,
+            period: state.currentPeriod,
+          })
+        ),
       },
       FINANCE_PARAMETERS_V1,
       CAPEX_PARAMETERS_V1,

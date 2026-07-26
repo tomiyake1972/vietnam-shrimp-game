@@ -13,12 +13,25 @@ import { CountryId } from "../market/types";
 import { CompanyId } from "../sales/types";
 import { RawMaterialLot } from "../rawMaterials/types";
 import { Factory, WorkerAssignment } from "../production/types";
+import { resolveFactoryColdStorageCapacity } from "../production/coldStorage";
+import { deriveDefaultFactorySpaceUnits } from "../production/factorySpace";
 import { CompanyFixture, CompanyPremiumEconomics, CompanyProductEconomics } from "./types";
 
 const PRODUCTS = ["hoso", "pd", "vap"] as const;
 
+/**
+ * 【Phase 8D】coldStorageCapacity（冷凍・冷蔵保管能力＝ストック）と
+ * totalFactorySpaceUnits（工場スペース総量）を、フィクスチャの時点で明示的に
+ * 埋める。値そのものは production/coldStorage.ts・production/factorySpace.ts の
+ * 導出関数をそのまま呼んで得るため、これらのフィールドを持たない既存ラボ
+ * （Phase 8D以前に作成されたもの）と完全に同じ値になる。
+ *
+ * 明示的に埋める理由は、新しく作るラボでは「保管能力・スペース総量がいくつか」が
+ * 保存データ自体から読み取れるようにするため（将来GMが会社ごとに変えられる
+ * 余地も残す）。導出式は1箇所にしかないので、二重管理にはならない。
+ */
 function factory(overrides: Partial<Factory> & Pick<Factory, "factoryId" | "companyId">): Factory {
-  return {
+  const withoutDerived: Factory = {
     status: "active",
     commonProcessingCapacity: hosoEqTons(0),
     hosoCapacity: hosoEqTons(0),
@@ -28,6 +41,14 @@ function factory(overrides: Partial<Factory> & Pick<Factory, "factoryId" | "comp
     baseUtilizationRate: ratio(0.9),
     equipmentAvailabilityRate: ratio(0.95),
     ...overrides,
+  };
+  const withColdStorage: Factory = {
+    ...withoutDerived,
+    coldStorageCapacity: withoutDerived.coldStorageCapacity ?? resolveFactoryColdStorageCapacity(withoutDerived),
+  };
+  return {
+    ...withColdStorage,
+    totalFactorySpaceUnits: withColdStorage.totalFactorySpaceUnits ?? deriveDefaultFactorySpaceUnits(withColdStorage),
   };
 }
 

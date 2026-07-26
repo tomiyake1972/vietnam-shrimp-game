@@ -60,8 +60,37 @@ export interface Factory {
   readonly pdCapacity: HosoEqTons;
   /** VAP専用加工能力。 */
   readonly vapCapacity: HosoEqTons;
-  /** 冷凍・包装能力（全商品が共有して消費する）。 */
+  /**
+   * 【Phase 8D-5で意味を明確化】**凍結・包装処理能力**（フロー）。
+   * 単位は「HOSO換算トン／四半期」であり、当四半期に凍結・包装できる数量の上限。
+   * allocation.tsの段階3が、この値を四半期あたりの処理量上限として使う。
+   *
+   * 【重要】これは「同時に保管できる量」（ストック）ではない。保管側は
+   * coldStorageCapacity（下記）が別に持つ。Phase 8D以前は画面・Excel上で
+   * 「冷凍能力」「冷凍・保管能力」と表記され、フローとストックが混同されていた。
+   */
   readonly freezingPackagingCapacity: HosoEqTons;
+  /**
+   * 【Phase 8D-5新設】**冷凍・冷蔵保管能力**（ストック）。
+   * 単位は「同時に保管できるHOSO換算トン」であり、四半期あたりの処理量ではない。
+   *
+   * 【エンジン未接続であることの明示】この値を上限として入庫を拒否する・期末在庫を
+   * 廃棄する・外部倉庫へ振替える・強制販売する、といったロジックはエンジンに
+   * 一切存在しない（Phase 8D-5の実装指示どおり、今回は追加しない）。使用量・
+   * 空き容量・投資案件・警告表示までを実装し、強制制約は未接続である。
+   *
+   * 省略時は production/coldStorage.ts の deriveDefaultColdStorageCapacityTons が
+   * 凍結・包装処理能力から決定論的に導出する（既存保存データとの後方互換）。
+   */
+  readonly coldStorageCapacity?: HosoEqTons;
+  /**
+   * 【Phase 8D-3新設】工場スペース総量（スペース単位）。設備を設置できる床面積の総枠。
+   * 稼働中設備の使用量と建設中案件の予約量の合計がこの値を超える投資案件は承認されない。
+   *
+   * 省略時は production/factorySpace.ts の deriveDefaultFactorySpaceUnits が
+   * 基礎能力と係数から決定論的に導出する（既存保存データとの後方互換）。
+   */
+  readonly totalFactorySpaceUnits?: number;
   /** 基準稼働率（0〜1）。計画上の標準操業度。 */
   readonly baseUtilizationRate: Ratio;
   /** 設備利用可能率（0〜1）。故障・保全等による可用性。 */
