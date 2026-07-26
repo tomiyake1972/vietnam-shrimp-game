@@ -44,6 +44,8 @@ import { CompanyFinancingState, FinancingRequestInput, FinancingState, Financing
 import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
 // 【Phase 8D-4】型のみの参照（workforce.ts 側も CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
 import type { CompanyWorkforceState, WorkforceState } from "./workforce";
+// 【Phase 8G §2】型のみの参照（salesForceHiring.ts 側も CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
+import type { CompanySalesForceHiringState, SalesForceHiringState } from "./salesForceHiring";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -139,6 +141,17 @@ export interface CompanyDecisionInput {
    * 統合テスト・意思決定編集からの上書きは可能）。
    */
   readonly capexDecision: CapexDecisionInput;
+  /**
+   * 【Phase 8G §2】当期の営業人員の新規採用人数（0以上の整数。増分のみ、
+   * 減員・離職は対象外）。当期採用した人数は当期の配分可能人数には加算されず
+   * （salesForceHiring.ts参照）、四半期確定時に採用が成立し、次の四半期の
+   * 開始時点から配分可能人数へ加算される。
+   *
+   * Phase 8G以前に確定した既存の永続化済み履歴にはこのフィールドが存在しない
+   * ため、後方互換のためoptionalとする（consumerMarketRecords等、既存の後発
+   * フィールドと同じ扱い。省略時は0として扱う＝旧保存データでは採用予定0人）。
+   */
+  readonly salesForceHireCount?: number;
 }
 
 // ---------------------------------------------------------------------
@@ -178,6 +191,13 @@ export interface CompanyOwnState {
    * 意思決定画面はこれを出発点として増減差分を入力する。
    */
   readonly workforceState: CompanyWorkforceState;
+  /**
+   * 【Phase 8G §2】前期末までの自社営業人員総数（当期に配分可能な人数）。
+   * 意思決定画面はこれを「現在の営業人員」「当期に配分可能」の出発点として表示し、
+   * 新規採用人数の入力は0から始まる（増分のみ。workforceStateの増減差分方式とは
+   * 異なり、採用は当期の配分可能人数へは加算されない）。
+   */
+  readonly salesForceHiringState: CompanySalesForceHiringState;
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */
@@ -366,6 +386,14 @@ export interface CompanyLabState {
    * （destinationMarketPricing）の算出だけに使う。
    */
   readonly consumerMarketState: ConsumerMarketCarryStateTable;
+  /**
+   * 【Phase 8G §2】会社別の営業人員総数（ターンをまたいで保持）。
+   * fixture.salesForceHeadcountTotalは静的な基準値のままとし、実際に当期
+   * 配分可能な人数はこの状態が持つ。意思決定の新規採用人数は当期はここへ
+   * 加算されず、四半期確定時にderiveNextSalesForceHiringStateが次期の状態へ
+   * 加算する（salesForceHiring.ts参照）。
+   */
+  readonly salesForceHiringState: SalesForceHiringState;
   readonly history: readonly CompanyQuarterRecord[];
   readonly isComplete: boolean;
 }

@@ -110,6 +110,7 @@ import type { QualityReliabilityState } from "../quality/types";
 import { buildCompanyQualitySummary } from "./qualitySummary";
 import { buildCompanyFixtures } from "./fixtures";
 import { buildInitialWorkforceState, deriveNextWorkforceState } from "./workforce";
+import { buildInitialSalesForceHiringState, deriveNextSalesForceHiringState } from "./salesForceHiring";
 import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { unwrapUsd } from "../finance/types";
@@ -347,6 +348,9 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
     // 【Phase 8F-1】市場別（CN/US/EU/JP/OTHER）の消費国在庫・購買循環モデルの
     // 初期carry state。
     consumerMarketState: buildInitialConsumerMarketCarryStateTable(initialMarketInput.demandMarkets),
+    // 【Phase 8G §2】営業人員総数の初期状態。fixture.salesForceHeadcountTotalを
+    // そのまま初期人数とするため、Phase 8G以前と初期人数は完全に同じ。
+    salesForceHiringState: buildInitialSalesForceHiringState(fixtures),
     history: [],
     isComplete: false,
   };
@@ -388,6 +392,11 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
   const workforceStateForCompany =
     state.workforceState?.companies.find((c) => c.companyId === fixture.companyId) ??
     buildInitialWorkforceState([fixture]).companies[0];
+  // 【Phase 8G §2】前期末までの自社営業人員総数。旧保存データから復元した場合など、
+  // 万一この会社ぶんが欠けていれば fixture の基準人数から組み立て直す（0で埋めない）。
+  const salesForceHiringStateForCompany =
+    state.salesForceHiringState?.companies.find((c) => c.companyId === fixture.companyId) ??
+    buildInitialSalesForceHiringState([fixture]).companies[0];
 
   return {
     companyId: fixture.companyId,
@@ -403,6 +412,7 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     financingState: financingStateForCompany,
     capexState: capexStateForCompany,
     workforceState: workforceStateForCompany,
+    salesForceHiringState: salesForceHiringStateForCompany,
   };
 }
 
@@ -573,11 +583,21 @@ export function advanceCompanyLabQuarter(
 
   const definition = findScenarioDefinitionForCompanyLab(state.config.scenarioId);
   const turn = state.scenarioState.currentTurn;
+  // 【Phase 8G §2】当期に配分可能な営業人員総数＝前期末までの状態（会社状態が
+  // 無ければfixtureの基準人数へフォールバック。0で埋めない）。当期の新規採用
+  // 意思決定（d.salesForceHireCount）はここには一切加算しない
+  // （採用は次の四半期から配分可能になる。salesForceHiring.ts冒頭コメント参照）。
+  const salesForceHeadcountByCompanyId = new Map(
+    fixtures.map((f) => [
+      f.companyId,
+      state.salesForceHiringState?.companies.find((c) => c.companyId === f.companyId)?.headcount ?? f.salesForceHeadcountTotal,
+    ])
+  );
   const decisions = fixtures.map((f) => {
     const d = decisionsByCompanyId[f.companyId];
     if (!d) throw new CompanyLabError(`会社 "${f.companyId}" の当期意思決定が指定されていません。`);
     try {
-      validateSalesForceHeadcountBudget(d.salesPlans, f.salesForceHeadcountTotal);
+      validateSalesForceHeadcountBudget(d.salesPlans, salesForceHeadcountByCompanyId.get(f.companyId) ?? f.salesForceHeadcountTotal);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new CompanyLabError(`会社 "${f.companyId}" の意思決定が不正です: ${message}`);
@@ -894,7 +914,12 @@ export function advanceCompanyLabQuarter(
       workerAssignments: companyDecision?.workerAssignments ?? [],
       appliedOvertimeRate: companyLoad ? unwrapUnit(companyLoad.overtimeRate) : 0,
       activeFactoryCount: f.factories.filter((factory) => factory.status === "active").length,
-      salesForceHeadcount: f.salesForceHeadcountTotal,
+      // 【Phase 8G §2】実際に当期SG&Aへ計上する営業人員数は、前期末までに確定
+      // した人数（増員後は翌四半期以降のSG&Aへ自動的に反映される。既存の
+      // salesForceSalaryUsdPerQuarter単価をそのまま使い、新しい費用係数は
+      // 追加しない）。当期の新規採用人数はここへ含めない（まだ配分可能ではなく、
+      // コストにも計上しない）。
+      salesForceHeadcount: salesForceHeadcountByCompanyId.get(f.companyId) ?? f.salesForceHeadcountTotal,
       procurementHeadcount: f.procurementHeadcountTotal,
     });
     const plan = financingPlanByCompanyId.get(f.companyId)!;
@@ -1077,6 +1102,15 @@ export function advanceCompanyLabQuarter(
     ),
     // 【Phase 8F-1】次期へ繰り越す市場別の消費国在庫carry state。
     consumerMarketState: consumerMarketStateAfter,
+    // 【Phase 8G §2】次期へ繰り越す営業人員総数。当期の新規採用意思決定
+    // （d.salesForceHireCount、無ければ0）を前期末人数へ加算する。加算は
+    // ここ（四半期処理が実際に成功した経路）だけで行われるため、二重加算は
+    // 起こらない。
+    salesForceHiringState: deriveNextSalesForceHiringState(
+      state.salesForceHiringState ?? buildInitialSalesForceHiringState(fixtures),
+      fixtures,
+      new Map(decisions.map((d) => [d.companyId, d.salesForceHireCount ?? 0]))
+    ),
     history,
     isComplete,
   };

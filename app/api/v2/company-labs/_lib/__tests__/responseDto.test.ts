@@ -19,6 +19,7 @@ function minimalRuntime() {
     capexState: { companies: [] },
     workforceState: { companies: [] },
     consumerMarketState: {} as never,
+    salesForceHiringState: { companies: [] },
     isComplete: false,
   };
 }

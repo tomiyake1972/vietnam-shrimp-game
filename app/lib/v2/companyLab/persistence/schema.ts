@@ -67,6 +67,7 @@ import { ScenarioMode, ScenarioState } from "../../scenario/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
 import type { WorkforceState } from "../workforce";
 import type { ConsumerMarketCarryState, ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
+import type { SalesForceHiringState } from "../salesForceHiring";
 import {
   CompanyLabDraftEnvelope,
   CompanyLabPersistedCurrentState,
@@ -681,6 +682,7 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
   const capexState = { companies: capexCompaniesRaw.map((c, i) => validateCompanyCapexState(c, `${path}.capexState.companies[${i}]`)) };
   const workforceState = validateWorkforceState(obj.workforceState, `${path}.workforceState`);
   const consumerMarketState = validateConsumerMarketState(obj.consumerMarketState, `${path}.consumerMarketState`);
+  const salesForceHiringState = validateSalesForceHiringState(obj.salesForceHiringState, `${path}.salesForceHiringState`);
   const isComplete = requireBoolean(obj.isComplete, `${path}.isComplete`);
 
   return {
@@ -696,7 +698,34 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
     capexState,
     workforceState,
     consumerMarketState,
+    salesForceHiringState,
     isComplete,
+  };
+}
+
+/**
+ * 【Phase 8G §2・schemaVersion 4】営業人員総数の検証。
+ *
+ * 【後方互換】キー自体が存在しない schemaVersion:1〜3 のデータでは空を返す
+ * （workforceStateと同じ「キーの有無で判定し、無ければ安全な既定値を補う」方式。
+ * バージョン番号で分岐しないため、マイグレーション処理は不要）。
+ * 空で返した場合、実際の人数は restoreCompanyLabStateFromRuntimeSnapshot が
+ * 確定履歴の全四半期のdecisions[].salesForceHireCountを積算して復元する
+ * （推測値は作らない）。
+ */
+function validateSalesForceHiringState(raw: unknown, path: string): SalesForceHiringState {
+  if (raw === undefined || raw === null) return { companies: [] };
+  const obj = requireObject(raw, path);
+  const companiesRaw = requireArray(obj.companies, `${path}.companies`);
+  return {
+    companies: companiesRaw.map((c, i) => {
+      const companyPath = `${path}.companies[${i}]`;
+      const companyObj = requireObject(c, companyPath);
+      return {
+        companyId: requireNonEmptyString(companyObj.companyId, `${companyPath}.companyId`),
+        headcount: requireNonNegativeInteger(companyObj.headcount, `${companyPath}.headcount`),
+      };
+    }),
   };
 }
 

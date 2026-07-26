@@ -43,6 +43,8 @@ export function createCompanyLabRuntimeSnapshot(state: CompanyLabState): Company
     workforceState: state.workforceState,
     // 【Phase 8F-1】市場別・消費国在庫・購買循環モデルのcarry state。
     consumerMarketState: state.consumerMarketState,
+    // 【Phase 8G §2】会社別・営業人員総数。
+    salesForceHiringState: state.salesForceHiringState,
     isComplete: state.isComplete,
   };
 }
@@ -98,6 +100,15 @@ export function restoreCompanyLabStateFromRuntimeSnapshot(
     consumerMarketState: isConsumerMarketStateEmpty(snapshot.consumerMarketState)
       ? restoreConsumerMarketStateFromHistory(history)
       : snapshot.consumerMarketState,
+    // 【Phase 8G §2 後方互換】Phase 8G以前に保存されたスナップショットには
+    // salesForceHiringState が存在しない（schema側で空として復元される）。
+    // この機能自体がPhase 8Gで新設されたものであり、それ以前のどの四半期にも
+    // 「採用」という意思決定は存在し得なかったため、workforceStateのように
+    // 履歴から積算し直す必要はない（積算しても結果は0のまま＝会社単位の
+    // フォールバックと完全に一致する）。空のままとし、会社単位のフォールバック
+    // （runner.ts buildCompanyOwnState・advanceCompanyLabQuarter）が
+    // fixture.salesForceHeadcountTotal を使う。
+    salesForceHiringState: snapshot.salesForceHiringState,
     history,
     isComplete: snapshot.isComplete,
   };

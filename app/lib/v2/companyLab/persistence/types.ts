@@ -32,6 +32,7 @@ import { CapexState } from "../../capex/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
 import type { WorkforceState } from "../workforce";
 import type { ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
+import type { SalesForceHiringState } from "../salesForceHiring";
 
 // ---------------------------------------------------------------------
 // 0. バージョン定数
@@ -67,8 +68,21 @@ import type { ConsumerMarketCarryStateTable } from "../../market/consumerInvento
  *        marketInput.demandMarketsから決定論的に再構築する（推測値は作らない）。
  *        併せてCompanyQuarterRecord.consumerMarketRecordsもoptionalとして追加した
  *        （既存の確定履歴エントリにはこのキーが無いため）。
+ *   v4 … 【Phase 8G §2】CompanyLabRuntimeSnapshot へ salesForceHiringState
+ *        （会社別・営業人員総数）を追加。**追加的変更のみで、マイグレーション処理は
+ *        不要**。schemaVersion:1〜3の既存データには salesForceHiringState キーが
+ *        存在しないため、schema側で空（{ companies: [] }）として復元される。
+ *        この機能自体がPhase 8Gで新設されたものであり、それ以前のどの四半期にも
+ *        「採用」という意思決定は存在し得なかったため、workforceState・
+ *        consumerMarketStateのような確定履歴からの再構築（積算・直近1件の復元）は
+ *        行わない（積算しても結果は0のまま＝下記のフォールバックと完全に一致する
+ *        ため不要）。restoreCompanyLabStateFromRuntimeSnapshotはスナップショットの
+ *        値をそのまま返し、空の場合は会社単位でrunner.ts側（buildCompanyOwnState・
+ *        advanceCompanyLabQuarter）がfixture.salesForceHeadcountTotalへ
+ *        フォールバックする。併せてCompanyDecisionInput.salesForceHireCountも
+ *        optionalとして追加した（既存の確定履歴エントリにはこのキーが無いため）。
  */
-export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 3;
+export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 4;
 
 // ---------------------------------------------------------------------
 // 1. ランタイムスナップショット（history非包含。§2-1・§2-2）
@@ -137,6 +151,13 @@ export interface CompanyLabRuntimeSnapshot {
    * として復元する（market/consumerInventory.ts isConsumerMarketStateEmpty参照）。
    */
   readonly consumerMarketState: ConsumerMarketCarryStateTable;
+  /**
+   * 【Phase 8G §2・schemaVersion 4で追加】会社別の営業人員総数。会社数ぶんの
+   * 小さなスカラー集合であり、四半期ごとに増え続けることはない
+   * （履歴エントリへ2回複製されても保存量への影響は無視できる）。
+   * schemaVersion:1〜3 のデータにはこのキーが無いため、schema側で空として復元する。
+   */
+  readonly salesForceHiringState: SalesForceHiringState;
   readonly isComplete: boolean;
 }
 

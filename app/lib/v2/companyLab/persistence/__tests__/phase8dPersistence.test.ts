@@ -19,6 +19,7 @@ import { createCompanyLabRuntimeSnapshot, restoreCompanyLabStateFromRuntimeSnaps
 import { CompanyLabPersistedStateV1, CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION } from "../types";
 import { baseTestConfig, runRealQuartersWithAutoPolicy } from "./testHelpers";
 import { buildInitialWorkforceState, deriveWorkforceStateFromDecisions } from "../../workforce";
+import { buildInitialSalesForceHiringState } from "../../salesForceHiring";
 
 const TURNS = 3;
 const TEST_ENGINE_VERSION = "test-v2-companyLab-engine-8d";
@@ -217,8 +218,8 @@ test("PS-5（必須14）: 履歴も無い旧データでも例外にならず、
   }
 });
 
-test("PS-6: 現行スキーマのバージョン番号が3へ上がっており、1・2のデータも受け付ける（Phase 8F-1でconsumerMarketStateを追加）", () => {
-  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 3);
+test("PS-6: 現行スキーマのバージョン番号が4へ上がっており、1・2・3のデータも受け付ける（Phase 8GでsalesForceHiringStateを追加）", () => {
+  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 4);
 });
 
 // ---------------------------------------------------------------------
@@ -440,4 +441,98 @@ test("PS-9（追補4・5）: 旧案件と新案件が同じ会社に併存して
     Math.abs(resolveFactoryColdStorageCapacityTons(after[0]) - (resolveFactoryColdStorageCapacityTons(baseFactory) + 1_250)) < 1e-6,
     "新案件ぶんの保管能力の増加が正しくありません"
   );
+});
+
+// ---------------------------------------------------------------------
+// Phase 8G §2: 営業人員の追加採用状態（salesForceHiringState）の永続化
+// ---------------------------------------------------------------------
+
+test("PS-10（Phase 8G §2）: 永続化round-trip後も 営業人員の採用済み人数（salesForceHiringState）が保持される", () => {
+  const { fixtures, quarters } = runRealQuartersWithAutoPolicy(baseTestConfig({ turns: TURNS }), TURNS);
+  const last = quarters[quarters.length - 1];
+
+  // 自動方針は採用を提案しない（常にsalesForceHireCount:0）ため、テスト用に
+  // 1社だけ採用実績があるsalesForceHiringStateへ差し替えて網羅性を確保する。
+  const targetCompanyId = fixtures[0].companyId;
+  const runtimeBase = createCompanyLabRuntimeSnapshot(last.stateAfter);
+  const runtime = {
+    ...runtimeBase,
+    salesForceHiringState: {
+      companies: runtimeBase.salesForceHiringState.companies.map((c) =>
+        c.companyId === targetCompanyId ? { ...c, headcount: c.headcount + 6 } : c
+      ),
+    },
+  };
+
+  assert.ok(runtime.salesForceHiringState.companies.length > 0, "スナップショットに営業人員の採用状態が含まれていません");
+
+  const stored = buildStored(runtime, fixtures, CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION);
+  const decoded = decodeCompanyLabPersistedState(encodeCompanyLabPersistedState(stored));
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(decoded.currentState.runtime.salesForceHiringState)),
+    JSON.parse(JSON.stringify(runtime.salesForceHiringState)),
+    "round-trip後に営業人員の採用状態が変化しています"
+  );
+
+  const restored = restoreCompanyLabStateFromRuntimeSnapshot(stored.config, decoded.currentState.runtime, [last.record]);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(restored.salesForceHiringState)),
+    JSON.parse(JSON.stringify(runtime.salesForceHiringState))
+  );
+  const targetCompany = restored.salesForceHiringState.companies.find((c) => c.companyId === targetCompanyId)!;
+  const targetFixture = fixtures.find((f) => f.companyId === targetCompanyId)!;
+  assert.equal(targetCompany.headcount, targetFixture.salesForceHeadcountTotal + 6, "採用済み6人ぶんが復元後も反映されていません");
+});
+
+test("PS-11（Phase 8G §2）: salesForceHiringStateを持たない旧schema（Phase 8G以前）の保存データを、例外にならず読み込める（旧保存データでは採用予定0人として扱う）", () => {
+  const { fixtures, quarters } = runRealQuartersWithAutoPolicy(baseTestConfig({ turns: TURNS }), TURNS);
+  const last = quarters[quarters.length - 1];
+  const runtime = createCompanyLabRuntimeSnapshot(last.stateAfter);
+
+  // Phase 8G以前の保存データを再現する: schemaVersion:3、salesForceHiringStateキー自体が無い。
+  const legacyStored = buildStored(runtime, fixtures, 3) as unknown as Record<string, unknown>;
+  const legacyCurrent = { ...(legacyStored.currentState as Record<string, unknown>) };
+  const runtimeWithoutSalesForceHiring = { ...(legacyCurrent.runtime as Record<string, unknown>) };
+  delete runtimeWithoutSalesForceHiring.salesForceHiringState;
+  legacyCurrent.runtime = runtimeWithoutSalesForceHiring;
+  legacyStored.currentState = legacyCurrent;
+
+  const json = JSON.stringify(legacyStored);
+  assert.ok(!json.includes("salesForceHiringState"), "テスト前提: 旧データにsalesForceHiringStateが含まれていないこと");
+
+  // 例外を投げずに読み込めること（マイグレーション処理は不要）。
+  const decoded = decodeCompanyLabPersistedState(json);
+  assert.equal(decoded.schemaVersion, 3, "旧バージョン番号がそのまま保持される");
+  assert.deepEqual(decoded.currentState.runtime.salesForceHiringState, { companies: [] }, "既定値（空）として復元されること");
+
+  // この機能自体がPhase 8G新設のため、履歴を積算し直す必要はなく、会社単位で
+  // fixture.salesForceHeadcountTotal（＝採用予定0人ぶんの基準人数）へ
+  // フォールバックする（workforceStateのような履歴からの再構築は行わない）。
+  const restored = restoreCompanyLabStateFromRuntimeSnapshot(decoded.config, decoded.currentState.runtime, [last.record]);
+  assert.deepEqual(restored.salesForceHiringState, { companies: [] }, "スナップショットが空なら復元後も空のまま（会社単位のフォールバックはrunner.ts側の責務）");
+
+  const fallback = buildInitialSalesForceHiringState(fixtures);
+  assert.equal(fallback.companies.length, fixtures.length);
+  for (const f of fixtures) {
+    const company = fallback.companies.find((c) => c.companyId === f.companyId)!;
+    assert.equal(company.headcount, f.salesForceHeadcountTotal, "旧保存データは会社単位でfixtureの基準人数（採用予定0人相当）へフォールバックするべき");
+  }
+});
+
+test("PS-12（Phase 8G §2）: 履歴も無い旧データでも例外にならず、会社単位でfixtureの基準人数へフォールバックできる", () => {
+  const { fixtures, quarters } = runRealQuartersWithAutoPolicy(baseTestConfig({ turns: 1 }), 1);
+  const first = quarters[0];
+  const runtime = createCompanyLabRuntimeSnapshot(first.stateBefore);
+
+  const legacyStored = buildStored(runtime, fixtures, 3) as unknown as Record<string, unknown>;
+  const legacyCurrent = { ...(legacyStored.currentState as Record<string, unknown>) };
+  const runtimeWithoutSalesForceHiring = { ...(legacyCurrent.runtime as Record<string, unknown>) };
+  delete runtimeWithoutSalesForceHiring.salesForceHiringState;
+  legacyCurrent.runtime = runtimeWithoutSalesForceHiring;
+  legacyStored.currentState = legacyCurrent;
+
+  const decoded = decodeCompanyLabPersistedState(JSON.stringify(legacyStored));
+  const restored = restoreCompanyLabStateFromRuntimeSnapshot(decoded.config, decoded.currentState.runtime, []);
+  assert.deepEqual(restored.salesForceHiringState, { companies: [] }, "履歴が無ければ空のまま（勝手な値を作らない）");
 });

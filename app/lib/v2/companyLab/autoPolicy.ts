@@ -626,5 +626,8 @@ export function generateAutoPolicyDecision(
     workerAssignments,
     financingRequest,
     capexDecision,
+    // 【Phase 8G §2】5社自動方針は常に0（新規採用なし）を返す（capexDecisionの
+    // 新規提案なしと同じ方針。統合テスト・意思決定編集からの上書きは可能）。
+    salesForceHireCount: 0,
   };
 }
