@@ -27,7 +27,8 @@ export interface CollapsibleSectionProps {
   readonly description?: string;
   /** 入力エリアか情報エリアか（色分けの根拠）。 */
   readonly tone: AreaTone;
-  /** 初期状態で開いているか（既定: 開いている）。 */
+  /** 初期状態で開いているか（既定: 閉じている。画面が縦長になりすぎるという
+      プレイヤーからの要望により、Phase 8G完了時点でデフォルトを畳んだ状態へ変更）。 */
   readonly defaultOpen?: boolean;
   /** 見出し行の右端に出す要約情報（折りたたんだままでも読めるようにするための一行）。 */
   readonly summaryRight?: ReactNode;
@@ -40,7 +41,7 @@ export default function CollapsibleSection(props: CollapsibleSectionProps) {
   const tone = AREA_TONES[props.tone];
   return (
     <details
-      open={props.defaultOpen ?? true}
+      open={props.defaultOpen ?? false}
       data-testid={props.testId}
       data-area-tone={props.tone}
       className={`group rounded-xl ${tone.section}`}
