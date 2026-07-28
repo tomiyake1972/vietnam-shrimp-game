@@ -27,7 +27,7 @@
 //   Pass2（確定）: Pass1の結果から算出した実際の利息・元本の現金支払額を渡し、
 //     最終的なPL/BS/CFを確定する。
 
-import { PeriodV2 } from "../core/period";
+import { PeriodV2, nextPeriod } from "../core/period";
 import { CompanyId } from "../sales/types";
 import {
   CompanyFinanceState,
@@ -247,6 +247,23 @@ export interface CloseQuarterWithFinancingOutput {
   readonly nextFinancingState: CompanyFinancingState;
 }
 
+/**
+ * 【バグ修正（fix/v2-emergency-loan-maturity）】緊急融資の満期を、当期からの
+ * termQuarters経過後として算出するための局所ヘルパー。initialPortfolio.ts・
+ * bankUnderwriting.tsに存在する同名ヘルパーと同じ実装（重複だが、各モジュールが
+ * 依存を増やさず独立して満期計算できるようにする既存の設計慣行に合わせた）。
+ * 通常融資の審査（bankUnderwriting.ts）が持つmaturityPeriodは通常融資自身の
+ * 希望期間（desiredTermQuarters）から算出されたものであり、緊急融資の期間
+ * （params.emergencyLoan.termQuarters）とは無関係。緊急融資の満期は必ずこの
+ * 関数で、緊急融資自身のtermQuartersから算出しなければならない
+ * （通常融資が否認・未実行の場合でも、緊急融資の満期計算はここで完結する）。
+ */
+function addQuarters(period: PeriodV2, quarters: number): PeriodV2 {
+  let p = period;
+  for (let i = 0; i < quarters; i++) p = nextPeriod(p);
+  return p;
+}
+
 function sortByRateDescending(loans: readonly LoanRecord[]): LoanRecord[] {
   return [...loans].sort((a, b) => b.annualInterestRate - a.annualInterestRate);
 }
@@ -450,7 +467,11 @@ export function closeQuarterWithFinancing(
           originalPrincipalUsd: emergencyDrawUsd,
           currentPrincipalUsd: emergencyDrawUsd,
           originationPeriod: period,
-          maturityPeriod: plan.underwriting.maturityPeriod ?? period,
+          // 【修正】通常融資の審査結果（plan.underwriting.maturityPeriod）を流用しない。
+          // 緊急融資自身のtermQuarters（params.emergencyLoan.termQuarters）から
+          // 満期を算出する。通常融資が否認・未実行（plan.underwriting.maturityPeriod
+          // がundefined）の場合でも、この計算は独立して成立する。
+          maturityPeriod: addQuarters(period, params.emergencyLoan.termQuarters),
           annualInterestRate: emergencyLoan!.annualRate,
           creditSpreadAnnual: params.interestRate.creditSpreadAnnualByTier[plan.creditScore.tier],
           repaymentMethod: "bulletAtMaturity",
