@@ -56,7 +56,15 @@ export interface CompanyActualsSource {
   readonly rawMaterialLotsAtStart: readonly RawMaterialLot[];
   /** 期末の原料ロット（生産消費適用後のupdatedRawMaterialLots）。 */
   readonly rawMaterialLotsAtEnd: readonly RawMaterialLot[];
-  /** 契約充当消費の適用前（期限切れ処理後）の完成品ロット（lotsAfterExpiry）。実消費差分の算出に使う。 */
+  /**
+   * 契約充当消費の適用前（品質調整後・当四半期の期限切れ処理より前）の完成品ロット
+   * （companyLab/runner.tsのlotsAfterProduction）。実消費差分の算出に使う。
+   *
+   * 【fix/v2-procurement-mix-after-emergency-maturity】期限切れ処理は当四半期の
+   * 契約充当消費より後に適用する（quarterClose = 「当四半期分の消費が終わった後、
+   * 未使用のまま残った在庫だけが期限切れになる」という順序）。そのため
+   * ここは期限切れ処理"後"ではなく"前"のスナップショットになる。
+   */
   readonly finishedGoodsLotsBeforeConsumption: readonly FinishedGoodsLot[];
   /** 期末の完成品ロット（契約充当消費後）。 */
   readonly finishedGoodsLotsAtEnd: readonly FinishedGoodsLot[];

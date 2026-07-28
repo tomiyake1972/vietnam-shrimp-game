@@ -780,25 +780,46 @@ export function advanceCompanyLabQuarter(
   const newFinishedGoodsLots = attachQualityInfoToFinishedGoodsLots(newFinishedGoodsLotsRaw, adjustedBatches, adjustmentsByBatchId(adjustments));
   const lotsAfterProduction = [...state.productionState.finishedGoodsLots, ...newFinishedGoodsLots];
 
-  // --- 契約充当計画・完成品期限切れ処理を、品質調整後のロットに対して
-  // 再計算する（planContractFulfillment・applyFinishedGoodsExpiryForQuarterEndを
-  // そのまま再利用。Phase6内部で計算済みの、品質調整前のfulfillmentPlanは使わない）。
+  // --- 契約充当計画を、品質調整後のロットに対して再計算する
+  // （planContractFulfillmentをそのまま再利用。Phase6内部で計算済みの、
+  // 品質調整前のfulfillmentPlanは使わない）。
+  //
+  // 【バグ修正（fix/v2-procurement-mix-after-emergency-maturity）】期限切れ処理
+  // （applyFinishedGoodsExpiryForQuarterEnd）は、当四半期の契約充当消費より前に
+  // 適用してはならない。修正前は「期限切れ処理 → 消費」の順で、
+  // fulfillmentPlanは期限切れ処理"前"のlotsAfterProductionを見て充当可能と
+  // 判断したのに、実際の消費（consumeFinishedGoods）は期限切れ処理"後"の
+  // 集合に対して行われていた。原料調達が枯渇するなどして新規生産がほぼ止まり、
+  // 既存の完成品在庫だけで古い契約を充当し続けるシナリオでは、計画時点で
+  // 「充当可能」と判定した数量が、消費実行までの間に期限切れで消えてしまい、
+  // 過剰消費拒否（ProductionValidationError）でシミュレーション全体が停止する
+  // （原料不足そのものではなく、期限切れ処理の順序が原因）。
+  // 「四半期末の期限切れ」は文字どおり当四半期の契約充当が終わった後に、
+  // 未使用のまま残った在庫にだけ適用されるべきものであり、消費より後に
+  // 適用する順序へ修正する。
   const fulfillmentPlan: ContractFulfillmentPlan = planContractFulfillment(turnResult.contracts, lotsAfterProduction);
-  const lotsAfterExpiry = applyFinishedGoodsExpiryForQuarterEnd(lotsAfterProduction, state.currentPeriod);
 
   // --- 契約履行の実適用（Phase4既存関数applyFulfillmentsをそのまま呼び出す） ---
   const contractsAfterFulfillment = applyFulfillments(turnResult.contracts, fulfillmentPlan.explicitInstructions);
   const nextPeriodValue = turnResult.pendingState.nextPeriod;
   const contractsAfterOverdue = updateContractStatusesForQuarterEnd(contractsAfterFulfillment, nextPeriodValue);
 
-  // --- 完成品ロットの実消費（Phase6既存関数consumeFinishedGoodsをそのまま呼び出す） ---
-  const finishedGoodsLotsAfterConsumption = consumeFinishedGoods(lotsAfterExpiry, fulfillmentPlan.finishedGoodsConsumption);
+  // --- 完成品ロットの実消費（Phase6既存関数consumeFinishedGoodsをそのまま呼び出す）。
+  // fulfillmentPlanが充当可能と判断した集合（lotsAfterProduction）に対して、
+  // 期限切れ処理より前に実行する。 ---
+  const finishedGoodsLotsAfterConsumption = consumeFinishedGoods(lotsAfterProduction, fulfillmentPlan.finishedGoodsConsumption);
+
+  // --- 四半期末の期限切れ処理は、当四半期の契約充当消費が終わった後の残数量に
+  // 対してのみ適用する（未使用のまま残った在庫だけが期限切れの対象になる）。
+  const finishedGoodsLotsAfterExpiry = applyFinishedGoodsExpiryForQuarterEnd(finishedGoodsLotsAfterConsumption, state.currentPeriod);
 
   // --- 【Phase 7A】納期観測・顧客信頼観測 → 品質・信頼状態の更新 ---
   const companyMarketPairs = fixtures.flatMap((f) => DEMAND_MARKET_IDS.map((market) => ({ companyId: f.companyId, market })));
   const deliveryObservations = computeMarketDeliveryObservations(companyMarketPairs, contractsAfterOverdue, state.currentPeriod);
   const contractsById = new Map(turnResult.contracts.map((c) => [c.contractId, c]));
-  const lotsById = new Map(lotsAfterExpiry.map((l) => [l.lotId, l]));
+  // ロットの静的な属性（品質情報等）の参照専用ルックアップ。lotIdは消費・期限切れの
+  // いずれでも不変のため、いずれの時点の集合から作っても同じ属性が引ける。
+  const lotsById = new Map(lotsAfterProduction.map((l) => [l.lotId, l]));
   const trustObservations = computeMarketTrustObservations(fulfillmentPlan.usage, contractsById, lotsById, deliveryObservations);
   const qualityStateAfter: QualityReliabilityState = {
     qualityByCompanyProduct: updateQualityByCompanyProduct(state.qualityState.qualityByCompanyProduct, adjustments),
@@ -837,7 +858,7 @@ export function advanceCompanyLabQuarter(
       updatedRawMaterialLots,
       productionRecord.allocation.entries,
       adjustedBatches,
-      finishedGoodsLotsAfterConsumption,
+      finishedGoodsLotsAfterExpiry,
       companyLoadMetrics,
       turnResult.aquacultureHarvestResults
     );
@@ -889,8 +910,11 @@ export function advanceCompanyLabQuarter(
       harvestedLots: turnResult.harvestedLots,
       rawMaterialLotsAtStart: state.rawMaterialLots,
       rawMaterialLotsAtEnd: updatedRawMaterialLots,
-      finishedGoodsLotsBeforeConsumption: lotsAfterExpiry,
-      finishedGoodsLotsAtEnd: finishedGoodsLotsAfterConsumption,
+      // 【バグ修正・上記の並び順修正に伴う変更】期限切れ処理は当四半期の消費より
+      // 後に適用するため、「消費適用前」の正しいスナップショットは
+      // lotsAfterProduction（品質調整後・当四半期の消費適用前）になる。
+      finishedGoodsLotsBeforeConsumption: lotsAfterProduction,
+      finishedGoodsLotsAtEnd: finishedGoodsLotsAfterExpiry,
       workerAssignments: companyDecision?.workerAssignments ?? [],
       appliedOvertimeRate: companyLoad ? unwrapUnit(companyLoad.overtimeRate) : 0,
       activeFactoryCount: f.factories.filter((factory) => factory.status === "active").length,
@@ -1061,7 +1085,7 @@ export function advanceCompanyLabQuarter(
     scenarioState: nextScenarioState,
     contracts: contractsAfterOverdue,
     rawMaterialLots: updatedRawMaterialLots,
-    productionState: { ...productionStateAfter, finishedGoodsLots: finishedGoodsLotsAfterConsumption },
+    productionState: { ...productionStateAfter, finishedGoodsLots: finishedGoodsLotsAfterExpiry },
     lastQuarterActualProduction,
     qualityState: qualityStateAfter,
     financeState: financeStateAfter,
