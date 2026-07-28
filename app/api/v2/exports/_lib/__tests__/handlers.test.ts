@@ -766,29 +766,48 @@ test("handleExportCompanyTurn: 複数回呼び出してもゲーム状態（load
 
 // --- 必須テスト(8): 内部型の余分なフィールドがDTOへ自動混入しないこと ---
 
-test("buildExportFinancialResult: 内部型に余分なフィールドが追加されても、DTOには許可した項目だけが含まれる", async () => {
+test("buildExportFinancialResult: 内部型に余分なフィールドが追加されても、DTOには許可した項目だけが含まれる（v1.3でmanufacturingCost/qualityLoss/costRecords/contributionMargin/absorptionVariableReconciliationを許可項目化した後も、それ以外の追加フィールドは自動混入しない）", async () => {
   const labId = "export-dto-allowlist-lab";
   const writableDeps = await setUpProcessedTurn1Lab(labId);
   const rawEntry = await writableDeps.repository.loadHistoryEntry(labId, 1);
   const rawFinancial = rawEntry.record.financialResults.find((r) => r.companyId === "BAL");
   assert.ok(rawFinancial);
 
-  // 【意図的な模擬】将来CompanyFinancialQuarterResultへ新しいフィールド
-  // （例: 内部監査用のsecretInternalDebugField）が追加されたケースを模擬する。
-  // buildExportFinancialResultはフィールドを1つずつ列挙して組み立てるため、
-  // このような追加フィールドは戻り値へ一切現れないはずである。
-  const tampered = { ...(rawFinancial as CompanyFinancialQuarterResult), secretInternalDebugField: "should-never-leak-to-export-api" } as CompanyFinancialQuarterResult;
+  // 【意図的な模擬】将来CompanyFinancialQuarterResult（トップレベル）およびその
+  // ネストしたmanufacturingCost/contributionMarginへ新しいフィールド（例: 内部監査用の
+  // secretInternalDebugField）が追加されたケースを模擬する。buildExportFinancialResultと
+  // その内部で使うbuildExportManufacturingCost/buildExportContributionMarginReport等は
+  // いずれもフィールドを1つずつ列挙して組み立てるため、このような追加フィールドは
+  // 戻り値へ一切現れないはずである。
+  const tampered = {
+    ...(rawFinancial as CompanyFinancialQuarterResult),
+    secretInternalDebugField: "should-never-leak-to-export-api",
+    manufacturingCost: { ...(rawFinancial as CompanyFinancialQuarterResult).manufacturingCost, secretNestedField: "should-never-leak-nested" },
+    contributionMargin: { ...(rawFinancial as CompanyFinancialQuarterResult).contributionMargin, secretNestedField: "should-never-leak-nested" },
+  } as CompanyFinancialQuarterResult;
 
   const dto = buildExportFinancialResult(tampered);
   const serialized = JSON.stringify(dto);
   assert.equal(serialized.includes("secretInternalDebugField"), false);
   assert.equal(serialized.includes("should-never-leak-to-export-api"), false);
-  // 意図的にv1スコープ外とした内部専用フィールドも、そのまま漏れていないことを確認する。
-  assert.equal(serialized.includes("manufacturingCost"), false);
-  assert.equal(serialized.includes("qualityLoss"), false);
-  assert.equal(serialized.includes("costRecords"), false);
-  assert.equal(serialized.includes("contributionMargin"), false);
-  assert.equal(serialized.includes("absorptionVariableReconciliation"), false);
+  assert.equal(serialized.includes("secretNestedField"), false);
+  assert.equal(serialized.includes("should-never-leak-nested"), false);
+
+  // 【v1.3】これらは既存の「intentionally NOT included」から許可項目化した5系統であり、
+  // 今度は逆に、期待どおりDTOへ実際に含まれていることを確認する（内部型の生データと
+  // 再計算なしで一致する）。
+  assert.deepEqual(dto.manufacturingCost.domesticRawMaterialCost, (rawFinancial as CompanyFinancialQuarterResult).manufacturingCost.domesticRawMaterialCost);
+  assert.deepEqual(dto.qualityLoss.qualityDiscardLoss, (rawFinancial as CompanyFinancialQuarterResult).qualityLoss.qualityDiscardLoss);
+  assert.equal(dto.costRecords.length, (rawFinancial as CompanyFinancialQuarterResult).costRecords.length);
+  assert.deepEqual(dto.contributionMargin.totalFixedCost, (rawFinancial as CompanyFinancialQuarterResult).contributionMargin.totalFixedCost);
+  assert.equal(
+    dto.contributionMargin.byProduct.length,
+    (rawFinancial as CompanyFinancialQuarterResult).contributionMargin.byProduct.length
+  );
+  assert.deepEqual(
+    dto.absorptionVariableReconciliation.profitDifference,
+    (rawFinancial as CompanyFinancialQuarterResult).absorptionVariableReconciliation.profitDifference
+  );
 });
 
 // --- 必須テスト(9)の一部: 監査ログにトークン・Authorizationヘッダー相当の情報が残らないこと（ハンドラー経由での確認） ---
