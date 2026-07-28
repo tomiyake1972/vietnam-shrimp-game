@@ -10,7 +10,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { period } from "../../core/period";
+import { period, nextPeriod } from "../../core/period";
 import { Product } from "../../market/types";
 import { FINANCE_PARAMETERS_V1 } from "../../finance/parameters";
 import { CompanyQuarterBusinessActuals } from "../../finance/quarterClose";
@@ -30,6 +30,13 @@ import { CompanyFinancingHistory, CompanyFinancingState, FinancingRequestInput, 
 const P1 = period(2015, 1);
 const PROCESSING_RATES: Readonly<Record<Product, number>> = { hoso: 350, pd: 520, vap: 780 };
 const EPS = 1;
+
+/** テスト側で期待値を独立に組み立てるためのヘルパー（liquidityClose.ts内部実装とは無関係）。 */
+function addQuartersForExpectation(p: ReturnType<typeof period>, quarters: number): ReturnType<typeof period> {
+  let result = p;
+  for (let i = 0; i < quarters; i++) result = nextPeriod(result);
+  return result;
+}
 
 /**
  * テスト用の期首財務状態を生成する。retainedEarnings は明示的に渡さず、
@@ -442,4 +449,100 @@ test("受入確認EM-3: 緊急融資の年率は同一信用区分の通常融�
   const normalRateForSameTier =
     FINANCING_PARAMETERS_V1.interestRate.baseRateAnnual + FINANCING_PARAMETERS_V1.interestRate.creditSpreadAnnualByTier[output.financingQuarterResult.creditScore.tier];
   assert.ok(em.annualRate > normalRateForSameTier);
+});
+
+// ---------------------------------------------------------------------
+// 5. 緊急融資の満期（バグ修正回帰: fix/v2-emergency-loan-maturity）
+//
+// 修正前は、緊急融資の maturityPeriod に「通常融資の審査結果
+// (plan.underwriting.maturityPeriod ?? period)」を誤って流用していた。
+// 通常融資が否認された四半期は plan.underwriting.maturityPeriod が
+// undefined となるため `?? period` で当期そのものが満期となり、緊急融資が
+// 実行直後にbulletAtMaturityの満期到来元本として扱われ、同一四半期のうちに
+// 延滞（もしくは取り崩し不能な現金不足）を引き起こしていた。
+// 修正後は、緊急融資自身の params.emergencyLoan.termQuarters から独立に
+// 満期を算出する（通常融資の承認有無・満期とは無関係）。
+// ---------------------------------------------------------------------
+
+test("受入確認EM-4（バグ修正回帰）: 通常融資が否認された四半期でも、緊急融資の満期は当期そのものにならず、実行四半期の元本延滞対象にならない", () => {
+  const loan = makeLoan({ currentPrincipalUsd: 8_000_000, originalPrincipalUsd: 8_000_000, annualInterestRate: 0.08, maturityPeriod: P1 });
+  const financeState = makeFinanceState({ cash: 1_000_000, shortTermLoans: 8_000_000 });
+  const financingState = makeFinancingState([loan]);
+  // 通常融資は申請なし（0円）→ plan.underwriting.maturityPeriod は undefined になるはずの場面。
+  const request = makeRequest({ desiredAmountUsd: 0, emergencyAcceptable: true });
+  const output = closeWithFinancing(financeState, financingState, request);
+
+  assert.equal(output.financingQuarterResult.underwriting.maturityPeriod, undefined, "前提: 通常融資は否認され、maturityPeriodはundefined");
+  assert.ok(output.financingQuarterResult.emergencyLoan, "既存融資の満期到来により緊急融資が発生するはず");
+
+  const emergencyRecord = output.nextFinancingState.loanPortfolio.loans.find((l) => l.loanType === "emergency");
+  assert.ok(emergencyRecord, "緊急融資のLoanRecordが融資ポートフォリオに残っているはず");
+  const expectedMaturity = addQuartersForExpectation(P1, FINANCING_PARAMETERS_V1.emergencyLoan.termQuarters);
+  assert.equal(emergencyRecord!.maturityPeriod, expectedMaturity, "緊急融資の満期は当期(P1)ではなく、当期+termQuarters後であるべき");
+  assert.notEqual(emergencyRecord!.maturityPeriod, P1, "満期が実行四半期と同一（＝即時満期扱いのバグ）になっていないこと");
+  assert.equal(emergencyRecord!.status, "current", "実行四半期に満期到来元本として扱われ延滞になっていないこと");
+  assert.equal(emergencyRecord!.arrearsPrincipalUsd, 0, "緊急融資自身の元本延滞が発生していないこと");
+  assert.ok((output.nextFinanceState.cash as number) >= -EPS, "緊急融資後の期末現金が0未満にならないこと（このシナリオでは担保が十分で不足額を全額補える）");
+  assertThreeStatementIdentities(output);
+});
+
+test("受入確認EM-5（バグ修正回帰）: 通常融資が同一四半期に承認された場合でも、緊急融資の満期は通常融資の満期を流用せず、緊急融資自身のtermQuartersから独立に算出される", () => {
+  const loan = makeLoan({ currentPrincipalUsd: 8_000_000, originalPrincipalUsd: 8_000_000, annualInterestRate: 0.08, maturityPeriod: P1 });
+  const financeState = makeFinanceState({ cash: 1_000_000, shortTermLoans: 8_000_000 });
+  const financingState = makeFinancingState([loan]);
+  // 通常融資も同一四半期に申請・承認される場面（担保を厚くして承認されるようにする）。
+  const request = makeRequest({ desiredAmountUsd: 2_000_000, desiredTermQuarters: 4, emergencyAcceptable: true });
+  const collateral = makeCollateral({ receivablesUsd: 30_000_000, rawMaterialAvailableUsd: 20_000_000, finishedGoodsUsd: 20_000_000 });
+  const output = closeWithFinancing(financeState, financingState, request, collateral);
+
+  assert.ok(output.financingQuarterResult.underwriting.approvedAmountUsd > 0, "前提: 通常融資が同一四半期に承認されている");
+  const normalMaturity = output.financingQuarterResult.underwriting.maturityPeriod;
+  assert.ok(normalMaturity, "前提: 通常融資のmaturityPeriodが確定している");
+  assert.ok(output.financingQuarterResult.emergencyLoan, "既存融資の満期到来により緊急融資も発生するはず");
+
+  const emergencyRecord = output.nextFinancingState.loanPortfolio.loans.find((l) => l.loanType === "emergency");
+  assert.ok(emergencyRecord);
+  const expectedMaturity = addQuartersForExpectation(P1, FINANCING_PARAMETERS_V1.emergencyLoan.termQuarters);
+  assert.equal(emergencyRecord!.maturityPeriod, expectedMaturity, "緊急融資の満期は緊急融資自身のtermQuartersから算出されるべき");
+  assert.notEqual(
+    emergencyRecord!.maturityPeriod,
+    normalMaturity,
+    "緊急融資の満期が、同一四半期に承認された通常融資の満期と一致してしまっていないこと（流用の再発防止）"
+  );
+  assert.equal(emergencyRecord!.status, "current");
+  assert.equal(emergencyRecord!.arrearsPrincipalUsd, 0);
+  assert.ok((output.nextFinanceState.cash as number) >= -EPS, "緊急融資後の期末現金が0未満にならないこと（通常融資と緊急融資の両方が同一四半期に発生しても成立する）");
+  assertThreeStatementIdentities(output);
+});
+
+test("受入確認EM-6（バグ修正の影響範囲確認・回帰）: 緊急融資の満期修正は、EM-2（担保不足で緊急融資が不足額の一部しか補えない）シナリオの既存の延滞処理・現金額を変えない", () => {
+  // 【重要な注記（本ブランチのスコープ外）】このシナリオ（cash=0・担保がほぼ0・
+  // 既存融資50Mが当期満期）では、緊急融資の満期修正の有無にかかわらず、期末現金は
+  // マイナス（本テスト実行時点で-765,000USD）になる。これは緊急融資の満期計算とは
+  // 無関係な、別の既存メカニズムによるもの: finance/quarterClose.tsのoperatingCashFlow
+  // （行896付近）は、企業の期首現金・緊急融資枠に関わらず、SG&A固定費
+  // （sellingGeneralAdmin.adminFixedUsdPerQuarter=800,000USD/四半期）を無条件に現金支出
+  // として差し引く。一方、元利金の支払（debt service）はapplyWaterfallAcrossPortfolio
+  // により「払えない分は延滞（arrears）へ振り替え、現金は0未満にしない」設計になっている
+  // が、SG&A固定費にはそのような「現金不足時は繰り延べる」仕組みが存在しない。
+  // そのため、担保不足で緊急融資が小額しか承認されない極端なケースでは、
+  // 延滞処理そのものは正しく機能していても、期末現金がマイナスになり得る。
+  // これは緊急融資の満期バグ（本ブランチで修正した項目②）とは別の、項目①
+  // （緊急融資後のマイナス現金）に関連しうる独立した論点であり、このブランチの
+  // 修正対象ではない。本テストは「今回の修正がこの挙動を悪化・改善させていない
+  // （baseline時点の値と一致する）」ことだけを回帰確認する。
+  const loan = makeLoan({ currentPrincipalUsd: 50_000_000, originalPrincipalUsd: 50_000_000, annualInterestRate: 0.08, maturityPeriod: P1 });
+  const financeState = makeFinanceState({ cash: 0, shortTermLoans: 50_000_000 });
+  const financingState = makeFinancingState([loan]);
+  const request = makeRequest({ desiredAmountUsd: 0, emergencyAcceptable: true });
+  const smallCollateral: CollateralInput = { receivablesUsd: 100_000, rawMaterialAvailableUsd: 0, rawMaterialInTransitUsd: 0, finishedGoodsUsd: 0 };
+  const output = closeWithFinancing(financeState, financingState, request, smallCollateral);
+
+  // 通常融資（今回は申請なし）や既存融資の延滞処理そのものは、緊急融資の満期修正によって変わらない。
+  assert.equal(output.financingQuarterResult.underwriting.approvedAmountUsd, 0);
+  assert.ok(output.financingQuarterResult.arrearsEvents.length > 0, "担保不足で緊急融資でも補いきれない分は、従来どおり延滞として残る");
+  // baseline（修正前コード）でも同じ値になることを別途スクリプトで確認済み（-765,000USD）。
+  // ここでは値そのものより「今回の修正で変化していないこと」を固定して回帰検知する。
+  assert.ok(Math.abs((output.nextFinanceState.cash as number) - -765_000) < EPS, "この既知シナリオでの期末現金は修正前後で変化しない（-765,000USD）");
+  assertThreeStatementIdentities(output);
 });

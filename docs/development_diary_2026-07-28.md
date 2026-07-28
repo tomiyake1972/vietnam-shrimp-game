@@ -185,10 +185,83 @@ Redis書き込みなし）で、Test13 Turn6確定データの実Export値に規
 
 ---
 
-## 残課題・申し送り
+## 残課題・申し送り（当初版）
 
 - **A（調達構成）**：`fix/v2-procurement-mix-after-emergency-maturity`はpush済み・1613件全pass確認済みだが
   develop/v2へは未マージ。マージ可否は別途判断が必要。
 - **B（商品別固定費配賦）**：Test13での「経営分析上の実データの見え方」は、通常プレイでTurn7を確定した際に
   改めて確認する（本機能デプロイ後に初めて新ロジックで計算されるため）。検証用の複製機能・管理画面・Redis
   直接操作は実装していない（方針通り、今回は見送り）。
+
+---
+
+## C. ブランチAのdevelop/v2統合 ＋ 原料不足時実生産量縮小の設計確認（当セッション追記）
+
+### C-1. ブランチAの統合
+
+`fix/v2-procurement-mix-after-emergency-maturity`（`89172e2`から分岐、`d83e8c2→a82bbcf→2c688bc→f8f8bbd`の
+4コミット、5ファイル・401行差分）を、develop/v2（`8f3a5bd`）へ`--no-ff`でマージした（コンフリクトなし）。
+マージ後の検証：
+
+- `npx tsc --noEmit`：エラー0件
+- `npm test`：**1621件全てpass**（既存1614件 + 本ブランチ由来のEM-4〜EM-6等の回帰テスト追加分）
+- `npx eslint`：0 errors（既存の無関係な警告2件のみ、他セクション記載の警告と同一）
+- `npm run build`：成功（ローカル検証ではステージング用KV環境変数(`STAGING_KV_REST_API_URL`等)が未設定の
+  ため`/api/game/[gameCode]/admin/clone`のpage data収集で失敗するが、これはマージ前の`8f3a5bd`単体でも
+  同一に再現する既存のローカル環境依存の問題であり、本マージによる回帰ではないことを、マージ前コミットを
+  別worktreeでチェックアウトして同条件でビルドし確認した。ダミー値を設定すれば正常にビルド完了する。
+
+### C-2. 「原料不足時の実生産量自動縮小」の設計確認
+
+三宅さんからの実装依頼（計画生産量と実生産量の区別、利用可能原料・生産優先順位・商品別必要原料に基づく
+実生産量縮小、原料消費・完成品入庫・労務・製造原価・在庫・財務の実績整合、計画未達量と理由の記録、
+原料不足でシミュレーション全体を停止させないこと）について、既存コードを調査した結果、**要求内容は
+Phase 6（`production/allocation.ts`・`production/batches.ts`）ですでに実装済み**であることを確認した。
+
+- `allocation.ts`：原料在庫（会社単位の共有プール）→工場共通処理能力→冷凍包装能力→商品別設備能力→
+  労働力の5段階で、`priority`（生産優先順位）に基づく水位法配分（`priorityAllocation.ts`）により実生産量
+  （`allocatedQuantity`）を計画量（`desiredQuantity`）から縮小する。各段階の縮小理由を
+  `shortfallReasons`（`rawMaterialShortage`等）として記録する。
+- `batches.ts`：実際に消費できた原料量（`clippedRequired = min(requiredRaw, 在庫実量)`）に基づいて
+  完成品数量を再計算するため、原料不足時も例外を投げず数量が縮小されるのみで、シミュレーション全体を
+  停止させない。
+- `finance/companyLabAdapter.ts`：財務側は`batch.finishedGoodsQuantity`（実績値）を使用しており、
+  計画値ではなく実績と整合している（労務・製造原価・在庫・財務が実生産量ベース）。
+- `api/v2/exports/_lib/dto/operationsDto.ts`（§5-6・§5-7）：`ExportProductionBatch`・
+  `ExportProductionAllocationEntry`として`desiredQuantity`・`allocatedQuantity`・`shortfallQuantity`・
+  `shortfallReasons`がすでにExport DTOへ許可項目化・公開済み（経営分析Excelで計画未達量・理由を確認可能）。
+
+このため、当セッションでの新規コード実装は行っていない。三宅さんとの確認の結果、既存実装のレビュー・
+固定シードでの複数ターン・複数社シミュレーションによる不変条件検証を優先する方針とした。
+
+### C-3. 固定シードによる完走・再現性・不変条件検証
+
+`scripts/v2CompanySimulate.ts`（シナリオ`baseline`・`canonical`モード、シード`shrimpx-invariant-check-001`、
+5社（`BAL`/`MASS`/`JPQ`/`VAP`/`CONSV`）、`--format json`）を用いて、12ターン・32ターンをそれぞれ2回ずつ実行：
+
+- **完走**：12ターン・32ターンともに例外停止なく完走（原料不足シナリオを含め、シミュレーション全体が
+  止まる状況は発生しなかった）
+- **再現性**：同一設定・同一シードでの2回の実行結果は、JSON出力が完全に一致（`diff`でバイト単位一致）
+- **不変条件**（全ターン・全社・全生産配分エントリ・全バッチ・全財務結果を対象に検証）：
+  - `allocatedQuantity <= desiredQuantity`（実生産量が計画を超えない）
+  - `shortfallQuantity == desiredQuantity - allocatedQuantity`（誤差1e-2以内）
+  - `shortfallQuantity > 0`の場合は必ず`shortfallReasons`が1件以上記録されている
+  - バッチの原料消費と完成品・加工ロスの質量保存（`finishedGoodsQuantity + processingLoss ==
+    rawMaterialConsumedTotal`、誤差1e-2以内）
+  - 貸借対照表の恒等式（`totalAssets == totalLiabilities + totalEquity`、誤差1USD-M以内）
+  - `NaN`・`Infinity`の出現：0件
+  - 上記いずれも12ターン・32ターンの両方で違反0件
+
+以上より、develop/v2（本セッションでのブランチA統合後）は、原料不足時の実生産量縮小・計画未達量記録の
+要求仕様を既存実装で満たしており、複数社・複数ターンの継続実行でも財務・生産・在庫の整合性が崩れないことを
+確認した。
+
+V1（`main`ブランチ・`v1-maintenance`ブランチ）には一切変更を加えていない。
+
+## 残課題・申し送り（当セッション時点）
+
+- **A（調達構成）**：develop/v2へ統合完了（本節C-1参照）。
+- **B（商品別固定費配賦）**：Test13 Turn7確定時の実データ確認は引き続き未実施（次回セッションの申し送り事項）。
+- **原料不足時の実生産量縮小**：新規実装は不要と判断（既存実装で要件を充足）。将来、生産優先順位の
+  ユーザー向けUI表示や、Export以外の画面（GM分析ブック等）への計画未達理由の可視化が必要になった場合は
+  別途要望として扱う。
