@@ -25,6 +25,14 @@ export const CLI_OUTPUT_FORMATS: readonly CliOutputFormat[] = ["summary", "json"
 /** --company の特殊値。全社比較表示を意味する。 */
 export const ALL_COMPANIES = "all" as const;
 
+/**
+ * 【Phase SAI-1】意思決定生成方式。"autoPolicy"（既定値、既存の交換可能な
+ * 決定論的ルールベース暫定方針）または "standardAi"（標準経営AI基盤、
+ * companyLab/standardAi/。5社すべてに同一ロジック・同一閾値を適用する）。
+ */
+export type CliDecisionProvider = "autoPolicy" | "standardAi";
+export const CLI_DECISION_PROVIDERS: readonly CliDecisionProvider[] = ["autoPolicy", "standardAi"];
+
 export interface ParsedCompanyLabCliArgs {
   readonly help: boolean;
   readonly scenario: string;
@@ -34,6 +42,8 @@ export interface ParsedCompanyLabCliArgs {
   readonly format: CliOutputFormat;
   /** 表示対象会社（"all" または fixtures.ts のCompanyId。指定が無ければ"all"）。 */
   readonly company: string;
+  /** 【Phase SAI-1】意思決定生成方式（既定値"autoPolicy"、既存動作を変えない）。 */
+  readonly provider: CliDecisionProvider;
 }
 
 /**
