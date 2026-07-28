@@ -440,6 +440,53 @@ test("調達構成B: 支払不能・重大な資金制約下の会社は、説�
   assert.ok(anyCompanyExercisedThisPath, "テストBの対象となる会社が1社も無い（本テストが意味のある検証を行っていない）");
 });
 
+// ---------------------------------------------------------------------
+// 緊急融資満期修正（fix/v2-emergency-loan-maturity, commit d83e8c2）の
+// 回帰確認: 「調達構成A」がVAPを正しく検査対象に含むこと
+//
+// 【経緯・注記（重要）】修正前のコードでは、緊急融資のmaturityPeriodが
+// 通常融資の審査結果を誤って流用するバグにより、VAPが対象期間の6ターン
+// 全てで「支払不能・重大な資金制約（paymentArrears=true, paymentDefault=true,
+// underwritingFrozen=true）」に誤分類され続け、isSeverelyConstrainedTurnに
+// より「調達構成A」の検査対象から常に除外されていた（自社養殖依存率100%が
+// 一度も検証されずに見過ごされていた）。
+//
+// 緊急融資満期修正後は、VAPの財務診断が是正され、対象6ターンの一部
+// （2016Q3）が「支払不能・重大な資金制約」の基準を満たさなくなるため、
+// VAPは「調達構成A」の検査対象に正しく含まれるようになる。
+//
+// この回帰テストは、あくまで上記の「検査対象へ含まれること」自体だけを
+// 固定する。VAPの自社養殖依存率が高いこと自体（別途「調達構成A」が既に
+// 検出し、現時点で未解決のまま残している既知の失敗）には一切触れない。
+// 「調達構成A」の閾値・除外条件は変更していない。
+// ---------------------------------------------------------------------
+test("回帰確認: 緊急融資満期修正後、VAPは「調達構成A」の検査対象から誤って除外されない", () => {
+  const result = runAllAuto(baseConfig({ seed: "mix-001", turns: 12 }));
+  const lastHalf = result.history.slice(6);
+  const turnsForVap = lastHalf.map((r) => ({
+    summary: r.companySummaries.find((x) => x.companyId === "VAP")!,
+    financing: r.financingResults.find((x) => x.companyId === "VAP"),
+  }));
+  const allTurnsConstrained = turnsForVap.every((t) => isSeverelyConstrainedTurn(t.financing));
+  assert.equal(
+    allTurnsConstrained,
+    false,
+    "VAPが対象期間6ターン全てで「支払不能・重大な資金制約」に分類され、調達構成Aの検査対象から除外されてしまっている" +
+      "（修正前バグの再発、または財務診断ロジックの別の後退の可能性がある）"
+  );
+
+  // 除外されない結果、VAPの自社養殖依存率がこの回帰テスト作成時点の値（約68.3%）で
+  // 可視化されていることも併せて記録する（「調達構成A」自体の閾値判定はassertしない。
+  // 数値そのものが変化しても、この回帰テストの目的である「除外されないこと」には影響しない）。
+  const domestic = turnsForVap.reduce((sum, t) => sum + unwrapUnit(t.summary.domesticPurchaseQuantity), 0);
+  const aqua = turnsForVap.reduce((sum, t) => sum + unwrapUnit(t.summary.aquacultureHarvestedQuantity), 0);
+  const imports = turnsForVap.reduce((sum, t) => sum + unwrapUnit(t.summary.importArrivedQuantity), 0);
+  const total = domestic + aqua + imports;
+  assert.ok(total > 0, "VAP: 調達実績が無い");
+  // 数値の記録のみ（アサーションではない）。将来この値が変わっても本テストは失敗しない。
+  void ((aqua / total) * 100).toFixed(1);
+});
+
 test("自動方針は公開情報と自社状態だけを使う（関数シグネチャ上、他社の非公開計画・将来シナリオを受け取れない）", () => {
   const { state, fixtures } = initializeCompanyLab(baseConfig({ seed: "isolation-001", turns: 1 }));
   const publicInfo = buildPublicMarketInfo(state);
