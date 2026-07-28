@@ -571,12 +571,29 @@ test("受入確認F-14: Σ(商品別限界利益) = 全社限界利益 + 共通�
 
 // --- 追加15: 共通固定費を商品別限界利益へ恣意的に配賦しない ---
 
-test("受入確認F-15: 商品別・市場別の直接固定費は0（共通固定費は配賦せずcommonFixedCostとして別掲）", () => {
+test("受入確認F-15: 商品別直接固定費は常用労務費（productive分）の実配属人数比配賦＋共通工場・設備固定費の加工度ウェイト付き数量配賦の合計となり、市場別直接固定費は引き続き常に0。commonFixedCost = totalFixedCost − Σ商品別直接固定費", () => {
   const { result } = close();
   const cm = result.contributionMargin;
-  for (const p of cm.byProduct) assert.equal(p.directFixedCost as number, 0);
+  // このシナリオ（makeActuals既定値）は商品がhoso単独・legacyモード（assignedRegularHeadcount等は
+  // 未指定）のため、常用労務費（legacyモードではidleLaborCost=0なので全額productive）と共通工場・
+  // 設備固定費（factoryFixedCost+utilityFixedCost+depreciationCost）の両方が100%hosoへ配賦され、
+  // 既存のfixedManufacturingCost（regularLaborCost+factoryFixedCost+utilityFixedCost+depreciation）
+  // と厳密に一致する。
+  assert.equal(cm.byProduct.length, 1);
+  assert.equal(cm.byProduct[0].key, "hoso");
+  assert.ok(
+    Math.abs((cm.byProduct[0].directFixedCost as number) - (cm.fixedManufacturingCost as number)) < EPS,
+    `hoso直接固定費 ${cm.byProduct[0].directFixedCost} ≠ fixedManufacturingCost ${cm.fixedManufacturingCost}`
+  );
+  // 市場別の直接固定費配賦は本変更のスコープ外（未実装）のため常に0のまま。
   for (const mk of cm.byMarket) assert.equal(mk.directFixedCost as number, 0);
-  assert.equal(cm.commonFixedCost as number, cm.totalFixedCost as number);
+  const totalDirect = cm.byProduct.reduce((s, p) => s + (p.directFixedCost as number), 0);
+  assert.ok(Math.abs((cm.commonFixedCost as number) - ((cm.totalFixedCost as number) - totalDirect)) < EPS);
+  // 単一商品・legacyモード（idleLaborCost=0）シナリオでは、commonFixedCostは
+  // 営業・調達人件費＋一般管理固定費のみとなる。
+  assert.ok(
+    Math.abs((cm.commonFixedCost as number) - ((cm.fixedPersonnelCost as number) + (cm.fixedSellingAdminCost as number))) < EPS
+  );
 });
 
 // --- 補助: 完成品の期限切れ在庫廃棄と利益差異の整合 ---
@@ -1861,4 +1878,385 @@ test("capex省略時（undefined）はcapexAssetsDepreciationUsd/capexMaintenanc
   const withZeroCapex = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES, undefined, makeCapexAdjustment());
   assert.deepEqual(withZeroCapex.result, withoutCapexArg.result);
   assert.deepEqual(withZeroCapex.nextState, withoutCapexArg.nextState);
+});
+
+// =====================================================================
+// 商品別固定費配賦・労務費区分（management-accounting-only、財務会計とは完全並行）
+// =====================================================================
+
+function withManagementAccountingCoefficients(coeffs: Readonly<Record<Product, number>>): typeof FINANCE_PARAMETERS_V1 {
+  return {
+    ...FINANCE_PARAMETERS_V1,
+    managementAccounting: { fixedCostAllocationCoefficientByProduct: coeffs },
+  };
+}
+
+test("商品別固定費配賦FC-1: 3商品（実配属人数200/300/500、生産量500/400/300t、遊休200人）で、常用労務費配分は実配属人数比、共通工場・設備固定費配分は加工度ウェイト付き数量比（HOSO1.0/PD1.5/VAP2.4）となり、遊休労務費はどの商品にも配賦されない。当期に販売実績がない（fulfillmentUsage=[]）が生産はあった商品の直接固定費も欠落しない", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 500,
+    adjustedTons: 500,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 200,
+    assignedTemporaryHeadcount: 50,
+    appliedOvertimeRate: 0.05,
+  });
+  const pdBatch = makeBatch({
+    batchId: "B-PD",
+    product: "pd",
+    originalTons: 400,
+    adjustedTons: 400,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-PD",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 300,
+    assignedTemporaryHeadcount: 100,
+    appliedOvertimeRate: 0.1,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 300,
+    adjustedTons: 300,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 500,
+    assignedTemporaryHeadcount: 150,
+    appliedOvertimeRate: 0.2,
+  });
+  const { result } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [hosoBatch, pdBatch, vapBatch],
+      regularHeadcount: 1200, // 配属合計1000 + 遊休200
+      temporaryHeadcount: 300,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 500, expired: false },
+        { lotId: "LOT-PD", remainingQuantityTons: 400, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 300, expired: false },
+      ],
+    })
+  );
+  const cm = result.contributionMargin;
+  // fulfillmentUsageが空でも、生産のあった3商品すべてがbyProductへ現れる
+  // （生産のみ・未販売の商品の直接固定費が欠落しないことの確認）。
+  assert.equal(cm.byProduct.length, 3);
+
+  const productiveRegularLaborCost = result.manufacturingCost.productiveRegularLaborCost as number;
+  assert.ok(Math.abs(productiveRegularLaborCost - 1000 * SALARY) < EPS); // 実配属合計1,000人分のみ
+  const idleLaborCost = result.manufacturingCost.idleLaborCost as number;
+  assert.ok(Math.abs(idleLaborCost - 200 * SALARY) < EPS); // 遊休200人分
+
+  const commonFixedManufacturingCost =
+    (result.manufacturingCost.factoryFixedCost as number) +
+    (result.manufacturingCost.utilityFixedCost as number) +
+    (result.manufacturingCost.depreciationCost as number);
+
+  const weighted = { hoso: 500 * 1.0, pd: 400 * 1.5, vap: 300 * 2.4 };
+  const totalWeighted = weighted.hoso + weighted.pd + weighted.vap;
+  const laborShare = { hoso: 200 / 1000, pd: 300 / 1000, vap: 500 / 1000 };
+  const expected: Record<string, number> = {
+    hoso: productiveRegularLaborCost * laborShare.hoso + commonFixedManufacturingCost * (weighted.hoso / totalWeighted),
+    pd: productiveRegularLaborCost * laborShare.pd + commonFixedManufacturingCost * (weighted.pd / totalWeighted),
+    vap: productiveRegularLaborCost * laborShare.vap + commonFixedManufacturingCost * (weighted.vap / totalWeighted),
+  };
+  for (const p of cm.byProduct) {
+    assert.ok(
+      Math.abs((p.directFixedCost as number) - expected[p.key]) < EPS,
+      `${p.key}: 直接固定費 ${p.directFixedCost} ≠ 期待値 ${expected[p.key]}`
+    );
+  }
+
+  // 遊休労務費は商品原価配賦の対象外＝合計に含まれない。
+  const totalDirect = cm.byProduct.reduce((s, p) => s + (p.directFixedCost as number), 0);
+  assert.ok(Math.abs(totalDirect - (productiveRegularLaborCost + commonFixedManufacturingCost)) < EPS);
+  assert.ok(Math.abs((cm.commonFixedCost as number) - ((cm.totalFixedCost as number) - totalDirect)) < EPS);
+  assert.ok(
+    Math.abs(
+      (cm.commonFixedCost as number) - (idleLaborCost + (cm.fixedPersonnelCost as number) + (cm.fixedSellingAdminCost as number))
+    ) < EPS,
+    "commonFixedCostは遊休労務費＋営業調達人件費＋一般管理固定費と一致するはず"
+  );
+});
+
+test("商品別固定費配賦FC-2: legacyモード（実配属人数データなし）の2商品（生産量300t/700t）では、常用労務費・共通工場固定費とも品質調整後数量（adjustedTons）シェアで配賦される（従来どおりのフォールバック）", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 300,
+    adjustedTons: 300,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+  });
+  const pdBatch = makeBatch({
+    batchId: "B-PD",
+    product: "pd",
+    originalTons: 700,
+    adjustedTons: 700,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-PD",
+    downgradeRatio: 0,
+  });
+  const { result } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [hosoBatch, pdBatch],
+      regularHeadcount: 100,
+      temporaryHeadcount: 20,
+      appliedOvertimeRate: 0.1,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 300, expired: false },
+        { lotId: "LOT-PD", remainingQuantityTons: 700, expired: false },
+      ],
+    })
+  );
+  assert.equal(resolveLaborAllocationMode([hosoBatch, pdBatch]), "legacy");
+  const cm = result.contributionMargin;
+  const productiveRegularLaborCost = result.manufacturingCost.productiveRegularLaborCost as number; // legacyはidle無し
+  assert.ok(Math.abs(productiveRegularLaborCost - 100 * SALARY) < EPS);
+  const commonFixedManufacturingCost =
+    (result.manufacturingCost.factoryFixedCost as number) +
+    (result.manufacturingCost.utilityFixedCost as number) +
+    (result.manufacturingCost.depreciationCost as number);
+  const weighted = { hoso: 300 * 1.0, pd: 700 * 1.5 };
+  const totalWeighted = weighted.hoso + weighted.pd;
+  const expected: Record<string, number> = {
+    hoso: productiveRegularLaborCost * (300 / 1000) + commonFixedManufacturingCost * (weighted.hoso / totalWeighted),
+    pd: productiveRegularLaborCost * (700 / 1000) + commonFixedManufacturingCost * (weighted.pd / totalWeighted),
+  };
+  for (const p of cm.byProduct) {
+    assert.ok(Math.abs((p.directFixedCost as number) - expected[p.key]) < EPS, `${p.key}: ${p.directFixedCost} ≠ ${expected[p.key]}`);
+  }
+});
+
+test("商品別固定費配賦FC-3: 当期に生産が全くない（batches=[]）場合、byProductは空配列となり、commonFixedCostはtotalFixedCostと一致する（ゼロ除算・NaN・Infinityは発生しない）", () => {
+  const { result } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [],
+      regularHeadcount: 50,
+      temporaryHeadcount: 0,
+      appliedOvertimeRate: 0,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [],
+    })
+  );
+  const cm = result.contributionMargin;
+  assert.equal(cm.byProduct.length, 0);
+  assert.ok(Number.isFinite(cm.commonFixedCost as number));
+  assert.ok(Math.abs((cm.commonFixedCost as number) - (cm.totalFixedCost as number)) < EPS);
+});
+
+test("商品別固定費配賦FC-4: 実配属正社員数が商品によってはゼロ（HOSO=1000人・VAP=0人、臨時ワーカーのみで稼働）でも、VAPは常用労務費の直接配賦は0のまま共通工場・設備固定費は加工度ウェイト付き数量比で配賦される（NaN・Infinityは発生しない）", () => {
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 600,
+    adjustedTons: 600,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 1000,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 200,
+    adjustedTons: 200,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 0,
+    assignedTemporaryHeadcount: 80,
+    appliedOvertimeRate: 0,
+  });
+  const { result } = close(
+    makeState(),
+    makeActuals({
+      fulfillmentUsage: [],
+      contractTerms: [],
+      batches: [hosoBatch, vapBatch],
+      regularHeadcount: 1000,
+      temporaryHeadcount: 80,
+      appliedOvertimeRate: 0,
+      domesticPurchasesUsd: 0,
+      rawMaterialInventoryEndUsd: 500_000,
+      lotConsumption: [],
+      finishedGoodsRemainingByLot: [
+        { lotId: "LOT-HOSO", remainingQuantityTons: 600, expired: false },
+        { lotId: "LOT-VAP", remainingQuantityTons: 200, expired: false },
+      ],
+    })
+  );
+  const cm = result.contributionMargin;
+  const vap = cm.byProduct.find((p) => p.key === "vap")!;
+  const hoso = cm.byProduct.find((p) => p.key === "hoso")!;
+  assert.ok(Number.isFinite(vap.directFixedCost as number));
+  const commonFixedManufacturingCost =
+    (result.manufacturingCost.factoryFixedCost as number) +
+    (result.manufacturingCost.utilityFixedCost as number) +
+    (result.manufacturingCost.depreciationCost as number);
+  const weighted = { hoso: 600 * 1.0, vap: 200 * 2.4 };
+  const totalWeighted = weighted.hoso + weighted.vap;
+  const expectedVap = commonFixedManufacturingCost * (weighted.vap / totalWeighted); // 常用労務費配分は0
+  const productiveRegularLaborCost = result.manufacturingCost.productiveRegularLaborCost as number;
+  const expectedHoso = productiveRegularLaborCost * 1.0 + commonFixedManufacturingCost * (weighted.hoso / totalWeighted);
+  assert.ok(Math.abs((vap.directFixedCost as number) - expectedVap) < EPS, `VAP: ${vap.directFixedCost} ≠ ${expectedVap}`);
+  assert.ok(Math.abs((hoso.directFixedCost as number) - expectedHoso) < EPS, `HOSO: ${hoso.directFixedCost} ≠ ${expectedHoso}`);
+});
+
+test("商品別固定費配賦FC-5（受入条件・最重要）: managementAccounting.fixedCostAllocationCoefficientByProductを変えても、財務会計側の結果（PL/BS/CF/製造原価内訳/品質損失/コスト記録/利益差異調整/次期財務状態）は同一入力（同一state・同一actuals）に対して完全に不変。変わるのはContributionMarginReport.byProduct/commonFixedCostだけである", () => {
+  const state = makeState();
+  const hosoBatch = makeBatch({
+    batchId: "B-HOSO",
+    product: "hoso",
+    originalTons: 500,
+    adjustedTons: 500,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-HOSO",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 200,
+    assignedTemporaryHeadcount: 50,
+    appliedOvertimeRate: 0.05,
+  });
+  const pdBatch = makeBatch({
+    batchId: "B-PD",
+    product: "pd",
+    originalTons: 400,
+    adjustedTons: 400,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-PD",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 300,
+    assignedTemporaryHeadcount: 100,
+    appliedOvertimeRate: 0.1,
+  });
+  const vapBatch = makeBatch({
+    batchId: "B-VAP",
+    product: "vap",
+    originalTons: 300,
+    adjustedTons: 300,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    lotId: "LOT-VAP",
+    downgradeRatio: 0,
+    assignedRegularHeadcount: 500,
+    assignedTemporaryHeadcount: 150,
+    appliedOvertimeRate: 0.2,
+  });
+  const actuals = makeActuals({
+    fulfillmentUsage: [],
+    contractTerms: [],
+    batches: [hosoBatch, pdBatch, vapBatch],
+    regularHeadcount: 1200,
+    temporaryHeadcount: 300,
+    domesticPurchasesUsd: 0,
+    rawMaterialInventoryEndUsd: 500_000,
+    lotConsumption: [],
+    finishedGoodsRemainingByLot: [
+      { lotId: "LOT-HOSO", remainingQuantityTons: 500, expired: false },
+      { lotId: "LOT-PD", remainingQuantityTons: 400, expired: false },
+      { lotId: "LOT-VAP", remainingQuantityTons: 300, expired: false },
+    ],
+  });
+
+  const baseline = closeFinancialQuarter(state, actuals, FINANCE_PARAMETERS_V1, PROCESSING_RATES);
+  const withDifferentCoefficients = closeFinancialQuarter(
+    state,
+    actuals,
+    withManagementAccountingCoefficients({ hoso: 1.0, pd: 1.0, vap: 1.0 }), // 一律1.0（従来の単純数量配賦相当）へ変更
+    PROCESSING_RATES
+  );
+
+  // 財務会計側は完全に不変（唯一の受入条件）。
+  assert.deepEqual(withDifferentCoefficients.result.profitAndLoss, baseline.result.profitAndLoss);
+  assert.deepEqual(withDifferentCoefficients.result.balanceSheet, baseline.result.balanceSheet);
+  assert.deepEqual(withDifferentCoefficients.result.cashFlow, baseline.result.cashFlow);
+  assert.deepEqual(withDifferentCoefficients.result.manufacturingCost, baseline.result.manufacturingCost);
+  assert.deepEqual(withDifferentCoefficients.result.qualityLoss, baseline.result.qualityLoss);
+  assert.deepEqual(withDifferentCoefficients.result.costRecords, baseline.result.costRecords);
+  assert.deepEqual(withDifferentCoefficients.result.absorptionVariableReconciliation, baseline.result.absorptionVariableReconciliation);
+  assert.deepEqual(withDifferentCoefficients.nextState, baseline.nextState);
+
+  // ContributionMarginReportのうち、商品別配賦に依存しない集計値も不変。
+  const cmA = baseline.result.contributionMargin;
+  const cmB = withDifferentCoefficients.result.contributionMargin;
+  assert.equal(cmA.totalFixedCost as number, cmB.totalFixedCost as number);
+  assert.equal(cmA.contributionMargin as number, cmB.contributionMargin as number);
+  assert.equal(cmA.managementOperatingProfit as number, cmB.managementOperatingProfit as number);
+
+  // 係数を変えると、商品別直接固定費の配賦だけは実際に変わる（=係数が一元管理された
+  // パラメータから読まれており、コード中にハードコードされていないことの確認）。
+  const pdA = cmA.byProduct.find((p) => p.key === "pd")!.directFixedCost as number;
+  const pdB = cmB.byProduct.find((p) => p.key === "pd")!.directFixedCost as number;
+  assert.notEqual(pdA, pdB);
+  const vapA = cmA.byProduct.find((p) => p.key === "vap")!.directFixedCost as number;
+  const vapB = cmB.byProduct.find((p) => p.key === "vap")!.directFixedCost as number;
+  assert.notEqual(vapA, vapB);
+
+  // それでも商品別直接固定費の合計＋commonFixedCost = totalFixedCostという恒等式はどちらでも成立する。
+  const totalDirectA = cmA.byProduct.reduce((s, p) => s + (p.directFixedCost as number), 0);
+  const totalDirectB = cmB.byProduct.reduce((s, p) => s + (p.directFixedCost as number), 0);
+  assert.ok(Math.abs((cmA.commonFixedCost as number) - ((cmA.totalFixedCost as number) - totalDirectA)) < EPS);
+  assert.ok(Math.abs((cmB.commonFixedCost as number) - ((cmB.totalFixedCost as number) - totalDirectB)) < EPS);
 });

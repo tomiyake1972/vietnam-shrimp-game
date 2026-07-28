@@ -505,6 +505,91 @@ function computeProductionCosting(
   };
 }
 
+/**
+ * 【商品別固定費配賦・労務費区分（management-accounting-only、財務会計とは完全並行）】
+ * ContributionMarginReport.byProduct[].directFixedCostを算定する。
+ * computeProductionCosting（financial-accounting、在庫評価・COGSの唯一の情報源）が
+ * 既に計算した会社全体の固定費総額（productiveRegularLaborCost・factoryFixedCost・
+ * utilityFixedCost・depreciationCost）を、財務会計側とは別の基準・別の変数へ
+ * 配賦するだけの追加ビューであり、financial-accounting側のいかなる値
+ * （FinishedGoodsUnitCostBreakdown・在庫評価額・COGS・PL/BS/CF）も一切変更しない。
+ * 遊休労務費（idleLaborCost）はこの配賦の対象外とし、どの商品にも配賦しない
+ * （常に「配賦不能固定費（遊休労務費）」として独立表示するという要件どおり）。
+ *
+ * 【配賦基準】
+ *   1. 常用労務費（productive分のみ）: 商品別Σ assignedRegularHeadcount
+ *      （既存の実配属人数データ。"actual"モードのみ利用可能）の比で配賦する。
+ *      "legacy"モード、または"actual"モードでも当期の実配属人数合計が実質ゼロの
+ *      場合は、adjustedTons（品質調整後生産数量）の商品別シェアへフォールバック
+ *      する（ゼロ除算回避。どちらのシェアも合計不能＝当期生産ゼロなら配賦しない）。
+ *   2. 共通工場・設備固定費（factoryFixedCost＋utilityFixedCost＋depreciationCost）:
+ *      商品別の「加工度ウェイト付き数量」（adjustedTons×
+ *      managementAccounting.fixedCostAllocationCoefficientByProduct）の比で配賦する。
+ * 係数はゲーム開始時点でFinanceParametersへ固定されており、四半期の途中で
+ * 変更・遡及適用されることはない（呼び出し元は毎期同じparamsを渡す前提）。
+ */
+function computeManagementAccountingProductFixedCostAllocation(
+  actuals: CompanyQuarterBusinessActuals,
+  manufacturing: ManufacturingCostBreakdown,
+  laborMode: "actual" | "legacy",
+  params: FinanceParameters
+): ReadonlyMap<Product, number> {
+  const adjustedTonsByProduct = new Map<Product, number>();
+  for (const b of actuals.batches) {
+    adjustedTonsByProduct.set(b.product, (adjustedTonsByProduct.get(b.product) ?? 0) + b.adjustedTons);
+  }
+  const totalAdjustedTons = [...adjustedTonsByProduct.values()].reduce((s, v) => s + v, 0);
+
+  // --- 常用労務費（productive分のみ）の配賦 ---
+  const assignedRegularHeadcountByProduct = new Map<Product, number>();
+  if (laborMode === "actual") {
+    for (const b of actuals.batches) {
+      assignedRegularHeadcountByProduct.set(
+        b.product,
+        (assignedRegularHeadcountByProduct.get(b.product) ?? 0) + (b.assignedRegularHeadcount as number)
+      );
+    }
+  }
+  const totalAssignedRegularHeadcount = [...assignedRegularHeadcountByProduct.values()].reduce((s, v) => s + v, 0);
+  const productiveRegularLaborCost = manufacturing.productiveRegularLaborCost as number;
+
+  const laborAllocationByProduct = new Map<Product, number>();
+  if (laborMode === "actual" && totalAssignedRegularHeadcount > HEADCOUNT_EPSILON) {
+    for (const [product, headcount] of assignedRegularHeadcountByProduct) {
+      laborAllocationByProduct.set(product, productiveRegularLaborCost * (headcount / totalAssignedRegularHeadcount));
+    }
+  } else if (totalAdjustedTons > QUANTITY_EPSILON) {
+    for (const [product, tons] of adjustedTonsByProduct) {
+      laborAllocationByProduct.set(product, productiveRegularLaborCost * (tons / totalAdjustedTons));
+    }
+  }
+
+  // --- 共通工場・設備固定費の配賦（加工度ウェイト付き数量） ---
+  const commonFixedManufacturingCost =
+    (manufacturing.factoryFixedCost as number) + (manufacturing.utilityFixedCost as number) + (manufacturing.depreciationCost as number);
+  const coefficients = params.managementAccounting.fixedCostAllocationCoefficientByProduct;
+  const weightedQuantityByProduct = new Map<Product, number>();
+  let totalWeightedQuantity = 0;
+  for (const [product, tons] of adjustedTonsByProduct) {
+    const weighted = tons * coefficients[product];
+    weightedQuantityByProduct.set(product, weighted);
+    totalWeightedQuantity += weighted;
+  }
+  const commonFixedAllocationByProduct = new Map<Product, number>();
+  if (totalWeightedQuantity > QUANTITY_EPSILON) {
+    for (const [product, weighted] of weightedQuantityByProduct) {
+      commonFixedAllocationByProduct.set(product, commonFixedManufacturingCost * (weighted / totalWeightedQuantity));
+    }
+  }
+
+  const result = new Map<Product, number>();
+  const allProducts = new Set<Product>([...laborAllocationByProduct.keys(), ...commonFixedAllocationByProduct.keys()]);
+  for (const product of allProducts) {
+    result.set(product, (laborAllocationByProduct.get(product) ?? 0) + (commonFixedAllocationByProduct.get(product) ?? 0));
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------
 // 3. 四半期決算本体
 // ---------------------------------------------------------------------
@@ -588,6 +673,14 @@ export function closeFinancialQuarter(
   // --- 生産原価計算 ---
   const costing = computeProductionCosting(actuals, params, depreciationUsd, processingRateByProduct, depreciationBreakdown);
 
+  // --- 商品別固定費配賦（management-accounting-only。財務会計側には一切影響しない） ---
+  const managementAccountingDirectFixedCostByProduct = computeManagementAccountingProductFixedCostAllocation(
+    actuals,
+    costing.manufacturing,
+    resolveLaborAllocationMode(actuals.batches),
+    params
+  );
+
   // --- 台帳の準備（前期繰越＋当期新規ロット） ---
   const contractById = new Map(actuals.contractTerms.map((c) => [c.contractId, c]));
   const ledgerById = new Map<string, { entry: FinishedGoodsCostLedgerEntry; remaining: number }>();
@@ -618,6 +711,16 @@ export function closeFinancialQuarter(
     }
     return v;
   };
+
+  // 【商品別固定費配賦】当期に生産があった商品は、たとえ当期の販売実績が
+  // ゼロでも（未販売在庫のみの場合）byProductAggにゼロ初期化のエントリを
+  // 用意しておく。そうしないと、その商品に配賦された固定費
+  // （managementAccountingDirectFixedCostByProduct）がContributionMarginReport.byProduct
+  // から欠落し、commonFixedCostの計算（totalFixedCost - Σ直接固定費）が
+  // 静かにその分を「共通固定費」側へ取りこぼしてしまう。
+  for (const b of actuals.batches) {
+    dim(byProductAgg, b.product);
+  }
 
   const arByMarket = new Map<DemandMarketId, number>();
 
@@ -1055,6 +1158,7 @@ export function closeFinancialQuarter(
       const productQuality = costing.variableQualityCostByProduct.get(product) ?? 0;
       const netRev = v.grossRevenue - v.deduction;
       const variableCost = v.variableCost + productQuality;
+      const directFixedCostValue = managementAccountingDirectFixedCostByProduct.get(product) ?? 0;
       return {
         key: product,
         grossRevenue: usd(v.grossRevenue),
@@ -1063,7 +1167,7 @@ export function closeFinancialQuarter(
         variableCost: usd(variableCost),
         contributionMargin: usd(netRev - variableCost),
         contributionMarginRatio: netRev > QUANTITY_EPSILON ? (netRev - variableCost) / netRev : undefined,
-        directFixedCost: usd(0),
+        directFixedCost: usd(directFixedCostValue),
       };
     })
     .sort((a, b) => a.key.localeCompare(b.key));
@@ -1088,6 +1192,12 @@ export function closeFinancialQuarter(
   // 品質費（rework+qualityDiscard、商品別Mapに帰属済み）を除いた残り。
   // = 原料期限切れ廃棄損 + 完成品在庫廃棄損の変動部分 + 生産ゼロ時の未配賦変動費。
   const commonVariableCost = rawMaterialExpiryLoss + finishedGoodsWriteOffVariable + Math.max(0, zeroProductionVariable);
+
+  // 【商品別固定費配賦】商品別へ配賦済みの直接固定費合計。totalFixedCostから
+  // これを差し引いた残りがcommonFixedCost（= idleLaborCost（遊休労務費。常に
+  // どの商品にも配賦しない）＋fixedPersonnelCost（営業・調達人件費）＋
+  // fixedSellingAdminCost（一般管理固定費）と恒等的に一致する）。
+  const totalDirectFixedCostAllocated = [...managementAccountingDirectFixedCostByProduct.values()].reduce((s, v) => s + v, 0);
 
   const contributionMargin: ContributionMarginReport = {
     companyId,
@@ -1115,7 +1225,7 @@ export function closeFinancialQuarter(
     assumedProductMix,
     byProduct,
     byMarket,
-    commonFixedCost: usd(totalFixedCost),
+    commonFixedCost: usd(totalFixedCost - totalDirectFixedCostAllocated),
     commonVariableCost: usd(commonVariableCost),
   };
 
