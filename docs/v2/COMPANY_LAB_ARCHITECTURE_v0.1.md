@@ -202,4 +202,81 @@ Phase 7A（`app/lib/v2/quality/`）が計算・保存した品質・操業リス
 - 5社×32ターンでのoperationalRisk分布: 会社別平均はBAL 0.312、MASS 0.304、JPQ 0.250、VAP 0.262、CONSV 0.386（会社間の最大-最小差0.136）。この差は複雑度項（一律+0.10）以外の5要因（設備稼働・残業・臨時ワーカー・原料経過期間・急増産）から生じており、複雑度項が飽和していても会社間の意味のある差別化は依然として機能している。
 - 重大事故・品質損失への実際の影響: 4,770バッチ中、重大事故発生は52件（1.090%）、総生産量に対し格落ち0.621%・再加工0.345%・廃棄0.499%（うち重大事故起因の廃棄が78,474のうち14,006）。`calculateMajorIncidentProbability = 0.002 + 0.08 × operationalRisk²`（二乗）のため、複雑度項による約+0.10の一律加算は、平均的な重大事故確率をおよそ0.52%（複雑度項なし試算）から0.92%（複雑度項あり試算）へ引き上げている計算になり、単なる表示上の飽和にとどまらず、重大事故発生確率の底上げという実質的な影響を持つ。ただし本Phaseでは計算式・係数は変更しない（三宅さんの指示どおり）。
 - 警告機能への影響: `WARNING_THRESHOLDS.complexityStress`（warn 1.5 / alert 1.7 / critical 1.85）は`complexityStress`の実際の取りうる範囲（0〜1）を超えており、到達不能に設定されている。**「商品構成複雑化」警告カテゴリは、本Phaseの表示閾値設定により実質的に常時休止中である**（他の警告カテゴリは正常に機能する）。
+
+## 14. Phase SAI-1: 標準経営AI基盤（`companyLab/standardAi/`、`feature/v2-standard-ai-foundation-rebuild`）
+
+### 14.1 目的・非目標
+
+SAI-1は「最強のAI」でも「個性を演じ分けるAI」でもない。目的は次の4つに限定される。
+
+1. バランス調整のための自動テストプレイヤー（人間の入力なしで5社×Nターンを完走できる）。
+2. 将来のAI改善（Phase 9以降）の比較対象となるベースライン方針。
+3. 将来のAI取締役会提案機能の土台。
+4. 意思決定→結果の因果関係を追跡・診断するための基盤（構造化理由コード、§14.6）。
+
+**全社同一ロジック**: 5社（BAL/MASS/JPQ/VAP/CONSV）すべてに同一の判断ロジック・同一の閾値（`parameters.ts`の`STANDARD_AI_PARAMETERS_V1`、1セットのみ）・同一の情報範囲を適用する。会社IDによる分岐は実装のどこにも存在しない。結果が会社ごとに異なるのは、各社の実際のfixture（工場能力・人員・原料在庫等）が異なるためであり、AI側のロジックが会社を特別扱いしているからではない（§14.7の単体テストで直接検証）。
+
+`autoPolicy.ts`（既存の暫定自動方針。`ARCHETYPE_PROFILES`という会社アーキタイプ別の静的パラメータ表を持つ）とは、この一点で設計思想が異なる。既存の`autoPolicy.ts`は一切変更していない（`--provider autoPolicy`が既定のまま。§14.5参照）。
+
+### 14.2 観測できる情報の範囲（Observation）と情報境界
+
+`standardAi/observation.ts`の`buildStandardAiObservation(fixture, ownState, publicInfo, period, turn)`が、既存の`CompanyDecisionProvider`型（本ドキュメント§4）と全く同じ4引数＋turnだけから、圧力スコア計算・各ドメイン意思決定生成が使う`StandardAiObservation`（商品別集計値のスナップショット）を機械的に構築する。以降のロジック（`pressures.ts`・`decision/`配下）は、原則としてこのObservationとパラメータだけを主入力とし、生のturn runner状態・他社の非公開情報・将来の乱数を受け取る経路が構造上存在しない（§4で保証されている情報境界をそのまま継承する）。
+
+### 14.3 意思決定の優先順位（実装指示の8段階）
+
+(1) 既存契約を履行できる生産・出荷計画 → (2) 資金ショート・入力ミス・営業停止の回避 → (3) 原料・生産能力・労働力との整合 → (4) 完成品・原料在庫の過剰抑制 → (5) 市場需要・商品別採算を反映した販売判断 → (6) 妥当な短期利益 → (7) 過大な借入・設備投資の抑制 → (8) 余力がある場合の成長。この優先順位は、各ドメインの計算式の組み立て順（未履行契約の反映→在庫過剰の反映→資金・借入判断→設備投資判断、の順）に反映されている。
+
+### 14.4 ドメイン別の基本方針としきい値の置き場所
+
+すべての閾値・重みは`standardAi/parameters.ts`の`STANDARD_AI_PARAMETERS_V1`一箇所に集約されている（値を変える場合はここだけを編集すればよい）。
+
+- **調達**（`decision/procurement.ts`）: 生産計画から逆算した必要原料量を、輸入（構成比`importMixRatio`）・自社養殖（必要量に対する上限`maxAquacultureShareOfRequirement`＝自社養殖だけで完全自給しない）・国内買付（残余需要＋在庫補正、下限`minDomesticPurchaseRatioOfBase`つき）へ配分する。現金圧力が深刻な場合（`severeCashPressureThreshold`）は国内買付希望量を必要最小限へ縮小する（`financing/liquidityClose.ts`の事後的な調達スケール制約とは別に、AI自身が過大な希望を出さないようにする一次的な自制であり、事後制約の計算を先取り・重複実装はしていない）。
+- **販売**（`decision/sales.ts`）: 未履行契約・完成品在庫を踏まえた基準販売目標（生産計画側の抑制式と共有）と、完成品在庫過剰時にのみ上乗せする「積極的売り切り数量」（販売計画だけに反映し、生産計画へは伝播させない。§14.8参照）を区別する。PD/VAPは`premiumPolicy.ts`の既存ロジック（会社×商品の目標/最低受注プレミアム）で受注量係数を決める。市場の優先順位は、会社固有の「好みの市場」ではなく、前期実績の参照価格が高い市場を優先する（`pressures.ts`の`marketPriceRanking`。公開情報だけで完結する規則）。
+- **生産**（`decision/production.ts`）: 生産希望量＝販売基準目標＋未履行契約残−完成品在庫。優先順位は未履行契約がある商品を最優先、次に在庫が目標を下回る商品、残りは通常優先度。工場の商品別能力でキャップし、複数工場保有時は能力比按分する。
+- **労働**（`decision/labor.ts`）: 今期の必要常用人数（`workforce.ts`の`computeRequiredRegularHeadcount`をそのまま利用）と、前期実績生産量から逆算した前期時点の必要人数を比較する2時点ヒステリシス近似で「持続的」か「一時的」かを判定する。一時的な不足は残業・臨時ワーカーで対応し正社員は増やさない。持続的な不足・過剰は正社員を`regularHeadcountAdjustmentDamping`（既定0.5）で段階的に増減する。
+- **資金繰り**（`decision/finance.ts`）: 会社規模連動の最低現金バッファ（§14.9）を下回る見込みなら通常融資を、十分な余剰かつ既存借入があれば任意期限前返済を申請する。両者は閾値設計上、同一四半期に同時発生し得ない（借入発生条件`cash < target`と返済発生条件`cash > target×voluntaryPrepaymentMultiple`は排反）。
+- **設備投資**（`decision/capex.ts`）: 「(1)今期・実際に観測されたボトルネック」「(2)前期も同じ能力区分が高稼働だった（持続性）」「(3)完成品在庫が過剰でない」「(4)最低現金バッファを安全マージン込みで維持できる」「(5)借入余力・財務健全性を著しく損なわない」「(6)同じ能力区分の案件が進行中でない」の全条件を満たす場合のみHOSO/PD/VAP加工ライン増設・共通前処理能力増設を提案する。それ以外は`CAPEX_DEFERRED`（見送り）を正常な既定結果として扱う。冷凍・包装処理能力／保管能力／品質管理設備／環境設備はSAI-1の対象外とし、§14.10のSAI-2申し送りに明記した。
+
+### 14.5 CLI・自動テストプレイモード
+
+既存CLI（`npm run v2:company-simulate`）へ`--provider autoPolicy|standardAi`（既定値`autoPolicy`）を追加した。ランナー本体（`runCompanyLabWithAutoPolicyForAllCompanies`）・既存の`--provider`省略時の挙動は一切変更していない。
+
+```
+npm run v2:company-simulate -- --scenario baseline --seed sai1-demo-001 --turns 8 --provider standardAi --format json > sai1.json
+npm run v2:company-simulate -- --scenario baseline --seed sai1-demo-001 --turns 32 --provider standardAi --format summary
+```
+
+`--format json`出力は既存フォーマット（`companySummaries`・`decisions`等）そのままであり、SAI-1固有の理由コード・圧力スコア等の詳細診断は含まれない（CLIの出力肥大化を避けるため）。詳細診断が必要な場合は、`standardAi/policy.ts`の`createStandardAiProvider()`をコードから直接呼び出し、返却される`diagnostics`配列（四半期×会社ごとの`StandardAiDiagnosticEntry[]`）を読む（`__tests__/standardAiIntegration.test.ts`の該当テストが具体的な使用例になっている）。
+
+### 14.6 理由コード全一覧（`standardAi/reasonCodes.ts`）
+
+`CONTRACT_FULFILLMENT_PRIORITY`・`FINISHED_GOODS_EXCESS`・`CAPACITY_CONSTRAINT`・`RAW_MATERIAL_SHORTAGE`・`PROCUREMENT_INCREASED_FOR_SHORTAGE`・`PROCUREMENT_REDUCED_FOR_EXCESS`・`PROCUREMENT_CASH_CONSTRAINED`・`PRICE_REDUCTION_FOR_EXCESS_STOCK`・`SALES_REDUCED_FOR_SUPPLY_LIMIT`・`LOW_ORDER_BOOK_PREMIUM_FLOOR`・`WORKER_CAPACITY_SHORTAGE`・`OVERTIME_TEMP_FOR_TRANSIENT_SHORTAGE`・`HIRING_FOR_SUSTAINED_SHORTAGE`・`HEADCOUNT_REDUCED_FOR_SUSTAINED_EXCESS`・`CASH_BUFFER_SHORTAGE`・`DEBT_REPAYMENT_SURPLUS`・`CAPEX_DEFERRED`・`CAPEX_PROPOSED`の18種類。各エントリは対象ドメイン・重大度・鍵となる事前値（`keyValues`）・人間向け説明文を持つ（`CompanyReasonEntry`という既存の簡易理由コードとは別の、SAI-1専用の詳細版）。
+
+### 14.7 テスト・検証結果
+
+- `standardAi/__tests__/standardAi.test.ts`（16件）: 決定論性、全フィールド存在、負値/NaN/Infinity不在、既存バリデーション通過、契約履行優先、在庫過剰時の生産抑制・販売促進、原料不足時の調達増、労働力不足時の応答、現金不足/余剰時の資金繰り応答、一時的不足でのcapex非提案、**会社名だけを変えても意思決定原則が変わらないこと（companyId以外の出力が完全一致）**、情報境界（5引数のみ）、診断理由と実際の意思決定の整合、丸め後の範囲遵守、極端な入力での非例外を検証。
+- `standardAi/__tests__/standardAiIntegration.test.ts`（11件）: 5社×8/32ターンの完走、決定論性・再現性、32ターン全体でのNaN/Infinity不在、在庫・約定残の非負、生産量が能力・原料・労働制約を超えないこと、ワーカー配分合計が配置人数を超えないこと、5引数シグネチャの確認、5社均一動作、入力不変性、診断情報つきプロバイダが通常実行と完全に同じ意思決定を返すこと。
+- 既存回帰: `npm test`（全1648件、既存1621件＋新規27件）・`npx tsc --noEmit`・`npm run lint`（いずれもエラー0件、警告0件）・`npm run build`（成功）。V1コードは本Phaseで一切変更していない（`git status`上、変更ファイルは`companyLab/cli/`3ファイルと新規`companyLab/standardAi/`のみ）。
+
+### 14.8 開発中に発見・修正した不具合（32ターン検証）
+
+実装指示どおり、32ターン検証で発見した「明らかなAI入力の不具合」は一般化した形で修正し、修正後に8Q/32Qを再実行して再現性を確認した。
+
+1. **完成品在庫過剰時の生産抑制が機能しない循環**: 当初、完成品在庫過剰時に販売希望量へ「積極的売り切り」の上乗せ（excessBoost）を行い、その**上乗せ後の値**を生産計画側の抑制式（販売希望＋約定残−完成品在庫）にもそのまま使っていた。このため、完成品在庫が多いほど販売希望が上乗せされ、生産計画側の「在庫を引く」効果が同じ上乗せ分だけ相殺され、在庫が減らず生産も減らないという発散気味の挙動が生じた（32ターンで会社の粗利益率が悪化する形で顕在化）。修正: 生産計画側が参照する基準販売目標には上乗せを含めず、上乗せは実際に市場へ提示する販売計画（`salesPlans`）だけに反映するよう分離した（`decision/sales.ts`の`desiredByProduct`と`plannedSalesQuantityByProduct`の分離）。
+2. **持続的な人員過剰が検出されず遊休労務費が高止まりする不具合**: 当初、労働の持続性判定にエンジンの`FactoryLoadMetrics.laborUtilizationRate`（前期の労働稼働率）を使っていたが、この指標は「実際に配属されたワーカーに対する稼働率」であり、配属されなかった余剰人員（遊休労務費として全額費用化される）を分母に含まないため、常に1.0近辺に張り付き、持続的な人員過剰を検出できなかった（32ターン検証で、常用人件費の6割前後が遊休費のまま高止まりする形で発見）。修正: 前期実績生産量（`CompanyOwnState`が正当に開示する自社実績情報）から前期時点の必要人数を逆算し、現在の必要人数と直接比較する2時点比較へ置き換えた（`decision/labor.ts`）。修正後、32ターン検証で遊休労務費は数四半期で自然に縮小し、健全な会社（BAL/CONSV）の営業利益は安定して黒字化した。
+
+いずれも会社固有のハードコーディングではなく、全社に一律適用される計算式の一般的な修正である。
+
+### 14.9 会社規模連動の最低現金バッファ（実装指示の明示要求）
+
+`companyLab/parameters.ts`の`AUTO_FINANCING_POLICY_PARAMETERS_V1.targetMinimumCashUsd = 40,000,000`（全社一律の絶対額）はSAI-1では使用しない。代わりに`standardAi/parameters.ts`の`estimateTargetMinimumCashUsd(fixture, expectedRawPriceUsdPerKg)`が、会社の総処理能力（HOSO/PD/VAP合計）×想定稼働率×想定原料単価（推定原料コスト）と、常用ワーカー人件費（`workforce.ts`の`computeQuarterlyLaborCost`をそのまま呼び出し、独自の人件費単価をハードコードしない）の合計に、`cashBufferQuarters`（既定0.6四半期分）を掛けた値を最低現金バッファとする（絶対下限`minimumCashBufferFloorUsd`＝500万USDあり）。会社ごとの工場・人員規模が異なれば、この推定値も自然に異なる（会社IDによる分岐ではなく、fixtureの実際の規模差に連動する）。
+
+### 14.10 既知の限界・SAI-2への申し送り
+
+- **32ターン長期実行の傾向**（複数シードで確認）: BAL・CONSVは健全に推移する一方、MASS・JPQ・VAPは32ターン目までに支払不能（`paymentDefault`）に陥る。既存の`autoPolicy.ts`（アーキタイプ別暫定方針）でも同一シードで同じ3社が支払不能に陥ること、両方針での最終借入残高が同程度のオーダーであることを確認しており、SAI-1固有の入力不具合ではなく、これら3社のfixture（工場・人員規模と原価economicsの組み合わせ）自体の収益力が構造的に弱いという既存のゲームバランス課題である可能性が高い。SAI-2以降で、AI要因とゲームバランス要因を切り分けるための「同一初期条件比較シナリオ」（下記）を実施することを推奨する。
+- **同一初期条件比較シナリオ**: 大規模なアーキテクチャ変更なしに実現するのが難しいと判断し、SAI-1では実装を見送った（既存の`buildCompanyFixtures`は5社固定のfixtureセットを返す設計で、工場能力・人員・原料経済性が会社ごとに作り込まれており、「fixtureの差だけを均一化する」ための安全な差し替え口が現状存在しない）。SAI-2で、`CompanyFixture`を外部から差し替え可能にする実行モード（テスト・診断専用、既存fixtureやゲームバランスには影響しない）を追加することを検討する。
+- **市場別の需要強度シグナルの欠如**: `PublicMarketInfo`には市場別の需要数量そのものが含まれず、前期実績の価格・プレミアムのみが公開情報として渡される。そのため「弱い需要の市場では数量を減らす」判断は、価格シグナル（`marketPriceRanking`）を代理指標として使う間接的な実装にとどまる。将来、需要量に関する公開情報が追加された場合はこの代理指標を置き換えられる設計にしてある。
+- **capexの対象範囲**: HOSO/PD/VAP加工ライン増設・共通前処理能力増設の4種類のみ対応。冷凍・包装処理能力／保管能力／品質管理設備／環境設備はSAI-1の観測情報だけでは必要性判断の材料が乏しいため対象外とした。
+- **圧力値フレームワークへの発展**: `pressures.ts`の`PressureScores`（契約履行・完成品在庫・原料在庫・現金・借入・市場価格ランキング）は、実装指示が言及する「圧力値フレームワーク」「AI取締役会機能」「プレイヤー向け説明」への発展の土台として設計してあるが、SAI-1では精密な重み最適化・UIへの可視化は行っていない。
+- **UI統合**: SAI-1はCLI・テスト経路のみで完結しており、`/v2/company-lab`画面への統合（自動テストプレイモードの画面操作、診断情報の可視化）は行っていない。
 - 結論・Phase 8以降への申し送り: 現行のcompany fixture設計（各社が常時ほぼ全商品を生産）を前提とする限り、`complexityStress`を「警告に使える差別化変数」として機能させるには、(1) `productMixComplexity`の算出方法自体の見直し（例: 商品種類数ではなく生産量シェアの偏り等を使う）、(2) 5社フィクスチャの商品構成に意図的な差を持たせる、のいずれかが必要。いずれも品質パラメータ・fixtureの本格校正であり、本Phaseの対象外のためPhase 8以降の校正課題として送る。

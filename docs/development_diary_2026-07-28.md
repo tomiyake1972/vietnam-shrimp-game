@@ -265,3 +265,39 @@ V1（`main`ブランチ・`v1-maintenance`ブランチ）には一切変更を�
 - **原料不足時の実生産量縮小**：新規実装は不要と判断（既存実装で要件を充足）。将来、生産優先順位の
   ユーザー向けUI表示や、Export以外の画面（GM分析ブック等）への計画未達理由の可視化が必要になった場合は
   別途要望として扱う。
+
+## D. Phase SAI-1: 標準経営AI基盤の実装（当セッション追記）
+
+develop/v2の`cd15bef`（上記A・Bを含む最新状態）から`feature/v2-standard-ai-foundation-rebuild`を作成し
+（同名`feature/v2-standard-ai-foundation`は既に別環境で`main`から誤って作成されていたため、削除・上書きせず
+別名で作成、以降一切触れていない）、「標準経営AI基盤（SAI-1）」を実装した。三宅さんの指示により今回は
+develop/v2へのマージは行わず、featureブランチへのpushまでを完了させている。詳細な設計・全理由コード・
+検証結果は`docs/v2/COMPANY_LAB_ARCHITECTURE_v0.1.md` §14に記載した。ここでは要点のみ記す。
+
+**実装内容**: `app/lib/v2/companyLab/standardAi/`配下に、5社すべてに同一ロジック・同一閾値
+（`parameters.ts`の`STANDARD_AI_PARAMETERS_V1`一箇所）を適用する意思決定生成モジュールを新設した。
+既存の`CompanyDecisionProvider`型（`fixture, ownState, publicInfo, period, turn`の5引数のみ）を完全に
+満たす`generateStandardAiDecision`を実装し、既存の`autoPolicy.ts`・ランナー（`runCompanyLabWithAutoPolicyForAllCompanies`）は
+一切変更していない。CLIには`--provider autoPolicy|standardAi`（既定`autoPolicy`）を追加し、既存呼び出しの
+挙動は完全に不変。
+
+**32ターン検証で発見・修正した不具合**（開発中、全社が同一シードで支払不能に陥る初期実装を確認し、
+根本原因を特定・修正）:
+
+1. 完成品在庫過剰時の「積極的売り切り」上乗せが、誤って生産計画側の抑制式にも伝播し、在庫が減っても
+   生産が減らない循環を生んでいた不具合（粗利益率の悪化として顕在化）。
+2. 持続的な人員過剰の判定にエンジンの労働稼働率指標（配属済みワーカーに対する比率のため常に1.0近辺に
+   張り付く）を使っていたため、遊休労務費（常用人件費の6割前後）が高止まりし続ける不具合。
+
+いずれも会社固有のハードコーディングではない一般的な修正であり、修正後は複数シードで8Q/32Qの再現性を
+再確認した。修正後の32ターン実行では、健全な会社（BAL/CONSV）は黒字で安定して推移し、既存`autoPolicy.ts`と
+同一シードで比較しても同じ3社（MASS/JPQ/VAP）が支払不能に陥ること・最終借入残高が同程度のオーダーである
+ことを確認しており、これら3社の帰結はSAI-1固有の不具合ではなく既存fixtureのゲームバランス（収益力）に
+起因する可能性が高いと判断した（詳細な根拠は§14.10）。
+
+**テスト・回帰**: 新規27件（単体16件・8Q/32Q統合11件）を追加し、`npm test`は既存1621件＋新規27件＝
+**合計1648件、全件成功**。`npx tsc --noEmit`・`npm run lint`はいずれもエラー0件・警告0件、`npm run build`成功。
+V1コードは本Phaseで一切変更していない。
+
+**コミット・push**: 実装＋テストは`1a7fc74`（`feature/v2-standard-ai-foundation-rebuild`、develop/v2の
+`cd15bef`からの差分）としてコミット・push済み。develop/v2・mainへのマージ・直接pushは行っていない。
