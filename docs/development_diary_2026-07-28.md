@@ -301,3 +301,33 @@ V1コードは本Phaseで一切変更していない。
 
 **コミット・push**: 実装＋テストは`1a7fc74`（`feature/v2-standard-ai-foundation-rebuild`、develop/v2の
 `cd15bef`からの差分）としてコミット・push済み。develop/v2・mainへのマージ・直接pushは行っていない。
+
+## E. Phase SAI-1.5: マージ前補完（定量分析・原因分解レポート、当セッション追記）
+
+三宅さんの指示により、SAI-1のマージ前受入修正として、会社間の結果差を「シナリオ・外部環境／会社固有の
+初期条件／ゲームルール・パラメータ／標準AIの圧力判定・意思決定」の4要因へ分解して検証できる定量分析
+レポート機能を追加した（コミット`d461f42`）。**ゲームバランス自体は変更していない**。詳細は
+`docs/v2/COMPANY_LAB_ARCHITECTURE_v0.1.md` §15、および三宅さんへ別途送付する最終レポート本体を参照。
+ここでは要点のみ記す。
+
+**実装内容**: `app/lib/v2/companyLab/standardAi/report/`配下に読み取り専用のレポート生成モジュール群を
+新設。診断情報（`policy.ts`の`StandardAiQuarterDiagnostics`）へ、計算済みの圧力スコア(`pressures`)と
+当四半期の意思決定(`decision`)を追加（計算の重複なし）。原因分解のため、5社の初期条件をテスト専用
+ハーネスで1社の値へ統一して走らせる比較runner（Test B）・全社同一の固定意思決定で走らせる比較runner
+（Test C）を新規実装し、本番の`buildCompanyFixtures`・`initializeCompanyLab`は一切変更していない
+（`runner.ts`の`buildPreviousMarketContext`を非公開関数からexportへ変更した1行のみが本体側の変更）。
+
+**主な発見**（詳細は最終レポート本体・アーキテクチャ文書§15.5）: 5社の初期条件をテスト専用ハーネスで
+1社の値へ統一すると、どのテンプレート会社を使っても5社の`paymentDefault`発生タイミングが一致する一方、
+全社同一の固定意思決定（AIロジックを完全に取り除いた状態）でも会社ごとに異なる`paymentDefault`発生
+タイミングが生じた。複数seed（12seed）集計でも`MASS`/`VAP`/`CONSV`は12/12、`BAL`/`JPQ`は0/12という
+明確な二極化を確認した。これらは、Test AでSAI-1標準AIを使ったときに観測される会社間の財務悪化の格差が、
+AIロジックの会社差別化や乱数由来ではなく、既存fixtureの初期条件（財務・工場能力等）の差に起因する
+可能性が高いことを裏付けている。
+
+**テスト・回帰**: 新規9件を追加し、`npm test`は既存1648件＋新規9件＝**合計1657件、全件成功**。
+`npx tsc --noEmit`・`npm run lint`はいずれもエラー0件・警告0件、`npm run build`成功。8Q/32Qは
+`npx tsx scripts/generateSai1Report.ts <出力先>`で再実行可能（既定seed使用で再現性あり）。
+
+**コミット・push**: `d461f42`（`feature/v2-standard-ai-foundation-rebuild`、`1a7fc74`/`7cdd1ef`の続き）
+としてコミット・push済み。develop/v2・mainへのマージ・直接pushは行っていない。
