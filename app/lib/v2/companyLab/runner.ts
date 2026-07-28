@@ -40,7 +40,7 @@
 // 必須の配線）。
 
 import { PeriodV2 } from "../core/period";
-import { HosoEqTons, hosoEqTons, ratio, Score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
+import { HosoEqTons, hosoEqTons, ratio, roundHosoEqTons, Score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import {
   CONSUMER_MARKET_INVENTORY_PARAMETERS_V1,
@@ -702,12 +702,26 @@ export function advanceCompanyLabQuarter(
   // --- 資金制約後の実行計画: 国内買付希望数量を縮小し、重大延滞・支払不能の会社は
   // 輸入発注も止める（決定した希望自体=decisionsは変更せず、turnInputへ渡す実行値
   // だけを別に作る。実装指示§5.11「計画値と実行値を区別」）。
+  //
+  // 【fix/v2-procurement-mix-after-emergency-maturity Step 2】自社養殖の池入れ計画
+  // にも、国内買付と同じ資金制約スケール（constraint.scaleRatio）を適用する。
+  // これまで自社養殖だけが資金制約を一切受けずに希望どおり実行されており、
+  // 資金難の会社ほど自社養殖比率が不自然に高くなる（調達構成テストで検出された
+  // VAPの68%依存）原因になっていた。新しい係数・下限フロアは追加せず、
+  // 既存の scaleRatio をそのまま再利用する（将来の池入れ・収穫支出に対する
+  // 財務能力の簡略的な代理指標として、国内買付と同じ計算を流用するだけ）。
+  // scaleRatio=0（最大制約）の場合は池入れ量ゼロも許容する。輸入の二値遮断
+  // ロジックは変更しない。養殖原料の現金支出タイミング（収穫時）も変更しない。
   const constrainedDecisions: CompanyDecisionInput[] = decisions.map((d) => {
     const constraint = procurementConstraintByCompanyId.get(d.companyId)!;
     return {
       ...d,
       domesticPurchasePlan: { ...d.domesticPurchasePlan, desiredQuantity: hosoEqTons(constraint.constrainedDomesticPurchaseQuantityTons) },
       importOrders: constraint.importOrdersBlocked ? [] : d.importOrders,
+      aquacultureStockingPlans: d.aquacultureStockingPlans.map((plan) => ({
+        ...plan,
+        plannedStockingQuantity: hosoEqTons(roundHosoEqTons(unwrapUnit(plan.plannedStockingQuantity) * constraint.scaleRatio)),
+      })),
     };
   });
 
@@ -722,7 +736,7 @@ export function advanceCompanyLabQuarter(
       externalIntent,
     },
     importOrders: constrainedDecisions.flatMap((d) => d.importOrders),
-    aquacultureStockingPlans: decisions.flatMap((d) => d.aquacultureStockingPlans),
+    aquacultureStockingPlans: constrainedDecisions.flatMap((d) => d.aquacultureStockingPlans),
     existingContracts: state.contracts,
     existingLots: state.rawMaterialLots,
     seed: state.config.seed,
