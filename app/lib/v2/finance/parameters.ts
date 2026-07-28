@@ -21,6 +21,7 @@
 // 耐用年数で定額償却する）へ改め、コメント上の呼称の誤りも解消した。
 
 import { FinanceValidationError } from "./types";
+import { Product } from "../market/types";
 
 export interface FinanceParameters {
   readonly parametersVersion: string;
@@ -112,6 +113,25 @@ export interface FinanceParameters {
 
   /** 貸借一致・CF一致等の検証に使う許容誤差（USD）。 */
   readonly epsilonUsd: number;
+
+  /**
+   * 【商品別固定費配賦・労務費区分】管理会計専用パラメータ。財務会計
+   * （在庫評価・FIFOロット原価・COGS・PL/BS/CF）には一切使用しない。
+   * ContributionMarginReport.byProduct[].directFixedCostの算定にのみ使う、
+   * 並行した「配賦ビュー」のための係数。ゲーム開始時点で固定し、途中で
+   * 変更・遡及適用しない。
+   */
+  readonly managementAccounting: {
+    /**
+     * 商品別の「加工度ウェイト付き数量」配賦係数。共通工場・設備固定費
+     * （factoryFixedCost + utilityFixedCost + 既存資産減価償却費）を、
+     * 各商品のadjustedTons×本係数の比で配賦するために使う（数量そのものの
+     * 配賦ではなく、加工度＝設備占有・工程負荷の違いを反映するため）。
+     * 既存の加工費想定単価（HOSO $0.50/PD $0.75/VAP $1.20）の比から
+     * 初期値を導出（HOSOを1.0として正規化）。
+     */
+    readonly fixedCostAllocationCoefficientByProduct: Readonly<Record<Product, number>>;
+  };
 }
 
 export const FINANCE_PARAMETERS_V1: FinanceParameters = {
@@ -163,6 +183,16 @@ export const FINANCE_PARAMETERS_V1: FinanceParameters = {
   },
 
   epsilonUsd: 0.01,
+
+  managementAccounting: {
+    // 既存の加工費想定単価 $0.50(HOSO) / $0.75(PD) / $1.20(VAP) の比から導出
+    // （HOSOを1.0に正規化: 0.75/0.50=1.5, 1.20/0.50=2.4）。
+    fixedCostAllocationCoefficientByProduct: {
+      hoso: 1.0,
+      pd: 1.5,
+      vap: 2.4,
+    },
+  },
 };
 
 /**
@@ -182,3 +212,21 @@ function assertValidExistingAssetRatios(p: FinanceParameters): void {
   }
 }
 assertValidExistingAssetRatios(FINANCE_PARAMETERS_V1);
+
+/**
+ * 【商品別固定費配賦】fixedCostAllocationCoefficientByProductの全商品が正の
+ * 有限数であることを検証する（0以下や非数だと配賦比率の計算がゼロ除算・
+ * 負値になり得るため、モジュール読み込み時点で校正ミスを検知する）。
+ */
+function assertValidFixedCostAllocationCoefficients(p: FinanceParameters): void {
+  const coeffs = p.managementAccounting.fixedCostAllocationCoefficientByProduct;
+  for (const product of Object.keys(coeffs) as Product[]) {
+    const value = coeffs[product];
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new FinanceValidationError(
+        `finance/parameters.ts: managementAccounting.fixedCostAllocationCoefficientByProduct.${product}(${value}) は正の有限数である必要があります。`
+      );
+    }
+  }
+}
+assertValidFixedCostAllocationCoefficients(FINANCE_PARAMETERS_V1);

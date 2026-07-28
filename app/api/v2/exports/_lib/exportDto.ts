@@ -28,13 +28,23 @@
 // 一切含めない。全社スコープ（AllCompaniesExportPayload、GMのみ）は全社の詳細・
 // 意思決定・処理結果・市場全体を収録する。両者を混在させない。
 //
+// 【v1.3（商品別固定費配賦・労務費区分）での出力範囲拡大】
+// 従来「intentionally NOT included」としていたCompanyFinancialQuarterResultの
+// 以下5系統は、このコメント自身が「製造原価計算書・限界利益計算書として将来の
+// 拡張候補」と明示的に宣言していたとおり、今回まとめて許可項目化した
+// （ExportFinancialResultへ追加。値の再計算は一切行わず、既存の内部型を
+// 1フィールドずつ列挙して組み立てるだけ。EXPORT_SCHEMA_VERSIONは追加のみの
+// 変更のため据え置き）。
+//   - manufacturingCost → ExportManufacturingCost（製造原価計算書の基礎データ）
+//   - qualityLoss → ExportQualityLoss
+//   - costRecords → ExportCostRecord[]（固変分解・ドライバー付きコスト記録）
+//   - contributionMargin → ExportContributionMarginReport
+//     （商品別固定費配賦・労務費区分で新設したbyProduct[].directFixedCost・
+//     commonFixedCostを含む。management-accounting-only、財務会計の在庫評価・
+//     COGSには一切影響しない値であることは quarterClose.ts 側の実装・テスト参照）
+//   - absorptionVariableReconciliation → ExportAbsorptionVariableReconciliation
+//
 // 【intentionally NOT included（保存データには存在するが出力しない）】
-//   - CompanyFinancialQuarterResult.manufacturingCost（ManufacturingCostBreakdown）
-//   - CompanyFinancialQuarterResult.qualityLoss（QualityLossBreakdown）
-//   - CompanyFinancialQuarterResult.costRecords（readonly CostRecord[]）
-//   - CompanyFinancialQuarterResult.contributionMargin（ContributionMarginReport）
-//   - CompanyFinancialQuarterResult.absorptionVariableReconciliation
-//     （以上は製造原価計算書・限界利益計算書として将来の拡張候補）
 //   - CompanyLabQuarterHistoryEntry.preProcessingStateSnapshot / postProcessingStateSnapshot
 //     を丸ごと出すことはしない（ランタイム内部スナップショット全体を出すと、財務・資金・
 //     設備投資の確定結果が二重に出てしまう上、内部専用フィールドが自動的に漏れる）。
@@ -52,10 +62,16 @@
 //     pendingAquaculture* からの部分的な再構成のみ可能）。
 
 import {
+  AbsorptionVariableReconciliation,
   BalanceSheet,
   CashFlowStatement,
   CompanyFinancialQuarterResult,
+  ContributionMarginByDimension,
+  ContributionMarginReport,
+  CostRecord,
+  ManufacturingCostBreakdown,
   ProfitAndLossStatement,
+  QualityLossBreakdown,
 } from "../../../../lib/v2/finance/types";
 import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
 import { CapexQuarterResult } from "../../../../lib/v2/capex";
@@ -353,6 +369,22 @@ export interface ExportFinancialResult {
   readonly profitAndLoss: ExportProfitAndLoss;
   readonly balanceSheet: ExportBalanceSheet;
   readonly cashFlow: ExportCashFlow;
+  /** 【v1.3】当期発生製造原価の内訳（製造原価計算書の基礎データ）。 */
+  readonly manufacturingCost: ExportManufacturingCost;
+  /** 【v1.3】当期の品質損失内訳。 */
+  readonly qualityLoss: ExportQualityLoss;
+  /** 【v1.3】固変分解・ドライバー付きコスト記録（商品・市場・工場への帰属付き）。 */
+  readonly costRecords: readonly ExportCostRecord[];
+  /**
+   * 【v1.3】変動原価計算ベースの限界利益レポート（management-accounting-only）。
+   * byProduct[].directFixedCostは商品別固定費配賦・労務費区分で新設した値
+   * （常用労務費の実配属人数比配賦＋共通工場・設備固定費の加工度ウェイト付き
+   * 数量配賦）で、財務会計側（profitAndLoss/balanceSheet/cashFlow等）には
+   * 一切影響しない。
+   */
+  readonly contributionMargin: ExportContributionMarginReport;
+  /** 【v1.3】全部原価計算と変動原価計算の利益差異調整。 */
+  readonly absorptionVariableReconciliation: ExportAbsorptionVariableReconciliation;
   readonly cashShortfall: boolean;
   readonly cashShortfallAmount: number;
   readonly negativeEquity: boolean;
@@ -365,9 +397,240 @@ export function buildExportFinancialResult(result: CompanyFinancialQuarterResult
     profitAndLoss: buildExportProfitAndLoss(result.profitAndLoss),
     balanceSheet: buildExportBalanceSheet(result.balanceSheet),
     cashFlow: buildExportCashFlow(result.cashFlow),
+    manufacturingCost: buildExportManufacturingCost(result.manufacturingCost),
+    qualityLoss: buildExportQualityLoss(result.qualityLoss),
+    costRecords: buildExportCostRecords(result.costRecords),
+    contributionMargin: buildExportContributionMarginReport(result.contributionMargin),
+    absorptionVariableReconciliation: buildExportAbsorptionVariableReconciliation(result.absorptionVariableReconciliation),
     cashShortfall: result.cashShortfall,
     cashShortfallAmount: result.cashShortfallAmount,
     negativeEquity: result.negativeEquity,
+  };
+}
+
+// ---------------------------------------------------------------------
+// 2.5 製造原価計算書・限界利益計算書（v1.3、商品別固定費配賦・労務費区分）
+// ---------------------------------------------------------------------
+
+export interface ExportManufacturingCost {
+  readonly domesticRawMaterialCost: number;
+  readonly importedRawMaterialCost: number;
+  readonly aquacultureRawMaterialCost: number;
+  readonly regularLaborCost: number;
+  readonly productiveRegularLaborCost: number;
+  readonly idleLaborCost: number;
+  readonly temporaryWorkerCost: number;
+  readonly overtimeCost: number;
+  readonly hosoProcessingCost: number;
+  readonly pdAdditionalProcessingCost: number;
+  readonly vapAdditionalProcessingCost: number;
+  readonly factoryFixedCost: number;
+  readonly utilityFixedCost: number;
+  readonly utilityVariableCost: number;
+  readonly depreciationCost: number;
+  readonly existingAssetBuildingDepreciationCost: number;
+  readonly existingAssetMachineryDepreciationCost: number;
+  readonly capexAssetsBuildingDepreciationCost: number;
+  readonly capexAssetsMachineryDepreciationCost: number;
+  readonly reworkCost: number;
+}
+
+export function buildExportManufacturingCost(mc: ManufacturingCostBreakdown): ExportManufacturingCost {
+  return {
+    domesticRawMaterialCost: mc.domesticRawMaterialCost,
+    importedRawMaterialCost: mc.importedRawMaterialCost,
+    aquacultureRawMaterialCost: mc.aquacultureRawMaterialCost,
+    regularLaborCost: mc.regularLaborCost,
+    productiveRegularLaborCost: mc.productiveRegularLaborCost,
+    idleLaborCost: mc.idleLaborCost,
+    temporaryWorkerCost: mc.temporaryWorkerCost,
+    overtimeCost: mc.overtimeCost,
+    hosoProcessingCost: mc.hosoProcessingCost,
+    pdAdditionalProcessingCost: mc.pdAdditionalProcessingCost,
+    vapAdditionalProcessingCost: mc.vapAdditionalProcessingCost,
+    factoryFixedCost: mc.factoryFixedCost,
+    utilityFixedCost: mc.utilityFixedCost,
+    utilityVariableCost: mc.utilityVariableCost,
+    depreciationCost: mc.depreciationCost,
+    existingAssetBuildingDepreciationCost: mc.existingAssetBuildingDepreciationCost,
+    existingAssetMachineryDepreciationCost: mc.existingAssetMachineryDepreciationCost,
+    capexAssetsBuildingDepreciationCost: mc.capexAssetsBuildingDepreciationCost,
+    capexAssetsMachineryDepreciationCost: mc.capexAssetsMachineryDepreciationCost,
+    reworkCost: mc.reworkCost,
+  };
+}
+
+export interface ExportQualityLoss {
+  readonly qualityDiscardLoss: number;
+  readonly rawMaterialExpiryLoss: number;
+  readonly finishedGoodsWriteOffLoss: number;
+  readonly reworkCost: number;
+  readonly downgradeSalesDeduction: number;
+  readonly discardQuantityTons: number;
+  readonly reworkQuantityTons: number;
+  readonly downgradeQuantitySoldTons: number;
+}
+
+export function buildExportQualityLoss(q: QualityLossBreakdown): ExportQualityLoss {
+  return {
+    qualityDiscardLoss: q.qualityDiscardLoss,
+    rawMaterialExpiryLoss: q.rawMaterialExpiryLoss,
+    finishedGoodsWriteOffLoss: q.finishedGoodsWriteOffLoss,
+    reworkCost: q.reworkCost,
+    downgradeSalesDeduction: q.downgradeSalesDeduction,
+    discardQuantityTons: q.discardQuantityTons,
+    reworkQuantityTons: q.reworkQuantityTons,
+    downgradeQuantitySoldTons: q.downgradeQuantitySoldTons,
+  };
+}
+
+export interface ExportCostRecord {
+  readonly account: string;
+  readonly behavior: string;
+  readonly fixedPortion: number;
+  readonly variablePortion: number;
+  readonly driver: string;
+  readonly driverQuantity: number;
+  readonly driverUnitRate: number;
+  readonly product: string | null;
+  readonly market: string | null;
+  readonly factoryId: string | null;
+  readonly period: PeriodV2;
+  readonly shortTermReducibility: string;
+  readonly sourceRef: string;
+}
+
+export function buildExportCostRecords(records: readonly CostRecord[]): readonly ExportCostRecord[] {
+  return records.map((r) => ({
+    account: r.account,
+    behavior: r.behavior,
+    fixedPortion: r.fixedPortion,
+    variablePortion: r.variablePortion,
+    driver: r.driver,
+    driverQuantity: r.driverQuantity,
+    driverUnitRate: r.driverUnitRate,
+    product: r.product ?? null,
+    market: r.market ?? null,
+    factoryId: r.factoryId ?? null,
+    period: r.period,
+    shortTermReducibility: r.shortTermReducibility,
+    sourceRef: r.sourceRef,
+  }));
+}
+
+export interface ExportContributionMarginByDimension {
+  readonly key: string;
+  readonly grossRevenue: number;
+  readonly salesDeduction: number;
+  readonly netRevenue: number;
+  readonly variableCost: number;
+  readonly contributionMargin: number;
+  readonly contributionMarginRatio: number | null;
+  /**
+   * この単位（商品または市場）に直接帰属できる固定費。商品別（key=Product）は
+   * 【商品別固定費配賦・労務費区分】常用労務費の実配属人数比配賦＋共通工場・
+   * 設備固定費の加工度ウェイト付き数量配賦の合計（quarterClose.tsの
+   * computeManagementAccountingProductFixedCostAllocation参照）。市場別は未実装のため常に0。
+   */
+  readonly directFixedCost: number;
+}
+
+function buildExportContributionMarginByDimension(d: ContributionMarginByDimension): ExportContributionMarginByDimension {
+  return {
+    key: d.key,
+    grossRevenue: d.grossRevenue,
+    salesDeduction: d.salesDeduction,
+    netRevenue: d.netRevenue,
+    variableCost: d.variableCost,
+    contributionMargin: d.contributionMargin,
+    contributionMarginRatio: d.contributionMarginRatio ?? null,
+    directFixedCost: d.directFixedCost,
+  };
+}
+
+export interface ExportContributionMarginReport {
+  readonly grossRevenue: number;
+  readonly salesDeduction: number;
+  readonly netRevenue: number;
+  readonly variableRawMaterialCost: number;
+  readonly variableProcessingCost: number;
+  readonly variableLaborCost: number;
+  readonly variableQualityCost: number;
+  readonly variableSellingCost: number;
+  readonly totalVariableCost: number;
+  readonly contributionMargin: number;
+  readonly contributionMarginRatio: number | null;
+  readonly fixedManufacturingCost: number;
+  readonly fixedPersonnelCost: number;
+  readonly fixedSellingAdminCost: number;
+  readonly totalFixedCost: number;
+  readonly managementOperatingProfit: number;
+  readonly breakEvenRevenue: number | null;
+  readonly marginOfSafety: number | null;
+  readonly marginOfSafetyRatio: number | null;
+  readonly operatingLeverage: number | null;
+  readonly assumedProductMix: readonly { readonly product: string; readonly netRevenueShare: number }[];
+  /** 商品別限界利益・直接固定費（HOSO/PD/VAPの加工度ウェイト付き数量配賦。商品別固定費配賦・労務費区分）。 */
+  readonly byProduct: readonly ExportContributionMarginByDimension[];
+  readonly byMarket: readonly ExportContributionMarginByDimension[];
+  /** 商品・市場へ配賦していない共通固定費（= totalFixedCost − Σ byProduct[].directFixedCost）。 */
+  readonly commonFixedCost: number;
+  readonly commonVariableCost: number;
+}
+
+export function buildExportContributionMarginReport(cm: ContributionMarginReport): ExportContributionMarginReport {
+  return {
+    grossRevenue: cm.grossRevenue,
+    salesDeduction: cm.salesDeduction,
+    netRevenue: cm.netRevenue,
+    variableRawMaterialCost: cm.variableRawMaterialCost,
+    variableProcessingCost: cm.variableProcessingCost,
+    variableLaborCost: cm.variableLaborCost,
+    variableQualityCost: cm.variableQualityCost,
+    variableSellingCost: cm.variableSellingCost,
+    totalVariableCost: cm.totalVariableCost,
+    contributionMargin: cm.contributionMargin,
+    contributionMarginRatio: cm.contributionMarginRatio ?? null,
+    fixedManufacturingCost: cm.fixedManufacturingCost,
+    fixedPersonnelCost: cm.fixedPersonnelCost,
+    fixedSellingAdminCost: cm.fixedSellingAdminCost,
+    totalFixedCost: cm.totalFixedCost,
+    managementOperatingProfit: cm.managementOperatingProfit,
+    breakEvenRevenue: cm.breakEvenRevenue ?? null,
+    marginOfSafety: cm.marginOfSafety ?? null,
+    marginOfSafetyRatio: cm.marginOfSafetyRatio ?? null,
+    operatingLeverage: cm.operatingLeverage ?? null,
+    assumedProductMix: cm.assumedProductMix.map((m) => ({ product: m.product, netRevenueShare: m.netRevenueShare })),
+    byProduct: cm.byProduct.map(buildExportContributionMarginByDimension),
+    byMarket: cm.byMarket.map(buildExportContributionMarginByDimension),
+    commonFixedCost: cm.commonFixedCost,
+    commonVariableCost: cm.commonVariableCost,
+  };
+}
+
+export interface ExportAbsorptionVariableReconciliation {
+  readonly fixedCostInOpeningInventory: number;
+  readonly fixedCostAbsorbedIntoInventory: number;
+  readonly fixedCostReleasedThroughSales: number;
+  readonly fixedCostReleasedThroughWriteOff: number;
+  readonly fixedCostInClosingInventory: number;
+  readonly absorptionOperatingProfit: number;
+  readonly variableCostingOperatingProfit: number;
+  readonly profitDifference: number;
+}
+
+export function buildExportAbsorptionVariableReconciliation(
+  a: AbsorptionVariableReconciliation
+): ExportAbsorptionVariableReconciliation {
+  return {
+    fixedCostInOpeningInventory: a.fixedCostInOpeningInventory,
+    fixedCostAbsorbedIntoInventory: a.fixedCostAbsorbedIntoInventory,
+    fixedCostReleasedThroughSales: a.fixedCostReleasedThroughSales,
+    fixedCostReleasedThroughWriteOff: a.fixedCostReleasedThroughWriteOff,
+    fixedCostInClosingInventory: a.fixedCostInClosingInventory,
+    absorptionOperatingProfit: a.absorptionOperatingProfit,
+    variableCostingOperatingProfit: a.variableCostingOperatingProfit,
+    profitDifference: a.profitDifference,
   };
 }
 

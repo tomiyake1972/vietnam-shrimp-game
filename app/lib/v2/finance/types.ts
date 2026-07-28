@@ -537,7 +537,17 @@ export interface ContributionMarginByDimension {
   readonly contributionMargin: Usd;
   /** 純売上高0の場合はundefined。 */
   readonly contributionMarginRatio?: number;
-  /** この単位に直接帰属できる固定費（Phase 8Aでは0が基本。構造として保持）。 */
+  /**
+   * この単位に直接帰属できる固定費。
+   * 【商品別（key=Product）】管理会計専用の並行配賦（財務会計の在庫評価・
+   * COGSには一切影響しない）: (a) 常用労務費のうちproductive分
+   * （idleLaborCostは対象外）を商品別Σ assignedRegularHeadcount比で配賦、
+   * (b) 共通工場・設備固定費（factoryFixedCost＋utilityFixedCost＋
+   * depreciationCost）を商品別「加工度ウェイト付き数量」
+   * （adjustedTons×managementAccounting.fixedCostAllocationCoefficientByProduct）比
+   * で配賦、の合計（quarterClose.tsのcomputeManagementAccountingProductFixedCostAllocation参照）。
+   * 【市場別（key=DemandMarketId）】市場別の直接固定費配賦は未実装のため常に0。
+   */
   readonly directFixedCost: Usd;
 }
 
