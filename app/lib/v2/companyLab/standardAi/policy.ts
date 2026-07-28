@@ -31,12 +31,23 @@ import { buildStandardAiFinancingRequest } from "./decision/finance";
 import { buildStandardAiCapexDecision } from "./decision/capex";
 import { sumProductAmount } from "./types";
 import { StandardAiDiagnosticEntry } from "./reasonCodes";
+import { PressureScores } from "./pressures";
 
+// 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
+// 診断情報にこれまで捨てていた圧力スコア(pressures)と、当四半期の意思決定
+// そのもの(decision＝「希望値」)を追加で保持する。計算そのものは重複させない
+// （generateStandardAiDecisionWithDiagnostics内で既に計算済みの値をそのまま
+// 詰め直すだけ）。既存の`entries`の意味・件数は変更しない。
 export interface StandardAiQuarterDiagnostics {
   readonly companyId: string;
   readonly turn: number;
   readonly period: PeriodV2;
   readonly entries: readonly StandardAiDiagnosticEntry[];
+  /** 当四半期の圧力スコア一式（レポートの「圧力値推移」節で使用）。 */
+  readonly pressures: PressureScores;
+  /** 当四半期にAIが提出した意思決定（＝「希望値」。ゲーム側の実行値・補正後の
+   *  値と対比するため、レポート生成側で companySummaries 等と突き合わせる）。 */
+  readonly decision: CompanyDecisionInput;
 }
 
 export interface StandardAiDecisionWithDiagnostics {
@@ -99,7 +110,7 @@ export function generateStandardAiDecisionWithDiagnostics(
 
   return {
     decision,
-    diagnostics: { companyId: fixture.companyId, turn, period, entries },
+    diagnostics: { companyId: fixture.companyId, turn, period, entries, pressures, decision },
   };
 }
 
