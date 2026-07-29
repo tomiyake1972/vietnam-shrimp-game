@@ -14,8 +14,14 @@
 export * from "./types";
 export * from "./parameters";
 export { deriveVietnamBasePrices, deriveVietnamMarketReferencePrices, deriveTargetDemand } from "./marketAdapter";
-export { salesCoverageScore, processingCapacity } from "./salesForce";
+export { salesCoverageScore, processingCapacity, validateSalesForceHeadcountBudget } from "./salesForce";
 export { computeCompetitivenessWeight, computeCompetitivenessBreakdown, allocateMarketProduct } from "./allocation";
+export {
+  salesEffortWeightedQuantity,
+  computeMarketSalesEffort,
+  allocateHeadcountAcrossMarkets,
+  applyMarketSalesEffortCapacity,
+} from "./marketEffort";
 export { buildContractId, createContractsFromAllocation } from "./contracts";
 export { applyFulfillments, cancelContract, updateContractStatusesForQuarterEnd } from "./backlog";
 export { initializeSalesState, advanceSalesQuarter, runSalesQuartersForTesting } from "./runner";

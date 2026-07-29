@@ -203,7 +203,8 @@ export type CompanyReasonCode =
   | "PD_SUPPLY_INCREASE_LOWERS_PREMIUM" // PD供給増加によるプレミアム低下
   | "OVER_CONTRACTED_OVERDUE" // 契約過多による納期超過
   | "DISEASE_HARVEST_LOSS" // 疾病による養殖収穫減
-  | "AQUACULTURE_HARVEST_ON_TRACK"; // 養殖収穫が計画どおり
+  | "AQUACULTURE_HARVEST_ON_TRACK" // 養殖収穫が計画どおり
+  | "SALES_PLAN_REDUCED_FOR_EFFORT_CAPACITY"; // 市場別営業工数換算能力の不足により販売計画が縮小された
 
 /** 1件の理由コード（対象会社・簡潔な理由文つき）。 */
 export interface CompanyReasonEntry {

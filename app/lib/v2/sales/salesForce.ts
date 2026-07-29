@@ -13,6 +13,7 @@
 import { HosoEqTons, hosoEqTons, roundHosoEqTons } from "../core/units";
 import { SalesValidationError } from "./types";
 import { SalesParameters } from "./parameters";
+import { DemandMarketId } from "../market/types";
 
 function assertNonNegativeIntegerHeadcount(headcount: number): void {
   if (!Number.isInteger(headcount) || headcount < 0) {
@@ -46,31 +47,51 @@ export function processingCapacity(headcount: number, params: SalesParameters): 
 
 /**
  * 【営業人員バジェット検証】1社の営業人員は`salesForceHeadcountTotal`人しかいない
- * （companyLab/fixtures.tsで会社ごとに固定）。ところが販売計画(salesPlans)は
- * 「市場×商品」単位の行で構成され、各行が独立に`salesForceHeadcount`を持つため、
- * 同じ人員をあたかも複数の商品ラインに同時配置できるかのように入力できてしまう
- * （例：3市場×3商品=9行すべてに6人と入力すると、カバレッジ・処理能力の計算上は
- * 9行分＝54人ぶんの効果を得るが、支払う人件費は実在する18人ぶんのまま）。
+ * （companyLab/fixtures.tsで会社ごとに固定）。販売計画(salesPlans)は「市場×商品」
+ * 単位の行で構成されるが、【SAI-2追加作業: 市場別営業配置】以降は「同じ市場の
+ * HOSO/PD/VAPは同じ営業チーム（同一人数）を共有する」という前提に変わったため、
+ * 単純な行ごとの合計ではなく、**市場ごとに重複排除したうえでの合計**が実在する
+ * 営業人員数を超えていないかを検証する（例：CN市場のHOSO/PD/VAP各行に同じ8人と
+ * 入力するのは正しい入力であり、8+8+8=24人と誤カウントしてはならない）。
  *
- * この関数は、1社の全salesPlans行の`salesForceHeadcount`合計が、その会社の
- * 実在する営業人員数（fixture.salesForceHeadcountTotal）を超えていないことを
- * 検証する。超えている場合はSalesValidationErrorを投げる。
+ * 検証内容:
+ *   1. 同一市場内の全行で`salesForceHeadcount`が一致していること（不一致は入力ミス。
+ *      同一市場に異なる人数を指定することはできない）。
+ *   2. 市場ごとに1回だけ数えたうえでの合計人数が、実在する営業人員数を超えないこと。
  *
  * 【設計判断】「各市場ごとの上限」ではなく「全社合計の上限」にしているのは、
  * 現実には同じ営業チームが複数商品を兼務できても、複数市場を同時に掛け持ちする
  * ことは（少なくとも本モデルでは）想定していないため。全社合計を守っていれば、
  * 市場間の配分は会社の裁量に委ねる。
+ *
+ * 【sales/marketEffort.tsとの関係】applyMarketSalesEffortCapacity内でも同様の
+ * 「同一市場内で人数一致」の検証を行っている。本関数は意思決定の受理可否を
+ * 会社単位でまとめてエラーにする早期バリデーション（companyLab/runner.ts）で、
+ * marketEffort.ts側はエンジン内部（advanceSalesQuarter、どの呼び出し元であっても
+ * 必ず通る）での構造的な安全網であり、同じ不変条件を異なる層で確認しているだけで
+ * 二重の制約を課しているわけではない。
  */
 export function validateSalesForceHeadcountBudget(
-  salesPlans: readonly { readonly salesForceHeadcount: number }[],
+  salesPlans: readonly { readonly market: DemandMarketId; readonly salesForceHeadcount: number }[],
   salesForceHeadcountTotal: number
 ): void {
-  const totalAssigned = salesPlans.reduce((sum, p) => sum + p.salesForceHeadcount, 0);
+  const headcountByMarket = new Map<DemandMarketId, number>();
+  for (const p of salesPlans) {
+    const existing = headcountByMarket.get(p.market);
+    if (existing !== undefined && existing !== p.salesForceHeadcount) {
+      throw new SalesValidationError(
+        `市場 "${p.market}" 内で、商品ごとに異なる営業人員(salesForceHeadcount)が指定されています` +
+          `（${existing}人 と ${p.salesForceHeadcount}人）。同一市場内の全商品は同一の営業人員数を共有する必要があります。`
+      );
+    }
+    headcountByMarket.set(p.market, p.salesForceHeadcount);
+  }
+  const totalAssigned = Array.from(headcountByMarket.values()).reduce((sum, h) => sum + h, 0);
   if (totalAssigned > salesForceHeadcountTotal) {
     throw new SalesValidationError(
-      `販売計画(salesPlans)の営業人員(salesForceHeadcount)の合計が、実在する営業人員数を超えています。` +
+      `販売計画(salesPlans)の営業人員(salesForceHeadcount)の合計（市場ごとに重複排除後）が、実在する営業人員数を超えています。` +
         `合計配置人数: ${totalAssigned}人、実在する営業人員数: ${salesForceHeadcountTotal}人。` +
-        `同じ人員を複数の市場×商品の行に重複して配置することはできません（1人は1つの市場×商品にのみ配置可能という前提です）。`
+        `同じ人員を複数の市場に重複して配置することはできません（1人は1つの市場にのみ配置可能という前提です。同一市場内の複数商品では共有できます）。`
     );
   }
 }

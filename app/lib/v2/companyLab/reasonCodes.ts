@@ -9,6 +9,7 @@ import { MarketPriceDriver } from "../market/types";
 import { AquacultureHarvestResult } from "../rawMaterials/types";
 import { ProductionAllocationEntry, ProductionShortfallReason } from "../production/types";
 import { CompanyId, CompanyAllocationEntry, SalesContract } from "../sales/types";
+import { MarketSalesEffortAdjustment } from "../sales/marketEffort";
 import { CompanyReasonCode, CompanyReasonEntry } from "./types";
 
 const EPSILON = 1e-6;
@@ -55,6 +56,24 @@ export function reasonCodesFromSalesAllocation(companyId: CompanyId, entry: Comp
     result.push({ code: "SALES_FORCE_SHORTAGE", companyId, message: `営業人員によるカバレッジが低く（${(entry.coverageScore * 100).toFixed(0)}%）、成約機会を取りきれていない。` });
   }
   return result;
+}
+
+/**
+ * 【SAI-2追加作業: 市場別営業配置・商品別営業工数】会社×市場ごとの営業工数換算
+ * 能力制約(sales/marketEffort.ts)により、当期の販売計画(desiredQuantity)が実際に
+ * 比例縮小された場合の理由コードを抽出する（1社ぶんに絞り込み済み）。
+ */
+export function reasonCodesFromSalesEffortAdjustments(companyId: CompanyId, adjustments: readonly MarketSalesEffortAdjustment[]): readonly CompanyReasonEntry[] {
+  return adjustments
+    .filter((a) => a.companyId === companyId)
+    .map((a) => ({
+      code: "SALES_PLAN_REDUCED_FOR_EFFORT_CAPACITY" as const,
+      companyId,
+      message:
+        `市場 "${a.market}": 営業人員${a.headcount}人による処理能力（${a.capacityHosoEqTons.toFixed(1)}トン、HOSO換算）に対し、` +
+        `商品別営業工数を加味した希望販売量（${a.desiredEffortWeightedQuantity.toFixed(1)}トン相当）が上回ったため、` +
+        `全商品の販売計画を一律${(a.scaleFactor * 100).toFixed(0)}%へ縮小した。`,
+    }));
 }
 
 /** 国内買付配分（会社の1件）から、国内買付競争激化の理由コードを抽出する。 */

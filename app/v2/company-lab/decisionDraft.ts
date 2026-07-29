@@ -174,11 +174,22 @@ export interface SalesForceAllocationSummary {
   readonly isOverAllocated: boolean;
 }
 
+/**
+ * 【SAI-2追加作業: 市場別営業配置・商品別営業工数】以前は行（市場×商品）ごとの
+ * salesForceHeadcountを単純合計していたが、同一市場のHOSO/PD/VAPが同じ営業人員数を
+ * 共有する新しい前提（sales/salesForce.tsのvalidateSalesForceHeadcountBudget）の
+ * もとでは、市場単位で重複排除してから合計しないと二重・三重カウントになる
+ * （例：CN市場のHOSO/PD/VAP全行に8人と入力するのは正しい入力であり24人ではない）。
+ */
 export function summarizeSalesForceAllocation(
-  salesPlans: readonly { readonly salesForceHeadcount: number }[],
+  salesPlans: readonly { readonly market: DemandMarketId; readonly salesForceHeadcount: number }[],
   availableTotal: number
 ): SalesForceAllocationSummary {
-  const assignedTotal = salesPlans.reduce((sum, p) => sum + (Number.isFinite(p.salesForceHeadcount) ? p.salesForceHeadcount : 0), 0);
+  const headcountByMarket = new Map<DemandMarketId, number>();
+  for (const p of salesPlans) {
+    if (Number.isFinite(p.salesForceHeadcount)) headcountByMarket.set(p.market, p.salesForceHeadcount);
+  }
+  const assignedTotal = Array.from(headcountByMarket.values()).reduce((sum, h) => sum + h, 0);
   const isOverAllocated = assignedTotal > availableTotal;
   return {
     assignedTotal,
@@ -192,6 +203,20 @@ export function summarizeSalesForceAllocation(
 /** 「営業配分をすべて0に戻す」操作。他のドラフト項目には一切触れない。 */
 export function resetAllSalesForceHeadcountToZero(draft: CompanyDecisionDraft): CompanyDecisionDraft {
   return { ...draft, salesPlans: draft.salesPlans.map((row) => ({ ...row, salesForceHeadcount: 0 })) };
+}
+
+/**
+ * 【SAI-2追加作業: 市場別営業配置・商品別営業工数】指定した市場の営業人員数を
+ * 変更し、同じ市場の全商品行（HOSO/PD/VAP）へ同一の値を同期する。同一市場内で
+ * 商品ごとに異なる営業人員数を持つことはできない、という新しい前提
+ * （sales/salesForce.tsのvalidateSalesForceHeadcountBudget）をUI入力の時点で
+ * 常に満たすようにするための操作。他の市場・他のドラフト項目には一切触れない。
+ */
+export function syncMarketSalesForceHeadcount(draft: CompanyDecisionDraft, market: DemandMarketId, headcount: number): CompanyDecisionDraft {
+  return {
+    ...draft,
+    salesPlans: draft.salesPlans.map((row) => (row.market === market ? { ...row, salesForceHeadcount: headcount } : row)),
+  };
 }
 
 // ---------------------------------------------------------------------

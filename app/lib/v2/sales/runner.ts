@@ -17,6 +17,7 @@ import {
 import { allocateMarketProduct } from "./allocation";
 import { createContractsFromAllocation } from "./contracts";
 import { deriveTargetDemand, deriveVietnamMarketReferencePrices } from "./marketAdapter";
+import { applyMarketSalesEffortCapacity } from "./marketEffort";
 import { SALES_PARAMETERS_V1, SalesParameters } from "./parameters";
 import { SalesQuarterInput, SalesQuarterRecord, SalesState } from "./types";
 
@@ -52,6 +53,13 @@ export function advanceSalesQuarter(
   const marketReferencePrices = deriveVietnamMarketReferencePrices(input.marketResult, destinationMarketPriceCoefficients);
   const targetDemandByMarketProduct = deriveTargetDemand(input.marketResult, input.marketInput, input.marketWeights);
 
+  // 【SAI-2追加作業: 市場別営業配置・商品別営業工数】成約配分(allocateMarketProduct)を
+  // 商品ごとに独立実行する前に、会社×市場で共有される営業人員から導かれる
+  // 営業工数換算能力の制約を一括で適用する（唯一の適用箇所。allocation.ts側の
+  // 既存の行単位capacity上限は、適用後の入力に対して数学的に非拘束となるため、
+  // 二重適用にはならない。詳細はsales/marketEffort.tsのコメント参照）。
+  const { adjustedPlans, adjustments: salesEffortAdjustments } = applyMarketSalesEffortCapacity(input.plans, params);
+
   const combos: Array<{ market: DemandMarketId; product: Product }> = [];
   for (const market of DEMAND_MARKET_IDS) {
     for (const product of PRODUCTS) {
@@ -60,22 +68,22 @@ export function advanceSalesQuarter(
   }
 
   const allocations = combos
-    .filter(({ market, product }) => input.plans.some((p) => p.market === market && p.product === product))
+    .filter(({ market, product }) => adjustedPlans.some((p) => p.market === market && p.product === product))
     .map(({ market, product }) =>
       allocateMarketProduct(
         market,
         product,
         period,
-        input.plans,
+        adjustedPlans,
         marketReferencePrices[market][product],
         targetDemandByMarketProduct[market][product],
         params
       )
     );
 
-  const newContracts = createContractsFromAllocation(allocations, input.plans, params);
+  const newContracts = createContractsFromAllocation(allocations, adjustedPlans, params);
 
-  const record: SalesQuarterRecord = { period, allocations, newContracts };
+  const record: SalesQuarterRecord = { period, allocations, newContracts, salesEffortAdjustments };
 
   return {
     currentPeriod: nextPeriod(period),

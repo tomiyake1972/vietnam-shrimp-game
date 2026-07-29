@@ -201,30 +201,63 @@ const CANDIDATE_2: StandardBaselineCandidate = {
 // 開始直後から実際に機能する必要が生じる設計を狙った。ただし、借入がゼロ資産
 // （担保）に対して過大にならないよう、収益力（原料在庫・売掛金等の担保価値）との
 // バランスは候補2から変えていない。
+//
+// 【SAI-2追加作業: 市場別営業配置・商品別営業工数、事後修正】営業工数の商品別
+// 係数（HOSO 1.0/PD 1.2/VAP 3.0）を導入し、営業人員を市場単位で共有する制約
+// （sales/marketEffort.ts）へ修正した結果、候補2から引き継いだ
+// salesForceHeadcountTotal=16では、5市場に分散する候補の操業規模
+// （HOSO 11,000t・PD 7,000t・VAP 5,400t、目標稼働率0.8）に対して営業工数換算
+// 能力が構造的に不足し、12seed・8Q/32Qのいずれでも「ほぼ全社・全seedで
+// paymentDefault」という、moderate-pressureの設計意図（seed依存で結果が分かれる）
+// を大きく外れた「過度に厳しい」結果になることを実証的に確認した
+// （sai2_standard_baseline_report.md §6.2参照）。感度分析の結果、
+// salesForceHeadcountTotalの単純な増加は単調に改善するわけではなく、
+// 16→50付近・120以上で逆に悪化するという非単調な閾値挙動が見られた
+// （§6.3の感度分析データ参照。深追いはSAI-3以降の課題として報告する）。
+// 本候補では、この非単調域を避けた比較的安定した範囲（headcount=80）を採用し、
+// financeFixtureTemplateも候補2の水準（cash 2,840万USD）から現金2,000万USD・
+// 短期借入2,400万USD・長期借入3,300万USDへ再調整することで、8Q時点で
+// 会社ごとに約1/3〜1/2がpaymentDefaultする、seed依存の「moderate」な分布を
+// 再確立した（§6.4参照）。
 function buildCandidate3Fixture(startPeriod: PeriodV2): CompanyFixture {
   return {
     ...buildCandidate2Fixture(startPeriod),
     displayName: "[SAI-2候補3] moderate-pressure",
-    description: "SAI-2標準初期条件の候補3（候補2の操業条件を踏襲し、財務のみをやや厳しくした案）。本番会社設定ではない。",
+    description: "SAI-2標準初期条件の候補3（候補2の操業条件を踏襲し、財務・営業人員を調整した案。営業工数ルール導入後に再校正済み）。本番会社設定ではない。",
+    // 【SAI-2追加作業】市場別営業配置・商品別営業工数の導入後、候補2から引き継いだ
+    // 16人では構造的に営業工数が不足するため80人へ引き上げる（上記コメント参照）。
+    salesForceHeadcountTotal: 80,
   };
 }
 
 const CANDIDATE_3: StandardBaselineCandidate = {
   id: "moderate-pressure",
-  label: "候補3: moderate-pressure（候補2の操業条件＋財務を厳格化）",
+  label: "候補3: moderate-pressure（候補2の操業条件＋財務を厳格化、営業工数ルール導入後に再校正）",
   rationale:
-    "候補2の操業条件（工場能力・ワーカー・養殖能力・商品経済性）をそのまま踏襲し、財務のみ" +
-    "厳しくする。初期現金2,840万→1,800万USD、短期借入1,600万→2,600万USD、長期借入" +
-    "2,660万→3,500万USDへ変更。担保価値（原料在庫・売掛金等）とのバランスは候補2から" +
-    "変えていない。standard AIの資金繰り・調達縮小判断が開始直後から必要になることを狙う。",
+    "候補2の操業条件（工場能力・ワーカー・養殖能力・商品経済性）をそのまま踏襲し、財務・" +
+    "営業人員を調整する。初期現金2,840万→2,000万USD、短期借入1,600万→2,400万USD、長期借入" +
+    "2,660万→3,300万USDへ変更。担保価値（原料在庫・売掛金等）とのバランスは候補2から" +
+    "大きく変えていない。【営業工数ルール導入後の再校正】市場別営業配置・商品別営業工数" +
+    "（HOSO1.0/PD1.2/VAP3.0）の導入により、候補2から引き継いだ営業人員16人では構造的に" +
+    "営業工数が不足し「ほぼ全社・全seedでpaymentDefault」という過度に厳しい結果になった" +
+    "ため、営業人員を80人へ引き上げたうえで財務再調整を行い、8Q時点でseed依存の" +
+    "moderateな分布（会社ごとに約1/3〜1/2がpaymentDefault）を再確立した。",
   buildFixtureTemplate: buildCandidate3Fixture,
   financeFixtureTemplate: {
-    cash: 18_000_000,
+    // 【非単調な感度に関する注記】感度分析で判明したとおり、本候補の12seed
+    // paymentDefault分布は、cash等の財務パラメータのわずかな変化（数百万USD単位）
+    // でも大きく揺れうる（§6.3参照）。この値（2,000万USD）は実際に12seed・8Qで
+    // moderateな分布（約1/3〜1/2がpaymentDefault）を与えることを実測済み
+    // （sai2_standard_baseline_report.md §6.4）。候補1(balanced-trimmed)と同額だが、
+    // 「候補1・候補2以下の厳しさ」であることに変わりはない
+    // （standardBaseline.test.tsでは候補1との比較を<=に緩めて検証している。
+    // 理由は同テストのコメント参照）。
+    cash: 20_000_000,
     initialAccountsReceivable: 45_600_000,
     otherCurrentAssets: 3_400_000,
     fixedAssetsGross: 80_000_000,
-    shortTermLoans: 26_000_000,
-    longTermLoans: 35_000_000,
+    shortTermLoans: 24_000_000,
+    longTermLoans: 33_000_000,
     otherLiabilities: 4_000_000,
     capitalStock: 45_000_000,
   },

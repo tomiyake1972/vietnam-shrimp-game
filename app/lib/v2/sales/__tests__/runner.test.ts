@@ -14,8 +14,13 @@ const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 function buildPlans(seedOffset: number): CompanySalesPlanEntry[] {
   const plans: CompanySalesPlanEntry[] = [];
   let i = 0;
+  let marketGroupIndex = 0;
   for (const companyId of COMPANIES) {
     for (const market of DEMAND_MARKET_IDS) {
+      // 【SAI-2追加作業: 市場別営業配置】同一市場のHOSO/PD/VAPは同じ営業人員数を
+      // 共有する必要があるため、headcountは会社×市場の組ごとに1つだけ決める
+      // （商品ごとにずらさない）。
+      const salesForceHeadcount = (marketGroupIndex + seedOffset) % 12;
       for (const product of PRODUCTS) {
         plans.push({
           companyId,
@@ -23,10 +28,11 @@ function buildPlans(seedOffset: number): CompanySalesPlanEntry[] {
           product,
           desiredQuantity: hosoEqTons(500 + ((i + seedOffset) % 7) * 50),
           priceAdjustmentUsdPerHosoEqKg: (((i + seedOffset) % 5) - 2) * 0.05,
-          salesForceHeadcount: (i + seedOffset) % 12,
+          salesForceHeadcount,
         });
         i++;
       }
+      marketGroupIndex++;
     }
   }
   return plans;

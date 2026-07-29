@@ -118,3 +118,56 @@ SAI-1.5マージ後）から新規ブランチ`feature/v2-sai2-standard-baseline
 - SAI-1.5で確認済みの品質事故システム（会社ID単位の独立乱数）に起因する会社間の残差は、標準初期条件でも
   同様に観測される（既知の残差であり、新たな不具合ではない）。
 - 詳細はSAI-2レポート（`docs/v2/reports/sai2_standard_baseline_report.md`）参照。
+
+---
+
+## 6. SAI-2追加作業: 市場別営業配置・商品別営業工数の実装と再基準テスト（同日追加）
+
+### 6.1 経緯
+
+三宅さんより、候補3「moderate-pressure」を暫定基準として受け入れつつ、(a) 旧営業ルールではHOSO/PD/VAPの
+営業負荷が実質同一である、(b) 候補3の32Q paymentDefault率がやや高い、の2点で「最終確定ではない」との
+ご指摘。調査の結果、(a)は設計思想の欠如ではなく実装バグ（`CompanySalesPlanEntry.salesForceHeadcount`が
+市場×商品の行単位で持たれ、`allocation.ts`が同じ人数を商品ごとに独立適用してしまう「幽霊能力」）と判明。
+
+### 6.2 実装
+
+- 営業工数係数（HOSO=1.0/PD=1.2/VAP=3.0）・市場単位の人員共有・`C(h)=200+4800h/(h+10)`制約を
+  新規モジュール`sales/marketEffort.ts`として実装。`allocation.ts`自体は変更せず、事前パス方式＋
+  数学的no-op証明（営業工数係数が全て1.0以上のため、事前パス後は行単位の旧上限が恒等的に非拘束）で
+  「同じ制約の二重適用」を回避した。
+- 標準AI（`standardAi/decision/sales.ts`）・旧5社AI（`autoPolicy.ts`）双方を、行単位の均等割りから
+  市場単位の営業工数比例配分＋自己制約適用（意思決定と実結果の食い違い防止）へ書き換え。
+- 新理由コード`SALES_PLAN_REDUCED_FOR_EFFORT_CAPACITY`（会社ラボ）・
+  `SALES_HEADCOUNT_INSUFFICIENT_TOTAL`/`VAP_MIX_INCREASES_SALES_EFFORT_NEED`（標準AI診断）を追加。
+- UI（`DecisionEditor.tsx`）の営業人員入力を市場単位で同期する`syncMarketSalesForceHeadcount`を追加。
+
+### 6.3 テスト
+
+directive項目6の10要件すべてに対応する新規テスト18件を作成（`sales/__tests__/marketEffort.test.ts`11件、
+`companyLab/standardAi/__tests__/salesEffort.test.ts`4件、`companyLab/persistence/__tests__/salesEffortRoundtrip.test.ts`3件）。
+既存テストのうち、市場×商品の行ごとに異なる営業人員を割り当てていたテストヘルパー6ファイルを、
+「市場内で人員数は一貫」という新制約に合わせて修正。既存5社アーキタイプ向けの回帰テスト2件
+（`runner.test.ts`のVAP特化アーキタイプ、`destinationMarketPricing.test.ts`のBAL）は、営業工数制約による
+新たな正当な信用degradeを理由コードで説明可能な場合は許容するよう更新。
+
+### 6.4 候補3の再校正
+
+旧営業人員16人のままでは12seed全てが即座にpaymentDefaultする極端な結果となったため、感度分析（非単調・
+カオス的な応答を確認: 16→ほぼ100%、50→16.7%、55→約97%、80→33-50%、120→100%、200→100%）の上、
+営業人員80人・現金2,000万USD・短期借入2,400万USD・長期借入3,300万USDへ再校正。8Qは狙いどおり
+moderate（33-50%）になったが、32Qは完走seed（7/12、残り5seedは既存の浮動小数点許容誤差バグで実行不能）に
+限っても57-100%とやや厳しい。詳細・トレース・申し送りは`docs/v2/reports/sai2_standard_baseline_report.md`
+§10を参照。
+
+### 6.5 検証・commit・push
+
+`npm test`（全1683件成功）・`npx tsc --noEmit`（エラー0件）・`npm run lint`（エラー0件、既存の無関係な
+warning2件のみ）・`npx next build`（成功）。`feature/v2-sai2-standard-baseline`ブランチへcommit・push済み。
+**develop/v2へはマージしていない**（実装指示どおり）。
+
+### 6.6 今後の申し送り
+
+- 既存5社アーキタイプの営業人員総数は営業工数ルール導入前の値のまま。再校正が必要かはSAI-3以降の判断。
+- `finance/quarterClose.ts`の`HEADCOUNT_EPSILON`許容誤差バグ（既存・無関係）は修正せず報告のみ。
+- 営業人員総数に対するpaymentDefault率の非単調・カオス的な感度は未解明。SAI-3での追加調査を推奨。

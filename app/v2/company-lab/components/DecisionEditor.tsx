@@ -18,6 +18,7 @@ import {
   CompanyDecisionDraft,
   resetAllSalesForceHeadcountToZero,
   summarizeSalesForceAllocation,
+  syncMarketSalesForceHeadcount,
 } from "../decisionDraft";
 import {
   addCapexCancelRequestToDraft,
@@ -466,9 +467,10 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                       disabled={disabled}
                       warn={salesForceAllocation.isOverAllocated}
                       onChange={(n) => {
-                        const next = [...draft.salesPlans];
-                        next[idx] = { ...row, salesForceHeadcount: Math.round(n) };
-                        onChange({ ...draft, salesPlans: next });
+                        // 【SAI-2追加作業: 市場別営業配置】営業人員は市場単位で共有される
+                        // （同一市場のHOSO/PD/VAP行は必ず同じ人数を持つ必要がある）ため、
+                        // このセルの編集は同じ市場の全商品行へ同期する。
+                        onChange(syncMarketSalesForceHeadcount(draft, row.market, Math.round(n)));
                       }}
                     />
                   </td>

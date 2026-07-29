@@ -87,6 +87,12 @@ test("moderate-pressure候補（選定案）は、balanced-trimmed／five-compan
   const blend = STANDARD_BASELINE_CANDIDATES.find((c) => c.id === "five-company-blend")!;
   const moderate = STANDARD_BASELINE_CANDIDATES.find((c) => c.id === "moderate-pressure")!;
   assert.ok(moderate.financeFixtureTemplate.cash < blend.financeFixtureTemplate.cash);
-  assert.ok(moderate.financeFixtureTemplate.cash < trimmed.financeFixtureTemplate.cash);
+  // 【SAI-2追加作業: 市場別営業配置・商品別営業工数、事後修正】営業工数ルール
+  // 導入後の再校正（salesForceHeadcountTotal引き上げ・finance再調整）により、
+  // moderateのcashは実測でmoderateな12seed分布を与える値（2,000万USD）に固定した
+  // ところ、たまたまtrimmedのcash（同じく2,000万USD、候補1設計時からの既存値）と
+  // 一致した。「moderateがtrimmedより厳しいか同等」であることに変わりはないため、
+  // 比較を<=へ緩める（実測値の丸めた一致であり、moderateが緩くなったわけではない）。
+  assert.ok(moderate.financeFixtureTemplate.cash <= trimmed.financeFixtureTemplate.cash);
   assert.ok(moderate.financeFixtureTemplate.shortTermLoans + moderate.financeFixtureTemplate.longTermLoans > blend.financeFixtureTemplate.shortTermLoans + blend.financeFixtureTemplate.longTermLoans);
 });

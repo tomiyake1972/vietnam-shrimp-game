@@ -17,6 +17,7 @@
 import { HosoEqTons, Score0to100, UsdPerHosoEqKg } from "../core/units";
 import { PeriodV2 } from "../core/period";
 import { DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
+import type { MarketSalesEffortAdjustment } from "./marketEffort";
 
 export class SalesValidationError extends Error {
   constructor(message: string) {
@@ -250,6 +251,13 @@ export interface SalesQuarterRecord {
   readonly period: PeriodV2;
   readonly allocations: readonly MarketProductAllocationResult[];
   readonly newContracts: readonly SalesContract[];
+  /**
+   * 【SAI-2追加作業: 市場別営業配置・商品別営業工数】会社×市場ごとの営業工数換算
+   * 能力制約により、当期の販売計画（desiredQuantity）が実際に比例縮小された場合の
+   * 記録（sales/marketEffort.ts の applyMarketSalesEffortCapacity）。縮小が
+   * 発生しなかった会社×市場は含まれない（空配列＝当期は誰も制約に達しなかった）。
+   */
+  readonly salesEffortAdjustments: readonly MarketSalesEffortAdjustment[];
 }
 
 export interface SalesState {

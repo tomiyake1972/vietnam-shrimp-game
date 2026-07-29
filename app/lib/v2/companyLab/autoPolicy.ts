@@ -30,6 +30,8 @@ import { CountryId, DemandMarketId, MarketQuarterResult, Product } from "../mark
 import { deriveMarketReferencePrices } from "../market/destinationPricing";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS } from "../market/destinationPricingParameters";
 import { CompanySalesPlanEntry, PlanCostExpectation } from "../sales/types";
+import { allocateHeadcountAcrossMarkets, salesEffortWeightedQuantity } from "../sales/marketEffort";
+import { SALES_PARAMETERS_V1 } from "../sales/parameters";
 import { AquacultureStockingPlanEntry, DomesticPurchasePlanEntry, ImportOrderInput } from "../rawMaterials/types";
 import { CompanyProductionPlanEntry, WorkerAssignment } from "../production/types";
 import { unwrapUsd } from "../finance/types";
@@ -323,40 +325,44 @@ function buildSalesPlans(
   // 「商品×市場参照価格に対して同じ相対的価格ポジションを取る」（実装指示 §17）。
   const referencePricesByMarket = referencePricesByMarketProduct(lastMarketResult);
 
-  // 【営業人員バジェット修正】以前は「市場数」でのみ均等割りした人数(headcountPerMarket)を
-  // 商品×市場の各行へ同じ値のまま重複して割り当てていたため、AIの標準案自体が
-  // salesForceHeadcountTotal（実在する営業人員数）を大きく超えてしまっていた
-  // （例：BALは18人だが、3市場×3商品=9行×6人=54人ぶんを計上）。
-  // sales/salesForce.tsのvalidateSalesForceHeadcountBudget()による検証を、AIの
-  // 標準案自体が必ず満たすよう、先に生成される行数を数えてから
-  // 「実在する人数 ÷ 行数」で均等割りする（端数は最初の行に寄せる）。
-  const plannedRows: { market: (typeof markets)[number]; product: Product }[] = [];
+  // 【営業人員バジェット修正・SAI-2追加作業で市場単位配分へ更新】以前は「行数」で
+  // 均等割りした人数を商品×市場の各行へ独立に割り当てていたため、(a) AIの標準案
+  // 自体がsalesForceHeadcountTotal（実在する営業人員数）を大きく超えてしまっていた
+  // うえ、(b) 同じ市場のHOSO/PD/VAPが異なる営業人員数を持ちうる、という新しい
+  // 「市場単位で営業人員を共有する」前提（sales/salesForce.tsの
+  // validateSalesForceHeadcountBudget・sales/marketEffort.ts）に違反していた。
+  // 市場×商品の希望数量をまず算出し、市場単位の営業工数換算需要
+  // （HOSO+1.2×PD+3.0×VAP）に比例して人数を配分する（同一市場の全商品行は
+  // 必ず同じ人数を共有する）。
+  const desiredByMarketProduct = new Map<DemandMarketId, Record<Product, number>>();
+  for (const market of markets) desiredByMarketProduct.set(market, { hoso: 0, pd: 0, vap: 0 });
   for (const product of ["hoso", "pd", "vap"] as const) {
     const totalDesired = totalDesiredByProduct[product];
     if (totalDesired <= EPSILON) continue;
-    markets.forEach((market, idx) => {
-      const weight = idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1);
-      if (totalDesired * weight <= EPSILON) return;
-      plannedRows.push({ market, product });
-    });
-  }
-  const rowCount = plannedRows.length;
-  const headcountPerRowBase = rowCount > 0 ? Math.floor(fixture.salesForceHeadcountTotal / rowCount) : 0;
-  const headcountRemainder = rowCount > 0 ? fixture.salesForceHeadcountTotal - headcountPerRowBase * rowCount : 0;
-  let rowIndex = 0;
-
-  for (const product of ["hoso", "pd", "vap"] as const) {
-    const totalDesired = totalDesiredByProduct[product];
-    if (totalDesired <= EPSILON) continue;
-    const costExpectation = buildCostExpectation(fixture, product, publicInfo);
     markets.forEach((market, idx) => {
       const weight = idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1);
       const desiredQuantity = totalDesired * weight;
       if (desiredQuantity <= EPSILON) return;
+      desiredByMarketProduct.get(market)![product] = desiredQuantity;
+    });
+  }
+  const marketsWithDemand = markets.filter((market) => {
+    const byProduct = desiredByMarketProduct.get(market)!;
+    return byProduct.hoso > EPSILON || byProduct.pd > EPSILON || byProduct.vap > EPSILON;
+  });
+  const effortDemandByMarket = new Map<DemandMarketId, number>(
+    marketsWithDemand.map((market) => [market, salesEffortWeightedQuantity(desiredByMarketProduct.get(market)!, SALES_PARAMETERS_V1)])
+  );
+  const headcountByMarket = allocateHeadcountAcrossMarkets(fixture.salesForceHeadcountTotal, effortDemandByMarket);
+
+  for (const market of marketsWithDemand) {
+    const byProduct = desiredByMarketProduct.get(market)!;
+    const rowHeadcount = headcountByMarket.get(market) ?? 0;
+    for (const product of ["hoso", "pd", "vap"] as const) {
+      const desiredQuantity = byProduct[product];
+      if (desiredQuantity <= EPSILON) continue;
+      const costExpectation = buildCostExpectation(fixture, product, publicInfo);
       const referencePrice = referencePricesByMarket ? referencePricesByMarket[market][product] : undefined;
-      // 端数(headcountRemainder)は最初の1行だけに寄せる（合計が実在人数を超えないことを保証）。
-      const rowHeadcount = headcountPerRowBase + (rowIndex === 0 ? headcountRemainder : 0);
-      rowIndex += 1;
       plans.push({
         companyId: fixture.companyId,
         market,
@@ -369,7 +375,7 @@ function buildSalesPlans(
         customerRelationship: ownState.customerTrustByMarket[market],
         deliveryReliability: ownState.deliveryReliabilityByMarket[market],
       });
-    });
+    }
   }
   return plans;
 }

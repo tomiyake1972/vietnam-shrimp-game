@@ -72,6 +72,7 @@ import { runTurn } from "../turn/runner";
 import { TurnOrchestratorInput } from "../turn/types";
 import { applyFulfillments, updateContractStatusesForQuarterEnd } from "../sales/backlog";
 import { validateSalesForceHeadcountBudget } from "../sales/salesForce";
+import { MarketSalesEffortAdjustment } from "../sales/marketEffort";
 import { CompanyId, MarketProductAllocationResult, SalesContract } from "../sales/types";
 import { AquacultureHarvestResult, DomesticPurchaseAllocationResult, RawMaterialLot } from "../rawMaterials/types";
 import {
@@ -143,6 +144,7 @@ import {
   reasonCodesFromOverdueContracts,
   reasonCodesFromProductionEntries,
   reasonCodesFromSalesAllocation,
+  reasonCodesFromSalesEffortAdjustments,
 } from "./reasonCodes";
 import { generateInitialContracts } from "./initialContracts";
 import {
@@ -432,6 +434,9 @@ function buildCompanySummary(
   fulfillmentUsage: readonly FinishedGoodsUsageRecord[],
   domesticAllocation: DomesticPurchaseAllocationResult,
   salesAllocations: readonly MarketProductAllocationResult[],
+  // 【SAI-2追加作業: 市場別営業配置・商品別営業工数】当期、営業工数換算能力の
+  // 不足により販売計画が縮小された会社×市場の記録（turnResult.salesRecord.salesEffortAdjustments）。
+  salesEffortAdjustments: readonly MarketSalesEffortAdjustment[],
   newImportLots: readonly RawMaterialLot[],
   arrivedImportLots: readonly RawMaterialLot[],
   newGrowingLots: readonly RawMaterialLot[],
@@ -510,10 +515,12 @@ function buildCompanySummary(
     const entry = allocation.companies.find((c) => c.companyId === companyId);
     return entry ? reasonCodesFromSalesAllocation(companyId, entry, unwrapUnit(allocation.basePrice)) : [];
   });
+  const salesEffortReasonCodes = reasonCodesFromSalesEffortAdjustments(companyId, salesEffortAdjustments);
 
   const reasonCodes: CompanyReasonEntry[] = [
     ...reasonCodesFromProductionEntries(companyId, companyEntries),
     ...salesReasonCodes,
+    ...salesEffortReasonCodes,
     ...(domesticEntry && desiredDomesticQuantity > EPSILON
       ? reasonCodeFromDomesticCompetition(companyId, domesticEntry.coverageScore, unwrapUnit(domesticEntry.allocatedQuantity) / desiredDomesticQuantity)
       : []),
@@ -865,6 +872,7 @@ export function advanceCompanyLabQuarter(
       fulfillmentPlan.usage,
       turnResult.domesticAllocation,
       turnResult.salesRecord.allocations,
+      turnResult.salesRecord.salesEffortAdjustments,
       turnResult.newImportLots,
       turnResult.arrivedImportLots,
       turnResult.newGrowingLots,

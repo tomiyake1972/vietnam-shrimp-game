@@ -8,6 +8,7 @@
 // 最小限の暫定値として置く）。
 
 import { Score0to100, score0to100 } from "../core/units";
+import { Product } from "../market/types";
 
 export interface SalesParameters {
   readonly parametersVersion: string;
@@ -27,6 +28,16 @@ export interface SalesParameters {
     /** 処理能力逓減曲線の半飽和点（この人数で増分上限の半分に到達）。 */
     readonly capacitySaturationHeadcount: number;
   };
+
+  /**
+   * 【SAI-2追加作業: 市場別営業配置・商品別営業工数】商品区分ごとの営業工数係数。
+   * 「営業工数換算数量 = HOSO数量 + PD係数×PD数量 + VAP係数×VAP数量」という
+   * 実装指示の式に使う。価格・加工難易度ではなく、顧客獲得・商品説明・サンプル
+   * 対応・仕様調整・契約管理等の「営業側の対応工数」を表す設計値。
+   * 【暫定値・確定値】三宅さんのご指示によりHOSO=1.0・PD=1.2・VAP=3.0で確定
+   * （PDはHOSOに近く、VAPだけが大幅に営業負荷が高い、という設計意図）。
+   */
+  readonly salesEffortCoefficients: Readonly<Record<Product, number>>;
 
   // --- 成約競争力の合成ウェイト（合計1.0を推奨） ---
   readonly competitivenessWeights: {
@@ -92,6 +103,12 @@ export const SALES_PARAMETERS_V1: SalesParameters = {
     baselineCapacityTons: 200,
     capacityMaxIncrementTons: 4800,
     capacitySaturationHeadcount: 10,
+  },
+
+  salesEffortCoefficients: {
+    hoso: 1.0,
+    pd: 1.2,
+    vap: 3.0,
   },
 
   competitivenessWeights: {

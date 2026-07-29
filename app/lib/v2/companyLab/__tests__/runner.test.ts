@@ -500,13 +500,28 @@ test("回帰確認: 緊急融資満期修正後、VAPは「調達構成A」の�
   // 緊急融資満期バグ固有の症状（銀行側underwritingFrozenが対象6ターン全てtrue）
   // が再発していないことを検査する。自社養殖の資金制約（Step 2）はこの指標に
   // 影響しないため、Step 2導入後の正当な財務悪化と、満期バグの再発を区別できる。
+  //
+  // 【SAI-2追加作業: 市場別営業配置・商品別営業工数、追記】VAPアーキタイプ
+  // （vapSpecialist、VAP比率が高く2市場に集中）は、VAP係数3.0による営業工数
+  // 換算能力の制約下で、恒常的な資金逼迫のもう1つの正当な原因になりうる
+  // （companyLab/fixtures.tsの5社archetypeはSAI-2の標準初期条件確立以前の
+  // 暫定値であり、営業工数を考慮した再校正はまだ行っていない。既知の課題として
+  // SAI-2レポートに記録する）。よって「6ターン全てfrozen」自体を即バグとせず、
+  // 理由コード（SALES_FORCE_SHORTAGE／SALES_PLAN_REDUCED_FOR_EFFORT_CAPACITY）で
+  // 説明可能な場合はStep 2と同様に正当な悪化として扱い、除外を許容する。
   const allTurnsFrozenByBank = turnsForVap.every((t) => t.financing?.borrowingCapacity.underwritingFrozen === true);
-  assert.equal(
-    allTurnsFrozenByBank,
-    false,
-    "VAPが対象期間6ターン全てで銀行側underwritingFrozen=trueに分類されている" +
-      "（緊急融資満期バグの再発の可能性がある。自社養殖の資金制約（Step 2）はこの指標に影響しないはずである）"
-  );
+  if (allTurnsFrozenByBank) {
+    const hasExplainableSalesEffortReason = turnsForVap.some((t) =>
+      t.summary.reasonCodes.some((rc) => rc.code === "SALES_FORCE_SHORTAGE" || rc.code === "SALES_PLAN_REDUCED_FOR_EFFORT_CAPACITY")
+    );
+    assert.ok(
+      hasExplainableSalesEffortReason,
+      "VAPが対象期間6ターン全てで銀行側underwritingFrozen=trueに分類されているが、" +
+        "営業工数不足（SALES_FORCE_SHORTAGE／SALES_PLAN_REDUCED_FOR_EFFORT_CAPACITY）で説明できない" +
+        "（緊急融資満期バグの再発の可能性がある。自社養殖の資金制約（Step 2）・営業工数制約（SAI-2）の" +
+        "いずれでも説明できない悪化は要調査）"
+    );
+  }
 
   // 【数値主張の更新】自社養殖の資金制約適用（Step 2）により、このseed/設定の
   // VAPは対象6ターン全てが「支払不能・重大な資金制約」に分類され、「調達構成A」

@@ -16,6 +16,8 @@
 import { hosoEqTons } from "../../../core/units";
 import { DemandMarketId, Product } from "../../../market/types";
 import { CompanySalesPlanEntry, PlanCostExpectation } from "../../../sales/types";
+import { SalesParameters, SALES_PARAMETERS_V1 } from "../../../sales/parameters";
+import { allocateHeadcountAcrossMarkets, computeMarketSalesEffort, salesEffortWeightedQuantity } from "../../../sales/marketEffort";
 import { minimumAcceptablePremium, orderQuantityFactor } from "../../premiumPolicy";
 import { CompanyFixture } from "../../types";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
@@ -87,7 +89,15 @@ export function buildStandardAiSalesPlans(
   fixture: CompanyFixture,
   observation: StandardAiObservation,
   pressures: PressureScores,
-  params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1
+  params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
+  /**
+   * 【SAI-2追加作業: 市場別営業配置・商品別営業工数】営業工数換算能力の計算
+   * （sales/marketEffort.ts）に使うパラメータ。エンジン本体(sales/runner.ts)が
+   * 使う定数と必ず同じ値を参照する必要があるため、既定値もSALES_PARAMETERS_V1で
+   * エンジン側と揃えている（標準AIの意思決定根拠と、エンジン適用後の実際の結果が
+   * 食い違わないようにするため）。
+   */
+  salesParams: SalesParameters = SALES_PARAMETERS_V1
 ): SalesPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const capacityTotals = observation.totalCapacityByProduct;
@@ -136,31 +146,106 @@ export function buildStandardAiSalesPlans(
   }
 
   const markets = pressures.marketPriceRanking as readonly DemandMarketId[];
-  const plannedRows: { market: DemandMarketId; product: Product }[] = [];
-  for (const product of ["hoso", "pd", "vap"] as const) {
-    if (plannedSalesQuantityByProduct[product] <= EPSILON) continue;
-    markets.forEach((market, idx) => {
-      const weight = idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1);
-      if (plannedSalesQuantityByProduct[product] * weight <= EPSILON) return;
-      plannedRows.push({ market, product });
-    });
-  }
-  const rowCount = plannedRows.length;
-  const headcountPerRowBase = rowCount > 0 ? Math.floor(fixture.salesForceHeadcountTotal / rowCount) : 0;
-  const headcountRemainder = rowCount > 0 ? fixture.salesForceHeadcountTotal - headcountPerRowBase * rowCount : 0;
-  let rowIndex = 0;
 
-  const plans: CompanySalesPlanEntry[] = [];
+  // --- 【SAI-2追加作業: 市場別営業配置・商品別営業工数】市場×商品の希望販売量を、
+  // 従来と同じ「上位市場50%・残りを均等割り」の重みでまず商品別に按分する
+  // （この按分ロジック自体は変更しない）。営業人員は行ごとではなく、この市場別
+  // 希望量から導かれる「営業工数換算需要」に応じて市場単位で配分する。
+  const desiredByMarketProduct = new Map<DemandMarketId, Record<Product, number>>();
+  for (const market of markets) {
+    desiredByMarketProduct.set(market, { hoso: 0, pd: 0, vap: 0 });
+  }
   for (const product of ["hoso", "pd", "vap"] as const) {
     const totalDesired = plannedSalesQuantityByProduct[product];
     if (totalDesired <= EPSILON) continue;
-    const costExpectation = buildCostExpectation(fixture, product, observation, params);
     markets.forEach((market, idx) => {
       const weight = idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1);
       const desiredQuantity = totalDesired * weight;
       if (desiredQuantity <= EPSILON) return;
-      const rowHeadcount = headcountPerRowBase + (rowIndex === 0 ? headcountRemainder : 0);
-      rowIndex += 1;
+      desiredByMarketProduct.get(market)![product] = desiredQuantity;
+    });
+  }
+
+  const marketsWithDemand = markets.filter((market) => {
+    const byProduct = desiredByMarketProduct.get(market)!;
+    return byProduct.hoso > EPSILON || byProduct.pd > EPSILON || byProduct.vap > EPSILON;
+  });
+
+  // 営業工数換算需要（HOSO+1.2×PD+3.0×VAP）に比例して、実在する営業人員を
+  // 市場単位で配分する（行単位の均等割りではない。同じ市場のHOSO/PD/VAPは
+  // この同一の人数を共有する）。
+  const effortDemandByMarket = new Map<DemandMarketId, number>(
+    marketsWithDemand.map((market) => [market, salesEffortWeightedQuantity(desiredByMarketProduct.get(market)!, salesParams)])
+  );
+  const headcountByMarket = allocateHeadcountAcrossMarkets(fixture.salesForceHeadcountTotal, effortDemandByMarket);
+
+  // 配分された人数では当該市場の営業工数換算需要を賄いきれない場合、標準AIが
+  // 自ら（エンジン側のsales/marketEffort.tsと全く同じ計算式で）市場内の全商品の
+  // 希望数量を比例縮小する。これにより、AIが提出する意思決定の時点で既に
+  // エンジン適用後と同じ制約を満たしており、「意思決定の説明」と「制約適用後の
+  // 実際の結果」が食い違わない。
+  const constrainedMarkets: { market: DemandMarketId; headcount: number; result: ReturnType<typeof computeMarketSalesEffort> }[] = [];
+  const adjustedByMarketProduct = new Map<DemandMarketId, Record<Product, number>>();
+  for (const market of marketsWithDemand) {
+    const headcount = headcountByMarket.get(market) ?? 0;
+    const result = computeMarketSalesEffort(headcount, desiredByMarketProduct.get(market)!, salesParams);
+    adjustedByMarketProduct.set(market, result.adjustedQuantityByProduct as Record<Product, number>);
+    if (result.isConstrained) {
+      constrainedMarkets.push({ market, headcount, result });
+    }
+  }
+
+  if (constrainedMarkets.length > 0) {
+    // すべての需要のある市場が制約に達した場合は、市場間の配分ではなく実在する
+    // 営業人員総数そのものが不足している可能性が高い。
+    if (constrainedMarkets.length === marketsWithDemand.length) {
+      diagnostics.push({
+        code: "SALES_HEADCOUNT_INSUFFICIENT_TOTAL",
+        domain: "sales",
+        companyId: fixture.companyId,
+        severity: "warning",
+        keyValues: { salesForceHeadcountTotal: fixture.salesForceHeadcountTotal, constrainedMarketCount: constrainedMarkets.length },
+        message: `実在する営業人員総数（${fixture.salesForceHeadcountTotal}人）では、全${marketsWithDemand.length}市場の希望販売量（商品別営業工数を加味）を賄いきれず、すべての市場で販売計画を縮小した。`,
+      });
+    }
+    for (const { market, headcount, result } of constrainedMarkets) {
+      const byProduct = desiredByMarketProduct.get(market)!;
+      const vapEffort = salesParams.salesEffortCoefficients.vap * byProduct.vap;
+      const nonVapEffort = result.desiredEffortWeightedQuantity - vapEffort;
+      if (byProduct.vap > EPSILON && vapEffort > nonVapEffort) {
+        diagnostics.push({
+          code: "VAP_MIX_INCREASES_SALES_EFFORT_NEED",
+          domain: "sales",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: {
+            vapDesiredQuantity: byProduct.vap,
+            vapEffortCoefficient: salesParams.salesEffortCoefficients.vap,
+            headcount,
+            capacityHosoEqTons: result.capacityHosoEqTons,
+          },
+          message: `市場 "${market}": VAP比率の上昇により必要営業工数が増加し（VAP係数${salesParams.salesEffortCoefficients.vap}）、配置営業人員${headcount}人の処理能力を上回ったため、当該市場の販売計画を縮小した。`,
+        });
+      }
+      diagnostics.push({
+        code: "SALES_REDUCED_FOR_SUPPLY_LIMIT",
+        domain: "sales",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: { scaleFactor: result.scaleFactor, capacityHosoEqTons: result.capacityHosoEqTons, headcount },
+        message: `市場 "${market}": 営業人員${headcount}人による処理能力（${result.capacityHosoEqTons.toFixed(1)}トン相当）の不足により、当該市場の販売計画を${(result.scaleFactor * 100).toFixed(0)}%へ縮小した。`,
+      });
+    }
+  }
+
+  const plans: CompanySalesPlanEntry[] = [];
+  for (const market of marketsWithDemand) {
+    const headcount = headcountByMarket.get(market) ?? 0;
+    const adjusted = adjustedByMarketProduct.get(market)!;
+    for (const product of ["hoso", "pd", "vap"] as const) {
+      const desiredQuantity = adjusted[product];
+      if (desiredQuantity <= EPSILON) continue;
+      const costExpectation = buildCostExpectation(fixture, product, observation, params);
       plans.push({
         companyId: fixture.companyId,
         market,
@@ -170,13 +255,13 @@ export function buildStandardAiSalesPlans(
           priceAdjustments[product],
           observation.markets.find((m) => m.market === market)?.referencePriceByProduct?.[product]
         ),
-        salesForceHeadcount: rowHeadcount,
+        salesForceHeadcount: headcount,
         costExpectation,
         qualityReputation: observation.qualityScoreByProduct[product],
         customerRelationship: observation.customerTrustByMarket[market],
         deliveryReliability: observation.deliveryReliabilityByMarket[market],
       });
-    });
+    }
   }
   return { salesPlans: plans, desiredByProduct, diagnostics };
 }
