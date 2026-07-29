@@ -437,20 +437,95 @@ turn 6のキャッシュフロー（原材料調達費・生産コストの配�
 
 ## 11. SAI-3Bへの引き継ぎ事項
 
-- **入力データ**: `decision-trace.jsonl`が最も情報量の多い唯一の完全な記録です
-  （state→wish→final→市場別販売数量トレースが1行1JSONで揃っています）。Excel化は
+本節は、三宅さんによるSAI-3A受入（2026-07-29、commit `34dd865`）の際に明示された
+7項目の申し送り事項を、そのままの精度でSAI-3B設計時の参照事項として記録する。
+特に11.1〜11.3の「希望（wish）」の意味論の違いは、ドメインごとに異なるため、
+SAI-3BのExcel設計時に混同しないこと（11.5参照）。
+
+### 11.1 販売の`desiredQuantityBeforeEffortConstraint`は、真の営業工数制約前希望量である
+
+`SalesQuantityTraceEntry.desiredQuantityBeforeEffortConstraint`
+（`autoplay/schema.ts`）は、標準AIが市場×商品ごとに算出した、営業工数制約
+（`sales/marketEffort.ts`の`computeMarketSalesEffort`）を適用する**前**の、
+文字通りの希望販売数量である。同エントリの`finalPlannedQuantity`との差分は、
+営業工数制約による比例縮小（`engineEffortScaleFactor`）を正確に表す。これは
+本フェーズで唯一、標準AI内部の「制約適用前」の値を追加公開したフィールドである
+（`policy.ts`の`salesWishByMarketProduct`、非破壊的追加。§10.2参照）。
+
+### 11.2 調達の`wish`はAI提出希望量であり、資金制約後の`final`と比較できる
+
+`QuarterDecisionLog.wish.domesticPurchaseDesiredQuantity`・
+`importOrdersDesiredQuantity`・`aquacultureStockingDesiredQuantity`は、標準AIが
+提出した調達希望量である。これは`QuarterDecisionLog.final.domesticPurchaseFinalQuantity`・
+`importOrdersFinalQuantity`（`importOrdersBlocked`含む）・
+`aquacultureStockingFinalQuantity`と直接比較可能である。`final`側は
+`companyLab/runner.ts`の`procurementConstraint`（資金制約）適用後の値であるため、
+`wish`と`final`の差分は資金制約による実質的な縮小・ブロックを正確に表す。
+
+### 11.3 生産・労務・財務の`wish`はAI提出計画であり、標準AI内部の全調整前の値とは限らない
+
+`QuarterDecisionLog.wish.productionDesiredQuantityByProduct`・
+`workerRegularHeadcountTotal`・`workerTemporaryHeadcountTotal`・
+`workerOvertimeRateAvg`・`financingRequestDesiredAmountUsd`・
+`financingRequestDesiredPrepaymentUsd`・`capexNewProposalCount`等は、標準AIが
+**実際に提出した**意思決定値であり、`final`側も同じ値がそのまま`runner`へ渡る
+（§3.2のコメント参照:「sales/production/labor/financing/capexはAIの提出値が
+そのままrunnerへ渡るため、wishと同じ値になる」）。すなわちこれらのドメインには
+11.1（販売）・11.2（調達）のような「制約適用前/後」の2段階トレースは存在しない。
+標準AIが内部でどのような調整・優先度判断を経てこの提出値に至ったか（例:
+生産商品ミックスの決定ロジック）は、本フェーズの記録範囲外である。
+
+### 11.4 数値化できない標準AI診断はreason codeのみであり、存在しないbefore/afterを捏造しない
+
+`AdjustmentTraceEntry`のうち、標準AI側診断エントリ（`StandardAiReasonCode`）由来の
+行は`before`/`after`/`delta`が意図的に`undefined`である（§3.3）。これはエンジン側の
+数値制約（営業工数・資金制約等）とは異なり、標準AI内部の非数値的な判断（優先度付け・
+定性的診断）には対応する「制約前の一意な数値」がそもそも存在しないためである。
+SAI-3B側でこれらの行に対し推測でbefore/after値を補完してはならない。市場別の
+正確な数値が必要な場合は、11.1の`salesQuantityTrace`（`decision-trace.jsonl`内）を
+参照すること。
+
+### 11.5 SAI-3BのExcelでは、11.1〜11.4を同一の「制約前希望量」列として統一表示しない
+
+11.1（販売: 真の制約前希望量）・11.2（調達: 提出希望量、finalと比較可能）・
+11.3（生産/労務/財務: 提出計画のみ、制約前値なし）・11.4（標準AI診断: reason
+codeのみ、数値なし）は、意味論が明確に異なる。SAI-3BのExcel設計において、これら
+4種類を単一の「制約前希望量」列・単一の凡例で表示すると、実際には存在しない
+「生産/労務/財務の制約前値」や「診断のbefore/after」が存在するかのような誤解を
+招く。ドメインごとに列見出し・注記を分けること（例: 販売列は「制約前希望量→
+制約後計画量」、調達列は「AI提出希望量→資金制約後final」、生産/労務/財務列は
+「AI提出計画（制約前値なし）」、診断列は「reason codeのみ」）。
+
+### 11.6 営業人員85人の異常分岐は未解決課題として残し、個別補正しない
+
+§10（headcount 80/85/90比較）で確認したとおり、85人だけ`paymentDefault`率が
+突出する傾向（本レポート時点のデータで80: 48.3%・85: 96.7%・90: 43.3%）は、
+`underwritingFrozen`が原因でないことは確認済みだが、根本原因（生産商品ミックスの
+閾値的な切り替わりとの関連含む）は未確定である。SAI-3Bにおいてもこれを
+「異常値」として個別に補正・除外・平滑化してはならず、未解決課題として
+そのまま可視化すること（11.7参照）。
+
+### 11.7 SAI-3Bでは営業人員80・85・90の比較を可視化できる構造にする
+
+本フェーズのCLI（`sai3a:autoplay`）は`--headcount`引数により、80/85/90人それぞれ
+独立した`run-id`・`manifest.json`・出力一式を生成できる（実施例:
+`headcount-80-12seed-8q`・`headcount-85-12seed-8q`・`headcount-90-12seed-8q`、
+§9〜10）。SAI-3Bの設計では、複数run-idの`case-summary.csv`・`quarter-summary.csv`
+を横断的に読み込み、headcount別の`paymentDefault`率・`underwritingFrozen`到達率
+等を並べて比較できるシート構成を用意すること。
+
+### 11.8 その他の技術的申し送り（既存記載事項）
+
+- **入力データ**: `decision-trace.jsonl`が最も情報量の多い唯一の完全な記録である
+  （state→wish→final→市場別販売数量トレースが1行1JSONで揃っている）。Excel化は
   この`decision-trace.jsonl`を主入力とし、`quarter-summary.csv`・
   `case-summary.csv`・`adjustment-trace.csv`・`warnings.csv`をシート別に取り込む
-  想定で列構造を設計しています（配列・列構造は既にExcelへ変換しやすい形にフラット化
-  済みです。§6参照）。
+  想定で列構造を設計している（配列・列構造は既にExcelへ変換しやすい形にフラット化
+  済み。§6参照）。
 - **schema version**: `SAI3A_LOG_SCHEMA_VERSION`（現在`"1.0.0"`）を`manifest.json`から
-  必ず読み取り、Excel変換ロジック側でバージョン不一致を検出できるようにしてください。
-- **未実装のフィールド**: `AdjustmentTraceEntry`のうち、標準AI側診断エントリ由来の
-  行は`before`/`after`/`delta`が`undefined`です（§3.3）。市場別の正確な数値が
-  必要な場合は`salesQuantityTrace`（`decision-trace.jsonl`内）を参照してください。
-- **既知の設計課題**（§8.2）: エンジン側営業工数制約がほぼ発火しないこと、
-  headcount変化による生産ミックスの不連続な変化は、SAI-3B側で可視化する際に
-  「異常値」ではなく「既知の未解決事項」として扱ってください。
+  必ず読み取り、Excel変換ロジック側でバージョン不一致を検出できるようにすること。
+- **既知の設計課題**（§8.2）: エンジン側営業工数制約がほぼ発火しないことは、
+  SAI-3B側で可視化する際に「異常値」ではなく「既知の未解決事項」として扱うこと。
 
 ## 12. テスト・検証結果
 

@@ -411,3 +411,82 @@ runner入力の一致・四半期結果ログと実結果の一致・default発�
 - `feature/v2-sai3a-autoplay-logging`（`develop/v2`の`5c1d62e`起点）へcommit・push。
 - **`develop/v2`へはまだマージしていない**（三宅さんの指示どおり）。
 - `main`は無変更。
+
+
+## 11. SAI-3A受入・develop/v2統合（同日追加）
+
+### 11.1 受入判定
+
+三宅さんより、commit `34dd865`（`feature/v2-sai3a-autoplay-logging`のtip、SAI-3A
+「標準AI自動テストプレイ・判断記録基盤」一式）について、以下すべてを含め完成・
+受入と判定するとの指示があった: 標準AIによる5社・複数seedの自動運転／8Q・32Qおよび
+会社・seed・営業人数の実行時指定／状態→希望→調整→最終決定→結果の構造化ログ／
+市場別・商品別の営業工数制約前後トレース／runner入力および四半期結果との整合／
+ケース単位のエラー隔離／JSON・CSV・JSONL出力／schema versionと再現条件の保存／
+サンプルfixtureと設計文書／32件の新規テスト／全1719テスト・tsc・lint・build成功／
+85人異常分岐の診断結果。
+
+### 11.2 develop/v2への統合
+
+`develop/v2`（統合直前`5c1d62e`）が`feature/v2-sai3a-autoplay-logging`（`34dd865`）の
+祖先であることを`git merge-base --is-ancestor`で確認したうえで、`git merge --ff-only`
+によりfast-forward統合した（マージコミットは生成されず、`develop/v2`は`5c1d62e`から
+`34dd865`へ直接前進）。`main`は一切操作しておらず、統合前後を通じて`3ae9485`のまま
+不変である。
+
+### 11.3 統合後の全検証
+
+`develop/v2`（`34dd865`）上で以下をすべて再実行し、成功を確認した。
+
+- `npx tsc --noEmit`: エラー0件。
+- `npm test`: 1,719 / 1,719件成功（既存1,687件＋SAI-3A新規32件、失敗0件）。
+- `npm run lint`: エラー0件。既知の無関係な警告2件（`app/lib/v2/redis/__tests__/
+  companyLabExportAuditLog.test.ts`内の`'_value'`・`'_options'`未使用引数、SAI-3A
+  以前から存在する既知事象で今回のスコープ外のため未対応）のみ。
+- `npx next build`: 成功、全ルート生成。
+
+### 11.4 デプロイ確認
+
+`develop/v2`へのpushにより自動トリガーされたデプロイを確認した。
+
+- **staging**（Vercelプロジェクト`vietnam-shrimp-game-staging`）:
+  デプロイ`dpl_8Kgd5KamEEYp59v9W67Z7VmgENqd`が`READY`（成功）。
+- **本番Vercelプロジェクト**（`vietnam-shrimp-game`）側のPreviewビルド
+  （デプロイ`dpl_4tmMjhuPYQyAZ5kUPwQq6KQPchVt`、`develop/v2`ブランチ・commit
+  `34dd865`）は`ERROR`。ビルドログを実際に取得して確認した結果、エラーは
+  `Error: [redis] 環境変数 "STAGING_KV_REST_API_URL" が設定されていません
+  （appEnvironment="staging"）。...`であり、これはSAI-2統合時（§9.2）に
+  確認済みの、本番プロジェクトに`STAGING_KV_REST_API_URL`環境変数が設定されて
+  おらず全Previewビルド（`main`以外の全ブランチ）が失敗する既知の設定ギャップと
+  完全に一致するテキストであった。同プロジェクトの過去デプロイ履歴（SAI-1.5・
+  SAI-2・SAI-3A期間の全コミット）を確認したところ、`main`以外は例外なく同じ
+  パターンで`ERROR`であり、今回のSAI-3A統合固有の新規リグレッションではない
+  ことを確認した。三宅さんのご指示（「前回確認済みの同一原因であれば修正不要」）
+  どおり、本件は修正不要と判断した。本番の実運用対象は引き続き`main`
+  （target=production、commit `3ae9485`のままREADY）であり、影響を受けない。
+
+### 11.5 SAI-3Bへの申し送り事項（三宅さんのご指示を明記）
+
+1. 販売の`desiredQuantityBeforeEffortConstraint`は、本当の営業工数制約前希望量
+   である。
+2. 調達の`wish`はAI提出希望量であり、資金制約後の`final`と比較できる。
+3. 生産・労務・財務の`wish`はAI提出計画であり、必ずしも標準AI内部の全調整前の
+   値ではない。
+4. 数値化できない標準AI診断はreason codeのみであり、存在しないbefore/afterを
+   捏造しない。
+5. SAI-3BのExcelでは、1〜4をすべて同じ「制約前希望量」と表示しない
+   （ドメインごとに意味論が異なるため、列見出し・注記を分ける）。
+6. 85人異常分岐は未解決課題として残し、個別補正しない。
+7. SAI-3Bでは営業人数80・85・90の比較を可視化できる構造にする
+   （`--headcount`引数による独立run-idはすでに実施済みで対応可能）。
+
+詳細な技術的根拠は`docs/v2/reports/sai3a_autoplay_logging_report.md`§11
+（11.1〜11.8）に展開・記録済み。
+
+### 11.6 最終状態
+
+- `develop/v2` = `34dd865`（`origin/develop/v2`とも一致、push済み）。
+- `main` = `3ae9485`（`origin/main`とも一致）、本統合を通じて完全に無変更。
+- `feature/v2-sai3a-autoplay-logging`ブランチは削除せず保持。
+- SAI-3Bの実装は、三宅さんの指示どおり本セッションでは着手していない
+  （本節はSAI-3A統合完了の記録のみ）。
