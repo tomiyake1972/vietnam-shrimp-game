@@ -56,8 +56,58 @@ const QUANTITY_EPSILON = 1e-9;
  * 実配属人数は商品×バッチ別の小数（例: 612.282183人）を複数合計するため、
  * QUANTITY_EPSILON(1e-9)では浮動小数点の丸め誤差を僅かに超えて誤検知しうる。
  * 人数スケールの丸め誤差を安全に吸収しつつ、実質的な過剰配属は確実に検出できる値とする。
+ *
+ * 【SAI-2最終化追加作業: 32Q完走修正・2026-07-29】上記の固定許容差(1e-6)には、
+ * バッチ数（商品×工場の組み合わせ数）を考慮していないという欠陥があった。
+ *
+ * 根本原因: production/labor.ts の allocateWorkersToPlans は、商品×工場別の
+ * assignedRegularHeadcount を「各行ごとに独立して」Math.round(x*1e6)/1e6で
+ * 丸めて返す（HEADCOUNT_ROUNDING_UNIT=1e-6単位）。丸め前の合計は水位法配分
+ * （waterFillAllocate）の性質上、会社全体の正社員数（regularHeadcount）を
+ * 厳密に超えないことが保証されているが、丸め後の値を本ファイルで再度合計する際、
+ * 各行が独立に最大 HEADCOUNT_ROUNDING_UNIT/2 まで「上方」へ丸められうるため、
+ * 行数（バッチ数）に比例して誤差が蓄積する。営業人員80人・候補3の設定では
+ * 商品数3行の丸めが重なり、固定許容差1e-6を僅かに超える（実測値
+ * 約1.0000003e-6）ケースが生じ、32Qの12seed中5seedでFinanceValidationErrorが
+ * 発生していた（実質的な不整合ではなく、丸め誤差の蓄積が原因）。
+ *
+ * 修正方針: 単純な許容差の底上げによる隠蔽ではなく、誤差の発生源に対応した
+ * 「行数に比例する絶対誤差（丸め誤差の理論上限）」＋「会社規模に応じた微小な
+ * 相対誤差（浮動小数点演算そのものの蓄積誤差に対する安全マージン）」の合計を
+ * 許容差とする（headcountBudgetTolerance参照）。これにより、丸め誤差に起因する
+ * 見かけ上の超過は行数に応じて正しく許容しつつ、1人単位の本物の過剰配属
+ * （例: 700人 vs 500人、500.01人 vs 500人）は従来どおり確実に検出できる。
  */
 const HEADCOUNT_EPSILON = 1e-6;
+/** production/labor.tsの`Math.round(x * 1e6) / 1e6`と一致させる丸め単位。 */
+const HEADCOUNT_ROUNDING_UNIT = 1e-6;
+/**
+ * 会社規模（regularHeadcount）に応じた微小な相対許容差。丸め誤差の蓄積量
+ * （行数×丸め単位/2）を主たる許容差としつつ、それとは別に生じうる一般的な
+ * 浮動小数点演算の蓄積誤差（合計・減算の丸め）を吸収するための、規模に比例する
+ * 極小のマージン。丸め誤差を隠すための値ではないため、意図的に非常に小さくしてある。
+ */
+const HEADCOUNT_RELATIVE_TOLERANCE = 1e-9;
+
+/**
+ * 実配属正社員数合計(totalAssigned)が会社全体の正社員数(budget)を実質的に上回って
+ * いるかどうかを判定するための許容差を計算する。
+ *
+ * rowCount: 合計対象のバッチ数（商品×工場の組み合わせ数）。各行が独立に
+ *   HEADCOUNT_ROUNDING_UNIT単位で丸められているため、丸め後の合計はbudgetに対して
+ *   最大 rowCount × (HEADCOUNT_ROUNDING_UNIT/2) まで上振れしうる（理論上限）。
+ * budget: 会社全体の正社員数（regularHeadcount）。この値に比例する微小な相対誤差も
+ *   別枠で加算する。
+ *
+ * 単純な固定値の底上げではなく、誤差の発生源（バッチ数に比例する丸め誤差）に
+ * 直接対応した式にすることで、行数が多い会社でも許容差が過小にならず、かつ
+ * 行数が少ない場合に許容差が過大になって実質的な不整合を見逃すこともない。
+ */
+export function headcountBudgetTolerance(rowCount: number, budget: number): number {
+  const roundingBound = Math.max(0, rowCount) * (HEADCOUNT_ROUNDING_UNIT / 2);
+  const relativeBound = Math.abs(budget) * HEADCOUNT_RELATIVE_TOLERANCE;
+  return roundingBound + relativeBound;
+}
 
 // ---------------------------------------------------------------------
 // 1. 入力（会社ラボのアダプターが既存実績データから抽出する）
@@ -299,7 +349,14 @@ function computeProductionCosting(
   // productiveとみなす（idleLaborCost=0、従来どおり全額を商品原価へ配賦）。
   const totalAssignedRegular =
     laborMode === "actual" ? actuals.batches.reduce((s, b) => s + (b.assignedRegularHeadcount as number), 0) : 0;
-  if (laborMode === "actual" && totalAssignedRegular > actuals.regularHeadcount + HEADCOUNT_EPSILON) {
+  // 【SAI-2最終化追加作業】固定許容差(HEADCOUNT_EPSILON)ではなく、バッチ数（商品×工場の
+  // 組み合わせ数）に比例した丸め誤差の理論上限＋規模に応じた微小な相対誤差を許容差とする
+  // （headcountBudgetTolerance参照。誤差の発生源そのものに対応した比較にすることで、
+  // 隠蔽ではなく正しい許容と実質的な不整合の検出を両立する）。
+  if (
+    laborMode === "actual" &&
+    totalAssignedRegular > actuals.regularHeadcount + headcountBudgetTolerance(actuals.batches.length, actuals.regularHeadcount)
+  ) {
     throw new FinanceValidationError(
       `商品・生産バッチへの実配属正社員数合計(${totalAssignedRegular})が、会社全体の正社員数(${actuals.regularHeadcount})を上回っています。過剰配属です: ${actuals.companyId} ${actuals.period}`
     );

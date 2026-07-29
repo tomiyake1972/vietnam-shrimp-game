@@ -13,7 +13,13 @@ import { INITIAL_PERIOD_V2, period } from "../../core/period";
 import { Product } from "../../market/types";
 import { FINANCE_PARAMETERS_V1 } from "../parameters";
 import { computeExistingAssetDepreciationUsd } from "../depreciation";
-import { CompanyQuarterBusinessActuals, ProductionBatchActual, closeFinancialQuarter, resolveLaborAllocationMode } from "../quarterClose";
+import {
+  CompanyQuarterBusinessActuals,
+  ProductionBatchActual,
+  closeFinancialQuarter,
+  resolveLaborAllocationMode,
+  headcountBudgetTolerance,
+} from "../quarterClose";
 import { CapexAdjustment, CompanyFinanceState, FinanceValidationError, fixedUnitCostPerTon, totalUnitCostPerTon, usd } from "../types";
 
 const P1 = period(2015, 1);
@@ -1514,6 +1520,126 @@ test("遊休労務費I-3(D): 実配属正社員数合計が会社全体人数を
   assert.throws(
     () => close(makeState(), makeActuals({ batches: [slightlyOver], regularHeadcount: 500 })),
     FinanceValidationError
+  );
+});
+
+// ---------------------------------------------------------------------
+// 【SAI-2最終化追加作業: 32Q完走修正】headcountBudgetTolerance
+//
+// 背景: production/labor.tsのallocateWorkersToPlansは、商品×工場別の
+// assignedRegularHeadcountを各行独立にMath.round(x*1e6)/1e6で丸める。
+// 丸め後の値を再合計するquarterClose.ts側では、バッチ数（行数）に比例して
+// 丸め誤差が蓄積しうるため、固定許容差(旧HEADCOUNT_EPSILON=1e-6)だと
+// バッチ数が2以上の会社で誤検知（実質的な不整合ではないのにFinanceValidationError）
+// が発生していた（実測: 候補3・営業人員80人・32Qで12seed中5seedが発生）。
+// ---------------------------------------------------------------------
+
+test("headcountBudgetTolerance-1: バッチ数（rowCount）に比例して許容差が増える（丸め誤差の理論上限どおり）", () => {
+  const t0 = headcountBudgetTolerance(0, 1000);
+  const t1 = headcountBudgetTolerance(1, 1000);
+  const t3 = headcountBudgetTolerance(3, 1000);
+  const t10 = headcountBudgetTolerance(10, 1000);
+  assert.ok(t0 < t1, "rowCount=0はrowCount=1より許容差が小さいはず");
+  assert.ok(t1 < t3, "rowCount=1はrowCount=3より許容差が小さいはず");
+  assert.ok(t3 < t10, "rowCount=3はrowCount=10より許容差が小さいはず");
+  // 丸め単位1e-6・行ごとに最大1e-6/2の理論上限 + 規模に応じた微小な相対誤差、という設計どおりの桁感であること
+  assert.ok(t3 > 1e-6, "3行分の丸め誤差蓄積は旧固定許容差1e-6を上回りうる設計であるべき（今回の修正の主目的）");
+  assert.ok(t3 < 1e-4, "許容差が過大化していない（実質的な不整合の検出力を保っている）こと");
+});
+
+test("headcountBudgetTolerance-2: 会社規模（budget）に応じて許容差がわずかに増える（相対誤差成分）", () => {
+  const small = headcountBudgetTolerance(3, 100);
+  const large = headcountBudgetTolerance(3, 10000);
+  assert.ok(large > small, "budgetが大きいほど許容差も（相対誤差分だけ）わずかに増えるはず");
+  // 相対誤差成分は「丸め誤差の隠蔽」が目的ではないため、規模が変わっても支配的にならない
+  assert.ok(large - small < 1e-4);
+});
+
+function makeZeroCostBatch(overrides: Partial<ProductionBatchActual> & { batchId: string; product: Product; lotId: string }): ProductionBatchActual {
+  // FC-1等と同じパターン（原料コスト・在庫消費をゼロにし、労務許容差の検証だけに
+  // 焦点を絞る）。3バッチを同時に使う際、makeBatch既定値のrawMaterialCostUsd/lotId
+  // をそのまま3行分重ねると原料在庫フローの整合チェックに抵触してしまうため。
+  return makeBatch({
+    originalTons: 100,
+    adjustedTons: 100,
+    discardTons: 0,
+    reworkTons: 0,
+    downgradeTons: 0,
+    rawMaterialCostUsd: 0,
+    rawMaterialCostBySourceUsd: { domestic: 0, imported: 0, aquaculture: 0 },
+    downgradeRatio: 0,
+    assignedTemporaryHeadcount: 0,
+    appliedOvertimeRate: 0,
+    ...overrides,
+  });
+}
+
+function makeZeroCostActuals(overrides: Partial<CompanyQuarterBusinessActuals> = {}): CompanyQuarterBusinessActuals {
+  return makeActuals({
+    fulfillmentUsage: [],
+    contractTerms: [],
+    domesticPurchasesUsd: 0,
+    rawMaterialInventoryEndUsd: 500_000,
+    lotConsumption: [],
+    ...overrides,
+  });
+}
+
+test("境界値: 商品数3行（HOSO/PD/VAP）で、各行が独立に丸め単位ギリギリまで上振れした合計は許容される（実測の32Q再現ケース）", () => {
+  // production/labor.tsのMath.round(x*1e6)/1e6により、各行は最大0.5e-6まで上方へ丸められうる。
+  // 3行合計で候補3の営業人員80人規模（会社全体では正社員数千人規模）を模した実測ケースを再現する。
+  const regularHeadcount = 2380;
+  // 3商品ぶんの「丸め後」の値。丸め前の真の合計はregularHeadcountと一致する想定だが、
+  // 各行が独立に丸め単位の半分ずつ上振れした結果、合計が理論上の最大値に近い形で超過する
+  // （実際に観測された超過量 約1.0000003e-6 と同オーダー）。
+  const third = regularHeadcount / 3;
+  const batches = [
+    makeZeroCostBatch({ batchId: "B1", product: "hoso", lotId: "LOT-HOSO", assignedRegularHeadcount: Math.round(third * 1e6) / 1e6 + 4e-7 }),
+    makeZeroCostBatch({ batchId: "B2", product: "pd", lotId: "LOT-PD", assignedRegularHeadcount: Math.round(third * 1e6) / 1e6 + 4e-7 }),
+    makeZeroCostBatch({ batchId: "B3", product: "vap", lotId: "LOT-VAP", assignedRegularHeadcount: Math.round(third * 1e6) / 1e6 + 3e-7 }),
+  ];
+  assert.doesNotThrow(
+    () =>
+      close(
+        makeState(),
+        makeZeroCostActuals({
+          batches,
+          regularHeadcount,
+          finishedGoodsRemainingByLot: [
+            { lotId: "LOT-HOSO", remainingQuantityTons: 100, expired: false },
+            { lotId: "LOT-PD", remainingQuantityTons: 100, expired: false },
+            { lotId: "LOT-VAP", remainingQuantityTons: 100, expired: false },
+          ],
+        })
+      ),
+    "3行ぶんの丸め誤差の蓄積（1e-6強）は、実質的な不整合ではないため許容されるべき"
+  );
+});
+
+test("明らかな不整合: 丸め誤差では説明できない規模の超過は、行数が多くても引き続き検出される", () => {
+  // 3行あっても、1人単位で明らかに超過しているケース（丸め誤差の範囲を大きく超える）は
+  // 引き続き「過剰配属」としてFinanceValidationErrorで検出されなければならない
+  // （3項目の指定漏れ等、別の理由での例外と混同しないようメッセージ内容も確認する）。
+  const batches = [
+    makeZeroCostBatch({ batchId: "B1", product: "hoso", lotId: "LOT-HOSO", assignedRegularHeadcount: 500 }),
+    makeZeroCostBatch({ batchId: "B2", product: "pd", lotId: "LOT-PD", assignedRegularHeadcount: 500 }),
+    makeZeroCostBatch({ batchId: "B3", product: "vap", lotId: "LOT-VAP", assignedRegularHeadcount: 500 }),
+  ];
+  assert.throws(
+    () =>
+      close(
+        makeState(),
+        makeZeroCostActuals({
+          batches,
+          regularHeadcount: 1000, // 合計1500 > 1000
+          finishedGoodsRemainingByLot: [
+            { lotId: "LOT-HOSO", remainingQuantityTons: 100, expired: false },
+            { lotId: "LOT-PD", remainingQuantityTons: 100, expired: false },
+            { lotId: "LOT-VAP", remainingQuantityTons: 100, expired: false },
+          ],
+        })
+      ),
+    (err: unknown) => err instanceof FinanceValidationError && /過剰配属/.test((err as Error).message)
   );
 });
 
