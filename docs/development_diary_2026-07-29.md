@@ -60,9 +60,61 @@
   `da3a36d`）し、`origin/develop/v2`へpush済み。コンフリクトなし。
 - `main`は本日も対象外・未変更。V1コードへの影響もなし。
 
-## 4. 今後の申し送り
+## 4. 今後の申し送り（SAI-1.5時点）
 
 - Test B（初期条件統一ハーネス）・複数seed分布・§9のTest B残差分析はSAI-2以降のバランス調整でそのまま
   再利用できる（アーキテクチャ文書§14.10・§15.5参照）。
 - 最終レポート§12・§13で提示したゲームルール側・AI判断側の変更候補は、いずれも提案のみで未実装。
   三宅さんの方針確認後、SAI-2で対応する。
+
+---
+
+## 5. Phase SAI-2: 標準初期条件の設計と基準テスト（当日追記、develop/v2マージ後の同日中に着手）
+
+三宅さんのご指示「SAI-2開始指示：標準初期条件の設計と基準テスト」に基づき、`develop/v2`（`83324eb`、
+SAI-1.5マージ後）から新規ブランチ`feature/v2-sai2-standard-baseline`を作成し、既存5社のどれかをそのまま
+標準とするのではなく、独立に設計した「標準初期条件（standard baseline）」を確立した。
+
+### 5.1 実施内容
+
+1. **既存5社の初期条件比較**: 工場能力・ワーカー・養殖能力・商品経済性・財務6項目・初期契約・品質信頼度・
+   operational risk初期値等を全項目一覧化（`docs/v2/reports/sai2_standard_baseline_report.md` §2）。
+2. **標準初期条件の候補設計（3案）**: 単純平均の機械的採用ではなく、内部整合性を確認したうえで設計した。
+   - 候補1 balanced-trimmed（BALの操業条件＋財務余力を調整）
+   - 候補2 five-company-blend（既存5社の単純平均。5×平均＝既存5社合計という性質を持つことを確認）
+   - 候補3 moderate-pressure（候補2の操業条件＋財務のみ厳格化）
+3. **候補別の8Q・32Q・12seed基準テスト**: 既存のTest Bハーネス（`decomposeHarness.ts`）を、既存5社の
+   companyIdに紐づかない任意のfixtureテンプレートを扱えるよう汎用化（`buildUnifiedFixturesFromTemplate`・
+   `initializeUnifiedCompanyLabFromTemplate`。既存Test Bの挙動は変更なし）し、`runStandardBaselineTest`・
+   `runStandardBaselineMultiSeed`を新設して実行した。
+4. **選定**: 候補1・候補2は12seedすべて・8Q/32Qいずれでも一度もpaymentDefaultが発生せず「安全すぎる」と
+   判断。候補3は8Qで大半のseedが健全に推移しつつ一部seedで支払不能が発生し、32Qで約4割のseedが
+   支払不能に至るという、seedによって結果が分かれる分布になり、standard AIの資金繰り・調達縮小・人員調整の
+   判断が実際に機能する必要がある状況を再現した。**候補3「moderate-pressure」を標準初期条件として採用した。**
+5. **実装**: `app/lib/v2/companyLab/standardAi/report/standardBaseline.ts`を新設し、3候補の定義・選定結果・
+   選定済み標準初期条件を返す再利用可能なbuilder（`buildStandardBaselineFixture`等）を実装した。既存5社の
+   会社特性（`fixtures.ts`）・standard AIの判断ロジック・ゲームルールは一切変更していない
+   （`fixtures.ts`の内部ヘルパー関数を再利用のためexportした以外、既存コードへの変更はゼロ）。
+
+### 5.2 テスト・回帰
+
+- `standardBaseline.test.ts`（新規7件、全件成功）: 選定済み候補IDの実在確認、5社複製後の内部整合性、
+  決定論性、moderate pressureという設計意図の恒久的な保証等。
+- `npm test`（全件成功）・`npx tsc --noEmit`（エラー0件）・`npm run lint`（エラー0件）・`npx next build`
+  （成功）。詳細な件数は本レポート作成時点のコミットログ参照。
+
+### 5.3 commit・push
+
+`feature/v2-sai2-standard-baseline`ブランチへcommit・push済み。**develop/v2へはまだマージしていない**
+（実装指示どおり、標準条件を作って基準線を引くところまでが今回のスコープ）。
+
+### 5.4 今後の申し送り
+
+- SAI-3以降の一項目ずつの感度分析（現金・能力・固定費・在庫・市場方針等）は、選定した標準初期条件
+  （moderate-pressure）を基準ケースとして、`standardBaseline.ts`の該当フィールドだけを差し替える形で
+  実施できる。
+- 候補2（five-company-blend）は既存5社合計の供給規模と厳密に整合する性質を持つため、操業条件側の
+  純粋な感度分析用の別基準としても保持している。
+- SAI-1.5で確認済みの品質事故システム（会社ID単位の独立乱数）に起因する会社間の残差は、標準初期条件でも
+  同様に観測される（既知の残差であり、新たな不具合ではない）。
+- 詳細はSAI-2レポート（`docs/v2/reports/sai2_standard_baseline_report.md`）参照。

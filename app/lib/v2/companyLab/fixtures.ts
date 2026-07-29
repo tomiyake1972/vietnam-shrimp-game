@@ -30,7 +30,10 @@ const PRODUCTS = ["hoso", "pd", "vap"] as const;
  * 保存データ自体から読み取れるようにするため（将来GMが会社ごとに変えられる
  * 余地も残す）。導出式は1箇所にしかないので、二重管理にはならない。
  */
-function factory(overrides: Partial<Factory> & Pick<Factory, "factoryId" | "companyId">): Factory {
+/** 【SAI-2】standardBaseline.tsが本番fixtureと同じ導出ロジック（冷凍・冷蔵保管能力、
+ * 工場スペース総量の自動導出）を再利用できるよう、以下のヘルパー関数をexportする。
+ * 既存5社のfixture構築ロジック・数値は一切変更していない（exportのみの変更）。 */
+export function factory(overrides: Partial<Factory> & Pick<Factory, "factoryId" | "companyId">): Factory {
   const withoutDerived: Factory = {
     status: "active",
     commonProcessingCapacity: hosoEqTons(0),
@@ -52,7 +55,7 @@ function factory(overrides: Partial<Factory> & Pick<Factory, "factoryId" | "comp
   };
 }
 
-function workerBaseline(
+export function workerBaseline(
   factoryId: string,
   companyId: CompanyId,
   regularHeadcount: number,
@@ -73,7 +76,7 @@ function workerBaseline(
  * すべてUSD/HOSO換算kgの暫定値（要校正）。Phase 8の実原価計算実装時に
  * 交換可能なテスト用フィクスチャ。VAPの最低受注水準は原則PDより高い。
  */
-function premiumEconomics(
+export function premiumEconomics(
   variable: number,
   fixed: number,
   selling: number,
@@ -93,7 +96,7 @@ function premiumEconomics(
   };
 }
 
-function productEconomics(
+export function productEconomics(
   processingCost: Readonly<Record<"hoso" | "pd" | "vap", number>>,
   pd: CompanyPremiumEconomics,
   vap: CompanyPremiumEconomics
@@ -104,7 +107,7 @@ function productEconomics(
   };
 }
 
-function initialLot(
+export function initialLot(
   lotId: string,
   companyId: CompanyId,
   originCountry: CountryId,

@@ -11,12 +11,13 @@ import { CompanyLabConfig, CompanyLabResult } from "../../types";
 import { runCompanyLabWithAutoPolicyForAllCompanies } from "../../runner";
 import { generateStandardAiDecision } from "../policy";
 import { collectRun } from "./collect";
-import { initializeUnifiedCompanyLab, runFromInit, fixedMinimalDecisionProvider } from "./decomposeHarness";
+import { initializeUnifiedCompanyLab, initializeUnifiedCompanyLabFromTemplate, runFromInit, fixedMinimalDecisionProvider } from "./decomposeHarness";
 import { DecompositionRunSummary, MultiSeedDistributionEntry, MultiSeedSummary, OrderSensitivityResult } from "./types";
+import { StandardBaselineCandidate } from "./standardBaseline";
 
 const ALL_COMPANY_IDS: readonly CompanyId[] = ["BAL", "MASS", "JPQ", "VAP", "CONSV"];
 
-function summarizeResult(testId: "A" | "B" | "C" | "D", testLabel: string, seed: string, turns: number, result: CompanyLabResult): DecompositionRunSummary {
+function summarizeResult(testId: DecompositionRunSummary["testId"], testLabel: string, seed: string, turns: number, result: CompanyLabResult): DecompositionRunSummary {
   const finalByCompany: Record<string, DecompositionRunSummary["finalByCompany"][CompanyId]> = {};
   for (const companyId of ALL_COMPANY_IDS) {
     let cumulativeRevenue = 0;
@@ -114,6 +115,31 @@ export function runTestBOrderSensitivity(seed: string, turns: number, templateCo
   };
 }
 
+/**
+ * 【SAI-2】標準初期条件（候補・確定案いずれも可）を5社へ複製し、Test Bと同じ
+ * 構造（同一初期条件＋同一standard AI＋同一情報＋同一seed、会社IDだけ維持）で
+ * 実行する基準テスト。既存5社のいずれかを流用するTest B（runTestB）とは異なり、
+ * 独立に設計したfixture/財務/契約テンプレート（standardBaseline.tsの候補）を使う。
+ */
+export function runStandardBaselineTest(seed: string, turns: number, candidate: StandardBaselineCandidate, order: readonly CompanyId[] = ALL_COMPANY_IDS): DecompositionRunSummary {
+  const config: CompanyLabConfig = { scenarioId: "baseline", mode: "canonical", seed, turns };
+  const initResult = initializeUnifiedCompanyLabFromTemplate(
+    config,
+    candidate.buildFixtureTemplate,
+    candidate.financeFixtureTemplate,
+    candidate.contractDefs,
+    order
+  );
+  const result = runFromInit(initResult, generateStandardAiDecision);
+  return summarizeResult(
+    "SAI2-baseline",
+    `SAI-2標準初期条件候補「${candidate.label}」を5社へ複製＋standard AI（同一情報・同一seed）`,
+    seed,
+    turns,
+    result
+  );
+}
+
 export function runTestC(seed: string, turns: number): DecompositionRunSummary {
   const config: CompanyLabConfig = { scenarioId: "baseline", mode: "canonical", seed, turns };
   const result = runCompanyLabWithAutoPolicyForAllCompanies(config, fixedMinimalDecisionProvider);
@@ -161,4 +187,30 @@ export function runMultiSeed(testId: "A" | "D", seeds: readonly string[], turns:
     }
   }
   return { testId, seeds, turns, paymentDefaultRateByCompany: paymentDefaultRateByCompany as Record<CompanyId, number>, distributions };
+}
+
+/**
+ * 【SAI-2】標準初期条件の候補を複数seedにわたり反復し、会社別の分布を集計する。
+ * runMultiSeedと同じ集計ロジックを、runStandardBaselineTestに差し替えて再利用する。
+ */
+export function runStandardBaselineMultiSeed(candidate: StandardBaselineCandidate, seeds: readonly string[], turns: number): MultiSeedSummary {
+  const perSeed = seeds.map((seed) => runStandardBaselineTest(seed, turns, candidate));
+  const metrics: readonly ["finalCashUsd", "finalEquityUsd", "cumulativeRevenueUsd", "cumulativeOperatingProfitUsd", "outstandingContractTons"] = [
+    "finalCashUsd",
+    "finalEquityUsd",
+    "cumulativeRevenueUsd",
+    "cumulativeOperatingProfitUsd",
+    "outstandingContractTons",
+  ];
+  const distributions: MultiSeedDistributionEntry[] = [];
+  const paymentDefaultRateByCompany: Record<string, number> = {};
+  for (const companyId of ALL_COMPANY_IDS) {
+    const defaultCount = perSeed.filter((r) => r.finalByCompany[companyId].paymentDefaultQuarter !== null).length;
+    paymentDefaultRateByCompany[companyId] = defaultCount / seeds.length;
+    for (const metric of metrics) {
+      const values = perSeed.map((r) => r.finalByCompany[companyId][metric]);
+      distributions.push({ companyId, metric, seedCount: seeds.length, values, mean: mean(values), stdev: stdev(values), min: Math.min(...values), max: Math.max(...values) });
+    }
+  }
+  return { testId: "SAI2-baseline", seeds, turns, paymentDefaultRateByCompany: paymentDefaultRateByCompany as Record<CompanyId, number>, distributions };
 }

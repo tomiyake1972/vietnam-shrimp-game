@@ -145,9 +145,11 @@ export interface InitialConditionRow {
   readonly note: string; // この初期差がどの圧力・意思決定に影響し得るか
 }
 
-/** 会社間格差の原因分解テスト結果1本ぶん。 */
+/** 会社間格差の原因分解テスト結果1本ぶん。"SAI2-baseline"はSAI-2の標準初期条件
+ *  候補比較テスト（§SAI-2レポート参照。Test Bと同じ「5社統一」構造だが、既存5社の
+ *  companyIdに紐づかない独立設計のfixtureをテンプレートに使う）。 */
 export interface DecompositionRunSummary {
-  readonly testId: "A" | "B" | "C" | "D";
+  readonly testId: "A" | "B" | "C" | "D" | "SAI2-baseline";
   readonly testLabel: string;
   readonly seed: string;
   readonly turns: number;
@@ -195,7 +197,7 @@ export interface MultiSeedDistributionEntry {
 }
 
 export interface MultiSeedSummary {
-  readonly testId: "A" | "D";
+  readonly testId: "A" | "D" | "SAI2-baseline";
   readonly seeds: readonly string[];
   readonly turns: number;
   readonly paymentDefaultRateByCompany: Readonly<Record<CompanyId, number>>; // 0〜1

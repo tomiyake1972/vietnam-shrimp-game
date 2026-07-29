@@ -22,8 +22,8 @@
 // テンプレートのInitialFinanceFixtureを直接引数に取る形で再実装する
 // （buildUnifiedFinanceState）。ロジック自体はfinance/initialState.tsと完全に同じ。
 
-import { PeriodV2 } from "../../../core/period";
-import { hosoEqTons, ratio } from "../../../core/units";
+import { PeriodV2, previousPeriod, parsePeriod } from "../../../core/period";
+import { hosoEqTons, ratio, usdPerHosoEqKg } from "../../../core/units";
 import { CompanyId } from "../../../sales/types";
 import { RawMaterialLot } from "../../../rawMaterials/types";
 import {
@@ -167,6 +167,106 @@ export function initializeUnifiedCompanyLab(config: CompanyLabConfig, templateCo
 
   const initialFinanceCompanies = fixtures.map((f) => buildUnifiedFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod, templateFinanceFixture));
   const initialContracts = buildUnifiedContracts(startPeriod, templateCompanyId, order);
+
+  const initialScenarioTurnInput = getScenarioTurnInput(scenarioState, 1);
+  const initialPreviousMarketContext = buildPreviousMarketContext(definition, 1, initialScenarioTurnInput, undefined);
+  const initialMarketInput = toMarketQuarterInput(initialScenarioTurnInput, initialPreviousMarketContext);
+
+  const state: CompanyLabState = {
+    config,
+    currentPeriod: startPeriod,
+    scenarioState,
+    contracts: initialContracts,
+    rawMaterialLots: fixtures.flatMap((f) => f.initialRawMaterialLots),
+    productionState: initializeProductionState(startPeriod),
+    lastQuarterActualProduction: Object.fromEntries(fixtures.map((f) => [f.companyId, {}])),
+    qualityState: initializeQualityReliabilityState(
+      fixtures.map((f) => f.companyId),
+      ["hoso", "pd", "vap"]
+    ),
+    financeState: { companies: initialFinanceCompanies },
+    financingState: {
+      companies: initialFinanceCompanies.map((fs) => buildInitialCompanyFinancingState(fs, startPeriod)),
+    },
+    capexState: {
+      companies: fixtures.map((f) => buildInitialCompanyCapexState(f.companyId)),
+    },
+    workforceState: buildInitialWorkforceState(fixtures),
+    consumerMarketState: buildInitialConsumerMarketCarryStateTable(initialMarketInput.demandMarkets),
+    history: [],
+    isComplete: false,
+  };
+
+  return { state, fixtures };
+}
+
+// ---------------------------------------------------------------------
+// 【SAI-2】任意のテンプレート（既存5社のcompanyIdに紐づかない、独立に設計した
+// 標準初期条件）から5社を複製する汎用版。Test B（既存5社のいずれかをテンプレート
+// にする、companyId引きの版）はそのまま残し、挙動を一切変えていない。
+// ---------------------------------------------------------------------
+
+/** 初期契約1件ぶんの定義（`companyLab/initialContracts.ts`のInitialContractDefと
+ *  同じ形。既存5社のcompanyIdに紐づかない、独立の契約定義を渡せるようにする）。 */
+export interface UnifiedContractDef {
+  readonly market: "CN" | "US" | "EU" | "JP" | "OTHER";
+  readonly product: "hoso" | "pd" | "vap";
+  readonly quantity: number;
+  readonly unitPrice: number;
+  readonly dueDateStr: string;
+}
+
+/** 任意のCompanyFixtureテンプレート（既存5社のcompanyIdに紐づかない）から、
+ *  5社ぶんのfixtureを複製する（cloneFixtureForCompanyをそのまま再利用）。 */
+export function buildUnifiedFixturesFromTemplate(template: CompanyFixture, order: readonly CompanyId[] = ALL_COMPANY_IDS): readonly CompanyFixture[] {
+  return order.map((id) => cloneFixtureForCompany(template, id));
+}
+
+/** 任意のUnifiedContractDef[]（既存5社のcompanyIdに紐づかない）から、5社ぶんの
+ *  初期契約を複製する（generateInitialContractsと同じcontractedPeriod/dueDate
+ *  導出ロジックを再利用）。 */
+function buildUnifiedContractsFromDefs(startPeriod: PeriodV2, contractDefs: readonly UnifiedContractDef[], order: readonly CompanyId[]): SalesContract[] {
+  const contractedPeriod = previousPeriod(startPeriod);
+  const out: SalesContract[] = [];
+  for (const id of order) {
+    contractDefs.forEach((def, i) => {
+      const dueDate = parsePeriod(def.dueDateStr);
+      out.push({
+        contractId: `SC-STD-${contractedPeriod}-${def.market}-${def.product}-${id}-${i}`,
+        companyId: id,
+        market: def.market,
+        product: def.product,
+        contractedPeriod,
+        dueDate,
+        originalQuantity: hosoEqTons(def.quantity),
+        outstandingQuantity: hosoEqTons(def.quantity),
+        unitPrice: usdPerHosoEqKg(def.unitPrice),
+        status: "open",
+      });
+    });
+  }
+  return out;
+}
+
+/** initializeUnifiedCompanyLabの汎用版。既存5社のcompanyIdに紐づかない、独立に
+ *  設計したfixtureテンプレート・財務テンプレート・契約定義から、5社を同一条件へ
+ *  複製した初期状態を構築する（SAI-2の標準初期条件・基準テスト用）。 */
+export function initializeUnifiedCompanyLabFromTemplate(
+  config: CompanyLabConfig,
+  buildFixtureTemplate: (startPeriod: PeriodV2) => CompanyFixture,
+  financeFixtureTemplate: Omit<InitialFinanceFixture, "companyId">,
+  contractDefs: readonly UnifiedContractDef[],
+  order: readonly CompanyId[] = ALL_COMPANY_IDS
+): CompanyLabInitResult {
+  const definition = findScenarioDefinitionForCompanyLab(config.scenarioId);
+  const scenarioState = initializeScenario(definition, config.mode, config.seed);
+  const startPeriod = getScenarioTurnInput(scenarioState, 1).period;
+  const fixtureTemplate = buildFixtureTemplate(startPeriod);
+  const fixtures = buildUnifiedFixturesFromTemplate(fixtureTemplate, order);
+  const templateFinanceFixture: InitialFinanceFixture = { companyId: fixtureTemplate.companyId, ...financeFixtureTemplate };
+
+  const initialFinanceCompanies = fixtures.map((f) => buildUnifiedFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod, templateFinanceFixture));
+  const initialContracts = buildUnifiedContractsFromDefs(startPeriod, contractDefs, order);
 
   const initialScenarioTurnInput = getScenarioTurnInput(scenarioState, 1);
   const initialPreviousMarketContext = buildPreviousMarketContext(definition, 1, initialScenarioTurnInput, undefined);
