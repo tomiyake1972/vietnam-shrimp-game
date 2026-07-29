@@ -490,3 +490,47 @@ runner入力の一致・四半期結果ログと実結果の一致・default発�
 - `feature/v2-sai3a-autoplay-logging`ブランチは削除せず保持。
 - SAI-3Bの実装は、三宅さんの指示どおり本セッションでは着手していない
   （本節はSAI-3A統合完了の記録のみ）。
+
+## 12. SAI-3B-1: Excel経営分析ブック第1版（同日追加）
+
+`feature/v2-sai3b-excel-analysis`ブランチ（`develop/v2`の`b1733e1`起点）で、
+SAI-3Aの出力を人間が分析できるExcelブックへ変換する基盤を実装した。`main`・
+`develop/v2`は一切操作していない（今回はfeatureブランチへのcommit/pushのみ、
+マージなし）。
+
+- 新規実装は`app/lib/v2/companyLab/standardAi/sai3b/`配下と
+  `scripts/sai3bExcel.ts`のみ。ゲームエンジン・標準AIロジックは無変更。
+- Excelライブラリは既存依存の`exceljs`をそのまま採用（新規npm依存なし）。
+  exceljsがネイティブグラフ非対応のため、既存依存の`jszip`を使い、生成後の
+  xlsxへOOXMLグラフパーツを手書きで後注入する`chartInjector.ts`を実装し、
+  `openpyxl`・`soffice --headless`（LibreOffice実変換）で破損なきことを
+  事前検証済み。
+- 18シート構成（README/全体サマリー/グラフ/会社別業績/四半期業績/販売分析/
+  調達_生産_在庫/営業能力分析/営業能力_市場別/計画調整分析/
+  Default_信用_警告/ReasonCode集計/80_85_90人比較（複数run時のみ）/
+  四半期判断トレース/Raw_Case・Quarter・Decision・Adjustment・Warnings）。
+- 希望/最終の意味論をドメインごとに区別（販売＝制約前希望vs工数調整後最終、
+  調達＝AI希望vs資金制約後最終、生産・労務・財務＝AI提出計画（全調整前では
+  ない）、数値化できない診断＝reason codeのみ）し、README・列見出しに明記。
+  非搭載ログ項目5件（実際の生産量・実際の販売数量・売掛買掛の期末残高・
+  市場別工数換算能力・商品別利益内訳）は捏造せずREADMEに明記。
+- 新規テスト63件（parse/loadRun/compareRuns/reasonCodeCatalog/aggregate/
+  buildAnalysis/CLI引数解析/CLI結合/writeWorkbook/chartInjector）すべて成功。
+  プロジェクト全体テスト1,782件（既存1,719＋新規63）全成功、`tsc`・`lint`・
+  `next build`すべて成功。
+- 既存のSAI-3A実run4本（12 seed×5社×8Q、80/85/90人）を再利用し、実物2ブック
+  を生成: `artifacts/sai3b/standard-h80.xlsx`（約19.7MB、1run）、
+  `artifacts/sai3b/headcount-80-85-90-comparison.xlsx`（約69.9MB、3run）。
+  どちらも元CSVからの独立再計算とのクロスチェック（default率・総売上・総
+  粗利益・「85人だけdefault」フラグの内訳）が完全一致し、LibreOffice実変換・
+  グラフオブジェクト解析でも破損・文字化けなしを確認。
+- 85人問題の追加診断: headcountごとのdefault率は80人=48.3%・
+  **85人=96.7%**・90人=43.3%と非単調であることを実データで再確認。80人・
+  90人ではdefaultせず85人だけdefaultする会社×seedの組が17件見つかり
+  （独立再計算でも同数・同一内訳）、いずれも初回default発動は第6四半期
+  （turn=6）で一致。ただし根本原因（なぜ85人だけ非連続に悪化するか）は
+  標準AI・ゲームエンジン側の挙動であり、SAI-3Bのスコープ外として断定して
+  いない（三宅さんのご指示どおり85人専用の補正は行っていない）。
+- 詳細は`docs/v2/reports/sai3b_excel_analysis_report.md`に記録。SAI-3B-2では
+  三宅さん・ChatGPTでの実物レビュー後、シート構成・グラフ・GM分析ブックとの
+  関係を改良する予定。

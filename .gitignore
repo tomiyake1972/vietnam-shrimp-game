@@ -45,3 +45,7 @@ next-env.d.ts
 # 小さなサンプルfixtureのみ、明示的にgit addして例外的にコミットする
 # （例: docs/v2/sai3a/fixtures/配下）。
 /artifacts/sai3a/
+
+# Phase SAI-3B-1: Excel経営分析ブック生成物（artifacts/sai3b/以下）。
+# 大量の生成.xlsxはGit管理対象にしない（三宅さんの指示§7）。
+/artifacts/sai3b/
