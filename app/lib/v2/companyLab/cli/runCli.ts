@@ -9,7 +9,8 @@
 
 import { resolveScenarioDefinition } from "../../industryLab/cli/scenarioAliases";
 import { generateAutoPolicyDecision } from "../autoPolicy";
-import { CompanyLabError, CompanyLabConfig } from "../types";
+import { generateStandardAiDecision } from "../standardAi/policy";
+import { CompanyLabError, CompanyLabConfig, CompanyDecisionProvider } from "../types";
 import { runCompanyLabWithAutoPolicyForAllCompanies } from "../runner";
 import { parseCompanyLabCliArgs, buildCompanyLabUsageText } from "./argParser";
 import { CliArgumentError, CliInvocationResult } from "./types";
@@ -57,8 +58,15 @@ export function runCompanyLabCli(argv: readonly string[]): CliInvocationResult {
     turns: args.turns,
   };
 
+  // 【Phase SAI-1】--providerの選択に応じて意思決定生成関数を切り替えるだけで、
+  // ランナー（runCompanyLabWithAutoPolicyForAllCompanies）自体は既存のまま
+  // 一切変更しない（CompanyDecisionProviderが交換可能な設計であることの実例）。
+  // 既定値は"autoPolicy"のため、--providerを指定しない既存の呼び出しは
+  // 従来と完全に同じ挙動のままである。
+  const decisionProvider: CompanyDecisionProvider = args.provider === "standardAi" ? generateStandardAiDecision : generateAutoPolicyDecision;
+
   try {
-    const result = runCompanyLabWithAutoPolicyForAllCompanies(config, generateAutoPolicyDecision);
+    const result = runCompanyLabWithAutoPolicyForAllCompanies(config, decisionProvider);
 
     const stdout =
       args.format === "json"

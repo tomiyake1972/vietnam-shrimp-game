@@ -201,7 +201,7 @@ function priorHosoFobPriceFromLastQuarter(lastResult: MarketQuarterResult): Prev
  * 各社の実際の国内買付計画（DomesticPurchaseIntentSource.companyPlans）により
  * 必ず上書きされるため、ここでの値そのものが最終結果へ影響することはない。
  */
-function buildPreviousMarketContext(
+export function buildPreviousMarketContext(
   definition: ScenarioDefinition,
   turn: number,
   scenarioTurnInput: ScenarioTurnInput,

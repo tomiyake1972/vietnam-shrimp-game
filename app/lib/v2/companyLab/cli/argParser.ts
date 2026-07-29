@@ -7,9 +7,17 @@
 
 import { listScenarioAliases, resolveScenarioDefinition } from "../../industryLab/cli/scenarioAliases";
 import { COMPANY_LAB_COMPANY_IDS } from "../fixtures";
-import { ALL_COMPANIES, CLI_OUTPUT_FORMATS, CliArgumentError, CliOutputFormat, ParsedCompanyLabCliArgs } from "./types";
+import {
+  ALL_COMPANIES,
+  CLI_DECISION_PROVIDERS,
+  CLI_OUTPUT_FORMATS,
+  CliArgumentError,
+  CliDecisionProvider,
+  CliOutputFormat,
+  ParsedCompanyLabCliArgs,
+} from "./types";
 
-const KNOWN_FLAGS = new Set(["--scenario", "--mode", "--seed", "--turns", "--format", "--company", "--help", "-h"]);
+const KNOWN_FLAGS = new Set(["--scenario", "--mode", "--seed", "--turns", "--format", "--company", "--provider", "--help", "-h"]);
 
 interface RawArgs {
   readonly help: boolean;
@@ -19,6 +27,7 @@ interface RawArgs {
   readonly turns?: string;
   readonly format?: string;
   readonly company?: string;
+  readonly provider?: string;
 }
 
 function splitEqualsForm(token: string): readonly [string, string | undefined] {
@@ -37,6 +46,7 @@ function tokenizeArgs(argv: readonly string[]): RawArgs {
   let turns: string | undefined;
   let format: string | undefined;
   let company: string | undefined;
+  let provider: string | undefined;
 
   let i = 0;
   while (i < argv.length) {
@@ -50,7 +60,7 @@ function tokenizeArgs(argv: readonly string[]): RawArgs {
 
     if (!KNOWN_FLAGS.has(flag)) {
       throw new CliArgumentError(
-        `不明な引数です: "${argv[i]}"。使用可能な引数は --scenario, --mode, --seed, --turns, --format, --company, --help です。`
+        `不明な引数です: "${argv[i]}"。使用可能な引数は --scenario, --mode, --seed, --turns, --format, --company, --provider, --help です。`
       );
     }
 
@@ -86,12 +96,15 @@ function tokenizeArgs(argv: readonly string[]): RawArgs {
       case "--company":
         company = value;
         break;
+      case "--provider":
+        provider = value;
+        break;
       default:
         break;
     }
   }
 
-  return { help, scenario, mode, seed, turns, format, company };
+  return { help, scenario, mode, seed, turns, format, company, provider };
 }
 
 function validateMode(raw: string | undefined): "canonical" | "variation" {
@@ -140,6 +153,16 @@ function validateScenario(raw: string | undefined): string {
   return raw.trim();
 }
 
+function validateProvider(raw: string | undefined): CliDecisionProvider {
+  const provider = raw ?? "autoPolicy";
+  if (!(CLI_DECISION_PROVIDERS as readonly string[]).includes(provider)) {
+    throw new CliArgumentError(
+      `--provider は ${CLI_DECISION_PROVIDERS.map((p) => `"${p}"`).join(" / ")} のいずれかである必要があります（受け取った値: "${provider}"）。`
+    );
+  }
+  return provider as CliDecisionProvider;
+}
+
 function validateCompany(raw: string | undefined): string {
   const company = raw ?? ALL_COMPANIES;
   if (company === ALL_COMPANIES) return ALL_COMPANIES;
@@ -156,7 +179,7 @@ export function parseCompanyLabCliArgs(argv: readonly string[]): ParsedCompanyLa
   const raw = tokenizeArgs(argv);
 
   if (raw.help) {
-    return { help: true, scenario: "", mode: "canonical", seed: "", turns: 0, format: "summary", company: ALL_COMPANIES };
+    return { help: true, scenario: "", mode: "canonical", seed: "", turns: 0, format: "summary", company: ALL_COMPANIES, provider: "autoPolicy" };
   }
 
   const scenario = validateScenario(raw.scenario);
@@ -167,8 +190,9 @@ export function parseCompanyLabCliArgs(argv: readonly string[]): ParsedCompanyLa
   const turns = validateTurns(raw.turns);
   const format = validateFormat(raw.format);
   const company = validateCompany(raw.company);
+  const provider = validateProvider(raw.provider);
 
-  return { help: false, scenario, mode, seed: raw.seed.trim(), turns, format, company };
+  return { help: false, scenario, mode, seed: raw.seed.trim(), turns, format, company, provider };
 }
 
 /** --help で表示する使用方法テキスト。 */
@@ -178,10 +202,10 @@ export function buildCompanyLabUsageText(): string {
     .join("\n");
   const companyLines = COMPANY_LAB_COMPANY_IDS.map((c) => `    ${c}`).join("\n");
 
-  return `ShrimpX V2 会社経営統合テスト環境 CLI（Phase 6.2）
+  return `ShrimpX V2 会社経営統合テスト環境 CLI（Phase 6.2、Phase SAI-1で--provider追加）
 
 使い方:
-  npm run v2:company-simulate -- --scenario <id> --mode <canonical|variation> --seed <文字列> --turns <1以上の整数> --format <summary|json|csv|pricing-csv> [--company <all|会社ID>]
+  npm run v2:company-simulate -- --scenario <id> --mode <canonical|variation> --seed <文字列> --turns <1以上の整数> --format <summary|json|csv|pricing-csv> [--company <all|会社ID>] [--provider <autoPolicy|standardAi>]
 
 引数:
   --scenario <id>   実行するシナリオ（必須）。短縮形または正式IDのどちらでも指定可。
@@ -191,6 +215,9 @@ export function buildCompanyLabUsageText(): string {
   --format <形式>    "summary"（既定値、人間向け）/ "json"（機械可読）/ "csv"（表計算向け）/
                      "pricing-csv"（Phase 8P-0A、商品×仕向市場の参照価格診断専用の詳細CSV）
   --company <対象>  "all"（既定値、5社比較）または特定の会社ID（個社詳細）
+  --provider <方式> "autoPolicy"（既定値、既存の暫定自動方針）または
+                     "standardAi"（Phase SAI-1、標準経営AI基盤。5社すべてに同一ロジック・
+                     同一閾値を適用する自動テストプレイヤー。companyLab/standardAi/参照）
   --help, -h        この使用方法を表示して終了する
 
 利用可能なシナリオ:
@@ -204,5 +231,6 @@ ${companyLines}
   npm run v2:company-simulate -- --scenario baseline --seed company-demo-001 --turns 32 --company BAL --format json > bal.json
   npm run v2:company-simulate -- --scenario baseline --seed company-demo-001 --turns 8 --format csv > result.csv
   npm run v2:company-simulate -- --scenario baseline --seed company-demo-001 --turns 8 --format pricing-csv > pricing.csv
+  npm run v2:company-simulate -- --scenario baseline --seed sai1-demo-001 --turns 8 --provider standardAi --format json > sai1.json
 `;
 }

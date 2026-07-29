@@ -265,3 +265,75 @@ V1（`main`ブランチ・`v1-maintenance`ブランチ）には一切変更を�
 - **原料不足時の実生産量縮小**：新規実装は不要と判断（既存実装で要件を充足）。将来、生産優先順位の
   ユーザー向けUI表示や、Export以外の画面（GM分析ブック等）への計画未達理由の可視化が必要になった場合は
   別途要望として扱う。
+
+## D. Phase SAI-1: 標準経営AI基盤の実装（当セッション追記）
+
+develop/v2の`cd15bef`（上記A・Bを含む最新状態）から`feature/v2-standard-ai-foundation-rebuild`を作成し
+（同名`feature/v2-standard-ai-foundation`は既に別環境で`main`から誤って作成されていたため、削除・上書きせず
+別名で作成、以降一切触れていない）、「標準経営AI基盤（SAI-1）」を実装した。三宅さんの指示により今回は
+develop/v2へのマージは行わず、featureブランチへのpushまでを完了させている。詳細な設計・全理由コード・
+検証結果は`docs/v2/COMPANY_LAB_ARCHITECTURE_v0.1.md` §14に記載した。ここでは要点のみ記す。
+
+**実装内容**: `app/lib/v2/companyLab/standardAi/`配下に、5社すべてに同一ロジック・同一閾値
+（`parameters.ts`の`STANDARD_AI_PARAMETERS_V1`一箇所）を適用する意思決定生成モジュールを新設した。
+既存の`CompanyDecisionProvider`型（`fixture, ownState, publicInfo, period, turn`の5引数のみ）を完全に
+満たす`generateStandardAiDecision`を実装し、既存の`autoPolicy.ts`・ランナー（`runCompanyLabWithAutoPolicyForAllCompanies`）は
+一切変更していない。CLIには`--provider autoPolicy|standardAi`（既定`autoPolicy`）を追加し、既存呼び出しの
+挙動は完全に不変。
+
+**32ターン検証で発見・修正した不具合**（開発中、全社が同一シードで支払不能に陥る初期実装を確認し、
+根本原因を特定・修正）:
+
+1. 完成品在庫過剰時の「積極的売り切り」上乗せが、誤って生産計画側の抑制式にも伝播し、在庫が減っても
+   生産が減らない循環を生んでいた不具合（粗利益率の悪化として顕在化）。
+2. 持続的な人員過剰の判定にエンジンの労働稼働率指標（配属済みワーカーに対する比率のため常に1.0近辺に
+   張り付く）を使っていたため、遊休労務費（常用人件費の6割前後）が高止まりし続ける不具合。
+
+いずれも会社固有のハードコーディングではない一般的な修正であり、修正後は複数シードで8Q/32Qの再現性を
+再確認した。修正後の32ターン実行では、当時は健全な会社をBAL・CONSVと記載し、既存`autoPolicy.ts`と
+同一シードで比較しても同じ3社（MASS/JPQ/VAP）が支払不能に陥ること・最終借入残高が同程度のオーダーである
+ことを確認しており、これら3社の帰結はSAI-1固有の不具合ではなく既存fixtureのゲームバランス（収益力）に
+起因する可能性が高いと判断した（詳細な根拠は§14.10）。
+
+> **【Phase SAI-1.5での訂正】** 下記§Eで追記したPhase SAI-1.5の系統的な再検証（複数seed集計等）により、
+> standard AI配下ではCONSVも他の3社と同様にturn2で`paymentDefault`に陥ることが判明した（autoPolicy配下では
+> CONSVは今も健全）。上記「健全な会社（BAL/CONSV）」という記載はautoPolicy側の挙動との混同、または
+> 当時の簡易確認（使用シード未記録）によるものであり、standard AIについてはBALのみが健全という結論に
+> 訂正する。詳細は`docs/v2/COMPANY_LAB_ARCHITECTURE_v0.1.md` §14.10・§15.5参照。
+
+**テスト・回帰**: 新規27件（単体16件・8Q/32Q統合11件）を追加し、`npm test`は既存1621件＋新規27件＝
+**合計1648件、全件成功**。`npx tsc --noEmit`・`npm run lint`はいずれもエラー0件・警告0件、`npm run build`成功。
+V1コードは本Phaseで一切変更していない。
+
+**コミット・push**: 実装＋テストは`1a7fc74`（`feature/v2-standard-ai-foundation-rebuild`、develop/v2の
+`cd15bef`からの差分）としてコミット・push済み。develop/v2・mainへのマージ・直接pushは行っていない。
+
+## E. Phase SAI-1.5: マージ前補完（定量分析・原因分解レポート、当セッション追記）
+
+三宅さんの指示により、SAI-1のマージ前受入修正として、会社間の結果差を「シナリオ・外部環境／会社固有の
+初期条件／ゲームルール・パラメータ／標準AIの圧力判定・意思決定」の4要因へ分解して検証できる定量分析
+レポート機能を追加した（コミット`d461f42`）。**ゲームバランス自体は変更していない**。詳細は
+`docs/v2/COMPANY_LAB_ARCHITECTURE_v0.1.md` §15、および三宅さんへ別途送付する最終レポート本体を参照。
+ここでは要点のみ記す。
+
+**実装内容**: `app/lib/v2/companyLab/standardAi/report/`配下に読み取り専用のレポート生成モジュール群を
+新設。診断情報（`policy.ts`の`StandardAiQuarterDiagnostics`）へ、計算済みの圧力スコア(`pressures`)と
+当四半期の意思決定(`decision`)を追加（計算の重複なし）。原因分解のため、5社の初期条件をテスト専用
+ハーネスで1社の値へ統一して走らせる比較runner（Test B）・全社同一の固定意思決定で走らせる比較runner
+（Test C）を新規実装し、本番の`buildCompanyFixtures`・`initializeCompanyLab`は一切変更していない
+（`runner.ts`の`buildPreviousMarketContext`を非公開関数からexportへ変更した1行のみが本体側の変更）。
+
+**主な発見**（詳細は最終レポート本体・アーキテクチャ文書§15.5）: 5社の初期条件をテスト専用ハーネスで
+1社の値へ統一すると、どのテンプレート会社を使っても5社の`paymentDefault`発生タイミングが一致する一方、
+全社同一の固定意思決定（AIロジックを完全に取り除いた状態）でも会社ごとに異なる`paymentDefault`発生
+タイミングが生じた。複数seed（12seed）集計でも`MASS`/`VAP`/`CONSV`は12/12、`BAL`/`JPQ`は0/12という
+明確な二極化を確認した。これらは、Test AでSAI-1標準AIを使ったときに観測される会社間の財務悪化の格差が、
+AIロジックの会社差別化や乱数由来ではなく、既存fixtureの初期条件（財務・工場能力等）の差に起因する
+可能性が高いことを裏付けている。
+
+**テスト・回帰**: 新規9件を追加し、`npm test`は既存1648件＋新規9件＝**合計1657件、全件成功**。
+`npx tsc --noEmit`・`npm run lint`はいずれもエラー0件・警告0件、`npm run build`成功。8Q/32Qは
+`npx tsx scripts/generateSai1Report.ts <出力先>`で再実行可能（既定seed使用で再現性あり）。
+
+**コミット・push**: `d461f42`（`feature/v2-standard-ai-foundation-rebuild`、`1a7fc74`/`7cdd1ef`の続き）
+としてコミット・push済み。develop/v2・mainへのマージ・直接pushは行っていない。
