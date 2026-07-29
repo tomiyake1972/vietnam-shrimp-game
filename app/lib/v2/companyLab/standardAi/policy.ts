@@ -31,6 +31,7 @@ import { buildStandardAiFinancingRequest } from "./decision/finance";
 import { buildStandardAiCapexDecision } from "./decision/capex";
 import { sumProductAmount } from "./types";
 import { StandardAiDiagnosticEntry } from "./reasonCodes";
+import { SalesWishEntry } from "./decision/sales";
 import { PressureScores } from "./pressures";
 
 // 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
@@ -48,6 +49,10 @@ export interface StandardAiQuarterDiagnostics {
   /** 当四半期にAIが提出した意思決定（＝「希望値」。ゲーム側の実行値・補正後の
    *  値と対比するため、レポート生成側で companySummaries 等と突き合わせる）。 */
   readonly decision: CompanyDecisionInput;
+  /** 【SAI-3A】営業工数制約を適用する前の、会社×市場×商品ぶんの希望販売数量
+   *  （decision.salesPlansは制約適用後の値のため、両者を突き合わせることで
+   *  「事前希望案→営業工数調整後」の差分を再計算なしで追跡できる）。 */
+  readonly salesWishByMarketProduct: readonly SalesWishEntry[];
 }
 
 export interface StandardAiDecisionWithDiagnostics {
@@ -110,7 +115,15 @@ export function generateStandardAiDecisionWithDiagnostics(
 
   return {
     decision,
-    diagnostics: { companyId: fixture.companyId, turn, period, entries, pressures, decision },
+    diagnostics: {
+      companyId: fixture.companyId,
+      turn,
+      period,
+      entries,
+      pressures,
+      decision,
+      salesWishByMarketProduct: salesResult.salesWishByMarketProduct,
+    },
   };
 }
 

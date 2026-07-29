@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "tsx --test \"app/lib/**/__tests__/**/*.test.ts\" \"app/v2/**/__tests__/**/*.test.ts\" \"app/api/**/__tests__/**/*.test.ts\"",
     "v2:simulate": "tsx scripts/v2Simulate.ts",
-    "v2:company-simulate": "tsx scripts/v2CompanySimulate.ts"
+    "v2:company-simulate": "tsx scripts/v2CompanySimulate.ts",
+    "sai3a:autoplay": "tsx scripts/sai3aAutoplay.ts"
   },
   "dependencies": {
     "@upstash/redis": "^1.34.9",

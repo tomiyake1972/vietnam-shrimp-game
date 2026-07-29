@@ -40,3 +40,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Phase SAI-3A: 標準AI自動テストプレイの大量実行生成物（artifacts/sai3a/<run-id>/以下）。
+# 小さなサンプルfixtureのみ、明示的にgit addして例外的にコミットする
+# （例: docs/v2/sai3a/fixtures/配下）。
+/artifacts/sai3a/

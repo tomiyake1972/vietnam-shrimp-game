@@ -79,9 +79,22 @@ function priceAdjustmentRatioByProduct(
   return result;
 }
 
+/** 会社×市場×商品ぶんの、営業工数制約を適用する「前」の希望販売数量（SAI-3A
+ *  自動運転・判断ログ基盤向け）。営業工数制約適用後（=最終的なCompanySalesPlanEntry.
+ *  desiredQuantity）と対にすることで、「事前希望案 → 営業工数調整後」の差分を
+ *  再計算なしで追跡できる。既存の計算経路（本ファイル内で既に算出済みの
+ *  desiredByMarketProduct）をそのまま公開するだけで、新しい計算は一切行わない。 */
+export interface SalesWishEntry {
+  readonly market: DemandMarketId;
+  readonly product: Product;
+  readonly desiredQuantityBeforeEffortConstraint: number;
+}
+
 export interface SalesPlanResult {
   readonly salesPlans: readonly CompanySalesPlanEntry[];
   readonly desiredByProduct: ProductAmount;
+  /** 【SAI-3A】営業工数制約適用前の、会社×市場×商品ぶんの希望販売数量一覧。 */
+  readonly salesWishByMarketProduct: readonly SalesWishEntry[];
   readonly diagnostics: readonly StandardAiDiagnosticEntry[];
 }
 
@@ -170,6 +183,19 @@ export function buildStandardAiSalesPlans(
     const byProduct = desiredByMarketProduct.get(market)!;
     return byProduct.hoso > EPSILON || byProduct.pd > EPSILON || byProduct.vap > EPSILON;
   });
+
+  // 【SAI-3A】営業工数制約を適用する前の、会社×市場×商品ぶんの希望販売数量を
+  // 診断・判断ログ向けにそのまま保存する（marketsWithDemandに含まれない市場は
+  // 希望量が実質ゼロのため記録しない。既存の按分ロジック・数値は一切変更しない）。
+  const salesWishByMarketProduct: SalesWishEntry[] = [];
+  for (const market of marketsWithDemand) {
+    const byProduct = desiredByMarketProduct.get(market)!;
+    for (const product of ["hoso", "pd", "vap"] as const) {
+      const desiredQuantityBeforeEffortConstraint = byProduct[product];
+      if (desiredQuantityBeforeEffortConstraint <= EPSILON) continue;
+      salesWishByMarketProduct.push({ market, product, desiredQuantityBeforeEffortConstraint });
+    }
+  }
 
   // 営業工数換算需要（HOSO+1.2×PD+3.0×VAP）に比例して、実在する営業人員を
   // 市場単位で配分する（行単位の均等割りではない。同じ市場のHOSO/PD/VAPは
@@ -263,5 +289,5 @@ export function buildStandardAiSalesPlans(
       });
     }
   }
-  return { salesPlans: plans, desiredByProduct, diagnostics };
+  return { salesPlans: plans, desiredByProduct, salesWishByMarketProduct, diagnostics };
 }

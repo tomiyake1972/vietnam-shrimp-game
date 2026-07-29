@@ -1,0 +1,41 @@
+seed,companyId,turn,period,category,source,code,severity,affectedDecision,affectedMarketOrProduct,before,after,delta,message,threshold,relevantMetric
+sai3a-sample-001,BAL,1,2015Q1,sales_effort_capacity,standardAi,SALES_HEADCOUNT_INSUFFICIENT_TOTAL,warning,sales,,,,,実在する営業人員総数（80人）では、全5市場の希望販売量（商品別営業工数を加味）を賄いきれず、すべての市場で販売計画を縮小した。,,salesForceHeadcountTotal
+sai3a-sample-001,BAL,1,2015Q1,sales_effort_capacity,standardAi,SALES_REDUCED_FOR_SUPPLY_LIMIT,info,sales,,,,,"市場 ""CN"": 営業人員40人による処理能力（4040.0トン相当）の不足により、当該市場の販売計画を28%へ縮小した。",,scaleFactor
+sai3a-sample-001,BAL,1,2015Q1,sales_effort_capacity,standardAi,SALES_REDUCED_FOR_SUPPLY_LIMIT,info,sales,,,,,"市場 ""US"": 営業人員10人による処理能力（2600.0トン相当）の不足により、当該市場の販売計画を73%へ縮小した。",,scaleFactor
+sai3a-sample-001,BAL,1,2015Q1,sales_effort_capacity,standardAi,SALES_REDUCED_FOR_SUPPLY_LIMIT,info,sales,,,,,"市場 ""EU"": 営業人員10人による処理能力（2600.0トン相当）の不足により、当該市場の販売計画を73%へ縮小した。",,scaleFactor
+sai3a-sample-001,BAL,1,2015Q1,sales_effort_capacity,standardAi,SALES_REDUCED_FOR_SUPPLY_LIMIT,info,sales,,,,,"市場 ""JP"": 営業人員10人による処理能力（2600.0トン相当）の不足により、当該市場の販売計画を73%へ縮小した。",,scaleFactor
+sai3a-sample-001,BAL,1,2015Q1,sales_effort_capacity,standardAi,SALES_REDUCED_FOR_SUPPLY_LIMIT,info,sales,,,,,"市場 ""OTHER"": 営業人員10人による処理能力（2600.0トン相当）の不足により、当該市場の販売計画を73%へ縮小した。",,scaleFactor
+sai3a-sample-001,BAL,1,2015Q1,market_demand_or_contract,standardAi,CONTRACT_FULFILLMENT_PRIORITY,info,production,,,,,HOSOの未履行契約残（1100トン）を優先して生産計画に織り込む。,,outstandingQuantity
+sai3a-sample-001,BAL,1,2015Q1,market_demand_or_contract,standardAi,CONTRACT_FULFILLMENT_PRIORITY,info,production,,,,,PDの未履行契約残（700トン）を優先して生産計画に織り込む。,,outstandingQuantity
+sai3a-sample-001,BAL,1,2015Q1,market_demand_or_contract,standardAi,CONTRACT_FULFILLMENT_PRIORITY,info,production,,,,,VAPの未履行契約残（530トン）を優先して生産計画に織り込む。,,outstandingQuantity
+sai3a-sample-001,BAL,1,2015Q1,raw_material,standardAi,RAW_MATERIAL_SHORTAGE,warning,procurement,,,,,原料在庫ポジションが必要量に対して低水準のため、調達量を増加させる。,,inventoryPosition
+sai3a-sample-001,BAL,1,2015Q1,cash_constraint,standardAi,CASH_BUFFER_SHORTAGE,warning,finance,,,,,"現金(20,000,000 USD)が会社規模連動の最低バッファ(30,558,600 USD)を下回る見込みのため、通常融資を申請する。",,cashUsd
+sai3a-sample-001,BAL,1,2015Q1,other,standardAi,CAPEX_DEFERRED,info,capex,,,,,当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。,,
+sai3a-sample-001,BAL,1,2015Q1,cash_constraint,companyLab,PROCUREMENT_CASH_CONSTRAINED,warning,procurement,,13135,4800,-8335,現金不足のため国内買付を37%へ縮小（必要32837500USD、利用可能12000000USD）。,0.3654358583936049,scaleRatio
+sai3a-sample-001,BAL,1,2015Q1,raw_material,companyLab,RAW_MATERIAL_SHORTAGE,info,production_or_sales,,,,,HOSO: 原料不足により生産希望量を満たせなかった。,,
+sai3a-sample-001,BAL,1,2015Q1,labor,companyLab,LABOR_SHORTAGE,info,production_or_sales,,,,,HOSO: ワーカー不足により生産希望量を満たせなかった。,,
+sai3a-sample-001,BAL,1,2015Q1,raw_material,companyLab,RAW_MATERIAL_SHORTAGE,info,production_or_sales,,,,,PD: 原料不足により生産希望量を満たせなかった。,,
+sai3a-sample-001,BAL,1,2015Q1,raw_material,companyLab,RAW_MATERIAL_SHORTAGE,info,production_or_sales,,,,,VAP: 原料不足により生産希望量を満たせなかった。,,
+sai3a-sample-001,BAL,1,2015Q1,labor,companyLab,LABOR_SHORTAGE,info,production_or_sales,,,,,VAP: ワーカー不足により生産希望量を満たせなかった。,,
+sai3a-sample-001,BAL,1,2015Q1,market_demand_or_contract,companyLab,DOMESTIC_COMPETITION_INTENSE,info,production_or_sales,,,,,国内買付希望量に対する実際の配分比率が低く（37%）、他社との買付競争が激しい可能性がある。,,
+sai3a-sample-001,BAL,1,2015Q1,raw_material,companyLab,IMPORT_IN_TRANSIT,info,production_or_sales,,,,,輸送中の輸入原料が3157.5トン(HOSO換算)あり、到着まで使用できない。,,
+sai3a-sample-001,BAL,2,2015Q2,sales_effort_capacity,standardAi,SALES_HEADCOUNT_INSUFFICIENT_TOTAL,warning,sales,,,,,実在する営業人員総数（80人）では、全5市場の希望販売量（商品別営業工数を加味）を賄いきれず、すべての市場で販売計画を縮小した。,,salesForceHeadcountTotal
+sai3a-sample-001,BAL,2,2015Q2,sales_effort_capacity,standardAi,SALES_REDUCED_FOR_SUPPLY_LIMIT,info,sales,,,,,"市場 ""JP"": 営業人員40人による処理能力（4040.0トン相当）の不足により、当該市場の販売計画を28%へ縮小した。",,scaleFactor
+sai3a-sample-001,BAL,2,2015Q2,sales_effort_capacity,standardAi,SALES_REDUCED_FOR_SUPPLY_LIMIT,info,sales,,,,,"市場 ""EU"": 営業人員10人による処理能力（2600.0トン相当）の不足により、当該市場の販売計画を73%へ縮小した。",,scaleFactor
+sai3a-sample-001,BAL,2,2015Q2,sales_effort_capacity,standardAi,SALES_REDUCED_FOR_SUPPLY_LIMIT,info,sales,,,,,"市場 ""US"": 営業人員10人による処理能力（2600.0トン相当）の不足により、当該市場の販売計画を73%へ縮小した。",,scaleFactor
+sai3a-sample-001,BAL,2,2015Q2,sales_effort_capacity,standardAi,SALES_REDUCED_FOR_SUPPLY_LIMIT,info,sales,,,,,"市場 ""CN"": 営業人員10人による処理能力（2600.0トン相当）の不足により、当該市場の販売計画を73%へ縮小した。",,scaleFactor
+sai3a-sample-001,BAL,2,2015Q2,sales_effort_capacity,standardAi,SALES_REDUCED_FOR_SUPPLY_LIMIT,info,sales,,,,,"市場 ""OTHER"": 営業人員10人による処理能力（2600.0トン相当）の不足により、当該市場の販売計画を73%へ縮小した。",,scaleFactor
+sai3a-sample-001,BAL,2,2015Q2,market_demand_or_contract,standardAi,CONTRACT_FULFILLMENT_PRIORITY,info,production,,,,,HOSOの未履行契約残（1826トン）を優先して生産計画に織り込む。,,outstandingQuantity
+sai3a-sample-001,BAL,2,2015Q2,market_demand_or_contract,standardAi,CONTRACT_FULFILLMENT_PRIORITY,info,production,,,,,PDの未履行契約残（1162トン）を優先して生産計画に織り込む。,,outstandingQuantity
+sai3a-sample-001,BAL,2,2015Q2,market_demand_or_contract,standardAi,CONTRACT_FULFILLMENT_PRIORITY,info,production,,,,,VAPの未履行契約残（890トン）を優先して生産計画に織り込む。,,outstandingQuantity
+sai3a-sample-001,BAL,2,2015Q2,raw_material,standardAi,RAW_MATERIAL_SHORTAGE,warning,procurement,,,,,原料在庫ポジションが必要量に対して低水準のため、調達量を増加させる。,,inventoryPosition
+sai3a-sample-001,BAL,2,2015Q2,labor,standardAi,HEADCOUNT_REDUCED_FOR_SUSTAINED_EXCESS,info,labor,,,,,工場BAL-UNIFIED-F1: 持続的な人員過剰のため常用ワーカーを6300人→5853人へ段階的に縮小する。,,currentRegular
+sai3a-sample-001,BAL,2,2015Q2,other,standardAi,CAPEX_DEFERRED,info,capex,,,,,共通原料処理能力は今期不足だが、持続性・財務健全性のいずれかの条件を満たさないため増設を見送る。,,commonShortfallRatio
+sai3a-sample-001,BAL,2,2015Q2,cash_constraint,companyLab,PROCUREMENT_CASH_CONSTRAINED,warning,procurement,,14057.73,7889.806607021285,-6167.923392978714,現金不足のため国内買付を56%へ縮小（必要38902219USD、利用可能21833609USD）。,0.5612432880003589,scaleRatio
+sai3a-sample-001,BAL,2,2015Q2,raw_material,companyLab,RAW_MATERIAL_SHORTAGE,info,production_or_sales,,,,,HOSO: 原料不足により生産希望量を満たせなかった。,,
+sai3a-sample-001,BAL,2,2015Q2,raw_material,companyLab,RAW_MATERIAL_SHORTAGE,info,production_or_sales,,,,,PD: 原料不足により生産希望量を満たせなかった。,,
+sai3a-sample-001,BAL,2,2015Q2,raw_material,companyLab,RAW_MATERIAL_SHORTAGE,info,production_or_sales,,,,,VAP: 原料不足により生産希望量を満たせなかった。,,
+sai3a-sample-001,BAL,2,2015Q2,labor,companyLab,LABOR_SHORTAGE,info,production_or_sales,,,,,VAP: ワーカー不足により生産希望量を満たせなかった。,,
+sai3a-sample-001,BAL,2,2015Q2,market_demand_or_contract,companyLab,DOMESTIC_COMPETITION_INTENSE,info,production_or_sales,,,,,国内買付希望量に対する実際の配分比率が低く（56%）、他社との買付競争が激しい可能性がある。,,
+sai3a-sample-001,BAL,2,2015Q2,raw_material,companyLab,IMPORT_IN_TRANSIT,info,production_or_sales,,,,,輸送中の輸入原料が3389.9トン(HOSO換算)あり、到着まで使用できない。,,
+sai3a-sample-001,BAL,2,2015Q2,raw_material,companyLab,AQUACULTURE_HARVEST_ON_TRACK,info,production_or_sales,,,,,養殖収穫はほぼ計画どおり（生残率100%）。,,

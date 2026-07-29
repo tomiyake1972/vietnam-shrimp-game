@@ -1,0 +1,330 @@
+// ShrimpX V2 — Phase SAI-3A: 判断記録基盤 — ファイル出力整形（純粋関数のみ）
+//
+// 【方針】ここではファイルI/O（fs書き込み）を一切行わない。AutoplayBatchResult /
+// AutoplayRunManifestを受け取り、書き込むべき「ファイル内容の文字列」を返すだけの
+// 純粋関数群。実際のfs.writeFileSync呼び出しはCLI層（cli/runCli.ts・
+// scripts/sai3aAutoplay.ts）が担当する（既存companyLab/cli/output.tsの
+// 「計算は一切行わず整形のみ」という方針を踏襲）。
+//
+// 巨大な一つのJSONにはしない（三宅さんの指示§7）。用途別に分割する:
+//   manifest.json          — 実行条件（再現性のためのマニフェスト）
+//   case-summary.csv        — 1社×1seedぶんの最終集計（5社×12seedなら60行）
+//   quarter-summary.csv      — 会社×seed×turnぶんの開始状態＋結果の主要スカラー値
+//   decision-trace.jsonl     — 会社×seed×turnぶんの「開始状態→希望→最終決定→
+//                              市場別販売数量トレース→結果」を1行1JSONで保持する
+//                              唯一の完全な記録（SAI-3Bの主要な入力）
+//   adjustment-trace.csv     — 希望→最終決定までの全調整エントリ（before/after/delta/reason code）
+//   warnings.csv             — 四半期結果に記録された理由コード（reasonCodes）の一覧
+//   run-summary.json         — run全体の集計＋失敗ケースの診断情報
+
+import {
+  AdjustmentTraceEntry,
+  AutoplayRunManifest,
+  CaseSummaryRow,
+  QuarterDecisionLog,
+  QuarterResultLog,
+  QuarterStartState,
+  RunSummary,
+  SalesQuantityTraceEntry,
+} from "./schema";
+import { AutoplayBatchResult } from "./runBatch";
+
+function csvEscape(value: string | number | boolean): string {
+  const s = String(value);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function toCsv(header: readonly string[], rows: ReadonlyArray<readonly (string | number | boolean)[]>): string {
+  const lines = [header.map(csvEscape).join(",")];
+  for (const row of rows) lines.push(row.map(csvEscape).join(","));
+  return lines.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------------
+// manifest.json
+// ---------------------------------------------------------------------
+
+export function formatManifestJson(manifest: AutoplayRunManifest): string {
+  return JSON.stringify(manifest, null, 2) + "\n";
+}
+
+// ---------------------------------------------------------------------
+// case-summary.csv
+// ---------------------------------------------------------------------
+
+const CASE_SUMMARY_CSV_HEADER: readonly string[] = [
+  "seed",
+  "companyId",
+  "completedTurns",
+  "requestedTurns",
+  "completed",
+  "cumulativeRevenueUsd",
+  "cumulativeGrossProfitUsd",
+  "cumulativeOperatingProfitUsd",
+  "cumulativeSalesForceCostUsd",
+  "finalCashUsd",
+  "finalLoansUsd",
+  "finalAvailableAdditionalCapacityUsd",
+  "paymentDefaultEverByRequestedTurns",
+  "paymentDefaultFirstTurn",
+  "underwritingFrozenEverByRequestedTurns",
+  "underwritingFrozenFirstTurn",
+  "topReasonCodes",
+  "warningCount",
+];
+
+function caseSummaryRowToCsv(r: CaseSummaryRow): readonly (string | number | boolean)[] {
+  return [
+    r.seed,
+    r.companyId,
+    r.completedTurns,
+    r.requestedTurns,
+    r.completed,
+    r.cumulativeRevenueUsd,
+    r.cumulativeGrossProfitUsd,
+    r.cumulativeOperatingProfitUsd,
+    r.cumulativeSalesForceCostUsd,
+    r.finalCashUsd,
+    r.finalLoansUsd,
+    r.finalAvailableAdditionalCapacityUsd,
+    r.paymentDefaultEverByRequestedTurns,
+    r.paymentDefaultFirstTurn ?? "",
+    r.underwritingFrozenEverByRequestedTurns,
+    r.underwritingFrozenFirstTurn ?? "",
+    r.topReasonCodes.join("|"),
+    r.warningCount,
+  ];
+}
+
+export function formatCaseSummaryCsv(batch: AutoplayBatchResult): string {
+  const rows = batch.caseLogs.flatMap((log) => log.caseSummaryRows.map(caseSummaryRowToCsv));
+  return toCsv(CASE_SUMMARY_CSV_HEADER, rows);
+}
+
+// ---------------------------------------------------------------------
+// quarter-summary.csv — 会社×seed×turnの開始状態＋結果の主要スカラー値
+// （ネストしたRecord値=品質・顧客信頼等の市場/商品別内訳はCSVでは列展開せず、
+//  decision-trace.jsonl側の完全な記録を参照する）。
+// ---------------------------------------------------------------------
+
+const QUARTER_SUMMARY_CSV_HEADER: readonly string[] = [
+  "seed",
+  "companyId",
+  "turn",
+  "period",
+  // A: 開始時状態
+  "startCashUsd",
+  "startShortTermLoansUsd",
+  "startLongTermLoansUsd",
+  "startAvailableAdditionalCapacityUsd",
+  "startCreditTier",
+  "startCreditScore0to100",
+  "startFinancialHealthTier",
+  "startPaymentDefault",
+  "startUnderwritingFrozen",
+  "startRawMaterialInventoryHosoEqTons",
+  "startFinishedGoodsInventoryHosoEqTons",
+  "startSalesForceHeadcountTotal",
+  // 参考値（会社全人員を単一市場に集中投入したと仮定した能力。QuarterStartState
+  // 側のコメント参照。市場別配分に基づく実際の能力とは一致しないことがある）。
+  "startSalesEffortCapacityHosoEqTonsReference",
+  // E: 結果
+  "netRevenueUsd",
+  "grossProfitUsd",
+  "operatingProfitUsd",
+  "netIncomeUsd",
+  "closingCashUsd",
+  "endingShortTermLoansUsd",
+  "endingLongTermLoansUsd",
+  "endingAvailableAdditionalCapacityUsd",
+  // 当四半期に実際に使われた市場別営業人員配分から積み上げた、営業工数換算の
+  // 能力・使用量（単位は営業工数換算トン。物理数量の単純合計ではない）。
+  "salesEffortCapacityHosoEqTonsActual",
+  "salesEffortUsedHosoEqTons",
+  "salesEffortUtilizationRate",
+  "salesReductionFromEffortConstraintHosoEqTons",
+  "rawMaterialInventoryHosoEqTons",
+  "finishedGoodsInventoryHosoEqTons",
+  "discardQuantityHosoEqTons",
+  "paymentDefault",
+  "paymentDefaultNewlyTriggered",
+  "underwritingFrozen",
+  "underwritingFrozenNewlyTriggered",
+  "warningCount",
+];
+
+export function formatQuarterSummaryCsv(batch: AutoplayBatchResult): string {
+  const rows: (string | number | boolean)[][] = [];
+  for (const log of batch.caseLogs) {
+    const startByKey = new Map<string, QuarterStartState>();
+    for (const s of log.quarterStartStates) startByKey.set(`${s.companyId}::${s.turn}`, s);
+    for (const r of log.quarterResults) {
+      const start = startByKey.get(`${r.companyId}::${r.turn}`);
+      rows.push([
+        log.seed,
+        r.companyId,
+        r.turn,
+        r.period,
+        start?.cashUsd ?? "",
+        start?.shortTermLoansUsd ?? "",
+        start?.longTermLoansUsd ?? "",
+        start?.availableAdditionalCapacityUsd ?? "",
+        start?.creditTier ?? "",
+        start?.creditScore0to100 ?? "",
+        start?.financialHealthTier ?? "",
+        start?.paymentDefault ?? "",
+        start?.underwritingFrozen ?? "",
+        start?.rawMaterialInventoryHosoEqTons ?? "",
+        start?.finishedGoodsInventoryHosoEqTons ?? "",
+        start?.salesForceHeadcountTotal ?? "",
+        start?.salesEffortCapacityHosoEqTons ?? "",
+        r.netRevenueUsd,
+        r.grossProfitUsd,
+        r.operatingProfitUsd,
+        r.netIncomeUsd,
+        r.closingCashUsd,
+        r.shortTermLoansUsd,
+        r.longTermLoansUsd,
+        r.availableAdditionalCapacityUsd,
+        r.salesEffortCapacityHosoEqTons,
+        r.salesEffortUsedHosoEqTons,
+        r.salesEffortCapacityHosoEqTons > 0 ? r.salesEffortUsedHosoEqTons / r.salesEffortCapacityHosoEqTons : "",
+        r.salesReductionFromEffortConstraintHosoEqTons,
+        r.rawMaterialInventoryHosoEqTons,
+        r.finishedGoodsInventoryHosoEqTons,
+        r.discardQuantityHosoEqTons,
+        r.paymentDefault,
+        r.paymentDefaultNewlyTriggered,
+        r.underwritingFrozen,
+        r.underwritingFrozenNewlyTriggered,
+        r.warningCount,
+      ]);
+    }
+  }
+  return toCsv(QUARTER_SUMMARY_CSV_HEADER, rows);
+}
+
+// ---------------------------------------------------------------------
+// decision-trace.jsonl — 会社×seed×turnの「開始状態→希望→最終決定→
+// 市場別販売数量トレース」を1行1JSONで保持する完全な記録。
+// ---------------------------------------------------------------------
+
+export interface DecisionTraceLine {
+  readonly seed: string;
+  readonly companyId: string;
+  readonly turn: number;
+  readonly period: string;
+  readonly startState: QuarterStartState;
+  readonly decision: QuarterDecisionLog;
+  readonly salesQuantityTrace: readonly SalesQuantityTraceEntry[];
+}
+
+export function formatDecisionTraceJsonl(batch: AutoplayBatchResult): string {
+  const lines: string[] = [];
+  for (const log of batch.caseLogs) {
+    const startByKey = new Map<string, QuarterStartState>();
+    for (const s of log.quarterStartStates) startByKey.set(`${s.companyId}::${s.turn}`, s);
+    const salesTraceByKey = new Map<string, SalesQuantityTraceEntry[]>();
+    for (const t of log.salesQuantityTrace) {
+      const key = `${t.companyId}::${t.turn}`;
+      const arr = salesTraceByKey.get(key);
+      if (arr) arr.push(t);
+      else salesTraceByKey.set(key, [t]);
+    }
+    for (const decision of log.decisionLogs) {
+      const key = `${decision.companyId}::${decision.turn}`;
+      const startState = startByKey.get(key);
+      if (!startState) continue;
+      const entry: DecisionTraceLine = {
+        seed: log.seed,
+        companyId: decision.companyId,
+        turn: decision.turn,
+        period: decision.period,
+        startState,
+        decision,
+        salesQuantityTrace: salesTraceByKey.get(key) ?? [],
+      };
+      lines.push(JSON.stringify(entry));
+    }
+  }
+  return lines.join("\n") + (lines.length > 0 ? "\n" : "");
+}
+
+// ---------------------------------------------------------------------
+// adjustment-trace.csv
+// ---------------------------------------------------------------------
+
+const ADJUSTMENT_TRACE_CSV_HEADER: readonly string[] = [
+  "seed",
+  "companyId",
+  "turn",
+  "period",
+  "category",
+  "source",
+  "code",
+  "severity",
+  "affectedDecision",
+  "affectedMarketOrProduct",
+  "before",
+  "after",
+  "delta",
+  "message",
+  "threshold",
+  "relevantMetric",
+];
+
+function adjustmentEntryToCsv(seed: string, e: AdjustmentTraceEntry): readonly (string | number | boolean)[] {
+  return [
+    seed,
+    e.companyId,
+    e.turn,
+    e.period,
+    e.category,
+    e.source,
+    e.code,
+    e.severity,
+    e.affectedDecision,
+    e.affectedMarketOrProduct ?? "",
+    e.before ?? "",
+    e.after ?? "",
+    e.delta ?? "",
+    e.message,
+    e.threshold ?? "",
+    e.relevantMetric ?? "",
+  ];
+}
+
+export function formatAdjustmentTraceCsv(batch: AutoplayBatchResult): string {
+  const rows = batch.caseLogs.flatMap((log) => log.adjustmentTrace.map((e) => adjustmentEntryToCsv(log.seed, e)));
+  return toCsv(ADJUSTMENT_TRACE_CSV_HEADER, rows);
+}
+
+// ---------------------------------------------------------------------
+// warnings.csv — 四半期結果に記録された理由コード（QuarterResultLog.reasonCodes）
+// ---------------------------------------------------------------------
+
+const WARNINGS_CSV_HEADER: readonly string[] = ["seed", "companyId", "turn", "period", "code", "source", "severity", "message"];
+
+function quarterResultWarningsToCsv(seed: string, r: QuarterResultLog): readonly (readonly (string | number)[])[] {
+  return r.reasonCodes.map((rc) => [seed, r.companyId, r.turn, r.period, rc.code, rc.source, rc.severity, rc.message] as const);
+}
+
+export function formatWarningsCsv(batch: AutoplayBatchResult): string {
+  const rows = batch.caseLogs.flatMap((log) => log.quarterResults.flatMap((r) => quarterResultWarningsToCsv(log.seed, r)));
+  return toCsv(WARNINGS_CSV_HEADER, rows);
+}
+
+// ---------------------------------------------------------------------
+// run-summary.json — run全体の集計＋失敗ケースの診断情報
+// ---------------------------------------------------------------------
+
+export interface RunSummaryJson {
+  readonly runSummary: RunSummary;
+  readonly errors: AutoplayBatchResult["errors"];
+}
+
+export function formatRunSummaryJson(batch: AutoplayBatchResult): string {
+  const payload: RunSummaryJson = { runSummary: batch.runSummary, errors: batch.errors };
+  return JSON.stringify(payload, null, 2) + "\n";
+}

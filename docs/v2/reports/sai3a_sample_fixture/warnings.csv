@@ -1,0 +1,15 @@
+seed,companyId,turn,period,code,source,severity,message
+sai3a-sample-001,BAL,1,2015Q1,RAW_MATERIAL_SHORTAGE,companyLab,info,HOSO: 原料不足により生産希望量を満たせなかった。
+sai3a-sample-001,BAL,1,2015Q1,LABOR_SHORTAGE,companyLab,info,HOSO: ワーカー不足により生産希望量を満たせなかった。
+sai3a-sample-001,BAL,1,2015Q1,RAW_MATERIAL_SHORTAGE,companyLab,info,PD: 原料不足により生産希望量を満たせなかった。
+sai3a-sample-001,BAL,1,2015Q1,RAW_MATERIAL_SHORTAGE,companyLab,info,VAP: 原料不足により生産希望量を満たせなかった。
+sai3a-sample-001,BAL,1,2015Q1,LABOR_SHORTAGE,companyLab,info,VAP: ワーカー不足により生産希望量を満たせなかった。
+sai3a-sample-001,BAL,1,2015Q1,DOMESTIC_COMPETITION_INTENSE,companyLab,info,国内買付希望量に対する実際の配分比率が低く（37%）、他社との買付競争が激しい可能性がある。
+sai3a-sample-001,BAL,1,2015Q1,IMPORT_IN_TRANSIT,companyLab,info,輸送中の輸入原料が3157.5トン(HOSO換算)あり、到着まで使用できない。
+sai3a-sample-001,BAL,2,2015Q2,RAW_MATERIAL_SHORTAGE,companyLab,info,HOSO: 原料不足により生産希望量を満たせなかった。
+sai3a-sample-001,BAL,2,2015Q2,RAW_MATERIAL_SHORTAGE,companyLab,info,PD: 原料不足により生産希望量を満たせなかった。
+sai3a-sample-001,BAL,2,2015Q2,RAW_MATERIAL_SHORTAGE,companyLab,info,VAP: 原料不足により生産希望量を満たせなかった。
+sai3a-sample-001,BAL,2,2015Q2,LABOR_SHORTAGE,companyLab,info,VAP: ワーカー不足により生産希望量を満たせなかった。
+sai3a-sample-001,BAL,2,2015Q2,DOMESTIC_COMPETITION_INTENSE,companyLab,info,国内買付希望量に対する実際の配分比率が低く（56%）、他社との買付競争が激しい可能性がある。
+sai3a-sample-001,BAL,2,2015Q2,IMPORT_IN_TRANSIT,companyLab,info,輸送中の輸入原料が3389.9トン(HOSO換算)あり、到着まで使用できない。
+sai3a-sample-001,BAL,2,2015Q2,AQUACULTURE_HARVEST_ON_TRACK,companyLab,info,養殖収穫はほぼ計画どおり（生残率100%）。
