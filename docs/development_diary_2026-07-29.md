@@ -283,3 +283,67 @@ directive指示に基づき、候補3の操業・財務条件を固定し営業�
 追加、旧記述は削除せず維持、§11.10〜§11.12を新設）・本日誌§8を追加。検証結果は
 `sai2_standard_baseline_report.md` §11.12参照。`feature/v2-sai2-standard-baseline`ブランチへ
 commit・push。**develop/v2へはまだマージしていない**。
+
+## 9. SAI-2受入・develop/v2統合（同日追加）
+
+### 9.1 経緯
+
+三宅さんよりコミット`4928593`（§8の最終訂正）を受入と判定。統合前にVercel本番プロジェクトの
+デプロイfailureの原因判定、`develop/v2`への統合、次フェーズ申し送り事項の記録を指示された。
+
+### 9.2 Vercel本番（`vietnam-shrimp-game`）failureの原因判定
+
+`vietnam-shrimp-game`（本番プロジェクト）のビルドログを確認した結果、エラーは
+`Error: [redis] 環境変数 "STAGING_KV_REST_API_URL" が設定されていません（appEnvironment="staging"）`
+であり、TypeScriptのコンパイル自体（`Finished TypeScript in 11.6s`）は成功していた。
+
+このプロジェクトのデプロイ履歴を遡って確認したところ、**同一コードでも`vietnam-shrimp-game-staging`
+プロジェクトでは成功（READY）し、`vietnam-shrimp-game`プロジェクトでは同じコミットが失敗（ERROR）する**
+という組み合わせが、develop/v2の既存コミット（例: `83324eb`・`da3a36d`）や、SAI-2着手より何週間も前の
+無関係な過去のfeatureブランチ（`feature/v2-8g-remaining`等）を含め、確認できた範囲すべてで一貫していた。
+一方、`main`ブランチ（target=production、コミット`3ae9485`）のデプロイは`READY`（`live`状態）であり、
+本番として実際に稼働しているのはこちらである。
+
+**判定: SAI-2とは無関係な、既存のVercelプロジェクト設定上のギャップである。** `vietnam-shrimp-game`
+プロジェクトのPreview（非productionターゲット）ビルドは、appEnvironment判定が"staging"に解決される
+一方、`STAGING_KV_REST_API_URL`という環境変数がこのプロジェクトには設定されていない（おそらく
+`vietnam-shrimp-game-staging`プロジェクト側にのみ設定されている）ため、`main`以外のブランチをこの
+プロジェクトへpushするたびに毎回同一の理由で失敗する。SAI-2のコード変更がこの失敗を新たに発生させた
+ものではなく、また実際の本番稼働（`main`・target=production）には影響しないため、**SAI-2の範囲では
+修正不要と判断した**（プロジェクト設定自体の是非は別途のインフラ課題として、必要であれば三宅さんの
+ご判断を仰ぐ）。
+
+### 9.3 develop/v2への統合
+
+`develop/v2`（`83324eb`）は`feature/v2-sai2-standard-baseline`（`4928593`）の祖先だったため、
+**fast-forwardで統合**（`git merge --ff-only`）。新たなマージコミットは作成されず、`develop/v2`は
+そのまま`4928593`を指す。`main`は変更していない（`3ae9485`のまま）。
+
+統合後、`develop/v2`上で全検証を再実行: `npm test`（1687件成功）・`npx tsc --noEmit`（エラー0件）・
+`npm run lint`（エラー0件、既存の無関係な警告2件のみ）・`npx next build`（成功）。stagingデプロイ
+（`vietnam-shrimp-game-staging`、`develop/v2`ブランチ、コミット`4928593`）が`READY`になったことを
+確認した。
+
+### 9.4 次フェーズへの申し送り（SAI-2を止めず、別課題として記録）
+
+以下2点は今回のSAI-2の範囲では確定・実装せず、次フェーズの課題として切り出す。
+
+1. **営業人員85人だけが8Q paymentDefault率100%になる離散的分岐の原因**: §11.10.2で発見した異常値
+   だが、原因は現時点で未特定であり、**「underwritingFrozen吸収状態が原因」と断定しない**。
+   `paymentDefaultBy8Q`は「8Q中に一度でも延滞ストリークが発生したか」を示す履歴フラグであり、
+   turn8時点で財務健全に回復しているケース（例: 85人・BAL/seed001はturn8時点でcash=$3.2M・
+   cumOp=$6.2Mといずれも黒字）も含むため、この統計だけでは根本原因を特定できない。85人固有で
+   何が起きているのかの原因分解は別課題とする。
+2. **standard AIの事前調整前希望量と調整後計画量の比較による、営業工数制約の実質的な経営判断への
+   影響測定**: §11.10.2ではscaleFactor（発火した市場のみの実測倍率）が0.01%未満と僅少であることを
+   確認したが、これはあくまで発火した市場の事後倍率であり、standard AI自身が事前に自己調整する前の
+   「希望量」との差分は未計測である。事前希望量と調整後計画量を明示的に比較し、営業工数制約が実際に
+   どの程度の量を切り詰めているかを定量測定することを、次フェーズの課題として記録する。
+
+### 9.5 統合後の状態
+
+- `develop/v2`: `4928593`（fast-forward、新規マージコミットなし）
+- `main`: `3ae9485`のまま変更なし
+- `feature/v2-sai2-standard-baseline`: `4928593`のまま維持（削除していない）
+- stagingデプロイ: `develop/v2`ブランチのプレビュー（コミット`4928593`）が`READY`
+- 本番（`main`、target=production）: 引き続き`3ae9485`のまま`READY`（本統合による影響なし）
