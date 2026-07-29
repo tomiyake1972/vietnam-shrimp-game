@@ -12,7 +12,7 @@ import { runCompanyLabWithAutoPolicyForAllCompanies } from "../../runner";
 import { generateStandardAiDecision } from "../policy";
 import { collectRun } from "./collect";
 import { initializeUnifiedCompanyLab, runFromInit, fixedMinimalDecisionProvider } from "./decomposeHarness";
-import { DecompositionRunSummary, MultiSeedDistributionEntry, MultiSeedSummary } from "./types";
+import { DecompositionRunSummary, MultiSeedDistributionEntry, MultiSeedSummary, OrderSensitivityResult } from "./types";
 
 const ALL_COMPANY_IDS: readonly CompanyId[] = ["BAL", "MASS", "JPQ", "VAP", "CONSV"];
 
@@ -57,11 +57,61 @@ export function runTestA(seed: string, turns: number): DecompositionRunSummary {
   return summarizeResult("A", "現行5社の初期条件＋standard AI", seed, turns, result);
 }
 
-export function runTestB(seed: string, turns: number, templateCompanyId: CompanyId): DecompositionRunSummary {
+export function runTestB(seed: string, turns: number, templateCompanyId: CompanyId, order: readonly CompanyId[] = ALL_COMPANY_IDS): DecompositionRunSummary {
   const config: CompanyLabConfig = { scenarioId: "baseline", mode: "canonical", seed, turns };
-  const initResult = initializeUnifiedCompanyLab(config, templateCompanyId);
+  const initResult = initializeUnifiedCompanyLab(config, templateCompanyId, order);
   const result = runFromInit(initResult, generateStandardAiDecision);
-  return summarizeResult("B", `5社の初期条件をテンプレート会社(${templateCompanyId})へ統一＋standard AI（同一情報・同一seed）`, seed, turns, result);
+  return summarizeResult("B", `5社の初期条件をテンプレート会社(${templateCompanyId})へ統一＋standard AI（同一情報・同一seed、fixtures配列順=${order.join(",")}）`, seed, turns, result);
+}
+
+/**
+ * 【三宅さん指示1】Test Bの残差原因確認: fixtures配列内の会社処理順を
+ * 逆順・巡回シフトへ変えて同じTest Bを再実行し、各会社の最終結果が
+ * 「配列内の位置」に紐づいて動くのか、「会社ID（文字列そのもの）」に
+ * 紐づいたまま変わらないのかを確認する。ゲームルール自体の修正はしない
+ * （原因確認のみ）。
+ *
+ * 判定方法: 正順・逆順・巡回シフトの3通りで実行し、会社ID別の最終結果
+ * （finalCashUsd等）を比較する。
+ *   - 3通りすべてで同一会社IDの結果が完全一致 → 配列位置に依存しない
+ *     （＝残差は会社IDそのものに紐づく現象であり、処理順序の問題ではない）。
+ *   - 会社IDごとの結果が並び順によって変化する → 配列位置に依存する
+ *     処理（アロケーション等）が実在することを意味し、追加調査が必要。
+ */
+export function runTestBOrderSensitivity(seed: string, turns: number, templateCompanyId: CompanyId): OrderSensitivityResult {
+  const forward = ALL_COMPANY_IDS;
+  const reversed = [...ALL_COMPANY_IDS].reverse();
+  const rotated = [...ALL_COMPANY_IDS.slice(2), ...ALL_COMPANY_IDS.slice(0, 2)];
+
+  const runs = [
+    { orderLabel: "forward" as const, order: forward },
+    { orderLabel: "reversed" as const, order: reversed },
+    { orderLabel: "rotated" as const, order: rotated },
+  ].map(({ orderLabel, order }) => ({ orderLabel, order, summary: runTestB(seed, turns, templateCompanyId, order) }));
+
+  let identicalAcrossOrderings = true;
+  const perCompanyFinalCashByOrder: Record<string, Record<string, number>> = {};
+  for (const companyId of ALL_COMPANY_IDS) {
+    perCompanyFinalCashByOrder[companyId] = {};
+    const values: number[] = [];
+    for (const r of runs) {
+      const v = r.summary.finalByCompany[companyId].finalCashUsd;
+      perCompanyFinalCashByOrder[companyId][r.orderLabel] = v;
+      values.push(v);
+    }
+    const allEqual = values.every((v) => v === values[0]);
+    if (!allEqual) identicalAcrossOrderings = false;
+  }
+
+  return {
+    testId: "B-order",
+    templateCompanyId,
+    seed,
+    turns,
+    orderingsTried: runs.map((r) => ({ orderLabel: r.orderLabel, order: r.order })),
+    perCompanyFinalCashByOrder: perCompanyFinalCashByOrder as OrderSensitivityResult["perCompanyFinalCashByOrder"],
+    identicalAcrossOrderings,
+  };
 }
 
 export function runTestC(seed: string, turns: number): DecompositionRunSummary {

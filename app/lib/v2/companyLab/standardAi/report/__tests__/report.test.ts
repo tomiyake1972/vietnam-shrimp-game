@@ -9,7 +9,7 @@ import { CompanyLabConfig } from "../../../types";
 import { collectRun, findFirstDefaultQuarter } from "../collect";
 import { extractScenarioRows, SCENARIO_UNIMPLEMENTED_NOTES } from "../scenario";
 import { buildInitialConditionRows } from "../initialConditions";
-import { runTestA, runTestB, runTestC, runTestD, runMultiSeed } from "../decompose";
+import { runTestA, runTestB, runTestC, runTestD, runMultiSeed, runTestBOrderSensitivity } from "../decompose";
 import { buildConfigSettingRows } from "../configSnapshot";
 
 function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig {
@@ -73,6 +73,12 @@ test("decompose: Test Bは会社間の初期条件差を実際に取り除く（
   // Test Bはfinancial結果までは検証しないが、少なくとも例外なく完走し、
   // 5社とも同じ「現金圧力の起点」から出発していることを、初期cashUsd経由で間接確認する。
   assert.equal(Object.keys(b.finalByCompany).length, 5);
+});
+
+test("runTestBOrderSensitivity: fixtures配列内の会社処理順(正順/逆順/巡回シフト)を変えても、各会社IDの最終現金は完全一致する（配列位置に依存しない）", () => {
+  const result = runTestBOrderSensitivity("decompose-order-smoke-001", 4, "BAL");
+  assert.equal(result.orderingsTried.length, 3);
+  assert.ok(result.identicalAcrossOrderings, `並び順によって結果が変わった: ${JSON.stringify(result.perCompanyFinalCashByOrder)}`);
 });
 
 test("runMultiSeed: 指定したseed数ぶんの分布を返す", () => {

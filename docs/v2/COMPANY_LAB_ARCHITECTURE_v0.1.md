@@ -273,7 +273,9 @@ npm run v2:company-simulate -- --scenario baseline --seed sai1-demo-001 --turns 
 
 ### 14.10 既知の限界・SAI-2への申し送り
 
-- **32ターン長期実行の傾向**（複数シードで確認）: BAL・CONSVは健全に推移する一方、MASS・JPQ・VAPは32ターン目までに支払不能（`paymentDefault`）に陥る。既存の`autoPolicy.ts`（アーキタイプ別暫定方針）でも同一シードで同じ3社が支払不能に陥ること、両方針での最終借入残高が同程度のオーダーであることを確認しており、SAI-1固有の入力不具合ではなく、これら3社のfixture（工場・人員規模と原価economicsの組み合わせ）自体の収益力が構造的に弱いという既存のゲームバランス課題である可能性が高い。SAI-2以降で、AI要因とゲームバランス要因を切り分けるための「同一初期条件比較シナリオ」（下記）を実施することを推奨する。
+- **32ターン長期実行の傾向**（Phase SAI-1開発時点の確認。使用シードを明記していなかった簡易確認であり、後述の訂正を参照）: 当時はBAL・CONSVは健全に推移する一方、MASS・JPQ・VAPが32ターン目までに支払不能（`paymentDefault`）に陥ると記載していた。既存の`autoPolicy.ts`（アーキタイプ別暫定方針）では、同一シードでMASS・JPQ・VAPの3社が支払不能に陥る一方CONSVは健全というのは今も正しい（後述で確認済み）。
+  > **【Phase SAI-1.5での訂正、§15.5参照】** SAI-1.5でのTest A・複数seedの系統的な再検証（seed=`sai15-final-32q-001`他、standard AI使用）の結果、**standard AI配下ではCONSVも他の3社と同様にturn2で`paymentDefault`に陥る**ことを確認した。上記の「BAL・CONSVは健全」という記載はautoPolicy側の挙動（CONSVは健全）とstandard AI側の挙動（CONSVも不健全）を当時混同していたか、限られたシードでの簡易確認に基づく誤りであり、standard AIについては訂正する。BALのみが健全に推移するという点は変わらない。詳細な検証手順・複数シードでの再現性は§15.5参照。
+- SAI-1固有の入力不具合ではなく、（BALを除く）4社のfixture（工場・人員規模と原価economicsの組み合わせ）自体の収益力が構造的に弱いという既存のゲームバランス課題である可能性が高い。SAI-2以降で、AI要因とゲームバランス要因を切り分けるための「同一初期条件比較シナリオ」（下記）を実施することを推奨する。
 - **同一初期条件比較シナリオ**: 大規模なアーキテクチャ変更なしに実現するのが難しいと判断し、SAI-1では実装を見送った（既存の`buildCompanyFixtures`は5社固定のfixtureセットを返す設計で、工場能力・人員・原料経済性が会社ごとに作り込まれており、「fixtureの差だけを均一化する」ための安全な差し替え口が現状存在しない）。SAI-2で、`CompanyFixture`を外部から差し替え可能にする実行モード（テスト・診断専用、既存fixtureやゲームバランスには影響しない）を追加することを検討する。
 - **市場別の需要強度シグナルの欠如**: `PublicMarketInfo`には市場別の需要数量そのものが含まれず、前期実績の価格・プレミアムのみが公開情報として渡される。そのため「弱い需要の市場では数量を減らす」判断は、価格シグナル（`marketPriceRanking`）を代理指標として使う間接的な実装にとどまる。将来、需要量に関する公開情報が追加された場合はこの代理指標を置き換えられる設計にしてある。
 - **capexの対象範囲**: HOSO/PD/VAP加工ライン増設・共通前処理能力増設の4種類のみ対応。冷凍・包装処理能力／保管能力／品質管理設備／環境設備はSAI-1の観測情報だけでは必要性判断の材料が乏しいため対象外とした。
@@ -329,12 +331,15 @@ npx tsx scripts/generateSai1Report.ts <出力先ディレクトリ>
 ### 15.5 原因分解テスト結果（seed=`sai15-final-8q-001`/`sai15-final-32q-001`、8Q・32Q）
 
 - **Test A（現行fixture＋standard AI）**: 8Qで`MASS`(turn2)・`VAP`(turn3)・`CONSV`(turn2)が`paymentDefault`、`BAL`・`JPQ`は健全。32Qでは`JPQ`もturn9で`paymentDefault`に転じる。
-- **Test B（5社の初期条件をテンプレート会社1社の値へ統一＋standard AI、テスト専用ハーネス。本番fixtureは変更していない）**: どのテンプレート会社を使っても、5社の`paymentDefault`発生turnが完全に一致する（例: テンプレート=MASSなら5社ともturn2、テンプレート=BALなら5社とも8Q以内は健全）。最終現金にわずかな残差（会社ごとに数百万USD程度）が残るが、これは会社配列内の処理順序（先に処理される会社が希少な原料・市場配分を先取りする効果）に由来すると考えられる。→ **Test Aで観測される会社間格差の主因は、AIロジックの会社差別化ではなく、fixture初期条件の差であることを強く裏付ける。**
-- **Test C（現行fixture＋全社同一の固定意思決定＝新規契約なし・生産0・最小限調達のみ）**: それでも会社ごとに異なる`paymentDefault`発生turn（BAL:8、MASS:5、JPQ:7、VAP:6、CONSV:8Q以内は健全）が生じる。AIの意思決定内容を完全に取り除いても初期条件＋ゲームルールだけで会社間差が生まれることを確認した。
-- **Test D（standard AI対autoPolicy、同一seed・同一fixture）**: `paymentDefault`発生パターンはほぼ同等（例: `MASS`はstandardAiでturn2・autoPolicyでturn3、`VAP`はstandardAiでturn3・autoPolicyでturn2）。standard AIへの切り替え自体が財務悪化を悪化させても改善させてもいないことを確認した。
+  > **【§14.10との関係】** §14.10（Phase SAI-1完了時点の記載）は「BAL・CONSVは健全に推移する」としていたが、本節の系統的な再検証（Test A、および下記の12seed集計）により、**standard AI配下ではCONSVも他の3社と同様にturn2で`paymentDefault`に陥る**ことを確認した。§14.10の記載はPhase SAI-1完了直後の簡易確認（使用シード未記録）に基づくものであり、autoPolicy側の挙動（CONSVは健全、下記Test D参照）と混同していたか、確認したシード数が不足していた可能性が高い。standard AIについてBAL以外の4社（MASS/JPQ/VAP/CONSV）が構造的に不健全という点で結論を更新する。§14.10側にも訂正の注記を追加済み。
+- **Test B（SAI-1の主基準実験。5社の初期条件をテンプレート会社1社の値へ統一＋同一standard AI＋同一情報＋同一seed、テスト専用ハーネス。本番fixtureは変更していない）**: どのテンプレート会社を使っても、5社の`paymentDefault`発生turnが完全に一致する（例: テンプレート=MASSなら5社ともturn2、テンプレート=BALなら5社とも8Q以内は健全）。→ **Test Aで観測される会社間格差の主因は、AIロジックの会社差別化ではなく、fixture初期条件の差であることを強く裏付ける。**
+  - **標準初期条件候補の感度分析**: BAL/MASS/JPQ/VAP/CONSVの5社それぞれをテンプレートとしてTest Bを実行し、結果の違いを比較した（現時点ではいずれの会社の条件も最終的な標準初期条件とは決定していない。決定はSAI-2以降、三宅さんの判断を仰いだ上で行う）。
+  - **残差の原因確認（三宅さん指示、2026-07-29）**: Test Bには最終現金にわずかな残差（会社ごとに数百万USD程度）が残る。`report/decompose.ts`の`runTestBOrderSensitivity()`（会社処理順序を正順・逆順・巡回シフトの3通りに変えて再実行し比較する自動テスト）により、**この残差は会社配列内の処理順序（配列位置）には一切依存しないことを実証的に確認した**（5テンプレート×3通りの並び順すべてで同一会社IDの最終現金が完全一致）。原因は`quality/majorIncident.ts`が会社×工場×商品×ターンごとに独立した乱数ストリームで重大品質事故を判定する設計にあり、Test Bで5社のfixtureを統一すると事故発生確率（`operationalRisk.ts`が算出）は5社で同一になるが、事故が実際に発生するかの乱数抽選自体は会社IDに紐づいて独立しているため、「5社のうちどの1社が事故を引くか」が残差として現れる。テンプレートを変えると5社共通の確率トラジェクトリ自体が変わるため、事故が発生する（turn, 会社, 商品）の組み合わせもテンプレートごとに変わる（これは設計意図どおりであり不具合ではない）。ゲームルール自体の修正は行っていない（原因確認のみ）。詳細な追跡結果は`sai1_5_final_report.md`§9.3参照。
+- **Test C（現行fixture＋全社同一の固定意思決定＝新規契約なし・生産0・最小限調達のみ）**: 通常の経営行動比較ではなく、**初期財務・固定費・ゲームルールだけによる耐久性テスト**として位置づける。standard AIの判断ロジックを完全に取り除いても、会社ごとに異なる`paymentDefault`発生turn（BAL:8、MASS:5、JPQ:7、VAP:6、CONSV:8Q以内は健全）が生じることを確認した。
+- **Test D（standard AI対autoPolicy、同一seed・同一fixture）**: `paymentDefault`発生パターンはほぼ同等（例: `MASS`はstandardAiでturn2・autoPolicyでturn3、`VAP`はstandardAiでturn3・autoPolicyでturn2）。ただし**CONSVはautoPolicyでは8Q・32Qとも健全のまま推移する一方、standardAiではturn2で`paymentDefault`に陥る**という明確な差が1件ある（§14.10訂正注記・上記Test A参照）。それ以外の4社ではstandard AIへの切り替え自体が財務悪化を悪化させても改善させてもいないことを確認した。
 - **複数seed集計（12seed、8Q、Test A・Test D standardAi）**: `MASS`・`VAP`・`CONSV`は12seed中12seedすべてで`paymentDefault`（発生率100%）、`BAL`・`JPQ`は12seed中0（発生率0%）。**この分布のはっきりした二極化（0%か100%で中間がない）は、結果差の大部分が乱数由来ではなく構造的（初期条件＋ゲームルール）であることを示している。**
 
-詳細な数値・分布・per-quarter推移は、生成される`decomposition.json`・`kpi_8q.csv`・`kpi_32q.csv`を参照（三宅さんへ別途お送りする最終レポート本体に、より詳しい会社別の四半期ごとの因果連鎖の記述がある）。
+詳細な数値・分布・per-quarter推移は、生成される`decomposition.json`・`kpi_8q.csv`・`kpi_32q.csv`を参照（三宅さんへ別途お送りする最終レポート本体`docs/v2/reports/sai1_5_final_report.md`に、より詳しい会社別の四半期ごとの因果連鎖の記述がある）。
 
 ### 15.6 変更候補（本節では提案のみ。実装はしていない）
 

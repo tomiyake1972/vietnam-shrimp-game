@@ -61,7 +61,7 @@ import {
 } from "../../runner";
 import { buildInitialWorkforceState } from "../../workforce";
 
-const ALL_COMPANY_IDS: readonly CompanyId[] = ["BAL", "MASS", "JPQ", "VAP", "CONSV"];
+export const ALL_COMPANY_IDS: readonly CompanyId[] = ["BAL", "MASS", "JPQ", "VAP", "CONSV"];
 
 function cloneFixtureForCompany(template: CompanyFixture, targetCompanyId: CompanyId): CompanyFixture {
   return {
@@ -88,12 +88,17 @@ function cloneFixtureForCompany(template: CompanyFixture, targetCompanyId: Compa
   };
 }
 
-/** テンプレート会社1社の値へ、5社の非会社ID項目を揃えたfixture一覧を作る。 */
-export function buildUnifiedFixtures(startPeriod: PeriodV2, templateCompanyId: CompanyId): readonly CompanyFixture[] {
+/** テンプレート会社1社の値へ、5社の非会社ID項目を揃えたfixture一覧を作る。
+ *  `order`（既定はALL_COMPANY_IDSの並び）は、原因分解Test B-order（§三宅さん指示1）で
+ *  「fixtures配列内の処理順」そのものが結果に影響するかどうかを確認するために
+ *  差し替え可能にしてある。順序を変えても各会社の非会社ID項目（fixture値）自体は
+ *  一切変わらない（cloneFixtureForCompanyは常にtemplateの値をそのcompanyIdへ複製する
+ *  だけで、orderはあくまで返す配列内の並び順にしか影響しない）。 */
+export function buildUnifiedFixtures(startPeriod: PeriodV2, templateCompanyId: CompanyId, order: readonly CompanyId[] = ALL_COMPANY_IDS): readonly CompanyFixture[] {
   const templates = buildCompanyFixtures(startPeriod);
   const template = templates.find((f) => f.companyId === templateCompanyId);
   if (!template) throw new Error(`テンプレート会社IDが見つかりません: ${templateCompanyId}`);
-  return ALL_COMPANY_IDS.map((id) => cloneFixtureForCompany(template, id));
+  return order.map((id) => cloneFixtureForCompany(template, id));
 }
 
 /** finance/initialState.tsのbuildInitialCompanyFinanceStateと同じ計算式を、
@@ -135,10 +140,10 @@ function buildUnifiedFinanceState(companyId: CompanyId, rawMaterialLots: readonl
   };
 }
 
-function buildUnifiedContracts(startPeriod: PeriodV2, templateCompanyId: CompanyId): SalesContract[] {
+function buildUnifiedContracts(startPeriod: PeriodV2, templateCompanyId: CompanyId, order: readonly CompanyId[]): SalesContract[] {
   const templateContracts = generateInitialContracts(startPeriod).filter((c) => c.companyId === templateCompanyId);
   const out: SalesContract[] = [];
-  for (const id of ALL_COMPANY_IDS) {
+  for (const id of order) {
     templateContracts.forEach((c, i) => {
       out.push({ ...c, contractId: `${c.contractId}-UNIFIED-${id}-${i}`, companyId: id });
     });
@@ -147,17 +152,21 @@ function buildUnifiedContracts(startPeriod: PeriodV2, templateCompanyId: Company
 }
 
 /** initializeCompanyLabと同じ手順を、5社の非会社ID項目をtemplateCompanyIdへ
- *  統一したfixture・財務・契約で組み立てる（Test B専用）。 */
-export function initializeUnifiedCompanyLab(config: CompanyLabConfig, templateCompanyId: CompanyId): CompanyLabInitResult {
+ *  統一したfixture・財務・契約で組み立てる（Test B専用）。
+ *  `order`（§三宅さん指示1「Test B-order」用）は5社をfixtures配列・契約配列・
+ *  会社別financeState配列へ並べる順序。既定はALL_COMPANY_IDSの並び
+ *  （BAL, MASS, JPQ, VAP, CONSV）で、逆順・巡回シフトを渡すことで
+ *  「配列内の処理順そのもの」が結果に影響するかどうかを検証できる。 */
+export function initializeUnifiedCompanyLab(config: CompanyLabConfig, templateCompanyId: CompanyId, order: readonly CompanyId[] = ALL_COMPANY_IDS): CompanyLabInitResult {
   const definition = findScenarioDefinitionForCompanyLab(config.scenarioId);
   const scenarioState = initializeScenario(definition, config.mode, config.seed);
   const startPeriod = getScenarioTurnInput(scenarioState, 1).period;
-  const fixtures = buildUnifiedFixtures(startPeriod, templateCompanyId);
+  const fixtures = buildUnifiedFixtures(startPeriod, templateCompanyId, order);
   const templateFinanceFixture = INITIAL_FINANCE_FIXTURES_V1.find((f) => f.companyId === templateCompanyId);
   if (!templateFinanceFixture) throw new Error(`初期財務テンプレートが見つかりません: ${templateCompanyId}`);
 
   const initialFinanceCompanies = fixtures.map((f) => buildUnifiedFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod, templateFinanceFixture));
-  const initialContracts = buildUnifiedContracts(startPeriod, templateCompanyId);
+  const initialContracts = buildUnifiedContracts(startPeriod, templateCompanyId, order);
 
   const initialScenarioTurnInput = getScenarioTurnInput(scenarioState, 1);
   const initialPreviousMarketContext = buildPreviousMarketContext(definition, 1, initialScenarioTurnInput, undefined);

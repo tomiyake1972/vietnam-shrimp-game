@@ -166,6 +166,22 @@ export interface DecompositionRunSummary {
   >;
 }
 
+/** Test B-order（§三宅さん指示1）: fixtures配列内の会社処理順を変えたときの
+ *  感度確認結果。「配列位置」に依存するのか「会社ID」に紐づいたまま変わらない
+ *  のかを、正順・逆順・巡回シフトの3通りの実行結果を突き合わせて判定する。 */
+export interface OrderSensitivityResult {
+  readonly testId: "B-order";
+  readonly templateCompanyId: CompanyId;
+  readonly seed: string;
+  readonly turns: number;
+  readonly orderingsTried: readonly { readonly orderLabel: string; readonly order: readonly CompanyId[] }[];
+  /** 会社ID×並び順ラベルごとの最終現金（USD）。同一会社IDの行内の値がすべて
+   *  一致していれば、配列位置に依存しないことを意味する。 */
+  readonly perCompanyFinalCashByOrder: Readonly<Record<CompanyId, Readonly<Record<string, number>>>>;
+  /** 3通りの並び順すべてで、全会社IDの結果が完全一致した場合のみtrue。 */
+  readonly identicalAcrossOrderings: boolean;
+}
+
 /** 複数seedにわたる分布集計（1指標×1会社）。 */
 export interface MultiSeedDistributionEntry {
   readonly companyId: CompanyId;
