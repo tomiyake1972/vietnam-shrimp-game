@@ -19,7 +19,11 @@ export interface ChartSeriesSpec {
   readonly name: string;
   /** 値のセル範囲（例: "'グラフ'!$C$2:$C$4"）。 */
   readonly valuesRef: string;
-  readonly values: readonly number[];
+  /** 値が存在しない（SAI-3Aログ側で欠損している）データ点はundefinedを渡す。
+   *  0への置換は行わない。buildNumCacheがそのidxの<c:pt>要素自体を省略する
+   *  ことで、グラフ上は空欄（棒グラフなら棒なし、線グラフなら線が途切れる）
+   *  として表現される（三宅さんの指示：欠損値をゼロへ変換しない設計原則）。 */
+  readonly values: readonly (number | undefined)[];
 }
 
 export interface ChartSpec {
@@ -45,8 +49,14 @@ function buildStrCache(values: readonly string[]): string {
   return `<c:strCache><c:ptCount val="${values.length}"/>${pts}</c:strCache>`;
 }
 
-function buildNumCache(values: readonly number[]): string {
-  const pts = values.map((v, i) => `<c:pt idx="${i}"><c:v>${Number.isFinite(v) ? v : 0}</c:v></c:pt>`).join("");
+function buildNumCache(values: readonly (number | undefined)[]): string {
+  // 欠損（undefined）・非有限値（NaN/Infinity）のデータ点は<c:pt>自体を出力しない。
+  // OOXMLでは、あるidxの<c:pt>を省略することでそのデータ点が「空欄」として扱われる
+  // （棒グラフなら棒が描かれず、線グラフなら線が途切れる）。0を書き込んで実データの
+  // ゼロと区別がつかなくなることを避けるため、意図的にこの表現を用いる。
+  const pts = values
+    .map((v, i) => (v !== undefined && Number.isFinite(v) ? `<c:pt idx="${i}"><c:v>${v}</c:v></c:pt>` : ""))
+    .join("");
   return `<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${values.length}"/>${pts}</c:numCache>`;
 }
 

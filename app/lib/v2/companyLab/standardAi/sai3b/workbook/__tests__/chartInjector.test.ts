@@ -92,3 +92,38 @@ test("injectNativeCharts: 複数グラフを同一シートへ追加できる", 
   const anchorCount = (drawing.match(/<xdr:twoCellAnchor>/g) ?? []).length;
   assert.equal(anchorCount, 2);
 });
+
+// 三宅さんのご指摘（受入レビュー）に基づく回帰テスト: 欠損値（undefined）を
+// 渡した場合、numCacheが0へ置換せず、当該idxの<c:pt>自体を省略すること。
+test("injectNativeCharts: seriesにundefinedを含む場合、0へ変換せずnumCacheの当該idxを省略する", async () => {
+  const base = await buildBaseWorkbookBuffer();
+  const out = await injectNativeCharts(base, "グラフ", [
+    {
+      title: "Missing value chart",
+      type: "bar",
+      categoriesRef: "'グラフ'!$A$2:$A$4",
+      categories: ["80", "85", "90"],
+      series: [{ name: "defaultRate", valuesRef: "'グラフ'!$B$2:$B$4", values: [0.483, undefined, 0.433] }],
+      anchorCol: 3,
+      anchorRow: 0,
+      widthCols: 8,
+      heightRows: 15,
+    },
+  ]);
+
+  const zip = await JSZip.loadAsync(out);
+  const chartXml = await zip.file("xl/charts/chart1.xml")!.async("string");
+
+  // 数値(val/numCache)側のみを対象に検証する。カテゴリ(cat/strCache)側は
+  // "80"/"85"/"90"のラベル3件がすべて存在するのが正しく、idx="1"を含んでいて
+  // 問題ない（欠損しているのは値であってカテゴリラベルではないため）。
+  const valNumCacheMatch = /<c:val><c:numRef>[\s\S]*?<c:numCache>[\s\S]*?<\/c:numCache><\/c:numRef><\/c:val>/.exec(chartXml);
+  assert.ok(valNumCacheMatch, "val numCacheが見つからない");
+  const numCacheXml = valNumCacheMatch![0];
+
+  assert.match(numCacheXml, /<c:ptCount val="3"\/>/, "ptCountは元の配列長(3)のままのはず");
+  assert.doesNotMatch(numCacheXml, /<c:v>0<\/c:v>/, "欠損データ点が0として書き込まれてはいけない");
+  assert.match(numCacheXml, /<c:pt idx="0"><c:v>0\.483<\/c:v><\/c:pt>/);
+  assert.doesNotMatch(numCacheXml, /<c:pt idx="1">/, "欠損(idx=1)の<c:pt>は省略されているべき");
+  assert.match(numCacheXml, /<c:pt idx="2"><c:v>0\.433<\/c:v><\/c:pt>/);
+});

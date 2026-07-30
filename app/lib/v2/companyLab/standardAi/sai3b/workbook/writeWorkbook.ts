@@ -896,7 +896,10 @@ function buildSai3bChartSpecs(analysis: Sai3bAnalysis): readonly ChartSpec[] {
       type: "bar",
       categoriesRef,
       categories,
-      series: [{ name: "平均使用率", valuesRef: col("J"), values: rows.map((r) => r.averageSalesEffortUtilizationRate ?? 0) }],
+      // averageSalesEffortUtilizationRateが欠損しているrun（該当四半期のログが
+      // 1件もない等）は0に置換せず、そのデータ点を空欄のままグラフへ渡す
+      // （chartInjector.buildNumCacheがundefinedを<c:pt>省略として扱う）。
+      series: [{ name: "平均使用率", valuesRef: col("J"), values: rows.map((r) => r.averageSalesEffortUtilizationRate) }],
       anchorCol: 12,
       anchorRow: 52,
       widthCols: 8,

@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { loadSai3aRun } from "../../loadRun";
 import { buildSai3bAnalysis } from "../../buildAnalysis";
 import { buildSai3bWorkbook, renderSai3bWorkbookToBuffer } from "../writeWorkbook";
@@ -101,4 +102,99 @@ test("renderSai3bWorkbookToBuffer: グラフ付きxlsxを生成し、exceljsで�
     assert.ok(wb.getWorksheet(name), `missing sheet after reload: ${name}`);
   }
   assert.ok(wb.getWorksheet("80_85_90人比較"));
+});
+
+// 三宅さんのご指摘（受入レビュー）に基づく回帰テスト:
+// averageSalesEffortUtilizationRateが欠損しているrunがあっても、Excelの表・
+// グラフ用データ表・ネイティブグラフのいずれでも0へ変換されないこと。
+test("buildSai3bWorkbook: 営業能力使用率が欠損しているrunでも、表・グラフ用データが0に変換されない", () => {
+  const normalFiles = buildFixtureRunFiles({
+    runId: "h80",
+    headcount: 80,
+    quarters: 2,
+    cases: [{ seed: "s1", companyId: "BAL", quarters: 2, headcount: 80 }],
+  });
+  const missingUtilFiles = buildFixtureRunFiles({
+    runId: "h85",
+    headcount: 85,
+    quarters: 2,
+    cases: [{ seed: "s1", companyId: "BAL", quarters: 2, headcount: 85 }],
+    utilizationRateMissing: true,
+  });
+  const runs = [
+    loadSai3aRun({ runLabel: "h80", sourceDir: "/tmp/h80", files: normalFiles }),
+    loadSai3aRun({ runLabel: "h85", sourceDir: "/tmp/h85", files: missingUtilFiles }),
+  ];
+  const analysis = buildSai3bAnalysis(runs, { generatedAtIso: "2026-01-01T00:00:00.000Z" });
+
+  // 集計値そのものがundefinedであり（0ではない）、正常runの値は数値のまま保持されていること。
+  const h80Row = analysis.dashboard.find((r) => r.runLabel === "h80")!;
+  const h85Row = analysis.dashboard.find((r) => r.runLabel === "h85")!;
+  assert.equal(typeof h80Row.averageSalesEffortUtilizationRate, "number");
+  assert.ok((h80Row.averageSalesEffortUtilizationRate ?? 0) > 0);
+  assert.equal(h85Row.averageSalesEffortUtilizationRate, undefined, "欠損runの集計値はundefinedのはず（0ではない）");
+
+  const wb = buildSai3bWorkbook(analysis);
+
+  // 全体サマリーシート: note行(1)+header行(2)の後、3行目=h80、4行目=h85。
+  // 平均営業能力使用率は20列目。
+  const dashboardWs = wb.getWorksheet("全体サマリー")!;
+  const UTIL_COL_DASHBOARD = 20;
+  assert.equal(dashboardWs.getRow(2).getCell(UTIL_COL_DASHBOARD).value, "平均営業能力使用率");
+  assert.notEqual(dashboardWs.getRow(3).getCell(UTIL_COL_DASHBOARD).value, 0);
+  assert.equal(dashboardWs.getRow(4).getCell(UTIL_COL_DASHBOARD).value, "", "h85行の使用率セルは空欄（0ではない）のはず");
+
+  // グラフ用データ表シート: 平均営業能力使用率は10列目（A〜J）。
+  const chartDataWs = wb.getWorksheet("グラフ")!;
+  const UTIL_COL_CHARTDATA = 10;
+  assert.equal(chartDataWs.getRow(2).getCell(UTIL_COL_CHARTDATA).value, "平均営業能力使用率");
+  assert.notEqual(chartDataWs.getRow(3).getCell(UTIL_COL_CHARTDATA).value, 0);
+  assert.equal(chartDataWs.getRow(4).getCell(UTIL_COL_CHARTDATA).value, "", "h85行のグラフ用データセルも空欄（0ではない）のはず");
+});
+
+test("renderSai3bWorkbookToBuffer: 営業能力使用率が欠損しているrunは、ネイティブグラフのnumCacheでも0に置換されず空欄（<c:pt>省略）になる", async () => {
+  const normalFiles = buildFixtureRunFiles({
+    runId: "h80",
+    headcount: 80,
+    quarters: 2,
+    cases: [{ seed: "s1", companyId: "BAL", quarters: 2, headcount: 80 }],
+  });
+  const missingUtilFiles = buildFixtureRunFiles({
+    runId: "h85",
+    headcount: 85,
+    quarters: 2,
+    cases: [{ seed: "s1", companyId: "BAL", quarters: 2, headcount: 85 }],
+    utilizationRateMissing: true,
+  });
+  const runs = [
+    loadSai3aRun({ runLabel: "h80", sourceDir: "/tmp/h80", files: normalFiles }),
+    loadSai3aRun({ runLabel: "h85", sourceDir: "/tmp/h85", files: missingUtilFiles }),
+  ];
+  const analysis = buildSai3bAnalysis(runs, { generatedAtIso: "2026-01-01T00:00:00.000Z" });
+
+  const buffer = await renderSai3bWorkbookToBuffer(analysis);
+  const zip = await JSZip.loadAsync(buffer);
+
+  // 4つのネイティブグラフのうち、「平均営業能力使用率」のグラフXMLを特定する。
+  let utilChartXml: string | undefined;
+  for (let i = 1; i <= 4; i++) {
+    const file = zip.file(`xl/charts/chart${i}.xml`);
+    if (!file) continue;
+    const xml = await file.async("string");
+    if (xml.includes("平均営業能力使用率")) {
+      utilChartXml = xml;
+      break;
+    }
+  }
+  assert.ok(utilChartXml, "営業能力使用率のグラフXMLが見つからない");
+
+  // numCacheのptCountはrun数（2）のまま、かつ<c:v>0</c:v>を含まない
+  // （h85＝2件目のデータ点はidx省略により空欄として表現される）。
+  assert.match(utilChartXml!, /<c:ptCount val="2"\/>/);
+  assert.doesNotMatch(utilChartXml!, /<c:v>0<\/c:v>/, "欠損データ点が0として書き込まれてはいけない");
+  // idx="1"（2件目=h85）の<c:pt>が数値キャッシュに存在しないこと（省略されていること）。
+  const valNumCacheMatch = /<c:val><c:numRef>[\s\S]*?<c:numCache>[\s\S]*?<\/c:numCache><\/c:numRef><\/c:val>/.exec(utilChartXml!);
+  assert.ok(valNumCacheMatch, "val numCacheが見つからない");
+  assert.doesNotMatch(valNumCacheMatch![0], /<c:pt idx="1">/, "欠損runのidxの<c:pt>は省略されているべき");
+  assert.match(valNumCacheMatch![0], /<c:pt idx="0">/, "正常runのidxの<c:pt>は存在しているべき");
 });

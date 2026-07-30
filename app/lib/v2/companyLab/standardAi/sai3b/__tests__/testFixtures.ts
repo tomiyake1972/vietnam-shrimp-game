@@ -21,6 +21,10 @@ export interface FixtureRunSpec {
   readonly quarters: number;
   readonly cases: readonly FixtureCaseSpec[];
   readonly schemaVersion?: string;
+  /** trueの場合、quarter-summary.csvのsalesEffortUtilizationRate列を全行で
+   *  空欄にする（SAI-3A側でこの値が取得できなかったケースを再現するための
+   *  fixtureオプション）。欠損値が0に変換されないことのテスト用。 */
+  readonly utilizationRateMissing?: boolean;
 }
 
 function csvLine(values: readonly (string | number | boolean)[]): string {
@@ -182,7 +186,7 @@ export function buildFixtureRunFiles(spec: FixtureRunSpec): Record<string, strin
           0,
           capacity,
           used,
-          used / capacity,
+          spec.utilizationRateMissing ? "" : used / capacity,
           200,
           3000,
           50,
