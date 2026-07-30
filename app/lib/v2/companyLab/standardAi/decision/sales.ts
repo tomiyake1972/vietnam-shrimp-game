@@ -373,6 +373,38 @@ export function buildStandardAiSalesPlans(
         qualityReputation: observation.qualityScoreByProduct[product],
         customerRelationship: observation.customerTrustByMarket[market],
         deliveryReliability: observation.deliveryReliabilityByMarket[market],
+        // 【SAI-5D】前四半期末までの自社営業基盤（無効時undefined→エンジン側は
+        // 中立値50として扱い、かつウェイト既定0のため結果へ影響しない）。
+        salesBaseScore: observation.salesBaseByMarketProduct?.[market]?.[product],
+      });
+    }
+  }
+
+  // 【SAI-5D】営業基盤の優位が実際に計画へ反映されたことを診断へ記録する
+  // （中立値+5点を超える基盤を持つ市場×商品へ計画を出した場合のみ、1件に集約）。
+  if (observation.salesBaseByMarketProduct) {
+    const advantaged = plans.filter((p) => {
+      const s = observation.salesBaseByMarketProduct?.[p.market]?.[p.product];
+      return s !== undefined && (s as unknown as number) > 55;
+    });
+    if (advantaged.length > 0) {
+      const top = advantaged.reduce((a, b) =>
+        ((observation.salesBaseByMarketProduct?.[a.market]?.[a.product] as unknown as number) ?? 0) >=
+        ((observation.salesBaseByMarketProduct?.[b.market]?.[b.product] as unknown as number) ?? 0)
+          ? a
+          : b
+      );
+      diagnostics.push({
+        code: "SALES_BASE_ADVANTAGE",
+        domain: "sales",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: {
+          advantagedPlanCount: advantaged.length,
+          topSalesBaseScore: (observation.salesBaseByMarketProduct?.[top.market]?.[top.product] as unknown as number) ?? 0,
+        },
+        decisionSummary: `${top.market}×${top.product.toUpperCase()}等${advantaged.length}件で営業基盤の優位あり`,
+        message: "蓄積した営業基盤（中立値超）を持つ市場×商品へ販売計画を提出した（成約競争力の第6項として反映される）。",
       });
     }
   }

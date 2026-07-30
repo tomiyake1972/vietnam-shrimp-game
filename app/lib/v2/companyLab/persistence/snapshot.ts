@@ -43,6 +43,9 @@ export function createCompanyLabRuntimeSnapshot(state: CompanyLabState): Company
     workforceState: state.workforceState,
     // 【Phase 8F-1】市場別・消費国在庫・購買循環モデルのcarry state。
     consumerMarketState: state.consumerMarketState,
+    // 【SAI-5D】営業基盤ストック（SAI-5機能フラグ有効時のみ存在するoptional。
+    // undefinedのときはキー自体を含めない＝既存スナップショットと同一形状）。
+    ...(state.salesBaseState ? { salesBaseState: state.salesBaseState } : {}),
     isComplete: state.isComplete,
   };
 }
@@ -98,6 +101,10 @@ export function restoreCompanyLabStateFromRuntimeSnapshot(
     consumerMarketState: isConsumerMarketStateEmpty(snapshot.consumerMarketState)
       ? restoreConsumerMarketStateFromHistory(history)
       : snapshot.consumerMarketState,
+    // 【SAI-5D 後方互換】schemaVersion:1〜3のスナップショットにはsalesBaseState
+    // キーが存在しない → undefined（機能無効）として復元する。履歴からの再構築は
+    // しない（機能フラグ無効のラボでは状態が存在しないことが正しい状態のため）。
+    ...(snapshot.salesBaseState ? { salesBaseState: snapshot.salesBaseState } : {}),
     history,
     isComplete: snapshot.isComplete,
   };

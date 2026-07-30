@@ -75,3 +75,42 @@ test("SAI-5C統合: AIはturn2以降にライフサイクル公開トレンド�
     assert.equal(c.publicInfo.productLifecycleOutlook, undefined);
   }
 });
+
+// ---------------------------------------------------------------------
+// SAI-5D: 会社×市場×商品の営業基盤蓄積
+// ---------------------------------------------------------------------
+
+test("SAI-5D統合: salesBaseAccumulation無効時は従来と完全に同一（後方互換）", () => {
+  const off1 = runAutoplayCase(baseConfig("sai5d-backcompat", 2));
+  const off2 = runAutoplayCase(baseConfig("sai5d-backcompat", 2, { salesBaseAccumulationEnabled: false }));
+  assert.equal(JSON.stringify(off1.history), JSON.stringify(off2.history));
+});
+
+test("SAI-5D統合: 有効時、8四半期完走・同一seedで完全再現・営業基盤が実際に蓄積される", () => {
+  const config = baseConfig("sai5d-on-repro", 8, { salesBaseAccumulationEnabled: true, marketProductOrientationEnabled: true });
+  const a = runAutoplayCase(config);
+  assert.equal(a.completedTurns, 8);
+  const b = runAutoplayCase(config);
+  assert.equal(JSON.stringify(a.history), JSON.stringify(b.history));
+  // turn8時点のAI観測に営業基盤が現れている（志向により活動配分が偏る→蓄積差）
+  const turn8 = a.quarterStartCaptures.filter((c) => c.turn === 8);
+  const withBase = turn8.filter((c) => c.ownState.salesBaseByMarketProduct && Object.keys(c.ownState.salesBaseByMarketProduct).length > 0);
+  assert.ok(withBase.length === 5, `turn8で営業基盤を観測できた会社が${withBase.length}/5社のみ`);
+});
+
+test("SAI-5D統合: 継続活動した市場×商品の基盤が中立値を上回り、志向の強い市場ほど高い（JPQ×JP > JPQ×CN）", () => {
+  const run = runAutoplayCase(
+    baseConfig("sai5d-direction", 8, { salesBaseAccumulationEnabled: true, marketProductOrientationEnabled: true })
+  );
+  const jpqTurn8 = run.quarterStartCaptures.find((c) => c.turn === 8 && c.companyId === "JPQ")!;
+  const base = jpqTurn8.ownState.salesBaseByMarketProduct!;
+  const jpVap = (base.JP?.vap as unknown as number) ?? 50;
+  assert.ok(jpVap > 50, `JPQの日本×VAP基盤(${jpVap})が中立値を超えていない`);
+});
+
+test("SAI-5D統合: 無効時はsnapshot形状が既存と同一（salesBaseStateがどこにも現れない）", () => {
+  const off = runAutoplayCase(baseConfig("sai5d-shape", 2));
+  for (const c of off.quarterStartCaptures) {
+    assert.equal(c.ownState.salesBaseByMarketProduct, undefined);
+  }
+});

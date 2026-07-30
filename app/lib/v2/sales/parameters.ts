@@ -46,6 +46,11 @@ export interface SalesParameters {
     readonly relationship: number;
     readonly quality: number;
     readonly deliveryReliability: number;
+    /** 【SAI-5D】営業基盤（会社×市場×商品の蓄積ストック、companyLab/salesBase.ts）
+     *  のウェイト。既定0（＝寄与が厳密に0でビット単位の後方互換）。有効化時は
+     *  SALES_PARAMETERS_SAI5_SALES_BASE_V1（合計1.0を保ってcoverage/relationship/
+     *  qualityから切り出して再配分）をturnInput.parameters.sales経由で渡す。 */
+    readonly salesBase: number;
   };
 
   /**
@@ -117,6 +122,7 @@ export const SALES_PARAMETERS_V1: SalesParameters = {
     relationship: 0.15,
     quality: 0.15,
     deliveryReliability: 0.1,
+    salesBase: 0,
   },
 
   priceSensitivity: 3.0,
@@ -133,4 +139,28 @@ export const SALES_PARAMETERS_V1: SalesParameters = {
 
   minAskPriceRatioOfBase: 0.5,
   maxAskPriceRatioOfBase: 2.0,
+};
+
+/**
+ * 【SAI-5D】営業基盤ウェイト有効化版。salesBase=0.08を、coverage(0.25→0.21)・
+ * relationship(0.15→0.13)・quality(0.15→0.13)から切り出して合計1.0を維持する
+ * （価格・納期の重みは不変）。
+ *
+ * 【切り出し元の設計判断】営業基盤は「顧客接点・販路の蓄積」であり、意味的に
+ * 最も近いcoverage（当期の営業人員フロー）とrelationship（履行体験の蓄積）から
+ * 主に切り出す（同種のシグナルの合計影響力を増やさない＝三重計上の抑制）。
+ * 合計を1.0に保つのは、外部オプション（externalOptionWeight=0.35）との相対
+ * バランスを変えないため（合計が増えると5社の成約量が構造的に増えてしまう）。
+ */
+export const SALES_PARAMETERS_SAI5_SALES_BASE_V1: SalesParameters = {
+  ...SALES_PARAMETERS_V1,
+  parametersVersion: "sales-v0.1+sai5-sales-base",
+  competitivenessWeights: {
+    price: 0.35,
+    coverage: 0.21,
+    relationship: 0.13,
+    quality: 0.13,
+    deliveryReliability: 0.1,
+    salesBase: 0.08,
+  },
 };

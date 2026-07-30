@@ -31,6 +31,7 @@ import { FinancingState } from "../../financing/types";
 import { CapexState } from "../../capex/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
 import type { WorkforceState } from "../workforce";
+import type { SalesBaseState } from "../salesBase";
 import type { ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 
 // ---------------------------------------------------------------------
@@ -67,8 +68,16 @@ import type { ConsumerMarketCarryStateTable } from "../../market/consumerInvento
  *        marketInput.demandMarketsから決定論的に再構築する（推測値は作らない）。
  *        併せてCompanyQuarterRecord.consumerMarketRecordsもoptionalとして追加した
  *        （既存の確定履歴エントリにはこのキーが無いため）。
+ *   v4 … 【SAI-5D】CompanyLabRuntimeSnapshot へ salesBaseState
+ *        （会社×市場×商品の営業基盤ストック、optional）を追加。
+ *        **追加的変更のみで、マイグレーション処理は不要**。
+ *        salesBaseStateはSAI-5の機能フラグ（config.sai5.salesBaseAccumulation）
+ *        有効時のみ設定されるoptionalな状態であり、schemaVersion:1〜3の
+ *        既存データにはキーが存在しない → undefined（機能無効）として復元する。
+ *        履歴からの再構築は行わない（機能フラグ無効のラボでは状態が存在しない
+ *        ことが正しい状態であり、欠落＝無効と等価なため）。
  */
-export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 3;
+export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 4;
 
 // ---------------------------------------------------------------------
 // 1. ランタイムスナップショット（history非包含。§2-1・§2-2）
@@ -137,6 +146,12 @@ export interface CompanyLabRuntimeSnapshot {
    * として復元する（market/consumerInventory.ts isConsumerMarketStateEmpty参照）。
    */
   readonly consumerMarketState: ConsumerMarketCarryStateTable;
+  /**
+   * 【SAI-5D・schemaVersion 4で追加】会社×市場×商品の営業基盤ストック
+   * （companyLab/salesBase.ts）。SAI-5機能フラグ有効時のみ設定されるoptional。
+   * schemaVersion:1〜3のデータにはキーが無い → undefined（機能無効）として復元。
+   */
+  readonly salesBaseState?: SalesBaseState;
   readonly isComplete: boolean;
 }
 

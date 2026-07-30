@@ -56,6 +56,8 @@ import {
 } from "../market/consumerInventory";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
 import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix } from "../market/productLifecycle";
+import { salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
+import { SALES_PARAMETERS_SAI5_SALES_BASE_V1 } from "../sales/parameters";
 import { deriveVietnamMarketReferencePrices } from "../sales/marketAdapter";
 import {
   advanceScenarioTurn,
@@ -406,6 +408,9 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     financingState: financingStateForCompany,
     capexState: capexStateForCompany,
     workforceState: workforceStateForCompany,
+    // 【SAI-5D】前四半期末までの自社の営業基盤（quality/trustと同じ「当期処理の
+    // 最後に更新される＝呼び出し時点では常に前期末値」の規約）。無効時はundefined。
+    ...(state.salesBaseState ? { salesBaseByMarketProduct: salesBaseSliceForCompany(state.salesBaseState, fixture.companyId) } : {}),
   };
 }
 
@@ -786,7 +791,13 @@ export function advanceCompanyLabQuarter(
     marketWeights: consumerMarketWeights,
     // 【SAI-5C】市場×商品の需要構成比行列（undefinedなら従来の世界一律構成比）。
     marketProductMix: lifecycleMix,
-    parameters: { destinationMarketPricing: destinationMarketPricingForThisQuarter },
+    parameters: {
+      destinationMarketPricing: destinationMarketPricingForThisQuarter,
+      // 【SAI-5D】営業基盤ウェイト有効化版のSalesParameters（合計1.0を保った
+      // 再配分。無効時はキー自体を渡さず、turn/runner.tsの既定
+      // SALES_PARAMETERS_V1＝salesBaseウェイト0で従来と完全に同一）。
+      ...(state.config.sai5?.salesBaseAccumulation ? { sales: SALES_PARAMETERS_SAI5_SALES_BASE_V1 } : {}),
+    },
   };
   const turnResult = runTurn(turnInput);
 
@@ -883,6 +894,23 @@ export function advanceCompanyLabQuarter(
     trustByCompanyMarket: updateTrustByCompanyMarket(state.qualityState.trustByCompanyMarket, deliveryObservations, trustObservations),
     rampHistory: updatedRampHistory,
   };
+
+  // --- 【SAI-5D】営業基盤の四半期末更新（quality/trust状態と同じ位置＝当期の
+  // 成約・履行・品質調整がすべて確定した後。当期の成約競争力に使われたのは
+  // 前期末値のみであり、この更新値が効くのは次期から＝遡及なし）。無効時は
+  // 従来どおりundefinedのまま持ち越す。 ---
+  const salesBaseStateAfter = state.config.sai5?.salesBaseAccumulation
+    ? updateSalesBaseState(
+        state.salesBaseState,
+        {
+          salesPlans: decisions.flatMap((d) => d.salesPlans),
+          allocations: turnResult.salesRecord.allocations,
+          qualityAdjustments: adjustments,
+          lifecycleMix,
+        },
+        fixtures.map((f) => f.companyId)
+      )
+    : state.salesBaseState;
 
   // --- 次期のPD/VAP供給シグナル用に、当期の実績生産量（品質調整後＝販売可能量）を会社×商品で集計する ---
   const lastQuarterActualProduction: Record<CompanyId, Record<Product, number>> = {};
@@ -1146,6 +1174,7 @@ export function advanceCompanyLabQuarter(
     productionState: { ...productionStateAfter, finishedGoodsLots: finishedGoodsLotsAfterExpiry },
     lastQuarterActualProduction,
     qualityState: qualityStateAfter,
+    ...(salesBaseStateAfter ? { salesBaseState: salesBaseStateAfter } : {}),
     financeState: financeStateAfter,
     financingState: financingStateAfter,
     capexState: capexStateAfter,

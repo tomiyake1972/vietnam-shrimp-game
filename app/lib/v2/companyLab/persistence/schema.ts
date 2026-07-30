@@ -67,6 +67,7 @@ import { ScenarioMode, ScenarioState } from "../../scenario/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
 import type { WorkforceState } from "../workforce";
 import type { ConsumerMarketCarryState, ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
+import type { SalesBaseState } from "../salesBase";
 import {
   CompanyLabDraftEnvelope,
   CompanyLabPersistedCurrentState,
@@ -681,6 +682,9 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
   const capexState = { companies: capexCompaniesRaw.map((c, i) => validateCompanyCapexState(c, `${path}.capexState.companies[${i}]`)) };
   const workforceState = validateWorkforceState(obj.workforceState, `${path}.workforceState`);
   const consumerMarketState = validateConsumerMarketState(obj.consumerMarketState, `${path}.consumerMarketState`);
+  // 【SAI-5D・schemaVersion 4】optionalな営業基盤ストック。キー欠落（v1〜v3の
+  // 既存データ）はundefined（機能無効）として復元する。
+  const salesBaseState = validateSalesBaseState(obj.salesBaseState, `${path}.salesBaseState`);
   const isComplete = requireBoolean(obj.isComplete, `${path}.isComplete`);
 
   return {
@@ -696,6 +700,7 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
     capexState,
     workforceState,
     consumerMarketState,
+    ...(salesBaseState ? { salesBaseState } : {}),
     isComplete,
   };
 }
@@ -770,6 +775,30 @@ function emptyConsumerMarketState(): ConsumerMarketCarryStateTable {
   }
   return result;
 }
+
+/**
+ * 【SAI-5D・schemaVersion 4】営業基盤ストックの検証。キー欠落（v1〜v3の既存
+ * データ）・nullはundefined（機能無効）を返す。存在する場合はエントリごとに
+ * 会社ID・市場・商品・スコア（Score0to100スマートコンストラクタ経由）を検証する。
+ */
+function validateSalesBaseState(raw: unknown, path: string): SalesBaseState | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = requireObject(raw, path);
+  const entriesRaw = requireArray(obj.entries, `${path}.entries`);
+  const entries = entriesRaw.map((e, i) => {
+    const entryPath = `${path}.entries[${i}]`;
+    const entryObj = requireObject(e, entryPath);
+    return {
+      companyId: requireNonEmptyString(entryObj.companyId, `${entryPath}.companyId`),
+      market: requireEnum(entryObj.market, DEMAND_MARKET_IDS, `${entryPath}.market`),
+      product: requireEnum(entryObj.product, PRODUCTS_FOR_SALES_BASE, `${entryPath}.product`),
+      score: wrapUnitConstructor(score0to100, entryObj.score, `${entryPath}.score`),
+    };
+  });
+  return { entries };
+}
+
+const PRODUCTS_FOR_SALES_BASE = ["hoso", "pd", "vap"] as const;
 
 // ---------------------------------------------------------------------
 // 8. CompanyFixture・CompanyLabConfig（軽量検証。静的フィクスチャデータ）

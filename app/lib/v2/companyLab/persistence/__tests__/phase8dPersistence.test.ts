@@ -217,8 +217,8 @@ test("PS-5（必須14）: 履歴も無い旧データでも例外にならず、
   }
 });
 
-test("PS-6: 現行スキーマのバージョン番号が3へ上がっており、1・2のデータも受け付ける（Phase 8F-1でconsumerMarketStateを追加）", () => {
-  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 3);
+test("PS-6: 現行スキーマのバージョン番号が4へ上がっており、1〜3のデータも受け付ける（SAI-5DでoptionalのsalesBaseStateを追加。追加的変更のみ）", () => {
+  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 4);
 });
 
 // ---------------------------------------------------------------------

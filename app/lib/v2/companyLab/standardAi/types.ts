@@ -115,6 +115,10 @@ export interface StandardAiObservation {
   readonly customerTrustByMarket: Readonly<Partial<Record<DemandMarketId, Score0to100>>>;
   readonly deliveryReliabilityByMarket: Readonly<Partial<Record<DemandMarketId, Score0to100>>>;
 
+  // --- 【SAI-5D】自社の営業基盤（会社×市場×商品、前四半期末まで） ---
+  /** 市場×商品の営業基盤スコア（salesBaseAccumulation有効時のみ。存在しないキーは中立50）。 */
+  readonly salesBaseByMarketProduct?: Readonly<Partial<Record<DemandMarketId, Readonly<Partial<Record<Product, Score0to100>>>>>>;
+
   // --- 【SAI-5C】市場別の商品ライフサイクル公開トレンド（前四半期までの公開情報） ---
   /** 前四半期に適用された市場×商品の需要構成比（productLifecycle有効時のみ。turn1はundefined）。 */
   readonly lifecycleSharesByMarket?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;

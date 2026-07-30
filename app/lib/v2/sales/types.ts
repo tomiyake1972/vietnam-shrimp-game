@@ -61,6 +61,11 @@ export interface CompanySalesPlanEntry {
   readonly qualityReputation?: Score0to100;
   /** 納期信頼性評価（0〜100）。未接続時は中立値。Phase7で実データに置き換える想定。 */
   readonly deliveryReliability?: Score0to100;
+  /** 【SAI-5D】この市場×商品への営業基盤スコア（0〜100、companyLab/salesBase.tsの
+   *  蓄積ストック。前四半期末までの値）。未接続時は中立値。ウェイト
+   *  （competitivenessWeights.salesBase）が既定0のため、値の有無に関わらず
+   *  既定パラメータでは成約結果へ一切影響しない。 */
+  readonly salesBaseScore?: Score0to100;
   /**
    * 承認済み取引枠・供給信認枠（外部から供給される任意の個社成約上限）。
    * 将来Phase（与信・取引先管理等）から接続される想定の外部入力で、未指定時は
@@ -98,6 +103,8 @@ export interface CompetitivenessWeightBreakdown {
   readonly qualityContribution: number;
   /** 納期信頼性のウェイト寄与分。 */
   readonly deliveryReliabilityContribution: number;
+  /** 【SAI-5D】営業基盤のウェイト寄与分（既定ウェイト0のため既定では常に0）。 */
+  readonly salesBaseContribution: number;
   /** clamp前の生の価格スコア（説明用、診断目的）。 */
   readonly rawPriceScore: number;
   /** clamp後の価格スコア（この値がmaximumPriceCompetitivenessに達していれば、追加値下げの効果はない）。 */

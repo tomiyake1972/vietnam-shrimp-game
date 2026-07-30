@@ -76,6 +76,10 @@ export function computeCompetitivenessBreakdown(
   const quality = (entry.qualityReputation !== undefined ? unwrapUnit(entry.qualityReputation) : unwrapUnit(params.neutralScore)) / 100;
   const reliability =
     (entry.deliveryReliability !== undefined ? unwrapUnit(entry.deliveryReliability) : unwrapUnit(params.neutralScore)) / 100;
+  // 【SAI-5D】営業基盤（会社×市場×商品の蓄積ストック）。ウェイト既定0のため、
+  // 既定パラメータでは寄与は厳密に0（0×x=0、末尾への加算は合計をビット単位で
+  // 変えない＝既存の全計算・全テストと完全に一致する）。
+  const salesBase = (entry.salesBaseScore !== undefined ? unwrapUnit(entry.salesBaseScore) : unwrapUnit(params.neutralScore)) / 100;
 
   return {
     priceContribution: w.price * priceContributionRatio,
@@ -83,6 +87,7 @@ export function computeCompetitivenessBreakdown(
     relationshipContribution: w.relationship * relationship,
     qualityContribution: w.quality * quality,
     deliveryReliabilityContribution: w.deliveryReliability * reliability,
+    salesBaseContribution: w.salesBase * salesBase,
     rawPriceScore,
     clampedPriceScore,
     isPriceScoreAtCeiling: clampedPriceScore >= params.maximumPriceCompetitiveness - EPSILON,
@@ -99,7 +104,11 @@ export function computeCompetitivenessWeight(
   params: SalesParameters
 ): number {
   const b = computeCompetitivenessBreakdown(entry, askPrice, basePrice, coverageScore, params);
-  return b.priceContribution + b.coverageContribution + b.relationshipContribution + b.qualityContribution + b.deliveryReliabilityContribution;
+  // 【SAI-5D】salesBaseContributionは既定ウェイト0のため厳密に0であり、末尾への
+  // 加算は既存の合計値をビット単位で変えない（x + 0 === x）。
+  return (
+    b.priceContribution + b.coverageContribution + b.relationshipContribution + b.qualityContribution + b.deliveryReliabilityContribution + b.salesBaseContribution
+  );
 }
 
 /**

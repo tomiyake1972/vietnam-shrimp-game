@@ -44,6 +44,7 @@ import { CompanyFinancingState, FinancingRequestInput, FinancingState, Financing
 import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
 // 【Phase 8D-4】型のみの参照（workforce.ts 側も CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
 import type { CompanyWorkforceState, WorkforceState } from "./workforce";
+import type { SalesBaseState } from "./salesBase";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -178,6 +179,13 @@ export interface CompanyOwnState {
    * 意思決定画面はこれを出発点として増減差分を入力する。
    */
   readonly workforceState: CompanyWorkforceState;
+  /**
+   * 【SAI-5D】前四半期末までの自社の営業基盤（市場×商品、0〜100）。
+   * config.sai5.salesBaseAccumulation有効時のみ設定される。存在しない
+   * キーは中立値（50）とみなす（quality/trustと同じ「前期末値のみを当期の
+   * 成約に使う」規約に従う）。
+   */
+  readonly salesBaseByMarketProduct?: Readonly<Partial<Record<DemandMarketId, Readonly<Partial<Record<Product, Score0to100>>>>>>;
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */
@@ -379,6 +387,9 @@ export interface CompanyLabState {
   readonly lastQuarterActualProduction: Readonly<Record<CompanyId, Readonly<Partial<Record<Product, number>>>>>;
   /** 【Phase 7A】品質・顧客信頼・納期信頼性・増産履歴（ターンをまたいで保持）。 */
   readonly qualityState: QualityReliabilityState;
+  /** 【SAI-5D】会社×市場×商品の営業基盤ストック（config.sai5.salesBaseAccumulation
+   *  有効時のみ更新・保持。無効時はundefinedのまま＝既存スナップショットと同一）。 */
+  readonly salesBaseState?: SalesBaseState;
   /** 【Phase 8A】会社別の財務状態（現金・売掛/買掛・借入・固定資産・完成品原価台帳等。ターンをまたいで保持）。 */
   readonly financeState: FinanceState;
   /** 【Phase 8B-1】会社別の資金繰り状態（融資ポートフォリオ・未払利息・信用/延滞履歴。ターンをまたいで保持）。 */
