@@ -16,7 +16,7 @@
 // 構造で扱われる（docs/v2/reusable-analysis/kpi_catalog.md参照）。
 
 import ExcelJS from "exceljs";
-import { CompanyQuarterStatRow, HeadcountDivergenceRow, LoadedSai3aRun, MarketShareStatRow, Sai3bAnalysis } from "../schema";
+import { CompanyQuarterStatRow, HeadcountDivergenceRow, LoadedSai3aRun, MarketShareStatRow, Sai3bAnalysis, StatSummary } from "../schema";
 import { ChartSeriesSpec, ChartSpec } from "./chartInjector";
 import {
   applyFreezeAndFilter,
@@ -71,6 +71,17 @@ interface CompanyQuarterKpiSpec {
   readonly chartType: "bar" | "line";
   readonly note: string;
   readonly extract: (row: CompanyQuarterStatRow) => number | undefined;
+  /**
+   * Layer2（会社・seed比較表：平均・中央値・最小・最大・標準偏差・seed数・
+   * defaultしたseed数）の元になる、そのKPIのStatSummary全体を返す関数
+   * （三宅さんのご指摘（受入レビュー2回目）§1で追加）。多くのKPIは
+   * `extract`が読んでいるのと同じStatSummaryフィールドをそのまま返すだけで
+   * よい。H-5（運転資金の部分指標）のように、複数のStatSummaryのmedian同士の
+   * 差分として計算される「合成KPI」は、個々のseedへ遡れないためLayer2の
+   * 分布統計を正しく再構成できない。そのようなKPIはこのフィールドを省略し
+   * （undefinedのまま）、Layer2側で「分布統計は算出不可」と明記して捏造を避ける。
+   */
+  readonly extractStat?: (row: CompanyQuarterStatRow) => StatSummary | undefined;
 }
 
 /**
@@ -122,19 +133,44 @@ function writeCompanyQuarterBlock(
   const dataEndRow = ws.rowCount;
 
   ws.addRow([]);
-  writeHeaderRow(ws, ["会社", "平均(中央値の全turn平均)", "最小(中央値)", "最大(中央値)", "延べdefault seed-quarter数"]);
-  for (const c of companies) {
-    const relevant = statsForRun.filter((s) => s.companyId === c);
-    const medians = relevant.map((s) => kpi.extract(s)).filter((v): v is number => v !== undefined);
-    const avg = medians.length > 0 ? medians.reduce((a, b) => a + b, 0) / medians.length : undefined;
-    const min = medians.length > 0 ? Math.min(...medians) : undefined;
-    const max = medians.length > 0 ? Math.max(...medians) : undefined;
-    const defaultedTotal = relevant.reduce((s, r) => s + r.defaultedSeedCount, 0);
-    const row = ws.addRow([c, avg ?? "", min ?? "", max ?? "", defaultedTotal]);
-    row.eachCell((cell, colNumber) => {
-      cell.font = BODY_FONT;
-      if (colNumber >= 2 && colNumber <= 4) cell.numFmt = NUM_FMT[kpi.format];
-    });
+  // Layer2: 会社・seed比較表（seed横断の分布統計）。Layer1（直上のピボット表）は
+  // 「turn×会社」を軸とした中央値のみの時系列表であるのに対し、Layer2は
+  // 「turn×会社ごとに、その裏にあるseed群の分布そのもの」を見せる表であり、
+  // 目的が異なる（三宅さんのご指摘（受入レビュー2回目）§1）。両者を明確に
+  // 区別するため、専用のsubheaderを立てて視覚的にもLayer1と分離する。
+  writeSubheader(ws, "Layer2: 会社・seed比較表（seed横断の分布統計）");
+  if (!kpi.extractStat) {
+    writeNote(
+      ws,
+      "このKPIは複数のStatSummary（例: 売掛金・買掛金それぞれの中央値）から算出される合成指標のため、" +
+        "個々のseedへ遡って分布を再構成することができません。捏造を避けるため、Layer2の分布統計は" +
+        "算出不可としています（平均・中央値等の欠測ではなく、定義上算出できないという意味です）。"
+    );
+  } else {
+    const extractStat = kpi.extractStat;
+    writeHeaderRow(ws, ["quarter", "会社", "平均", "中央値", "最小", "最大", "標準偏差", "seed数(n)", "defaultしたseed数"]);
+    for (const turn of turns) {
+      const period = periodByTurn.get(turn) ?? `T${turn}`;
+      for (const c of companies) {
+        const s = statsForRun.find((x) => x.companyId === c && x.turn === turn);
+        const stat: StatSummary | undefined = s ? extractStat(s) : undefined;
+        const row = ws.addRow([
+          period,
+          c,
+          stat?.average ?? "",
+          stat?.median ?? "",
+          stat?.min ?? "",
+          stat?.max ?? "",
+          stat?.stddev ?? "",
+          stat?.n ?? "",
+          s?.defaultedSeedCount ?? "",
+        ]);
+        row.eachCell((cell, colNumber) => {
+          cell.font = BODY_FONT;
+          if (colNumber >= 3 && colNumber <= 7) cell.numFmt = NUM_FMT[kpi.format];
+        });
+      }
+    }
   }
   ws.addRow([]);
   ws.addRow([]);
@@ -199,6 +235,7 @@ const SALES_QUANTITY_KPIS: readonly CompanyQuarterKpiSpec[] = [
     chartType: "bar",
     note: "単位: USD（純売上、seed横断の中央値）。同一営業人数条件・同一シナリオ内での比較。",
     extract: (r) => r.netRevenueUsd.median,
+    extractStat: (r) => r.netRevenueUsd,
   },
   {
     title: "B. 会社別販売数量推移（市場配分ベースの実績）",
@@ -209,6 +246,7 @@ const SALES_QUANTITY_KPIS: readonly CompanyQuarterKpiSpec[] = [
       "（実績に相当）。これはengineへ提出された「最終計画数量」（wish後の計画値。四半期業績シートのfinalPlannedSalesQuantityTotal）" +
       "とは異なる値であり、実績と計画を混同しないよう別集計にしている。market-allocation-trace.csvを含まない古いrunでは作成不能。",
     extract: (r) => r.actualSalesQuantityHosoEqTons.median,
+    extractStat: (r) => r.actualSalesQuantityHosoEqTons,
   },
 ];
 
@@ -221,16 +259,38 @@ export function writeSalesQuantitySheet(wb: ExcelJS.Workbook, analysis: Sai3bAna
 // ---------------------------------------------------------------------
 
 const PROFITABILITY_KPIS: readonly CompanyQuarterKpiSpec[] = [
-  { title: "D-1. 会社別売上総利益推移", format: "usd", chartType: "bar", note: "単位: USD（seed横断の中央値）。", extract: (r) => r.grossProfitUsd.median },
+  {
+    title: "D-1. 会社別売上総利益推移",
+    format: "usd",
+    chartType: "bar",
+    note: "単位: USD（seed横断の中央値）。",
+    extract: (r) => r.grossProfitUsd.median,
+    extractStat: (r) => r.grossProfitUsd,
+  },
   {
     title: "D-2. 会社別粗利益率推移",
     format: "rate",
     chartType: "line",
     note: "粗利益÷売上（seed横断の中央値）。金額と%を同一グラフに混在させないため、D-1（金額）とは別グラフにしている。",
     extract: (r) => r.grossMarginRate.median,
+    extractStat: (r) => r.grossMarginRate,
   },
-  { title: "D-3. 会社別営業利益推移", format: "usd", chartType: "bar", note: "単位: USD（seed横断の中央値）。", extract: (r) => r.operatingProfitUsd.median },
-  { title: "D-4. 会社別純利益推移", format: "usd", chartType: "bar", note: "単位: USD（seed横断の中央値）。", extract: (r) => r.netIncomeUsd.median },
+  {
+    title: "D-3. 会社別営業利益推移",
+    format: "usd",
+    chartType: "bar",
+    note: "単位: USD（seed横断の中央値）。",
+    extract: (r) => r.operatingProfitUsd.median,
+    extractStat: (r) => r.operatingProfitUsd,
+  },
+  {
+    title: "D-4. 会社別純利益推移",
+    format: "usd",
+    chartType: "bar",
+    note: "単位: USD（seed横断の中央値）。",
+    extract: (r) => r.netIncomeUsd.median,
+    extractStat: (r) => r.netIncomeUsd,
+  },
 ];
 
 export function writeProfitabilitySheet(wb: ExcelJS.Workbook, analysis: Sai3bAnalysis): SheetChartResult {
@@ -248,6 +308,7 @@ const CASH_FINANCE_KPIS: readonly CompanyQuarterKpiSpec[] = [
     chartType: "line",
     note: "単位: USD（seed横断の中央値）。マイナス値も実額のまま表示（負の現金＝債務超過の目安）。default発生turnは会社別統計の「延べdefault seed-quarter数」欄で把握できる。",
     extract: (r) => r.closingCashUsd.median,
+    extractStat: (r) => r.closingCashUsd,
   },
   {
     title: "F-1. 会社別営業キャッシュフロー推移",
@@ -255,6 +316,7 @@ const CASH_FINANCE_KPIS: readonly CompanyQuarterKpiSpec[] = [
     chartType: "bar",
     note: "単位: USD（seed横断の中央値）。現金残高（水準）とキャッシュフロー（増減）は別概念のため、E（水準）とは別グラフにしている。",
     extract: (r) => r.operatingCashFlowUsd.median,
+    extractStat: (r) => r.operatingCashFlowUsd,
   },
   {
     title: "F-2. 会社別投資キャッシュフロー推移",
@@ -262,6 +324,7 @@ const CASH_FINANCE_KPIS: readonly CompanyQuarterKpiSpec[] = [
     chartType: "bar",
     note: "単位: USD（seed横断の中央値）。",
     extract: (r) => r.investingCashFlowUsd.median,
+    extractStat: (r) => r.investingCashFlowUsd,
   },
   {
     title: "F-3. 会社別財務キャッシュフロー推移",
@@ -269,6 +332,7 @@ const CASH_FINANCE_KPIS: readonly CompanyQuarterKpiSpec[] = [
     chartType: "bar",
     note: "単位: USD（seed横断の中央値）。",
     extract: (r) => r.financingCashFlowUsd.median,
+    extractStat: (r) => r.financingCashFlowUsd,
   },
   {
     title: "G-1. 会社別短期借入推移",
@@ -276,6 +340,7 @@ const CASH_FINANCE_KPIS: readonly CompanyQuarterKpiSpec[] = [
     chartType: "bar",
     note: "単位: USD（seed横断の中央値、期末残高）。",
     extract: (r) => r.shortTermLoansUsd.median,
+    extractStat: (r) => r.shortTermLoansUsd,
   },
   {
     title: "G-2. 会社別長期借入推移",
@@ -283,6 +348,7 @@ const CASH_FINANCE_KPIS: readonly CompanyQuarterKpiSpec[] = [
     chartType: "bar",
     note: "単位: USD（seed横断の中央値、期末残高）。",
     extract: (r) => r.longTermLoansUsd.median,
+    extractStat: (r) => r.longTermLoansUsd,
   },
   {
     title: "G-3. 会社別追加融資余力推移",
@@ -290,6 +356,7 @@ const CASH_FINANCE_KPIS: readonly CompanyQuarterKpiSpec[] = [
     chartType: "line",
     note: "単位: USD（seed横断の中央値、期末値）。0付近まで下がるとunderwriting frozenに近いことを示す（Default_信用_警告シート参照）。",
     extract: (r) => r.availableAdditionalCapacityUsd.median,
+    extractStat: (r) => r.availableAdditionalCapacityUsd,
   },
 ];
 
@@ -302,14 +369,29 @@ export function writeCashFinanceSheet(wb: ExcelJS.Workbook, analysis: Sai3bAnaly
 // ---------------------------------------------------------------------
 
 const INVENTORY_WORKING_CAPITAL_KPIS: readonly CompanyQuarterKpiSpec[] = [
-  { title: "H-1. 会社別原料在庫推移", format: "quantity", chartType: "line", note: "単位: HOSO換算トン（seed横断の中央値、期末値）。", extract: (r) => r.rawMaterialInventoryHosoEqTons.median },
-  { title: "H-2. 会社別製品在庫推移", format: "quantity", chartType: "line", note: "単位: HOSO換算トン（seed横断の中央値、期末値）。", extract: (r) => r.finishedGoodsInventoryHosoEqTons.median },
+  {
+    title: "H-1. 会社別原料在庫推移",
+    format: "quantity",
+    chartType: "line",
+    note: "単位: HOSO換算トン（seed横断の中央値、期末値）。",
+    extract: (r) => r.rawMaterialInventoryHosoEqTons.median,
+    extractStat: (r) => r.rawMaterialInventoryHosoEqTons,
+  },
+  {
+    title: "H-2. 会社別製品在庫推移",
+    format: "quantity",
+    chartType: "line",
+    note: "単位: HOSO換算トン（seed横断の中央値、期末値）。",
+    extract: (r) => r.finishedGoodsInventoryHosoEqTons.median,
+    extractStat: (r) => r.finishedGoodsInventoryHosoEqTons,
+  },
   {
     title: "H-3. 会社別売掛金推移（期首時点）",
     format: "usd",
     chartType: "line",
     note: "単位: USD（seed横断の中央値、四半期「開始」時点。期末残高はSAI-3Aの出力に含まれていないため取得できない）。",
     extract: (r) => r.accountsReceivableUsdAtStart.median,
+    extractStat: (r) => r.accountsReceivableUsdAtStart,
   },
   {
     title: "H-4. 会社別買掛金推移（期首時点）",
@@ -317,6 +399,7 @@ const INVENTORY_WORKING_CAPITAL_KPIS: readonly CompanyQuarterKpiSpec[] = [
     chartType: "line",
     note: "単位: USD（seed横断の中央値、四半期「開始」時点。期末残高は取得できない）。",
     extract: (r) => r.accountsPayableUsdAtStart.median,
+    extractStat: (r) => r.accountsPayableUsdAtStart,
   },
   {
     title: "H-5.（参考・一部作成可能）運転資金の部分指標（在庫除く、期首AR-AP）",

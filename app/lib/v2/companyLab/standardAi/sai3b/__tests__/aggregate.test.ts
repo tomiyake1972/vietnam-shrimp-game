@@ -310,6 +310,40 @@ test("buildCompanyQuarterStats: 複数seedの分布からaverage/median/min/max�
   assert.ok(Math.abs(row.grossMarginRate.average! - 0.2) < 1e-9);
 });
 
+// 三宅さんのご指摘（受入レビュー2回目）§1: Layer2（会社・seed比較表）に
+// 標準偏差が欠けていた。標本標準偏差（n-1で割る）が正しく計算されることを検証する。
+// s1=1,000,000 / s2=2,000,000 / s3=3,000,000 -> average=2,000,000
+// 分散(不偏) = ((1e6)^2 + 0 + (1e6)^2) / (3-1) = 1e12 -> stddev = 1,000,000
+test("buildCompanyQuarterStats: 複数seedの分布から標本標準偏差(n-1)が正しく計算される", () => {
+  const run = makeLoadedRun({
+    runLabel: "r1",
+    quarterSummaryRows: [
+      makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 1, netRevenueUsd: 1_000_000, grossProfitUsd: 200_000 }),
+      makeQuarterSummaryRow({ seed: "s2", companyId: "BAL", turn: 1, netRevenueUsd: 2_000_000, grossProfitUsd: 400_000 }),
+      makeQuarterSummaryRow({ seed: "s3", companyId: "BAL", turn: 1, netRevenueUsd: 3_000_000, grossProfitUsd: 600_000, paymentDefault: true }),
+    ],
+  });
+  const quarterPerformance = buildQuarterPerformance([run]);
+  const rows = buildCompanyQuarterStats([run], quarterPerformance);
+  const row = rows[0];
+  assert.equal(row.netRevenueUsd.n, 3);
+  assert.ok(row.netRevenueUsd.stddev !== undefined);
+  assert.ok(Math.abs(row.netRevenueUsd.stddev! - 1_000_000) < 1e-6);
+});
+
+// n<2（seedが1件だけ）の場合、「ばらつき」という概念自体が定義できないため、
+// 0にせずundefinedのままにする（捏造しない設計原則）。
+test("buildCompanyQuarterStats: seedが1件だけの場合、標準偏差は0ではなくundefined", () => {
+  const run = makeLoadedRun({
+    runLabel: "r1",
+    quarterSummaryRows: [makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 1, netRevenueUsd: 1_000_000, grossProfitUsd: 200_000 })],
+  });
+  const quarterPerformance = buildQuarterPerformance([run]);
+  const rows = buildCompanyQuarterStats([run], quarterPerformance);
+  assert.equal(rows[0].netRevenueUsd.n, 1);
+  assert.equal(rows[0].netRevenueUsd.stddev, undefined);
+});
+
 test("buildCompanyQuarterStats: 値が1件も無いKPI（market-allocation-trace無しのactualSalesQuantityHosoEqTons）はn=0でaverage等がundefined", () => {
   const run = makeLoadedRun({
     runLabel: "r1",

@@ -16,6 +16,7 @@ import {
   writeAllDashboardSheets,
   writeCashFinanceSheet,
   writeExecutiveDashboardSheet,
+  writeInventoryWorkingCapitalSheet,
   writeMarketShareSheet,
   writeProfitabilitySheet,
   writeSalesQuantitySheet,
@@ -63,6 +64,44 @@ test("writeSalesQuantitySheet: fixtureデータがある場合、A・B両KPIのC
   assert.equal(result.specs.length, 2);
   assert.ok(result.specs.some((s) => s.title.includes("会社別売上高推移")));
   assert.ok(result.specs.some((s) => s.title.includes("会社別販売数量推移")));
+});
+
+// 三宅さんのご指摘（受入レビュー2回目）§1: Layer2（会社・seed比較表）が
+// Layer1（中央値ピボット表）と明確に区別されているか、平均・中央値・最小・
+// 最大・標準偏差・seed数・defaultしたseed数の列がすべて存在するかを検証する。
+test("writeSalesQuantitySheet: Layer2（会社・seed比較表）にLayer1とは別ラベル・平均/中央値/最小/最大/標準偏差/seed数/defaultしたseed数の列が書き込まれる", () => {
+  const analysis = analysisFromRuns([{ runId: "r1", headcount: 80 }]);
+  const wb = new ExcelJS.Workbook();
+  writeSalesQuantitySheet(wb, analysis);
+  const ws = wb.getWorksheet("売上・数量推移")!;
+  const allText = ws
+    .getSheetValues()
+    .flat()
+    .filter((v): v is string => typeof v === "string")
+    .join("\n");
+  assert.match(allText, /Layer2: 会社・seed比較表（seed横断の分布統計）/);
+  assert.match(allText, /標準偏差/);
+  assert.match(allText, /seed数\(n\)/);
+  assert.match(allText, /defaultしたseed数/);
+  // 旧・誤った実装（「時間方向の中央値のばらつき」を集計したもの）のラベルが
+  // もう残っていないこと。
+  assert.doesNotMatch(allText, /平均\(中央値の全turn平均\)/);
+});
+
+// H-5（運転資金の部分指標）は複数のStatSummaryのmedian同士の差分として計算される
+// 合成KPIのため、個々のseedへ遡ってLayer2の分布統計を再構成できない。
+// 捏造を避けるため、表ではなく明示的な「算出不可」ノートが出ることを検証する。
+test("writeInventoryWorkingCapitalSheet: H-5（運転資金の部分指標）はLayer2の分布統計が「算出不可」ノートになる（表を捏造しない）", () => {
+  const analysis = analysisFromRuns([{ runId: "r1", headcount: 80 }]);
+  const wb = new ExcelJS.Workbook();
+  writeInventoryWorkingCapitalSheet(wb, analysis);
+  const ws = wb.getWorksheet("在庫・運転資金推移")!;
+  const allText = ws
+    .getSheetValues()
+    .flat()
+    .filter((v): v is string => typeof v === "string")
+    .join("\n");
+  assert.match(allText, /このKPIは複数のStatSummary[\s\S]*算出不可/);
 });
 
 test("writeMarketShareSheet: market-allocation-trace.csvを含まないrunのみの場合、作成不能ノートを出しChartSpecは空になる", () => {

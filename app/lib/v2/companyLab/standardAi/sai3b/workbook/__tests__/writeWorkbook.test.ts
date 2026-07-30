@@ -90,6 +90,46 @@ test("buildSai3bWorkbook: headcountDivergenceがある場合、80_85_90人比較
   assert.match(allText, /乖離を検出したKPI/);
 });
 
+// 三宅さんのご指摘（受入レビュー2回目）§2: 営業人件費（cumulativeSalesForceCostUsd）が
+// 従来Raw_Caseの生データダンプにしか存在しなかった（80_85_90人比較の正式KPIとして
+// 未実装だった）ことの是正。横並び比較表の列として追加されていること、および
+// 本シート自体にネイティブグラフ（会社×営業人数の比較グラフ）が追加されていることを検証する。
+test("buildSai3bWorkbook: 80_85_90人比較シートに営業人件費列が追加される", () => {
+  const analysis = analysisFromRuns([
+    { runId: "h80", headcount: 80 },
+    { runId: "h85", headcount: 85, defaultAtTurn: 1 },
+    { runId: "h90", headcount: 90 },
+  ]);
+  const wb = buildSai3bWorkbook(analysis);
+  const ws = wb.getWorksheet("80_85_90人比較")!;
+  const headerRow = ws.getRow(2).values as (string | undefined)[]; // 1行目はnote、2行目がヘッダー
+  const headerTexts = headerRow.filter((v): v is string => typeof v === "string");
+  assert.ok(
+    headerTexts.some((h) => h.includes("営業人件費")),
+    `営業人件費列が見つからない: ${JSON.stringify(headerTexts)}`
+  );
+});
+
+test("renderSai3bWorkbookToBuffer: 80_85_90人比較シートに会社別営業人件費のネイティブグラフが追加される", async () => {
+  const analysis = analysisFromRuns([
+    { runId: "h80", headcount: 80 },
+    { runId: "h85", headcount: 85, defaultAtTurn: 1 },
+    { runId: "h90", headcount: 90 },
+  ]);
+  const buffer = await renderSai3bWorkbookToBuffer(analysis);
+  const zip = await JSZip.loadAsync(buffer);
+  const chartFileNames = Object.keys(zip.files).filter((name) => /^xl\/charts\/chart\d+\.xml$/.test(name));
+  let salesForceCostChartXml: string | undefined;
+  for (const name of chartFileNames) {
+    const xml = await zip.file(name)!.async("string");
+    if (xml.includes("会社別 平均営業人件費")) {
+      salesForceCostChartXml = xml;
+      break;
+    }
+  }
+  assert.ok(salesForceCostChartXml, "会社別 平均営業人件費のグラフXMLが見つからない");
+});
+
 test("buildSai3bWorkbook: 数値セルが文字列化されていない", () => {
   const analysis = analysisFromRuns([{ runId: "r1", headcount: 80 }]);
   const wb = buildSai3bWorkbook(analysis);

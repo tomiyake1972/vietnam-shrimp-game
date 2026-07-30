@@ -15,6 +15,7 @@ import {
   AGGREGATE_RESULT_FILL,
   BODY_FONT,
   boolToLabel,
+  CANONICAL_COMPANY_ORDER,
   columnLetter,
   INPUT_CONDITION_FILL,
   INTEGER_FORMAT,
@@ -26,7 +27,7 @@ import {
   USD_FORMAT,
   writeHeaderRow,
 } from "./styles";
-import { ChartSpec, injectNativeChartsMultiSheet, SheetChartSpecs } from "./chartInjector";
+import { ChartSeriesSpec, ChartSpec, injectNativeChartsMultiSheet, SheetChartSpecs } from "./chartInjector";
 import { SheetChartResult, writeAllDashboardSheets } from "./dashboardCharts";
 
 type CellValue = string | number | boolean | undefined;
@@ -317,7 +318,11 @@ function writeChartsDataSheet(wb: ExcelJS.Workbook, analysis: Sai3bAnalysis): vo
  * （writeAllDashboardSheetsが実際にシートへ書き込みながら算出する）、ここで一緒に
  * 返し、renderSai3bWorkbookToBufferがそのままinjectNativeChartsMultiSheetへ渡す。
  */
-function buildSai3bWorkbookInternal(analysis: Sai3bAnalysis): { readonly wb: ExcelJS.Workbook; readonly dashboardSheetResults: readonly SheetChartResult[] } {
+function buildSai3bWorkbookInternal(analysis: Sai3bAnalysis): {
+  readonly wb: ExcelJS.Workbook;
+  readonly dashboardSheetResults: readonly SheetChartResult[];
+  readonly headcountComparisonChartSpecs: readonly ChartSpec[];
+} {
   const wb = new ExcelJS.Workbook();
   wb.creator = "ShrimpX V2 SAI-3B-1";
   wb.created = new Date(analysis.generatedAtIso);
@@ -335,13 +340,14 @@ function buildSai3bWorkbookInternal(analysis: Sai3bAnalysis): { readonly wb: Exc
   writeAdjustmentAnalysisSheet(wb, analysis);
   writeDefaultWarningSheet(wb, analysis);
   writeReasonCodeTallySheet(wb, analysis);
+  let headcountComparisonChartSpecs: readonly ChartSpec[] = [];
   if (analysis.loadedRuns.length >= 2) {
-    writeHeadcountComparisonSheet(wb, analysis);
+    headcountComparisonChartSpecs = writeHeadcountComparisonSheet(wb, analysis);
   }
   writeDecisionTraceSheet(wb, analysis);
   writeRawDataSheets(wb, analysis);
 
-  return { wb, dashboardSheetResults };
+  return { wb, dashboardSheetResults, headcountComparisonChartSpecs };
 }
 
 export function buildSai3bWorkbook(analysis: Sai3bAnalysis): ExcelJS.Workbook {
@@ -620,7 +626,7 @@ function writeReasonCodeTallySheet(wb: ExcelJS.Workbook, analysis: Sai3bAnalysis
 // 80・85・90人比較
 // ---------------------------------------------------------------------
 
-function writeHeadcountComparisonSheet(wb: ExcelJS.Workbook, analysis: Sai3bAnalysis): void {
+function writeHeadcountComparisonSheet(wb: ExcelJS.Workbook, analysis: Sai3bAnalysis): readonly ChartSpec[] {
   const headcounts = Array.from(new Set(analysis.loadedRuns.map((r) => r.manifest.salesForceHeadcountTotal))).sort((a, b) => a - b);
   const rows = analysis.headcountComparison;
 
@@ -637,6 +643,9 @@ function writeHeadcountComparisonSheet(wb: ExcelJS.Workbook, analysis: Sai3bAnal
     columns.push({ header: `${hc}人:営業利益(USD)`, width: 16, format: "usd", value: (r) => r.operatingProfitByHeadcount[hc] });
     columns.push({ header: `${hc}人:最終現金(USD)`, width: 16, format: "usd", value: (r) => r.finalCashByHeadcount[hc] });
     columns.push({ header: `${hc}人:最終借入(USD)`, width: 16, format: "usd", value: (r) => r.finalLoansByHeadcount[hc] });
+    // 営業人件費（累計）。三宅さんのご指摘（受入レビュー2回目）§2で追加。
+    // 従来はRaw_Caseシートの生データダンプにしか存在しなかった正式KPI。
+    columns.push({ header: `${hc}人:営業人件費(USD)`, width: 16, format: "usd", value: (r) => r.salesForceCostByHeadcount[hc] });
   }
 
   const { ws, headerRowNumber } = writeTableSheet(wb, "80_85_90人比較", columns, rows, {
@@ -681,6 +690,82 @@ function writeHeadcountComparisonSheet(wb: ExcelJS.Workbook, analysis: Sai3bAnal
       row.eachCell((cell) => (cell.font = BODY_FONT));
     }
   }
+
+  // SAI-3B-2 受入レビュー2回目 §2: 本シートには横並び比較表・乖離詳細表という
+  // 「表」はあったが、ネイティブグラフが1つも無かった（§6が求める「グラフで
+  // 比較できるように」が本シート単体では満たされていなかった）。新規追加KPI
+  // である営業人件費を対象に、会社×営業人数の比較グラフを追加する
+  // （大規模な作り直しは行わず、既存の横並び表と同じ対応関係
+  // ＝headcountComparisonの対象seed群を、会社単位でseed横断の単純平均に
+  // 集約するだけに留める。新規の集計ロジックの追加ではない）。
+  const companiesPresent = new Set(rows.map((r) => r.companyId));
+  const orderedCompanies = [
+    ...CANONICAL_COMPANY_ORDER.filter((c) => companiesPresent.has(c)),
+    ...Array.from(companiesPresent)
+      .filter((c) => !CANONICAL_COMPANY_ORDER.includes(c))
+      .sort(),
+  ];
+
+  if (orderedCompanies.length === 0 || headcounts.length === 0) return [];
+
+  ws.addRow([]);
+  ws.addRow([]);
+  const subheaderRow2 = ws.addRow(["会社別 平均営業人件費（営業人数別、seed横断の平均）"]);
+  subheaderRow2.getCell(1).font = SUBHEADER_FONT;
+  subheaderRow2.getCell(1).fill = SUBHEADER_FILL;
+  const noteRow2 = ws.addRow([
+    "本シートで新規に追加した営業人件費（累計、USD）KPIについて、会社×営業人数で比較できるようグラフ化したもの" +
+      "（三宅さんのご指摘（受入レビュー2回目）§2）。値は同一会社内でheadcountComparisonの対象となったseed群" +
+      "（上記横並び比較表と同じ対応関係）の単純平均。値が1件も無い会社×営業人数の組は空欄のまま（0への置換はしない）。",
+  ]);
+  noteRow2.getCell(1).font = NOTE_FONT;
+  noteRow2.getCell(1).alignment = { wrapText: true };
+
+  const aggHeaderRowNumber = ws.rowCount + 1;
+  writeHeaderRow(ws, ["会社", ...headcounts.map((hc) => `${hc}人`)]);
+  const aggDataStartRow = aggHeaderRowNumber + 1;
+  const perCompanyAverages = new Map<string, Map<number, number | undefined>>();
+  for (const c of orderedCompanies) {
+    const byHc = new Map<number, number | undefined>();
+    for (const hc of headcounts) {
+      const values = rows.filter((r) => r.companyId === c && r.salesForceCostByHeadcount[hc] !== undefined).map((r) => r.salesForceCostByHeadcount[hc]);
+      byHc.set(hc, values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : undefined);
+    }
+    perCompanyAverages.set(c, byHc);
+    const row = ws.addRow([c, ...headcounts.map((hc) => byHc.get(hc) ?? "")]);
+    row.getCell(1).font = BODY_FONT;
+    headcounts.forEach((_, i) => {
+      const cell = row.getCell(i + 2);
+      cell.font = BODY_FONT;
+      cell.numFmt = USD_FORMAT;
+    });
+  }
+  const aggDataEndRow = ws.rowCount;
+
+  const sheetRef = `'80_85_90人比較'`;
+  const categoriesRef = `${sheetRef}!$A$${aggDataStartRow}:$A$${aggDataEndRow}`;
+  const series: ChartSeriesSpec[] = headcounts.map((hc, i) => {
+    const colLetter = columnLetter(i + 2);
+    return {
+      name: `${hc}人`,
+      valuesRef: `${sheetRef}!$${colLetter}$${aggDataStartRow}:$${colLetter}$${aggDataEndRow}`,
+      values: orderedCompanies.map((c) => perCompanyAverages.get(c)?.get(hc)),
+    };
+  });
+
+  return [
+    {
+      title: "会社別 平均営業人件費（営業人数比較）",
+      type: "bar",
+      categoriesRef,
+      categories: orderedCompanies,
+      series,
+      anchorCol: headcounts.length + 3,
+      anchorRow: Math.max(0, aggHeaderRowNumber - 3),
+      widthCols: 10,
+      heightRows: 16,
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------
@@ -963,7 +1048,7 @@ function buildSai3bChartSpecs(analysis: Sai3bAnalysis): readonly ChartSpec[] {
  * chartInjector.injectNativeCharts（非同期）でグラフを後付けする。
  */
 export async function renderSai3bWorkbookToBuffer(analysis: Sai3bAnalysis): Promise<Buffer> {
-  const { wb, dashboardSheetResults } = buildSai3bWorkbookInternal(analysis);
+  const { wb, dashboardSheetResults, headcountComparisonChartSpecs } = buildSai3bWorkbookInternal(analysis);
   const baseBuffer = Buffer.from(await wb.xlsx.writeBuffer());
 
   const sheetSpecs: SheetChartSpecs[] = [];
@@ -972,6 +1057,10 @@ export async function renderSai3bWorkbookToBuffer(analysis: Sai3bAnalysis): Prom
   }
   const chartSheetSpecs = buildSai3bChartSpecs(analysis);
   if (chartSheetSpecs.length > 0) sheetSpecs.push({ sheetName: CHART_SHEET_NAME, specs: chartSheetSpecs });
+  // SAI-3B-2 受入レビュー2回目 §2: 80_85_90人比較シート自体に会社×営業人数の
+  // 比較グラフ（営業人件費）を追加（従来この専用シートにはネイティブグラフが
+  // 1つも無かった）。
+  if (headcountComparisonChartSpecs.length > 0) sheetSpecs.push({ sheetName: "80_85_90人比較", specs: headcountComparisonChartSpecs });
 
   if (sheetSpecs.length === 0) return baseBuffer;
   return injectNativeChartsMultiSheet(baseBuffer, sheetSpecs);

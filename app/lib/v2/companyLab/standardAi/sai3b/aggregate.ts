@@ -243,11 +243,17 @@ function statSummary(values: readonly number[]): StatSummary {
   const sorted = [...finite].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  const average = sum(finite) / finite.length;
+  // 標本標準偏差（n-1）。三宅さんのご指摘（受入レビュー2回目）§1で追加。
+  // n<2では「ばらつき」という概念自体が定義できないため、0にせずundefinedのままにする。
+  const stddev =
+    finite.length >= 2 ? Math.sqrt(finite.reduce((s, v) => s + (v - average) ** 2, 0) / (finite.length - 1)) : undefined;
   return {
-    average: sum(finite) / finite.length,
+    average,
     median,
     min: sorted[0],
     max: sorted[sorted.length - 1],
+    stddev,
     n: finite.length,
   };
 }
@@ -792,6 +798,8 @@ export function buildHeadcountComparison(runs: readonly LoadedSai3aRun[], common
       const operatingProfitByHeadcount: Record<number, number> = {};
       const finalCashByHeadcount: Record<number, number> = {};
       const finalLoansByHeadcount: Record<number, number> = {};
+      // 営業人件費（三宅さんのご指摘（受入レビュー2回目）§2）。
+      const salesForceCostByHeadcount: Record<number, number> = {};
       let hasAnyData = false;
 
       for (const hc of sortedHeadcounts) {
@@ -806,6 +814,7 @@ export function buildHeadcountComparison(runs: readonly LoadedSai3aRun[], common
         operatingProfitByHeadcount[hc] = caseRow.cumulativeOperatingProfitUsd;
         finalCashByHeadcount[hc] = caseRow.finalCashUsd;
         finalLoansByHeadcount[hc] = caseRow.finalLoansUsd;
+        salesForceCostByHeadcount[hc] = caseRow.cumulativeSalesForceCostUsd;
       }
       if (!hasAnyData) continue;
 
@@ -834,6 +843,7 @@ export function buildHeadcountComparison(runs: readonly LoadedSai3aRun[], common
         operatingProfitByHeadcount,
         finalCashByHeadcount,
         finalLoansByHeadcount,
+        salesForceCostByHeadcount,
         middleHeadcountOnlyDefaultFlag,
       });
     }

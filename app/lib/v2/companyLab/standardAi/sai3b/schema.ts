@@ -390,6 +390,10 @@ export interface StatSummary {
   readonly median?: number;
   readonly min?: number;
   readonly max?: number;
+  /** 標本標準偏差（n-1で割る、不偏分散の平方根）。n<2の場合はundefined
+   *  （1件だけのデータからばらつきを語ることはできないため。三宅さんの
+   *  ご指摘（受入レビュー2回目）§1で追加）。 */
+  readonly stddev?: number;
   readonly n: number;
 }
 
@@ -586,6 +590,11 @@ export interface HeadcountComparisonRow {
   readonly operatingProfitByHeadcount: Readonly<Record<number, number>>;
   readonly finalCashByHeadcount: Readonly<Record<number, number>>;
   readonly finalLoansByHeadcount: Readonly<Record<number, number>>;
+  /** 営業人件費（累計、USD）。三宅さんのご指摘（受入レビュー2回目）§2で追加。
+   *  従来はRaw_Caseシートの生データダンプにしか存在せず、80/85/90人比較の
+   *  正式KPI（§6で必須指定）としては未実装だった。case-summary.csvの
+   *  cumulativeSalesForceCostUsdをそのまま引き写す（新規計算は行わない）。 */
+  readonly salesForceCostByHeadcount: Readonly<Record<number, number>>;
   /** 85人（または比較対象の中間値）だけがdefaultし、他はしないケースの識別フラグ。
    *  85人という値をハードコードせず、比較headcountの「中間・その他」との相対関係
    *  から機械的に判定する（headcountComparison.tsのロジック参照）。 */
