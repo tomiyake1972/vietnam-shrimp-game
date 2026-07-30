@@ -125,7 +125,7 @@ E社（opportunistic）は、実装指示§6「無理に新しい状態管理を
 
 `--management-profiles`未指定時（既定）は、リゾルバ自体が注入されないため
 `createStandardAiProvider()`は従来どおり全社`STANDARD_AI_PARAMETERS_V1`固定で
-動作し、既存の出力・既存の全1837件のテストへの影響はゼロです（実測: 今回の
+動作し、既存の出力・既存の全1807件のテストへの影響はゼロです（実測: 今回の
 変更後も既存テストは1件も壊れていません。§9参照）。
 
 ## 2. 診断ログ・追跡性（§8）
@@ -197,6 +197,16 @@ interface StandardAiManagementProfileDiagnostics {
 
 ## 4. 試験run（§10）
 
+> **2026-07-30追記（三宅さんの受入確認への対応）**: 三宅さんのご指摘のとおり、
+> 当初の試験runはコミット前の作業ツリー（`appCommitId`が分岐元の`b933b04`の
+> まま）で実行してしまっていました。**SAI-4完成コードを確定したコミット
+> `dd478af`（本報告書§7参照）の上で、同一の8seed・8四半期・4パターンを
+> 再実行**し、以下4.1〜4.5節の数値・成果物をすべて更新しました。再実行後の
+> 各runの`manifest.json`はいずれも`"appCommitId": "dd478af20d143c38634314ca3087df65bc7a4c8e"`
+> であることを確認済みです。再実行結果は、コミット前に実行した最初の試験run
+> （実装ロジックは同一のため）と全指標が完全に一致しており、再現性も併せて
+> 確認できました。
+
 ### 4.1 単一seed・8四半期の正常性確認
 
 ```
@@ -207,24 +217,31 @@ npx tsx scripts/sai3aAutoplay.ts --seeds sai4-trial-single-001 --quarters 8 \
 
 5社×8四半期、完了ケース5/5・エラー0件。デフォルト・与信凍結は発生せず、
 養殖池入れ計画は全四半期・全社で4,000トン（上限ちょうど）で一貫していました。
+`manifest.json`の`appCommitId`は`dd478af...`（確定コミット）です。
 
 ### 4.2 複数seed試験（既存SAI-3B分析パイプライン再利用）
 
 同一の8seed（`sai4-het-001`〜`008`）・8四半期で、以下4パターンを実行し比較
 しました（要因を切り分けるため、経営性格プロファイルと養殖上限4,000トンを
-個別にON/OFFした4通り）:
+個別にON/OFFした4通り）。いずれもコミット`dd478af`上で実行しています。
 
-| run | 経営性格プロファイル | 養殖上限4,000t | 完了ケース |
-|---|---|---|---|
-| `sai4-baseline-sameseed-8seed-8q` | OFF | OFF（候補既定値） | 40/40 |
-| `sai4-profilesonly-8seed-8q` | ON | OFF | 40/40 |
-| `sai4-caponly-8seed-8q` | OFF | ON | 40/40 |
-| `sai4-heterogeneous-8seed-8q`（本命） | ON | ON | 40/40 |
+| run | 経営性格プロファイル | 養殖上限4,000t | 完了ケース | appCommitId |
+|---|---|---|---|---|
+| `sai4-baseline-8seed-8q` | OFF | OFF（候補既定値） | 40/40・エラー0 | `dd478af...` |
+| `sai4-profilesonly-8seed-8q` | ON | OFF | 40/40・エラー0 | `dd478af...` |
+| `sai4-caponly-8seed-8q` | OFF | ON | 40/40・エラー0 | `dd478af...` |
+| `sai4-heterogeneous-8seed-8q`（本命） | ON | ON | 40/40・エラー0 | `dd478af...` |
 
 いずれもエラー0件・8ターン完走。既存SAI-3B-1 Excel生成CLI
 （`scripts/sai3bExcel.ts`）で、baseline runとheterogeneous runの2run比較
 ブック（`artifacts/sai4/sai4_baseline_vs_heterogeneous_comparison.xlsx`、
-既存のダッシュボード・Layer1/Layer2構成をそのまま再利用）を生成しました。
+既存のダッシュボード・Layer1/Layer2構成をそのまま再利用）を再生成しました。
+併せて、4run全てを横並びで確認できる小さな補足成果物として
+`docs/v2/reports/sai4_4run_comparison_summary.csv`（git管理対象、5指標×4run）
+を追加しました。既存Excelの多run比較機能（「80/85/90人比較」シート）に
+4run全てを流し込むことも試しましたが、これは元々headcount比較専用に設計
+されたシートであり、意味的に対応しないうえ出力が約58MBと大きくなりすぎる
+ため採用せず、上記の軽量なCSVという形にしました（本報告書§6参照）。
 
 ### 4.3 同一初期条件の証明
 
@@ -232,14 +249,24 @@ npx tsx scripts/sai3aAutoplay.ts --seeds sai4-trial-single-001 --quarters 8 \
 turn1開始時点のfixture・ownStateを目視確認し、会社ID・会社名以外の差異が
 ないことを確認しました（詳細な機械的証明は自動テスト側の責務）。
 
-### 4.4 財務・運営トレンドの比較（run全体平均、8seed）
+### 4.4 財務・運営トレンドの比較（run全体平均、8seed、4run横並び）
 
-| run | デフォルト率 | 平均累計売上(USD) | 平均累計営業利益(USD) | 平均期末現金(USD) |
-|---|---|---|---|---|
-| baseline（プロファイルOFF・上限OFF） | 45.0% | 367,380,117 | 7,336,307 | 10,327,990 |
-| profilesOnly（プロファイルON・上限OFF） | 57.5% | 359,365,252 | 3,033,158 | 8,012,386 |
-| capOnly（プロファイルOFF・上限4,000t） | 0% | 362,495,541 | 6,004,647 | 13,686,694 |
-| heterogeneous（両方ON、本命） | 0% | 357,488,868 | 3,532,845 | 14,387,168 |
+三宅さんのご指摘に対応し、「最大養殖希望量」（AIの意思決定=池入れ計画の
+`aquacultureStockingDesiredQuantity`、40ケース×8ターン=320件中の最大値）を
+含めた5指標を4run横並びで示します（同じ表は
+`docs/v2/reports/sai4_4run_comparison_summary.csv`にも保存済み）。
+
+| run | デフォルト率 | 平均累計売上(USD) | 平均累計営業利益(USD) | 平均期末現金(USD) | 最大養殖希望量(トン) |
+|---|---|---|---|---|---|
+| baseline（プロファイルOFF・上限OFF） | 45.0% | 367,380,117 | 7,336,307 | 10,327,990 | 9,096.3 |
+| profilesOnly（プロファイルON・上限OFF） | 57.5% | 359,365,252 | 3,033,158 | 8,012,386 | 9,555.0 |
+| capOnly（プロファイルOFF・上限4,000t） | 0% | 362,495,541 | 6,004,647 | 13,686,694 | 4,000.0 |
+| heterogeneous（両方ON、本命） | 0% | 357,488,868 | 3,532,845 | 14,387,168 | 4,000.0 |
+
+養殖上限を設定していないbaseline/profilesOnlyでは最大養殖希望量が
+9,000トン超（候補既定の養殖能力に応じた自然な需要水準）まで達している一方、
+capOnly/heterogeneousでは4,000トンちょうどに揃っており、上限が意図どおり
+拘束条件として機能していることが run全体の数値からも確認できます。
 
 **要因の切り分け**: デフォルト率が45%→0%へ劇的に下がった主因は**養殖上限
 4,000トン**です（capOnly単独でも0%）。経営性格プロファイル単独
@@ -320,6 +347,30 @@ turn1開始時点のfixture・ownStateを目視確認し、会社ID・会社名�
   ではありません）。今回の実装過程で発見した実装バグは、tsc/lint/既存
   1807件のテストいずれにも現れておらず、**新たなバグは確認していません**。
 
+### 4.6 確定コミットでの再確認チェックリスト（三宅さんの受入確認§4対応）
+
+コミット`dd478af`での再実行後、以下をすべて確認しました。
+
+- [x] **heterogeneousの全社・全quarterで養殖希望量が4,000トン以下**:
+  40ケース×8ターン=320件のAI意思決定（`aquacultureStockingDesiredQuantity`）
+  すべてが4,000トン以下（最大値=ちょうど4,000トン、超過0件）。
+- [x] **baselineおよびA社の再現性**: 4run全体平均（デフォルト率・売上・
+  営業利益・現金・最大養殖希望量）は、コミット前に実行した最初の試験runと
+  完全に一致。会社別デフォルト発生回数（baseline: BAL=4/MASS=4/JPQ=3/
+  VAP=4/CONSV=3、profilesOnly: BAL=4/MASS=6/JPQ=6/VAP=6/CONSV=1）も
+  完全に一致し、特にA社(BAL)はbaseline・profilesOnlyの両方で
+  デフォルト回数4/8のまま変化していません。
+- [x] **4runすべて完走、エラー0**: baseline/profilesOnly/capOnly/
+  heterogeneousいずれも完了ケース40/40・エラー0件。
+- [x] **`npm test` 1844件成功**: 既存1807件＋新規37件（3節参照）、全件成功。
+- [x] **tsc・eslintに新規エラーなし**: `npx tsc --noEmit -p .`・
+  `npx eslint .`ともにエラー0（eslintの4件の警告はいずれもSAI-4と無関係な
+  既存コードのもの）。
+
+係数調整・ゲームバランス調整は行っていません（4.4〜4.5節の数値は
+再実行後もコミット前の初回試験runと完全一致しており、結果を見て後から
+チューニングした事実はありません）。`develop/v2`への統合も行っていません。
+
 ## 5. 生成物一覧（§11）
 
 | 種別 | 場所 | 備考 |
@@ -330,8 +381,9 @@ turn1開始時点のfixture・ownStateを目視確認し、会社ID・会社名�
 | 4,000トン上限実装 | `autoplay/runCase.ts`・`runBatch.ts`・CLI一式 | |
 | 4,000トン上限の検証 | `autoplay/__tests__/runCase.test.ts`・試験run（4.5節） | |
 | 自動テスト | 3ファイル・37件（3節参照） | |
-| 試験結果 | `artifacts/sai4/`以下（git管理対象外） | |
-| Excel分析 | `artifacts/sai4/sai4_baseline_vs_heterogeneous_comparison.xlsx`（約28.6MB、既存SAI-3B構造を再利用） | git管理対象外 |
+| 試験結果 | `artifacts/sai4/`以下（git管理対象外、コミット`dd478af`で再実行済み） | |
+| Excel分析 | `artifacts/sai4/sai4_baseline_vs_heterogeneous_comparison.xlsx`（約28.6MB、既存SAI-3B構造を再利用、コミット`dd478af`で再生成済み） | git管理対象外 |
+| 4run簡易比較表 | `docs/v2/reports/sai4_4run_comparison_summary.csv` | 新規（git管理対象、5指標×4run） |
 | 将来二層設計メモ | `docs/v2/design/sai4_officer_vs_company_personality_memo.md` | 新規（§7、実装無し） |
 | 完了報告書 | 本ファイル | |
 
@@ -354,12 +406,20 @@ turn1開始時点のfixture・ownStateを目視確認し、会社ID・会社名�
 
 - ブランチ名: `feature/v2-sai4-heterogeneous-standard-ai`
 - 分岐元: `feature/v2-sai3b-excel-analysis`（コミット`b933b04`）
+- **SAI-4実装の確定コミット（§4の全試験runの`appCommitId`）**: `dd478af`
+  （フルハッシュ: `dd478af20d143c38634314ca3087df65bc7a4c8e`）。プロファイル
+  実装・4,000トン上限・診断ログ・自動テスト37件・将来設計メモは、いずれも
+  このコミットに含まれています。
+- 本コミット（このcommitted版の完了報告書自体）は、上記`dd478af`に対する
+  **追跡性の修正コミット**（テスト件数表記の修正、`dd478af`確定後の4パターン
+  再実行、4run比較表の追加）であり、実装コード自体の変更は含んでいません。
+  最終的なコミットハッシュは`git log`・`git show --stat`で確認してください。
 - `develop/v2`への統合は行っていません。統合時は、上記の「重要な依存関係」
   節のとおり、SAI-3B-2を先に統合してから本ブランチを統合することを推奨します。
-- 変更ファイル・コミットハッシュ・テスト結果: 本報告書をコミットした後の
-  `git log`・`git show --stat`を参照してください（このコミット自体が対象
-  コミットです）。
 - 試験run・Excel分析の保存場所: `artifacts/sai4/`（git管理対象外、ローカル
-  生成物）。
+  生成物、`dd478af`上で再実行済み）。4run簡易比較表のみ
+  `docs/v2/reports/sai4_4run_comparison_summary.csv`としてgit管理下に
+  保存しています。
 - 残課題: 6章「既知の制約・注意点」を参照。追加の実装作業は不要と判断して
-  います（三宅さんのレビューをお待ちします）。
+  います（三宅さんのレビューをお待ちします）。係数調整・ゲームバランス
+  調整・`develop/v2`への統合は行っていません。

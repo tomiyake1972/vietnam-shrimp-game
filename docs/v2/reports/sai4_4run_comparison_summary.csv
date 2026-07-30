@@ -1,0 +1,5 @@
+runId,label,managementProfiles,aquacultureCap,appCommitId,completedCases,totalCases,errorCases,paymentDefaultRatePercent,averageCumulativeRevenueUsd,averageCumulativeOperatingProfitUsd,averageFinalCashUsd,maxAquacultureStockingWishHosoEqTons
+sai4-baseline-8seed-8q,baseline,OFF,OFF,dd478af20d143c38634314ca3087df65bc7a4c8e,40,40,0,45.0,367380117,7336307,10327990,9096.3
+sai4-profilesonly-8seed-8q,profilesOnly,ON,OFF,dd478af20d143c38634314ca3087df65bc7a4c8e,40,40,0,57.5,359365252,3033158,8012386,9555
+sai4-caponly-8seed-8q,capOnly,OFF,ON(4000t),dd478af20d143c38634314ca3087df65bc7a4c8e,40,40,0,0,362495541,6004647,13686694,4000
+sai4-heterogeneous-8seed-8q,heterogeneous,ON,ON(4000t),dd478af20d143c38634314ca3087df65bc7a4c8e,40,40,0,0,357488868,3532845,14387168,4000
