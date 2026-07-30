@@ -126,11 +126,50 @@ export function buildStandardAiSalesPlans(
   const orderFactors = orderFactorsByProduct(fixture, observation, params);
   const priceAdjustments = priceAdjustmentRatioByProduct(observation, pressures, params);
 
+  // 【SAI-5A】市場・商品志向。倍率が1件も設定されていない（既定の空オブジェクト）
+  // 場合はorientationActive=falseとなり、以降の志向関連コードパスを完全に
+  // スキップする（乗算・再正規化による浮動小数点の揺れも発生させず、従来と
+  // ビット単位で同一の結果を保証する）。
+  const marketOrientation = params.marketOrientationMultipliers;
+  const productOrientation = params.productOrientationMultipliers;
+  // 「1.0（中立）以外の倍率が1件でもあるか」で判定する。BAL（全倍率1.0の
+  // 明示的な中立プロファイル）も、倍率未設定（既定の空オブジェクト）と同様に
+  // 完全な既存コードパスを通す（×1.0の乗算や再正規化の除算による浮動小数点の
+  // 揺れも発生させない＝中立志向の会社の判断は志向機能の有効/無効に依らず
+  // ビット単位で同一）。
+  const marketOrientationActive = Object.values(marketOrientation).some((v) => v !== undefined && v !== 1);
+  const productOrientationActive = Object.values(productOrientation).some((v) => v !== undefined && v !== 1);
+  const orientationActive = marketOrientationActive || productOrientationActive;
+  const clampProductMult = (v: number) => Math.max(0.85, Math.min(1.2, v));
+  const clampCombinedMult = (v: number) => Math.max(0.7, Math.min(1.35, v));
+
   const potentialByProduct: ProductAmount = {
     hoso: capacityTotals.hoso * params.salesUtilizationTarget,
     pd: capacityTotals.pd * params.salesUtilizationTarget,
     vap: capacityTotals.vap * params.salesUtilizationTarget,
   };
+  if (productOrientationActive) {
+    // 商品志向: 商品別の目標販売数量へ倍率（0.85〜1.20にclamp）を乗じる。
+    // 上限1.20×既定稼働率0.8=0.96のため、能力を超える希望量は構造上作られない。
+    for (const product of ["hoso", "pd", "vap"] as const) {
+      const mult = productOrientation[product];
+      if (mult !== undefined && mult !== 1) {
+        potentialByProduct[product] = potentialByProduct[product] * clampProductMult(mult);
+      }
+    }
+    diagnostics.push({
+      code: "PRODUCT_ORIENTATION_APPLIED",
+      domain: "sales",
+      companyId: fixture.companyId,
+      severity: "info",
+      keyValues: {
+        hosoMultiplier: productOrientation.hoso ?? 1,
+        pdMultiplier: productOrientation.pd ?? 1,
+        vapMultiplier: productOrientation.vap ?? 1,
+      },
+      message: "商品志向倍率を商品別の目標販売数量へ適用した（能力・安全ガードは上書きしない魅力度補正）。",
+    });
+  }
 
   // 【重要】desiredByProduct（生産計画側が参照するベースライン販売目標）には
   // 在庫過剰による上乗せ（excessBoost）を含めない。含めてしまうと、production.tsの
@@ -180,11 +219,50 @@ export function buildStandardAiSalesPlans(
   for (const product of ["hoso", "pd", "vap"] as const) {
     const totalDesired = plannedSalesQuantityByProduct[product];
     if (totalDesired <= EPSILON) continue;
+    if (!orientationActive) {
+      markets.forEach((market, idx) => {
+        const weight = idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1);
+        const desiredQuantity = totalDesired * weight;
+        if (desiredQuantity <= EPSILON) return;
+        desiredByMarketProduct.get(market)![product] = desiredQuantity;
+      });
+      continue;
+    }
+    // 【SAI-5A】市場志向: 既存の按分重み（前期価格ランキング首位50%・残り均等）に
+    // 総合補正 clamp(市場倍率×商品倍率, 0.70, 1.35) を乗じ、商品ごとに再正規化する
+    // （＝販売目標総量は変えず、市場・商品間で再配分する。実装指示§3）。
+    //   - 按分の基礎は従来どおり市況（価格ランキング）であり、得意市場の市況が
+    //     大幅に悪化して首位が交代すれば、志向倍率(≤1.25)より首位重み(50%)の
+    //     移動が支配的になる＝他市場へ自然に移れる。
+    //   - 需要ゼロ・プレミアム下限割れで基礎重み0の行は0のまま（志向だけを理由に
+    //     販売を強制しない）。
+    const baseWeights = markets.map((_, idx) => (idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1)));
+    const adjustedWeights = markets.map((market, idx) => {
+      const combined = clampCombinedMult((marketOrientation[market] ?? 1) * (productOrientation[product] ?? 1));
+      return baseWeights[idx] * combined;
+    });
+    const adjustedSum = adjustedWeights.reduce((s, w) => s + w, 0);
+    const effectiveWeights = adjustedSum > EPSILON ? adjustedWeights.map((w) => w / adjustedSum) : baseWeights;
     markets.forEach((market, idx) => {
-      const weight = idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1);
-      const desiredQuantity = totalDesired * weight;
+      const desiredQuantity = totalDesired * effectiveWeights[idx];
       if (desiredQuantity <= EPSILON) return;
       desiredByMarketProduct.get(market)![product] = desiredQuantity;
+    });
+  }
+  if (marketOrientationActive) {
+    diagnostics.push({
+      code: "MARKET_ORIENTATION_APPLIED",
+      domain: "sales",
+      companyId: fixture.companyId,
+      severity: "info",
+      keyValues: {
+        cnMultiplier: marketOrientation.CN ?? 1,
+        usMultiplier: marketOrientation.US ?? 1,
+        euMultiplier: marketOrientation.EU ?? 1,
+        jpMultiplier: marketOrientation.JP ?? 1,
+        otherMultiplier: marketOrientation.OTHER ?? 1,
+      },
+      message: "市場志向倍率を市場別の按分重みへ適用し、販売目標総量を保存したまま市場間で再配分した。",
     });
   }
 

@@ -17,7 +17,7 @@ import { StandardBaselineCandidate } from "../report/standardBaseline";
 import { createInstrumentedStandardAiRun, QuarterStartCapture } from "./capture";
 import { StandardAiQuarterDiagnostics } from "../policy";
 import { CompanyQuarterRecord } from "../../types";
-import { createManagementProfileParamsResolver } from "../managementProfile";
+import { createSai5ParamsResolver } from "../orientationProfile";
 
 export interface AutoplayCaseConfig {
   readonly scenarioId: string;
@@ -47,6 +47,23 @@ export interface AutoplayCaseConfig {
    * (既存の全出力・全テストへの影響ゼロ)。
    */
   readonly managementProfilesEnabled?: boolean;
+  /**
+   * 【SAI-5A追加】trueの場合のみ、会社IDに応じた市場・商品志向プロファイル
+   * (orientationProfile.ts)を適用する。SAI-4の経営性格とは独立したレイヤーで
+   * あり、両フラグの4通りの組み合わせすべてが有効（§13EのA/B比較用）。
+   * 未指定(false相当)なら志向なし＝既存挙動とビット単位で一致。
+   */
+  readonly marketProductOrientationEnabled?: boolean;
+  /** 【SAI-5B】trueの場合のみ異質5社preset（会社別の小幅な初期差）を適用する。 */
+  readonly heterogeneousInitialConditionsEnabled?: boolean;
+  /** 【SAI-5C】trueの場合のみ市場別の商品ライフサイクル需要を有効化する（エンジン側フラグ）。 */
+  readonly productLifecycleEnabled?: boolean;
+  /** 【SAI-5D】trueの場合のみ会社×市場×商品の営業基盤蓄積を有効化する（エンジン側フラグ）。 */
+  readonly salesBaseAccumulationEnabled?: boolean;
+  /** 【SAI-5E】trueの場合のみ5社供給圧力→翌期プレミアムのフィードバックを有効化する（エンジン側フラグ）。 */
+  readonly supplyPremiumFeedbackEnabled?: boolean;
+  /** 【SAI-5F】trueの場合のみStandard AIの拡張設備投資判断を有効化する。 */
+  readonly standardAiCapexEnabled?: boolean;
 }
 
 export interface AutoplayCaseResult {
@@ -91,16 +108,49 @@ export function runAutoplayCase(config: AutoplayCaseConfig): AutoplayCaseResult 
     config.aquacultureCapacityOverrideHosoEqTons
   );
 
+  // 【SAI-5】エンジン側の機能フラグ。全てOFF（未指定）のときはsai5フィールド自体を
+  // 付与しない（CompanyLabConfigの内容が従来と完全に同一＝再現性・スナップショット
+  // 互換の面でも既存と一致する）。
+  const engineFlagsActive =
+    Boolean(config.productLifecycleEnabled) ||
+    Boolean(config.salesBaseAccumulationEnabled) ||
+    Boolean(config.supplyPremiumFeedbackEnabled);
   const initResult = initializeUnifiedCompanyLabFromTemplate(
-    { scenarioId: config.scenarioId, mode: "canonical", seed: config.seed, turns: config.quarters },
+    {
+      scenarioId: config.scenarioId,
+      mode: "canonical",
+      seed: config.seed,
+      turns: config.quarters,
+      ...(engineFlagsActive
+        ? {
+            sai5: {
+              productLifecycle: Boolean(config.productLifecycleEnabled),
+              salesBaseAccumulation: Boolean(config.salesBaseAccumulationEnabled),
+              supplyPremiumFeedback: Boolean(config.supplyPremiumFeedbackEnabled),
+            },
+          }
+        : {}),
+    },
     buildFixtureTemplate,
     config.candidate.financeFixtureTemplate,
     config.candidate.contractDefs,
     order
   );
 
+  const useResolver =
+    Boolean(config.managementProfilesEnabled) ||
+    Boolean(config.marketProductOrientationEnabled) ||
+    Boolean(config.standardAiCapexEnabled);
   const { provider, quarterStartCaptures, diagnostics } = createInstrumentedStandardAiRun(
-    config.managementProfilesEnabled ? { resolveParams: createManagementProfileParamsResolver() } : {}
+    useResolver
+      ? {
+          resolveParams: createSai5ParamsResolver({
+            managementProfilesEnabled: Boolean(config.managementProfilesEnabled),
+            orientationEnabled: Boolean(config.marketProductOrientationEnabled),
+            aiCapexEnabled: Boolean(config.standardAiCapexEnabled),
+          }),
+        }
+      : {}
   );
   const { companies, history } = runFromInit(initResult, provider);
 

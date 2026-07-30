@@ -329,11 +329,27 @@ export interface CompanyQuarterRecord {
   readonly consumerMarketRecords?: readonly ConsumerMarketQuarterRecord[];
 }
 
+/**
+ * 【SAI-5】市場進化モデルの機能フラグ。未指定（またはすべてfalse）なら
+ * 各挿入点で既存コードパスをそのまま通り、従来挙動とビット単位で一致する
+ * （§13EのA/B比較は、このフラグの組み合わせで表現する）。
+ */
+export interface Sai5FeatureFlags {
+  /** 市場別の商品ライフサイクル需要（market/productLifecycle.ts）。 */
+  readonly productLifecycle?: boolean;
+  /** 会社×市場×商品の営業基盤蓄積（companyLab/salesBase.ts）。 */
+  readonly salesBaseAccumulation?: boolean;
+  /** 5社供給圧力→翌期PD/VAPプレミアムのフィードバック。 */
+  readonly supplyPremiumFeedback?: boolean;
+}
+
 export interface CompanyLabConfig {
   readonly scenarioId: string;
   readonly mode: ScenarioMode;
   readonly seed: string;
   readonly turns: number;
+  /** 【SAI-5】市場進化モデルの機能フラグ（optional。未指定=全OFF=従来挙動）。 */
+  readonly sai5?: Sai5FeatureFlags;
 }
 
 export interface CompanyLabState {

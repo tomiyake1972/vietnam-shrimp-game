@@ -30,6 +30,17 @@ export const STANDARD_AI_REASON_CATEGORY: Readonly<Record<string, AdjustmentCate
   DEBT_REPAYMENT_SURPLUS: "cash_constraint",
   CAPEX_DEFERRED: "other",
   CAPEX_PROPOSED: "other",
+  // 【SAI-5】市場・商品志向／ライフサイクル／営業基盤／供給圧力
+  MARKET_ORIENTATION_APPLIED: "market_demand_or_contract",
+  PRODUCT_ORIENTATION_APPLIED: "market_demand_or_contract",
+  LIFECYCLE_GROWTH_PURSUED: "market_demand_or_contract",
+  SALES_BASE_ADVANTAGE: "market_demand_or_contract",
+  SUPPLY_PRESSURE_RETREAT: "market_demand_or_contract",
+  CAPEX_DEFERRED_OVERSUPPLY: "other",
+  CAPEX_RESUME_PROPOSED: "other",
+  VAP_GROWTH_ENTRY: "market_demand_or_contract",
+  VAP_OVERSUPPLY_RETREAT: "market_demand_or_contract",
+  PD_CAPACITY_MAINTAINED: "production_capacity",
 };
 
 /** companyLab/types.ts の CompanyReasonCode → AdjustmentCategory。 */

@@ -41,7 +41,18 @@ export type StandardAiReasonCode =
   | "DEBT_REPAYMENT_SURPLUS" // 現金余剰のため任意期限前返済
   // --- 設備投資 ---
   | "CAPEX_DEFERRED" // 設備投資を見送り（既定の正常な結果）
-  | "CAPEX_PROPOSED"; // 持続的なボトルネック解消のため設備投資を提案
+  | "CAPEX_PROPOSED" // 持続的なボトルネック解消のため設備投資を提案
+  // --- 【SAI-5】市場・商品志向／ライフサイクル／営業基盤／供給圧力 ---
+  | "MARKET_ORIENTATION_APPLIED" // 市場志向倍率による市場間の再配分を適用
+  | "PRODUCT_ORIENTATION_APPLIED" // 商品志向倍率による商品別目標数量の補正を適用
+  | "LIFECYCLE_GROWTH_PURSUED" // 公開ライフサイクルトレンドの成長を捉えるため販売・投資を前傾
+  | "SALES_BASE_ADVANTAGE" // 蓄積した営業基盤の優位を販売計画に反映
+  | "SUPPLY_PRESSURE_RETREAT" // 公開供給圧力の高止まりを受けて販売・投資を抑制
+  | "CAPEX_DEFERRED_OVERSUPPLY" // 供給過剰シグナルにより設備投資を見送り
+  | "CAPEX_RESUME_PROPOSED" // 資金回復により中断中の設備投資案件の再開を提案
+  | "VAP_GROWTH_ENTRY" // VAP需要の成長局面を捉えるためVAP能力・販売へ参入
+  | "VAP_OVERSUPPLY_RETREAT" // VAP供給過剰局面のためVAP拡大を抑制
+  | "PD_CAPACITY_MAINTAINED"; // PD能力の維持を選択（VAP転換へ追随しない）
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -64,6 +75,16 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "DEBT_REPAYMENT_SURPLUS",
   "CAPEX_DEFERRED",
   "CAPEX_PROPOSED",
+  "MARKET_ORIENTATION_APPLIED",
+  "PRODUCT_ORIENTATION_APPLIED",
+  "LIFECYCLE_GROWTH_PURSUED",
+  "SALES_BASE_ADVANTAGE",
+  "SUPPLY_PRESSURE_RETREAT",
+  "CAPEX_DEFERRED_OVERSUPPLY",
+  "CAPEX_RESUME_PROPOSED",
+  "VAP_GROWTH_ENTRY",
+  "VAP_OVERSUPPLY_RETREAT",
+  "PD_CAPACITY_MAINTAINED",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

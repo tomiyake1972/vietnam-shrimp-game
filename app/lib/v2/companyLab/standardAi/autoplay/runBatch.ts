@@ -27,6 +27,18 @@ export interface AutoplayBatchConfig {
   readonly aquacultureCapacityOverrideHosoEqTons?: number;
   /** 【SAI-4追加】trueの場合のみ経営性格プロファイル（managementProfile.ts）を適用する。 */
   readonly managementProfilesEnabled?: boolean;
+  /** 【SAI-5A追加】trueの場合のみ市場・商品志向プロファイル（orientationProfile.ts）を適用する。 */
+  readonly marketProductOrientationEnabled?: boolean;
+  /** 【SAI-5B】trueの場合のみ異質5社preset（会社別の小幅な初期差）を適用する。 */
+  readonly heterogeneousInitialConditionsEnabled?: boolean;
+  /** 【SAI-5C】trueの場合のみ市場別の商品ライフサイクル需要を有効化する。 */
+  readonly productLifecycleEnabled?: boolean;
+  /** 【SAI-5D】trueの場合のみ会社×市場×商品の営業基盤蓄積を有効化する。 */
+  readonly salesBaseAccumulationEnabled?: boolean;
+  /** 【SAI-5E】trueの場合のみ5社供給圧力→翌期プレミアムのフィードバックを有効化する。 */
+  readonly supplyPremiumFeedbackEnabled?: boolean;
+  /** 【SAI-5F】trueの場合のみStandard AIの拡張設備投資判断を有効化する。 */
+  readonly standardAiCapexEnabled?: boolean;
 }
 
 export interface AutoplayBatchResult {
@@ -56,6 +68,12 @@ export function runAutoplayBatch(config: AutoplayBatchConfig): AutoplayBatchResu
         salesForceHeadcountOverride: config.salesForceHeadcountOverride,
         aquacultureCapacityOverrideHosoEqTons: config.aquacultureCapacityOverrideHosoEqTons,
         managementProfilesEnabled: config.managementProfilesEnabled,
+        marketProductOrientationEnabled: config.marketProductOrientationEnabled,
+        heterogeneousInitialConditionsEnabled: config.heterogeneousInitialConditionsEnabled,
+        productLifecycleEnabled: config.productLifecycleEnabled,
+        salesBaseAccumulationEnabled: config.salesBaseAccumulationEnabled,
+        supplyPremiumFeedbackEnabled: config.supplyPremiumFeedbackEnabled,
+        standardAiCapexEnabled: config.standardAiCapexEnabled,
       });
       caseLogs.push(buildAutoplayCaseLogs(caseResult));
     } catch (err) {

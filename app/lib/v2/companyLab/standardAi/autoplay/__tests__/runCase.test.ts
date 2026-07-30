@@ -180,3 +180,59 @@ test("runAutoplayCase: managementProfilesEnabled=trueのとき、A社(BAL/balanc
     assert.equal(diag.managementProfile?.baselineDecision, undefined, "バイアスなしのA社ではbaselineDecisionの二重計算を省略するはず");
   }
 });
+
+// ---------------------------------------------------------------------
+// 【SAI-5A追加】市場・商品志向オプション
+// ---------------------------------------------------------------------
+
+test("runAutoplayCase: marketProductOrientationEnabled未指定なら、SAI-4までの出力と完全に同一（後方互換）", () => {
+  const base = {
+    scenarioId: "baseline",
+    seed: "sai5a-test-backcompat",
+    quarters: 2,
+    companyIds: ALL_COMPANY_IDS,
+    candidate,
+    managementProfilesEnabled: true,
+  };
+  const withoutFlag = runAutoplayCase(base);
+  const withFalse = runAutoplayCase({ ...base, marketProductOrientationEnabled: false });
+  assert.equal(JSON.stringify(withoutFlag.history), JSON.stringify(withFalse.history));
+  assert.equal(JSON.stringify(withoutFlag.diagnostics), JSON.stringify(withFalse.diagnostics));
+});
+
+test("runAutoplayCase: marketProductOrientationEnabled=trueでも、同一config・同一seedなら常に同一結果（再現性）", () => {
+  const config = {
+    scenarioId: "baseline",
+    seed: "sai5a-test-repro",
+    quarters: 3,
+    companyIds: ALL_COMPANY_IDS,
+    candidate,
+    managementProfilesEnabled: true,
+    marketProductOrientationEnabled: true,
+  };
+  const a = runAutoplayCase(config);
+  const b = runAutoplayCase(config);
+  assert.equal(JSON.stringify(a.history), JSON.stringify(b.history));
+  assert.equal(JSON.stringify(a.diagnostics), JSON.stringify(b.diagnostics));
+});
+
+test("runAutoplayCase: orientation有効時、BAL(中立)のturn1判断はorientation無効時と完全一致し、他4社はturn1から差が生じる", () => {
+  const base = {
+    scenarioId: "baseline",
+    seed: "sai5a-test-bal-neutral",
+    quarters: 2,
+    companyIds: ALL_COMPANY_IDS,
+    candidate,
+  };
+  const off = runAutoplayCase(base);
+  const on = runAutoplayCase({ ...base, marketProductOrientationEnabled: true });
+  const turn1DecisionOf = (r: typeof off, companyId: string) =>
+    JSON.stringify(r.diagnostics.filter((d) => d.companyId === companyId && d.turn === 1).map((d) => d.decision));
+  // 【重要】比較はturn1のみ。turn2以降は、志向を持つ他4社の行動変化が市場精算
+  // 結果（公開情報）を変えるため、中立のBALの判断も市場経由で正当に変わりうる
+  // （＝「競合の行動によって自社戦略の価値が変わる」という意図した相互作用で
+  // あり、BAL自身のロジックが変わったわけではない）。
+  assert.equal(turn1DecisionOf(off, "BAL"), turn1DecisionOf(on, "BAL"), "BAL(中立志向)のturn1判断がorientation有効化で変わった");
+  const othersChanged = ["MASS", "JPQ", "VAP", "CONSV"].filter((c) => turn1DecisionOf(off, c) !== turn1DecisionOf(on, c));
+  assert.equal(othersChanged.length, 4, `志向を持つ4社のうちturn1判断が変わったのは${othersChanged.length}社のみ`);
+});

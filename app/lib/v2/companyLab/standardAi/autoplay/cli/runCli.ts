@@ -75,6 +75,12 @@ export function runAutoplayCli(argv: readonly string[], options: AutoplayCliOpti
       salesForceHeadcountOverride: args.salesForceHeadcountOverride,
       aquacultureCapacityOverrideHosoEqTons: args.aquacultureCapacityOverrideHosoEqTons,
       managementProfilesEnabled: args.managementProfilesEnabled,
+      marketProductOrientationEnabled: args.marketProductOrientationEnabled,
+      heterogeneousInitialConditionsEnabled: args.heterogeneousInitialConditionsEnabled,
+      productLifecycleEnabled: args.productLifecycleEnabled,
+      salesBaseAccumulationEnabled: args.salesBaseAccumulationEnabled,
+      supplyPremiumFeedbackEnabled: args.supplyPremiumFeedbackEnabled,
+      standardAiCapexEnabled: args.standardAiCapexEnabled,
     });
 
     // 標準営業人数は「実際に実行された1ケース目の四半期開始時状態」から観測する
@@ -105,6 +111,13 @@ export function runAutoplayCli(argv: readonly string[], options: AutoplayCliOpti
         aquacultureCapacityOverrideSpecified: args.aquacultureCapacityOverrideHosoEqTons !== undefined,
         aquacultureCapacityOverrideHosoEqTons: args.aquacultureCapacityOverrideHosoEqTons ?? -1,
         managementProfilesEnabled: args.managementProfilesEnabled,
+        // 【SAI-5】各機能フラグ（A/B比較の再現条件をmanifestへ記録）。
+        marketProductOrientationEnabled: args.marketProductOrientationEnabled,
+        heterogeneousInitialConditionsEnabled: args.heterogeneousInitialConditionsEnabled,
+        productLifecycleEnabled: args.productLifecycleEnabled,
+        salesBaseAccumulationEnabled: args.salesBaseAccumulationEnabled,
+        supplyPremiumFeedbackEnabled: args.supplyPremiumFeedbackEnabled,
+        standardAiCapexEnabled: args.standardAiCapexEnabled,
       },
       outputFormats: ["json", "csv"],
     };

@@ -14,7 +14,7 @@
 import { CompanyFixture } from "../types";
 import { unwrapUnit } from "../../core/units";
 import { computeQuarterlyLaborCost } from "../workforce";
-import { Product } from "../../market/types";
+import { DemandMarketId, Product } from "../../market/types";
 
 export interface StandardAiParameters {
   // --- 在庫目標（生産・調達共通） ---
@@ -45,6 +45,29 @@ export interface StandardAiParameters {
    *  少し優先する）の差し込み口。加算後は[0, 1.1]にクランプする
    *  （decision/sales.ts参照、捏造的な値を作らないための上限）。 */
   readonly valueAddedOrderFactorBoost: number;
+
+  // --- 【SAI-5A追加】市場・商品志向（orientationProfile.tsが会社別に注入） ---
+  /** 市場志向倍率（市場ごとの魅力度補正、許容範囲0.80〜1.25）。既定は空
+   *  オブジェクト（=全市場1.0、志向なし）。空のときdecision/sales.tsは
+   *  再配分コードパス自体をスキップするため、既定値での浮動小数点結果は
+   *  従来とビット単位で一致する。値の意味・会社別の設定は
+   *  orientationProfile.tsに一箇所集約（ここでは会社IDによる分岐を持たない）。 */
+  readonly marketOrientationMultipliers: Readonly<Partial<Record<DemandMarketId, number>>>;
+  /** 商品志向倍率（商品ごとの魅力度補正、許容範囲0.85〜1.20）。既定は空
+   *  オブジェクト（=全商品1.0）。商品別の目標販売数量（能力×目標稼働率）に
+   *  乗算する。上限1.20×既定稼働率0.8=0.96のため能力超過は構造上起きない。 */
+  readonly productOrientationMultipliers: Readonly<Partial<Record<Product, number>>>;
+  /** 【SAI-5F】成長トレンド応答度（0〜1）。公開のライフサイクル構成比トレンド
+   *  （前期差分）が正のとき、PD/VAP設備投資の入口しきい値をどの程度前倒し
+   *  するかの係数。既定0（無効。orientation有効時のみ会社別に設定される）。 */
+  readonly growthTrendResponsiveness: number;
+  /** 【SAI-5F】過剰供給リトリート感度（0〜1）。公開の商品別供給圧力が高い
+   *  とき、PD/VAP設備投資をどの程度強く見送るか。既定0（無効）。 */
+  readonly oversupplyRetreatSensitivity: number;
+  /** 【SAI-5F】Standard AIの拡張設備投資判断（suspended案件のresume提案・
+   *  ライフサイクル成長エントリ・過剰供給リトリート）の有効化。既定false
+   *  （decision/capex.tsの既存判断と完全に同一の挙動）。 */
+  readonly standardAiCapexExtensionsEnabled: boolean;
 
   // --- 労働 ---
   /** ワーカー不足が「持続的」とみなす連続四半期しきい値（ヒステリシス）。 */
@@ -131,6 +154,12 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   highUtilizationRatioForNoDiscount: 0.95,
   salesUtilizationTarget: 0.8,
   valueAddedOrderFactorBoost: 0,
+
+  marketOrientationMultipliers: {},
+  productOrientationMultipliers: {},
+  growthTrendResponsiveness: 0,
+  oversupplyRetreatSensitivity: 0,
+  standardAiCapexExtensionsEnabled: false,
 
   sustainedShortageQuarterThreshold: 2,
   sustainedExcessQuarterThreshold: 2,

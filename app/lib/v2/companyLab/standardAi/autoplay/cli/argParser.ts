@@ -24,14 +24,30 @@ const KNOWN_FLAGS = new Set([
   "--headcount",
   "--aquaculture-cap",
   "--management-profiles",
+  "--orientation",
+  "--heterogeneous-initial",
+  "--lifecycle",
+  "--sales-base",
+  "--premium-feedback",
+  "--ai-capex",
   "--out-dir",
   "--run-id",
   "--help",
   "-h",
 ]);
 
-/** 値を取らないboolean専用フラグ（--help/-hと同じ扱い）。 */
-const BOOLEAN_FLAGS = new Set(["--management-profiles"]);
+/** 値を取らないboolean専用フラグ（--help/-hと同じ扱い）。SAI-5で複数に
+ *  なったため、SAI-4の単一変数方式からフラグ名→boolean値のマップ方式へ
+ *  一般化した（`--flag=false` の明示指定のみfalse、指定=true、未指定=false）。 */
+const BOOLEAN_FLAGS = new Set([
+  "--management-profiles",
+  "--orientation",
+  "--heterogeneous-initial",
+  "--lifecycle",
+  "--sales-base",
+  "--premium-feedback",
+  "--ai-capex",
+]);
 
 interface RawArgs {
   readonly help: boolean;
@@ -44,7 +60,7 @@ interface RawArgs {
   readonly companies?: string;
   readonly headcount?: string;
   readonly aquacultureCap?: string;
-  readonly managementProfiles: boolean;
+  readonly booleanFlags: Readonly<Record<string, boolean>>;
   readonly outDir?: string;
   readonly runId?: string;
 }
@@ -59,7 +75,7 @@ function splitEqualsForm(token: string): readonly [string, string | undefined] {
 
 function tokenizeArgs(argv: readonly string[]): RawArgs {
   let help = false;
-  let managementProfiles = false;
+  const booleanFlags: { [k: string]: boolean } = {};
   const values: { [k: string]: string } = {};
 
   let i = 0;
@@ -82,9 +98,9 @@ function tokenizeArgs(argv: readonly string[]): RawArgs {
       // 値なしのbooleanフラグ（inlineValueで明示的に"false"等が指定された場合のみ
       // それを尊重し、それ以外は指定=trueとして扱う）。
       if (inlineValue !== undefined) {
-        managementProfiles = inlineValue.trim().toLowerCase() !== "false";
+        booleanFlags[flag] = inlineValue.trim().toLowerCase() !== "false";
       } else {
-        managementProfiles = true;
+        booleanFlags[flag] = true;
       }
       i += 1;
       continue;
@@ -107,7 +123,7 @@ function tokenizeArgs(argv: readonly string[]): RawArgs {
 
   return {
     help,
-    managementProfiles,
+    booleanFlags,
     scenario: values["--scenario"],
     baselineId: values["--baseline-id"],
     seeds: values["--seeds"],
@@ -242,6 +258,12 @@ export function parseAutoplayCliArgs(argv: readonly string[]): ParsedAutoplayCli
       quarters: 0,
       companyIds: [],
       managementProfilesEnabled: false,
+      marketProductOrientationEnabled: false,
+      heterogeneousInitialConditionsEnabled: false,
+      productLifecycleEnabled: false,
+      salesBaseAccumulationEnabled: false,
+      supplyPremiumFeedbackEnabled: false,
+      standardAiCapexEnabled: false,
       outDir: "",
       runId: "",
     };
@@ -254,7 +276,6 @@ export function parseAutoplayCliArgs(argv: readonly string[]): ParsedAutoplayCli
   const companyIds = validateCompanies(raw.companies);
   const salesForceHeadcountOverride = validateHeadcount(raw.headcount);
   const aquacultureCapacityOverrideHosoEqTons = validateAquacultureCap(raw.aquacultureCap);
-  const managementProfilesEnabled = raw.managementProfiles;
   const outDir = raw.outDir && raw.outDir.trim().length > 0 ? raw.outDir.trim() : "artifacts/sai3a";
   const runId = raw.runId && raw.runId.trim().length > 0 ? raw.runId.trim() : defaultRunId();
 
@@ -267,7 +288,13 @@ export function parseAutoplayCliArgs(argv: readonly string[]): ParsedAutoplayCli
     companyIds,
     salesForceHeadcountOverride,
     aquacultureCapacityOverrideHosoEqTons,
-    managementProfilesEnabled,
+    managementProfilesEnabled: raw.booleanFlags["--management-profiles"] ?? false,
+    marketProductOrientationEnabled: raw.booleanFlags["--orientation"] ?? false,
+    heterogeneousInitialConditionsEnabled: raw.booleanFlags["--heterogeneous-initial"] ?? false,
+    productLifecycleEnabled: raw.booleanFlags["--lifecycle"] ?? false,
+    salesBaseAccumulationEnabled: raw.booleanFlags["--sales-base"] ?? false,
+    supplyPremiumFeedbackEnabled: raw.booleanFlags["--premium-feedback"] ?? false,
+    standardAiCapexEnabled: raw.booleanFlags["--ai-capex"] ?? false,
     outDir,
     runId,
   };
@@ -294,6 +321,14 @@ export function buildAutoplayUsageText(): string {
                         この値を超える池入れ計画を拒否する（実際のハード制約）。
   --management-profiles 【SAI-4】会社IDに応じた経営性格プロファイル（managementProfile.ts、小幅バイアス）を
                         有効化する（未指定時は全社STANDARD_AI_PARAMETERS_V1固定＝従来どおり）。
+  --orientation         【SAI-5A】会社IDに応じた市場・商品志向プロファイル（orientationProfile.ts）を有効化する。
+                        SAI-4の経営性格とは独立に指定できる（未指定時は志向なし＝従来どおり）。
+  --heterogeneous-initial 【SAI-5B】異質5社preset（会社別の小幅な初期設備・営業基盤差）を有効化する
+                        （未指定時は従来どおり5社完全同一のidentical-standard）。
+  --lifecycle           【SAI-5C】市場別の商品ライフサイクル需要（productLifecycle.ts）を有効化する。
+  --sales-base          【SAI-5D】会社×市場×商品の営業基盤蓄積（salesBase.ts）を有効化する。
+  --premium-feedback    【SAI-5E】5社供給圧力→翌期PD/VAPプレミアムのフィードバックを有効化する。
+  --ai-capex            【SAI-5F】Standard AIの拡張設備投資判断（resume提案・ライフサイクル参入・過剰供給リトリート）を有効化する。
   --out-dir <ディレクトリ> 出力先ディレクトリ（既定値: "artifacts/sai3a"）。実際の書き出し先は <out-dir>/<run-id>/ 以下。
   --run-id <run識別子>  この実行のrun ID（既定値は固定のプレースホルダー。再現可能な命名を推奨）。
   --help, -h            この使用方法を表示して終了する
