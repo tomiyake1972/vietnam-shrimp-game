@@ -646,6 +646,41 @@ function writeHeadcountComparisonSheet(wb: ExcelJS.Workbook, analysis: Sai3bAnal
       "しないケースを機械的に検出したものであり、原因（underwritingFrozen等）を特定・断定するものではない（未解決課題のまま）。",
   });
   applyBooleanConditionalFormat(ws, headerRowNumber, 3, "はい");
+
+  // SAI-3B-2 §6: 「80/85/90人比較の強化」として、同一会社×seedにおいて
+  // 営業人数間で最初にKPIが乖離し始めた四半期を追跡する専用テーブルを、
+  // 既存の横並び比較表の下に追加する（経営ダッシュボードシートにも要約は
+  // あるが、こちらが§6が求める「詳細な比較強化」の本体）。
+  if (analysis.headcountDivergence.length > 0) {
+    ws.addRow([]);
+    ws.addRow([]);
+    const subheaderRow = ws.addRow(["80/85/90人比較の強化: 最初に乖離が始まった四半期（詳細）"]);
+    subheaderRow.getCell(1).font = SUBHEADER_FONT;
+    subheaderRow.getCell(1).fill = SUBHEADER_FILL;
+    const noteRow = ws.addRow([
+      "会社×seedごとに、比較対象headcountのうちその四半期時点でまだデータが存在する（=defaultでログが途切れて" +
+        "いない）headcount間の相対乖離率（(最大-最小)/max(|最大|,ε)）が、下記候補KPI（netRevenueUsd・" +
+        "operatingProfitUsd・closingCashUsd・operatingCashFlowUsd・shortTermLoansUsd・" +
+        "finishedGoodsInventoryHosoEqTons）のいずれかで閾値を超えた最初のturnを機械的に検出したもの。" +
+        "原因（underwritingFrozen発生等）の特定・断定は行わない（三宅さんの指示§6：乖離開始点の可視化のみ）。" +
+        "乖離が検出されなかった会社×seedは「(乖離なし)」と表示する。",
+    ]);
+    noteRow.getCell(1).font = NOTE_FONT;
+    noteRow.getCell(1).alignment = { wrapText: true };
+    writeHeaderRow(ws, ["会社ID", "seed", "対象営業人数", "最初に乖離したturn", "乖離を検出したKPI", "乖離判定閾値(相対乖離率)"]);
+    for (const d of analysis.headcountDivergence) {
+      const row = ws.addRow([
+        d.companyId,
+        d.seed,
+        d.headcounts.join("/"),
+        d.firstDivergingTurn ?? "(乖離なし)",
+        d.firstDivergingKpi ?? "",
+        d.divergenceThreshold,
+      ]);
+      row.getCell(6).numFmt = RATE_FORMAT;
+      row.eachCell((cell) => (cell.font = BODY_FONT));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------

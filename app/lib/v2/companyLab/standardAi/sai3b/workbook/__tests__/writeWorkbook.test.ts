@@ -70,6 +70,26 @@ test("buildSai3bWorkbook: 複数run（headcount比較）で80_85_90人比較シ�
   assert.ok(ws);
 });
 
+// SAI-3B-2 §6: 80_85_90人比較シートに、乖離開始点の詳細テーブルが
+// 既存の横並び比較表の下に追加されていること（経営ダッシュボードの要約とは別）。
+test("buildSai3bWorkbook: headcountDivergenceがある場合、80_85_90人比較シートに乖離開始点の詳細テーブルが追加される", () => {
+  const analysis = analysisFromRuns([
+    { runId: "h80", headcount: 80 },
+    { runId: "h85", headcount: 85, defaultAtTurn: 1 },
+    { runId: "h90", headcount: 90 },
+  ]);
+  assert.ok(analysis.headcountDivergence.length > 0, "前提: headcountDivergenceにデータがあること");
+  const wb = buildSai3bWorkbook(analysis);
+  const ws = wb.getWorksheet("80_85_90人比較")!;
+  const allText = ws
+    .getSheetValues()
+    .flat()
+    .filter((v): v is string => typeof v === "string")
+    .join("\n");
+  assert.match(allText, /80\/85\/90人比較の強化: 最初に乖離が始まった四半期（詳細）/);
+  assert.match(allText, /乖離を検出したKPI/);
+});
+
 test("buildSai3bWorkbook: 数値セルが文字列化されていない", () => {
   const analysis = analysisFromRuns([{ runId: "r1", headcount: 80 }]);
   const wb = buildSai3bWorkbook(analysis);
