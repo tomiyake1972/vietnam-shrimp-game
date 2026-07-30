@@ -4,7 +4,7 @@
 // （Sai3bCliIoとして注入されたreadFileのみを使う）。実際のfs読み込み・
 // xlsx書き出しはscripts/sai3bExcel.tsが行う。
 
-import { SAI3A_REQUIRED_RUN_FILES, loadSai3aRun } from "../loadRun";
+import { SAI3A_OPTIONAL_RUN_FILES, SAI3A_REQUIRED_RUN_FILES, loadSai3aRun } from "../loadRun";
 import { validateComparableRuns } from "../compareRuns";
 import { buildSai3bAnalysis } from "../buildAnalysis";
 import { renderSai3bWorkbookToBuffer } from "../workbook/writeWorkbook";
@@ -27,7 +27,13 @@ function describeError(e: unknown): string {
 
 function loadRunFromDir(io: Sai3bCliIo, dir: string): LoadedSai3aRun {
   const files: Record<string, string | undefined> = {};
-  for (const fileName of SAI3A_REQUIRED_RUN_FILES) {
+  // SAI3A_OPTIONAL_RUN_FILES（market-allocation-trace.csv等）も、必須ファイルと
+  // 同様にここで読み込みを試みる。存在しないrunディレクトリ（SAI-3B-2より前の
+  // 生成物）ではio.readFileがundefinedを返し、loadSai3aRun側の後方互換ロジック
+  // （空配列＋読み込み警告）が働く。以前はここで読み込みを試みていなかったため、
+  // 実際にmarket-allocation-trace.csvを含むrunディレクトリを指定しても、CLI経由
+  // では常に「ファイルが見つかりません」警告が出てしまうバグがあった（§12検証で発見）。
+  for (const fileName of [...SAI3A_REQUIRED_RUN_FILES, ...SAI3A_OPTIONAL_RUN_FILES]) {
     files[fileName] = io.readFile(`${dir}/${fileName}`);
   }
   const manifestText = files["manifest.json"];

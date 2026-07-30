@@ -26,6 +26,12 @@ export const SAI3A_REQUIRED_RUN_FILES: readonly string[] = [
   "run-summary.json",
 ];
 
+/** 任意ファイル（存在しなくても必須ファイル欠落エラーにしない）。CLI層
+ *  （sai3b/cli/runCli.ts）は、これらもSAI3A_REQUIRED_RUN_FILESと同様に
+ *  読み込みを試みる必要がある（存在しなければ単にundefinedのまま）。
+ *  market-allocation-trace.csv（SAI-3B-2で追加）はこの一覧に含まれる。 */
+export const SAI3A_OPTIONAL_RUN_FILES: readonly string[] = ["market-allocation-trace.csv"];
+
 export interface RunFilesInput {
   /** run比較時の識別ラベル（既定はmanifest.runIdをそのまま使うが、CLI引数で
    *  別名を明示指定できる。複数run入力時に同名衝突があればcompareRuns.tsで検出）。 */
