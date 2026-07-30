@@ -130,8 +130,13 @@ function buildDrawingXml(specs: readonly ChartSpec[]): string {
   );
 }
 
-function buildDrawingRelsXml(chartCount: number): string {
-  const rels = Array.from({ length: chartCount }, (_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${i + 1}.xml"/>`).join("");
+/** chartFileNumbers: このdrawingが参照するchart{N}.xmlの実ファイル番号（グローバル、
+ *  シートをまたいでユニーク）。rId自体はこのdrawing内でローカルに1から振り直す
+ *  （drawingXmlのrIdと1:1対応させるため、配列のインデックス順=rId順とする）。 */
+function buildDrawingRelsXml(chartFileNumbers: readonly number[]): string {
+  const rels = chartFileNumbers
+    .map((n, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${n}.xml"/>`)
+    .join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`;
 }
 
@@ -149,67 +154,100 @@ function resolveSheetFilePath(workbookXml: string, workbookRelsXml: string, shee
   return `xl/${targetMatch[1]}`;
 }
 
+/** 1シートぶんの注入対象（シート名＋そのシートに追加するグラフ仕様一覧）。 */
+export interface SheetChartSpecs {
+  readonly sheetName: string;
+  readonly specs: readonly ChartSpec[];
+}
+
 /**
- * exceljsが生成したxlsxバッファへ、指定したシート（chartSheetName）上に
- * ネイティブの棒/線グラフを追加する。参照範囲はすべて既にシート上に書き込み
- * 済みのセルを指すのみで、値の再計算は行わない。
+ * exceljsが生成したxlsxバッファへ、複数シートにまたがってネイティブの棒/線
+ * グラフを追加する（SAI-3B-2で複数のダッシュボードシートにグラフを分散配置
+ * するために一般化）。参照範囲はすべて既にシート上に書き込み済みのセルを
+ * 指すのみで、値の再計算は行わない。chart{N}.xml・drawing{N}.xmlのファイル
+ * 番号はワークブック全体でユニークになるよう、シートをまたいで採番する
+ * （xl/charts/・xl/drawings/はワークブック共通の単一ディレクトリのため）。
  */
-export async function injectNativeCharts(xlsxBuffer: Buffer, chartSheetName: string, specs: readonly ChartSpec[]): Promise<Buffer> {
-  if (specs.length === 0) return xlsxBuffer;
+export async function injectNativeChartsMultiSheet(xlsxBuffer: Buffer, sheetSpecs: readonly SheetChartSpecs[]): Promise<Buffer> {
+  const nonEmpty = sheetSpecs.filter((s) => s.specs.length > 0);
+  if (nonEmpty.length === 0) return xlsxBuffer;
 
   const zip = await JSZip.loadAsync(xlsxBuffer);
 
   const workbookXml = await zip.file("xl/workbook.xml")!.async("string");
   const workbookRelsXml = await zip.file("xl/_rels/workbook.xml.rels")!.async("string");
-  const sheetPath = resolveSheetFilePath(workbookXml, workbookRelsXml, chartSheetName);
-  const sheetFileName = sheetPath.split("/").pop()!;
-
-  let sheetXml = await zip.file(sheetPath)!.async("string");
-  if (!sheetXml.includes('xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"')) {
-    sheetXml = sheetXml.replace("<worksheet ", '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
-  }
-
-  const sheetRelsPath = `xl/worksheets/_rels/${sheetFileName}.rels`;
-  const existingSheetRels = zip.file(sheetRelsPath);
-  const existingRelsXml = existingSheetRels ? await existingSheetRels.async("string") : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
-  const drawingRid = `rIdSai3bChartDrawing1`;
-  const newSheetRelsXml = existingRelsXml.replace(
-    "</Relationships>",
-    `<Relationship Id="${drawingRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>`
-  );
-
-  if (!sheetXml.includes("<drawing ")) {
-    sheetXml = sheetXml.replace("</worksheet>", `<drawing r:id="${drawingRid}"/></worksheet>`);
-  }
-
-  const drawingXml = buildDrawingXml(specs);
-  const drawingRelsXml = buildDrawingRelsXml(specs.length);
-
-  zip.file(sheetPath, sheetXml);
-  zip.file(sheetRelsPath, newSheetRelsXml);
-  zip.file("xl/drawings/drawing1.xml", drawingXml);
-  zip.file("xl/drawings/_rels/drawing1.xml.rels", drawingRelsXml);
-  specs.forEach((spec, i) => {
-    zip.file(`xl/charts/chart${i + 1}.xml`, buildChartXml(spec, i));
-  });
 
   const contentTypesPath = "[Content_Types].xml";
   let contentTypesXml = await zip.file(contentTypesPath)!.async("string");
-  const additions: string[] = [];
-  if (!contentTypesXml.includes("/xl/drawings/drawing1.xml")) {
-    additions.push(`<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`);
-  }
-  for (let i = 0; i < specs.length; i++) {
-    const partName = `/xl/charts/chart${i + 1}.xml`;
-    if (!contentTypesXml.includes(partName)) {
-      additions.push(`<Override PartName="${partName}" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`);
+  const contentTypeAdditions: string[] = [];
+
+  let globalChartCounter = 0;
+
+  for (let drawingIndex = 0; drawingIndex < nonEmpty.length; drawingIndex++) {
+    const { sheetName, specs } = nonEmpty[drawingIndex];
+    const drawingNumber = drawingIndex + 1;
+
+    const sheetPath = resolveSheetFilePath(workbookXml, workbookRelsXml, sheetName);
+    const sheetFileName = sheetPath.split("/").pop()!;
+
+    let sheetXml = await zip.file(sheetPath)!.async("string");
+    if (!sheetXml.includes('xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"')) {
+      sheetXml = sheetXml.replace("<worksheet ", '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
+    }
+
+    const sheetRelsPath = `xl/worksheets/_rels/${sheetFileName}.rels`;
+    const existingSheetRels = zip.file(sheetRelsPath);
+    const existingRelsXml = existingSheetRels
+      ? await existingSheetRels.async("string")
+      : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
+    const drawingRid = `rIdSai3bChartDrawing${drawingNumber}`;
+    const newSheetRelsXml = existingRelsXml.replace(
+      "</Relationships>",
+      `<Relationship Id="${drawingRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${drawingNumber}.xml"/></Relationships>`
+    );
+
+    if (!sheetXml.includes("<drawing ")) {
+      sheetXml = sheetXml.replace("</worksheet>", `<drawing r:id="${drawingRid}"/></worksheet>`);
+    }
+
+    const chartFileNumbers = specs.map(() => ++globalChartCounter);
+    const drawingXml = buildDrawingXml(specs);
+    const drawingRelsXml = buildDrawingRelsXml(chartFileNumbers);
+
+    zip.file(sheetPath, sheetXml);
+    zip.file(sheetRelsPath, newSheetRelsXml);
+    zip.file(`xl/drawings/drawing${drawingNumber}.xml`, drawingXml);
+    zip.file(`xl/drawings/_rels/drawing${drawingNumber}.xml.rels`, drawingRelsXml);
+    specs.forEach((spec, i) => {
+      zip.file(`xl/charts/chart${chartFileNumbers[i]}.xml`, buildChartXml(spec, chartFileNumbers[i]));
+    });
+
+    const drawingPartName = `/xl/drawings/drawing${drawingNumber}.xml`;
+    if (!contentTypesXml.includes(drawingPartName)) {
+      contentTypeAdditions.push(`<Override PartName="${drawingPartName}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`);
+    }
+    for (const n of chartFileNumbers) {
+      const partName = `/xl/charts/chart${n}.xml`;
+      if (!contentTypesXml.includes(partName)) {
+        contentTypeAdditions.push(`<Override PartName="${partName}" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`);
+      }
     }
   }
-  if (additions.length > 0) {
-    contentTypesXml = contentTypesXml.replace("</Types>", `${additions.join("")}</Types>`);
+
+  if (contentTypeAdditions.length > 0) {
+    contentTypesXml = contentTypesXml.replace("</Types>", `${contentTypeAdditions.join("")}</Types>`);
     zip.file(contentTypesPath, contentTypesXml);
   }
 
   const outBuffer = await zip.generateAsync({ type: "nodebuffer" });
   return outBuffer;
+}
+
+/**
+ * 単一シートのみへグラフを追加する（後方互換のための薄いラッパー。
+ * SAI-3B-1時点のAPIをそのまま維持する）。
+ */
+export async function injectNativeCharts(xlsxBuffer: Buffer, chartSheetName: string, specs: readonly ChartSpec[]): Promise<Buffer> {
+  if (specs.length === 0) return xlsxBuffer;
+  return injectNativeChartsMultiSheet(xlsxBuffer, [{ sheetName: chartSheetName, specs }]);
 }

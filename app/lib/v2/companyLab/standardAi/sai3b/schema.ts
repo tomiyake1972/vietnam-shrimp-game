@@ -307,10 +307,78 @@ export interface QuarterPerformanceRow {
    *  （newContractedQuantityHosoEqTons等）はSAI-3Aの出力ファイルに含まれていない
    *  ため取得できない（missingFieldReports参照）。 */
   readonly finalPlannedSalesQuantityTotal?: number;
+  // --- SAI-3B-2で追加（quarter-summary.csvの拡張列に対応。§1監査で
+  //     「作成不能」としていたF（キャッシュフロー3区分）が、SAI-3A出力層の
+  //     追記により作成可能になった）。 ---
+  readonly operatingCashFlowUsd?: number;
+  readonly investingCashFlowUsd?: number;
+  readonly financingCashFlowUsd?: number;
+  readonly endingAvailableAdditionalCapacityUsd?: number;
+  /** market-allocation-trace.csv由来。市場清算で実際に配分を得た（=売れた）
+   *  数量の合計（商品・市場を問わず会社単位で合算）。finalPlannedSalesQuantityTotal
+   *  （営業工数制約後にengineへ提出された計画数量）とは異なるデータ源であり、
+   *  市場清算後の実際の結果に近い（「実績」に相当）。market-allocation-trace.csv
+   *  が存在しない古いrunでは取得できずundefinedのまま（0にしない）。 */
+  readonly actualSalesQuantityHosoEqTons?: number;
+  readonly newContractedQuantityHosoEqTons?: number;
+  readonly fulfilledQuantityHosoEqTons?: number;
+  readonly outstandingQuantityHosoEqTons?: number;
+  readonly overdueQuantityHosoEqTons?: number;
   readonly paymentDefault: boolean;
   readonly underwritingFrozen: boolean;
   readonly startCreditTier?: string;
   readonly topWarningCodes: string;
+}
+
+/**
+ * 市場別シェア推移（SAI-3B-2 §3-C）。market-allocation-trace.csv由来。
+ * 【分母の定義】quantityShare = 自社のallocatedQuantity（当該run×seed×turn×市場で
+ * 商品を問わず合算） ÷ 同一run×seed×turn×市場で実際に配分エントリに登場した
+ * 全社のallocatedQuantity合計（三宅さんの指示どおり「全社合計」であり、
+ * externalOptionQuantityは含まない）。会社が1社でも欠けている場合（=その
+ * 市場に対して配分エントリ自体が無い）は、companyCountInMarketで会社数が
+ * わかるようにし、5社に満たない場合は「比較対象外」として扱えるようにする
+ * （三宅さんの指示：欠けている会社を無理に100%へ補正しない）。
+ * 【revenueShareについて】市場別の実現収益（価格×数量）はSAI-3Aのいずれの
+ * 出力にも含まれておらず、askPrice（自社の提示価格。市場清算価格そのものでは
+ * ない）から逆算すると捏造になるため、revenueShareは意図的に持たない
+ * （quantityShareのみ提供。README/シート注記で明記する）。
+ */
+export interface MarketShareRow {
+  readonly runLabel: string;
+  readonly seed: string;
+  readonly turn: number;
+  readonly period: string;
+  readonly market: string;
+  readonly companyId: string;
+  readonly allocatedQuantityHosoEqTons: number;
+  readonly totalAllocatedQuantityHosoEqTonsAcrossCompanies: number;
+  readonly quantityShare: number;
+  /** この市場×turn×seedに実際に配分エントリを持っていた会社数（5社中）。 */
+  readonly companyCountInMarket: number;
+}
+
+/**
+ * 80/85/90人比較における「最初に乖離が始まった四半期」の追跡（SAI-3B-2 §6）。
+ * 原因の特定・断定は行わない（三宅さんの指示どおり「乖離開始点の可視化」のみ）。
+ * 乖離判定は、比較対象headcountのうちその四半期時点でまだデータが存在する
+ * （=defaultでログが途切れていない）headcount間の相対乖離率
+ * （(最大-最小)/max(|最大|,ε)）が閾値を超えた最初のturnを機械的に検出する
+ * ヒューリスティックであり、統計的因果推論ではない。
+ */
+export interface HeadcountDivergenceRow {
+  readonly companyId: string;
+  readonly seed: string;
+  readonly headcounts: readonly number[];
+  /** 乖離が最初に検出されたturn（どのKPIでも乖離が見つからなければundefined）。 */
+  readonly firstDivergingTurn?: number;
+  /** 上記turnで最初に乖離を検出したKPI名（複数KPIが同一turnで同時に乖離した
+   *  場合は、候補リストの先頭にあるものを採用。厳密な「真の最初の原因」の
+   *  特定ではない）。 */
+  readonly firstDivergingKpi?: string;
+  /** 検出に用いた相対乖離率の閾値（ヒューリスティックのパラメータをシート上で
+   *  明示するため）。 */
+  readonly divergenceThreshold: number;
 }
 
 export interface SalesAnalysisRow {
@@ -483,6 +551,12 @@ export interface Sai3bAnalysis {
   readonly defaultWarningEvents: readonly DefaultWarningEventRow[];
   readonly reasonCodeTally: readonly ReasonCodeTallyRow[];
   readonly headcountComparison: readonly HeadcountComparisonRow[];
+  /** SAI-3B-2で追加。market-allocation-trace.csvが存在しないrunのみで構成
+   *  された場合は空配列（「現時点の出力データでは作成不能」の扱い）。 */
+  readonly marketShare: readonly MarketShareRow[];
+  /** SAI-3B-2で追加。複数run（headcount比較）入力時のみ意味を持つ（単一run
+   *  入力時は空配列）。 */
+  readonly headcountDivergence: readonly HeadcountDivergenceRow[];
   readonly decisionTrace: readonly DecisionTraceRow[];
   readonly missingFieldReports: readonly string[];
 }

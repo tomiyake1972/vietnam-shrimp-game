@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
-import { injectNativeCharts } from "../chartInjector";
+import { injectNativeCharts, injectNativeChartsMultiSheet } from "../chartInjector";
 
 async function buildBaseWorkbookBuffer(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
@@ -17,6 +17,19 @@ async function buildBaseWorkbookBuffer(): Promise<Buffer> {
   ws.addRow([80, 0.483]);
   ws.addRow([85, 0.967]);
   ws.addRow([90, 0.433]);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+async function buildTwoSheetWorkbookBuffer(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws1 = wb.addWorksheet("シートA");
+  ws1.addRow(["headcount", "value"]);
+  ws1.addRow([80, 100]);
+  ws1.addRow([85, 200]);
+  const ws2 = wb.addWorksheet("シートB");
+  ws2.addRow(["quarter", "value"]);
+  ws2.addRow(["2015Q1", 10]);
+  ws2.addRow(["2015Q2", 20]);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -91,6 +104,99 @@ test("injectNativeCharts: 複数グラフを同一シートへ追加できる", 
   const drawing = await zip.file("xl/drawings/drawing1.xml")!.async("string");
   const anchorCount = (drawing.match(/<xdr:twoCellAnchor>/g) ?? []).length;
   assert.equal(anchorCount, 2);
+});
+
+// SAI-3B-2で追加。複数のダッシュボードシートにグラフを分散配置するための
+// injectNativeChartsMultiSheetが、シートをまたいでchart/drawingパーツ番号を
+// 正しくユニーク採番し、どちらのシートにもグラフが実際に追加されることを確認する。
+test("injectNativeChartsMultiSheet: 複数シートへそれぞれグラフを追加でき、chart/drawing番号がワークブック全体でユニークになる", async () => {
+  const base = await buildTwoSheetWorkbookBuffer();
+  const out = await injectNativeChartsMultiSheet(base, [
+    {
+      sheetName: "シートA",
+      specs: [
+        {
+          title: "Chart on Sheet A",
+          type: "bar",
+          categoriesRef: "'シートA'!$A$2:$A$3",
+          categories: ["80", "85"],
+          series: [{ name: "value", valuesRef: "'シートA'!$B$2:$B$3", values: [100, 200] }],
+          anchorCol: 3,
+          anchorRow: 0,
+          widthCols: 6,
+          heightRows: 10,
+        },
+      ],
+    },
+    {
+      sheetName: "シートB",
+      specs: [
+        {
+          title: "Chart 1 on Sheet B",
+          type: "line",
+          categoriesRef: "'シートB'!$A$2:$A$3",
+          categories: ["2015Q1", "2015Q2"],
+          series: [{ name: "value", valuesRef: "'シートB'!$B$2:$B$3", values: [10, 20] }],
+          anchorCol: 3,
+          anchorRow: 0,
+          widthCols: 6,
+          heightRows: 10,
+        },
+        {
+          title: "Chart 2 on Sheet B",
+          type: "bar",
+          categoriesRef: "'シートB'!$A$2:$A$3",
+          categories: ["2015Q1", "2015Q2"],
+          series: [{ name: "value2", valuesRef: "'シートB'!$B$2:$B$3", values: [30, 40] }],
+          anchorCol: 3,
+          anchorRow: 12,
+          widthCols: 6,
+          heightRows: 10,
+        },
+      ],
+    },
+  ]);
+
+  const zip = await JSZip.loadAsync(out);
+  // シートA用drawing1・シートB用drawing2、chart1(シートA)・chart2/chart3(シートB)が
+  // それぞれ存在し、番号が衝突していないこと。
+  assert.ok(zip.file("xl/drawings/drawing1.xml"), "drawing1.xml (シートA) should exist");
+  assert.ok(zip.file("xl/drawings/drawing2.xml"), "drawing2.xml (シートB) should exist");
+  assert.ok(zip.file("xl/charts/chart1.xml"), "chart1.xml should exist");
+  assert.ok(zip.file("xl/charts/chart2.xml"), "chart2.xml should exist");
+  assert.ok(zip.file("xl/charts/chart3.xml"), "chart3.xml should exist");
+  assert.ok(!zip.file("xl/charts/chart4.xml"), "chart4.xmlは存在しないはず（グラフは合計3件）");
+
+  const chart1Xml = await zip.file("xl/charts/chart1.xml")!.async("string");
+  assert.match(chart1Xml, /Chart on Sheet A/);
+  const chart2Xml = await zip.file("xl/charts/chart2.xml")!.async("string");
+  assert.match(chart2Xml, /Chart 1 on Sheet B/);
+  const chart3Xml = await zip.file("xl/charts/chart3.xml")!.async("string");
+  assert.match(chart3Xml, /Chart 2 on Sheet B/);
+
+  const drawing2Rels = await zip.file("xl/drawings/_rels/drawing2.xml.rels")!.async("string");
+  assert.match(drawing2Rels, /Target="\.\.\/charts\/chart2\.xml"/);
+  assert.match(drawing2Rels, /Target="\.\.\/charts\/chart3\.xml"/);
+
+  const contentTypes = await zip.file("[Content_Types].xml")!.async("string");
+  for (const part of ["drawing1.xml", "drawing2.xml", "chart1.xml", "chart2.xml", "chart3.xml"]) {
+    assert.match(contentTypes, new RegExp(part.replace(".", "\\.")));
+  }
+
+  // exceljsで再読込でき、両シートのデータが壊れていないこと。
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(out as unknown as ExcelJS.Buffer);
+  assert.equal(wb.getWorksheet("シートA")!.getRow(2).getCell(1).value, 80);
+  assert.equal(wb.getWorksheet("シートB")!.getRow(3).getCell(2).value, 20);
+});
+
+test("injectNativeChartsMultiSheet: すべてのシートでspecsが空なら元バッファをそのまま返す", async () => {
+  const base = await buildTwoSheetWorkbookBuffer();
+  const out = await injectNativeChartsMultiSheet(base, [
+    { sheetName: "シートA", specs: [] },
+    { sheetName: "シートB", specs: [] },
+  ]);
+  assert.equal(out, base);
 });
 
 // 三宅さんのご指摘（受入レビュー）に基づく回帰テスト: 欠損値（undefined）を

@@ -10,11 +10,15 @@ import {
   buildCompanyPerformance,
   buildDashboardSummary,
   buildHeadcountComparison,
+  buildHeadcountDivergence,
+  buildMarketShare,
+  buildQuarterPerformance,
   buildReasonCodeTally,
   buildSalesAnalysis,
 } from "../aggregate";
 import { validateComparableRuns } from "../compareRuns";
 import { buildFixtureRunFiles } from "./testFixtures";
+import { LoadedSai3aRun, Sai3bMarketAllocationTraceRow, Sai3bQuarterSummaryRow } from "../schema";
 
 function loadedRun(runId: string, headcount: number, cases: Parameters<typeof buildFixtureRunFiles>[0]["cases"]) {
   const files = buildFixtureRunFiles({ runId, headcount, quarters: 2, cases });
@@ -113,4 +117,201 @@ test("buildHeadcountComparison: 単一runでは空配列を返す", () => {
   const comparison = validateComparableRuns([run80]);
   const rows = buildHeadcountComparison([run80], comparison.commonSeeds, comparison.commonCompanyIds);
   assert.equal(rows.length, 0);
+});
+
+// ---------------------------------------------------------------------
+// SAI-3B-2で追加: buildQuarterPerformance拡張・buildMarketShare・buildHeadcountDivergence
+// ---------------------------------------------------------------------
+
+function makeQuarterSummaryRow(overrides: Partial<Sai3bQuarterSummaryRow> & Pick<Sai3bQuarterSummaryRow, "seed" | "companyId" | "turn">): Sai3bQuarterSummaryRow {
+  return {
+    period: `2015Q${overrides.turn}`,
+    netRevenueUsd: 1_000_000,
+    grossProfitUsd: 200_000,
+    operatingProfitUsd: 100_000,
+    netIncomeUsd: 80_000,
+    closingCashUsd: 5_000_000,
+    endingShortTermLoansUsd: 1_000_000,
+    endingLongTermLoansUsd: 2_000_000,
+    salesEffortCapacityHosoEqTonsActual: 4000,
+    salesEffortUsedHosoEqTons: 3800,
+    salesReductionFromEffortConstraintHosoEqTons: 200,
+    rawMaterialInventoryHosoEqTons: 3000,
+    finishedGoodsInventoryHosoEqTons: 500,
+    discardQuantityHosoEqTons: 10,
+    paymentDefault: false,
+    paymentDefaultNewlyTriggered: false,
+    underwritingFrozen: false,
+    underwritingFrozenNewlyTriggered: false,
+    warningCount: 0,
+    ...overrides,
+  };
+}
+
+function makeAllocationRow(overrides: Partial<Sai3bMarketAllocationTraceRow> & Pick<Sai3bMarketAllocationTraceRow, "seed" | "turn" | "market" | "product" | "companyId" | "allocatedQuantityHosoEqTons">): Sai3bMarketAllocationTraceRow {
+  return {
+    period: `2015Q${overrides.turn}`,
+    targetDemandHosoEqTons: 1000,
+    externalOptionQuantityHosoEqTons: 0,
+    askPriceUsdPerHosoEqKg: 4.5,
+    basePriceUsdPerHosoEqKg: 4.2,
+    coverageScore: 70,
+    competitivenessWeight: 1.0,
+    ...overrides,
+  };
+}
+
+function makeLoadedRun(overrides: Partial<LoadedSai3aRun> & Pick<LoadedSai3aRun, "runLabel">): LoadedSai3aRun {
+  return {
+    sourceDir: `/tmp/${overrides.runLabel}`,
+    manifest: {
+      schemaVersion: "1.0.0",
+      runId: overrides.runLabel,
+      scenarioId: "baseline",
+      standardBaselineId: "moderate-pressure",
+      seeds: ["s1"],
+      quarters: 4,
+      companyIds: ["BAL", "MASS"],
+      aiPolicyVersion: "STANDARD_AI_PARAMETERS_V1",
+      salesForceHeadcountTotal: 80,
+      keyParameters: {},
+      outputFormats: ["json", "csv"],
+    },
+    caseSummaryRows: [],
+    quarterSummaryRows: [],
+    decisionTraceLines: [],
+    adjustmentTraceRows: [],
+    warningRows: [],
+    marketAllocationTraceRows: [],
+    runSummary: { runSummary: { runId: overrides.runLabel, totalCases: 0, completedCases: 0, errorCases: 0, paymentDefaultRate: 0, underwritingFrozenRate: 0, averageCumulativeRevenueUsd: 0, averageCumulativeGrossProfitUsd: 0, averageCumulativeOperatingProfitUsd: 0, averageFinalCashUsd: 0, topReasonCodeCounts: [], totalWarningCount: 0 }, errors: [] },
+    loadWarnings: [],
+    ...overrides,
+  };
+}
+
+test("buildQuarterPerformance: market-allocation-trace由来のactualSalesQuantityHosoEqTonsは、finalPlannedSalesQuantityTotal（計画）とは別の値として、商品・市場を問わず会社単位で正しく合算される", () => {
+  const run = makeLoadedRun({
+    runLabel: "r1",
+    quarterSummaryRows: [makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 1 })],
+    marketAllocationTraceRows: [
+      makeAllocationRow({ seed: "s1", turn: 1, market: "CN", product: "hoso", companyId: "BAL", allocatedQuantityHosoEqTons: 900 }),
+      makeAllocationRow({ seed: "s1", turn: 1, market: "US", product: "pd", companyId: "BAL", allocatedQuantityHosoEqTons: 300 }),
+      makeAllocationRow({ seed: "s1", turn: 1, market: "CN", product: "hoso", companyId: "MASS", allocatedQuantityHosoEqTons: 500 }),
+    ],
+  });
+  const rows = buildQuarterPerformance([run]);
+  const balRow = rows.find((r) => r.companyId === "BAL")!;
+  assert.equal(balRow.actualSalesQuantityHosoEqTons, 1200); // 900 + 300、MASSの分は含まない
+});
+
+test("buildMarketShare: 市場ごとの数量シェアが正しく計算され、同一run×seed×turn×市場内の全社シェア合計が1になる", () => {
+  const run = makeLoadedRun({
+    runLabel: "r1",
+    quarterSummaryRows: [
+      makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 1 }),
+      makeQuarterSummaryRow({ seed: "s1", companyId: "MASS", turn: 1 }),
+    ],
+    marketAllocationTraceRows: [
+      makeAllocationRow({ seed: "s1", turn: 1, market: "CN", product: "hoso", companyId: "BAL", allocatedQuantityHosoEqTons: 300 }),
+      makeAllocationRow({ seed: "s1", turn: 1, market: "CN", product: "pd", companyId: "BAL", allocatedQuantityHosoEqTons: 100 }),
+      makeAllocationRow({ seed: "s1", turn: 1, market: "CN", product: "hoso", companyId: "MASS", allocatedQuantityHosoEqTons: 600 }),
+    ],
+  });
+  const rows = buildMarketShare([run]);
+  assert.equal(rows.length, 2); // BAL, MASS の2行（CN市場、turn=1）
+  const balRow = rows.find((r) => r.companyId === "BAL")!;
+  const massRow = rows.find((r) => r.companyId === "MASS")!;
+  assert.equal(balRow.allocatedQuantityHosoEqTons, 400); // 300+100（商品を問わず合算）
+  assert.equal(massRow.allocatedQuantityHosoEqTons, 600);
+  assert.equal(balRow.totalAllocatedQuantityHosoEqTonsAcrossCompanies, 1000);
+  assert.ok(Math.abs(balRow.quantityShare + massRow.quantityShare - 1) < 1e-9, "同一市場内の全社シェア合計は1になるはず");
+  assert.equal(balRow.companyCountInMarket, 2);
+});
+
+test("buildMarketShare: market-allocation-trace.csvが空（古いrun）の場合は空配列を返す", () => {
+  const run = makeLoadedRun({ runLabel: "r1", marketAllocationTraceRows: [] });
+  assert.deepEqual(buildMarketShare([run]), []);
+});
+
+test("buildHeadcountDivergence: 乖離が発生したturnとKPIを機械的に検出する", () => {
+  const run80 = makeLoadedRun({
+    runLabel: "r80",
+    manifest: {
+      schemaVersion: "1.0.0",
+      runId: "r80",
+      scenarioId: "baseline",
+      standardBaselineId: "moderate-pressure",
+      seeds: ["s1"],
+      quarters: 3,
+      companyIds: ["BAL"],
+      aiPolicyVersion: "STANDARD_AI_PARAMETERS_V1",
+      salesForceHeadcountTotal: 80,
+      keyParameters: {},
+      outputFormats: ["json", "csv"],
+    },
+    quarterSummaryRows: [
+      makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 1, netRevenueUsd: 1_000_000 }),
+      makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 2, netRevenueUsd: 1_000_000 }),
+      makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 3, netRevenueUsd: 1_000_000 }),
+    ],
+  });
+  const run85 = makeLoadedRun({
+    runLabel: "r85",
+    manifest: {
+      schemaVersion: "1.0.0",
+      runId: "r85",
+      scenarioId: "baseline",
+      standardBaselineId: "moderate-pressure",
+      seeds: ["s1"],
+      quarters: 3,
+      companyIds: ["BAL"],
+      aiPolicyVersion: "STANDARD_AI_PARAMETERS_V1",
+      salesForceHeadcountTotal: 85,
+      keyParameters: {},
+      outputFormats: ["json", "csv"],
+    },
+    quarterSummaryRows: [
+      // turn1は80人条件と同じ（乖離なし）。turn2から売上が大きく乖離する。
+      makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 1, netRevenueUsd: 1_000_000 }),
+      makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 2, netRevenueUsd: 500_000 }),
+      makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 3, netRevenueUsd: 400_000 }),
+    ],
+  });
+  const runs = [run80, run85];
+  const comparison = validateComparableRuns(runs);
+  const quarterPerformance = buildQuarterPerformance(runs);
+  const rows = buildHeadcountDivergence(runs, quarterPerformance, comparison.commonSeeds, comparison.commonCompanyIds);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].firstDivergingTurn, 2);
+  assert.equal(rows[0].firstDivergingKpi, "netRevenueUsd");
+});
+
+test("buildHeadcountDivergence: 全turnで乖離が閾値を超えない場合はfirstDivergingTurnがundefined", () => {
+  const makeRun = (runLabel: string, headcount: number) =>
+    makeLoadedRun({
+      runLabel,
+      manifest: {
+        schemaVersion: "1.0.0",
+        runId: runLabel,
+        scenarioId: "baseline",
+        standardBaselineId: "moderate-pressure",
+        seeds: ["s1"],
+        quarters: 2,
+        companyIds: ["BAL"],
+        aiPolicyVersion: "STANDARD_AI_PARAMETERS_V1",
+        salesForceHeadcountTotal: headcount,
+        keyParameters: {},
+        outputFormats: ["json", "csv"],
+      },
+      quarterSummaryRows: [
+        makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 1, netRevenueUsd: 1_000_000 }),
+        makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 2, netRevenueUsd: 1_010_000 }),
+      ],
+    });
+  const runs = [makeRun("r80", 80), makeRun("r85", 85)];
+  const comparison = validateComparableRuns(runs);
+  const quarterPerformance = buildQuarterPerformance(runs);
+  const rows = buildHeadcountDivergence(runs, quarterPerformance, comparison.commonSeeds, comparison.commonCompanyIds);
+  assert.equal(rows[0].firstDivergingTurn, undefined);
+  assert.equal(rows[0].firstDivergingKpi, undefined);
 });

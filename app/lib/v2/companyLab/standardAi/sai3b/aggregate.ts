@@ -12,7 +12,9 @@ import {
   DecisionTraceRow,
   DefaultWarningEventRow,
   HeadcountComparisonRow,
+  HeadcountDivergenceRow,
   LoadedSai3aRun,
+  MarketShareRow,
   ProcurementProductionRow,
   QuarterPerformanceRow,
   ReasonCodeTallyRow,
@@ -173,14 +175,22 @@ export function buildQuarterPerformance(runs: readonly LoadedSai3aRun[]): readon
       if (arr) arr.push(w.code);
       else warningsByKey.set(k, [w.code]);
     }
+    // market-allocation-trace.csv由来の、会社×seed×turnの実際の獲得数量合計
+    // （商品・市場を問わず合算。ファイルが無いrun=古いrunでは空Map=常にundefined）。
+    const actualSalesByKey = new Map<string, number>();
+    for (const a of run.marketAllocationTraceRows) {
+      const k = `${keyOf(a.seed, a.companyId)}::${a.turn}`;
+      actualSalesByKey.set(k, (actualSalesByKey.get(k) ?? 0) + a.allocatedQuantityHosoEqTons);
+    }
 
     for (const q of run.quarterSummaryRows) {
-      const line = decisionByKey.get(`${keyOf(q.seed, q.companyId)}::${q.turn}`);
+      const k = `${keyOf(q.seed, q.companyId)}::${q.turn}`;
+      const line = decisionByKey.get(k);
       const productionPlanQuantityTotal = line
         ? sum(Object.values(line.decision.wish.productionDesiredQuantityByProduct))
         : undefined;
       const finalPlannedSalesQuantityTotal = line ? sum(line.salesQuantityTrace.map((t) => t.finalPlannedQuantity)) : undefined;
-      const topWarningCodes = (warningsByKey.get(`${keyOf(q.seed, q.companyId)}::${q.turn}`) ?? []).join("|");
+      const topWarningCodes = (warningsByKey.get(k) ?? []).join("|");
 
       result.push({
         runLabel: run.runLabel,
@@ -201,10 +211,155 @@ export function buildQuarterPerformance(runs: readonly LoadedSai3aRun[]): readon
         finishedGoodsInventoryHosoEqTons: q.finishedGoodsInventoryHosoEqTons,
         productionPlanQuantityTotal,
         finalPlannedSalesQuantityTotal,
+        operatingCashFlowUsd: q.operatingCashFlowUsd,
+        investingCashFlowUsd: q.investingCashFlowUsd,
+        financingCashFlowUsd: q.financingCashFlowUsd,
+        endingAvailableAdditionalCapacityUsd: q.endingAvailableAdditionalCapacityUsd,
+        actualSalesQuantityHosoEqTons: actualSalesByKey.get(k),
+        newContractedQuantityHosoEqTons: q.newContractedQuantityHosoEqTons,
+        fulfilledQuantityHosoEqTons: q.fulfilledQuantityHosoEqTons,
+        outstandingQuantityHosoEqTons: q.outstandingQuantityHosoEqTons,
+        overdueQuantityHosoEqTons: q.overdueQuantityHosoEqTons,
         paymentDefault: q.paymentDefault,
         underwritingFrozen: q.underwritingFrozen,
         startCreditTier: q.startCreditTier,
         topWarningCodes,
+      });
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------
+// 4-13（SAI-3B-2で追加）. 市場別シェア推移
+// ---------------------------------------------------------------------
+
+export function buildMarketShare(runs: readonly LoadedSai3aRun[]): readonly MarketShareRow[] {
+  const result: MarketShareRow[] = [];
+  for (const run of runs) {
+    // run×seed×turn×市場 で、会社をまたいだ配分数量合計・会社数を先に集計する
+    // （商品を問わず合算。三宅さんの指示どおり「市場別」の粒度で会社別シェアを見る）。
+    const byRunSeedTurnMarket = new Map<string, Map<string, number>>(); // key -> (companyId -> qty)
+    for (const a of run.marketAllocationTraceRows) {
+      const key = `${a.seed}::${a.turn}::${a.market}`;
+      let byCompany = byRunSeedTurnMarket.get(key);
+      if (!byCompany) {
+        byCompany = new Map();
+        byRunSeedTurnMarket.set(key, byCompany);
+      }
+      byCompany.set(a.companyId, (byCompany.get(a.companyId) ?? 0) + a.allocatedQuantityHosoEqTons);
+    }
+
+    for (const [key, byCompany] of byRunSeedTurnMarket.entries()) {
+      const [seed, turnStr, market] = key.split("::");
+      const turn = Number(turnStr);
+      const total = sum(Array.from(byCompany.values()));
+      const period = run.quarterSummaryRows.find((q) => q.seed === seed && q.turn === turn)?.period ?? "";
+      for (const [companyId, qty] of byCompany.entries()) {
+        result.push({
+          runLabel: run.runLabel,
+          seed,
+          turn,
+          period,
+          market,
+          companyId,
+          allocatedQuantityHosoEqTons: qty,
+          totalAllocatedQuantityHosoEqTonsAcrossCompanies: total,
+          quantityShare: total > EPSILON ? qty / total : 0,
+          companyCountInMarket: byCompany.size,
+        });
+      }
+    }
+  }
+  return result.sort(
+    (a, b) =>
+      a.runLabel.localeCompare(b.runLabel) ||
+      a.market.localeCompare(b.market) ||
+      a.seed.localeCompare(b.seed) ||
+      a.turn - b.turn ||
+      a.companyId.localeCompare(b.companyId)
+  );
+}
+
+// ---------------------------------------------------------------------
+// 4-14（SAI-3B-2で追加）. 80/85/90人比較: 最初に乖離が始まった四半期の追跡
+// ---------------------------------------------------------------------
+
+/** 乖離検出に用いるKPI候補（優先順位順。同一turnで複数KPIが同時に乖離した
+ *  場合は先頭のものを採用する）。財務系KPIを優先し、比率(0〜1)のKPIは
+ *  スケールが異なるため別途相対乖離率を計算する。 */
+const DIVERGENCE_KPI_CANDIDATES: readonly { readonly key: string; readonly extract: (r: QuarterPerformanceRow) => number | undefined }[] = [
+  { key: "netRevenueUsd", extract: (r) => r.netRevenueUsd },
+  { key: "operatingProfitUsd", extract: (r) => r.operatingProfitUsd },
+  { key: "closingCashUsd", extract: (r) => r.closingCashUsd },
+  { key: "operatingCashFlowUsd", extract: (r) => r.operatingCashFlowUsd },
+  { key: "shortTermLoansUsd", extract: (r) => r.shortTermLoansUsd },
+  { key: "finishedGoodsInventoryHosoEqTons", extract: (r) => r.finishedGoodsInventoryHosoEqTons },
+];
+
+/** ヒューリスティックな相対乖離率の閾値。財務系KPIの通常の四半期間変動幅を
+ *  上回る値として、経験的に5%を採用（統計的根拠のある値ではなく、あくまで
+ *  「どこから見た目上ばらつき始めたか」を機械的に拾うためのパラメータ）。 */
+const DIVERGENCE_THRESHOLD = 0.05;
+
+export function buildHeadcountDivergence(
+  runs: readonly LoadedSai3aRun[],
+  quarterPerformance: readonly QuarterPerformanceRow[],
+  commonSeeds: readonly string[],
+  commonCompanyIds: readonly string[]
+): readonly HeadcountDivergenceRow[] {
+  if (runs.length < 2) return [];
+  const headcounts = Array.from(new Set(runs.map((r) => r.manifest.salesForceHeadcountTotal))).sort((a, b) => a - b);
+  const runLabelByHeadcount = new Map<number, string>();
+  for (const r of runs) runLabelByHeadcount.set(r.manifest.salesForceHeadcountTotal, r.runLabel);
+
+  const maxTurn = Math.max(...runs.map((r) => r.manifest.quarters));
+
+  const result: HeadcountDivergenceRow[] = [];
+  for (const companyId of commonCompanyIds) {
+    for (const seed of commonSeeds) {
+      // headcount -> turn -> QuarterPerformanceRow（このcompany×seedのみ）。
+      const byHeadcountTurn = new Map<number, Map<number, QuarterPerformanceRow>>();
+      for (const hc of headcounts) {
+        const runLabel = runLabelByHeadcount.get(hc);
+        const byTurn = new Map<number, QuarterPerformanceRow>();
+        for (const r of quarterPerformance) {
+          if (r.runLabel === runLabel && r.companyId === companyId && r.seed === seed) byTurn.set(r.turn, r);
+        }
+        if (byTurn.size > 0) byHeadcountTurn.set(hc, byTurn);
+      }
+      if (byHeadcountTurn.size < 2) continue; // 比較対象が2つ未満なら乖離判定不能。
+
+      let firstDivergingTurn: number | undefined;
+      let firstDivergingKpi: string | undefined;
+      outer: for (let turn = 1; turn <= maxTurn; turn++) {
+        for (const { key, extract } of DIVERGENCE_KPI_CANDIDATES) {
+          const values: number[] = [];
+          for (const byTurn of byHeadcountTurn.values()) {
+            const row = byTurn.get(turn);
+            const v = row ? extract(row) : undefined;
+            if (v !== undefined && Number.isFinite(v)) values.push(v);
+          }
+          if (values.length < 2) continue;
+          const maxV = Math.max(...values);
+          const minV = Math.min(...values);
+          const denom = Math.max(Math.abs(maxV), EPSILON);
+          const relativeDivergence = (maxV - minV) / denom;
+          if (relativeDivergence > DIVERGENCE_THRESHOLD) {
+            firstDivergingTurn = turn;
+            firstDivergingKpi = key;
+            break outer;
+          }
+        }
+      }
+
+      result.push({
+        companyId,
+        seed,
+        headcounts: Array.from(byHeadcountTurn.keys()).sort((a, b) => a - b),
+        firstDivergingTurn,
+        firstDivergingKpi,
+        divergenceThreshold: DIVERGENCE_THRESHOLD,
       });
     }
   }

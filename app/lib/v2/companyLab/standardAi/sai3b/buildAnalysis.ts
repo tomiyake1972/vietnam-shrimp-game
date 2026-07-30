@@ -13,6 +13,8 @@ import {
   buildDecisionTrace,
   buildDefaultWarningEvents,
   buildHeadcountComparison,
+  buildHeadcountDivergence,
+  buildMarketShare,
   buildProcurementProduction,
   buildQuarterPerformance,
   buildReasonCodeTally,
@@ -32,11 +34,14 @@ const MISSING_FIELD_NOTES: readonly string[] = [
     "SAI-3Aのいずれの出力ファイル（quarter-summary.csv/decision-trace.jsonl）にも含まれていないため、" +
     "本ブックでは取得できない。四半期業績シート・調達生産在庫シートの生産量は、AIが提出した生産計画" +
     "（productionDesiredQuantityByProduct）であり、実績ではない点に注意（三宅さんの指示11.3）。",
-  "実際に成約・履行された販売数量（QuarterResultLog.newContractedQuantityHosoEqTons・" +
-    "fulfilledQuantityHosoEqTons・outstandingQuantityHosoEqTons・overdueQuantityHosoEqTons）は同様に" +
-    "SAI-3Aの出力ファイルに含まれていないため取得できない。販売分析・四半期業績シートの販売数量は、" +
-    "営業工数制約適用後にquarter runnerへ渡された「最終計画数量」（salesQuantityTrace.finalPlannedQuantity）" +
-    "であり、市場での実際の成約結果とは異なる可能性がある。",
+  "【SAI-3B-2で解消】実際に成約・履行された販売数量（newContractedQuantityHosoEqTons・" +
+    "fulfilledQuantityHosoEqTons・outstandingQuantityHosoEqTons・overdueQuantityHosoEqTons）と、" +
+    "市場清算で実際に配分を得た数量（market-allocation-trace.csv由来）は、SAI-3B-2でのSAI-3A出力層" +
+    "拡張により取得可能になった（四半期業績シートのactualSalesQuantityHosoEqTons等・売上・数量推移" +
+    "ダッシュボード参照）。ただし販売分析シートのfinalPlannedQuantity列は、従来どおり営業工数制約" +
+    "適用後にquarter runnerへ渡された「最終計画数量」のままであり、実際の成約結果（actual）とは" +
+    "引き続き区別して掲載している。market-allocation-trace.csvを含まない古いrunディレクトリ" +
+    "（SAI-3B-2より前に生成）を読み込んだ場合は、この拡張データのみ従来どおり取得できない。",
   "四半期末時点の売掛金・買掛金残高はSAI-3Aの出力に含まれていない。四半期業績シートの売掛金・買掛金は" +
     "「四半期開始時点」の値（QuarterStartState由来）であり、期末残高ではない。",
   "市場別の営業工数換算能力・使用率（HOSO×1.0+PD×1.2+VAP×3.0の係数を用いた値）は、会社全体の合計値のみ" +
@@ -50,6 +55,7 @@ const MISSING_FIELD_NOTES: readonly string[] = [
 /** 複数（1件を含む）のLoadedSai3aRunから、Sai3bAnalysis（全シートぶんの集計結果）を組み立てる。 */
 export function buildSai3bAnalysis(loadedRuns: readonly LoadedSai3aRun[], options: BuildSai3bAnalysisOptions): Sai3bAnalysis {
   const comparison = validateComparableRuns(loadedRuns);
+  const quarterPerformance = buildQuarterPerformance(loadedRuns);
 
   return {
     generatedAtIso: options.generatedAtIso,
@@ -58,7 +64,7 @@ export function buildSai3bAnalysis(loadedRuns: readonly LoadedSai3aRun[], option
     comparison,
     dashboard: buildDashboardSummary(loadedRuns),
     companyPerformance: buildCompanyPerformance(loadedRuns),
-    quarterPerformance: buildQuarterPerformance(loadedRuns),
+    quarterPerformance,
     salesAnalysis: buildSalesAnalysis(loadedRuns),
     procurementProduction: buildProcurementProduction(loadedRuns),
     salesCapacity: buildSalesCapacity(loadedRuns),
@@ -67,6 +73,8 @@ export function buildSai3bAnalysis(loadedRuns: readonly LoadedSai3aRun[], option
     defaultWarningEvents: buildDefaultWarningEvents(loadedRuns),
     reasonCodeTally: buildReasonCodeTally(loadedRuns),
     headcountComparison: buildHeadcountComparison(loadedRuns, comparison.commonSeeds, comparison.commonCompanyIds),
+    marketShare: buildMarketShare(loadedRuns),
+    headcountDivergence: buildHeadcountDivergence(loadedRuns, quarterPerformance, comparison.commonSeeds, comparison.commonCompanyIds),
     decisionTrace: buildDecisionTrace(loadedRuns),
     missingFieldReports: MISSING_FIELD_NOTES,
   };
