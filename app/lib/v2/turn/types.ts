@@ -12,7 +12,7 @@
 import { RandomStream } from "../core/random";
 import { PeriodV2 } from "../core/period";
 import { HosoEqTons, Ratio, UsdPerHosoEqKg } from "../core/units";
-import { CountryId, DemandMarketId, MarketQuarterInput, MarketQuarterResult } from "../market/types";
+import { CountryId, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import { MarketParameters } from "../market/parameters";
 import { DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
 import { CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
@@ -138,6 +138,13 @@ export interface TurnOrchestratorInput {
    * ベース）にフォールバックする（後方互換）。
    */
   readonly marketWeights?: Readonly<Record<DemandMarketId, number>>;
+
+  /**
+   * 【SAI-5C】市場×商品の需要構成比行列（market/productLifecycle.ts）。
+   * sales/types.ts の SalesQuarterInput.marketProductMix へそのまま渡すだけ
+   * （省略時はsales側の既存の世界一律商品構成比へフォールバック。後方互換）。
+   */
+  readonly marketProductMix?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
 
   /**
    * 決定論的乱数のシード（Phase1のHOSO価格ショック等に使う）。同じseed・同じ

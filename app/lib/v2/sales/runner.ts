@@ -51,7 +51,7 @@ export function advanceSalesQuarter(
   // では両者は完全に一致する（market/__tests__/destinationPricing.test.ts・
   // sales/__tests__/runner.test.ts で検証）。
   const marketReferencePrices = deriveVietnamMarketReferencePrices(input.marketResult, destinationMarketPriceCoefficients);
-  const targetDemandByMarketProduct = deriveTargetDemand(input.marketResult, input.marketInput, input.marketWeights);
+  const targetDemandByMarketProduct = deriveTargetDemand(input.marketResult, input.marketInput, input.marketWeights, input.marketProductMix);
 
   // 【SAI-2追加作業: 市場別営業配置・商品別営業工数】成約配分(allocateMarketProduct)を
   // 商品ごとに独立実行する前に、会社×市場で共有される営業人員から導かれる

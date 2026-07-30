@@ -55,6 +55,7 @@ import {
   settleConsumerMarketQuarter,
 } from "../market/consumerInventory";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
+import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix } from "../market/productLifecycle";
 import { deriveVietnamMarketReferencePrices } from "../sales/marketAdapter";
 import {
   advanceScenarioTurn,
@@ -411,9 +412,33 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
 /** 自動方針・プレイヤー入力の双方が参照してよい公開市場情報を組み立てる。 */
 export function buildPublicMarketInfo(state: CompanyLabState): PublicMarketInfo {
   const lastRecord = state.history[state.history.length - 1];
+
+  // 【SAI-5C】ライフサイクル公開トレンド。「前四半期までに適用された構成比」
+  // のみを公開する（当期の構成比・実現需要は含まない＝lastMarketResultと同じ
+  // 「前四半期の結果のみ公開」の情報境界）。構成比は決定論的な関数
+  // computeMarketProductMixで再計算する（turn1では前期が存在しないためundefined）。
+  let productLifecycleOutlook: PublicMarketInfo["productLifecycleOutlook"];
+  if (state.config.sai5?.productLifecycle) {
+    const nextTurn = state.history.length + 1;
+    if (nextTurn >= 2) {
+      const prevMix = computeMarketProductMix(nextTurn - 1);
+      const prevPrevMix = nextTurn >= 3 ? computeMarketProductMix(nextTurn - 2) : prevMix;
+      const trend = {} as Record<DemandMarketId, Record<Product, number>>;
+      for (const market of DEMAND_MARKET_IDS) {
+        trend[market] = {
+          hoso: prevMix[market].hoso - prevPrevMix[market].hoso,
+          pd: prevMix[market].pd - prevPrevMix[market].pd,
+          vap: prevMix[market].vap - prevPrevMix[market].vap,
+        };
+      }
+      productLifecycleOutlook = { sharesByMarket: prevMix, quarterlyTrendByMarket: trend };
+    }
+  }
+
   return {
     lastMarketResult: lastRecord?.marketResult,
     vietnamDomesticPriorPrice: lastRecord ? unwrapUnit(lastRecord.marketResult.vietnamDomestic.price) : 0,
+    ...(productLifecycleOutlook ? { productLifecycleOutlook } : {}),
   };
 }
 
@@ -598,10 +623,19 @@ export function advanceCompanyLabQuarter(
   const previousMarketContext = buildPreviousMarketContext(definition, turn, scenarioTurnInput, lastRecord?.marketResult);
   const baseMarketInput = toMarketQuarterInput(scenarioTurnInput, previousMarketContext);
 
+  // --- 【SAI-5C】市場別の商品ライフサイクル（opt-in。config.sai5未指定なら完全に従来経路） ---
+  // 世界PD/VAP需要（プレミアム計算の入力）を「市場別消費×市場別ライフサイクル
+  // 構成比」の合計で置き換える。市場全体の消費量そのものは一切変更しない
+  // （構成比のみ＝総需要の二重計上なし）。同じ行列を成約側の対象需要按分
+  // （turnInput.marketProductMix経由）にも渡し、プレミアム側と成約上限側の
+  // 構成比の食い違いを構造的に防ぐ（market/productLifecycle.tsヘッダ参照）。
+  const lifecycleMix: MarketProductMix | undefined = state.config.sai5?.productLifecycle ? computeMarketProductMix(turn) : undefined;
+  const lifecycleAdjustedMarketInput = lifecycleMix ? applyLifecycleDemandToMarketInput(baseMarketInput, lifecycleMix) : baseMarketInput;
+
   // --- 実装指示 §3: PD/VAP供給計画（会社の生産計画）の集計 → 市場入力への適用 ---
   const companyCountry = buildCompanyCountryMap(fixtures);
   const supplySignals = buildSupplySignalInputs(decisions, state.lastQuarterActualProduction);
-  const marketInput = applyProductionSupplySignalsToMarketInput(baseMarketInput, supplySignals, companyCountry);
+  const marketInput = applyProductionSupplySignalsToMarketInput(lifecycleAdjustedMarketInput, supplySignals, companyCountry);
 
   // --- 【Phase 8F-1】消費国在庫・購買循環モデル: 当期の計画(実購買量が確定する前) ---
   // 市場価格形成（globalDemand.ts・hosoPricing.ts）は一切変更しない。ここで計算する
@@ -750,6 +784,8 @@ export function advanceCompanyLabQuarter(
     // 【Phase 8F-1】対象需要の市場別按分ウェイト（希望購買量ベース）と、
     // 前四半期の購買圧力・在庫逼迫度から導いた当四半期の仕向市場価格係数。
     marketWeights: consumerMarketWeights,
+    // 【SAI-5C】市場×商品の需要構成比行列（undefinedなら従来の世界一律構成比）。
+    marketProductMix: lifecycleMix,
     parameters: { destinationMarketPricing: destinationMarketPricingForThisQuarter },
   };
   const turnResult = runTurn(turnInput);

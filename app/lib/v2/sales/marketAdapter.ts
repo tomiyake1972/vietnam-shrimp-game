@@ -112,7 +112,17 @@ function deriveVietnamDemandByProduct(marketResult: MarketQuarterResult): Readon
 export function deriveTargetDemand(
   marketResult: MarketQuarterResult,
   marketInput: MarketQuarterInput,
-  marketWeights?: Readonly<Record<DemandMarketId, number>>
+  marketWeights?: Readonly<Record<DemandMarketId, number>>,
+  /**
+   * 【SAI-5C】市場×商品の需要構成比行列（market/productLifecycle.ts の
+   * computeMarketProductMix。各市場の行和=1）。指定時は、従来の
+   * 「世界一律の商品構成比 × 市場ウェイト」（分離形。全市場が同じ商品構成に
+   * なる簡略化＝上記(b)(c)）を「市場ウェイト × 市場別の商品構成比」（結合形）
+   * へ置き換える。どちらの形でも全セルの合計はベトナム獲得需要の総量に一致する
+   * （総需要保存。分離形はΣ_p世界構成比=1、結合形はΣ_p行和=1のため）。
+   * 省略時は完全に従来の計算（後方互換・ビット単位一致）。
+   */
+  marketProductMix?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>
 ): Readonly<Record<DemandMarketId, Readonly<Record<Product, HosoEqTons>>>> {
   const vietnamDemandByProduct = deriveVietnamDemandByProduct(marketResult);
 
@@ -120,6 +130,10 @@ export function deriveTargetDemand(
     (sum, m) => sum + unwrapUnit(marketInput.demandMarkets[m].priorPeriodConsumption),
     0
   );
+
+  const vietnamAllocatedDemandTotal = marketProductMix
+    ? PRODUCTS.reduce((sum, p) => sum + vietnamDemandByProduct[p], 0)
+    : 0;
 
   const result = {} as Record<DemandMarketId, Record<Product, HosoEqTons>>;
   for (const market of DEMAND_MARKET_IDS) {
@@ -130,7 +144,10 @@ export function deriveTargetDemand(
       : 1 / DEMAND_MARKET_IDS.length;
     const perProduct = {} as Record<Product, HosoEqTons>;
     for (const product of PRODUCTS) {
-      perProduct[product] = hosoEqTons(Math.max(0, vietnamDemandByProduct[product] * marketShare));
+      const cell = marketProductMix
+        ? vietnamAllocatedDemandTotal * marketShare * marketProductMix[market][product]
+        : vietnamDemandByProduct[product] * marketShare;
+      perProduct[product] = hosoEqTons(Math.max(0, cell));
     }
     result[market] = perProduct;
   }

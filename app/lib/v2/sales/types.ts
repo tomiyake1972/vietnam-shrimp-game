@@ -244,6 +244,12 @@ export interface SalesQuarterInput {
    * フォールバックする（後方互換）。
    */
   readonly marketWeights?: Readonly<Record<DemandMarketId, number>>;
+  /**
+   * 【SAI-5C】市場×商品の需要構成比行列（market/productLifecycle.ts の
+   * computeMarketProductMix）。deriveTargetDemand へそのまま渡すだけ
+   * （省略時は既存の世界一律商品構成比へフォールバックする。後方互換）。
+   */
+  readonly marketProductMix?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
 }
 
 /** 1四半期分の成約計算・契約生成の記録。 */

@@ -184,6 +184,22 @@ export interface CompanyOwnState {
 export interface PublicMarketInfo {
   readonly lastMarketResult?: MarketQuarterResult;
   readonly vietnamDomesticPriorPrice: number;
+  /**
+   * 【SAI-5C】市場別の商品ライフサイクル公開トレンド（config.sai5.productLifecycle
+   * 有効時のみ設定）。**前四半期までに実際に適用された構成比**とその四半期差分
+   * （＝公開の市場調査に相当する情報）であり、当期の実現需要そのものは含まない
+   * （既存の「前四半期の結果のみ公開」という情報境界を維持する）。turn1では
+   * undefined（前期が存在しないため。lastMarketResultと同じ規約）。
+   */
+  readonly productLifecycleOutlook?: ProductLifecycleOutlook;
+}
+
+/** 【SAI-5C】前四半期までのライフサイクル構成比と四半期トレンド（公開情報）。 */
+export interface ProductLifecycleOutlook {
+  /** 前四半期に適用された市場×商品の需要構成比（各市場の行和=1）。 */
+  readonly sharesByMarket: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
+  /** 前四半期の構成比 − 前々四半期の構成比（四半期あたりの変化量。turn2では0）。 */
+  readonly quarterlyTrendByMarket: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
 }
 
 // ---------------------------------------------------------------------

@@ -114,4 +114,10 @@ export interface StandardAiObservation {
   readonly qualityScoreByProduct: Readonly<Partial<Record<Product, Score0to100>>>;
   readonly customerTrustByMarket: Readonly<Partial<Record<DemandMarketId, Score0to100>>>;
   readonly deliveryReliabilityByMarket: Readonly<Partial<Record<DemandMarketId, Score0to100>>>;
+
+  // --- 【SAI-5C】市場別の商品ライフサイクル公開トレンド（前四半期までの公開情報） ---
+  /** 前四半期に適用された市場×商品の需要構成比（productLifecycle有効時のみ。turn1はundefined）。 */
+  readonly lifecycleSharesByMarket?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
+  /** 構成比の四半期トレンド（前期−前々期。productLifecycle有効時のみ）。 */
+  readonly lifecycleTrendByMarket?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
 }
