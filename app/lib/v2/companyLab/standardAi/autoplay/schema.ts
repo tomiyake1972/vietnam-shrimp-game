@@ -266,6 +266,45 @@ export interface QuarterResultLog {
 }
 
 // ---------------------------------------------------------------------
+// F（SAI-3B-2で追加）. 市場×商品×会社ぶんの販売配分トレース
+// ---------------------------------------------------------------------
+
+/**
+ * 四半期ごとの市場×商品×会社ぶんの需要・配分結果（record.salesRecord.allocationsを
+ * そのまま読み替えたもの。新しい計算・新しい判定は一切行わない）。
+ *
+ * 【会社横断の1レコードである点に注意】CompanyQuarterRecordは5社共通の
+ * 単一オブジェクトであり、市場×商品ぶんの配分（targetDemand/externalOptionQuantity/
+ * basePrice等）も会社をまたいだ共通値である。buildLog.ts側では、この節のみ
+ * 会社ごとの外側ループではなく、turnごとに一度だけ組み立てる
+ * （5社分の重複を避けるため）。
+ *
+ * 【用途】SAI-3B-2の市場別シェア推移（§3-C）・売上総利益要因分解等で、
+ * 「その市場・その商品・その四半期に、全社合計でどれだけ需要があり、
+ * 自社がいくら配分を得たか」を会社別売上・数量とは独立に検証できるようにする。
+ */
+export interface MarketAllocationTraceEntry {
+  readonly turn: number;
+  readonly period: string;
+  readonly market: string;
+  readonly product: string;
+  readonly companyId: SaiCompanyId;
+  /** その市場×商品の当四半期需要量（全社共通、会社をまたいだ値）。 */
+  readonly targetDemandHosoEqTons: number;
+  /** 需要のうち、いずれの会社にも配分されず外部オプションに流れた数量
+   *  （全社共通）。 */
+  readonly externalOptionQuantityHosoEqTons: number;
+  /** 自社の提示価格（USD/HOSO換算kg）。 */
+  readonly askPriceUsdPerHosoEqKg: number;
+  /** 市場の基準価格（USD/HOSO換算kg、全社共通）。 */
+  readonly basePriceUsdPerHosoEqKg: number;
+  /** 自社が実際に配分を得た数量（=市場清算後、当四半期の実質販売数量に相当）。 */
+  readonly allocatedQuantityHosoEqTons: number;
+  readonly coverageScore: number;
+  readonly competitivenessWeight: number;
+}
+
+// ---------------------------------------------------------------------
 // ケース（=1 seed の5社同時実行）・run全体の集計
 // ---------------------------------------------------------------------
 
@@ -291,6 +330,9 @@ export interface AutoplayCaseLog {
   readonly salesQuantityTrace: readonly SalesQuantityTraceEntry[];
   readonly quarterResults: readonly QuarterResultLog[];
   readonly caseSummaryRows: readonly CaseSummaryRow[];
+  /** SAI-3B-2で追加。turnごとに1回だけ組み立てる（会社をまたいだ共通データの
+   *  ため、5社分重複させない。buildAutoplayCaseLogsのコメント参照）。 */
+  readonly marketAllocationTrace: readonly MarketAllocationTraceEntry[];
 }
 
 /** 1社×1seedぶんの最終サマリー（=ケース単位の集計行。5社×12seed runなら60行）。 */

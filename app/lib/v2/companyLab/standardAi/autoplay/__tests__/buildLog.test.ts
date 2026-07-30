@@ -114,6 +114,55 @@ test("buildAutoplayCaseLogs: 四半期結果ログ（QuarterResultLog）は、�
   }
 });
 
+test("buildAutoplayCaseLogs: marketAllocationTrace（SAI-3B-2で追加）は会社をまたいで重複せず、turn×市場×商品ごとに5社ぶんのエントリを持つ", () => {
+  const { caseResult, log } = run("sai3a-test-counts-001", 8);
+  assert.ok(log.marketAllocationTrace.length > 0, "marketAllocationTraceが空");
+
+  // 会社横断データが会社の外側ループで5倍に重複していないことを確認する:
+  // 同一turnの市場×商品の組み合わせ数 × 5社 と、実際のエントリ件数が一致するはず。
+  const turn1Entries = log.marketAllocationTrace.filter((e) => e.turn === 1);
+  const marketProductPairs = new Set(turn1Entries.map((e) => `${e.market}::${e.product}`));
+  const record1 = caseResult.history.find((h) => h.turn === 1)!;
+  assert.equal(marketProductPairs.size, record1.salesRecord.allocations.length, "turn=1の市場×商品の組み合わせ数がrecord.salesRecord.allocationsと一致しない");
+  for (const alloc of record1.salesRecord.allocations) {
+    const matching = turn1Entries.filter((e) => e.market === alloc.market && e.product === alloc.product);
+    assert.equal(matching.length, alloc.companies.length, `市場"${alloc.market}"×商品"${alloc.product}"のエントリ数が会社数と一致しない`);
+  }
+
+  // 自社のallocatedQuantity/askPrice/coverageScore/competitivenessWeightが
+  // 元のrecord.salesRecord.allocationsの値と一致すること。
+  for (const alloc of record1.salesRecord.allocations) {
+    for (const c of alloc.companies) {
+      const entry = turn1Entries.find((e) => e.market === alloc.market && e.product === alloc.product && e.companyId === c.companyId);
+      assert.ok(entry, `対応するmarketAllocationTraceエントリが見つからない: ${alloc.market}/${alloc.product}/${c.companyId}`);
+      assert.equal(entry!.allocatedQuantityHosoEqTons, c.allocatedQuantity as unknown as number);
+      assert.equal(entry!.coverageScore, c.coverageScore);
+      assert.equal(entry!.competitivenessWeight, c.competitivenessWeight);
+    }
+  }
+});
+
+test("buildAutoplayCaseLogs: 四半期結果ログのsalesQuantityByProductは、productionQuantityByProductとは異なるデータ源（市場配分の実際の獲得数量）から計算される", () => {
+  const { caseResult, log } = run("sai3a-test-counts-001", 8);
+  for (const r of log.quarterResults) {
+    const record = caseResult.history.find((h) => h.turn === r.turn)!;
+    // salesQuantityByProductの商品別合計は、その会社が当turnに市場配分で
+    // 実際に得た数量の合計（=marketAllocationTraceの同一companyId分のallocatedQuantity合計）と一致するはず。
+    const expectedByProduct: Record<string, number> = { hoso: 0, pd: 0, vap: 0 };
+    for (const alloc of record.salesRecord.allocations) {
+      const mine = alloc.companies.find((c) => c.companyId === r.companyId);
+      if (!mine) continue;
+      expectedByProduct[alloc.product] += mine.allocatedQuantity as unknown as number;
+    }
+    for (const product of ["hoso", "pd", "vap"]) {
+      assert.ok(
+        Math.abs((r.salesQuantityByProduct[product] ?? 0) - expectedByProduct[product]) < EPSILON,
+        `salesQuantityByProduct.${product}が市場配分の実際の獲得数量と一致しない（turn=${r.turn}, companyId=${r.companyId}）`
+      );
+    }
+  }
+});
+
 test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも、ログが欠落しない（8Qぶん全turnのログが揃う）", () => {
   // "baseline"シナリオの標準候補は、moderate pressure設計によりデフォルトが
   // 発生しうることが既存テスト（standardBaseline.test.ts）で確認済み。

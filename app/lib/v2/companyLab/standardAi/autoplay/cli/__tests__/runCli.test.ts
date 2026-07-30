@@ -21,7 +21,7 @@ test("runAutoplayCli: 引数エラー時はexitCode 1でstderrにエラー内容
   assert.match(result.stderr, /引数エラー/);
 });
 
-test("runAutoplayCli: 正常実行時は7種類のファイル内容とoutputDirを返す", () => {
+test("runAutoplayCli: 正常実行時は8種類のファイル内容とoutputDirを返す", () => {
   const result = runAutoplayCli(["--seed-count", "1", "--quarters", "2", "--companies", "BAL", "--run-id", "sai3a-cli-test-001", "--out-dir", "artifacts/sai3a"]);
   assert.equal(result.exitCode, 0, result.stderr);
   assert.ok(result.files);
@@ -31,6 +31,7 @@ test("runAutoplayCli: 正常実行時は7種類のファイル内容とoutputDir
     "case-summary.csv",
     "decision-trace.jsonl",
     "manifest.json",
+    "market-allocation-trace.csv",
     "quarter-summary.csv",
     "run-summary.json",
     "warnings.csv",

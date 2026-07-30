@@ -135,6 +135,34 @@ export function buildFixtureRunFiles(spec: FixtureRunSpec): Record<string, strin
     "rawMaterialInventoryHosoEqTons",
     "finishedGoodsInventoryHosoEqTons",
     "discardQuantityHosoEqTons",
+    // --- SAI-3B-2で追加 ---
+    "operatingCashFlowUsd",
+    "investingCashFlowUsd",
+    "financingCashFlowUsd",
+    "downgradeQuantityHosoEqTons",
+    "newContractedQuantityHosoEqTons",
+    "fulfilledQuantityHosoEqTons",
+    "outstandingQuantityHosoEqTons",
+    "overdueQuantityHosoEqTons",
+    "productionQuantityHosoEqTons_hoso",
+    "productionQuantityHosoEqTons_pd",
+    "productionQuantityHosoEqTons_vap",
+    "salesQuantityHosoEqTons_hoso",
+    "salesQuantityHosoEqTons_pd",
+    "salesQuantityHosoEqTons_vap",
+    "customerTrustAtEnd_CN",
+    "customerTrustAtEnd_US",
+    "customerTrustAtEnd_EU",
+    "customerTrustAtEnd_JP",
+    "customerTrustAtEnd_OTHER",
+    "qualityScoreAtEnd_hoso",
+    "qualityScoreAtEnd_pd",
+    "qualityScoreAtEnd_vap",
+    "deliveryReliabilityAtEnd_CN",
+    "deliveryReliabilityAtEnd_US",
+    "deliveryReliabilityAtEnd_EU",
+    "deliveryReliabilityAtEnd_JP",
+    "deliveryReliabilityAtEnd_OTHER",
     "paymentDefault",
     "paymentDefaultNewlyTriggered",
     "underwritingFrozen",
@@ -142,10 +170,27 @@ export function buildFixtureRunFiles(spec: FixtureRunSpec): Record<string, strin
     "warningCount",
   ];
 
+  const marketAllocationTraceHeader = [
+    "seed",
+    "turn",
+    "period",
+    "market",
+    "product",
+    "companyId",
+    "targetDemandHosoEqTons",
+    "externalOptionQuantityHosoEqTons",
+    "askPriceUsdPerHosoEqKg",
+    "basePriceUsdPerHosoEqKg",
+    "allocatedQuantityHosoEqTons",
+    "coverageScore",
+    "competitivenessWeight",
+  ];
+
   const quarterSummaryRows: string[] = [];
   const decisionTraceLines: string[] = [];
   const adjustmentTraceRows: string[] = [];
   const warningsRows: string[] = [];
+  const marketAllocationTraceRows: string[] = [];
 
   for (const c of spec.cases) {
     let cash = 20_000_000;
@@ -190,6 +235,34 @@ export function buildFixtureRunFiles(spec: FixtureRunSpec): Record<string, strin
           200,
           3000,
           50,
+          // --- SAI-3B-2で追加 ---
+          300000,
+          -50000,
+          -20000,
+          10,
+          4200,
+          4000,
+          200,
+          isDefaultTurn ? 50 : 0,
+          2000,
+          1000,
+          500,
+          1900,
+          950,
+          480,
+          55,
+          "",
+          "",
+          "",
+          "",
+          82,
+          80,
+          78,
+          60,
+          "",
+          "",
+          "",
+          "",
           0,
           isDefaultTurn,
           isDefaultTurn,
@@ -197,6 +270,12 @@ export function buildFixtureRunFiles(spec: FixtureRunSpec): Record<string, strin
           false,
           2,
         ])
+      );
+
+      marketAllocationTraceRows.push(
+        csvLine([c.seed, turn, period, "CN", "hoso", c.companyId, 2100, 200, 4.5, 4.2, 1900, 72, 1.1]),
+        csvLine([c.seed, turn, period, "CN", "pd", c.companyId, 1050, 100, 5.1, 4.8, 950, 70, 1.05]),
+        csvLine([c.seed, turn, period, "CN", "vap", c.companyId, 520, 40, 6.3, 6.0, 480, 68, 1.0])
       );
 
       const desiredHoso = 4400;
@@ -309,6 +388,7 @@ export function buildFixtureRunFiles(spec: FixtureRunSpec): Record<string, strin
       ...adjustmentTraceRows,
     ].join("\n") + "\n",
     "warnings.csv": [csvLine(["seed", "companyId", "turn", "period", "code", "source", "severity", "message"]), ...warningsRows].join("\n") + "\n",
+    "market-allocation-trace.csv": [csvLine(marketAllocationTraceHeader), ...marketAllocationTraceRows].join("\n") + "\n",
     "run-summary.json": JSON.stringify(runSummary, null, 2) + "\n",
   };
 }

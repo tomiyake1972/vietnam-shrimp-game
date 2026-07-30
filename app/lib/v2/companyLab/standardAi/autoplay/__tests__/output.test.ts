@@ -12,6 +12,7 @@ import {
   formatCaseSummaryCsv,
   formatDecisionTraceJsonl,
   formatManifestJson,
+  formatMarketAllocationTraceCsv,
   formatQuarterSummaryCsv,
   formatRunSummaryJson,
   formatWarningsCsv,
@@ -93,10 +94,52 @@ test("output.ts: バッチ実行結果から生成した全出力ファイルが
   assert.ok(caseSummary.header.includes("seed") && caseSummary.header.includes("companyId"));
   for (const row of caseSummary.rows) assert.equal(row.length, caseSummary.header.length);
 
-  // quarter-summary.csv
+  // quarter-summary.csv（SAI-3B-2で列を追加。CF3分割・生産/販売数量の商品別・
+  // 品質/信頼の市場別内訳が含まれること、かつ既存の主要スカラー列も引き続き
+  // 含まれることを確認する）。
   const quarterSummary = parseCsv(formatQuarterSummaryCsv(batch));
   assert.equal(quarterSummary.rows.length, 4 * 4); // 2 seeds × 2 companies × 4 quarters
   for (const row of quarterSummary.rows) assert.equal(row.length, quarterSummary.header.length);
+  for (const col of [
+    "operatingCashFlowUsd",
+    "investingCashFlowUsd",
+    "financingCashFlowUsd",
+    "downgradeQuantityHosoEqTons",
+    "newContractedQuantityHosoEqTons",
+    "fulfilledQuantityHosoEqTons",
+    "outstandingQuantityHosoEqTons",
+    "overdueQuantityHosoEqTons",
+    "productionQuantityHosoEqTons_hoso",
+    "salesQuantityHosoEqTons_hoso",
+    "customerTrustAtEnd_CN",
+    "qualityScoreAtEnd_hoso",
+    "deliveryReliabilityAtEnd_CN",
+  ]) {
+    assert.ok(quarterSummary.header.includes(col), `quarter-summary.csvに列 "${col}" が含まれていない`);
+  }
+
+  // market-allocation-trace.csv（SAI-3B-2で追加）
+  const marketAllocationTrace = parseCsv(formatMarketAllocationTraceCsv(batch));
+  assert.ok(marketAllocationTrace.rows.length > 0, "market-allocation-trace.csvに行が1件もない");
+  for (const row of marketAllocationTrace.rows) assert.equal(row.length, marketAllocationTrace.header.length);
+  assert.deepEqual(
+    [...marketAllocationTrace.header].sort(),
+    [
+      "allocatedQuantityHosoEqTons",
+      "askPriceUsdPerHosoEqKg",
+      "basePriceUsdPerHosoEqKg",
+      "companyId",
+      "competitivenessWeight",
+      "coverageScore",
+      "externalOptionQuantityHosoEqTons",
+      "market",
+      "period",
+      "product",
+      "seed",
+      "targetDemandHosoEqTons",
+      "turn",
+    ].sort()
+  );
 
   // decision-trace.jsonl
   const jsonlLines = formatDecisionTraceJsonl(batch)

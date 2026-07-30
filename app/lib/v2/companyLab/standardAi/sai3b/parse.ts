@@ -8,7 +8,19 @@
 
 import { AdjustmentTraceEntry, AutoplayRunManifest, CaseSummaryRow, SaiCompanyId } from "../autoplay/schema";
 import type { DecisionTraceLine } from "../autoplay/output";
-import { Sai3bAdjustmentTraceRow, Sai3bInputError, Sai3bQuarterSummaryRow, Sai3bRunSummaryJson, Sai3bWarningRow } from "./schema";
+import { Sai3bAdjustmentTraceRow, Sai3bInputError, Sai3bMarketAllocationTraceRow, Sai3bQuarterSummaryRow, Sai3bRunSummaryJson, Sai3bWarningRow } from "./schema";
+
+const SAI3B2_PRODUCTS: readonly string[] = ["hoso", "pd", "vap"];
+const SAI3B2_MARKETS: readonly string[] = ["CN", "US", "EU", "JP", "OTHER"];
+
+/** キー集合が固定・少数の商品/市場別内訳列（例: "salesQuantityHosoEqTons_hoso"）を
+ *  Record形式へ読み戻す。列が存在しない古いCSV（後方互換対象）では、該当キーは
+ *  すべてundefinedのままになる（0への変換はしない）。 */
+function readByKeyColumns(r: Readonly<Record<string, string>>, prefix: string, keys: readonly string[]): Readonly<Record<string, number | undefined>> {
+  const out: Record<string, number | undefined> = {};
+  for (const k of keys) out[k] = toOptionalNumber(r[`${prefix}_${k}`]);
+  return out;
+}
 
 // ---------------------------------------------------------------------
 // 汎用CSVパース（output.ts の csvEscape/toCsv と対になる読み取り側）
@@ -304,11 +316,66 @@ export function parseQuarterSummaryCsv(text: string, sourceLabel: string): reado
     rawMaterialInventoryHosoEqTons: toRequiredNumber(label, "rawMaterialInventoryHosoEqTons", r.rawMaterialInventoryHosoEqTons),
     finishedGoodsInventoryHosoEqTons: toRequiredNumber(label, "finishedGoodsInventoryHosoEqTons", r.finishedGoodsInventoryHosoEqTons),
     discardQuantityHosoEqTons: toRequiredNumber(label, "discardQuantityHosoEqTons", r.discardQuantityHosoEqTons),
+    // --- SAI-3B-2で追加。列が存在しない古いCSV（後方互換対象）ではすべてundefined。 ---
+    operatingCashFlowUsd: toOptionalNumber(r.operatingCashFlowUsd),
+    investingCashFlowUsd: toOptionalNumber(r.investingCashFlowUsd),
+    financingCashFlowUsd: toOptionalNumber(r.financingCashFlowUsd),
+    downgradeQuantityHosoEqTons: toOptionalNumber(r.downgradeQuantityHosoEqTons),
+    newContractedQuantityHosoEqTons: toOptionalNumber(r.newContractedQuantityHosoEqTons),
+    fulfilledQuantityHosoEqTons: toOptionalNumber(r.fulfilledQuantityHosoEqTons),
+    outstandingQuantityHosoEqTons: toOptionalNumber(r.outstandingQuantityHosoEqTons),
+    overdueQuantityHosoEqTons: toOptionalNumber(r.overdueQuantityHosoEqTons),
+    productionQuantityHosoEqTonsByProduct: readByKeyColumns(r, "productionQuantityHosoEqTons", SAI3B2_PRODUCTS),
+    salesQuantityHosoEqTonsByProduct: readByKeyColumns(r, "salesQuantityHosoEqTons", SAI3B2_PRODUCTS),
+    customerTrustAtEndByMarket: readByKeyColumns(r, "customerTrustAtEnd", SAI3B2_MARKETS),
+    qualityScoreAtEndByProduct: readByKeyColumns(r, "qualityScoreAtEnd", SAI3B2_PRODUCTS),
+    deliveryReliabilityAtEndByMarket: readByKeyColumns(r, "deliveryReliabilityAtEnd", SAI3B2_MARKETS),
     paymentDefault: toRequiredBoolean(label, "paymentDefault", r.paymentDefault),
     paymentDefaultNewlyTriggered: toRequiredBoolean(label, "paymentDefaultNewlyTriggered", r.paymentDefaultNewlyTriggered),
     underwritingFrozen: toRequiredBoolean(label, "underwritingFrozen", r.underwritingFrozen),
     underwritingFrozenNewlyTriggered: toRequiredBoolean(label, "underwritingFrozenNewlyTriggered", r.underwritingFrozenNewlyTriggered),
     warningCount: toRequiredNumber(label, "warningCount", r.warningCount),
+  }));
+}
+
+// ---------------------------------------------------------------------
+// market-allocation-trace.csv（SAI-3B-2で追加、任意ファイル）
+// ---------------------------------------------------------------------
+
+const MARKET_ALLOCATION_TRACE_REQUIRED_COLUMNS: readonly string[] = [
+  "seed",
+  "turn",
+  "period",
+  "market",
+  "product",
+  "companyId",
+  "targetDemandHosoEqTons",
+  "externalOptionQuantityHosoEqTons",
+  "askPriceUsdPerHosoEqKg",
+  "basePriceUsdPerHosoEqKg",
+  "allocatedQuantityHosoEqTons",
+  "coverageScore",
+  "competitivenessWeight",
+];
+
+export function parseMarketAllocationTraceCsv(text: string, sourceLabel: string): readonly Sai3bMarketAllocationTraceRow[] {
+  const { header, rows } = parseCsvText(text);
+  requireColumns(`${sourceLabel}/market-allocation-trace.csv`, header, MARKET_ALLOCATION_TRACE_REQUIRED_COLUMNS);
+  const label = `${sourceLabel}/market-allocation-trace.csv`;
+  return rowsToRecords(header, rows).map((r) => ({
+    seed: toRequiredString(label, "seed", r.seed),
+    turn: toRequiredNumber(label, "turn", r.turn),
+    period: toRequiredString(label, "period", r.period),
+    market: toRequiredString(label, "market", r.market),
+    product: toRequiredString(label, "product", r.product),
+    companyId: toRequiredString(label, "companyId", r.companyId),
+    targetDemandHosoEqTons: toRequiredNumber(label, "targetDemandHosoEqTons", r.targetDemandHosoEqTons),
+    externalOptionQuantityHosoEqTons: toRequiredNumber(label, "externalOptionQuantityHosoEqTons", r.externalOptionQuantityHosoEqTons),
+    askPriceUsdPerHosoEqKg: toRequiredNumber(label, "askPriceUsdPerHosoEqKg", r.askPriceUsdPerHosoEqKg),
+    basePriceUsdPerHosoEqKg: toRequiredNumber(label, "basePriceUsdPerHosoEqKg", r.basePriceUsdPerHosoEqKg),
+    allocatedQuantityHosoEqTons: toRequiredNumber(label, "allocatedQuantityHosoEqTons", r.allocatedQuantityHosoEqTons),
+    coverageScore: toRequiredNumber(label, "coverageScore", r.coverageScore),
+    competitivenessWeight: toRequiredNumber(label, "competitivenessWeight", r.competitivenessWeight),
   }));
 }
 

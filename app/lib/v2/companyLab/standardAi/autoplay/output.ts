@@ -21,6 +21,7 @@ import {
   AdjustmentTraceEntry,
   AutoplayRunManifest,
   CaseSummaryRow,
+  MarketAllocationTraceEntry,
   QuarterDecisionLog,
   QuarterResultLog,
   QuarterStartState,
@@ -28,6 +29,14 @@ import {
   SalesQuantityTraceEntry,
 } from "./schema";
 import { AutoplayBatchResult } from "./runBatch";
+
+// SAI-3B-2で追加。market/typesのProduct/DemandMarketIdは固定・少数の集合
+// （hoso/pd/vap、CN/US/EU/JP/OTHER）であるため、CSV列として安全に列展開できる
+// （任意のキー集合を持つRecordを無理に列展開すると将来の市場追加等で破綻するが、
+// 本リストは既存のmarket/types.tsの型定義そのものであり、新しい判定・新しい
+// 分類を導入するものではない）。
+const SAI3B2_PRODUCTS: readonly string[] = ["hoso", "pd", "vap"];
+const SAI3B2_MARKETS: readonly string[] = ["CN", "US", "EU", "JP", "OTHER"];
 
 function csvEscape(value: string | number | boolean): string {
   const s = String(value);
@@ -104,8 +113,11 @@ export function formatCaseSummaryCsv(batch: AutoplayBatchResult): string {
 
 // ---------------------------------------------------------------------
 // quarter-summary.csv — 会社×seed×turnの開始状態＋結果の主要スカラー値
-// （ネストしたRecord値=品質・顧客信頼等の市場/商品別内訳はCSVでは列展開せず、
-//  decision-trace.jsonl側の完全な記録を参照する）。
+// （SAI-3B-2で列を追加。品質・顧客信頼・納期信頼性・生産/販売数量の商品/市場別
+//  内訳は、対応するキー集合（Product=hoso/pd/vap、DemandMarketId=CN/US/EU/JP/OTHER）
+//  が固定・少数であるため、列展開してCSVへ含める。値が存在しない場合は空欄とし、
+//  0へ変換しない。pressures等、キー集合が可変・非構造の値は引き続き
+//  decision-trace.jsonl側の完全な記録のみを参照する）。
 // ---------------------------------------------------------------------
 
 const QUARTER_SUMMARY_CSV_HEADER: readonly string[] = [
@@ -147,6 +159,22 @@ const QUARTER_SUMMARY_CSV_HEADER: readonly string[] = [
   "rawMaterialInventoryHosoEqTons",
   "finishedGoodsInventoryHosoEqTons",
   "discardQuantityHosoEqTons",
+  // --- SAI-3B-2で追加（すべてbuildQuarterResultLogで既に計算済みだった値。
+  //     以前はここに列挙されておらずファイル出力から漏れていただけであり、
+  //     新しい計算は一切加えていない）。 ---
+  "operatingCashFlowUsd",
+  "investingCashFlowUsd",
+  "financingCashFlowUsd",
+  "downgradeQuantityHosoEqTons",
+  "newContractedQuantityHosoEqTons",
+  "fulfilledQuantityHosoEqTons",
+  "outstandingQuantityHosoEqTons",
+  "overdueQuantityHosoEqTons",
+  ...SAI3B2_PRODUCTS.map((p) => `productionQuantityHosoEqTons_${p}`),
+  ...SAI3B2_PRODUCTS.map((p) => `salesQuantityHosoEqTons_${p}`),
+  ...SAI3B2_MARKETS.map((m) => `customerTrustAtEnd_${m}`),
+  ...SAI3B2_PRODUCTS.map((p) => `qualityScoreAtEnd_${p}`),
+  ...SAI3B2_MARKETS.map((m) => `deliveryReliabilityAtEnd_${m}`),
   "paymentDefault",
   "paymentDefaultNewlyTriggered",
   "underwritingFrozen",
@@ -194,6 +222,19 @@ export function formatQuarterSummaryCsv(batch: AutoplayBatchResult): string {
         r.rawMaterialInventoryHosoEqTons,
         r.finishedGoodsInventoryHosoEqTons,
         r.discardQuantityHosoEqTons,
+        r.operatingCashFlowUsd,
+        r.investingCashFlowUsd,
+        r.financingCashFlowUsd,
+        r.downgradeQuantityHosoEqTons,
+        r.newContractedQuantityHosoEqTons,
+        r.fulfilledQuantityHosoEqTons,
+        r.outstandingQuantityHosoEqTons,
+        r.overdueQuantityHosoEqTons,
+        ...SAI3B2_PRODUCTS.map((p) => r.productionQuantityByProduct[p] ?? ""),
+        ...SAI3B2_PRODUCTS.map((p) => r.salesQuantityByProduct[p] ?? ""),
+        ...SAI3B2_MARKETS.map((m) => r.customerTrustByMarket[m] ?? ""),
+        ...SAI3B2_PRODUCTS.map((p) => r.qualityScoreByProduct[p] ?? ""),
+        ...SAI3B2_MARKETS.map((m) => r.deliveryReliabilityByMarket[m] ?? ""),
         r.paymentDefault,
         r.paymentDefaultNewlyTriggered,
         r.underwritingFrozen,
@@ -313,6 +354,53 @@ function quarterResultWarningsToCsv(seed: string, r: QuarterResultLog): readonly
 export function formatWarningsCsv(batch: AutoplayBatchResult): string {
   const rows = batch.caseLogs.flatMap((log) => log.quarterResults.flatMap((r) => quarterResultWarningsToCsv(log.seed, r)));
   return toCsv(WARNINGS_CSV_HEADER, rows);
+}
+
+// ---------------------------------------------------------------------
+// market-allocation-trace.csv — SAI-3B-2で追加。市場×商品×会社×turnぶんの
+// 需要・配分結果（schema.tsのMarketAllocationTraceEntry + seed）。
+// 【後方互換】既存run（このファイルを含まない古いrunディレクトリ）でも
+// SAI-3Bが読み込めるよう、SAI-3B側ではこのファイルを必須としない
+// （loadRun.tsのSAI3A_REQUIRED_RUN_FILESには含めず、任意ファイルとして扱う）。
+// ---------------------------------------------------------------------
+
+const MARKET_ALLOCATION_TRACE_CSV_HEADER: readonly string[] = [
+  "seed",
+  "turn",
+  "period",
+  "market",
+  "product",
+  "companyId",
+  "targetDemandHosoEqTons",
+  "externalOptionQuantityHosoEqTons",
+  "askPriceUsdPerHosoEqKg",
+  "basePriceUsdPerHosoEqKg",
+  "allocatedQuantityHosoEqTons",
+  "coverageScore",
+  "competitivenessWeight",
+];
+
+function marketAllocationEntryToCsv(seed: string, e: MarketAllocationTraceEntry): readonly (string | number | boolean)[] {
+  return [
+    seed,
+    e.turn,
+    e.period,
+    e.market,
+    e.product,
+    e.companyId,
+    e.targetDemandHosoEqTons,
+    e.externalOptionQuantityHosoEqTons,
+    e.askPriceUsdPerHosoEqKg,
+    e.basePriceUsdPerHosoEqKg,
+    e.allocatedQuantityHosoEqTons,
+    e.coverageScore,
+    e.competitivenessWeight,
+  ];
+}
+
+export function formatMarketAllocationTraceCsv(batch: AutoplayBatchResult): string {
+  const rows = batch.caseLogs.flatMap((log) => log.marketAllocationTrace.map((e) => marketAllocationEntryToCsv(log.seed, e)));
+  return toCsv(MARKET_ALLOCATION_TRACE_CSV_HEADER, rows);
 }
 
 // ---------------------------------------------------------------------

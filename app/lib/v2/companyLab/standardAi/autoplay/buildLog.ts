@@ -23,6 +23,7 @@ import {
   AdjustmentTraceEntry,
   AutoplayCaseLog,
   CaseSummaryRow,
+  MarketAllocationTraceEntry,
   QuarterDecisionLog,
   QuarterResultLog,
   QuarterStartState,
@@ -400,6 +401,69 @@ function computeCompanyLevelSalesEffort(salesPlans: readonly CompanySalesPlanEnt
   return { capacity, used };
 }
 
+/**
+ * 自社が当四半期に市場清算で実際に配分を得た数量を、商品別に積み上げる
+ * （record.salesRecord.allocations由来。report/collect.tsの
+ * salesQuantityByMarketAndProductと同じ考え方の計算式）。
+ *
+ * 【三宅さんの指示（SAI-3B-2 §1）への対応・既存バグの是正】
+ * 本関数を追加する前のbuildQuarterResultLogは、schema.tsの
+ * salesQuantityByProduct（本来「販売数量」であるべき）に、誤って
+ * productionQuantityByProductと同じ値（summary.hosoProduced等＝生産数量）を
+ * 転記してしまっていた（既存のSAI-3A実装のバグ。他のいかなる箇所からも
+ * 未参照だったため、今回SAI-3B-2の監査中に発見し、ここで是正する）。
+ * 生産数量と販売数量を混同したまま出力へ乗せることは、三宅さんが繰り返し
+ * 指示している「実績・計画・希望を混同しない」原則に反するため、
+ * ゲームエンジン・standard AIの判断ロジックを一切変更しない範囲で
+ * （既存のrecord.salesRecord.allocationsを読み替えるだけで）修正する。
+ */
+function computeSalesQuantityByProduct(record: CompanyQuarterRecord, companyId: SaiCompanyId): Record<string, number> {
+  const byProduct: Record<string, number> = { hoso: 0, pd: 0, vap: 0 };
+  for (const alloc of record.salesRecord.allocations) {
+    const mine = alloc.companies.find((c) => c.companyId === companyId);
+    if (!mine) continue;
+    byProduct[alloc.product] = (byProduct[alloc.product] ?? 0) + unwrapUnit(mine.allocatedQuantity);
+  }
+  return byProduct;
+}
+
+/**
+ * セクションF（SAI-3B-2で追加）: 市場×商品×会社ぶんの販売配分トレース。
+ *
+ * 【会社をまたいだ共通データである点に注意】record.salesRecord.allocations
+ * （targetDemand・externalOptionQuantity・basePrice等）はCompanyQuarterRecord
+ * 単位＝turn単位で1つしか存在せず、5社共通である。したがって本関数は
+ * turnごとに一度だけ呼び出すこと（会社の外側ループの中で呼び出すと5倍に
+ * 重複してしまう）。buildAutoplayCaseLogs側の呼び出し箇所を参照。
+ */
+export function buildMarketAllocationTrace(record: CompanyQuarterRecord): readonly MarketAllocationTraceEntry[] {
+  const turn = record.turn;
+  const period = periodToString(record.period);
+  const entries: MarketAllocationTraceEntry[] = [];
+  for (const alloc of record.salesRecord.allocations) {
+    const targetDemandHosoEqTons = unwrapUnit(alloc.targetDemand);
+    const externalOptionQuantityHosoEqTons = unwrapUnit(alloc.externalOptionQuantity);
+    const basePriceUsdPerHosoEqKg = unwrapUnit(alloc.basePrice);
+    for (const c of alloc.companies) {
+      entries.push({
+        turn,
+        period,
+        market: alloc.market,
+        product: alloc.product,
+        companyId: c.companyId as SaiCompanyId,
+        targetDemandHosoEqTons,
+        externalOptionQuantityHosoEqTons,
+        askPriceUsdPerHosoEqKg: unwrapUnit(c.askPrice),
+        basePriceUsdPerHosoEqKg,
+        allocatedQuantityHosoEqTons: unwrapUnit(c.allocatedQuantity),
+        coverageScore: c.coverageScore,
+        competitivenessWeight: c.competitivenessWeight,
+      });
+    }
+  }
+  return entries;
+}
+
 /** セクションE: 四半期結果。 */
 export function buildQuarterResultLog(
   companyId: SaiCompanyId,
@@ -448,11 +512,10 @@ export function buildQuarterResultLog(
     shortTermLoansUsd: unwrapUsd(fin.balanceSheet.shortTermLoans),
     longTermLoansUsd: unwrapUsd(fin.balanceSheet.longTermLoans),
     availableAdditionalCapacityUsd: financing.borrowingCapacity.availableAdditionalCapacityUsd,
-    salesQuantityByProduct: {
-      hoso: summary.hosoProduced !== undefined ? unwrapUnit(summary.hosoProduced) : 0,
-      pd: summary.pdProduced !== undefined ? unwrapUnit(summary.pdProduced) : 0,
-      vap: summary.vapProduced !== undefined ? unwrapUnit(summary.vapProduced) : 0,
-    },
+    // 市場清算で自社が実際に配分を得た（=販売した）数量の商品別合計。
+    // 生産数量（productionQuantityByProduct）とは別のデータ源（既存バグの是正。
+    // 本関数直前のcomputeSalesQuantityByProductのコメント参照）。
+    salesQuantityByProduct: computeSalesQuantityByProduct(record, companyId),
     productionQuantityByProduct: {
       hoso: unwrapUnit(summary.hosoProduced),
       pd: unwrapUnit(summary.pdProduced),
@@ -569,6 +632,13 @@ export function buildAutoplayCaseLogs(caseResult: AutoplayCaseResult): AutoplayC
   const quarterResults: QuarterResultLog[] = [];
   const caseSummaryRows: CaseSummaryRow[] = [];
 
+  // セクションF（市場配分トレース）は5社共通の会社横断データのため、会社の
+  // 外側ループとは別に、turnごとに一度だけ組み立てる（5倍の重複を避ける）。
+  const marketAllocationTrace: MarketAllocationTraceEntry[] = [];
+  for (const record of caseResult.history) {
+    marketAllocationTrace.push(...buildMarketAllocationTrace(record));
+  }
+
   for (const rawCompanyId of caseResult.companyIds) {
     const companyId = rawCompanyId as SaiCompanyId;
     let previousStartState: QuarterStartState | undefined;
@@ -624,6 +694,7 @@ export function buildAutoplayCaseLogs(caseResult: AutoplayCaseResult): AutoplayC
     salesQuantityTrace,
     quarterResults,
     caseSummaryRows,
+    marketAllocationTrace,
   };
 }
 

@@ -10,6 +10,7 @@ import {
   parseCaseSummaryCsv,
   parseDecisionTraceJsonl,
   parseManifestJson,
+  parseMarketAllocationTraceCsv,
   parseQuarterSummaryCsv,
   parseRunSummaryJson,
   parseWarningsCsv,
@@ -63,7 +64,20 @@ export function loadSai3aRun(input: RunFilesInput): LoadedSai3aRun {
   const warningRows = parseWarningsCsv(files["warnings.csv"]!, sourceDir);
   const runSummary = parseRunSummaryJson(files["run-summary.json"]!, sourceDir);
 
+  // market-allocation-trace.csv（SAI-3B-2で追加）は任意ファイル。既存run
+  // （SAI-3B-2以前に生成されたrunディレクトリ）との後方互換のため、無くても
+  // 必須ファイル欠落エラーにはしない（=空配列として扱い、依存するチャート・
+  // シートは「現時点の出力データでは作成不能」の扱いにする）。
+  const marketAllocationTraceRows =
+    files["market-allocation-trace.csv"] !== undefined ? parseMarketAllocationTraceCsv(files["market-allocation-trace.csv"], sourceDir) : [];
+
   const loadWarnings: string[] = [];
+  if (files["market-allocation-trace.csv"] === undefined) {
+    loadWarnings.push(
+      `run "${runLabel}": market-allocation-trace.csvが見つかりません（SAI-3B-2より前に生成されたrunディレクトリの可能性）。` +
+        `市場別シェア推移など、このファイルに依存する分析は「現時点の出力データでは作成不能」として扱われます。`
+    );
+  }
   if (runSummary.errors.length > 0) {
     loadWarnings.push(
       `run "${runLabel}": run-summary.jsonに${runSummary.errors.length}件のケースエラーが記録されています` +
@@ -87,6 +101,7 @@ export function loadSai3aRun(input: RunFilesInput): LoadedSai3aRun {
     decisionTraceLines,
     adjustmentTraceRows,
     warningRows,
+    marketAllocationTraceRows,
     runSummary,
     loadWarnings,
   };

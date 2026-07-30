@@ -14,6 +14,7 @@ import {
   formatCaseSummaryCsv,
   formatDecisionTraceJsonl,
   formatManifestJson,
+  formatMarketAllocationTraceCsv,
   formatQuarterSummaryCsv,
   formatRunSummaryJson,
   formatWarningsCsv,
@@ -105,6 +106,7 @@ export function runAutoplayCli(argv: readonly string[], options: AutoplayCliOpti
       "decision-trace.jsonl": formatDecisionTraceJsonl(batch),
       "adjustment-trace.csv": formatAdjustmentTraceCsv(batch),
       "warnings.csv": formatWarningsCsv(batch),
+      "market-allocation-trace.csv": formatMarketAllocationTraceCsv(batch),
       "run-summary.json": formatRunSummaryJson(batch),
     };
 

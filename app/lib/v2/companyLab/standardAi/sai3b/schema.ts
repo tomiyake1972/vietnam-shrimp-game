@@ -78,11 +78,54 @@ export interface Sai3bQuarterSummaryRow {
   readonly rawMaterialInventoryHosoEqTons: number;
   readonly finishedGoodsInventoryHosoEqTons: number;
   readonly discardQuantityHosoEqTons: number;
+  // --- SAI-3B-2で追加（output.tsのQUARTER_SUMMARY_CSV_HEADER拡張と1対1対応）。
+  //     いずれもSAI-3A側で既に計算済みだった値がファイル出力から漏れていた
+  //     ものであり、値の意味・単位は既存フィールドと同じ方針
+  //     （実績・欠損=undefined、0との混同禁止）。 ---
+  readonly operatingCashFlowUsd?: number;
+  readonly investingCashFlowUsd?: number;
+  readonly financingCashFlowUsd?: number;
+  readonly downgradeQuantityHosoEqTons?: number;
+  readonly newContractedQuantityHosoEqTons?: number;
+  readonly fulfilledQuantityHosoEqTons?: number;
+  readonly outstandingQuantityHosoEqTons?: number;
+  readonly overdueQuantityHosoEqTons?: number;
+  /** 当四半期の生産数量（商品別、hoso/pd/vap）。 */
+  readonly productionQuantityHosoEqTonsByProduct?: Readonly<Record<string, number | undefined>>;
+  /** 当四半期に市場清算で自社が実際に獲得した販売数量（商品別、hoso/pd/vap）。
+   *  生産数量とは異なるデータ源（既存SAI-3Aバグの是正。autoplay/buildLog.tsの
+   *  computeSalesQuantityByProductのコメント参照）。 */
+  readonly salesQuantityHosoEqTonsByProduct?: Readonly<Record<string, number | undefined>>;
+  /** 当四半期末時点（更新後）の市場別顧客信頼（CN/US/EU/JP/OTHER）。 */
+  readonly customerTrustAtEndByMarket?: Readonly<Record<string, number | undefined>>;
+  /** 当四半期末時点（更新後）の商品別品質スコア（hoso/pd/vap）。 */
+  readonly qualityScoreAtEndByProduct?: Readonly<Record<string, number | undefined>>;
+  /** 当四半期末時点（更新後）の市場別納期信頼性（CN/US/EU/JP/OTHER）。 */
+  readonly deliveryReliabilityAtEndByMarket?: Readonly<Record<string, number | undefined>>;
   readonly paymentDefault: boolean;
   readonly paymentDefaultNewlyTriggered: boolean;
   readonly underwritingFrozen: boolean;
   readonly underwritingFrozenNewlyTriggered: boolean;
   readonly warningCount: number;
+}
+
+/** market-allocation-trace.csvの1行（schema.tsのMarketAllocationTraceEntry + seed）。
+ *  SAI-3B-2で追加。既存run（このファイルを含まない）との後方互換のため、
+ *  LoadedSai3aRunでは任意（存在しなければ空配列）として扱う。 */
+export interface Sai3bMarketAllocationTraceRow {
+  readonly seed: string;
+  readonly turn: number;
+  readonly period: string;
+  readonly market: string;
+  readonly product: string;
+  readonly companyId: string;
+  readonly targetDemandHosoEqTons: number;
+  readonly externalOptionQuantityHosoEqTons: number;
+  readonly askPriceUsdPerHosoEqKg: number;
+  readonly basePriceUsdPerHosoEqKg: number;
+  readonly allocatedQuantityHosoEqTons: number;
+  readonly coverageScore: number;
+  readonly competitivenessWeight: number;
 }
 
 /** adjustment-trace.csvの1行（schema.tsのAdjustmentTraceEntry + seed）。 */
@@ -154,6 +197,9 @@ export interface LoadedSai3aRun {
   readonly decisionTraceLines: readonly DecisionTraceLine[];
   readonly adjustmentTraceRows: readonly Sai3bAdjustmentTraceRow[];
   readonly warningRows: readonly Sai3bWarningRow[];
+  /** market-allocation-trace.csv（SAI-3B-2で追加、任意ファイル）。存在しない
+   *  run（既存run・後方互換）の場合は空配列。 */
+  readonly marketAllocationTraceRows: readonly Sai3bMarketAllocationTraceRow[];
   readonly runSummary: Sai3bRunSummaryJson;
   /** 読み込み時に検出した、致命的ではないが利用者に報告すべき事項
    *  （例: run-summary.jsonのerrorsに記録されたケース単位のエラー）。 */
