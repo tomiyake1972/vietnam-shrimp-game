@@ -49,3 +49,7 @@ next-env.d.ts
 # Phase SAI-3B-1: Excel経営分析ブック生成物（artifacts/sai3b/以下）。
 # 大量の生成.xlsxはGit管理対象にしない（三宅さんの指示§7）。
 /artifacts/sai3b/
+
+# Phase SAI-4: 標準AI異質5社テスト・養殖上限4,000トン試験の生成物
+# （artifacts/sai4/以下）。同じ理由でGit管理対象にしない。
+/artifacts/sai4/

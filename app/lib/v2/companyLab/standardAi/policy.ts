@@ -33,6 +33,7 @@ import { sumProductAmount } from "./types";
 import { StandardAiDiagnosticEntry } from "./reasonCodes";
 import { SalesWishEntry } from "./decision/sales";
 import { PressureScores } from "./pressures";
+import { AppliedManagementBiasItem } from "./managementProfile";
 
 // 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
 // 診断情報にこれまで捨てていた圧力スコア(pressures)と、当四半期の意思決定
@@ -53,6 +54,35 @@ export interface StandardAiQuarterDiagnostics {
    *  （decision.salesPlansは制約適用後の値のため、両者を突き合わせることで
    *  「事前希望案→営業工数調整後」の差分を再計算なしで追跡できる）。 */
   readonly salesWishByMarketProduct: readonly SalesWishEntry[];
+  /**
+   * 【SAI-4追加】経営性格プロファイルが有効な場合のみ設定される（createStandardAiProvider
+   * に resolveParams オプションを渡した場合。既定=undefinedであり、既存の全出力・
+   * 全テストへの影響はゼロ）。実装指示§8「基準値→バイアス後」の追跡用。
+   */
+  readonly managementProfile?: StandardAiManagementProfileDiagnostics;
+}
+
+/**
+ * 【SAI-4追加】1社・1四半期ぶんの経営性格プロファイル適用結果（診断専用）。
+ * 「STANDARD_AI_PARAMETERS_V1による基準判断」と「プロファイル適用後の判断
+ * （＝実際にゲームへ提出される決定。安全ガードは既にdecision内に反映済み）」を
+ * 区別できるようにするためのもの。
+ */
+export interface StandardAiManagementProfileDiagnostics {
+  readonly profileId: string;
+  /** このプロファイルが基準値から実際に変更したパラメータ項目一覧（0件=A社balanced相当）。 */
+  readonly appliedBiasItems: readonly AppliedManagementBiasItem[];
+  /**
+   * バイアスなし（STANDARD_AI_PARAMETERS_V1）で同一入力を評価した場合の判断。
+   * appliedBiasItemsが1件もない場合（バイアスなし＝decisionと数学的に同一になる）は
+   * 無駄な二重計算を避けるため計算しない（undefined）。
+   *
+   * 【実装指示§4の制約への対応】Standard AI全体を大規模に二重実行するのではなく、
+   * 「entryポイント（generateStandardAiDecisionWithDiagnostics）をもう一度、
+   * 基準パラメータで呼ぶだけ」という最小実装にとどめている。ゲームエンジン・
+   * 状態遷移・他四半期への影響は一切ない（純粋関数の再呼び出しのみ）。
+   */
+  readonly baselineDecision?: CompanyDecisionInput;
 }
 
 export interface StandardAiDecisionWithDiagnostics {
@@ -156,14 +186,60 @@ void _typeCheck;
  * 限定される（意思決定の計算結果そのものは、直接generateStandardAiDecisionを
  * 呼んだ場合と完全に同一。決定論性・再現性に影響しない）。
  */
-export function createStandardAiProvider(): {
+export interface StandardAiParamsResolution {
+  readonly params: StandardAiParameters;
+  readonly profileId: string;
+  readonly appliedBiasItems: readonly AppliedManagementBiasItem[];
+}
+
+export interface StandardAiProviderOptions {
+  /**
+   * 【SAI-4追加】会社IDごとにStandardAiParametersを解決する関数（省略時=undefinedなら
+   * 従来どおり全社STANDARD_AI_PARAMETERS_V1固定。既存の呼び出し元は一切変更不要で、
+   * 既存の全出力・全テストへの影響はゼロ）。
+   *
+   * 【会社IDによる分岐の集約】本オプションを注入する側（managementProfile.tsの
+   * createManagementProfileParamsResolver等）だけが会社IDによる分岐を持ち、
+   * policy.ts自身は「渡された関数をfixture.companyIdで呼ぶ」以外の分岐を
+   * 一切持たない。decision/*.tsの内部にも会社ID分岐は存在しない。
+   */
+  readonly resolveParams?: (companyId: string) => StandardAiParamsResolution;
+}
+
+export function createStandardAiProvider(
+  options: StandardAiProviderOptions = {}
+): {
   readonly provider: CompanyDecisionProvider;
   readonly diagnostics: StandardAiQuarterDiagnostics[];
 } {
+  const { resolveParams } = options;
   const diagnostics: StandardAiQuarterDiagnostics[] = [];
   const provider: CompanyDecisionProvider = (fixture, ownState, publicInfo, period, turn) => {
-    const result = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
-    diagnostics.push(result.diagnostics);
+    if (!resolveParams) {
+      const result = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
+      diagnostics.push(result.diagnostics);
+      return result.decision;
+    }
+
+    const resolution = resolveParams(fixture.companyId);
+    const result = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, resolution.params);
+
+    // 【実装指示§4】バイアスが1件でも適用されている場合のみ、基準パラメータでの
+    // 判断も計算し診断へ残す（バイアスなしの会社・四半期では省略し、Standard AI
+    // 全体の実行コストを不必要に倍増させない）。
+    const baselineDecision =
+      resolution.appliedBiasItems.length > 0
+        ? generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, STANDARD_AI_PARAMETERS_V1).decision
+        : undefined;
+
+    diagnostics.push({
+      ...result.diagnostics,
+      managementProfile: {
+        profileId: resolution.profileId,
+        appliedBiasItems: resolution.appliedBiasItems,
+        baselineDecision,
+      },
+    });
     return result.decision;
   };
   return { provider, diagnostics };

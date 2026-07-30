@@ -21,6 +21,10 @@ export interface ParsedAutoplayCliArgs {
   readonly quarters: number;
   readonly companyIds: readonly CompanyId[];
   readonly salesForceHeadcountOverride?: number;
+  /** 【SAI-4追加】5社共通の養殖能力上書き値（HOSO換算トン）。未指定なら候補既定値のまま。 */
+  readonly aquacultureCapacityOverrideHosoEqTons?: number;
+  /** 【SAI-4追加】trueの場合のみ経営性格プロファイル（managementProfile.ts）を適用する。 */
+  readonly managementProfilesEnabled: boolean;
   readonly outDir: string;
   readonly runId: string;
 }

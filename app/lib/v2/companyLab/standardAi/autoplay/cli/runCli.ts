@@ -73,6 +73,8 @@ export function runAutoplayCli(argv: readonly string[], options: AutoplayCliOpti
       companyIds: args.companyIds,
       candidate,
       salesForceHeadcountOverride: args.salesForceHeadcountOverride,
+      aquacultureCapacityOverrideHosoEqTons: args.aquacultureCapacityOverrideHosoEqTons,
+      managementProfilesEnabled: args.managementProfilesEnabled,
     });
 
     // 標準営業人数は「実際に実行された1ケース目の四半期開始時状態」から観測する
@@ -95,6 +97,14 @@ export function runAutoplayCli(argv: readonly string[], options: AutoplayCliOpti
       salesForceHeadcountTotal: observedHeadcount,
       keyParameters: {
         salesForceHeadcountOverrideSpecified: args.salesForceHeadcountOverride !== undefined,
+        // 【SAI-4追加】三宅さんの追加条件2「分析成果物とrun metadataには、
+        // aquacultureCapacityOverride = 4000が適用されたことを記録する」に対応。
+        // keyParametersはRecord<string, number|string|boolean>として拡張可能に
+        // 設計されており（SAI-3Bのマニフェストパーサーの必須フィールド一覧にも
+        // 含まれない）、既存のSAI-3A/3Bの成果物・パーサーへの影響はゼロ。
+        aquacultureCapacityOverrideSpecified: args.aquacultureCapacityOverrideHosoEqTons !== undefined,
+        aquacultureCapacityOverrideHosoEqTons: args.aquacultureCapacityOverrideHosoEqTons ?? -1,
+        managementProfilesEnabled: args.managementProfilesEnabled,
       },
       outputFormats: ["json", "csv"],
     };

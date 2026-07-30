@@ -3,10 +3,18 @@
 // すべての閾値・重みをこのファイルへ集約する（実装指示: 「閾値・重み・優先順位を
 // 後から1箇所で調整できること」）。5社すべてに同一の値を適用する（会社IDに
 // よる分岐は存在しない）。将来の校正フェーズでの調整対象であることを明示する。
+//
+// 【SAI-4追記】STANDARD_AI_PARAMETERS_V1は引き続き「全社同一」の既定値であり、
+// 本ファイル自体は一切変更していない（既存のSAI-1〜SAI-3Bの全テスト・成果物に
+// 影響を与えない）。5社異質モデル（小幅な経営性格差）は、このデフォルトを会社ID
+// ごとに小さくバイアスした別の`StandardAiParameters`インスタンスを、companyLab/
+// standardAi/managementProfile.tsが生成して差し替えるだけであり、ここで会社IDに
+// よる分岐を持ち込むわけではない。
 
 import { CompanyFixture } from "../types";
 import { unwrapUnit } from "../../core/units";
 import { computeQuarterlyLaborCost } from "../workforce";
+import { Product } from "../../market/types";
 
 export interface StandardAiParameters {
   // --- 在庫目標（生産・調達共通） ---
@@ -24,6 +32,19 @@ export interface StandardAiParameters {
   readonly maxDiscountRatioForExcessStock: number;
   /** 供給余力が薄いときの値引き回避しきい値（能力使用率）。 */
   readonly highUtilizationRatioForNoDiscount: number;
+  /** 【SAI-4追加】商品別能力に対する目標販売数量の比率（会社×商品ごとの目標稼働率）。
+   *  従来はdecision/sales.tsに`BASE_UTILIZATION_TARGET = 0.8`としてハードコードされて
+   *  いた定数をパラメータ化しただけで、既定値0.8は変更していない（全社一律の
+   *  数値が変わっていないため、既存の全テスト・成果物への影響はゼロ）。5社異質
+   *  モデルのsalesVolumeBias/marketShareBias（B社が少し高め・C社が少し低めにする等）
+   *  の差し込み口として使う。 */
+  readonly salesUtilizationTarget: number;
+  /** 【SAI-4追加】PD/VAPの受注量係数（premiumPolicy.tsのorderQuantityFactor、
+   *  0〜1）に加算する上乗せ・割引（±0〜0.1程度を想定）。既定0（無補正、premiumPolicy.ts
+   *  の計算式は一切変更しない）。5社異質モデルのvalueAddedBias（D社がPD/VAPを
+   *  少し優先する）の差し込み口。加算後は[0, 1.1]にクランプする
+   *  （decision/sales.ts参照、捏造的な値を作らないための上限）。 */
+  readonly valueAddedOrderFactorBoost: number;
 
   // --- 労働 ---
   /** ワーカー不足が「持続的」とみなす連続四半期しきい値（ヒステリシス）。 */
@@ -86,6 +107,14 @@ export interface StandardAiParameters {
   readonly cashConstrainedProcurementDampingAtSeverePressure: number;
   /** これを超える現金圧力を「深刻」とみなし、調達を必要最小限へ寄せる。 */
   readonly severeCashPressureThreshold: number;
+
+  /** 【SAI-4追加】設備投資しきい値（capexCurrentShortfallRatioThreshold）の、
+   *  商品別の追加バイアス（比率。正の値＝そのぶんしきい値を下げて投資判断を早める、
+   *  負の値＝遅らせる）。既定は空オブジェクト（全商品バイアスなし＝既存の
+   *  capex.tsの計算式と完全に同じ結果になる）。5社異質モデルのD社（高付加価値型）
+   *  が「PD・VAP能力不足が継続した場合の設備投資判断を少し早める」を、HOSOには
+   *  影響させずPD/VAPだけに適用するための差し込み口。 */
+  readonly capexShortfallThresholdBiasByProduct: Readonly<Partial<Record<Product, number>>>;
 }
 
 /**
@@ -100,6 +129,8 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   excessInventoryRatioForDiscount: 1.3,
   maxDiscountRatioForExcessStock: 0.12,
   highUtilizationRatioForNoDiscount: 0.95,
+  salesUtilizationTarget: 0.8,
+  valueAddedOrderFactorBoost: 0,
 
   sustainedShortageQuarterThreshold: 2,
   sustainedExcessQuarterThreshold: 2,
@@ -129,6 +160,8 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   maxAquacultureShareOfRequirement: 0.35,
   cashConstrainedProcurementDampingAtSeverePressure: 0.5,
   severeCashPressureThreshold: 0.7,
+
+  capexShortfallThresholdBiasByProduct: {},
 };
 
 // ---------------------------------------------------------------------

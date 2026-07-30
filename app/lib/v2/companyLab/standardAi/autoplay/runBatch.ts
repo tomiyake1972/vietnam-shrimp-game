@@ -22,6 +22,11 @@ export interface AutoplayBatchConfig {
   readonly candidate: StandardBaselineCandidate;
   /** 標準候補の営業人数を上書きする場合の値（未指定なら候補既定値のまま）。 */
   readonly salesForceHeadcountOverride?: number;
+  /** 【SAI-4追加】5社共通の養殖能力上書き値（HOSO換算トン）。runCase.tsのAutoplayCaseConfig
+   *  参照。未指定なら候補既定値のまま。 */
+  readonly aquacultureCapacityOverrideHosoEqTons?: number;
+  /** 【SAI-4追加】trueの場合のみ経営性格プロファイル（managementProfile.ts）を適用する。 */
+  readonly managementProfilesEnabled?: boolean;
 }
 
 export interface AutoplayBatchResult {
@@ -49,6 +54,8 @@ export function runAutoplayBatch(config: AutoplayBatchConfig): AutoplayBatchResu
         companyIds: config.companyIds,
         candidate: config.candidate,
         salesForceHeadcountOverride: config.salesForceHeadcountOverride,
+        aquacultureCapacityOverrideHosoEqTons: config.aquacultureCapacityOverrideHosoEqTons,
+        managementProfilesEnabled: config.managementProfilesEnabled,
       });
       caseLogs.push(buildAutoplayCaseLogs(caseResult));
     } catch (err) {

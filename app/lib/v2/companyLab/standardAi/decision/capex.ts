@@ -63,7 +63,15 @@ export function buildStandardAiCapexDecision(
     const shortfallRatio = productionNeededByProductBeforeCap[product] / capacity;
     const noExcess = observation.finishedGoodsByProduct[product] <= capacity * params.finishedGoodsTargetQuarters * params.excessInventoryRatioForDiscount;
     const alreadyPlanned = observation.activeCapexProjectTargets.has(product);
-    const isBottleneck = shortfallRatio > params.capexCurrentShortfallRatioThreshold;
+    // 【SAI-4追加】経営性格プロファイル（D社=高付加価値重視）向けの差し込み口。
+    // capexShortfallThresholdBiasByProduct[product]は既定0（全社共通の
+    // capexCurrentShortfallRatioThresholdをそのまま使うのと完全に同じ）。正の値は
+    // しきい値をそのぶん下げ、PD/VAPのボトルネック解消投資をわずかに前倒しする
+    // （安全ガード：cashAndBorrowingSafe・sustained・noExceptの各条件は一切変更せず、
+    // 「投資を検討し始める入口の感度」だけを動かす）。
+    const productThresholdBias = params.capexShortfallThresholdBiasByProduct[product] ?? 0;
+    const effectiveShortfallThreshold = params.capexCurrentShortfallRatioThreshold - productThresholdBias;
+    const isBottleneck = shortfallRatio > effectiveShortfallThreshold;
 
     if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned) {
       proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product] });
@@ -72,7 +80,12 @@ export function buildStandardAiCapexDecision(
         domain: "capex",
         companyId: fixture.companyId,
         severity: "info",
-        keyValues: { shortfallRatio, equipmentUtilizationLastQuarter: pressures.equipmentUtilizationLastQuarter },
+        keyValues: {
+          shortfallRatio,
+          equipmentUtilizationLastQuarter: pressures.equipmentUtilizationLastQuarter,
+          effectiveShortfallThreshold,
+          productThresholdBias,
+        },
         message: `${product.toUpperCase()}加工能力が持続的なボトルネックのため、増設案件を提案する。`,
       });
     } else if (isBottleneck) {
@@ -81,7 +94,15 @@ export function buildStandardAiCapexDecision(
         domain: "capex",
         companyId: fixture.companyId,
         severity: "info",
-        keyValues: { shortfallRatio, sustained: sustained ? 1 : 0, noExcess: noExcess ? 1 : 0, safe: safe ? 1 : 0, alreadyPlanned: alreadyPlanned ? 1 : 0 },
+        keyValues: {
+          shortfallRatio,
+          sustained: sustained ? 1 : 0,
+          noExcess: noExcess ? 1 : 0,
+          safe: safe ? 1 : 0,
+          alreadyPlanned: alreadyPlanned ? 1 : 0,
+          effectiveShortfallThreshold,
+          productThresholdBias,
+        },
         message: `${product.toUpperCase()}は今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。`,
       });
     }

@@ -26,8 +26,6 @@ import { ProductAmount, StandardAiObservation, zeroProductAmount } from "../type
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
 
 const EPSILON = 1e-6;
-/** 商品×工場能力に対する目標稼働比率（全社一律。攻めすぎない標準的な水準）。 */
-const BASE_UTILIZATION_TARGET = 0.8;
 
 function ratioAdjustmentToUsd(ratioAdjustment: number, referencePrice: number | undefined): number {
   if (referencePrice === undefined || referencePrice <= EPSILON) return 0;
@@ -35,11 +33,22 @@ function ratioAdjustmentToUsd(ratioAdjustment: number, referencePrice: number | 
   return clamped * referencePrice;
 }
 
-function orderFactorsByProduct(fixture: CompanyFixture, observation: StandardAiObservation): ProductAmount {
+/**
+ * 【SAI-4変更】旧`BASE_UTILIZATION_TARGET = 0.8`のハードコード定数を
+ * `params.salesUtilizationTarget`へ置き換えただけで、既定値・計算式は変更していない
+ * （STANDARD_AI_PARAMETERS_V1.salesUtilizationTarget = 0.8のため、パラメータ未指定・
+ * 未バイアス時は従来と完全に同じ挙動）。5社異質モデルの差し込み口。
+ */
+function orderFactorsByProduct(fixture: CompanyFixture, observation: StandardAiObservation, params: StandardAiParameters): ProductAmount {
+  // 【SAI-4変更】PD/VAPの受注量係数に、valueAddedOrderFactorBoost（既定0）を加算する。
+  // HOSOには適用しない（HOSOはpremiumPolicy.tsの対象外＝常に1のため、そもそも
+  // 「加算して優先させる」対象にならない）。加算後は[0, 1.1]にクランプし、
+  // 捏造的な値（例えば負の受注量係数）を作らない。
+  const clampOrderFactor = (v: number) => Math.max(0, Math.min(1.1, v));
   return {
     hoso: 1,
-    pd: orderQuantityFactor(fixture.productEconomics.premiumEconomics.pd, observation.marketPremiumByProduct.pd),
-    vap: orderQuantityFactor(fixture.productEconomics.premiumEconomics.vap, observation.marketPremiumByProduct.vap),
+    pd: clampOrderFactor(orderQuantityFactor(fixture.productEconomics.premiumEconomics.pd, observation.marketPremiumByProduct.pd) + params.valueAddedOrderFactorBoost),
+    vap: clampOrderFactor(orderQuantityFactor(fixture.productEconomics.premiumEconomics.vap, observation.marketPremiumByProduct.vap) + params.valueAddedOrderFactorBoost),
   };
 }
 
@@ -114,13 +123,13 @@ export function buildStandardAiSalesPlans(
 ): SalesPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const capacityTotals = observation.totalCapacityByProduct;
-  const orderFactors = orderFactorsByProduct(fixture, observation);
+  const orderFactors = orderFactorsByProduct(fixture, observation, params);
   const priceAdjustments = priceAdjustmentRatioByProduct(observation, pressures, params);
 
   const potentialByProduct: ProductAmount = {
-    hoso: capacityTotals.hoso * BASE_UTILIZATION_TARGET,
-    pd: capacityTotals.pd * BASE_UTILIZATION_TARGET,
-    vap: capacityTotals.vap * BASE_UTILIZATION_TARGET,
+    hoso: capacityTotals.hoso * params.salesUtilizationTarget,
+    pd: capacityTotals.pd * params.salesUtilizationTarget,
+    vap: capacityTotals.vap * params.salesUtilizationTarget,
   };
 
   // 【重要】desiredByProduct（生産計画側が参照するベースライン販売目標）には

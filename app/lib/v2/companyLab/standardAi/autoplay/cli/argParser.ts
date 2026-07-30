@@ -22,11 +22,16 @@ const KNOWN_FLAGS = new Set([
   "--quarters",
   "--companies",
   "--headcount",
+  "--aquaculture-cap",
+  "--management-profiles",
   "--out-dir",
   "--run-id",
   "--help",
   "-h",
 ]);
+
+/** 値を取らないboolean専用フラグ（--help/-hと同じ扱い）。 */
+const BOOLEAN_FLAGS = new Set(["--management-profiles"]);
 
 interface RawArgs {
   readonly help: boolean;
@@ -38,6 +43,8 @@ interface RawArgs {
   readonly quarters?: string;
   readonly companies?: string;
   readonly headcount?: string;
+  readonly aquacultureCap?: string;
+  readonly managementProfiles: boolean;
   readonly outDir?: string;
   readonly runId?: string;
 }
@@ -52,6 +59,7 @@ function splitEqualsForm(token: string): readonly [string, string | undefined] {
 
 function tokenizeArgs(argv: readonly string[]): RawArgs {
   let help = false;
+  let managementProfiles = false;
   const values: { [k: string]: string } = {};
 
   let i = 0;
@@ -68,6 +76,18 @@ function tokenizeArgs(argv: readonly string[]): RawArgs {
       throw new CliArgumentError(
         `不明な引数です: "${argv[i]}"。使用可能な引数は ${Array.from(KNOWN_FLAGS).join(", ")} です。`
       );
+    }
+
+    if (BOOLEAN_FLAGS.has(flag)) {
+      // 値なしのbooleanフラグ（inlineValueで明示的に"false"等が指定された場合のみ
+      // それを尊重し、それ以外は指定=trueとして扱う）。
+      if (inlineValue !== undefined) {
+        managementProfiles = inlineValue.trim().toLowerCase() !== "false";
+      } else {
+        managementProfiles = true;
+      }
+      i += 1;
+      continue;
     }
 
     let value: string;
@@ -87,6 +107,7 @@ function tokenizeArgs(argv: readonly string[]): RawArgs {
 
   return {
     help,
+    managementProfiles,
     scenario: values["--scenario"],
     baselineId: values["--baseline-id"],
     seeds: values["--seeds"],
@@ -95,6 +116,7 @@ function tokenizeArgs(argv: readonly string[]): RawArgs {
     quarters: values["--quarters"],
     companies: values["--companies"],
     headcount: values["--headcount"],
+    aquacultureCap: values["--aquaculture-cap"],
     outDir: values["--out-dir"],
     runId: values["--run-id"],
   };
@@ -188,6 +210,18 @@ function validateHeadcount(raw: string | undefined): number | undefined {
   return n;
 }
 
+function validateAquacultureCap(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw.trim().length === 0) return undefined;
+  if (!/^\d+(\.\d+)?$/.test(raw.trim())) {
+    throw new CliArgumentError(`--aquaculture-cap は正の数値（HOSO換算トン）である必要があります（受け取った値: "${raw}"）。`);
+  }
+  const n = Number(raw.trim());
+  if (n <= 0) {
+    throw new CliArgumentError(`--aquaculture-cap は0より大きい必要があります（受け取った値: ${n}）。`);
+  }
+  return n;
+}
+
 function defaultRunId(): string {
   // scripts/側でDate.now()由来のrunIdを明示的に渡すのが基本だが、CLI単体テストや
   // --run-id省略時のフォールバックとして、固定文字列＋実行時渡しのseed/quartersに
@@ -207,6 +241,7 @@ export function parseAutoplayCliArgs(argv: readonly string[]): ParsedAutoplayCli
       seeds: [],
       quarters: 0,
       companyIds: [],
+      managementProfilesEnabled: false,
       outDir: "",
       runId: "",
     };
@@ -218,10 +253,24 @@ export function parseAutoplayCliArgs(argv: readonly string[]): ParsedAutoplayCli
   const quarters = validateQuarters(raw.quarters);
   const companyIds = validateCompanies(raw.companies);
   const salesForceHeadcountOverride = validateHeadcount(raw.headcount);
+  const aquacultureCapacityOverrideHosoEqTons = validateAquacultureCap(raw.aquacultureCap);
+  const managementProfilesEnabled = raw.managementProfiles;
   const outDir = raw.outDir && raw.outDir.trim().length > 0 ? raw.outDir.trim() : "artifacts/sai3a";
   const runId = raw.runId && raw.runId.trim().length > 0 ? raw.runId.trim() : defaultRunId();
 
-  return { help: false, scenario, baselineId, seeds, quarters, companyIds, salesForceHeadcountOverride, outDir, runId };
+  return {
+    help: false,
+    scenario,
+    baselineId,
+    seeds,
+    quarters,
+    companyIds,
+    salesForceHeadcountOverride,
+    aquacultureCapacityOverrideHosoEqTons,
+    managementProfilesEnabled,
+    outDir,
+    runId,
+  };
 }
 
 /** --help で表示する使用方法テキスト。 */
@@ -229,7 +278,7 @@ export function buildAutoplayUsageText(): string {
   return `ShrimpX V2 標準AI自動テストプレイ・判断記録基盤 CLI（Phase SAI-3A）
 
 使い方:
-  npx tsx scripts/sai3aAutoplay.ts --seed-count <件数> --quarters <四半期数> [--scenario <id>] [--baseline-id <id>] [--companies <会社ID,会社ID,...>] [--headcount <人数>] [--out-dir <ディレクトリ>] [--run-id <run識別子>]
+  npx tsx scripts/sai3aAutoplay.ts --seed-count <件数> --quarters <四半期数> [--scenario <id>] [--baseline-id <id>] [--companies <会社ID,会社ID,...>] [--headcount <人数>] [--aquaculture-cap <トン数>] [--management-profiles] [--out-dir <ディレクトリ>] [--run-id <run識別子>]
 
 引数:
   --scenario <id>       実行するシナリオ（既定値: "baseline"）。短縮形または正式IDのどちらでも指定可。
@@ -240,6 +289,11 @@ export function buildAutoplayUsageText(): string {
   --quarters <数>       実行クォーター数（既定値: 8。32も指定可）。
   --companies <c1,c2,...> 対象会社ID（既定値: 5社すべて）。
   --headcount <人数>    標準営業人数を上書きする場合の値（未指定なら候補既定値のまま）。
+  --aquaculture-cap <トン数> 【SAI-4】5社共通の養殖能力（aquacultureCapacity）をこの値（HOSO換算トン）へ
+                        上書きする（未指定なら候補既定値のまま）。エンジン側のassertValidStockingPlan()が
+                        この値を超える池入れ計画を拒否する（実際のハード制約）。
+  --management-profiles 【SAI-4】会社IDに応じた経営性格プロファイル（managementProfile.ts、小幅バイアス）を
+                        有効化する（未指定時は全社STANDARD_AI_PARAMETERS_V1固定＝従来どおり）。
   --out-dir <ディレクトリ> 出力先ディレクトリ（既定値: "artifacts/sai3a"）。実際の書き出し先は <out-dir>/<run-id>/ 以下。
   --run-id <run識別子>  この実行のrun ID（既定値は固定のプレースホルダー。再現可能な命名を推奨）。
   --help, -h            この使用方法を表示して終了する
@@ -247,5 +301,6 @@ export function buildAutoplayUsageText(): string {
 例:
   npx tsx scripts/sai3aAutoplay.ts --seed-count 12 --quarters 8
   npx tsx scripts/sai3aAutoplay.ts --seeds sai3a-h85-001,sai3a-h85-002 --quarters 8 --headcount 85 --run-id headcount85-check
+  npx tsx scripts/sai3aAutoplay.ts --seed-count 4 --quarters 8 --management-profiles --aquaculture-cap 4000 --run-id sai4-heterogeneous-check
 `;
 }

@@ -10,12 +10,14 @@
 import { CompanyId } from "../../../sales/types";
 import { CompanyFixture } from "../../types";
 import { PeriodV2 } from "../../../core/period";
+import { hosoEqTons } from "../../../core/units";
 import { ALL_COMPANY_IDS, initializeUnifiedCompanyLabFromTemplate } from "../report/decomposeHarness";
 import { runFromInit } from "../report/decomposeHarness";
 import { StandardBaselineCandidate } from "../report/standardBaseline";
 import { createInstrumentedStandardAiRun, QuarterStartCapture } from "./capture";
 import { StandardAiQuarterDiagnostics } from "../policy";
 import { CompanyQuarterRecord } from "../../types";
+import { createManagementProfileParamsResolver } from "../managementProfile";
 
 export interface AutoplayCaseConfig {
   readonly scenarioId: string;
@@ -23,10 +25,28 @@ export interface AutoplayCaseConfig {
   readonly quarters: number;
   readonly companyIds: readonly CompanyId[];
   readonly candidate: StandardBaselineCandidate;
-  /** 標準候補の営業人数を上書きする場合の値（未指定なら候補既定値のまま）。
+  /** 標準候補の営業人数を上書きする場合の値(未指定なら候補既定値のまま)。
    *  SAI-2の80/85/90人比較や、将来のheadcount感度分析をスクリプト固有処理に
    *  せず、この実行基盤から直接指定できるようにする。 */
   readonly salesForceHeadcountOverride?: number;
+  /**
+   * 【SAI-4追加】5社共通の養殖能力(aquacultureCapacity、HOSO換算トン)を上書きする
+   * 場合の値(未指定なら候補既定値のまま)。実装指示の「養殖上限4,000トン」試験用。
+   * salesForceHeadcountOverrideと同じ設計方針(既存のbuildCompanyFixtures・
+   * standardBaseline.tsの校正値そのものは書き換えず、この実行時オプションだけで
+   * 上書きする)を踏襲する。上限そのものの強制はAI側の自己抑制ではなく、
+   * rawMaterials/aquaculture.ts の assertValidStockingPlan()
+   * (エンジン側のハード制約)が担う。ここでの上書きは、その制約が実際に効く
+   * fixture.aquacultureCapacityの値を全社同一に揃えるだけである。
+   */
+  readonly aquacultureCapacityOverrideHosoEqTons?: number;
+  /**
+   * 【SAI-4追加】trueの場合のみ、会社IDに応じた経営性格プロファイル
+   * (managementProfile.ts)による小幅なStandardAiParametersバイアスを適用する。
+   * 未指定(false相当)なら従来どおり全社STANDARD_AI_PARAMETERS_V1固定
+   * (既存の全出力・全テストへの影響ゼロ)。
+   */
+  readonly managementProfilesEnabled?: boolean;
 }
 
 export interface AutoplayCaseResult {
@@ -42,12 +62,18 @@ export interface AutoplayCaseResult {
 
 function buildFixtureTemplateWithOverride(
   candidate: StandardBaselineCandidate,
-  salesForceHeadcountOverride: number | undefined
+  salesForceHeadcountOverride: number | undefined,
+  aquacultureCapacityOverrideHosoEqTons: number | undefined
 ): (startPeriod: PeriodV2) => CompanyFixture {
-  if (salesForceHeadcountOverride === undefined) return candidate.buildFixtureTemplate;
+  if (salesForceHeadcountOverride === undefined && aquacultureCapacityOverrideHosoEqTons === undefined) {
+    return candidate.buildFixtureTemplate;
+  }
   return (startPeriod: PeriodV2) => ({
     ...candidate.buildFixtureTemplate(startPeriod),
-    salesForceHeadcountTotal: salesForceHeadcountOverride,
+    ...(salesForceHeadcountOverride === undefined ? {} : { salesForceHeadcountTotal: salesForceHeadcountOverride }),
+    ...(aquacultureCapacityOverrideHosoEqTons === undefined
+      ? {}
+      : { aquacultureCapacity: hosoEqTons(aquacultureCapacityOverrideHosoEqTons) }),
   });
 }
 
@@ -59,7 +85,11 @@ function buildFixtureTemplateWithOverride(
  */
 export function runAutoplayCase(config: AutoplayCaseConfig): AutoplayCaseResult {
   const order: readonly CompanyId[] = config.companyIds.length > 0 ? config.companyIds : ALL_COMPANY_IDS;
-  const buildFixtureTemplate = buildFixtureTemplateWithOverride(config.candidate, config.salesForceHeadcountOverride);
+  const buildFixtureTemplate = buildFixtureTemplateWithOverride(
+    config.candidate,
+    config.salesForceHeadcountOverride,
+    config.aquacultureCapacityOverrideHosoEqTons
+  );
 
   const initResult = initializeUnifiedCompanyLabFromTemplate(
     { scenarioId: config.scenarioId, mode: "canonical", seed: config.seed, turns: config.quarters },
@@ -69,7 +99,9 @@ export function runAutoplayCase(config: AutoplayCaseConfig): AutoplayCaseResult 
     order
   );
 
-  const { provider, quarterStartCaptures, diagnostics } = createInstrumentedStandardAiRun();
+  const { provider, quarterStartCaptures, diagnostics } = createInstrumentedStandardAiRun(
+    config.managementProfilesEnabled ? { resolveParams: createManagementProfileParamsResolver() } : {}
+  );
   const { companies, history } = runFromInit(initResult, provider);
 
   return {

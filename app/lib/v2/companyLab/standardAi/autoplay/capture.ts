@@ -9,7 +9,7 @@
 
 import { CompanyDecisionProvider, CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../types";
 import { PeriodV2 } from "../../../core/period";
-import { createStandardAiProvider, StandardAiQuarterDiagnostics } from "../policy";
+import { createStandardAiProvider, StandardAiProviderOptions, StandardAiQuarterDiagnostics } from "../policy";
 
 /** 1社・1四半期ぶんの「意思決定生成直前」に渡された入力一式（=四半期開始時点で
  *  標準AIが参照できた情報の全体。判断記録のセクションAを組み立てる材料）。 */
@@ -34,8 +34,11 @@ export interface InstrumentedStandardAiRun {
  * 配列へ記録する。返り値（意思決定そのもの）は一切変更しない
  * （標準AIの挙動・決定論性に影響しない）。
  */
-export function createInstrumentedStandardAiRun(): InstrumentedStandardAiRun {
-  const { provider: baseProvider, diagnostics } = createStandardAiProvider();
+export function createInstrumentedStandardAiRun(
+  /** 【SAI-4追加】省略時=undefinedなら従来どおり（既存の全出力・全テストへの影響ゼロ）。 */
+  options: StandardAiProviderOptions = {}
+): InstrumentedStandardAiRun {
+  const { provider: baseProvider, diagnostics } = createStandardAiProvider(options);
   const quarterStartCaptures: QuarterStartCapture[] = [];
 
   const provider: CompanyDecisionProvider = (fixture, ownState, publicInfo, period, turn) => {
