@@ -124,4 +124,8 @@ export interface StandardAiObservation {
   readonly lifecycleSharesByMarket?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
   /** 構成比の四半期トレンド（前期−前々期。productLifecycle有効時のみ）。 */
   readonly lifecycleTrendByMarket?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
+
+  // --- 【SAI-5E】商品別供給圧力の公開統計（前四半期末までのEWMA） ---
+  /** 5社提示量÷対象需要のEWMA（1.0=均衡、>1=供給過剰の持続。SAI-5有効時のみ）。 */
+  readonly productSupplyPressureByProduct?: Readonly<Record<"pd" | "vap", number>>;
 }

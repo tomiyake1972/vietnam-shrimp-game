@@ -32,6 +32,7 @@ import { CapexState } from "../../capex/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
 import type { WorkforceState } from "../workforce";
 import type { SalesBaseState } from "../salesBase";
+import type { MarketEvolutionState } from "../marketEvolution";
 import type { ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 
 // ---------------------------------------------------------------------
@@ -152,6 +153,12 @@ export interface CompanyLabRuntimeSnapshot {
    * schemaVersion:1〜3のデータにはキーが無い → undefined（機能無効）として復元。
    */
   readonly salesBaseState?: SalesBaseState;
+  /**
+   * 【SAI-5E・schemaVersion 4で追加】市場進化carry state（供給圧力EWMA・
+   * プレミアム倍率・割安シグナル）。SAI-5機能フラグ有効時のみ設定される
+   * optional。キー欠落（v1〜v3）はundefined（機能無効）として復元。
+   */
+  readonly marketEvolutionState?: MarketEvolutionState;
   readonly isComplete: boolean;
 }
 

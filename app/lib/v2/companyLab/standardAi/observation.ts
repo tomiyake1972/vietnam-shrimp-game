@@ -189,5 +189,8 @@ export function buildStandardAiObservation(
     // publicInfo経由の一本道＝当期需要の先読みリークはない）。
     lifecycleSharesByMarket: publicInfo.productLifecycleOutlook?.sharesByMarket,
     lifecycleTrendByMarket: publicInfo.productLifecycleOutlook?.quarterlyTrendByMarket,
+
+    // 【SAI-5E】商品別供給圧力の公開統計（前四半期末までのEWMA）。
+    productSupplyPressureByProduct: publicInfo.productSupplyPressureOutlook,
   };
 }

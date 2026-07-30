@@ -45,6 +45,7 @@ import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState }
 // 【Phase 8D-4】型のみの参照（workforce.ts 側も CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
 import type { CompanyWorkforceState, WorkforceState } from "./workforce";
 import type { SalesBaseState } from "./salesBase";
+import type { MarketEvolutionState, Sai5MarketEvolutionRecord } from "./marketEvolution";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -200,6 +201,12 @@ export interface PublicMarketInfo {
    * undefined（前期が存在しないため。lastMarketResultと同じ規約）。
    */
   readonly productLifecycleOutlook?: ProductLifecycleOutlook;
+  /**
+   * 【SAI-5E】前四半期末までの商品別供給圧力（5社提示量÷対象需要のEWMA。
+   * config.sai5有効時のみ）。市場全体の需給比という公開の業界統計に相当し、
+   * 個社の非公開計画は含まない。1.0=需給均衡、>1=供給過剰の持続。
+   */
+  readonly productSupplyPressureOutlook?: Readonly<Record<"pd" | "vap", number>>;
 }
 
 /** 【SAI-5C】前四半期までのライフサイクル構成比と四半期トレンド（公開情報）。 */
@@ -351,6 +358,12 @@ export interface CompanyQuarterRecord {
    * （SalesContract.costSnapshot等、既存の後発フィールドと同じ扱い）。
    */
   readonly consumerMarketRecords?: readonly ConsumerMarketQuarterRecord[];
+  /**
+   * 【SAI-5E】市場進化の因果ログ（適用プレミアム倍率・普及前倒し・PD⇔VAP代替・
+   * 供給圧力・適用構成比行列）。SAI-5機能フラグ有効時のみ設定されるoptional
+   * （既存の永続化済み履歴・SAI-3Bパーサーへの影響なし）。
+   */
+  readonly sai5MarketEvolution?: Sai5MarketEvolutionRecord;
 }
 
 /**
@@ -390,6 +403,9 @@ export interface CompanyLabState {
   /** 【SAI-5D】会社×市場×商品の営業基盤ストック（config.sai5.salesBaseAccumulation
    *  有効時のみ更新・保持。無効時はundefinedのまま＝既存スナップショットと同一）。 */
   readonly salesBaseState?: SalesBaseState;
+  /** 【SAI-5E】市場進化carry state（供給圧力EWMA・プレミアム倍率・割安シグナル。
+   *  config.sai5.productLifecycle/supplyPremiumFeedback有効時のみ保持）。 */
+  readonly marketEvolutionState?: MarketEvolutionState;
   /** 【Phase 8A】会社別の財務状態（現金・売掛/買掛・借入・固定資産・完成品原価台帳等。ターンをまたいで保持）。 */
   readonly financeState: FinanceState;
   /** 【Phase 8B-1】会社別の資金繰り状態（融資ポートフォリオ・未払利息・信用/延滞履歴。ターンをまたいで保持）。 */

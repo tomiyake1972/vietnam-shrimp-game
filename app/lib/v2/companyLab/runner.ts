@@ -55,9 +55,17 @@ import {
   settleConsumerMarketQuarter,
 } from "../market/consumerInventory";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
-import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix } from "../market/productLifecycle";
+import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../market/productLifecycle";
 import { salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
 import { SALES_PARAMETERS_SAI5_SALES_BASE_V1 } from "../sales/parameters";
+import { MARKET_PARAMETERS_V1 } from "../market/parameters";
+import {
+  applyProductSubstitution,
+  deriveAdoptionTurnShift,
+  derivePremiumRatioMultipliers,
+  updateMarketEvolutionState,
+  Sai5MarketEvolutionRecord,
+} from "./marketEvolution";
 import { deriveVietnamMarketReferencePrices } from "../sales/marketAdapter";
 import {
   advanceScenarioTurn,
@@ -426,8 +434,14 @@ export function buildPublicMarketInfo(state: CompanyLabState): PublicMarketInfo 
   if (state.config.sai5?.productLifecycle) {
     const nextTurn = state.history.length + 1;
     if (nextTurn >= 2) {
-      const prevMix = computeMarketProductMix(nextTurn - 1);
-      const prevPrevMix = nextTurn >= 3 ? computeMarketProductMix(nextTurn - 2) : prevMix;
+      // 【SAI-5E】adoption前倒し・PD⇔VAP代替の適用後に実際に使われた構成比が
+      // 履歴に記録されていればそれを優先する（公開情報は「実際に適用された値」）。
+      // 記録が無い場合（SAI-5E無効・旧履歴）は決定論的な基礎曲線で再計算する。
+      const prevRecord = state.history[state.history.length - 1];
+      const prevPrevRecord = state.history[state.history.length - 2];
+      const prevMix = prevRecord?.sai5MarketEvolution?.appliedMix ?? computeMarketProductMix(nextTurn - 1);
+      const prevPrevMix =
+        nextTurn >= 3 ? prevPrevRecord?.sai5MarketEvolution?.appliedMix ?? computeMarketProductMix(nextTurn - 2) : prevMix;
       const trend = {} as Record<DemandMarketId, Record<Product, number>>;
       for (const market of DEMAND_MARKET_IDS) {
         trend[market] = {
@@ -444,6 +458,15 @@ export function buildPublicMarketInfo(state: CompanyLabState): PublicMarketInfo 
     lastMarketResult: lastRecord?.marketResult,
     vietnamDomesticPriorPrice: lastRecord ? unwrapUnit(lastRecord.marketResult.vietnamDomestic.price) : 0,
     ...(productLifecycleOutlook ? { productLifecycleOutlook } : {}),
+    // 【SAI-5E】前四半期末までの商品別供給圧力EWMA（公開の業界需給統計に相当）。
+    ...(state.marketEvolutionState
+      ? {
+          productSupplyPressureOutlook: {
+            pd: state.marketEvolutionState.pd.supplyPressureEwma,
+            vap: state.marketEvolutionState.vap.supplyPressureEwma,
+          },
+        }
+      : {}),
   };
 }
 
@@ -628,14 +651,40 @@ export function advanceCompanyLabQuarter(
   const previousMarketContext = buildPreviousMarketContext(definition, turn, scenarioTurnInput, lastRecord?.marketResult);
   const baseMarketInput = toMarketQuarterInput(scenarioTurnInput, previousMarketContext);
 
-  // --- 【SAI-5C】市場別の商品ライフサイクル（opt-in。config.sai5未指定なら完全に従来経路） ---
+  // --- 【SAI-5C/5E】市場別の商品ライフサイクル＋遅行需要＋PD⇔VAP代替
+  // （opt-in。config.sai5未指定なら完全に従来経路） ---
   // 世界PD/VAP需要（プレミアム計算の入力）を「市場別消費×市場別ライフサイクル
   // 構成比」の合計で置き換える。市場全体の消費量そのものは一切変更しない
   // （構成比のみ＝総需要の二重計上なし）。同じ行列を成約側の対象需要按分
   // （turnInput.marketProductMix経由）にも渡し、プレミアム側と成約上限側の
   // 構成比の食い違いを構造的に防ぐ（market/productLifecycle.tsヘッダ参照）。
-  const lifecycleMix: MarketProductMix | undefined = state.config.sai5?.productLifecycle ? computeMarketProductMix(turn) : undefined;
+  // 【SAI-5E】(a) 前期末までの割安シグナル（affordability EWMA）が普及を前倒しし、
+  // (b) 前期の実現プレミアム比に応じてPD⇔VAP間で構成比を限定的に移動する。
+  // いずれも「前期実績→当期入力」の片方向で、当期内の循環はない。
+  const sai5ReferencePremiumRatios = {
+    pd: MARKET_PARAMETERS_V1.pdVapPremium.pdBasePremiumRatio,
+    vap: MARKET_PARAMETERS_V1.pdVapPremium.vapBasePremiumRatio,
+  } as const;
+  const appliedAdoptionTurnShift = state.config.sai5?.productLifecycle
+    ? deriveAdoptionTurnShift(state.marketEvolutionState)
+    : ({ pd: 0, vap: 0 } as const);
+  let lifecycleMix: MarketProductMix | undefined;
+  let substitutionShareShift = 0;
+  if (state.config.sai5?.productLifecycle) {
+    const shiftByMarket = Object.fromEntries(
+      DEMAND_MARKET_IDS.map((m) => [m, { pd: appliedAdoptionTurnShift.pd, vap: appliedAdoptionTurnShift.vap }])
+    ) as Readonly<Partial<Record<DemandMarketId, { pd: number; vap: number }>>>;
+    const baseMix = computeMarketProductMix(turn, PRODUCT_LIFECYCLE_PARAMETERS_V1, shiftByMarket);
+    const substitution = applyProductSubstitution(baseMix, lastRecord?.marketResult, sai5ReferencePremiumRatios);
+    lifecycleMix = substitution.mix;
+    substitutionShareShift = substitution.substitutionShareShift;
+  }
   const lifecycleAdjustedMarketInput = lifecycleMix ? applyLifecycleDemandToMarketInput(baseMarketInput, lifecycleMix) : baseMarketInput;
+  // 【SAI-5E】前期末までの供給圧力EWMAから導いた、当期のPD/VAPベースプレミアム
+  // 比率の倍率（当期の契約単価への遡及は構造上ない。成約単価は成約時スナップショット）。
+  const appliedPremiumRatioMultipliers = state.config.sai5?.supplyPremiumFeedback
+    ? derivePremiumRatioMultipliers(state.marketEvolutionState)
+    : ({ pd: 1, vap: 1 } as const);
 
   // --- 実装指示 §3: PD/VAP供給計画（会社の生産計画）の集計 → 市場入力への適用 ---
   const companyCountry = buildCompanyCountryMap(fixtures);
@@ -797,6 +846,21 @@ export function advanceCompanyLabQuarter(
       // 再配分。無効時はキー自体を渡さず、turn/runner.tsの既定
       // SALES_PARAMETERS_V1＝salesBaseウェイト0で従来と完全に同一）。
       ...(state.config.sai5?.salesBaseAccumulation ? { sales: SALES_PARAMETERS_SAI5_SALES_BASE_V1 } : {}),
+      // 【SAI-5E】供給圧力フィードバック有効時のみ、PD/VAPベースプレミアム比率へ
+      // 前期末stateの倍率を乗じたMarketParametersを渡す（市場モジュール内部は
+      // 無変更。既存の稼働率倍率clamp・最低プレミアム床はそのまま機能する）。
+      ...(state.config.sai5?.supplyPremiumFeedback
+        ? {
+            market: {
+              ...MARKET_PARAMETERS_V1,
+              pdVapPremium: {
+                ...MARKET_PARAMETERS_V1.pdVapPremium,
+                pdBasePremiumRatio: MARKET_PARAMETERS_V1.pdVapPremium.pdBasePremiumRatio * appliedPremiumRatioMultipliers.pd,
+                vapBasePremiumRatio: MARKET_PARAMETERS_V1.pdVapPremium.vapBasePremiumRatio * appliedPremiumRatioMultipliers.vap,
+              },
+            },
+          }
+        : {}),
     },
   };
   const turnResult = runTurn(turnInput);
@@ -911,6 +975,46 @@ export function advanceCompanyLabQuarter(
         fixtures.map((f) => f.companyId)
       )
     : state.salesBaseState;
+
+  // --- 【SAI-5E】市場進化carry stateの四半期末更新（供給圧力EWMA・プレミアム
+  // 倍率・割安シグナル）。productLifecycle/supplyPremiumFeedbackのどちらかが
+  // 有効なら更新する（affordabilityシグナルはライフサイクル側の普及前倒しにも
+  // 使うため）。無効時はundefinedのまま＝既存スナップショットと同一形状。 ---
+  const sai5Active = Boolean(state.config.sai5?.productLifecycle) || Boolean(state.config.sai5?.supplyPremiumFeedback);
+  let marketEvolutionStateAfter = state.marketEvolutionState;
+  let sai5MarketEvolutionRecord: Sai5MarketEvolutionRecord | undefined;
+  if (sai5Active) {
+    const offeredByProduct = { pd: 0, vap: 0 };
+    for (const d of decisions) {
+      for (const p of d.salesPlans) {
+        if (p.product === "pd") offeredByProduct.pd += unwrapUnit(p.desiredQuantity);
+        else if (p.product === "vap") offeredByProduct.vap += unwrapUnit(p.desiredQuantity);
+      }
+    }
+    const targetDemandByProduct = { pd: 0, vap: 0 };
+    for (const alloc of turnResult.salesRecord.allocations) {
+      if (alloc.product === "pd") targetDemandByProduct.pd += unwrapUnit(alloc.targetDemand);
+      else if (alloc.product === "vap") targetDemandByProduct.vap += unwrapUnit(alloc.targetDemand);
+    }
+    marketEvolutionStateAfter = updateMarketEvolutionState(state.marketEvolutionState, {
+      offeredByProduct,
+      targetDemandByProduct,
+      marketResult: turnResult.marketResult,
+      referencePremiumRatios: sai5ReferencePremiumRatios,
+    });
+    sai5MarketEvolutionRecord = {
+      appliedPremiumRatioMultipliers,
+      appliedAdoptionTurnShift,
+      substitutionShareShift,
+      ...(lifecycleMix ? { appliedMix: lifecycleMix } : {}),
+      supplyPressureByProduct: {
+        pd: targetDemandByProduct.pd > 0 ? offeredByProduct.pd / targetDemandByProduct.pd : 1,
+        vap: targetDemandByProduct.vap > 0 ? offeredByProduct.vap / targetDemandByProduct.vap : 1,
+      },
+      offeredByProduct,
+      targetDemandByProduct,
+    };
+  }
 
   // --- 次期のPD/VAP供給シグナル用に、当期の実績生産量（品質調整後＝販売可能量）を会社×商品で集計する ---
   const lastQuarterActualProduction: Record<CompanyId, Record<Product, number>> = {};
@@ -1156,6 +1260,9 @@ export function advanceCompanyLabQuarter(
     financingResults,
     capexResults,
     consumerMarketRecords,
+    // 【SAI-5E】市場進化の因果ログ（機能有効時のみ。optionalのため既存の
+    // 履歴形状・persistence・SAI-3Bパーサーへの影響はない）。
+    ...(sai5MarketEvolutionRecord ? { sai5MarketEvolution: sai5MarketEvolutionRecord } : {}),
   };
 
   const canAdvanceWithinScenario = turn < definition.durationTurns;
@@ -1175,6 +1282,7 @@ export function advanceCompanyLabQuarter(
     lastQuarterActualProduction,
     qualityState: qualityStateAfter,
     ...(salesBaseStateAfter ? { salesBaseState: salesBaseStateAfter } : {}),
+    ...(marketEvolutionStateAfter ? { marketEvolutionState: marketEvolutionStateAfter } : {}),
     financeState: financeStateAfter,
     financingState: financingStateAfter,
     capexState: capexStateAfter,

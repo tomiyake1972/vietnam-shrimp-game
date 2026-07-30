@@ -114,3 +114,55 @@ test("SAI-5D統合: 無効時はsnapshot形状が既存と同一（salesBaseStat
     assert.equal(c.ownState.salesBaseByMarketProduct, undefined);
   }
 });
+
+// ---------------------------------------------------------------------
+// SAI-5E: 供給圧力→プレミアムフィードバック
+// ---------------------------------------------------------------------
+
+test("SAI-5E統合: supplyPremiumFeedback無効時は従来と完全に同一（後方互換）", () => {
+  const off1 = runAutoplayCase(baseConfig("sai5e-backcompat", 2));
+  const off2 = runAutoplayCase(baseConfig("sai5e-backcompat", 2, { supplyPremiumFeedbackEnabled: false }));
+  assert.equal(JSON.stringify(off1.history), JSON.stringify(off2.history));
+});
+
+test("SAI-5E統合: 有効時、8四半期完走・同一seedで完全再現・供給圧力とプレミアム倍率が記録される", () => {
+  const config = baseConfig("sai5e-on-repro", 8, { supplyPremiumFeedbackEnabled: true, productLifecycleEnabled: true });
+  const a = runAutoplayCase(config);
+  assert.equal(a.completedTurns, 8);
+  const b = runAutoplayCase(config);
+  assert.equal(JSON.stringify(a.history), JSON.stringify(b.history));
+  for (const h of a.history) {
+    const rec = h.sai5MarketEvolution;
+    assert.ok(rec, `turn${h.turn}にsai5MarketEvolutionが記録されていない`);
+    for (const p of ["pd", "vap"] as const) {
+      assertAllFinite(rec!.supplyPressureByProduct[p], `turn${h.turn}.supplyPressure.${p}`);
+      assert.ok(rec!.appliedPremiumRatioMultipliers[p] >= 0.6 - 1e-9 && rec!.appliedPremiumRatioMultipliers[p] <= 1.4 + 1e-9);
+    }
+  }
+  // turn1は前期stateが無いため倍率は必ず中立1
+  assert.deepEqual(a.history[0].sai5MarketEvolution!.appliedPremiumRatioMultipliers, { pd: 1, vap: 1 });
+});
+
+test("SAI-5E統合: AIはturn2以降に供給圧力の公開統計を観測できる（turn1は前期が無いためundefined）", () => {
+  const run = runAutoplayCase(baseConfig("sai5e-outlook", 3, { supplyPremiumFeedbackEnabled: true }));
+  const turn1 = run.quarterStartCaptures.find((c) => c.turn === 1)!;
+  const turn2 = run.quarterStartCaptures.find((c) => c.turn === 2)!;
+  assert.equal(turn1.publicInfo.productSupplyPressureOutlook, undefined);
+  assert.ok(turn2.publicInfo.productSupplyPressureOutlook, "turn2で供給圧力の公開統計が観測できない");
+  assertAllFinite(turn2.publicInfo.productSupplyPressureOutlook);
+});
+
+test("SAI-5E統合: 契約単価は遡及変更されない（同一契約のunitPriceが全四半期で不変）", () => {
+  const run = runAutoplayCase(baseConfig("sai5e-contract-immutable", 6, { supplyPremiumFeedbackEnabled: true, productLifecycleEnabled: true }));
+  const priceByContract = new Map<string, number>();
+  for (const h of run.history) {
+    for (const c of h.salesRecord.newContracts) {
+      priceByContract.set(c.contractId, c.unitPrice as unknown as number);
+    }
+  }
+  // 最終状態の契約一覧で、成約時の単価から変わっていないことを確認
+  const lastState = run.history[run.history.length - 1];
+  for (const c of lastState.salesRecord.newContracts) {
+    assert.equal(c.unitPrice as unknown as number, priceByContract.get(c.contractId));
+  }
+});

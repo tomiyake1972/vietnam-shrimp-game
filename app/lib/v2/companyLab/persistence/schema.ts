@@ -68,6 +68,7 @@ import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterR
 import type { WorkforceState } from "../workforce";
 import type { ConsumerMarketCarryState, ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 import type { SalesBaseState } from "../salesBase";
+import type { MarketEvolutionState } from "../marketEvolution";
 import {
   CompanyLabDraftEnvelope,
   CompanyLabPersistedCurrentState,
@@ -685,6 +686,7 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
   // 【SAI-5D・schemaVersion 4】optionalな営業基盤ストック。キー欠落（v1〜v3の
   // 既存データ）はundefined（機能無効）として復元する。
   const salesBaseState = validateSalesBaseState(obj.salesBaseState, `${path}.salesBaseState`);
+  const marketEvolutionState = validateMarketEvolutionState(obj.marketEvolutionState, `${path}.marketEvolutionState`);
   const isComplete = requireBoolean(obj.isComplete, `${path}.isComplete`);
 
   return {
@@ -701,6 +703,7 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
     workforceState,
     consumerMarketState,
     ...(salesBaseState ? { salesBaseState } : {}),
+    ...(marketEvolutionState ? { marketEvolutionState } : {}),
     isComplete,
   };
 }
@@ -799,6 +802,27 @@ function validateSalesBaseState(raw: unknown, path: string): SalesBaseState | un
 }
 
 const PRODUCTS_FOR_SALES_BASE = ["hoso", "pd", "vap"] as const;
+
+/**
+ * 【SAI-5E・schemaVersion 4】市場進化carry stateの検証。キー欠落・nullは
+ * undefined（機能無効）を返す。
+ */
+function validateMarketEvolutionState(raw: unknown, path: string): MarketEvolutionState | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = requireObject(raw, path);
+  const validateEntry = (entryRaw: unknown, entryPath: string) => {
+    const e = requireObject(entryRaw, entryPath);
+    return {
+      supplyPressureEwma: requireFiniteNumber(e.supplyPressureEwma, `${entryPath}.supplyPressureEwma`),
+      premiumRatioMultiplier: requireFiniteNumber(e.premiumRatioMultiplier, `${entryPath}.premiumRatioMultiplier`),
+      affordabilitySignalEwma: requireFiniteNumber(e.affordabilitySignalEwma, `${entryPath}.affordabilitySignalEwma`),
+    };
+  };
+  return {
+    pd: validateEntry(obj.pd, `${path}.pd`),
+    vap: validateEntry(obj.vap, `${path}.vap`),
+  };
+}
 
 // ---------------------------------------------------------------------
 // 8. CompanyFixture・CompanyLabConfig（軽量検証。静的フィクスチャデータ）
