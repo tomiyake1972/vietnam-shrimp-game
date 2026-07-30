@@ -24,6 +24,12 @@ function analysisFromRuns(specs: readonly { runId: string; headcount: number; de
 
 const EXPECTED_SHEETS = [
   "README",
+  "経営ダッシュボード",
+  "売上・数量推移",
+  "市場シェア推移",
+  "利益・採算推移",
+  "資金繰り・財務推移",
+  "在庫・運転資金推移",
   "全体サマリー",
   "グラフ",
   "会社別業績",
@@ -175,12 +181,14 @@ test("renderSai3bWorkbookToBuffer: 営業能力使用率が欠損しているrun
   const buffer = await renderSai3bWorkbookToBuffer(analysis);
   const zip = await JSZip.loadAsync(buffer);
 
-  // 4つのネイティブグラフのうち、「平均営業能力使用率」のグラフXMLを特定する。
+  // SAI-3B-2でダッシュボード系シートのグラフが「グラフ」シートより先に追加され、
+  // chart番号がグローバルに振られるため、固定範囲(1-4)ではなく実際に存在する
+  // xl/charts/chart*.xmlすべてから「平均営業能力使用率」のグラフXMLを探す。
+  const chartFileNames = Object.keys(zip.files).filter((name) => /^xl\/charts\/chart\d+\.xml$/.test(name));
+  assert.ok(chartFileNames.length > 0, "ネイティブグラフのXMLファイルが1つも見つからない");
   let utilChartXml: string | undefined;
-  for (let i = 1; i <= 4; i++) {
-    const file = zip.file(`xl/charts/chart${i}.xml`);
-    if (!file) continue;
-    const xml = await file.async("string");
+  for (const name of chartFileNames) {
+    const xml = await zip.file(name)!.async("string");
     if (xml.includes("平均営業能力使用率")) {
       utilChartXml = xml;
       break;

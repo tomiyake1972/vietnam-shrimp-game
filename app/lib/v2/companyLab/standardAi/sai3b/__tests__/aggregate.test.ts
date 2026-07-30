@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { loadSai3aRun } from "../loadRun";
 import {
   buildCompanyPerformance,
+  buildCompanyQuarterStats,
   buildDashboardSummary,
   buildHeadcountComparison,
   buildHeadcountDivergence,
@@ -284,6 +285,41 @@ test("buildHeadcountDivergence: 乖離が発生したturnとKPIを機械的に�
   assert.equal(rows.length, 1);
   assert.equal(rows[0].firstDivergingTurn, 2);
   assert.equal(rows[0].firstDivergingKpi, "netRevenueUsd");
+});
+
+test("buildCompanyQuarterStats: 複数seedの分布からaverage/median/min/maxが正しく計算され、defaultedSeedCountが正しい", () => {
+  const run = makeLoadedRun({
+    runLabel: "r1",
+    quarterSummaryRows: [
+      makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 1, netRevenueUsd: 1_000_000, grossProfitUsd: 200_000 }),
+      makeQuarterSummaryRow({ seed: "s2", companyId: "BAL", turn: 1, netRevenueUsd: 2_000_000, grossProfitUsd: 400_000 }),
+      makeQuarterSummaryRow({ seed: "s3", companyId: "BAL", turn: 1, netRevenueUsd: 3_000_000, grossProfitUsd: 600_000, paymentDefault: true }),
+    ],
+  });
+  const quarterPerformance = buildQuarterPerformance([run]);
+  const rows = buildCompanyQuarterStats([run], quarterPerformance);
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.equal(row.seedCount, 3);
+  assert.equal(row.defaultedSeedCount, 1);
+  assert.equal(row.netRevenueUsd.average, 2_000_000);
+  assert.equal(row.netRevenueUsd.median, 2_000_000);
+  assert.equal(row.netRevenueUsd.min, 1_000_000);
+  assert.equal(row.netRevenueUsd.max, 3_000_000);
+  // grossMarginRateは各seedのgrossProfit/netRevenueが全て0.2なので、平均・中央値とも0.2。
+  assert.ok(Math.abs(row.grossMarginRate.average! - 0.2) < 1e-9);
+});
+
+test("buildCompanyQuarterStats: 値が1件も無いKPI（market-allocation-trace無しのactualSalesQuantityHosoEqTons）はn=0でaverage等がundefined", () => {
+  const run = makeLoadedRun({
+    runLabel: "r1",
+    quarterSummaryRows: [makeQuarterSummaryRow({ seed: "s1", companyId: "BAL", turn: 1 })],
+    marketAllocationTraceRows: [],
+  });
+  const quarterPerformance = buildQuarterPerformance([run]);
+  const rows = buildCompanyQuarterStats([run], quarterPerformance);
+  assert.equal(rows[0].actualSalesQuantityHosoEqTons.n, 0);
+  assert.equal(rows[0].actualSalesQuantityHosoEqTons.average, undefined);
 });
 
 test("buildHeadcountDivergence: 全turnで乖離が閾値を超えない場合はfirstDivergingTurnがundefined", () => {

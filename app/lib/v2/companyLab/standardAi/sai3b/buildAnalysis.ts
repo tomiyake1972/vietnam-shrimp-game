@@ -9,12 +9,14 @@ import { LoadedSai3aRun, Sai3bAnalysis, SAI3B_VERSION } from "./schema";
 import {
   buildAdjustmentAnalysis,
   buildCompanyPerformance,
+  buildCompanyQuarterStats,
   buildDashboardSummary,
   buildDecisionTrace,
   buildDefaultWarningEvents,
   buildHeadcountComparison,
   buildHeadcountDivergence,
   buildMarketShare,
+  buildMarketShareStats,
   buildProcurementProduction,
   buildQuarterPerformance,
   buildReasonCodeTally,
@@ -56,6 +58,7 @@ const MISSING_FIELD_NOTES: readonly string[] = [
 export function buildSai3bAnalysis(loadedRuns: readonly LoadedSai3aRun[], options: BuildSai3bAnalysisOptions): Sai3bAnalysis {
   const comparison = validateComparableRuns(loadedRuns);
   const quarterPerformance = buildQuarterPerformance(loadedRuns);
+  const marketShare = buildMarketShare(loadedRuns);
 
   return {
     generatedAtIso: options.generatedAtIso,
@@ -73,7 +76,9 @@ export function buildSai3bAnalysis(loadedRuns: readonly LoadedSai3aRun[], option
     defaultWarningEvents: buildDefaultWarningEvents(loadedRuns),
     reasonCodeTally: buildReasonCodeTally(loadedRuns),
     headcountComparison: buildHeadcountComparison(loadedRuns, comparison.commonSeeds, comparison.commonCompanyIds),
-    marketShare: buildMarketShare(loadedRuns),
+    companyQuarterStats: buildCompanyQuarterStats(loadedRuns, quarterPerformance),
+    marketShare,
+    marketShareStats: buildMarketShareStats(marketShare),
     headcountDivergence: buildHeadcountDivergence(loadedRuns, quarterPerformance, comparison.commonSeeds, comparison.commonCompanyIds),
     decisionTrace: buildDecisionTrace(loadedRuns),
     missingFieldReports: MISSING_FIELD_NOTES,

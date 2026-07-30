@@ -26,7 +26,8 @@ import {
   USD_FORMAT,
   writeHeaderRow,
 } from "./styles";
-import { ChartSpec, injectNativeCharts } from "./chartInjector";
+import { ChartSpec, injectNativeChartsMultiSheet, SheetChartSpecs } from "./chartInjector";
+import { SheetChartResult, writeAllDashboardSheets } from "./dashboardCharts";
 
 type CellValue = string | number | boolean | undefined;
 type ColumnFormat = "usd" | "quantity" | "rate" | "integer" | "text" | "bool";
@@ -309,13 +310,21 @@ function writeChartsDataSheet(wb: ExcelJS.Workbook, analysis: Sai3bAnalysis): vo
   });
 }
 
-export function buildSai3bWorkbook(analysis: Sai3bAnalysis): ExcelJS.Workbook {
+/**
+ * ブック本体（全シート）を組み立てる内部実装。SAI-3B-2で追加した経営ダッシュボード
+ * 系6シート（dashboardCharts.ts）は、README直後・「近いフロント」に配置する
+ * （三宅さんの指示§2）。これらのシートのChartSpecはシート内の行位置に依存するため
+ * （writeAllDashboardSheetsが実際にシートへ書き込みながら算出する）、ここで一緒に
+ * 返し、renderSai3bWorkbookToBufferがそのままinjectNativeChartsMultiSheetへ渡す。
+ */
+function buildSai3bWorkbookInternal(analysis: Sai3bAnalysis): { readonly wb: ExcelJS.Workbook; readonly dashboardSheetResults: readonly SheetChartResult[] } {
   const wb = new ExcelJS.Workbook();
   wb.creator = "ShrimpX V2 SAI-3B-1";
   wb.created = new Date(analysis.generatedAtIso);
   wb.modified = wb.created;
 
   writeReadmeSheet(wb, analysis);
+  const dashboardSheetResults = writeAllDashboardSheets(wb, analysis);
   writeDashboardSheet(wb, analysis.dashboard);
   writeChartsDataSheet(wb, analysis);
   writeCompanyPerformanceSheet(wb, analysis);
@@ -332,7 +341,11 @@ export function buildSai3bWorkbook(analysis: Sai3bAnalysis): ExcelJS.Workbook {
   writeDecisionTraceSheet(wb, analysis);
   writeRawDataSheets(wb, analysis);
 
-  return wb;
+  return { wb, dashboardSheetResults };
+}
+
+export function buildSai3bWorkbook(analysis: Sai3bAnalysis): ExcelJS.Workbook {
+  return buildSai3bWorkbookInternal(analysis).wb;
 }
 
 // ---------------------------------------------------------------------
@@ -915,9 +928,16 @@ function buildSai3bChartSpecs(analysis: Sai3bAnalysis): readonly ChartSpec[] {
  * chartInjector.injectNativeCharts（非同期）でグラフを後付けする。
  */
 export async function renderSai3bWorkbookToBuffer(analysis: Sai3bAnalysis): Promise<Buffer> {
-  const wb = buildSai3bWorkbook(analysis);
+  const { wb, dashboardSheetResults } = buildSai3bWorkbookInternal(analysis);
   const baseBuffer = Buffer.from(await wb.xlsx.writeBuffer());
-  const specs = buildSai3bChartSpecs(analysis);
-  if (specs.length === 0) return baseBuffer;
-  return injectNativeCharts(baseBuffer, CHART_SHEET_NAME, specs);
+
+  const sheetSpecs: SheetChartSpecs[] = [];
+  for (const result of dashboardSheetResults) {
+    if (result.specs.length > 0) sheetSpecs.push({ sheetName: result.sheetName, specs: result.specs });
+  }
+  const chartSheetSpecs = buildSai3bChartSpecs(analysis);
+  if (chartSheetSpecs.length > 0) sheetSpecs.push({ sheetName: CHART_SHEET_NAME, specs: chartSheetSpecs });
+
+  if (sheetSpecs.length === 0) return baseBuffer;
+  return injectNativeChartsMultiSheet(baseBuffer, sheetSpecs);
 }

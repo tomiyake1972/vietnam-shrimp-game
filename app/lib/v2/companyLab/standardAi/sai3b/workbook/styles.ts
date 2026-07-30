@@ -64,3 +64,34 @@ export function boolToLabel(v: boolean | undefined): string {
   if (v === undefined) return "";
   return v ? "はい" : "いいえ";
 }
+
+// ---------------------------------------------------------------------
+// SAI-3B-2で追加。会社別・営業人数別の色をブック全体で一貫させるための
+// 固定パレット（三宅さんの指示§7「会社A〜E・80/85/90人の配色を全シートで統一」）。
+// ---------------------------------------------------------------------
+
+/** 会社IDの標準表示順（全シート共通。report/decomposeHarness.tsのALL_COMPANY_IDSと同じ順）。 */
+export const CANONICAL_COMPANY_ORDER: readonly string[] = ["BAL", "MASS", "JPQ", "VAP", "CONSV"];
+
+/** 会社ID(SaiCompanyId) -> 色（6桁HEX、"#"なし）。全シートで同じ会社は同じ色。 */
+export const COMPANY_COLOR_HEX: Readonly<Record<string, string>> = {
+  BAL: "4472C4", // 青
+  MASS: "ED7D31", // オレンジ
+  JPQ: "A5A5A5", // グレー
+  VAP: "FFC000", // 黄
+  CONSV: "70AD47", // 緑
+};
+
+export function companyColorHex(companyId: string): string | undefined {
+  return COMPANY_COLOR_HEX[companyId];
+}
+
+/** 営業人数(headcount) -> 色。80/85/90の3値が主な用途だが、他の値が来ても
+ *  ソート順に応じて固定パレットを順番に割り当てることで一貫性を保つ。 */
+const HEADCOUNT_PALETTE: readonly string[] = ["4472C4", "C00000", "70AD47", "FFC000", "7030A0", "1F4E78"];
+
+export function headcountColorHex(sortedHeadcounts: readonly number[], headcount: number): string | undefined {
+  const idx = sortedHeadcounts.indexOf(headcount);
+  if (idx < 0) return undefined;
+  return HEADCOUNT_PALETTE[idx % HEADCOUNT_PALETTE.length];
+}

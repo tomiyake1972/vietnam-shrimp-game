@@ -8,6 +8,7 @@
 import {
   AdjustmentAnalysisRow,
   CompanyPerformanceRow,
+  CompanyQuarterStatRow,
   DashboardSummaryRow,
   DecisionTraceRow,
   DefaultWarningEventRow,
@@ -15,6 +16,7 @@ import {
   HeadcountDivergenceRow,
   LoadedSai3aRun,
   MarketShareRow,
+  MarketShareStatRow,
   ProcurementProductionRow,
   QuarterPerformanceRow,
   ReasonCodeTallyRow,
@@ -23,6 +25,7 @@ import {
   SalesAnalysisRow,
   SalesCapacityMarketBreakdownRow,
   SalesCapacityRow,
+  StatSummary,
 } from "./schema";
 import type { DecisionTraceLine } from "../autoplay/output";
 import { lookupReasonCode } from "./reasonCodeCatalog";
@@ -231,6 +234,77 @@ export function buildQuarterPerformance(runs: readonly LoadedSai3aRun[]): readon
 }
 
 // ---------------------------------------------------------------------
+// 4-12b（SAI-3B-2で追加）. 会社×turn分布要約（ダッシュボード見出しグラフ用）
+// ---------------------------------------------------------------------
+
+function statSummary(values: readonly number[]): StatSummary {
+  const finite = values.filter((v) => Number.isFinite(v));
+  if (finite.length === 0) return { n: 0 };
+  const sorted = [...finite].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  return {
+    average: sum(finite) / finite.length,
+    median,
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+    n: finite.length,
+  };
+}
+
+function pickDefined<T, K extends { [P in keyof T]: T[P] extends number | undefined ? P : never }[keyof T]>(rows: readonly T[], key: K): number[] {
+  return rows.map((r) => r[key] as unknown as number | undefined).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+}
+
+export function buildCompanyQuarterStats(runs: readonly LoadedSai3aRun[], quarterPerformance: readonly QuarterPerformanceRow[]): readonly CompanyQuarterStatRow[] {
+  const result: CompanyQuarterStatRow[] = [];
+  for (const run of runs) {
+    const rowsForRun = quarterPerformance.filter((r) => r.runLabel === run.runLabel);
+    const companyIds = Array.from(new Set(rowsForRun.map((r) => r.companyId))).sort();
+    const turns = Array.from(new Set(rowsForRun.map((r) => r.turn))).sort((a, b) => a - b);
+
+    for (const companyId of companyIds) {
+      for (const turn of turns) {
+        const group = rowsForRun.filter((r) => r.companyId === companyId && r.turn === turn);
+        if (group.length === 0) continue;
+        const period = group[0].period;
+        const marginRates = group
+          .filter((r) => Math.abs(r.netRevenueUsd) > EPSILON)
+          .map((r) => r.grossProfitUsd / r.netRevenueUsd);
+
+        result.push({
+          runLabel: run.runLabel,
+          companyId,
+          turn,
+          period,
+          seedCount: group.length,
+          defaultedSeedCount: group.filter((r) => r.paymentDefault).length,
+          netRevenueUsd: statSummary(pickDefined(group, "netRevenueUsd")),
+          grossProfitUsd: statSummary(pickDefined(group, "grossProfitUsd")),
+          grossMarginRate: statSummary(marginRates),
+          operatingProfitUsd: statSummary(pickDefined(group, "operatingProfitUsd")),
+          netIncomeUsd: statSummary(pickDefined(group, "netIncomeUsd")),
+          closingCashUsd: statSummary(pickDefined(group, "closingCashUsd")),
+          operatingCashFlowUsd: statSummary(pickDefined(group, "operatingCashFlowUsd")),
+          investingCashFlowUsd: statSummary(pickDefined(group, "investingCashFlowUsd")),
+          financingCashFlowUsd: statSummary(pickDefined(group, "financingCashFlowUsd")),
+          shortTermLoansUsd: statSummary(pickDefined(group, "shortTermLoansUsd")),
+          longTermLoansUsd: statSummary(pickDefined(group, "longTermLoansUsd")),
+          availableAdditionalCapacityUsd: statSummary(pickDefined(group, "endingAvailableAdditionalCapacityUsd")),
+          rawMaterialInventoryHosoEqTons: statSummary(pickDefined(group, "rawMaterialInventoryHosoEqTons")),
+          finishedGoodsInventoryHosoEqTons: statSummary(pickDefined(group, "finishedGoodsInventoryHosoEqTons")),
+          accountsReceivableUsdAtStart: statSummary(pickDefined(group, "accountsReceivableUsdAtStart")),
+          accountsPayableUsdAtStart: statSummary(pickDefined(group, "accountsPayableUsdAtStart")),
+          actualSalesQuantityHosoEqTons: statSummary(pickDefined(group, "actualSalesQuantityHosoEqTons")),
+          finalPlannedSalesQuantityHosoEqTons: statSummary(pickDefined(group, "finalPlannedSalesQuantityTotal")),
+        });
+      }
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------
 // 4-13（SAI-3B-2で追加）. 市場別シェア推移
 // ---------------------------------------------------------------------
 
@@ -278,6 +352,35 @@ export function buildMarketShare(runs: readonly LoadedSai3aRun[]): readonly Mark
       a.seed.localeCompare(b.seed) ||
       a.turn - b.turn ||
       a.companyId.localeCompare(b.companyId)
+  );
+}
+
+/** buildMarketShare（seed単位）を、run×市場×会社×turnで横断集計し、
+ *  quantityShareの中央値を求める（ダッシュボードのLayer1見出し値）。 */
+export function buildMarketShareStats(marketShare: readonly MarketShareRow[]): readonly MarketShareStatRow[] {
+  const byKey = new Map<string, MarketShareRow[]>();
+  for (const r of marketShare) {
+    const key = `${r.runLabel}::${r.market}::${r.companyId}::${r.turn}`;
+    const arr = byKey.get(key);
+    if (arr) arr.push(r);
+    else byKey.set(key, [r]);
+  }
+  const result: MarketShareStatRow[] = [];
+  for (const [key, rows] of byKey.entries()) {
+    const [runLabel, market, companyId, turnStr] = key.split("::");
+    const stat = statSummary(rows.map((r) => r.quantityShare));
+    result.push({
+      runLabel,
+      market,
+      companyId,
+      turn: Number(turnStr),
+      period: rows[0].period,
+      quantityShareMedian: stat.median,
+      seedCount: stat.n,
+    });
+  }
+  return result.sort(
+    (a, b) => a.runLabel.localeCompare(b.runLabel) || a.market.localeCompare(b.market) || a.companyId.localeCompare(b.companyId) || a.turn - b.turn
   );
 }
 

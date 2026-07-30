@@ -358,6 +358,19 @@ export interface MarketShareRow {
   readonly companyCountInMarket: number;
 }
 
+/** MarketShareRow（seed単位）を、run×市場×会社×turnで横断集計した中央値
+ *  （ダッシュボードの市場別シェア推移チャート用。Layer1見出し値）。 */
+export interface MarketShareStatRow {
+  readonly runLabel: string;
+  readonly market: string;
+  readonly companyId: string;
+  readonly turn: number;
+  readonly period: string;
+  readonly quantityShareMedian?: number;
+  /** シェアを計算できたseed数。 */
+  readonly seedCount: number;
+}
+
 /**
  * 80/85/90人比較における「最初に乖離が始まった四半期」の追跡（SAI-3B-2 §6）。
  * 原因の特定・断定は行わない（三宅さんの指示どおり「乖離開始点の可視化」のみ）。
@@ -366,6 +379,61 @@ export interface MarketShareRow {
  * （(最大-最小)/max(|最大|,ε)）が閾値を超えた最初のturnを機械的に検出する
  * ヒューリスティックであり、統計的因果推論ではない。
  */
+/**
+ * 会社×seedを横断した分布要約（SAI-3B-2 §5「3層構造」のLayer1見出しグラフ用）。
+ * average/medianの両方を保持し、default等の外れ値が多いKPIではmedianを
+ * 見出し線として採用できるようにする（三宅さんの指示§5）。値が1件も無い
+ * （n=0）場合はaverage/median/min/maxすべてundefinedのまま（0にしない）。
+ */
+export interface StatSummary {
+  readonly average?: number;
+  readonly median?: number;
+  readonly min?: number;
+  readonly max?: number;
+  readonly n: number;
+}
+
+/**
+ * run×会社×turn単位で、その会社×turnに該当する全seedの値を分布要約した行
+ * （SAI-3B-2 §5 Layer1：経営ダッシュボード見出しグラフ用のデータ源）。
+ * Layer2（会社/seed比較統計）はこの行のStatSummaryそのもの、Layer3（個別run
+ * 詳細）は既存の四半期業績シート（QuarterPerformanceRow、seed単位）を参照する
+ * 設計とし、同じ値を二重に持たない。
+ */
+export interface CompanyQuarterStatRow {
+  readonly runLabel: string;
+  readonly companyId: string;
+  readonly turn: number;
+  readonly period: string;
+  /** この会社×turnにデータが存在したseed数（全seed中）。 */
+  readonly seedCount: number;
+  /** 上記のうちpaymentDefault=trueだったseed数。 */
+  readonly defaultedSeedCount: number;
+  readonly netRevenueUsd: StatSummary;
+  readonly grossProfitUsd: StatSummary;
+  /** 粗利益率（粗利益÷売上）。売上が0のseedはこのKPIの分布から除外する。 */
+  readonly grossMarginRate: StatSummary;
+  readonly operatingProfitUsd: StatSummary;
+  readonly netIncomeUsd: StatSummary;
+  readonly closingCashUsd: StatSummary;
+  readonly operatingCashFlowUsd: StatSummary;
+  readonly investingCashFlowUsd: StatSummary;
+  readonly financingCashFlowUsd: StatSummary;
+  readonly shortTermLoansUsd: StatSummary;
+  readonly longTermLoansUsd: StatSummary;
+  readonly availableAdditionalCapacityUsd: StatSummary;
+  readonly rawMaterialInventoryHosoEqTons: StatSummary;
+  readonly finishedGoodsInventoryHosoEqTons: StatSummary;
+  /** 期首（四半期開始時点）の値。期末残高はSAI-3Aの出力に含まれていない。 */
+  readonly accountsReceivableUsdAtStart: StatSummary;
+  readonly accountsPayableUsdAtStart: StatSummary;
+  /** market-allocation-trace.csv由来の実際の獲得数量。ファイルが無い古いrunでは
+   *  n=0のまま。 */
+  readonly actualSalesQuantityHosoEqTons: StatSummary;
+  /** 営業工数制約適用後にengineへ提出された「最終計画数量」（実績ではない）。 */
+  readonly finalPlannedSalesQuantityHosoEqTons: StatSummary;
+}
+
 export interface HeadcountDivergenceRow {
   readonly companyId: string;
   readonly seed: string;
@@ -551,9 +619,14 @@ export interface Sai3bAnalysis {
   readonly defaultWarningEvents: readonly DefaultWarningEventRow[];
   readonly reasonCodeTally: readonly ReasonCodeTallyRow[];
   readonly headcountComparison: readonly HeadcountComparisonRow[];
+  /** SAI-3B-2で追加。ダッシュボードの見出しグラフ（§5 Layer1）用の会社×turn分布要約。 */
+  readonly companyQuarterStats: readonly CompanyQuarterStatRow[];
   /** SAI-3B-2で追加。market-allocation-trace.csvが存在しないrunのみで構成
    *  された場合は空配列（「現時点の出力データでは作成不能」の扱い）。 */
   readonly marketShare: readonly MarketShareRow[];
+  /** SAI-3B-2で追加。marketShareをseed横断で中央値集計したもの（ダッシュボード
+   *  グラフ用のLayer1見出し値。marketShare自体はseed単位の生データ）。 */
+  readonly marketShareStats: readonly MarketShareStatRow[];
   /** SAI-3B-2で追加。複数run（headcount比較）入力時のみ意味を持つ（単一run
    *  入力時は空配列）。 */
   readonly headcountDivergence: readonly HeadcountDivergenceRow[];

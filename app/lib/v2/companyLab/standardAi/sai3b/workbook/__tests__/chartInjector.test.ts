@@ -190,6 +190,39 @@ test("injectNativeChartsMultiSheet: 複数シートへそれぞれグラフを�
   assert.equal(wb.getWorksheet("シートB")!.getRow(3).getCell(2).value, 20);
 });
 
+test("injectNativeCharts: colorHexを指定した系列は、bar/lineそれぞれ正しい形式でspPrへ出力される", async () => {
+  const base = await buildBaseWorkbookBuffer();
+  const out = await injectNativeCharts(base, "グラフ", [
+    {
+      title: "Bar with color",
+      type: "bar",
+      categoriesRef: "'グラフ'!$A$2:$A$4",
+      categories: ["80", "85", "90"],
+      series: [{ name: "s1", valuesRef: "'グラフ'!$B$2:$B$4", values: [1, 2, 3], colorHex: "4472C4" }],
+      anchorCol: 3,
+      anchorRow: 0,
+      widthCols: 6,
+      heightRows: 10,
+    },
+    {
+      title: "Line with color",
+      type: "line",
+      categoriesRef: "'グラフ'!$A$2:$A$4",
+      categories: ["80", "85", "90"],
+      series: [{ name: "s2", valuesRef: "'グラフ'!$B$2:$B$4", values: [1, 2, 3], colorHex: "ED7D31" }],
+      anchorCol: 3,
+      anchorRow: 12,
+      widthCols: 6,
+      heightRows: 10,
+    },
+  ]);
+  const zip = await JSZip.loadAsync(out);
+  const chart1Xml = await zip.file("xl/charts/chart1.xml")!.async("string");
+  assert.match(chart1Xml, /<c:spPr><a:solidFill><a:srgbClr val="4472C4"\/><\/a:solidFill><\/c:spPr>/);
+  const chart2Xml = await zip.file("xl/charts/chart2.xml")!.async("string");
+  assert.match(chart2Xml, /<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="ED7D31"\/><\/a:solidFill><\/a:ln><\/c:spPr>/);
+});
+
 test("injectNativeChartsMultiSheet: すべてのシートでspecsが空なら元バッファをそのまま返す", async () => {
   const base = await buildTwoSheetWorkbookBuffer();
   const out = await injectNativeChartsMultiSheet(base, [

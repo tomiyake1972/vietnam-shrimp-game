@@ -24,6 +24,10 @@ export interface ChartSeriesSpec {
    *  ことで、グラフ上は空欄（棒グラフなら棒なし、線グラフなら線が途切れる）
    *  として表現される（三宅さんの指示：欠損値をゼロへ変換しない設計原則）。 */
   readonly values: readonly (number | undefined)[];
+  /** SAI-3B-2で追加。系列の色（6桁HEX、例: "4472C4"）。会社別・営業人数別の
+   *  色を全シートで一貫させるため（三宅さんの指示§7）。未指定時はExcelの
+   *  既定テーマ配色に委ねる。 */
+  readonly colorHex?: string;
 }
 
 export interface ChartSpec {
@@ -60,11 +64,20 @@ function buildNumCache(values: readonly (number | undefined)[]): string {
   return `<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${values.length}"/>${pts}</c:numCache>`;
 }
 
+function buildSeriesShapeProps(spec: ChartSpec, colorHex: string): string {
+  // 棒グラフは塗りつぶし色、線グラフは線色として同じ色指定を適用する。
+  if (spec.type === "bar") {
+    return `<c:spPr><a:solidFill><a:srgbClr val="${colorHex}"/></a:solidFill></c:spPr>`;
+  }
+  return `<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="${colorHex}"/></a:solidFill></a:ln></c:spPr>`;
+}
+
 function buildSeriesXml(spec: ChartSpec, series: ChartSeriesSpec, idx: number): string {
   return (
     `<c:ser>` +
     `<c:idx val="${idx}"/><c:order val="${idx}"/>` +
     `<c:tx><c:v>${xmlEscape(series.name)}</c:v></c:tx>` +
+    (series.colorHex ? buildSeriesShapeProps(spec, series.colorHex) : ``) +
     `<c:cat><c:strRef><c:f>${xmlEscape(spec.categoriesRef)}</c:f>${buildStrCache(spec.categories)}</c:strRef></c:cat>` +
     `<c:val><c:numRef><c:f>${xmlEscape(series.valuesRef)}</c:f>${buildNumCache(series.values)}</c:numRef></c:val>` +
     (spec.type === "line" ? `<c:smooth val="0"/>` : ``) +
