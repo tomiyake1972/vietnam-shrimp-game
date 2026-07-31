@@ -171,6 +171,20 @@ export interface StandardAiParameters {
    *  が「PD・VAP能力不足が継続した場合の設備投資判断を少し早める」を、HOSOには
    *  影響させずPD/VAPだけに適用するための差し込み口。 */
   readonly capexShortfallThresholdBiasByProduct: Readonly<Partial<Record<Product, number>>>;
+
+  /**
+   * 【SAI-6 Phase 1A追加】資金見通し（funding outlook）に基づく必要借入の是正を
+   * 有効化するかどうか。既定false（＝decision/finance.tsの既存の「現金と最低
+   * バッファの差額」だけを見る計算式のまま。既存の全出力・全テストへの影響は
+   * ゼロ）。trueにすると、当期に確実な入金（前期末までの売掛金のうち当期決済期
+   * 到来分）・当期に確実な支出（前期末までの買掛金のうち当期決済期到来分、
+   * 既存借入の当期約定利息・元本、当期自身の調達・労務の意思決定に基づく
+   * 現金支出見積り、fixture由来の販管費固定費）から資金見通しを立て、必要借入額
+   * を計算し直す（decision/finance.ts §Phase1A参照）。将来の市場結果・乱数は
+   * 一切参照しない。他のSAI-6機能（labor/price等、いずれも未実装）とは独立して
+   * 単独でON/OFFできる。
+   */
+  readonly fundingOutlookEnabled: boolean;
 }
 
 /**
@@ -232,6 +246,8 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   severeCashPressureThreshold: 0.7,
 
   capexShortfallThresholdBiasByProduct: {},
+
+  fundingOutlookEnabled: false,
 };
 
 // ---------------------------------------------------------------------

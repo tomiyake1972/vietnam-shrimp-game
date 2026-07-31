@@ -27,8 +27,9 @@ import { buildStandardAiSalesPlans } from "./decision/sales";
 import { buildStandardAiProductionPlans } from "./decision/production";
 import { buildStandardAiProcurementPlan } from "./decision/procurement";
 import { buildStandardAiWorkerAssignments } from "./decision/labor";
-import { buildStandardAiFinancingRequest } from "./decision/finance";
+import { buildStandardAiFinancingRequest, FundingOutlookInputs } from "./decision/finance";
 import { buildStandardAiCapexDecision } from "./decision/capex";
+import { FINANCE_PARAMETERS_V1 } from "../../finance/parameters";
 import { sumProductAmount } from "./types";
 import { StandardAiDiagnosticEntry } from "./reasonCodes";
 import { SalesWishEntry } from "./decision/sales";
@@ -112,7 +113,31 @@ export function generateStandardAiDecisionWithDiagnostics(
 
   const procurementResult = buildStandardAiProcurementPlan(fixture, observation, pressures, requiredRawMaterial, period, params);
   const laborResult = buildStandardAiWorkerAssignments(fixture, observation, pressures, productionResult.productionPlans, params);
-  const financingResult = buildStandardAiFinancingRequest(observation, pressures, params);
+
+  // 【SAI-6 Phase 1A】資金見通し（fundingOutlookEnabled=trueのときのみdecision/finance.ts側で
+  // 使用される）。当期自身の調達・労務の意思決定（procurementResult・laborResultは、この
+  // financing判断より前にすでに確定している＝パイプライン順序は変更していない）から、
+  // 当期の現金支出見積りを機械的に導出するだけであり、将来の市場結果・乱数は一切含まない。
+  const fundingOutlook: FundingOutlookInputs = {
+    period,
+    financeState: ownState.financeState,
+    financingState: ownState.financingState,
+    domesticPurchaseCashNeedUsd:
+      unwrapUnit(procurementResult.domesticPurchasePlan.desiredQuantity) *
+      1000 *
+      (observation.vietnamDomesticPriorPrice ?? params.defaultExpectedRawPriceUsdPerKg),
+    laborCashCostUsd: laborResult.workerAssignments.reduce((sum, a) => {
+      const regularCost = a.regularHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter;
+      const temporaryCost = a.temporaryHeadcount * FINANCE_PARAMETERS_V1.labor.temporaryWorkerCostUsdPerQuarter;
+      const overtimeCost = regularCost * unwrapUnit(a.overtimeRate) * FINANCE_PARAMETERS_V1.labor.overtimePremiumFactor;
+      return sum + regularCost + temporaryCost + overtimeCost;
+    }, 0),
+    sgaFixedCashCostUsd:
+      FINANCE_PARAMETERS_V1.sellingGeneralAdmin.adminFixedUsdPerQuarter +
+      observation.salesForceHeadcountTotal * FINANCE_PARAMETERS_V1.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter +
+      observation.procurementHeadcountTotal * FINANCE_PARAMETERS_V1.sellingGeneralAdmin.procurementSalaryUsdPerQuarter,
+  };
+  const financingResult = buildStandardAiFinancingRequest(observation, pressures, params, fundingOutlook);
   const capexResult = buildStandardAiCapexDecision(
     fixture,
     observation,

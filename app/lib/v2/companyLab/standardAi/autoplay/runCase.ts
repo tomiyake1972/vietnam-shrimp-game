@@ -71,6 +71,13 @@ export interface AutoplayCaseConfig {
    * scripts/sai5SupplyPressureStudy.ts が候補を実測比較するためだけに使う。
    */
   readonly supplyPressureDefinition?: SupplyPressureDefinition;
+  /**
+   * 【SAI-6 Phase 1A】trueの場合のみ、StandardAiParameters.fundingOutlookEnabled
+   * をtrueへ上書きする（他のSAI-6/SAI-5系オプションとは完全に独立。未指定
+   * (false相当)なら既存の全出力・全テストへの影響ゼロ）。scripts/
+   * sai6Phase1AAbStudy.ts がPhase 1AのON/OFF A/B比較のためだけに使う。
+   */
+  readonly fundingOutlookEnabled?: boolean;
 }
 
 export interface AutoplayCaseResult {
@@ -152,18 +159,23 @@ export function runAutoplayCase(config: AutoplayCaseConfig): AutoplayCaseResult 
   const useResolver =
     Boolean(config.managementProfilesEnabled) ||
     Boolean(config.marketProductOrientationEnabled) ||
-    Boolean(config.standardAiCapexEnabled);
-  const { provider, quarterStartCaptures, diagnostics } = createInstrumentedStandardAiRun(
-    useResolver
-      ? {
-          resolveParams: createSai5ParamsResolver({
-            managementProfilesEnabled: Boolean(config.managementProfilesEnabled),
-            orientationEnabled: Boolean(config.marketProductOrientationEnabled),
-            aiCapexEnabled: Boolean(config.standardAiCapexEnabled),
-          }),
-        }
-      : {}
-  );
+    Boolean(config.standardAiCapexEnabled) ||
+    Boolean(config.fundingOutlookEnabled);
+  const baseResolveParams = createSai5ParamsResolver({
+    managementProfilesEnabled: Boolean(config.managementProfilesEnabled),
+    orientationEnabled: Boolean(config.marketProductOrientationEnabled),
+    aiCapexEnabled: Boolean(config.standardAiCapexEnabled),
+  });
+  // 【SAI-6 Phase 1A】既存のSAI-4/5系レゾルバとは完全に独立に、資金見通しフラグだけを
+  // 上書きする薄いラッパー。config.fundingOutlookEnabled未指定ならbaseResolveParamsを
+  // そのまま返す（既存の全出力・全テストへの影響ゼロ）。
+  const resolveParams = config.fundingOutlookEnabled
+    ? (companyId: Parameters<typeof baseResolveParams>[0]) => {
+        const resolution = baseResolveParams(companyId);
+        return { ...resolution, params: { ...resolution.params, fundingOutlookEnabled: true } };
+      }
+    : baseResolveParams;
+  const { provider, quarterStartCaptures, diagnostics } = createInstrumentedStandardAiRun(useResolver ? { resolveParams } : {});
   const { companies, history } = runFromInit(initResult, provider);
 
   return {

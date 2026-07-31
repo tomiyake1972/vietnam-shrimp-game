@@ -39,6 +39,7 @@ export type StandardAiReasonCode =
   // --- 資金繰り ---
   | "CASH_BUFFER_SHORTAGE" // 最低現金水準を下回る見込みのため借入
   | "DEBT_REPAYMENT_SURPLUS" // 現金余剰のため任意期限前返済
+  | "FUNDING_OUTLOOK_BORROWING_REQUESTED" // 【SAI-6 Phase 1A】資金見通しに基づく必要借入額の算出（診断用、常時記録）
   // --- 設備投資 ---
   | "CAPEX_DEFERRED" // 設備投資を見送り（既定の正常な結果）
   | "CAPEX_PROPOSED" // 持続的なボトルネック解消のため設備投資を提案
@@ -73,6 +74,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "HEADCOUNT_REDUCED_FOR_SUSTAINED_EXCESS",
   "CASH_BUFFER_SHORTAGE",
   "DEBT_REPAYMENT_SURPLUS",
+  "FUNDING_OUTLOOK_BORROWING_REQUESTED",
   "CAPEX_DEFERRED",
   "CAPEX_PROPOSED",
   "MARKET_ORIENTATION_APPLIED",
