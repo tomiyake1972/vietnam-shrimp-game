@@ -206,14 +206,22 @@ export function buildStandardAiCapexDecision(
   //
   //   「VAPが客観的に魅力的に見える局面（成長トレンドが増設しきい値に到達）、
   //     または供給過剰で撤退した局面において、それでもVAP増設へ追随せず、
-  //     稼働中で相対的に採算の良い既存PD能力で戦うことを選んだ」
+  //     稼働中で自力採算の取れている既存PD能力で戦うことを選んだ」
   //
-  // 4条件すべてを実データから確認したときだけ発火する:
+  // 5条件すべてを実データから確認したときだけ発火する:
   //   (a) 既存PD能力がある（維持する対象が実在する）
   //   (b) VAP側に追随の誘因が実在した（成長シグナル or 供給過剰撤退）
   //   (c) 当期VAP増設を提案していない（実際に追随しなかった）
-  //   (d) PDの採算がVAPより相対的に良い（最低受注水準に対する余裕で比較）、
-  //       かつPD能力が遊んでいない
+  //   (d) PD能力が遊んでおらず、PDプレミアムが自身の最低受注水準を上回っている
+  //   (e) VAPの公開供給圧力が抑制しきい値を超えている（＝過熱局面）
+  //
+  // 【(d)で「PDの単価採算がVAPより良い」を条件にしない理由】本モデルのVAPは
+  // 単価あたりの上乗せが構造的にPDより大きく（基準比率 0.55 vs 0.18）、
+  // 絶対額でも最低受注水準に対する比率でもPDがVAPを上回る局面は存在しない。
+  // それを条件にすると、この判断は定義上一度も成立しない（＝また実体のない
+  // reason codeに戻る）。ここで問うべきは「単価の高さ」ではなく「過熱している
+  // VAPへ新規投資するより、すでに投資済みで自力採算の取れているPDを回し続ける
+  // 方が良い」という限界的な判断であり、(d)+(e)がそれを表す。
   if (ext && params.growthTrendResponsiveness > 0) {
     const pdCapacity = observation.totalCapacityByProduct.pd;
     const vapProposed = proposals.some((p) => p.projectType === LINE_EXPANSION_BY_PRODUCT.vap);
@@ -225,9 +233,17 @@ export function buildStandardAiCapexDecision(
     const vapHeadroomOverMinimum =
       vapPremium === undefined ? undefined : vapPremium - minimumAcceptablePremium(fixture.productEconomics.premiumEconomics.vap);
     const pdInUse = pdCapacity > EPSILON && productionNeededByProductBeforeCap.pd / pdCapacity > params.capexPdInUseUtilizationThreshold;
-    const pdRelativelyProfitable =
-      pdHeadroomOverMinimum !== undefined && vapHeadroomOverMinimum !== undefined && pdHeadroomOverMinimum > 0 && pdHeadroomOverMinimum >= vapHeadroomOverMinimum;
-    if (pdCapacity > EPSILON && (vapGrowthSignalPresent || vapOversupplyRetreated) && !vapProposed && pdInUse && pdRelativelyProfitable) {
+    const pdStandsOnItsOwn = pdHeadroomOverMinimum !== undefined && pdHeadroomOverMinimum > 0;
+    const vapPressure = supplyPressureOf("vap");
+    const vapOverheated = vapPressure !== undefined && vapPressure > params.supplyPressureRetreatThreshold;
+    if (
+      pdCapacity > EPSILON &&
+      (vapGrowthSignalPresent || vapOversupplyRetreated) &&
+      !vapProposed &&
+      pdInUse &&
+      pdStandsOnItsOwn &&
+      vapOverheated
+    ) {
       diagnostics.push({
         code: "PD_CAPACITY_MAINTAINED",
         domain: "capex",
@@ -240,11 +256,12 @@ export function buildStandardAiCapexDecision(
           vapHeadroomOverMinimumPremium: vapHeadroomOverMinimum ?? 0,
           vapGrowthSignalPresent: vapGrowthSignalPresent ? 1 : 0,
           vapOversupplyRetreated: vapOversupplyRetreated ? 1 : 0,
-          vapSupplyPressureEwma: supplyPressureOf("vap") ?? 0,
+          vapSupplyPressureEwma: vapPressure ?? 0,
+          supplyPressureRetreatThreshold: params.supplyPressureRetreatThreshold,
         },
         decisionSummary: "VAP転換へ追随せず、既存PD能力の維持を選択",
         message:
-          "VAP側に追随の誘因（成長トレンド到達または供給過剰）があったが、既存PD能力が稼働中で最低受注水準に対する採算がVAPより良いため、VAP増設へは追随せずPD能力の維持を選択した。",
+          "VAPの公開供給圧力が過熱水準にあり、既存PD能力は稼働中でPDプレミアムが自社の最低受注水準を上回っているため、VAP増設へは追随せずPD能力の維持を選択した。",
       });
     }
   }

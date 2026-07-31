@@ -66,6 +66,7 @@ import {
   deriveAdoptionTurnShift,
   derivePremiumRatioMultipliers,
   initialMarketEvolutionState,
+  pushRecentAppliedMix,
   updateMarketEvolutionState,
   MARKET_EVOLUTION_PARAMETERS_V1,
   MarketEvolutionParameters,
@@ -454,7 +455,10 @@ function salesParametersFor(config: CompanyLabConfig): SalesParameters {
  *    （未取得の値を無条件に50で埋めない、というご指示への対応）。
  */
 function applyAuthoritativeSalesBaseScores(state: CompanyLabState, decision: CompanyDecisionInput): CompanyDecisionInput {
-  if (!state.config.sai5?.salesBaseAccumulation || !state.salesBaseState) return decision;
+  // 機能OFFのときは何もしない（既存挙動とビット単位で一致）。
+  // 機能ONなら、stateがまだ無い1期目でも必ず通す。sliceが空になり、意思決定側が
+  // 自己申告した salesBaseScore はすべて削除される（情報境界の担保）。
+  if (!state.config.sai5?.salesBaseAccumulation) return decision;
   const slice = salesBaseSliceForCompany(state.salesBaseState, decision.companyId);
   return {
     ...decision,
@@ -492,11 +496,20 @@ export function buildPublicMarketInfo(state: CompanyLabState): PublicMarketInfo 
       // 【SAI-5E】adoption前倒し・PD⇔VAP代替の適用後に実際に使われた構成比が
       // 履歴に記録されていればそれを優先する（公開情報は「実際に適用された値」）。
       // 記録が無い場合（SAI-5E無効・旧履歴）は決定論的な基礎曲線で再計算する。
+      // 【監査指摘F】直近2四半期に実際に適用された構成比は carry state
+      // （marketEvolutionState.recentAppliedMixes）から読む。履歴配列の深さに
+      // 依存しないため、永続化から直近1件だけを注入して再開した場合でも、
+      // 中断なし実行と完全に同じ公開情報になる。
+      // carry stateが無い場合（SAI-5E無効・旧スナップショット）は従来どおり
+      // 履歴 → 決定論的な基礎曲線の順にフォールバックする。
+      const recentMixes = state.marketEvolutionState?.recentAppliedMixes ?? [];
       const prevRecord = state.history[state.history.length - 1];
       const prevPrevRecord = state.history[state.history.length - 2];
-      const prevMix = prevRecord?.sai5MarketEvolution?.appliedMix ?? computeMarketProductMix(nextTurn - 1);
+      const prevMix = recentMixes[0] ?? prevRecord?.sai5MarketEvolution?.appliedMix ?? computeMarketProductMix(nextTurn - 1);
       const prevPrevMix =
-        nextTurn >= 3 ? prevPrevRecord?.sai5MarketEvolution?.appliedMix ?? computeMarketProductMix(nextTurn - 2) : prevMix;
+        nextTurn >= 3
+          ? recentMixes[1] ?? prevPrevRecord?.sai5MarketEvolution?.appliedMix ?? computeMarketProductMix(nextTurn - 2)
+          : prevMix;
       const trend = {} as Record<DemandMarketId, Record<Product, number>>;
       for (const market of DEMAND_MARKET_IDS) {
         trend[market] = {
@@ -1046,11 +1059,20 @@ export function advanceCompanyLabQuarter(
   let marketEvolutionStateAfter = state.marketEvolutionState;
   let sai5MarketEvolutionRecord: Sai5MarketEvolutionRecord | undefined;
   if (sai5Active) {
+    // 【監査指摘B】分子は「実際に成約配分へ提示された数量」。営業工数制約
+    // （applyMarketSalesEffortCapacity）で比例縮小された分は市場へ提示されて
+    // いないため、縮小後の量で数える。縮小前の希望量で数えると、市場に出して
+    // すらいない量を「売れ残り」として供給圧力に計上してしまう
+    // （＝分子が成約側の母集団とずれる）。
+    const effortScaleByCompanyMarket = new Map(
+      turnResult.salesRecord.salesEffortAdjustments.map((a) => [`${a.companyId}::${a.market}`, a.scaleFactor])
+    );
     const offeredByProduct = { pd: 0, vap: 0 };
     for (const d of decisions) {
       for (const p of d.salesPlans) {
-        if (p.product === "pd") offeredByProduct.pd += unwrapUnit(p.desiredQuantity);
-        else if (p.product === "vap") offeredByProduct.vap += unwrapUnit(p.desiredQuantity);
+        if (p.product !== "pd" && p.product !== "vap") continue;
+        const scale = effortScaleByCompanyMarket.get(`${p.companyId}::${p.market}`) ?? 1;
+        offeredByProduct[p.product] += unwrapUnit(p.desiredQuantity) * scale;
       }
     }
     // 【監査指摘B】分母は「全ベトナム対象需要」ではなく「5社が構造的に配分を
@@ -1077,7 +1099,10 @@ export function advanceCompanyLabQuarter(
       marketResult: turnResult.marketResult,
       referencePremiumRatios: sai5ReferencePremiumRatios,
     };
-    marketEvolutionStateAfter = updateMarketEvolutionState(state.marketEvolutionState, evolutionInputs, marketEvolutionParameters);
+    marketEvolutionStateAfter = pushRecentAppliedMix(
+      updateMarketEvolutionState(state.marketEvolutionState, evolutionInputs, marketEvolutionParameters),
+      lifecycleMix
+    );
     const prevEntry = state.marketEvolutionState ?? initialMarketEvolutionState();
     sai5MarketEvolutionRecord = {
       appliedPremiumRatioMultipliers,

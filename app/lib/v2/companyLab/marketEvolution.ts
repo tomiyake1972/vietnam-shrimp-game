@@ -61,6 +61,19 @@ export interface ProductEvolutionEntry {
 export interface MarketEvolutionState {
   readonly pd: ProductEvolutionEntry;
   readonly vap: ProductEvolutionEntry;
+  /**
+   * 【監査指摘F・追加修正】直近2四半期に実際に適用した市場×商品構成比（新しい順）。
+   *
+   * ライフサイクルの公開トレンド（前期構成比 − 前々期構成比）は、以前は
+   * state.history の直近2件から読んでいた。永続化からの復元経路では
+   * サービスが直近1件しか注入しないことがあり、その場合だけ前々期の値が
+   * 「実際に適用された構成比」ではなく基礎曲線の再計算値になり、中断なし実行と
+   * 公開情報が食い違っていた（＝保存・復元でAIの判断材料が変わる）。
+   * carry state に持たせることで、履歴の深さに依存せず常に同じ値になる。
+   *
+   * ライフサイクル無効時は空配列（構成比そのものが存在しない）。
+   */
+  readonly recentAppliedMixes?: readonly MarketProductMix[];
 }
 
 export interface MarketEvolutionParameters {
@@ -118,6 +131,15 @@ export const MARKET_EVOLUTION_PARAMETERS_V1: MarketEvolutionParameters = {
 export function initialMarketEvolutionState(): MarketEvolutionState {
   const neutral: ProductEvolutionEntry = { supplyPressureEwma: 1, premiumRatioMultiplier: 1, affordabilitySignalEwma: 0 };
   return { pd: neutral, vap: neutral };
+}
+
+/** 直近2四半期ぶんの適用構成比（新しい順）を積む。ライフサイクル無効時は何も積まない。 */
+export function pushRecentAppliedMix(
+  state: MarketEvolutionState,
+  appliedMix: MarketProductMix | undefined
+): MarketEvolutionState {
+  if (!appliedMix) return state;
+  return { ...state, recentAppliedMixes: [appliedMix, ...(state.recentAppliedMixes ?? [])].slice(0, 2) };
 }
 
 /** 当期実績からの更新入力。 */
@@ -315,6 +337,7 @@ export function updateMarketEvolutionState(
 ): MarketEvolutionState {
   const base = prev ?? initialMarketEvolutionState();
   return {
+    ...base,
     pd: updateEntry(base.pd, "pd", inputs, params),
     vap: updateEntry(base.vap, "vap", inputs, params),
   };

@@ -196,3 +196,100 @@ test("SAI-5F: 成長エントリは既に同一ターゲットの案件が進行
   const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams());
   assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "進行中でも二重提案している");
 });
+
+// ---------------------------------------------------------------------
+// 【監査指摘H】PD_CAPACITY_MAINTAINED — 実際の判断への接続
+//
+// 以前は3箇所（reasonCodes.ts / reasonTaxonomy.ts / reasonCodeCatalog.ts）で
+// 定義されているだけで、どこからも発火しない「実体のない判断」だった。
+// 5条件をすべて実データから確認したときだけ発火することを、条件ごとに検証する。
+// ---------------------------------------------------------------------
+
+/** PD_CAPACITY_MAINTAINEDが発火する基準条件（VAP過熱・PD稼働中・PD自力採算）。 */
+const PD_MAINTAINED_BASE = {
+  // VAP: 供給圧力が抑制しきい値(1.14)を超えて過熱 → 過剰供給リトリートで増設せず
+  productSupplyPressureByProduct: { pd: 1.0, vap: 2.0 },
+  // VAPには成長トレンドもある（追随の誘因が実在する）
+  lifecycleTrendByMarket: positiveVapTrend,
+  // PDプレミアムは最低受注水準（約0.25）を上回る
+  marketPremiumByProduct: { pd: 0.9, vap: 2.5 },
+} as const;
+
+/** PD稼働率がしきい値(0.5)を十分に超える生産必要量。 */
+const PD_IN_USE = { hoso: 5000, pd: 6000, vap: 3000 }; // pd能力8000に対し0.75
+
+test("SAI-5H: VAPが過熱していてPDが稼働中・自力採算なら、PD_CAPACITY_MAINTAINEDが発火する", () => {
+  const result = buildStandardAiCapexDecision(fixture, observation(PD_MAINTAINED_BASE), pressures(), PD_IN_USE, 10000, extParams());
+  const entry = result.diagnostics.find((d) => d.code === "PD_CAPACITY_MAINTAINED");
+  assert.ok(entry, "PD_CAPACITY_MAINTAINEDが発火していない");
+  // VAPへは実際に追随していない（＝判断と記録が一致している）
+  assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "VAP増設を提案しているのに『追随せず』と記録している");
+  assert.ok(result.diagnostics.some((d) => d.code === "VAP_OVERSUPPLY_RETREAT"), "VAP側の見送り判断が記録されていない");
+  assert.ok((entry!.keyValues?.vapSupplyPressureEwma ?? 0) > (entry!.keyValues?.supplyPressureRetreatThreshold ?? Infinity));
+});
+
+test("SAI-5H: VAPが過熱していなければ発火しない（過熱局面に限った判断であること）", () => {
+  const result = buildStandardAiCapexDecision(
+    fixture,
+    observation({ ...PD_MAINTAINED_BASE, productSupplyPressureByProduct: { pd: 1.0, vap: 1.0 } }),
+    pressures(),
+    PD_IN_USE,
+    10000,
+    extParams()
+  );
+  assert.ok(!result.diagnostics.some((d) => d.code === "PD_CAPACITY_MAINTAINED"), "VAPが過熱していないのに発火した");
+});
+
+test("SAI-5H: PD能力が遊んでいれば発火しない（維持する価値のある稼働があること）", () => {
+  const idlePd = { hoso: 5000, pd: 800, vap: 3000 }; // pd能力8000に対し0.1
+  const result = buildStandardAiCapexDecision(fixture, observation(PD_MAINTAINED_BASE), pressures(), idlePd, 10000, extParams());
+  assert.ok(!result.diagnostics.some((d) => d.code === "PD_CAPACITY_MAINTAINED"), "PD能力が遊んでいるのに『維持を選択』と記録された");
+});
+
+test("SAI-5H: PDプレミアムが最低受注水準を下回れば発火しない（自力採算が取れていること）", () => {
+  const result = buildStandardAiCapexDecision(
+    fixture,
+    observation({ ...PD_MAINTAINED_BASE, marketPremiumByProduct: { pd: 0.1, vap: 2.5 } }),
+    pressures(),
+    PD_IN_USE,
+    10000,
+    extParams()
+  );
+  assert.ok(!result.diagnostics.some((d) => d.code === "PD_CAPACITY_MAINTAINED"), "PDが最低受注水準を割っているのに『維持を選択』と記録された");
+});
+
+test("SAI-5H: 実際にVAP増設を提案した四半期には発火しない（追随したのに『追随せず』と記録しない）", () => {
+  // VAPは過熱していないが成長トレンドはある → VAP_GROWTH_ENTRYで増設を提案する局面
+  const result = buildStandardAiCapexDecision(
+    fixture,
+    observation({ ...PD_MAINTAINED_BASE, productSupplyPressureByProduct: { pd: 1.0, vap: 1.0 } }),
+    pressures(),
+    NO_SHORTFALL,
+    10000,
+    extParams()
+  );
+  assert.ok(result.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "テスト前提: VAP増設が提案されていない");
+  assert.ok(!result.diagnostics.some((d) => d.code === "PD_CAPACITY_MAINTAINED"), "VAP増設に追随したのにPD維持が記録された");
+});
+
+test("SAI-5H: 拡張機能が無効なら発火しない（後方互換）", () => {
+  const result = buildStandardAiCapexDecision(fixture, observation(PD_MAINTAINED_BASE), pressures(), PD_IN_USE, 10000, STANDARD_AI_PARAMETERS_V1);
+  assert.ok(!result.diagnostics.some((d) => d.code === "PD_CAPACITY_MAINTAINED"));
+});
+
+test("SAI-5H: PD側の供給圧力が見送りしきい値を超えればCAPEX_DEFERRED_OVERSUPPLYも発火する（代表シナリオでは到達しない経路の健全性確認）", () => {
+  // 【正直な報告】4seed×32Qの実測ではPD供給圧力EWMAの上限が1.048で、見送り
+  // しきい値1.20へ到達しないため、この経路は代表シナリオでは発火しない。
+  // 発火させるために本体の条件を緩めることはせず、専用fixtureで経路の健全性のみ確認する。
+  const pdShortfall = { hoso: 5000, pd: 12000, vap: 3000 }; // pd能力8000を超える＝ボトルネック
+  const result = buildStandardAiCapexDecision(
+    fixture,
+    observation({ productSupplyPressureByProduct: { pd: 2.0, vap: 1.0 }, lifecycleTrendByMarket: positiveVapTrend }),
+    pressures(),
+    pdShortfall,
+    10000,
+    extParams()
+  );
+  assert.ok(result.diagnostics.some((d) => d.code === "CAPEX_DEFERRED_OVERSUPPLY"), "PD供給過剰による投資見送りが記録されていない");
+  assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "pdLineExpansion"), "供給過剰なのにPD増設を提案している");
+});

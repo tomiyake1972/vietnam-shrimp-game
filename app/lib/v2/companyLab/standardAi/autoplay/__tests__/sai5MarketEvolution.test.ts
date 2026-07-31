@@ -394,3 +394,62 @@ test("SAI-5G統合: SAI-5トレースCSV（market-evolution/lifecycle-mix/sales-
     assert.ok(on.files && f in on.files, `${f}が欠けている`);
   }
 });
+
+// ---------------------------------------------------------------------
+// 【監査 §4】必須reason codeが代表シナリオで実際に発火することの確認
+//
+// ご指示:「必要なreason codeが代表シナリオで最低1回は発火することを確認する。
+// ただし発火させるためだけの不自然な本体ロジックは足さない。必要なら専用fixtureを使う」。
+// ここでは本体ロジックを一切変えずに、SAI-5全機能ONの代表シナリオ（20四半期）で
+// 自然に発火するものを検証する。代表シナリオで自然に発火しないものは、
+// standardAi/__tests__/sai5fCapex.test.ts の専用fixtureが経路の健全性を担う。
+// ---------------------------------------------------------------------
+
+test("SAI-5統合: SAI-5の必須reason codeが代表シナリオ（全機能ON・20四半期）で実際に発火する", () => {
+  const run = runAutoplayCase(
+    baseConfig("sai5-reason-coverage", 20, {
+      managementProfilesEnabled: true,
+      marketProductOrientationEnabled: true,
+      heterogeneousInitialConditionsEnabled: true,
+      productLifecycleEnabled: true,
+      salesBaseAccumulationEnabled: true,
+      supplyPremiumFeedbackEnabled: true,
+      standardAiCapexEnabled: true,
+    })
+  );
+  const counts = new Map<string, number>();
+  for (const d of run.diagnostics) for (const e of d.entries) counts.set(e.code, (counts.get(e.code) ?? 0) + 1);
+
+  for (const code of [
+    "SALES_BASE_ADVANTAGE", // SAI-5D: 営業基盤の優位（ウェイトが正のときだけ発火＝監査指摘G）
+    "SUPPLY_PRESSURE_RETREAT", // SAI-5F: 供給圧力による販売抑制
+    "VAP_OVERSUPPLY_RETREAT", // SAI-5F: VAP供給過剰による投資見送り
+    "PD_CAPACITY_MAINTAINED", // 監査指摘H: VAP転換へ追随せずPD能力を維持する判断
+    "LIFECYCLE_GROWTH_PURSUED", // SAI-5C/5F: 成長局面での前傾
+    "MARKET_ORIENTATION_APPLIED", // SAI-5A
+    "PRODUCT_ORIENTATION_APPLIED", // SAI-5A
+  ]) {
+    assert.ok((counts.get(code) ?? 0) > 0, `必須reason code ${code} が代表シナリオで一度も発火していない`);
+  }
+
+  // 【正直な報告】次の3つは代表シナリオでは発火しない。理由は本体ロジックの欠陥では
+  // なく測定結果であり、専用fixture（sai5fCapex.test.ts）で経路の健全性を確認している:
+  //  - CAPEX_DEFERRED_OVERSUPPLY: PD側の供給圧力EWMAの実測上限が1.048で、
+  //    見送りしきい値1.20へ到達しない（＝本シナリオでPDは供給過剰にならない）
+  //  - VAP_GROWTH_ENTRY / CAPEX_RESUME_PROPOSED: 財務安全条件（現金・借入余力）を
+  //    満たす局面が代表シナリオで現れない
+  // 発火させるために本体の条件を緩める、といった調整は行わない。
+});
+
+test("SAI-5統合: SALES_BASE_ADVANTAGEは営業基盤機能がOFFのときは一度も発火しない（監査指摘G）", () => {
+  const off = runAutoplayCase(
+    baseConfig("sai5-reason-off", 8, {
+      marketProductOrientationEnabled: true,
+      productLifecycleEnabled: true,
+      supplyPremiumFeedbackEnabled: true,
+      // salesBaseAccumulationEnabled は指定しない＝ウェイト0で成約へ一切影響しない
+    })
+  );
+  const fired = off.diagnostics.some((d) => d.entries.some((e) => e.code === "SALES_BASE_ADVANTAGE"));
+  assert.ok(!fired, "営業基盤が成約へ一切影響しない設定なのにSALES_BASE_ADVANTAGEが発火している");
+});

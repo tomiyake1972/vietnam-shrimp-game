@@ -819,15 +819,36 @@ function validateMarketEvolutionState(raw: unknown, path: string): MarketEvoluti
   const obj = requireObject(raw, path);
   const validateEntry = (entryRaw: unknown, entryPath: string) => {
     const e = requireObject(entryRaw, entryPath);
+    const supplyRatioBaselineEwma =
+      e.supplyRatioBaselineEwma === undefined ? undefined : requireFiniteNumber(e.supplyRatioBaselineEwma, `${entryPath}.supplyRatioBaselineEwma`);
     return {
       supplyPressureEwma: requireFiniteNumber(e.supplyPressureEwma, `${entryPath}.supplyPressureEwma`),
       premiumRatioMultiplier: requireFiniteNumber(e.premiumRatioMultiplier, `${entryPath}.premiumRatioMultiplier`),
       affordabilitySignalEwma: requireFiniteNumber(e.affordabilitySignalEwma, `${entryPath}.affordabilitySignalEwma`),
+      ...(supplyRatioBaselineEwma === undefined ? {} : { supplyRatioBaselineEwma }),
     };
   };
+  // 【監査指摘F】直近2四半期の適用構成比。ライフサイクル無効・旧スナップショットでは
+  // キー自体が存在しない（undefinedのまま＝従来の履歴フォールバックが働く）。
+  const recentAppliedMixesRaw = obj.recentAppliedMixes === undefined ? undefined : requireArray(obj.recentAppliedMixes, `${path}.recentAppliedMixes`);
+  const recentAppliedMixes = recentAppliedMixesRaw?.map((mixRaw, i) => {
+    const mixPath = `${path}.recentAppliedMixes[${i}]`;
+    const mixObj = requireObject(mixRaw, mixPath);
+    const out = {} as Record<DemandMarketId, Record<Product, number>>;
+    for (const market of DEMAND_MARKET_IDS) {
+      const row = requireObject(mixObj[market], `${mixPath}.${market}`);
+      out[market] = {
+        hoso: requireFiniteNumber(row.hoso, `${mixPath}.${market}.hoso`),
+        pd: requireFiniteNumber(row.pd, `${mixPath}.${market}.pd`),
+        vap: requireFiniteNumber(row.vap, `${mixPath}.${market}.vap`),
+      };
+    }
+    return out;
+  });
   return {
     pd: validateEntry(obj.pd, `${path}.pd`),
     vap: validateEntry(obj.vap, `${path}.vap`),
+    ...(recentAppliedMixes === undefined ? {} : { recentAppliedMixes }),
   };
 }
 
