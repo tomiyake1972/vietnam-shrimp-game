@@ -157,6 +157,55 @@ export function buildStandardAiSalesPlans(
         potentialByProduct[product] = potentialByProduct[product] * clampProductMult(mult);
       }
     }
+  }
+
+  // 【SAI-5F】ライフサイクル成長への前傾と、供給圧力リトリート（いずれも
+  // 志向パラメータが非ゼロ かつ 該当する公開情報が観測できる場合のみ動く。
+  // 既定パラメータ（growthTrendResponsiveness=0等）では完全に不活性）。
+  if (params.growthTrendResponsiveness > 0 && observation.lifecycleTrendByMarket) {
+    for (const product of ["pd", "vap"] as const) {
+      const markets = Object.values(observation.lifecycleTrendByMarket);
+      if (markets.length === 0) continue;
+      const avgTrend = markets.reduce((s, m) => s + m[product], 0) / markets.length;
+      if (avgTrend <= 0) continue;
+      const boost = Math.min(
+        params.lifecycleGrowthSalesBoostCap,
+        avgTrend * params.lifecycleGrowthSalesBoostScale * params.growthTrendResponsiveness
+      );
+      if (boost <= EPSILON) continue;
+      // 能力の98%を超えない範囲でのみ前傾する（hard constraintの尊重）。
+      potentialByProduct[product] = Math.min(capacityTotals[product] * 0.98, potentialByProduct[product] * (1 + boost));
+      diagnostics.push({
+        code: "LIFECYCLE_GROWTH_PURSUED",
+        domain: "sales",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: { avgLifecycleTrendPerQuarter: avgTrend, appliedBoostRatio: boost },
+        message: `${product.toUpperCase()}の公開ライフサイクルトレンドが成長局面のため、販売目標を小幅（最大+5%）に前傾した。`,
+      });
+    }
+  }
+  if (params.oversupplyRetreatSensitivity > 0 && observation.productSupplyPressureByProduct) {
+    for (const product of ["pd", "vap"] as const) {
+      const pressure = observation.productSupplyPressureByProduct[product];
+      if (pressure === undefined || pressure <= params.supplyPressureRetreatThreshold) continue;
+      const retreatFactor = Math.max(
+        params.supplyPressureRetreatFloor,
+        1 - (pressure - params.supplyPressureRetreatThreshold) * params.oversupplyRetreatSensitivity
+      );
+      potentialByProduct[product] = potentialByProduct[product] * retreatFactor;
+      diagnostics.push({
+        code: "SUPPLY_PRESSURE_RETREAT",
+        domain: "sales",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: { supplyPressureEwma: pressure, retreatFactor },
+        message: `${product.toUpperCase()}の公開供給圧力が高止まりしているため、販売目標を小幅に抑制した（下限-15%）。`,
+      });
+    }
+  }
+
+  if (productOrientationActive) {
     diagnostics.push({
       code: "PRODUCT_ORIENTATION_APPLIED",
       domain: "sales",

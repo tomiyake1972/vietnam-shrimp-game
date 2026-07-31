@@ -1,0 +1,170 @@
+// ShrimpX V2 — Phase SAI-5F: Standard AIの拡張設備投資判断の単体テスト
+//
+// 合成observation/pressuresで、(a) ext無効時は新コード・resume提案が一切出ない、
+// (b) 過剰供給リトリート、(c) ライフサイクル成長エントリ、(d) suspended案件の
+// resume提案、(e) 資金難時はresumeしない、の方向性を検証する。
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { buildStandardAiCapexDecision } from "../decision/capex";
+import { StandardAiObservation } from "../types";
+import { PressureScores } from "../pressures";
+import { STANDARD_AI_PARAMETERS_V1, StandardAiParameters } from "../parameters";
+import { CompanyFixture } from "../../types";
+import { DEMAND_MARKET_IDS } from "../../../market/types";
+
+const fixture = { companyId: "VAP" } as unknown as CompanyFixture;
+
+function observation(overrides: Partial<StandardAiObservation> = {}): StandardAiObservation {
+  return {
+    companyId: "VAP",
+    period: "2015Q3",
+    turn: 3,
+    outstandingContractByProduct: { hoso: 0, pd: 0, vap: 0 },
+    finishedGoodsByProduct: { hoso: 0, pd: 0, vap: 0 },
+    rawMaterialAvailable: 5000,
+    rawMaterialPipeline: 0,
+    factories: [],
+    totalCapacityByProduct: { hoso: 10000, pd: 8000, vap: 6000 },
+    totalCommonProcessingCapacity: 22000,
+    aquacultureCapacity: 4000,
+    salesForceHeadcountTotal: 80,
+    procurementHeadcountTotal: 12,
+    lastQuarterEquipmentUtilizationRate: 0.9,
+    lastQuarterLaborUtilizationRate: 0.85,
+    lastQuarterActualProductionByProduct: {},
+    markets: [],
+    marketPremiumByProduct: { pd: 1.0, vap: 3.0 },
+    vietnamDomesticPriorPrice: 4.0,
+    lastHosoPriceVn: 5.0,
+    productEconomics: { expectedProcessingCostUsdPerHosoEqKg: { hoso: 0.5, pd: 0.75, vap: 1.2 } },
+    cashUsd: 200_000_000, // 十分に安全な現金
+    existingLoanBalanceUsd: 0,
+    regularHeadcountTotal: 6000,
+    activeCapexProjectTargets: new Set(),
+    suspendedCapexProjectIds: [],
+    qualityScoreByProduct: {},
+    customerTrustByMarket: {},
+    deliveryReliabilityByMarket: {},
+    ...overrides,
+  } as unknown as StandardAiObservation;
+}
+
+function pressures(overrides: Partial<PressureScores> = {}): PressureScores {
+  return {
+    contractFulfillmentPressure: 0,
+    finishedGoodsExcessRatioByProduct: { hoso: 0, pd: 0, vap: 0 },
+    rawMaterialInventoryPosition: 5000,
+    cashPressure: 0,
+    borrowingPressure: 0.1,
+    equipmentUtilizationLastQuarter: 0.9,
+    hadPriorQuarterUtilization: true,
+    laborUtilizationLastQuarter: 0.85,
+    marketPriceRanking: [...DEMAND_MARKET_IDS],
+    targetMinimumCashUsd: 30_000_000,
+    expectedRawPriceUsdPerKg: 2.5,
+    ...overrides,
+  } as unknown as PressureScores;
+}
+
+const NO_SHORTFALL = { hoso: 5000, pd: 4000, vap: 3000 }; // 全商品とも能力未満
+
+function extParams(overrides: Partial<StandardAiParameters> = {}): StandardAiParameters {
+  return {
+    ...STANDARD_AI_PARAMETERS_V1,
+    standardAiCapexExtensionsEnabled: true,
+    growthTrendResponsiveness: 0.9,
+    oversupplyRetreatSensitivity: 0.5,
+    ...overrides,
+  };
+}
+
+const positiveVapTrend = Object.fromEntries(DEMAND_MARKET_IDS.map((m) => [m, { hoso: -0.01, pd: 0.002, vap: 0.008 }])) as never;
+
+test("SAI-5F: 拡張無効（既定パラメータ）ではresume提案・新コードが一切出ない（後方互換）", () => {
+  const obs = observation({
+    suspendedCapexProjectIds: ["VAP-CAPEX-1"],
+    lifecycleTrendByMarket: positiveVapTrend,
+    productSupplyPressureByProduct: { pd: 1.0, vap: 3.0 },
+  });
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, STANDARD_AI_PARAMETERS_V1);
+  assert.equal(result.capexDecision.resumeRequests.length, 0);
+  assert.equal(result.capexDecision.newProjectProposals.length, 0);
+  const codes = result.diagnostics.map((d) => d.code);
+  for (const c of ["CAPEX_RESUME_PROPOSED", "VAP_GROWTH_ENTRY", "LIFECYCLE_GROWTH_PURSUED", "VAP_OVERSUPPLY_RETREAT", "CAPEX_DEFERRED_OVERSUPPLY"]) {
+    assert.ok(!codes.includes(c as never), `拡張無効なのに${c}が出力された`);
+  }
+});
+
+test("SAI-5F: 成長エントリ — 公開VAPトレンドが正・稼働率高・財務安全なら、能力不足の顕在化前にVAPライン増設を提案する", () => {
+  const obs = observation({ lifecycleTrendByMarket: positiveVapTrend });
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams());
+  assert.ok(
+    result.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"),
+    "VAPライン増設が提案されていない"
+  );
+  assert.ok(result.diagnostics.some((d) => d.code === "VAP_GROWTH_ENTRY"));
+});
+
+test("SAI-5F: 成長エントリは応答度が低い会社ほどしきい値が高く、同じトレンドでは動かない（保守型と積極型の投資時期差）", () => {
+  const weakTrend = Object.fromEntries(DEMAND_MARKET_IDS.map((m) => [m, { hoso: -0.005, pd: 0.001, vap: 0.005 }])) as never;
+  const obs = observation({ lifecycleTrendByMarket: weakTrend });
+  const aggressive = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ growthTrendResponsiveness: 0.9 }));
+  const conservative = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ growthTrendResponsiveness: 0.2 }));
+  assert.ok(aggressive.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "積極型が動いていない");
+  assert.ok(!conservative.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "保守型まで同時に動いている");
+});
+
+test("SAI-5F: 過剰供給リトリート — 公開供給圧力が高止まりしているVAPは、成長トレンドがあっても投資を見送る", () => {
+  const obs = observation({
+    lifecycleTrendByMarket: positiveVapTrend,
+    productSupplyPressureByProduct: { pd: 1.0, vap: 2.5 },
+  });
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams());
+  assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "過剰供給下でVAP投資している");
+  assert.ok(result.diagnostics.some((d) => d.code === "VAP_OVERSUPPLY_RETREAT"));
+});
+
+test("SAI-5F: 過剰供給リトリートの感度 — 追随型（低感度）は同じ圧力でもまだ投資し、慎重型（高感度）は見送る", () => {
+  const obs = observation({
+    lifecycleTrendByMarket: positiveVapTrend,
+    productSupplyPressureByProduct: { pd: 1.0, vap: 1.3 },
+  });
+  // 高感度(0.9): しきい値 1.15+(1-0.9)*0.3=1.18 < 1.3 → 見送り
+  const cautious = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ oversupplyRetreatSensitivity: 0.9 }));
+  // 低感度(0.1): しきい値 1.15+0.27=1.42 > 1.3 → まだ投資
+  const follower = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ oversupplyRetreatSensitivity: 0.1 }));
+  assert.ok(!cautious.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"));
+  assert.ok(follower.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"));
+});
+
+test("SAI-5F: resume提案 — 現金が安全水準を回復した場合のみ、中断中案件の再開を提案する", () => {
+  const suspended = { suspendedCapexProjectIds: ["VAP-CAPEX-1", "VAP-CAPEX-2"] };
+  const rich = buildStandardAiCapexDecision(fixture, observation(suspended), pressures(), NO_SHORTFALL, 10000, extParams());
+  assert.equal(rich.capexDecision.resumeRequests.length, 2);
+  assert.deepEqual(
+    rich.capexDecision.resumeRequests.map((r) => r.projectId),
+    ["VAP-CAPEX-1", "VAP-CAPEX-2"]
+  );
+  assert.ok(rich.diagnostics.some((d) => d.code === "CAPEX_RESUME_PROPOSED"));
+
+  // 資金難（現金 < 目標バッファ×1.75）ならresumeしない（安全ガード優先）
+  const poor = buildStandardAiCapexDecision(
+    fixture,
+    observation({ ...suspended, cashUsd: 40_000_000 }),
+    pressures(),
+    NO_SHORTFALL,
+    10000,
+    extParams()
+  );
+  assert.equal(poor.capexDecision.resumeRequests.length, 0);
+});
+
+test("SAI-5F: 成長エントリは既に同一ターゲットの案件が進行中なら提案しない（二重提案の防止）", () => {
+  const obs = observation({
+    lifecycleTrendByMarket: positiveVapTrend,
+    activeCapexProjectTargets: new Set(["vap"]),
+  });
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams());
+  assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "進行中でも二重提案している");
+});

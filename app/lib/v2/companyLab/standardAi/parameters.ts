@@ -68,6 +68,25 @@ export interface StandardAiParameters {
    *  ライフサイクル成長エントリ・過剰供給リトリート）の有効化。既定false
    *  （decision/capex.tsの既存判断と完全に同一の挙動）。 */
   readonly standardAiCapexExtensionsEnabled: boolean;
+  /** 【SAI-5F】成長エントリの最低前期稼働率（通常のcapex条件0.92より低い入口。
+   *  ライフサイクル成長局面では能力逼迫の「手前」で投資判断するための緩和値。
+   *  資金・在庫・借入の安全条件は通常capexと完全に同一のまま）。 */
+  readonly capexGrowthEntryUtilizationThreshold: number;
+  /** 【SAI-5F】成長エントリとみなす公開ライフサイクルトレンドの下限
+   *  （構成比pt/四半期。0.004 = 年率約1.6ptの構成比シフト）。 */
+  readonly capexGrowthEntryTrendPerQuarterThreshold: number;
+  /** 【SAI-5F】これを超える公開供給圧力（提示量/需要のEWMA）ではPD/VAPの
+   *  設備投資を見送る（CAPEX_DEFERRED_OVERSUPPLY）。 */
+  readonly capexOversupplyPressureThreshold: number;
+  /** 【SAI-5F】ライフサイクル成長トレンドによる販売数量ブーストの上限
+   *  （比率。成長市場でも希望量の増加は最大+5%までの小幅な前傾）。 */
+  readonly lifecycleGrowthSalesBoostCap: number;
+  /** 【SAI-5F】トレンド（構成比pt/四半期）→販売ブースト比率への変換係数。 */
+  readonly lifecycleGrowthSalesBoostScale: number;
+  /** 【SAI-5F】これを超える公開供給圧力で当該商品の販売希望量を抑制し始める。 */
+  readonly supplyPressureRetreatThreshold: number;
+  /** 【SAI-5F】供給圧力リトリートによる販売希望量縮小の下限倍率（最大-15%）。 */
+  readonly supplyPressureRetreatFloor: number;
 
   // --- 労働 ---
   /** ワーカー不足が「持続的」とみなす連続四半期しきい値（ヒステリシス）。 */
@@ -160,6 +179,13 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   growthTrendResponsiveness: 0,
   oversupplyRetreatSensitivity: 0,
   standardAiCapexExtensionsEnabled: false,
+  capexGrowthEntryUtilizationThreshold: 0.85,
+  capexGrowthEntryTrendPerQuarterThreshold: 0.004,
+  capexOversupplyPressureThreshold: 1.15,
+  lifecycleGrowthSalesBoostCap: 0.05,
+  lifecycleGrowthSalesBoostScale: 10,
+  supplyPressureRetreatThreshold: 1.2,
+  supplyPressureRetreatFloor: 0.85,
 
   sustainedShortageQuarterThreshold: 2,
   sustainedExcessQuarterThreshold: 2,

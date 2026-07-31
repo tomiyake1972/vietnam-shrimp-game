@@ -109,6 +109,9 @@ export interface StandardAiObservation {
 
   // --- 設備投資 ---
   readonly activeCapexProjectTargets: ReadonlySet<Product | "commonProcessing" | "freezingPackaging" | "coldStorage">;
+  /** 【SAI-5F】資金難で中断中（suspended）の自社設備投資案件ID（projectId昇順。
+   *  資金回復時のresume提案の対象）。 */
+  readonly suspendedCapexProjectIds?: readonly string[];
 
   // --- 品質・顧客信頼・納期信頼性（自社の前四半期末までの実績。Phase 7A接続） ---
   readonly qualityScoreByProduct: Readonly<Partial<Record<Product, Score0to100>>>;

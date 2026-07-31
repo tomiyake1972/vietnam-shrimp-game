@@ -243,3 +243,55 @@ test("SAI-5B統合: 有効時でも8四半期完走・エラー0・同一seedで
   assert.equal(JSON.stringify(a.history), JSON.stringify(b.history));
   assert.equal(JSON.stringify(a.diagnostics), JSON.stringify(b.diagnostics));
 });
+
+// ---------------------------------------------------------------------
+// SAI-5F: Standard AIの拡張設備投資判断（統合）
+// ---------------------------------------------------------------------
+
+test("SAI-5F統合: standardAiCapex無効時は従来と完全に同一（後方互換）", () => {
+  const off1 = runAutoplayCase(baseConfig("sai5f-backcompat", 2, { managementProfilesEnabled: true }));
+  const off2 = runAutoplayCase(baseConfig("sai5f-backcompat", 2, { managementProfilesEnabled: true, standardAiCapexEnabled: false }));
+  assert.equal(JSON.stringify(off1.history), JSON.stringify(off2.history));
+});
+
+test("SAI-5F統合: 全フラグON・16四半期完走・再現・建設中設備の二重提案なし", () => {
+  const config = baseConfig("sai5f-all-on", 16, {
+    heterogeneousInitialConditionsEnabled: true,
+    managementProfilesEnabled: true,
+    marketProductOrientationEnabled: true,
+    salesBaseAccumulationEnabled: true,
+    productLifecycleEnabled: true,
+    supplyPremiumFeedbackEnabled: true,
+    standardAiCapexEnabled: true,
+  });
+  const a = runAutoplayCase(config);
+  assert.equal(a.completedTurns, 16);
+  const b = runAutoplayCase(config);
+  assert.equal(JSON.stringify(a.history), JSON.stringify(b.history));
+
+  // 建設中設備の二重提案なし: 各会社×turnで、期首時点で進行中（cancelled・
+  // 稼働開始済みcompleted以外）のターゲットへ同種の新規提案を出していない。
+  const targetOfProjectType: Record<string, string> = {
+    hosoLineExpansion: "hoso",
+    pdLineExpansion: "pd",
+    vapLineExpansion: "vap",
+    commonProcessingExpansion: "commonProcessing",
+  };
+  for (const capture of a.quarterStartCaptures) {
+    const decision = a.diagnostics.find((d) => d.companyId === capture.companyId && d.turn === capture.turn)?.decision;
+    if (!decision || decision.capexDecision.newProjectProposals.length === 0) continue;
+    const inProgressTargets = new Set(
+      capture.ownState.capexState.portfolio.projects
+        .filter((p) => p.status === "approved" || p.status === "underConstruction" || p.status === "suspended")
+        .map((p) => p.futureCapacityEffect?.targetProduct)
+        .filter(Boolean)
+    );
+    for (const proposal of decision.capexDecision.newProjectProposals) {
+      const target = targetOfProjectType[proposal.projectType];
+      assert.ok(
+        !inProgressTargets.has(target as never),
+        `${capture.companyId} turn${capture.turn}: 進行中の${target}案件があるのに${proposal.projectType}を再提案している`
+      );
+    }
+  }
+});

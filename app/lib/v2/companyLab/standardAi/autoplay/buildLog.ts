@@ -195,12 +195,28 @@ export function buildQuarterDecisionLog(
       capexNewProposalCount: decision.capexDecision.newProjectProposals.length,
       capexCancelCount: decision.capexDecision.cancelRequests.length,
       capexResumeCount: decision.capexDecision.resumeRequests.length,
+      // 【SAI-5F】提案の中身（projectType）。提案なしはキー省略（optional規約）。
+      ...(decision.capexDecision.newProjectProposals.length > 0
+        ? { capexProposalProjectTypes: decision.capexDecision.newProjectProposals.map((p) => p.projectType).join(",") }
+        : {}),
     },
     final: {
       domesticPurchaseFinalQuantity,
       importOrdersBlocked,
       importOrdersFinalQuantity,
       aquacultureStockingFinalQuantity,
+      // 【SAI-5F】capexのwish→executed対比（エンジン側の承認/却下。capexResults由来）。
+      // 承認は個別イベントを生成しないため、承認数 = 提案数 − 却下数 で導出する
+      // （capexClose.tsの評価ループ: 各提案は承認かrejectedProposals行きの二択）。
+      ...(decision.capexDecision.newProjectProposals.length > 0
+        ? (() => {
+            const rejected = record.capexResults.find((c) => c.companyId === companyId)?.rejectedProposals.length ?? 0;
+            return {
+              capexApprovedProposalCount: decision.capexDecision.newProjectProposals.length - rejected,
+              capexRejectedProposalCount: rejected,
+            };
+          })()
+        : {}),
     },
   };
 }

@@ -57,12 +57,44 @@ export function buildStandardAiCapexDecision(
   const safe = cashAndBorrowingSafe(observation, pressures, params);
   const sustained = pressures.hadPriorQuarterUtilization && pressures.equipmentUtilizationLastQuarter >= params.capexSustainedUtilizationThreshold;
 
+  // 【SAI-5F】拡張判断用の公開シグナル（前四半期までの公開情報のみ。無効時は未使用）。
+  const ext = params.standardAiCapexExtensionsEnabled;
+  const supplyPressureOf = (product: Product): number | undefined =>
+    product === "pd" || product === "vap" ? observation.productSupplyPressureByProduct?.[product] : undefined;
+  const lifecycleTrendOf = (product: Product): number | undefined => {
+    if (!observation.lifecycleTrendByMarket || (product !== "pd" && product !== "vap")) return undefined;
+    // 全市場の構成比トレンドの単純平均（公開の市場調査水準の粗い集計）。
+    const markets = Object.values(observation.lifecycleTrendByMarket);
+    if (markets.length === 0) return undefined;
+    return markets.reduce((s, m) => s + m[product], 0) / markets.length;
+  };
+
   for (const product of ["hoso", "pd", "vap"] as const) {
     const capacity = observation.totalCapacityByProduct[product];
     if (capacity <= EPSILON) continue;
     const shortfallRatio = productionNeededByProductBeforeCap[product] / capacity;
     const noExcess = observation.finishedGoodsByProduct[product] <= capacity * params.finishedGoodsTargetQuarters * params.excessInventoryRatioForDiscount;
     const alreadyPlanned = observation.activeCapexProjectTargets.has(product);
+
+    // 【SAI-5F】過剰供給リトリート: 公開供給圧力が高止まりしているPD/VAPは、
+    // 他の条件を満たしても投資を見送る（志向の強い会社ほどしきい値側の感度
+    // oversupplyRetreatSensitivityが低く=追随的、高い=慎重/逆張り）。
+    const pressureSignal = ext ? supplyPressureOf(product) : undefined;
+    const oversupplyRetreat =
+      ext &&
+      pressureSignal !== undefined &&
+      pressureSignal > params.capexOversupplyPressureThreshold + (1 - params.oversupplyRetreatSensitivity) * 0.3;
+    if (oversupplyRetreat) {
+      diagnostics.push({
+        code: product === "vap" ? "VAP_OVERSUPPLY_RETREAT" : "CAPEX_DEFERRED_OVERSUPPLY",
+        domain: "capex",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: { supplyPressureEwma: pressureSignal, threshold: params.capexOversupplyPressureThreshold, oversupplyRetreatSensitivity: params.oversupplyRetreatSensitivity },
+        message: `${product.toUpperCase()}の公開供給圧力が高止まりしているため、当期の${product.toUpperCase()}設備投資を見送る。`,
+      });
+      continue;
+    }
     // 【SAI-4追加】経営性格プロファイル（D社=高付加価値重視）向けの差し込み口。
     // capexShortfallThresholdBiasByProduct[product]は既定0（全社共通の
     // capexCurrentShortfallRatioThresholdをそのまま使うのと完全に同じ）。正の値は
@@ -105,6 +137,57 @@ export function buildStandardAiCapexDecision(
         },
         message: `${product.toUpperCase()}は今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。`,
       });
+    } else if (ext && (product === "pd" || product === "vap") && !alreadyPlanned && params.growthTrendResponsiveness > 0) {
+      // 【SAI-5F】ライフサイクル成長エントリ: 現時点の能力不足（shortfall）が
+      // 発生する「手前」でも、(a) 公開ライフサイクルトレンドが十分に正、
+      // (b) 前期稼働率が既に高め（growthEntryUtilizationThreshold以上）、
+      // (c) 在庫・現金・借入の安全条件は通常capexと同一、を満たす場合に
+      // 成長市場向けの増設を提案する。志向のgrowthTrendResponsivenessが高い
+      // 会社ほどトレンドしきい値が下がる＝早く動く（将来を知るのではなく、
+      // 公開の過去トレンドへの反応速度の違いとして表現）。
+      const trend = lifecycleTrendOf(product);
+      const trendThreshold = params.capexGrowthEntryTrendPerQuarterThreshold * (2 - params.growthTrendResponsiveness);
+      const utilizationOk =
+        pressures.hadPriorQuarterUtilization && pressures.equipmentUtilizationLastQuarter >= params.capexGrowthEntryUtilizationThreshold;
+      if (trend !== undefined && trend >= trendThreshold && utilizationOk && noExcess && safe) {
+        proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product] });
+        diagnostics.push({
+          code: product === "vap" ? "VAP_GROWTH_ENTRY" : "LIFECYCLE_GROWTH_PURSUED",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: {
+            lifecycleTrendPerQuarter: trend,
+            trendThreshold,
+            equipmentUtilizationLastQuarter: pressures.equipmentUtilizationLastQuarter,
+            growthTrendResponsiveness: params.growthTrendResponsiveness,
+          },
+          decisionSummary: `${product.toUpperCase()}ライン増設を成長エントリとして提案`,
+          message: `${product.toUpperCase()}の公開ライフサイクルトレンドが成長局面にあり、稼働率・在庫・財務の安全条件を満たすため、能力不足の顕在化前に増設を提案する。`,
+        });
+      }
+    }
+  }
+
+  // 【SAI-5F】suspended案件のresume提案: 資金難で中断した案件は、現金が
+  // 通常capexと同じ安全水準（目標バッファ×capexCashSafetyMultiple）を回復した
+  // 場合に再開を提案する（従来は再開経路が無く、中断案件がCIPに現金を固定した
+  // ままデッドロックし得た。Fable事前監査で特定）。
+  const resumeRequests: { readonly projectId: string }[] = [];
+  if (ext) {
+    for (const projectId of observation.suspendedCapexProjectIds ?? []) {
+      if (safe) {
+        resumeRequests.push({ projectId });
+        diagnostics.push({
+          code: "CAPEX_RESUME_PROPOSED",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: { cashUsd: observation.cashUsd, targetMinimumCashUsd: pressures.targetMinimumCashUsd },
+          decisionSummary: `中断中の設備投資案件 ${projectId} の再開を提案`,
+          message: "現金が安全水準を回復したため、資金難で中断中の設備投資案件の再開を提案する。",
+        });
+      }
     }
   }
 
@@ -150,7 +233,7 @@ export function buildStandardAiCapexDecision(
       companyId: fixture.companyId,
       newProjectProposals: proposals,
       cancelRequests: [],
-      resumeRequests: [],
+      resumeRequests,
     },
     diagnostics,
   };

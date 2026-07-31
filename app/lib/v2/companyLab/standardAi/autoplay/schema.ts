@@ -153,6 +153,9 @@ export interface QuarterDecisionLog {
     readonly capexNewProposalCount: number;
     readonly capexCancelCount: number;
     readonly capexResumeCount: number;
+    /** 【SAI-5F・optional追加】提案した設備投資のprojectType一覧（カンマ区切り。
+     *  提案なしは省略。バージョン規約どおりoptional追加のみ＝既存パーサーへの影響なし）。 */
+    readonly capexProposalProjectTypes?: string;
   };
 
   /** D: quarter runnerへ実際に渡された最終意思決定値（procurementConstraint
@@ -164,6 +167,10 @@ export interface QuarterDecisionLog {
     readonly importOrdersBlocked: boolean;
     readonly importOrdersFinalQuantity: number;
     readonly aquacultureStockingFinalQuantity: number;
+    /** 【SAI-5F・optional追加】capexのwish→executed対比: エンジン側で承認された
+     *  提案数・却下された提案数（capexResults由来。SAI-5F以前のログには無い）。 */
+    readonly capexApprovedProposalCount?: number;
+    readonly capexRejectedProposalCount?: number;
   };
 }
 

@@ -15,6 +15,7 @@ import { PeriodV2 } from "../../core/period";
 import { unwrapUsd } from "../../finance/types";
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../types";
 import { findFactoryRegularHeadcount } from "../workforce";
+import { computeCapacityEffectForCompany, isCapexProjectOperationalAt } from "../../capex/capacityEffect";
 import { FactoryObservation, MarketObservationEntry, ProductAmount, StandardAiObservation, zeroProductAmount } from "./types";
 
 const EPSILON = 1e-6;
@@ -71,7 +72,15 @@ function buildMarkets(publicInfo: PublicMarketInfo): readonly MarketObservationE
   }));
 }
 
-function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnState): readonly FactoryObservation[] {
+function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnState, period: PeriodV2): readonly FactoryObservation[] {
+  // 【SAI-5F修正（Fable事前監査で特定した既存の観測ギャップ）】完成・稼働開始済み
+  // のcapex能力増加を、エンジン側（runner.tsのapplyCapexCapacityToFactories）と
+  // 同じ規則で観測へ反映する。従来は静的fixtureの能力のみを観測していたため、
+  // 増設が完成してもAIは旧能力を分母に使い続け、同じボトルネックを恒久的に
+  // 再提案し得た（判断根拠と実際のエンジン能力の食い違い）。
+  // エンジン側と同じく「その会社の最初の工場（factoryId昇順）」へ加算する。
+  const capexEffect = computeCapacityEffectForCompany(ownState.capexState.portfolio.projects, period);
+  const firstFactoryId = [...fixture.factories].map((f) => f.factoryId).sort()[0];
   return fixture.factories.map((f) => {
     const baseline = fixture.workerBaseline.find((w) => w.factoryId === f.factoryId);
     const currentRegularHeadcount =
@@ -82,11 +91,16 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
         skillByProduct[s.product] = unwrapUnit(s.skillLevel);
       }
     }
+    const isMainFactory = f.factoryId === firstFactoryId;
     return {
       factoryId: f.factoryId,
-      capacityByProduct: { hoso: unwrapUnit(f.hosoCapacity), pd: unwrapUnit(f.pdCapacity), vap: unwrapUnit(f.vapCapacity) },
-      commonProcessingCapacity: unwrapUnit(f.commonProcessingCapacity),
-      freezingPackagingCapacity: unwrapUnit(f.freezingPackagingCapacity),
+      capacityByProduct: {
+        hoso: unwrapUnit(f.hosoCapacity) + (isMainFactory ? capexEffect.hoso : 0),
+        pd: unwrapUnit(f.pdCapacity) + (isMainFactory ? capexEffect.pd : 0),
+        vap: unwrapUnit(f.vapCapacity) + (isMainFactory ? capexEffect.vap : 0),
+      },
+      commonProcessingCapacity: unwrapUnit(f.commonProcessingCapacity) + (isMainFactory ? capexEffect.commonProcessing : 0),
+      freezingPackagingCapacity: unwrapUnit(f.freezingPackagingCapacity) + (isMainFactory ? capexEffect.freezingPackaging : 0),
       currentRegularHeadcount,
       skillByProduct,
       attendanceRate: baseline ? unwrapUnit(baseline.attendanceRate) : 1,
@@ -119,10 +133,16 @@ function averageLaborUtilization(ownState: CompanyOwnState): number | undefined 
   return sum / metrics.length;
 }
 
-function activeCapexTargets(ownState: CompanyOwnState): ReadonlySet<Product | "commonProcessing" | "freezingPackaging" | "coldStorage"> {
+function activeCapexTargets(ownState: CompanyOwnState, period: PeriodV2): ReadonlySet<Product | "commonProcessing" | "freezingPackaging" | "coldStorage"> {
   const targets = new Set<Product | "commonProcessing" | "freezingPackaging" | "coldStorage">();
   for (const project of ownState.capexState.portfolio.projects) {
-    if (project.status !== "approved" && project.status !== "underConstruction") continue;
+    // 【SAI-5F修正（Fable事前監査）】従来はapproved/underConstructionのみを
+    // 「進行中」とみなしていたため、(a) suspended（資金難で中断中。再開待ちの
+    // 実在する案件）、(b) completedだが稼働開始前（readiness期間中の1〜2四半期）
+    // の窓で同一ターゲットを重複提案し得た。cancelled と「completedかつ稼働開始
+    // 済み（＝能力へ反映済み、上のcapexEffectが観測に含める）」だけを除外する。
+    if (project.status === "cancelled") continue;
+    if (project.status === "completed" && isCapexProjectOperationalAt(project, period)) continue;
     const target = project.futureCapacityEffect?.targetProduct;
     if (target) targets.add(target);
   }
@@ -136,7 +156,7 @@ export function buildStandardAiObservation(
   period: PeriodV2,
   turn: number
 ): StandardAiObservation {
-  const factories = buildFactoryObservations(fixture, ownState);
+  const factories = buildFactoryObservations(fixture, ownState, period);
   const lastMarketResult = publicInfo.lastMarketResult;
 
   return {
@@ -176,7 +196,12 @@ export function buildStandardAiObservation(
     existingLoanBalanceUsd: ownState.financingState.loanPortfolio.loans.reduce((s, l) => s + l.currentPrincipalUsd, 0),
     regularHeadcountTotal: factories.reduce((s, f) => s + f.currentRegularHeadcount, 0),
 
-    activeCapexProjectTargets: activeCapexTargets(ownState),
+    activeCapexProjectTargets: activeCapexTargets(ownState, period),
+    // 【SAI-5F】中断中案件（projectId昇順の決定論的順序。resume提案の対象）。
+    suspendedCapexProjectIds: ownState.capexState.portfolio.projects
+      .filter((p) => p.status === "suspended")
+      .map((p) => p.projectId)
+      .sort(),
 
     qualityScoreByProduct: ownState.qualityScoreByProduct,
     customerTrustByMarket: ownState.customerTrustByMarket,
