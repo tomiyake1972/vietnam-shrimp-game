@@ -2,7 +2,10 @@
 
 - 対象ブランチ: `feature/v2-sai5-market-evolution`
 - 作成日: 2026-07-31（JST）
-- 状態: **develop/v2・main へはマージしていない。Preview・production へのdeployも行っていない。**
+- 状態: **受入判定「完成」。`develop/v2` へ fast-forward マージ済み（`2195ae7` → `0ec2564`、
+  マージコミットなし）。`main` は `3ae9485` のまま未変更。Preview・production への deploy は行っていない。**
+- マージ後の `develop/v2` で `npm test`（1975件成功）・`tsc`・`eslint`（エラー0）・`npm run build` を再実行し、
+  すべて成功することを確認済み。
 
 本報告の数値は、事後監査の指摘（Blocker A/B、重要指摘 C〜J）をすべて修正したうえで
 **全面的に取り直したもの**である。監査前のサマリ数値は受入判定には使用していない。
@@ -292,8 +295,11 @@ bf75858 fix(v2): normalize supply pressure and premium feedback
 
 ## 8. 次の作業への引き継ぎ
 
-- **マージは未実施**。`develop/v2`（`2195ae7`）・`main`（`3ae9485`）はいずれも未変更。
+- **`develop/v2` へ fast-forward マージ済み**（`2195ae7` → `0ec2564`）。`main`（`3ae9485`）は未変更。
+  feature branch `feature/v2-sai5-market-evolution` は削除せず保存している。
 - Preview・production への deploy は行っていない。
+- 次フェーズは **Phase SAI-6: Standard AI 意思決定強化（設備投資／供給過剰対応／価格戦略強化）**。
+  SAI-6 の設計時に踏まえるべき既知の制約は開発日誌 `docs/development_diary_2026-07-31.md` §8 に整理した。
 - Calibration 5件・Future 3件を `sai5_fable_audit.md` §8.3 / §8.4 に、
   それぞれ実測値と推奨対応つきで記録した。優先度は **R-1 ＞ R-3 ＞ M ＞ R-4 ＞ R-2**。
 - 供給圧力の定義は `SupplyPressureDefinition` として4種すべてを実装に残しており、
