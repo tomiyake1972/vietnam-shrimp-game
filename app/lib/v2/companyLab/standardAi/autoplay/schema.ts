@@ -358,8 +358,16 @@ export interface Sai5MarketEvolutionTraceRow {
   readonly offeredHosoEqTons: number;
   /** 商品別の対象需要合計（HOSO換算トン）。 */
   readonly targetDemandHosoEqTons: number;
-  /** 当期の供給圧力（提示量/需要）。 */
+  /** 【監査指摘B】5社が構造的に配分を受けられる需要（棄却した候補(i)の分母。監査再現用）。 */
+  readonly addressableDemandHosoEqTons: number;
+  /** 外部選択肢（非5社供給）が埋めた数量（HOSO換算トン）。 */
+  readonly externalOptionQuantityHosoEqTons: number;
+  /** 当期の生の供給圧力（採用定義 completed_supply = 1 + 売れ残り/対象需要）。 */
   readonly supplyPressure: number;
+  /** EWMA適用後の供給圧力（＝実際に翌期プレミアム倍率とAI判断へ効く値）。 */
+  readonly supplyPressureEwma: number;
+  /** この四半期に用いた供給圧力の定義（監査・再現用）。 */
+  readonly supplyPressureDefinition: string;
   /** 当期の市場計算へ適用したプレミアム比率倍率（前期末state由来）。 */
   readonly appliedPremiumRatioMultiplier: number;
   /** 当期に適用した普及前倒しシフト（四半期数）。 */

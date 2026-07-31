@@ -20,6 +20,8 @@ import {
   SELECTED_STANDARD_BASELINE_CANDIDATE_ID,
 } from "../app/lib/v2/companyLab/standardAi/report/standardBaseline";
 import { unwrapUnit } from "../app/lib/v2/core/units";
+import { MARKET_EVOLUTION_PARAMETERS_V1 } from "../app/lib/v2/companyLab/marketEvolution";
+import { DEMAND_MARKET_IDS } from "../app/lib/v2/market/types";
 
 const candidate = STANDARD_BASELINE_CANDIDATES.find((c) => c.id === SELECTED_STANDARD_BASELINE_CANDIDATE_ID)!;
 const SEEDS_8 = Array.from({ length: 8 }, (_, i) => `sai5-ab-${String(i + 1).padStart(3, "0")}`);
@@ -118,7 +120,12 @@ function runConfig(spec: ConfigSpec) {
   const perCompany = new Map<string, CompanyMetrics>(ALL_COMPANY_IDS.map((id) => [id, emptyCompanyMetrics()]));
   const premiumByTurn: { pd: number[][]; vap: number[][] } = { pd: [], vap: [] };
   const supplyPressureByTurn: { pd: number[][]; vap: number[][] } = { pd: [], vap: [] };
+  const supplyPressureEwmaByTurn: { pd: number[][]; vap: number[][] } = { pd: [], vap: [] };
   const premiumMultiplierByTurn: { pd: number[][]; vap: number[][] } = { pd: [], vap: [] };
+  // 【監査§5】reason code発火回数、営業基盤の会社差、上下限への張り付き
+  const reasonCodeCounts = new Map<string, number>();
+  const salesBaseFinalByCompany = new Map<string, number[]>();
+  const allMultipliers: number[] = [];
   let maxAquacultureWish = 0;
   let firstDivergenceTurn: number | undefined;
   let completedCases = 0;
@@ -135,6 +142,27 @@ function runConfig(spec: ConfigSpec) {
     }
     completedCases += 1;
     const logs = buildAutoplayCaseLogs(result);
+    for (const d of result.diagnostics) {
+      for (const e of d.entries) reasonCodeCounts.set(e.code, (reasonCodeCounts.get(e.code) ?? 0) + 1);
+    }
+    // 営業基盤の最終値（会社ごとに全市場×全商品の平均）。最終四半期開始時点の
+    // 自社観測（ownState.salesBaseByMarketProduct）＝前期末までの正典の値を使う。
+    // 機能OFFのconfigではキー自体が存在せず、全セルが中立50になる。
+    const lastTurn = Math.max(...result.quarterStartCaptures.map((c) => c.turn));
+    for (const companyId of ALL_COMPANY_IDS) {
+      const capture = result.quarterStartCaptures.find((c) => c.turn === lastTurn && c.companyId === companyId);
+      const slice = capture?.ownState.salesBaseByMarketProduct;
+      const scores: number[] = [];
+      for (const market of DEMAND_MARKET_IDS) {
+        for (const product of ["hoso", "pd", "vap"] as const) {
+          const v = slice?.[market]?.[product];
+          scores.push(v === undefined ? 50 : Number(v));
+        }
+      }
+      const arr = salesBaseFinalByCompany.get(companyId) ?? [];
+      arr.push(scores.reduce((s2, v) => s2 + v, 0) / scores.length);
+      salesBaseFinalByCompany.set(companyId, arr);
+    }
 
     for (const row of logs.caseSummaryRows) {
       const m = perCompany.get(row.companyId)!;
@@ -169,8 +197,11 @@ function runConfig(spec: ConfigSpec) {
       if (h.sai5MarketEvolution) {
         (supplyPressureByTurn.pd[i] ??= []).push(h.sai5MarketEvolution.supplyPressureByProduct.pd);
         (supplyPressureByTurn.vap[i] ??= []).push(h.sai5MarketEvolution.supplyPressureByProduct.vap);
+        (supplyPressureEwmaByTurn.pd[i] ??= []).push(h.sai5MarketEvolution.supplyPressureEwmaByProduct.pd);
+        (supplyPressureEwmaByTurn.vap[i] ??= []).push(h.sai5MarketEvolution.supplyPressureEwmaByProduct.vap);
         (premiumMultiplierByTurn.pd[i] ??= []).push(h.sai5MarketEvolution.appliedPremiumRatioMultipliers.pd);
         (premiumMultiplierByTurn.vap[i] ??= []).push(h.sai5MarketEvolution.appliedPremiumRatioMultipliers.vap);
+        allMultipliers.push(h.sai5MarketEvolution.appliedPremiumRatioMultipliers.pd, h.sai5MarketEvolution.appliedPremiumRatioMultipliers.vap);
       }
     });
     // 5社の市場別販売構成が最初に分岐したturn
@@ -258,10 +289,24 @@ function runConfig(spec: ConfigSpec) {
       pd: supplyPressureByTurn.pd.map(median),
       vap: supplyPressureByTurn.vap.map(median),
     },
+    medianSupplyPressureEwmaByTurn: {
+      pd: supplyPressureEwmaByTurn.pd.map(median),
+      vap: supplyPressureEwmaByTurn.vap.map(median),
+    },
     medianPremiumMultiplierByTurn: {
       pd: premiumMultiplierByTurn.pd.map(median),
       vap: premiumMultiplierByTurn.vap.map(median),
     },
+    // 【監査§5】上下限への一方向の張り付き（0%が望ましい）
+    premiumMultiplierPegging: {
+      samples: allMultipliers.length,
+      shareAtFloor: allMultipliers.length > 0 ? allMultipliers.filter((m) => m <= MARKET_EVOLUTION_PARAMETERS_V1.premiumMultiplierFloor + 1e-9).length / allMultipliers.length : 0,
+      shareAtCap: allMultipliers.length > 0 ? allMultipliers.filter((m) => m >= MARKET_EVOLUTION_PARAMETERS_V1.premiumMultiplierCap - 1e-9).length / allMultipliers.length : 0,
+    },
+    reasonCodeCounts: Object.fromEntries([...reasonCodeCounts].sort((a, b) => b[1] - a[1])),
+    salesBaseFinalMeanByCompany: Object.fromEntries(
+      [...salesBaseFinalByCompany].map(([id, arr]) => [id, arr.reduce((s2, v) => s2 + v, 0) / arr.length])
+    ),
     companies,
     fiveCompanyShareByMarket,
     fiveCompanyShareByProduct,
@@ -307,6 +352,48 @@ function main() {
     );
   }
   lines.push("");
+  lines.push("## 供給圧力・プレミアム倍率の四半期推移（中央値）");
+  lines.push("");
+  for (const r of results) {
+    if (r.medianSupplyPressureEwmaByTurn.vap.length === 0) continue;
+    const fmt = (xs: (number | null)[]) => xs.map((v) => (v === null ? "-" : v.toFixed(3))).join(" ");
+    lines.push(`### ${r.id}`);
+    lines.push("");
+    lines.push("```");
+    lines.push(`PD  圧力EWMA : ${fmt(r.medianSupplyPressureEwmaByTurn.pd)}`);
+    lines.push(`PD  倍率     : ${fmt(r.medianPremiumMultiplierByTurn.pd)}`);
+    lines.push(`VAP 圧力EWMA : ${fmt(r.medianSupplyPressureEwmaByTurn.vap)}`);
+    lines.push(`VAP 倍率     : ${fmt(r.medianPremiumMultiplierByTurn.vap)}`);
+    lines.push(`PD  VNプレミアム: ${fmt(r.medianVnPremiumByTurn.pd)}`);
+    lines.push(`VAP VNプレミアム: ${fmt(r.medianVnPremiumByTurn.vap)}`);
+    lines.push("```");
+    lines.push("");
+    lines.push(
+      `倍率の上下限張り付き: 床(0.6) ${pct(r.premiumMultiplierPegging.shareAtFloor)} / 天井(1.4) ${pct(r.premiumMultiplierPegging.shareAtCap)}（${r.premiumMultiplierPegging.samples}サンプル）`
+    );
+    lines.push("");
+  }
+
+  lines.push("## 営業基盤の会社差（最終四半期開始時点、全市場×全商品の平均）");
+  lines.push("");
+  lines.push(`| config | ${ALL_COMPANY_IDS.join(" | ")} | 最大差 |`);
+  lines.push(`|---|${ALL_COMPANY_IDS.map(() => "---:").join("|")}|---:|`);
+  for (const r of results) {
+    const vals = ALL_COMPANY_IDS.map((id) => r.salesBaseFinalMeanByCompany[id] ?? 50);
+    lines.push(`| ${r.id} | ${vals.map((v) => v.toFixed(2)).join(" | ")} | ${(Math.max(...vals) - Math.min(...vals)).toFixed(2)} |`);
+  }
+  lines.push("");
+
+  lines.push("## reason code 発火回数");
+  lines.push("");
+  const allCodes = Array.from(new Set(results.flatMap((r) => Object.keys(r.reasonCodeCounts)))).sort();
+  lines.push(`| reason code | ${results.map((r) => r.id).join(" | ")} |`);
+  lines.push(`|---|${results.map(() => "---:").join("|")}|`);
+  for (const code of allCodes) {
+    lines.push(`| ${code} | ${results.map((r) => r.reasonCodeCounts[code] ?? 0).join(" | ")} |`);
+  }
+  lines.push("");
+
   for (const r of results) {
     lines.push(`## ${r.id} — ${r.label}`);
     lines.push("");
