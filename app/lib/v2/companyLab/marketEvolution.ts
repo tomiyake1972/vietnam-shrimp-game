@@ -24,7 +24,7 @@
 
 import { unwrapUnit } from "../core/units";
 import { MarketQuarterResult, Product } from "../market/types";
-import { MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../market/productLifecycle";
+import { MarketProductMix } from "../market/productLifecycle";
 import { DEMAND_MARKET_IDS, DemandMarketId } from "../market/types";
 
 /** 1商品（pd/vap）ぶんの進化carry state。 */

@@ -6,7 +6,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  SALES_BASE_PARAMETERS_V1,
   emptySalesBaseState,
   lookupSalesBaseScore,
   salesBaseSliceForCompany,

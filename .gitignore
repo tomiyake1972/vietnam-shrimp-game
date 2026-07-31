@@ -53,3 +53,8 @@ next-env.d.ts
 # Phase SAI-4: 標準AI異質5社テスト・養殖上限4,000トン試験の生成物
 # （artifacts/sai4/以下）。同じ理由でGit管理対象にしない。
 /artifacts/sai4/
+
+# Phase SAI-5: 市場進化モデル（A/B比較・因果トレース）の生成物
+# （artifacts/sai5/以下）。同じ理由でGit管理対象にしない
+# （生成スクリプト scripts/sai5Analysis.ts のみGit管理する）。
+/artifacts/sai5/
