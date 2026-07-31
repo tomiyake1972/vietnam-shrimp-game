@@ -6,6 +6,25 @@
 - 計測スクリプト: `scripts/sai6Phase0Study.ts`（エンジン・標準AIの本体ロジックは一切変更していない）
 - 生成物: `artifacts/sai6/phase0/{measurement.json, policy-grid.json, summary.md, quarterly.csv, policy-grid.csv}`
 
+> **【2026-08-01追記・重要な訂正】§4「資金（ご指示8・9）」の`totalCashOutflowUsd`／
+> `資金枠余裕`／`借入余力を超えた会社×四半期`（"0/208"）は、**符号規約の誤り**により
+> 実態を反映していない疑いが強い。本スクリプトの`outflow`はfinance/types.tsの
+> `operatingDirect`各支出項目（負値で保持）をそのまま合計しており、結果として
+> `totalCashOutflowUsd`自体が負値（例: 控えめな四半期で-16.7M、支出の大きい四半期で
+> -43.9M）になっている。一方で`資金枠余裕 = 期首現金＋借入余力－totalCashOutflowUsd`の
+> 計算式は「支出は正の金額」という前提で書かれているため、負値を引く＝実質的に
+> 加算してしまい、資金枠余裕を実際より大きく見せ、結果として「借入余力を超えた
+> 四半期が0/208件」という数値を作り出していた可能性が高い（試しに符号を正しく
+> 補正して再計算すると、今度は逆に640/640件が「超過」と出る。ただしこれも
+> 「当期の売上入金を一切考慮しない」計算のため過大に出ており、意味のある指標には
+> ならない）。**結論**: このスクリプトの資金枠余裕・借入余力超過統計は、符号の
+> 誤りと、そもそも当期の入金を考慮していないという設計上の欠陥の両方を抱えており、
+> **信頼できる測定ではない**。SAI-6 Phase 1Aの因果監査（`scripts/
+> sai6Phase1ACausalAudit.ts`、`docs/v2/reports/sai6_phase1a_causal_audit_and_ab_report.md`）
+> は、この欠陥のある指標に依拠せず、`reliableCashInflowsUsd`／`plannedCashOutflowsUsd`を
+> 独立に正しい符号（正の金額）で計算し直しており、影響を受けていない。
+> `scripts/sai6Phase0Study.ts`側の修正・再計測は別途の作業として残す（本追記時点では未修正）。
+
 条件: 4 seed × 32Q × 5社（全標本 640 会社×四半期）、標準初期条件 `balanced-trimmed`。
 
 ---
