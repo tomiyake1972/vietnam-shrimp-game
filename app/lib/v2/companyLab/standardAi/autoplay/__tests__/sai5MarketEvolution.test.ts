@@ -166,3 +166,80 @@ test("SAI-5E統合: 契約単価は遡及変更されない（同一契約のuni
     assert.equal(c.unitPrice as unknown as number, priceByContract.get(c.contractId));
   }
 });
+
+// ---------------------------------------------------------------------
+// SAI-5B: 異質5社preset（会社別の小幅な初期差）
+// ---------------------------------------------------------------------
+
+test("SAI-5B統合: heterogeneousInitial無効時は従来と完全に同一（identical-standardの維持）", () => {
+  const off1 = runAutoplayCase(baseConfig("sai5b-backcompat", 2));
+  const off2 = runAutoplayCase(baseConfig("sai5b-backcompat", 2, { heterogeneousInitialConditionsEnabled: false }));
+  assert.equal(JSON.stringify(off1.history), JSON.stringify(off2.history));
+  // 5社のfixtureが完全同一（会社ID系を除く）であることは既存の
+  // heterogeneousProfiles.test.tsの同一初期条件テストが引き続き保証する。
+});
+
+test("SAI-5B統合: 有効時、会社別の設備ミックスが設計どおり傾斜し、固定資産が能力合計に比例して調整される", () => {
+  const run = runAutoplayCase(baseConfig("sai5b-tilts", 1, { heterogeneousInitialConditionsEnabled: true }));
+  const fixtureOf = (id: string) => run.companies.find((f) => f.companyId === id)!;
+  const capOf = (id: string, product: "hosoCapacity" | "pdCapacity" | "vapCapacity") =>
+    fixtureOf(id).factories.reduce((s, f) => s + (f[product] as unknown as number), 0);
+
+  // MASS=HOSO寄り、JPQ=VAP寄り、VAP社=PD/VAP寄り、CONSV=PD寄り（BAL基準）
+  assert.ok(capOf("MASS", "hosoCapacity") > capOf("BAL", "hosoCapacity"));
+  assert.ok(capOf("MASS", "vapCapacity") < capOf("BAL", "vapCapacity"));
+  assert.ok(capOf("JPQ", "vapCapacity") > capOf("BAL", "vapCapacity"));
+  assert.ok(capOf("VAP", "pdCapacity") > capOf("BAL", "pdCapacity"));
+  assert.ok(capOf("CONSV", "pdCapacity") > capOf("BAL", "pdCapacity"));
+
+  // 固定資産: 能力を増やしたMASS(合計+3%程度)とBALで方向が整合
+  const turn1 = run.quarterStartCaptures.filter((c) => c.turn === 1);
+  const faOf = (id: string) => turn1.find((c) => c.companyId === id)!.ownState.financeState.fixedAssetsGross as unknown as number;
+  const totalCapOf = (id: string) => capOf(id, "hosoCapacity") + capOf(id, "pdCapacity") + capOf(id, "vapCapacity");
+  for (const id of ["MASS", "JPQ", "VAP", "CONSV"]) {
+    const capRatio = totalCapOf(id) / totalCapOf("BAL");
+    const faRatio = faOf(id) / faOf("BAL");
+    assert.ok(Math.abs(faRatio - capRatio) < 0.01, `${id}: 固定資産比率(${faRatio})が能力比率(${capRatio})と整合しない`);
+  }
+});
+
+test("SAI-5B統合: 有効時、BSは全社バランスし（残差利益剰余金）、初期営業基盤が会社像どおり設定される", () => {
+  const run = runAutoplayCase(
+    baseConfig("sai5b-bs", 1, { heterogeneousInitialConditionsEnabled: true, salesBaseAccumulationEnabled: true })
+  );
+  const turn1 = run.quarterStartCaptures.filter((c) => c.turn === 1);
+  for (const c of turn1) {
+    const fs = c.ownState.financeState;
+    const n = (v: unknown) => v as number;
+    const rawMaterialValue = c.ownState.rawMaterialLots.reduce(
+      (s, l) => s + (l.remainingQuantity as unknown as number) * 1000 * (l.unitCost as unknown as number),
+      0
+    );
+    const receivables = fs.receivables.reduce((s, r) => s + n(r.amount), 0);
+    const assets = n(fs.cash) + receivables + rawMaterialValue + n(fs.otherCurrentAssets) + n(fs.fixedAssetsGross) - n(fs.accumulatedDepreciation);
+    const liabilitiesAndEquity =
+      n(fs.shortTermLoans) + n(fs.longTermLoans) + n(fs.otherLiabilities) + n(fs.capitalStock) + n(fs.retainedEarnings);
+    assert.ok(Math.abs(assets - liabilitiesAndEquity) < 1, `${c.companyId}: BSがバランスしない (資産${assets} vs 負債資本${liabilitiesAndEquity})`);
+  }
+  // 初期営業基盤（JPQ×JP×VAP=65等）がAIの観測に現れる
+  const jpq = turn1.find((c) => c.companyId === "JPQ")!;
+  assert.equal(jpq.ownState.salesBaseByMarketProduct?.JP?.vap as unknown as number, 65);
+  const bal = turn1.find((c) => c.companyId === "BAL")!;
+  assert.equal(bal.ownState.salesBaseByMarketProduct?.JP?.vap, undefined); // BALは初期差なし（中立）
+});
+
+test("SAI-5B統合: 有効時でも8四半期完走・エラー0・同一seedで完全再現", () => {
+  const config = baseConfig("sai5b-repro", 8, {
+    heterogeneousInitialConditionsEnabled: true,
+    marketProductOrientationEnabled: true,
+    managementProfilesEnabled: true,
+    salesBaseAccumulationEnabled: true,
+    productLifecycleEnabled: true,
+    supplyPremiumFeedbackEnabled: true,
+  });
+  const a = runAutoplayCase(config);
+  assert.equal(a.completedTurns, 8);
+  const b = runAutoplayCase(config);
+  assert.equal(JSON.stringify(a.history), JSON.stringify(b.history));
+  assert.equal(JSON.stringify(a.diagnostics), JSON.stringify(b.diagnostics));
+});

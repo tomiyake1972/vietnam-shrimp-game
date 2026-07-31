@@ -13,6 +13,7 @@ import { PeriodV2 } from "../../../core/period";
 import { hosoEqTons } from "../../../core/units";
 import { ALL_COMPANY_IDS, initializeUnifiedCompanyLabFromTemplate } from "../report/decomposeHarness";
 import { runFromInit } from "../report/decomposeHarness";
+import { buildSai5HeterogeneousOverrides } from "../report/heterogeneousPreset";
 import { StandardBaselineCandidate } from "../report/standardBaseline";
 import { createInstrumentedStandardAiRun, QuarterStartCapture } from "./capture";
 import { StandardAiQuarterDiagnostics } from "../policy";
@@ -134,7 +135,11 @@ export function runAutoplayCase(config: AutoplayCaseConfig): AutoplayCaseResult 
     buildFixtureTemplate,
     config.candidate.financeFixtureTemplate,
     config.candidate.contractDefs,
-    order
+    order,
+    // 【SAI-5B】異質preset有効時のみ、会社別の小幅な初期差（設備ミックス・技能・
+    // 初期営業基盤・比例した固定資産調整）を適用する。未指定なら従来どおり
+    // 5社完全同一（identical-standard）。
+    config.heterogeneousInitialConditionsEnabled ? buildSai5HeterogeneousOverrides() : undefined
   );
 
   const useResolver =

@@ -60,6 +60,7 @@ import {
   advanceCompanyLabQuarter,
 } from "../../runner";
 import { buildInitialWorkforceState } from "../../workforce";
+import type { SalesBaseState } from "../../salesBase";
 
 export const ALL_COMPANY_IDS: readonly CompanyId[] = ["BAL", "MASS", "JPQ", "VAP", "CONSV"];
 
@@ -248,24 +249,52 @@ function buildUnifiedContractsFromDefs(startPeriod: PeriodV2, contractDefs: read
   return out;
 }
 
+/**
+ * 【SAI-5B】会社別の小幅な初期差を注入するためのoptionalなoverride群。
+ * 未指定なら従来どおり5社完全同一（identical-standard）。
+ * - fixtureOverride: 複製済みfixtureへの会社別上書き（設備能力ミックス・技能等）。
+ * - financeFixtureOverride: 会社別の財務テンプレート上書き。上書き後も
+ *   retainedEarningsは従来どおり残差（総資産−総負債−資本金）で決まるため、
+ *   fixedAssetsGross等を変えてもBSは構造的にバランスする。第3引数に
+ *   （fixtureOverride適用後の）fixtureを渡すため、設備能力に比例した
+ *   固定資産調整が実装できる。
+ * - initialSalesBaseState: 初期の営業基盤ストック（BS非接続のため最も安全な初期差）。
+ */
+export interface UnifiedPerCompanyOverrides {
+  readonly fixtureOverride?: (companyId: CompanyId, fixture: CompanyFixture) => CompanyFixture;
+  readonly financeFixtureOverride?: (companyId: CompanyId, template: InitialFinanceFixture, fixture: CompanyFixture) => InitialFinanceFixture;
+  readonly initialSalesBaseState?: SalesBaseState;
+}
+
 /** initializeUnifiedCompanyLabの汎用版。既存5社のcompanyIdに紐づかない、独立に
  *  設計したfixtureテンプレート・財務テンプレート・契約定義から、5社を同一条件へ
- *  複製した初期状態を構築する（SAI-2の標準初期条件・基準テスト用）。 */
+ *  複製した初期状態を構築する（SAI-2の標準初期条件・基準テスト用）。
+ *  【SAI-5B】perCompanyOverridesを渡した場合のみ、複製後に会社別の小幅な
+ *  初期差を適用する（未指定なら従来と完全に同一の初期状態）。 */
 export function initializeUnifiedCompanyLabFromTemplate(
   config: CompanyLabConfig,
   buildFixtureTemplate: (startPeriod: PeriodV2) => CompanyFixture,
   financeFixtureTemplate: Omit<InitialFinanceFixture, "companyId">,
   contractDefs: readonly UnifiedContractDef[],
-  order: readonly CompanyId[] = ALL_COMPANY_IDS
+  order: readonly CompanyId[] = ALL_COMPANY_IDS,
+  perCompanyOverrides?: UnifiedPerCompanyOverrides
 ): CompanyLabInitResult {
   const definition = findScenarioDefinitionForCompanyLab(config.scenarioId);
   const scenarioState = initializeScenario(definition, config.mode, config.seed);
   const startPeriod = getScenarioTurnInput(scenarioState, 1).period;
   const fixtureTemplate = buildFixtureTemplate(startPeriod);
-  const fixtures = buildUnifiedFixturesFromTemplate(fixtureTemplate, order);
+  const clonedFixtures = buildUnifiedFixturesFromTemplate(fixtureTemplate, order);
+  const fixtures = perCompanyOverrides?.fixtureOverride
+    ? clonedFixtures.map((f) => perCompanyOverrides.fixtureOverride!(f.companyId, f))
+    : clonedFixtures;
   const templateFinanceFixture: InitialFinanceFixture = { companyId: fixtureTemplate.companyId, ...financeFixtureTemplate };
 
-  const initialFinanceCompanies = fixtures.map((f) => buildUnifiedFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod, templateFinanceFixture));
+  const initialFinanceCompanies = fixtures.map((f) => {
+    const financeTemplate = perCompanyOverrides?.financeFixtureOverride
+      ? perCompanyOverrides.financeFixtureOverride(f.companyId, templateFinanceFixture, f)
+      : templateFinanceFixture;
+    return buildUnifiedFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod, financeTemplate);
+  });
   const initialContracts = buildUnifiedContractsFromDefs(startPeriod, contractDefs, order);
 
   const initialScenarioTurnInput = getScenarioTurnInput(scenarioState, 1);
@@ -293,6 +322,8 @@ export function initializeUnifiedCompanyLabFromTemplate(
     },
     workforceState: buildInitialWorkforceState(fixtures),
     consumerMarketState: buildInitialConsumerMarketCarryStateTable(initialMarketInput.demandMarkets),
+    // 【SAI-5B】初期営業基盤（BS非接続の初期差。未指定なら従来どおりキー自体なし）。
+    ...(perCompanyOverrides?.initialSalesBaseState ? { salesBaseState: perCompanyOverrides.initialSalesBaseState } : {}),
     history: [],
     isComplete: false,
   };
