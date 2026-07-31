@@ -45,7 +45,7 @@ import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState }
 // 【Phase 8D-4】型のみの参照（workforce.ts 側も CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
 import type { CompanyWorkforceState, WorkforceState } from "./workforce";
 import type { SalesBaseState } from "./salesBase";
-import type { MarketEvolutionState, Sai5MarketEvolutionRecord } from "./marketEvolution";
+import type { MarketEvolutionState, Sai5MarketEvolutionRecord, SupplyPressureDefinition } from "./marketEvolution";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -378,6 +378,12 @@ export interface Sai5FeatureFlags {
   readonly salesBaseAccumulation?: boolean;
   /** 5社供給圧力→翌期PD/VAPプレミアムのフィードバック。 */
   readonly supplyPremiumFeedback?: boolean;
+  /**
+   * 【監査指摘B・定義比較用】供給圧力の定義。未指定＝採用済みの既定
+   * （MARKET_EVOLUTION_PARAMETERS_V1.supplyPressureDefinition）。
+   * 定義候補の実測比較（scripts/sai5SupplyPressureStudy.ts）以外では指定しない。
+   */
+  readonly supplyPressureDefinition?: SupplyPressureDefinition;
 }
 
 export interface CompanyLabConfig {

@@ -27,14 +27,34 @@ import { MarketQuarterResult, Product } from "../market/types";
 import { MarketProductMix } from "../market/productLifecycle";
 import { DEMAND_MARKET_IDS, DemandMarketId } from "../market/types";
 
+/**
+ * 供給圧力の定義（分子・分母の意味をそろえるための候補）。
+ * 【SAI-5 監査指摘B】どれを採用したか・他をなぜ棄却したかは
+ * docs/v2/design/sai5_market_evolution_design.md §2.6 に記録する。
+ */
+export type SupplyPressureDefinition =
+  /** 旧実装（棄却）: 5社の提示量 ÷ 全ベトナム対象需要。分子は5社、分母は全ベトナムでスケールが違い1.0を中心にできない。 */
+  | "raw_target_demand"
+  /** 候補(i): 5社の提示量 ÷ 5社が構造的に配分を受けられる需要（対象需要×5社の均衡シェア）。 */
+  | "addressable_demand"
+  /** 候補(ii): 生の比率を、同じ比率の長期EWMA（中立ベースライン）で正規化した無次元指数。 */
+  | "neutral_baseline"
+  /** 候補(iii): 分子を「5社提示量＋外部供給量」に補完し、全ベトナム対象需要と同じ母集団にそろえる。 */
+  | "completed_supply";
+
 /** 1商品（pd/vap）ぶんの進化carry state。 */
 export interface ProductEvolutionEntry {
-  /** 供給圧力（5社提示量÷対象需要）のEWMA。1.0=需給均衡、>1=供給過剰。 */
+  /** 供給圧力のEWMA。1.0=需給均衡、>1=供給過剰。定義はSupplyPressureDefinition参照。 */
   readonly supplyPressureEwma: number;
   /** 当期に適用したプレミアム比率倍率（次期の平滑化・変動上限の起点）。 */
   readonly premiumRatioMultiplier: number;
   /** 割安シグナルのEWMA（正=実現プレミアムが基準より安い状態が持続）。 */
   readonly affordabilitySignalEwma: number;
+  /**
+   * 候補(ii) neutral_baseline 専用の遅いEWMA（生比率の長期基準）。
+   * 他の定義では未使用（undefined）。
+   */
+  readonly supplyRatioBaselineEwma?: number;
 }
 
 /** SAI-5Eのcarry state（CompanyLabState.marketEvolutionState）。 */
@@ -61,6 +81,10 @@ export interface MarketEvolutionParameters {
   readonly substitutionMaxShare: number;
   /** 代替が発動し始めるプレミアム比の乖離しきい値（基準比に対する相対乖離）。 */
   readonly substitutionActivationThreshold: number;
+  /** 供給圧力の定義（監査指摘Bの構造修正）。 */
+  readonly supplyPressureDefinition: SupplyPressureDefinition;
+  /** 候補(ii)専用: 中立ベースラインEWMAの平滑化係数（小さいほど基準が遅く動く）。 */
+  readonly supplyRatioBaselineEwmaAlpha: number;
 }
 
 /**
@@ -84,6 +108,11 @@ export const MARKET_EVOLUTION_PARAMETERS_V1: MarketEvolutionParameters = {
   adoptionShiftSensitivityQuarters: 8,
   substitutionMaxShare: 0.1,
   substitutionActivationThreshold: 0.1,
+  // 【監査指摘B・採用】実測比較（scripts/sai5SupplyPressureStudy.ts、4seed×32Q）の
+  // 結果、中立状態で1.0を中心にできたのは completed_supply だけだった。
+  // 採否の根拠は docs/v2/design/sai5_market_evolution_design.md §2.6 に記録。
+  supplyPressureDefinition: "completed_supply",
+  supplyRatioBaselineEwmaAlpha: 0.12,
 };
 
 export function initialMarketEvolutionState(): MarketEvolutionState {
@@ -97,6 +126,13 @@ export interface MarketEvolutionQuarterInputs {
   readonly offeredByProduct: Readonly<Record<"pd" | "vap", number>>;
   /** 商品別の対象需要合計（deriveTargetDemandの商品合計、HOSO換算トン）。 */
   readonly targetDemandByProduct: Readonly<Record<"pd" | "vap", number>>;
+  /**
+   * 【監査指摘B】5社が構造的に配分を受けられる需要（＝分子と母集団をそろえた分母）。
+   * 対象需要 × 5社の水位法均衡シェア（後述 computeAddressableDemand）。
+   */
+  readonly addressableDemandByProduct: Readonly<Record<"pd" | "vap", number>>;
+  /** 外部選択肢（非5社供給）へ流れた需要の商品別合計（候補(iii)の分子補完に使う）。 */
+  readonly externalOptionQuantityByProduct: Readonly<Record<"pd" | "vap", number>>;
   /** 当期の市場結果（実現プレミアムの読み取りのみ）。 */
   readonly marketResult: MarketQuarterResult;
   /** 基準プレミアム比率（MarketParameters.pdVapPremiumの基準値）。 */
@@ -109,16 +145,104 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
+/**
+ * 【監査指摘B・構造修正の中核】1つの市場×商品について、5社が構造的に配分を
+ * 受けられる需要（addressable demand）を返す。
+ *
+ * 成約配分は水位法（allocation.ts）で、5社と外部選択肢（他産地供給者・非購入、
+ * ウェイト externalOptionWeight）が対象需要という予算を奪い合う。誰も上限に
+ * 当たっていない均衡では、5社の取り分は
+ *
+ *     targetDemand × Σᵢwᵢ / (Σᵢwᵢ + w_ext)
+ *
+ * になる。つまり「5社が全力で提示したときに取れる量」がこれであり、これを
+ * 分母に置くと供給圧力は
+ *
+ *     pressure = 5社提示量 ÷ 5社が取れる量
+ *
+ * となって分子・分母の母集団が一致し、「ちょうど取れる分だけ提示している中立
+ * 状態」で厳密に1.0になる。旧実装は分母が全ベトナム対象需要だったため、分子が
+ * 5社だけなのに分母が全体という非対称があり、構造的に1.0を中心にできなかった。
+ *
+ * 係数は externalOptionWeight（既存の設計パラメータ）と、当期に実際に配分へ
+ * 使われた各社の競争力ウェイトだけで決まる。A/B結果に合わせて後から当てはめた
+ * 定数・会社別の補正は一切含まない。
+ */
+export function computeAddressableDemand(targetDemand: number, totalCompanyWeight: number, externalOptionWeight: number): number {
+  const denominator = totalCompanyWeight + externalOptionWeight;
+  if (!(denominator > EPSILON) || !(targetDemand > EPSILON)) return 0;
+  return targetDemand * (totalCompanyWeight / denominator);
+}
+
+/**
+ * 当期の生の供給圧力（EWMA適用前）を、採用した定義に従って計算する。
+ * 需要ゼロ・分母ゼロは中立1として扱う（発散を構造的に排除）。
+ */
+export function computeRawSupplyPressure(
+  product: "pd" | "vap",
+  inputs: MarketEvolutionQuarterInputs,
+  params: MarketEvolutionParameters,
+  prevBaselineEwma: number | undefined
+): { readonly pressure: number; readonly nextBaselineEwma: number | undefined } {
+  const targetDemand = inputs.targetDemandByProduct[product];
+  const offered = inputs.offeredByProduct[product];
+  const rawRatio = targetDemand > EPSILON ? offered / targetDemand : 1;
+
+  switch (params.supplyPressureDefinition) {
+    case "raw_target_demand":
+      return { pressure: rawRatio, nextBaselineEwma: undefined };
+
+    case "addressable_demand": {
+      const addressable = inputs.addressableDemandByProduct[product];
+      return { pressure: addressable > EPSILON ? offered / addressable : 1, nextBaselineEwma: undefined };
+    }
+
+    case "neutral_baseline": {
+      // 生比率を、同じ比率の遅いEWMA（中立ベースライン）で割った無次元指数。
+      // 定常状態では定義上1.0へ収束する。
+      const baseline = prevBaselineEwma !== undefined && prevBaselineEwma > EPSILON ? prevBaselineEwma : rawRatio;
+      const pressure = baseline > EPSILON ? rawRatio / baseline : 1;
+      const nextBaselineEwma = baseline + params.supplyRatioBaselineEwmaAlpha * (rawRatio - baseline);
+      return { pressure, nextBaselineEwma };
+    }
+
+    case "completed_supply": {
+      // 【採用】分子を「5社提示量＋外部選択肢が実際に埋めた量」に補完し、
+      // 全ベトナム対象需要と同じ母集団にそろえる。
+      //
+      // 外部選択肢が埋めた量は水位法の残差（＝対象需要 − 5社成約量）なので、
+      // この式は代数的に
+      //     pressure = 1 + (5社の提示量 − 5社の成約量) / 対象需要
+      // と等しい。つまり「5社が売りたかったのに売れ残った量が、市場需要の
+      // 何％にあたるか」という、意味の明確な供給過剰指標になる。
+      //   - 提示した分がすべて成約した中立状態 → 厳密に1.0
+      //   - 提示だけ増やす → 売れ残りが増えて上昇
+      //   - 提示を減らす → 売れ残りが減って1.0へ低下
+      // 分子・分母はどちらも「同じ市場×商品のHOSO換算トン」で母集団が一致する。
+      //
+      // 【外部選択肢との二重計上について】外部選択肢の数量はここで1度だけ、
+      // 「市場全体の供給量を数える」目的に使う。プレミアムへ別経路で加算する
+      // ことはないため、二重計上にはあたらない。
+      //
+      // 【1.0が下限になることの意味】本モデルの外部選択肢は上限なし（完全弾力的）
+      // として定義されているため、市場が構造的に供給不足になることは起こり得ない。
+      // したがって供給圧力は1.0を下回らず、プレミアム倍率は中立1.0以下の範囲で
+      // 動く（供給過剰でプレミアムが下がり、過剰が解消すると1.0へ回復する）。
+      // 対称な上振れを作るには根拠のない基準定数が必要になるため採らない。
+      const total = offered + inputs.externalOptionQuantityByProduct[product];
+      return { pressure: targetDemand > EPSILON ? total / targetDemand : 1, nextBaselineEwma: undefined };
+    }
+  }
+}
+
 function updateEntry(
   prev: ProductEvolutionEntry,
   product: "pd" | "vap",
   inputs: MarketEvolutionQuarterInputs,
   params: MarketEvolutionParameters
 ): ProductEvolutionEntry {
-  // --- 供給圧力: 提示量/需要（需要ゼロなら中立1として扱う） ---
-  const demand = inputs.targetDemandByProduct[product];
-  const offered = inputs.offeredByProduct[product];
-  const pressure = demand > EPSILON ? offered / demand : 1;
+  // --- 供給圧力: 採用した定義で算出（分子・分母の母集団を一致させる） ---
+  const { pressure, nextBaselineEwma } = computeRawSupplyPressure(product, inputs, params, prev.supplyRatioBaselineEwma);
   const supplyPressureEwma =
     prev.supplyPressureEwma + params.supplyPressureEwmaAlpha * (clamp(pressure, 0, 5) - prev.supplyPressureEwma);
 
@@ -136,7 +260,12 @@ function updateEntry(
   const cheapness = reference > EPSILON ? clamp((reference - realizedRatio) / reference, -1, 1) : 0;
   const affordabilitySignalEwma = prev.affordabilitySignalEwma + params.affordabilityEwmaAlpha * (cheapness - prev.affordabilitySignalEwma);
 
-  return { supplyPressureEwma, premiumRatioMultiplier, affordabilitySignalEwma };
+  return {
+    supplyPressureEwma,
+    premiumRatioMultiplier,
+    affordabilitySignalEwma,
+    ...(nextBaselineEwma !== undefined ? { supplyRatioBaselineEwma: nextBaselineEwma } : {}),
+  };
 }
 
 /** 四半期末のcarry state更新（純粋関数・決定論的）。 */
@@ -231,9 +360,15 @@ export interface Sai5MarketEvolutionRecord {
   readonly substitutionShareShift: number;
   /** 当期に実際に適用した市場×商品構成比（ライフサイクル+代替適用後）。 */
   readonly appliedMix?: MarketProductMix;
-  /** 当期実績から更新した供給圧力（提示量/需要）。 */
+  /** 当期実績から更新した生の供給圧力（採用定義で算出、EWMA適用前）。 */
   readonly supplyPressureByProduct: Readonly<Record<"pd" | "vap", number>>;
-  /** 商品別の提示量・対象需要（供給圧力の分子・分母、HOSO換算トン）。 */
+  /** EWMA適用後の供給圧力（＝実際に翌期プレミアム倍率を決める値）。 */
+  readonly supplyPressureEwmaByProduct: Readonly<Record<"pd" | "vap", number>>;
+  /** 商品別の提示量・対象需要・addressable需要・外部流出量（HOSO換算トン、監査可能性のため生値を保存）。 */
   readonly offeredByProduct: Readonly<Record<"pd" | "vap", number>>;
   readonly targetDemandByProduct: Readonly<Record<"pd" | "vap", number>>;
+  readonly addressableDemandByProduct: Readonly<Record<"pd" | "vap", number>>;
+  readonly externalOptionQuantityByProduct: Readonly<Record<"pd" | "vap", number>>;
+  /** この四半期に用いた供給圧力の定義（後からの再現・監査用）。 */
+  readonly supplyPressureDefinition: SupplyPressureDefinition;
 }

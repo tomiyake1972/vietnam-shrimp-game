@@ -75,15 +75,25 @@ export interface StandardAiParameters {
   /** 【SAI-5F】成長エントリとみなす公開ライフサイクルトレンドの下限
    *  （構成比pt/四半期。0.004 = 年率約1.6ptの構成比シフト）。 */
   readonly capexGrowthEntryTrendPerQuarterThreshold: number;
-  /** 【SAI-5F】これを超える公開供給圧力（提示量/需要のEWMA）ではPD/VAPの
-   *  設備投資を見送る（CAPEX_DEFERRED_OVERSUPPLY）。 */
+  /** 【SAI-5F】これを超える公開供給圧力のEWMAではPD/VAPの設備投資を見送る
+   *  （CAPEX_DEFERRED_OVERSUPPLY / VAP_OVERSUPPLY_RETREAT）。
+   *  【監査指摘B後に再測定】供給圧力の定義を completed_supply
+   *  （= 1 + 売れ残り提示量/対象需要）へ構造修正したため、旧定義（0.2〜0.5の
+   *  レンジ）を前提にした1.15は意味を失った。4seed×32Q実測のEWMA分布は
+   *  PD 1.000〜1.044（中央値1.021）、VAP 1.070〜1.318（中央値1.106、p75 1.141、
+   *  p90 1.279）。設備投資の見送りは販売抑制より重い判断のため、VAPで上位2割
+   *  程度の局面だけが該当する水準に置く。 */
   readonly capexOversupplyPressureThreshold: number;
   /** 【SAI-5F】ライフサイクル成長トレンドによる販売数量ブーストの上限
    *  （比率。成長市場でも希望量の増加は最大+5%までの小幅な前傾）。 */
   readonly lifecycleGrowthSalesBoostCap: number;
   /** 【SAI-5F】トレンド（構成比pt/四半期）→販売ブースト比率への変換係数。 */
   readonly lifecycleGrowthSalesBoostScale: number;
-  /** 【SAI-5F】これを超える公開供給圧力で当該商品の販売希望量を抑制し始める。 */
+  /** 【SAI-5F】これを超える公開供給圧力のEWMAで当該商品の販売希望量を抑制し始める。
+   *  【監査指摘B後に再測定】上記と同じ実測分布に基づき、VAPの上位25%程度
+   *  （p75=1.141付近）から緩やかに抑制が効き始める水準に置く。PD側は実測レンジの
+   *  上限が1.044のため通常運転では発火しない（＝PDは本シナリオで供給過剰に
+   *  ならない、という測定結果。発火させるための本体ロジックの追加はしない）。 */
   readonly supplyPressureRetreatThreshold: number;
   /** 【SAI-5F】供給圧力リトリートによる販売希望量縮小の下限倍率（最大-15%）。 */
   readonly supplyPressureRetreatFloor: number;
@@ -181,10 +191,10 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   standardAiCapexExtensionsEnabled: false,
   capexGrowthEntryUtilizationThreshold: 0.85,
   capexGrowthEntryTrendPerQuarterThreshold: 0.004,
-  capexOversupplyPressureThreshold: 1.15,
+  capexOversupplyPressureThreshold: 1.2,
   lifecycleGrowthSalesBoostCap: 0.05,
   lifecycleGrowthSalesBoostScale: 10,
-  supplyPressureRetreatThreshold: 1.2,
+  supplyPressureRetreatThreshold: 1.14,
   supplyPressureRetreatFloor: 0.85,
 
   sustainedShortageQuarterThreshold: 2,

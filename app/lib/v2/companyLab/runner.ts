@@ -57,13 +57,18 @@ import {
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
 import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../market/productLifecycle";
 import { salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
-import { SALES_PARAMETERS_SAI5_SALES_BASE_V1 } from "../sales/parameters";
+import { SALES_PARAMETERS_SAI5_SALES_BASE_V1, SALES_PARAMETERS_V1, SalesParameters } from "../sales/parameters";
 import { MARKET_PARAMETERS_V1 } from "../market/parameters";
 import {
   applyProductSubstitution,
+  computeAddressableDemand,
+  computeRawSupplyPressure,
   deriveAdoptionTurnShift,
   derivePremiumRatioMultipliers,
+  initialMarketEvolutionState,
   updateMarketEvolutionState,
+  MARKET_EVOLUTION_PARAMETERS_V1,
+  MarketEvolutionParameters,
   Sai5MarketEvolutionRecord,
 } from "./marketEvolution";
 import { deriveVietnamMarketReferencePrices } from "../sales/marketAdapter";
@@ -432,7 +437,12 @@ export function buildPublicMarketInfo(state: CompanyLabState): PublicMarketInfo 
   // computeMarketProductMixで再計算する（turn1では前期が存在しないためundefined）。
   let productLifecycleOutlook: PublicMarketInfo["productLifecycleOutlook"];
   if (state.config.sai5?.productLifecycle) {
-    const nextTurn = state.history.length + 1;
+    // 【監査指摘F・修正】turnはシナリオ状態（scenarioState.currentTurn）を正典と
+    // する。以前は state.history.length + 1 で導出していたが、永続化からの復元
+    // 経路ではサービス側が「直近1件の記録」しか注入しないことがあり、その場合
+    // nextTurnが常に2に張り付いて nextTurn >= 3 の分岐へ到達せず、ライフサイクル
+    // トレンドが恒久的にゼロになっていた（＝AIの成長局面判断が働かない）。
+    const nextTurn = state.scenarioState.currentTurn;
     if (nextTurn >= 2) {
       // 【SAI-5E】adoption前倒し・PD⇔VAP代替の適用後に実際に使われた構成比が
       // 履歴に記録されていればそれを優先する（公開情報は「実際に適用された値」）。
@@ -665,6 +675,15 @@ export function advanceCompanyLabQuarter(
     pd: MARKET_PARAMETERS_V1.pdVapPremium.pdBasePremiumRatio,
     vap: MARKET_PARAMETERS_V1.pdVapPremium.vapBasePremiumRatio,
   } as const;
+  // 【監査指摘B】当期の成約配分に実際に使うSalesParametersと、市場進化パラメータ。
+  // 供給圧力の分母（addressable demand）は前者のexternalOptionWeightから導くため、
+  // 両者が同じ値を参照することを1箇所で保証する。
+  const salesParametersForThisQuarter: SalesParameters = state.config.sai5?.salesBaseAccumulation
+    ? SALES_PARAMETERS_SAI5_SALES_BASE_V1
+    : SALES_PARAMETERS_V1;
+  const marketEvolutionParameters: MarketEvolutionParameters = state.config.sai5?.supplyPressureDefinition
+    ? { ...MARKET_EVOLUTION_PARAMETERS_V1, supplyPressureDefinition: state.config.sai5.supplyPressureDefinition }
+    : MARKET_EVOLUTION_PARAMETERS_V1;
   const appliedAdoptionTurnShift = state.config.sai5?.productLifecycle
     ? deriveAdoptionTurnShift(state.marketEvolutionState)
     : ({ pd: 0, vap: 0 } as const);
@@ -845,7 +864,7 @@ export function advanceCompanyLabQuarter(
       // 【SAI-5D】営業基盤ウェイト有効化版のSalesParameters（合計1.0を保った
       // 再配分。無効時はキー自体を渡さず、turn/runner.tsの既定
       // SALES_PARAMETERS_V1＝salesBaseウェイト0で従来と完全に同一）。
-      ...(state.config.sai5?.salesBaseAccumulation ? { sales: SALES_PARAMETERS_SAI5_SALES_BASE_V1 } : {}),
+      ...(state.config.sai5?.salesBaseAccumulation ? { sales: salesParametersForThisQuarter } : {}),
       // 【SAI-5E】供給圧力フィードバック有効時のみ、PD/VAPベースプレミアム比率へ
       // 前期末stateの倍率を乗じたMarketParametersを渡す（市場モジュール内部は
       // 無変更。既存の稼働率倍率clamp・最低プレミアム床はそのまま機能する）。
@@ -991,28 +1010,50 @@ export function advanceCompanyLabQuarter(
         else if (p.product === "vap") offeredByProduct.vap += unwrapUnit(p.desiredQuantity);
       }
     }
+    // 【監査指摘B】分母は「全ベトナム対象需要」ではなく「5社が構造的に配分を
+    // 受けられる需要（addressable demand）」を市場×商品ごとに積み上げる。
+    // 各社の競争力ウェイトは当期の配分で実際に使われた値をそのまま用いる
+    // （新たな推定・当てはめは行わない）。
+    const externalOptionWeight = salesParametersForThisQuarter.externalOptionWeight;
     const targetDemandByProduct = { pd: 0, vap: 0 };
+    const addressableDemandByProduct = { pd: 0, vap: 0 };
+    const externalOptionQuantityByProduct = { pd: 0, vap: 0 };
     for (const alloc of turnResult.salesRecord.allocations) {
-      if (alloc.product === "pd") targetDemandByProduct.pd += unwrapUnit(alloc.targetDemand);
-      else if (alloc.product === "vap") targetDemandByProduct.vap += unwrapUnit(alloc.targetDemand);
+      if (alloc.product !== "pd" && alloc.product !== "vap") continue;
+      const targetDemand = unwrapUnit(alloc.targetDemand);
+      const totalCompanyWeight = alloc.companies.reduce((sum, c) => sum + c.competitivenessWeight, 0);
+      targetDemandByProduct[alloc.product] += targetDemand;
+      addressableDemandByProduct[alloc.product] += computeAddressableDemand(targetDemand, totalCompanyWeight, externalOptionWeight);
+      externalOptionQuantityByProduct[alloc.product] += unwrapUnit(alloc.externalOptionQuantity);
     }
-    marketEvolutionStateAfter = updateMarketEvolutionState(state.marketEvolutionState, {
+    const evolutionInputs = {
       offeredByProduct,
       targetDemandByProduct,
+      addressableDemandByProduct,
+      externalOptionQuantityByProduct,
       marketResult: turnResult.marketResult,
       referencePremiumRatios: sai5ReferencePremiumRatios,
-    });
+    };
+    marketEvolutionStateAfter = updateMarketEvolutionState(state.marketEvolutionState, evolutionInputs, marketEvolutionParameters);
+    const prevEntry = state.marketEvolutionState ?? initialMarketEvolutionState();
     sai5MarketEvolutionRecord = {
       appliedPremiumRatioMultipliers,
       appliedAdoptionTurnShift,
       substitutionShareShift,
       ...(lifecycleMix ? { appliedMix: lifecycleMix } : {}),
       supplyPressureByProduct: {
-        pd: targetDemandByProduct.pd > 0 ? offeredByProduct.pd / targetDemandByProduct.pd : 1,
-        vap: targetDemandByProduct.vap > 0 ? offeredByProduct.vap / targetDemandByProduct.vap : 1,
+        pd: computeRawSupplyPressure("pd", evolutionInputs, marketEvolutionParameters, prevEntry.pd.supplyRatioBaselineEwma).pressure,
+        vap: computeRawSupplyPressure("vap", evolutionInputs, marketEvolutionParameters, prevEntry.vap.supplyRatioBaselineEwma).pressure,
+      },
+      supplyPressureEwmaByProduct: {
+        pd: marketEvolutionStateAfter.pd.supplyPressureEwma,
+        vap: marketEvolutionStateAfter.vap.supplyPressureEwma,
       },
       offeredByProduct,
       targetDemandByProduct,
+      addressableDemandByProduct,
+      externalOptionQuantityByProduct,
+      supplyPressureDefinition: marketEvolutionParameters.supplyPressureDefinition,
     };
   }
 

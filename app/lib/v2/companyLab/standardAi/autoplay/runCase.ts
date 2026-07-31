@@ -9,6 +9,7 @@
 
 import { CompanyId } from "../../../sales/types";
 import { CompanyFixture } from "../../types";
+import type { SupplyPressureDefinition } from "../../marketEvolution";
 import { PeriodV2 } from "../../../core/period";
 import { hosoEqTons } from "../../../core/units";
 import { ALL_COMPANY_IDS, initializeUnifiedCompanyLabFromTemplate } from "../report/decomposeHarness";
@@ -65,6 +66,11 @@ export interface AutoplayCaseConfig {
   readonly supplyPremiumFeedbackEnabled?: boolean;
   /** 【SAI-5F】trueの場合のみStandard AIの拡張設備投資判断を有効化する。 */
   readonly standardAiCapexEnabled?: boolean;
+  /**
+   * 【監査指摘B・定義比較用】供給圧力の定義。未指定＝採用済みの既定。
+   * scripts/sai5SupplyPressureStudy.ts が候補を実測比較するためだけに使う。
+   */
+  readonly supplyPressureDefinition?: SupplyPressureDefinition;
 }
 
 export interface AutoplayCaseResult {
@@ -128,6 +134,7 @@ export function runAutoplayCase(config: AutoplayCaseConfig): AutoplayCaseResult 
               productLifecycle: Boolean(config.productLifecycleEnabled),
               salesBaseAccumulation: Boolean(config.salesBaseAccumulationEnabled),
               supplyPremiumFeedback: Boolean(config.supplyPremiumFeedbackEnabled),
+              ...(config.supplyPressureDefinition ? { supplyPressureDefinition: config.supplyPressureDefinition } : {}),
             },
           }
         : {}),

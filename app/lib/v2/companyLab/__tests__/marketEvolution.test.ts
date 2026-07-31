@@ -26,10 +26,21 @@ function marketResultWithPremiums(hosoPriceVn: number, pdPremium: number, vapPre
   } as never;
 }
 
+/**
+ * 【監査指摘B対応】これらの単体テストは「供給圧力の更新則」を検証するものであり、
+ * 分母のスケール（全ベトナム需要 vs 5社addressable需要）そのものは検証対象では
+ * ないため、addressableDemandByProduct は既定で targetDemandByProduct と同値に
+ * 置く（＝5社が需要を100%取りにいける仮想市場）。これにより既存テストの意味・
+ * 期待値は変更前と完全に同一のまま保たれる。分母の定義そのものの検証は
+ * supplyPressureDefinition.test.ts が担当する。
+ */
 function inputs(overrides: Partial<MarketEvolutionQuarterInputs> = {}): MarketEvolutionQuarterInputs {
+  const targetDemandByProduct = overrides.targetDemandByProduct ?? { pd: 1000, vap: 500 };
   return {
     offeredByProduct: { pd: 1000, vap: 500 },
-    targetDemandByProduct: { pd: 1000, vap: 500 },
+    targetDemandByProduct,
+    addressableDemandByProduct: targetDemandByProduct,
+    externalOptionQuantityByProduct: { pd: 0, vap: 0 },
     marketResult: marketResultWithPremiums(5, 5 * REF.pd, 5 * REF.vap), // 中立（基準比率どおり）
     referencePremiumRatios: REF,
     ...overrides,
