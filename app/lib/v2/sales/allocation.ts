@@ -95,6 +95,43 @@ export function computeCompetitivenessBreakdown(
   };
 }
 
+/**
+ * 競争力ウェイトの「係数キー → 内訳キー」の対応表。
+ *
+ * 【SAI-5 監査指摘A・再発防止】この表はマップ型
+ * `{ [K in keyof SalesParameters["competitivenessWeights"]]: ... }` で定義しており、
+ * SalesParameters.competitivenessWeightsに新しい係数を1つ追加すると、この表に
+ * 対応する内訳キーを書くまでコンパイルが通らない。合計処理は必ずこの表を回すため、
+ * 「内訳には項目があるのに合計に入っていない」という分岐が構造的に起こり得ない。
+ *
+ * 加算順（price → coverage → relationship → quality → deliveryReliability →
+ * salesBase）はオブジェクトのキー挿入順で決まり、既存の手書き合計と同一順序。
+ * したがって浮動小数の丸めまで含めて既存結果とビット単位で一致する。
+ */
+const COMPETITIVENESS_CONTRIBUTION_KEYS: {
+  readonly [K in keyof SalesParameters["competitivenessWeights"]]: `${K}Contribution` & keyof CompetitivenessWeightBreakdown;
+} = {
+  price: "priceContribution",
+  coverage: "coverageContribution",
+  relationship: "relationshipContribution",
+  quality: "qualityContribution",
+  deliveryReliability: "deliveryReliabilityContribution",
+  salesBase: "salesBaseContribution",
+};
+
+/**
+ * 競争力内訳を合計して合成ウェイトにする、唯一の合計処理。
+ * 公開ヘルパー（computeCompetitivenessWeight）も実エンジン（allocateMarketProduct）も
+ * 必ずこの関数を通す。
+ */
+export function sumCompetitivenessContributions(breakdown: CompetitivenessWeightBreakdown): number {
+  let sum = 0;
+  for (const contributionKey of Object.values(COMPETITIVENESS_CONTRIBUTION_KEYS)) {
+    sum += breakdown[contributionKey];
+  }
+  return sum;
+}
+
 /** 5社それぞれの合成競争力ウェイトを計算する（0〜1程度のスケール）。 */
 export function computeCompetitivenessWeight(
   entry: CompanySalesPlanEntry,
@@ -103,12 +140,7 @@ export function computeCompetitivenessWeight(
   coverageScore: number,
   params: SalesParameters
 ): number {
-  const b = computeCompetitivenessBreakdown(entry, askPrice, basePrice, coverageScore, params);
-  // 【SAI-5D】salesBaseContributionは既定ウェイト0のため厳密に0であり、末尾への
-  // 加算は既存の合計値をビット単位で変えない（x + 0 === x）。
-  return (
-    b.priceContribution + b.coverageContribution + b.relationshipContribution + b.qualityContribution + b.deliveryReliabilityContribution + b.salesBaseContribution
-  );
+  return sumCompetitivenessContributions(computeCompetitivenessBreakdown(entry, askPrice, basePrice, coverageScore, params));
 }
 
 /**
@@ -213,12 +245,12 @@ export function allocateMarketProduct(
     const coverage = salesCoverageScore(entry.salesForceHeadcount, params);
     const capacity = processingCapacity(entry.salesForceHeadcount, params);
     const breakdown = computeCompetitivenessBreakdown(entry, askPrice, basePrice, coverage, params);
-    const weight =
-      breakdown.priceContribution +
-      breakdown.coverageContribution +
-      breakdown.relationshipContribution +
-      breakdown.qualityContribution +
-      breakdown.deliveryReliabilityContribution;
+    // 【SAI-5 監査指摘A・修正】以前はここで内訳を手書きで5項目だけ合計しており、
+    // 公開ヘルパーcomputeCompetitivenessWeight（6項目）と実エンジンの計算が
+    // 分岐していた（＝営業基盤が実際の成約に一切効かない状態だった）。
+    // 合計処理をsumCompetitivenessContributionsへ一本化し、内訳の項目が増減しても
+    // 二度と分岐しない構造にする。
+    const weight = sumCompetitivenessContributions(breakdown);
     // 個社成約上限 = min(販売希望量, 処理能力, 対象需要×最大供給者シェア, 承認済み取引枠[未指定ならInfinity])。
     // 極端な安値・大量の営業人員・大量の販売希望量を同時に満たしても、1社が対象需要を
     // 独占できないようにする（安売りによる過剰受注の防止）。

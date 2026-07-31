@@ -128,7 +128,9 @@ export interface CompanyAllocationEntry {
   readonly competitivenessWeight: number;
   /**
    * 【Phase 7B】competitivenessWeightの内訳（読み取り専用、説明用）。
-   * 5つのcontributionの合計が必ずcompetitivenessWeightと一致する。
+   * 【SAI-5 監査指摘A】すべてのcontribution（salesBaseContributionを含む6項目）の
+   * 合計が必ずcompetitivenessWeightと一致する。合計処理はallocation.tsの
+   * sumCompetitivenessContributionsへ一本化されている。
    */
   readonly competitivenessBreakdown: CompetitivenessWeightBreakdown;
   /** 成約量（0 <= allocatedQuantity <= min(desiredQuantity, processingCapacity)）。 */
