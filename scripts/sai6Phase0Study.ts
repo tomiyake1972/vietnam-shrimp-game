@@ -102,7 +102,23 @@ interface QuarterRow {
   // --- 資金 ---
   openingCashUsd: number;
   closingCashUsd: number;
-  totalCashOutflowUsd: number; // 直接法の支出合計＋投資支出
+  /**
+   * 直接法の支出合計＋投資支出（符号修正版・正の値＝実際の資金流出額）。
+   * 【Phase 1A-2 作業5での修正】operatingDirectの支出項目（paymentsForRawMaterials等）は
+   * 負の値で保持されている（finance/types.ts参照）。旧実装はこれを単純合算しており、
+   * 支出が多いほど totalCashOutflowUsd が「より負」になる＝資金枠余裕の計算式
+   * （期首資金 − 支出）で実質的に加算になっていた（符号バグ）。ここでは各項目の絶対値を
+   * 取って正の支出額として保持する。
+   */
+  totalCashOutflowUsd: number;
+  /**
+   * 【Phase 1A-2 作業5で追加】当期の確実な現金収入（当期決済期到来の売掛金回収額）。
+   * 単純にsignを反転するだけでは「当期の収入」を無視したままになり、逆方向に
+   * 資金制約を過大評価する（実測で640/640件が「超過」に振れた別の欠陥）。
+   * 資金枠余裕は「期首資金＋借入余力＋当期の確実な収入 − 当期の実際の支出」として
+   * 一貫してネットする必要があるため、この項目を独立に保持する。
+   */
+  reliableCashInflowUsd: number;
   availableAdditionalBorrowingUsd: number;
   paymentDefault: boolean;
   /** この会社ケースが最初に paymentDefault を起こした四半期より前か（＝経営判断が意味を持つ期間）。 */
@@ -170,15 +186,20 @@ function collectRows(configId: string, flags: Partial<AutoplayCaseConfig>): Quar
         nominalCapacityByProduct.common = nominalCommon;
         effectiveCapacityByProduct.common = nominalCommon * EFFECTIVE_CAPACITY_FACTOR;
 
-        // 直接法の支出内訳（すべて正の値で保持されている）＋ 投資支出
+        // 直接法の支出内訳（finance/types.tsの定義どおり各項目は負の値で保持されている
+        // ため、絶対値を取って正の「実際の資金流出額」とする）＋ 投資支出。
+        // 【Phase 1A-2 作業5】旧実装はtoNumber()をそのまま合算しており、支出項目が
+        // 負値であることを考慮していなかった（符号バグ、詳細は型定義参照）。
         const od = cf.operatingDirect;
         const outflow =
-          toNumber(od.paymentsForRawMaterials) +
-          toNumber(od.paymentsForManufacturing) +
-          toNumber(od.paymentsForSellingGeneralAdmin) +
-          toNumber(od.interestPaid) +
-          toNumber(od.incomeTaxPaid) +
+          Math.abs(toNumber(od.paymentsForRawMaterials)) +
+          Math.abs(toNumber(od.paymentsForManufacturing)) +
+          Math.abs(toNumber(od.paymentsForSellingGeneralAdmin)) +
+          Math.abs(toNumber(od.interestPaid)) +
+          Math.abs(toNumber(od.incomeTaxPaid)) +
           Math.max(0, -toNumber(cf.investingCashFlow));
+        // 当期の確実な現金収入（売掛金回収）。receiptsFromCustomersは正の値で保持されている。
+        const reliableCashInflow = toNumber(od.receiptsFromCustomers);
 
         rows.push({
           configId,
@@ -215,6 +236,7 @@ function collectRows(configId: string, flags: Partial<AutoplayCaseConfig>): Quar
           openingCashUsd: toNumber(cf.openingCash),
           closingCashUsd: toNumber(cf.closingCash),
           totalCashOutflowUsd: outflow,
+          reliableCashInflowUsd: reliableCashInflow,
           availableAdditionalBorrowingUsd: toNumber(financing?.borrowingCapacity?.availableAdditionalCapacityUsd),
           paymentDefault: financing?.financialHealth?.paymentDefault === true,
           preDefault: true, // 後段でケースごとに再計算する
@@ -372,23 +394,32 @@ function measure(rows: readonly QuarterRow[]) {
     },
 
     // --- 資金 ---
+    // 【Phase 1A-2 作業5での修正】旧実装は支出項目の符号バグにより「資金枠余裕」を
+    // 実質的に「期首資金＋借入余力＋支出」（加算）として計算していた（常に正で
+    // 超過0件になっていた欠陥）。単純にsignを反転するだけだと、今度は当期の確実な
+    // 収入（売掛金回収）を無視することになり、逆方向に過大な資金制約が出る
+    // （試算では640/640件が「超過」に振れた）。正しくは「期首現金＋借入余力＋当期の
+    // 確実な収入 − 当期の実際の支出」を一貫してネットする。
     funding: {
       meanOpeningCashUsd: mean(rows.map((r) => r.openingCashUsd)),
+      meanReliableCashInflowUsd: mean(rows.map((r) => r.reliableCashInflowUsd)),
       meanTotalOutflowUsd: mean(rows.map((r) => r.totalCashOutflowUsd)),
-      // 【ご指示】期首資金枠（期首現金＋借入余力）と計画支出の差
-      meanFundingHeadroomUsd: mean(rows.map((r) => r.openingCashUsd + r.availableAdditionalBorrowingUsd - r.totalCashOutflowUsd)),
+      // 【ご指示】期首資金枠（期首現金＋借入余力＋当期の確実な収入）と実際の支出の差
+      meanFundingHeadroomUsd: mean(
+        rows.map((r) => r.openingCashUsd + r.availableAdditionalBorrowingUsd + r.reliableCashInflowUsd - r.totalCashOutflowUsd)
+      ),
       medianFundingHeadroomUsd: quantile(
-        rows.map((r) => r.openingCashUsd + r.availableAdditionalBorrowingUsd - r.totalCashOutflowUsd),
+        rows.map((r) => r.openingCashUsd + r.availableAdditionalBorrowingUsd + r.reliableCashInflowUsd - r.totalCashOutflowUsd),
         0.5
       ),
       // 【ご指示】借入余力を超える会社・四半期
       quartersExceedingBorrowingCapacity: rows.filter(
-        (r) => r.openingCashUsd + r.availableAdditionalBorrowingUsd < r.totalCashOutflowUsd
+        (r) => r.openingCashUsd + r.availableAdditionalBorrowingUsd + r.reliableCashInflowUsd < r.totalCashOutflowUsd
       ).length,
       quartersTotal: rows.length,
       companiesEverExceeding: new Set(
         rows
-          .filter((r) => r.openingCashUsd + r.availableAdditionalBorrowingUsd < r.totalCashOutflowUsd)
+          .filter((r) => r.openingCashUsd + r.availableAdditionalBorrowingUsd + r.reliableCashInflowUsd < r.totalCashOutflowUsd)
           .map((r) => `${r.seed}::${r.companyId}`)
       ).size,
       companyCasesTotal: perCaseCount,
@@ -651,7 +682,7 @@ function main(): void {
     "regularLaborCostUsd,idleLaborCostUsd,unabsorbedFixedCostUsd,capexMaintenanceCostUsd,totalFixedCostUsd",
     "netRevenueUsd,contributionMarginUsd,operatingProfitUsd,equipmentUtilizationRate,laborUtilizationRate",
     "totalProducedTons,effCapHoso,effCapPd,effCapVap,effCapCommon,prodHoso,prodPd,prodVap",
-    "openingCashUsd,totalCashOutflowUsd,availableAdditionalBorrowingUsd,paymentDefault",
+    "openingCashUsd,totalCashOutflowUsd,reliableCashInflowUsd,availableAdditionalBorrowingUsd,paymentDefault",
   ].join(",");
   const csvRows = [...allOnRows, ...controlRows].map((r) =>
     [
@@ -682,6 +713,7 @@ function main(): void {
       r.producedByProduct.vap.toFixed(1),
       r.openingCashUsd.toFixed(0),
       r.totalCashOutflowUsd.toFixed(0),
+      r.reliableCashInflowUsd.toFixed(0),
       r.availableAdditionalBorrowingUsd.toFixed(0),
       r.paymentDefault ? 1 : 0,
     ].join(",")
@@ -809,13 +841,19 @@ function main(): void {
   L.push("人員を増やしても生産は1トンも増えず、削減の一方通行が最適になる。");
   L.push("");
 
-  L.push("## 4. 資金（ご指示8・9）");
+  L.push("## 4. 資金（ご指示8・9）【Phase 1A-2 作業5で符号バグを修正・再計測】");
+  L.push("");
+  L.push("旧バージョンは`operatingDirect`の支出項目（負の値で保持）を符号調整せずに合算していたため、");
+  L.push("「資金枠余裕」が実質的に加算式になり、常に0/208件（超過なし）という誤った結果を出していた。");
+  L.push("単純に符号を反転するだけでは今度は当期の確実な収入（売掛金回収）を無視することになり、");
+  L.push("逆方向に過大な制約（640/640件が超過）が出ることも確認済み。以下は両方を修正した値。");
   L.push("");
   L.push("| 指標 | " + sections.map((x) => x.title).join(" | ") + " |");
   L.push("|---|" + sections.map(() => "---:").join("|") + "|");
   const fundRows: [string, (m: ReturnType<typeof measure>) => string][] = [
     ["期首現金（平均）", (m) => fmtUsd(m.funding.meanOpeningCashUsd)],
-    ["当期総支出（平均）", (m) => fmtUsd(m.funding.meanTotalOutflowUsd)],
+    ["当期の確実な収入（平均・売掛金回収）", (m) => fmtUsd(m.funding.meanReliableCashInflowUsd)],
+    ["当期の実際の支出（平均・符号修正済み）", (m) => fmtUsd(m.funding.meanTotalOutflowUsd)],
     ["資金枠余裕（平均）", (m) => fmtUsd(m.funding.meanFundingHeadroomUsd)],
     ["資金枠余裕（中央値）", (m) => fmtUsd(m.funding.medianFundingHeadroomUsd)],
     ["借入余力超過の会社×四半期", (m) => `${m.funding.quartersExceedingBorrowingCapacity} / ${m.funding.quartersTotal}`],
@@ -823,7 +861,10 @@ function main(): void {
   ];
   for (const [label, f] of fundRows) L.push(`| ${label} | ` + sections.map((x) => f(x.m)).join(" | ") + " |");
   L.push("");
-  L.push("資金枠余裕 = 期首現金 ＋ 借入余力 − 当期総支出（直接法の支出内訳＋投資支出）。");
+  L.push(
+    "資金枠余裕 = 期首現金 ＋ 借入余力 ＋ 当期の確実な収入（売掛金回収） − 当期の実際の支出" +
+      "（直接法の支出内訳の絶対値合計＋投資支出）。"
+  );
   L.push("");
 
   L.push("## 5. 人員方針の係数候補比較（反実仮想リプレイ）");
