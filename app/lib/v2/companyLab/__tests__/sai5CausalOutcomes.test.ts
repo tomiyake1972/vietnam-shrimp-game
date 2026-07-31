@@ -61,11 +61,6 @@ function runControlled(cfg: CompanyLabConfig, quarters: number, mutate?: PlanMut
   return { fixtures, history: state.history, finalState: state, decisions };
 }
 
-/** 販売計画の特定商品の希望量を倍率で増減させるmutator（他の条件は一切変えない）。 */
-function scaleProduct(product: "pd" | "vap", factor: number): PlanMutator {
-  return (plan) => (plan.product === product ? { ...plan, desiredQuantity: hosoEqTons(unwrapUnit(plan.desiredQuantity) * factor) } : plan);
-}
-
 /**
  * ある商品へ営業資源を集中させて「実際に市場へ提示する量」を増やすmutator。
  *
