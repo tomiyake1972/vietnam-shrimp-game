@@ -29,6 +29,9 @@ import {
   QuarterStartState,
   QuarterStateDelta,
   SaiCompanyId,
+  Sai5LifecycleMixTraceRow,
+  Sai5MarketEvolutionTraceRow,
+  Sai5SalesBaseTraceRow,
   SalesQuantityTraceEntry,
 } from "./schema";
 
@@ -655,6 +658,57 @@ export function buildAutoplayCaseLogs(caseResult: AutoplayCaseResult): AutoplayC
     marketAllocationTrace.push(...buildMarketAllocationTrace(record));
   }
 
+  // 【SAI-5G】市場進化の因果トレース（SAI-5機能フラグ有効時のみ記録が存在する）。
+  const sai5MarketEvolutionTrace: Sai5MarketEvolutionTraceRow[] = [];
+  const sai5LifecycleMixTrace: Sai5LifecycleMixTraceRow[] = [];
+  for (const record of caseResult.history) {
+    const evo = record.sai5MarketEvolution;
+    if (!evo) continue;
+    for (const product of ["pd", "vap"] as const) {
+      sai5MarketEvolutionTrace.push({
+        turn: record.turn,
+        period: record.period,
+        product,
+        offeredHosoEqTons: evo.offeredByProduct[product],
+        targetDemandHosoEqTons: evo.targetDemandByProduct[product],
+        supplyPressure: evo.supplyPressureByProduct[product],
+        appliedPremiumRatioMultiplier: evo.appliedPremiumRatioMultipliers[product],
+        appliedAdoptionTurnShift: evo.appliedAdoptionTurnShift[product],
+        substitutionShareShift: evo.substitutionShareShift,
+      });
+    }
+    if (evo.appliedMix) {
+      for (const [market, mix] of Object.entries(evo.appliedMix)) {
+        sai5LifecycleMixTrace.push({
+          turn: record.turn,
+          period: record.period,
+          market,
+          hosoShare: mix.hoso,
+          pdShare: mix.pd,
+          vapShare: mix.vap,
+        });
+      }
+    }
+  }
+  // 営業基盤トレース（各turn期首=前期末値。ownStateキャプチャ由来）。
+  const sai5SalesBaseTrace: Sai5SalesBaseTraceRow[] = [];
+  for (const capture of caseResult.quarterStartCaptures) {
+    const base = capture.ownState.salesBaseByMarketProduct;
+    if (!base) continue;
+    for (const [market, byProduct] of Object.entries(base)) {
+      for (const [product, score] of Object.entries(byProduct ?? {})) {
+        sai5SalesBaseTrace.push({
+          turn: capture.turn,
+          period: capture.period,
+          companyId: capture.companyId as SaiCompanyId,
+          market,
+          product,
+          salesBaseScore: score as unknown as number,
+        });
+      }
+    }
+  }
+
   for (const rawCompanyId of caseResult.companyIds) {
     const companyId = rawCompanyId as SaiCompanyId;
     let previousStartState: QuarterStartState | undefined;
@@ -711,6 +765,9 @@ export function buildAutoplayCaseLogs(caseResult: AutoplayCaseResult): AutoplayC
     quarterResults,
     caseSummaryRows,
     marketAllocationTrace,
+    ...(sai5MarketEvolutionTrace.length > 0 ? { sai5MarketEvolutionTrace } : {}),
+    ...(sai5LifecycleMixTrace.length > 0 ? { sai5LifecycleMixTrace } : {}),
+    ...(sai5SalesBaseTrace.length > 0 ? { sai5SalesBaseTrace } : {}),
   };
 }
 

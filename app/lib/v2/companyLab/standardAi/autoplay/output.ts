@@ -404,6 +404,97 @@ export function formatMarketAllocationTraceCsv(batch: AutoplayBatchResult): stri
 }
 
 // ---------------------------------------------------------------------
+// 【SAI-5G】market-evolution-trace.csv / lifecycle-mix-trace.csv /
+// sales-base-trace.csv — 市場進化・営業基盤の因果トレース（任意ファイル。
+// SAI-5機能フラグ有効時のみ出力する。market-allocation-trace.csvと同じ
+// 「存在しないrunでは生成しない」方式で、既存SAI-3Bパーサーへの影響なし）
+// ---------------------------------------------------------------------
+
+const SAI5_MARKET_EVOLUTION_TRACE_CSV_HEADER: readonly string[] = [
+  "seed",
+  "turn",
+  "period",
+  "product",
+  "offeredHosoEqTons",
+  "targetDemandHosoEqTons",
+  "supplyPressure",
+  "appliedPremiumRatioMultiplier",
+  "appliedAdoptionTurnShift",
+  "substitutionShareShift",
+];
+
+export function formatSai5MarketEvolutionTraceCsv(batch: AutoplayBatchResult): string | undefined {
+  const rows = batch.caseLogs.flatMap((log) =>
+    (log.sai5MarketEvolutionTrace ?? []).map((e) => [
+      log.seed,
+      e.turn,
+      e.period,
+      e.product,
+      e.offeredHosoEqTons,
+      e.targetDemandHosoEqTons,
+      e.supplyPressure,
+      e.appliedPremiumRatioMultiplier,
+      e.appliedAdoptionTurnShift,
+      e.substitutionShareShift,
+    ])
+  );
+  if (rows.length === 0) return undefined;
+  return toCsv(SAI5_MARKET_EVOLUTION_TRACE_CSV_HEADER, rows);
+}
+
+const SAI5_LIFECYCLE_MIX_TRACE_CSV_HEADER: readonly string[] = [
+  "seed",
+  "turn",
+  "period",
+  "market",
+  "hosoShare",
+  "pdShare",
+  "vapShare",
+];
+
+export function formatSai5LifecycleMixTraceCsv(batch: AutoplayBatchResult): string | undefined {
+  const rows = batch.caseLogs.flatMap((log) =>
+    (log.sai5LifecycleMixTrace ?? []).map((e) => [
+      log.seed,
+      e.turn,
+      e.period,
+      e.market,
+      e.hosoShare,
+      e.pdShare,
+      e.vapShare,
+    ])
+  );
+  if (rows.length === 0) return undefined;
+  return toCsv(SAI5_LIFECYCLE_MIX_TRACE_CSV_HEADER, rows);
+}
+
+const SAI5_SALES_BASE_TRACE_CSV_HEADER: readonly string[] = [
+  "seed",
+  "turn",
+  "period",
+  "companyId",
+  "market",
+  "product",
+  "salesBaseScore",
+];
+
+export function formatSai5SalesBaseTraceCsv(batch: AutoplayBatchResult): string | undefined {
+  const rows = batch.caseLogs.flatMap((log) =>
+    (log.sai5SalesBaseTrace ?? []).map((e) => [
+      log.seed,
+      e.turn,
+      e.period,
+      e.companyId,
+      e.market,
+      e.product,
+      e.salesBaseScore,
+    ])
+  );
+  if (rows.length === 0) return undefined;
+  return toCsv(SAI5_SALES_BASE_TRACE_CSV_HEADER, rows);
+}
+
+// ---------------------------------------------------------------------
 // run-summary.json — run全体の集計＋失敗ケースの診断情報
 // ---------------------------------------------------------------------
 

@@ -295,3 +295,75 @@ test("SAI-5F統合: 全フラグON・16四半期完走・再現・建設中設�
     }
   }
 });
+
+// ---------------------------------------------------------------------
+// SAI-5G: 長期安定性（32四半期）・収斂しないことの確認
+// ---------------------------------------------------------------------
+
+test("SAI-5G統合: 全フラグON・32四半期を完走し、NaN/Infinity/負数量・状態爆発がなく、5社が同一判断へ収束し続けない", () => {
+  const run = runAutoplayCase(
+    baseConfig("sai5g-32q-stability", 32, {
+      heterogeneousInitialConditionsEnabled: true,
+      managementProfilesEnabled: true,
+      marketProductOrientationEnabled: true,
+      salesBaseAccumulationEnabled: true,
+      productLifecycleEnabled: true,
+      supplyPremiumFeedbackEnabled: true,
+      standardAiCapexEnabled: true,
+    })
+  );
+  assert.equal(run.completedTurns, 32);
+  assertAllFinite(run.history.map((h) => ({ s: h.companySummaries, e: h.sai5MarketEvolution })));
+
+  // 負数量なし（販売希望・池入れ・生産）
+  for (const d of run.diagnostics) {
+    for (const p of d.decision.salesPlans) assert.ok((p.desiredQuantity as unknown as number) >= 0);
+    for (const p of d.decision.productionPlans) assert.ok((p.desiredQuantity as unknown as number) >= 0);
+    for (const p of d.decision.aquacultureStockingPlans) assert.ok((p.plannedStockingQuantity as unknown as number) >= 0);
+  }
+
+  // 状態爆発なし: 営業基盤エントリ数は最大 会社×市場×商品=75
+  const lastCapture = run.quarterStartCaptures.filter((c) => c.turn === 32);
+  for (const c of lastCapture) {
+    const entries = Object.values(c.ownState.salesBaseByMarketProduct ?? {}).flatMap((m) => Object.keys(m ?? {}));
+    assert.ok(entries.length <= 15, `${c.companyId}: 自社の営業基盤エントリ(${entries.length})が上限15(市場5×商品3)を超えている`);
+  }
+
+  // 全社が同一判断へ収束し続けない: 最終四半期の市場別販売構成が5社で同一でない
+  const turn32ByCompany = new Map<string, string>();
+  for (const d of run.diagnostics.filter((d) => d.turn === 32)) {
+    const byMarket: Record<string, number> = {};
+    for (const p of d.decision.salesPlans) byMarket[p.market] = (byMarket[p.market] ?? 0) + (p.desiredQuantity as unknown as number);
+    turn32ByCompany.set(d.companyId, JSON.stringify(byMarket));
+  }
+  const distinct = new Set(turn32ByCompany.values());
+  assert.ok(distinct.size >= 3, `turn32の市場別販売構成が${distinct.size}種類しかない（全社同一行動への収束）`);
+});
+
+test("SAI-5G統合: SAI-5トレースCSV（market-evolution/lifecycle-mix/sales-base）はフラグ有効時のみ生成される", async () => {
+  const { runAutoplayCli } = await import("../cli");
+  const off = runAutoplayCli(["--seeds", "sai5g-csv-off", "--quarters", "2", "--run-id", "t-off"]);
+  assert.equal(off.exitCode, 0);
+  assert.ok(off.files && !("market-evolution-trace.csv" in off.files) && !("sales-base-trace.csv" in off.files));
+
+  const on = runAutoplayCli([
+    "--seeds",
+    "sai5g-csv-on",
+    "--quarters",
+    "2",
+    "--run-id",
+    "t-on",
+    "--lifecycle",
+    "--sales-base",
+    "--premium-feedback",
+    "--orientation",
+  ]);
+  assert.equal(on.exitCode, 0);
+  assert.ok(on.files && "market-evolution-trace.csv" in on.files, "market-evolution-trace.csvが生成されない");
+  assert.ok(on.files && "lifecycle-mix-trace.csv" in on.files, "lifecycle-mix-trace.csvが生成されない");
+  assert.ok(on.files && "sales-base-trace.csv" in on.files, "sales-base-trace.csvが生成されない");
+  // 既存の必須7ファイルも揃っている（SAI-3B後方互換の前提）
+  for (const f of ["manifest.json", "case-summary.csv", "quarter-summary.csv", "decision-trace.jsonl", "adjustment-trace.csv", "warnings.csv", "run-summary.json"]) {
+    assert.ok(on.files && f in on.files, `${f}が欠けている`);
+  }
+});

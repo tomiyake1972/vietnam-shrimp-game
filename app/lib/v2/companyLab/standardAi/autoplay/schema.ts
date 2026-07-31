@@ -340,6 +340,52 @@ export interface AutoplayCaseLog {
   /** SAI-3B-2で追加。turnごとに1回だけ組み立てる（会社をまたいだ共通データの
    *  ため、5社分重複させない。buildAutoplayCaseLogsのコメント参照）。 */
   readonly marketAllocationTrace: readonly MarketAllocationTraceEntry[];
+  /** 【SAI-5G・optional追加】市場進化の因果トレース（turn×商品:供給圧力・
+   *  プレミアム倍率・普及シフト・代替、turn×市場:適用構成比）。SAI-5機能
+   *  フラグ有効時のみ設定される（既存パーサーへの影響なし）。 */
+  readonly sai5MarketEvolutionTrace?: readonly Sai5MarketEvolutionTraceRow[];
+  readonly sai5LifecycleMixTrace?: readonly Sai5LifecycleMixTraceRow[];
+  /** 【SAI-5G・optional追加】会社×市場×商品の営業基盤スコア（各turn期首=前期末値）。 */
+  readonly sai5SalesBaseTrace?: readonly Sai5SalesBaseTraceRow[];
+}
+
+/** 【SAI-5G】turn×商品の市場進化トレース行。 */
+export interface Sai5MarketEvolutionTraceRow {
+  readonly turn: number;
+  readonly period: string;
+  readonly product: "pd" | "vap";
+  /** 5社が成約配分へ提示した合計数量（HOSO換算トン）。 */
+  readonly offeredHosoEqTons: number;
+  /** 商品別の対象需要合計（HOSO換算トン）。 */
+  readonly targetDemandHosoEqTons: number;
+  /** 当期の供給圧力（提示量/需要）。 */
+  readonly supplyPressure: number;
+  /** 当期の市場計算へ適用したプレミアム比率倍率（前期末state由来）。 */
+  readonly appliedPremiumRatioMultiplier: number;
+  /** 当期に適用した普及前倒しシフト（四半期数）。 */
+  readonly appliedAdoptionTurnShift: number;
+  /** 当期に適用したPD⇔VAP代替の移動比率（正=PD→VAP）。 */
+  readonly substitutionShareShift: number;
+}
+
+/** 【SAI-5G】turn×市場の適用構成比トレース行。 */
+export interface Sai5LifecycleMixTraceRow {
+  readonly turn: number;
+  readonly period: string;
+  readonly market: string;
+  readonly hosoShare: number;
+  readonly pdShare: number;
+  readonly vapShare: number;
+}
+
+/** 【SAI-5G】turn×会社×市場×商品の営業基盤トレース行（期首=前期末値）。 */
+export interface Sai5SalesBaseTraceRow {
+  readonly turn: number;
+  readonly period: string;
+  readonly companyId: SaiCompanyId;
+  readonly market: string;
+  readonly product: string;
+  readonly salesBaseScore: number;
 }
 
 /** 1社×1seedぶんの最終サマリー（=ケース単位の集計行。5社×12seed runなら60行）。 */

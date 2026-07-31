@@ -134,3 +134,59 @@ test("SAI-5E: 同一入力なら常に同一の状態（決定論）・全数値
   }
   assert.deepEqual(derivePremiumRatioMultipliers(undefined), { pd: 1, vap: 1 });
 });
+
+// ---------------------------------------------------------------------
+// 代表シナリオ（§13C-4/5相当のモジュールレベル検証）
+// ---------------------------------------------------------------------
+
+test("SAI-5E: VAP-demand-recovery — 過剰供給後に需要が加速すると倍率は回復方向、供給がさらに増え続ければ回復しない", () => {
+  // フェーズ1: 過剰供給（需要500に対し提示1200）を6四半期 → 倍率低下
+  let recovered = initialMarketEvolutionState();
+  for (let q = 0; q < 6; q++) {
+    recovered = updateMarketEvolutionState(recovered, inputs({ offeredByProduct: { pd: 1000, vap: 1200 }, targetDemandByProduct: { pd: 1000, vap: 500 } }));
+  }
+  const depressed = recovered.vap.premiumRatioMultiplier;
+  assert.ok(depressed < 0.9);
+
+  // フェーズ2a: 需要が急成長（500→1500）・供給は1200のまま → 圧力<1 → 倍率回復方向
+  let caseRecovery = recovered;
+  for (let q = 0; q < 6; q++) {
+    caseRecovery = updateMarketEvolutionState(caseRecovery, inputs({ offeredByProduct: { pd: 1000, vap: 1200 }, targetDemandByProduct: { pd: 1000, vap: 1500 } }));
+  }
+  assert.ok(caseRecovery.vap.premiumRatioMultiplier > depressed, "需要回復後に倍率が回復方向へ動いていない");
+
+  // フェーズ2b: 需要成長(500→1500)と同時に供給がそれ以上に増える（1200→3600、
+  // 圧力2.4のまま） → 需要が増えても回復しない
+  let caseOversupply = recovered;
+  for (let q = 0; q < 6; q++) {
+    caseOversupply = updateMarketEvolutionState(caseOversupply, inputs({ offeredByProduct: { pd: 1000, vap: 3600 }, targetDemandByProduct: { pd: 1000, vap: 1500 } }));
+  }
+  assert.ok(
+    caseOversupply.vap.premiumRatioMultiplier <= depressed + 1e-9,
+    `供給がそれ以上に増えるケースで倍率(${caseOversupply.vap.premiumRatioMultiplier})が回復してしまっている`
+  );
+  assert.ok(
+    caseRecovery.vap.premiumRatioMultiplier > caseOversupply.vap.premiumRatioMultiplier,
+    "需要回復ケースと供給継続増加ケースの差が出ていない"
+  );
+});
+
+test("SAI-5E: HOSO-affordability-cycle相当 — 割安持続→数四半期遅れて普及シフト増→価格正常化で徐々に減衰（PD/VAPの構成比チャネル）", () => {
+  // 注: HOSO安値→市場全体需要の増加は既存のconsumerInventory弾力性が担うため
+  // 本モジュールでは扱わない（設計メモ§2.4。二重計上防止）。ここではPD/VAPの
+  // 割安→普及前倒し→需給が締まる、の遅行循環を検証する。
+  let s = initialMarketEvolutionState();
+  const cheapVap = marketResultWithPremiums(5, 5 * REF.pd, 5 * REF.vap * 0.6);
+  const shifts: number[] = [];
+  for (let q = 0; q < 6; q++) {
+    s = updateMarketEvolutionState(s, inputs({ marketResult: cheapVap }));
+    shifts.push(deriveAdoptionTurnShift(s).vap);
+  }
+  // 遅行的に単調増加（1四半期で飽和しない）
+  for (let i = 1; i < shifts.length; i++) assert.ok(shifts[i] > shifts[i - 1]);
+  assert.ok(shifts[0] < shifts[5] * 0.5, "初回で一気に跳ねている（遅行になっていない）");
+  // 価格正常化 → 徐々に減衰（即時ゼロ化しない）
+  for (let q = 0; q < 2; q++) s = updateMarketEvolutionState(s, inputs());
+  const afterNormalization = deriveAdoptionTurnShift(s).vap;
+  assert.ok(afterNormalization < shifts[5] && afterNormalization > 0);
+});

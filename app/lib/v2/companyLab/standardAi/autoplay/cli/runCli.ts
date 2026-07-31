@@ -17,6 +17,9 @@ import {
   formatMarketAllocationTraceCsv,
   formatQuarterSummaryCsv,
   formatRunSummaryJson,
+  formatSai5LifecycleMixTraceCsv,
+  formatSai5MarketEvolutionTraceCsv,
+  formatSai5SalesBaseTraceCsv,
   formatWarningsCsv,
 } from "../output";
 import { AutoplayRunManifest, SAI3A_LOG_SCHEMA_VERSION, SaiCompanyId } from "../schema";
@@ -132,6 +135,14 @@ export function runAutoplayCli(argv: readonly string[], options: AutoplayCliOpti
       "market-allocation-trace.csv": formatMarketAllocationTraceCsv(batch),
       "run-summary.json": formatRunSummaryJson(batch),
     };
+    // 【SAI-5G】市場進化・営業基盤の因果トレース（SAI-5機能フラグ有効時のみ
+    // データが存在する任意ファイル。無効なrunではファイル自体を生成しない）。
+    const sai5MarketEvolutionCsv = formatSai5MarketEvolutionTraceCsv(batch);
+    if (sai5MarketEvolutionCsv !== undefined) files["market-evolution-trace.csv"] = sai5MarketEvolutionCsv;
+    const sai5LifecycleMixCsv = formatSai5LifecycleMixTraceCsv(batch);
+    if (sai5LifecycleMixCsv !== undefined) files["lifecycle-mix-trace.csv"] = sai5LifecycleMixCsv;
+    const sai5SalesBaseCsv = formatSai5SalesBaseTraceCsv(batch);
+    if (sai5SalesBaseCsv !== undefined) files["sales-base-trace.csv"] = sai5SalesBaseCsv;
 
     const outputDir = `${args.outDir}/${args.runId}`;
     const stdout = `run "${args.runId}" 完了: 完了ケース ${batch.runSummary.completedCases}/${batch.runSummary.totalCases}、エラー ${batch.runSummary.errorCases}件。出力先: ${outputDir}/\n`;
