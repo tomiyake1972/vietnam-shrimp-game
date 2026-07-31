@@ -17,12 +17,17 @@ import { usdPerHosoEqKg } from "../../core/units";
 
 const REF = { pd: 0.18, vap: 0.55 } as const;
 
-/** 実現プレミアムを直接指定できる最小のmarketResultダミー。 */
-function marketResultWithPremiums(hosoPriceVn: number, pdPremium: number, vapPremium: number) {
+/**
+ * 実現プレミアムを直接指定できる最小のmarketResultダミー。
+ * 【監査指摘C対応】品質プレミアム（qualityAdjustment）を明示的に持たせる。
+ * 既定は0＝「品質調整なしの純粋なベースプレミアム」であり、これらのテストが
+ * 意図してきた前提（実現比率＝ベース比率）と一致する。
+ */
+function marketResultWithPremiums(hosoPriceVn: number, pdPremium: number, vapPremium: number, qualityAdjustment = 0) {
   return {
     hosoPrices: { VN: { price: usdPerHosoEqKg(hosoPriceVn) } },
-    pdPremium: { byCountry: { VN: { premium: usdPerHosoEqKg(pdPremium) } } },
-    vapPremium: { byCountry: { VN: { premium: usdPerHosoEqKg(vapPremium) } } },
+    pdPremium: { byCountry: { VN: { premium: usdPerHosoEqKg(pdPremium), qualityAdjustment: usdPerHosoEqKg(qualityAdjustment) } } },
+    vapPremium: { byCountry: { VN: { premium: usdPerHosoEqKg(vapPremium), qualityAdjustment: usdPerHosoEqKg(qualityAdjustment) } } },
   } as never;
 }
 
@@ -200,4 +205,52 @@ test("SAI-5E: HOSO-affordability-cycle相当 — 割安持続→数四半期遅�
   for (let q = 0; q < 2; q++) s = updateMarketEvolutionState(s, inputs());
   const afterNormalization = deriveAdoptionTurnShift(s).vap;
   assert.ok(afterNormalization < shifts[5] && afterNormalization > 0);
+});
+
+// ---------------------------------------------------------------------------
+// 【監査指摘C】実現プレミアム比率と参照プレミアム比率の定義そろえ
+// ---------------------------------------------------------------------------
+
+test("SAI-5C修正: 品質プレミアムは割安シグナルに影響しない（定義そろえ後の定数バイアス除去）", () => {
+  // 同じベースプレミアム水準で、品質プレミアムだけが乗っている市場結果。
+  // 修正前は品質プレミアム分だけ実現側が高く出て、割安シグナルが恒常的に
+  // マイナス（＝普及を遅らせ続ける）方向へ偏っていた。
+  const hoso = 5;
+  const qualityAdj = 0.3; // USD/kg の品質プレミアム
+  const withQuality = marketResultWithPremiums(hoso, hoso * REF.pd + qualityAdj, hoso * REF.vap + qualityAdj, qualityAdj);
+  const withoutQuality = marketResultWithPremiums(hoso, hoso * REF.pd, hoso * REF.vap, 0);
+
+  let a = initialMarketEvolutionState();
+  let b = initialMarketEvolutionState();
+  for (let q = 0; q < 6; q++) {
+    a = updateMarketEvolutionState(a, inputs({ marketResult: withQuality }));
+    b = updateMarketEvolutionState(b, inputs({ marketResult: withoutQuality }));
+  }
+  assert.ok(Math.abs(a.vap.affordabilitySignalEwma - b.vap.affordabilitySignalEwma) < 1e-12, "品質プレミアムの有無で割安シグナルが変わっている");
+  assert.ok(Math.abs(a.vap.affordabilitySignalEwma) < 1e-12, `基準どおりの価格なのにシグナル(${a.vap.affordabilitySignalEwma})が0でない`);
+  assert.ok(Math.abs(a.pd.affordabilitySignalEwma) < 1e-12);
+});
+
+test("SAI-5C修正: 品質プレミアムはPD⇔VAP代替の判定にも影響しない", () => {
+  const mix = computeMarketProductMix(8);
+  const hoso = 5;
+  const qualityAdj = 0.3;
+  // ベース比率としてはVAPが基準の50%（＝代替が発動する水準）。品質プレミアムは
+  // PD・VAPに同額で乗る（productPremium.tsの構成と同じ）。
+  const withQuality = marketResultWithPremiums(hoso, hoso * REF.pd + qualityAdj, hoso * REF.vap * 0.5 + qualityAdj, qualityAdj);
+  const withoutQuality = marketResultWithPremiums(hoso, hoso * REF.pd, hoso * REF.vap * 0.5, 0);
+  const a = applyProductSubstitution(mix, withQuality, REF);
+  const b = applyProductSubstitution(mix, withoutQuality, REF);
+  assert.equal(a.substitutionShareShift, b.substitutionShareShift, "品質プレミアムの有無で代替の移動量が変わっている");
+  assert.ok(a.substitutionShareShift > 0);
+});
+
+test("SAI-5C修正: 供給倍率によるプレミアム低下は割安シグナルに反映される（設計§2.4の意図した経路）", () => {
+  // 稼働率倍率・供給倍率の効果は意図的に残す（供給増→価格低下→普及加速）。
+  const hoso = 5;
+  const cheapBase = marketResultWithPremiums(hoso, hoso * REF.pd, hoso * REF.vap * 0.7, 0.3);
+  let s = initialMarketEvolutionState();
+  for (let q = 0; q < 4; q++) s = updateMarketEvolutionState(s, inputs({ marketResult: cheapBase }));
+  assert.ok(s.vap.affordabilitySignalEwma > 0, "ベースプレミアムの低下が割安シグナルへ反映されていない");
+  assert.ok(deriveAdoptionTurnShift(s).vap > 0, "割安シグナルが普及前倒しへ変換されていない");
 });

@@ -424,10 +424,55 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // 【SAI-5D】前四半期末までの自社の営業基盤（quality/trustと同じ「当期処理の
     // 最後に更新される＝呼び出し時点では常に前期末値」の規約）。無効時はundefined。
     ...(state.salesBaseState ? { salesBaseByMarketProduct: salesBaseSliceForCompany(state.salesBaseState, fixture.companyId) } : {}),
+    // 【監査指摘G】営業基盤が当期の成約へ実際にどれだけ効くか（ウェイト）。
+    // 機能OFFなら0＝「基盤の高低は成約に一切影響しない」ことが判断側から分かる。
+    salesBaseCompetitivenessWeight: salesParametersFor(state.config).competitivenessWeights.salesBase,
   };
 }
 
+/** 当期の成約配分に使うSalesParameters（SAI-5D有効時のみ営業基盤ウェイトが正）。 */
+function salesParametersFor(config: CompanyLabConfig): SalesParameters {
+  return config.sai5?.salesBaseAccumulation ? SALES_PARAMETERS_SAI5_SALES_BASE_V1 : SALES_PARAMETERS_V1;
+}
+
 /** 自動方針・プレイヤー入力の双方が参照してよい公開市場情報を組み立てる。 */
+/**
+ * 【監査指摘I・修正】販売計画の salesBaseScore を、エンジンが持つ正典の
+ * SalesBaseState で必ず上書きする。
+ *
+ * 以前は Standard AI の販売判断（standardAi/decision/sales.ts）だけが
+ * salesBaseScore を計画へ載せており、autoPolicy.ts（暫定自動方針）と
+ * 手入力・意思決定編集の経路では常に undefined ＝ 成約競争力の計算で中立50
+ * として扱われていた。同じ状態を持っているのに、どの意思決定経路を通ったかで
+ * 成約結果が変わってしまう（かつ、意思決定側が任意の値を申告できてしまう）。
+ *
+ * ここで一括して上書きすることで:
+ *  - 経路によらず、当期の成約に使われる営業基盤は必ず「前期末の正典の状態」になる
+ *  - 意思決定側が自己申告した値は採用されない（情報境界の担保）
+ *  - 機能OFF・旧stateでは salesBaseScore を**付けない**（undefined のまま）。
+ *    競争力ウェイトも0のため、既存挙動とビット単位で一致する
+ *    （未取得の値を無条件に50で埋めない、というご指示への対応）。
+ */
+function applyAuthoritativeSalesBaseScores(state: CompanyLabState, decision: CompanyDecisionInput): CompanyDecisionInput {
+  if (!state.config.sai5?.salesBaseAccumulation || !state.salesBaseState) return decision;
+  const slice = salesBaseSliceForCompany(state.salesBaseState, decision.companyId);
+  return {
+    ...decision,
+    salesPlans: decision.salesPlans.map((plan) => {
+      const score = slice[plan.market]?.[plan.product];
+      // 状態に該当エントリが無い（＝一度も活動していない市場×商品）場合は
+      // キー自体を付けない。allocation.ts側が params.neutralScore を使う。
+      if (score === undefined) {
+        if (plan.salesBaseScore === undefined) return plan;
+        const rest = { ...plan };
+        delete (rest as { salesBaseScore?: unknown }).salesBaseScore;
+        return rest;
+      }
+      return { ...plan, salesBaseScore: score };
+    }),
+  };
+}
+
 export function buildPublicMarketInfo(state: CompanyLabState): PublicMarketInfo {
   const lastRecord = state.history[state.history.length - 1];
 
@@ -652,7 +697,7 @@ export function advanceCompanyLabQuarter(
       const message = err instanceof Error ? err.message : String(err);
       throw new CompanyLabError(`会社 "${f.companyId}" の意思決定が不正です: ${message}`);
     }
-    return d;
+    return applyAuthoritativeSalesBaseScores(state, d);
   });
 
   // --- Phase2: シナリオ → 市場入力（industryLab/simulationRunner.tsと同じ手順） ---
@@ -678,9 +723,7 @@ export function advanceCompanyLabQuarter(
   // 【監査指摘B】当期の成約配分に実際に使うSalesParametersと、市場進化パラメータ。
   // 供給圧力の分母（addressable demand）は前者のexternalOptionWeightから導くため、
   // 両者が同じ値を参照することを1箇所で保証する。
-  const salesParametersForThisQuarter: SalesParameters = state.config.sai5?.salesBaseAccumulation
-    ? SALES_PARAMETERS_SAI5_SALES_BASE_V1
-    : SALES_PARAMETERS_V1;
+  const salesParametersForThisQuarter: SalesParameters = salesParametersFor(state.config);
   const marketEvolutionParameters: MarketEvolutionParameters = state.config.sai5?.supplyPressureDefinition
     ? { ...MARKET_EVOLUTION_PARAMETERS_V1, supplyPressureDefinition: state.config.sai5.supplyPressureDefinition }
     : MARKET_EVOLUTION_PARAMETERS_V1;

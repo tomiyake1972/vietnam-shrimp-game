@@ -235,6 +235,35 @@ export function computeRawSupplyPressure(
   }
 }
 
+/**
+ * 【監査指摘C】実現プレミアムから品質プレミアムを除いた「ベースプレミアム比率」を返す。
+ *
+ * productPremium.ts の構成:
+ *   premium = hoso × (基準比率 × 供給倍率 × 稼働率倍率) + hoso × 品質調整比率
+ *   （ただし minPremiumUsdPerKg による床あり）
+ * 基準比率（MarketParameters.pdVapPremium.*BasePremiumRatio）には品質プレミアムも
+ * 稼働率倍率も含まれないため、比較するにはこの分解が必要になる。
+ *
+ * 稼働率倍率と供給倍率（SAI-5E自身の出力）は**意図的に残す**。
+ * 「供給が増える→プレミアムが下がる→数四半期遅れて普及が加速する」という
+ * 設計メモ§2.4の因果そのものであり、普及が進めば需要構成比が上がって供給過剰が
+ * 解消し倍率が戻る（負のフィードバック＝発散しない）。
+ *
+ * 【既知の限界】productPremium.ts は qualityAdjustment を max(・,0) で下側クランプ
+ * するため、品質スコアが基準を下回る国では負の品質調整が実現側に残る。本モデルの
+ * VNは基準を上回る設定のため実運転では発生しないが、将来品質スコアを下げる
+ * シナリオを足す場合はここで再確認する必要がある。
+ */
+function realizedBasePremiumRatio(
+  premiumResult: MarketQuarterResult["pdPremium"],
+  hosoPriceVn: number,
+  fallbackRatio: number
+): number {
+  if (!(hosoPriceVn > EPSILON)) return fallbackRatio;
+  const vn = premiumResult.byCountry.VN;
+  return (unwrapUnit(vn.premium) - unwrapUnit(vn.qualityAdjustment)) / hosoPriceVn;
+}
+
 function updateEntry(
   prev: ProductEvolutionEntry,
   product: "pd" | "vap",
@@ -253,11 +282,21 @@ function updateEntry(
   const premiumRatioMultiplier = clamp(stepped, params.premiumMultiplierFloor, params.premiumMultiplierCap);
 
   // --- 割安シグナル: 実現プレミアム比率 vs 基準比率（正=割安が持続） ---
+  // 【監査指摘C・修正】以前は実現側に品質プレミアム・稼働率倍率が乗ったままの
+  // byCountry.VN.premium を、それらを一切含まない基準比率と比較していた。
+  // ベトナムの品質スコアは基準より高いため、品質プレミアム分だけ実現側が恒常的に
+  // 高く出て、割安シグナルが「常にマイナス（＝普及を遅らせ続ける）」という
+  // 定数バイアスになっていた（価格の割安さとは無関係な偏り）。
+  //
+  // 修正後は両辺を「品質プレミアムを除いたベースプレミアム比率」にそろえる。
+  // productPremium.ts の構成は
+  //     premium = hoso × (基準比率 × 供給倍率 × 稼働率倍率) + hoso × 品質調整比率
+  // なので、premium から qualityAdjustment を引けば実現側のベース部分が得られる。
   const premiumResult = product === "pd" ? inputs.marketResult.pdPremium : inputs.marketResult.vapPremium;
   const hosoPriceVn = unwrapUnit(inputs.marketResult.hosoPrices.VN.price);
-  const realizedRatio = hosoPriceVn > EPSILON ? unwrapUnit(premiumResult.byCountry.VN.premium) / hosoPriceVn : inputs.referencePremiumRatios[product];
   const reference = inputs.referencePremiumRatios[product];
-  const cheapness = reference > EPSILON ? clamp((reference - realizedRatio) / reference, -1, 1) : 0;
+  const realizedBaseRatio = realizedBasePremiumRatio(premiumResult, hosoPriceVn, reference);
+  const cheapness = reference > EPSILON ? clamp((reference - realizedBaseRatio) / reference, -1, 1) : 0;
   const affordabilitySignalEwma = prev.affordabilitySignalEwma + params.affordabilityEwmaAlpha * (cheapness - prev.affordabilitySignalEwma);
 
   return {
@@ -311,11 +350,15 @@ export function applyProductSubstitution(
   params: MarketEvolutionParameters = MARKET_EVOLUTION_PARAMETERS_V1
 ): { readonly mix: MarketProductMix; readonly substitutionShareShift: number } {
   if (!priorMarketResult) return { mix, substitutionShareShift: 0 };
-  const pdPremium = unwrapUnit(priorMarketResult.pdPremium.byCountry.VN.premium);
-  const vapPremium = unwrapUnit(priorMarketResult.vapPremium.byCountry.VN.premium);
-  if (pdPremium <= EPSILON || referencePremiumRatios.pd <= EPSILON) return { mix, substitutionShareShift: 0 };
+  // 【監査指摘C・修正】実現側にだけ品質プレミアムが乗った状態で基準比と比べていた
+  // ため、PD/VAPで品質調整の絶対額が異なるぶんだけ恒常的な偏りが乗っていた。
+  // updateEntryと同じ分解で、両辺を「品質プレミアムを除いたベース比率」にそろえる。
+  const hosoPriceVn = unwrapUnit(priorMarketResult.hosoPrices.VN.price);
+  const pdBaseRatio = realizedBasePremiumRatio(priorMarketResult.pdPremium, hosoPriceVn, referencePremiumRatios.pd);
+  const vapBaseRatio = realizedBasePremiumRatio(priorMarketResult.vapPremium, hosoPriceVn, referencePremiumRatios.vap);
+  if (pdBaseRatio <= EPSILON || referencePremiumRatios.pd <= EPSILON) return { mix, substitutionShareShift: 0 };
 
-  const realizedRatio = vapPremium / pdPremium;
+  const realizedRatio = vapBaseRatio / pdBaseRatio;
   const referenceRatio = referencePremiumRatios.vap / referencePremiumRatios.pd;
   const relativeGap = (realizedRatio - referenceRatio) / referenceRatio; // 負=VAPが相対的に安い
 

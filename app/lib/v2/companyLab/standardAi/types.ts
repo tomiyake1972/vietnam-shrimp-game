@@ -121,6 +121,8 @@ export interface StandardAiObservation {
   // --- 【SAI-5D】自社の営業基盤（会社×市場×商品、前四半期末まで） ---
   /** 市場×商品の営業基盤スコア（salesBaseAccumulation有効時のみ。存在しないキーは中立50）。 */
   readonly salesBaseByMarketProduct?: Readonly<Partial<Record<DemandMarketId, Readonly<Partial<Record<Product, Score0to100>>>>>>;
+  /** 【監査指摘G】当期の成約配分で実際に使われる営業基盤の競争力ウェイト（機能OFF時は0）。 */
+  readonly salesBaseCompetitivenessWeight?: number;
 
   // --- 【SAI-5C】市場別の商品ライフサイクル公開トレンド（前四半期までの公開情報） ---
   /** 前四半期に適用された市場×商品の需要構成比（productLifecycle有効時のみ。turn1はundefined）。 */

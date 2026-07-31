@@ -20,6 +20,7 @@
 import { CapexDecisionInput, CapexProjectProposalInput, CapitalProjectType } from "../../../capex/types";
 import { Product } from "../../../market/types";
 import { CompanyFixture } from "../../types";
+import { minimumAcceptablePremium } from "../../premiumPolicy";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
 import { ProductAmount, StandardAiObservation } from "../types";
@@ -54,6 +55,9 @@ export function buildStandardAiCapexDecision(
 ): CapexPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const proposals: CapexProjectProposalInput[] = [];
+  // 【監査指摘H】PD_CAPACITY_MAINTAINED の判定材料（VAP転換へ追随しなかったか）。
+  let vapOversupplyRetreated = false;
+  let vapGrowthSignalPresent = false;
   const safe = cashAndBorrowingSafe(observation, pressures, params);
   const sustained = pressures.hadPriorQuarterUtilization && pressures.equipmentUtilizationLastQuarter >= params.capexSustainedUtilizationThreshold;
 
@@ -85,6 +89,7 @@ export function buildStandardAiCapexDecision(
       pressureSignal !== undefined &&
       pressureSignal > params.capexOversupplyPressureThreshold + (1 - params.oversupplyRetreatSensitivity) * 0.3;
     if (oversupplyRetreat) {
+      if (product === "vap") vapOversupplyRetreated = true;
       diagnostics.push({
         code: product === "vap" ? "VAP_OVERSUPPLY_RETREAT" : "CAPEX_DEFERRED_OVERSUPPLY",
         domain: "capex",
@@ -147,6 +152,7 @@ export function buildStandardAiCapexDecision(
       // 公開の過去トレンドへの反応速度の違いとして表現）。
       const trend = lifecycleTrendOf(product);
       const trendThreshold = params.capexGrowthEntryTrendPerQuarterThreshold * (2 - params.growthTrendResponsiveness);
+      if (product === "vap" && trend !== undefined && trend >= trendThreshold) vapGrowthSignalPresent = true;
       const utilizationOk =
         pressures.hadPriorQuarterUtilization && pressures.equipmentUtilizationLastQuarter >= params.capexGrowthEntryUtilizationThreshold;
       if (trend !== undefined && trend >= trendThreshold && utilizationOk && noExcess && safe) {
@@ -188,6 +194,58 @@ export function buildStandardAiCapexDecision(
           message: "現金が安全水準を回復したため、資金難で中断中の設備投資案件の再開を提案する。",
         });
       }
+    }
+  }
+
+  // 【監査指摘H・修正】PD_CAPACITY_MAINTAINED を実際の判断へ接続する。
+  //
+  // 以前はこのreason codeが3箇所（reasonCodes.ts / reasonTaxonomy.ts /
+  // reasonCodeCatalog.ts）で定義されているだけで、どこからも発火していなかった
+  // （＝仕様書には載っているが実体のない判断）。当初のご指示にある必須reason
+  // codeなので削除はせず、次の実際の判断へ接続する:
+  //
+  //   「VAPが客観的に魅力的に見える局面（成長トレンドが増設しきい値に到達）、
+  //     または供給過剰で撤退した局面において、それでもVAP増設へ追随せず、
+  //     稼働中で相対的に採算の良い既存PD能力で戦うことを選んだ」
+  //
+  // 4条件すべてを実データから確認したときだけ発火する:
+  //   (a) 既存PD能力がある（維持する対象が実在する）
+  //   (b) VAP側に追随の誘因が実在した（成長シグナル or 供給過剰撤退）
+  //   (c) 当期VAP増設を提案していない（実際に追随しなかった）
+  //   (d) PDの採算がVAPより相対的に良い（最低受注水準に対する余裕で比較）、
+  //       かつPD能力が遊んでいない
+  if (ext && params.growthTrendResponsiveness > 0) {
+    const pdCapacity = observation.totalCapacityByProduct.pd;
+    const vapProposed = proposals.some((p) => p.projectType === LINE_EXPANSION_BY_PRODUCT.vap);
+    // 前期の公開プレミアムが未取得（turn1等）なら判断材料が無いので発火させない。
+    const pdPremium = observation.marketPremiumByProduct.pd;
+    const vapPremium = observation.marketPremiumByProduct.vap;
+    const pdHeadroomOverMinimum =
+      pdPremium === undefined ? undefined : pdPremium - minimumAcceptablePremium(fixture.productEconomics.premiumEconomics.pd);
+    const vapHeadroomOverMinimum =
+      vapPremium === undefined ? undefined : vapPremium - minimumAcceptablePremium(fixture.productEconomics.premiumEconomics.vap);
+    const pdInUse = pdCapacity > EPSILON && productionNeededByProductBeforeCap.pd / pdCapacity > params.capexPdInUseUtilizationThreshold;
+    const pdRelativelyProfitable =
+      pdHeadroomOverMinimum !== undefined && vapHeadroomOverMinimum !== undefined && pdHeadroomOverMinimum > 0 && pdHeadroomOverMinimum >= vapHeadroomOverMinimum;
+    if (pdCapacity > EPSILON && (vapGrowthSignalPresent || vapOversupplyRetreated) && !vapProposed && pdInUse && pdRelativelyProfitable) {
+      diagnostics.push({
+        code: "PD_CAPACITY_MAINTAINED",
+        domain: "capex",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: {
+          pdCapacity,
+          pdUtilizationBeforeCap: productionNeededByProductBeforeCap.pd / pdCapacity,
+          pdHeadroomOverMinimumPremium: pdHeadroomOverMinimum ?? 0,
+          vapHeadroomOverMinimumPremium: vapHeadroomOverMinimum ?? 0,
+          vapGrowthSignalPresent: vapGrowthSignalPresent ? 1 : 0,
+          vapOversupplyRetreated: vapOversupplyRetreated ? 1 : 0,
+          vapSupplyPressureEwma: supplyPressureOf("vap") ?? 0,
+        },
+        decisionSummary: "VAP転換へ追随せず、既存PD能力の維持を選択",
+        message:
+          "VAP側に追随の誘因（成長トレンド到達または供給過剰）があったが、既存PD能力が稼働中で最低受注水準に対する採算がVAPより良いため、VAP増設へは追随せずPD能力の維持を選択した。",
+      });
     }
   }
 

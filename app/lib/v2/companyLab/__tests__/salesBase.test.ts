@@ -166,3 +166,57 @@ test("SAI-5D: スコアが負・NaN・Infinityにならない（score0to100ス�
   assert.throws(() => score0to100(NaN));
   assert.throws(() => score0to100(Infinity));
 });
+
+// ---------------------------------------------------------------------------
+// 【監査指摘D】成約強化のヘッドルーム — 早期飽和の防止と順位の可変性
+// ---------------------------------------------------------------------------
+
+test("SAI-5D修正: 成約を続けても上限100へ早期飽和せず、努力の差が結果に残り続ける", () => {
+  // 成約率100%で営業を続ける会社を32四半期回す。
+  const fullContract = (desired: number) =>
+    activity({
+      salesPlans: [plan("JPQ", "JP", "vap", desired)],
+      allocations: [
+        {
+          market: "JP",
+          product: "vap",
+          period: "2015Q1",
+          basePrice: 0,
+          targetDemand: hosoEqTons(desired * 3),
+          companies: [{ companyId: "JPQ", allocatedQuantity: hosoEqTons(desired) } as never],
+          externalOptionQuantity: hosoEqTons(0),
+        } as never,
+      ],
+    });
+
+  let s: ReturnType<typeof updateSalesBaseState> | undefined;
+  const scores: number[] = [];
+  for (let q = 0; q < 32; q++) {
+    s = updateSalesBaseState(s, fullContract(500), COMPANIES);
+    scores.push(lookupSalesBaseScore(s, "JPQ", "JP", "vap"));
+  }
+  const final = scores[scores.length - 1];
+  assert.ok(final < 100 - 1e-6, `32四半期の連続成約で上限100へ飽和した（${final}）`);
+  assert.ok(final > 90, `32四半期の連続成約でも基盤が伸びていない（${final}）`);
+  // 直近4四半期でもまだ伸びている＝飽和して差がつかなくなっていない
+  assert.ok(scores[31] > scores[27], "終盤で完全に頭打ちになっている（努力が結果に反映されない）");
+});
+
+test("SAI-5D修正: 初期の順位は固定されない — 継続営業した後発が、撤退した先行を追い越す", () => {
+  // 先行者LEADは最初の8四半期だけ営業し、その後撤退。
+  // 後発FOLLOWは最初の8四半期は何もせず、その後ずっと営業を続ける。
+  let s: ReturnType<typeof updateSalesBaseState> | undefined;
+  const companies = ["LEAD", "FOLLOW"];
+  let crossoverQuarter: number | undefined;
+  for (let q = 1; q <= 40; q++) {
+    const plans = [];
+    if (q <= 8) plans.push(plan("LEAD", "JP", "vap", 500));
+    if (q > 8) plans.push(plan("FOLLOW", "JP", "vap", 500));
+    s = updateSalesBaseState(s, activity({ salesPlans: plans }), companies);
+    const lead = lookupSalesBaseScore(s, "LEAD", "JP", "vap");
+    const follow = lookupSalesBaseScore(s, "FOLLOW", "JP", "vap");
+    if (crossoverQuarter === undefined && follow > lead) crossoverQuarter = q;
+  }
+  assert.ok(crossoverQuarter !== undefined, "撤退した先行者を、継続営業した後発が一度も追い越せない（順位が初期値で固定）");
+  assert.ok(crossoverQuarter > 8, `追い越しが早すぎる（${crossoverQuarter}期目。蓄積の意味がない）`);
+});

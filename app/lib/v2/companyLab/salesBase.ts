@@ -48,13 +48,28 @@ export interface SalesBaseParameters {
    *  4.0 → 中立50から上限付近まで約3〜4年（12〜16四半期）。「営業基盤の形成には
    *  年単位の継続が必要」という意図の初期値。 */
   readonly activeAcquisitionPerQuarter: number;
-  /** 成約成功による強化（点/四半期 × min(1, 成約量/希望量)）。 */
+  /** 成約成功による強化（点/四半期 × min(1, 成約量/希望量) × ヘッドルーム(1-score/100)）。
+   *  【監査指摘D】活動獲得と同じくヘッドルームを乗じる（上限への早期飽和を防ぐ）。 */
   readonly contractSuccessBoostPerQuarter: number;
   /** 放置時の減衰率（現在値に対する比率/四半期）。0.06 → 1四半期でゼロにならず、
    *  中立超過分が半減するのに約11四半期（ゆっくり失われる）。 */
   readonly idleDecayRatioPerQuarter: number;
-  /** 重大品質事故時の毀損（点。当該会社×商品の全市場に適用）。 */
-  readonly majorIncidentPenalty: number;
+  /**
+   * 重大品質事故時の毀損（点／severity 1.0あたり。当該会社×商品の全市場に適用）。
+   *
+   * 【監査指摘J・修正】以前は severity を無視した定額8点だった。他の2経路
+   * （品質スコア: severity×40、顧客信頼: severity×25）は severity 比例なのに
+   * 営業基盤だけが定額で、軽微な事故（severity 0.1）と最悪の事故（1.0）が
+   * 同じ毀損になっていた。severity 比例に統一する。
+   *
+   * 【合計影響の実測（qualityIncidentPropagation.test.ts）】severity 0.5 の
+   * 事故1件で合成競争力は約2%低下し、内訳は品質39% / 顧客信頼13% /
+   * 営業基盤48%（修正前）だった。合計2%は過大ではないが、補助シグナル
+   * （ウェイト0.08）である営業基盤が主シグナル（品質0.13）より大きいのは
+   * 主従が逆で不自然なため、severity 比例化により severity 0.5 では
+   * 4点＝寄与26%へ収める（毀損そのものは削除しない）。
+   */
+  readonly majorIncidentPenaltyPerSeverity: number;
   /** 市場成熟度係数の下限（小さい初期市場での基盤形成速度の下限倍率）。 */
   readonly maturityFactorFloor: number;
   /** スコアの下限・上限。 */
@@ -67,7 +82,7 @@ export const SALES_BASE_PARAMETERS_V1: SalesBaseParameters = {
   activeAcquisitionPerQuarter: 4.0,
   contractSuccessBoostPerQuarter: 2.0,
   idleDecayRatioPerQuarter: 0.06,
-  majorIncidentPenalty: 8.0,
+  majorIncidentPenaltyPerSeverity: 8.0,
   maturityFactorFloor: 0.25,
   floor: 0,
   cap: 100,
@@ -132,10 +147,11 @@ function maturityFactor(market: DemandMarketId, product: Product, mix: MarketPro
  * 四半期末の営業基盤更新（純粋関数・決定論的）。
  *
  *   次期基盤 = clamp( 前期基盤
- *                     + 活動獲得（提示あり: acquisition × (1-score/100) × 成熟度係数）
- *                     + 成約強化（contractBoost × min(1, 成約量/希望量)）
- *                     − 放置減衰（提示なし: score × decayRatio）
- *                     − 重大事故毀損, floor, cap )
+ *                     + 提示あり: (acquisition × 成熟度係数
+ *                                  + contractBoost × min(1, 成約量/希望量))
+ *                                 × ヘッドルーム(1 - score/100)
+ *                     − 提示なし: 中立値へ向けた減衰（(score-50) × decayRatio）
+ *                     − 重大事故毀損（severity × majorIncidentPenaltyPerSeverity）, floor, cap )
  *
  * - 営業を止めても1四半期でゼロにはならない（減衰は比率6%/四半期）。
  * - 市場急成長時は成熟度係数が1へ近づき、後発企業の基盤形成も速くなる
@@ -164,12 +180,15 @@ export function updateSalesBaseState(
       allocated.set(activkey(c.companyId, alloc.market, alloc.product), unwrapUnit(c.allocatedQuantity));
     }
   }
-  // 重大事故マップ（会社×商品）
-  const incidents = new Set<string>();
+  // 重大事故マップ（会社×商品 → 当期の最大severity）。
+  // 同一四半期に同じ会社×商品で複数バッチの事故が起きた場合は、最大severityの
+  // 1件ぶんだけを毀損とする（バッチ数に比例して無制限に積み上がるのを防ぐ）。
+  const incidentSeverity = new Map<string, number>();
   for (const adj of activity.qualityAdjustments) {
-    if (adj.outcome.majorIncident.occurred) {
-      incidents.add(`${adj.companyId}::${adj.product}`);
-    }
+    const incident = adj.outcome.majorIncident;
+    if (!incident.occurred) continue;
+    const key = `${adj.companyId}::${adj.product}`;
+    incidentSeverity.set(key, Math.max(incidentSeverity.get(key) ?? 0, Math.max(0, incident.severity)));
   }
 
   const prevScores = new Map<string, number>();
@@ -187,12 +206,21 @@ export function updateSalesBaseState(
         let score = prevScores.get(key) ?? params.neutralScore;
         const active = activePlans.get(key);
         if (active) {
+          // 【監査指摘D・修正】成約強化にもヘッドルーム (1 - score/100) を乗じる。
+          // 以前は成約強化だけが定額加算だったため、成約を続ける会社が数年で
+          // 上限100へ飽和し、それ以上の営業努力が結果に反映されなくなっていた
+          // （飽和した会社同士は営業基盤で差がつかない＝機能が死ぬ）。
+          //
+          // ヘッドルームを付けても順位が初期値で固定されることはない:
+          //   - スコアが低い会社ほどヘッドルームが大きく、伸び幅が大きい
+          //   - 活動を止めた会社は中立50へ向けて減衰し続ける
+          // したがって「営業を続ける／撤退する／成約できる」の違いで順位は入れ替わる
+          // （salesBase.test.ts の順位入れ替えテストで検証）。
+          const headroom = 1 - score / 100;
           const factor = maturityFactor(market, product, activity.lifecycleMix, params);
-          score += params.activeAcquisitionPerQuarter * (1 - score / 100) * factor;
           const alloc = allocated.get(key) ?? 0;
-          if (alloc > EPSILON && active.desired > EPSILON) {
-            score += params.contractSuccessBoostPerQuarter * Math.min(1, alloc / active.desired);
-          }
+          const fillRatio = alloc > EPSILON && active.desired > EPSILON ? Math.min(1, alloc / active.desired) : 0;
+          score += (params.activeAcquisitionPerQuarter * factor + params.contractSuccessBoostPerQuarter * fillRatio) * headroom;
         } else {
           // 放置減衰は**中立値へ向かって**減衰する（0へ向かわない）。
           // 中立値50は「その市場×商品で無名の新規参入者」の基準点であり、
@@ -202,8 +230,9 @@ export function updateSalesBaseState(
           // 中立へ回復する（悪評の風化）。
           score = params.neutralScore + (score - params.neutralScore) * (1 - params.idleDecayRatioPerQuarter);
         }
-        if (incidents.has(`${companyId}::${product}`)) {
-          score -= params.majorIncidentPenalty;
+        const severity = incidentSeverity.get(`${companyId}::${product}`);
+        if (severity !== undefined) {
+          score -= params.majorIncidentPenaltyPerSeverity * severity;
         }
         score = Math.max(params.floor, Math.min(params.cap, score));
         // スパース表現: 中立値と実質同値（±0.005未満）のエントリは保存しない

@@ -13,7 +13,35 @@ import { STANDARD_AI_PARAMETERS_V1, StandardAiParameters } from "../parameters";
 import { CompanyFixture } from "../../types";
 import { DEMAND_MARKET_IDS } from "../../../market/types";
 
-const fixture = { companyId: "VAP" } as unknown as CompanyFixture;
+// 【監査指摘H】PD_CAPACITY_MAINTAINED の判定がPD/VAPの最低受注水準を参照するため、
+// 合成fixtureにも標準ベースラインと同等の商品経済性を持たせる（CompanyFixtureの
+// 必須フィールドであり、本来省略してはいけない）。
+const fixture = {
+  companyId: "VAP",
+  productEconomics: {
+    expectedProcessingCostUsdPerHosoEqKg: { hoso: 0.5, pd: 0.75, vap: 1.2 },
+    premiumEconomics: {
+      pd: {
+        expectedVariableProcessingCostUsdPerHosoEqKg: 0.17,
+        allocatedFixedCostUsdPerHosoEqKg: 0.15,
+        sellingAndLogisticsCostUsdPerHosoEqKg: 0.05,
+        targetMarginUsdPerHosoEqKg: 0.15,
+        avoidableVariableProcessingCostUsdPerHosoEqKg: 0.17,
+        incrementalSellingAndLogisticsCostUsdPerHosoEqKg: 0.03,
+        minimumContributionMarginUsdPerHosoEqKg: 0.05,
+      },
+      vap: {
+        expectedVariableProcessingCostUsdPerHosoEqKg: 0.43,
+        allocatedFixedCostUsdPerHosoEqKg: 0.35,
+        sellingAndLogisticsCostUsdPerHosoEqKg: 0.1,
+        targetMarginUsdPerHosoEqKg: 0.3,
+        avoidableVariableProcessingCostUsdPerHosoEqKg: 0.43,
+        incrementalSellingAndLogisticsCostUsdPerHosoEqKg: 0.06,
+        minimumContributionMarginUsdPerHosoEqKg: 0.1,
+      },
+    },
+  },
+} as unknown as CompanyFixture;
 
 function observation(overrides: Partial<StandardAiObservation> = {}): StandardAiObservation {
   return {

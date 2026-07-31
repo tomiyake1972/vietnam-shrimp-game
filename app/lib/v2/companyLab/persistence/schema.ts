@@ -64,11 +64,11 @@ import {
   CompanyCapexState,
 } from "../../capex/types";
 import { ScenarioMode, ScenarioState } from "../../scenario/types";
-import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
+import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord, Sai5FeatureFlags } from "../types";
 import type { WorkforceState } from "../workforce";
 import type { ConsumerMarketCarryState, ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 import type { SalesBaseState } from "../salesBase";
-import type { MarketEvolutionState } from "../marketEvolution";
+import type { MarketEvolutionState, SupplyPressureDefinition } from "../marketEvolution";
 import {
   CompanyLabDraftEnvelope,
   CompanyLabPersistedCurrentState,
@@ -191,6 +191,13 @@ const FINANCIAL_HEALTH_TIERS: readonly FinancialHealthTier[] = [
   "paymentDefault",
 ];
 const SCENARIO_MODES: readonly ScenarioMode[] = ["canonical", "variation"];
+/** 【監査指摘E】config.sai5.supplyPressureDefinition の復元に使う許容値。 */
+const SUPPLY_PRESSURE_DEFINITIONS: readonly SupplyPressureDefinition[] = [
+  "raw_target_demand",
+  "addressable_demand",
+  "neutral_baseline",
+  "completed_supply",
+];
 const COMPANY_ARCHETYPES: readonly string[] = ["balanced", "massMarket", "japanQuality", "vapSpecialist", "conservative"];
 
 // ---------------------------------------------------------------------
@@ -861,8 +868,39 @@ function validateCompanyFixture(raw: unknown, path: string): CompanyFixture {
   };
 }
 
+/**
+ * 【監査指摘E・修正】CompanyLabConfig.sai5（SAI-5機能フラグ）の復元。
+ *
+ * 以前は validateCompanyLabConfig が scenarioId/mode/seed/turns の4つだけを
+ * 再構築しており、保存時に存在した sai5 を**黙って捨てていた**。その結果、
+ * SAI-5有効のセッションを保存して読み直すと機能が全てOFFに戻り、営業基盤・
+ * 市場進化のcarry stateだけが残るという不整合が起きていた。
+ *
+ * 未指定（旧スキーマの保存データ）は undefined を返し、従来どおり全機能OFFの
+ * 挙動になる（後方互換。マイグレーションは不要）。
+ */
+function validateSai5FeatureFlags(raw: unknown, path: string): Sai5FeatureFlags | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = requireObject(raw, path);
+  const optionalBoolean = (value: unknown, p: string): boolean | undefined => (value === undefined ? undefined : requireBoolean(value, p));
+  const productLifecycle = optionalBoolean(obj.productLifecycle, `${path}.productLifecycle`);
+  const salesBaseAccumulation = optionalBoolean(obj.salesBaseAccumulation, `${path}.salesBaseAccumulation`);
+  const supplyPremiumFeedback = optionalBoolean(obj.supplyPremiumFeedback, `${path}.supplyPremiumFeedback`);
+  const supplyPressureDefinition =
+    obj.supplyPressureDefinition === undefined
+      ? undefined
+      : requireEnum(obj.supplyPressureDefinition, SUPPLY_PRESSURE_DEFINITIONS, `${path}.supplyPressureDefinition`);
+  return {
+    ...(productLifecycle === undefined ? {} : { productLifecycle }),
+    ...(salesBaseAccumulation === undefined ? {} : { salesBaseAccumulation }),
+    ...(supplyPremiumFeedback === undefined ? {} : { supplyPremiumFeedback }),
+    ...(supplyPressureDefinition === undefined ? {} : { supplyPressureDefinition }),
+  };
+}
+
 function validateCompanyLabConfig(raw: unknown, path: string): CompanyLabConfig {
   const obj = requireObject(raw, path);
+  const sai5 = validateSai5FeatureFlags(obj.sai5, `${path}.sai5`);
   return {
     scenarioId: requireNonEmptyString(obj.scenarioId, `${path}.scenarioId`),
     mode: requireEnum(obj.mode, SCENARIO_MODES, `${path}.mode`),
@@ -872,6 +910,7 @@ function validateCompanyLabConfig(raw: unknown, path: string): CompanyLabConfig 
       if (n < 1) fail(`${path}.turns`, "1以上の整数である必要があります");
       return n;
     })(),
+    ...(sai5 === undefined ? {} : { sai5 }),
   };
 }
 

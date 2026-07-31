@@ -209,6 +209,7 @@ export function buildStandardAiObservation(
 
     // 【SAI-5D】自社の営業基盤（前四半期末までの値。ownState経由の一本道）。
     salesBaseByMarketProduct: ownState.salesBaseByMarketProduct,
+    salesBaseCompetitivenessWeight: ownState.salesBaseCompetitivenessWeight,
 
     // 【SAI-5C】ライフサイクル公開トレンド（前四半期までの公開情報のみ。
     // publicInfo経由の一本道＝当期需要の先読みリークはない）。

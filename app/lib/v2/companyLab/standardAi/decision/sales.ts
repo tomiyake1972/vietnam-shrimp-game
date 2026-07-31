@@ -431,7 +431,14 @@ export function buildStandardAiSalesPlans(
 
   // 【SAI-5D】営業基盤の優位が実際に計画へ反映されたことを診断へ記録する
   // （中立値+5点を超える基盤を持つ市場×商品へ計画を出した場合のみ、1件に集約）。
-  if (observation.salesBaseByMarketProduct) {
+  //
+  // 【監査指摘G・修正】以前は「基盤スコアが55超」だけで発火していたため、
+  // 機能OFF・ウェイト中立（salesBase=0）で営業基盤が成約に一切影響しない状況でも
+  // 「優位が反映された」と記録され、診断が事実と食い違っていた。
+  // エンジンが当期に実際に使うウェイト（salesBaseCompetitivenessWeight）が
+  // 正のときだけ発火させる。
+  const salesBaseWeightInEffect = observation.salesBaseCompetitivenessWeight ?? 0;
+  if (observation.salesBaseByMarketProduct && salesBaseWeightInEffect > 0) {
     const advantaged = plans.filter((p) => {
       const s = observation.salesBaseByMarketProduct?.[p.market]?.[p.product];
       return s !== undefined && (s as unknown as number) > 55;
@@ -451,9 +458,10 @@ export function buildStandardAiSalesPlans(
         keyValues: {
           advantagedPlanCount: advantaged.length,
           topSalesBaseScore: (observation.salesBaseByMarketProduct?.[top.market]?.[top.product] as unknown as number) ?? 0,
+          salesBaseCompetitivenessWeight: salesBaseWeightInEffect,
         },
         decisionSummary: `${top.market}×${top.product.toUpperCase()}等${advantaged.length}件で営業基盤の優位あり`,
-        message: "蓄積した営業基盤（中立値超）を持つ市場×商品へ販売計画を提出した（成約競争力の第6項として反映される）。",
+        message: `蓄積した営業基盤（中立値超）を持つ市場×商品へ販売計画を提出した。営業基盤は当期の成約競争力にウェイト${salesBaseWeightInEffect}で加算される（allocation.tsの第6項）。`,
       });
     }
   }

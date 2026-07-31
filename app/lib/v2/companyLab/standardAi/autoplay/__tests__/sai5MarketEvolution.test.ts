@@ -152,19 +152,46 @@ test("SAI-5E統合: AIはturn2以降に供給圧力の公開統計を観測で�
   assertAllFinite(turn2.publicInfo.productSupplyPressureOutlook);
 });
 
-test("SAI-5E統合: 契約単価は遡及変更されない（同一契約のunitPriceが全四半期で不変）", () => {
-  const run = runAutoplayCase(baseConfig("sai5e-contract-immutable", 6, { supplyPremiumFeedbackEnabled: true, productLifecycleEnabled: true }));
-  const priceByContract = new Map<string, number>();
+test("SAI-5E統合: 契約単価は遡及変更されない（市場価格・プレミアム倍率が動いた後も成約時単価が不変）", () => {
+  // 【監査指摘・修正】旧テストは h.salesRecord.newContracts（＝各四半期の新規契約）
+  // を集めて、最後の四半期の**同じ配列**と突き合わせていたため、常に自明に成立して
+  // いた（同一オブジェクトの比較）。SAI-5Eで翌期の市場価格・プレミアム倍率が実際に
+  // 動いたことを確認したうえで、**過去の四半期に成約した契約**の単価が現在の契約
+  // 一覧の中で変わっていないことを検証する形へ置き換える。
+  const run = runAutoplayCase(baseConfig("sai5e-contract-immutable", 8, { supplyPremiumFeedbackEnabled: true, productLifecycleEnabled: true }));
+
+  // (1) 成約時点の単価を四半期ごとに記録する
+  const priceAtContracting = new Map<string, { unitPrice: number; turn: number }>();
   for (const h of run.history) {
     for (const c of h.salesRecord.newContracts) {
-      priceByContract.set(c.contractId, c.unitPrice as unknown as number);
+      priceAtContracting.set(c.contractId, { unitPrice: Number(c.unitPrice), turn: h.turn });
     }
   }
-  // 最終状態の契約一覧で、成約時の単価から変わっていないことを確認
-  const lastState = run.history[run.history.length - 1];
-  for (const c of lastState.salesRecord.newContracts) {
-    assert.equal(c.unitPrice as unknown as number, priceByContract.get(c.contractId));
+  assert.ok(priceAtContracting.size > 0, "検証対象の契約が1件も無い");
+
+  // (2) 市場価格・プレミアム倍率が実際に動いていることを先に確認する
+  //     （動いていなければ「不変であること」の検証に意味がない）
+  const vnPdPremiums = run.history.map((h) => Number(h.marketResult.pdPremium.byCountry.VN.premium));
+  const multipliers = run.history.map((h) => h.sai5MarketEvolution?.appliedPremiumRatioMultipliers.vap ?? 1);
+  assert.ok(Math.max(...vnPdPremiums) - Math.min(...vnPdPremiums) > 1e-6, "市場プレミアムが全期間で動いていない（前提が成立しない）");
+  assert.ok(Math.max(...multipliers) - Math.min(...multipliers) > 1e-9, "SAI-5Eのプレミアム倍率が全期間で動いていない（前提が成立しない）");
+
+  // (3) 後続四半期の開始時点で会社が保持している累積契約一覧（ownState.contracts）を見て、
+  //     過去に成約した契約の単価が成約時のままかを確認する
+  let checkedPastContracts = 0;
+  for (const capture of run.quarterStartCaptures) {
+    for (const c of capture.ownState.contracts) {
+      const atContracting = priceAtContracting.get(c.contractId);
+      if (!atContracting || capture.turn <= atContracting.turn) continue;
+      assert.equal(
+        Number(c.unitPrice),
+        atContracting.unitPrice,
+        `契約${c.contractId}（turn${atContracting.turn}成約）の単価がturn${capture.turn}時点で変化している（成約単価の遡及変更）`
+      );
+      checkedPastContracts += 1;
+    }
   }
+  assert.ok(checkedPastContracts > 0, "成約した四半期より後の四半期で検証できた契約が1件も無い（実効的な検証になっていない）");
 });
 
 // ---------------------------------------------------------------------

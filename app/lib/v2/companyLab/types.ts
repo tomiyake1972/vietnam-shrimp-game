@@ -187,6 +187,13 @@ export interface CompanyOwnState {
    * 成約に使う」規約に従う）。
    */
   readonly salesBaseByMarketProduct?: Readonly<Partial<Record<DemandMarketId, Readonly<Partial<Record<Product, Score0to100>>>>>>;
+  /**
+   * 【監査指摘G】当期の成約配分で実際に使われる営業基盤の競争力ウェイト。
+   * 機能OFF・旧state（＝営業基盤が成約へ一切影響しない）のとき 0。
+   * 判断側が「営業基盤の優位が実際に効く局面かどうか」を、思い込みではなく
+   * エンジンの実値で確認できるようにするために公開する。
+   */
+  readonly salesBaseCompetitivenessWeight?: number;
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */

@@ -97,6 +97,10 @@ export interface StandardAiParameters {
   readonly supplyPressureRetreatThreshold: number;
   /** 【SAI-5F】供給圧力リトリートによる販売希望量縮小の下限倍率（最大-15%）。 */
   readonly supplyPressureRetreatFloor: number;
+  /** 【監査指摘H】PD能力が「稼働中（＝維持する価値がある）」とみなす稼働率の下限。
+   *  PD_CAPACITY_MAINTAINED は、遊休のPD能力を維持していると称さないために
+   *  この水準を超えている場合にのみ発火する。 */
+  readonly capexPdInUseUtilizationThreshold: number;
 
   // --- 労働 ---
   /** ワーカー不足が「持続的」とみなす連続四半期しきい値（ヒステリシス）。 */
@@ -196,6 +200,7 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   lifecycleGrowthSalesBoostScale: 10,
   supplyPressureRetreatThreshold: 1.14,
   supplyPressureRetreatFloor: 0.85,
+  capexPdInUseUtilizationThreshold: 0.5,
 
   sustainedShortageQuarterThreshold: 2,
   sustainedExcessQuarterThreshold: 2,
