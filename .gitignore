@@ -58,3 +58,7 @@ next-env.d.ts
 # （artifacts/sai5/以下）。同じ理由でGit管理対象にしない
 # （生成スクリプト scripts/sai5Analysis.ts のみGit管理する）。
 /artifacts/sai5/
+
+# Phase SAI-6: Standard AI経営能力強化の計測生成物（artifacts/sai6/以下）。
+# 同じ理由でGit管理対象にしない（計測スクリプト scripts/sai6Phase0Study.ts のみGit管理する）。
+/artifacts/sai6/
