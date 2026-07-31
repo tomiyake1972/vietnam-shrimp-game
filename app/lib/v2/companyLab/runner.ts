@@ -1034,6 +1034,21 @@ export function advanceCompanyLabQuarter(
     rampHistory: updatedRampHistory,
   };
 
+  // 【監査指摘B/D】営業工数制約（applyMarketSalesEffortCapacity）で比例縮小された
+  // 後の「実際に市場へ提示した数量」。供給圧力の分子（SAI-5E）と、営業基盤の
+  // 成約充足率の分母（SAI-5D）は、どちらも成約配分が見た量と同じでなければならない。
+  // 縮小前の希望量を使うと、市場に出していない量まで「売れ残り」「未達」として
+  // 数えてしまう。
+  const effortScaleByCompanyMarket = new Map(
+    turnResult.salesRecord.salesEffortAdjustments.map((a) => [`${a.companyId}::${a.market}`, a.scaleFactor])
+  );
+  const effortAdjustedSalesPlans = decisions.flatMap((d) =>
+    d.salesPlans.map((p) => {
+      const scale = effortScaleByCompanyMarket.get(`${p.companyId}::${p.market}`) ?? 1;
+      return scale === 1 ? p : { ...p, desiredQuantity: hosoEqTons(unwrapUnit(p.desiredQuantity) * scale) };
+    })
+  );
+
   // --- 【SAI-5D】営業基盤の四半期末更新（quality/trust状態と同じ位置＝当期の
   // 成約・履行・品質調整がすべて確定した後。当期の成約競争力に使われたのは
   // 前期末値のみであり、この更新値が効くのは次期から＝遡及なし）。無効時は
@@ -1042,7 +1057,7 @@ export function advanceCompanyLabQuarter(
     ? updateSalesBaseState(
         state.salesBaseState,
         {
-          salesPlans: decisions.flatMap((d) => d.salesPlans),
+          salesPlans: effortAdjustedSalesPlans,
           allocations: turnResult.salesRecord.allocations,
           qualityAdjustments: adjustments,
           lifecycleMix,
@@ -1059,21 +1074,11 @@ export function advanceCompanyLabQuarter(
   let marketEvolutionStateAfter = state.marketEvolutionState;
   let sai5MarketEvolutionRecord: Sai5MarketEvolutionRecord | undefined;
   if (sai5Active) {
-    // 【監査指摘B】分子は「実際に成約配分へ提示された数量」。営業工数制約
-    // （applyMarketSalesEffortCapacity）で比例縮小された分は市場へ提示されて
-    // いないため、縮小後の量で数える。縮小前の希望量で数えると、市場に出して
-    // すらいない量を「売れ残り」として供給圧力に計上してしまう
-    // （＝分子が成約側の母集団とずれる）。
-    const effortScaleByCompanyMarket = new Map(
-      turnResult.salesRecord.salesEffortAdjustments.map((a) => [`${a.companyId}::${a.market}`, a.scaleFactor])
-    );
+    // 【監査指摘B】分子は「実際に成約配分へ提示された数量」（営業工数制約適用後）。
     const offeredByProduct = { pd: 0, vap: 0 };
-    for (const d of decisions) {
-      for (const p of d.salesPlans) {
-        if (p.product !== "pd" && p.product !== "vap") continue;
-        const scale = effortScaleByCompanyMarket.get(`${p.companyId}::${p.market}`) ?? 1;
-        offeredByProduct[p.product] += unwrapUnit(p.desiredQuantity) * scale;
-      }
+    for (const p of effortAdjustedSalesPlans) {
+      if (p.product !== "pd" && p.product !== "vap") continue;
+      offeredByProduct[p.product] += unwrapUnit(p.desiredQuantity);
     }
     // 【監査指摘B】分母は「全ベトナム対象需要」ではなく「5社が構造的に配分を
     // 受けられる需要（addressable demand）」を市場×商品ごとに積み上げる。

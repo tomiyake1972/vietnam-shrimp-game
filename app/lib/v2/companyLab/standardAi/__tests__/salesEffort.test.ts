@@ -18,6 +18,13 @@ import { unwrapUnit } from "../../../core/units";
 import { initializeCompanyLab, buildCompanyOwnState, buildPublicMarketInfo } from "../../runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../policy";
 import { CompanyLabConfig, CompanyFixture } from "../../types";
+import { score0to100 } from "../../../core/units";
+import { buildStandardAiObservation } from "../observation";
+import { buildStandardAiSalesPlans } from "../decision/sales";
+import { computePressureScores } from "../pressures";
+import { StandardAiObservation } from "../types";
+import { STANDARD_AI_PARAMETERS_V1 } from "../parameters";
+import { SALES_PARAMETERS_SAI5_SALES_BASE_V1 } from "../../../sales/parameters";
 
 function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig {
   return { scenarioId: "baseline", mode: "canonical", seed: "sai2-standardai-effort-001", turns: 8, ...overrides };
@@ -109,4 +116,48 @@ test("7d. VAP比率が高い商品構成のほうが、同じ営業人員数・�
     (d) => d.code === "SALES_REDUCED_FOR_SUPPLY_LIMIT" || d.code === "VAP_MIX_INCREASES_SALES_EFFORT_NEED"
   );
   assert.ok(anyConstrained, "少人数配分×VAP提案ありという設定なのに、供給制約系の診断が一件も出ていない");
+});
+
+// ---------------------------------------------------------------------
+// 【監査指摘G】SALES_BASE_ADVANTAGE は「営業基盤が実際に成約へ効くとき」だけ発火する
+//
+// 監査の再指摘: 「機能OFFでは発火しない」ことは修正前から成立していた
+// （機能OFFではそもそも salesBaseByMarketProduct が観測に載らないため）。
+// 修正が効く唯一の状況は「基盤スコアは観測できるが、成約競争力ウェイトが0」
+// ＝ 基盤の高低が成約結果に一切影響しない状況である。ここを直接検証する。
+// ---------------------------------------------------------------------
+
+test("7g. 営業基盤スコアが観測できても、成約競争力ウェイトが0ならSALES_BASE_ADVANTAGEは発火しない（監査指摘G）", () => {
+  const { fixture, ownState, publicInfo, period, turn } = setup("sai5-g-guard-001");
+  void publicInfo;
+  void period;
+  void turn;
+
+  const highSalesBase = Object.fromEntries(
+    (["CN", "US", "EU", "JP", "OTHER"] as const).map((m) => [m, { hoso: score0to100(90), pd: score0to100(90), vap: score0to100(90) }])
+  );
+
+  const observationWith = (weight: number): StandardAiObservation =>
+    ({
+      ...buildStandardAiObservation(fixture, ownState, publicInfo, period, turn),
+      salesBaseByMarketProduct: highSalesBase,
+      salesBaseCompetitivenessWeight: weight,
+    }) as StandardAiObservation;
+
+  const pressuresFor = (obs: StandardAiObservation) => computePressureScores(obs, fixture, STANDARD_AI_PARAMETERS_V1);
+
+  // ウェイト0（＝営業基盤は成約に一切効かない）→ 発火しない
+  const obsZero = observationWith(0);
+  const zero = buildStandardAiSalesPlans(fixture, obsZero, pressuresFor(obsZero), STANDARD_AI_PARAMETERS_V1);
+  assert.ok(
+    !zero.diagnostics.some((d) => d.code === "SALES_BASE_ADVANTAGE"),
+    "営業基盤ウェイトが0（成約へ影響しない）なのにSALES_BASE_ADVANTAGEが発火した"
+  );
+
+  // ウェイトが正（＝SAI-5D有効）→ 同じ基盤スコアで発火する
+  const obsPositive = observationWith(SALES_PARAMETERS_SAI5_SALES_BASE_V1.competitivenessWeights.salesBase);
+  const positive = buildStandardAiSalesPlans(fixture, obsPositive, pressuresFor(obsPositive), STANDARD_AI_PARAMETERS_V1);
+  const entry = positive.diagnostics.find((d) => d.code === "SALES_BASE_ADVANTAGE");
+  assert.ok(entry, "営業基盤ウェイトが正で高い基盤を持つのにSALES_BASE_ADVANTAGEが発火しない");
+  assert.equal(entry!.keyValues?.salesBaseCompetitivenessWeight, SALES_PARAMETERS_SAI5_SALES_BASE_V1.competitivenessWeights.salesBase);
 });

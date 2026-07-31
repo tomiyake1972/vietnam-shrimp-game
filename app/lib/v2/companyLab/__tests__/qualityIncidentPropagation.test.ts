@@ -23,9 +23,27 @@ import assert from "node:assert/strict";
 import { QUALITY_PARAMETERS_V1 } from "../../quality/parameters";
 import { updateCustomerTrustScore, updateQualityScore } from "../../quality/scoreUpdates";
 import { SALES_BASE_PARAMETERS_V1, updateSalesBaseState, lookupSalesBaseScore, SalesBaseQuarterActivity } from "../salesBase";
-import { computeCompetitivenessBreakdown, sumCompetitivenessContributions } from "../../sales/allocation";
+import { allocateMarketProduct, computeCompetitivenessBreakdown } from "../../sales/allocation";
+import { period } from "../../core/period";
 import { SALES_PARAMETERS_SAI5_SALES_BASE_V1 } from "../../sales/parameters";
-import { CompanySalesPlanEntry } from "../../sales/types";
+import { CompanySalesPlanEntry, CompetitivenessWeightBreakdown } from "../../sales/types";
+/**
+ * 内訳の6項目を**テスト側で独立に**合計する。
+ * 実装の sumCompetitivenessContributions をそのまま使うと、実装側で項を落とす
+ * リグレッションを入れたときに両辺が同時に変わって検出できない（監査再指摘）。
+ * ここは意図的に手書きで、実装とは別経路にしておく。
+ */
+function sumBreakdownIndependently(b: CompetitivenessWeightBreakdown): number {
+  return (
+    b.priceContribution +
+    b.coverageContribution +
+    b.relationshipContribution +
+    b.qualityContribution +
+    b.deliveryReliabilityContribution +
+    b.salesBaseContribution
+  );
+}
+
 import { hosoEqTons, score0to100, usdPerHosoEqKg } from "../../core/units";
 
 const SEVERITY = 0.5; // 中程度の重大事故（severity=1.0が最悪）
@@ -61,7 +79,7 @@ function competitiveness(quality: number, trust: number, salesBase: number): num
     customerRelationship: score0to100(trust),
     salesBaseScore: score0to100(salesBase),
   };
-  return sumCompetitivenessContributions(computeCompetitivenessBreakdown(entry, BASE_PRICE, BASE_PRICE, 0.8, SALES_PARAMETERS_SAI5_SALES_BASE_V1));
+  return sumBreakdownIndependently(computeCompetitivenessBreakdown(entry, BASE_PRICE, BASE_PRICE, 0.8, SALES_PARAMETERS_SAI5_SALES_BASE_V1));
 }
 
 test("SAI-5J: severity0.5の重大事故1件が3経路へ伝播する量を数値で確認する", () => {
@@ -205,4 +223,57 @@ test("SAI-5J修正: 同一四半期に同じ会社×商品で複数バッチの�
     lookupSalesBaseScore(single, "A", "JP", "vap"),
     "バッチ数に比例して毀損が積み上がっている"
   );
+});
+
+test("SAI-5J: 重大事故は「結果水準」まで届く — 事故を起こした会社の成約量が実際に減る", () => {
+  // 【監査再指摘への対応】旧版は合成競争力（内訳の合計）までで止まっており、
+  // 成約配分を通した実際の成約量の差までは見ていなかった。
+  // 事故あり/なしの2社を同一条件で allocateMarketProduct へ投入して比較する。
+  const p = QUALITY_PARAMETERS_V1;
+  const before = 70;
+  const observedQuality = before - SEVERITY * p.majorIncident.severityToQualityPenalty;
+  const qualityAfter = Number(updateQualityScore(score0to100(before), score0to100(observedQuality)));
+  const trustAfter = Number(
+    updateCustomerTrustScore(score0to100(before), score0to100(observedQuality), score0to100(100), SEVERITY * p.majorIncident.severityToTrustPenalty)
+  );
+  const baseNo = lookupSalesBaseScore(updateSalesBaseState(undefined, activity(false), COMPANIES), "A", "JP", "vap");
+  const baseWith = lookupSalesBaseScore(updateSalesBaseState(undefined, activity(true), COMPANIES), "A", "JP", "vap");
+
+  const planFor = (companyId: string, quality: number, trust: number, salesBase: number): CompanySalesPlanEntry => ({
+    companyId,
+    market: "JP",
+    product: "vap",
+    desiredQuantity: hosoEqTons(100000),
+    priceAdjustmentUsdPerHosoEqKg: 0,
+    salesForceHeadcount: 40,
+    qualityReputation: score0to100(quality),
+    customerRelationship: score0to100(trust),
+    salesBaseScore: score0to100(salesBase),
+  });
+
+  const result = allocateMarketProduct(
+    "JP",
+    "vap",
+    period(2015, 1),
+    // 3社にするのは、2社だと双方が最大供給者シェア上限（対象需要の35%）に張り付いて
+    // 競争力の差が成約量に現れないため（上限が拘束すると差が消える）。
+    [
+      planFor("CLEAN", before, before, baseNo),
+      planFor("INCIDENT", qualityAfter, trustAfter, baseWith),
+      planFor("OTHER", before, before, baseNo),
+    ],
+    usdPerHosoEqKg(4.5),
+    hosoEqTons(10000),
+    SALES_PARAMETERS_SAI5_SALES_BASE_V1
+  );
+  const clean = result.companies.find((c) => c.companyId === "CLEAN")!;
+  const incident = result.companies.find((c) => c.companyId === "INCIDENT")!;
+  const cleanQty = Number(clean.allocatedQuantity);
+  const incidentQty = Number(incident.allocatedQuantity);
+
+  assert.ok(incidentQty < cleanQty, `事故を起こした会社の成約量(${incidentQty})が無事故(${cleanQty})を下回っていない`);
+  // 影響は「意味があるが壊滅的ではない」水準
+  const drop = (cleanQty - incidentQty) / cleanQty;
+  assert.ok(drop > 0.005, `事故1件の成約量への影響(${(drop * 100).toFixed(2)}%)が小さすぎる`);
+  assert.ok(drop < 0.05, `事故1件の成約量への影響(${(drop * 100).toFixed(2)}%)が過大`);
 });

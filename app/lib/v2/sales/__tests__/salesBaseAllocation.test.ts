@@ -12,9 +12,26 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { allocateMarketProduct, computeCompetitivenessBreakdown, computeCompetitivenessWeight, sumCompetitivenessContributions } from "../allocation";
+import { allocateMarketProduct, computeCompetitivenessWeight } from "../allocation";
 import { SALES_PARAMETERS_SAI5_SALES_BASE_V1, SALES_PARAMETERS_V1 } from "../parameters";
-import { CompanySalesPlanEntry } from "../types";
+import { CompanySalesPlanEntry, CompetitivenessWeightBreakdown } from "../types";
+/**
+ * 内訳の6項目を**テスト側で独立に**合計する。
+ * 実装の sumCompetitivenessContributions をそのまま使うと、実装側で項を落とす
+ * リグレッションを入れたときに両辺が同時に変わって検出できない（監査再指摘）。
+ * ここは意図的に手書きで、実装とは別経路にしておく。
+ */
+function sumBreakdownIndependently(b: CompetitivenessWeightBreakdown): number {
+  return (
+    b.priceContribution +
+    b.coverageContribution +
+    b.relationshipContribution +
+    b.qualityContribution +
+    b.deliveryReliabilityContribution +
+    b.salesBaseContribution
+  );
+}
+
 import { hosoEqTons, score0to100, unwrapUnit, usdPerHosoEqKg } from "../../core/units";
 import { period } from "../../core/period";
 
@@ -72,7 +89,7 @@ test("SAI-5A修正(a2): 営業基盤の差は実エンジン(allocateMarketProdu
   for (const c of result.companies) {
     // 内訳の全項目合計 === 実際に配分で使われたウェイト（分岐していないことの構造的検証）
     assert.equal(
-      sumCompetitivenessContributions(c.competitivenessBreakdown),
+      sumBreakdownIndependently(c.competitivenessBreakdown),
       c.competitivenessWeight,
       `会社 ${c.companyId} で内訳合計と配分に使われたウェイトが一致しない（合計処理が再び分岐している）`
     );
@@ -122,12 +139,22 @@ test("SAI-5A修正(c): 競争力ウェイトの合計は既定・SAI-5有効時�
   assert.equal(sai5.deliveryReliability, SALES_PARAMETERS_V1.competitivenessWeights.deliveryReliability);
 });
 
-test("SAI-5A修正(c2): 内訳の全項目合計は公開ヘルパーの返り値と厳密に一致する（両パラメータ）", () => {
+test("SAI-5A修正(c2): 内訳の全項目合計は、実配分で使われたウェイトと厳密に一致する（合計処理の一本化）", () => {
+  // 【監査再指摘への対応】旧版は computeCompetitivenessWeight と
+  // sumCompetitivenessContributions を比べていたが、前者は後者を呼ぶだけの実装なので
+  // 恒真だった。比較対象を「実エンジン allocateMarketProduct が実際に配分へ使った
+  // competitivenessWeight」にすることで、実経路の合計から項が抜けたら必ず落ちる。
   for (const params of [SALES_PARAMETERS_V1, SALES_PARAMETERS_SAI5_SALES_BASE_V1]) {
-    for (const salesBase of [0, 50, 100]) {
-      const e = entry("X", salesBase);
-      const breakdown = computeCompetitivenessBreakdown(e, BASE_PRICE, BASE_PRICE, 0.7, params);
-      assert.equal(sumCompetitivenessContributions(breakdown), computeCompetitivenessWeight(e, BASE_PRICE, BASE_PRICE, 0.7, params));
+    const entries = [entry("A", 0), entry("B", 50), entry("C", 100)];
+    const result = allocateMarketProduct("CN", "hoso", P1, entries, BASE_PRICE, TARGET_DEMAND, params);
+    for (const c of result.companies) {
+      assert.equal(
+        sumBreakdownIndependently(c.competitivenessBreakdown),
+        c.competitivenessWeight,
+        `${c.companyId}: 実配分のウェイトが内訳合計と一致しない（合計処理が分岐している）`
+      );
+      // 公開ヘルパーも同じ値を返す（公開APIと実エンジンの一致）
+      assert.equal(computeCompetitivenessWeight(entries.find((e) => e.companyId === c.companyId)!, c.askPrice, BASE_PRICE, c.coverageScore, params), c.competitivenessWeight);
     }
   }
 });

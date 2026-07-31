@@ -205,14 +205,35 @@ test("SAI-5D修正: 成約を続けても上限100へ早期飽和せず、努力
 test("SAI-5D修正: 初期の順位は固定されない — 継続営業した後発が、撤退した先行を追い越す", () => {
   // 先行者LEADは最初の8四半期だけ営業し、その後撤退。
   // 後発FOLLOWは最初の8四半期は何もせず、その後ずっと営業を続ける。
+  // 【監査再指摘への対応】旧版は allocations が空（成約なし）で回していたため、
+  // ヘッドルームを掛ける対象である「成約強化項」を一度も通っていなかった。
+  // 両社に成約実績を持たせ、成約強化経路を含めて順位が入れ替わることを確認する。
+  const allocationFor = (companyId: string, desired: number, allocated: number) =>
+    ({
+      market: "JP",
+      product: "vap",
+      period: "2015Q1",
+      basePrice: 0,
+      targetDemand: hosoEqTons(desired * 3),
+      companies: [{ companyId, allocatedQuantity: hosoEqTons(allocated) } as never],
+      externalOptionQuantity: hosoEqTons(0),
+    }) as never;
+
   let s: ReturnType<typeof updateSalesBaseState> | undefined;
   const companies = ["LEAD", "FOLLOW"];
   let crossoverQuarter: number | undefined;
   for (let q = 1; q <= 40; q++) {
-    const plans = [];
-    if (q <= 8) plans.push(plan("LEAD", "JP", "vap", 500));
-    if (q > 8) plans.push(plan("FOLLOW", "JP", "vap", 500));
-    s = updateSalesBaseState(s, activity({ salesPlans: plans }), companies);
+    const plans: CompanySalesPlanEntry[] = [];
+    const allocations: SalesBaseQuarterActivity["allocations"][number][] = [];
+    if (q <= 8) {
+      plans.push(plan("LEAD", "JP", "vap", 500));
+      allocations.push(allocationFor("LEAD", 500, 500)); // 成約率100%＝成約強化も満額
+    }
+    if (q > 8) {
+      plans.push(plan("FOLLOW", "JP", "vap", 500));
+      allocations.push(allocationFor("FOLLOW", 500, 500));
+    }
+    s = updateSalesBaseState(s, activity({ salesPlans: plans, allocations }), companies);
     const lead = lookupSalesBaseScore(s, "LEAD", "JP", "vap");
     const follow = lookupSalesBaseScore(s, "FOLLOW", "JP", "vap");
     if (crossoverQuarter === undefined && follow > lead) crossoverQuarter = q;

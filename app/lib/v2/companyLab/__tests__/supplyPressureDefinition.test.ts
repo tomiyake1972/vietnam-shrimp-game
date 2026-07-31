@@ -157,12 +157,25 @@ test("SAI-5B修正[7]: 外部選択肢の数量は供給圧力に1度だけ現�
 // 採用条件[8] 会社別の隠れた補正・当てはめ定数がない
 // ---------------------------------------------------------------------------
 
-test("SAI-5B修正[8]: 供給圧力は市場×商品の集計量だけで決まり、会社別の補正項を持たない", () => {
-  // 同じ合計提示量・同じ合計成約量なら、それが1社由来でも5社由来でも結果は同一。
-  // （computeRawSupplyPressureの入力に会社IDが存在しないことの動作上の確認）
-  const a = rawPressure(scenario(90, 40));
-  const b = rawPressure(scenario(30 + 30 + 30, 10 + 10 + 20));
-  assert.equal(a, b);
+test("SAI-5B修正[8]: 供給圧力は市場×商品の集計量だけで決まり、内訳の分かれ方に依存しない", () => {
+  // 同じ「合計提示量・合計成約量・対象需要」なら、その内訳が1社由来でも5社由来でも、
+  // 市場が3つに割れていても、結果は同一でなければならない
+  // （会社別・市場別の隠れた補正項が無いことの動作確認）。
+  const single = rawPressure(scenario(90, 40, 100));
+
+  // 3つの市場に分割しても合計が同じなら同じ値になる
+  const split: MarketEvolutionQuarterInputs = {
+    offeredByProduct: { pd: 30 + 25 + 35, vap: 30 + 25 + 35 },
+    targetDemandByProduct: { pd: 20 + 50 + 30, vap: 20 + 50 + 30 },
+    addressableDemandByProduct: { pd: 90, vap: 90 },
+    externalOptionQuantityByProduct: { pd: 10 + 30 + 20, vap: 10 + 30 + 20 }, // 合計60 = 100 - 40
+    marketResult: marketResultNeutral(),
+    referencePremiumRatios: REF,
+  };
+  assert.equal(rawPressure(split), single, "内訳の分かれ方で供給圧力が変わっている（隠れた会社別・市場別補正の疑い）");
+
+  // 規模だけを10倍しても同じ（当てはめた絶対量の定数を持たないことの確認）
+  assert.ok(Math.abs(rawPressure(scenario(900, 400, 1000)) - single) < 1e-12, "規模を変えると供給圧力が変わる（絶対量の定数が混入している）");
 });
 
 // ---------------------------------------------------------------------------
