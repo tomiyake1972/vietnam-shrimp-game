@@ -31,10 +31,12 @@ import { ENGINE_VERSION_V2 } from "../../core/version";
 import { PeriodV2 } from "../../core/period";
 import { CompanyId } from "../../sales/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabError, CompanyLabState } from "../types";
-import { advanceCompanyLabQuarter, buildPublicMarketInfo, initializeCompanyLab } from "../runner";
+import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../runner";
 import { PublicMarketInfo } from "../types";
 import { createCompanyLabRuntimeSnapshot, restoreCompanyLabStateFromRuntimeSnapshot } from "../persistence/snapshot";
 import { validateCompanyLabQuarterHistoryEntry } from "../persistence/schema";
+import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../standardAi/policy";
+import { computeDecisionDiffSummary } from "../decisionDiff";
 import {
   CompanyLabDraftEnvelope,
   CompanyLabPersistedStateV1,
@@ -236,6 +238,41 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
       throw new CompanyLabDraftConflictError(input.labId, existing.turnId, input.turnId);
     }
     const isSameTurnUpdate = existing !== null && existing.turnId === input.turnId;
+
+    // 【feature/v2-persist-standard-ai-proposal（Phase A）】このturnIdの最初の保存
+    // （isSameTurnUpdate===false）でのみ、その時点のStandard AI原案・診断情報を
+    // 1回だけ生成して永続化する。以後、同一turnの2回目以降の保存
+    // （isSameTurnUpdate===true）では既存envelopeの値をそのまま引き継ぎ、
+    // 再計算しない——「同一turn中はAI原案そのものが変わらない」という要件を、
+    // その場の再計算ではなく永続化によって満たす（app/v2/company-lab/play/_lib/
+    // viewModel.tsのcoerceDraftOrRebuildが初回表示時に行うのと全く同じ手順・
+    // 同じ決定論的関数を、ここでも1回だけ再利用するだけであり、Standard AI本体の
+    // 判断ロジックを重複実装するものではない）。
+    let aiProposalDiagnostics: StandardAiQuarterDiagnostics | undefined;
+    if (isSameTurnUpdate) {
+      aiProposalDiagnostics = existing.aiProposalDiagnostics;
+    } else {
+      const fixture = stored.fixtures.find((f) => f.companyId === stored.playerCompanyId);
+      if (fixture) {
+        const latestEntryForDraft = await repository.loadLatestHistoryEntry(input.labId);
+        const historyRecordsForDraft = latestEntryForDraft !== null ? [latestEntryForDraft.record] : [];
+        const restoredStateForDraft = restoreCompanyLabStateFromRuntimeSnapshot(stored.config, stored.currentState.runtime, historyRecordsForDraft);
+        const ownStateForDraft = buildCompanyOwnState(restoredStateForDraft, fixture);
+        const publicInfoForDraft = buildPublicMarketInfo(restoredStateForDraft);
+        const turnForDraft = restoredStateForDraft.scenarioState.currentTurn;
+        const generated = generateStandardAiDecisionWithDiagnostics(
+          fixture,
+          ownStateForDraft,
+          publicInfoForDraft,
+          restoredStateForDraft.currentPeriod,
+          turnForDraft
+        );
+        aiProposalDiagnostics = generated.diagnostics;
+      }
+      // fixtureが見つからない場合（防御的、通常到達しない）はaiProposalDiagnosticsを
+      // undefinedのままとする。draft本体の保存自体は妨げない。
+    }
+
     const envelope: CompanyLabDraftEnvelope = {
       labId: input.labId,
       period: stored.currentState.runtime.currentPeriod,
@@ -245,6 +282,7 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
       createdAt: isSameTurnUpdate ? existing.createdAt : input.now,
       updatedAt: input.now,
       submittedAt: null,
+      ...(aiProposalDiagnostics !== undefined ? { aiProposalDiagnostics } : {}),
     };
     await repository.saveDraft(envelope);
     return envelope;
@@ -419,6 +457,22 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
       const record = nextState.history[nextState.history.length - 1];
 
       // --- 11-12. 履歴エントリの作成＋コミット前検証（§5） ---
+      // 【feature/v2-persist-standard-ai-proposal（Phase A）】これまでaiProposal/
+      // diffFromAiProposalは型のみ先行定義され、実際には一切代入されていなかった
+      // （persistence/types.tsのDecisionDiffSummaryのdoc comment「実際の差分計算
+      // ロジックはPhase 8C-1の対象外・未実装」参照）。今回、提出済みdraft envelope
+      // （直前でloadDraft済みのdraft変数）に保存されているaiProposalDiagnostics.decision
+      // を「turn開始時にAIが提示した原案」として、実際に提出されたプレイヤー会社の
+      // 意思決定（decisions[stored.playerCompanyId]）と比較し、この2フィールドへ
+      // 初めて実データを入れる。draft.aiProposalDiagnosticsが存在しない場合
+      // （後方互換：この機能の導入前に保存されたdraftがそのまま提出された場合）は、
+      // 従来通りundefined（＝export DTO側のaiProposalUnavailableReasonがそのまま
+      // 機能する）。
+      const aiProposalForHistory = draft.aiProposalDiagnostics?.decision;
+      const playerDecisionForDiff = decisions[stored.playerCompanyId];
+      const diffFromAiProposalForHistory =
+        aiProposalForHistory !== undefined ? computeDecisionDiffSummary(aiProposalForHistory, playerDecisionForDiff) : undefined;
+
       const entryDraft: CompanyLabQuarterHistoryEntry = {
         turnId: input.turnId,
         turn,
@@ -428,6 +482,8 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
         preProcessingStateSnapshot,
         postProcessingStateSnapshot,
         playerSubmission: decisions[stored.playerCompanyId],
+        ...(aiProposalForHistory !== undefined ? { aiProposal: aiProposalForHistory } : {}),
+        ...(diffFromAiProposalForHistory !== undefined ? { diffFromAiProposal: diffFromAiProposalForHistory } : {}),
         otherCompaniesDecisions: stored.fixtures.filter((f) => f.companyId !== stored.playerCompanyId).map((f) => decisions[f.companyId]),
         record,
         processedAt: input.now,

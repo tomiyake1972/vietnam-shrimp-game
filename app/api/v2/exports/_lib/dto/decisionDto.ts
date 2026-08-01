@@ -14,18 +14,18 @@
 //   会社スコープ用の関数は buildExportCompanyDecision*、GMスコープ専用の関数は
 //   buildExportAllCompaniesDecisions で、名前で区別できるようにしている。
 //
-// 【AI提案との差（§6の3項目め）— 保存されていない】
-//   CompanyLabQuarterHistoryEntry には aiProposal?: CompanyDecisionInput と
-//   diffFromAiProposal?: DecisionDiffSummary が型として定義されている
-//   （app/lib/v2/companyLab/persistence/types.ts:165-166）が、四半期を確定させる
-//   companyLabQuarterFlowService.ts の entryDraft リテラル（同ファイル 380-392行）は
-//   この2フィールドをいずれも代入していないため、確定済みの全履歴エントリで
-//   undefined である（DecisionDiffSummary 自体のdoc commentも「実際の差分計算
-//   ロジックはPhase 8C-1の対象外・未実装」と明記）。
-//   したがって本DTOは推測値を実績として作らず（三宅さんの指示 §9）、
-//   aiProposal / diffFromAiProposal を null とし、
-//   aiProposalUnavailableReason に理由を明示して出力する。
-//   保存され次第、この2フィールドはそのまま値を持つようになる。
+// 【AI提案との差（§6の3項目め）】
+//   【feature/v2-persist-standard-ai-proposal（Phase A）で更新】
+//   CompanyLabQuarterHistoryEntry.aiProposal / diffFromAiProposal は、以前は型のみ
+//   先行定義され実際には一切代入されていなかった（companyLabQuarterFlowService.ts
+//   の processQuarter が、提出済みdraft envelopeに永続化されたaiProposalDiagnostics
+//   から実際に計算するようになった）。したがって、この機能の導入後に確定した
+//   履歴エントリでは、原則として値が入っている。
+//   ただし、導入前に保存された既存draftがそのまま提出・確定した履歴エントリ
+//   （後方互換ケース）では、依然としてundefinedのままである。この場合のみ、
+//   本DTOは推測値を実績として作らず（三宅さんの指示 §9）、aiProposal /
+//   diffFromAiProposal を null とし、aiProposalUnavailableReason に理由を
+//   明示して出力する。
 //
 // 【許可フィールドの明示的組み立て】内部型 CompanyDecisionInput をそのまま
 // spreadせず、8つの意思決定領域をフィールドごとに列挙する。
@@ -37,7 +37,7 @@ import {
   CompanyDecisionInput,
   CompanyReasonEntry,
 } from "../../../../../lib/v2/companyLab/types";
-import { CompanyLabQuarterHistoryEntry } from "../../../../../lib/v2/companyLab/persistence/types";
+import { CompanyLabQuarterHistoryEntry, DecisionDiffSummary } from "../../../../../lib/v2/companyLab/persistence/types";
 import {
   AquacultureStockingPlanEntry,
   ImportOrderInput,
@@ -60,10 +60,9 @@ import { ExportDomesticPurchasePlan, buildExportDomesticPurchasePlan } from "./o
 
 /** aiProposal / diffFromAiProposal が出力できない理由の定型文（§9の報告義務に対応）。 */
 export const AI_PROPOSAL_UNAVAILABLE_REASON =
-  "確定履歴の保存型 CompanyLabQuarterHistoryEntry には aiProposal / diffFromAiProposal " +
-  "が定義されているが（app/lib/v2/companyLab/persistence/types.ts:165-166）、四半期確定処理 " +
-  "companyLabQuarterFlowService.ts の entryDraft（同380-392行）がこの2フィールドを代入していないため、" +
-  "既存の確定履歴では未保存（undefined）である。推測値を実績として補完しないため null を返す。";
+  "feature/v2-persist-standard-ai-proposal導入前に保存されたdraftがそのまま提出・確定した" +
+  "履歴エントリのため、turn開始時のStandard AI原案（aiProposalDiagnostics）が保存されておらず、" +
+  "aiProposal / diffFromAiProposalが未保存（undefined）である。推測値を実績として補完しないため null を返す。";
 
 // ---------------------------------------------------------------------
 // 輸入発注
@@ -367,8 +366,8 @@ export interface ExportCompanyDecisionInfo {
   readonly submission: ExportCompanyDecision | null;
   /** 対象会社へのAI提案。未保存のため常に null（理由は aiProposalUnavailableReason）。 */
   readonly aiProposal: ExportCompanyDecision | null;
-  /** 提出とAI提案の差分要約。未保存のため常に null。 */
-  readonly diffFromAiProposal: null;
+  /** 提出とAI提案の差分要約。AI提案が未保存（後方互換ケース）の場合のみnull。 */
+  readonly diffFromAiProposal: DecisionDiffSummary | null;
   /** aiProposal / diffFromAiProposal が null である理由。保存済みなら null。 */
   readonly aiProposalUnavailableReason: string | null;
   /** 対象会社ぶんの当期警告（理由コード）。 */
@@ -385,7 +384,7 @@ export function buildExportCompanyDecisionInfo(
     isPlayerCompany: entry.playerSubmission.companyId === companyId,
     submission: decision ? buildExportCompanyDecision(decision) : null,
     aiProposal: aiProposal ? buildExportCompanyDecision(aiProposal) : null,
-    diffFromAiProposal: null,
+    diffFromAiProposal: aiProposal ? entry.diffFromAiProposal ?? null : null,
     aiProposalUnavailableReason: aiProposal ? null : AI_PROPOSAL_UNAVAILABLE_REASON,
     reasonCodes: buildExportGlobalReasonCodes(entry, companyId),
   };
@@ -405,7 +404,8 @@ export interface ExportAllCompaniesDecisionInfo {
   readonly otherCompaniesDecisions: readonly ExportCompanyDecision[];
   /** 各社のAI提案（未保存のため空配列。理由は aiProposalUnavailableReason）。 */
   readonly aiProposals: readonly ExportCompanyDecision[];
-  readonly diffFromAiProposal: null;
+  /** プレイヤー会社ぶんの提出とAI提案の差分要約。AI提案が未保存（後方互換ケース）の場合のみnull。 */
+  readonly diffFromAiProposal: DecisionDiffSummary | null;
   readonly aiProposalUnavailableReason: string | null;
   /** 全社の当期警告（理由コード、発生順）。 */
   readonly reasonCodes: readonly ExportReasonEntry[];
@@ -425,7 +425,7 @@ export function buildExportAllCompaniesDecisionInfo(
       .map(buildExportCompanyDecision)
       .sort((a, b) => a.companyId.localeCompare(b.companyId)),
     aiProposals: aiProposal ? [buildExportCompanyDecision(aiProposal)] : [],
-    diffFromAiProposal: null,
+    diffFromAiProposal: aiProposal ? entry.diffFromAiProposal ?? null : null,
     aiProposalUnavailableReason: aiProposal ? null : AI_PROPOSAL_UNAVAILABLE_REASON,
     reasonCodes: buildExportGlobalReasonCodes(entry),
   };

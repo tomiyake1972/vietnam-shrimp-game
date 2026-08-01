@@ -70,6 +70,7 @@ import type { SalesForceHiringState } from "../salesForceHiring";
 import type { ConsumerMarketCarryState, ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 import type { SalesBaseState } from "../salesBase";
 import type { MarketEvolutionState, SupplyPressureDefinition } from "../marketEvolution";
+import type { StandardAiQuarterDiagnostics } from "../standardAi/policy";
 import {
   CompanyLabDraftEnvelope,
   CompanyLabPersistedCurrentState,
@@ -1088,6 +1089,35 @@ export function validateCompanyLabQuarterHistoryEntry(raw: unknown, path: string
 // 11. ドラフトエンベロープ
 // ---------------------------------------------------------------------
 
+/**
+ * 【feature/v2-persist-standard-ai-proposal（Phase A）】draftエンベロープ内に
+ * 保存されるStandard AI診断情報（StandardAiQuarterDiagnostics）の検証。
+ * この値はサーバー自身（generateStandardAiDecisionWithDiagnostics）が生成した
+ * データを単に往復させるだけの用途であり、CompanyQuarterRecordの既存の検証方針
+ * （validateCompanyQuarterRecordのコメント参照）と同様に、主要キーの存在・
+ * 形状（配列/オブジェクト）だけを確認し、entries/pressures/salesWishByMarketProduct
+ * 内部のリーフフィールドまでは再帰検証しない。decisionフィールドのみ、既存の
+ * validateCompanyDecisionInput（playerSubmission等と同一の検証）をそのまま再利用する。
+ */
+const STANDARD_AI_QUARTER_DIAGNOSTICS_REQUIRED_KEYS = ["entries", "pressures", "decision", "salesWishByMarketProduct"];
+
+function validateStandardAiQuarterDiagnostics(raw: unknown, path: string): StandardAiQuarterDiagnostics {
+  const obj = requireObject(raw, path);
+  const companyId = requireNonEmptyString(obj.companyId, `${path}.companyId`);
+  const turn = requireNonNegativeInteger(obj.turn, `${path}.turn`);
+  const period = requirePeriod(obj.period, `${path}.period`);
+  for (const key of STANDARD_AI_QUARTER_DIAGNOSTICS_REQUIRED_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) {
+      fail(path, `StandardAiQuarterDiagnosticsに必須フィールド "${key}" が存在しません`);
+    }
+  }
+  requireArray(obj.entries, `${path}.entries`);
+  requireObject(obj.pressures, `${path}.pressures`);
+  const decision = validateCompanyDecisionInput(obj.decision, `${path}.decision`);
+  requireArray(obj.salesWishByMarketProduct, `${path}.salesWishByMarketProduct`);
+  return { ...obj, companyId, turn, period, decision } as unknown as StandardAiQuarterDiagnostics;
+}
+
 export function validateCompanyLabDraftEnvelope(raw: unknown, path: string): CompanyLabDraftEnvelope {
   const obj = requireObject(raw, path);
   const labId = requireNonEmptyString(obj.labId, `${path}.labId`);
@@ -1105,7 +1135,21 @@ export function validateCompanyLabDraftEnvelope(raw: unknown, path: string): Com
   } else {
     submittedAt = requireIsoTimestamp(obj.submittedAt, `${path}.submittedAt`);
   }
-  return { labId, period, turnId, revision, draft: obj.draft, createdAt, updatedAt, submittedAt };
+  // 【後方互換】この機能の導入前に保存された既存envelopeにはこのキー自体が存在しない
+  // （undefined）。存在する場合のみ検証する。
+  const aiProposalDiagnostics =
+    obj.aiProposalDiagnostics === undefined ? undefined : validateStandardAiQuarterDiagnostics(obj.aiProposalDiagnostics, `${path}.aiProposalDiagnostics`);
+  return {
+    labId,
+    period,
+    turnId,
+    revision,
+    draft: obj.draft,
+    createdAt,
+    updatedAt,
+    submittedAt,
+    ...(aiProposalDiagnostics !== undefined ? { aiProposalDiagnostics } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------

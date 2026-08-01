@@ -368,3 +368,157 @@ Phase 8G §2〜§6一式を丸ごと統合するのではなく、「営業人�
 - Standard AIの減員判断ロジックの新設（今回は常に減員数0で従来挙動を維持）。
 - `test/sai6-manual-observation-2026-08-01`（Test14用）ブランチ・`develop/v2`・`main`への
   マージ・反映、およびdeploy。
+
+## 14. 「Standard AI原案がリロード後に消える」不具合の修正（Cowork #05・Phase A）
+
+### 14.1 経緯
+
+三宅さんより「これはCowork #05向けです」として、Test14実プレイ中に見つかった不具合の
+修正指示を受けた。現象は、新しいturnを最初に開いた際には「Standard AIの提案（実行前
+プレビュー）」と判断diagnosticsが表示されるが、一度draftを保存してブラウザをリロード
+すると、この提案部分が消えてしまうというもの。三宅さんの指示で、原因の一つとして
+`loadPlayerScreenViewModel`→`coerceDraftOrRebuild`→`aiProposalDiagnostics`の流れにおいて、
+保存済みdraftを復元した場合に`diagnostics: null`となり、UI側の表示条件を満たさなくなる
+ことが既に特定されていた。
+
+三宅さんの指示は、「保存済みdraftはユーザーが変更済みかもしれないので、それをAI提案として
+表示しない」という既存の思想自体は正しいとしつつ、問題は「AI原案そのものまで失っている」
+ことだと明確に整理されていた。すなわち、turn開始時にStandard AIが生成した原案（A）と、
+現在のプレイヤーdraft（B）と、両者の差分（C）を明確に別物として扱い、リロード時にAI
+を再実行して「新しいAI案」を作り直す方式は原則避け、Aを永続化してそのまま参照できる
+構造にすることが求められた。
+
+### 14.2 根本原因
+
+`app/v2/company-lab/play/_lib/viewModel.ts`の`coerceDraftOrRebuild`は、保存済みdraft
+envelopeが見つかった場合、常に`diagnostics: null`を返していた（draft本体だけが保存され、
+そのdraftを生成した時点でのStandard AI原案・診断情報自体はどこにも永続化されていなかった
+ため）。これに対し、draftが存在しない場合（新しいturn初回表示）は毎回
+`generateStandardAiDecisionWithDiagnostics`をその場で実行して原案を新規生成していた。
+この非対称性が「初回は出るがリロード後は消える」という現象そのものだった。
+
+なお、既存の`CompanyLabQuarterHistoryEntry`型には`aiProposal`・`diffFromAiProposal`
+フィールドが以前から先行定義されていたが、実際に値を計算・代入するロジックは一切
+存在しなかった（`companyLabQuarterFlowService.ts`のprocessQuarterのentryDraftはこの
+2フィールドを代入していなかった。export DTO側`decisionDto.ts`のコメントにもその旨が
+明記されていた）。三宅さんの指示にあった「既存のhistoryエントリの設計思想を編集中turnへ
+拡張できないか」という調査項目に対する回答は、「拡張元となる実装自体がまだ存在しなかった」
+というものであり、本Phaseで両方（draft envelope側・履行済みhistory側）に実際の値を
+持たせる実装を新設した。
+
+### 14.3 採用した保持方法
+
+再計算ではなく永続化で解決した。具体的には：
+
+- `companyLabQuarterFlowService.ts`の`saveDraft`が、あるturnIdへの**最初の**保存時にのみ
+  （`isSameTurnUpdate === false`の場合のみ）、`coerceDraftOrRebuild`の初回生成と全く同じ
+  手順（`restoreCompanyLabStateFromRuntimeSnapshot`→`buildCompanyOwnState`→
+  `buildPublicMarketInfo`→`generateStandardAiDecisionWithDiagnostics`）でAI原案・診断情報を
+  1回だけ生成し、draft envelopeの新フィールド`aiProposalDiagnostics`へ保存する。
+- 同一turnの2回目以降の保存（`isSameTurnUpdate === true`）では、既存envelopeの
+  `aiProposalDiagnostics`を単純に引き継ぐだけで、再計算しない。これにより「同一turn中は
+  AI原案そのものが変わらない」という要件を、その場の再計算ではなく構造的に保証する。
+- `viewModel.ts`の`coerceDraftOrRebuild`は、envelopeに`aiProposalDiagnostics`が存在すれば
+  それをそのまま返す。存在しない場合（本機能の導入前に保存された旧draft envelopeのみ）は
+  後方互換のためベストエフォートでその場から再現し、次回保存時に新形式へ移行する。
+- turn 2以降の最初の表示（draftがまだ存在しない状態）は、従来どおり
+  `generateStandardAiDecisionWithDiagnostics`をその場で新規生成する（「新しいturnでは
+  新しいAI原案を生成する」という要件を、この既存の分岐がそのまま満たす）。
+
+### 14.4 schema変更
+
+`app/lib/v2/companyLab/persistence/types.ts`の`CompanyLabDraftEnvelope`へ、任意項目
+`aiProposalDiagnostics?: StandardAiQuarterDiagnostics`を追加した。既存envelopeとの
+後方互換のためoptionalとし、`persistence/schema.ts`にも対応する検証関数
+（`validateStandardAiQuarterDiagnostics`。`CompanyQuarterRecord`と同じ「サーバー自身が
+生成したデータの往復のみが用途のため主要キーの存在だけ確認し、内部のリーフフィールドまでは
+再帰検証しない」という既存方針を踏襲）を追加した。`CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION`
+自体は変更していない（既存の`salesForceHireCount`等と同様、optionalフィールド追加のみで
+足りるため）。
+
+### 14.5 aiProposal / diffFromAiProposalとの関係
+
+前述のとおり、`CompanyLabQuarterHistoryEntry.aiProposal`・`diffFromAiProposal`は型のみ
+先行定義され実装が存在しなかったため、本Phaseで実際に計算するロジックを新設した。
+
+- 新設した`app/lib/v2/companyLab/decisionDiff.ts`の`computeDecisionDiffSummary`が、
+  Standard AI原案（`CompanyDecisionInput`）と実際の提出内容を、キー順序に依存しない
+  構造比較で比べ、`{hasDifferences, changedFieldPaths}`を返す純粋関数。
+- `companyLabQuarterFlowService.ts`の`processQuarter`が、提出済みdraft envelopeの
+  `aiProposalDiagnostics.decision`（＝turn開始時のAI原案）と、実際に提出された
+  プレイヤー会社の意思決定を`computeDecisionDiffSummary`で比較し、確定履歴エントリの
+  `aiProposal`・`diffFromAiProposal`へ初めて実データを入れるようにした。
+- `app/api/v2/exports/_lib/dto/decisionDto.ts`のExport DTO（`buildExportCompanyDecisionInfo`・
+  `buildExportAllCompaniesDecisionInfo`）も、これまで`diffFromAiProposal`を常に`null`へ
+  ハードコードしていた箇所を、実際に保存された値を渡すように修正した（`aiProposal`自体は
+  以前から条件分岐で渡されていたため変更不要だった）。
+- 本機能の導入前に保存されたdraftがそのまま提出・確定した履歴エントリ（後方互換ケース）
+  では、依然として`aiProposal`・`diffFromAiProposal`は`undefined`のままであり、export DTO側は
+  従来通り`aiProposalUnavailableReason`に理由を明示して`null`を返す。
+
+### 14.6 UI
+
+- 「Standard AIの提案」セクションの説明文を、「保存済みdraftでは表示されない」という
+  従来の（誤りとなった）記述から、「下書きを保存してブラウザを再読み込みしても、この
+  turn中は変わらない」という正しい記述へ更新した。
+- 低コストな範囲で、セクション見出し右端に「AI原案から変更あり」／「AI原案から変更なし」
+  の小さなバッジを追加した（指示§A-5、大規模な比較UIは作らない方針どおり）。現在の
+  draft（UI型`CompanyDecisionDraft`）を既存の`buildDecisionInputFromDraft`で
+  `CompanyDecisionInput`へ変換し、`computeDecisionDiffSummary`で比較するだけで、
+  重複ロジックを増やしていない。
+
+### 14.7 テスト結果
+
+- `app/lib/v2/companyLab/__tests__/decisionDiff.test.ts`（新設）：
+  `computeDecisionDiffSummary`の単体テスト7件（同一入力で差分なし、companyId除外、
+  フィールド単位の差分検出、`salesForceHireCount`省略=0の後方互換、キー順序非依存の
+  構造比較、複数フィールド同時変更）。
+- `app/lib/v2/companyLab/application/__tests__/companyLabQuarterFlowService.test.ts`
+  （追記）：Phase A回帰テスト5件×2バックエンド（in-memory・Redis fake client）＝10件。
+  最初の保存でAI原案が生成されること、2回目以降の保存で不変であること、次turnで新しい
+  AI原案が生成され前turnを引き継がないこと、確定履行後の`aiProposal`/`diffFromAiProposal`
+  が実データで正しく記録されること（一致時・変更時の両方）を確認した。
+- `app/v2/company-lab/play/_lib/__tests__/viewModel.test.ts`（新設）：
+  `loadPlayerScreenViewModel`の回帰テスト5件（初回表示でAI原案あり、保存後リロードでも
+  AI原案あり=旧バグの回帰確認、編集後もAI原案は不変・draftは変更後の値、次turnで新しい
+  AI原案・前turnを誤って引き継がない、後方互換：旧形式envelopeでもベストエフォートで
+  再現できる）。
+- `npm test`：**2128件全てpass**（fail 0。今回追加した22件を含む）。
+- `npx tsc --noEmit`：**エラー0件**。
+- `npm run lint`（eslint）：**エラー0件**（既存の無関係な警告4件のみ、本Phaseの変更とは
+  無関係）。
+- `npm run build`：コンパイル・TypeScript型チェックは成功
+  （`✓ Compiled successfully`・`Finished TypeScript`）。ページデータ収集段階で
+  `STAGING_KV_REST_API_URL`未設定により失敗（第11節・第13.4節と同一の既知の
+  サンドボックス環境制約であり、今回の変更が原因ではない）。
+- 実機確認（Playwright、`COMPANY_LAB_UI_E2E_IN_MEMORY=1`によるローカルdevサーバー、
+  `feature/v2-persist-standard-ai-proposal`ブランチ上での実装確認用。**Test14には
+  まだ反映されていない**）：turn1初回表示でAI原案・診断情報が表示され、バッジが
+  「AI原案から変更なし」と表示されることを確認→「下書きを保存」→ブラウザを再読み込み
+  →AI原案セクションが消えずに表示され続けることを確認（旧バグの再発なし）→入力欄
+  （営業人員採用数）を7へ変更して再保存→再度リロード→AI原案セクションは表示され
+  続け、バッジが「AI原案から変更あり」へ切り替わり、入力欄は編集後の値「7」のまま
+  であることを確認した。同じ画面でClaude生成の経営説明文はAPIキー未設定のため
+  「経営説明の生成に失敗しました」と表示されたが、Standard AIエンジン自身の原案・
+  診断ログ（判断理由コード等）は正常に表示され続けており、A-4の要件
+  （Claude API失敗時もdeterministicなAI原案・diagnosticsは消えない）を満たすことを
+  実機で確認した。
+
+### 14.8 未解決事項
+
+- 本機能の導入前に保存された既存のdraft envelope・確定履行エントリは、後方互換の
+  フォールバック（envelope側はベストエフォート再現、確定履行エントリ側は
+  `aiProposalUnavailableReason`付きのnull）で扱われ、遡って実データへ変換されることは
+  ない。実運用上のTest14進行中ラボへの影響は、Test14用branchへの反映・deploy時に
+  別途確認が必要。
+- `STANDARD_AI_PARAMETERS_V1`が版内で改訂された場合、後方互換フォールバックの
+  ベストエフォート再現がドリフトし得る（既知の限界。コード内コメントに明記済み）。
+- Standard AIの営業人員配分ロジックが静的fixture人数を参照する既知の課題（第13.3節）は、
+  三宅さんの明示指示により本Phaseでも修正していない。
+
+### 14.9 今回のスコープ外・branch運用
+
+- `develop/v2`・Test14用branch（`test/sai6-manual-observation-2026-08-01`）・`main`への
+  マージ・反映は行っていない。
+- 実装は`develop/v2`最新HEADから作成した`feature/v2-persist-standard-ai-proposal`ブランチ
+  上でのみ行い、commit・push後、受入前のマージは行わずここで停止する。

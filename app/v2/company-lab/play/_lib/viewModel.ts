@@ -105,11 +105,15 @@ export interface PlayerScreenViewModel {
   /** 編集対象のdraft本体（未保存ならStandard AIの提案から組み立てた初期値。完了済みならnull）。 */
   readonly draft: CompanyDecisionDraft | null;
   /**
-   * 【test/sai6-manual-observation-2026-08-01 で追加】draftをStandard AIの提案から
-   * 新規生成した場合のみ設定される診断情報（判断理由コード・圧力値・希望値）。
-   * 既存の保存済みdraftをそのまま表示している場合、および提出済み／完了済みの
-   * 場合は常にnull（保存済みdraftはプレイヤーが既に編集している可能性があり、
-   * その場合に「これはAIの提案です」という診断情報を出すと誤解を招くため）。
+   * 【feature/v2-persist-standard-ai-proposal（Phase A）で修正】このturn開始時に
+   * Standard AIが提示した原案の診断情報（判断理由コード・圧力値・当時のdecision＝
+   * 「希望値」）。draftをその場で新規生成した場合はもちろん、既存の保存済みdraft
+   * envelopeにaiProposalDiagnosticsが永続化されている場合も、その値をそのまま
+   * 返す（＝draftを保存・リロードしてもこの値は変わらない。旧バグ「保存後の
+   * リロードでAI提案が消える」の修正）。draftを編集してもこの値自体は変化しない
+   * ——「AI原案」と「現在の入力」は明確に別物として扱う（指示§A-2）。
+   * 提出済み／完了済みの場合、および（後方互換の再現に失敗した等の）防御的な
+   * 理由でdraft自体が組み立てられない場合のみnull。
    */
   readonly aiProposalDiagnostics: StandardAiQuarterDiagnostics | null;
   readonly draftSubmittedAt: string | null;
@@ -127,14 +131,14 @@ export interface PlayerScreenViewModel {
 
 export type PlayerScreenLoadResult = { readonly kind: "ok"; readonly viewModel: PlayerScreenViewModel } | { readonly kind: "notFound" };
 
-/** coerceDraftOrRebuildの戻り値。draftはUIへの表示・編集対象、diagnosticsは新規生成時のみStandard AIの診断情報を持つ。 */
+/** coerceDraftOrRebuildの戻り値。draftはUIへの表示・編集対象、diagnosticsはこのturnのAI原案の診断情報。 */
 interface CoercedDraftResult {
   readonly draft: CompanyDecisionDraft;
   /**
-   * 【test/sai6-manual-observation-2026-08-01 で追加】この四半期分としてStandard AIの
-   * 提案をその場で新規生成した場合のみ設定される（＝draftが既存の保存済みdraftを
-   * そのまま返した場合はnull。保存済みdraftは既に編集されている可能性があり、
-   * その場合に「これはAIの提案です」という診断情報を出すと誤解を招くため）。
+   * 【feature/v2-persist-standard-ai-proposal（Phase A）で修正】このturnについて
+   * Standard AIが提示した原案の診断情報。draftを新規生成した場合はその場で生成した
+   * ものを、既存の保存済みdraftを返す場合は原則envelopeに永続化済みの値を、
+   * そのまま返す（＝draftを保存・リロードしても値が変わらない）。
    */
   readonly diagnostics: StandardAiQuarterDiagnostics | null;
 }
@@ -148,7 +152,28 @@ function coerceDraftOrRebuild(
   turn: number
 ): CoercedDraftResult {
   if (envelope !== null && isPlausibleCompanyDecisionDraft(envelope.draft, fixture.companyId)) {
-    return { draft: envelope.draft, diagnostics: null };
+    if (envelope.aiProposalDiagnostics !== undefined) {
+      // 【feature/v2-persist-standard-ai-proposal（Phase A）】このturnの最初の
+      // saveDraft呼び出し時に永続化済みのAI原案・診断情報をそのまま返す。
+      // Standard AIを再実行しない（指示§A-2「リロード時にAIを再実行して新しいAI案を
+      // 作り直す方式は原則避ける」）。
+      return { draft: envelope.draft, diagnostics: envelope.aiProposalDiagnostics };
+    }
+    // 【後方互換】この機能の導入前（feature/v2-persist-standard-ai-proposal以前）に
+    // 保存された既存draftにはaiProposalDiagnosticsが存在しない。この場合のみ、
+    // ベストエフォートでその場から再現する（ownState/publicInfoはturn開始時から
+    // 変化しないため、通常は同一turn開始時に生成されたものと同じ値になるが、
+    // STANDARD_AI_PARAMETERS_V1が版内で改訂された場合はドリフトし得る既知の限界。
+    // 次回保存時にはsaveDraft側で新しいenvelopeとして永続化され直す）。
+    const ownStateForLegacyDraft = buildCompanyOwnState(restoredState, fixture);
+    const { diagnostics: legacyDiagnostics } = generateStandardAiDecisionWithDiagnostics(
+      fixture,
+      ownStateForLegacyDraft,
+      publicInfo,
+      restoredState.currentPeriod,
+      turn
+    );
+    return { draft: envelope.draft, diagnostics: legacyDiagnostics };
   }
   // draftが無い（新しいturn）か、保存済みだが構造上解釈できない場合は、既存の仮UI
   // （page.tsx）と同じ手順でStandard AIの提案から初期値を組み立てる

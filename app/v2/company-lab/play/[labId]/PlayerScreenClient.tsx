@@ -31,9 +31,10 @@ import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
 import FinancialResultsSection from "../../components/financial/FinancialResultsSection";
 import PlayLabBanner from "../components/PlayLabBanner";
-import { CompanyDecisionDraft, summarizeSalesForceAllocation, summarizeSalesForceHiring } from "../../decisionDraft";
+import { buildDecisionInputFromDraft, CompanyDecisionDraft, summarizeSalesForceAllocation, summarizeSalesForceHiring } from "../../decisionDraft";
 import { PlayerScreenViewModel } from "../_lib/viewModel";
 import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
+import { computeDecisionDiffSummary } from "../../../../lib/v2/companyLab/decisionDiff";
 import { fetchAiExplanationAction, processQuarterAction, saveDraftAction, submitDraftAction, withdrawDraftAction } from "./actions";
 
 /** fetchAiExplanationActionの読み込み状態（このコンポーネントのローカル表示状態専用。サーバー側の正とは無関係）。 */
@@ -142,6 +143,16 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
   const salesForceHiring = draft
     ? summarizeSalesForceHiring(viewModel.ownState.salesForceHiringState.headcount, draft.salesForceHireCount ?? 0, draft.salesForceLayoffCount ?? 0)
     : null;
+
+  // 【feature/v2-persist-standard-ai-proposal（Phase A・指示§A-5）】「AI原案」と
+  // 「現在の入力」は別物であることが最低限わかるよう、両者の差分要約だけを
+  // 低コストで計算して表示する（大規模な比較UIは作らない）。draftは編集中の
+  // UI型（CompanyDecisionDraft）なので、比較可能なCompanyDecisionInputへ変換
+  // したうえで、AI原案（aiProposalDiagnostics.decision）と構造比較する。
+  const aiProposalDiff =
+    draft && isEditing && viewModel.aiProposalDiagnostics
+      ? computeDecisionDiffSummary(viewModel.aiProposalDiagnostics.decision, buildDecisionInputFromDraft(draft, viewModel.fixture, viewModel.period))
+      : null;
 
   function handleWithdrawSubmission() {
     setWithdrawMessage(null);
@@ -252,10 +263,24 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
             title={`Standard AIの提案（turn ${viewModel.currentTurn}・実行前プレビュー）`}
             tone="info"
             testId="ai-proposal-diagnostics-section"
+            summaryRight={
+              aiProposalDiff ? (
+                <span
+                  data-testid="ai-proposal-diff-badge"
+                  className={
+                    aiProposalDiff.hasDifferences
+                      ? "text-[11px] rounded px-1.5 py-0.5 bg-amber-900/60 text-amber-200 border border-amber-700/60"
+                      : "text-[11px] rounded px-1.5 py-0.5 bg-gray-700/60 text-gray-300 border border-gray-600/60"
+                  }
+                >
+                  {aiProposalDiff.hasDifferences ? "AI原案から変更あり" : "AI原案から変更なし"}
+                </span>
+              ) : undefined
+            }
           >
             <p className="text-xs text-gray-400 mb-2">
               下の「意思決定編集」欄には、Standard
-              AIが同じ入力（自社状態・公開市場情報）から算出した提案が初期値として入っています。このまま「この内容で提出する」を押せばAI提案どおりに実行され、内容を編集してから提出することもできます。（提出後・下書き保存後は表示されません）
+              AIがturn開始時に算出した提案（原案）が初期値として入っています。このまま「この内容で提出する」を押せばAI提案どおりに実行され、内容を編集してから提出することもできます。この原案・判断理由は、下書きを保存してブラウザを再読み込みしても、このturn中は変わりません（編集後の現在の入力とは別に保持されます）。
             </p>
 
             {/* 【視覚的な区別（実装指示§10）】(a) ゲームエンジンが確定した事実＝上のOpeningCompanyStatePanel/

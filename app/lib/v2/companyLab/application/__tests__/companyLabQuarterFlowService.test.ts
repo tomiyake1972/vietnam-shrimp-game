@@ -667,4 +667,180 @@ for (const { label, create } of makeContexts()) {
     const draftAfter = await ctx.repo.loadDraft("lab-done-submit-guard");
     assert.equal(draftAfter?.submittedAt, null, "完了済みラボでsubmitDraftが誤って成功し、draftが提出済みになっている");
   });
+
+  // -------------------------------------------------------------------
+  // feature/v2-persist-standard-ai-proposal（Phase A）: AI原案・診断情報の永続化
+  // -------------------------------------------------------------------
+
+  test(`[${label}] Phase A: saveDraft最初の保存で、turn開始時のStandard AI原案・診断情報が生成・保存される`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-ai-proposal-first-save", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
+    const envelope = await ctx.service.saveDraft({
+      labId: "lab-ai-proposal-first-save",
+      turnId: "turn-1",
+      draftBody: { note: "player-draft-v1" },
+      now: NOW,
+    });
+    assert.ok(envelope.aiProposalDiagnostics, "最初の保存でaiProposalDiagnosticsが生成されていません");
+    assert.equal(envelope.aiProposalDiagnostics!.companyId, PLAYER_COMPANY_ID);
+    assert.equal(envelope.aiProposalDiagnostics!.turn, 1);
+    assert.equal(envelope.aiProposalDiagnostics!.decision.companyId, PLAYER_COMPANY_ID);
+    assert.ok(Array.isArray(envelope.aiProposalDiagnostics!.entries));
+    assert.ok(envelope.aiProposalDiagnostics!.pressures);
+    assert.ok(Array.isArray(envelope.aiProposalDiagnostics!.salesWishByMarketProduct));
+  });
+
+  test(`[${label}] Phase A: 同一turnの2回目以降の保存では、draft本体を変更してもaiProposalDiagnosticsは初回値のまま変化しない`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-ai-proposal-repeat-save", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
+    const first = await ctx.service.saveDraft({
+      labId: "lab-ai-proposal-repeat-save",
+      turnId: "turn-1",
+      draftBody: { note: "player-draft-v1" },
+      now: NOW,
+    });
+    assert.ok(first.aiProposalDiagnostics);
+
+    const second = await ctx.service.saveDraft({
+      labId: "lab-ai-proposal-repeat-save",
+      turnId: "turn-1",
+      draftBody: { note: "player-draft-v2-edited" },
+      now: NOW,
+    });
+    // 現在のdraft本体（プレイヤーの入力）は新しい値へ更新されている。
+    assert.deepEqual(second.draft, { note: "player-draft-v2-edited" });
+    // 一方、AI原案・診断情報は最初の保存時の値のまま、完全に不変（再計算されていない）。
+    // 【注記】2回目のsaveDraftはRedisバックエンドの場合、内部でrepository.loadDraft
+    // （JSON往復）を経由した既存envelopeの値を引き継ぐため、undefinedの任意キーが
+    // 失われている可能性がある。両辺をJSON往復させて正規化してから比較する。
+    assert.deepEqual(JSON.parse(JSON.stringify(second.aiProposalDiagnostics)), JSON.parse(JSON.stringify(first.aiProposalDiagnostics)));
+
+    // リロード（loadDraft）でも同じ値が読める。
+    // 【注記】RedisバックエンドではloadDraftがJSON往復（validateCompanyLabDraftEnvelope）
+    // を経由するため、値がundefinedの任意キー（例: salesBaseScore）はJSON.stringifyの
+    // 仕様上キー自体が失われる。これは本Phaseの変更とは無関係な既存のシリアライズ特性
+    // のため、比較の両辺をJSON往復させて正規化してから比較する（実質的な値の一致だけを見る）。
+    const reloaded = await ctx.repo.loadDraft("lab-ai-proposal-repeat-save");
+    assert.deepEqual(JSON.parse(JSON.stringify(reloaded?.aiProposalDiagnostics)), JSON.parse(JSON.stringify(first.aiProposalDiagnostics)));
+    assert.deepEqual(reloaded?.draft, { note: "player-draft-v2-edited" });
+  });
+
+  test(`[${label}] Phase A: 四半期処理後、次のturnのsaveDraftでは新しいAI原案が生成され、前turnのAI原案を誤って引き継がない`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-ai-proposal-next-turn", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
+    const turn1Envelope = await ctx.service.saveDraft({
+      labId: "lab-ai-proposal-next-turn",
+      turnId: "turn-1",
+      draftBody: { note: "turn1" },
+      now: NOW,
+    });
+    assert.ok(turn1Envelope.aiProposalDiagnostics);
+    await ctx.service.submitDraft({ labId: "lab-ai-proposal-next-turn", turnId: "turn-1", now: NOW });
+    await ctx.service.processQuarter({
+      labId: "lab-ai-proposal-next-turn",
+      turnId: "turn-1",
+      lockToken: "lock-turn1",
+      now: NOW,
+      decisionsProvider: autoPolicyProvider,
+    });
+
+    const turn2Envelope = await ctx.service.saveDraft({
+      labId: "lab-ai-proposal-next-turn",
+      turnId: "turn-2",
+      draftBody: { note: "turn2" },
+      now: NOW,
+    });
+    assert.ok(turn2Envelope.aiProposalDiagnostics, "turn2の最初の保存でaiProposalDiagnosticsが生成されていません");
+    assert.equal(turn2Envelope.aiProposalDiagnostics!.turn, 2, "turn2のAI原案のturn番号が2になっていません（前turnの値を誤って引き継いでいる可能性）");
+    assert.notDeepEqual(
+      turn2Envelope.aiProposalDiagnostics,
+      turn1Envelope.aiProposalDiagnostics,
+      "turn2のAI原案がturn1のAI原案と完全に同一です（新しいturnで新しいAI原案が生成されていない）"
+    );
+  });
+
+  test(`[${label}] Phase A: 確定履歴に、保存済みAI原案（aiProposal）と実際の提出との差分（diffFromAiProposal）が正しく記録される`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-ai-proposal-history-diff", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
+    const saved = await ctx.service.saveDraft({
+      labId: "lab-ai-proposal-history-diff",
+      turnId: "turn-1",
+      draftBody: { note: "irrelevant-to-decisionsProvider" },
+      now: NOW,
+    });
+    assert.ok(saved.aiProposalDiagnostics);
+    const aiProposalDecision = saved.aiProposalDiagnostics!.decision;
+    await ctx.service.submitDraft({ labId: "lab-ai-proposal-history-diff", turnId: "turn-1", now: NOW });
+
+    // ケース1: プレイヤーが保存済みAI原案どおりに提出した場合 → 差分なし。
+    const identicalProvider: CompanyLabDecisionsProvider = ({ restoredState, fixtures, publicInfo, period, turn }) => {
+      const decisions: Record<CompanyId, CompanyDecisionInput> = {};
+      for (const fixture of fixtures) {
+        if (fixture.companyId === PLAYER_COMPANY_ID) {
+          decisions[fixture.companyId] = aiProposalDecision;
+          continue;
+        }
+        const ownState = buildCompanyOwnState(restoredState, fixture);
+        decisions[fixture.companyId] = generateAutoPolicyDecision(fixture, ownState, publicInfo, period, turn);
+      }
+      return decisions;
+    };
+    const result = await ctx.service.processQuarter({
+      labId: "lab-ai-proposal-history-diff",
+      turnId: "turn-1",
+      lockToken: "lock-identical",
+      now: NOW,
+      decisionsProvider: identicalProvider,
+    });
+    // 【注記】RedisバックエンドはvalidateCompanyLabQuarterHistoryEntryのJSON往復を
+    // 経由するため、値がundefinedの任意キーはJSON.stringifyの仕様上失われる
+    // （本Phaseの変更とは無関係な既存のシリアライズ特性）。両辺をJSON往復させて
+    // 正規化してから比較する。
+    assert.deepEqual(JSON.parse(JSON.stringify(result.historyEntry.aiProposal)), JSON.parse(JSON.stringify(aiProposalDecision)));
+    assert.ok(result.historyEntry.diffFromAiProposal);
+    assert.equal(result.historyEntry.diffFromAiProposal!.hasDifferences, false, "AI原案どおりに提出したのにhasDifferences=trueになっている");
+    assert.deepEqual(result.historyEntry.diffFromAiProposal!.changedFieldPaths, []);
+  });
+
+  test(`[${label}] Phase A: プレイヤーがAI原案から採用人数を変更して提出した場合、diffFromAiProposalが変更ありと正しく判定する`, async () => {
+    const ctx = create();
+    await ctx.service.createLab({ labId: "lab-ai-proposal-history-diff-changed", config: baseConfig(), playerCompanyId: PLAYER_COMPANY_ID, now: NOW });
+    const saved = await ctx.service.saveDraft({
+      labId: "lab-ai-proposal-history-diff-changed",
+      turnId: "turn-1",
+      draftBody: { note: "irrelevant-to-decisionsProvider" },
+      now: NOW,
+    });
+    assert.ok(saved.aiProposalDiagnostics);
+    const aiProposalDecision = saved.aiProposalDiagnostics!.decision;
+    await ctx.service.submitDraft({ labId: "lab-ai-proposal-history-diff-changed", turnId: "turn-1", now: NOW });
+
+    // ケース2: プレイヤーがAI原案の採用人数（salesForceHireCount）だけを+2人変更して提出。
+    const changedDecision: CompanyDecisionInput = {
+      ...aiProposalDecision,
+      salesForceHireCount: (aiProposalDecision.salesForceHireCount ?? 0) + 2,
+    };
+    const changedProvider: CompanyLabDecisionsProvider = ({ restoredState, fixtures, publicInfo, period, turn }) => {
+      const decisions: Record<CompanyId, CompanyDecisionInput> = {};
+      for (const fixture of fixtures) {
+        if (fixture.companyId === PLAYER_COMPANY_ID) {
+          decisions[fixture.companyId] = changedDecision;
+          continue;
+        }
+        const ownState = buildCompanyOwnState(restoredState, fixture);
+        decisions[fixture.companyId] = generateAutoPolicyDecision(fixture, ownState, publicInfo, period, turn);
+      }
+      return decisions;
+    };
+    const result = await ctx.service.processQuarter({
+      labId: "lab-ai-proposal-history-diff-changed",
+      turnId: "turn-1",
+      lockToken: "lock-changed",
+      now: NOW,
+      decisionsProvider: changedProvider,
+    });
+    assert.ok(result.historyEntry.diffFromAiProposal);
+    assert.equal(result.historyEntry.diffFromAiProposal!.hasDifferences, true);
+    assert.ok(result.historyEntry.diffFromAiProposal!.changedFieldPaths.includes("salesForceHireCount"));
+  });
 }

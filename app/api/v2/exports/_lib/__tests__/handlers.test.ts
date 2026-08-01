@@ -25,7 +25,7 @@ import { toReadOnlyCompanyLabRepository } from "../../../../../lib/v2/companyLab
 import { CompanyLabExportApiDependencies } from "../dependencies";
 import { CompanyLabExportLogEntry } from "../../../../../lib/v2/redis/companyLabExportAuditLog";
 import { handleExportAllCompaniesTurn, handleExportCompanyTurn, handleExportLabIndex, handleExportMarketTurn } from "../handlers";
-import { AI_PROPOSAL_UNAVAILABLE_REASON, buildExportFinancialResult, ExportFinancialResult } from "../exportDto";
+import { buildExportFinancialResult, ExportFinancialResult } from "../exportDto";
 import type { ExportSalesContract } from "../exportDto";
 import { CompanyFinancialQuarterResult } from "../../../../../lib/v2/finance/types";
 import { COUNTRY_IDS } from "../../../../../lib/v2/market/types";
@@ -578,10 +578,14 @@ test("handleExportCompanyTurn: 会社スコープのdecisionInfoは対象会社�
   assert.ok(rawDecision);
   assert.equal(info.submission!.financingRequest.desiredAmountUsd, rawDecision!.financingRequest.desiredAmountUsd);
 
-  // AI提案は確定履歴に未保存であるため null＋理由文（推測値を実績として補完しない＝§9）。
-  assert.equal(info.aiProposal, null);
-  assert.equal(info.diffFromAiProposal, null);
-  assert.equal(info.aiProposalUnavailableReason, AI_PROPOSAL_UNAVAILABLE_REASON);
+  // 【feature/v2-persist-standard-ai-proposal】saveAndSubmitDraftはhandleSaveDraft経由
+  // （＝companyLabQuarterFlowService.saveDraftの新しい経路）でVALID_PLAYER_DRAFT_BODYを
+  // 保存するため、この最初の保存時にStandard AI原案が生成・永続化され、確定履行時に
+  // aiProposal / diffFromAiProposalへ実データが入る（推測値ではなく、実際に保存された
+  // AI原案とVALID_PLAYER_DRAFT_BODYから提出された値との比較）。
+  assert.ok(info.aiProposal, "AI提案が確定履歴へ保存されているはずです（feature/v2-persist-standard-ai-proposal導入後）");
+  assert.ok(info.diffFromAiProposal, "AI提案との差分要約が計算されているはずです");
+  assert.equal(info.aiProposalUnavailableReason, null);
 
   // 会社スコープのレスポンス本文に、他社の意思決定を示すキーが一切現れない。
   const serialized = JSON.stringify(result.body);
@@ -619,8 +623,10 @@ test("handleExportAllCompaniesTurn: GMスコープのdecisionInfoは全5社の�
   assert.equal(body.decisionInfo.playerSubmission.companyId, "BAL");
   assert.equal(body.decisionInfo.otherCompaniesDecisions.length, rawEntry.otherCompaniesDecisions.length);
   assert.equal(body.decisionInfo.otherCompaniesDecisions.some((d) => d.companyId === "BAL"), false);
-  assert.deepEqual(body.decisionInfo.aiProposals, []);
-  assert.equal(body.decisionInfo.aiProposalUnavailableReason, AI_PROPOSAL_UNAVAILABLE_REASON);
+  // 【feature/v2-persist-standard-ai-proposal】setUpProcessedTurn1LabはhandleSaveDraft
+  // 経由で保存するため、プレイヤー会社ぶんのAI原案が確定履歴へ実際に保存されている。
+  assert.equal(body.decisionInfo.aiProposals.length, 1);
+  assert.equal(body.decisionInfo.aiProposalUnavailableReason, null);
 
   // GMスコープは全社ぶんの明細を持つ（会社スコープと異なり絞り込まない）。
   const loadMetricCompanyIds = [...new Set(body.operations.companyLoadMetrics.map((m) => m.companyId))].sort();

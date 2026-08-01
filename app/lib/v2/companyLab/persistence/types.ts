@@ -35,6 +35,7 @@ import type { SalesForceHiringState } from "../salesForceHiring";
 import type { SalesBaseState } from "../salesBase";
 import type { MarketEvolutionState } from "../marketEvolution";
 import type { ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
+import type { StandardAiQuarterDiagnostics } from "../standardAi/policy";
 
 // ---------------------------------------------------------------------
 // 0. バージョン定数
@@ -219,6 +220,24 @@ export interface CompanyLabDraftEnvelope {
   readonly updatedAt: string;
   /** 正式提出前はnull。正式提出された瞬間にISO8601文字列が入る。 */
   readonly submittedAt: string | null;
+  /**
+   * 【feature/v2-persist-standard-ai-proposal（Phase A）】このturnIdの最初の
+   * saveDraft呼び出し時に、その時点のStandard AI原案（decision）と診断情報
+   * （entries・pressures・salesWishByMarketProduct等）を1回だけ生成して保存した
+   * もの。同一turnの2回目以降の保存では（companyLabQuarterFlowService.saveDraft
+   * が）値を変更せずそのまま引き継ぐ——「draftを編集・保存・リロードしても、
+   * turn開始時にAIが提示した原案そのものは変わらない」という要件を、
+   * 再計算ではなく永続化によって満たすための唯一の保存場所。
+   *
+   * 【後方互換】この機能の導入前（test/sai6-manual-observation-2026-08-01の
+   * 営業人員機能マージ時点まで）に保存された既存のenvelopeにはこのフィールドが
+   * 存在しない。読み込み側（app/v2/company-lab/play/_lib/viewModel.ts の
+   * coerceDraftOrRebuild）は、undefinedの場合のみベストエフォートで
+   * Standard AIをその場から再現し（ownState/publicInfoはturn開始時から
+   * 変化しないため通常は同じ値になるが、パラメータ改訂を挟むと一致しなくなる
+   * 既知の限界がある）、以後は新しいenvelopeとして保存し直す。
+   */
+  readonly aiProposalDiagnostics?: StandardAiQuarterDiagnostics;
 }
 
 // ---------------------------------------------------------------------
