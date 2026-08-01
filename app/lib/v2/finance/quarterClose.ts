@@ -182,6 +182,15 @@ export interface CompanyQuarterBusinessActuals {
   readonly activeFactoryCount: number;
   readonly salesForceHeadcount: number;
   readonly procurementHeadcount: number;
+  /**
+   * 【Test15新設】当期のVAP商品開発費（CompanyDecisionInput.vapProductDevelopmentSpendUsd
+   * をそのまま渡す。$0/$100,000/$250,000/$500,000の4段階）。全額を当期SG&Aへ
+   * 費用化し、当期のキャッシュフロー（sgaTotal経由）へも同額を計上する
+   * （資産計上・減価償却は一切行わない）。省略時は0（後方互換）。
+   * companyLab/productDevelopmentState.tsのスコア更新も同じ値を読む
+   * （唯一の情報源、companyLab/runner.ts参照）。
+   */
+  readonly vapProductDevelopmentSpendUsd?: number;
   /** 当期の国内原料購入額（当期の新規国内ロットのΣ数量×取得単価×1,000。当四半期に現金払い）。 */
   readonly domesticPurchasesUsd: number;
   /** 当期の輸入発注額（当期の新規輸入ロットのΣ数量×着地単価×1,000。買掛金計上→支払サイト後に決済）。 */
@@ -935,7 +944,12 @@ export function closeFinancialQuarter(
   const procurementCost = actuals.procurementHeadcount * params.sellingGeneralAdmin.procurementSalaryUsdPerQuarter;
   const adminFixed = params.sellingGeneralAdmin.adminFixedUsdPerQuarter;
   const sellingLogistics = soldTonsTotal * params.sellingGeneralAdmin.sellingLogisticsUsdPerTon;
-  const sgaTotal = salesForceCost + procurementCost + adminFixed + sellingLogistics;
+  // 【Test15新設】VAP商品開発費は全額を当期SG&Aへ費用化する（資産計上・減価償却
+  // なし）。actuals.vapProductDevelopmentSpendUsdは、意思決定側のCompanyDecisionInput.
+  // vapProductDevelopmentSpendUsdをそのまま渡した値（companyLab/runner.ts参照。
+  // companyLab/productDevelopmentState.tsのスコア更新と同一の値＝唯一の情報源）。
+  const vapProductDevelopmentSpendUsd = actuals.vapProductDevelopmentSpendUsd ?? 0;
+  const sgaTotal = salesForceCost + procurementCost + adminFixed + sellingLogistics + vapProductDevelopmentSpendUsd;
 
   // 【Phase 8B-1】financingが指定されれば融資ポートフォリオ由来の実発生利息を使う。
   // 省略時はPhase 8Aの簡易計算（既存借入残高×固定利率）のまま（後方互換）。

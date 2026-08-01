@@ -75,6 +75,12 @@ export interface CompanyActualsSource {
   readonly activeFactoryCount: number;
   readonly salesForceHeadcount: number;
   readonly procurementHeadcount: number;
+  /**
+   * 【Test15新設】当期のVAP商品開発費（decisions.vapProductDevelopmentSpendUsdを
+   * そのまま渡す。省略時は0）。finance/quarterClose.tsのCompanyQuarterBusinessActuals.
+   * vapProductDevelopmentSpendUsdへそのまま引き継ぐ（金額の再計算はしない）。
+   */
+  readonly vapProductDevelopmentSpendUsd?: number;
 }
 
 /** ロット一覧の金額合計（Σ 残数量×取得単価×1,000）。 */
@@ -276,6 +282,7 @@ export function buildCompanyQuarterBusinessActuals(src: CompanyActualsSource): C
     activeFactoryCount: src.activeFactoryCount,
     salesForceHeadcount: src.salesForceHeadcount,
     procurementHeadcount: src.procurementHeadcount,
+    vapProductDevelopmentSpendUsd: src.vapProductDevelopmentSpendUsd ?? 0,
     domesticPurchasesUsd,
     importOrdersUsd,
     aquacultureHarvestUsd,

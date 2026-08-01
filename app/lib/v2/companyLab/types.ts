@@ -46,6 +46,7 @@ import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState }
 import type { CompanyWorkforceState, WorkforceState } from "./workforce";
 import type { SalesBaseState } from "./salesBase";
 import type { PdMechanizationState } from "./pdMechanizationState";
+import type { ProductDevelopmentState } from "./productDevelopmentState";
 import type { MarketEvolutionState, Sai5MarketEvolutionRecord, SupplyPressureDefinition } from "./marketEvolution";
 
 export class CompanyLabError extends Error {
@@ -142,6 +143,17 @@ export interface CompanyDecisionInput {
    * 統合テスト・意思決定編集からの上書きは可能）。
    */
   readonly capexDecision: CapexDecisionInput;
+  /**
+   * 【Test15新設】当期のVAP商品開発費。companyLab/productDevelopmentState.tsの
+   * VAP_PRODUCT_DEVELOPMENT_SPEND_TIERS_USD（$0/$100,000/$250,000/$500,000）の
+   * いずれか（自由入力ではない4段階選択。isValidVapProductDevelopmentSpendTier
+   * 参照）。全額が当期SG&Aへ費用化され、同額が当期キャッシュフローの支出となる
+   * （資産計上・減価償却なし。finance/quarterClose.ts参照）。同じ値がVAP商品開発
+   * スコアの更新（companyLab/productDevelopmentState.ts）にも使われる、唯一の
+   * 情報源（companyLab/runner.ts参照）。省略時は0（後方互換、既存の意思決定
+   * 構築箇所を壊さない）。
+   */
+  readonly vapProductDevelopmentSpendUsd?: number;
 }
 
 // ---------------------------------------------------------------------
@@ -392,6 +404,14 @@ export interface Sai5FeatureFlags {
    * 定義候補の実測比較（scripts/sai5SupplyPressureStudy.ts）以外では指定しない。
    */
   readonly supplyPressureDefinition?: SupplyPressureDefinition;
+  /**
+   * 【Test15新設】VAP能力合成係数（companyLab/premiumPolicy.tsの
+   * calculateCompanyCapabilityCoefficient）を成約競争力へ接続する
+   * （sales/allocation.tsのvapCapabilityウェイト）。未指定・falseなら既存の
+   * salesBaseAccumulationと同じく「ビット単位で既存挙動と一致」する
+   * （ウェイト0・販売計画へvapCapabilityScoreを一切付けない）。
+   */
+  readonly vapProductDevelopmentCompetitiveness?: boolean;
 }
 
 export interface CompanyLabConfig {
@@ -427,6 +447,11 @@ export interface CompanyLabState {
    * この状態は存在しない）。
    */
   readonly pdMechanizationState?: PdMechanizationState;
+  /**
+   * 【Test15新設】会社単位のVAP商品開発スコア（前四半期末までの値、companyLab/
+   * productDevelopmentState.ts）。省略時は全会社が中立値50扱い（後方互換）。
+   */
+  readonly productDevelopmentState?: ProductDevelopmentState;
   /** 【Phase 8A】会社別の財務状態（現金・売掛/買掛・借入・固定資産・完成品原価台帳等。ターンをまたいで保持）。 */
   readonly financeState: FinanceState;
   /** 【Phase 8B-1】会社別の資金繰り状態（融資ポートフォリオ・未払利息・信用/延滞履歴。ターンをまたいで保持）。 */
