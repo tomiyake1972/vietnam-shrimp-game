@@ -49,7 +49,9 @@ export type CapitalProjectType =
   | "qualityControlEquipment" // 品質管理設備
   | "environmentalEquipment" // 排水・環境設備
   | "commonProcessingExpansion" // 【Phase 8B-2B】共通前処理能力増設
-  | "freezingPackagingExpansion"; // 【Phase 8D-5】凍結・包装処理能力増設（フロー側）
+  | "freezingPackagingExpansion" // 【Phase 8D-5】凍結・包装処理能力増設（フロー側）
+  | "newFactoryConstruction"; // 【Test15新設】新工場建設（標準工場）。既存工場の能力増強ではなく、
+  // Factory[]へ新しい工場そのものを追加する（capex/factoryConstruction.ts参照）。
 
 export const CAPITAL_PROJECT_TYPES: readonly CapitalProjectType[] = [
   "hosoLineExpansion",
@@ -60,6 +62,7 @@ export const CAPITAL_PROJECT_TYPES: readonly CapitalProjectType[] = [
   "coldStorageExpansion",
   "qualityControlEquipment",
   "environmentalEquipment",
+  "newFactoryConstruction",
 ];
 
 /** 最低6状態（実装指示§10）。 */
@@ -128,6 +131,29 @@ export interface FutureCapacityEffectPlaceholder {
 }
 
 /**
+ * 【Test15新設】新工場建設（newFactoryConstruction）専用の効果メタデータ。
+ * 既存のFutureCapacityEffectPlaceholder（targetProduct1個への加算）とは異なり、
+ * 完成・稼働開始時にFactory[]へ丸ごと1つ新しいFactoryを追加するために必要な
+ * 全能力プールの満稼働（フルランプ）時の値をまとめて持つ。承認時にテンプレート
+ * （capex/parameters.ts）から機械的にコピーされ、案件のライフサイクル全体を通じて
+ * 不変（futureCapacityEffectと同じ「承認時スナップショット」設計）。
+ * 実際のFactory合成・段階的ランプアップの適用はcapex/factoryConstruction.tsが行う。
+ */
+export interface NewFactoryEffectPlaceholder {
+  /** フルランプ（3四半期目以降）時の各能力プール（HOSO換算トン/四半期。coldStorageのみ同時保管トン）。 */
+  readonly fullCapacities: {
+    readonly commonProcessing: number;
+    readonly hoso: number;
+    readonly pd: number;
+    readonly vap: number;
+    readonly freezingPackaging: number;
+    readonly coldStorage: number;
+  };
+  /** 稼働開始からの経過四半期（0始まり）ごとの実効能力倍率。配列末尾を超える四半期は最後の値を使う。 */
+  readonly rampMultipliers: readonly number[];
+}
+
+/**
  * 1件の設備投資案件。cumulativePaidUsdが建設中勘定（CIP）の唯一の真実。
  *   「着工」= 最初のstage支払が全額実行された時点（approved→underConstruction）。
  *   「完成」= 全stage支払完了 かつ cumulativePaidUsd=approvedBudgetUsd かつ
@@ -161,6 +187,8 @@ export interface CapitalProject {
   readonly priority: number;
   /** Phase 8B-2B用の予約フィールド（8B-2Aでは一切参照・使用しない）。 */
   readonly futureCapacityEffect?: FutureCapacityEffectPlaceholder;
+  /** 【Test15新設】newFactoryConstruction案件のみ設定される、新設Factory合成用の承認時スナップショット。 */
+  readonly newFactoryEffect?: NewFactoryEffectPlaceholder;
   /** 直近の意思決定・処理結果の診断メモ（承認拒否理由・支払見送り理由等、直近1件分）。 */
   readonly lastDiagnosticReasons: readonly string[];
 }
