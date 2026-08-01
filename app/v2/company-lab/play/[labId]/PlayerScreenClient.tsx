@@ -140,7 +140,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
             tone="info"
             testId="opening-company-state-section"
           >
-            <OpeningCompanyStatePanel ownState={viewModel.ownState} turn={viewModel.currentTurn} />
+            <OpeningCompanyStatePanel ownState={viewModel.ownState} fixture={viewModel.fixture} turn={viewModel.currentTurn} />
           </CollapsibleSection>
         )}
 
