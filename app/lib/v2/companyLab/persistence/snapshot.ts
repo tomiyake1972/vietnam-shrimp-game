@@ -50,6 +50,10 @@ export function createCompanyLabRuntimeSnapshot(state: CompanyLabState): Company
     ...(state.marketEvolutionState ? { marketEvolutionState: state.marketEvolutionState } : {}),
     // 【営業人員の追加採用・forward-port】会社別・営業人員総数。
     salesForceHiringState: state.salesForceHiringState,
+    // 【Test15】Factory単位PD稼働率・会社単位VAP商品開発スコア。undefinedのときは
+    // キー自体を含めない（既存スナップショットと同一形状。salesBaseStateと同じ方式）。
+    ...(state.pdMechanizationState ? { pdMechanizationState: state.pdMechanizationState } : {}),
+    ...(state.productDevelopmentState ? { productDevelopmentState: state.productDevelopmentState } : {}),
     isComplete: state.isComplete,
   };
 }
@@ -120,6 +124,12 @@ export function restoreCompanyLabStateFromRuntimeSnapshot(
     // のフォールバック（runner.ts buildCompanyOwnState・advanceCompanyLabQuarter）
     // が fixture.salesForceHeadcountTotal を使う。
     salesForceHiringState: snapshot.salesForceHiringState,
+    // 【Test15 後方互換】schemaVersion:1〜6のスナップショットにはpdMechanizationState・
+    // productDevelopmentStateキーが存在しない → undefinedとして復元する。
+    // 履歴からの再構築・推測値の捏造は行わない（呼び出し側が既定の初期値
+    // （initialPdUtilizationRatio(0.0)・中立値50）を使う設計のため、それで十分）。
+    ...(snapshot.pdMechanizationState ? { pdMechanizationState: snapshot.pdMechanizationState } : {}),
+    ...(snapshot.productDevelopmentState ? { productDevelopmentState: snapshot.productDevelopmentState } : {}),
     history,
     isComplete: snapshot.isComplete,
   };
