@@ -41,7 +41,7 @@ import { CompanyId } from "../sales/types";
 import { Product } from "../market/types";
 import { WorkerAssignment } from "../production/types";
 import { PRODUCTION_PARAMETERS_V1, ProductionParameters } from "../production/parameters";
-import { requiredHeadcountForQuantity } from "../production/labor";
+import { requiredHeadcountForQuantity, effectiveEfficiencyPerHeadTons } from "../production/labor";
 import { FINANCE_PARAMETERS_V1, FinanceParameters } from "../finance/parameters";
 // 型のみの参照にとどめ、実行時の循環参照を作らない（types.ts はこのファイルの
 // 状態型を型としてだけ参照し、このファイルは CompanyFixture を型としてだけ参照する）。
@@ -229,9 +229,13 @@ export function computeRequiredRegularHeadcount(input: RequiredHeadcountInput): 
 
   for (const [product, quantity] of Object.entries(input.quantityByProduct) as [Product, number][]) {
     if (!Number.isFinite(quantity) || quantity <= 0) continue;
+    // 【Test15】商品別労働集約度係数（HOSO:PD:VAP=1.0:1.2:3.0）を織り込んだ
+    // 実効効率で逆算する。唯一の情報源はeffectiveEfficiencyPerHeadTons経由の
+    // parameters.ts labor.laborIntensityCoefficientであり、ここでは係数を持たない。
+    const efficiencyPerHead = effectiveEfficiencyPerHeadTons(params.labor.regularEfficiencyPerHeadTons, product, params);
     const required = requiredHeadcountForQuantity(
       quantity,
-      params.labor.regularEfficiencyPerHeadTons,
+      efficiencyPerHead,
       input.attendanceRate,
       input.skillByProduct[product] ?? 0,
       input.appliedOvertimeRate,

@@ -169,7 +169,18 @@ test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも�
   // 実際にdefaultが発生したケースをいくつか試し、発生後もログ件数が
   // 欠けないことを確認する（発生しなかった場合はそのシードでは検証できないため
   // skipし、少なくとも1件は発生確認できるシードで検証する）。
-  const seeds = ["sai3a-002", ...Array.from({ length: 8 }, (_, i) => `sai3a-test-default-${i}`)];
+  // 【Test15追記】商品別労働集約度係数（HOSO:PD:VAP=1.0:1.2:3.0）の導入により
+  // 会社の財務トラジェクトリが変化し、従来のseedリスト（sai3a-002等）では
+  // 8四半期以内にpaymentDefaultへ至らなくなった。同じ検証意図（defaultが
+  // 発生した後もログが欠落しないこと）を保つため、新しい経済パラメータの下で
+  // BAL単独・8四半期・baselineシナリオでpaymentDefaultが確認できるseedを
+  // 総当たりで探し直した（test15-bal-scan-181, test15-bal-scan-754）。
+  const seeds = [
+    "sai3a-002",
+    ...Array.from({ length: 8 }, (_, i) => `sai3a-test-default-${i}`),
+    "test15-bal-scan-181",
+    "test15-bal-scan-754",
+  ];
   let verifiedAtLeastOne = false;
   for (const seed of seeds) {
     const { log } = run(seed, 8, ["BAL"]);

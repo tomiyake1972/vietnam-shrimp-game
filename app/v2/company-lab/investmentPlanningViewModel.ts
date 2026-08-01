@@ -530,7 +530,8 @@ export function buildCompanyInvestmentPlanningViewModel(
           skillByProduct[product] ?? 0,
           overtimeRate,
           factory ? poolNominalTons(factory, product as SpaceConsumingPoolKey) : 0,
-          PRODUCTION_PARAMETERS_V1
+          PRODUCTION_PARAMETERS_V1,
+          product
         );
       }
 
