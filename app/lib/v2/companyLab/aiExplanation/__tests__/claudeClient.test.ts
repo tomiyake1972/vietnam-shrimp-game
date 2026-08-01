@@ -207,6 +207,42 @@ test("generateManagementReport: スキーマ不一致(必須フィールド欠�
   assert.equal(callCount(), 2);
 });
 
+test("generateManagementReport: スキーマ不一致時、console.errorへ実際のissues(path/code等の構造情報)が出るが本文(headline等の文章)は出ない", async () => {
+  // 【2026-08-01・schema_mismatch診断強化の回帰テスト】従来はスキーマ不一致時、
+  // console.errorに「スキーマ不一致」というタグしか出ておらず、Vercelランタイムログだけを
+  // 見ても実際にどのfield・pathで何が起きたか分からなかった。この不具合の再発を防ぐため、
+  // ログへ実際のZod issues（path等の構造情報）が出ること、かつ本文（headline等の実際の
+  // 文章）が出ないことを確認する。
+  const badInput = {
+    headline: "テスト見出し",
+    executiveSummary: "テスト要約",
+    recommendations: [],
+    keyRisks: [{ severity: "critical", title: "x", description: "y" }],
+    questionsForPlayer: [],
+    dataLimitations: [],
+  };
+  const { client } = makeClient([toolUseResponse(badInput), toolUseResponse(badInput)]);
+  const originalConsoleError = console.error;
+  const captured: string[] = [];
+  console.error = (...args: unknown[]) => {
+    captured.push(args.map((a) => String(a)).join(" "));
+  };
+  try {
+    const result = await generateManagementReport(minimalContext(), client);
+    assert.equal(result.ok, false);
+  } finally {
+    console.error = originalConsoleError;
+  }
+  const schemaMismatchLogs = captured.filter((line) => line.includes("スキーマ不一致"));
+  assert.equal(schemaMismatchLogs.length, 2);
+  // path情報(keyRisks配下のsevirity)が出ている。
+  assert.ok(schemaMismatchLogs[0].includes("keyRisks"));
+  assert.ok(schemaMismatchLogs[0].includes("severity"));
+  // 本文(実際の文章)はログに含まれない。
+  assert.equal(schemaMismatchLogs[0].includes("テスト見出し"), false);
+  assert.equal(schemaMismatchLogs[0].includes("テスト要約"), false);
+});
+
 test("generateManagementReport: 空応答(contentが空配列)はinvalid_json扱い、その後リトライしても空ならinvalid_jsonのまま", async () => {
   const { client, callCount } = makeClient([emptyContentResponse(), emptyContentResponse()]);
   const result = await generateManagementReport(minimalContext(), client);

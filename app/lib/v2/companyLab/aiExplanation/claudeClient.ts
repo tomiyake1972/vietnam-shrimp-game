@@ -41,6 +41,7 @@
 // 別のリクエストパラメータ（`tools`/`tool_choice`）として追加するだけである。
 
 import Anthropic from "@anthropic-ai/sdk";
+import { z } from "zod";
 import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V1 } from "./systemPrompt";
 import { StandardAiManagementReport, standardAiManagementReportSchema } from "./reportSchema";
 import { ExplanationContext } from "./buildExplanationContext";
@@ -212,6 +213,57 @@ function findToolUseInput(response: AnthropicMessageResponse): unknown | undefin
   return block?.input;
 }
 
+/**
+ * 【2026-08-01・schema_mismatch診断強化】これまでschema_mismatch発生時、Vercelログには
+ * 「スキーマ不一致」というタグしか出ておらず、実際にどのfield・pathで何が起きたのかが
+ * ログから一切分からなかった（validated.error.messageはGenerateManagementReportResultの
+ * detailとして呼び出し元へ返ってはいたが、どこにもconsole.errorされていなかった）。
+ * これではVercelランタイムログだけを見ても実データに基づく原因特定ができないため、
+ * ZodErrorのissues配列から、安全に出せる情報（path・code・期待される型/enum・実際に
+ * 受け取った型やenum値など、ゲームの本文・数値そのものではない構造情報）だけを
+ * 抜き出してログへ出す。recommendations[3].reasons等の本文（headline/executiveSummary等の
+ * 実際の文章）は一切ログに含めない。
+ */
+function summarizeZodIssuesForLog(error: z.ZodError): string {
+  // 【zodのメジャーバージョン差異への耐性】issueの追加プロパティ名（expected/values/
+  // minimum/maximum/keys等）はzodのバージョンによって異なり（例: v3のinvalid_enum_value
+  // ＋optionsがv4ではinvalid_value＋valuesに変わっている）、型定義もcodeごとの判別
+  // ユニオンで厳密である。そのためcode別にプロパティ名を決め打ちせず、既知のキー名だけを
+  // Record<string, unknown>として緩く読み取る（存在しないキーはundefinedのまま無視）。
+  // 値が文字列の場合は40文字までに切り詰め、万一将来のzodバージョンでissueオブジェクトに
+  // Claudeの生成文そのものが含まれるようになった場合でも本文が丸ごと漏れないようにする。
+  const KNOWN_KEYS = ["expected", "received", "values", "options", "keys", "minimum", "maximum", "origin"] as const;
+  const issues = error.issues.slice(0, 10).map((issue) => {
+    const raw = issue as unknown as Record<string, unknown>;
+    const base: Record<string, unknown> = {
+      path: issue.path.join(".") || "(root)",
+      code: issue.code,
+    };
+    for (const key of KNOWN_KEYS) {
+      const value = raw[key];
+      if (value === undefined) continue;
+      base[key] = typeof value === "string" && value.length > 40 ? `${value.slice(0, 40)}…` : value;
+    }
+    return base;
+  });
+  return JSON.stringify(issues);
+}
+
+/**
+ * トップレベルのキー集合と値の型（本文そのものではない）だけを安全にログへ出すための
+ * 要約。toolInputがオブジェクトでない場合はその旨だけを返す。
+ */
+function summarizeTopLevelShapeForLog(toolInput: unknown): string {
+  if (toolInput === null || typeof toolInput !== "object" || Array.isArray(toolInput)) {
+    return JSON.stringify({ topLevelType: Array.isArray(toolInput) ? "array" : typeof toolInput });
+  }
+  const shape: Record<string, string> = {};
+  for (const [key, value] of Object.entries(toolInput as Record<string, unknown>)) {
+    shape[key] = Array.isArray(value) ? `array(${value.length})` : typeof value;
+  }
+  return JSON.stringify(shape);
+}
+
 interface SingleAttemptResult {
   readonly kind: "success"; readonly report: StandardAiManagementReport; readonly usage: GenerateManagementReportUsage;
 }
@@ -301,7 +353,14 @@ async function attemptOnce(
   // 多重防御として維持する」という方針）。
   const validated = standardAiManagementReportSchema.safeParse(toolInput);
   if (!validated.success) {
-    console.error(`[claudeClient] attempt ${logTag.attempt} スキーマ不一致 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn}`);
+    // 【診断強化】本文（headline/executiveSummary等の実際の文章）は出さず、
+    // トップレベルの型形状とZodのissues（path/code/expected/received等の構造情報のみ）
+    // だけをログへ出す。これで次回の実失敗時、Vercelランタイムログから実際に
+    // どのfield・どんな型/enum不一致だったかを推測ではなく確認できるようにする。
+    console.error(
+      `[claudeClient] attempt ${logTag.attempt} スキーマ不一致 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn} ` +
+        `shape=${summarizeTopLevelShapeForLog(toolInput)} issues=${summarizeZodIssuesForLog(validated.error)}`
+    );
     return { kind: "failure", errorCategory: "schema_mismatch", detail: validated.error.message };
   }
 
