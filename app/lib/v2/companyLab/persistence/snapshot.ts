@@ -48,6 +48,10 @@ export function createCompanyLabRuntimeSnapshot(state: CompanyLabState): Company
     // ショットと同一形状）。
     ...(state.salesBaseState ? { salesBaseState: state.salesBaseState } : {}),
     ...(state.marketEvolutionState ? { marketEvolutionState: state.marketEvolutionState } : {}),
+    // 【Test15】Factory単位PD稼働率・会社単位VAP商品開発スコア。undefinedのときは
+    // キー自体を含めない（既存スナップショットと同一形状。salesBaseStateと同じ方式）。
+    ...(state.pdMechanizationState ? { pdMechanizationState: state.pdMechanizationState } : {}),
+    ...(state.productDevelopmentState ? { productDevelopmentState: state.productDevelopmentState } : {}),
     isComplete: state.isComplete,
   };
 }
@@ -109,6 +113,12 @@ export function restoreCompanyLabStateFromRuntimeSnapshot(
     ...(snapshot.salesBaseState ? { salesBaseState: snapshot.salesBaseState } : {}),
     // 【SAI-5E 後方互換】salesBaseStateと同じ方式（キー欠落=機能無効）。
     ...(snapshot.marketEvolutionState ? { marketEvolutionState: snapshot.marketEvolutionState } : {}),
+    // 【Test15 後方互換】schemaVersion:1〜4のスナップショットにはpdMechanizationState・
+    // productDevelopmentStateキーが存在しない → undefinedとして復元する。
+    // 履歴からの再構築・推測値の捏造は行わない（呼び出し側が既定の初期値
+    // （initialPdUtilizationRatio(0.0)・中立値50）を使う設計のため、それで十分）。
+    ...(snapshot.pdMechanizationState ? { pdMechanizationState: snapshot.pdMechanizationState } : {}),
+    ...(snapshot.productDevelopmentState ? { productDevelopmentState: snapshot.productDevelopmentState } : {}),
     history,
     isComplete: snapshot.isComplete,
   };

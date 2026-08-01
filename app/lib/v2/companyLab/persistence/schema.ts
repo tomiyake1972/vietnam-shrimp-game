@@ -69,6 +69,8 @@ import type { WorkforceState } from "../workforce";
 import type { ConsumerMarketCarryState, ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 import type { SalesBaseState } from "../salesBase";
 import type { MarketEvolutionState, SupplyPressureDefinition } from "../marketEvolution";
+import type { PdMechanizationState } from "../pdMechanizationState";
+import type { ProductDevelopmentState } from "../productDevelopmentState";
 import {
   CompanyLabDraftEnvelope,
   CompanyLabPersistedCurrentState,
@@ -589,8 +591,32 @@ function validateCapitalProject(raw: unknown, path: string): CapitalProject {
       ...(fc.readinessQuartersAfterCompletion !== undefined ? { readinessQuartersAfterCompletion: requireNonNegativeInteger(fc.readinessQuartersAfterCompletion, `${path}.futureCapacityEffect.readinessQuartersAfterCompletion`) } : {}),
     };
   }
+  // 【Test15追補・既知の欠落を修正】newFactoryConstruction案件のnewFactoryEffect
+  // （承認時スナップショット、Factory合成に必須）。これまでvalidateCapitalProjectで
+  // 一切検証・引き継ぎされておらず、保存・復元後にcompleted状態の新工場が
+  // Factory[]へ合成されなくなる欠落があったため、Task6でここに追加した。
+  let newFactoryEffect: CapitalProject["newFactoryEffect"];
+  if (obj.newFactoryEffect !== undefined) {
+    const nf = requireObject(obj.newFactoryEffect, `${path}.newFactoryEffect`);
+    const fc = requireObject(nf.fullCapacities, `${path}.newFactoryEffect.fullCapacities`);
+    const rampRaw = requireArray(nf.rampMultipliers, `${path}.newFactoryEffect.rampMultipliers`);
+    newFactoryEffect = {
+      fullCapacities: {
+        commonProcessing: requireFiniteNumber(fc.commonProcessing, `${path}.newFactoryEffect.fullCapacities.commonProcessing`),
+        hoso: requireFiniteNumber(fc.hoso, `${path}.newFactoryEffect.fullCapacities.hoso`),
+        pd: requireFiniteNumber(fc.pd, `${path}.newFactoryEffect.fullCapacities.pd`),
+        vap: requireFiniteNumber(fc.vap, `${path}.newFactoryEffect.fullCapacities.vap`),
+        freezingPackaging: requireFiniteNumber(fc.freezingPackaging, `${path}.newFactoryEffect.fullCapacities.freezingPackaging`),
+        coldStorage: requireFiniteNumber(fc.coldStorage, `${path}.newFactoryEffect.fullCapacities.coldStorage`),
+      },
+      rampMultipliers: rampRaw.map((r, i) => requireFiniteNumber(r, `${path}.newFactoryEffect.rampMultipliers[${i}]`)),
+    };
+  }
   const reasonsRaw = requireArray(obj.lastDiagnosticReasons, `${path}.lastDiagnosticReasons`);
   const lastDiagnosticReasons = reasonsRaw.map((r, i) => requireString(r, `${path}.lastDiagnosticReasons[${i}]`));
+  // 【Test15】PD省人化投資（pdMechanization）が対象とするFactoryId。他の案件種別
+  // では未使用のoptionalフィールド（capex/types.ts参照）。
+  const targetFactoryId = obj.targetFactoryId === undefined ? undefined : requireNonEmptyString(obj.targetFactoryId, `${path}.targetFactoryId`);
   return {
     projectId: requireNonEmptyString(obj.projectId, `${path}.projectId`),
     companyId: requireNonEmptyString(obj.companyId, `${path}.companyId`),
@@ -610,6 +636,8 @@ function validateCapitalProject(raw: unknown, path: string): CapitalProject {
     ...(capitalizedAmountUsd !== undefined ? { capitalizedAmountUsd } : {}),
     priority,
     ...(futureCapacityEffect !== undefined ? { futureCapacityEffect } : {}),
+    ...(newFactoryEffect !== undefined ? { newFactoryEffect } : {}),
+    ...(targetFactoryId !== undefined ? { targetFactoryId } : {}),
     lastDiagnosticReasons,
   };
 }
@@ -694,6 +722,11 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
   // 既存データ）はundefined（機能無効）として復元する。
   const salesBaseState = validateSalesBaseState(obj.salesBaseState, `${path}.salesBaseState`);
   const marketEvolutionState = validateMarketEvolutionState(obj.marketEvolutionState, `${path}.marketEvolutionState`);
+  // 【Test15・schemaVersion 5】optionalなFactory単位PD稼働率・会社単位VAP商品開発
+  // スコア。キー欠落（v1〜v4の既存データ）はundefined（未設定＝既定初期値扱い）
+  // として復元する。
+  const pdMechanizationState = validatePdMechanizationState(obj.pdMechanizationState, `${path}.pdMechanizationState`);
+  const productDevelopmentState = validateProductDevelopmentState(obj.productDevelopmentState, `${path}.productDevelopmentState`);
   const isComplete = requireBoolean(obj.isComplete, `${path}.isComplete`);
 
   return {
@@ -711,6 +744,8 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
     consumerMarketState,
     ...(salesBaseState ? { salesBaseState } : {}),
     ...(marketEvolutionState ? { marketEvolutionState } : {}),
+    ...(pdMechanizationState ? { pdMechanizationState } : {}),
+    ...(productDevelopmentState ? { productDevelopmentState } : {}),
     isComplete,
   };
 }
@@ -850,6 +885,51 @@ function validateMarketEvolutionState(raw: unknown, path: string): MarketEvoluti
     vap: validateEntry(obj.vap, `${path}.vap`),
     ...(recentAppliedMixes === undefined ? {} : { recentAppliedMixes }),
   };
+}
+
+/**
+ * 【Test15・schemaVersion 5】Factory単位PD稼働率状態の検証。キー欠落（v1〜v4の
+ * 既存データ）・nullはundefined（未設定＝initialPdUtilizationRatio(0.0)扱い）を
+ * 返す。存在する場合はエントリごとにfactoryId・companyId・稼働率（[0,1]の
+ * 有限数）を検証する。
+ */
+function validatePdMechanizationState(raw: unknown, path: string): PdMechanizationState | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = requireObject(raw, path);
+  const entriesRaw = requireArray(obj.entries, `${path}.entries`);
+  const entries = entriesRaw.map((e, i) => {
+    const entryPath = `${path}.entries[${i}]`;
+    const entryObj = requireObject(e, entryPath);
+    const previousQuarterPdUtilization = requireFiniteNumber(entryObj.previousQuarterPdUtilization, `${entryPath}.previousQuarterPdUtilization`);
+    if (previousQuarterPdUtilization < -EPSILON || previousQuarterPdUtilization > 1 + EPSILON) {
+      fail(`${entryPath}.previousQuarterPdUtilization`, "[0,1]の範囲である必要があります");
+    }
+    return {
+      factoryId: requireNonEmptyString(entryObj.factoryId, `${entryPath}.factoryId`),
+      companyId: requireNonEmptyString(entryObj.companyId, `${entryPath}.companyId`),
+      previousQuarterPdUtilization,
+    };
+  });
+  return { entries };
+}
+
+/**
+ * 【Test15・schemaVersion 5】会社単位VAP商品開発スコア状態の検証。キー欠落
+ * （v1〜v4の既存データ）・nullはundefined（未設定＝中立値50扱い）を返す。
+ */
+function validateProductDevelopmentState(raw: unknown, path: string): ProductDevelopmentState | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = requireObject(raw, path);
+  const entriesRaw = requireArray(obj.entries, `${path}.entries`);
+  const entries = entriesRaw.map((e, i) => {
+    const entryPath = `${path}.entries[${i}]`;
+    const entryObj = requireObject(e, entryPath);
+    return {
+      companyId: requireNonEmptyString(entryObj.companyId, `${entryPath}.companyId`),
+      score: wrapUnitConstructor(score0to100, entryObj.score, `${entryPath}.score`),
+    };
+  });
+  return { entries };
 }
 
 // ---------------------------------------------------------------------
