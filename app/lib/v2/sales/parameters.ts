@@ -193,3 +193,25 @@ export const SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1: SalesParameters = {
     vapCapability: 0.08,
   },
 };
+
+/**
+ * 【Test15新設・コーディネーター指示による既定ON対応】vapProductDevelopmentCompetitiveness
+ * （既定ON）とsalesBaseAccumulation（既定OFF、明示opt-in）の両方が有効なときに使う
+ * 組み合わせ版。salesBase=0.08・vapCapability=0.08の両方をcoverage/relationship/
+ * qualityから切り出す（各項目につき上のSAI-5D版・Test15単独版の切り出し幅を
+ * 単純に2倍し、合計1.0を維持する）。
+ * 【Test15暫定値・要校正】
+ */
+export const SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1: SalesParameters = {
+  ...SALES_PARAMETERS_V1,
+  parametersVersion: "sales-v0.1+test15-vap-capability+sai5-sales-base",
+  competitivenessWeights: {
+    price: 0.35,
+    coverage: 0.17,
+    relationship: 0.11,
+    quality: 0.11,
+    deliveryReliability: 0.1,
+    salesBase: 0.08,
+    vapCapability: 0.08,
+  },
+};
