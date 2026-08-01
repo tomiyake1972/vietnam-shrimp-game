@@ -49,6 +49,18 @@
 | 9 | `app/lib/v2/capex/parameters.ts` | `CAPEX_PARAMETERS_V1` | `capex-v0.3` |
 | 10 | `app/lib/v2/companyLab/parameters.ts` | `EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1` 他 | （個別） |
 | 11 | `app/lib/v2/companyLab/fixtures.ts` | 5社フィクスチャ | （個別） |
+| 12 | `app/lib/v2/companyLab/procurementScaleState.ts` | `PROCUREMENT_SCALE_PARAMETERS_V1` | （個別、§10.5） |
+| 13 | `app/lib/v2/companyLab/productDevelopmentState.ts` | `PRODUCT_DEVELOPMENT_PARAMETERS_V1` | （個別、§10.6） |
+| 14 | `app/lib/v2/companyLab/premiumPolicy.ts` | `COMPANY_CAPABILITY_COEFFICIENT_PARAMETERS_V1` | （個別、§10.7） |
+| 15 | `app/lib/v2/companyLab/qualityAssuranceInvestment.ts` | `QUALITY_ASSURANCE_INVESTMENT_PARAMETERS_V1` | （個別、§10.8） |
+| 16 | `app/lib/v2/companyLab/standardAi/strategyProfile.ts` | `STRATEGY_PROFILES` 他 | （個別、§10.9。companyLab検証専用） |
+| 17 | `app/lib/v2/companyLab/strategyProfileCapexOverlay.ts` | （定数 `OVERLAY_PRODUCT_UTILIZATION_THRESHOLD`） | （個別、§10.10。companyLab検証専用） |
+| 18 | `app/lib/v2/companyLab/strategyProfileInvestmentOverlay.ts` | （定数 `VAP_PRODUCT_DEVELOPMENT_INVESTMENT_RATIO`） | （個別、§10.11。companyLab検証専用） |
+| 19 | `app/lib/v2/companyLab/standardAi/autoplay/strategyVerificationEnvironments.ts` | `STRATEGY_VERIFICATION_ENVIRONMENTS` | （個別、§10.12。検証シナリオ専用） |
+| 20 | `app/lib/v2/production/pdMechanizationEffect.ts` | （関数群、パラメータ本体は`capex/parameters.ts`のpdMechanizationテンプレート） | （個別、§5.6・§9.9） |
+| 21 | `app/lib/v2/finance/productStrategyProfitability.ts` | （レポート生成関数群。チューニング対象パラメータなし） | （個別、§7.10） |
+
+**【2026-08-01追記】** #12〜21は Tasks 23-29（HOSO/PD/VAP商品戦略経済性＋検証環境）で新規追加された。#16〜19は本番のStandard AI既定値ではなく、**companyLab検証専用**（`strategyProfilesEnabled`を明示的にtrueで渡した場合のみ参照される）である点に注意。詳細は §5.6・§7.10・§9.9・§10.5〜§10.13を参照。
 
 ### 0.4 実行時アサーション
 
@@ -645,6 +657,33 @@ HOSO原料 100t → 冷凍HOSO 約100 物理t（1.00）
 | `finishedGoods.defaultShelfLifeTurns` | 4 |
 | `supplySignal.preserveExistingWhenNoSignal` | true |
 
+### 5.6 PD機械化による実効労務負荷係数（`production/pdMechanizationEffect.ts`、2026-08-01追加）
+
+**目的**: PD自動化戦略（製造業型）を成立させるため、capex側の投資（§9.9の`pdMechanization`案件）が完成・稼働開始したあと、§5.3の`laborIntensityCoefficientByProduct.pd`（基準1.2）を段階的に引き下げる因果関係だけを新規に接続する。会社別の投資水準・稼働開始時期・累積習熟度という新規の永続状態は作らず、既存の`CompanyCapexState`（capex側のプロジェクト状態遷移）から毎期再導出する（decision/*.ts・policy.tsは無改変）。
+
+**適用される計算式**:
+
+```
+rampProgress        = 稼働開始からの習熟度（0〜1）。稼働開始四半期は0、
+                       t=1..rampUpQuarters-1 は t/rampUpQuarters の線形立ち上がり、
+                       t>=rampUpQuarters で1.0
+mechanizationLevel   = rampProgress × 当期のPD稼働率（0〜1）
+effectivePdCoefficient = max(floorCoefficient,
+                              baseCoefficient × (1 − maxReductionRatio × mechanizationLevel))
+```
+
+`baseCoefficient` は§5.3の`laborIntensityCoefficientByProduct.pd`（1.2）。`maxReductionRatio`・`floorCoefficient`・`rampUpQuarters`は capex側テンプレート（§9.9）が保持する暫定値であり、本ファイルはそれをそのまま消費する（数値自体は本ファイルには存在しない）。
+
+**mechanizationLevelを稼働率と掛け合わせる設計意図（採用根拠）**: 「機械は動かしていなければ省人化効果を生まない」という設計要件を満たすため。投資が完成・稼働開始済みであっても、当期のPD操業度が低ければ実効係数はほとんど下がらない。
+
+**感度**: `mechanizationLevel`が0→1へ変化すると（他条件が中度採用の暫定値 maxReductionRatio=0.20 のとき）、実効係数は1.2→max(1.0, 1.2×0.8=0.96)=**1.0（floorに到達）**。すなわち完全に機械化・フル稼働した会社のPD必要人員は、係数ベースで基準（1.2）比 **最大16.7%削減**（1.2→1.0）。稼働率が半分（0.5）なら`mechanizationLevel`も比例して半分になり、削減幅もおおむね半分（1.2×(1-0.2×0.5×1.0)=1.08、10%削減）に縮小する。
+
+**副次効果（小さく上限付き）**: `computePdMechanizationQualityBonus`が、機械化レベルに応じて`baselineOperationalQuality`（§6.2、基準85）へ**最大+3点**の加点を与える（主効果である労務負荷低減より小さい効果として意図的に上限を設けている）。
+
+**どの戦略を支えるか**: PD自動化戦略（製造業型、companyLab検証専用の`PD_AUTOMATION`プロファイル、§10.9）。
+
+**変更時に影響するテスト**: `app/lib/v2/production/__tests__/pdMechanizationEffect.test.ts`、`app/lib/v2/companyLab/standardAi/__tests__/strategyProfile.test.ts`、`app/v2/company-lab/__tests__/capexViewModel.test.ts`（capexビューモデル側のラベル・効果表示）。
+
 ---
 
 ## 6. 品質・信頼性（`quality/parameters.ts`）
@@ -883,6 +922,27 @@ baseline / canonical の8ターン実行に対して校正されている。
 
 目標としているのは **Minh Phu 型の経済構造**（原料費が売上原価の60〜70%、営業利益率は一桁）。
 
+### 7.10 商品戦略別収益性レポート（`finance/productStrategyProfitability.ts`、2026-08-01新規）
+
+**このファイルは他と性質が異なる。** ここに集約されているのは**チューニング対象のパラメータではなく、レポート生成のための計算式定義**である。「商品別限界利益率が高い商品（VAP）が常に最良の戦略に見える」という誤解を正すため、既存の決算結果（`closeFinancialQuarter`の出力）・生産/販売/設備投資の実績値を読み取るだけの純粋関数として、投入資源あたりの収益性・ROIC・運転資本・在庫回転を横並びで算出する。`closeFinancialQuarter`のシグネチャ・戻り値やPL/BS/CFの数値には一切影響しない、完全に追加的（additive）なレポートである。下限・上限・感度は「ないので記載しない」（実装指示どおり、本節はフィールドを簡略形式とする）。
+
+| # | レポート項目 | 計算式 | 採用根拠 |
+|---|---|---|---|
+| 1 | トンあたり限界利益 | `contributionMarginUsd ÷ tonsSold` | 商品別限界利益（既存値）を数量で正規化し、規模の違う商品間で比較可能にする |
+| 2 | ワーカー1人あたり限界利益 | `contributionMarginUsd ÷ workerHeadcount` | 「労務集約度の高いVAPは同じ利益でも多くの人員を要する」という§5.3の労務負荷係数（HOSO:PD:VAP=1.0:1.2:3.0）の帰結を、収益性の面から裏づけるための指標 |
+| 3 | 営業人員1人あたり限界利益 | `contributionMarginUsd ÷ salesForceHeadcount` | 同上、営業側の投入資源に対する正規化 |
+| 4 | 設備能力単位あたり利益 | `operatingProfitAttributableUsd ÷ capacityUnitsHosoEqTons`（`operatingProfitAttributableUsd = contributionMarginUsd − directFixedCost`） | 設備投資の資本効率を商品間で比較する。`capacityUnitsHosoEqTons`は稼働中工場の商品専用能力（hoso/pd/vapCapacity）のみを合計し、共通前処理・凍結包装能力（商品非依存）は含めない（帰属先が一意に定まらないため） |
+| 5 | ROIC | `NOPAT ÷ investedCapital`、`NOPAT = operatingProfit × (1 − incomeTaxRate)`、`investedCapital = totalEquity + shortTermLoans + longTermLoans` | 税率は§7.5の`incomeTaxRate`（0.20）をそのまま再利用。投下資本は自己資本＋有利子負債という標準的な定義の1つ |
+| 6 | 必要運転資本 | `(AR + 原料在庫 + 完成品在庫 + その他流動資産) − (AP + その他負債)` | 現金を除く「オペレーティング・ワーキングキャピタル」の一般的定義。有利子負債はROIC側の投下資本と二重に扱わないよう除外 |
+| 7 | 在庫回転（会社レベル） | 原料: `rawMaterialCost ÷ 平均原料在庫`／完成品: `totalCostOfSales ÷ 平均完成品在庫` | 商品別の全部原価COGS内訳が財務モジュールに存在しないため、恣意的な配賦を避けて会社レベルにとどめる（期末完成品在庫の商品別内訳は参考情報として別途提供） |
+| 8 | 戦略固有投資控除後利益 | `operatingProfit − (pdMechanizationSpendUsd + qualityAssuranceInvestmentSpendUsd)` | PD自動化・VAP品質保証投資の当期capex支払額（`CapexProjectQuarterEvent.paymentSucceededUsd`）を営業利益から控除する |
+
+**§8の既知の制約（追跡不能な2チャネル）**: 調達スケール戦略（§10.5 `procurementScaleState.ts`）とVAP商品開発戦略（§10.6 `productDevelopmentState.ts`）は、いずれもゲーム内の意思決定入力にUSD建て投資額フィールドが存在しない（前者はトン数、後者は`companyLab/runner.ts`から実際には呼び出されていない引数）。0として扱うと「投資していない」という誤った事実を作ってしまうため、`procurementRelationshipSpendUsd`・`vapProductDevelopmentSpendUsd`は**意図的にnull固定**とし、`isComplete: false`で「4戦略中2戦略しか金額を追跡できていない」ことを明示する。
+
+**どの戦略を支えるか**: HOSO/PD/VAP全戦略の比較・振り返り用レポート（意思決定ロジックへは影響しない）。
+
+**変更時に影響するテスト**: `app/lib/v2/finance/__tests__/productStrategyProfitability.test.ts`。
+
 ---
 
 ## 8. 資金調達・信用（`financing/parameters.ts`）
@@ -1100,6 +1160,32 @@ assertValidComponentRatios(CAPEX_PARAMETERS_V1.templatesByType);
 
 全テンプレートについて `buildingRatio + machineryRatio` が 1（誤差 1e-9 以内）であることをモジュール読み込み時に検証し、違反すれば `CapexValidationError` を投げる。
 
+### 9.9 PD専用機械化投資テンプレート（`pdMechanization`、2026-08-01新規）
+
+> **【重要・暫定値・要校正】本節の数値はすべて仮置きであり、工場増設・PD機械化投資額そのものの正式な意思決定フロー（別途設計レビュー予定）が確定するまでの暫定値として扱うこと。最終値として扱ってはならない。**
+
+**位置づけ**: `pdLineExpansion`（新規ライン増設、能力+350t/四半期）とは異なり、既存PDラインへの自動化・省人化改修という位置づけ。生産能力（`capacityIncreaseTonsPerQuarter`）は増やさず、§5.6の実効労務負荷係数を下げる効果のみを持つ。
+
+| パラメータ | 初期値 | 単位 | 下限/上限 | 校正状態 |
+|---|---|---|---|---|
+| `standardBudgetUsd` | 2,500,000 | USD | なし（テンプレート固定値） | 仮置き（`pdLineExpansion`の6割程度として設定） |
+| `paymentRatios` | [0.4, 0.6] | 比率（合計1.0） | 合計=1.0（実行時アサーション対象外だが慣例踏襲） | 仮置き |
+| `buildingRatio` / `machineryRatio` | 0.1 / 0.9 | 比率 | 合計=1（`assertValidComponentRatios`で検証） | 仮置き（改修中心で新規建屋比率を下げた） |
+| `maintenanceRatePerQuarter` | 0.01 | 比率/四半期 | なし | 仮置き（4%/年。品質管理設備5%/年とHOSOライン3%/年の中間） |
+| `laborIntensityReduction.maxReductionRatio` | 0.20 | 比率 | 0〜1 | **要校正**。軽度10%/中度20%/高度30%の3案を比較検討し、「HOSO水準（1.0）へ着実に近づきつつ下回らない」という設計意図に最も合致する中度20%を暫定採用 |
+| `laborIntensityReduction.floorCoefficient` | 1.0 | 係数（無次元） | なし（下限そのもの） | 確定的に「HOSOの基準と同水準を下限とし、それ以上は下げない」という設計方針 |
+| `laborIntensityReduction.rampUpQuarters` | 2 | 四半期 | なし | 仮置き。稼働開始1四半期目ゼロ→2四半期目立ち上げ→3四半期目満額という段階的習熟の想定 |
+
+**適用される計算式**: §5.6参照（`calculateEffectivePdLaborIntensity`）。
+
+**採用根拠（`maxReductionRatio=0.20`の選定理由、ファイル内コメントより）**: 軽度10%は`mechanizationLevel=1.0`でも理論値1.2×0.9=1.08までしか下がらず「機械化戦略」として成立しにくい。高度30%は理論値1.2×0.7=0.84までHOSO水準(1.0)を大きく下回ることになり、`floorCoefficient=1.0`でクリップされる前提と整合しない（floorに張り付く前提の投資効果を過大な削減率で謳うのは誤解を招く）。中度20%は理論値0.96となり、`floorCoefficient=1.0`によって機械化レベルが十分高い四半期にちょうどHOSO水準で頭打ちになる、という設計意図に最も合致する。
+
+**感度**: `maxReductionRatio`を0.20→0.30（+50%）に変更すると、フル機械化・フル稼働時の実効係数は変わらず1.0（floorCoefficientでクリップされるため）だが、floorに到達するまでの`mechanizationLevel`の閾値が下がる（0.20時は`mechanizationLevel=0.833`でfloor到達、0.30時は`mechanizationLevel=0.556`で到達）。つまり感度は非線形で、floorに到達済みの状態では`maxReductionRatio`を変えても実効係数自体は変化しない。
+
+**どの戦略を支えるか**: PD自動化戦略（製造業型）。
+
+**変更時に影響するテスト**: `app/lib/v2/production/__tests__/pdMechanizationEffect.test.ts`、`app/lib/v2/capex/__tests__/`配下のテンプレート検証テスト（`assertValidComponentRatios`を含む）、`app/v2/company-lab/__tests__/capexViewModel.test.ts`。
+
 ---
 
 ## 10. Company Lab 固有の前提値（`companyLab/parameters.ts`）
@@ -1157,6 +1243,249 @@ Phase 8B-1、実装指示 §5.6。プレイヤー以外の4社が使う単純な
 ### 10.4 廃止された値（Phase 6.3）
 
 旧 `COMPANY_LAB_RAW_MATERIALS_PARAMETERS`（調達処理能力の約100倍一律補正）は**廃止された**。明確な経済的根拠のないテスト専用倍率であり、補正後は調達能力が工場能力の7〜11倍と過大で、制約として一度も機能していなかった（Phase 6.2 診断）。第4.3節の工場能力連動方式へ置き換えられている。
+
+### 10.5 HOSO規模戦略：調達規模効果（`procurementScaleState.ts`、2026-08-01新規）
+
+**目的**: HOSO集中戦略（コストリーダー戦略）を成立させるため、会社×調達チャネル（国内買付/輸入/自社養殖）の粒度で「継続的な調達規模」が蓄積される状態を導入する。継続的に大量調達する会社ほど、実効仕入原価が逓減する（数量割引）・仕入先との関係性が厚くなる（競争力ウェイトへの加点）、という2経路でHOSO大量生産・薄利多売戦略を後押しする。`salesBase.ts`（既存の営業基盤蓄積）と同じ設計パターン（スパース表現・純粋関数・決定論的companyId固定順ソート）を踏襲する。
+
+**適用される計算式**:
+
+```
+移動平均（早期丸め・逐次更新）:
+  n = min(trailingQuarters, 経過四半期数+1)
+  trailingVolume = 前期trailingVolume + (当期購入量 - 前期trailingVolume) / n
+
+割引率（飽和型逓減カーブ）:
+  discountRatio = maxDiscountRatio × (1 - exp(-trailingVolume / scaleUnitTons))
+
+関係スコア:
+  活動あり（当期購入量>0）: relationshipScore = min(100, 前期 + relationshipActiveGainPerQuarter)
+  活動なし: relationshipScore = neutral + (前期 - neutral) × (1 - relationshipIdleDecayRatioPerQuarter)
+```
+
+| パラメータ | 初期値 | 単位 | 下限/上限 | 校正状態 |
+|---|---|---|---|---|
+| `trailingQuarters` | 4 | 四半期 | なし | 仮置き |
+| `maxDiscountRatioByChannel.domestic` | 0.10 | 比率 | 0〜1（実質的な逓減カーブの漸近上限） | **要校正**。国内買付は国内サプライヤーとの直接取引で規模の経済が働きやすいと想定し3チャネル中最大 |
+| `maxDiscountRatioByChannel.imported` | 0.06 | 比率 | 同上 | **要校正**。物流制約で規模効果が相対的に小さい |
+| `maxDiscountRatioByChannel.aquaculture` | 0.04 | 比率 | 同上 | **要校正**。生物学的制約で規模効果が最小 |
+| `scaleUnitTonsByChannel.domestic` | 800 | HOSO換算トン/四半期 | なし（曲線の半飽和点） | **要校正**。会社フィクスチャの調達処理能力（数百〜数千トン/四半期）を踏まえ、4四半期継続でこの規模なら効果の半分程度に達する水準として設定 |
+| `scaleUnitTonsByChannel.imported` | 1,200 | 同上 | なし | **要校正** |
+| `scaleUnitTonsByChannel.aquaculture` | 600 | 同上 | なし | **要校正** |
+| `relationshipActiveGainPerQuarter` | 3.0 | 点/四半期 | 上限100（スコア自体の上限） | **要校正**。`salesBase.ts`の同種パラメータと同水準の設計思想 |
+| `relationshipIdleDecayRatioPerQuarter` | 0.08 | 比率/四半期 | なし | **要校正** |
+| `relationshipNeutralScore` | 50 | 点（0-100スケール） | なし | 全モジュール共通の中立値（付録参照）に合わせた確定的な選択 |
+
+**採用根拠**: 単発の大量購入と継続購入を区別する（後者の方が最終的な効果が大きい）という要求を、累積平均の逐次更新式で満たす。指数飽和カーブ（割引率）を採用したのは、数量が増えるほど増分が逓減する、という一般的な規模の経済の性質を最小限のパラメータ（`maxDiscountRatio`・`scaleUnitTons`の2つ）で表現するため。
+
+**感度**: `scaleUnitTonsByChannel.domestic`（800t）を基準に、四半期あたり継続800tの国内買付を続けると割引率は`maxDiscountRatio × (1-e⁻¹) ≈ 0.10 × 0.632 = 6.3%`。1,600t継続なら`0.10 × (1-e⁻²) ≈ 8.6%`。`scaleUnitTons`を±20%変化させると、同じ購入量に対する割引率はおおむね±15〜20%程度変化する（指数関数の性質上、購入量がscaleUnitTonsに近い領域で感度が最大）。
+
+**どの戦略を支えるか**: HOSO規模戦略（コストリーダー型）。companyLab検証環境ではCompany `MASS`（`HOSO_SCALE`プロファイル、§10.9）が主にこの効果を活用する想定。
+
+**変更時に影響するテスト**: `app/lib/v2/companyLab/__tests__/procurementScaleState.test.ts`。
+
+### 10.6 VAP差別化戦略：商品開発投資の蓄積（`productDevelopmentState.ts`、2026-08-01新規）
+
+**目的**: VAP差別化戦略（顧客理解型）を成立させるため、会社の継続的なVAP商品開発投資（新規レシピ・仕様開発・試作評価等、Phase 8正式capex体系とは別枠の暫定入力）が「会社別VAP商品開発力」として蓄積される状態を導入する。この蓄積は§10.7の会社能力係数の構成要素の1つになる。`salesBase.ts`と同じ設計パターンだが、粒度は会社単位（市場非依存）。
+
+**適用される計算式**:
+
+```
+投資あり（当期投資額>0）:
+  investmentRatio = min(investmentRatioCap, 当期投資額 / standardBudgetUsd)
+  headroom        = 1 - score/100
+  次期score = clamp(前期score + investmentGainPerQuarterAtStandardBudget × investmentRatio × headroom, floor, cap)
+
+投資なし:
+  次期score = clamp(neutral + (前期score - neutral) × (1 - idleDecayRatioPerQuarter), floor, cap)
+```
+
+| パラメータ | 初期値 | 単位 | 下限/上限 | 校正状態 |
+|---|---|---|---|---|
+| `neutralScore` | 50 | 点（0-100スケール） | なし | 既存スコア体系の中立値に整合 |
+| `standardBudgetUsd` | 400,000 | USD/四半期 | なし | **要校正**。`salesBase.ts`の営業人員基準予算感（数十万〜百万USDのオーダー）を参考にした仮置き |
+| `investmentGainPerQuarterAtStandardBudget` | 4.0 | 点/四半期 | なし | **要校正**。`salesBase.ts`の`activeAcquisitionPerQuarter`(4.0)と同水準（「年単位の継続投資が必要」という設計意図の踏襲） |
+| `investmentRatioCap` | 2.0 | 倍 | なし（それ自体が上限） | **要校正**。標準予算比2倍を超える投資でもゲイン倍率が青天井に増えない飽和上限 |
+| `idleDecayRatioPerQuarter` | 0.06 | 比率/四半期 | なし | **要校正**。`salesBase.ts`の同パラメータ(0.06)と同水準 |
+| `floor` / `cap` | 0 / 100 | 点 | — | スコアレンジそのもの |
+
+**採用根拠**: ヘッドルーム（`1 - score/100`）を乗じるのは、継続投資でも上限100へ急速に飽和しないようにするため（`salesBase.ts`の営業基盤と同じ設計上の理由）。放置時は0ではなく中立値50へ向けて減衰させ、「一度も投資しなかった会社」と「積み上げてから放棄した会社」を区別する。
+
+**感度**: 標準予算どおり（$400,000/四半期）を中立値50から継続投資した場合、初期のゲインは`4.0 × 1.0 × (1-50/100) = 2.0点/四半期`。スコアが上がるほどヘッドルームが縮小するため収束は逓減的（およそ年4回×数年で80点台に到達する程度の速度感）。投資額を標準の0.5倍（§10.11参照）にすると、ゲイン速度もほぼ比例して半減する。
+
+**どの戦略を支えるか**: VAP差別化戦略（顧客理解型）。companyLab検証環境ではCompany `VAP`（`VAP_DIFFERENTIATION`プロファイル）が主にこの効果を活用する想定。
+
+**変更時に影響するテスト**: `app/lib/v2/companyLab/__tests__/productDevelopmentState.test.ts`。
+
+### 10.7 VAP差別化戦略：会社能力係数と市場VAPプレミアムの合成（`premiumPolicy.ts`、2026-08-01新規）
+
+**目的**: 市場全体のVAPプレミアム（`market/productPremium.ts`、§1.6の`vapBasePremiumRatio`等）は一切変更せず、その外側に「会社が実際に実現するプレミアム」を求める合成層を追加する。会社別の能力（営業基盤・商品開発力・品質保証投資・納期信頼性・重大事故履歴）に応じて、市場プレミアムに±30%程度の掛け目をかける。
+
+**適用される計算式**:
+
+```
+raw = 1 + salesBaseWeight × (salesBaseScoreVap - neutral)
+        + productDevelopmentWeight × (productDevelopmentScore - neutral)
+        + qualityAssuranceWeight × (qualityAssuranceLevel×100 - neutral)
+        + deliveryReliabilityWeight × (deliveryReliability×100 - neutral)
+        - majorIncidentPenaltyWeight × max(0, recentMajorIncidentPenalty)
+
+capabilityCoefficient = clamp(raw, coefficientFloor, coefficientCap)
+
+会社実現VAPプレミアム比率 = 市場VAPプレミアム比率 × capabilityCoefficient
+```
+
+| パラメータ | 初期値 | 単位 | 下限/上限 | 校正状態 |
+|---|---|---|---|---|
+| `neutralScore` | 50 | 点（0-100スケール換算後） | なし | 全モジュール共通中立値に整合 |
+| `salesBaseWeight` | 0.006 | 係数点⁻¹ | なし | **要校正**。4要素合計で0-100スコアが中立から最大50点乖離したとき係数がおおむね下限0.7〜上限1.3に収まるよう小さめに設定。営業基盤は「顧客理解・顧客接点」の中核シグナルとして4要素中最大の重み |
+| `productDevelopmentWeight` | 0.006 | 同上 | なし | **要校正**。営業基盤と同水準の重み |
+| `qualityAssuranceWeight` | 0.004 | 同上 | なし | **要校正**。0〜1レンジを×100して同じ点数スケールへ揃えたうえで適用 |
+| `deliveryReliabilityWeight` | 0.003 | 同上 | なし | **要校正**。4要素中最小の重み（VAPプレミアム獲得力の主因は顧客理解・商品開発・品質保証であり、納期は補助的シグナルという位置づけ） |
+| `majorIncidentPenaltyWeight` | 0.1 | 係数点⁻¹（severity基準） | なし | **要校正**。severity 0.5の重大事故1件でおおむね0.05の減点となる水準。`salesBase.ts`の`majorIncidentPenaltyPerSeverity`(8点)と同じ事故が、能力係数側では過大に効かないよう小さめに設定 |
+| `coefficientFloor` | 0.7 | 係数（無次元） | — | **確定**（実装指示どおり） |
+| `coefficientCap` | 1.3 | 係数（無次元） | — | **確定**（実装指示どおり） |
+
+**採用根拠**: VAPに限定して使う（HOSO/PDの価格計算からは一切呼び出さない）。市場全体プレミアム計算（`market/productPremium.ts`）そのものは変更せず、後段に「会社差」を乗せる層として分離することで、既存の市場価格形成ロジックへの影響をゼロに保っている。
+
+**感度**: 4要素すべてが中立（各50点相当）のとき係数=1.0（市場プレミアムそのまま）。4要素すべてが上限（100点相当）まで振れると、寄与合計は`(0.006+0.006+0.004+0.003)×50 = 0.95`となり係数は理論値1.95だが`coefficientCap=1.3`でクランプされるため、**実質的にはどの要素の変化幅でもクランプ内（+30%が上限）**。単独で商品開発力（§10.6）を中立50→満点100まで引き上げても、寄与は`0.006×50=0.30`（+30%）で単独でもcapに到達しうる大きさ。
+
+**下流の減衰（既知の制約）**: この会社実現VAPプレミアム比率は`decision/sales.ts`の`orderQuantityFactor`（受注量係数、[0, 1.1]にクランプ）を経由してのみ販売実績に反映される。市場VAPプレミアムが目標水準（§10.6経済定義の`targetPremium`）付近で既に受注量係数が1.0近辺に飽和している局面では、能力係数を引き上げても受注量には反映されにくい。詳細は§10.13「既知の制約」を参照。
+
+**どの戦略を支えるか**: VAP差別化戦略（顧客理解型）。
+
+**変更時に影響するテスト**: `app/lib/v2/companyLab/__tests__/premiumPolicy.test.ts`。
+
+### 10.8 VAP差別化戦略：品質保証投資のVAP品質接続（`qualityAssuranceInvestment.ts`、2026-08-01新規）
+
+**目的**: `capex/parameters.ts`に既存のテンプレートがありながら生産能力・品質のいずれにも未接続だった`qualityControlEquipment`（品質管理設備、§9.3参照。`capacityIncreaseTonsPerQuarter=0`）を、会社のVAP `baselineOperationalQuality`（§6.2、基準85）へ小さな加点として接続する。新規の永続状態は作らず、既存の`CompanyCapexState`から毎期再導出する（§5.6のPD機械化と同じ設計方針）。
+
+**適用される計算式**:
+
+```
+qualityAssuranceLevel = clamp(稼働中のqualityControlEquipment案件数 / levelProjectCap, 0, 1)
+VAP品質への加点        = maxVapQualityBonusPoints × qualityAssuranceLevel
+```
+
+| パラメータ | 初期値 | 単位 | 下限/上限 | 校正状態 |
+|---|---|---|---|---|
+| `levelProjectCap` | 2 | 件（稼働中のqualityControlEquipment案件数） | なし | **要校正**。1件で部分的効果、2件目で満額とする。`capex/parameters.ts`の`maxConcurrentActiveProjectsPerCompany`(3、§9.7)の範囲内で現実的に到達しうる件数として設定 |
+| `maxVapQualityBonusPoints` | 3 | 点（0-100スケール） | なし | **要校正**。§5.6の`MAX_QUALITY_BONUS_POINTS`(PD機械化の副次品質効果)と同水準の「小さく、上限付き」の設計。基準baseline85に対し3.5%強に相当する程度に意図的に小さく抑えている |
+
+**採用根拠**: 実装指示§7「品質・環境設備は今回、生産能力を増加させない」（§9.3）を踏襲しつつ、VAP差別化戦略成立のために品質面の小さな副次効果だけを新たに認める、という限定的な接続。既存のPD機械化副次効果（`baselineOperationalQuality`への加点、company::pdキー）と衝突しないよう、`mergeBaselineQualityOverrides`で**上書きではなく加算合成**する。
+
+**感度**: `qualityControlEquipment`案件を1件稼働させると`qualityAssuranceLevel=0.5`、VAP品質へ+1.5点。2件稼働で満額`qualityAssuranceLevel=1.0`、+3.0点（基準85→88、+3.5%）。同時に§10.7の`qualityAssuranceWeight`(0.004)経由でVAP能力係数にも寄与する（`qualityAssuranceLevel=1.0`のとき`0.004×(100-50)=0.02`、+2%相当）。
+
+**どの戦略を支えるか**: VAP差別化戦略（顧客理解型）。
+
+**変更時に影響するテスト**: 本ファイル専用の単体テストは無い（2026-08-01時点）。`app/lib/v2/finance/__tests__/productStrategyProfitability.test.ts`が`qualityAssuranceInvestmentSpendUsd`経由で間接的に参照する。将来変更時は`companyLab/runner.ts`を通した統合テスト（`app/lib/v2/companyLab/__tests__/runner.test.ts`）でも回帰確認すること。
+
+### 10.9 商品戦略プロファイル（`standardAi/strategyProfile.ts`、2026-08-01新規・companyLab検証専用）
+
+> **【本番非活性であることに注意】** 本節のプロファイルは、`standardAi/orientationProfile.ts`の`createSai5ParamsResolver`に`strategyProfileEnabled`オプションを明示的にtrueで渡した場合のみ参照される。**本番のStandard AI既定値（`STANDARD_AI_PARAMETERS_V1`）ではない。** 未指定（false相当）なら既存の全出力・全テストへの影響はゼロ。
+
+**目的**: `managementProfile.ts`（経営性格）・`orientationProfile.ts`（市場・商品志向）と同じ設計原則で、「会社がどの商品戦略（規模/自動化/差別化）を追求するか」というもう1層の会社別バイアスを表現する。標準AIの判断ロジック（`policy.ts`・`decision/*.ts`）は一切変更せず、会社IDに応じて差し替える`StandardAiParameters`インスタンスを生成するだけ。
+
+**4プロファイルとバイアス値（2026-08-01時点、1回のチューニングラウンド後の最終値）**:
+
+| プロファイル | 会社ID(検証割当) | 販売積極性 | 値引許容度 | 輸入依存度 | 商品志向バイアス | 設備投資しきい値前倒し | 高付加価値受注選好 | capex overlay | investment overlay |
+|---|---|---|---|---|---|---|---|---|---|
+| `BALANCED` | BAL, CONSV | 0 | 0 | 0 | なし | なし | 0 | 無効 | 無効 |
+| `HOSO_SCALE` | MASS | +5% | −5% | +5% | hoso +5% | hoso +0.03（絶対値） | 0 | 無効 | 無効 |
+| `PD_AUTOMATION` | JPQ | 0 | 0 | 0 | **pd +1.5%**（2026-08-01調整、旧+5%から縮小） | pd +0.08（絶対値） | 0 | pdMechanization有効 | 無効 |
+| `VAP_DIFFERENTIATION` | VAP | 0 | 0 | 0 | **vap +7%**（2026-08-01調整、旧+5%から引き上げ） | なし | +0.05 | qualityControlEquipment有効 | vapProductDevelopment有効 |
+
+**採用根拠（チューニング経緯）**: 当初`PD_AUTOMATION.productOrientationBiasRatioByProduct.pd`と`VAP_DIFFERENTIATION.productOrientationBiasRatioByProduct.vap`はいずれも+5%だったが、4環境×6seed×32ターンの実測検証で以下が判明した。
+
+- PDの基準単価あたり貢献利益がHOSOより構造的に高い（実測: HOSO ~$658/t・PD ~$1,356/t）ため、+5%の商品志向シフトが環境（追い風かどうか）に関係なく一律の利益押上げとして効き、JPQがNORMAL環境でも6seed中5seed首位という「環境非依存の一律優位」を生んでいた。pd側は0.05→**0.015**へ縮小し、代わりにcapex overlay（§10.10、トリガー訂正後）が需要が伸びた四半期・環境でのみ間欠的に発火する効果の相対的寄与を高めた。
+- VAPの基準単価あたり貢献利益はさらに高い（実測: VAP ~$2,805〜4,143/t）にもかかわらず、投資overlay（§10.11）の固定コストが効果の薄いメカニズム（§10.13参照）に費やされていたため、VAP_DIFFERENTIATIONが4環境すべてで環境平均を下回るという逆転が確認された。investment overlayのコストを縮小（§10.11）する一方、志向バイアスをvap +5%→**+7%**へ引き上げ、投資の重荷を減らしつつ実効性のある（生産構成シフトによる）押上げの比重を高めた。
+
+**感度**: `productOrientationBiasRatioByProduct`は`productOrientationMultipliers[product]`（既定1.0）への比率バイアスとして乗算される。PD_AUTOMATIONのpd=0.015なら、既定倍率1.0が1.015に、VAP_DIFFERENTIATIONのvap=0.07なら1.0が1.07になる。この倍率はさらに`clampProductMult`（0.85〜1.20にクランプ、`decision/sales.ts`）を通るため、他レイヤー（`orientationProfile.ts`のSAI-5A等）の既存バイアスと合算した結果がこの範囲を超える場合はクランプされる。
+
+**どの戦略を支えるか**: HOSO規模・PD自動化・VAP差別化の3戦略すべて（検証専用の会社IDマッピングは`STRATEGY_PROFILE_BY_COMPANY_ID`に一か所集約）。
+
+**変更時に影響するテスト**: `app/lib/v2/companyLab/standardAi/__tests__/strategyProfile.test.ts`、`app/lib/v2/companyLab/standardAi/autoplay/__tests__/heterogeneousProfiles.test.ts`、`app/lib/v2/companyLab/standardAi/autoplay/__tests__/runCase.test.ts`。
+
+### 10.10 商品戦略プロファイル capex overlay（`strategyProfileCapexOverlay.ts`、2026-08-01新規・companyLab検証専用）
+
+**目的**: 標準AIの`decision/capex.ts`はHOSO/PD/VAPライン増設・共通前処理能力増設の4種類しか提案しない（実装指示のスコープ判断）。`pdMechanization`・`qualityControlEquipment`は一切提案しない。本ファイルは`decision/*.ts`・`policy.ts`を無改変のまま、標準AIが提出した`CompanyDecisionInput`の末尾へ、商品戦略プロファイルが要求する追加capex提案を合成する別枠のオーバーレイ。
+
+**適用される計算式（発火条件）**:
+
+```
+安全性判定  = observation.cashUsd > targetMinimumCashUsd × capexCashSafetyMultiple(1.75)
+             AND borrowingPressure < 1
+在庫判定    = 対象商品の完成品在庫 <= 対象商品能力 × finishedGoodsTargetQuarters × excessInventoryRatioForDiscount
+稼働判定    = (前期実績生産量 / 商品別総能力) >= OVERLAY_PRODUCT_UTILIZATION_THRESHOLD
+全条件成立かつ既存の同種案件を保有していなければ提案を追加
+```
+
+| パラメータ | 初期値 | 単位 | 下限/上限 | 校正状態 |
+|---|---|---|---|---|
+| `OVERLAY_PRODUCT_UTILIZATION_THRESHOLD` | 0.50 | 比率（対象商品固有の前期稼働率） | 0〜1 | **要校正・2026-08-01訂正**。当初は`decision/capex.ts`の会社全体集計しきい値`capexSustainedUtilizationThreshold`(0.92、§10.9の親モジュールにあたるStandard AIパラメータ)をそのまま流用していたが、4環境×6seed×32ターンの実測で会社全体稼働率が全期間・全環境・全会社を通じて0.50を超えることがほぼ無く（実測平均0.38〜0.49）、この条件が常にfalseで固定され、120ケース全てで累計capex支払額が0という「常時不発」のバグ状態だったことが判明。対象商品固有の前期稼働率（商品別総能力に対する前期実績生産量の比、`observation`が既に保持する既存2フィールドのみで算出）へトリガーを訂正し、実測分布（平均0.35〜0.40、最大0.76）から「平均的な四半期では満たされず、需要が伸びた四半期・環境でのみ間欠的に満たされる」水準として0.50を選定 |
+
+**採用根拠**: `decision/capex.ts`側の会社全体集計しきい値（0.92）は一切変更しない。本ファイル内だけで使う、対象商品限定の別しきい値として新設した。新しい・無関係なトリガーは発明せず、既存のライン増設トリガーが使う信号（現金/借入健全性・対象商品の完成品在庫が過剰でない）をそのまま鏡写しする。
+
+**感度**: しきい値0.50を0.76（実測最大値）近くまで引き上げると、発火頻度はさらに稀になり「需要が非常に伸びた四半期のみ」に限定される。逆に0.35（実測平均下限）まで下げると、平均的な四半期でも発火するようになり、追加capexの支払頻度が上がる。
+
+**どの戦略を支えるか**: PD自動化戦略（`pdMechanization`提案）・VAP差別化戦略（`qualityControlEquipment`提案）。
+
+**変更時に影響するテスト**: `app/lib/v2/companyLab/__tests__/strategyProfileOverlays.test.ts`。
+
+### 10.11 商品戦略プロファイル investment overlay（`strategyProfileInvestmentOverlay.ts`、2026-08-01新規・companyLab検証専用）
+
+**目的**: `productDevelopmentState.ts`（§10.6）の更新関数`updateProductDevelopmentState`は会社別の当期投資額を受け取れる形に対応済みだが、実際の呼び出し元（`companyLab/runner.ts`）は常に空Map（投資額0）で呼び出しており、実額を投入する経路がどこにも存在しなかった。本ファイルはVAP差別化戦略プロファイルが要求する場合にのみ、四半期あたりの投資額を計算する。
+
+**適用される計算式**:
+
+```
+投資額（会社×四半期） = standardBudgetUsd × VAP_PRODUCT_DEVELOPMENT_INVESTMENT_RATIO
+                       （investmentOverlay.vapProductDevelopmentを要求する会社のみ。他は0＝マップに含めない）
+```
+
+| パラメータ | 初期値 | 単位 | 下限/上限 | 校正状態 |
+|---|---|---|---|---|
+| `VAP_PRODUCT_DEVELOPMENT_INVESTMENT_RATIO` | 0.5 | 倍（`standardBudgetUsd`比） | なし | **要校正・2026-08-01調整**。当初1.0倍（$400,000/四半期そのもの）だったが、4環境×6seed×32ターンの実測検証で、この投資が費消する現金（累計$12.8M、環境非依存の固定コスト）に対し、それが押し上げるVAP能力係数（§10.7）は`orderQuantityFactor`（受注量係数、§10.13参照）経由でしか使われず、市場VAPプレミアムが目標水準に近い/上回っている限り実質的に飽和してほぼ効果が出ない（実測: VAP社のVAP商品貢献利益/tはBALANCED社とほぼ同一、例VAP_TAILWINDで$4,070.8 vs $4,076.4/t）ことが判明。「効果がほとんど無いのに環境非依存の固定費だけがかかる」状態を軽減するため0.5倍（$200,000/四半期、累計$6.4M）へ引き下げた |
+
+`standardBudgetUsd`本体（$400,000）は§10.6の値をそのまま参照する（新しい金額の物差しを発明しない）。
+
+**採用根拠**: `decision/sales.ts`側の受注量係数の消費ロジックはこのブランチのスコープ外（decision/*.ts変更禁止）のため直接は直せないが、少なくとも「効果の薄い投資に払うコストを縮小する」ことは本ファイルのスコープ内である。
+
+**感度**: VAP能力係数は、標準予算比0.5倍の投資でも複数四半期をかけて上限近くへ収束する設計（idle decayとのバランス上、投資額が半分でも定常状態のスコアはさほど下がらない）ため、能力面の意図はおおむね維持しつつ固定費側の重荷だけを軽くしている。この投資チャネルを完全に0にすると、`productDevelopmentScore`は中立値50付近に留まり、§10.7の能力係数への寄与（`productDevelopmentWeight × (score-50)`）はゼロに近づく。
+
+**どの戦略を支えるか**: VAP差別化戦略（顧客理解型）。調達規模効果（HOSO_SCALE、§10.5）は購入行動そのものから蓄積する設計のため、対応する$投資チャネルは意図的に追加していない（非対称性はファイル冒頭コメントに明記）。
+
+**変更時に影響するテスト**: `app/lib/v2/companyLab/__tests__/strategyProfileOverlays.test.ts`。
+
+### 10.12 戦略検証用シナリオ環境（`standardAi/autoplay/strategyVerificationEnvironments.ts`、2026-08-01新規）
+
+**位置づけ**: 本節のパラメータは**ゲームバランス調整対象の「ゲームプレイ用パラメータ」ではなく、検証専用の「シナリオ・市場条件パラメータ」**である。既存の代表5シナリオ（`ALL_SCENARIO_DEFINITIONS`）には含まれず、`companyLab/runner.ts`の`findScenarioDefinitionForCompanyLab()`のフォールバックとしてのみ解決される。既存の長期シナリオ・イベントモジュール（`scenario/`）をそのまま再利用し、新しい「市場条件」の型・パイプラインは作っていない。`market/productPremium.ts`・`decision/*.ts`・`policy.ts`は一切変更しない（需要・処理能力トレンドという既存の外生入力レバーだけを使う）。
+
+4環境の需要成長率・能力トレンドの差分（ベースライン比）:
+
+| 環境 | 差分内容 | 主な数値 |
+|---|---|---|
+| `NORMAL` | ベースラインそのもの（差分ゼロ） | — |
+| `HOSO_TAILWIND` | CN/OTHERのHOSO需要成長を引き上げ＋4か国の養殖能力成長を抑制 | 需要成長率: CN 1.21→**1.55**、OTHER 1.17→**1.35**。養殖能力成長率: EC 1.10→1.05、IN 1.08→1.04、ID 1.07→1.035、VN 1.09→1.045（いずれもベースラインの伸び幅を概ね半減） |
+| `PD_TAILWIND` | 全5市場の需要を底堅く引き上げ＋PD処理能力をほぼ横ばいに固定＋VN/ID品質スコア引き上げ＋疾病/景気減速イベント除外 | 需要成長率: CN 1.21→1.28、US 1.11→1.15、EU 1.06→1.09、JP 1.02→1.05、OTHER 1.17→1.22。PD処理能力成長: 8年で**+5%のみ**（既定フォールバックはproduction比率で伸び続ける）。品質スコア: VN/ID +12点（8年間） |
+| `VAP_TAILWIND` | US/EU/JP/CNのVAP需要成長を引き上げ＋VAP処理能力をほぼ横ばいに固定 | 需要成長率: CN 1.21→1.30、US 1.11→**1.35**、EU 1.06→**1.30**、JP 1.02→**1.20**。VAP処理能力成長: 8年で**+2%のみ** |
+
+**適用される計算式**: 需要成長率・処理能力成長率はいずれも`scenario/`の`LongTermTrend`（キーフレーム線形補間）としてそのまま流し込まれる。処理能力の「ほぼ横ばい」トレンドは`tightProcessingCapacityTrends()`が、シナリオ前史のturn1供給量×既定比率（§2.2の`defaultPdCapacityRatioOfProduction`=0.30 / `defaultVapCapacityRatioOfProduction`=0.10）を起点に、`STANDARD_SCENARIO_DURATION_TURNS`(32、§2.5)時点で`start × endGrowthRatio`（PD: 1.05倍、VAP: 1.02倍）に達するキーフレームを2点だけ作る形で実装している。
+
+**採用根拠**: 需要側を引き上げつつ対象製品の処理能力の伸びを需要成長より意図的に遅くする（＝需給を逼迫させる）ことで、`market/productPremium.ts`内部の数式やパラメータを一切触らずに対象商品のプレミアムを引き上げられる、という外生レバーのみを使う設計。各環境は「切り分け」を意識しており、たとえばPD_TAILWINDはVAP処理能力を明示トレンドなし（既定フォールバックのまま）にすることで、VAP_DIFFERENTIATION戦略の効果を混入させないようにしている。
+
+**どの戦略を支えるか**: 検証環境そのもの（HOSO_TAILWINDはHOSO規模戦略、PD_TAILWINDはPD自動化戦略、VAP_TAILWINDはVAP差別化戦略の効果を、それぞれ切り分けて測定するための市場条件）。
+
+**変更時に影響するテスト**: `app/lib/v2/companyLab/standardAi/autoplay/__tests__/strategyVerificationEnvironments.test.ts`、`app/lib/v2/companyLab/standardAi/autoplay/__tests__/runCase.test.ts`、`app/lib/v2/companyLab/standardAi/autoplay/__tests__/heterogeneousProfiles.test.ts`。
+
+### 10.13 既知の制約（4環境×4プロファイル検証シミュレーションの結果、2026-08-01）
+
+Tasks 23-29の最終検証として、32ターン×4戦略プロファイル×4環境×複数seedのシミュレーション（`scripts/strategyComparisonSim.ts`）を実行し、1回のチューニングラウンド（§10.9〜§10.11の値調整）後の結果を確認した。**現在のパラメータ化は部分的な差別化を達成しているが、完全な効果は確認できていない。** 以下2点を隠さず記録する。
+
+1. **VAP_DIFFERENTIATIONの自社タイルウィンド環境（VAP_TAILWIND）が、VAPにとって最良の環境として現れない。** §10.7の会社能力係数メカニズムは、`decision/sales.ts`の`orderQuantityFactor`（受注量係数、§10.7参照）というボリューム受入ゲートに消費されており、このゲートが市場条件次第でほぼ1.0近辺に飽和してしまうため、能力係数を引き上げても販売実績への反映が限定的になる。`decision/sales.ts`は本ブランチの変更許可範囲外である。
+2. **専門戦略（HOSO_SCALE・PD_AUTOMATION・VAP_DIFFERENTIATION）が、BALANCEDと比べて明確に大きいseed間の結果ばらつきを示さない。** §10.10のcapex overlayメカニズム（発火すればseed依存の確率的ばらつきを追加するはずの経路）が、`decision/capex.ts`の現行の現金安全性ゲート（`capexCashSafetyMultiple=1.75`、§9.7の`minimumCashReserveUsd`と連動）のもとでは滅多に発火しないため。`decision/capex.ts`も本ブランチの変更許可範囲外である。
+
+**今後の対応の選択肢（本ブランチのスコープ外）**: (a) 本節のプロファイル振れ幅（§10.9のバイアス値）を、今回検証した範囲を超えてさらに拡大する、または (b) `decision/capex.ts`の現金安全性ゲートと`decision/sales.ts`のプレミアム消費ロジックそのものに手を入れる。いずれも別タスクとして設計レビューを要する。
 
 ---
 
@@ -1324,3 +1653,5 @@ CONSV だけ出勤率が 0.97 と高い。
 ---
 
 *本書に記載したすべての値は、2026-07-26 時点のリポジトリ `feature/v2-export-download-ui` ブランチの各 `parameters.ts` および `fixtures.ts` を全文読解して転記したものである。導出値（カバレッジ表・成約能力表・実効能力表・労働能力表・priceScore表など）は上記の実値から本書作成時に計算したものであり、その旨を各表で明示している。*
+
+*【2026-08-01追記】§0.3の#12〜21、§5.6、§7.10、§9.9、§10.5〜§10.13は、`feature/v2-product-strategy-economics`ブランチ（Tasks 23-29、HOSO/PD/VAP商品戦略経済性＋検証環境）の完了に伴い追記した。既存の章立て・節番号は変更していない（新規節の挿入のみ）。追記対象ファイルは同ブランチの各`parameters.ts`・関連実装ファイルを全文読解して転記したものである。*
