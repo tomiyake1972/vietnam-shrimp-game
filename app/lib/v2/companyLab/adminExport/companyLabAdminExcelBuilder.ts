@@ -9,6 +9,7 @@
 // 検算式のロジックをexceljsへ移植したもの。
 
 import ExcelJS from "exceljs";
+import { execFileSync } from "node:child_process";
 import type {
   AllCompaniesExportPayload,
   CompanyExportPayload,
@@ -16,6 +17,43 @@ import type {
   ExportCompanyDecisionInfo,
   ExportCompanySummary,
 } from "../../../../api/v2/exports/_lib/exportDto";
+import { CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION } from "../persistence/types";
+import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
+import { PD_MECHANIZATION_PARAMETERS_V1 } from "../../capex/pdMechanization";
+import { PRODUCT_DEVELOPMENT_PARAMETERS_V1 } from "../productDevelopmentState";
+import { CAPEX_PARAMETERS_V1 } from "../../capex";
+
+/**
+ * 【Test15新設】「ゲーム情報」行（Meta系シートへ追加する共通の項目）。
+ * branch/commitはビルド時点の実行環境（git）からの取得を試みるだけの補助情報であり、
+ * ラボの状態（Redis・Repository）は一切参照しない（既存の「Export API JSONのみが
+ * 入力元」という設計方針とは独立の、静的なビルド／パラメータ情報）。取得できない
+ * 場合は例外を投げずに「未取得」を書く（このモジュール全体の「値が無ければ0や
+ * 推測値で埋めない」方針と同じ）。
+ */
+function buildGameInfoRows(): readonly (readonly [string, string | number])[] {
+  const branchName = tryGitCommand(["rev-parse", "--abbrev-ref", "HEAD"]);
+  const commitHash = tryGitCommand(["rev-parse", "HEAD"]);
+  return [
+    ["branch（実行環境のgitブランチ名。取得できない場合は未取得）", branchName ?? "未取得"],
+    ["commitHash（実行環境のHEADコミットハッシュ。取得できない場合は未取得）", commitHash ?? "未取得"],
+    ["永続化スキーマバージョン (CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION)", CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION],
+    ["労働集約度係数パラメータバージョン (production/parameters.ts)", PRODUCTION_PARAMETERS_V1.parametersVersion],
+    ["設備投資パラメータバージョン (capex/parameters.ts)", CAPEX_PARAMETERS_V1.parametersVersion],
+    ["PD省人化投資パラメータバージョン (capex/pdMechanization.ts)", PD_MECHANIZATION_PARAMETERS_V1.parametersVersion],
+    ["VAP商品開発パラメータバージョン (companyLab/productDevelopmentState.ts)", PRODUCT_DEVELOPMENT_PARAMETERS_V1.parametersVersion],
+  ];
+}
+
+function tryGitCommand(args: readonly string[]): string | undefined {
+  try {
+    const out = execFileSync("git", args as string[], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const trimmed = out.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const FONT_NAME = "Arial";
 const HEADER_FONT: Partial<ExcelJS.Font> = { name: FONT_NAME, bold: true, color: { argb: "FFFFFFFF" } };
@@ -50,7 +88,7 @@ function writeMetaSheet(wb: ExcelJS.Workbook, payload: CompanyExportPayload): vo
     ["scope", JSON.stringify(meta.scope)],
     ["データ入力元", "Export API JSON のみ（Redis・Repository・画面表示値は一切参照していません）"],
   ];
-  for (const [label, value] of rows) {
+  for (const [label, value] of [...rows, ...buildGameInfoRows()]) {
     const row = ws.addRow([label, value]);
     row.getCell(1).font = LABEL_FONT;
     row.getCell(2).font = VALUE_FONT;
@@ -504,9 +542,9 @@ function writeDecisionsSheet(wb: ExcelJS.Workbook, decisionInfo: ExportCompanyDe
     sectionRow("⑥ 設備投資の意思決定");
     const cx = decision.capexDecision;
     if (cx.newProjectProposals.length > 0) {
-      writeHeaderRow(ws, ["新規案件種別", "希望投資額(USD)", "優先順位", "", "", "", "", ""]);
+      writeHeaderRow(ws, ["新規案件種別", "対象工場ID(pdMechanizationのみ)", "希望投資額(USD)", "優先順位", "", "", "", ""]);
       for (const p of cx.newProjectProposals) {
-        const row = ws.addRow([p.projectType, p.requestedBudgetUsd ?? "（標準額）", p.priority ?? "（提案順）"]);
+        const row = ws.addRow([p.projectType, p.targetFactoryId ?? "－", p.requestedBudgetUsd ?? "（標準額）", p.priority ?? "（提案順）"]);
         row.eachCell((cell) => {
           if (!cell.font) cell.font = VALUE_FONT;
         });
@@ -516,6 +554,13 @@ function writeDecisionsSheet(wb: ExcelJS.Workbook, decisionInfo: ExportCompanyDe
     }
     noteRow(`取消希望案件ID: ${cx.cancelProjectIds.join(", ") || "(なし)"}`);
     noteRow(`再開希望案件ID: ${cx.resumeProjectIds.join(", ") || "(なし)"}`);
+    ws.addRow([]);
+
+    sectionRow("⑦ 【Test15新設】VAP商品開発費");
+    const vapRow = ws.addRow(["今四半期のVAP商品開発費(USD)", decision.vapProductDevelopmentSpendUsd]);
+    vapRow.getCell(1).font = LABEL_FONT;
+    vapRow.getCell(2).font = VALUE_FONT;
+    vapRow.getCell(2).numFmt = USD_FORMAT;
     ws.addRow([]);
   }
 
@@ -917,8 +962,32 @@ function writeProcessingCapacitySheet(
     "能力が増えるのは「完成した四半期」ではなく「能力へ反映される四半期（稼働開始四半期）」からです。完成前の案件は完成時期そのものが確定していないため、反映四半期は完成後に確定します。",
   ]);
   noteRow2.getCell(1).font = LABEL_FONT;
-
   ws.addRow([]);
+
+  // --- 【Test15新設】工場別PD省人化投資の状況 ---
+  sectionRow("【Test15新設】工場別PD省人化投資の状況");
+  writeHeaderRow(ws, ["工場", "前四半期PD稼働率", "稼働中案件ID", "mechanizationLevel", "実効PD係数", "基準PD係数(1.2)", "削減率", "備考"]);
+  for (const pd of capacity.pdMechanizationByFactory) {
+    const row = ws.addRow([
+      pd.factoryId,
+      pd.previousQuarterPdUtilization,
+      pd.activeProjectId ?? "－",
+      pd.mechanizationLevel ?? "－",
+      pd.effectivePdCoefficient ?? "－",
+      pd.basePdCoefficient,
+      pd.reductionRatio ?? "－",
+      pd.activeProjectId === null ? "稼働中の投資案件はありません（基準係数のまま）" : "",
+    ]);
+    row.eachCell((cell) => {
+      if (!cell.font) cell.font = VALUE_FONT;
+    });
+    row.getCell(2).numFmt = "0.0000";
+    if (typeof pd.mechanizationLevel === "number") row.getCell(4).numFmt = "0.0000";
+    if (typeof pd.effectivePdCoefficient === "number") row.getCell(5).numFmt = "0.0000";
+    if (typeof pd.reductionRatio === "number") row.getCell(7).numFmt = "0.0000";
+  }
+  ws.addRow([]);
+
   writeCapacityRateAndForecastSections(ws, capacity);
 }
 
@@ -1153,7 +1222,7 @@ export async function buildAllCompaniesExportExcelWorkbook(payload: AllCompanies
     ["用途", "GM用。全社の加工能力と処理見込みを確認するためのブックです（会社別ブックとは別ファイルです）"],
     ["データ入力元", "Export API JSON（全社スコープ）のみ。Redis・Repository・画面表示値は参照していません"],
   ];
-  for (const [label, value] of metaRows) {
+  for (const [label, value] of [...metaRows, ...buildGameInfoRows()]) {
     const row = ws.addRow([label, value]);
     row.getCell(1).font = LABEL_FONT;
     row.getCell(2).font = VALUE_FONT;
@@ -1164,6 +1233,202 @@ export async function buildAllCompaniesExportExcelWorkbook(payload: AllCompanies
     writeProcessingCapacitySheet(wb, company.processingCapacity, `Capacity_${company.companyId}`);
   }
 
+  writeProductionFacilitiesLaborSheet(wb, payload.companies);
+  writeAllCompaniesDecisionsSheet(wb, payload.decisionInfo);
+  writeStandardAiInputSheet(wb, payload);
+
   const arrayBuffer = await wb.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);
+}
+
+/**
+ * 【Test15新設】「生産・設備・労務」シート。全社・全工場を1シートへ機械可読な形（会社ID・
+ * 工場ID・案件IDを列として持つ）で並べる（会社別タブに分けると集計・フィルタしにくいため、
+ * このシートだけはあえてフラットな一覧にする）。
+ *
+ * 【再計算しない】能力・稼働率・PD省人化投資の状況は、すべて processingCapacityDto.ts の
+ * buildExportProcessingCapacity（意思決定画面と同一の導出）が返した値をそのまま書き写す。
+ */
+function writeProductionFacilitiesLaborSheet(wb: ExcelJS.Workbook, companies: AllCompaniesExportPayload["companies"]): void {
+  const ws = wb.addWorksheet("生産・設備・労務");
+  ws.columns = [
+    { width: 12 }, { width: 14 }, { width: 10 }, { width: 12 }, { width: 12 }, { width: 12 },
+    { width: 12 }, { width: 12 }, { width: 14 }, { width: 16 }, { width: 20 }, { width: 16 }, { width: 16 }, { width: 16 },
+  ];
+
+  const noteRow = ws.addRow([
+    "工場別の現時点の加工能力（名目）・PD稼働率・PD省人化投資の状況を、会社ID・工場ID・案件IDつきで一覧化したシートです。processingCapacity（意思決定画面と同一の導出）をそのまま転記しています。",
+  ]);
+  noteRow.getCell(1).font = LABEL_FONT;
+  ws.addRow([]);
+
+  // --- 工場別能力・PD稼働率・PD省人化 ---
+  writeHeaderRow(ws, [
+    "会社ID", "工場ID", "状態", "HOSO能力(t)", "PD能力(t)", "VAP能力(t)",
+    "前四半期PD稼働率", "稼働中PD省人化案件ID", "mechanizationLevel", "実効PD係数", "基準PD係数(1.2)",
+    "削減率", "", "",
+  ]);
+  for (const company of companies) {
+    const capacity = company.processingCapacity;
+    if (!capacity) continue;
+    for (const factory of capacity.factories) {
+      const pd = capacity.pdMechanizationByFactory.find((p) => p.factoryId === factory.factoryId);
+      const poolTon = (poolKey: string) => factory.pools.find((p) => p.poolKey === poolKey)?.currentNominalTons ?? 0;
+      const row = ws.addRow([
+        company.companyId,
+        factory.factoryId,
+        factory.status,
+        poolTon("hoso"),
+        poolTon("pd"),
+        poolTon("vap"),
+        pd?.previousQuarterPdUtilization ?? "未取得",
+        pd?.activeProjectId ?? "－",
+        pd?.mechanizationLevel ?? "－",
+        pd?.effectivePdCoefficient ?? "－",
+        pd?.basePdCoefficient ?? "－",
+        pd?.reductionRatio ?? "－",
+      ]);
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = VALUE_FONT;
+      });
+      for (const col of [4, 5, 6]) row.getCell(col).numFmt = "#,##0.00";
+      if (typeof pd?.previousQuarterPdUtilization === "number") row.getCell(7).numFmt = "0.0000";
+      if (typeof pd?.mechanizationLevel === "number") row.getCell(9).numFmt = "0.0000";
+      if (typeof pd?.effectivePdCoefficient === "number") row.getCell(10).numFmt = "0.0000";
+      if (typeof pd?.reductionRatio === "number") row.getCell(12).numFmt = "0.0000";
+    }
+  }
+  ws.addRow([]);
+
+  // --- 現在追加中の設備投資案件（新工場建設・PD省人化含む、全案件種別を機械可読に） ---
+  const sectionRow = ws.addRow(["現在追加中の設備投資案件（案件IDつき、全案件種別）"]);
+  sectionRow.getCell(1).font = CHECK_FONT;
+  writeHeaderRow(ws, [
+    "会社ID", "案件ID", "案件種別", "状態", "対象能力", "増加量(t/四半期)", "工期(四半期)",
+    "経過四半期(支払を伴う)", "完成四半期", "能力反映四半期", "承認額(USD)", "支払済(USD)", "未払予定(USD)", "",
+  ]);
+  for (const company of companies) {
+    const capacity = company.processingCapacity;
+    if (!capacity) continue;
+    for (const project of capacity.pendingProjects) {
+      const row = ws.addRow([
+        company.companyId,
+        project.projectId,
+        project.projectType,
+        project.displayStatusLabel,
+        project.targetPoolLabel ?? "－",
+        project.capacityIncreaseTonsPerQuarter,
+        project.requiredConstructionQuarters,
+        project.elapsedConstructionQuartersWithPayment,
+        project.completionPeriod === null ? "－" : project.isCompletionEstimate ? `${project.completionPeriod}（見込）` : project.completionPeriod,
+        project.operationalStartPeriod ?? "完成後に確定",
+        project.approvedBudgetUsd,
+        project.cumulativePaidUsd,
+        project.remainingScheduledPaymentUsd,
+      ]);
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = VALUE_FONT;
+      });
+      for (const col of [6, 11, 12, 13]) row.getCell(col).numFmt = USD_FORMAT;
+      row.getCell(6).numFmt = "#,##0.00";
+    }
+  }
+}
+
+/**
+ * 【Test15新設】「意思決定項目」シート（全社版）。VAP商品開発費・設備投資提案
+ * （対象工場IDを含む）を会社ID列つきでフラットに並べる。
+ * AI提案（aiProposals）はDecisions側と同じ理由で未保存のため、その旨のみ記す
+ * （推測値で埋めない）。
+ */
+function writeAllCompaniesDecisionsSheet(wb: ExcelJS.Workbook, decisionInfo: AllCompaniesExportPayload["decisionInfo"]): void {
+  const ws = wb.addWorksheet("意思決定項目");
+  ws.columns = [{ width: 14 }, { width: 24 }, { width: 20 }, { width: 16 }, { width: 14 }, { width: 40 }];
+
+  writeHeaderRow(ws, ["会社ID", "今四半期のVAP商品開発費(USD)", "", "", "", ""]);
+  for (const d of decisionInfo.submissions) {
+    const row = ws.addRow([d.companyId, d.vapProductDevelopmentSpendUsd]);
+    row.getCell(1).font = VALUE_FONT;
+    row.getCell(2).font = VALUE_FONT;
+    row.getCell(2).numFmt = USD_FORMAT;
+  }
+  ws.addRow([]);
+
+  const sectionRow = ws.addRow(["設備投資の新規提案（新工場建設・PD省人化を含む全案件種別）"]);
+  sectionRow.getCell(1).font = CHECK_FONT;
+  writeHeaderRow(ws, ["会社ID", "案件種別", "対象工場ID(pdMechanizationのみ)", "希望投資額(USD)", "優先順位", ""]);
+  for (const d of decisionInfo.submissions) {
+    for (const p of d.capexDecision.newProjectProposals) {
+      const row = ws.addRow([d.companyId, p.projectType, p.targetFactoryId ?? "－", p.requestedBudgetUsd ?? "（標準額）", p.priority ?? "（提案順）"]);
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = VALUE_FONT;
+      });
+    }
+  }
+  ws.addRow([]);
+
+  const aiSectionRow = ws.addRow(["Standard AI提案（三宅判断との比較用）"]);
+  aiSectionRow.getCell(1).font = CHECK_FONT;
+  const aiNote = ws.addRow([decisionInfo.aiProposalUnavailableReason ?? "AI提案が保存されています（下記参照）。"]);
+  aiNote.getCell(1).font = LABEL_FONT;
+}
+
+/**
+ * 【Test15新設】「StandardAI入力」シート。Standard AI（autoPolicy.ts
+ * generateAutoPolicyDecision）が実際に受け取る入力の型は
+ * (fixture: CompanyFixture, ownState: CompanyOwnState, publicInfo: PublicMarketInfo, period, turn)
+ * のみであり、将来四半期の情報・シナリオの真の確率分布・非公開のground truthは
+ * いずれの型にも一切含まれない（companyLab/types.ts参照）。本シートはその実際の
+ * 入力に対応するフィールドだけを転記する（監査専用の「シナリオ監査」情報は
+ * 本シートには一切含まれない。両者が別の型・別の生成経路であることは
+ * companyLabAdminExportSource.test.ts / companyLabAdminExcelBuilder.test.ts の
+ * 監査情報リーク防止テストで確認している）。
+ *
+ * 【Test15の新規フィールドについて】pdUtilizationByFactory・vapProductDevelopmentScore
+ * はCompanyOwnStateにはすでに存在する（companyLab/runner.ts buildCompanyOwnState）が、
+ * autoPolicy.ts（Standard AI）の判断ロジックはまだこの2フィールドを一切参照していない
+ * （#05のStandard AI改修待ち）。本シートはその状態を「未参照」として明示し、
+ * 参照していないのに参照しているかのような入力値を書かない。
+ */
+function writeStandardAiInputSheet(wb: ExcelJS.Workbook, payload: AllCompaniesExportPayload): void {
+  const ws = wb.addWorksheet("StandardAI入力");
+  ws.columns = [{ width: 40 }, { width: 60 }];
+
+  const noteRow = ws.addRow([
+    "Standard AIの入力型は (fixture, ownState: CompanyOwnState, publicInfo: PublicMarketInfo, period, turn) のみです。" +
+      "将来四半期・シナリオ真値・非公開グラウンドトゥルースはいずれの型にも存在しません。",
+  ]);
+  noteRow.getCell(1).font = LABEL_FONT;
+  ws.addRow([]);
+
+  writeHeaderRow(ws, ["会社ID", "公開市場情報・自社状態のうち実際にStandard AIへ渡る値"]);
+  for (const company of payload.companies) {
+    const row = ws.addRow([company.companyId, ""]);
+    row.getCell(1).font = CHECK_FONT;
+    const summary = company.companySummary;
+    if (summary) {
+      for (const [label, value] of [
+        ["品質スコア(hoso/pd/vap)", summary.qualityScoreByProduct.map((q) => `${q.product}:${q.value ?? "－"}`).join(" / ")],
+        ["顧客信頼(市場別)", summary.customerTrustByMarket.map((c) => `${c.market}:${c.value ?? "－"}`).join(" / ")],
+        ["納期信頼性(市場別)", summary.deliveryReliabilityByMarket.map((c) => `${c.market}:${c.value ?? "－"}`).join(" / ")],
+        ["期末原料在庫(t)", summary.rawMaterialInventory],
+        ["期末完成品在庫(t)", summary.finishedGoodsInventory],
+      ] as readonly [string, string | number][]) {
+        const r = ws.addRow([`  ${label}`, value]);
+        r.getCell(1).font = LABEL_FONT;
+        r.getCell(2).font = VALUE_FONT;
+      }
+    }
+    const noteRow2 = ws.addRow([
+      "  【Test15】前四半期PD稼働率・VAP商品開発スコア",
+      "Standard AIはまだ本項目を参照していない（#05対応待ち）",
+    ]);
+    noteRow2.getCell(1).font = LABEL_FONT;
+    noteRow2.getCell(2).font = VALUE_FONT;
+  }
+  ws.addRow([]);
+  const marketNoteRow = ws.addRow([
+    "市場情報（公開情報のみ）は「Market」相当のデータをそのまま参照してください。本シートは会社別state部分の抜粋です。",
+  ]);
+  marketNoteRow.getCell(1).font = LABEL_FONT;
 }

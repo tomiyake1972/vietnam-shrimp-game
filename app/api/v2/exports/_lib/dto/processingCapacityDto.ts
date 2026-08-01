@@ -48,6 +48,8 @@ import {
   PRIORITY_RULE_TEXT,
   YIELD_APPLICATION_TEXT,
 } from "../../../../../v2/company-lab/processingForecastViewModel";
+import { buildPdMechanizationStatusByFactory, findPreviousQuarterPdUtilization, PdMechanizationState } from "../../../../../lib/v2/companyLab/pdMechanizationState";
+import { PD_MECHANIZATION_PARAMETERS_V1 } from "../../../../../lib/v2/capex/pdMechanization";
 
 /** 能力プール（商品別加工能力）1つぶんの内訳。 */
 export interface ExportCapacityPool {
@@ -172,6 +174,28 @@ export interface ExportProcessingForecast {
   readonly caveatTexts: readonly string[];
 }
 
+/**
+ * 【Test15新設】1工場ぶんのPD省人化投資の状況。稼働開始済みの投資案件が無い工場は
+ * mechanizationLevel/effectivePdCoefficientがnull（0で埋めない。「投資自体が無い」
+ * ことと「投資があるが効果0」を区別するため）。
+ * 【注記】「削減される常用Worker人数」は、他の生産変数（生産量・優先度等）を固定した
+ * 単一の数値として一意に定まらないため、実効係数・削減率という実測可能な値だけを
+ * 出力する（それらしい人数を作らない）。
+ */
+export interface ExportFactoryPdMechanizationStatus {
+  readonly factoryId: string;
+  readonly companyId: CompanyId;
+  /** 前四半期末までのPD稼働率（[0,1]）。投資有無に関わらず常に実測値。 */
+  readonly previousQuarterPdUtilization: number;
+  /** 稼働中のpdMechanization案件ID（無ければnull）。 */
+  readonly activeProjectId: string | null;
+  readonly mechanizationLevel: number | null;
+  readonly effectivePdCoefficient: number | null;
+  readonly basePdCoefficient: number;
+  /** 実効係数が基準からどれだけ下がったか（0〜1）。稼働中案件が無ければnull。 */
+  readonly reductionRatio: number | null;
+}
+
 export interface ExportProcessingCapacity {
   readonly companyId: CompanyId;
   /** どの四半期時点の能力か（当期処理直後＝次期の意思決定が前提とする能力）。 */
@@ -182,6 +206,8 @@ export interface ExportProcessingCapacity {
   readonly pendingProjects: readonly ExportPendingCapacityProject[];
   /** 名目→実効の計算過程と、現在の生産計画に基づく処理見込み。 */
   readonly forecast: ExportProcessingForecast;
+  /** 【Test15新設】工場別のPD省人化投資状況。 */
+  readonly pdMechanizationByFactory: readonly ExportFactoryPdMechanizationStatus[];
 }
 
 export interface BuildExportProcessingCapacityInput {
@@ -201,6 +227,8 @@ export interface BuildExportProcessingCapacityInput {
   readonly workerAssignments?: readonly WorkerAssignment[];
   /** 見込み計算に使う原料ロット（対象会社ぶん）。 */
   readonly rawMaterialLots?: readonly RawMaterialLot[];
+  /** 【Test15新設】当期処理直後のPD省人化状態（未指定なら空配列扱い＝全工場が初期値）。 */
+  readonly pdMechanizationState?: PdMechanizationState;
 }
 
 /**
@@ -285,7 +313,37 @@ export function buildExportProcessingCapacity(input: BuildExportProcessingCapaci
       availableRawMaterialTons: forecastVm.availableRawMaterialTons,
       caveatTexts: forecastVm.caveatTexts,
     },
+    pdMechanizationByFactory: buildExportPdMechanizationByFactory(input),
   };
+}
+
+/**
+ * 【Test15新設】工場別PD省人化投資状況。buildPdMechanizationStatusByFactory
+ * （companyLab/pdMechanizationState.ts）をそのまま呼び、独自の再計算をしない。
+ * 対象会社の工場だけへ絞り込む（他社の投資案件は一切含めない＝スコープ隔離）。
+ */
+function buildExportPdMechanizationByFactory(input: BuildExportProcessingCapacityInput): readonly ExportFactoryPdMechanizationStatus[] {
+  const baseFactories = input.fixtures.flatMap((f) => f.factories).filter((f) => f.companyId === input.companyId);
+  const statusByFactory = buildPdMechanizationStatusByFactory(input.capexState, input.pdMechanizationState, input.asOfPeriod);
+  const companyProjects = input.capexState.companies.find((c) => c.companyId === input.companyId)?.portfolio.projects ?? [];
+  return baseFactories
+    .map((f) => {
+      const status = statusByFactory.get(f.factoryId);
+      const activeProject = companyProjects.find(
+        (p) => p.projectType === "pdMechanization" && p.targetFactoryId === f.factoryId && p.status !== "cancelled",
+      );
+      return {
+        factoryId: f.factoryId,
+        companyId: f.companyId,
+        previousQuarterPdUtilization: findPreviousQuarterPdUtilization(input.pdMechanizationState, f.factoryId),
+        activeProjectId: activeProject?.projectId ?? null,
+        mechanizationLevel: status?.mechanizationLevel ?? null,
+        effectivePdCoefficient: status?.effectivePdCoefficient ?? null,
+        basePdCoefficient: PD_MECHANIZATION_PARAMETERS_V1.baseCoefficient,
+        reductionRatio: status ? 1 - status.effectivePdCoefficient / PD_MECHANIZATION_PARAMETERS_V1.baseCoefficient : null,
+      };
+    })
+    .sort((a, b) => a.factoryId.localeCompare(b.factoryId));
 }
 
 function toExportRateTable(table: {
