@@ -35,6 +35,8 @@ import type { SalesForceHiringState } from "../salesForceHiring";
 import type { SalesBaseState } from "../salesBase";
 import type { MarketEvolutionState } from "../marketEvolution";
 import type { ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
+import type { PdMechanizationState } from "../pdMechanizationState";
+import type { ProductDevelopmentState } from "../productDevelopmentState";
 
 // ---------------------------------------------------------------------
 // 0. バージョン定数
@@ -101,8 +103,45 @@ import type { ConsumerMarketCarryStateTable } from "../../market/consumerInvento
  *        salesForceLayoffCount（optional、既存のsalesForceHireCountと同じ後方
  *        互換方針）を追加した。既存のschemaVersion:1〜5データはこのキーが
  *        存在しないため0（減員予定なし）として復元され、そのまま読み込める。
+ *   v7 … 【Test15・develop/v2統合（#05営業人員機能マージ後の再採番）】
+ *        CompanyLabRuntimeSnapshot へ pdMechanizationState（Factory単位
+ *        PD稼働率・PD省人化投資の効果算出に使う前四半期末までの値、optional）と
+ *        productDevelopmentState（会社単位VAP商品開発スコア、optional）を追加。
+ *        **追加的変更のみで、マイグレーション処理は不要**（salesBaseStateと同じ
+ *        「キー欠落=undefined=既定の初期値扱い」方式）。schemaVersion:1〜6の
+ *        既存データにはどちらのキーも存在しない → undefinedとして復元し、
+ *        呼び出し側（companyLab/runner.ts・pdMechanizationState.ts・
+ *        productDevelopmentState.ts）が「未設定＝initialPdUtilizationRatio(0.0)・
+ *        中立値50」という既存の設計どおりに扱う（履歴からの再構築・推測値の
+ *        捏造は一切行わない）。
+ *        あわせて、capex/types.ts の CapitalProject.targetFactoryId（PD省人化
+ *        投資が対象とするFactoryId、pdMechanization案件のみ必須・他は未使用）
+ *        フィールドをschema.tsのvalidateCapitalProjectで検証対象に追加した
+ *        （既存のcapexStateはCompanyLabRuntimeSnapshotに既に含まれているため、
+ *        新工場建設・PD省人化投資の案件そのものはバージョンを上げずとも
+ *        既存のcapexStateへ自然に乗るが、targetFactoryIdの検証漏れだけを補う）。
+ *        【Task6調査で発見・修正した既存の欠落】validateCapitalProjectは
+ *        Phase8D（新工場建設、schemaVersion変更なしの機能追加）で導入された
+ *        CapitalProject.newFactoryEffect（完成時にFactoryを合成するための
+ *        承認時スナップショット）を一切検証・引き継いでおらず、保存・復元後に
+ *        稼働開始済みの新設Factoryが合成されなくなる欠落があった。本v7で
+ *        あわせて修正した（スキーマバージョンの意味には影響しない、
+ *        バリデーターのバグ修正）。
+ *        新設フィールドの意思決定側（CompanyDecisionInput.vapProductDevelopmentSpendUsd）
+ *        は、validateCompanyDecisionInputが元オブジェクトをそのまま返す実装
+ *        （余分なフィールドを削ぎ落とさない）のため、スキーマ変更なしで
+ *        既に往復可能だった（本v7では検証コード変更なし）。
+ *
+ *        【統合時の再採番の経緯】Test15側の作業ブランチでは、develop/v2へまだ
+ *        マージされていなかった#05（営業人員追加採用・減員）を知らずに、
+ *        同じ4を起点として独自に4→5（pdMechanizationState・
+ *        productDevelopmentStateの追加）と番号を振っていた。その後#05が
+ *        develop/v2へ先にマージされ、develop/v2側は独自に4→5→6と番号を
+ *        使用済みだったため、本統合作業でTest15側の変更を5→7へ再採番した
+ *        （develop/v2の5・6とは意味の異なる別の変更であるため、単純な
+ *        5→6への読み替えではなく、develop/v2の6の続き番号として7を採番した）。
  */
-export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 6;
+export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 7;
 
 // ---------------------------------------------------------------------
 // 1. ランタイムスナップショット（history非包含。§2-1・§2-2）
@@ -191,6 +230,21 @@ export interface CompanyLabRuntimeSnapshot {
    * 復元する。
    */
   readonly salesForceHiringState: SalesForceHiringState;
+  /**
+   * 【Test15・schemaVersion 7で追加】Factory単位のPD稼働率（PD省人化投資の効果
+   * 算出に使う、前四半期末までの値）。optional。キー欠落（v1〜v6）は
+   * undefinedとして復元し、companyLab/pdMechanizationState.tsの
+   * findPreviousQuarterPdUtilizationが既定どおりinitialPdUtilizationRatio(0.0)
+   * を返す（履歴からの再構築・推測値の捏造はしない）。
+   */
+  readonly pdMechanizationState?: PdMechanizationState;
+  /**
+   * 【Test15・schemaVersion 7で追加】会社単位のVAP商品開発スコア（前四半期末
+   * までの値）。optional。キー欠落（v1〜v6）はundefinedとして復元し、
+   * companyLab/productDevelopmentState.tsのlookupProductDevelopmentScoreが
+   * 既定どおり中立値50を返す（推測値の捏造はしない）。
+   */
+  readonly productDevelopmentState?: ProductDevelopmentState;
   readonly isComplete: boolean;
 }
 
