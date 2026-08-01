@@ -67,6 +67,15 @@ export interface CompanySalesPlanEntry {
    *  既定パラメータでは成約結果へ一切影響しない。 */
   readonly salesBaseScore?: Score0to100;
   /**
+   * 【Test15新設】このentryの商品がVAPのときにのみ意味を持つ、会社のVAP能力合成
+   * 係数（0〜100、companyLab/premiumPolicy.tsのcalculateCompanyCapabilityCoefficient
+   * 由来。VAP商品開発スコア・VAP営業基盤・品質・納期信頼性の合成）。未接続時は
+   * 中立値。ウェイト（competitivenessWeights.vapCapability）が既定0のため、値の
+   * 有無に関わらず既定パラメータでは成約結果へ一切影響しない。product!=="vap"の
+   * entryでは、値が設定されていても寄与は構造的に常に0（allocation.ts参照）。
+   */
+  readonly vapCapabilityScore?: Score0to100;
+  /**
    * 承認済み取引枠・供給信認枠（外部から供給される任意の個社成約上限）。
    * 将来Phase（与信・取引先管理等）から接続される想定の外部入力で、未指定時は
    * SalesParameters.maximumSupplierShareに基づく上限（targetDemand×shareの下限）を
@@ -105,6 +114,9 @@ export interface CompetitivenessWeightBreakdown {
   readonly deliveryReliabilityContribution: number;
   /** 【SAI-5D】営業基盤のウェイト寄与分（既定ウェイト0のため既定では常に0）。 */
   readonly salesBaseContribution: number;
+  /** 【Test15新設】VAP能力合成係数のウェイト寄与分（既定ウェイト0のため既定では
+   *  常に0。かつproduct!=="vap"のentryでは常に0＝HOSO/PDには一切影響しない）。 */
+  readonly vapCapabilityContribution: number;
   /** clamp前の生の価格スコア（説明用、診断目的）。 */
   readonly rawPriceScore: number;
   /** clamp後の価格スコア（この値がmaximumPriceCompetitivenessに達していれば、追加値下げの効果はない）。 */
