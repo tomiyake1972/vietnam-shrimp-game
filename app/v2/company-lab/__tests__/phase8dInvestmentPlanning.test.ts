@@ -593,8 +593,15 @@ test("IP-19（追補2-4）: 投資前から存在する人員不足は、増分�
 
 test("IP-20（追補2）: 実データでも、人員に余力がある間は投資カードの追加Workerが0人になる", () => {
   const { state, fixture, draft } = setup("phase8d-ip-020");
-  // fixtureの初期人数（BAL 6,000人）は現在の生産計画に対して余力がある状態。
-  const planning = buildPlanning(state, fixture, draft);
+  // 【Test15】商品別労働集約度係数（HOSO:PD:VAP=1.0:1.2:3.0）の導入により、
+  // fixtureの初期人数（BAL 6,000人）だけではPD/VAPを含む現在の生産計画に対して
+  // 余力が無くなった（必要人数が現有人数を上回る）ため、本テストの前提
+  // 「人員に余力がある」を明示的に作るために、必要人数を十分上回る人数へ
+  // 引き上げてから検証する（このテストが確認したいのは「余力がある状態では
+  // 追加Workerが0人になる」ことであり、fixtureの初期人数そのものではない）。
+  const requiredBeforeBump = buildPlanning(state, fixture, draft).workforceRows[0].requiredRegularHeadcount;
+  const draftWithSurplus = withHeadcount(draft, Math.ceil(requiredBeforeBump) + 1000);
+  const planning = buildPlanning(state, fixture, draftWithSurplus);
   const surplus = planning.workforceRows[0].headcountSurplus;
   assert.ok(surplus > 0, "前提: 現在の人員に余力があること");
 

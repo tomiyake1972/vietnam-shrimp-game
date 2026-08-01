@@ -23,7 +23,13 @@ export { PRODUCTION_PARAMETERS_V1 } from "./parameters";
 export type { ProductionParameters } from "./parameters";
 export { buildBatchId, buildFinishedGoodsLotId } from "./ids";
 export { calculateFactoryEffectiveCapacity, calculateFactoryEffectiveCapacities } from "./capacity";
-export { calculateLaborCapacityFromAssignedHeadcount, allocateWorkersToPlans } from "./labor";
+export {
+  calculateLaborCapacityFromAssignedHeadcount,
+  allocateWorkersToPlans,
+  requiredHeadcountForQuantity,
+  effectiveEfficiencyPerHeadTons,
+  laborIntensityCoefficientFor,
+} from "./labor";
 export type { WorkerDemandItem } from "./labor";
 export { calculatePhysicalOutputTons } from "./yieldConversion";
 export { allocateByPriorityTiers } from "./priorityAllocation";
