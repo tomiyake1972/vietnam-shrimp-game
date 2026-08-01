@@ -198,6 +198,14 @@ export interface AnthropicMessageResponse {
     readonly input?: unknown;
   }[];
   readonly usage?: { readonly input_tokens?: number; readonly output_tokens?: number };
+  /**
+   * 【2026-08-01・schema_mismatch原因確定のための追加】"max_tokens"ならmax_tokens設定値に
+   * 達して応答が途中で打ち切られたことを意味する。実際のPreview環境で、headline/
+   * executiveSummaryの2フィールドだけが埋まり、残り4つの配列フィールドが丸ごと欠落する
+   * schema_mismatchが再現したため、「max_tokens不足による打ち切りが原因か」を推測でなく
+   * この値で確定させる。
+   */
+  readonly stop_reason?: string | null;
 }
 
 function createRealClient(apiKey: string): AnthropicMessagesClient {
@@ -359,6 +367,7 @@ async function attemptOnce(
     // どのfield・どんな型/enum不一致だったかを推測ではなく確認できるようにする。
     console.error(
       `[claudeClient] attempt ${logTag.attempt} スキーマ不一致 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn} ` +
+        `stopReason=${response.stop_reason ?? "(なし)"} outputTokens=${response.usage?.output_tokens ?? "(不明)"} maxTokens=${config.maxTokens} ` +
         `shape=${summarizeTopLevelShapeForLog(toolInput)} issues=${summarizeZodIssuesForLog(validated.error)}`
     );
     return { kind: "failure", errorCategory: "schema_mismatch", detail: validated.error.message };
