@@ -87,13 +87,29 @@ test("VAPDEV-INT-3（タイミング）: 当期のvapProductDevelopmentSpendUsd�
   assert.ok(scoreAfterQ2 > 50, "Q1の投資効果が完全には消えていないはず（減衰は緩やか）");
 });
 
-test("VAPDEV-INT-4（機能フラグ・回帰確認）: vapProductDevelopmentCompetitiveness未指定（既定）では、選択会社以外の意思決定オブジェクトは参照同一のまま変わらない", () => {
+test("VAPDEV-INT-4（既定ONの確認・コーディネーター指示による修正）: vapProductDevelopmentCompetitiveness未指定（既定）では、VAP販売計画を持つ全社の意思決定へ正典のvapCapabilityScoreが実際に付与される", () => {
   const { state, fixtures } = initializeCompanyLab(baseConfig());
+  const decisions = buildAutoDecisions(state, fixtures);
+
+  const after = advanceCompanyLabQuarter(state, fixtures, decisions);
+  let sawVapPlan = false;
+  for (const d of after.history[0].decisions) {
+    for (const plan of d.salesPlans) {
+      if (plan.product !== "vap") continue;
+      sawVapPlan = true;
+      assert.notEqual(plan.vapCapabilityScore, undefined, `${d.companyId}のVAP計画にはvapCapabilityScoreが既定で付与されるはず`);
+    }
+  }
+  assert.ok(sawVapPlan, "このシナリオ設定にVAP販売計画が1件も無く、テストの前提が崩れている");
+});
+
+test("VAPDEV-INT-5（明示OFF確認）: vapProductDevelopmentCompetitiveness=falseを明示指定すると、他社の意思決定オブジェクトは参照同一のまま変わらない（無効化できることの確認）", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig({ sai5: { vapProductDevelopmentCompetitiveness: false } }));
   const decisions = buildAutoDecisions(state, fixtures);
   const otherCompanyId = fixtures[1].companyId;
   const originalOtherDecision = decisions[otherCompanyId];
 
   const after = advanceCompanyLabQuarter(state, fixtures, decisions);
   const otherDecisionAfter = after.history[0].decisions.find((d) => d.companyId === otherCompanyId);
-  assert.equal(otherDecisionAfter, originalOtherDecision, "機能フラグ未指定時は、他社の意思決定オブジェクト参照が変わらないはず（ビット単位の後方互換）");
+  assert.equal(otherDecisionAfter, originalOtherDecision, "明示的にfalseを指定すれば、他社の意思決定オブジェクト参照が変わらないはず");
 });

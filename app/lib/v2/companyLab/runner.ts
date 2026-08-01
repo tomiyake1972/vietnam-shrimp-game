@@ -64,7 +64,13 @@ import {
   updateProductDevelopmentState,
 } from "./productDevelopmentState";
 import { calculateCompanyCapabilityCoefficient } from "./premiumPolicy";
-import { SALES_PARAMETERS_SAI5_SALES_BASE_V1, SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1, SALES_PARAMETERS_V1, SalesParameters } from "../sales/parameters";
+import {
+  SALES_PARAMETERS_SAI5_SALES_BASE_V1,
+  SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1,
+  SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1,
+  SALES_PARAMETERS_V1,
+  SalesParameters,
+} from "../sales/parameters";
 import { MARKET_PARAMETERS_V1 } from "../market/parameters";
 import {
   applyProductSubstitution,
@@ -452,15 +458,19 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
 
 /**
  * 当期の成約配分に使うSalesParameters（SAI-5D有効時のみ営業基盤ウェイトが正、
- * 【Test15新設】vapProductDevelopmentCompetitiveness有効時のみVAP能力ウェイトが正）。
- * 【Test15暫定値・要校正】両方同時有効時の重み配分定数は未整備のため、
- * vapProductDevelopmentCompetitivenessを優先する（salesBaseAccumulationも同時に
- * trueの場合はsalesBase側のウェイトが0に戻る。組み合わせが必要になった時点で
- * 専用の定数を追加する）。
+ * 【Test15新設・コーディネーター指示により既定ON】vapProductDevelopmentCompetitiveness
+ * はTest15の正式なゲームルールであり、明示的に false を指定しない限り常時有効
+ * （config.sai5そのものが未指定の場合も含めて既定ON。他の機能フラグ
+ * （salesBaseAccumulation等、既定OFF＝opt-in）とは既定値の向きが異なる点に注意）。
+ * 両方同時有効時はSALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1
+ * （両ウェイトを保持したまま合計1.0を維持する組み合わせ版）を使う。
  */
 function salesParametersFor(config: CompanyLabConfig): SalesParameters {
-  if (config.sai5?.vapProductDevelopmentCompetitiveness) return SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1;
-  return config.sai5?.salesBaseAccumulation ? SALES_PARAMETERS_SAI5_SALES_BASE_V1 : SALES_PARAMETERS_V1;
+  const vapCapabilityOn = config.sai5?.vapProductDevelopmentCompetitiveness !== false;
+  const salesBaseOn = !!config.sai5?.salesBaseAccumulation;
+  if (vapCapabilityOn && salesBaseOn) return SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1;
+  if (vapCapabilityOn) return SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1;
+  return salesBaseOn ? SALES_PARAMETERS_SAI5_SALES_BASE_V1 : SALES_PARAMETERS_V1;
 }
 
 /** 自動方針・プレイヤー入力の双方が参照してよい公開市場情報を組み立てる。 */
@@ -505,20 +515,20 @@ function applyAuthoritativeSalesBaseScores(state: CompanyLabState, decision: Com
 }
 
 /**
- * 【Test15新設】販売計画のVAP entryへ、正典のVAP能力合成係数
- * （companyLab/premiumPolicy.tsのcalculateCompanyCapabilityCoefficient）を
- * 上書きで設定する。applyAuthoritativeSalesBaseScoresと同じ設計方針:
- *  - 意思決定側が自己申告したvapCapabilityScoreは採用されない（情報境界の担保）
- *  - product!=="vap"のentryにはそもそも値を付けない（HOSO/PDへは構造的に無関係）
- *  - 常に前四半期末までの状態だけを読む（今期の実績を遡及しない）
+ * 【Test15新設・コーディネーター指示により既定ON】販売計画のVAP entryへ、正典の
+ * VAP能力合成係数（companyLab/premiumPolicy.tsのcalculateCompanyCapabilityCoefficient）
+ * を上書きで設定する。applyAuthoritativeSalesBaseScoresと同じ設計方針（自己申告の
+ * 採用禁止・商品ゲート・前四半期末までの値のみ）を踏襲しつつ、これはTest15の
+ * 正式なゲームルールであるため既定で常時有効（config.sai5.vapProductDevelopmentCompetitiveness
+ * を明示的にfalseにしたときだけ無効化できる）。
  *
- * ウェイト（competitivenessWeights.vapCapability）が既定0のため、この関数は
- * 常時有効でも既存の全allocation結果とビット単位で一致する（値を設定しても
- * 寄与が0×xで必ず0になるため）。
+ * 「未接続（vapCapabilityScore不設定）のCOMPANYは中立扱い」という後方互換規約は、
+ * calculateCompanyCapabilityCoefficient側の「入力未接続→中立値50」という設計で
+ * 満たされる（本関数自体の有効/無効は、個社の未接続とは別の話）。
  */
 function applyAuthoritativeVapCapabilityScores(state: CompanyLabState, decision: CompanyDecisionInput): CompanyDecisionInput {
-  // 機能OFFのときは何もしない（既存挙動とビット単位で一致、salesBase側と同じ方針）。
-  if (!state.config.sai5?.vapProductDevelopmentCompetitiveness) return decision;
+  // 明示的にfalseを指定したときだけ無効化する（既定ON）。
+  if (state.config.sai5?.vapProductDevelopmentCompetitiveness === false) return decision;
   const hasVapPlan = decision.salesPlans.some((p) => p.product === "vap");
   if (!hasVapPlan) return decision;
 
