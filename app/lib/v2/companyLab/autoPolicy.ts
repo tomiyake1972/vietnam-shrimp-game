@@ -636,5 +636,8 @@ export function generateAutoPolicyDecision(
     // 返す（capexDecisionの新規提案なしと同じ方針。統合テスト・意思決定編集
     // からの上書きは可能）。Standard AIの営業採用ロジック自体の新設は対象外。
     salesForceHireCount: 0,
+    // 【営業人員の減員・forward-port続き】Standard AIの減員判断ロジックは後続
+    // 課題として対象外とし、今回は常に0（減員なし）を返し従来挙動を維持する。
+    salesForceLayoffCount: 0,
   };
 }

@@ -88,6 +88,7 @@ export type CostDriver =
   | "productCount" // 商品数
   | "loanBalance" // 借入残高（支払利息）
   | "fixedAssetBalance" // 固定資産残高（減価償却）
+  | "salesForceLayoffHeadcount" // 営業人員の当期減員数（退職金）
   | "none"; // ドライバーなし（純粋な期間固定費）
 
 /** 勘定科目（原価・費用の分類）。財務会計PLの表示行とは独立した、費用の発生源分類。 */
@@ -109,6 +110,7 @@ export type CostAccount =
   | "downgradeSalesDeduction" // 格落ちによる売上控除
   | "sellingLogistics" // 変動販売物流費
   | "salesForceSalary" // 営業人件費
+  | "salesForceSeverance" // 営業人員の退職金（減員決定当期に一度だけ発生）
   | "procurementSalary" // 調達人件費
   | "adminFixed" // 一般管理固定費
   | "interestExpense" // 支払利息

@@ -219,8 +219,8 @@ test("PS-5（必須14）: 履歴も無い旧データでも例外にならず、
   }
 });
 
-test("PS-6: 現行スキーマのバージョン番号が5へ上がっており、1〜4のデータも受け付ける（営業人員の追加採用forward-portでsalesForceHiringStateを追加。追加的変更のみ）", () => {
-  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 5);
+test("PS-6: 現行スキーマのバージョン番号が6へ上がっており、1〜5のデータも受け付ける（営業人員の減員・退職金forward-port続きで三宅さんの明示指示によりv5→v6。CompanyLabRuntimeSnapshotの構造自体は変更なし）", () => {
+  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 6);
 });
 
 // ---------------------------------------------------------------------

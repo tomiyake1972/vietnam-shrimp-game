@@ -166,9 +166,10 @@ export default function DecisionEditor(props: DecisionEditorProps) {
   // 翌四半期以降も配分可能数が増えたことが画面に反映されない。
   const currentSalesForceHeadcount = ownState.salesForceHiringState.headcount;
   const salesForceAllocation = summarizeSalesForceAllocation(draft.salesPlans, currentSalesForceHeadcount);
-  // --- 【営業人員の追加採用・forward-port】営業人員の追加採用プレビュー
-  // （現在の営業人員＋今回の採用予定）。
-  const salesForceHiring = summarizeSalesForceHiring(currentSalesForceHeadcount, draft.salesForceHireCount ?? 0);
+  // --- 【営業人員の追加採用・減員・forward-port（続き）】営業人員の増減プレビュー
+  // （現在の営業人員＋今回の採用予定−今回の減員予定、退職金見積り、同時入力
+  // 禁止の判定を含む）。
+  const salesForceHiring = summarizeSalesForceHiring(currentSalesForceHeadcount, draft.salesForceHireCount ?? 0, draft.salesForceLayoffCount ?? 0);
 
   const rawMaterialInventory = ownState.rawMaterialLots
     .filter((l) => l.status === "available")
@@ -490,19 +491,23 @@ export default function DecisionEditor(props: DecisionEditorProps) {
         </div>
       </CollapsibleSection>
 
-      {/* 【営業人員の追加採用・forward-port】当期採用した人数は当期の配分可能
-          人数には加算されない（配分可能人数は上のsalesForceAllocation.
-          availableTotalと同じ値のまま）。四半期確定時に採用が成立し、次の
-          四半期の開始時点から配分可能人数へ加算される
-          （app/lib/v2/companyLab/salesForceHiring.ts参照）。 */}
+      {/* 【営業人員の追加採用・減員・forward-port（続き）】当期に決定した採用・
+          減員はいずれも当期の配分可能人数には加算・減算されない（配分可能
+          人数は上のsalesForceAllocation.availableTotalと同じ値のまま）。
+          四半期確定時に採用・減員が成立し、次の四半期の開始時点から配分可能
+          人数へ反映される（app/lib/v2/companyLab/salesForceHiring.ts参照）。
+          採用と減員は同一四半期に同時入力できない（下の警告・提出ボタンの
+          無効化で防止する）。 */}
       <CollapsibleSection
-        title="営業人員の追加採用"
+        title="営業人員の追加採用・減員"
         tone="input"
         testId="sales-force-hiring-section"
         summaryRight={
           salesForceHiring.plannedHireCount > 0
             ? `今回 採用予定 ${salesForceHiring.plannedHireCount}人 → 次期見込み ${salesForceHiring.nextQuarterHeadcount}人`
-            : `現在の営業人員 ${salesForceHiring.currentHeadcount}人`
+            : salesForceHiring.plannedLayoffCount > 0
+              ? `今回 減員予定 ${salesForceHiring.plannedLayoffCount}人 → 次期見込み ${salesForceHiring.nextQuarterHeadcount}人`
+              : `現在の営業人員 ${salesForceHiring.currentHeadcount}人`
         }
       >
         <div className="space-y-2">
@@ -530,21 +535,53 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                   </td>
                 </tr>
                 <tr className="border-t border-gray-700/60">
+                  <td className="pr-3 py-1 text-gray-400">営業人員減員数（今回の減員予定）</td>
+                  <td className="pr-3 py-1">
+                    <NumberCell
+                      value={draft.salesForceLayoffCount ?? 0}
+                      disabled={disabled}
+                      onChange={(n) => onChange({ ...draft, salesForceLayoffCount: Math.round(Math.max(0, n)) })}
+                    />
+                  </td>
+                </tr>
+                <tr className="border-t border-gray-700/60">
                   <td className="pr-3 py-1 text-gray-400">次期の営業人員見込み</td>
                   <td className="pr-3 py-1" data-testid="sales-force-hiring-next-quarter-headcount">
                     {salesForceHiring.nextQuarterHeadcount}人
                   </td>
                 </tr>
                 <tr className="border-t border-gray-700/60">
-                  <td className="pr-3 py-1 text-gray-400">採用の反映時期</td>
+                  <td className="pr-3 py-1 text-gray-400">採用・減員の反映時期</td>
                   <td className="pr-3 py-1">次の四半期から</td>
                 </tr>
+                {salesForceHiring.plannedLayoffCount > 0 && (
+                  <tr className="border-t border-gray-700/60">
+                    <td className="pr-3 py-1 text-gray-400">今回発生する退職金（当期一括）</td>
+                    <td className="pr-3 py-1" data-testid="sales-force-hiring-severance-cost">
+                      {formatUsd(salesForceHiring.severanceCostUsd)}
+                      {salesForceHiring.effectiveLayoffCount < salesForceHiring.plannedLayoffCount && (
+                        <span className="ml-1 text-amber-400">
+                          （現在の営業人員{salesForceHiring.currentHeadcount}人が上限のため、実際の減員は
+                          {salesForceHiring.effectiveLayoffCount}人）
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
           <p className="text-[11px] text-gray-400">
             今期採用した営業人員は、教育・引継ぎ期間を経て、次の四半期から営業活動に参加します。
+            今期減員を決定した営業人員は、当期は引き続き配置・給与の対象のままで、次の四半期から
+            配分可能人数が減ります（退職金は減員を決定した当期に一括で発生します）。
           </p>
+          {salesForceHiring.hasMutualExclusionConflict && (
+            <p className="text-[11px] text-red-400" data-testid="sales-force-hiring-conflict-warning" role="alert">
+              営業人員の採用と減員を同一四半期に同時入力することはできません。いずれか一方を0にしてください
+              （この内容のままでは提出できません）。
+            </p>
+          )}
         </div>
       </CollapsibleSection>
 

@@ -181,6 +181,12 @@ export interface CompanyQuarterBusinessActuals {
   /** 稼働中の工場数。 */
   readonly activeFactoryCount: number;
   readonly salesForceHeadcount: number;
+  /**
+   * 【営業人員の減員・退職金・forward-port続き】当期に実際に減員される営業人員数
+   * （前期末人数で頭打ち済み）。1人あたり四半期給与2四半期分の退職金を当期に
+   * 一度だけ費用・支出計上するための人数。省略時は0（既存呼び出し元との後方互換）。
+   */
+  readonly salesForceSeveranceCount?: number;
   readonly procurementHeadcount: number;
   /** 当期の国内原料購入額（当期の新規国内ロットのΣ数量×取得単価×1,000。当四半期に現金払い）。 */
   readonly domesticPurchasesUsd: number;
@@ -932,10 +938,17 @@ export function closeFinancialQuarter(
   const capexMaintenanceCostUsd = capex ? capex.capexMaintenanceCostUsd : 0;
 
   const salesForceCost = actuals.salesForceHeadcount * params.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter;
+  // 【営業人員の減員・退職金・forward-port続き】減員を決定した当期に、1人あたり
+  // 四半期給与2四半期分の退職金を一度だけ費用・支出計上する。単価は既存の
+  // salesForceSalaryUsdPerQuarterをそのまま使い、「2四半期分」という係数のみ
+  // ここに追加する（新しい単価パラメータは追加しない）。
+  const SALES_FORCE_SEVERANCE_QUARTERS = 2;
+  const salesForceSeveranceCost =
+    (actuals.salesForceSeveranceCount ?? 0) * SALES_FORCE_SEVERANCE_QUARTERS * params.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter;
   const procurementCost = actuals.procurementHeadcount * params.sellingGeneralAdmin.procurementSalaryUsdPerQuarter;
   const adminFixed = params.sellingGeneralAdmin.adminFixedUsdPerQuarter;
   const sellingLogistics = soldTonsTotal * params.sellingGeneralAdmin.sellingLogisticsUsdPerTon;
-  const sgaTotal = salesForceCost + procurementCost + adminFixed + sellingLogistics;
+  const sgaTotal = salesForceCost + salesForceSeveranceCost + procurementCost + adminFixed + sellingLogistics;
 
   // 【Phase 8B-1】financingが指定されれば融資ポートフォリオ由来の実発生利息を使う。
   // 省略時はPhase 8Aの簡易計算（既存借入残高×固定利率）のまま（後方互換）。
@@ -1306,6 +1319,7 @@ export function closeFinancialQuarter(
   const costRecords = buildCostRecords(actuals, params, costing, {
     sellingLogistics,
     salesForceCost,
+    salesForceSeveranceCost,
     procurementCost,
     adminFixed,
     interestExpense,
@@ -1367,6 +1381,7 @@ export function closeFinancialQuarter(
 interface CostRecordContext {
   readonly sellingLogistics: number;
   readonly salesForceCost: number;
+  readonly salesForceSeveranceCost: number;
   readonly procurementCost: number;
   readonly adminFixed: number;
   readonly interestExpense: number;
@@ -1604,6 +1619,22 @@ function buildCostRecords(
       period,
       shortTermReducibility: "committed",
       sourceRef: `fixtures.salesForceHeadcountTotal:${period}`,
+    },
+    {
+      // 【営業人員の減員・退職金・forward-port続き】減員を決定した当期にのみ
+      // 発生する一度限りの費用（退職金）。会社の意思決定（減員数）で当期に
+      // 回避可能なため"variable"・"reducible"として記録する（既存の
+      // salesForceSalaryが"stepFixed"・"committed"なのとは異なる特性）。
+      account: "salesForceSeverance",
+      behavior: "variable",
+      fixedPortion: zero,
+      variablePortion: v(ctx.salesForceSeveranceCost),
+      driver: "salesForceLayoffHeadcount",
+      driverQuantity: actuals.salesForceSeveranceCount ?? 0,
+      driverUnitRate: 2 * params.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter,
+      period,
+      shortTermReducibility: "reducible",
+      sourceRef: `decisions.salesForceLayoffCount:${period}`,
     },
     {
       account: "procurementSalary",

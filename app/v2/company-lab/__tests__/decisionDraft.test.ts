@@ -95,28 +95,62 @@ test("受入確認5b: 自動方針が計画しなかった市場×商品の組�
 });
 
 // ---------------------------------------------------------------------
-// 営業人員の追加採用（forward-port）
+// 営業人員の追加採用・減員（forward-port。減員・退職金は続き作業）
 // ---------------------------------------------------------------------
 
-test("summarizeSalesForceHiring: 採用予定0人なら、現在人数と次期見込みが一致する", () => {
-  const preview = summarizeSalesForceHiring(18, 0);
-  assert.deepEqual(preview, { currentHeadcount: 18, plannedHireCount: 0, nextQuarterHeadcount: 18 });
+test("summarizeSalesForceHiring: 採用予定0人・減員予定0人なら、現在人数と次期見込みが一致する", () => {
+  const preview = summarizeSalesForceHiring(18, 0, 0);
+  assert.equal(preview.currentHeadcount, 18);
+  assert.equal(preview.plannedHireCount, 0);
+  assert.equal(preview.plannedLayoffCount, 0);
+  assert.equal(preview.effectiveLayoffCount, 0);
+  assert.equal(preview.nextQuarterHeadcount, 18);
+  assert.equal(preview.severanceCostUsd, 0);
+  assert.equal(preview.hasMutualExclusionConflict, false);
 });
 
 test("summarizeSalesForceHiring: 正の整数の採用予定は現在人数へ単純加算される（ユーザー提示例: 18人→採用6人→次期見込み24人）", () => {
-  const preview = summarizeSalesForceHiring(18, 6);
-  assert.deepEqual(preview, { currentHeadcount: 18, plannedHireCount: 6, nextQuarterHeadcount: 24 });
+  const preview = summarizeSalesForceHiring(18, 6, 0);
+  assert.equal(preview.plannedHireCount, 6);
+  assert.equal(preview.nextQuarterHeadcount, 24);
+  assert.equal(preview.severanceCostUsd, 0);
 });
 
 test("summarizeSalesForceHiring: 負数・NaN・Infinityの採用予定は0として扱う", () => {
-  assert.equal(summarizeSalesForceHiring(18, -3).plannedHireCount, 0);
-  assert.equal(summarizeSalesForceHiring(18, NaN).plannedHireCount, 0);
-  assert.equal(summarizeSalesForceHiring(18, Infinity).plannedHireCount, 0);
+  assert.equal(summarizeSalesForceHiring(18, -3, 0).plannedHireCount, 0);
+  assert.equal(summarizeSalesForceHiring(18, NaN, 0).plannedHireCount, 0);
+  assert.equal(summarizeSalesForceHiring(18, Infinity, 0).plannedHireCount, 0);
 });
 
 test("summarizeSalesForceHiring: 小数の採用予定は四捨五入する", () => {
-  assert.equal(summarizeSalesForceHiring(18, 6.4).plannedHireCount, 6);
-  assert.equal(summarizeSalesForceHiring(18, 6.6).plannedHireCount, 7);
+  assert.equal(summarizeSalesForceHiring(18, 6.4, 0).plannedHireCount, 6);
+  assert.equal(summarizeSalesForceHiring(18, 6.6, 0).plannedHireCount, 7);
+});
+
+test("summarizeSalesForceHiring: 正の整数の減員予定は現在人数から単純減算され、退職金（1人あたり四半期給与2四半期分）が見積られる（18人→減員6人→次期見込み12人）", () => {
+  const preview = summarizeSalesForceHiring(18, 0, 6);
+  assert.equal(preview.plannedLayoffCount, 6);
+  assert.equal(preview.effectiveLayoffCount, 6);
+  assert.equal(preview.nextQuarterHeadcount, 12);
+  assert.equal(preview.severanceCostUsd, 6 * 2 * 8_000, "1人あたり四半期給与$8,000の2四半期分×6人");
+});
+
+test("summarizeSalesForceHiring: 現在人数を超える減員予定は現在人数で頭打ちする（営業人員は0人未満にならない）", () => {
+  const preview = summarizeSalesForceHiring(18, 0, 30);
+  assert.equal(preview.plannedLayoffCount, 30, "入力欄表示用の値はそのまま保持する");
+  assert.equal(preview.effectiveLayoffCount, 18, "実際に減員される人数は現在人数で頭打ち");
+  assert.equal(preview.nextQuarterHeadcount, 0);
+  assert.equal(preview.severanceCostUsd, 18 * 2 * 8_000, "退職金は実際に減員される人数(18人)ぶんのみ");
+});
+
+test("summarizeSalesForceHiring: 採用予定・減員予定の両方が正の場合はhasMutualExclusionConflictがtrueになる（同時入力禁止の検知）", () => {
+  const preview = summarizeSalesForceHiring(18, 6, 3);
+  assert.equal(preview.hasMutualExclusionConflict, true);
+});
+
+test("summarizeSalesForceHiring: 採用予定・減員予定のいずれか一方だけが正の場合はhasMutualExclusionConflictがfalseになる", () => {
+  assert.equal(summarizeSalesForceHiring(18, 6, 0).hasMutualExclusionConflict, false);
+  assert.equal(summarizeSalesForceHiring(18, 0, 6).hasMutualExclusionConflict, false);
 });
 
 test("buildInitialDraft: 新しい四半期のドラフトは常に採用予定0人から始まる", () => {
@@ -169,4 +203,60 @@ test("draft往復: この機能導入前に保存されたドラフト（salesFo
 
   const rebuilt = buildDecisionInputFromDraft(legacyDraft as unknown as typeof draft, fixture, state.currentPeriod);
   assert.equal(rebuilt.salesForceHireCount, 0);
+});
+
+// ---------------------------------------------------------------------
+// 営業人員の減員（forward-port続き）
+// ---------------------------------------------------------------------
+
+test("buildInitialDraft: 新しい四半期のドラフトは常に減員予定0人から始まる", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig());
+  const fixture = fixtures[0];
+  const ownState = buildCompanyOwnState(state, fixture);
+  const publicInfo = buildPublicMarketInfo(state);
+  const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+  const draft = buildInitialDraft(fixture, autoDecision);
+  assert.equal(draft.salesForceLayoffCount, 0);
+});
+
+test("draft往復(buildInitialDraft→buildDecisionInputFromDraft): プレイヤーが入力した減員予定人数が消失しない", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig());
+  const fixture = fixtures[0];
+  const ownState = buildCompanyOwnState(state, fixture);
+  const publicInfo = buildPublicMarketInfo(state);
+  const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+
+  const draft = buildInitialDraft(fixture, autoDecision);
+  const editedDraft = { ...draft, salesForceLayoffCount: 6 };
+  const rebuilt = buildDecisionInputFromDraft(editedDraft, fixture, state.currentPeriod);
+  assert.equal(rebuilt.salesForceLayoffCount, 6, "draft往復後も減員予定人数6人が消失していない");
+});
+
+test("draft往復: 負数・小数・NaNの減員予定人数は0以上の整数へ丸められて送信される（ハードエラー防止）", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig());
+  const fixture = fixtures[0];
+  const ownState = buildCompanyOwnState(state, fixture);
+  const publicInfo = buildPublicMarketInfo(state);
+  const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+  const draft = buildInitialDraft(fixture, autoDecision);
+
+  assert.equal(buildDecisionInputFromDraft({ ...draft, salesForceLayoffCount: -5 }, fixture, state.currentPeriod).salesForceLayoffCount, 0);
+  assert.equal(buildDecisionInputFromDraft({ ...draft, salesForceLayoffCount: 6.6 }, fixture, state.currentPeriod).salesForceLayoffCount, 7);
+  assert.equal(buildDecisionInputFromDraft({ ...draft, salesForceLayoffCount: NaN }, fixture, state.currentPeriod).salesForceLayoffCount, 0);
+});
+
+test("draft往復: この機能導入前に保存されたドラフト（salesForceLayoffCountキー自体が無い）は0として扱われる", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig());
+  const fixture = fixtures[0];
+  const ownState = buildCompanyOwnState(state, fixture);
+  const publicInfo = buildPublicMarketInfo(state);
+  const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+  const draft = buildInitialDraft(fixture, autoDecision);
+
+  const legacyDraft = { ...draft } as Record<string, unknown>;
+  delete legacyDraft.salesForceLayoffCount;
+  assert.ok(!("salesForceLayoffCount" in legacyDraft), "テスト前提: 旧ドラフトにキー自体が無いこと");
+
+  const rebuilt = buildDecisionInputFromDraft(legacyDraft as unknown as typeof draft, fixture, state.currentPeriod);
+  assert.equal(rebuilt.salesForceLayoffCount, 0);
 });

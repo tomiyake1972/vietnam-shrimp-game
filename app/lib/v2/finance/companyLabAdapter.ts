@@ -74,6 +74,14 @@ export interface CompanyActualsSource {
   readonly appliedOvertimeRate: number;
   readonly activeFactoryCount: number;
   readonly salesForceHeadcount: number;
+  /**
+   * 【営業人員の減員・退職金・forward-port続き】当期に実際に減員される営業人員数
+   * （前期末人数で頭打ち済み、companyLab/salesForceHiring.ts
+   * computeEffectiveSalesForceLayoffCount参照）。1人あたり四半期給与2四半期分の
+   * 退職金を当期に一度だけ費用・支出計上するための人数。省略時（undefined）は
+   * 既存呼び出し元との後方互換のため0として扱う。
+   */
+  readonly salesForceSeveranceCount?: number;
   readonly procurementHeadcount: number;
 }
 
@@ -275,6 +283,7 @@ export function buildCompanyQuarterBusinessActuals(src: CompanyActualsSource): C
     appliedOvertimeRate: src.appliedOvertimeRate,
     activeFactoryCount: src.activeFactoryCount,
     salesForceHeadcount: src.salesForceHeadcount,
+    salesForceSeveranceCount: src.salesForceSeveranceCount ?? 0,
     procurementHeadcount: src.procurementHeadcount,
     domesticPurchasesUsd,
     importOrdersUsd,

@@ -156,6 +156,21 @@ export interface CompanyDecisionInput {
    * 0人）。
    */
   readonly salesForceHireCount?: number;
+  /**
+   * 【営業人員の減員・forward-port続き】当期の営業人員の減員人数（0以上の
+   * 整数）。減員対象者は当期中は営業戦力・通常給与に含まれたまま
+   * （salesForceHiring.ts参照）で、次の四半期の開始時点から配分可能人数が
+   * 減る。減員を決定した当期に、1人あたり四半期給与2四半期分の退職金を
+   * 一度だけ費用・支出計上する（finance/quarterClose.ts参照）。
+   *
+   * salesForceHireCountと同一四半期に両方>0を入力することはできない
+   * （runner.ts advanceCompanyLabQuarterが受理時に検証・エラー化する）。
+   *
+   * この機能の導入前に確定した既存の永続化済み履歴にはこのフィールドが存在
+   * しないため、後方互換のためoptionalとする（省略時は0として扱う＝
+   * 旧保存データでは減員予定0人）。
+   */
+  readonly salesForceLayoffCount?: number;
 }
 
 // ---------------------------------------------------------------------

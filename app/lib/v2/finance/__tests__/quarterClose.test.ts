@@ -2386,3 +2386,51 @@ test("商品別固定費配賦FC-5（受入条件・最重要）: managementAcco
   assert.ok(Math.abs((cmA.commonFixedCost as number) - ((cmA.totalFixedCost as number) - totalDirectA)) < EPS);
   assert.ok(Math.abs((cmB.commonFixedCost as number) - ((cmB.totalFixedCost as number) - totalDirectB)) < EPS);
 });
+
+// ---------------------------------------------------------------------
+// 営業人員の減員・退職金（forward-port続き）
+// ---------------------------------------------------------------------
+
+test("営業人員の退職金: salesForceSeveranceCountを省略した場合、退職金は発生しない（既存呼び出し元との後方互換）", () => {
+  const withoutField = close(makeState(), makeActuals());
+  const explicitZero = close(makeState(), makeActuals({ salesForceSeveranceCount: 0 }));
+  assert.equal(withoutField.result.profitAndLoss.sellingGeneralAdmin as number, explicitZero.result.profitAndLoss.sellingGeneralAdmin as number);
+  const severanceRecord = withoutField.result.costRecords.find((r) => r.account === "salesForceSeverance");
+  assert.ok(severanceRecord, "salesForceSeveranceのコスト記録自体は常に存在する（金額0でも記録は残す）");
+  assert.equal(severanceRecord!.variablePortion as number, 0);
+});
+
+test("営業人員の退職金: 1人あたり四半期給与2四半期分×減員数がSG&Aへ一度だけ加算される", () => {
+  const withoutSeverance = close(makeState(), makeActuals({ salesForceSeveranceCount: 0 }));
+  const withSeverance = close(makeState(), makeActuals({ salesForceSeveranceCount: 6 }));
+  const expectedSeverance = 6 * 2 * FINANCE_PARAMETERS_V1.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter;
+  const sgaDiff =
+    (withSeverance.result.profitAndLoss.sellingGeneralAdmin as number) - (withoutSeverance.result.profitAndLoss.sellingGeneralAdmin as number);
+  assert.ok(Math.abs(sgaDiff - expectedSeverance) < EPS, `SG&A差分が退職金見積りと一致しない: ${sgaDiff} vs ${expectedSeverance}`);
+
+  const severanceRecord = withSeverance.result.costRecords.find((r) => r.account === "salesForceSeverance")!;
+  assert.equal(severanceRecord.variablePortion as number, expectedSeverance);
+  assert.equal(severanceRecord.behavior, "variable");
+  assert.equal(severanceRecord.shortTermReducibility, "reducible");
+  assert.equal(severanceRecord.driverQuantity, 6);
+});
+
+test("営業人員の退職金: 当期に一度だけ発生する現金支出でもある（SG&A現金支払を通じてキャッシュフローへも反映される）", () => {
+  const withoutSeverance = close(makeState(), makeActuals({ salesForceSeveranceCount: 0 }));
+  const withSeverance = close(makeState(), makeActuals({ salesForceSeveranceCount: 6 }));
+  const expectedSeverance = 6 * 2 * FINANCE_PARAMETERS_V1.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter;
+  const cashDiff =
+    (withoutSeverance.result.cashFlow.operatingDirect.paymentsForSellingGeneralAdmin as number) -
+    (withSeverance.result.cashFlow.operatingDirect.paymentsForSellingGeneralAdmin as number);
+  // paymentsForSellingGeneralAdminは負値（支出）で記録されるため、支出が増えるほど
+  // より負の値になる＝差分（withoutSeverance − withSeverance）は正の値になるはず。
+  assert.ok(Math.abs(cashDiff - expectedSeverance) < EPS, `キャッシュフローの現金支出差分が退職金見積りと一致しない: ${cashDiff}`);
+});
+
+test("営業人員の退職金: 通常の営業人件費(salesForceSalary)とは独立したコスト記録として、既存のsalesForceHeadcountベースの通常給与を変えない", () => {
+  const withoutSeverance = close(makeState(), makeActuals({ salesForceHeadcount: 5, salesForceSeveranceCount: 0 }));
+  const withSeverance = close(makeState(), makeActuals({ salesForceHeadcount: 5, salesForceSeveranceCount: 6 }));
+  const salaryA = withoutSeverance.result.costRecords.find((r) => r.account === "salesForceSalary")!;
+  const salaryB = withSeverance.result.costRecords.find((r) => r.account === "salesForceSalary")!;
+  assert.equal(salaryA.fixedPortion as number, salaryB.fixedPortion as number, "退職金の有無で通常給与(salesForceSalary)は変化しない");
+});

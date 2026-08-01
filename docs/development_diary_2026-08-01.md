@@ -289,3 +289,82 @@ Phase 8G §2〜§6一式を丸ごと統合するのではなく、「営業人�
   `allocateHeadcountAcrossMarkets`呼び出し側の設計から見直す必要がある。
 - 今回の変更は`feature/v2-sales-staff-hiring-forward-port`ブランチ上のみであり、
   `develop/v2`・`main`へはまだマージしていない（三宅さんの指示によりマージは別タスク）。
+
+## 13. 「営業人員の減員・退職金」機能の追加（forward-portの続き作業）
+
+### 13.1 経緯
+
+三宅さんより、営業人員の追加採用に続けて「減員」も実装するよう、詳細仕様（増員・減員の
+反映タイミング、退職金の計上方法、同時入力禁止、schema versionの扱い等）を明示指示された。
+追加の仕様検討は不要との指示のため、以下は指示内容をそのまま実装した記録である。
+
+### 13.2 実装内容（要点）
+
+- `app/lib/v2/companyLab/salesForceHiring.ts`：`deriveNextSalesForceHiringState`が
+  減員（layoffCount）も受け取れるよう拡張し、次期人数＝前期末人数＋採用−減員（0未満には
+  ならない）とした。新規関数`computeEffectiveSalesForceLayoffCount`で「実際に減員される
+  人数」（前期末人数で頭打ち）を一箇所に集約し、次期人数算出と退職金コスト算出の両方で
+  同じ値を使う（二重実装によるズレを防止）。
+- `runner.ts`：会社の意思決定受理時に、採用数・減員数が同一四半期に両方>0であれば
+  `CompanyLabError`を投げて拒否する（既存の`validateSalesForceHeadcountBudget`と同じ
+  検証タイミング・扱い）。減員対象者は当期の配分可能人数・当期の通常給与（SG&A）には
+  含まれたまま（既存の採用の設計と対称）。当期に実際に減員される人数を
+  `buildCompanyQuarterBusinessActuals`へ`salesForceSeveranceCount`として渡す。
+- `finance/quarterClose.ts`：`salesForceSeveranceCount × 2四半期 × salesForceSalaryUsdPerQuarter`
+  を退職金として算出し、SG&A合計（したがって営業利益・キャッシュフローの現金支出）へ
+  当期一度だけ加算する。既存のコスト記録（固変分解）にも`salesForceSeverance`勘定を
+  新設し、`behavior: "variable"`・`shortTermReducibility: "reducible"`として記録した
+  （既存の`salesForceSalary`が`stepFixed`・`committed`なのとは異なる特性であることを
+  明示するため）。`salesForceSeveranceCount`は既存呼び出し元との後方互換のためoptionalとし、
+  省略時は退職金0として扱う。
+- UI（`DecisionEditor.tsx`・`decisionDraft.ts`・`PlayerScreenClient.tsx`）：「営業人員の
+  追加採用」セクションを「営業人員の追加採用・減員」に改称し、減員入力欄・退職金見積り
+  （当期一括）・次期見込み人数を追加。採用と減員が同時に>0の場合は赤字の警告文を表示し、
+  「この内容で提出する」ボタンをクライアント側でも無効化する（サーバー側の検証だけに
+  頼らない、既存の営業配分オーバー時と同じ二重防御方針）。
+- `autoPolicy.ts`：Standard AIは常に`salesForceLayoffCount: 0`を返すのみとし、新規の
+  AI減員判断ロジックは追加していない（指示どおり後続課題）。
+- 永続化スキーマ：三宅さんの明示指示により`CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION`を
+  5→6へ更新した。`CompanyLabRuntimeSnapshot`の構造自体は変更していない
+  （`salesForceHiringState`の各社`headcount`は増員・減員のいずれでも同じ形のまま
+  増減するだけで、新規フィールド追加は不要だったため）。`CompanyDecisionInput`へ
+  `salesForceLayoffCount`をoptionalとして追加した（既存の`salesForceHireCount`と同じ
+  後方互換方針。既存のschemaVersion:1〜5データはこのキーが存在しないため0として復元される）。
+
+### 13.3 判明した既存設計上の制約（今回の変更が原因ではない既存の挙動）
+
+統合テスト作成中に、Standard AIの営業人員配分ロジック（`autoPolicy.ts`の
+`allocateHeadcountAcrossMarkets`呼び出し）が、動的な現在人数
+（`ownState.salesForceHiringState.headcount`）ではなく、常に静的なfixture基準値
+（`fixture.salesForceHeadcountTotal`）を参照して配分を提案する設計であることを再確認した。
+これは採用機能の実装時点から一貫した既存の設計（今回新たに導入した挙動ではない）だが、
+採用（人数が基準値以上に増える一方）では問題が表面化しなかったのに対し、減員
+（人数が基準値未満に減る）では、減員後に画面へ表示される自動方針の提案がそのまま
+提出すると、配分人数が実在人数を超えて`validateSalesForceHeadcountBudget`に拒否される
+ケースが生じうることが分かった。これは既存の「営業配分オーバー時は警告表示＋提出ブロック」
+という既存のソフト警告フローの範囲内で正しく検知・防止される（クラッシュや不正な状態には
+ならない）が、減員直後の四半期はプレイヤーが自動方針の営業配分を手動で減らす操作を
+求められる可能性がある。Standard AIの営業配分ロジック自体の改修は、当初の指示どおり
+今回のスコープ外（AIの減員判断ロジックの新設と同様、後続課題）としたため、対応していない。
+
+### 13.4 検証結果
+
+- `npm test`：**2106件全てpass**（fail 0。今回の追加テスト23件を含む）。
+- `npx tsc --noEmit`：**エラー0件**。
+- `npm run lint`（eslint）：**エラー0件**（既存の無関係な警告4件のみ）。
+- `npm run build`：コンパイル・TypeScript型チェックは成功。ページデータ収集段階で
+  `STAGING_KV_REST_API_URL`未設定により失敗（第11節と同一の既知のサンドボックス環境制約、
+  今回の変更とは無関係）。
+- 実機確認（Playwright、`COMPANY_LAB_UI_E2E_IN_MEMORY=1`によるローカルdevサーバー、
+  `feature/v2-sales-staff-hiring-forward-port`ブランチ上での実装確認用。**Test14
+  （`test/sai6-manual-observation-2026-08-01`ブランチ）にはまだ反映されていない**）：
+  減員5人・採用3人を同時入力→赤字警告表示＋提出ボタン無効化を確認→採用を0に修正して
+  警告解消・提出可能に戻ることを確認→提出・四半期処理・再読込を行い、turn2で
+  現在の営業人員が13人（18−5）へ正しく反映されることを実機で確認した。
+
+### 13.5 今回のスコープ外（三宅さんの明示指示どおり）
+
+- 採用時の別建て採用費・研修費の新設。
+- Standard AIの減員判断ロジックの新設（今回は常に減員数0で従来挙動を維持）。
+- `test/sai6-manual-observation-2026-08-01`（Test14用）ブランチ・`develop/v2`・`main`への
+  マージ・反映、およびdeploy。

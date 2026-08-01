@@ -31,7 +31,7 @@ import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
 import FinancialResultsSection from "../../components/financial/FinancialResultsSection";
 import PlayLabBanner from "../components/PlayLabBanner";
-import { CompanyDecisionDraft, summarizeSalesForceAllocation } from "../../decisionDraft";
+import { CompanyDecisionDraft, summarizeSalesForceAllocation, summarizeSalesForceHiring } from "../../decisionDraft";
 import { PlayerScreenViewModel } from "../_lib/viewModel";
 import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
 import { fetchAiExplanationAction, processQuarterAction, saveDraftAction, submitDraftAction, withdrawDraftAction } from "./actions";
@@ -133,6 +133,14 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
   // こちらが増える）。
   const salesForceAllocation = draft
     ? summarizeSalesForceAllocation(draft.salesPlans, viewModel.ownState.salesForceHiringState.headcount)
+    : null;
+
+  // 【営業人員の増員・減員の同時入力禁止・forward-port続き】draft.salesForceHireCount・
+  // salesForceLayoffCountが両方>0の場合、runner.ts側で必ずエラーになるため、
+  // クライアント側でも提出ボタンを無効化する（クライアント側のdisabledだけに
+  // 頼らない方針＝上のsalesForceAllocationと同じ二重防御。指示§10）。
+  const salesForceHiring = draft
+    ? summarizeSalesForceHiring(viewModel.ownState.salesForceHiringState.headcount, draft.salesForceHireCount ?? 0, draft.salesForceLayoffCount ?? 0)
     : null;
 
   function handleWithdrawSubmission() {
@@ -433,6 +441,12 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
                     人 / 配分可能 {salesForceAllocation.availableTotal}人）。現在の人員数に収まるように再編集してください。この状態では提出できません。
                   </div>
                 )}
+                {salesForceHiring?.hasMutualExclusionConflict && (
+                  <div className="bg-rose-950/50 border border-rose-700/60 text-rose-200 rounded-lg px-3 py-2 text-xs">
+                    営業人員の採用（{salesForceHiring.plannedHireCount}人）と減員（{salesForceHiring.plannedLayoffCount}人）を同一四半期に
+                    同時入力することはできません。「営業人員の追加採用・減員」欄でいずれか一方を0にしてください。この状態では提出できません。
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     onClick={handleSaveDraft}
@@ -443,8 +457,14 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
                   </button>
                   <button
                     onClick={handleSubmitDraft}
-                    disabled={busy || Boolean(salesForceAllocation?.isOverAllocated)}
-                    title={salesForceAllocation?.isOverAllocated ? "営業人員の配分合計が実在人数を超えているため提出できません。" : undefined}
+                    disabled={busy || Boolean(salesForceAllocation?.isOverAllocated) || Boolean(salesForceHiring?.hasMutualExclusionConflict)}
+                    title={
+                      salesForceAllocation?.isOverAllocated
+                        ? "営業人員の配分合計が実在人数を超えているため提出できません。"
+                        : salesForceHiring?.hasMutualExclusionConflict
+                          ? "営業人員の採用と減員を同時に入力しているため提出できません。"
+                          : undefined
+                    }
                     className="bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-2 text-sm"
                   >
                     {submitPending ? "提出中…" : "この内容で提出する"}

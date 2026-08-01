@@ -841,3 +841,154 @@ test("営業人員採用: 追加採用0人の場合、この機能導入前と�
     assert.equal(buildCompanyOwnState(state, f).salesForceHiringState.headcount, f.salesForceHeadcountTotal);
   }
 });
+
+// ---------------------------------------------------------------------
+// 営業人員の減員・退職金（forward-port続き）
+// ---------------------------------------------------------------------
+
+test("営業人員減員: 当期は配分可能人数・当期の通常SG&Aから減算されず（減員対象者も当期は配置・給与のまま）、次四半期から人数が減り、当期に一括で退職金が発生する（18人→減員6人→次期12人）", () => {
+  const balId = "BAL";
+
+  function buildTurn1Decisions(
+    state: ReturnType<typeof initializeCompanyLab>["state"],
+    fixtures: ReturnType<typeof initializeCompanyLab>["fixtures"],
+    balLayoffCount: number
+  ): Record<string, CompanyDecisionInput> {
+    const publicInfo = buildPublicMarketInfo(state);
+    const decisions: Record<string, CompanyDecisionInput> = {};
+    for (const f of fixtures) {
+      const own = buildCompanyOwnState(state, f);
+      const base = generateAutoPolicyDecision(f, own, publicInfo, state.currentPeriod, 1);
+      decisions[f.companyId] = f.companyId === balId ? { ...base, salesForceLayoffCount: balLayoffCount } : base;
+    }
+    return decisions;
+  }
+
+  const laidOff0 = initializeCompanyLab(baseConfig({ seed: "sales-layoff-001", turns: 2 }));
+  const baseline0 = initializeCompanyLab(baseConfig({ seed: "sales-layoff-001", turns: 2 }));
+  const { fixtures } = laidOff0;
+  const balFixture = fixtures.find((f) => f.companyId === balId)!;
+  assert.equal(balFixture.salesForceHeadcountTotal, 18, "この検証はBALの基準人数18人を前提にしている");
+
+  const decisionsLaidOff1 = buildTurn1Decisions(laidOff0.state, fixtures, 6);
+  const decisionsBaseline1 = buildTurn1Decisions(baseline0.state, fixtures, 0);
+  const laidOff1State = advanceCompanyLabQuarter(laidOff0.state, fixtures, decisionsLaidOff1);
+  const baseline1State = advanceCompanyLabQuarter(baseline0.state, fixtures, decisionsBaseline1);
+
+  // 当期の通常給与ぶんのSG&Aは減員対象者も含めたまま（当期はまだ配置・給与の対象）。
+  // ただし当期に退職金（6人×2四半期分×$8,000＝$96,000）が一度だけ発生するため、
+  // SG&A全体としてはその分だけ「減員あり」ブランチが高くなる。
+  const balFrLaidOff1 = laidOff1State.history[0].financialResults.find((fr) => fr.companyId === balId)!;
+  const balFrBaseline1 = baseline1State.history[0].financialResults.find((fr) => fr.companyId === balId)!;
+  const sgaDiffTurn1 = (balFrLaidOff1.profitAndLoss.sellingGeneralAdmin as number) - (balFrBaseline1.profitAndLoss.sellingGeneralAdmin as number);
+  assert.ok(
+    Math.abs(sgaDiffTurn1 - 6 * 2 * 8000) < 0.01,
+    `減員決定当期のSG&A差分（退職金6人×2四半期分ぶんのみ）が想定と異なる: ${sgaDiffTurn1}`
+  );
+
+  // 次四半期の期首では、配分可能人数が12人（減員ブランチ）／18人（対照ブランチ）。
+  assert.equal(buildCompanyOwnState(laidOff1State, balFixture).salesForceHiringState.headcount, 12);
+  assert.equal(buildCompanyOwnState(baseline1State, balFixture).salesForceHiringState.headcount, 18);
+
+  // turn2は両ブランチとも自動方針のみ（新規の採用・減員なし）で、減員の効果だけを見る。
+  // 【注記】generateAutoPolicyDecisionの営業配分（allocateHeadcountAcrossMarkets）は
+  // 既存仕様どおりfixture.salesForceHeadcountTotal（静的な基準値・BALは18）を参照し、
+  // 動的な減員後人数には追随しない（プレイヤーが減員後にDecisionEditorで再編集する
+  // ことを前提にした既存の設計。今回のforward-portが新たに変えた挙動ではない）。
+  // このため減員後（12人）のBALへ自動方針をそのまま渡すとバジェット検証で拒否
+  // されるため、この統合テストではBALの販売計画の営業配分だけを0にクランプする
+  // （SG&Aは販売計画の営業配分ではなくsalesForceHiringState.headcountから算出される
+  // ため、この操作は本テストが検証したいSG&A差分には影響しない）。
+  function buildTurn2Decisions(state: typeof laidOff1State, fixtures: ReturnType<typeof initializeCompanyLab>["fixtures"]) {
+    const publicInfo = buildPublicMarketInfo(state);
+    const decisions: Record<string, CompanyDecisionInput> = {};
+    for (const f of fixtures) {
+      const base = generateAutoPolicyDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, 2);
+      decisions[f.companyId] =
+        f.companyId === balId
+          ? { ...base, salesPlans: base.salesPlans.map((p) => ({ ...p, salesForceHeadcount: 0 })) }
+          : base;
+    }
+    return decisions;
+  }
+
+  const laidOff2State = advanceCompanyLabQuarter(laidOff1State, fixtures, buildTurn2Decisions(laidOff1State, fixtures));
+  const baseline2State = advanceCompanyLabQuarter(baseline1State, fixtures, buildTurn2Decisions(baseline1State, fixtures));
+
+  // 次四半期(quarter2)のSG&Aは、退職金は既に発生済み（一度だけ）なので、
+  // 通常給与の減員6人ぶん（6人×salesForceSalaryUsdPerQuarter）だけ低くなる。
+  const balFrLaidOff2 = laidOff2State.history[1].financialResults.find((fr) => fr.companyId === balId)!;
+  const balFrBaseline2 = baseline2State.history[1].financialResults.find((fr) => fr.companyId === balId)!;
+  const sgaDiffTurn2 = (balFrBaseline2.profitAndLoss.sellingGeneralAdmin as number) - (balFrLaidOff2.profitAndLoss.sellingGeneralAdmin as number);
+  assert.ok(Math.abs(sgaDiffTurn2 - 6 * 8000) < 0.01, `減員6人ぶんの通常給与SG&A差分が想定と異なる: ${sgaDiffTurn2}`);
+
+  // 3四半期目以降に追加の採用・減員が無ければ、配分可能人数はそれ以上変化しない。
+  assert.equal(buildCompanyOwnState(laidOff2State, balFixture).salesForceHiringState.headcount, 12);
+  assert.equal(buildCompanyOwnState(baseline2State, balFixture).salesForceHiringState.headcount, 18);
+});
+
+test("営業人員減員: 現在人数を超える減員を入力しても営業人員は0人未満にならず、退職金は実際に減員される人数（現在人数）ぶんのみ発生する", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig({ seed: "sales-layoff-overshoot-001", turns: 1 }));
+  const balFixture = fixtures.find((f) => f.companyId === "BAL")!;
+  assert.equal(balFixture.salesForceHeadcountTotal, 18);
+  const publicInfo = buildPublicMarketInfo(state);
+
+  const decisions: Record<string, CompanyDecisionInput> = {};
+  for (const f of fixtures) {
+    const base = generateAutoPolicyDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, 1);
+    decisions[f.companyId] = f.companyId === "BAL" ? { ...base, salesForceLayoffCount: 30 } : base;
+  }
+  const nextState = advanceCompanyLabQuarter(state, fixtures, decisions);
+
+  assert.equal(buildCompanyOwnState(nextState, balFixture).salesForceHiringState.headcount, 0, "0人未満にはならず0人で頭打ち");
+  const balFr = nextState.history[0].financialResults.find((fr) => fr.companyId === "BAL")!;
+  const baselineDecisions: Record<string, CompanyDecisionInput> = {};
+  for (const f of fixtures) {
+    baselineDecisions[f.companyId] = generateAutoPolicyDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, 1);
+  }
+  const baselineState = advanceCompanyLabQuarter(state, fixtures, baselineDecisions);
+  const balFrBaseline = baselineState.history[0].financialResults.find((fr) => fr.companyId === "BAL")!;
+  const sgaDiff = (balFr.profitAndLoss.sellingGeneralAdmin as number) - (balFrBaseline.profitAndLoss.sellingGeneralAdmin as number);
+  assert.ok(
+    Math.abs(sgaDiff - 18 * 2 * 8000) < 0.01,
+    `退職金は実際に減員される人数(18人=現在人数で頭打ち)ぶんのみのはず。差分: ${sgaDiff}`
+  );
+});
+
+test("営業人員の採用・減員の同時入力禁止: 1社が同一四半期に採用と減員を両方>0で入力すると、意思決定が拒否される", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig({ seed: "sales-hiring-layoff-conflict-001", turns: 1 }));
+  const publicInfo = buildPublicMarketInfo(state);
+
+  const decisions: Record<string, CompanyDecisionInput> = {};
+  for (const f of fixtures) {
+    const base = generateAutoPolicyDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, 1);
+    decisions[f.companyId] = f.companyId === "BAL" ? { ...base, salesForceHireCount: 6, salesForceLayoffCount: 3 } : base;
+  }
+
+  assert.throws(() => advanceCompanyLabQuarter(state, fixtures, decisions), /採用.*減員|同時入力/);
+});
+
+test("営業人員減員: 減員0人の場合、この機能導入前と完全に同じ結果になる（回帰なし）", () => {
+  const withZeroLayoff = initializeCompanyLab(baseConfig({ seed: "sales-layoff-zero-001", turns: 3 }));
+  const { fixtures } = withZeroLayoff;
+
+  function decisionsAllZero(state: ReturnType<typeof initializeCompanyLab>["state"], turn: number): Record<string, CompanyDecisionInput> {
+    const publicInfo = buildPublicMarketInfo(state);
+    const decisions: Record<string, CompanyDecisionInput> = {};
+    for (const f of fixtures) {
+      // 【回帰確認】salesForceLayoffCountを明示的に渡さない（omit）。autoPolicy.ts自体が
+      // 常に0を返すため、意思決定側は減員0人固定の従来どおりの経路のまま。
+      decisions[f.companyId] = generateAutoPolicyDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, turn);
+    }
+    return decisions;
+  }
+
+  let state = withZeroLayoff.state;
+  for (let turn = 1; turn <= 3; turn++) {
+    state = advanceCompanyLabQuarter(state, fixtures, decisionsAllZero(state, turn));
+  }
+
+  for (const f of fixtures) {
+    assert.equal(buildCompanyOwnState(state, f).salesForceHiringState.headcount, f.salesForceHeadcountTotal);
+  }
+});

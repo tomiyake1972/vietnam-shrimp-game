@@ -8,6 +8,7 @@
 // advanceCompanyLabQuarterの計算結果・入力契約はここでは一切変更しない）。
 
 import { hosoEqTons, ratio, unwrapUnit } from "../../lib/v2/core/units";
+import { FINANCE_PARAMETERS_V1 } from "../../lib/v2/finance/parameters";
 import { PeriodV2 } from "../../lib/v2/core/period";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../lib/v2/market/types";
 import { CompanyDecisionInput, CompanyFixture } from "../../lib/v2/companyLab";
@@ -164,6 +165,20 @@ export interface CompanyDecisionDraft {
    * （読み込み側は `?? 0` として扱う。0で埋めない）。
    */
   readonly salesForceHireCount?: number;
+  /**
+   * 【営業人員の減員・forward-port続き】当期の営業人員の減員人数（0以上の
+   * 整数）。減員対象者は今期は配置・給与の対象のままで、四半期確定時に減員が
+   * 成立し、次の四半期の開始時点から配分可能人数が減る
+   * （app/lib/v2/companyLab/salesForceHiring.ts参照）。減員を決定した当期に
+   * 1人あたり四半期給与2四半期分の退職金が一度だけ発生する
+   * （app/lib/v2/finance/quarterClose.ts参照）。
+   * salesForceHireCountと同一四半期に両方>0を入力することはできない
+   * （提出時にrunner.ts側で検証・エラー化される。画面側でも提出ボタンを
+   * 無効化する）。
+   * 新しい四半期のドラフトは常に0から始まる。省略可能なのは、この機能導入前に
+   * 保存された下書きにこのフィールドが無いため（読み込み側は `?? 0` として扱う）。
+   */
+  readonly salesForceLayoffCount?: number;
 }
 
 // ---------------------------------------------------------------------
@@ -217,12 +232,14 @@ export function resetAllSalesForceHeadcountToZero(draft: CompanyDecisionDraft): 
 }
 
 // ---------------------------------------------------------------------
-// 【営業人員の追加採用・forward-port】営業人員の追加採用（表示用の単純な合算。判定
-// ロジックは持たない）
+// 【営業人員の追加採用・減員・forward-port（減員・退職金は続き作業）】表示用の単純な
+// 合算・退職金見積り。判定ロジック（採用・減員の同時入力禁止）は持つが、
+// バジェット検証等の受理判定そのものはrunner.ts側（唯一の正）と重複させない。
 //
-// 「今回の採用予定」（draft.salesForceHireCount）は今期の配分可能人数へは
-// 加算しない（当期の配分可能人数は常に現在の営業人員そのもの）。次期の
-// 営業人員見込みだけが、現在の営業人員＋今回の採用予定の単純な合算になる。
+// 「今回の採用予定」「今回の減員予定」（draft.salesForceHireCount /
+// salesForceLayoffCount）は今期の配分可能人数へは加算・減算しない（当期の
+// 配分可能人数は常に現在の営業人員そのもの）。次期の営業人員見込みだけが、
+// 現在の営業人員＋今回の採用予定−今回の減員予定（0未満はしない）になる。
 // ---------------------------------------------------------------------
 
 export interface SalesForceHiringPreview {
@@ -230,17 +247,43 @@ export interface SalesForceHiringPreview {
   readonly currentHeadcount: number;
   /** 今回の採用予定（ドラフトの入力値。0未満・NaN・Infinityは0として扱う）。 */
   readonly plannedHireCount: number;
-  /** 次期の営業人員見込み＝現在の営業人員＋今回の採用予定。 */
+  /**
+   * 今回の減員予定（ドラフトの入力値。0未満・NaN・Infinityは0として扱う）。
+   * 現在の営業人員を超える入力は、実際に減員される人数（effectiveLayoffCount）
+   * では現在の営業人員に頭打ちされるが、この値自体（入力そのまま）は
+   * 画面上の入力欄表示に使う。
+   */
+  readonly plannedLayoffCount: number;
+  /** 実際に減員される人数（現在の営業人員で頭打ち。退職金の対象人数と一致）。 */
+  readonly effectiveLayoffCount: number;
+  /** 次期の営業人員見込み＝現在の営業人員＋今回の採用予定−実際の減員人数（0以上）。 */
   readonly nextQuarterHeadcount: number;
+  /** 今回の減員により当期に一度だけ発生する退職金（1人あたり四半期給与2四半期分）。 */
+  readonly severanceCostUsd: number;
+  /** 採用予定・減員予定の両方が>0（同一四半期の同時入力、禁止事項）。 */
+  readonly hasMutualExclusionConflict: boolean;
 }
 
-export function summarizeSalesForceHiring(currentHeadcount: number, plannedHireCountRaw: number): SalesForceHiringPreview {
+const SALES_FORCE_SEVERANCE_QUARTERS = 2;
+
+export function summarizeSalesForceHiring(
+  currentHeadcount: number,
+  plannedHireCountRaw: number,
+  plannedLayoffCountRaw: number = 0
+): SalesForceHiringPreview {
   const safeCurrentHeadcount = Number.isFinite(currentHeadcount) && currentHeadcount > 0 ? Math.round(currentHeadcount) : 0;
   const plannedHireCount = Number.isFinite(plannedHireCountRaw) && plannedHireCountRaw > 0 ? Math.round(plannedHireCountRaw) : 0;
+  const plannedLayoffCount = Number.isFinite(plannedLayoffCountRaw) && plannedLayoffCountRaw > 0 ? Math.round(plannedLayoffCountRaw) : 0;
+  const effectiveLayoffCount = Math.min(plannedLayoffCount, safeCurrentHeadcount);
+  const severanceCostUsd = effectiveLayoffCount * SALES_FORCE_SEVERANCE_QUARTERS * FINANCE_PARAMETERS_V1.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter;
   return {
     currentHeadcount: safeCurrentHeadcount,
     plannedHireCount,
-    nextQuarterHeadcount: safeCurrentHeadcount + plannedHireCount,
+    plannedLayoffCount,
+    effectiveLayoffCount,
+    nextQuarterHeadcount: Math.max(0, safeCurrentHeadcount + plannedHireCount - effectiveLayoffCount),
+    severanceCostUsd,
+    hasMutualExclusionConflict: plannedHireCount > 0 && plannedLayoffCount > 0,
   };
 }
 
@@ -386,9 +429,11 @@ export function buildInitialDraft(
     workerAssignments,
     financingRequest,
     capexDecision,
-    // 【営業人員の追加採用・forward-port】新しい四半期のドラフトは常に採用予定
-    // 0人から始まる（前四半期の採用決定を引き継がない）。
+    // 【営業人員の追加採用・減員・forward-port（続き）】新しい四半期のドラフトは
+    // 常に採用予定・減員予定0人から始まる（前四半期の決定を引き継がない。
+    // 「今回の採用・減員予定」は毎回新しい意思決定であるため）。
     salesForceHireCount: 0,
+    salesForceLayoffCount: 0,
   };
 }
 
@@ -500,8 +545,11 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
     workerAssignments,
     financingRequest,
     capexDecision,
-    // 【営業人員の追加採用・forward-port】負値・NaN・Infinityは0へ丸める
-    // （採用人数は常に0以上の整数）。
+    // 【営業人員の追加採用・減員・forward-port（続き）】負値・NaN・Infinityは0へ
+    // 丸める（採用・減員人数は常に0以上の整数）。同一四半期の同時入力禁止の
+    // 検証はここでは行わない（このドラフト→入力変換層は計算・検証ロジックを
+    // 持たない方針のため。runner.ts advanceCompanyLabQuarterが唯一の検証箇所）。
     salesForceHireCount: Math.round(safeNonNegative(draft.salesForceHireCount ?? 0)),
+    salesForceLayoffCount: Math.round(safeNonNegative(draft.salesForceLayoffCount ?? 0)),
   };
 }

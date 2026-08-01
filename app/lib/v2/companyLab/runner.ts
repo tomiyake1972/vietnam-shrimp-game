@@ -128,7 +128,11 @@ import type { QualityReliabilityState } from "../quality/types";
 import { buildCompanyQualitySummary } from "./qualitySummary";
 import { buildCompanyFixtures } from "./fixtures";
 import { buildInitialWorkforceState, deriveNextWorkforceState } from "./workforce";
-import { buildInitialSalesForceHiringState, deriveNextSalesForceHiringState } from "./salesForceHiring";
+import {
+  buildInitialSalesForceHiringState,
+  computeEffectiveSalesForceLayoffCount,
+  deriveNextSalesForceHiringState,
+} from "./salesForceHiring";
 import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { unwrapUsd } from "../finance/types";
@@ -724,9 +728,27 @@ export function advanceCompanyLabQuarter(
       state.salesForceHiringState?.companies.find((c) => c.companyId === f.companyId)?.headcount ?? f.salesForceHeadcountTotal,
     ])
   );
+  // 【営業人員の減員・forward-port続き】当期に実際に減員される人数（＝退職金
+  // 対象人数。前期末人数で頭打ち済み）。次期繰り越し（deriveNextSalesForceHiringState）
+  // と当期の退職金コスト算出（buildCompanyQuarterBusinessActuals呼び出し側）の
+  // 両方で同じ値を使うよう、ここで一度だけ計算する。
+  const salesForceEffectiveLayoffCountByCompanyId = new Map(
+    fixtures.map((f) => {
+      const d = decisionsByCompanyId[f.companyId];
+      const currentHeadcount = salesForceHeadcountByCompanyId.get(f.companyId) ?? f.salesForceHeadcountTotal;
+      return [f.companyId, computeEffectiveSalesForceLayoffCount(currentHeadcount, d?.salesForceLayoffCount ?? 0)];
+    })
+  );
   const decisions = fixtures.map((f) => {
     const d = decisionsByCompanyId[f.companyId];
     if (!d) throw new CompanyLabError(`会社 "${f.companyId}" の当期意思決定が指定されていません。`);
+    // 【営業人員の増員・減員の同時入力禁止・forward-port続き】1社が同一四半期に
+    // 採用と減員を両方>0で入力することは会社の意思決定として矛盾するため禁止する。
+    if ((d.salesForceHireCount ?? 0) > 0 && (d.salesForceLayoffCount ?? 0) > 0) {
+      throw new CompanyLabError(
+        `会社 "${f.companyId}" の意思決定が不正です: 営業人員の採用（${d.salesForceHireCount}人）と減員（${d.salesForceLayoffCount}人）を同一四半期に同時入力することはできません。いずれか一方を0にしてください。`
+      );
+    }
     try {
       validateSalesForceHeadcountBudget(d.salesPlans, salesForceHeadcountByCompanyId.get(f.companyId) ?? f.salesForceHeadcountTotal);
     } catch (err) {
@@ -1251,6 +1273,12 @@ export function advanceCompanyLabQuarter(
       // 費用係数は追加しない）。当期の新規採用人数はここへ含めない（まだ配分
       // 可能ではなく、コストにも計上しない）。
       salesForceHeadcount: salesForceHeadcountByCompanyId.get(f.companyId) ?? f.salesForceHeadcountTotal,
+      // 【営業人員の減員・forward-port続き】当期に実際に減員される人数（前期末
+      // 人数で頭打ち済み）。減員対象者自身の給与は上記salesForceHeadcountに
+      // 含まれたまま（当期は変わらず稼働・給与支払いが続く）。退職金は
+      // これとは別に、finance/quarterClose.ts側で1人あたり四半期給与2四半期分
+      // として一度だけ費用・支出計上する。
+      salesForceSeveranceCount: salesForceEffectiveLayoffCountByCompanyId.get(f.companyId) ?? 0,
       procurementHeadcount: f.procurementHeadcountTotal,
     });
     const plan = financingPlanByCompanyId.get(f.companyId)!;
@@ -1438,14 +1466,16 @@ export function advanceCompanyLabQuarter(
     ),
     // 【Phase 8F-1】次期へ繰り越す市場別の消費国在庫carry state。
     consumerMarketState: consumerMarketStateAfter,
-    // 【営業人員の追加採用・forward-port】次期へ繰り越す営業人員総数。当期の
-    // 新規採用意思決定（d.salesForceHireCount、無ければ0）を前期末人数へ加算
-    // する。加算はここ（四半期処理が実際に成功した経路）だけで行われるため、
-    // 二重加算は起こらない。
+    // 【営業人員の追加採用・減員・forward-port（続き）】次期へ繰り越す営業人員
+    // 総数。当期の新規採用意思決定（d.salesForceHireCount）を加算し、当期の
+    // 減員意思決定（d.salesForceLayoffCount、前期末人数で頭打ち）を減算する
+    // （増員・減員は同一会社・同一四半期に同時発生しない前提。上の検証で保証済み）。
+    // 加算・減算はここ（四半期処理が実際に成功した経路）だけで行われるため、
+    // 二重加算・二重減算は起こらない。
     salesForceHiringState: deriveNextSalesForceHiringState(
       state.salesForceHiringState ?? buildInitialSalesForceHiringState(fixtures),
       fixtures,
-      new Map(decisions.map((d) => [d.companyId, d.salesForceHireCount ?? 0]))
+      new Map(decisions.map((d) => [d.companyId, { hireCount: d.salesForceHireCount ?? 0, layoffCount: d.salesForceLayoffCount ?? 0 }]))
     ),
     history,
     isComplete,

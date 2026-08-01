@@ -92,8 +92,17 @@ import type { ConsumerMarketCarryStateTable } from "../../market/consumerInvento
  *        advanceCompanyLabQuarter）がfixture.salesForceHeadcountTotalへ
  *        フォールバックする。併せてCompanyDecisionInput.salesForceHireCountも
  *        optionalとして追加した（既存の確定履歴エントリにはこのキーが無いため）。
+ *   v6 … 【営業人員の減員・退職金・forward-port続き】三宅さんの明示指示により、
+ *        v5→v6へバージョン番号を進める（三宅さんの指示: 「現行schema version 5を
+ *        確認し、今回の変更でversion 6へ更新する」）。CompanyLabRuntimeSnapshotの
+ *        構造そのものは**変更していない**（salesForceHiringStateの各社
+ *        headcountフィールドは増員・減員のいずれでも同じ形のまま増減するだけで、
+ *        新規フィールドの追加は不要なため）。CompanyDecisionInputへ
+ *        salesForceLayoffCount（optional、既存のsalesForceHireCountと同じ後方
+ *        互換方針）を追加した。既存のschemaVersion:1〜5データはこのキーが
+ *        存在しないため0（減員予定なし）として復元され、そのまま読み込める。
  */
-export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 5;
+export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 6;
 
 // ---------------------------------------------------------------------
 // 1. ランタイムスナップショット（history非包含。§2-1・§2-2）
