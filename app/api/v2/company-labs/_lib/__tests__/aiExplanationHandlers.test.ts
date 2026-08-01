@@ -167,6 +167,66 @@ test("handlePostAiExplanation: Claude呼び出しが失敗(missing_api_key相当
   assert.equal(body.errorCategory, "http_error");
 });
 
+test("handlePostAiExplanation: 失敗結果はキャッシュへ保存されない(同一turn・同一状態でも次回POSTでClaudeが再び呼ばれる)", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-post-6");
+  let calls = 0;
+  const failingClient: AnthropicMessagesClient = {
+    messages: {
+      create: async () => {
+        calls += 1;
+        throw Object.assign(new Error("rate limited"), { status: 429 });
+      },
+    },
+  };
+
+  const first = await handlePostAiExplanation(deps, "lab-post-6", "BAL", "1", NOW, failingClient);
+  assert.equal((first.body as { result: string }).result, "failure");
+  assert.equal(calls, 1);
+
+  // contextは全く変わっていない（turn・状態とも同一）にもかかわらず、直前の失敗が
+  // 永久キャッシュされていないため、2回目のPOSTでもClaudeが再び呼ばれる。
+  const second = await handlePostAiExplanation(deps, "lab-post-6", "BAL", "1", NOW, failingClient);
+  assert.equal((second.body as { result: string }).result, "failure");
+  assert.equal(calls, 2);
+
+  // GET側にも失敗結果は残らない(未生成として404のまま)。
+  const getResult = await handleGetAiExplanation(deps, "lab-post-6", "BAL", "1");
+  assert.equal(getResult.status, 404);
+});
+
+test("handlePostAiExplanation: 失敗の後に成功すれば、その成功結果はキャッシュされGETでも取得できる", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-post-7");
+  const responses: (AnthropicMessageResponse | Error)[] = [
+    Object.assign(new Error("rate limited"), { status: 429 }),
+    toolUseResponse(VALID_REPORT_INPUT),
+  ];
+  let calls = 0;
+  const client: AnthropicMessagesClient = {
+    messages: {
+      create: async () => {
+        const r = responses[calls];
+        calls += 1;
+        if (r instanceof Error) throw r;
+        return r;
+      },
+    },
+  };
+
+  const first = await handlePostAiExplanation(deps, "lab-post-7", "BAL", "1", NOW, client);
+  assert.equal((first.body as { result: string }).result, "failure");
+
+  const second = await handlePostAiExplanation(deps, "lab-post-7", "BAL", "1", NOW, client);
+  assert.equal((second.body as { result: string }).result, "success");
+
+  const getResult = await handleGetAiExplanation(deps, "lab-post-7", "BAL", "1");
+  assert.equal(getResult.status, 200);
+  const getBody = getResult.body as { cached: boolean; report?: { headline: string } };
+  assert.equal(getBody.cached, true);
+  assert.equal(getBody.report?.headline, "見出し");
+});
+
 test("handleGetAiExplanation: 未生成の場合は404", async () => {
   const deps = makeDeps();
   await createBaselineLab(deps, "lab-get-1");

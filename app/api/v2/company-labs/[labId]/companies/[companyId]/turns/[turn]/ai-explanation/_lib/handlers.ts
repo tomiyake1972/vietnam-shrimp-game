@@ -181,14 +181,29 @@ export async function handlePostAiExplanation(
         contextHash: resolved.value.contextHash,
       };
 
-  try {
-    await saveReport(deps.redisClient, cacheKey, stored);
-    console.log(`${logPrefix} キャッシュ保存完了`);
-  } catch (e) {
-    // 【キャッシュ書き込み失敗への耐性】保存に失敗しても、生成済みの結果（成功・失敗
-    // いずれも）はこのリクエストの応答としては返す（次回リクエスト時にまた生成し直す
-    // だけであり、UIをブロックする理由にはならない）。
-    console.error(`${logPrefix} キャッシュ保存に失敗（結果はそのまま返します）:`, e instanceof Error ? e.message : String(e));
+  // 【2026-08-01・失敗結果は永続キャッシュしない】従来は成功・失敗いずれの結果も
+  // 同じcacheKey（labId:companyId:turn:promptVersion:contextSchemaVersion:contextHash）で
+  // 無期限にRedisへ保存していた。しかしcontextHashはStandard AIの提案・診断・自社状態・
+  // 公開市場情報だけで決まり、Claude呼び出しの一時的な不調（invalid_json/schema_mismatch/
+  // 空応答等）では変化しない。そのため一度でも失敗すると、同一turn・同一状態のままでは
+  // 何度リロードしても同じcacheKeyの「失敗」が永久にヒットし続け、コード側の不具合修正後や
+  // Claude側の一時的な不調が解消した後でも再試行する手段が無かった（この不具合そのものが
+  // Zodスキーマ不一致調査を妨げていた）。失敗結果はレスポンスとしてはそのまま返すが、
+  // Redisへは保存しない（＝次回のリクエストで無条件に再度Claudeを呼び直せるようにする）。
+  // 成功結果のキャッシュ（「保存済みレポートの再表示ではAPIを再呼び出ししない」という
+  // 既存の要件）はそのまま維持する。
+  if (generated.ok) {
+    try {
+      await saveReport(deps.redisClient, cacheKey, stored);
+      console.log(`${logPrefix} キャッシュ保存完了`);
+    } catch (e) {
+      // 【キャッシュ書き込み失敗への耐性】保存に失敗しても、生成済みの成功結果は
+      // このリクエストの応答としては返す（次回リクエスト時にまた生成し直すだけであり、
+      // UIをブロックする理由にはならない）。
+      console.error(`${logPrefix} キャッシュ保存に失敗（結果はそのまま返します）:`, e instanceof Error ? e.message : String(e));
+    }
+  } else {
+    console.log(`${logPrefix} 失敗結果はキャッシュへ保存しません(次回リクエストで再試行可能にするため) category=${generated.errorCategory}`);
   }
 
   // 失敗時もHTTP自体は200で「構造化された失敗」を返す（呼び出し側が例外ではなく
