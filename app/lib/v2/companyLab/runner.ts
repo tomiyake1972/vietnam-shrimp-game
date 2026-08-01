@@ -56,7 +56,21 @@ import {
 } from "../market/consumerInventory";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
 import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../market/productLifecycle";
-import { salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
+import { averageVapSalesBaseScoreForCompany, salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
+import { lookupProductDevelopmentScore, PRODUCT_DEVELOPMENT_PARAMETERS_V1, updateProductDevelopmentState } from "./productDevelopmentState";
+import { computeStrategyProfileProductDevelopmentInvestment } from "./strategyProfileInvestmentOverlay";
+import {
+  computeQualityAssuranceLevelForCompany,
+  computeQualityAssuranceVapQualityBonus,
+  mergeBaselineQualityOverrides,
+} from "./qualityAssuranceInvestment";
+import { calculateCompanyCapabilityCoefficient } from "./premiumPolicy";
+import {
+  calculateVolumeDiscountRatio,
+  PROCUREMENT_SCALE_PARAMETERS_V1,
+  procurementScaleSliceForCompany,
+  updateProcurementScaleState,
+} from "./procurementScaleState";
 import { SALES_PARAMETERS_SAI5_SALES_BASE_V1, SALES_PARAMETERS_V1, SalesParameters } from "../sales/parameters";
 import { MARKET_PARAMETERS_V1 } from "../market/parameters";
 import {
@@ -84,6 +98,7 @@ import {
   toMarketQuarterInput,
 } from "../scenario";
 import { listScenarioAliases, resolveScenarioDefinition } from "../industryLab/cli/scenarioAliases";
+import { resolveStrategyVerificationEnvironment } from "./standardAi/autoplay/strategyVerificationEnvironments";
 import { INDUSTRY_LAB_ASSUMPTIONS_V1 } from "../industryLab/assumptions";
 import { runTurn } from "../turn/runner";
 import { TurnOrchestratorInput } from "../turn/types";
@@ -102,7 +117,12 @@ import {
   initializeProductionState,
   planContractFulfillment,
   PRODUCTION_PARAMETERS_V1,
+  buildCompanyProductionParametersForPdMechanization,
+  computePdMechanizationQualityBonus,
+  computePdMechanizationLevel,
+  computePdMechanizationRampProgress,
 } from "../production";
+import type { ProductionParameters } from "../production";
 import {
   CompanyLoadMetrics,
   ContractFulfillmentPlan,
@@ -122,6 +142,7 @@ import {
   initializeQualityReliabilityState,
   updateQualityByCompanyProduct,
   updateTrustByCompanyMarket,
+  QUALITY_PARAMETERS_V1,
 } from "../quality";
 import type { QualityAdjustmentInput } from "../quality";
 import type { QualityReliabilityState } from "../quality/types";
@@ -185,17 +206,25 @@ const EPSILON = 1e-6;
  * industryLabのCLIがすでに採用しているバージョン接尾辞省略形（例: "baseline"）の
  * どちらも受け付ける（resolveScenarioDefinition・industryLab/cli/scenarioAliases.ts
  * をそのまま再利用し、ID解決ロジックを重複実装しない）。
+ *
+ * 【商品戦略プロファイル・companyLab検証専用】上記の代表5シナリオ
+ * （ALL_SCENARIO_DEFINITIONS）で解決できない場合のみ、
+ * strategyVerificationEnvironments.ts の4検証環境（NORMAL/HOSO_TAILWIND/
+ * PD_TAILWIND/VAP_TAILWIND）をフォールバックとして解決する。代表5シナリオの
+ * 一覧・件数（industryLab側のテストが5件固定で検証している）には一切影響しない。
  */
 export function findScenarioDefinitionForCompanyLab(scenarioId: string): ScenarioDefinition {
   const definition = resolveScenarioDefinition(scenarioId);
-  if (!definition) {
-    throw new CompanyLabError(
-      `scenarioId "${scenarioId}" に一致するシナリオ定義が見つかりません。利用可能なシナリオ: ${listScenarioAliases()
-        .map((e) => `${e.alias}（正式ID: ${e.definition.scenarioId}）`)
-        .join(", ")}`
-    );
-  }
-  return definition;
+  if (definition) return definition;
+
+  const verificationEnvironment = resolveStrategyVerificationEnvironment(scenarioId);
+  if (verificationEnvironment) return verificationEnvironment;
+
+  throw new CompanyLabError(
+    `scenarioId "${scenarioId}" に一致するシナリオ定義が見つかりません。利用可能なシナリオ: ${listScenarioAliases()
+      .map((e) => `${e.alias}（正式ID: ${e.definition.scenarioId}）`)
+      .join(", ")}`
+  );
 }
 
 function priorHosoFobPriceFromPrehistory(definition: ScenarioDefinition): PreviousMarketContext["priorHosoFobPrice"] {
@@ -408,6 +437,40 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     state.workforceState?.companies.find((c) => c.companyId === fixture.companyId) ??
     buildInitialWorkforceState([fixture]).companies[0];
 
+  // 【VAP差別化戦略】前四半期末までの自社VAP能力係数（会社別に獲得できるVAP
+  // プレミアムの合成に使う）。config.sai5.vapDifferentiation有効時のみ算出する
+  // （機能OFFなら他の全フィールドと同様に既存挙動とビット単位で一致させる）。
+  let productDevelopmentScore: number | undefined;
+  let vapCapabilityCoefficient: number | undefined;
+  if (state.config.sai5?.vapDifferentiation) {
+    productDevelopmentScore = lookupProductDevelopmentScore(state.productDevelopmentState, fixture.companyId);
+    const salesBaseScoreVap = averageVapSalesBaseScoreForCompany(state.salesBaseState, fixture.companyId);
+    const qualityAssuranceLevel = computeQualityAssuranceLevelForCompany(capexStateForCompany, state.currentPeriod);
+    const deliveryScores = Object.values(deliveryReliabilityByMarket);
+    const deliveryReliability =
+      (deliveryScores.length > 0 ? deliveryScores.reduce((s, v) => s + unwrapUnit(v), 0) / deliveryScores.length : 50) / 100;
+    // 直近（前四半期）に確定したVAPの重大事故severity（会社×商品）。複数バッチで
+    // 発生していれば最大値を採用する（salesBase.tsのincidentSeverityマップと
+    // 同じ「最大severityの1件ぶんだけ」という単純化）。当期分はまだ未確定のため
+    // 参照しない（今期の品質結果を今期の受注判断へ遡及適用しない、という既存の
+    // 時間順序規約を踏襲）。
+    let recentMajorIncidentPenalty = 0;
+    if (lastRecord) {
+      for (const adj of lastRecord.qualityAdjustments) {
+        if (adj.companyId !== fixture.companyId || adj.product !== "vap") continue;
+        if (!adj.outcome.majorIncident.occurred) continue;
+        recentMajorIncidentPenalty = Math.max(recentMajorIncidentPenalty, Math.max(0, adj.outcome.majorIncident.severity));
+      }
+    }
+    vapCapabilityCoefficient = calculateCompanyCapabilityCoefficient({
+      salesBaseScoreVap,
+      productDevelopmentScore,
+      qualityAssuranceLevel,
+      deliveryReliability,
+      recentMajorIncidentPenalty,
+    });
+  }
+
   return {
     companyId: fixture.companyId,
     contracts: state.contracts.filter((c) => c.companyId === fixture.companyId),
@@ -428,6 +491,13 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // 【監査指摘G】営業基盤が当期の成約へ実際にどれだけ効くか（ウェイト）。
     // 機能OFFなら0＝「基盤の高低は成約に一切影響しない」ことが判断側から分かる。
     salesBaseCompetitivenessWeight: salesParametersFor(state.config).competitivenessWeights.salesBase,
+    // 【調達規模効果】前四半期末までの自社の調達規模（salesBaseByMarketProductと
+    // 同じ「呼び出し時点では常に前期末値」の規約）。無効時はundefined。
+    ...(state.config.sai5?.procurementScaleEffect
+      ? { procurementScaleByChannel: procurementScaleSliceForCompany(state.procurementScaleState, fixture.companyId) }
+      : {}),
+    // 【VAP差別化戦略】機能OFFならどちらも付けない（既存挙動とビット単位一致）。
+    ...(state.config.sai5?.vapDifferentiation ? { productDevelopmentScore, vapCapabilityCoefficient } : {}),
   };
 }
 
@@ -895,6 +965,45 @@ export function advanceCompanyLabQuarter(
     };
   });
 
+  // 【調達規模効果】前四半期末までのprocurementScaleStateから、会社別・チャネル別の
+  // 実効仕入原価割引率（calculateVolumeDiscountRatio）と、国内買付チャネルの
+  // 関係スコアを算出し、rawMaterials層へそのまま渡す（turn/runner.ts経由）。
+  // 無効時（config.sai5.procurementScaleEffect未設定）はundefinedのまま渡し、
+  // turn/rawMaterials側は割引なし・中立関係スコア＝従来挙動になる。
+  const procurementScaleParams = PROCUREMENT_SCALE_PARAMETERS_V1;
+  const procurementDiscountRatioByCompanyChannel = state.config.sai5?.procurementScaleEffect
+    ? new Map(
+        fixtures.map((f) => {
+          const slice = procurementScaleSliceForCompany(state.procurementScaleState, f.companyId, procurementScaleParams);
+          return [
+            f.companyId,
+            {
+              domestic: calculateVolumeDiscountRatio(
+                slice.domestic.trailingVolumeHosoEqTons,
+                procurementScaleParams.maxDiscountRatioByChannel.domestic,
+                procurementScaleParams.scaleUnitTonsByChannel.domestic
+              ),
+              imported: calculateVolumeDiscountRatio(
+                slice.imported.trailingVolumeHosoEqTons,
+                procurementScaleParams.maxDiscountRatioByChannel.imported,
+                procurementScaleParams.scaleUnitTonsByChannel.imported
+              ),
+              aquaculture: calculateVolumeDiscountRatio(
+                slice.aquaculture.trailingVolumeHosoEqTons,
+                procurementScaleParams.maxDiscountRatioByChannel.aquaculture,
+                procurementScaleParams.scaleUnitTonsByChannel.aquaculture
+              ),
+            },
+          ] as const;
+        })
+      )
+    : undefined;
+  const domesticRelationshipScoreByCompany = state.config.sai5?.procurementScaleEffect
+    ? new Map(
+        fixtures.map((f) => [f.companyId, procurementScaleSliceForCompany(state.procurementScaleState, f.companyId, procurementScaleParams).domestic.relationshipScore] as const)
+      )
+    : undefined;
+
   const turnInput: TurnOrchestratorInput = {
     currentPeriod: state.currentPeriod,
     marketInput,
@@ -910,6 +1019,12 @@ export function advanceCompanyLabQuarter(
     existingContracts: state.contracts,
     existingLots: state.rawMaterialLots,
     seed: state.config.seed,
+    // 【調達規模効果】未接続時（procurementDiscountRatioByCompanyChannel/
+    // domesticRelationshipScoreByCompanyの両方がundefined）はキー自体を省略する
+    // （turn/runner.tsのTurnProcurementScaleInputs参照）。
+    ...(procurementDiscountRatioByCompanyChannel || domesticRelationshipScoreByCompany
+      ? { procurementScale: { discountRatioByCompanyChannel: procurementDiscountRatioByCompanyChannel, domesticRelationshipScoreByCompany } }
+      : {}),
     // 【Phase 8F-1】対象需要の市場別按分ウェイト（希望購買量ベース）と、
     // 前四半期の購買圧力・在庫逼迫度から導いた当四半期の仕向市場価格係数。
     marketWeights: consumerMarketWeights,
@@ -954,12 +1069,44 @@ export function advanceCompanyLabQuarter(
     plans: decisions.flatMap((d) => d.productionPlans),
     companyCountry,
   };
+
+  // 【2026-08-01新規・PD専用機械化投資】会社別に、PD専用機械化投資の稼働状況
+  // （state.capexState、既存のCompanyCapexState/CapitalProjectから毎期再導出。
+  // 新規の永続状態は作らない）と、直近確定済みの前四半期PD操業度（当四半期の
+  // 労働配分が確定する前の時点では当期の稼働率がまだ存在しないため、
+  // 「低稼働なら効果が出ない」の判定には前四半期実績を使う。ラボ開始直後で
+  // 前四半期実績が無い会社は稼働率0扱い＝効果0となる）から、会社別に実効PD係数を
+  // 反映したProductionParametersのコピーを組み立てる。pdMechanization未投資・
+  // 未稼働の会社はbuildCompanyProductionParametersForPdMechanizationが
+  // PRODUCTION_PARAMETERS_V1をそのまま返すため、既存の全社共通挙動から一切変化しない。
+  const previousProductionRecord = state.productionState.history[state.productionState.history.length - 1];
+  const previousPdUtilizationByCompanyId = new Map<CompanyId, number>(
+    (previousProductionRecord?.companyLoadMetrics ?? []).map((m) => [m.companyId, unwrapUnit(m.equipmentUtilizationRate)])
+  );
+  const productionParamsByCompany = new Map<string, ProductionParameters>();
+  const pdMechanizationLevelByCompanyId = new Map<CompanyId, number>();
+  for (const f of fixtures) {
+    const capexStateForCompany = state.capexState.companies.find((c) => c.companyId === f.companyId);
+    const projects = capexStateForCompany?.portfolio.projects ?? [];
+    const previousUtilization = previousPdUtilizationByCompanyId.get(f.companyId) ?? 0;
+    const companyParams = buildCompanyProductionParametersForPdMechanization(PRODUCTION_PARAMETERS_V1, projects, state.currentPeriod, previousUtilization);
+    if (companyParams !== PRODUCTION_PARAMETERS_V1) {
+      productionParamsByCompany.set(f.companyId, companyParams);
+    }
+    const rampProgress = computePdMechanizationRampProgress(projects, state.currentPeriod);
+    if (rampProgress > 0) {
+      pdMechanizationLevelByCompanyId.set(f.companyId, computePdMechanizationLevel(rampProgress, previousUtilization));
+    }
+  }
+
   const { state: productionStateAfter, updatedRawMaterialLots } = advanceProductionQuarter(
     state.productionState,
     productionInput,
     turnResult.contracts,
     turnResult.lots,
-    supplySignals
+    supplySignals,
+    PRODUCTION_PARAMETERS_V1,
+    productionParamsByCompany.size > 0 ? productionParamsByCompany : undefined
   );
   const productionRecord = productionStateAfter.history[productionStateAfter.history.length - 1];
 
@@ -968,6 +1115,44 @@ export function advanceCompanyLabQuarter(
   // production/allocation.ts・batches.ts自体は一切書き換えず、Phase6が既に出力した
   // factoryLoadMetrics・batchesへの後段アダプターとして接続する（開発ルール
   // 「既存公開関数を不必要に書き換えず、アダプターと状態遷移で接続する」に従う）。
+  // 【2026-08-01新規・PD専用機械化投資の副次効果】機械化レベルに応じた、PDの
+  // 基準操業品質（baselineOperationalQuality）への小さな加点（上限付き、主効果
+  // ＝Worker削減より小さい。production/pdMechanizationEffect.ts参照）。未投資・
+  // 未稼働の会社はキー自体を作らないため、既存の全社共通baseline（85点）から
+  // 一切変化しない。
+  const pdBaselineQualityOverride = new Map<string, number>();
+  for (const [companyId, mechanizationLevel] of pdMechanizationLevelByCompanyId) {
+    if (mechanizationLevel <= 0) continue;
+    const bonus = computePdMechanizationQualityBonus(mechanizationLevel);
+    if (bonus <= 0) continue;
+    pdBaselineQualityOverride.set(`${companyId}::pd`, unwrapUnit(QUALITY_PARAMETERS_V1.qualityOutcome.baselineOperationalQuality) + bonus);
+  }
+
+  // 【VAP差別化戦略・2026-08-01新規】品質保証投資（qualityControlEquipment、
+  // capex/parameters.ts）の副次効果。会社別のVAP品質保証投資レベル（0〜1、既存の
+  // CompanyCapexStateから導出。新規の永続状態は追加しない）に応じた、VAPの
+  // 基準操業品質（baselineOperationalQuality）への小さな加点（上限付き、
+  // production/pdMechanizationEffect.tsのPD副次効果と同水準の設計）。未投資の
+  // 会社はキー自体を作らないため、既存の全社共通baseline（85点）から一切変化
+  // しない。PD機械化の副次効果（company::pdキー）とは対象商品が異なるため
+  // キーは衝突しないが、mergeBaselineQualityOverridesで加算合成することで
+  // 「上書きではなく加算」という実装指示を、対象キーが将来変わっても安全な形で
+  // 満たす。
+  const qaVapBonusDeltaByCompany = new Map<string, number>();
+  for (const f of fixtures) {
+    const capexStateForCompany = state.capexState.companies.find((c) => c.companyId === f.companyId);
+    const qualityAssuranceLevel = computeQualityAssuranceLevelForCompany(capexStateForCompany, state.currentPeriod);
+    if (qualityAssuranceLevel <= 0) continue;
+    const bonus = computeQualityAssuranceVapQualityBonus(qualityAssuranceLevel);
+    if (bonus <= 0) continue;
+    qaVapBonusDeltaByCompany.set(`${f.companyId}::vap`, bonus);
+  }
+  const combinedBaselineQualityOverride = mergeBaselineQualityOverrides(
+    pdBaselineQualityOverride.size > 0 ? pdBaselineQualityOverride : undefined,
+    qaVapBonusDeltaByCompany,
+    () => unwrapUnit(QUALITY_PARAMETERS_V1.qualityOutcome.baselineOperationalQuality)
+  );
+
   const qualityAdjustmentInput: QualityAdjustmentInput = {
     batches: productionRecord.batches,
     factoryLoadMetrics: productionRecord.factoryLoadMetrics,
@@ -977,6 +1162,7 @@ export function advanceCompanyLabQuarter(
     period: state.currentPeriod,
     turn,
     gameSeed: state.config.seed,
+    ...(combinedBaselineQualityOverride ? { baselineQualityOverride: combinedBaselineQualityOverride } : {}),
   };
   const { adjustedBatches, adjustments, updatedRampHistory } = applyQualityToBatches(qualityAdjustmentInput);
 
@@ -1049,6 +1235,32 @@ export function advanceCompanyLabQuarter(
     })
   );
 
+  // --- 【VAP差別化戦略】VAP商品開発投資の四半期末更新（salesBaseと同じ位置）。
+  // 【商品戦略プロファイル投資overlayとの接続】CompanyDecisionInputには「当期の
+  // VAP商品開発投資額」に相当するフィールドは引き続き存在しない（会社別のR&D投資
+  // 意思決定そのものの追加は本タスクの範囲外）。代わりに、companyLab検証専用の
+  // strategyProfilesEnabled有効時のみ、会社の商品戦略プロファイル
+  // （standardAi/strategyProfile.ts、VAP_DIFFERENTIATIONのみ）に基づく実額投資を
+  // strategyProfileInvestmentOverlay.tsが計算して投入する。未指定（既定）なら
+  // 従来どおり空Map（投資額0）＝投資が無ければ中立値へ緩やかに減衰する
+  // updateProductDevelopmentStateの既定挙動のみが働き、既存の全出力・全テストへの
+  // 影響はゼロ。
+  const productDevelopmentInvestmentByCompany = state.config.strategyProfilesEnabled
+    ? computeStrategyProfileProductDevelopmentInvestment(
+        fixtures.map((f) => f.companyId),
+        PRODUCT_DEVELOPMENT_PARAMETERS_V1.standardBudgetUsd
+      )
+    : new Map();
+  const productDevelopmentStateAfter = state.config.sai5?.vapDifferentiation
+    ? updateProductDevelopmentState(
+        state.productDevelopmentState,
+        fixtures.map((f) => f.companyId),
+        productDevelopmentInvestmentByCompany,
+        PRODUCT_DEVELOPMENT_PARAMETERS_V1.standardBudgetUsd,
+        PRODUCT_DEVELOPMENT_PARAMETERS_V1
+      )
+    : state.productDevelopmentState;
+
   // --- 【SAI-5D】営業基盤の四半期末更新（quality/trust状態と同じ位置＝当期の
   // 成約・履行・品質調整がすべて確定した後。当期の成約競争力に使われたのは
   // 前期末値のみであり、この更新値が効くのは次期から＝遡及なし）。無効時は
@@ -1065,6 +1277,39 @@ export function advanceCompanyLabQuarter(
         fixtures.map((f) => f.companyId)
       )
     : state.salesBaseState;
+
+  // --- 【調達規模効果】調達規模ストックの四半期末更新（salesBaseと同じ位置＝
+  // 当期の調達配分・輸入発注・養殖池入れが確定した後。当期の実効原価・買付競争力に
+  // 使われたのは前期末値のみであり、この更新値が効くのは次期から＝遡及なし）。
+  // 当期の会社別購入量は、既存のdomesticPurchase/imports/aquacultureの配分結果
+  // （turnResultの新規ロット・配分）からそのまま集計する（新しい観測系列は
+  // 追加しない）。無効時は従来どおりundefinedのまま持ち越す。 ---
+  const domesticVolumeByCompany = new Map(turnResult.domesticAllocation.companies.map((c) => [c.companyId, unwrapUnit(c.allocatedQuantity)]));
+  const importedVolumeByCompany = new Map<string, number>();
+  for (const lot of turnResult.newImportLots) {
+    importedVolumeByCompany.set(lot.companyId, (importedVolumeByCompany.get(lot.companyId) ?? 0) + unwrapUnit(lot.originalQuantity));
+  }
+  const aquacultureVolumeByCompany = new Map<string, number>();
+  for (const lot of turnResult.newGrowingLots) {
+    aquacultureVolumeByCompany.set(lot.companyId, (aquacultureVolumeByCompany.get(lot.companyId) ?? 0) + unwrapUnit(lot.originalQuantity));
+  }
+  const procurementScaleStateAfter = state.config.sai5?.procurementScaleEffect
+    ? updateProcurementScaleState(
+        state.procurementScaleState,
+        fixtures.map((f) => f.companyId),
+        new Map(
+          fixtures.map((f) => [
+            f.companyId,
+            {
+              domestic: domesticVolumeByCompany.get(f.companyId) ?? 0,
+              imported: importedVolumeByCompany.get(f.companyId) ?? 0,
+              aquaculture: aquacultureVolumeByCompany.get(f.companyId) ?? 0,
+            },
+          ])
+        ),
+        procurementScaleParams
+      )
+    : state.procurementScaleState;
 
   // --- 【SAI-5E】市場進化carry stateの四半期末更新（供給圧力EWMA・プレミアム
   // 倍率・割安シグナル）。productLifecycle/supplyPremiumFeedbackのどちらかが
@@ -1396,6 +1641,8 @@ export function advanceCompanyLabQuarter(
     lastQuarterActualProduction,
     qualityState: qualityStateAfter,
     ...(salesBaseStateAfter ? { salesBaseState: salesBaseStateAfter } : {}),
+    ...(productDevelopmentStateAfter ? { productDevelopmentState: productDevelopmentStateAfter } : {}),
+    ...(procurementScaleStateAfter ? { procurementScaleState: procurementScaleStateAfter } : {}),
     ...(marketEvolutionStateAfter ? { marketEvolutionState: marketEvolutionStateAfter } : {}),
     financeState: financeStateAfter,
     financingState: financingStateAfter,

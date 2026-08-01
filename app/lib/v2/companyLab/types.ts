@@ -45,7 +45,9 @@ import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState }
 // 【Phase 8D-4】型のみの参照（workforce.ts 側も CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
 import type { CompanyWorkforceState, WorkforceState } from "./workforce";
 import type { SalesBaseState } from "./salesBase";
+import type { ProductDevelopmentState } from "./productDevelopmentState";
 import type { MarketEvolutionState, Sai5MarketEvolutionRecord, SupplyPressureDefinition } from "./marketEvolution";
+import type { ProcurementChannel, ProcurementChannelScale, ProcurementScaleState } from "./procurementScaleState";
 
 export class CompanyLabError extends Error {
   constructor(message: string) {
@@ -194,6 +196,27 @@ export interface CompanyOwnState {
    * エンジンの実値で確認できるようにするために公開する。
    */
   readonly salesBaseCompetitivenessWeight?: number;
+  /**
+   * 【調達規模効果】前四半期末までの自社の調達規模スコア（調達チャネル別、
+   * 0-100の関係スコア＋移動平均調達量）。config.sai5.procurementScaleEffect
+   * 有効時のみ設定される。存在しないチャネルキーは初期値（規模0・関係中立50）
+   * とみなす（salesBaseByMarketProductと同じ「前期末値のみを当期に使う」規約）。
+   */
+  readonly procurementScaleByChannel?: Readonly<Record<ProcurementChannel, ProcurementChannelScale>>;
+  /**
+   * 【VAP差別化戦略】前四半期末までの自社VAP商品開発力スコア（0-100、
+   * companyLab/productDevelopmentState.tsから取得）。config.sai5.vapDifferentiation
+   * 有効時のみ設定される。存在しない場合は中立値（50）とみなす
+   * （salesBaseByMarketProductと同じ「前期末値のみを当期に使う」規約）。
+   */
+  readonly productDevelopmentScore?: number;
+  /**
+   * 【VAP差別化戦略】当期の受注判断に実際に使われる会社別VAP能力係数
+   * （companyLab/premiumPolicy.ts の calculateCompanyCapabilityCoefficient、
+   * 下限0.7・上限1.3）。config.sai5.vapDifferentiation有効時のみ設定される。
+   * 未設定（機能OFF）のときは呼び出し側が1.0（無補正）として扱う。
+   */
+  readonly vapCapabilityCoefficient?: number;
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */
@@ -391,6 +414,24 @@ export interface Sai5FeatureFlags {
    * 定義候補の実測比較（scripts/sai5SupplyPressureStudy.ts）以外では指定しない。
    */
   readonly supplyPressureDefinition?: SupplyPressureDefinition;
+  /**
+   * 【調達規模効果】会社×調達チャネル（国内買付/輸入/自社養殖）の調達規模ストック
+   * （companyLab/procurementScaleState.ts）。有効時、継続的な調達量が実効仕入原価の
+   * 逓減割引・買付競争力ウェイトへの関係スコア加点として反映される。未指定
+   * （またはfalse）なら既存コードパスをそのまま通り、従来挙動とビット単位で一致する。
+   */
+  readonly procurementScaleEffect?: boolean;
+  /**
+   * 【VAP差別化戦略（顧客理解型）】会社別に獲得できるVAPプレミアム
+   * （companyLab/premiumPolicy.ts の calculateCompanyCapabilityCoefficient・
+   * calculateCompanyRealizedVapPremiumRatio）。有効時、営業基盤・VAP商品開発力・
+   * 品質保証投資・納期信頼性・直近の重大事故から会社別の能力係数（0.7〜1.3）を
+   * 算出し、VAPの受注量係数判定（premiumPolicy.tsのorderQuantityFactor）にだけ
+   * 反映する（HOSO/PDには一切影響しない）。市場全体のVAPプレミアム計算
+   * （market/productPremium.ts）自体は変更しない。未指定（またはfalse）なら
+   * 既存コードパスをそのまま通り、従来挙動とビット単位で一致する。
+   */
+  readonly vapDifferentiation?: boolean;
 }
 
 export interface CompanyLabConfig {
@@ -400,6 +441,17 @@ export interface CompanyLabConfig {
   readonly turns: number;
   /** 【SAI-5】市場進化モデルの機能フラグ（optional。未指定=全OFF=従来挙動）。 */
   readonly sai5?: Sai5FeatureFlags;
+  /**
+   * 【商品戦略プロファイル・companyLab検証専用】trueの場合のみ、
+   * companyLab/strategyProfileInvestmentOverlay.ts が会社の商品戦略プロファイル
+   * （standardAi/strategyProfile.ts）に基づくVAP商品開発投資額を
+   * productDevelopmentState.tsの四半期末更新へ実際に投入する
+   * （runner.ts該当箇所参照）。standardAi側のパラメータバイアス・capex overlayは
+   * standardAi/autoplay/runCase.ts のAutoplayCaseConfig.strategyProfilesEnabled
+   * （別フラグ）で制御する。未指定(false相当)なら従来どおり常に投資額0
+   * （既存の全出力・全テストへの影響ゼロ）。
+   */
+  readonly strategyProfilesEnabled?: boolean;
 }
 
 export interface CompanyLabState {
@@ -416,9 +468,15 @@ export interface CompanyLabState {
   /** 【SAI-5D】会社×市場×商品の営業基盤ストック（config.sai5.salesBaseAccumulation
    *  有効時のみ更新・保持。無効時はundefinedのまま＝既存スナップショットと同一）。 */
   readonly salesBaseState?: SalesBaseState;
+  /** 【VAP差別化戦略】会社別のVAP商品開発投資の蓄積状態（config.sai5.vapDifferentiation
+   *  有効時のみ更新・保持。無効時はundefinedのまま＝既存スナップショットと同一）。 */
+  readonly productDevelopmentState?: ProductDevelopmentState;
   /** 【SAI-5E】市場進化carry state（供給圧力EWMA・プレミアム倍率・割安シグナル。
    *  config.sai5.productLifecycle/supplyPremiumFeedback有効時のみ保持）。 */
   readonly marketEvolutionState?: MarketEvolutionState;
+  /** 【調達規模効果】会社×調達チャネルの調達規模ストック（config.sai5.procurementScaleEffect
+   *  有効時のみ更新・保持。無効時はundefinedのまま＝既存スナップショットと同一）。 */
+  readonly procurementScaleState?: ProcurementScaleState;
   /** 【Phase 8A】会社別の財務状態（現金・売掛/買掛・借入・固定資産・完成品原価台帳等。ターンをまたいで保持）。 */
   readonly financeState: FinanceState;
   /** 【Phase 8B-1】会社別の資金繰り状態（融資ポートフォリオ・未払利息・信用/延滞履歴。ターンをまたいで保持）。 */
