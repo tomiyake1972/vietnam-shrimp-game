@@ -20,6 +20,7 @@ import {
   computeFactoryCapacitySummaries,
   computeLaborProductivityByProduct,
   computeSalesForceCapacitySummary,
+  computeBacklogByMarketProduct,
 } from "../openingStateSummary";
 
 const EPS_USD = 0.01;
@@ -166,4 +167,46 @@ test("computeSalesForceCapacitySummary: 実際の営業人員数をprocessingCap
 test("computeSalesForceCapacitySummary: headcount=0でも既存顧客ぶんの最低限の処理能力を返す（青天井にならない）", () => {
   const summary = computeSalesForceCapacitySummary(0);
   assert.equal(summary.currentProcessingCapacityTons, 200);
+});
+
+// --- ⑧ 受注残（未履行契約）の市場×商品別グルーピング ---
+
+test("computeBacklogByMarketProduct: 同じ市場×商品はまとめ、outstandingQuantity<=0（完了・キャンセル）は除外し、合計トン降順で返す", () => {
+  const p1 = period(2015, 2);
+  const p2 = period(2015, 3);
+  const p3 = period(2015, 4);
+  const contracts = [
+    { contractId: "1", companyId: "BAL", market: "US", product: "hoso", contractedPeriod: period(2015, 1), dueDate: p2, originalQuantity: 100, outstandingQuantity: 40, unitPrice: 5, status: "partiallyFulfilled" },
+    { contractId: "2", companyId: "BAL", market: "US", product: "hoso", contractedPeriod: period(2015, 1), dueDate: p3, originalQuantity: 50, outstandingQuantity: 50, unitPrice: 5, status: "open" },
+    { contractId: "3", companyId: "BAL", market: "EU", product: "pd", contractedPeriod: period(2015, 1), dueDate: p1, originalQuantity: 200, outstandingQuantity: 200, unitPrice: 6, status: "open" },
+    { contractId: "4", companyId: "BAL", market: "EU", product: "pd", contractedPeriod: period(2015, 1), dueDate: p2, originalQuantity: 30, outstandingQuantity: 0, unitPrice: 6, status: "fulfilled" },
+    { contractId: "5", companyId: "OTHER", market: "US", product: "hoso", contractedPeriod: period(2015, 1), dueDate: p1, originalQuantity: 999, outstandingQuantity: 999, unitPrice: 5, status: "open" },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ] as any[];
+
+  const groups = computeBacklogByMarketProduct(contracts, "BAL");
+  assert.equal(groups.length, 2);
+
+  // 合計トン降順: EU/pd(200) > US/hoso(90)
+  assert.equal(groups[0].market, "EU");
+  assert.equal(groups[0].product, "pd");
+  assert.equal(groups[0].outstandingTons, 200);
+  assert.equal(groups[0].contractCount, 1);
+  assert.equal(groups[0].nearestDueDate, p1);
+
+  assert.equal(groups[1].market, "US");
+  assert.equal(groups[1].product, "hoso");
+  assert.equal(groups[1].outstandingTons, 90);
+  assert.equal(groups[1].contractCount, 2);
+  // 2件のうち近い方（p2）が最短納期
+  assert.equal(groups[1].nearestDueDate, p2);
+  assert.equal(groups[1].nearestDueDateLabel, "2015年Q3");
+});
+
+test("computeBacklogByMarketProduct: 契約が無い（全てoutstandingQuantity<=0）場合は空配列", () => {
+  const contracts = [
+    { contractId: "1", companyId: "BAL", market: "US", product: "hoso", contractedPeriod: period(2015, 1), dueDate: period(2015, 2), originalQuantity: 100, outstandingQuantity: 0, unitPrice: 5, status: "fulfilled" },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ] as any[];
+  assert.deepEqual(computeBacklogByMarketProduct(contracts, "BAL"), []);
 });

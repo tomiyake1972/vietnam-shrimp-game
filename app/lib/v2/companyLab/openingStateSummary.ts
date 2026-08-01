@@ -27,6 +27,8 @@ import { Factory, FactoryEffectiveCapacity, WorkerAssignment } from "../producti
 import { RawMaterialLot, RawMaterialLotStatus } from "../rawMaterials/types";
 import { SALES_PARAMETERS_V1, SalesParameters } from "../sales/parameters";
 import { processingCapacity, salesCoverageScore } from "../sales/salesForce";
+import { DemandMarketId } from "../market/types";
+import { SalesContract } from "../sales/types";
 import { CompanyOwnState } from "./types";
 
 // ---------------------------------------------------------------------
@@ -329,4 +331,61 @@ export function computeSalesForceCapacitySummary(
     currentProcessingCapacityTons: current,
     marginalCapacityTonsForOneMoreHeadcount: plusOne - current,
   };
+}
+
+// ---------------------------------------------------------------------
+// 8. 受注残（未履行契約）の市場×商品別グルーピング
+// ---------------------------------------------------------------------
+//
+// 【経緯】三宅さんの3回目の手動観察テストで、「受注残（未履行契約）」が集計トンの
+// 単一値しか出ておらず、どの市場×商品の受注が積み上がっているのか分からない、
+// という指摘を受けた。集計値そのものは既存のCompanyOwnState.contracts
+// （Standard AIが実際に参照する自社の契約一覧、standardAi/policy.tsの入力そのもの）
+// から導出しているため誤りではないが、単一の合計トンだけでは行動に繋がりにくい。
+// ここでは同じcontractsを市場×商品でグルーピングするだけの純粋関数を追加する
+// （数量・単価等の値は一切再計算しない。outstandingQuantity・dueDateの転記と
+// 集計のみ）。
+
+export interface BacklogByMarketProductEntry {
+  readonly market: DemandMarketId;
+  readonly product: Product;
+  /** このグループの未履行数量（outstandingQuantity）合計。HOSO換算トン。 */
+  readonly outstandingTons: number;
+  /** outstandingQuantity > 0 の契約件数。 */
+  readonly contractCount: number;
+  /** このグループの中で最も近い納期（PeriodV2）。 */
+  readonly nearestDueDate: PeriodV2;
+  readonly nearestDueDateLabel: string;
+}
+
+/**
+ * 自社契約（ownState.contracts）を市場×商品でグルーピングし、未履行数量・件数・
+ * 最も近い納期を返す。outstandingQuantity <= 0（完了・キャンセル等）の契約は
+ * このグルーピングの対象外とする（受注「残」という性質上、表示上の意味がないため）。
+ * 合計トンの降順で返す（最も積み上がっている市場×商品から見えるようにするため）。
+ */
+export function computeBacklogByMarketProduct(
+  contracts: readonly SalesContract[],
+  companyId: CompanyOwnState["companyId"]
+): readonly BacklogByMarketProductEntry[] {
+  const groups = new Map<string, { market: DemandMarketId; product: Product; outstandingTons: number; contractCount: number; nearestDueDate: PeriodV2 }>();
+  for (const c of contracts) {
+    if (c.companyId !== companyId) continue;
+    const outstanding = c.outstandingQuantity as number;
+    if (outstanding <= 0) continue;
+    const key = `${c.market}::${c.product}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.outstandingTons += outstanding;
+      existing.contractCount += 1;
+      if (periodDifferenceInQuarters(c.dueDate, existing.nearestDueDate) > 0) {
+        existing.nearestDueDate = c.dueDate;
+      }
+    } else {
+      groups.set(key, { market: c.market, product: c.product, outstandingTons: outstanding, contractCount: 1, nearestDueDate: c.dueDate });
+    }
+  }
+  return Array.from(groups.values())
+    .map((g) => ({ ...g, nearestDueDateLabel: periodLabel(g.nearestDueDate) }))
+    .sort((a, b) => b.outstandingTons - a.outstandingTons);
 }

@@ -25,6 +25,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DecisionEditor from "../../components/DecisionEditor";
 import OpeningCompanyStatePanel from "../../components/OpeningCompanyStatePanel";
+import AiMarketInfoPanel from "../../components/AiMarketInfoPanel";
 import CollapsibleSection from "../../components/CollapsibleSection";
 import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
@@ -141,6 +142,21 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
             testId="opening-company-state-section"
           >
             <OpeningCompanyStatePanel ownState={viewModel.ownState} fixture={viewModel.fixture} turn={viewModel.currentTurn} />
+          </CollapsibleSection>
+        )}
+
+        {!isCompleted && (
+          <CollapsibleSection
+            title="AIが見ている市場情報（Standard AIの判断入力そのまま）"
+            tone="info"
+            defaultOpen={false}
+            testId="ai-market-info-section"
+          >
+            <AiMarketInfoPanel
+              publicInfo={viewModel.publicInfo}
+              previousMarketResult={viewModel.previousQuarterMarket?.marketResult ?? null}
+              previousPeriodLabel={viewModel.previousQuarterMarket?.period ?? null}
+            />
           </CollapsibleSection>
         )}
 

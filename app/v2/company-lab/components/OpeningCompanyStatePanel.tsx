@@ -20,6 +20,7 @@
 import { Fragment } from "react";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab/types";
 import {
+  computeBacklogByMarketProduct,
   computeFactoryCapacitySummaries,
   computeLaborProductivityByProduct,
   computeOpeningBalanceSheetSummary,
@@ -28,6 +29,7 @@ import {
   periodLabel,
   summarizeSettlementLag,
 } from "../../../lib/v2/companyLab/openingStateSummary";
+import { DEMAND_MARKET_NAMES } from "../../industry-lab/components/chartColors";
 import CollapsibleSection from "./CollapsibleSection";
 
 export interface OpeningCompanyStatePanelProps {
@@ -50,6 +52,7 @@ export default function OpeningCompanyStatePanel({ ownState, fixture, turn }: Op
   const bs = computeOpeningBalanceSheetSummary(ownState);
 
   const backlogTons = ownState.contracts.reduce((sum, c) => sum + (c.outstandingQuantity as number), 0);
+  const backlogByMarketProduct = computeBacklogByMarketProduct(ownState.contracts, ownState.companyId);
   const rawMaterialGroups = groupRawMaterialLotsByAvailability(ownState.rawMaterialLots, ownState.companyId);
   const rawMaterialTotalTons = rawMaterialGroups.reduce((sum, g) => sum + g.quantityTons, 0);
   const finishedGoodsTons = ownState.finishedGoodsLots.reduce((sum, lot) => sum + (lot.remainingQuantity as number), 0);
@@ -94,6 +97,40 @@ export default function OpeningCompanyStatePanel({ ownState, fixture, turn }: Op
             <span className="sm:block font-medium">{item.value}</span>
           </div>
         ))}
+      </div>
+
+      <div className="border-t border-gray-700/60 pt-3">
+        <h4 className="text-xs font-semibold text-gray-300 mb-1">受注残（未履行契約）の内訳（市場×商品別）</h4>
+        {backlogByMarketProduct.length === 0 ? (
+          <p className="text-[11px] text-gray-500">現在、未履行の契約はありません。</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="text-gray-400 text-left">
+                  <th className="pr-2 py-1">市場</th>
+                  <th className="pr-2 py-1">商品</th>
+                  <th className="pr-2 py-1">未履行数量</th>
+                  <th className="pr-2 py-1">件数</th>
+                  <th className="pr-2 py-1">最短納期</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backlogByMarketProduct.map((g) => (
+                  <tr key={`${g.market}-${g.product}`} className="border-t border-gray-700/60">
+                    <td className="pr-2 py-1">
+                      {DEMAND_MARKET_NAMES[g.market]}（{g.market}）
+                    </td>
+                    <td className="pr-2 py-1">{PRODUCT_LABEL[g.product] ?? g.product}</td>
+                    <td className="pr-2 py-1">{formatTons(g.outstandingTons)}</td>
+                    <td className="pr-2 py-1">{g.contractCount}件</td>
+                    <td className="pr-2 py-1">{g.nearestDueDateLabel}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="border-t border-gray-700/60 pt-3">
