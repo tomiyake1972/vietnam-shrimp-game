@@ -1,0 +1,373 @@
+# SAI-6 Phase 1A-2 完了報告書（訂正版・2026-08-01夜）
+
+**本書は `docs/v2/reports/sai6_phase1a2_completion_report_2026-08-01.md`（2026-08-01作成）を
+supersede（差し替え）する。** 三宅さんより、旧完了報告書は「Phase 1A-2の完了報告になっていない」
+と明確に指摘され、以下7点の追加確認・修正を求められた。本書はその7点すべてに対する回答であり、
+旧完了報告書は**参考記録として残すが、Phase 1A-2の正式な完了報告としては本書に置き換える**。
+
+- 対象ブランチ: `feature/v2-sai6-standard-ai-capability`
+- `develop/v2`・`main`へは統合していない（§10で確認）
+- Phase 1B以降の本体実装には着手していない
+- `fundingOutlookEnabled`フラグは既定`false`のまま維持している（削除していない）
+
+---
+
+## 作業1: 「調達時の資金制約179/208件」等の数値の理由を、一律の分類にせず分解する
+
+### 1.1 問題として指摘された3つの数値の関係
+
+- 調達時の資金制約（`computeProcurementConstraint`の`scaleRatio<1`）: **179/208件**
+  （Phase 0の`classifyLowUtilizationCause`による集計。後述1.4で193/208との違いを説明）
+- 会社全体の利用可能資金不足（借入余力超過）: **20/208件**
+- 平均資金枠余裕: **+14.79M USD**
+
+これらは矛盾ではない。**「調達時の狭い流動性チェック」と「会社全体の資金繰り」は
+別の指標**である。`computeProcurementConstraint`が見る「調達時に使える現金」は
+**前期末現金の60%（`domesticPurchaseCashAllocationRatio`）＋承認済み通常融資枠のみ**
+であり、当期中に決済期が到来する売掛金回収（`reliableCashInflowsUsd`と同じ定義）や
+借入余力の残り全部を含まない。一方、「会社全体の利用可能資金不足」は前期末現金＋借入余力
+＋当期確実収入－当期実際支出というより広い定義で見ており、平均では余裕がある
+（+14.79M）にもかかわらず、**調達判断という狭い瞬間の流動性チェックだけを見れば
+制約が頻発しうる**。
+
+### 1.2 179件を一律に「銀行与信上限が支配的制約」と分類しないための4分解
+
+`scripts/sai6Phase1A2CashConstraintDecomposition.ts`（新規、本作業で追加）を用いて、
+control（全機能OFF）の生存期間208四半期（4 seed×5社×32Q、破綻後除く）について、
+`computeProcurementConstraint`が`scaleRatio<1`となる**193四半期**（Phase 0の
+`classifyLowUtilizationCause`が数える179件とは定義が異なる。§1.4で説明）を、
+安価な説明から順に次の4分類へ分解した:
+
+1. **(B) procurementが承認可能借入額（与信上限）を認識しない** … 与信上限
+   （`capacity.availableAdditionalCapacityUsd`）自体は必要額を満たすのに、AIの
+   実際の申請額が届かず、承認額が申請額どまりになっている。
+2. **(C) financeがprocurementより後にあることによる時間順序** … 通常融資の承認自体は
+   同一四半期・同一ループ内でprocurementの制約計算より前に確定する（既存の因果接続監査で
+   確認済み）が、緊急融資（`emergencyLoan`）は`closeQuarterWithFinancing`（四半期末、
+   `runner.ts:1234`）で初めて確定し、procurementの制約計算（`runner.ts:857-870`）より
+   構造的に後になる。したがって当期に緊急融資が出る会社では、procurementはその緊急融資を
+   一切認識できない。
+3. **(D) 入出金タイミング差** … procurementの流動性チェックは「前期末現金の60%＋承認済み
+   通常融資」だけを見ており、当期中に決済期が到来する売掛金回収（当期の確実な収入）を
+   一切考慮しない。
+4. **(A) 真の借入余力不足** … 与信上限＋緊急融資＋当期確実収入をすべて動員しても、なお
+   国内買付の必要額を満たせない。
+
+判定順序（安価な説明から順に実データで確認）: まず与信上限だけで足りるか（B）→次に
+与信上限＋当期緊急融資（あれば）で足りるか（C）→次に＋当期確実収入で足りるか（D）→
+それでも足りなければ（A）。
+
+### 1.3 実測結果
+
+| 分類 | 件数 | 割合 |
+|---|---:|---:|
+| (A) 真の借入余力不足 | 0 | 0.0% |
+| (B) 与信上限だけで説明できる（申請額が与信上限未満） | 0 | 0.0% |
+| (C) 緊急融資の時間順序 | 19 | 9.8% |
+| (D) 入出金タイミング差 | 174 | 90.2% |
+
+出力: `artifacts/sai6/phase1a2/cash_constraint_decomposition.{json,csv,md}`（Git管理外、
+再現可能: `npx tsx scripts/sai6Phase1A2CashConstraintDecomposition.ts`）。
+
+**結論**: 生存期間全体（control、208四半期）で見ると、調達時の資金制約の**90.2%は
+「与信上限」ではなく「入出金タイミング差」（前期末現金の60%配分ルールが当期の確実な
+売掛金回収を無視すること）で説明できる**。「銀行与信上限が支配的制約」という表現は、
+**破綻前後20ケース（80四半期）という狭い母集団についての判定としては引き続き妥当と
+考えられる**（§1.5参照）が、**生存期間全体・より広い母集団に一般化できる結論ではない**。
+既存の複数の報告書・設計書に残っていたこの一般化した表現は、§6の文書修正で
+「再検証中」と明記した。
+
+### 1.4 179/208件（Phase 0） vs 193/208件（本作業）の差の説明
+
+Phase 0の`classifyLowUtilizationCause`は、「原料不足が労働力・設備不足より大きい
+"主因"であり、かつ`procurementScaleRatio<0.999`」という**複合条件**で数えている
+（原料不足が最大要因でない四半期は、たとえ資金制約でscaleRatio<1でも数えない）。
+一方、本作業の分解スクリプトは`scaleRatio<1-EPS`という**単一条件**のみで数えている
+（原料不足が労務・設備不足より大きいかどうかは問わない）。この違いにより、
+Phase 0は179件、本作業は193件と異なる。**両者は矛盾する二重計測ではなく、
+異なる問いに答えている**: Phase 0は「稼働率低下の主因が資金制約か」、本作業は
+「調達の流動性チェックがそもそも制約として発火したか」。
+
+### 1.5 破綻前後20ケースでの判定との整合性
+
+`docs/v2/reports/sai6_phase1a2_causal_connection_report.md`の因果接続監査（作業1・作業2）は、
+**破綻直前3〜4四半期の窓（20ケース×4四半期=80四半期）**という別の・より狭い母集団を対象に
+しており、そこでは78/80四半期（97.5%）で「承認額＝借入余力上限」が成立していた。
+この2つの分析は**対象母集団が違う**ため両立しうる: 破綻直前の会社は、生存期間全体の
+平均的な会社よりも与信上限そのものに近い状態にあることが多く（延滞・信用毀損の蓄積で
+与信枠が縮小している等）、そこでは確かに与信上限が支配的に見える。しかし生存期間全体
+（大半は非破綻企業・非危機四半期を含む）で見ると、資金制約の大半（90.2%）は
+「入出金タイミング差」（60%配分ルール）に起因する。
+
+---
+
+## 作業2: Phase 1AでA類型とした5件の再分類（前回指定の6分類 + 新4分類とのクロス集計）
+
+### 2.1 「前回指定した6分類」の所在確認
+
+`docs/v2/reports/sai6_phase1a2_causal_connection_report.md` §2（既存、2026-08-01夜作成）に、
+20破綻ケース全数を再分類した際の6分類が明記されている（本書が新規に定義したものではない）:
+
+| # | 分類 | 定義 |
+|---|---|---|
+| 1 | 借入判断是正だけで当期調達が実際に改善する | 借入実行額が増え、かつ同一四半期の調達量・生産量が実際に増える |
+| 2 | 借入余力はあるが意思決定順序のため当期調達へ反映されない | 承認額は増えるが、procurement判断が先に確定しているため当期の調達実行に反映されない |
+| 3 | 借入余力不足で借入判断是正だけでは救えない | 承認額が借入余力の上限に常に張り付いており、希望額を是正しても実行額が変わらない |
+| 4 | 調達制約はあるが主因は資金以外 | 原料不足が発生していても、資金制約（cashPressure由来のscaleRatio<1）が主因ではない |
+| 5 | 破綻前3Qでは原因を特定できない | 観測窓が開業直後（1桁四半期目）にかかり、初期資本構成の影響が支配的 |
+| 6 | 破綻後の結果にすぎない | 窓が実質的に破綻確定後の四半期のみで構成される |
+
+同報告書§2.1で、旧「A類型」5件（`sai5-ab-001/BAL`,`JPQ`,`VAP`、`sai5-ab-002/MASS`、
+`sai5-ab-004/VAP`）を含む20ケース全数を、この6分類で再分類済みである
+（**全20ケースが分類3、うち`sai5-ab-004/VAP`のみ「唯一の例外ケース」として注記付き**）。
+
+### 2.2 5件の再分類結果（6分類 + 本作業の新4分類のクロス集計）
+
+旧5件それぞれについて、破綻窓の各四半期での遮断点（A〜F、既存の因果接続監査スクリプト
+`scripts/sai6Phase1A2CausalConnectionAudit.ts`が判定）と、本作業の新4分類
+（`scripts/sai6Phase1A2CashConstraintDecomposition.ts`。ただしこちらは**control単独実行の
+一般分類であり、fundingOutlook ON/OFFの対とは無関係**。破綻窓の四半期の一部は
+本作業の分類でも重複確認できた）を突き合わせる。
+
+| ケース | 破綻四半期 | 6分類（既存報告書） | 遮断点（A〜F） | 本作業4分類（重複確認できた四半期） |
+|---|---:|---:|---|---|
+| sai5-ab-001/BAL | 24Q | 3（借入余力不足） | B（全四半期） | D_cash_timing_input_output（21Q）、none（22-23Q） |
+| sai5-ab-001/JPQ | 24Q | 3（借入余力不足） | B（全四半期） | D_cash_timing_input_output（21Q）、none（22-23Q） |
+| sai5-ab-001/VAP | 18Q | 3（借入余力不足） | B（全四半期） | D_cash_timing_input_output（15-16Q）、none（17Q） |
+| sai5-ab-002/MASS | 10Q | 3（借入余力不足） | B（全四半期） | D_cash_timing_input_output（7-9Q） |
+| sai5-ab-004/VAP | 12Q | 3（唯一の例外ケース、下記参照） | B,B,F,F（9-12Q） | D_cash_timing_input_output（9-11Q） |
+
+**読み方の注意（混同しないこと）**: 「6分類」は**破綻直前の窓に限定した、fundingOutlook
+ON/OFFの対比較**（借入是正が実際の破綻回避に効いたかを問う）。「本作業4分類」は
+**control単独実行（フラグOFF固定）での`computeProcurementConstraint`自体の制約原因**
+（借入是正とは無関係に、なぜその四半期は資金制約が発生したか）。両者は問いが異なるため、
+同じ四半期でも「6分類=3（借入余力不足）」かつ「4分類=D（入出金タイミング差）」という
+組み合わせが成立しうる。これは矛盾ではなく、**「借入是正では救えない（6分類3）」ことと
+「その資金制約自体の直接原因は入出金タイミング差である（4分類D）」ことが両立する**ことを
+示している——すなわち、借入是正だけでは救えないケースでも、その根本原因は
+「与信上限そのものの絶対的不足」ではなく「60%配分ルールが当期の確実な収入を見ない設計」
+である可能性が高い。
+
+### 2.3 sai5-ab-004/VAPの扱い
+
+5件中唯一、実際の借入実行額に差が生じたケース（`drawDeltaSum = -443,932 USD`、窓全体の合計）。
+四半期別に見ると方向は一様ではない: 9-10Qは完全一致（B）、11Qはfundingoutlook ONの方が
+**684,097 USD少なく**借入・生産も少ない（F、ON側が悪化）、12Qは逆にONの方が
+**685,204 USD多く**借入・生産も多い（F、ON側が改善）。窓全体では正味わずかにマイナス
+（-443,932 USD）。**単純に「新式のほうが少なく借りる方向」と一様に言うのは不正確**であり、
+四半期ごとに方向が入れ替わる非単調な差であることを明記する（旧報告の記述はこの非単調性を
+明示していなかった点を本書で補足する）。
+
+---
+
+## 作業3: OFF/ON差が消える位置の実数トレース
+
+`新旧必要借入額 → 申請額 → 承認額 → 実行額 → 調達判断時点の利用可能現金 → 調達damping(scaleRatio) → 調達量 → 生産量`
+の順で、代表例を実数で示す（データ源: `artifacts/sai6/phase1a2/paired_window.json`の
+`preDefaultWindow`。旧式=`fundingOutlookEnabled=false`、新式=`true`）。
+
+### 3.1 代表例（すべてUSD、数量はトン）
+
+| 例 | 旧式必要借入額 | 新式必要借入額 | 申請額(OFF) | 申請額(ON) | 承認額(OFF) | 承認額(ON) | 実行額(OFF) | 実行額(ON) | scaleRatio(OFF) | scaleRatio(ON) | 調達量(OFF) | 調達量(ON) | 生産量(OFF) | 生産量(ON) | 差が消える位置 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| **D類型**: sai5-ab-001/VAP/15Q | 30,761,223 | 16,749,480 | 30,761,223 | 16,749,480 | 1,260,499 | 1,260,499 | 1,260,499 | 1,260,499 | 0.1930 | 0.1930 | 500.3t | 500.3t | 4,844.2t | 4,844.2t | **申請額→承認額**（与信上限1,260,499が両者とも同一に頭打ち） |
+| **旧A類型1**: sai5-ab-001/BAL/24Q | 30,874,043 | 13,378,221 | 30,874,043 | 13,378,221 | 5,626,871 | 5,626,871 | 7,080,673 | 7,080,673 | 0.9339 | 0.9339 | 2,224.1t | 2,224.1t | 9,525.4t | 9,525.4t | **申請額→承認額** |
+| **旧A類型2**: sai5-ab-001/JPQ/24Q | 30,874,043 | 13,378,221 | 30,874,043 | 13,378,221 | 5,626,871 | 5,626,871 | 7,080,673 | 7,080,673 | 0.9339 | 0.9339 | 2,224.1t | 2,224.1t | 9,525.4t | 9,525.4t | **申請額→承認額** |
+| **旧A類型3**: sai5-ab-001/VAP/18Q | 31,651,130 | 20,203,218 | 31,651,130 | 20,203,218 | 13,668,093 | 13,668,093 | 17,923,360 | 17,923,360 | 1.0000 | 1.0000 | 3,543.2t | 3,543.2t | 10,705.2t | 10,705.2t | **申請額→承認額**（この四半期は元々scaleRatio=1で非制約） |
+| **旧A類型4**: sai5-ab-002/MASS/10Q | 20,537,673 | 29,967,986 | 20,537,673 | 29,967,986 | 0 | 0 | 6,611,386 | 6,611,386 | 0.3061 | 0.3061 | 2,271.2t | 2,271.2t | 8,565.5t | 8,565.5t | **申請額→承認額**（与信上限がそもそも0。新式のほうが希望額が"高い"点にも注意） |
+| **旧A類型5（例外）**: sai5-ab-004/VAP/12Q | 29,110,378 | 17,742,275 | 29,110,378 | 18,260,506 | 5,612,550 | 6,323,253 | 14,516,209 | 15,201,413 | 0.6899 | 0.7308 | 2,375.7t | 2,692.3t | 12,809.4t | 12,927.2t | **消えない**（承認額から先まで一貫して差が残る唯一の例。ただし与信上限自体が四半期ごとに異なる値になっている点に注意=直接効果と間接効果が混在） |
+
+### 3.2 一般化した所見
+
+- **20破綻ケースの窓では19/20（95%）で「申請額→承認額」の段階で差が完全に消える**。
+  与信上限（担保・信用スコア由来の`availableAdditionalCapacityUsd`）が申請額の是正幅より
+  常に小さい（またはゼロ）ため、希望額の算定式をどれだけ正確にしても実行額は変わらない。
+- **唯一の例外（sai5-ab-004/VAP）でも、差は一様な方向ではなく、四半期ごとに正負が
+  入れ替わる**（§2.3）。これは「借入是正の効果が量的に小さく、他の要因（原料価格変動や
+  在庫水準等の副次的な波及効果）に埋もれるレベルである」ことを示唆する。
+- **重要な限定**: 上記5例はいずれも「銀行の承認額＝借入余力上限」という、狭い破綻直前の
+  母集団での傾向である。作業1で確認したとおり、生存期間全体で見れば資金制約の大半
+  （90.2%）は与信上限ではなく入出金タイミング差（D）に起因する。この表は
+  「破綻直前の窓では申請額の是正がほとんど効かない」ことを実数で示すものであり、
+  「Phase 1Aの効果が全く無い」ことの一般的な証明ではない（生存期間の他の四半期では
+  入出金タイミング差の解消により調達が改善する余地が別途あることを示唆する、
+  §1.3のD=90.2%と整合）。
+
+---
+
+## 作業4: `reliableCashInflowsUsd`/`plannedCashOutflowsUsd`の完全性監査表
+
+**【最重要な区別】** 以下の「ex-ante（決定時点の予定支出・予定収入）」列と「ex-post（実際の
+決済・キャッシュフロー実績）」列は**異なるレンズ**である。ex-anteは`decision/finance.ts`の
+`buildStandardAiFinancingRequest`が**当期の意思決定時点**（当期の市場結果が確定する前）に
+入手可能な情報だけで見積もる将来予測であり、ex-postは`finance/quarterClose.ts`が
+**当期の実績が全て確定した後**に計算する実際のキャッシュフロー計算書の値である。
+両者が一致しないこと自体は「バグ」ではなく、**「見通しは実績と一致しないことがある」という
+当然の性質**であり、一致しない箇所ごとに理由を明記する。
+
+### 4.1 `reliableCashInflowsUsd`（ex-ante・当期の確実な収入）の照合
+
+| ex-anteの計算式（`decision/finance.ts:85-87`） | ex-postの対応する実績値 | 一致するか | 差の理由 |
+|---|---|---|---|
+| `financeState.receivables.filter(r => r.dueSettlementPeriod === period).reduce(sum, amount)`（前期末までに発生済みの売掛金のうち、決済期が"当期と一致"するものの金額合計） | `CashFlowStatement.operatingDirect.receiptsFromCustomers`（`quarterClose.ts:1011`、`collectedReceivables = prev.receivables.filter(r => r.dueSettlementPeriod <= period)`の合計） | **構造的にはほぼ一致するはずだが、フィルタ条件が異なる**（`===`対`<=`） | 通常運用では売掛金は発生の都度、決済期に確実に回収される設計（回収不能・貸倒れのモデルなし）であるため、`dueSettlementPeriod`が当期より前に残っている売掛金は本来存在しない。ただし理論上、何らかの理由で過去の売掛金が残存していれば`<=`のex-post側がex-anteより大きくなりうる（本エンジンの実装上はこのケースは発生しない設計だが、フィルタ条件の非対称性自体は完全性監査として明記する）。 |
+
+### 4.2 `plannedCashOutflowsUsd`（ex-ante・当期の計画支出）の項目別照合
+
+`plannedCashOutflowsUsd = payablesDueThisPeriodUsd + scheduledDebtServiceUsd + domesticPurchaseCashNeedUsd + laborCashCostUsd + sgaFixedCashCostUsd`
+（`decision/finance.ts:95-96`）
+
+| ex-ante項目 | ex-anteの計算式 | ex-postの対応する実績値 | 一致するか | 差の理由 |
+|---|---|---|---|---|
+| `payablesDueThisPeriodUsd` | `financeState.payables.filter(p => p.dueSettlementPeriod === period)`の合計（前期末までに発生済みの買掛金のうち決済期が当期のもの） | `apSettlementsPaid`（`quarterClose.ts:1012-1013`、`dueSettlementPeriod <= period`でフィルタ、`paymentsForRawMaterials`の内訳の一部） | **通常は一致**（§4.1と同じ理由: `<=`と`===`の非対称性はあるが、実運用では発生しない） | 買掛金は前期末までに確定した金額であり、決定時点で正確に予見可能。真の予測誤差はない。 |
+| `scheduledDebtServiceUsd` | `financingState.loanPortfolio.loans`の当期の`computeLoanQuarterlyInterest + computeScheduledPrincipalDue`の合計（**約定どおり支払われる前提**） | `interestPaid`（`quarterClose.ts:1146`、実際に支払えた利息のみ）＋元本返済（財務諸表の財務CF区分、`principalPaidCashUsd`） | **資金不足時は一致しない**。ex-anteは「約定どおり全額払う前提」、ex-postは「実際に払えた額」（延滞時は下回る） | **これが唯一の意味のある予測誤差**: 会社が資金繰り破綻に近い状態では、実際の利払い・元本返済はスケジュールを下回り（延滞に計上）、ex-anteの見積りは実際の支出より**過大**になる。ただしこれは「借入の必要性を過大評価する」方向のバイアスであり、「借入判断を誤って過小評価させる」方向ではないため、Phase 1Aの目的（過小な借入是正）への影響は限定的。 |
+| `domesticPurchaseCashNeedUsd` | `procurementResult.domesticPurchasePlan.desiredQuantity × 1000 × expectedDomesticPriceUsdPerKg`（**AIの希望調達量**。`computeProcurementConstraint`によるscaleRatio縮小を反映する**前**の値、`policy.ts:125-127`） | `actuals.domesticPurchasesUsd`（**scaleRatio縮小後の実際の購入額**。`paymentsForRawMaterials`の内訳の一部） | **`scaleRatio<1`のときは一致しない（ex-anteが過大）** | **完全性監査で最も重要な発見**: ex-anteの見積りは、procurement自身の資金制約（当期に確定する`computeProcurementConstraint`の結果）を織り込んでいない**希望量ベース**であり、実際にはscaleRatio倍された量しか購入されない。つまり資金が乏しい四半期ほど、ex-anteは実際の原料仕入支出を**過大評価**し、その結果`plannedCashOutflowsUsd`全体も過大評価され、`desiredAmountUsd`（必要借入額）も**やや過大**に算出される可能性がある（安全側のバイアス）。 |
+| `laborCashCostUsd` | `decision.workerAssignments`から計算した常用・臨時・残業の人件費見積り（`policy.ts`の労務意思決定、finance判断より前に確定済み） | `laborCashTotal`（`quarterClose.ts:1053`の`paymentsForManufacturing`の内訳の一部） | **通常は一致**（当期の労務意思決定自体がex-post側でもそのまま使われる設計のため） | 労務コストは当期の意思決定から決定論的に計算されるため、意思決定内容が変わらない限り予測誤差はない。 |
+| `sgaFixedCashCostUsd` | fixture由来の販管費固定費（会社規模から決定論的に定まる） | `sgaTotal`（`paymentsForSellingGeneralAdmin`の内訳） | **一致しない可能性あり（未確認の完全性ギャップ）** | ex-anteは固定費のみを見積もる。ex-post側の`sgaTotal`に変動販管費（売上高連動の販管費等）が含まれる場合、ex-anteはその変動部分を欠落させている可能性がある（既存の`sai6_phase1a2_causal_connection_report.md`作業3で「変動販管費」の欠落が既に指摘されている）。 |
+| **（ex-anteに含まれない項目）** | — | `processingCashTotal`、`utilityCashTotal`、`factoryFixedCashTotal`、`capexMaintenanceCostUsd`（`paymentsForManufacturing`の残りの内訳、`quarterClose.ts:1053`）、`incomeTaxPaid`（`quarterClose.ts:1146`） | **ex-anteには一切含まれない（完全性ギャップ）** | `plannedCashOutflowsUsd`は加工費・水光熱費・工場固定費・capex保守費・法人税の当期現金支出を一切見積もっていない。これらはいずれも実在する現金支出項目であり、`desiredAmountUsd`（必要借入額）を**過小評価**する方向に働く（§4.2「輸入原料の買掛金」と異なり、安全側ではなく危険側のバイアス）。ただし作業1・作業3で確認したとおり、破綻直前の窓では承認額が与信上限（申請額とは無関係な上限）で頭打ちになっているケースが大半のため、この過小評価が実行額にどこまで影響するかは母集団により異なる（生存期間全体でのD類型90.2%の文脈では、この過小評価が入出金タイミング差の一因である可能性がある）。 |
+
+### 4.3 総括
+
+- ex-ante側の`plannedCashOutflowsUsd`は、**輸入原料の買掛金（deferred、正しく対象外）を除けば
+  国内原料・人件費・SGA固定費・既存債務の元利のみをカバーし、加工費・水光熱費・工場固定費・
+  capex保守費・法人税を欠落させている**（過小評価バイアス）。
+- 一方、`domesticPurchaseCashNeedUsd`自体は「AIの希望量」であり「scaleRatio縮小後の実際の
+  購入量」ではないため、scaleRatioが効く四半期では**逆に過大評価バイアス**が生じる。
+- **2つの逆方向バイアスが打ち消し合っているかどうかは未検証**であり、本作業では
+  「打ち消し合っている」という主張はしない。これは今回の完全性監査の限界として明記する。
+- 上記のいずれの欠落・非対称性も、**「ex-post（実際の支出を使った事後診断）」と
+  「ex-ante（意思決定時点の予定支出による資金見通し）」を混同した結果ではなく**、
+  両者を明確に区別した上で項目ごとに突き合わせた結果である。
+
+---
+
+## 作業5: 最小統合ケースでの次四半期反映確認
+
+`app/lib/v2/companyLab/standardAi/decision/__tests__/financeFundingOutlookCausalConnection.test.ts`
+に3つのテストを追加した（既存の2テストに加えて計5テスト、全て合格）。
+
+1. **(a) pure function**: `closeQuarterWithFinancing`で、事業活動をゼロに固定した上で
+   希望借入額だけを変えると、当期末現金（`nextFinanceState.cash`）の差が実行額の差と
+   ちょうど一致することを確認（会計恒等式レベル）。
+2. **(b) 実データでの結合テスト**: `sai5-ab-001`の実際のオートプレイ実行（24Q、5社）で、
+   `financialResults[t].cashFlow.closingCash`と`quarterStartCaptures[t+1].ownState.financeState.cash`
+   （＝翌四半期の`computeProcurementConstraint`へ渡される`prevCashUsd`の元）を全115件の
+   四半期遷移で突き合わせ、**最大差0 USD（完全一致）**を確認した。これは
+   「当期末現金が翌四半期の期首現金へ遮断なく繰り越される」ことの直接的な証拠である。
+3. **(c) pure function（翌四半期側）**: `computeProcurementConstraint`で、翌四半期の
+   `prevCashUsd`が(a)と同じだけ高い場合、翌四半期の`scaleRatio`・調達量が実際に改善する
+   ことを確認。
+
+**(a)+(b)+(c)を合成すると**、「当期の承認額増加 → 当期末現金増加 → 翌四半期の期首現金増加
+（遮断なし、(b)で実証済み） → 翌四半期の調達制約緩和」という因果の連結が、少なくとも
+会計上の繰越メカニズムそのものについては**遮断されていない**ことが分かる。
+
+**重要な限定**: (a)(c)はpure functionレベルの合成であり、実際のゲームでは翌四半期中に
+他の支出（人件費・SGA・元利払い等）が繰り越された現金を先に消費しうるため、
+「繰り越された現金の効果の一部が翌四半期の他の支出に吸収される」可能性は本テストの
+範囲外である。ただし、吸収されても繰り越し自体が消えるわけではなく、(b)で確認した
+「厳密な繰り越し」自体は常に成立する。
+
+テスト実行結果: `npx tsx --test app/lib/v2/companyLab/standardAi/decision/__tests__/financeFundingOutlookCausalConnection.test.ts`
+→ **5/5合格**。
+
+---
+
+## 作業6: 文書修正
+
+以下の4文書に、次の訂正を反映した:
+
+1. `docs/v2/reports/sai6_phase1a2_causal_connection_report.md`
+2. `docs/v2/reports/sai6_phase1a_causal_audit_and_ab_report.md`
+3. `docs/v2/reports/sai6_phase0_measurement_report.md`
+4. `docs/v2/design/sai6_standard_ai_capability_design.md`
+
+適用した修正:
+
+- **「銀行与信上限が支配的制約」は再検証中**（4文書すべてに、作業1の分解結果を踏まえた
+  「破綻直前20ケースの狭い母集団では成立しうるが、生存期間全体への一般化は再検証中」
+  という趣旨の注記を追加）。
+- **15%/3Q/15%は反実仮想上の推奨初期候補**（`replayPolicy`という反実仮想シミュレーション
+  上の比較でのみ求めた値であり、Standard AI本体で検証済みの値ではないことを明記）。
+- **解雇0.75x＋採用0.50xの往復回収条件は整数四半期ならN≥2Q**
+  （`docs/v2/reports/sai6_phase0_extended_measurement_and_phase1_spec_2026-08-01.md`の
+  §5を訂正。損益分岐点1.25四半期は非整数であり、整数四半期でしか再採用できないため
+  `Math.ceil(1.25)=2`。旧記述「N≥1四半期」は`toFixed(0)`の四捨五入誤りだった）。
+- **採用リードタイム感度が同一になった直接原因**（`pendingHires.length`をキューの長さで
+  経過四半期数の代用にしていた構造的バグを修正済みであること、修正後も差が出ないのは
+  採用イベント自体が稀（全208四半期中わずか数件）であるという中央パラメータの帰結
+  であることを明記。§7参照）。
+- **資金・原料制約ガードと資金危機時緊急削減の優先順位**
+  （`sai6_phase0_extended_measurement_and_phase1_spec_2026-08-01.md` §6.2.1を新規追加。
+  §6.2-4（資金危機時緊急削減）は§6.2-3（資金・原料制約ガード）より優先して発動する
+  という設計方針を明記。ただし現時点ではpure functionレベルで未検証であることも明記）。
+
+変更ファイル一覧は§7参照。
+
+---
+
+## 作業7: 完了報告のまとめ
+
+### 7.1 変更ファイル（本ラウンド、コミット前時点）
+
+- `scripts/sai6Phase0Study.ts`（修正・既存の未コミット差分をこの完了報告と合わせてコミット）
+  - 採用リードタイムのキュー長バグ修正（`{qty, turnsWaited}`個別追跡）
+  - 往復回収期間のN四捨五入バグ修正（`Math.ceil`、N≥2Qへ訂正）
+- `scripts/sai6Phase1A2CashConstraintDecomposition.ts`（新規）
+  - 調達時資金制約179/208件（Phase 0基準）・193/208件（本作業基準）の4分類分解スクリプト
+- `app/lib/v2/companyLab/standardAi/decision/__tests__/financeFundingOutlookCausalConnection.test.ts`（修正）
+  - 次四半期反映の統合テスト3件を追加（計5テスト）
+- `docs/v2/reports/sai6_phase1a2_causal_connection_report.md`（修正、訂正注記追加）
+- `docs/v2/reports/sai6_phase1a_causal_audit_and_ab_report.md`（修正、訂正注記追加）
+- `docs/v2/reports/sai6_phase0_measurement_report.md`（修正、訂正注記追加）
+- `docs/v2/design/sai6_standard_ai_capability_design.md`（修正、訂正注記追加）
+- `docs/v2/reports/sai6_phase0_extended_measurement_and_phase1_spec_2026-08-01.md`（修正、
+  N≥2Q訂正・リードタイム直接原因・優先順位§6.2.1追加）
+- `docs/v2/reports/sai6_phase1a2_completion_report_corrected_2026-08-01.md`（新規、本書）
+
+### 7.2 検証結果
+
+- `npx tsc --noEmit -p .`: **エラーなし**
+- `npm test`: **1990/1990合格**（既存1987 + 本作業で追加した3件）
+- `npm run lint`: **0エラー**（既存の無関係な警告4件のみ、新規警告なし）
+- `npm run build`: **成功**
+- `scripts/sai6Phase0Study.ts`の再現性: 2回実行し`summary.md`・`measurement.json`・
+  `quarterly.csv`が**完全一致**（差分なし）
+- `scripts/sai6Phase1A2CashConstraintDecomposition.ts`の再現性・品質: 208行、
+  NaN/Infinity/重複キーいずれも**0件**
+
+### 7.3 コミット履歴
+
+旧コミット（既存、本作業では変更していない）:
+`22a4022`, `2f290fe`, `3242a1a`, `5a47a36`, `dc333f5`, `0a11026`
+
+新コミット（本ラウンド、`git log --oneline`で確認可能。本書自体を追加するコミットの
+ハッシュのみは自己参照になるため記載できないが、`git log`の最新コミットとして確認できる）:
+
+- `26a5a6e` fix(sai6): Phase 0計測スクリプトの往復回収期間N四捨五入バグと採用リードタイムのキュー長バグを修正
+- `0d0e969` diag(sai6): 調達時資金制約179/208件の直接原因を4分解する監査スクリプトを追加
+- `307784c` diag(sai6): 借入増加が翌四半期の調達・生産へ届くかを検証する統合テストを追加
+- `b7ea383` docs(sai6): 「与信上限が支配的制約」を再検証中と明記し、初期候補値のラベル・N≥2Q・優先順位を訂正
+- （本書を追加するコミット。ハッシュは`git log --oneline -1`で確認）
+
+### 7.4 push状況
+
+`origin/feature/v2-sai6-standard-ai-capability`へpush済み（push後のコミットハッシュは
+上記と同一。`git log origin/feature/v2-sai6-standard-ai-capability --oneline -5`で確認可能）。
+
+### 7.5 develop/v2・mainの確認
+
+- `develop/v2` = `f6b4e45`（変更なし、`git rev-parse develop/v2`で確認）
+- `main` = `3ae9485`（変更なし、`git rev-parse main`で確認）
+- 両ブランチとも本ラウンドの作業で一切触れていない（マージ・チェックアウトのいずれも実施せず）。
+
+---
+
+## 完了できなかった事項・限界（正直な明記）
+
+- 作業4の完全性監査で指摘した「2つの逆方向バイアス（原料仕入の過大評価 vs
+  加工費等の過小評価）が打ち消し合っているか」は**未検証**。定量的な相殺効果の測定には
+  別途の反実仮想実験が必要であり、本ラウンドの範囲外とした。
+- 作業6の「優先順位」（§6.2.1）は設計方針の明文化であり、**Phase 1本体実装前のため
+  pure functionレベルでの検証はできていない**（Phase 1着手時にテストを追加する必要がある）。
+- 「前回指定した6分類」は`sai6_phase1a2_causal_connection_report.md`に既存で存在しており、
+  本ラウンドで新たに定義し直したものではない（作業2で確認・引用したのみ）。
