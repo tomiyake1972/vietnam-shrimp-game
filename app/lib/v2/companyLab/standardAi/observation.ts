@@ -211,6 +211,9 @@ export function buildStandardAiObservation(
     salesBaseByMarketProduct: ownState.salesBaseByMarketProduct,
     salesBaseCompetitivenessWeight: ownState.salesBaseCompetitivenessWeight,
 
+    // 【VAP差別化戦略】自社のVAP能力係数（前四半期末までの値。ownState経由の一本道）。
+    vapCapabilityCoefficient: ownState.vapCapabilityCoefficient,
+
     // 【SAI-5C】ライフサイクル公開トレンド（前四半期までの公開情報のみ。
     // publicInfo経由の一本道＝当期需要の先読みリークはない）。
     lifecycleSharesByMarket: publicInfo.productLifecycleOutlook?.sharesByMarket,

@@ -108,6 +108,26 @@ export function lookupSalesBaseScore(
   return entry ? unwrapUnit(entry.score) : params.neutralScore;
 }
 
+/**
+ * 【VAP差別化戦略】会社の全市場平均VAP営業基盤スコア（0-100）。
+ * companyLab/premiumPolicy.ts の calculateCompanyCapabilityCoefficient への
+ * 入力（salesBaseScoreVap）は市場非依存の会社単位係数のため、会社×市場×商品の
+ * 営業基盤（本ファイルの粒度）から市場をまたいで単純平均する（新しい状態は
+ * 追加せず、既存のSalesBaseStateから導出するだけ）。活動実績が1件も無い
+ * （全市場が中立値）場合も、単純平均の結果としてneutralScoreになる。
+ */
+export function averageVapSalesBaseScoreForCompany(
+  state: SalesBaseState | undefined,
+  companyId: CompanyId,
+  params: SalesBaseParameters = SALES_BASE_PARAMETERS_V1
+): number {
+  let sum = 0;
+  for (const market of DEMAND_MARKET_IDS) {
+    sum += lookupSalesBaseScore(state, companyId, market, "vap", params);
+  }
+  return sum / DEMAND_MARKET_IDS.length;
+}
+
 /** 1社ぶんの営業基盤スライス（AIの観測・販売計画注入用）。 */
 export function salesBaseSliceForCompany(
   state: SalesBaseState | undefined,

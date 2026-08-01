@@ -18,7 +18,7 @@ import { DemandMarketId, Product } from "../../../market/types";
 import { CompanySalesPlanEntry, PlanCostExpectation } from "../../../sales/types";
 import { SalesParameters, SALES_PARAMETERS_V1 } from "../../../sales/parameters";
 import { allocateHeadcountAcrossMarkets, computeMarketSalesEffort, salesEffortWeightedQuantity } from "../../../sales/marketEffort";
-import { minimumAcceptablePremium, orderQuantityFactor } from "../../premiumPolicy";
+import { calculateCompanyRealizedVapPremiumRatio, minimumAcceptablePremium, orderQuantityFactor } from "../../premiumPolicy";
 import { CompanyFixture } from "../../types";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
@@ -45,10 +45,19 @@ function orderFactorsByProduct(fixture: CompanyFixture, observation: StandardAiO
   // 「加算して優先させる」対象にならない）。加算後は[0, 1.1]にクランプし、
   // 捏造的な値（例えば負の受注量係数）を作らない。
   const clampOrderFactor = (v: number) => Math.max(0, Math.min(1.1, v));
+  // 【VAP差別化戦略】VAPに限り、市場プレミアムへ会社別の能力係数
+  // （observation.vapCapabilityCoefficient、companyLab/runner.tsのbuildCompanyOwnStateが
+  // config.sai5.vapDifferentiation有効時のみ算出）を掛けた「会社が実際に実現する
+  // VAPプレミアム」を受注量係数判定へ渡す。未接続（機能OFF・未設定）の場合は
+  // 係数1.0（無補正）で、既存の市場プレミアムそのままの挙動とビット単位で一致する。
+  const vapCapabilityCoefficient = observation.vapCapabilityCoefficient ?? 1;
+  const marketPremiumVap = observation.marketPremiumByProduct.vap;
+  const realizedVapPremium =
+    marketPremiumVap === undefined ? undefined : calculateCompanyRealizedVapPremiumRatio(marketPremiumVap, vapCapabilityCoefficient);
   return {
     hoso: 1,
     pd: clampOrderFactor(orderQuantityFactor(fixture.productEconomics.premiumEconomics.pd, observation.marketPremiumByProduct.pd) + params.valueAddedOrderFactorBoost),
-    vap: clampOrderFactor(orderQuantityFactor(fixture.productEconomics.premiumEconomics.vap, observation.marketPremiumByProduct.vap) + params.valueAddedOrderFactorBoost),
+    vap: clampOrderFactor(orderQuantityFactor(fixture.productEconomics.premiumEconomics.vap, realizedVapPremium) + params.valueAddedOrderFactorBoost),
   };
 }
 

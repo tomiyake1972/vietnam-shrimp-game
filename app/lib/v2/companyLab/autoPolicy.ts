@@ -37,7 +37,7 @@ import { CompanyProductionPlanEntry, WorkerAssignment } from "../production/type
 import { unwrapUsd } from "../finance/types";
 import { FinancingRequestInput } from "../financing/types";
 import { CapexDecisionInput } from "../capex/types";
-import { orderQuantityFactor } from "./premiumPolicy";
+import { calculateCompanyRealizedVapPremiumRatio, orderQuantityFactor } from "./premiumPolicy";
 import { AUTO_FINANCING_POLICY_PARAMETERS_V1 } from "./parameters";
 import { CompanyDecisionInput, CompanyFixture, CompanyOwnState, PublicMarketInfo } from "./types";
 
@@ -259,13 +259,26 @@ function marketPremiumsFromPublicInfo(publicInfo: PublicMarketInfo): Record<"pd"
   };
 }
 
-/** 商品別の受注量係数（PD/VAPは最低受注プレミアム判断、HOSOは基準商品として常に1）。 */
-function orderFactorsByProduct(fixture: CompanyFixture, publicInfo: PublicMarketInfo): Record<Product, number> {
+/**
+ * 商品別の受注量係数（PD/VAPは最低受注プレミアム判断、HOSOは基準商品として常に1）。
+ *
+ * 【VAP差別化戦略】VAPに限り、市場プレミアム（前期公開情報）へ会社別の能力係数
+ * （companyLab/premiumPolicy.ts の calculateCompanyCapabilityCoefficient、
+ * ownState.vapCapabilityCoefficient。companyLab/runner.tsのbuildCompanyOwnStateが
+ * config.sai5.vapDifferentiation有効時のみ算出する）を掛けた「会社が実際に
+ * 実現するVAPプレミアム」を受注量係数判定へ渡す。未接続（機能OFF・未設定）の
+ * 場合は係数1.0（無補正）となり、既存の市場プレミアムそのままの挙動とビット単位で
+ * 一致する。PD・HOSOには一切適用しない。
+ */
+function orderFactorsByProduct(fixture: CompanyFixture, publicInfo: PublicMarketInfo, ownState: CompanyOwnState): Record<Product, number> {
   const premiums = marketPremiumsFromPublicInfo(publicInfo);
+  const vapCapabilityCoefficient = ownState.vapCapabilityCoefficient ?? 1;
+  const realizedVapPremium =
+    premiums.vap === undefined ? undefined : calculateCompanyRealizedVapPremiumRatio(premiums.vap, vapCapabilityCoefficient);
   return {
     hoso: 1,
     pd: orderQuantityFactor(fixture.productEconomics.premiumEconomics.pd, premiums.pd),
-    vap: orderQuantityFactor(fixture.productEconomics.premiumEconomics.vap, premiums.vap),
+    vap: orderQuantityFactor(fixture.productEconomics.premiumEconomics.vap, realizedVapPremium),
   };
 }
 
@@ -593,7 +606,7 @@ export function generateAutoPolicyDecision(
   };
 
   // --- 2. PD/VAPの受注判断（実装指示 §9）: 最低受注プレミアム未満では販売提案を出さない ---
-  const orderFactors = orderFactorsByProduct(fixture, publicInfo);
+  const orderFactors = orderFactorsByProduct(fixture, publicInfo, ownState);
 
   // --- 3. 保守的会社の約定残による抑制（Phase 6.2から継続） ---
   const totalQuarterlyProductionScale = potentialByProduct.hoso + potentialByProduct.pd + potentialByProduct.vap;

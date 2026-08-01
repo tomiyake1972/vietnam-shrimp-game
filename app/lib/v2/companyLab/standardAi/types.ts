@@ -124,6 +124,15 @@ export interface StandardAiObservation {
   /** 【監査指摘G】当期の成約配分で実際に使われる営業基盤の競争力ウェイト（機能OFF時は0）。 */
   readonly salesBaseCompetitivenessWeight?: number;
 
+  // --- 【VAP差別化戦略】会社別のVAP能力係数（前四半期末まで） ---
+  /**
+   * 会社別のVAP能力係数（companyLab/premiumPolicy.ts の
+   * calculateCompanyCapabilityCoefficient、下限0.7・上限1.3）。
+   * config.sai5.vapDifferentiation有効時のみ設定される。未設定（機能OFF）の
+   * ときは呼び出し側が1.0（無補正）として扱う。
+   */
+  readonly vapCapabilityCoefficient?: number;
+
   // --- 【SAI-5C】市場別の商品ライフサイクル公開トレンド（前四半期までの公開情報） ---
   /** 前四半期に適用された市場×商品の需要構成比（productLifecycle有効時のみ。turn1はundefined）。 */
   readonly lifecycleSharesByMarket?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
