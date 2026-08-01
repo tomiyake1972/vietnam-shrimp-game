@@ -147,7 +147,9 @@ test("受入確認CX-11: 分割払いが成功すると、支払額は必ずappr
 
 test("受入確認CX-12: 全案件種別で、テンプレートの予定支払比率の合計は1.0（提案評価が例外を投げない）", () => {
   for (const projectType of Object.keys(CAPEX_PARAMETERS_V1.templatesByType) as (keyof typeof CAPEX_PARAMETERS_V1.templatesByType)[]) {
-    const project = approve(0, 0, HEALTHY_GATE, proposal({ projectType }));
+    // 【Test15】pdMechanizationはtargetFactoryId必須（projectLifecycle.tsのバリデーション）。
+    const extra = projectType === "pdMechanization" ? { targetFactoryId: "F-TEST" } : {};
+    const project = approve(0, 0, HEALTHY_GATE, proposal({ projectType, ...extra }));
     const sum = project.paymentSchedule.reduce((s, st) => s + st.plannedRatio, 0);
     assert.ok(Math.abs(sum - 1) < 1e-6, `${projectType}: 予定支払比率合計 ${sum}`);
   }
@@ -255,4 +257,60 @@ test("受入確認CX-21: 承認された案件のfutureCapacityEffectはテン�
   const project = approve(0, 0, HEALTHY_GATE, proposal({ projectType: "vapLineExpansion" }));
   const template = CAPEX_PARAMETERS_V1.templatesByType.vapLineExpansion;
   assert.deepEqual(project.futureCapacityEffect, template.futureCapacityEffect);
+});
+
+// ---------------------------------------------------------------------
+// 8. PD省人化投資（pdMechanization、Test15新設）— targetFactoryId必須・
+//    Factory単位で高々1件までの制約
+// ---------------------------------------------------------------------
+
+test("受入確認CX-22: pdMechanization提案はtargetFactoryId未指定だと拒否される", () => {
+  const outcome = evaluateProposal("TEST", proposal({ projectType: "pdMechanization" }), 0, HEALTHY_GATE, CAPEX_PARAMETERS_V1, P1, "X-1", 1);
+  assert.ok("rejected" in outcome);
+  if ("rejected" in outcome) {
+    assert.ok(outcome.rejected.reasons.some((r) => r.includes("targetFactoryId")));
+  }
+});
+
+test("受入確認CX-23: pdMechanization提案はtargetFactoryIdを指定すれば承認され、承認後のCapitalProject.targetFactoryIdへスナップショットされる", () => {
+  const project = approve(0, 0, HEALTHY_GATE, proposal({ projectType: "pdMechanization", targetFactoryId: "F1" }));
+  assert.equal(project.targetFactoryId, "F1");
+  assert.equal(project.approvedBudgetUsd, 2_500_000);
+});
+
+test("受入確認CX-24: 同一Factoryを対象とする進行中のpdMechanization案件があるときは、新規提案がmechanizationGate経由で拒否される", () => {
+  const outcome = evaluateProposal(
+    "TEST",
+    proposal({ projectType: "pdMechanization", targetFactoryId: "F1" }),
+    0,
+    HEALTHY_GATE,
+    CAPEX_PARAMETERS_V1,
+    P1,
+    "X-2",
+    2,
+    undefined,
+    undefined,
+    { hasActiveProjectForSameFactory: true }
+  );
+  assert.ok("rejected" in outcome);
+  if ("rejected" in outcome) {
+    assert.ok(outcome.rejected.reasons.some((r) => r.includes("F1")));
+  }
+});
+
+test("受入確認CX-25: 別のFactoryを対象とするpdMechanization提案は、他Factoryの進行中案件の有無に影響されず承認される", () => {
+  const outcome = evaluateProposal(
+    "TEST",
+    proposal({ projectType: "pdMechanization", targetFactoryId: "F2" }),
+    0,
+    HEALTHY_GATE,
+    CAPEX_PARAMETERS_V1,
+    P1,
+    "X-3",
+    3,
+    undefined,
+    undefined,
+    { hasActiveProjectForSameFactory: false }
+  );
+  assert.ok("approved" in outcome);
 });

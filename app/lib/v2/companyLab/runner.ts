@@ -133,6 +133,12 @@ import {
   computeEffectiveSalesForceLayoffCount,
   deriveNextSalesForceHiringState,
 } from "./salesForceHiring";
+import {
+  buildInitialPdMechanizationState,
+  buildPdCoefficientOverridesByFactory,
+  computeCurrentQuarterPdUtilizationByFactory,
+  deriveNextPdMechanizationState,
+} from "./pdMechanizationState";
 import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { unwrapUsd } from "../finance/types";
@@ -369,6 +375,9 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
     // 【Phase 8D-4】Worker総人数の初期状態。fixture.workerBaselineの常用人数を
     // そのまま初期値とするため、Phase 8D以前と初期人数は完全に同じ。
     workforceState: buildInitialWorkforceState(fixtures),
+    // 【Test15新設】Factory単位のPD稼働率の初期状態（疎配列・空。全FactoryがPD
+    // 省人化投資パラメータのinitialPdUtilizationRatio扱いになる）。
+    pdMechanizationState: buildInitialPdMechanizationState(),
     // 【Phase 8F-1】市場別（CN/US/EU/JP/OTHER）の消費国在庫・購買循環モデルの
     // 初期carry state。
     consumerMarketState: buildInitialConsumerMarketCarryStateTable(initialMarketInput.demandMarkets),
@@ -1001,11 +1010,17 @@ export function advanceCompanyLabQuarter(
   // （baseFactoriesではなくfactoriesWithCapexCapacityへ以降のすべての箇所が
   // 揃って接続されているため）。
   const factoriesWithCapex = applyNewFactoryConstructionToFactories(factoriesWithCapexCapacity, state.capexState, state.currentPeriod);
+  // 【Test15新設・PD省人化投資】当四半期の実効PD係数の上書きは、必ず「前四半期末
+  // までのPD稼働率」（state.pdMechanizationState）と「前四半期末までのcapex状態」
+  // （state.capexState、上のfactoriesWithCapexCapacity算出と同じ基準）から算出する。
+  // 当期の生産実績を当期の効果算出へ遡及させない（先読み禁止）。
+  const pdCoefficientOverrideByFactoryId = buildPdCoefficientOverridesByFactory(state.capexState, state.pdMechanizationState, state.currentPeriod);
   const productionInput: ProductionQuarterInput = {
     factories: factoriesWithCapex,
     workerAssignments: decisions.flatMap((d) => d.workerAssignments),
     plans: decisions.flatMap((d) => d.productionPlans),
     companyCountry,
+    pdCoefficientOverrideByFactoryId,
   };
   const { state: productionStateAfter, updatedRawMaterialLots } = advanceProductionQuarter(
     state.productionState,
@@ -1487,6 +1502,15 @@ export function advanceCompanyLabQuarter(
       state.workforceState ?? buildInitialWorkforceState(fixtures),
       fixtures,
       new Map(decisions.map((d) => [d.companyId, d.workerAssignments]))
+    ),
+    // 【Test15新設】次期へ繰り越すFactory単位のPD稼働率。当四半期に確定した
+    // 実績（factoriesWithCapex・productionRecord.batches）から算出する。ここで
+    // 算出した値は「次期の」pdCoefficientOverrideByFactoryId算出でのみ読まれ、
+    // 当期の効果算出（既にproductionInput構築前に終わっている）には遡及しない。
+    pdMechanizationState: deriveNextPdMechanizationState(
+      state.pdMechanizationState,
+      factoriesWithCapex,
+      computeCurrentQuarterPdUtilizationByFactory(factoriesWithCapex, productionRecord.batches)
     ),
     // 【Phase 8F-1】次期へ繰り越す市場別の消費国在庫carry state。
     consumerMarketState: consumerMarketStateAfter,

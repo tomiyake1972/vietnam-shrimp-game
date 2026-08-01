@@ -48,6 +48,7 @@ import type { CompanyWorkforceState, WorkforceState } from "./workforce";
 // CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
 import type { CompanySalesForceHiringState, SalesForceHiringState } from "./salesForceHiring";
 import type { SalesBaseState } from "./salesBase";
+import type { PdMechanizationState } from "./pdMechanizationState";
 import type { MarketEvolutionState, Sai5MarketEvolutionRecord, SupplyPressureDefinition } from "./marketEvolution";
 
 export class CompanyLabError extends Error {
@@ -457,6 +458,13 @@ export interface CompanyLabState {
   /** 【SAI-5E】市場進化carry state（供給圧力EWMA・プレミアム倍率・割安シグナル。
    *  config.sai5.productLifecycle/supplyPremiumFeedback有効時のみ保持）。 */
   readonly marketEvolutionState?: MarketEvolutionState;
+  /**
+   * 【Test15新設】Factory単位のPD稼働率（PD省人化投資の効果算出に使う、前四半期末
+   * までの値）。省略時は全Factoryがcapex/pdMechanization.ts
+   * initialPdUtilizationRatio扱い（後方互換：Phase Test15以前に作成されたラボにも
+   * この状態は存在しない）。
+   */
+  readonly pdMechanizationState?: PdMechanizationState;
   /** 【Phase 8A】会社別の財務状態（現金・売掛/買掛・借入・固定資産・完成品原価台帳等。ターンをまたいで保持）。 */
   readonly financeState: FinanceState;
   /** 【Phase 8B-1】会社別の資金繰り状態（融資ポートフォリオ・未払利息・信用/延滞履歴。ターンをまたいで保持）。 */

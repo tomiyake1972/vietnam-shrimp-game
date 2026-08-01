@@ -40,9 +40,11 @@ import {
   attemptPayment,
   buildPaymentQueue,
   evaluateProposal,
+  hasActivePdMechanizationProjectForFactory,
   isActiveStatus,
   ProposalApprovalGate,
   ProposalFactoryCountGate,
+  ProposalFactoryMechanizationGate,
   ProposalSpaceGate,
   replaceProject,
   validateResumeRequest,
@@ -159,6 +161,13 @@ export function closeQuarterWithCapex(
       proposal.projectType === "newFactoryConstruction"
         ? { wouldExceedMax: wouldExceedMaxFactories(existingFactoryCount, projects), maxFactoriesPerCompany: MAX_FACTORIES_PER_COMPANY }
         : undefined;
+    // 【Test15新設】pdMechanization提案のみ、同一Factoryへの重複進行を判定する。
+    // projectsは同一四半期内の直前までの承認をすでに反映済みのため、同じ四半期に
+    // 同じFactoryへ2件提案しても2件目は正しく拒否される。
+    const mechanizationGate: ProposalFactoryMechanizationGate | undefined =
+      proposal.projectType === "pdMechanization" && proposal.targetFactoryId !== undefined
+        ? { hasActiveProjectForSameFactory: hasActivePdMechanizationProjectForFactory(projects, proposal.targetFactoryId) }
+        : undefined;
     const outcome = evaluateProposal(
       companyId,
       proposal,
@@ -169,7 +178,8 @@ export function closeQuarterWithCapex(
       projectId,
       index + 1,
       spaceGate,
-      factoryCountGate
+      factoryCountGate,
+      mechanizationGate
     );
     if ("approved" in outcome) {
       projects = [...projects, outcome.approved];
