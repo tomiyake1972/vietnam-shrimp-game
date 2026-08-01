@@ -37,6 +37,33 @@ function capacityPoolFor(factoryCapacity: FactoryEffectiveCapacity, product: Pro
 }
 
 /**
+ * 【Test15新設】商品別の労働集約度係数の唯一の情報源（parameters.ts）を返す。
+ * production/labor.ts・companyLab/workforce.ts・意思決定画面・Standard AIは、
+ * 商品別の1人あたり生産力を求める際に必ずこの関数（またはこれを内部で使う
+ * effectiveEfficiencyPerHeadTons）を経由し、係数を個別にハードコードしない。
+ */
+export function laborIntensityCoefficientFor(product: Product, params: ProductionParameters = PRODUCTION_PARAMETERS_V1): number {
+  const coefficient = params.labor.laborIntensityCoefficient[product];
+  return Number.isFinite(coefficient) && coefficient > 0 ? coefficient : 1;
+}
+
+/**
+ * 【Test15新設】商品別労働集約度を織り込んだ、1人あたりの実効生産力
+ * （baseEfficiencyPerHeadTons ÷ 労働集約度係数）。
+ * HOSO=1.0を基準に、PD・VAPは同じ人数でより少ない量しか処理できない
+ * （＝同じ数量を処理するのにより多くの人手を要する）ことをこの一箇所だけで表現する。
+ * calculateLaborCapacityFromAssignedHeadcount・requiredHeadcountForQuantityの
+ * 呼び出し側は、いずれもこの関数を通した実効効率を渡す。
+ */
+export function effectiveEfficiencyPerHeadTons(
+  baseEfficiencyPerHeadTons: number,
+  product: Product,
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+): number {
+  return baseEfficiencyPerHeadTons / laborIntensityCoefficientFor(product, params);
+}
+
+/**
  * 配分された常用・臨時ワーカー人数から、1商品ぶんの有効労働能力を算出する
  * （純粋な計算式のみを担う低レベル関数。ワーカーの奪い合い解決は
  * allocateWorkersToPlansが行う）。
@@ -48,14 +75,17 @@ export function calculateLaborCapacityFromAssignedHeadcount(
   skillLevel: number,
   appliedOvertimeRate: number,
   factoryCapacityForProduct: number,
-  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
+  // 【Test15新設】省略時はHOSO扱い（laborIntensityCoefficient.hoso=1.0のため
+  // 既存の呼び出し元・既存テストの挙動は変わらない）。商品が分かっている
+  // 呼び出し元は必ず対象商品を渡すこと。
+  product: Product = "hoso"
 ): number {
   const overtimeMultiplier = 1 + appliedOvertimeRate * params.labor.overtimeEfficiencyFactor;
+  const regularEfficiency = effectiveEfficiencyPerHeadTons(params.labor.regularEfficiencyPerHeadTons, product, params);
+  const temporaryEfficiency = effectiveEfficiencyPerHeadTons(params.labor.temporaryEfficiencyPerHeadTons, product, params);
   const raw =
-    (assignedRegularHeadcount * params.labor.regularEfficiencyPerHeadTons + assignedTemporaryHeadcount * params.labor.temporaryEfficiencyPerHeadTons) *
-    attendanceRate *
-    skillLevel *
-    overtimeMultiplier;
+    (assignedRegularHeadcount * regularEfficiency + assignedTemporaryHeadcount * temporaryEfficiency) * attendanceRate * skillLevel * overtimeMultiplier;
   return Math.min(Math.max(0, raw), Math.max(0, factoryCapacityForProduct));
 }
 
@@ -145,7 +175,9 @@ export function allocateWorkersToPlans(
     // 必要な人数を、水位法配分の重み・capとして使う。
     // 【Phase 8D-4】逆算式は requiredHeadcountForQuantity に一元化した。
     // 意思決定画面の「必要Worker人数」も同じ関数を呼ぶ。
-    function headcountDemandFor(d: (typeof factoryDemands)[number], efficiencyPerHead: number): number {
+    function headcountDemandFor(d: (typeof factoryDemands)[number], baseEfficiencyPerHead: number): number {
+      // 【Test15】商品別の労働集約度係数を織り込んだ実効効率で逆算する。
+      const efficiencyPerHead = effectiveEfficiencyPerHeadTons(baseEfficiencyPerHead, d.product, params);
       return requiredHeadcountForQuantity(
         d.candidateQuantity,
         efficiencyPerHead,
@@ -187,7 +219,8 @@ export function allocateWorkersToPlans(
         skillByDemand.get(d.id) ?? 0,
         appliedOvertimeByDemand.get(d.id) ?? 0,
         capacityPool,
-        params
+        params,
+        d.product
       );
 
       entryById.set(d.id, {

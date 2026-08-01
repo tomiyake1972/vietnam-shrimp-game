@@ -69,6 +69,20 @@ export interface ProductionParameters {
     readonly overtimeRateCap: number;
     /** 残業1単位（overtimeRate=1.0）あたりの能力増加係数（線形近似）。 */
     readonly overtimeEfficiencyFactor: number;
+    /**
+     * 【Test15新設】商品別の労働集約度係数。1人あたり基準効率
+     * （regularEfficiencyPerHeadTons / temporaryEfficiencyPerHeadTons）を、
+     * この係数で除して商品別の実効1人あたり効率を求める（値が大きいほど、
+     * 同じ数量を生産するのにより多くの人手を要する）。
+     * HOSO=1.0を基準に PD=1.2、VAP=3.0（Test15暫定値・要校正）。
+     * 唯一の情報源はこのテーブルであり、production/labor.ts の
+     * effectiveEfficiencyPerHeadTons()を通じてのみ参照する
+     * （呼び出し側・UI・AIが個別に係数をハードコードしない）。
+     * 【将来拡張への配慮】PDの機械化投資（別セッションでの実装予定）は、
+     * この係数の上へ掛け合わせる別レイヤー（機械化倍率）として追加される想定であり、
+     * 本係数自体は機械化前のベースライン値を表す（本タスクでは機械化倍率は実装しない）。
+     */
+    readonly laborIntensityCoefficient: Readonly<Record<Product, number>>;
   };
 
   readonly cost: {
@@ -123,6 +137,12 @@ export const PRODUCTION_PARAMETERS_V1: ProductionParameters = {
     temporaryEfficiencyPerHeadTons: 3.5,
     overtimeRateCap: 0.3,
     overtimeEfficiencyFactor: 0.5,
+    // 【Test15暫定値・要校正】HOSO:PD:VAP = 1.0 : 1.2 : 3.0
+    laborIntensityCoefficient: {
+      hoso: 1.0,
+      pd: 1.2,
+      vap: 3.0,
+    },
   },
 
   cost: {
