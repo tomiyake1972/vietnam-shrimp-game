@@ -88,6 +88,8 @@ const CAPEX_PROJECT_DESCRIPTIONS: Readonly<Record<CapitalProjectType, string>> =
   commonProcessingExpansion: "HOSO/PD/VAP共通の前処理（一次加工）能力を増設します。",
   freezingPackagingExpansion:
     "凍結・包装ラインを増設し、四半期あたりに凍結・包装できる数量（フロー）の上限を引き上げます。生産量の上限として実際に働くのはこちらです。",
+  pdMechanization:
+    "PD（殻剥き）ラインへ自動化・省人化設備を導入します。PD生産能力そのものは増やさず、稼働開始後に習熟・稼働率に応じてPDの実効労務負荷（必要Worker人数）を段階的に引き下げます。",
 };
 
 export type CapexDisplayStatus = "planned" | "underConstruction" | "suspended" | "completedPreparing" | "operating" | "cancelled";

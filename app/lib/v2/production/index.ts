@@ -42,3 +42,12 @@ export {
   runProductionQuartersForTesting,
 } from "./runner";
 export type { ProductionQuarterTestInput } from "./runner";
+export {
+  calculateEffectivePdLaborIntensity,
+  computePdMechanizationRampProgress,
+  computePdMechanizationLevel,
+  findActivePdMechanizationEffect,
+  buildProductionParametersWithEffectivePdIntensity,
+  buildCompanyProductionParametersForPdMechanization,
+  computePdMechanizationQualityBonus,
+} from "./pdMechanizationEffect";

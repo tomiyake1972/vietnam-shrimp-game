@@ -55,11 +55,13 @@ export function advanceProductionQuarter(
   contracts: readonly SalesContract[],
   rawMaterialLots: readonly RawMaterialLot[],
   supplySignals: readonly ProductionSupplySignalInput[] = [],
-  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
+  /** 【2026-08-01新規】PD専用機械化投資による会社別ProductionParameters上書き。allocateProductionPlansへそのまま渡す。 */
+  paramsByCompany?: ReadonlyMap<string, ProductionParameters>
 ): { readonly state: ProductionState; readonly updatedRawMaterialLots: readonly RawMaterialLot[] } {
   const period = state.currentPeriod;
 
-  const allocation = allocateProductionPlans(input.plans, input.factories, input.workerAssignments, rawMaterialLots, period, params);
+  const allocation = allocateProductionPlans(input.plans, input.factories, input.workerAssignments, rawMaterialLots, period, params, paramsByCompany);
 
   const { batches, updatedRawMaterialLots } = buildProductionBatches(input.plans, allocation.entries, rawMaterialLots, period, params);
 

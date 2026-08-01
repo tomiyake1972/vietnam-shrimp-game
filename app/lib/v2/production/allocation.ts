@@ -87,7 +87,14 @@ export function allocateProductionPlans(
   workerAssignments: readonly WorkerAssignment[],
   rawMaterialLots: readonly RawMaterialLot[],
   period: PeriodV2,
-  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
+  /**
+   * 【2026-08-01新規】PD専用機械化投資による、会社別の実効PD労務負荷係数を
+   * 反映したProductionParametersの上書き（production/pdMechanizationEffect.ts参照）。
+   * 段階5（労働）でのみ使う（原料・設備能力等の他段階は影響を受けない）。
+   * 未指定・未該当の会社は既定のparamsのまま（後方互換）。
+   */
+  paramsByCompany?: ReadonlyMap<string, ProductionParameters>
 ): ProductionAllocationResult {
   const epsilon = params.capacity.epsilon;
 
@@ -176,7 +183,7 @@ export function allocateProductionPlans(
     candidateQuantity: Math.max(0, productCapacityLimited[i]),
     overtimeRateOverride: p.overtimeRateOverride ? unwrapUnit(p.overtimeRateOverride) : undefined,
   }));
-  const { entries: laborEntries, factorySummaries } = allocateWorkersToPlans(demands, workerAssignments, capacityById, params);
+  const { entries: laborEntries, factorySummaries } = allocateWorkersToPlans(demands, workerAssignments, capacityById, params, paramsByCompany);
   const laborByPlanId = new Map(laborEntries.map((e, i) => [demands[i].id, e]));
   const laborLimited = plans.map((_, i) => unwrapUnit(laborByPlanId.get(ids[i])!.laborCapacity));
 

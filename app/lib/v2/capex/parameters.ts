@@ -27,7 +27,7 @@
 // 遡って新しい値が適用される。readiness/能力効果はスナップショットで不変・
 // 構成比/保守費率はライブ参照、という非対称性は実装指示の要求どおりであり意図的）。
 
-import { CapexValidationError, CapitalProjectType, FutureCapacityEffectPlaceholder } from "./types";
+import { CapexValidationError, CapitalProjectType, FutureCapacityEffectPlaceholder, LaborIntensityReductionEffect } from "./types";
 
 export interface CapexProjectTemplate {
   readonly projectType: CapitalProjectType;
@@ -132,6 +132,22 @@ function assertValidComponentRatios(templatesByType: Readonly<Record<CapitalProj
       );
     }
   }
+}
+
+/**
+ * 【2026-08-01新規・暫定値・要校正】pdMechanizationのlaborIntensityReductionメタデータ。
+ * 値の根拠はCAPEX_PARAMETERS_V1.templatesByType.pdMechanizationのコメント参照。
+ */
+function buildPdMechanizationFutureCapacityEffect(): FutureCapacityEffectPlaceholder {
+  const laborIntensityReduction: LaborIntensityReductionEffect = {
+    targetProduct: "pd",
+    maxReductionRatio: 0.2, // 暫定・中度採用（軽度10%/中度20%/高度30%の3案。コメント参照）
+    floorCoefficient: 1.0, // HOSOの基準と同水準が下限
+    rampUpQuarters: 2, // 稼働開始1四半期目ゼロ→2四半期目立ち上げ→3四半期目満額
+  };
+  // 生産能力（capacityIncreaseTonsPerQuarter）は増やさない（今回実装するのは
+  // 省人化効果のみ。工場増設・PD能力増強の意思決定フローは別タスク）。
+  return { capacityIncreaseTonsPerQuarter: 0, readinessQuartersAfterCompletion: 1, laborIntensityReduction };
 }
 
 export const CAPEX_PARAMETERS_V1: CapexParameters = {
@@ -256,6 +272,46 @@ export const CAPEX_PARAMETERS_V1: CapexParameters = {
       // 構造にする。予算・工期・保守費率・建物/機械構成比はhosoLineExpansion/
       // pdLineExpansionと同水準（前工程も本質的には同種の加工設備であるため）。
       { targetProduct: "commonProcessing", capacityIncreaseTonsPerQuarter: 700, readinessQuartersAfterCompletion: 1 }
+    ),
+    // 【2026-08-01新規・暫定値・要校正】PD専用機械化投資（省人化）。
+    // pdLineExpansion（新規ライン増設、能力+350t/四半期）とは異なり、既存PDラインへの
+    // 自動化・省人化改修という位置づけのため、予算はpdLineExpansionより小さく、
+    // 建物比率も低く（新規建屋をほとんど要しない）、機械・自動化設備の比率を高くした
+    // 暫定値とする。工期・保守費率はpdLineExpansionを参考値としつつ、精密な自動化設備
+    // という性質からqualityControlEquipment寄りにやや高めの保守費率を設定した。
+    //   - standardBudgetUsd: pdLineExpansion(4,000,000)の6割程度＝2,500,000（暫定・要校正）
+    //   - buildingRatio/machineryRatio: 0.1 / 0.9（改修中心で新規建屋比率を下げた）
+    //   - maintenanceRatePerQuarter: 0.01（4%/年。自動化設備は精密機器同様、保守頻度が
+    //     やや高いという一般的な想定。qualityControlEquipment(5%/年)とhosoLineExpansion
+    //     (3%/年)の中間）
+    // 省人化パラメータ（production/pdMechanizationEffect.tsが参照する
+    // laborIntensityReduction、暫定値・要校正）:
+    //   - maxReductionRatio: 軽度10%/中度20%/高度30%の3案を検討した。軽度10%は
+    //     mechanizationLevel=1.0でも理論値1.2×(1-0.1)=1.08までしか下がらず、
+    //     floorCoefficient=1.0（HOSO水準）へほとんど届かないため「機械化戦略」として
+    //     成立しにくい。高度30%は理論値1.2×(1-0.3)=0.84までHOSO(1.0)を大きく下回る
+    //     水準を狙うことになり、floorCoefficient=1.0でクリップされる前提と整合しない
+    //     （floorに張り付く前提の投資効果を過大な削減率で謳うのは誤解を招く）。
+    //     中度20%は理論値1.2×(1-0.2)=0.96となり、floorCoefficient=1.0によって
+    //     実際にはmechanizationLevelが十分高い（本パラメータでは概ね0.83以上）四半期に
+    //     ちょうどHOSO水準（1.0）で頭打ちになる——「HOSO水準へ着実に近づきつつ下回らない」
+    //     という「PD自動化戦略」の狙いに最も合致するため暫定採用。
+    //   - floorCoefficient: 1.0（HOSOの基準と同水準を下限とし、それ以上は下げない）。
+    //   - rampUpQuarters: 2（稼働開始後1四半期目は効果ゼロ、2四半期目から効果が
+    //     段階的に立ち上がり、3四半期目で満額習熟、という設計。設備投資の完成直後に
+    //     即座にフル効果が出るのは非現実的なため、他の投資効果（readinessQuarters）とは
+    //     別に、効果の"大きさ"自体が緩やかに立ち上がる仕組みとして導入する）。
+    pdMechanization: template(
+      "pdMechanization",
+      "PD専用機械化投資（省人化）",
+      2_500_000,
+      [0.4, 0.6],
+      "productionEquipment",
+      1,
+      0.1,
+      0.9,
+      0.01,
+      buildPdMechanizationFutureCapacityEffect()
     ),
   },
 

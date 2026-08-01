@@ -128,7 +128,17 @@ export function allocateWorkersToPlans(
   demands: readonly WorkerDemandItem[],
   assignments: readonly WorkerAssignment[],
   factoryCapacities: ReadonlyMap<string, FactoryEffectiveCapacity>,
-  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
+  /**
+   * 【2026-08-01新規】会社別にlaborIntensityCoefficientByProductだけを上書きした
+   * ProductionParametersのコピー（production/pdMechanizationEffect.ts参照）。
+   * 未指定の会社・未指定そのものは既定のparamsをそのまま使う（後方互換、
+   * 既存呼び出し元・既存テストの挙動は一切変わらない）。
+   * calculateLaborCapacityFromAssignedHeadcount・requiredHeadcountForQuantity
+   * 自体のシグネチャは変更せず、ここで呼び出しごとに渡すparams引数だけを
+   * 会社別に差し替える。
+   */
+  paramsByCompany?: ReadonlyMap<string, ProductionParameters>
 ): { readonly entries: readonly WorkerAllocationEntry[]; readonly factorySummaries: readonly FactoryWorkerAllocationSummary[] } {
   // 工場ごとにグループ化して解決するため、結果は一旦demand.id別に記録し、
   // 最後に入力demandsと同じ順序へ復元する（呼び出し側がdemands[i]と
@@ -143,6 +153,10 @@ export function allocateWorkersToPlans(
   for (const factoryId of factoryIds) {
     const factoryDemands = demands.filter((d) => d.factoryId === factoryId);
     const companyId = factoryDemands[0].companyId;
+    // 【2026-08-01新規】この工場の所属会社向けに上書きされたparamsがあれば使う
+    // （PD専用機械化投資による会社別の実効PD労務負荷係数。他社・未投資の会社は
+    // 従来どおり既定のparamsを使うため、この工場・会社に無関係な挙動は一切変わらない）。
+    const paramsForCompany = paramsByCompany?.get(companyId) ?? params;
     const assignment = assignments.find((a) => a.factoryId === factoryId && a.companyId === companyId);
     const factoryCapacity = factoryCapacities.get(factoryId);
 
@@ -150,7 +164,7 @@ export function allocateWorkersToPlans(
     const temporaryHeadcount = assignment?.temporaryHeadcount ?? 0;
     const attendanceRate = assignment ? unwrapUnit(assignment.attendanceRate) : 0;
 
-    const overtimeCap = params.labor.overtimeRateCap;
+    const overtimeCap = paramsForCompany.labor.overtimeRateCap;
     const appliedOvertimeByDemand = new Map<string, number>();
     const skillByDemand = new Map<string, number>();
     for (const d of factoryDemands) {
@@ -171,19 +185,19 @@ export function allocateWorkersToPlans(
         skillByDemand.get(d.id) ?? 0,
         appliedOvertimeByDemand.get(d.id) ?? 0,
         d.product,
-        params
+        paramsForCompany
       );
     }
 
     const regularItems: PriorityAllocationItem[] = factoryDemands.map((d) => ({
       id: d.id,
       priority: d.priority,
-      desired: headcountDemandFor(d, params.labor.regularEfficiencyPerHeadTons),
+      desired: headcountDemandFor(d, paramsForCompany.labor.regularEfficiencyPerHeadTons),
     }));
     const temporaryItems: PriorityAllocationItem[] = factoryDemands.map((d) => ({
       id: d.id,
       priority: d.priority,
-      desired: headcountDemandFor(d, params.labor.temporaryEfficiencyPerHeadTons),
+      desired: headcountDemandFor(d, paramsForCompany.labor.temporaryEfficiencyPerHeadTons),
     }));
 
     const assignedRegular = allocateByPriorityTiers(regularItems, regularHeadcount);
@@ -207,7 +221,7 @@ export function allocateWorkersToPlans(
         appliedOvertimeByDemand.get(d.id) ?? 0,
         capacityPool,
         d.product,
-        params
+        paramsForCompany
       );
 
       entryById.set(d.id, {

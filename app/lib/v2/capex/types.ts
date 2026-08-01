@@ -49,7 +49,8 @@ export type CapitalProjectType =
   | "qualityControlEquipment" // 品質管理設備
   | "environmentalEquipment" // 排水・環境設備
   | "commonProcessingExpansion" // 【Phase 8B-2B】共通前処理能力増設
-  | "freezingPackagingExpansion"; // 【Phase 8D-5】凍結・包装処理能力増設（フロー側）
+  | "freezingPackagingExpansion" // 【Phase 8D-5】凍結・包装処理能力増設（フロー側）
+  | "pdMechanization"; // 【2026-08-01】PD専用機械化投資（省人化。生産能力は増やさず、PDの実効労務負荷係数を下げる）
 
 export const CAPITAL_PROJECT_TYPES: readonly CapitalProjectType[] = [
   "hosoLineExpansion",
@@ -60,6 +61,7 @@ export const CAPITAL_PROJECT_TYPES: readonly CapitalProjectType[] = [
   "coldStorageExpansion",
   "qualityControlEquipment",
   "environmentalEquipment",
+  "pdMechanization",
 ];
 
 /** 最低6状態（実装指示§10）。 */
@@ -125,6 +127,32 @@ export interface FutureCapacityEffectPlaceholder {
   readonly targetProduct?: "hoso" | "pd" | "vap" | "commonProcessing" | "freezingPackaging" | "coldStorage";
   readonly capacityIncreaseTonsPerQuarter?: number;
   readonly readinessQuartersAfterCompletion?: number;
+  /**
+   * 【2026-08-01新規】PD専用機械化投資の省人化効果メタデータ。既存の
+   * capacityIncreaseTonsPerQuarter（能力効果チャネル）とは別の、独立した効果
+   * チャネルとして追加する（capacityIncreaseTonsPerQuarter=0のまま、こちらだけを
+   * 持つ案件として表現する。既存フィールドの意味・既存案件種別への影響は無い）。
+   * production/pdMechanizationEffect.ts が、稼働開始済み（capacityEffect.tsの
+   * isCapexProjectOperationalAtと同じ判定）かつ導入期間（rampUpQuarters）を
+   * 経過した度合いと、当期のPD稼働率とを掛け合わせて実効係数へ反映する。
+   */
+  readonly laborIntensityReduction?: LaborIntensityReductionEffect;
+}
+
+/**
+ * 【2026-08-01新規】PD専用機械化投資の省人化効果メタデータ（承認時にテンプレートから
+ * スナップショットされ、案件のライフサイクル全体を通じて不変。他のfutureCapacityEffect
+ * フィールドと同じ設計）。
+ */
+export interface LaborIntensityReductionEffect {
+  /** 現時点ではPDのみを対象とする（HOSO/VAPには一切影響しない）。 */
+  readonly targetProduct: "pd";
+  /** 起点係数（laborIntensityCoefficientByProduct.pd=1.2）からの最大削減率（0〜1、例0.20=20%）。 */
+  readonly maxReductionRatio: number;
+  /** 実効係数の下限（HOSOの基準1.0を下回らせない）。 */
+  readonly floorCoefficient: number;
+  /** 稼働開始後、効果が満額に立ち上がるまでの習熟期間（四半期数）。 */
+  readonly rampUpQuarters: number;
 }
 
 /**
