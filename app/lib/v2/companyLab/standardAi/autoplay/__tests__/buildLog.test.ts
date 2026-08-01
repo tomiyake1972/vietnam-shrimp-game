@@ -169,7 +169,13 @@ test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも�
   // 実際にdefaultが発生したケースをいくつか試し、発生後もログ件数が
   // 欠けないことを確認する（発生しなかった場合はそのシードでは検証できないため
   // skipし、少なくとも1件は発生確認できるシードで検証する）。
-  const seeds = ["sai3a-002", ...Array.from({ length: 8 }, (_, i) => `sai3a-test-default-${i}`)];
+  // 【2026-08-01・製品別労務負荷係数（HOSO:PD:VAP=1.0:1.2:3.0）導入により変更】
+  // 労務コストの構造が変わったことでBAL単独シミュレーション時のデフォルト発生
+  // タイミングがシフトし、従来のシード探索範囲（0〜7）では8Q以内に1件も
+  // デフォルトが発生しなくなった。これはログ組み立ての正しさとは無関係な、
+  // 探索範囲の狭さによるテスト側の問題のため、探索範囲を広げて対応する
+  // （seed=sai3a-test-default-22 / 54 でturn=8にデフォルトが発生することを確認済み）。
+  const seeds = ["sai3a-002", ...Array.from({ length: 60 }, (_, i) => `sai3a-test-default-${i}`)];
   let verifiedAtLeastOne = false;
   for (const seed of seeds) {
     const { log } = run(seed, 8, ["BAL"]);

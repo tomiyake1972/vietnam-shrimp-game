@@ -593,8 +593,18 @@ test("IP-19（追補2-4）: 投資前から存在する人員不足は、増分�
 
 test("IP-20（追補2）: 実データでも、人員に余力がある間は投資カードの追加Workerが0人になる", () => {
   const { state, fixture, draft } = setup("phase8d-ip-020");
-  // fixtureの初期人数（BAL 6,000人）は現在の生産計画に対して余力がある状態。
-  const planning = buildPlanning(state, fixture, draft);
+  // 【2026-08-01・製品別労務負荷係数（HOSO:PD:VAP=1.0:1.2:3.0）導入により変更】
+  // fixtureの初期人数（BAL 6,000人）は、旧実装（労務負荷が商品非依存）では
+  // 生産計画に対して大きく余力がある状態だったが、VAP比率の高い生産計画に対し
+  // 正しい労務負荷を適用すると、この初期人数だけでは不足する（意図した挙動の変化。
+  // 詳細はPRの完了報告を参照）。本テストの目的は「余力があるときに投資カードの
+  // 追加Workerが0人になること」の検証であり、余力の有無は労務負荷係数の値に
+  // 左右されるべきではないため、必要人数を実際に算出したうえで、その上に
+  // 確実な余力（+20%）を積んだ人数を明示的に設定する。
+  const before = buildPlanning(state, fixture, draft);
+  const requiredRegularHeadcount = before.workforceRows[0].requiredRegularHeadcount;
+  const surplusHeadcount = Math.ceil(requiredRegularHeadcount * 1.2) + 100;
+  const planning = buildPlanning(state, fixture, withHeadcount(draft, surplusHeadcount));
   const surplus = planning.workforceRows[0].headcountSurplus;
   assert.ok(surplus > 0, "前提: 現在の人員に余力があること");
 
