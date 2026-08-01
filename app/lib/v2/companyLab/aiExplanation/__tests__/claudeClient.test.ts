@@ -3,10 +3,23 @@
 // 実Anthropic APIは一切呼ばない。AnthropicMessagesClientインターフェースをモックした
 // フェイクだけを使う。ANTHROPIC_API_KEY等の実キー値は一切使わず、テスト用の
 // 明らかに偽と分かるプレースホルダ文字列のみを使う。
+//
+// 【2026-08-01・本番Preview手動観察テストで発見された invalid_json バグの事後対応】
+// 従来はプレーンテキスト応答をJSON.parseしていたが、Claudeがマークダウンのコード
+// フェンス（```json ... ```）付きで返すことがあり、初回・リトライの両方が同じ理由で
+// 系統的に失敗する実例が発生した。対策として、応答をtool_use（tool_choiceで強制）の
+// content blockから取り出す方式へ変更したため、本ファイルのモック応答もtool_use
+// ブロックを返す形に更新した（プレーンテキストのJSON文字列を返すテストはもう存在しない
+// ＝この失敗モード自体が構造的に起こりえないことをテストで表現する）。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AnthropicMessageResponse, AnthropicMessagesClient, generateManagementReport } from "../claudeClient";
+import {
+  AnthropicMessageResponse,
+  AnthropicMessagesClient,
+  EXPLANATION_REPORT_TOOL_NAME,
+  generateManagementReport,
+} from "../claudeClient";
 import { ExplanationContext } from "../buildExplanationContext";
 
 const FAKE_API_KEY = "test-fake-key-not-real";
@@ -74,24 +87,53 @@ function minimalContext(): ExplanationContext {
   };
 }
 
-const VALID_REPORT_JSON = JSON.stringify({
+const VALID_REPORT_INPUT = {
   headline: "テスト見出し",
   executiveSummary: "テスト要約",
   recommendations: [],
   keyRisks: [],
   questionsForPlayer: [],
   dataLimitations: [],
-});
+};
 
-function textResponse(text: string): AnthropicMessageResponse {
+/** tool_choiceで強制した想定どおりの、tool_use content blockを持つ応答。 */
+function toolUseResponse(input: unknown): AnthropicMessageResponse {
+  return {
+    content: [{ type: "tool_use", input }],
+    usage: { input_tokens: 10, output_tokens: 20 },
+  };
+}
+
+/**
+ * tool_choiceで強制したにもかかわらず、tool_useブロックが無い応答
+ * （例: モデルがテキストのみを返してきた場合。マークダウンのコードフェンスや前置き文章
+ * つきのテキストであっても、tool_useブロックが無い以上は同じ扱いになることを示す）。
+ */
+function textOnlyResponse(text: string): AnthropicMessageResponse {
   return { content: [{ type: "text", text }], usage: { input_tokens: 10, output_tokens: 20 } };
 }
 
-function makeClient(responses: readonly (AnthropicMessageResponse | Error)[]): { client: AnthropicMessagesClient; callCount: () => number } {
+/** contentが空配列の応答（空応答）。 */
+function emptyContentResponse(): AnthropicMessageResponse {
+  return { content: [], usage: { input_tokens: 10, output_tokens: 20 } };
+}
+
+interface CapturedCall {
+  readonly tools?: readonly { readonly name: string }[];
+  readonly tool_choice?: { readonly type: string; readonly name: string };
+}
+
+function makeClient(responses: readonly (AnthropicMessageResponse | Error)[]): {
+  client: AnthropicMessagesClient;
+  callCount: () => number;
+  capturedCalls: CapturedCall[];
+} {
   let calls = 0;
+  const capturedCalls: CapturedCall[] = [];
   const client: AnthropicMessagesClient = {
     messages: {
-      create: async () => {
+      create: async (params) => {
+        capturedCalls.push({ tools: params.tools, tool_choice: params.tool_choice });
         const response = responses[calls];
         calls += 1;
         if (response instanceof Error) throw response;
@@ -99,7 +141,7 @@ function makeClient(responses: readonly (AnthropicMessageResponse | Error)[]): {
       },
     },
   };
-  return { client, callCount: () => calls };
+  return { client, callCount: () => calls, capturedCalls };
 }
 
 test("generateManagementReport: ANTHROPIC_API_KEY未設定ならmissing_api_key(例外を投げない、クライアント未注入時)", async () => {
@@ -114,48 +156,62 @@ test("generateManagementReport: ANTHROPIC_API_KEY未設定ならmissing_api_key(
   }
 });
 
-test("generateManagementReport: 正常系(1回で成功)、usageが返る", async () => {
-  const { client, callCount } = makeClient([textResponse(VALID_REPORT_JSON)]);
+test("generateManagementReport: 正常系(1回で成功、tool_useブロック経由)、usageが返る", async () => {
+  const { client, callCount } = makeClient([toolUseResponse(VALID_REPORT_INPUT)]);
   const result = await generateManagementReport(minimalContext(), client);
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.report.headline, "テスト見出し");
     assert.equal(result.usage.inputTokens, 10);
     assert.equal(result.usage.outputTokens, 20);
-    assert.equal(result.usage.model, "claude-sonnet-4-6");
+    assert.equal(result.usage.model, "claude-haiku-4-6");
   }
   assert.equal(callCount(), 1);
 });
 
-test("generateManagementReport: 1回目が壊れたJSON、2回目成功→リトライにより成功扱い(呼び出しは2回)", async () => {
-  const { client, callCount } = makeClient([textResponse("{not valid json"), textResponse(VALID_REPORT_JSON)]);
-  const result = await generateManagementReport(minimalContext(), client);
-  assert.equal(result.ok, true);
-  assert.equal(callCount(), 2);
+test("generateManagementReport: リクエストにtool定義とtool_choiceが必ず含まれる（tool_use強制の確認）", async () => {
+  const { client, capturedCalls } = makeClient([toolUseResponse(VALID_REPORT_INPUT)]);
+  await generateManagementReport(minimalContext(), client);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].tools?.length, 1);
+  assert.equal(capturedCalls[0].tools?.[0]?.name, EXPLANATION_REPORT_TOOL_NAME);
+  assert.deepEqual(capturedCalls[0].tool_choice, { type: "tool", name: EXPLANATION_REPORT_TOOL_NAME });
 });
 
-test("generateManagementReport: 2回とも壊れたJSON→最終的にinvalid_jsonで失敗、呼び出しはちょうど2回まで", async () => {
-  const { client, callCount } = makeClient([textResponse("{not valid"), textResponse("{still not valid")]);
+test("generateManagementReport: tool_useブロックが無い(テキストのみ)応答1回目→2回目もtool_useなしなら最終的にinvalid_jsonで失敗", async () => {
+  // マークダウンのコードフェンス付きテキストであっても、tool_useブロックが存在しない
+  // 限り同じ扱いになることを示す（コードフェンスの有無自体で分岐しない設計）。
+  const { client, callCount } = makeClient([
+    textOnlyResponse("```json\n" + JSON.stringify(VALID_REPORT_INPUT) + "\n```"),
+    textOnlyResponse("以下がレポートです: " + JSON.stringify(VALID_REPORT_INPUT)),
+  ]);
   const result = await generateManagementReport(minimalContext(), client);
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.errorCategory, "invalid_json");
   assert.equal(callCount(), 2);
 });
 
-test("generateManagementReport: スキーマ不一致(必須フィールド欠落)は1回目失敗→2回目も不一致ならschema_mismatch", async () => {
-  const badJson = JSON.stringify({ executiveSummary: "見出しがありません" });
-  const { client, callCount } = makeClient([textResponse(badJson), textResponse(badJson)]);
+test("generateManagementReport: 1回目tool_useなし、2回目tool_useあり→リトライにより成功扱い(呼び出しは2回)", async () => {
+  const { client, callCount } = makeClient([textOnlyResponse("(tool_useなしの応答)"), toolUseResponse(VALID_REPORT_INPUT)]);
+  const result = await generateManagementReport(minimalContext(), client);
+  assert.equal(result.ok, true);
+  assert.equal(callCount(), 2);
+});
+
+test("generateManagementReport: スキーマ不一致(必須フィールド欠落、tool_useのinputとして)は1回目失敗→2回目も不一致ならschema_mismatch", async () => {
+  const badInput = { executiveSummary: "見出しがありません" };
+  const { client, callCount } = makeClient([toolUseResponse(badInput), toolUseResponse(badInput)]);
   const result = await generateManagementReport(minimalContext(), client);
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.errorCategory, "schema_mismatch");
   assert.equal(callCount(), 2);
 });
 
-test("generateManagementReport: 空応答(テキストなし)はempty_response、その後リトライしても空ならempty_responseのまま", async () => {
-  const { client, callCount } = makeClient([textResponse(""), textResponse("")]);
+test("generateManagementReport: 空応答(contentが空配列)はinvalid_json扱い、その後リトライしても空ならinvalid_jsonのまま", async () => {
+  const { client, callCount } = makeClient([emptyContentResponse(), emptyContentResponse()]);
   const result = await generateManagementReport(minimalContext(), client);
   assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.errorCategory, "empty_response");
+  if (!result.ok) assert.equal(result.errorCategory, "invalid_json");
   assert.equal(callCount(), 2);
 });
 

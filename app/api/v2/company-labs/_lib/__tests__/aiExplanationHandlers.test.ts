@@ -66,17 +66,23 @@ async function createBaselineLab(deps: AiExplanationApiDependencies, labId: stri
   assert.equal(result.status, 201, JSON.stringify(result.body));
 }
 
-const VALID_REPORT_JSON = JSON.stringify({
+const VALID_REPORT_INPUT = {
   headline: "見出し",
   executiveSummary: "要約",
   recommendations: [],
   keyRisks: [],
   questionsForPlayer: [],
   dataLimitations: [],
-});
+};
 
-function textResponse(text: string): AnthropicMessageResponse {
-  return { content: [{ type: "text", text }], usage: { input_tokens: 1, output_tokens: 2 } };
+/**
+ * 【2026-08-01・tool_use強制への切り替え後】claudeClient.tsはtool_choiceでtool呼び出しを
+ * 強制するため、モック応答もtool_use content blockを返す形にする（プレーンテキストの
+ * JSON文字列を返す旧方式のテストはclaudeClient.test.ts側に委譲し、ここでは
+ * ハンドラー層の配線確認に専念する）。
+ */
+function toolUseResponse(input: unknown): AnthropicMessageResponse {
+  return { content: [{ type: "tool_use", input }], usage: { input_tokens: 1, output_tokens: 2 } };
 }
 
 function makeCountingClient(response: AnthropicMessageResponse): { client: AnthropicMessagesClient; callCount: () => number } {
@@ -95,7 +101,7 @@ function makeCountingClient(response: AnthropicMessageResponse): { client: Anthr
 test("handlePostAiExplanation: 初回呼び出しはClaudeを呼び生成・キャッシュする", async () => {
   const deps = makeDeps();
   await createBaselineLab(deps, "lab-post-1");
-  const { client, callCount } = makeCountingClient(textResponse(VALID_REPORT_JSON));
+  const { client, callCount } = makeCountingClient(toolUseResponse(VALID_REPORT_INPUT));
 
   const result = await handlePostAiExplanation(deps, "lab-post-1", "BAL", "1", NOW, client);
   assert.equal(result.status, 200, JSON.stringify(result.body));
@@ -109,7 +115,7 @@ test("handlePostAiExplanation: 初回呼び出しはClaudeを呼び生成・キ�
 test("handlePostAiExplanation: 2回目の呼び出しはキャッシュを返し、Claudeを呼び直さない(モックの呼び出し回数は1のまま)", async () => {
   const deps = makeDeps();
   await createBaselineLab(deps, "lab-post-2");
-  const { client, callCount } = makeCountingClient(textResponse(VALID_REPORT_JSON));
+  const { client, callCount } = makeCountingClient(toolUseResponse(VALID_REPORT_INPUT));
 
   const first = await handlePostAiExplanation(deps, "lab-post-2", "BAL", "1", NOW, client);
   assert.equal(first.status, 200);
@@ -123,7 +129,7 @@ test("handlePostAiExplanation: 2回目の呼び出しはキャッシュを返し
 
 test("handlePostAiExplanation: labIdが存在しない場合は404", async () => {
   const deps = makeDeps();
-  const { client } = makeCountingClient(textResponse(VALID_REPORT_JSON));
+  const { client } = makeCountingClient(toolUseResponse(VALID_REPORT_INPUT));
   const result = await handlePostAiExplanation(deps, "no-such-lab", "BAL", "1", NOW, client);
   assert.equal(result.status, 404);
 });
@@ -131,7 +137,7 @@ test("handlePostAiExplanation: labIdが存在しない場合は404", async () =>
 test("handlePostAiExplanation: companyIdがプレイヤー会社と異なる場合は404(対象外)", async () => {
   const deps = makeDeps();
   await createBaselineLab(deps, "lab-post-3");
-  const { client } = makeCountingClient(textResponse(VALID_REPORT_JSON));
+  const { client } = makeCountingClient(toolUseResponse(VALID_REPORT_INPUT));
   const result = await handlePostAiExplanation(deps, "lab-post-3", "MASS", "1", NOW, client);
   assert.equal(result.status, 404);
 });
@@ -139,7 +145,7 @@ test("handlePostAiExplanation: companyIdがプレイヤー会社と異なる場�
 test("handlePostAiExplanation: turnが現在のturnと異なる場合は404", async () => {
   const deps = makeDeps();
   await createBaselineLab(deps, "lab-post-4");
-  const { client } = makeCountingClient(textResponse(VALID_REPORT_JSON));
+  const { client } = makeCountingClient(toolUseResponse(VALID_REPORT_INPUT));
   const result = await handlePostAiExplanation(deps, "lab-post-4", "BAL", "99", NOW, client);
   assert.equal(result.status, 404);
 });
@@ -171,7 +177,7 @@ test("handleGetAiExplanation: 未生成の場合は404", async () => {
 test("handleGetAiExplanation: POST後はGETでキャッシュ済みレポートを取得できる(副作用なし)", async () => {
   const deps = makeDeps();
   await createBaselineLab(deps, "lab-get-2");
-  const { client } = makeCountingClient(textResponse(VALID_REPORT_JSON));
+  const { client } = makeCountingClient(toolUseResponse(VALID_REPORT_INPUT));
   await handlePostAiExplanation(deps, "lab-get-2", "BAL", "1", NOW, client);
 
   const result = await handleGetAiExplanation(deps, "lab-get-2", "BAL", "1");
@@ -186,7 +192,7 @@ test("handlePostAiExplanation: 四半期処理が進みStandard AIの状況(コ�
   const labId = "lab-context-change-1";
   await createBaselineLab(deps, labId);
 
-  const { client, callCount } = makeCountingClient(textResponse(VALID_REPORT_JSON));
+  const { client, callCount } = makeCountingClient(toolUseResponse(VALID_REPORT_INPUT));
 
   // turn1ぶんのレポートを生成・キャッシュする。
   const turn1Result = await handlePostAiExplanation(deps, labId, "BAL", "1", NOW, client);

@@ -21,11 +21,87 @@
 // クライアント生成時・各呼び出し時の両方に明示的なタイムアウトを設定する
 // （SDKのRequestOptions.timeout / signal機能を使う。指示: 「Anthropic SDKのtimeout
 // オプションまたはAbortController経由で明示的なタイムアウトを追加する」）。
+//
+// 【構造化出力（2026-08-01・本番Preview手動観察テストで発見された invalid_json の
+// 事後対応）】従来はプレーンテキスト応答に対して素朴にJSON.parseしていたが、Claudeが
+// マークダウンのコードフェンス（```json ... ```）や前置きの文章を含めて返すことがあり、
+// 初回・リトライの両方が同じ理由（invalid_json）で系統的に失敗する事例が実際に発生した
+// （2回目の同一リトライでは直らない＝一時的な問題ではない）。対策として、プレーン
+// テキスト応答をパースする方式をやめ、単一のtool定義（input_schemaがreportSchema.tsの
+// Zodスキーマと同じ形）を渡し、tool_choiceでその呼び出しを強制する。Claudeの応答は
+// 自由形式のテキストではなく、tool_use contentブロックのinput（SDKが既にJSONとして
+// パース済みのオブジェクト）になるため、マークダウン装飾・前置き文章の混入自体が
+// 構造的に発生しなくなる。なお、tool定義のinput_schema自体に取りこぼしがあった場合の
+// 保険として、reportSchema.tsのZod検証は従来どおり維持する（多重防御。指示「tool-use
+// guarantees valid JSON shape-wise per the schema you declare, but keep our own runtime
+// Zod check as defense in depth」）。
+//
+// システムプロンプト文字列自体（STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V1）は一切変更
+// しない（spec §3で一字一句固定と規定されているため）。tool定義は`system`とは独立した
+// 別のリクエストパラメータ（`tools`/`tool_choice`）として追加するだけである。
 
 import Anthropic from "@anthropic-ai/sdk";
 import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V1 } from "./systemPrompt";
 import { StandardAiManagementReport, standardAiManagementReportSchema } from "./reportSchema";
 import { ExplanationContext } from "./buildExplanationContext";
+
+/**
+ * Claudeにレポートを提出させるための唯一のtool名。tool_choiceでこの名前を強制指定する。
+ */
+export const EXPLANATION_REPORT_TOOL_NAME = "submit_management_report";
+
+/**
+ * reportSchema.tsのstandardAiManagementReportSchema（Zod）と同じ形のJSON Schema。
+ * 【重複について】Zodスキーマから自動生成する仕組み（zod-to-json-schema等）は
+ * 新規依存追加のコストに見合わないと判断し、この機能専用の小さな固定スキーマとして
+ * 手書きする。reportSchema.ts側の形を変更した場合は、このJSON Schemaも合わせて
+ * 更新すること（reportSchema.test.tsのテストが両者の食い違いを検出する）。
+ */
+const EXPLANATION_REPORT_TOOL_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    headline: { type: "string" },
+    executiveSummary: { type: "string" },
+    recommendations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          area: { type: "string" },
+          title: { type: "string" },
+          action: { type: "string" },
+          reasons: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                value: { type: "string" },
+              },
+              required: ["label", "value"],
+            },
+          },
+        },
+        required: ["area", "title", "action", "reasons"],
+      },
+    },
+    keyRisks: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          severity: { type: "string", enum: ["low", "medium", "high"] },
+          title: { type: "string" },
+          description: { type: "string" },
+        },
+        required: ["severity", "title", "description"],
+      },
+    },
+    questionsForPlayer: { type: "array", items: { type: "string" } },
+    dataLimitations: { type: "array", items: { type: "string" } },
+  },
+  required: ["headline", "executiveSummary", "recommendations", "keyRisks", "questionsForPlayer", "dataLimitations"],
+} as const;
 
 /**
  * Claude呼び出し1回あたりの明示的なタイムアウト（ミリ秒）。SDKの既定（10分）は
@@ -38,7 +114,13 @@ export interface ExplanationModelConfig {
   readonly maxTokens: number;
 }
 
-const DEFAULT_EXPLANATION_MODEL = "claude-sonnet-4-6";
+// 【2026-08-01・三宅さんのご指示によりコスト最適化】経営説明はあくまで既存の
+// Standard AI決定・診断ログを日本語へ言い換えるだけの用途（新しい判断・数値の
+// 創作は禁止、出力もJSON tool_use経由で厳格にスキーマ検証される）であり、
+// 高度な推論能力を必要としない。そのため既定モデルをSonnet系からHaiku系へ
+// 変更し、1レポートあたりのトークン単価を抑える。品質に問題が出た場合は
+// 環境変数STANDARD_AI_EXPLANATION_MODELで個別に上書きできる（コード変更不要）。
+const DEFAULT_EXPLANATION_MODEL = "claude-haiku-4-6";
 
 /**
  * このAI経営説明機能で使うモデル名・最大トークン数の唯一の定義箇所。
@@ -70,6 +152,13 @@ export type GenerateManagementReportResult =
   | { readonly ok: true; readonly report: StandardAiManagementReport; readonly usage: GenerateManagementReportUsage }
   | { readonly ok: false; readonly errorCategory: GenerateManagementReportErrorCategory; readonly detail?: string };
 
+/** tool_useを強制するためのtool定義（Anthropic Messages APIのTool型の最小部分集合）。 */
+export interface AnthropicToolDefinition {
+  readonly name: string;
+  readonly description?: string;
+  readonly input_schema: Readonly<Record<string, unknown>>;
+}
+
 /**
  * Anthropic Messages APIを実際に叩くクライアントの最小インターフェース。
  * テストではこれをモックする（実SDKクライアントをnewせずに済むようにするため、
@@ -83,6 +172,10 @@ export interface AnthropicMessagesClient {
         max_tokens: number;
         system: string;
         messages: readonly { role: "user"; content: string }[];
+        // 【構造化出力対応】単一のtool定義＋tool_choiceで、応答を必ずそのtool呼び出し
+        // （＝input_schemaに沿ったオブジェクト）に強制する。
+        tools?: readonly AnthropicToolDefinition[];
+        tool_choice?: { readonly type: "tool"; readonly name: string };
       },
       // 【タイムアウト対応】第2引数はSDKのRequestOptions相当（timeout/signal等）。
       // テスト用モックはこの引数を無視して構わない（関数型の構造的部分型では、
@@ -93,7 +186,12 @@ export interface AnthropicMessagesClient {
 }
 
 export interface AnthropicMessageResponse {
-  readonly content: readonly { readonly type: string; readonly text?: string }[];
+  readonly content: readonly {
+    readonly type: string;
+    readonly text?: string;
+    /** type === "tool_use" のときだけ設定される。SDKが既にJSONとしてパース済みのオブジェクト。 */
+    readonly input?: unknown;
+  }[];
   readonly usage?: { readonly input_tokens?: number; readonly output_tokens?: number };
 }
 
@@ -104,11 +202,10 @@ function createRealClient(apiKey: string): AnthropicMessagesClient {
   return new Anthropic({ apiKey, timeout: EXPLANATION_CLAUDE_TIMEOUT_MS }) as unknown as AnthropicMessagesClient;
 }
 
-function extractResponseText(response: AnthropicMessageResponse): string {
-  return response.content
-    .filter((block) => block.type === "text" && typeof block.text === "string")
-    .map((block) => block.text ?? "")
-    .join("");
+/** content配列から、tool_choiceで強制したtool呼び出しのtool_useブロックを探す。 */
+function findToolUseInput(response: AnthropicMessageResponse): unknown | undefined {
+  const block = response.content.find((b) => b.type === "tool_use");
+  return block?.input;
 }
 
 interface SingleAttemptResult {
@@ -144,6 +241,16 @@ async function attemptOnce(
         max_tokens: config.maxTokens,
         system: STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V1,
         messages: [{ role: "user", content: JSON.stringify(context) }],
+        // 【構造化出力対応】システムプロンプト文字列自体は変更せず、tool定義と
+        // tool_choiceだけを別パラメータとして追加し、応答をこのtool呼び出しに強制する。
+        tools: [
+          {
+            name: EXPLANATION_REPORT_TOOL_NAME,
+            description: "Standard AIの提案・診断情報を経営者向けに説明したレポートを提出する。",
+            input_schema: EXPLANATION_REPORT_TOOL_INPUT_SCHEMA,
+          },
+        ],
+        tool_choice: { type: "tool", name: EXPLANATION_REPORT_TOOL_NAME },
       },
       // 【タイムアウト対応】per-request指定（クライアント構築時の既定値と二重防御）。
       { timeout: EXPLANATION_CLAUDE_TIMEOUT_MS }
@@ -166,21 +273,29 @@ async function attemptOnce(
   console.log(
     `[claudeClient] attempt ${logTag.attempt} 応答受信 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn} latencyMs=${latencyMs}`
   );
-  const text = extractResponseText(response);
-  if (!text || text.trim().length === 0) {
-    console.error(`[claudeClient] attempt ${logTag.attempt} 空応答 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn}`);
-    return { kind: "failure", errorCategory: "empty_response" };
+
+  // 【構造化出力対応】tool_choiceで強制しているため、応答は自由形式のテキストではなく
+  // tool_use contentブロックのinput（SDKが既にJSONとしてパース済みのオブジェクト）に
+  // なるはずである。マークダウンのコードフェンス・前置き文章の混入によるJSON.parse失敗
+  // （2026-08-01の手動観察テストで実際に発生した systematic な invalid_json）が
+  // 構造的に起こらなくなる。
+  const toolInput = findToolUseInput(response);
+  if (toolInput === undefined) {
+    // tool_choiceで強制したにもかかわらずtool_useブロックが無い（応答が空、またはテキスト
+    // のみを返してきた等）。「JSONとしてすら解釈できる形で返ってこなかった」ことを
+    // 引き続きinvalid_jsonとして分類する（呼び出し元の既存のリトライ・エラー分類方針を
+    // 変えないため）。
+    console.error(
+      `[claudeClient] attempt ${logTag.attempt} tool_useブロックが見つかりません lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn}`
+    );
+    return { kind: "failure", errorCategory: "invalid_json" };
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (e) {
-    console.error(`[claudeClient] attempt ${logTag.attempt} JSON解析失敗 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn}`);
-    return { kind: "failure", errorCategory: "invalid_json", detail: e instanceof Error ? e.message : String(e) };
-  }
-
-  const validated = standardAiManagementReportSchema.safeParse(parsed);
+  // 【多重防御】tool_choiceで強制したtool呼び出しはinput_schemaに沿った形であるはずだが、
+  // スキーマ宣言側の取りこぼし・SDKの将来的な仕様変化等に備え、reportSchema.tsの
+  // Zod検証は引き続き必ず通す（「tool-useはshape的に保証するが、独自のZodチェックも
+  // 多重防御として維持する」という方針）。
+  const validated = standardAiManagementReportSchema.safeParse(toolInput);
   if (!validated.success) {
     console.error(`[claudeClient] attempt ${logTag.attempt} スキーマ不一致 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn}`);
     return { kind: "failure", errorCategory: "schema_mismatch", detail: validated.error.message };
@@ -204,8 +319,9 @@ async function attemptOnce(
 /**
  * Standard AIの診断・提案から、経営者向け説明レポートを生成する。
  *
- * リトライ方針: JSONパース失敗・スキーマ不一致・空応答のいずれかで最初の試行が
- * 失敗した場合、同一の入力でちょうど1回だけ再試行する（合計最大2回のAPI呼び出し）。
+ * リトライ方針: tool_useブロック欠落（invalid_json）・スキーマ不一致（schema_mismatch）・
+ * 空応答（empty_response、tool_use強制下では通常発生しないが型としては維持）のいずれかで
+ * 最初の試行が失敗した場合、同一の入力でちょうど1回だけ再試行する（合計最大2回のAPI呼び出し）。
  * http_error・network_error（＝APIそのものに到達できない/拒否された場合）は
  * 再試行せず、その場で失敗として返す。
  *
