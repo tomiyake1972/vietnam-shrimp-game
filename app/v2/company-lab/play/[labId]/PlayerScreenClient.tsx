@@ -24,6 +24,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DecisionEditor from "../../components/DecisionEditor";
+import OpeningCompanyStatePanel from "../../components/OpeningCompanyStatePanel";
 import CollapsibleSection from "../../components/CollapsibleSection";
 import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
@@ -132,6 +133,16 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
             {isEditing && <span className="bg-teal-700 text-teal-100 rounded-full px-3 py-1">入力中</span>}
           </div>
         </div>
+
+        {!isCompleted && (
+          <CollapsibleSection
+            title={`自社の状態（turn ${viewModel.currentTurn} 開始時点）`}
+            tone="info"
+            testId="opening-company-state-section"
+          >
+            <OpeningCompanyStatePanel ownState={viewModel.ownState} turn={viewModel.currentTurn} />
+          </CollapsibleSection>
+        )}
 
         {isCompleted && (
           <div className="bg-gray-800 rounded-2xl p-8 text-center space-y-2">
