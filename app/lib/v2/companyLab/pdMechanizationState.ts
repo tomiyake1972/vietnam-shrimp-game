@@ -147,7 +147,33 @@ export function buildPdCoefficientOverridesByFactory(
   period: PeriodV2,
   params: PdMechanizationParameters = PD_MECHANIZATION_PARAMETERS_V1
 ): ReadonlyMap<string, number> {
+  const statusByFactory = buildPdMechanizationStatusByFactory(capexState, pdMechanizationState, period, params);
   const result = new Map<string, number>();
+  for (const [factoryId, status] of statusByFactory) {
+    result.set(factoryId, status.effectivePdCoefficient);
+  }
+  return result;
+}
+
+/** 1工場ぶんのPD省人化投資の状況（UI表示・buildPdCoefficientOverridesByFactoryの両方が使う唯一の計算経路）。 */
+export interface PdMechanizationStatus {
+  readonly mechanizationLevel: number;
+  readonly effectivePdCoefficient: number;
+}
+
+/**
+ * 【Test15新設・UI表示用】稼働開始済みのpdMechanization案件について、
+ * targetFactoryIdごとの機械化レベル・実効PD係数の両方を返す（buildPdCoefficientOverridesByFactory
+ * が係数だけを使うのに対し、UI側は「現在のmechanizationLevel」もそのまま表示したいための
+ * 追加公開。計算経路自体は完全に同一・重複実装しない）。
+ */
+export function buildPdMechanizationStatusByFactory(
+  capexState: CapexState,
+  pdMechanizationState: PdMechanizationState | undefined,
+  period: PeriodV2,
+  params: PdMechanizationParameters = PD_MECHANIZATION_PARAMETERS_V1
+): ReadonlyMap<string, PdMechanizationStatus> {
+  const result = new Map<string, PdMechanizationStatus>();
   const allProjects: CapitalProject[] = capexState.companies.flatMap((c) => c.portfolio.projects);
   const mechanizationProjects = allProjects
     .filter((p) => p.projectType === "pdMechanization" && p.targetFactoryId !== undefined)
@@ -163,8 +189,8 @@ export function buildPdCoefficientOverridesByFactory(
     const rampProgress = computeAdoptionRampProgress(quartersSinceActivation, params);
     const previousQuarterPdUtilization = findPreviousQuarterPdUtilization(pdMechanizationState, factoryId, params);
     const mechanizationLevel = computeMechanizationLevel(rampProgress, previousQuarterPdUtilization);
-    const coefficient = computeEffectivePdCoefficient(mechanizationLevel, params);
-    result.set(factoryId, coefficient);
+    const effectivePdCoefficient = computeEffectivePdCoefficient(mechanizationLevel, params);
+    result.set(factoryId, { mechanizationLevel, effectivePdCoefficient });
   }
   return result;
 }

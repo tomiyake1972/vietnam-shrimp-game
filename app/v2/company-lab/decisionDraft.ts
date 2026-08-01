@@ -18,8 +18,12 @@ import { CapitalProjectType } from "../../lib/v2/capex/types";
 import { PlanCostExpectation } from "../../lib/v2/sales/types";
 import { Score0to100 } from "../../lib/v2/core/units";
 import { WorkerSkillEntry } from "../../lib/v2/production/types";
+import { isValidVapProductDevelopmentSpendTier, VAP_PRODUCT_DEVELOPMENT_SPEND_TIERS_USD } from "../../lib/v2/companyLab/productDevelopmentState";
 
 export const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
+
+/** 【Test15新設】VAP商品開発費の4段階選択肢を画面側へ再輸出する（唯一の情報源はproductDevelopmentState.ts）。 */
+export const VAP_PRODUCT_DEVELOPMENT_SPEND_TIER_OPTIONS_USD = VAP_PRODUCT_DEVELOPMENT_SPEND_TIERS_USD;
 
 function safeNonNegative(n: number): number {
   return Number.isFinite(n) && n >= 0 ? n : 0;
@@ -132,6 +136,8 @@ export interface CapexProjectProposalDraftRow {
   readonly projectType: CapitalProjectType;
   readonly requestedBudgetUsd?: number;
   readonly priority?: number;
+  /** 【Test15新設】pdMechanization提案の対象Factory（他の案件種別では未設定）。 */
+  readonly targetFactoryId?: string;
 }
 
 export interface CapexProjectReferenceDraftRow {
@@ -179,6 +185,11 @@ export interface CompanyDecisionDraft {
    * 保存された下書きにこのフィールドが無いため（読み込み側は `?? 0` として扱う）。
    */
   readonly salesForceLayoffCount?: number;
+  /**
+   * 【Test15新設】今四半期のVAP商品開発費（$0/$100,000/$250,000/$500,000の4段階のみ）。
+   * 未設定（自動方針が値を生成しなかった場合）は0として扱う。
+   */
+  readonly vapProductDevelopmentSpendUsd: number;
 }
 
 // ---------------------------------------------------------------------
@@ -414,6 +425,7 @@ export function buildInitialDraft(
       projectType: p.projectType,
       ...(p.requestedBudgetUsd !== undefined ? { requestedBudgetUsd: p.requestedBudgetUsd } : {}),
       ...(p.priority !== undefined ? { priority: p.priority } : {}),
+      ...(p.targetFactoryId !== undefined ? { targetFactoryId: p.targetFactoryId } : {}),
     })),
     cancelRequests: autoDecision.capexDecision.cancelRequests.map((c) => ({ projectId: c.projectId })),
     resumeRequests: autoDecision.capexDecision.resumeRequests.map((r) => ({ projectId: r.projectId })),
@@ -434,6 +446,7 @@ export function buildInitialDraft(
     // 「今回の採用・減員予定」は毎回新しい意思決定であるため）。
     salesForceHireCount: 0,
     salesForceLayoffCount: 0,
+    vapProductDevelopmentSpendUsd: autoDecision.vapProductDevelopmentSpendUsd ?? 0,
   };
 }
 
@@ -530,6 +543,7 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
       projectType: p.projectType,
       ...(p.requestedBudgetUsd !== undefined && Number.isFinite(p.requestedBudgetUsd) ? { requestedBudgetUsd: p.requestedBudgetUsd } : {}),
       ...(p.priority !== undefined && Number.isFinite(p.priority) ? { priority: p.priority } : {}),
+      ...(p.targetFactoryId !== undefined ? { targetFactoryId: p.targetFactoryId } : {}),
     })),
     cancelRequests: draft.capexDecision.cancelRequests.map((c) => ({ projectId: c.projectId })),
     resumeRequests: draft.capexDecision.resumeRequests.map((r) => ({ projectId: r.projectId })),
@@ -551,5 +565,6 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
     // 持たない方針のため。runner.ts advanceCompanyLabQuarterが唯一の検証箇所）。
     salesForceHireCount: Math.round(safeNonNegative(draft.salesForceHireCount ?? 0)),
     salesForceLayoffCount: Math.round(safeNonNegative(draft.salesForceLayoffCount ?? 0)),
+    vapProductDevelopmentSpendUsd: isValidVapProductDevelopmentSpendTier(draft.vapProductDevelopmentSpendUsd) ? draft.vapProductDevelopmentSpendUsd : 0,
   };
 }

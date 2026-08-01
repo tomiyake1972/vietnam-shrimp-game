@@ -19,6 +19,12 @@ interface InvestmentCardListProps {
   readonly isDuplicate: (projectType: CapitalProjectType) => boolean;
   readonly onAdd: (projectType: CapitalProjectType) => void;
   readonly disabled: boolean;
+  /**
+   * 【Test15新設】案件種別ごとの追加ブロック理由（例: 新工場建設の4工場上限）。
+   * 文字列を返すとその種別の「ドラフトへ追加」ボタンがdisabledになり、理由が表示される。
+   * 省略時・undefined返却時はブロックしない（既存の挙動を変えない）。
+   */
+  readonly extraBlockedReasonByType?: (projectType: CapitalProjectType) => string | undefined;
 }
 
 function usd(value: number): string {
@@ -53,6 +59,7 @@ export default function InvestmentCardList(props: InvestmentCardListProps) {
         const c = card.candidate;
         const affordable = props.currentCashUsd - props.draftPaymentThisQuarterUsd >= c.thisQuarterExpectedPaymentUsd;
         const duplicate = props.isDuplicate(card.projectType);
+        const extraBlockedReason = props.extraBlockedReasonByType?.(card.projectType);
 
         return (
           <div key={card.projectType} className="bg-gray-900/60 border border-gray-700/60 rounded-lg px-3 py-2 space-y-2">
@@ -64,13 +71,17 @@ export default function InvestmentCardList(props: InvestmentCardListProps) {
               </div>
               <button
                 type="button"
-                disabled={disabled}
+                disabled={disabled || extraBlockedReason !== undefined}
                 onClick={() => props.onAdd(card.projectType)}
                 className="shrink-0 text-[11px] px-2 py-1 rounded bg-sky-900/70 border border-sky-500/70 text-sky-50 hover:bg-sky-800/70 disabled:opacity-50 disabled:bg-gray-800 disabled:border-gray-600 disabled:text-gray-400"
               >
                 ドラフトへ追加
               </button>
             </div>
+
+            {extraBlockedReason !== undefined && (
+              <div className="bg-amber-950/40 border border-amber-700/50 rounded px-2 py-1 text-[10px] text-amber-200">{extraBlockedReason}</div>
+            )}
 
             {/* 主要項目 */}
             <div className="grid grid-cols-3 gap-x-3 gap-y-1.5">

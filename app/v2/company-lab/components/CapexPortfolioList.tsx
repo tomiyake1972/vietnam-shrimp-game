@@ -55,6 +55,7 @@ function PortfolioCard(props: {
         <StatusBadge displayStatus={row.displayStatus} label={row.displayStatusLabel} />
       </div>
       <div className="text-[10px] text-gray-500">{row.projectId}</div>
+      {row.targetFactoryId !== undefined && <div className="text-[10px] text-gray-400">対象工場: {row.targetFactoryId}</div>}
 
       <div className="space-y-1">
         <Row label="総投資額" value={formatUsd(row.totalInvestmentUsd)} />
