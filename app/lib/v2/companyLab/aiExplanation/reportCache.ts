@@ -11,11 +11,43 @@
 //     キー自体が変わる＝古いレポートを誤って再利用することはない
 //     （「Contextが変わった場合に古いレポートを再利用してはならない」という要件は、
 //     このキー設計そのものによって自動的に満たされる。追加の無効化ロジックは不要）。
+//
+// 【タイムアウト（2026-08-01・本番Preview手動観察テストで発生した無限ローディングの
+// 事後対応）】@upstash/redisのHTTPクライアントには既定のリクエストタイムアウトが無く、
+// fetchが詰まった場合に無言で長時間ハングしうる（コード上確認済み）。get/set呼び出しを
+// このファイル側で明示的なタイムアウトでラップし、Redis経路が詰まった場合でも
+// 一定時間内に必ずエラーとして呼び出し元へ返す。
 
 import { createHash } from "crypto";
 import { CompanyLabRedisClient } from "../../redis/companyLabTypes";
 import { ExplanationContext } from "./buildExplanationContext";
 import { StandardAiManagementReport } from "./reportSchema";
+
+/** Redisキャッシュの get/set 1回あたりの明示的なタイムアウト（ミリ秒）。 */
+export const EXPLANATION_CACHE_TIMEOUT_MS = 8_000;
+
+class ExplanationCacheTimeoutError extends Error {
+  constructor(operation: string, timeoutMs: number) {
+    super(`[reportCache] Redis操作(${operation})が${timeoutMs}msでタイムアウトしました。`);
+    this.name = "ExplanationCacheTimeoutError";
+  }
+}
+
+function withTimeout<T>(operation: string, promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new ExplanationCacheTimeoutError(operation, timeoutMs)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
 
 export interface StoredExplanationReport {
   readonly generatedAt: string;
@@ -65,19 +97,27 @@ export function buildExplanationCacheKey(input: ExplanationCacheKeyInput): strin
 }
 
 export async function loadCachedReport(client: CompanyLabRedisClient, key: string): Promise<StoredExplanationReport | null> {
-  const raw = await client.get(key);
-  if (raw === null || raw === undefined) return null;
+  console.log(`[reportCache] キャッシュ参照開始 key=${key}`);
+  const raw = await withTimeout("get", client.get(key), EXPLANATION_CACHE_TIMEOUT_MS);
+  if (raw === null || raw === undefined) {
+    console.log(`[reportCache] キャッシュミス key=${key}`);
+    return null;
+  }
   if (typeof raw === "string") {
     try {
+      console.log(`[reportCache] キャッシュヒット key=${key}`);
       return JSON.parse(raw) as StoredExplanationReport;
     } catch {
       return null;
     }
   }
   // @upstash/redisは値が既にJSONとしてパース可能な場合、自動でオブジェクトを返すことがある。
+  console.log(`[reportCache] キャッシュヒット key=${key}`);
   return raw as StoredExplanationReport;
 }
 
 export async function saveReport(client: CompanyLabRedisClient, key: string, value: StoredExplanationReport): Promise<void> {
-  await client.set(key, JSON.stringify(value));
+  console.log(`[reportCache] キャッシュ保存開始 key=${key} result=${value.result}`);
+  await withTimeout("set", client.set(key, JSON.stringify(value)), EXPLANATION_CACHE_TIMEOUT_MS);
+  console.log(`[reportCache] キャッシュ保存完了 key=${key}`);
 }

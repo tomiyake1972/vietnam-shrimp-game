@@ -132,16 +132,34 @@ export async function handlePostAiExplanation(
   now: string,
   anthropicClient?: AnthropicMessagesClient
 ): Promise<AiExplanationApiResult> {
-  const resolved = await resolveRequestContext(deps, labId, companyId, turnParam);
-  if (resolved.kind === "error") return resolved.result;
-  const { context, cacheKey } = resolved.value;
+  const logPrefix = `[ai-explanation handlePost] lab=${labId} company=${companyId} turn=${turnParam}`;
+  console.log(`${logPrefix} 開始`);
 
-  const cached = await loadCachedReport(deps.redisClient, cacheKey);
+  const resolved = await resolveRequestContext(deps, labId, companyId, turnParam);
+  if (resolved.kind === "error") {
+    console.log(`${logPrefix} resolveRequestContextでエラー応答 status=${resolved.result.status}`);
+    return resolved.result;
+  }
+  const { context, cacheKey } = resolved.value;
+  console.log(`${logPrefix} context構築完了 cacheKey=${cacheKey} diagnosticEntries=${context.standardAi.diagnosticEntries.length}`);
+
+  // 【キャッシュ読み取り失敗への耐性】タイムアウト等でキャッシュ参照自体が失敗しても、
+  // 「キャッシュミス」として扱い、Claude生成へフォールバックする（キャッシュ層の不調で
+  // レポート生成全体が止まらないようにする）。
+  let cached: StoredExplanationReport | null = null;
+  try {
+    cached = await loadCachedReport(deps.redisClient, cacheKey);
+  } catch (e) {
+    console.error(`${logPrefix} キャッシュ参照に失敗（キャッシュミス扱いで続行）:`, e instanceof Error ? e.message : String(e));
+  }
   if (cached !== null) {
+    console.log(`${logPrefix} キャッシュヒットのため応答（Claude呼び出しなし）`);
     return { status: 200, body: { cached: true, cacheKey, ...cached } };
   }
+  console.log(`${logPrefix} キャッシュミス。Claude呼び出しを開始します`);
 
   const generated = await generateManagementReport(context, anthropicClient);
+  console.log(`${logPrefix} Claude呼び出し完了 ok=${generated.ok}${generated.ok ? "" : ` category=${generated.errorCategory}`}`);
 
   const stored: StoredExplanationReport = generated.ok
     ? {
@@ -163,11 +181,20 @@ export async function handlePostAiExplanation(
         contextHash: resolved.value.contextHash,
       };
 
-  await saveReport(deps.redisClient, cacheKey, stored);
+  try {
+    await saveReport(deps.redisClient, cacheKey, stored);
+    console.log(`${logPrefix} キャッシュ保存完了`);
+  } catch (e) {
+    // 【キャッシュ書き込み失敗への耐性】保存に失敗しても、生成済みの結果（成功・失敗
+    // いずれも）はこのリクエストの応答としては返す（次回リクエスト時にまた生成し直す
+    // だけであり、UIをブロックする理由にはならない）。
+    console.error(`${logPrefix} キャッシュ保存に失敗（結果はそのまま返します）:`, e instanceof Error ? e.message : String(e));
+  }
 
   // 失敗時もHTTP自体は200で「構造化された失敗」を返す（呼び出し側が例外ではなく
   // 分岐でフォールバック表示できるようにするため。実装指示「API失敗時も
   // 構造化された（例外を投げない）応答を返す」に対応）。
+  console.log(`${logPrefix} 応答を返します result=${stored.result}`);
   return { status: 200, body: { cached: false, cacheKey, ...stored } };
 }
 
@@ -178,13 +205,26 @@ export async function handleGetAiExplanation(
   companyId: string,
   turnParam: string
 ): Promise<AiExplanationApiResult> {
+  const logPrefix = `[ai-explanation handleGet] lab=${labId} company=${companyId} turn=${turnParam}`;
+  console.log(`${logPrefix} 開始`);
+
   const resolved = await resolveRequestContext(deps, labId, companyId, turnParam);
-  if (resolved.kind === "error") return resolved.result;
+  if (resolved.kind === "error") {
+    console.log(`${logPrefix} resolveRequestContextでエラー応答 status=${resolved.result.status}`);
+    return resolved.result;
+  }
   const { cacheKey } = resolved.value;
 
-  const cached = await loadCachedReport(deps.redisClient, cacheKey);
+  let cached: StoredExplanationReport | null = null;
+  try {
+    cached = await loadCachedReport(deps.redisClient, cacheKey);
+  } catch (e) {
+    console.error(`${logPrefix} キャッシュ参照に失敗（未生成として応答）:`, e instanceof Error ? e.message : String(e));
+  }
   if (cached === null) {
+    console.log(`${logPrefix} キャッシュなし`);
     return notFound("この四半期のAI経営説明レポートはまだ生成されていません。");
   }
+  console.log(`${logPrefix} キャッシュヒット`);
   return { status: 200, body: { cached: true, cacheKey, ...cached } };
 }

@@ -70,6 +70,15 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
   // 一切外部へ渡さず、既存のhandlePostAiExplanation（キャッシュ済みならClaudeを呼び直さない）
   // をサーバー側でそのまま呼ぶだけ。失敗しても意思決定画面自体は必ず正常に表示され続ける
   // （failure状態でも詳細な判断ログ・DecisionEditor・提出ボタン等は通常どおり描画する）。
+  //
+  // 【クライアント側の安全策（2026-08-01・本番Preview手動観察テストで発見された
+  // 無限ローディングの事後対応）】サーバー側（claudeClient.ts・reportCache.ts・
+  // actions.ts）にタイムアウト・try/catchを追加済みだが、Server Actionの呼び出し
+  // 自体が何らかの理由でPromiseとして解決も棄却もされない可能性を完全には排除
+  // できないため、ここでもPromise.raceによるクライアント側タイムアウトを設け、
+  // 「経営説明を生成しています…」の無限ループを二重に防ぐ（実装指示§「API失敗が
+  // 意思決定画面を絶対にブロックしない」の趣旨を、ローディング表示自体にも適用する）。
+  const AI_EXPLANATION_CLIENT_TIMEOUT_MS = 20_000;
   const [aiExplanationState, setAiExplanationState] = useState<AiExplanationLoadState>({ kind: "loading" });
   useEffect(() => {
     if (!isEditing || !viewModel.aiProposalDiagnostics) return;
@@ -79,17 +88,37 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
     // setState(loading)を呼ぶ必要はない（呼ぶと「effect内での同期的setState」という
     // 不要なレンダーカスケードをlintが指摘するため、意図的に呼ばない）。
     let cancelled = false;
-    fetchAiExplanationAction(viewModel.labId, viewModel.playerCompanyId, viewModel.currentTurn)
-      .then((result) => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const timeoutPromise = new Promise<{ readonly kind: "timeout" }>((resolve) => {
+      timeoutId = setTimeout(() => resolve({ kind: "timeout" }), AI_EXPLANATION_CLIENT_TIMEOUT_MS);
+    });
+    const actionPromise = fetchAiExplanationAction(viewModel.labId, viewModel.playerCompanyId, viewModel.currentTurn).then((result) => ({
+      kind: "resolved" as const,
+      result,
+    }));
+
+    Promise.race([actionPromise, timeoutPromise])
+      .then((outcome) => {
         if (cancelled) return;
+        if (outcome.kind === "timeout") {
+          // サーバー側からの応答が一定時間内に届かなかった（何らかの理由でハングしている）。
+          // 意思決定画面自体は既に正常に表示され続けているため、この説明文ブロックだけを
+          // failure扱いにする。
+          setAiExplanationState({ kind: "failure" });
+          return;
+        }
+        const { result } = outcome;
         setAiExplanationState(result.ok && result.report ? { kind: "success", report: result.report } : { kind: "failure" });
       })
       .catch(() => {
         if (cancelled) return;
         setAiExplanationState({ kind: "failure" });
       });
+
     return () => {
       cancelled = true;
+      if (timeoutId !== null) clearTimeout(timeoutId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditing, viewModel.labId, viewModel.playerCompanyId, viewModel.currentTurn, Boolean(viewModel.aiProposalDiagnostics)]);

@@ -19,6 +19,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { requireStagingSession, assertSameOriginRequest } from "../../../../lib/companyLabUiSession";
 import { resolveCompanyLabUiDependencies } from "../_lib/uiDependencies";
 import { resolveAiExplanationUiDependencies } from "../_lib/aiExplanationUiDependencies";
@@ -144,6 +145,25 @@ export async function processQuarterAction(labId: string): Promise<ProcessQuarte
 // 秘密情報はサーバー側の環境変数からのみ読まれ、クライアントへは一切渡らない）。
 // handlePostAiExplanation自体は「キャッシュ済みならClaudeを呼び直さない」という
 // 冪等性を既に持つため、この関数はPOST（生成トリガー）をそのまま呼べばよい。
+//
+// 【2026-08-01・本番Preview手動観察テストで発見された無限ローディングの事後対応】
+// 従来はguard()の呼び出しがtry/catchの外側にあった。requireStagingSession()は
+// セッションが無効な場合にNext.jsのredirect()（NEXT_REDIRECT digestを持つ特殊な
+// 例外）を投げる。このActionはuseEffect（フォーム送信でもuseTransitionでもない
+// 生の関数呼び出し）から起動されており、他のAction（save/submit/process/withdraw、
+// いずれもクリックハンドラー→startXxxTransition経由）とは呼び出し経路が異なる。
+// 直接の再現はできていないが、redirect()の特殊例外がこの呼び出し経路上で
+// 期待どおりに伝播せず、呼び出し元のPromiseが解決も棄却もされずに無期限へ
+// 保留され続ける、という筋が最も疑わしい（Vercelランタイムログにcatchブロックの
+// console.errorが一切出ていない＝例外としてこのActionへ届いていない、という
+// 観察と整合する）。対策として:
+//   (1) guard()も含めてActionの全体をtry/catchで包む。
+//   (2) catchの先頭でunstable_rethrow(e)を呼び、redirect()等Next.js内部の
+//       制御用例外だけは握りつぶさずそのまま再送出する（本来のログイン誘導動作を
+//       壊さない）。それ以外の例外だけを「構造化された失敗」に変換する。
+//   (3) 呼び出し元（PlayerScreenClient.tsx）側にも、Promise.raceによる
+//       クライアント側タイムアウトを追加し、万一この経路が今後も予期せぬ形で
+//       ハングした場合の二重防御とする。
 
 export interface AiExplanationActionResult {
   readonly ok: boolean;
@@ -152,22 +172,35 @@ export interface AiExplanationActionResult {
 }
 
 export async function fetchAiExplanationAction(labId: string, companyId: string, turn: number): Promise<AiExplanationActionResult> {
-  const g = await guard();
-  if (!g.ok) return { ok: false, errorCategory: "unauthorized" };
-
+  const logPrefix = `[fetchAiExplanationAction] lab=${labId} company=${companyId} turn=${turn}`;
+  console.log(`${logPrefix} 呼び出し開始`);
   try {
+    const g = await guard();
+    if (!g.ok) {
+      console.log(`${logPrefix} guard()で拒否されました（未認証またはOrigin不一致）`);
+      return { ok: false, errorCategory: "unauthorized" };
+    }
+    console.log(`${logPrefix} guard()通過`);
+
     const deps = await resolveAiExplanationUiDependencies();
+    console.log(`${logPrefix} 依存関係解決完了`);
+
     const result = await handlePostAiExplanation(deps, labId, companyId, String(turn), new Date().toISOString());
+    console.log(`${logPrefix} handlePostAiExplanation完了 status=${result.status}`);
+
     const body = result.body as { result?: "success" | "failure"; report?: StandardAiManagementReport; errorCategory?: string } | undefined;
     if (result.status === 200 && body?.result === "success" && body.report) {
+      console.log(`${logPrefix} 成功として返却します`);
       return { ok: true, report: body.report };
     }
+    console.log(`${logPrefix} 失敗として返却します category=${body?.errorCategory ?? "unknown"}`);
     return { ok: false, errorCategory: body?.errorCategory ?? "unknown" };
   } catch (e) {
-    // 【Claude API失敗が意思決定画面をブロックしてはならない】依存関係の組み立て失敗
-    // （Redis接続不可等）や想定外の例外も、ここで必ず捕まえて構造化された失敗として返す
-    // （詳細はサーバーログにのみ残し、クライアントへは一般化したカテゴリ名だけ返す）。
-    console.error("[fetchAiExplanationAction] 依存関係の組み立てまたはハンドラー呼び出しに失敗しました:", e);
+    // 【重要】redirect()・notFound()等、Next.js自身が制御フローとして使う特殊な例外
+    // （NEXT_REDIRECT digest等）は、ここで握りつぶさず必ず再送出する。それ以外
+    // （依存関係の組み立て失敗・想定外の例外）だけを構造化された失敗として返す。
+    unstable_rethrow(e);
+    console.error(`${logPrefix} 予期しない例外を捕捉しました:`, e instanceof Error ? e.message : String(e));
     return { ok: false, errorCategory: "internal_error" };
   }
 }
