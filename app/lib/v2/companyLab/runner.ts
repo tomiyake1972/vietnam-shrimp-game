@@ -151,6 +151,7 @@ import {
   buildPdCoefficientOverridesByFactory,
   computeCurrentQuarterPdUtilizationByFactory,
   deriveNextPdMechanizationState,
+  findPreviousQuarterPdUtilization,
 } from "./pdMechanizationState";
 import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
@@ -469,6 +470,13 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // 【監査指摘G】営業基盤が当期の成約へ実際にどれだけ効くか（ウェイト）。
     // 機能OFFなら0＝「基盤の高低は成約に一切影響しない」ことが判断側から分かる。
     salesBaseCompetitivenessWeight: salesParametersFor(state.config).competitivenessWeights.salesBase,
+    // 【Test15新設】前四半期末までの自社工場ごとのPD稼働率・VAP商品開発スコア
+    // （UI側の意思決定画面が状況表示に使う。常時ゲームルールのため常に設定する）。
+    pdUtilizationByFactory: fixture.factories.map((f) => ({
+      factoryId: f.factoryId,
+      previousQuarterPdUtilization: findPreviousQuarterPdUtilization(state.pdMechanizationState, f.factoryId),
+    })),
+    vapProductDevelopmentScore: lookupProductDevelopmentScore(state.productDevelopmentState, fixture.companyId),
   };
 }
 
