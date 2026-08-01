@@ -60,6 +60,19 @@ export function formatSpaceShortageReason(gate: ProposalSpaceGate): string {
 }
 
 /**
+ * 【Test15新設】新工場建設（newFactoryConstruction）専用の工場数上限ゲート。
+ * 呼び出し側（capexClose.ts）が、この提案を承認すると会社の工場数（既存工場＋
+ * 取消以外のnewFactoryConstruction案件）が上限を超えるかどうかを事前に判定して渡す。
+ * newFactoryConstruction以外の提案には一切関係しない（gate自体を渡さなければ判定しない）。
+ */
+export interface ProposalFactoryCountGate {
+  /** この提案を承認すると工場数が上限を超えるか（capex/factoryConstruction.tsのwouldExceedMaxFactoriesの結果）。 */
+  readonly wouldExceedMax: boolean;
+  /** 拒否理由の説明文に使う上限値。 */
+  readonly maxFactoriesPerCompany: number;
+}
+
+/**
  * 1件の新規提案を評価する。承認条件（実装指示§12。会社IDでの特殊扱いは
  * 一切行わない。財務・信用診断だけで判定する）:
  *   - 銀行引受停止・重大資金繰り不安（前期末までの情報のみ）の会社は新規承認しない。
@@ -80,7 +93,8 @@ export function evaluateProposal(
   period: PeriodV2,
   projectId: string,
   priority: number,
-  spaceGate?: ProposalSpaceGate
+  spaceGate?: ProposalSpaceGate,
+  factoryCountGate?: ProposalFactoryCountGate
 ): { readonly approved: CapitalProject } | { readonly rejected: CapexRejectedProposal } {
   const template: CapexProjectTemplate | undefined = params.templatesByType[proposal.projectType];
   if (!template) {
@@ -106,6 +120,11 @@ export function evaluateProposal(
   // 同じ扱い。docs/v2/CAPITAL_INVESTMENT_ARCHITECTURE_v0.1.md §エラー処理方針）。
   if (spaceGate !== undefined && spaceGate.requiredSpaceUnits > spaceGate.remainingSpaceUnits + spaceGate.epsilonSpaceUnits) {
     reasons.push(formatSpaceShortageReason(spaceGate));
+  }
+  // 【Test15新設】新工場建設のみ、1社あたり最大工場数の上限（既存工場＋取消以外の
+  // newFactoryConstruction案件の合計、capex/factoryConstruction.ts参照）で拒否する。
+  if (factoryCountGate !== undefined && factoryCountGate.wouldExceedMax) {
+    reasons.push(`工場数が上限(${factoryCountGate.maxFactoriesPerCompany})に達しているため、新工場建設の新規承認を見送り。`);
   }
 
   if (reasons.length > 0) {
@@ -134,6 +153,9 @@ export function evaluateProposal(
     approvedPeriod: period,
     priority: proposal.priority ?? priority,
     ...(template.futureCapacityEffect !== undefined ? { futureCapacityEffect: template.futureCapacityEffect } : {}),
+    // 【Test15新設】newFactoryConstruction案件のみ、新設Factory合成用の情報を
+    // 承認時にテンプレートからスナップショットする（他の案件種別は常にundefined）。
+    ...(template.newFactoryEffect !== undefined ? { newFactoryEffect: template.newFactoryEffect } : {}),
     lastDiagnosticReasons: ["承認され、着工待ち（当四半期の支払処理で初回支払を試行する）。"],
   };
   return { approved };

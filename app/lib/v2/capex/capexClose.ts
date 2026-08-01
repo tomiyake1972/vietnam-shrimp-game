@@ -42,10 +42,12 @@ import {
   evaluateProposal,
   isActiveStatus,
   ProposalApprovalGate,
+  ProposalFactoryCountGate,
   ProposalSpaceGate,
   replaceProject,
   validateResumeRequest,
 } from "./projectLifecycle";
+import { MAX_FACTORIES_PER_COMPANY, wouldExceedMaxFactories } from "./factoryConstruction";
 import { CapexDecisionInput, CapexQuarterResult, CapexRejectedProposal, CapexValidationError, CapitalProject, CompanyCapexState } from "./types";
 
 export interface CloseQuarterWithCapexInput {
@@ -69,6 +71,14 @@ export interface CloseQuarterWithCapexInput {
   readonly factorySpaceBudget?: FactorySpaceApprovalBudget;
   /** スペース係数（省略時は FACTORY_SPACE_PARAMETERS_V1）。 */
   readonly factorySpaceParams?: FactorySpaceParameters;
+  /**
+   * 【Test15新設】この会社の既存（静的fixture由来）工場数。newFactoryConstruction
+   * 提案の1社あたり工場数上限（capex/factoryConstruction.tsのMAX_FACTORIES_PER_COMPANY）
+   * 判定に使う。省略時は0扱い（Phase 8D以前の呼び出し元・既存テストとの後方互換。
+   * ただし省略するとnewFactoryConstructionを提案しても既存工場ぶんが数えられず
+   * 上限判定が甘くなるため、新工場建設を扱う呼び出し元は必ず渡すこと）。
+   */
+  readonly existingFactoryCount?: number;
 }
 
 export interface CloseQuarterWithCapexOutput {
@@ -126,6 +136,7 @@ export function closeQuarterWithCapex(
   // 意図した仕様である。
   const spaceParams = input.factorySpaceParams ?? FACTORY_SPACE_PARAMETERS_V1;
   let remainingSpaceUnits = input.factorySpaceBudget?.remainingSpaceUnits ?? 0;
+  const existingFactoryCount = input.existingFactoryCount ?? 0;
   const rejectedProposals: CapexRejectedProposal[] = [];
   let nextProjectSequence = prevCapexState.nextProjectSequence;
   decision.newProjectProposals.forEach((proposal, index) => {
@@ -141,7 +152,25 @@ export function closeQuarterWithCapex(
             epsilonSpaceUnits: spaceParams.epsilonSpaceUnits,
           }
         : undefined;
-    const outcome = evaluateProposal(companyId, proposal, activeCount, input.approvalGate, params, period, projectId, index + 1, spaceGate);
+    // 【Test15新設】newFactoryConstruction提案のみ、1社あたり工場数上限を判定する。
+    // projectsは同一四半期内の直前までの承認をすでに反映済みのため（`projects = [...projects, outcome.approved]`で
+    // 逐次更新）、同じ四半期に複数のnewFactoryConstructionを提案しても正しく積み上がる。
+    const factoryCountGate: ProposalFactoryCountGate | undefined =
+      proposal.projectType === "newFactoryConstruction"
+        ? { wouldExceedMax: wouldExceedMaxFactories(existingFactoryCount, projects), maxFactoriesPerCompany: MAX_FACTORIES_PER_COMPANY }
+        : undefined;
+    const outcome = evaluateProposal(
+      companyId,
+      proposal,
+      activeCount,
+      input.approvalGate,
+      params,
+      period,
+      projectId,
+      index + 1,
+      spaceGate,
+      factoryCountGate
+    );
     if ("approved" in outcome) {
       projects = [...projects, outcome.approved];
       nextProjectSequence += 1;
