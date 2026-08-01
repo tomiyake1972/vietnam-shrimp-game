@@ -310,6 +310,31 @@ export const CAPEX_PARAMETERS_V1: CapexParameters = {
         rampMultipliers: [0.5, 0.75, 1.0],
       }
     ),
+    // 【Test15新設】PD省人化投資（機械化）。特定Factory（targetFactoryId、
+    // capex/types.ts CapitalProject.targetFactoryId）だけを対象に、そのFactoryの
+    // PD労働集約度係数を引き下げる（capex/pdMechanization.ts参照）。PD生産能力・
+    // HOSO/VAPの労働集約度には一切影響しない。
+    // 【重要】達成可能な最大削減率は「20%」ではなく、フロア(HOSO=1.0)を下回れない
+    // ことから決まる「約16.67%（正確には1/6）」である。この数値はここでは
+    // 一切ハードコードせず、capex/pdMechanization.ts の
+    // reductionRatioAtFullMaturity()（基準係数1.2とフロア1.0の比から導出）を
+    // 唯一の情報源とする。
+    pdMechanization: template(
+      "pdMechanization",
+      "PD省人化投資（機械化）",
+      2_500_000,
+      [0.4, 0.6],
+      "productionEquipment",
+      1, // 竣工後1四半期の操業準備期間（実装指示どおり）
+      0.1, // 建物10%（実装指示どおり）
+      0.9, // 機械90%（実装指示どおり）
+      0.01, // 保守費率1%/四半期（実装指示どおり）
+      // PD生産能力は増やさない（targetProduct省略・capacityIncreaseTonsPerQuarter=0）。
+      // 労働集約度係数の引き下げという効果は、futureCapacityEffect/newFactoryEffectの
+      // どちらの枠組みにも属さない別種の効果のため、companyLab層が
+      // capex/pdMechanization.tsの関数群を通じて別途算出する（唯一の計算箇所）。
+      { capacityIncreaseTonsPerQuarter: 0, readinessQuartersAfterCompletion: 1 }
+    ),
   },
 
   // 5社の初期現金（22M〜35M USD、finance/initialState.ts参照）に対し、通常の

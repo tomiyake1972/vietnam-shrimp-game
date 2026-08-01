@@ -279,3 +279,60 @@ test("Test15: laborIntensityCoefficientForはproduction/labor.tsのlaborIntensit
   assert.equal(PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.pd, 1.2);
   assert.equal(PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.vap, 3.0);
 });
+
+// ---------------------------------------------------------------------
+// Test15（PD省人化投資）: pdCoefficientOverrideByFactoryIdの配線検証
+// ---------------------------------------------------------------------
+
+test("Test15-PDOVR-1: pdCoefficientOverrideByFactoryIdでPD係数を1.0（フル機械化フロア）へ上書きすると、同じ完成品数量に必要なPD人数がHOSOと一致する", () => {
+  const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), pdCapacity: hosoEqTons(100000), vapCapacity: hosoEqTons(100000) });
+  const targetQuantity = 100;
+  const assignment = makeAssignment({ regularHeadcount: 1000, temporaryHeadcount: 0 });
+
+  const hosoDemands = [demand({ id: "hoso", product: "hoso", candidateQuantity: targetQuantity, priority: 1 })];
+  const hosoResult = allocateWorkersToPlans(hosoDemands, [assignment], capacityMapFor(factory));
+  const hosoHeadcount = hosoResult.entries[0].assignedRegularHeadcount;
+
+  const pdDemands = [demand({ id: "pd", product: "pd", candidateQuantity: targetQuantity, priority: 1 })];
+  const overrideToFloor = new Map([["F1", 1.0]]);
+  const pdResultOverridden = allocateWorkersToPlans(pdDemands, [assignment], capacityMapFor(factory), PRODUCTION_PARAMETERS_V1, overrideToFloor);
+  const pdHeadcountOverridden = pdResultOverridden.entries[0].assignedRegularHeadcount;
+
+  assert.ok(Math.abs(pdHeadcountOverridden - hosoHeadcount) < 1e-6, `override適用後のPD必要人数(${pdHeadcountOverridden})はHOSO(${hosoHeadcount})と一致するはず`);
+});
+
+test("Test15-PDOVR-2: pdCoefficientOverrideByFactoryIdが指定されていないFactoryは、通常どおりベース係数(1.2)のまま計算される（他Factoryへ波及しない）", () => {
+  const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), pdCapacity: hosoEqTons(100000), vapCapacity: hosoEqTons(100000) });
+  const targetQuantity = 100;
+  const assignment = makeAssignment({ regularHeadcount: 1000, temporaryHeadcount: 0 });
+  const pdDemands = [demand({ id: "pd", product: "pd", candidateQuantity: targetQuantity, priority: 1 })];
+
+  const noOverrideResult = allocateWorkersToPlans(pdDemands, [assignment], capacityMapFor(factory));
+  const otherFactoryOverride = new Map([["OTHER-FACTORY", 1.0]]); // F1向けではない
+  const unaffectedResult = allocateWorkersToPlans(pdDemands, [assignment], capacityMapFor(factory), PRODUCTION_PARAMETERS_V1, otherFactoryOverride);
+
+  assert.ok(
+    Math.abs(noOverrideResult.entries[0].assignedRegularHeadcount - unaffectedResult.entries[0].assignedRegularHeadcount) < 1e-9,
+    "自Factory向けでないoverrideは一切影響しないはず"
+  );
+});
+
+test("Test15-PDOVR-3: pdCoefficientOverrideByFactoryIdはHOSO・VAPの必要人数に一切影響しない（PDのみに適用される）", () => {
+  const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), pdCapacity: hosoEqTons(100000), vapCapacity: hosoEqTons(100000) });
+  const targetQuantity = 100;
+  const assignment = makeAssignment({ regularHeadcount: 1000, temporaryHeadcount: 0 });
+  const override = new Map([["F1", 1.0]]); // PDをフロアへ
+
+  const hosoDemands = [demand({ id: "hoso", product: "hoso", candidateQuantity: targetQuantity, priority: 1 })];
+  const vapDemands = [demand({ id: "vap", product: "vap", candidateQuantity: targetQuantity, priority: 1 })];
+
+  const hosoNoOverride = allocateWorkersToPlans(hosoDemands, [assignment], capacityMapFor(factory)).entries[0].assignedRegularHeadcount;
+  const hosoWithOverride = allocateWorkersToPlans(hosoDemands, [assignment], capacityMapFor(factory), PRODUCTION_PARAMETERS_V1, override).entries[0]
+    .assignedRegularHeadcount;
+  const vapNoOverride = allocateWorkersToPlans(vapDemands, [assignment], capacityMapFor(factory)).entries[0].assignedRegularHeadcount;
+  const vapWithOverride = allocateWorkersToPlans(vapDemands, [assignment], capacityMapFor(factory), PRODUCTION_PARAMETERS_V1, override).entries[0]
+    .assignedRegularHeadcount;
+
+  assert.ok(Math.abs(hosoNoOverride - hosoWithOverride) < 1e-9, "HOSOはPD向けoverrideの影響を受けないはず");
+  assert.ok(Math.abs(vapNoOverride - vapWithOverride) < 1e-9, "VAPはPD向けoverrideの影響を受けないはず");
+});

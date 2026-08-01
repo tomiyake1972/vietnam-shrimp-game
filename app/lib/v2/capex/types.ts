@@ -50,8 +50,11 @@ export type CapitalProjectType =
   | "environmentalEquipment" // 排水・環境設備
   | "commonProcessingExpansion" // 【Phase 8B-2B】共通前処理能力増設
   | "freezingPackagingExpansion" // 【Phase 8D-5】凍結・包装処理能力増設（フロー側）
-  | "newFactoryConstruction"; // 【Test15新設】新工場建設（標準工場）。既存工場の能力増強ではなく、
+  | "newFactoryConstruction" // 【Test15新設】新工場建設（標準工場）。既存工場の能力増強ではなく、
   // Factory[]へ新しい工場そのものを追加する（capex/factoryConstruction.ts参照）。
+  | "pdMechanization"; // 【Test15新設】PD省人化投資（機械化）。特定factoryIdを対象とし、
+  // そのFactoryのPD労働集約度係数のみを引き下げる（capex/pdMechanization.ts参照）。
+  // PD生産能力そのものは増やさない。HOSO/VAPには一切影響しない。
 
 export const CAPITAL_PROJECT_TYPES: readonly CapitalProjectType[] = [
   "hosoLineExpansion",
@@ -63,6 +66,7 @@ export const CAPITAL_PROJECT_TYPES: readonly CapitalProjectType[] = [
   "qualityControlEquipment",
   "environmentalEquipment",
   "newFactoryConstruction",
+  "pdMechanization",
 ];
 
 /** 最低6状態（実装指示§10）。 */
@@ -189,6 +193,12 @@ export interface CapitalProject {
   readonly futureCapacityEffect?: FutureCapacityEffectPlaceholder;
   /** 【Test15新設】newFactoryConstruction案件のみ設定される、新設Factory合成用の承認時スナップショット。 */
   readonly newFactoryEffect?: NewFactoryEffectPlaceholder;
+  /**
+   * 【Test15新設】この案件が対象とする特定のFactoryId。pdMechanization案件は必須
+   * （会社単位ではなく工場単位の投資のため）。他の案件種別は未設定（会社全体・
+   * または既存の「主工場」規則に従う既存挙動を変えない）。
+   */
+  readonly targetFactoryId?: string;
   /** 直近の意思決定・処理結果の診断メモ（承認拒否理由・支払見送り理由等、直近1件分）。 */
   readonly lastDiagnosticReasons: readonly string[];
 }
@@ -223,6 +233,8 @@ export interface CapexProjectProposalInput {
   readonly requestedBudgetUsd?: number;
   /** 省略時は提案順に自動付与される連番を使う。 */
   readonly priority?: number;
+  /** 【Test15新設】この提案が対象とする特定のFactoryId。pdMechanization提案は必須。 */
+  readonly targetFactoryId?: string;
 }
 
 export interface CapexCancelRequestInput {

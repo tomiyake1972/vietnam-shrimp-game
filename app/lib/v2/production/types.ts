@@ -449,6 +449,14 @@ export interface ProductionQuarterInput {
   readonly plans: readonly CompanyProductionPlanEntry[];
   /** 会社→産地（VN固定が基本だが将来の拡張性のため明示入力とする）のマッピング。PD/VAP供給シグナル集計に使う。 */
   readonly companyCountry: Readonly<Record<CompanyId, CountryId>>;
+  /**
+   * 【Test15新設・PD省人化投資】factoryId→そのFactoryの実効PD労働集約度係数の
+   * 上書き（capex/pdMechanization.tsが、前四半期に確定したそのFactoryのPD稼働率と
+   * 稼働中のPD省人化投資案件から算出する）。省略時は全Factoryとも通常のPD係数
+   * （production/parameters.ts labor.laborIntensityCoefficient.pd）のまま。
+   * HOSO/VAPには一切影響しない。
+   */
+  readonly pdCoefficientOverrideByFactoryId?: ReadonlyMap<string, number>;
 }
 
 export interface ProductionQuarterRecord {
