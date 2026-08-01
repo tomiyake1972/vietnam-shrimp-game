@@ -143,3 +143,25 @@ tool_use入力の型情報、`stop_reason`・`output_tokens`をログへ追加�
   `app/api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/ai-explanation/_lib/handlers.ts`、
   `app/lib/v2/companyLab/aiExplanation/__tests__/claudeClient.test.ts`、
   `app/api/v2/company-labs/_lib/__tests__/aiExplanationHandlers.test.ts`
+
+## 11. npm run build 最終結果（三宅さんの受入確認指示に基づく再実行）
+
+- **結果：失敗**（`EXIT=1`）。ただし失敗箇所は「コンパイル」「TypeScript型チェック」ではなく、
+  その後の「ページデータ収集（Collecting page data）」段階。
+- コンパイル：`✓ Compiled successfully`／TypeScript：`✓ Finished TypeScript` いずれも成功。
+- 失敗の実際のエラー：
+  ```
+  Error: [redis] 環境変数 "STAGING_KV_REST_API_URL" が設定されていません
+  （appEnvironment="development"）。
+  Error: Failed to collect page data for /api/game/[gameCode]/admin/clone
+  ```
+- **今回の変更との関係：無関係。既知のサンドボックス環境制約。**
+  失敗しているルートは`/api/game/[gameCode]/admin/clone`（V1のゲーム管理系エンドポイント）で、
+  今回変更したV2の`ai-explanation`関連ファイルとは無関係。原因は`app/lib/redis.ts`が
+  モジュール読み込み時に`STAGING_KV_REST_API_URL`を要求する既存の実装であり、この環境変数が
+  クラウドサンドボックスに設定されていないために発生する。Vercel（本番／Preview）側には
+  この環境変数が設定済みのため、実際のデプロイ・実機確認では発生しない
+  （現に本件のPreviewデプロイは`READY`まで到達し、Test14／BAL／turn1で正常動作を確認済み）。
+- 今回のschema_mismatch対応コミット（`a3a113c`〜`990dba9`）はいずれもこのルート・
+  `app/lib/redis.ts`を変更していないため、このビルド失敗は今回の変更で新たに生じたものではなく、
+  修正前から存在していた既知の制約がそのまま再現しているだけであると判断する。
