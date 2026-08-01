@@ -20,7 +20,7 @@
 
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DecisionEditor from "../../components/DecisionEditor";
@@ -33,7 +33,14 @@ import FinancialResultsSection from "../../components/financial/FinancialResults
 import PlayLabBanner from "../components/PlayLabBanner";
 import { CompanyDecisionDraft, summarizeSalesForceAllocation } from "../../decisionDraft";
 import { PlayerScreenViewModel } from "../_lib/viewModel";
-import { processQuarterAction, saveDraftAction, submitDraftAction, withdrawDraftAction } from "./actions";
+import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
+import { fetchAiExplanationAction, processQuarterAction, saveDraftAction, submitDraftAction, withdrawDraftAction } from "./actions";
+
+/** fetchAiExplanationActionの読み込み状態（このコンポーネントのローカル表示状態専用。サーバー側の正とは無関係）。 */
+type AiExplanationLoadState =
+  | { readonly kind: "loading" }
+  | { readonly kind: "success"; readonly report: StandardAiManagementReport }
+  | { readonly kind: "failure" };
 
 interface PlayerScreenClientProps {
   readonly viewModel: PlayerScreenViewModel;
@@ -56,6 +63,36 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
   const isSubmitted = viewModel.phase === "submitted";
   const isCompleted = viewModel.phase === "completed";
   const busy = savePending || submitPending || processPending || withdrawPending;
+
+  // 【Standard AI経営説明レポート（MVP）】isEditing && aiProposalDiagnosticsがある場合のみ、
+  // マウント時にServer Action（fetchAiExplanationAction）でClaudeが生成した経営説明を取得する。
+  // このServer Actionはブラウザから見えない秘密（ANTHROPIC_API_KEY・STAGING_ADMIN_TOKEN）を
+  // 一切外部へ渡さず、既存のhandlePostAiExplanation（キャッシュ済みならClaudeを呼び直さない）
+  // をサーバー側でそのまま呼ぶだけ。失敗しても意思決定画面自体は必ず正常に表示され続ける
+  // （failure状態でも詳細な判断ログ・DecisionEditor・提出ボタン等は通常どおり描画する）。
+  const [aiExplanationState, setAiExplanationState] = useState<AiExplanationLoadState>({ kind: "loading" });
+  useEffect(() => {
+    if (!isEditing || !viewModel.aiProposalDiagnostics) return;
+    // 【初期状態について】aiExplanationStateの初期値は既にuseState({kind:"loading"})。
+    // このコンポーネント自体がturn・revision・phase等が変わるたびに新しいkeyでremountされる
+    // 設計（PlayerScreenClient本体のresetKey参照）のため、このeffect内で改めて
+    // setState(loading)を呼ぶ必要はない（呼ぶと「effect内での同期的setState」という
+    // 不要なレンダーカスケードをlintが指摘するため、意図的に呼ばない）。
+    let cancelled = false;
+    fetchAiExplanationAction(viewModel.labId, viewModel.playerCompanyId, viewModel.currentTurn)
+      .then((result) => {
+        if (cancelled) return;
+        setAiExplanationState(result.ok && result.report ? { kind: "success", report: result.report } : { kind: "failure" });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAiExplanationState({ kind: "failure" });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, viewModel.labId, viewModel.playerCompanyId, viewModel.currentTurn, Boolean(viewModel.aiProposalDiagnostics)]);
 
   // 【Phase 8G】営業人員の配分合計チェック。draft.salesPlansが存在する（=完了済みでない）
   // ときだけ意味を持つ。validateSalesForceHeadcountBudget（エンジン側）と同じ
@@ -175,31 +212,166 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
           >
             <p className="text-xs text-gray-400 mb-2">
               下の「意思決定編集」欄には、Standard
-              AIが同じ入力（自社状態・公開市場情報）から算出した提案が初期値として入っています。このまま「この内容で提出する」を押せばAI提案どおりに実行され、内容を編集してから提出することもできます。以下はAIがその提案に至った判断理由です（提出後・下書き保存後は表示されません）。
+              AIが同じ入力（自社状態・公開市場情報）から算出した提案が初期値として入っています。このまま「この内容で提出する」を押せばAI提案どおりに実行され、内容を編集してから提出することもできます。（提出後・下書き保存後は表示されません）
             </p>
-            {viewModel.aiProposalDiagnostics.entries.length === 0 ? (
-              <p className="text-xs text-gray-500">この四半期は特筆すべき判断理由（警告・閾値超過等）がありません。</p>
-            ) : (
-              <ul className="text-xs text-gray-300 space-y-1.5">
-                {viewModel.aiProposalDiagnostics.entries.map((entry, idx) => (
-                  <li key={`${entry.code}-${idx}`} className="border-b border-gray-700/40 pb-1.5 last:border-b-0">
-                    <span
-                      className={
-                        entry.severity === "critical"
-                          ? "text-rose-300"
-                          : entry.severity === "warning"
-                            ? "text-amber-300"
-                            : "text-gray-400"
-                      }
-                    >
-                      [{entry.domain}/{entry.code}]
-                    </span>{" "}
-                    {entry.message}
-                    {entry.decisionSummary ? ` → ${entry.decisionSummary}` : ""}
-                  </li>
-                ))}
-              </ul>
-            )}
+
+            {/* 【視覚的な区別（実装指示§10）】(a) ゲームエンジンが確定した事実＝上のOpeningCompanyStatePanel/
+                AiMarketInfoPanel等（tone="info"、灰色）、(b) Standard AI自身の評価＝下の詳細な判断ログ
+                （既存のseverity色分けをそのまま維持）、(c) Claude生成の説明文＝以下のindigo系の
+                背景・バッジをつけたブロック、の3つをプレイヤーが混同しないようにする。 */}
+            <div className="rounded-lg border border-indigo-700/50 bg-indigo-950/30 p-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] rounded px-1.5 py-0.5 bg-indigo-900/70 text-indigo-200 border border-indigo-700/70">
+                  AIによる説明文（Claude生成）
+                </span>
+              </div>
+              <p className="text-[11px] text-indigo-200/80">
+                以下はStandard
+                AIの提案をClaude
+                APIが日本語で解説したものです。提案の数値自体はStandard
+                AIが算出したもので、Claudeはそれを変更していません。
+              </p>
+
+              {aiExplanationState.kind === "loading" && <p className="text-xs text-indigo-200/70">経営説明を生成しています…</p>}
+
+              {aiExplanationState.kind === "failure" && (
+                <p className="text-xs text-amber-300">経営説明の生成に失敗しました（詳細な判断ログは下記でご確認いただけます）。</p>
+              )}
+
+              {aiExplanationState.kind === "success" && (
+                <div className="space-y-4">
+                  {/* ① 今期の基本方針 */}
+                  <div>
+                    <h4 className="text-xs font-semibold text-indigo-100 mb-1">① 今期の基本方針</h4>
+                    <p className="text-sm text-gray-100">{aiExplanationState.report.headline}</p>
+                  </div>
+
+                  {/* ② 経営サマリー */}
+                  <div>
+                    <h4 className="text-xs font-semibold text-indigo-100 mb-1">② 経営サマリー</h4>
+                    <p className="text-xs text-gray-200 whitespace-pre-wrap">{aiExplanationState.report.executiveSummary}</p>
+                  </div>
+
+                  {/* ③④ 分野別の重要提案・主要な数値根拠 */}
+                  <div>
+                    <h4 className="text-xs font-semibold text-indigo-100 mb-1">③ 分野別の重要提案</h4>
+                    {aiExplanationState.report.recommendations.length === 0 ? (
+                      <p className="text-xs text-gray-500">今期は特筆すべき重要提案はありません。</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {aiExplanationState.report.recommendations.map((rec, idx) => (
+                          <li key={`${rec.area}-${idx}`} className="rounded border border-gray-700/60 bg-gray-900/40 p-2">
+                            <div className="text-[10px] text-gray-500">{rec.area}</div>
+                            <div className="text-xs font-semibold text-gray-100">{rec.title}</div>
+                            <div className="text-xs text-gray-300 mt-0.5">{rec.action}</div>
+                            {rec.reasons.length > 0 && (
+                              <ul className="mt-1.5 space-y-0.5">
+                                {rec.reasons.map((reason, reasonIdx) => (
+                                  <li key={`${reason.label}-${reasonIdx}`} className="text-[11px] text-gray-400">
+                                    <span className="text-gray-500">{reason.label}:</span> {reason.value}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* ⑤ 重要なリスク */}
+                  <div>
+                    <h4 className="text-xs font-semibold text-indigo-100 mb-1">⑤ 重要なリスク</h4>
+                    {aiExplanationState.report.keyRisks.length === 0 ? (
+                      <p className="text-xs text-gray-500">今期は特筆すべきリスクはありません。</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {aiExplanationState.report.keyRisks.map((risk, idx) => (
+                          <li
+                            key={`${risk.title}-${idx}`}
+                            className={
+                              "rounded border p-2 text-xs " +
+                              (risk.severity === "high"
+                                ? "border-rose-700/60 bg-rose-950/30 text-rose-200"
+                                : risk.severity === "medium"
+                                  ? "border-amber-700/60 bg-amber-950/30 text-amber-200"
+                                  : "border-gray-700/60 bg-gray-900/40 text-gray-300")
+                            }
+                          >
+                            <div className="font-semibold">{risk.title}</div>
+                            <div className="mt-0.5 opacity-90">{risk.description}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* ⑥ プレイヤーが検討すべき論点 */}
+                  <div>
+                    <h4 className="text-xs font-semibold text-indigo-100 mb-1">⑥ プレイヤーが検討すべき論点</h4>
+                    {aiExplanationState.report.questionsForPlayer.length === 0 ? (
+                      <p className="text-xs text-gray-500">今期は特に論点はありません。</p>
+                    ) : (
+                      <ul className="list-disc list-inside text-xs text-gray-300 space-y-0.5">
+                        {aiExplanationState.report.questionsForPlayer.map((question, idx) => (
+                          <li key={idx}>{question}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* ⑦ データ上の制約・不明点 */}
+                  <div>
+                    <h4 className="text-xs font-semibold text-indigo-100 mb-1">⑦ データ上の制約・不明点</h4>
+                    {aiExplanationState.report.dataLimitations.length === 0 ? (
+                      <p className="text-xs text-gray-500">今期は特筆すべきデータ上の制約はありません。</p>
+                    ) : (
+                      <ul className="list-disc list-inside text-xs text-gray-400 space-y-0.5">
+                        {aiExplanationState.report.dataLimitations.map((limitation, idx) => (
+                          <li key={idx}>{limitation}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ⑧ 詳細な判断ログ — 既存の内容をそのまま維持し、折りたたみへ移動しただけ（削除・改変なし）。 */}
+            <CollapsibleSection
+              title="⑧ 詳細な判断ログ（Standard AI自身の理由コード・閾値）"
+              tone="info"
+              defaultOpen={false}
+              testId="ai-proposal-diagnostics-entries-section"
+            >
+              <p className="text-xs text-gray-400 mb-2">
+                以下はAIがその提案に至った判断理由そのもの（理由コード・鍵となる入力値・閾値）です。上のClaude生成の説明文とは異なり、
+                Standard AIエンジン自身が出力した値です。
+              </p>
+              {viewModel.aiProposalDiagnostics.entries.length === 0 ? (
+                <p className="text-xs text-gray-500">この四半期は特筆すべき判断理由（警告・閾値超過等）がありません。</p>
+              ) : (
+                <ul className="text-xs text-gray-300 space-y-1.5">
+                  {viewModel.aiProposalDiagnostics.entries.map((entry, idx) => (
+                    <li key={`${entry.code}-${idx}`} className="border-b border-gray-700/40 pb-1.5 last:border-b-0">
+                      <span
+                        className={
+                          entry.severity === "critical"
+                            ? "text-rose-300"
+                            : entry.severity === "warning"
+                              ? "text-amber-300"
+                              : "text-gray-400"
+                        }
+                      >
+                        [{entry.domain}/{entry.code}]
+                      </span>{" "}
+                      {entry.message}
+                      {entry.decisionSummary ? ` → ${entry.decisionSummary}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CollapsibleSection>
           </CollapsibleSection>
         )}
 

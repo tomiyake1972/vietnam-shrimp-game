@@ -21,7 +21,10 @@
 import { revalidatePath } from "next/cache";
 import { requireStagingSession, assertSameOriginRequest } from "../../../../lib/companyLabUiSession";
 import { resolveCompanyLabUiDependencies } from "../_lib/uiDependencies";
+import { resolveAiExplanationUiDependencies } from "../_lib/aiExplanationUiDependencies";
 import { ApiResult, handleProcessQuarter, handleSaveDraft, handleSubmitDraft, handleWithdrawDraft } from "../../../../api/v2/company-labs/_lib/handlers";
+import { handlePostAiExplanation } from "../../../../api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/ai-explanation/_lib/handlers";
+import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
 
 export interface PlayerActionResult {
   readonly ok: boolean;
@@ -128,4 +131,43 @@ export async function processQuarterAction(labId: string): Promise<ProcessQuarte
     return { ...base, quarterStatus: body.status };
   }
   return base;
+}
+
+// ---------------------------------------------------------------------
+// Standard AI経営説明レポート機能（MVP）— Claudeが生成した経営説明の取得
+// ---------------------------------------------------------------------
+//
+// 【方式選択の理由】このServer Actionは、既存のsaveDraftAction等と全く同じ配線
+// （requireStagingSession→resolveCompanyLabUiDependencies同様のUI用依存関係解決
+// →handlers.tsの既存ハンドラーを直接呼ぶ）に揃えている。ブラウザからこの機能専用の
+// 自己HTTP fetchは一切行わない（指示§7の既存方針を踏襲。ANTHROPIC_API_KEY等の
+// 秘密情報はサーバー側の環境変数からのみ読まれ、クライアントへは一切渡らない）。
+// handlePostAiExplanation自体は「キャッシュ済みならClaudeを呼び直さない」という
+// 冪等性を既に持つため、この関数はPOST（生成トリガー）をそのまま呼べばよい。
+
+export interface AiExplanationActionResult {
+  readonly ok: boolean;
+  readonly report?: StandardAiManagementReport;
+  readonly errorCategory?: string;
+}
+
+export async function fetchAiExplanationAction(labId: string, companyId: string, turn: number): Promise<AiExplanationActionResult> {
+  const g = await guard();
+  if (!g.ok) return { ok: false, errorCategory: "unauthorized" };
+
+  try {
+    const deps = await resolveAiExplanationUiDependencies();
+    const result = await handlePostAiExplanation(deps, labId, companyId, String(turn), new Date().toISOString());
+    const body = result.body as { result?: "success" | "failure"; report?: StandardAiManagementReport; errorCategory?: string } | undefined;
+    if (result.status === 200 && body?.result === "success" && body.report) {
+      return { ok: true, report: body.report };
+    }
+    return { ok: false, errorCategory: body?.errorCategory ?? "unknown" };
+  } catch (e) {
+    // 【Claude API失敗が意思決定画面をブロックしてはならない】依存関係の組み立て失敗
+    // （Redis接続不可等）や想定外の例外も、ここで必ず捕まえて構造化された失敗として返す
+    // （詳細はサーバーログにのみ残し、クライアントへは一般化したカテゴリ名だけ返す）。
+    console.error("[fetchAiExplanationAction] 依存関係の組み立てまたはハンドラー呼び出しに失敗しました:", e);
+    return { ok: false, errorCategory: "internal_error" };
+  }
 }
