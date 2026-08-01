@@ -604,7 +604,7 @@ HOSO原料 100t → 冷凍HOSO 約100 物理t（1.00）
 | `overtimeEfficiencyFactor` | 0.5 | 残業時間の能力換算効率 |
 | `laborIntensityCoefficientByProduct` | hoso 1.0 / pd 1.2 / vap 3.0 | **【2026-08-01追加】製品別労務負荷係数** |
 
-**【2026-08-01・製品別労務負荷係数の追加】** 以前は正社員・臨時工の基礎処理能力（上記2値）が商品非依存であり、会社別skillの差だけが商品間の労務負荷差を表していた。これはゲーム設計上の意図（同じHOSO換算生産量を処理するときの労務負荷はHOSO:PD:VAP = 1.0:1.2:3.0であるべき）と一致しておらず、結果として6,000人規模のWorkerに対して必要人数が極端に少なくなる、巨額の遊休人件費が恒常的に発生する等の不具合を引き起こしていた（詳細はブランチ`feature/v2-product-labor-intensity`の完了報告を参照）。
+**【2026-08-01・製品別労務負荷係数の追加】** 以前は正社員・臨時工の基礎処理能力（上記2値）が商品非依存であり、会社別skillの差だけが商品間の労務負荷差を表していた。これはゲーム設計上の意図（同じHOSO換算生産量を処理するときの労務負荷はHOSO:PD:VAP = 1.0:1.2:3.0であるべき）と一致しておらず、Worker必要人数が実態より少なく算出され、遊休人件費を過大にする原因の一つとなっていた。
 
 この係数は「同じHOSO換算生産量を処理するときに要する労務量」の相対比であり、**歩留まり係数（`yield.saleableRecoveryRatio`、原料→完成品の物理的回収率）とも、管理会計上の固定費配賦係数（`finance/parameters.ts` `managementAccounting.fixedCostAllocationCoefficientByProduct`、hoso 1.0/pd 1.5/vap 2.4）とも、営業工数係数（`sales/parameters.ts` `salesEffortCoefficients`、hoso 1.0/pd 1.2/vap 3.0、営業活動専用）とも別系統の、労務専用の係数である**。数値がsalesEffortCoefficientsとたまたま同じであっても意味も適用箇所も異なるため混同しないこと。
 
