@@ -59,7 +59,15 @@ export function advanceProductionQuarter(
 ): { readonly state: ProductionState; readonly updatedRawMaterialLots: readonly RawMaterialLot[] } {
   const period = state.currentPeriod;
 
-  const allocation = allocateProductionPlans(input.plans, input.factories, input.workerAssignments, rawMaterialLots, period, params);
+  const allocation = allocateProductionPlans(
+    input.plans,
+    input.factories,
+    input.workerAssignments,
+    rawMaterialLots,
+    period,
+    params,
+    input.pdCoefficientOverrideByFactoryId
+  );
 
   const { batches, updatedRawMaterialLots } = buildProductionBatches(input.plans, allocation.entries, rawMaterialLots, period, params);
 

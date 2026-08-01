@@ -73,6 +73,22 @@ export interface ProposalFactoryCountGate {
 }
 
 /**
+ * 【Test15新設】pdMechanization（PD省人化投資）専用の工場単位ゲート。
+ * 「1つのFactoryには同時に1件のPD省人化投資しか進行できない」を判定する。
+ * 呼び出し側（capexClose.ts）が、その会社の現在の案件一覧（同一四半期内で
+ * すでに承認した分を含む）を渡す。
+ */
+export interface ProposalFactoryMechanizationGate {
+  /** すでに同じFactoryを対象とする、取消・完成以外（＝進行中）のpdMechanization案件が存在するか。 */
+  readonly hasActiveProjectForSameFactory: boolean;
+}
+
+/** 特定Factoryに、進行中（approved/underConstruction/suspended）のpdMechanization案件が既に存在するか判定する。 */
+export function hasActivePdMechanizationProjectForFactory(portfolio: readonly CapitalProject[], targetFactoryId: string): boolean {
+  return portfolio.some((p) => p.projectType === "pdMechanization" && p.targetFactoryId === targetFactoryId && isActiveStatus(p.status));
+}
+
+/**
  * 1件の新規提案を評価する。承認条件（実装指示§12。会社IDでの特殊扱いは
  * 一切行わない。財務・信用診断だけで判定する）:
  *   - 銀行引受停止・重大資金繰り不安（前期末までの情報のみ）の会社は新規承認しない。
@@ -94,7 +110,8 @@ export function evaluateProposal(
   projectId: string,
   priority: number,
   spaceGate?: ProposalSpaceGate,
-  factoryCountGate?: ProposalFactoryCountGate
+  factoryCountGate?: ProposalFactoryCountGate,
+  mechanizationGate?: ProposalFactoryMechanizationGate
 ): { readonly approved: CapitalProject } | { readonly rejected: CapexRejectedProposal } {
   const template: CapexProjectTemplate | undefined = params.templatesByType[proposal.projectType];
   if (!template) {
@@ -126,6 +143,15 @@ export function evaluateProposal(
   if (factoryCountGate !== undefined && factoryCountGate.wouldExceedMax) {
     reasons.push(`工場数が上限(${factoryCountGate.maxFactoriesPerCompany})に達しているため、新工場建設の新規承認を見送り。`);
   }
+  // 【Test15新設】pdMechanizationはtargetFactoryIdが必須（工場単位の投資のため）。
+  if (proposal.projectType === "pdMechanization" && !proposal.targetFactoryId) {
+    reasons.push("PD省人化投資は対象Factory（targetFactoryId）の指定が必須です。");
+  }
+  // 【Test15新設】同一Factoryに進行中のpdMechanization案件が既にある場合は拒否する
+  // （1工場につき同時に1件まで）。
+  if (proposal.projectType === "pdMechanization" && mechanizationGate?.hasActiveProjectForSameFactory) {
+    reasons.push(`工場"${proposal.targetFactoryId}"には既に進行中のPD省人化投資があるため、新規承認を見送り。`);
+  }
 
   if (reasons.length > 0) {
     return { rejected: { projectType: proposal.projectType, requestedBudgetUsd, reasons } };
@@ -156,6 +182,9 @@ export function evaluateProposal(
     // 【Test15新設】newFactoryConstruction案件のみ、新設Factory合成用の情報を
     // 承認時にテンプレートからスナップショットする（他の案件種別は常にundefined）。
     ...(template.newFactoryEffect !== undefined ? { newFactoryEffect: template.newFactoryEffect } : {}),
+    // 【Test15新設】pdMechanization等、特定Factoryを対象とする案件のtargetFactoryIdを
+    // 承認時にスナップショットする。
+    ...(proposal.targetFactoryId !== undefined ? { targetFactoryId: proposal.targetFactoryId } : {}),
     lastDiagnosticReasons: ["承認され、着工待ち（当四半期の支払処理で初回支払を試行する）。"],
   };
   return { approved };
