@@ -250,6 +250,44 @@ test("受入確認Q-10: PLの各段階利益が勘定内訳から正しく積み
   assert.ok(Math.abs((pl.interestExpense as number) - 10_000_000 * FINANCE_PARAMETERS_V1.finance.shortTermInterestRatePerQuarter) < EPS);
 });
 
+// --- Test15新設: VAP商品開発費の単一情報源（SG&A・キャッシュフロー） ---
+
+test("Test15-VAPDEV-1: vapProductDevelopmentSpendUsdは全額が当期SG&A(sellingGeneralAdmin)へそのまま加算される（資産計上・減価償却なし）", () => {
+  const withoutSpend = close(makeState(), makeActuals({ vapProductDevelopmentSpendUsd: 0 }));
+  const withSpend = close(makeState(), makeActuals({ vapProductDevelopmentSpendUsd: 250_000 }));
+  const sgaDiff = (withSpend.result.profitAndLoss.sellingGeneralAdmin as number) - (withoutSpend.result.profitAndLoss.sellingGeneralAdmin as number);
+  assert.ok(Math.abs(sgaDiff - 250_000) < EPS, `SG&Aの差分が投資額と厳密に一致するはず（実際: ${sgaDiff}）`);
+  // 営業利益は同額だけ押し下げられる（他の勘定に分散しない）。
+  const opDiff = (withoutSpend.result.profitAndLoss.operatingProfit as number) - (withSpend.result.profitAndLoss.operatingProfit as number);
+  assert.ok(Math.abs(opDiff - 250_000) < EPS, `実際: ${opDiff}`);
+});
+
+test("Test15-VAPDEV-2: vapProductDevelopmentSpendUsdは全額が当期キャッシュフローの支出（SG&A支払）としてそのまま現れる", () => {
+  const withoutSpend = close(makeState(), makeActuals({ vapProductDevelopmentSpendUsd: 0 }));
+  const withSpend = close(makeState(), makeActuals({ vapProductDevelopmentSpendUsd: 250_000 }));
+  const cashDiff =
+    (withoutSpend.result.cashFlow.operatingDirect.paymentsForSellingGeneralAdmin as number) -
+    (withSpend.result.cashFlow.operatingDirect.paymentsForSellingGeneralAdmin as number);
+  // paymentsForSellingGeneralAdminは負値（支出）で計上されるため、支出が増えるほど値はより負になる。
+  assert.ok(Math.abs(cashDiff - 250_000) < EPS, `実際の差分: ${cashDiff}`);
+});
+
+test("Test15-VAPDEV-3: 未設定（省略）時はvapProductDevelopmentSpendUsd=0と完全に同一結果になる（後方互換）", () => {
+  const omitted = close(makeState(), makeActuals({ vapProductDevelopmentSpendUsd: undefined }));
+  const explicitZero = close(makeState(), makeActuals({ vapProductDevelopmentSpendUsd: 0 }));
+  assert.equal(omitted.result.profitAndLoss.sellingGeneralAdmin as number, explicitZero.result.profitAndLoss.sellingGeneralAdmin as number);
+});
+
+test("Test15-VAPDEV-4: 資産計上・固定資産の増加は一切発生しない（fixedAssetsGrossに変化なし）", () => {
+  const withoutSpend = close(makeState(), makeActuals({ vapProductDevelopmentSpendUsd: 0 }));
+  const withSpend = close(makeState(), makeActuals({ vapProductDevelopmentSpendUsd: 500_000 }));
+  assert.equal(
+    withoutSpend.nextState.fixedAssetsGross as unknown as number,
+    withSpend.nextState.fixedAssetsGross as unknown as number,
+    "VAP商品開発費は資産計上されないため、固定資産総額は変化しないはず"
+  );
+});
+
 // --- 重要テスト11: BSが毎四半期貸借一致する ---
 
 test("受入確認Q-11: BSの貸借差額が許容誤差内で0になる", () => {

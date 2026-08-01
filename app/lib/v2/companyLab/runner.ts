@@ -40,7 +40,7 @@
 // 必須の配線）。
 
 import { PeriodV2 } from "../core/period";
-import { HosoEqTons, hosoEqTons, ratio, roundHosoEqTons, Score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
+import { HosoEqTons, hosoEqTons, ratio, roundHosoEqTons, Score0to100, score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import {
   CONSUMER_MARKET_INVENTORY_PARAMETERS_V1,
@@ -56,8 +56,15 @@ import {
 } from "../market/consumerInventory";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
 import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../market/productLifecycle";
-import { salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
-import { SALES_PARAMETERS_SAI5_SALES_BASE_V1, SALES_PARAMETERS_V1, SalesParameters } from "../sales/parameters";
+import { lookupSalesBaseScore, salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
+import {
+  buildInitialProductDevelopmentState,
+  lookupProductDevelopmentScore,
+  ProductDevelopmentState,
+  updateProductDevelopmentState,
+} from "./productDevelopmentState";
+import { calculateCompanyCapabilityCoefficient } from "./premiumPolicy";
+import { SALES_PARAMETERS_SAI5_SALES_BASE_V1, SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1, SALES_PARAMETERS_V1, SalesParameters } from "../sales/parameters";
 import { MARKET_PARAMETERS_V1 } from "../market/parameters";
 import {
   applyProductSubstitution,
@@ -378,6 +385,8 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
     // 【Test15新設】Factory単位のPD稼働率の初期状態（疎配列・空。全FactoryがPD
     // 省人化投資パラメータのinitialPdUtilizationRatio扱いになる）。
     pdMechanizationState: buildInitialPdMechanizationState(),
+    // 【Test15新設】VAP商品開発スコアの初期状態（疎配列・空。全会社が中立値50扱い）。
+    productDevelopmentState: buildInitialProductDevelopmentState(),
     // 【Phase 8F-1】市場別（CN/US/EU/JP/OTHER）の消費国在庫・購買循環モデルの
     // 初期carry state。
     consumerMarketState: buildInitialConsumerMarketCarryStateTable(initialMarketInput.demandMarkets),
@@ -457,8 +466,16 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
   };
 }
 
-/** 当期の成約配分に使うSalesParameters（SAI-5D有効時のみ営業基盤ウェイトが正）。 */
+/**
+ * 当期の成約配分に使うSalesParameters（SAI-5D有効時のみ営業基盤ウェイトが正、
+ * 【Test15新設】vapProductDevelopmentCompetitiveness有効時のみVAP能力ウェイトが正）。
+ * 【Test15暫定値・要校正】両方同時有効時の重み配分定数は未整備のため、
+ * vapProductDevelopmentCompetitivenessを優先する（salesBaseAccumulationも同時に
+ * trueの場合はsalesBase側のウェイトが0に戻る。組み合わせが必要になった時点で
+ * 専用の定数を追加する）。
+ */
 function salesParametersFor(config: CompanyLabConfig): SalesParameters {
+  if (config.sai5?.vapProductDevelopmentCompetitiveness) return SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1;
   return config.sai5?.salesBaseAccumulation ? SALES_PARAMETERS_SAI5_SALES_BASE_V1 : SALES_PARAMETERS_V1;
 }
 
@@ -499,6 +516,58 @@ function applyAuthoritativeSalesBaseScores(state: CompanyLabState, decision: Com
         return rest;
       }
       return { ...plan, salesBaseScore: score };
+    }),
+  };
+}
+
+/**
+ * 【Test15新設】販売計画のVAP entryへ、正典のVAP能力合成係数
+ * （companyLab/premiumPolicy.tsのcalculateCompanyCapabilityCoefficient）を
+ * 上書きで設定する。applyAuthoritativeSalesBaseScoresと同じ設計方針:
+ *  - 意思決定側が自己申告したvapCapabilityScoreは採用されない（情報境界の担保）
+ *  - product!=="vap"のentryにはそもそも値を付けない（HOSO/PDへは構造的に無関係）
+ *  - 常に前四半期末までの状態だけを読む（今期の実績を遡及しない）
+ *
+ * ウェイト（competitivenessWeights.vapCapability）が既定0のため、この関数は
+ * 常時有効でも既存の全allocation結果とビット単位で一致する（値を設定しても
+ * 寄与が0×xで必ず0になるため）。
+ */
+function applyAuthoritativeVapCapabilityScores(state: CompanyLabState, decision: CompanyDecisionInput): CompanyDecisionInput {
+  // 機能OFFのときは何もしない（既存挙動とビット単位で一致、salesBase側と同じ方針）。
+  if (!state.config.sai5?.vapProductDevelopmentCompetitiveness) return decision;
+  const hasVapPlan = decision.salesPlans.some((p) => p.product === "vap");
+  if (!hasVapPlan) return decision;
+
+  const productDevelopmentScore = score0to100(lookupProductDevelopmentScore(state.productDevelopmentState, decision.companyId));
+
+  const vapSalesBaseScores = DEMAND_MARKET_IDS.map((market) => lookupSalesBaseScore(state.salesBaseState, decision.companyId, market, "vap"));
+  const salesBaseAvg = vapSalesBaseScores.reduce((s, v) => s + v, 0) / Math.max(1, vapSalesBaseScores.length);
+
+  const qualityEntry = state.qualityState.qualityByCompanyProduct.find((q) => q.companyId === decision.companyId && q.product === "vap");
+  const qualityScore = qualityEntry?.qualityScore;
+
+  const trustEntries = state.qualityState.trustByCompanyMarket.filter((t) => t.companyId === decision.companyId);
+  const deliveryAvg =
+    trustEntries.length > 0 ? trustEntries.reduce((s, t) => s + unwrapUnit(t.deliveryReliabilityScore), 0) / trustEntries.length : undefined;
+
+  const coefficient = calculateCompanyCapabilityCoefficient({
+    productDevelopmentScore,
+    salesBaseScore: score0to100(salesBaseAvg),
+    qualityScore,
+    deliveryReliabilityScore: deliveryAvg !== undefined ? score0to100(deliveryAvg) : undefined,
+  });
+  const vapCapabilityScore = score0to100(coefficient);
+
+  return {
+    ...decision,
+    salesPlans: decision.salesPlans.map((plan) => {
+      if (plan.product !== "vap") {
+        if (plan.vapCapabilityScore === undefined) return plan;
+        const rest = { ...plan };
+        delete (rest as { vapCapabilityScore?: unknown }).vapCapabilityScore;
+        return rest;
+      }
+      return { ...plan, vapCapabilityScore };
     }),
   };
 }
@@ -765,7 +834,7 @@ export function advanceCompanyLabQuarter(
       const message = err instanceof Error ? err.message : String(err);
       throw new CompanyLabError(`会社 "${f.companyId}" の意思決定が不正です: ${message}`);
     }
-    return applyAuthoritativeSalesBaseScores(state, d);
+    return applyAuthoritativeVapCapabilityScores(state, applyAuthoritativeSalesBaseScores(state, d));
   });
 
   // --- Phase2: シナリオ → 市場入力（industryLab/simulationRunner.tsと同じ手順） ---
@@ -1310,6 +1379,10 @@ export function advanceCompanyLabQuarter(
       // として一度だけ費用・支出計上する。
       salesForceSeveranceCount: salesForceEffectiveLayoffCountByCompanyId.get(f.companyId) ?? 0,
       procurementHeadcount: f.procurementHeadcountTotal,
+      // 【Test15新設】会計計上（SG&A・キャッシュフロー）とVAP商品開発スコア更新の
+      // 唯一の情報源。companyDecision.vapProductDevelopmentSpendUsdをそのまま渡す
+      // （未設定時は0。ここで別の金額を作らない）。
+      vapProductDevelopmentSpendUsd: companyDecision?.vapProductDevelopmentSpendUsd ?? 0,
     });
     const plan = financingPlanByCompanyId.get(f.companyId)!;
     const collateral = collateralByCompanyId.get(f.companyId)!;
@@ -1511,6 +1584,16 @@ export function advanceCompanyLabQuarter(
       state.pdMechanizationState,
       factoriesWithCapex,
       computeCurrentQuarterPdUtilizationByFactory(factoriesWithCapex, productionRecord.batches)
+    ),
+    // 【Test15新設】次期へ繰り越すVAP商品開発スコア。当四半期のdecisions（会計計上と
+    // 同一のvapProductDevelopmentSpendUsd）から算出する。今期の効果算出
+    // （applyAuthoritativeVapCapabilityScores呼び出し）は既に本関数の先頭で
+    // state.productDevelopmentState（前四半期末までの値）だけを使って終わっている
+    // ため、ここでの更新が今期の成約へ遡及することはない。
+    productDevelopmentState: updateProductDevelopmentState(
+      state.productDevelopmentState,
+      new Map(decisions.map((d) => [d.companyId, d.vapProductDevelopmentSpendUsd ?? 0])),
+      fixtures.map((f) => f.companyId)
     ),
     // 【Phase 8F-1】次期へ繰り越す市場別の消費国在庫carry state。
     consumerMarketState: consumerMarketStateAfter,

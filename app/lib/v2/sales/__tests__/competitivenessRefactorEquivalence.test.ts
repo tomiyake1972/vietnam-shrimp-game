@@ -180,7 +180,7 @@ test("受入確認R-6: 異なるSalesParameters（ウェイト・感度係数を
     ...SALES_PARAMETERS_V1,
     // 【SAI-5D】salesBase: 0 … 旧式（5項の合成）にはsalesBase項が存在しないため、
     // 旧式との等価性を検証するカスタム設定でもウェイト0（寄与が厳密に0）で固定する。
-    competitivenessWeights: { price: 0.5, coverage: 0.1, relationship: 0.1, quality: 0.2, deliveryReliability: 0.1, salesBase: 0 },
+    competitivenessWeights: { price: 0.5, coverage: 0.1, relationship: 0.1, quality: 0.2, deliveryReliability: 0.1, salesBase: 0, vapCapability: 0 },
     priceSensitivity: 5.0,
     minimumPriceCompetitiveness: 0.3,
     maximumPriceCompetitiveness: 2.0,
