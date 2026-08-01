@@ -359,6 +359,9 @@ test("極端な入力（原料・完成品ゼロ、契約ゼロ、現金が大�
     },
     capexState: { companyId: fixture.companyId, portfolio: { companyId: fixture.companyId, projects: [] }, nextProjectSequence: 1 },
     workforceState: { companyId: fixture.companyId, factories: fixture.workerBaseline.map((w) => ({ factoryId: w.factoryId, regularHeadcount: 0 })) },
+    // 【Test15新設・tsc修正】PD稼働率実績なし・VAP商品開発スコアは中立値50（未投資の既定値）。
+    pdUtilizationByFactory: [],
+    vapProductDevelopmentScore: 50,
   };
 
   let decision: CompanyDecisionInput | undefined;

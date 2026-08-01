@@ -7,7 +7,6 @@ import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, 
 import { generateAutoPolicyDecision } from "../autoPolicy";
 import { CompanyDecisionInput, CompanyLabConfig } from "../types";
 import { lookupProductDevelopmentScore } from "../productDevelopmentState";
-import { unwrapUnit } from "../../core/units";
 
 function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig {
   return { scenarioId: "baseline", mode: "canonical", seed: "vapdev-seed-001", turns: 8, ...overrides };
@@ -36,8 +35,11 @@ test("VAPDEV-INT-1: vapProductDevelopmentSpendUsdを設定すると、当期末�
   const afterBase = advanceCompanyLabQuarter(state, fixtures, decisionsBase);
   const afterSpend = advanceCompanyLabQuarter(state, fixtures, decisionsWithSpend);
 
-  const cashBase = unwrapUnit(afterBase.financeState.companies.find((c) => c.companyId === targetCompanyId)!.cash);
-  const cashSpend = unwrapUnit(afterSpend.financeState.companies.find((c) => c.companyId === targetCompanyId)!.cash);
+  // 【tsc修正】Usd（finance/types.ts）はcore/units.tsのBrand<T,B>とは別のブランド機構
+  // （別のunique symbol）のため、unwrapUnitへは渡せない。Usdはnumberのサブタイプ
+  // なので算術演算にはそのまま使える（unwrapは不要）。
+  const cashBase = Number(afterBase.financeState.companies.find((c) => c.companyId === targetCompanyId)!.cash);
+  const cashSpend = Number(afterSpend.financeState.companies.find((c) => c.companyId === targetCompanyId)!.cash);
 
   assert.ok(Math.abs(cashBase - cashSpend - 250_000) < 1, `現金差分が投資額と一致するはず（base=${cashBase}, spend=${cashSpend}）`);
 });
