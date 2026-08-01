@@ -88,6 +88,7 @@ function makePdMechanizationProject(overrides: Partial<CapitalProject> = {}): Ca
     targetFactoryId: "F1",
     futureCapacityEffect: { capacityIncreaseTonsPerQuarter: 0, readinessQuartersAfterCompletion: 1 },
     lastDiagnosticReasons: [],
+    priority: 0,
     ...overrides,
   };
 }
