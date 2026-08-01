@@ -6,31 +6,47 @@
 //   - 会社全体の利用可能資金不足（借入余力超過）            20/208件
 //   - 平均資金枠余裕                                        +14.79M
 // という一見矛盾する3つの数値を、179件を一律「銀行与信上限が支配的制約」と
-// 分類せずに、次の4つに分解して説明する。
+// 分類せずに、次の4つの反実仮想（counterfactual）カバレッジ判定に分解して説明する。
 //
-//   (A) 真の借入余力不足 … 通常融資の全枠＋緊急融資枠＋当期の確実な現金収入を
-//       すべて動員しても、なお国内買付の必要額を満たせない
+// 【2026-08-01夜・訂正（三宅さんのご指摘）】以下(A)(C)(D)はいずれも
+// 「特定の追加資金を仮に全額動員できたと仮定した反実仮想で、資金需要が充足するか」
+// を判定しているに過ぎない。当期の売掛金回収（reliableCashInflowsUsd）は買掛金・
+// 人件費・元利払い・加工費・SGA・法人税等、国内原料買付以外にも競合する使途があり、
+// それらを実際に差し引いた上で買付に回せたかどうかは本スクリプトでは未検証。
+// 同様に緊急融資も、調達判断の時点で実際に引き出せたかどうか（時間順序の制約）は
+// 未検証であり、「反実仮想上カバーされる」ことと「実際に利用可能だった」ことは別問題。
+// したがって(A)(C)(D)はいずれも「原因の確定」ではなく「反実仮想でのカバレッジ」を
+// 意味する分類名に改めている。
+//
+//   (A) gross funding upper bound（与信上限＋緊急融資＋当期売掛金回収の全額を
+//       すべて動員できたと仮定した反実仮想上の資金上限）でもなお国内買付の
+//       必要額を満たせないケース（0件）。「真の資金不足」への一般化はしない。
 //   (B) procurementが承認可能借入額（＝与信上限そのもの）を認識しないこと …
 //       与信上限（capacity.availableAdditionalCapacityUsd）自体は必要額を
 //       満たすのに、AIの実際の申請額（financingRequest.desiredAmountUsd）が
 //       それに届かず、承認額が申請額どまりになっている
-//   (C) financeが（緊急融資の確定という意味で）procurementより後にあることに
-//       よる時間順序 … 通常融資の承認自体は同一四半期・同一ループ内で
-//       procurementの制約計算より前に確定する（既存の因果接続監査で確認済み）が、
-//       緊急融資（emergencyLoan）は`closeQuarterWithFinancing`（四半期末）で
-//       初めて確定し、procurementの制約計算より後になる。したがって、当期に
-//       緊急融資が出た会社では、procurementはその緊急融資を一切認識できない
-//   (D) 入出金タイミング差 … procurementの流動性チェックは「前期末現金の60%
-//       （domesticPurchaseCashAllocationRatio）＋承認済み通常融資」だけを見ており、
-//       当期中に決済期が到来する売掛金回収（当期の確実な収入、fundingOutlookの
-//       reliableCashInflowsUsdと同じ定義。ただし本スクリプトはfundingOutlookの
-//       ON/OFFに関わらず、常にこの値を独立に再計算するだけで、意思決定ロジックは
-//       一切変更しない）を一切考慮しない
+//   (C) 緊急融資を調達時点で利用できたと仮定する反実仮想では充足する … 通常融資の
+//       承認自体は同一四半期・同一ループ内でprocurementの制約計算より前に確定する
+//       （既存の因果接続監査で確認済み）が、緊急融資（emergencyLoan）は
+//       `closeQuarterWithFinancing`（四半期末）で初めて確定し、procurementの
+//       制約計算より後になる。したがって、当期に緊急融資が出た会社では、
+//       procurementはその緊急融資を一切認識できない。ここでの判定は「もし
+//       procurementの時点で緊急融資分を先に使えたと仮定したら充足するか」という
+//       反実仮想であり、「実際にその時点で利用可能だった」ことの証明ではない
+//   (D) 当期売掛金回収を全額利用する反実仮想では充足する … procurementの
+//       流動性チェックは「前期末現金の60%（domesticPurchaseCashAllocationRatio）
+//       ＋承認済み通常融資」だけを見ており、当期中に決済期が到来する売掛金回収
+//       （当期の確実な収入、fundingOutlookのreliableCashInflowsUsdと同じ定義。
+//       ただし本スクリプトはfundingOutlookのON/OFFに関わらず、常にこの値を
+//       独立に再計算するだけで、意思決定ロジックは一切変更しない）を国内買付へ
+//       仮に全額充当できたと仮定すれば充足する、という反実仮想上のカバレッジで
+//       あり、当期売掛金回収は買掛金・人件費・元利払い・加工費・SGA・法人税等の
+//       競合する使途もあるため、実際に買付へ回せたかどうかは未検証・未確立である
 //
 // 判定の優先順位（安価な説明から順に、実際にデータで確認する）:
 //   1. 与信上限（capacity）だけで足りるか？ → 足りれば (B)
-//   2. 与信上限＋当期の緊急融資（あれば）で足りるか？ → 足りれば (C)
-//   3. 与信上限＋緊急融資＋当期の確実な収入で足りるか？ → 足りれば (D)
+//   2. 与信上限＋当期の緊急融資（あれば、反実仮想）で足りるか？ → 足りれば (C)
+//   3. 与信上限＋緊急融資＋当期の確実な収入（反実仮想）で足りるか？ → 足りれば (D)
 //   4. それでも足りなければ (A)
 //
 // 【重要】本スクリプトは読み取り専用の診断であり、エンジン・標準AI本体の
@@ -59,7 +75,12 @@ function toNumber(v: unknown): number {
   return typeof v === "number" ? v : Number(v);
 }
 
-type Category = "A_true_capacity_shortage" | "B_request_below_capacity" | "C_emergency_loan_timing" | "D_cash_timing_input_output" | "none_not_constrained";
+type Category =
+  | "A_gross_upper_bound_insufficient"
+  | "B_request_below_capacity"
+  | "C_emergency_loan_counterfactual_covers"
+  | "D_gross_ar_inclusive_counterfactual_covers"
+  | "none_not_constrained";
 
 interface Row {
   seed: string;
@@ -146,11 +167,11 @@ function collect(): Row[] {
         } else if (ratioWithCapacityCeiling >= 1 - EPS) {
           category = "B_request_below_capacity";
         } else if (ratioWithEmergencyLoan >= 1 - EPS) {
-          category = "C_emergency_loan_timing";
+          category = "C_emergency_loan_counterfactual_covers";
         } else if (ratioWithReliableInflow >= 1 - EPS) {
-          category = "D_cash_timing_input_output";
+          category = "D_gross_ar_inclusive_counterfactual_covers";
         } else {
-          category = "A_true_capacity_shortage";
+          category = "A_gross_upper_bound_insufficient";
         }
 
         rows.push({
@@ -235,19 +256,36 @@ function main(): void {
   fs.writeFileSync(path.join(outDir, "cash_constraint_decomposition.csv"), [csvHeader, ...csvRows].join("\n"));
 
   const L: string[] = [];
-  L.push("# SAI-6 Phase 1A-2 追加監査 — 調達時資金制約179/208件の直接原因分解");
+  L.push("# SAI-6 Phase 1A-2 追加監査 — 調達時資金制約179/208件のgross funding upper bound反実仮想分解");
   L.push("");
   L.push(`対象: control（全機能OFF）生存期間、${pre.length}四半期（4 seed×5社×32Q、破綻後除く）。`);
   L.push("");
   L.push(`調達時の資金制約（scaleRatio<1）: ${constrained.length}/${pre.length}件。`);
   L.push("");
+  L.push(
+    "**注意**: 以下(A)(C)(D)は「特定の追加資金を全額動員できたと仮定した反実仮想で資金需要が" +
+      "充足するか」の判定であり、「原因の確定」ではない。当期売掛金回収（C・Dが加算する額）には" +
+      "買掛金・人件費・元利払い・加工費・SGA・法人税等の競合する使途があり、実際に国内買付へ" +
+      "回せたかどうかは本スクリプトでは未検証。緊急融資（Cが加算する額）も調達判断の時点で" +
+      "実際に引き出せたかは未検証（時間順序の制約、上記コメント参照）。"
+  );
+  L.push("");
   L.push("| 分類 | 件数 | 割合 |");
   L.push("|---|---:|---:|");
   const labels: [Category, string][] = [
-    ["A_true_capacity_shortage", "(A) 真の借入余力不足（与信上限＋緊急融資＋当期確実収入を全て動員しても不足）"],
+    [
+      "A_gross_upper_bound_insufficient",
+      "(A) 売掛金回収等を全額加えたgross funding upper boundでも不足するケースは0件（与信上限＋緊急融資＋当期売掛金回収を全て反実仮想で動員しても不足）",
+    ],
     ["B_request_below_capacity", "(B) procurementが承認可能借入額（与信上限）を認識しない（申請額が与信上限未満）"],
-    ["C_emergency_loan_timing", "(C) 緊急融資の時間順序（緊急融資は調達判断より後に確定するため反映されない）"],
-    ["D_cash_timing_input_output", "(D) 入出金タイミング差（当期の確実な売掛金回収を調達の流動性チェックが見ていない）"],
+    [
+      "C_emergency_loan_counterfactual_covers",
+      "(C) 緊急融資を調達時点で利用できる反実仮想では充足（実際にその時点で利用可能だったことの証明ではない）",
+    ],
+    [
+      "D_gross_ar_inclusive_counterfactual_covers",
+      "(D) 当期売掛金回収を全額利用する反実仮想では充足（買付以外の競合する使途を考慮した実際の充当可否は未検証）",
+    ],
   ];
   for (const [key, label] of labels) {
     const n = counts[key] ?? 0;
@@ -255,8 +293,8 @@ function main(): void {
   }
   L.push("");
   L.push(
-    `判定は「安価な説明から順」に行っている: (B)与信上限だけで足りるか→(C)＋当期緊急融資で足りるか→` +
-      `(D)＋当期確実収入で足りるか→(A)それでも足りない、の優先順位。`
+    `判定は「安価な説明から順」に行っている: (B)与信上限だけで足りるか→(C)＋当期緊急融資（反実仮想）で足りるか→` +
+      `(D)＋当期確実収入（反実仮想）で足りるか→(A)それでも足りない、の優先順位。`
   );
   L.push("");
   L.push(`国内買付の現金配分比率（domesticPurchaseCashAllocationRatio）: ${ALLOCATION_RATIO}（前期末現金のこの割合のみが対象）。`);
