@@ -243,6 +243,11 @@ export interface ExportCapexProposal {
   readonly requestedBudgetUsd: number | null;
   /** 優先順位（未指定なら null＝提案順の連番）。 */
   readonly priority: number | null;
+  /**
+   * 【Test15新設】この提案が対象とする特定のFactoryId（pdMechanization提案のみ設定。
+   * 他の案件種別はnull）。
+   */
+  readonly targetFactoryId: string | null;
 }
 
 function buildExportCapexProposal(proposal: CapexProjectProposalInput): ExportCapexProposal {
@@ -250,6 +255,7 @@ function buildExportCapexProposal(proposal: CapexProjectProposalInput): ExportCa
     projectType: proposal.projectType,
     requestedBudgetUsd: proposal.requestedBudgetUsd ?? null,
     priority: proposal.priority ?? null,
+    targetFactoryId: proposal.targetFactoryId ?? null,
   };
 }
 
@@ -294,6 +300,8 @@ export interface ExportCompanyDecision {
   readonly workerAssignments: readonly ExportWorkerAssignment[];
   readonly financingRequest: ExportFinancingRequest;
   readonly capexDecision: ExportCapexDecision;
+  /** 【Test15新設】当期のVAP商品開発費（USD、未指定なら0）。 */
+  readonly vapProductDevelopmentSpendUsd: number;
 }
 
 export function buildExportCompanyDecision(decision: CompanyDecisionInput): ExportCompanyDecision {
@@ -319,6 +327,7 @@ export function buildExportCompanyDecision(decision: CompanyDecisionInput): Expo
       .sort((a, b) => a.factoryId.localeCompare(b.factoryId)),
     financingRequest: buildExportFinancingRequest(decision.financingRequest),
     capexDecision: buildExportCapexDecision(decision.capexDecision),
+    vapProductDevelopmentSpendUsd: decision.vapProductDevelopmentSpendUsd ?? 0,
   };
 }
 
