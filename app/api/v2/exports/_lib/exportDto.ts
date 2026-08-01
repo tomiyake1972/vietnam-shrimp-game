@@ -128,6 +128,7 @@ import {
 } from "./dto/operationsDto";
 import { CompanyFixture } from "../../../../lib/v2/companyLab/types";
 import { ExportProcessingCapacity, buildExportProcessingCapacity } from "./dto/processingCapacityDto";
+import { lookupProductDevelopmentScore } from "../../../../lib/v2/companyLab/productDevelopmentState";
 import { CompanyProductionPlanEntry, WorkerAssignment } from "../../../../lib/v2/production/types";
 import { RawMaterialLot } from "../../../../lib/v2/rawMaterials/types";
 import {
@@ -1069,6 +1070,8 @@ export interface CompanyExportPayload {
    * nullになる。値が無いことを0や推測値で埋めない方針のためnullを許容する。
    */
   readonly processingCapacity: ExportProcessingCapacity | null;
+  /** 【Test15新設】前四半期末までの自社VAP商品開発スコア（0〜100、中立50）。 */
+  readonly vapProductDevelopmentScore: number;
   /** §2 この会社の契約×完成品ロット単位の履行内訳。 */
   readonly contractFulfillmentUsage: readonly ExportContractFulfillmentUsage[];
   /** §3 この会社の市場別×商品別の販売計画。 */
@@ -1157,8 +1160,10 @@ export function buildCompanyExportPayload(input: BuildCompanyExportPayloadInput)
             fixtures: input.fixtures,
             capexState: entry.postProcessingStateSnapshot.capexState,
             asOfPeriod: entry.postProcessingStateSnapshot.currentPeriod,
+            pdMechanizationState: entry.postProcessingStateSnapshot.pdMechanizationState,
             ...pickCompanyForecastInputs(entry, companyId),
           }),
+    vapProductDevelopmentScore: lookupProductDevelopmentScore(entry.postProcessingStateSnapshot.productDevelopmentState, companyId),
     contractFulfillmentUsage: buildExportContractFulfillmentUsageForCompany(entry, companyId),
     salesPlans: buildExportSalesPlansForCompany(entry, companyId),
     marketProductAllocations: buildExportMarketProductAllocations(entry, companyId),
@@ -1179,6 +1184,8 @@ export interface AllCompaniesExportCompanyEntry {
   readonly salesContracts: readonly ExportSalesContract[];
   /** 工場の加工能力（当期末時点の各能力＋現在追加中の能力）。fixtures未指定時はnull。 */
   readonly processingCapacity: ExportProcessingCapacity | null;
+  /** 【Test15新設】前四半期末までの自社VAP商品開発スコア（0〜100、中立50）。 */
+  readonly vapProductDevelopmentScore: number;
 }
 
 /**
@@ -1247,7 +1254,9 @@ export function buildAllCompaniesExportPayload(input: BuildAllCompaniesExportPay
                 fixtures: input.fixtures,
                 capexState: entry.postProcessingStateSnapshot.capexState,
                 asOfPeriod: entry.postProcessingStateSnapshot.currentPeriod,
+                pdMechanizationState: entry.postProcessingStateSnapshot.pdMechanizationState,
               }),
+        vapProductDevelopmentScore: lookupProductDevelopmentScore(entry.postProcessingStateSnapshot.productDevelopmentState, companyId),
       };
     }),
     contractFulfillmentUsage: buildExportContractFulfillmentUsageAllCompanies(entry),

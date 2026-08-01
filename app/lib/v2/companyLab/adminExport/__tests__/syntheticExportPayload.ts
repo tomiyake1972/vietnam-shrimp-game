@@ -442,6 +442,7 @@ const SYNTHETIC_BAL_DECISION: ExportCompanyDecision = {
     emergencyAcceptable: false,
   },
   capexDecision: { companyId: "BAL", newProjectProposals: [], cancelProjectIds: [], resumeProjectIds: [] },
+  vapProductDevelopmentSpendUsd: 0,
 };
 
 /**
@@ -638,6 +639,18 @@ const SYNTHETIC_PROCESSING_CAPACITY: ExportProcessingCapacity = {
     availableRawMaterialTons: 15000,
     caveatTexts: ["この表は確定結果ではありません。現在の入力値をそのまま生産処理エンジンへ渡した場合の見込みです。"],
   },
+  pdMechanizationByFactory: [
+    {
+      factoryId: "BAL-F1",
+      companyId: "BAL",
+      previousQuarterPdUtilization: 0.72,
+      activeProjectId: "BAL-CX-2",
+      mechanizationLevel: 0.5,
+      effectivePdCoefficient: 1.1,
+      basePdCoefficient: 1.2,
+      reductionRatio: 1 - 1.1 / 1.2,
+    },
+  ],
 };
 
 /**
@@ -817,6 +830,7 @@ export function buildSyntheticCompanyExportPayload(
     companySummary: null,
     salesContracts: [],
     processingCapacity: SYNTHETIC_PROCESSING_CAPACITY,
+    vapProductDevelopmentScore: 50,
     contractFulfillmentUsage: SYNTHETIC_FULFILLMENT_USAGE,
     salesPlans: SYNTHETIC_SALES_PLANS,
     marketProductAllocations: SYNTHETIC_MARKET_PRODUCT_ALLOCATIONS,
