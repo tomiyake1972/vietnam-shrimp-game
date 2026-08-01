@@ -24,6 +24,7 @@ import { DemandMarketId, Product } from "../../market/types";
 import { CompanyId } from "../../sales/types";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "./parameters";
 import { AppliedManagementBiasItem, resolveManagementProfileParameters } from "./managementProfile";
+import { resolveStrategyProfileParameters } from "./strategyProfile";
 import { StandardAiParamsResolution } from "./policy";
 
 /** 市場志向倍率の許容範囲（実装指示§3）。 */
@@ -213,14 +214,24 @@ export function resolveOrientationProfile(companyId: CompanyId): CompanyOrientat
  * - managementProfiles=false / orientation=false の組み合わせで、それぞれの
  *   レイヤーを独立にON/OFFできる（§13EのA/B比較用）。両方falseのリゾルバは
  *   作れない（その場合はresolveParams自体を渡さない=完全な従来経路）。
- * - 適用順: SAI-4性格バイアス→SAI-5A志向。志向はSAI-4が触らない専用フィールド
- *   のみを書き換えるため、順序による相互作用はない（独立性はテストで保証）。
+ * - 適用順: SAI-4性格バイアス→SAI-5A志向→商品戦略プロファイル（strategyProfile.ts）。
+ *   志向・商品戦略プロファイルはそれぞれSAI-4が触らない専用フィールド／志向とは
+ *   別の追加フィールドだけを書き換えるため、順序による相互作用は限定的
+ *   （productOrientationMultipliersだけはSAI-5A確定値の上へ商品戦略プロファイルが
+ *   小幅に重ねる。strategyProfile.tsのderiveStrategyProfileParametersを参照）。
  */
 export function createSai5ParamsResolver(options: {
   readonly managementProfilesEnabled: boolean;
   readonly orientationEnabled: boolean;
   /** 【SAI-5F】Standard AIの拡張設備投資判断（decision/capex.ts）の有効化。 */
   readonly aiCapexEnabled?: boolean;
+  /**
+   * 【商品戦略プロファイル・companyLab検証専用】trueの場合のみ、会社IDに応じた
+   * 商品戦略プロファイル（strategyProfile.ts）による小幅なStandardAiParameters
+   * バイアスを4層目として適用する。未指定(false相当)なら従来どおり
+   * （既存の全出力・全テストへの影響ゼロ）。
+   */
+  readonly strategyProfileEnabled?: boolean;
 }): (companyId: CompanyId) => StandardAiParamsResolution {
   return (companyId: CompanyId) => {
     let params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1;
@@ -242,6 +253,12 @@ export function createSai5ParamsResolver(options: {
     }
     if (options.aiCapexEnabled) {
       params = { ...params, standardAiCapexExtensionsEnabled: true };
+    }
+    if (options.strategyProfileEnabled) {
+      const s = resolveStrategyProfileParameters(companyId, params);
+      params = s.params;
+      profileId = profileId === "none" ? s.profileId : `${profileId}+${s.profileId}`;
+      appliedBiasItems.push(...s.appliedBiasItems);
     }
     return { params, profileId, appliedBiasItems };
   };

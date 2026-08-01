@@ -8,7 +8,7 @@
 // standardAi本体のロジックは一切変更しない。
 
 import { CompanyId } from "../../../sales/types";
-import { CompanyFixture } from "../../types";
+import { CompanyDecisionProvider, CompanyFixture } from "../../types";
 import type { SupplyPressureDefinition } from "../../marketEvolution";
 import { PeriodV2 } from "../../../core/period";
 import { hosoEqTons } from "../../../core/units";
@@ -20,6 +20,7 @@ import { createInstrumentedStandardAiRun, QuarterStartCapture } from "./capture"
 import { StandardAiQuarterDiagnostics } from "../policy";
 import { CompanyQuarterRecord } from "../../types";
 import { createSai5ParamsResolver } from "../orientationProfile";
+import { applyStrategyProfileCapexOverlay } from "../../strategyProfileCapexOverlay";
 
 export interface AutoplayCaseConfig {
   readonly scenarioId: string;
@@ -66,6 +67,16 @@ export interface AutoplayCaseConfig {
   readonly supplyPremiumFeedbackEnabled?: boolean;
   /** 【SAI-5F】trueの場合のみStandard AIの拡張設備投資判断を有効化する。 */
   readonly standardAiCapexEnabled?: boolean;
+  /**
+   * 【商品戦略プロファイル・companyLab検証専用】trueの場合のみ、会社IDに応じた
+   * 商品戦略プロファイル（standardAi/strategyProfile.ts）による小幅な
+   * StandardAiParametersバイアスと、対応するcapex overlay（追加設備投資提案）を
+   * 有効化する（investment overlay側=VAP R&D投資はcompanyLab/runner.ts側の
+   * CompanyLabConfig.strategyProfilesEnabledで別途制御する。標準AI本体のcapex提案
+   * ロジック(decision/capex.ts)は一切変更しない）。未指定(false相当)なら従来どおり
+   * （既存の全出力・全テストへの影響ゼロ）。
+   */
+  readonly strategyProfilesEnabled?: boolean;
   /**
    * 【監査指摘B・定義比較用】供給圧力の定義。未指定＝採用済みの既定。
    * scripts/sai5SupplyPressureStudy.ts が候補を実測比較するためだけに使う。
@@ -118,22 +129,47 @@ export function runAutoplayCase(config: AutoplayCaseConfig): AutoplayCaseResult 
   // 【SAI-5】エンジン側の機能フラグ。全てOFF（未指定）のときはsai5フィールド自体を
   // 付与しない（CompanyLabConfigの内容が従来と完全に同一＝再現性・スナップショット
   // 互換の面でも既存と一致する）。
+  //
+  // 【商品戦略プロファイル・procurementScaleEffect/vapDifferentiation追加】この2つの
+  // sai5フラグは、それぞれTask 23（調達規模効果）・Task 25（VAP差別化）で実装済み
+  // だが、このハーネスからは一度も有効化されていなかった（strategyProfilesEnabled
+  // で会社別プロファイルのバイアスは効いても、対応するエンジン側の効果測定フラグが
+  // OFFのままだったため、MASS/HOSO_SCALEの調達規模割引・VAPのR&D→能力係数が実際には
+  // 一切反映されていなかった）。strategyProfilesEnabled有効時にのみ、この2フラグを
+  // 連動して有効化する（strategyProfilesEnabled=false、すなわち既存の全呼び出し元・
+  // 既存テストでは、この2フラグも従来どおり未設定のまま＝ビット単位で既存挙動と一致）。
   const engineFlagsActive =
     Boolean(config.productLifecycleEnabled) ||
     Boolean(config.salesBaseAccumulationEnabled) ||
-    Boolean(config.supplyPremiumFeedbackEnabled);
+    Boolean(config.supplyPremiumFeedbackEnabled) ||
+    Boolean(config.strategyProfilesEnabled);
   const initResult = initializeUnifiedCompanyLabFromTemplate(
     {
       scenarioId: config.scenarioId,
       mode: "canonical",
       seed: config.seed,
       turns: config.quarters,
+      // 【CompanyLabConfig.strategyProfilesEnabled(トップレベル)追加】これは
+      // AutoplayCaseConfig.strategyProfilesEnabledとは別の(同名だが型上は別の)
+      // フラグで、companyLab/runner.ts側でVAP商品開発「投資額」そのものを
+      // strategyProfileInvestmentOverlay.ts経由でproductDevelopmentStateへ
+      // 実際に投入するかどうかを制御する（types.ts CompanyLabConfig定義参照）。
+      // これが未設定のままだと、sai5.vapDifferentiationをONにしても投資額が
+      // 常に0のままなので、productDevelopmentScoreが中立値50から一切動かず、
+      // vapCapabilityCoefficientもVAP_DIFFERENTIATIONプロファイルの狙いどおりには
+      // 変化しない（Task 25のR&D→能力係数メカニズムが実質的に働かない）。
+      // AutoplayCaseConfig.strategyProfilesEnabled=true時にのみ連動させる
+      // （false時は従来どおり未設定＝ビット単位で既存挙動と一致）。
+      ...(config.strategyProfilesEnabled ? { strategyProfilesEnabled: true } : {}),
       ...(engineFlagsActive
         ? {
             sai5: {
               productLifecycle: Boolean(config.productLifecycleEnabled),
               salesBaseAccumulation: Boolean(config.salesBaseAccumulationEnabled),
               supplyPremiumFeedback: Boolean(config.supplyPremiumFeedbackEnabled),
+              ...(config.strategyProfilesEnabled
+                ? { procurementScaleEffect: true, vapDifferentiation: true }
+                : {}),
               ...(config.supplyPressureDefinition ? { supplyPressureDefinition: config.supplyPressureDefinition } : {}),
             },
           }
@@ -152,18 +188,30 @@ export function runAutoplayCase(config: AutoplayCaseConfig): AutoplayCaseResult 
   const useResolver =
     Boolean(config.managementProfilesEnabled) ||
     Boolean(config.marketProductOrientationEnabled) ||
-    Boolean(config.standardAiCapexEnabled);
-  const { provider, quarterStartCaptures, diagnostics } = createInstrumentedStandardAiRun(
+    Boolean(config.standardAiCapexEnabled) ||
+    Boolean(config.strategyProfilesEnabled);
+  const { provider: baseProvider, quarterStartCaptures, diagnostics } = createInstrumentedStandardAiRun(
     useResolver
       ? {
           resolveParams: createSai5ParamsResolver({
             managementProfilesEnabled: Boolean(config.managementProfilesEnabled),
             orientationEnabled: Boolean(config.marketProductOrientationEnabled),
             aiCapexEnabled: Boolean(config.standardAiCapexEnabled),
+            strategyProfileEnabled: Boolean(config.strategyProfilesEnabled),
           }),
         }
       : {}
   );
+  // 【商品戦略プロファイル・capex overlay】標準AI本体(decision/capex.ts)が一切提案しない
+  // pdMechanization/qualityControlEquipmentを、strategyProfilesEnabled有効時のみ
+  // 会社の戦略プロファイルに応じて標準AIの提出後に追加する（decision/*.ts・policy.ts
+  // は一切変更しない。providerが返す意思決定を「意思決定生成の直後」でラップするだけ）。
+  const provider: CompanyDecisionProvider = config.strategyProfilesEnabled
+    ? (fixture, ownState, publicInfo, period, turn) => {
+        const decision = baseProvider(fixture, ownState, publicInfo, period, turn);
+        return applyStrategyProfileCapexOverlay(fixture, ownState, publicInfo, period, turn, decision);
+      }
+    : baseProvider;
   const { companies, history } = runFromInit(initResult, provider);
 
   return {
