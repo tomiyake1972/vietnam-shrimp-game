@@ -11,7 +11,7 @@
 import { nextPeriod, PeriodV2 } from "../core/period";
 import { HosoEqTons, UsdPerHosoEqKg, hosoEqTons, roundHosoEqTons, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { CountryId } from "../market/types";
-import { ImportLandedPriceBreakdown, ImportOrderInput, RawMaterialLot, RawMaterialsValidationError } from "./types";
+import { CompanyId, ImportLandedPriceBreakdown, ImportOrderInput, RawMaterialLot, RawMaterialsValidationError } from "./types";
 import { RawMaterialsParameters } from "./parameters";
 import { waterFillAllocate } from "./waterFill";
 import { buildLotId } from "./inventoryIds";
@@ -65,12 +65,18 @@ interface PreparedOrder {
  * （originExportableSupply[country] × importAvailableSupplyRatio）を超えた
  * 場合、決定論的（会社×原産国×発注四半期の要求量に比例した水位法）に配分する。
  * 入力配列の順序には一切依存しない。
+ *
+ * 【調達規模効果】国際HOSO基準価格（originHosoFobPrice）・着地価格の計算式自体は
+ * 一切変更しない。discountRatioByCompany（会社別・輸入チャネルの割引率、0〜1）が
+ * 指定された場合のみ、着地価格確定後にロットのunitCostへ(1-discountRatio)を
+ * 乗じて、会社別の実効仕入原価として記録する（未指定時は従来どおり）。
  */
 export function createImportLots(
   orders: readonly ImportOrderInput[],
   originHosoFobPrice: Readonly<Record<CountryId, UsdPerHosoEqKg>>,
   originExportableSupply: Readonly<Record<CountryId, HosoEqTons>>,
-  params: RawMaterialsParameters
+  params: RawMaterialsParameters,
+  discountRatioByCompany?: ReadonlyMap<CompanyId, number>
 ): readonly RawMaterialLot[] {
   const prepared: PreparedOrder[] = [...orders]
     .sort((a, b) => {
@@ -125,6 +131,8 @@ export function createImportLots(
       if (allocatedQuantity <= 0) return;
       sequence += 1;
       const lotId = buildLotId("import", p.order.companyId, p.order.orderedPeriod, p.order.originCountry, sequence);
+      const discountRatio = Math.max(0, Math.min(1, discountRatioByCompany?.get(p.order.companyId) ?? 0));
+      const unitCost = usdPerHosoEqKg(unwrapUnit(p.breakdown.landedPrice) * (1 - discountRatio));
       lots.push({
         lotId,
         companyId: p.order.companyId,
@@ -133,7 +141,7 @@ export function createImportLots(
         inboundPeriod: p.order.orderedPeriod,
         originalQuantity: hosoEqTons(allocatedQuantity),
         remainingQuantity: hosoEqTons(allocatedQuantity),
-        unitCost: p.breakdown.landedPrice,
+        unitCost,
         availableFromPeriod: p.arrivalPeriod,
         status: "inTransitImport",
       });

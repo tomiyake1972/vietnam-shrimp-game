@@ -145,6 +145,10 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
       Object.entries(marketResult.hosoPrices).map(([country, r]) => [country, r.exportableSupply])
     ) as RawMaterialsQuarterInput["originExportableSupply"],
     diseasePressure: input.scenarioVariables?.diseasePressure ?? ratio(0),
+    // 【調達規模効果】companyLabが算出した前四半期末までの割引率・関係スコアを
+    // そのままrawMaterials層へ渡す（turn自身は計算しない。§2b参照）。
+    procurementDiscountRatioByCompanyChannel: input.procurementScale?.discountRatioByCompanyChannel,
+    domesticRelationshipScoreByCompany: input.procurementScale?.domesticRelationshipScoreByCompany,
   };
   const rawMaterialsStateAfter = advanceRawMaterialsQuarter(rawMaterialsStateBefore, rawMaterialsQuarterInput, contracts, rawMaterialsParams);
   const rmRecord = rawMaterialsStateAfter.history[0];

@@ -46,13 +46,28 @@ export function advanceRawMaterialsQuarter(
     input.vietnamDomesticPrice,
     input.vietnamDomesticSupply,
     params,
-    input.shareCapReferenceSupply ?? input.vietnamDomesticSupply
+    input.shareCapReferenceSupply ?? input.vietnamDomesticSupply,
+    input.domesticRelationshipScoreByCompany
   );
-  const domesticLots = createDomesticPurchaseLots(domesticAllocation, params);
+  // 【調達規模効果】会社別・調達チャネル別の実効仕入原価割引率（未指定時は割引なし
+  // ＝従来挙動）。市場清算価格・着地価格・自社養殖単位原価そのものは変更せず、
+  // 会社別に配分された数量に対する取得原価（unitCost）へのみ、各チャネル生成関数の
+  // 内部で乗じる。
+  const domesticDiscountRatioByCompany = new Map(
+    Array.from(input.procurementDiscountRatioByCompanyChannel ?? []).map(([companyId, r]) => [companyId, r.domestic])
+  );
+  const importedDiscountRatioByCompany = new Map(
+    Array.from(input.procurementDiscountRatioByCompanyChannel ?? []).map(([companyId, r]) => [companyId, r.imported])
+  );
+  const aquacultureDiscountRatioByCompany = new Map(
+    Array.from(input.procurementDiscountRatioByCompanyChannel ?? []).map(([companyId, r]) => [companyId, r.aquaculture])
+  );
 
-  const newImportLots = createImportLots(input.importOrders, input.originHosoFobPrice, input.originExportableSupply, params);
+  const domesticLots = createDomesticPurchaseLots(domesticAllocation, params, domesticDiscountRatioByCompany);
 
-  const newGrowingLots = createGrowingLots(input.aquacultureStockingPlans, params);
+  const newImportLots = createImportLots(input.importOrders, input.originHosoFobPrice, input.originExportableSupply, params, importedDiscountRatioByCompany);
+
+  const newGrowingLots = createGrowingLots(input.aquacultureStockingPlans, params, aquacultureDiscountRatioByCompany);
 
   // まず今期生成された新規ロット（国内購入・輸入・養殖池入れ）を在庫へ加える。
   const lotsAfterNewIntake = [...state.lots, ...domesticLots, ...newImportLots, ...newGrowingLots];

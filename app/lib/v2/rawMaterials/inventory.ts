@@ -12,6 +12,7 @@
 import { nextPeriod, PeriodV2 } from "../core/period";
 import { hosoEqTons, roundHosoEqTons, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import {
+  CompanyId,
   DomesticPurchaseAllocationResult,
   RawMaterialConsumptionInstruction,
   RawMaterialLot,
@@ -50,10 +51,16 @@ function resolveExpiryPeriod(fromPeriod: PeriodV2, params: RawMaterialsParameter
  * 安く自動的に原料を確保できる」ことになってしまう。高値を提示して優先的に
  * 確保した会社はその提示価格をそのまま取得原価として保持する一方、低い提示価格
  * では市場価格を下回る取得原価にはならないようにする。
+ *
+ * 【調達規模効果】市場清算価格（allocation.marketPrice）自体は一切変更しない。
+ * discountRatioByCompany（会社別・国内買付チャネルの割引率、0〜1）が指定された
+ * 場合のみ、上記で確定したmax(marketPrice, bidPrice)へさらに(1-discountRatio)を
+ * 乗じて、会社別の実効仕入原価としてロットへ記録する（未指定時は従来どおり）。
  */
 export function createDomesticPurchaseLots(
   allocation: DomesticPurchaseAllocationResult,
-  params: RawMaterialsParameters
+  params: RawMaterialsParameters,
+  discountRatioByCompany?: ReadonlyMap<CompanyId, number>
 ): readonly RawMaterialLot[] {
   let sequence = 0;
   return allocation.companies
@@ -61,7 +68,9 @@ export function createDomesticPurchaseLots(
     .map((c) => {
       sequence += 1;
       const lotId = buildLotId("domestic", c.companyId, allocation.period, "VN", sequence);
-      const unitCost = usdPerHosoEqKg(Math.max(unwrapUnit(allocation.marketPrice), unwrapUnit(c.bidPrice)));
+      const baseUnitCost = Math.max(unwrapUnit(allocation.marketPrice), unwrapUnit(c.bidPrice));
+      const discountRatio = Math.max(0, Math.min(1, discountRatioByCompany?.get(c.companyId) ?? 0));
+      const unitCost = usdPerHosoEqKg(baseUnitCost * (1 - discountRatio));
       return {
         lotId,
         companyId: c.companyId,

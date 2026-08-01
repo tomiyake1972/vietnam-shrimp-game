@@ -81,6 +81,22 @@ export interface TurnScenarioVariables {
 }
 
 // ---------------------------------------------------------------------
+// 2b. 調達規模効果（companyLab/procurementScaleState.ts由来の外部入力）
+// ---------------------------------------------------------------------
+
+/**
+ * 【調達規模効果】会社別・調達チャネル別の実効仕入原価割引率と、国内買付チャネルの
+ * 関係スコア。companyLab（procurementScaleState.ts）が前四半期末までの状態から
+ * 算出し、そのままrawMaterials/types.tsのRawMaterialsQuarterInputへ渡す
+ * （turn自身はcompanyLabのストック状態に依存しない。既存のTurnOrchestratorInput同様、
+ * 呼び出し側が必要な値だけを抜き出して渡す最小限の橋渡し）。
+ */
+export interface TurnProcurementScaleInputs {
+  readonly discountRatioByCompanyChannel?: ReadonlyMap<CompanyId, Readonly<{ domestic: number; imported: number; aquaculture: number }>>;
+  readonly domesticRelationshipScoreByCompany?: ReadonlyMap<CompanyId, number>;
+}
+
+// ---------------------------------------------------------------------
 // 3. パラメータ束（各Phaseの係数オーバーライド。既定はV1定数）
 // ---------------------------------------------------------------------
 
@@ -122,6 +138,9 @@ export interface TurnOrchestratorInput {
 
   /** 会社別の養殖池入れ計画（Phase5）。未提出の会社は含めない（＝新規投入ゼロ）。 */
   readonly aquacultureStockingPlans: readonly AquacultureStockingPlanEntry[];
+
+  /** 【調達規模効果】前四半期末までの調達規模ストックから算出した割引率・関係スコア（省略可、§2b参照）。 */
+  readonly procurementScale?: TurnProcurementScaleInputs;
 
   /** 直前ターンまでの販売契約（Phase4の約定残）。このターンの新規契約が追加される。 */
   readonly existingContracts: readonly SalesContract[];

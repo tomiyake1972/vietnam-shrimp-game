@@ -18,7 +18,7 @@
 
 import { nextPeriod, PeriodV2 } from "../core/period";
 import { HosoEqTons, hosoEqTons, ratio, Ratio, roundHosoEqTons, roundRatio, unwrapUnit, usdPerHosoEqKg } from "../core/units";
-import { AquacultureHarvestResult, AquacultureStockingPlanEntry, RawMaterialLot, RawMaterialsValidationError } from "./types";
+import { AquacultureHarvestResult, AquacultureStockingPlanEntry, CompanyId, RawMaterialLot, RawMaterialsValidationError } from "./types";
 import { RawMaterialsParameters } from "./parameters";
 import { buildLotId } from "./inventoryIds";
 
@@ -62,8 +62,18 @@ function assertValidStockingPlan(entry: AquacultureStockingPlanEntry): void {
  * 池入れ計画一式から「養殖中」状態の原料ロットを生成する（この時点では
  * 疾病影響前の予定生産量を暫定の数量として保持し、実際の収穫時に
  * harvestAquacultureLotsで補正・確定する）。
+ *
+ * 【調達規模効果】自社養殖の単位取得原価（aquacultureUnitCostUsdPerHosoEqKg）自体は
+ * 変更しない。discountRatioByCompany（会社別・自社養殖チャネルの割引率、0〜1）が
+ * 指定された場合のみ、池入れ時点でロットのunitCostへ(1-discountRatio)を乗じて
+ * 記録する（収穫時（harvestAquacultureLots）はロットのunitCostをそのまま引き継ぐ
+ * だけなので、ここで一度確定すれば十分。未指定時は従来どおり）。
  */
-export function createGrowingLots(entries: readonly AquacultureStockingPlanEntry[], params: RawMaterialsParameters): readonly RawMaterialLot[] {
+export function createGrowingLots(
+  entries: readonly AquacultureStockingPlanEntry[],
+  params: RawMaterialsParameters,
+  discountRatioByCompany?: ReadonlyMap<CompanyId, number>
+): readonly RawMaterialLot[] {
   const sorted = [...entries].sort((a, b) => (a.companyId !== b.companyId ? a.companyId.localeCompare(b.companyId) : a.stockingPeriod.localeCompare(b.stockingPeriod)));
 
   const bySequenceKey = new Map<string, number>();
@@ -76,6 +86,8 @@ export function createGrowingLots(entries: readonly AquacultureStockingPlanEntry
     bySequenceKey.set(key, sequence);
 
     const lotId = buildLotId("aquaculture", entry.companyId, entry.stockingPeriod, "VN", sequence);
+    const discountRatio = Math.max(0, Math.min(1, discountRatioByCompany?.get(entry.companyId) ?? 0));
+    const unitCost = usdPerHosoEqKg(params.aquaculture.aquacultureUnitCostUsdPerHosoEqKg * (1 - discountRatio));
     return {
       lotId,
       companyId: entry.companyId,
@@ -84,7 +96,7 @@ export function createGrowingLots(entries: readonly AquacultureStockingPlanEntry
       inboundPeriod: entry.stockingPeriod,
       originalQuantity: expectedProduction,
       remainingQuantity: expectedProduction,
-      unitCost: usdPerHosoEqKg(params.aquaculture.aquacultureUnitCostUsdPerHosoEqKg),
+      unitCost,
       availableFromPeriod: harvestPeriod,
       status: "growingAquaculture" as const,
       pendingAquacultureIntensity: entry.aquacultureIntensity,

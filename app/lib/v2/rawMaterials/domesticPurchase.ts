@@ -162,13 +162,25 @@ function buyerPriceScore(bidPrice: number, marketPrice: number, params: RawMater
   return Math.exp(params.domesticPurchase.purchasePriceSensitivity * deviation);
 }
 
-/** 5社それぞれの合成競争力ウェイトを計算する（0〜1程度のスケール）。 */
+/**
+ * 5社それぞれの合成競争力ウェイトを計算する（0〜1程度のスケール）。
+ *
+ * 【調達規模効果】procurementRelationshipScore（会社×国内買付チャネルの調達規模
+ * ストックから算出される関係スコア、0〜100）は、entry.farmerRelationship（売り手＝
+ * 養殖業者側の関係、意思決定側からの外部入力）とは別の観測系列（買い手側の
+ * 継続調達実績というエンジン内で確定するストック）であり、二重加算防止のため
+ * 独立したウェイト（competitivenessWeights.procurementRelationship）で加点する。
+ * 未指定時は中立値（params.neutralScore）を使うため、機能OFF・procurementScaleState
+ * 未接続の呼び出しでは常に一定の加点となり、既存の相対順位・既存テストの結果へ
+ * 影響しない。
+ */
 export function computeBuyerCompetitivenessWeight(
   entry: DomesticPurchasePlanEntry,
   bidPrice: UsdPerHosoEqKg,
   marketPrice: UsdPerHosoEqKg,
   coverageScore: number,
-  params: RawMaterialsParameters
+  params: RawMaterialsParameters,
+  procurementRelationshipScore?: number
 ): number {
   const p = params.domesticPurchase;
   const w = p.competitivenessWeights;
@@ -178,8 +190,15 @@ export function computeBuyerCompetitivenessWeight(
 
   const relationship = (entry.farmerRelationship !== undefined ? unwrapUnit(entry.farmerRelationship) : unwrapUnit(p.neutralScore)) / 100;
   const reliability = (entry.paymentReliability !== undefined ? unwrapUnit(entry.paymentReliability) : unwrapUnit(p.neutralScore)) / 100;
+  const procurementRelationship = (procurementRelationshipScore !== undefined ? procurementRelationshipScore : unwrapUnit(p.neutralScore)) / 100;
 
-  return w.price * priceContribution + w.coverage * coverageScore + w.farmerRelationship * relationship + w.paymentReliability * reliability;
+  return (
+    w.price * priceContribution +
+    w.coverage * coverageScore +
+    w.farmerRelationship * relationship +
+    w.paymentReliability * reliability +
+    w.procurementRelationship * procurementRelationship
+  );
 }
 
 /**
@@ -205,7 +224,9 @@ export function allocateDomesticPurchase(
   // 【Phase 6.3】maximumBuyerShareの基準供給量。未指定時はavailableSupply（後方互換）。
   // 外部加工業者需要の導入後、availableSupplyは「会社側の配分原資」に縮小されるため、
   // 市場全体に対する買い占め防止上限の基準は別引数で渡せるようにする。
-  shareCapReferenceSupply: HosoEqTons = availableSupply
+  shareCapReferenceSupply: HosoEqTons = availableSupply,
+  // 【調達規模効果】会社別の国内買付チャネル関係スコア（0〜100、未指定=中立値50相当）。
+  procurementRelationshipScoreByCompany?: ReadonlyMap<string, number>
 ): DomesticPurchaseAllocationResult {
   const sorted = [...entries].sort((a, b) => a.companyId.localeCompare(b.companyId));
 
@@ -226,7 +247,8 @@ export function allocateDomesticPurchase(
 
     const coverage = procurementCoverageScore(entry.procurementHeadcount, params);
     const capacity = procurementCapacity(entry.procurementHeadcount, params, entry.factoryCommonProcessingCapacityTons);
-    const weight = computeBuyerCompetitivenessWeight(entry, bidPrice, marketPrice, coverage, params);
+    const procurementRelationshipScore = procurementRelationshipScoreByCompany?.get(entry.companyId);
+    const weight = computeBuyerCompetitivenessWeight(entry, bidPrice, marketPrice, coverage, params, procurementRelationshipScore);
 
     const shareCap = unwrapUnit(shareCapReferenceSupply) * maximumBuyerShareFor(entry, params);
     const approvedCap = entry.approvedPurchaseCap !== undefined ? unwrapUnit(entry.approvedPurchaseCap) : Number.POSITIVE_INFINITY;

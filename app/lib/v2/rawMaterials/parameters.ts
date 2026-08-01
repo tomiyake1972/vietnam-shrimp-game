@@ -64,6 +64,17 @@ export interface RawMaterialsParameters {
       readonly coverage: number;
       readonly farmerRelationship: number;
       readonly paymentReliability: number;
+      /**
+       * 【調達規模効果】買い手（会社）側の調達規模ストック（companyLab/
+       * procurementScaleState.ts）から算出される国内買付チャネルの関係スコア
+       * （0〜100、継続買付で上昇・放置で中立へ減衰）。farmerRelationship
+       * （売り手＝養殖業者側の関係、意思決定側からの外部入力）とは別の観測系列
+       * （買い手側の継続調達実績というエンジン内で確定するストック）であり、
+       * 二重加算防止のため独立したウェイトとして持つ。未接続時（procurementScale
+       * ByCompany未指定）は中立値50を使うため、機能OFF・旧stateでは常に一定の
+       * 加点となり既存の相対順位には影響しない。
+       */
+      readonly procurementRelationship: number;
     };
 
     /** 顧客関係・信頼性が未接続の場合に使う中立値（0〜100スケール）。 */
@@ -164,10 +175,14 @@ export const RAW_MATERIALS_PARAMETERS_V1: RawMaterialsParameters = {
     },
 
     competitivenessWeights: {
-      price: 0.4,
-      coverage: 0.25,
-      farmerRelationship: 0.2,
-      paymentReliability: 0.15,
+      price: 0.35,
+      coverage: 0.22,
+      farmerRelationship: 0.18,
+      paymentReliability: 0.13,
+      // 【調達規模効果・暫定値】procurementScaleByCompany未接続時（従来挙動）は
+      // 全社一律neutralScore相当となり、相対順位には影響しない（合計1.0を維持
+      // するため他ウェイトを比例的に圧縮した）。
+      procurementRelationship: 0.12,
     },
 
     neutralScore: score0to100(50),

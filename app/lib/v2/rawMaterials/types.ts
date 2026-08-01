@@ -245,6 +245,24 @@ export interface RawMaterialsQuarterInput {
   readonly originExportableSupply: Readonly<Record<CountryId, HosoEqTons>>;
   /** 当期のベトナム疾病圧力（Phase2/3シナリオからの外部入力）。未指定時は0（疾病なし）。 */
   readonly diseasePressure?: Ratio;
+  /**
+   * 【調達規模効果】会社別・調達チャネル別の実効仕入原価割引率（0〜1、
+   * companyLab/procurementScaleState.tsのcalculateVolumeDiscountRatioが算出する
+   * 上限付きの値）。市場清算価格そのものは一切変更せず、会社別に配分された
+   * 数量に対する単位取得原価（unitCost）へのみ乗じる（createDomesticPurchaseLots・
+   * createImportLots・createGrowingLots参照）。未指定時は割引なし（0）＝従来挙動。
+   */
+  readonly procurementDiscountRatioByCompanyChannel?: ReadonlyMap<
+    CompanyId,
+    Readonly<{ domestic: number; imported: number; aquaculture: number }>
+  >;
+  /**
+   * 【調達規模効果】会社別の国内買付チャネル関係スコア（0〜100、
+   * companyLab/procurementScaleState.tsのdomestic.relationshipScore）。
+   * computeBuyerCompetitivenessWeightの追加ウェイト要素として渡す（未指定時は
+   * 中立値50相当を使う＝従来挙動）。
+   */
+  readonly domesticRelationshipScoreByCompany?: ReadonlyMap<CompanyId, number>;
 }
 
 export interface RawMaterialsQuarterRecord {
