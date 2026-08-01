@@ -235,6 +235,7 @@ export function computeRequiredRegularHeadcount(input: RequiredHeadcountInput): 
       input.attendanceRate,
       input.skillByProduct[product] ?? 0,
       input.appliedOvertimeRate,
+      product,
       params
     );
     requiredRegularByProduct[product] = required;

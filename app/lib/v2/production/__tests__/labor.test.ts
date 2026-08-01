@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { hosoEqTons, ratio, unwrapUnit } from "../../core/units";
 import { calculateFactoryEffectiveCapacity } from "../capacity";
-import { allocateWorkersToPlans, calculateLaborCapacityFromAssignedHeadcount, WorkerDemandItem } from "../labor";
+import { allocateWorkersToPlans, calculateLaborCapacityFromAssignedHeadcount, requiredHeadcountForQuantity, WorkerDemandItem } from "../labor";
 import { PRODUCTION_PARAMETERS_V1 } from "../parameters";
 import { Factory, FactoryEffectiveCapacity, WorkerAssignment } from "../types";
 
@@ -55,33 +55,33 @@ function demand(overrides: Partial<WorkerDemandItem> & Pick<WorkerDemandItem, "i
 // ---- calculateLaborCapacityFromAssignedHeadcount（低レベル計算式）----
 
 test("スキルのない商品は有効労働能力0になる（低レベル計算式）", () => {
-  const capacity = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 0, 0, 1_000_000);
+  const capacity = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 0, 0, 1_000_000, "hoso");
   assert.equal(capacity, 0);
 });
 
 test("常用ワーカーの方が臨時ワーカーより1人あたりの生産効率が高い", () => {
-  const regularOnly = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000);
-  const temporaryOnly = calculateLaborCapacityFromAssignedHeadcount(0, 10, 1, 1, 0, 1_000_000);
+  const regularOnly = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, "hoso");
+  const temporaryOnly = calculateLaborCapacityFromAssignedHeadcount(0, 10, 1, 1, 0, 1_000_000, "hoso");
   assert.ok(regularOnly > temporaryOnly);
 });
 
 test("人員増加の効果は設備能力（商品別能力プール）を超えない", () => {
-  const capacity = calculateLaborCapacityFromAssignedHeadcount(10000, 0, 1, 1, 0, 50);
+  const capacity = calculateLaborCapacityFromAssignedHeadcount(10000, 0, 1, 1, 0, 50, "hoso");
   assert.ok(capacity <= 50 + 1e-6);
 });
 
 test("残業効果は設定上限（overtimeRateCap）を超えない", () => {
   const cap = PRODUCTION_PARAMETERS_V1.labor.overtimeRateCap;
-  const atCap = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, cap, 1_000_000);
-  const beyondCap = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, cap * 10, 1_000_000);
+  const atCap = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, cap, 1_000_000, "hoso");
+  const beyondCap = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, cap * 10, 1_000_000, "hoso");
   // 呼び出し側（allocateWorkersToPlans）がoverTimeRateCapへクリップする責務を持つため、
   // 本関数自体は与えられたappliedOvertimeRateをそのまま使う（クリップ責務の所在確認）。
   assert.ok(beyondCap > atCap);
 });
 
 test("欠勤・稼働可能率が低いほど有効労働能力は下がる", () => {
-  const fullAttendance = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000);
-  const halfAttendance = calculateLaborCapacityFromAssignedHeadcount(10, 0, 0.5, 1, 0, 1_000_000);
+  const fullAttendance = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, "hoso");
+  const halfAttendance = calculateLaborCapacityFromAssignedHeadcount(10, 0, 0.5, 1, 0, 1_000_000, "hoso");
   assert.ok(fullAttendance > halfAttendance);
 });
 
@@ -200,7 +200,7 @@ test("労働能力は実際に配分された人数から算出される（配�
   const totalAssigned = entries.reduce((sum, e) => sum + e.assignedRegularHeadcount + e.assignedTemporaryHeadcount, 0);
   assert.ok(totalAssigned <= 10 + 1e-6);
 
-  const fullCapacityIfDoubleCounted = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000);
+  const fullCapacityIfDoubleCounted = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, "hoso");
   const totalLaborCapacity = entries.reduce((sum, e) => sum + unwrapUnit(e.laborCapacity), 0);
   assert.ok(totalLaborCapacity <= fullCapacityIfDoubleCounted + 1e-6);
 });
@@ -223,4 +223,128 @@ test("入力を変更しない（不変性）", () => {
   allocateWorkersToPlans(demands, [assignment], capacityMapFor(factory));
   assert.equal(JSON.stringify(assignment), beforeAssignment);
   assert.equal(JSON.stringify(demands), beforeDemands);
+});
+
+// ---- 製品別労務負荷係数（2026-08-01・HOSO:PD:VAP = 1.0:1.2:3.0）----
+
+test("同一配分人数での有効労働能力比はHOSO:PD:VAP = 1.0 : 1/1.2 : 1/3.0（労務負荷が重いほど同人数で作れる量が少ない）", () => {
+  const hoso = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, "hoso");
+  const pd = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, "pd");
+  const vap = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, "vap");
+  assert.ok(Math.abs(hoso / pd - 1.2) < 1e-9, `hoso/pd should be 1.2, got ${hoso / pd}`);
+  assert.ok(Math.abs(hoso / vap - 3.0) < 1e-9, `hoso/vap should be 3.0, got ${hoso / vap}`);
+});
+
+test("同一HOSO換算数量に対する必要人数比はHOSO:PD:VAP = 1.0 : 1.2 : 3.0（PD・VAPの方がより多くの人手を要する）", () => {
+  const requiredHoso = requiredHeadcountForQuantity(120, 6, 1, 1, 0, "hoso");
+  const requiredPd = requiredHeadcountForQuantity(120, 6, 1, 1, 0, "pd");
+  const requiredVap = requiredHeadcountForQuantity(120, 6, 1, 1, 0, "vap");
+  assert.ok(Math.abs(requiredPd / requiredHoso - 1.2) < 1e-9, `requiredPd/requiredHoso should be 1.2, got ${requiredPd / requiredHoso}`);
+  assert.ok(Math.abs(requiredVap / requiredHoso - 3.0) < 1e-9, `requiredVap/requiredHoso should be 3.0, got ${requiredVap / requiredHoso}`);
+});
+
+test("HOSOのみ生産: 必要人数どおりに配分されれば全量処理できる", () => {
+  const factory = makeFactory({ hosoCapacity: hosoEqTons(100000) });
+  const requiredRegular = requiredHeadcountForQuantity(600, PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons, 1, 1, 0, "hoso");
+  const assignment = makeAssignment({ regularHeadcount: Math.ceil(requiredRegular), temporaryHeadcount: 0 });
+  const demands = [demand({ id: "hoso", product: "hoso", candidateQuantity: 600, priority: 1 })];
+  const { entries } = allocateWorkersToPlans(demands, [assignment], capacityMapFor(factory));
+  assert.ok(unwrapUnit(entries[0].laborCapacity) >= 600 - 1e-6);
+});
+
+test("PDのみ生産: HOSOと同じ配分人数ではHOSOより少ない量しか処理できない（負荷1.2倍ぶん）", () => {
+  const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), pdCapacity: hosoEqTons(100000) });
+  const assignment = makeAssignment({ regularHeadcount: 10, temporaryHeadcount: 0 });
+  const hosoDemand = [demand({ id: "hoso", product: "hoso", candidateQuantity: 100000, priority: 1 })];
+  const pdDemand = [demand({ id: "pd", product: "pd", candidateQuantity: 100000, priority: 1 })];
+  const hosoResult = allocateWorkersToPlans(hosoDemand, [assignment], capacityMapFor(factory));
+  const pdResult = allocateWorkersToPlans(pdDemand, [assignment], capacityMapFor(factory));
+  const hosoCap = unwrapUnit(hosoResult.entries[0].laborCapacity);
+  const pdCap = unwrapUnit(pdResult.entries[0].laborCapacity);
+  assert.ok(Math.abs(hosoCap / pdCap - 1.2) < 1e-6, `hosoCap/pdCap should be 1.2, got ${hosoCap / pdCap}`);
+});
+
+test("VAPのみ生産: HOSOと同じ配分人数ではHOSOの1/3しか処理できない（負荷3.0倍ぶん）", () => {
+  const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), vapCapacity: hosoEqTons(100000) });
+  const assignment = makeAssignment({ regularHeadcount: 10, temporaryHeadcount: 0 });
+  const hosoDemand = [demand({ id: "hoso", product: "hoso", candidateQuantity: 100000, priority: 1 })];
+  const vapDemand = [demand({ id: "vap", product: "vap", candidateQuantity: 100000, priority: 1 })];
+  const hosoResult = allocateWorkersToPlans(hosoDemand, [assignment], capacityMapFor(factory));
+  const vapResult = allocateWorkersToPlans(vapDemand, [assignment], capacityMapFor(factory));
+  const hosoCap = unwrapUnit(hosoResult.entries[0].laborCapacity);
+  const vapCap = unwrapUnit(vapResult.entries[0].laborCapacity);
+  assert.ok(Math.abs(hosoCap / vapCap - 3.0) < 1e-6, `hosoCap/vapCap should be 3.0, got ${hosoCap / vapCap}`);
+});
+
+test("HOSO・PD・VAP混合生産: 十分な人員があれば、必要人数の按分が1.0:1.2:3.0の負荷比を反映する", () => {
+  const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), pdCapacity: hosoEqTons(100000), vapCapacity: hosoEqTons(100000) });
+  // 3商品とも同数量(100トン)を要求。余裕を持った人員（1000人）を配置し、
+  // 労働制約で頭打ちにならない条件で「必要人数」の比率そのものを検証する。
+  const assignment = makeAssignment({ regularHeadcount: 1000, temporaryHeadcount: 0 });
+  const demands = [
+    demand({ id: "hoso", product: "hoso", candidateQuantity: 100, priority: 1 }),
+    demand({ id: "pd", product: "pd", candidateQuantity: 100, priority: 1 }),
+    demand({ id: "vap", product: "vap", candidateQuantity: 100, priority: 1 }),
+  ];
+  const { entries } = allocateWorkersToPlans(demands, [assignment], capacityMapFor(factory));
+  const byId = new Map(entries.map((e, i) => [demands[i].id, e]));
+  const hosoHeadcount = byId.get("hoso")!.assignedRegularHeadcount;
+  const pdHeadcount = byId.get("pd")!.assignedRegularHeadcount;
+  const vapHeadcount = byId.get("vap")!.assignedRegularHeadcount;
+  assert.ok(Math.abs(pdHeadcount / hosoHeadcount - 1.2) < 1e-4, `pd/hoso headcount ratio should be 1.2, got ${pdHeadcount / hosoHeadcount}`);
+  assert.ok(Math.abs(vapHeadcount / hosoHeadcount - 3.0) < 1e-4, `vap/hoso headcount ratio should be 3.0, got ${vapHeadcount / hosoHeadcount}`);
+  // 全量処理できていること（=全て完全充足、按分比較が意味を持つ前提の確認）。
+  for (const e of entries) assert.ok(unwrapUnit(e.laborCapacity) >= 100 - 1e-6);
+});
+
+test("会社別skillは製品別労務負荷係数の後に（同じ乗算内で）一貫して適用される", () => {
+  const fullSkill = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, "vap");
+  const halfSkill = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 0.5, 0, 1_000_000, "vap");
+  assert.ok(Math.abs(fullSkill / halfSkill - 2) < 1e-9, "skillLevelは労務負荷係数と独立して線形に効くべき");
+});
+
+test("attendance補正は製品別労務負荷係数と独立して一貫して適用される", () => {
+  const fullAttendance = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, "vap");
+  const halfAttendance = calculateLaborCapacityFromAssignedHeadcount(10, 0, 0.5, 1, 0, 1_000_000, "vap");
+  assert.ok(Math.abs(fullAttendance / halfAttendance - 2) < 1e-9, "attendanceRateは労務負荷係数と独立して線形に効くべき");
+});
+
+test("overtime補正は製品別労務負荷係数と独立して一貫して適用される", () => {
+  const cap = PRODUCTION_PARAMETERS_V1.labor.overtimeEfficiencyFactor;
+  const noOvertime = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, "vap");
+  const withOvertime = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0.2, 1_000_000, "vap");
+  const expectedMultiplier = 1 + 0.2 * cap;
+  assert.ok(Math.abs(withOvertime / noOvertime - expectedMultiplier) < 1e-9);
+});
+
+test("臨時雇用能力も製品別労務負荷係数を一貫して適用される（HOSO比でVAPは1/3）", () => {
+  const hosoTemp = calculateLaborCapacityFromAssignedHeadcount(0, 10, 1, 1, 0, 1_000_000, "hoso");
+  const vapTemp = calculateLaborCapacityFromAssignedHeadcount(0, 10, 1, 1, 0, 1_000_000, "vap");
+  assert.ok(Math.abs(hosoTemp / vapTemp - 3.0) < 1e-9);
+});
+
+test("労務不足時、VAPは同じ人数配置でもHOSOより早く生産可能量が頭打ちになる（労務制約が製品ごとに正しく反映される）", () => {
+  const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), vapCapacity: hosoEqTons(100000) });
+  const assignment = makeAssignment({ regularHeadcount: 5, temporaryHeadcount: 0 });
+  const hosoDemand = [demand({ id: "hoso", product: "hoso", candidateQuantity: 40, priority: 1 })];
+  const vapDemand = [demand({ id: "vap", product: "vap", candidateQuantity: 40, priority: 1 })];
+  const hosoResult = allocateWorkersToPlans(hosoDemand, [assignment], capacityMapFor(factory));
+  const vapResult = allocateWorkersToPlans(vapDemand, [assignment], capacityMapFor(factory));
+  // 5人 × 6t = 30t が基礎能力。HOSO(÷1.0)=30tでcandidateQuantity40tに届かず不足、
+  // VAP(÷3.0)=10tでさらに大きく不足するはず。
+  assert.ok(unwrapUnit(hosoResult.entries[0].laborCapacity) < 40);
+  assert.ok(unwrapUnit(vapResult.entries[0].laborCapacity) < unwrapUnit(hosoResult.entries[0].laborCapacity));
+});
+
+test("決定論性: 同一入力を複数回計算しても同じ結果になる", () => {
+  const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), pdCapacity: hosoEqTons(100000), vapCapacity: hosoEqTons(100000) });
+  const assignment = makeAssignment({ regularHeadcount: 37, temporaryHeadcount: 4 });
+  const demands = [
+    demand({ id: "hoso", product: "hoso", candidateQuantity: 123.456, priority: 1 }),
+    demand({ id: "pd", product: "pd", candidateQuantity: 78.9, priority: 2 }),
+    demand({ id: "vap", product: "vap", candidateQuantity: 12.3, priority: 1 }),
+  ];
+  const run1 = allocateWorkersToPlans(demands, [assignment], capacityMapFor(factory));
+  const run2 = allocateWorkersToPlans(demands, [assignment], capacityMapFor(factory));
+  assert.deepEqual(run1, run2);
 });

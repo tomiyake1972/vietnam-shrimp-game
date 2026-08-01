@@ -69,6 +69,26 @@ export interface ProductionParameters {
     readonly overtimeRateCap: number;
     /** 残業1単位（overtimeRate=1.0）あたりの能力増加係数（線形近似）。 */
     readonly overtimeEfficiencyFactor: number;
+    /**
+     * 【2026-08-01・三宅さんのご指示（ゲーム設計上の意図）】製品別労務負荷係数。
+     * 「同じHOSO換算生産量を処理するときに要する労務量」の相対比を表す
+     * （HOSO=1.0を基準に、PDは1.2倍、VAPは3.0倍の労務量を要する）。
+     *
+     * regularEfficiencyPerHeadTons/temporaryEfficiencyPerHeadTonsは商品非依存の
+     * 「1人あたり基準効率」であり、本係数はその基準効率を商品ごとに実効的に
+     * 割り引く／割り増すための唯一の乗数である。歩留まり（yield.saleableRecoveryRatio、
+     * 原料→完成品の物理的回収率）・固定費配賦係数（finance/parameters.ts
+     * managementAccounting.fixedCostAllocationCoefficientByProduct、会計上の
+     * 費用配賦専用）・営業工数係数（sales/parameters.ts salesEffortCoefficients、
+     * 営業活動の労力配分専用）とは目的・適用箇所が異なる別系統の係数であり、
+     * 数値がたまたま同じでも意味的に混同しないこと。
+     *
+     * 適用箇所は production/labor.ts の calculateLaborCapacityFromAssignedHeadcount
+     * （配分人数→有効労働能力）と requiredHeadcountForQuantity（数量→必要人数）の
+     * 2関数のみに一元化する（この2関数はUI・Standard AI・生産エンジンの全てが
+     * 共有する唯一の逆算・順算経路であるため、ここを直せば全体に反映される）。
+     */
+    readonly laborIntensityCoefficientByProduct: Readonly<Record<Product, number>>;
   };
 
   readonly cost: {
@@ -123,6 +143,13 @@ export const PRODUCTION_PARAMETERS_V1: ProductionParameters = {
     temporaryEfficiencyPerHeadTons: 3.5,
     overtimeRateCap: 0.3,
     overtimeEfficiencyFactor: 0.5,
+    // 【2026-08-01】製品別労務負荷係数（HOSO換算量ベース）。HOSO=1.0を基準に
+    // PD=1.2・VAP=3.0。設計意図どおりの比率をここで唯一定義する。
+    laborIntensityCoefficientByProduct: {
+      hoso: 1.0,
+      pd: 1.2,
+      vap: 3.0,
+    },
   },
 
   cost: {

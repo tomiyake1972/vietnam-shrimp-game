@@ -36,10 +36,21 @@ function capacityPoolFor(factoryCapacity: FactoryEffectiveCapacity, product: Pro
   return unwrapUnit(factoryCapacity.vap);
 }
 
+/** 製品別労務負荷係数（HOSO換算量ベース、hoso=1.0基準）を取得する。未定義商品は1.0扱い。 */
+function laborIntensityFor(product: Product, params: ProductionParameters): number {
+  const coefficient = params.labor.laborIntensityCoefficientByProduct[product];
+  return coefficient > 0 ? coefficient : 1;
+}
+
 /**
  * 配分された常用・臨時ワーカー人数から、1商品ぶんの有効労働能力を算出する
  * （純粋な計算式のみを担う低レベル関数。ワーカーの奪い合い解決は
  * allocateWorkersToPlansが行う）。
+ *
+ * 【2026-08-01】製品別労務負荷係数（params.labor.laborIntensityCoefficientByProduct）を
+ * divisorとして適用する。1人あたり基準効率（regular/temporaryEfficiencyPerHeadTons）は
+ * 商品非依存のまま据え置き、商品ごとの労務集約度の差はこの係数のみで表現する
+ * （skill・attendance・overtimeの各補正とは独立した乗数であり、二重計上しない）。
  */
 export function calculateLaborCapacityFromAssignedHeadcount(
   assignedRegularHeadcount: number,
@@ -48,6 +59,7 @@ export function calculateLaborCapacityFromAssignedHeadcount(
   skillLevel: number,
   appliedOvertimeRate: number,
   factoryCapacityForProduct: number,
+  product: Product,
   params: ProductionParameters = PRODUCTION_PARAMETERS_V1
 ): number {
   const overtimeMultiplier = 1 + appliedOvertimeRate * params.labor.overtimeEfficiencyFactor;
@@ -56,7 +68,8 @@ export function calculateLaborCapacityFromAssignedHeadcount(
     attendanceRate *
     skillLevel *
     overtimeMultiplier;
-  return Math.min(Math.max(0, raw), Math.max(0, factoryCapacityForProduct));
+  const effective = raw / laborIntensityFor(product, params);
+  return Math.min(Math.max(0, effective), Math.max(0, factoryCapacityForProduct));
 }
 
 /**
@@ -70,6 +83,10 @@ export function calculateLaborCapacityFromAssignedHeadcount(
  *
  * 分母（1人あたり効率 × 出勤率 × 技能 × 残業係数）が0以下のときは、
  * どれだけ人を増やしても生産できないため 0 を返す（無限大を返さない）。
+ *
+ * 【2026-08-01】必要量（quantity）に製品別労務負荷係数を乗じたうえで逆算する
+ * （calculateLaborCapacityFromAssignedHeadcountの除数適用と対になる、数学的に
+ * 一貫した逆演算）。
  */
 export function requiredHeadcountForQuantity(
   quantity: number,
@@ -77,12 +94,13 @@ export function requiredHeadcountForQuantity(
   attendanceRate: number,
   skillLevel: number,
   appliedOvertimeRate: number,
+  product: Product,
   params: ProductionParameters = PRODUCTION_PARAMETERS_V1
 ): number {
   const overtimeMultiplier = 1 + appliedOvertimeRate * params.labor.overtimeEfficiencyFactor;
   const denom = efficiencyPerHead * attendanceRate * skillLevel * overtimeMultiplier;
   if (!(denom > 0)) return 0;
-  const required = quantity / denom;
+  const required = (quantity * laborIntensityFor(product, params)) / denom;
   return Number.isFinite(required) && required > 0 ? required : 0;
 }
 
@@ -152,6 +170,7 @@ export function allocateWorkersToPlans(
         attendanceRate,
         skillByDemand.get(d.id) ?? 0,
         appliedOvertimeByDemand.get(d.id) ?? 0,
+        d.product,
         params
       );
     }
@@ -187,6 +206,7 @@ export function allocateWorkersToPlans(
         skillByDemand.get(d.id) ?? 0,
         appliedOvertimeByDemand.get(d.id) ?? 0,
         capacityPool,
+        d.product,
         params
       );
 
