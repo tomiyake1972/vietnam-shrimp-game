@@ -166,25 +166,19 @@ test("buildAutoplayCaseLogs: 四半期結果ログのsalesQuantityByProductは�
 test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも、ログが欠落しない（8Qぶん全turnのログが揃う）", () => {
   // "baseline"シナリオの標準候補は、moderate pressure設計によりデフォルトが
   // 発生しうることが既存テスト（standardBaseline.test.ts）で確認済み。
-  // 実際にdefaultが発生したケースをいくつか試し、発生後もログ件数が
-  // 欠けないことを確認する（発生しなかった場合はそのシードでは検証できないため
-  // skipし、少なくとも1件は発生確認できるシードで検証する）。
   // 【2026-08-01・製品別労務負荷係数（HOSO:PD:VAP=1.0:1.2:3.0）導入により変更】
   // 労務コストの構造が変わったことでBAL単独シミュレーション時のデフォルト発生
-  // タイミングがシフトし、従来のシード探索範囲（0〜7）では8Q以内に1件も
-  // デフォルトが発生しなくなった。これはログ組み立ての正しさとは無関係な、
-  // 探索範囲の狭さによるテスト側の問題のため、探索範囲を広げて対応する
-  // （seed=sai3a-test-default-22 / 54 でturn=8にデフォルトが発生することを確認済み）。
-  const seeds = ["sai3a-002", ...Array.from({ length: 60 }, (_, i) => `sai3a-test-default-${i}`)];
-  let verifiedAtLeastOne = false;
-  for (const seed of seeds) {
-    const { log } = run(seed, 8, ["BAL"]);
-    const defaultedTurn = log.quarterResults.find((r) => r.paymentDefault)?.turn;
-    if (defaultedTurn === undefined) continue;
-    verifiedAtLeastOne = true;
-    assert.equal(log.quarterResults.length, 8, `paymentDefault発生後もログが8Qぶん揃っているべき（seed=${seed}）`);
-    assert.equal(log.quarterStartStates.length, 8);
-    assert.equal(log.decisionLogs.length, 8);
-  }
-  assert.ok(verifiedAtLeastOne, "検証対象のseedでpaymentDefaultが1件も発生しなかった（standardBaselineの想定と異なる可能性）");
+  // タイミングがシフトし、従来のシード（sai3a-002、sai3a-test-default-0〜7）
+  // では8Q以内に1件もデフォルトが発生しなくなった。ログ組み立ての正しさとは
+  // 無関係な事象のため、探索を広げる代わりに、現行コードでturn=8に確実に
+  // デフォルトが発生することを確認済みの単一seed（sai3a-test-default-22）へ
+  // 固定する（決定論的で、テストの意図＝「default発生後もログが欠けないこと」の
+  // 検証に必要十分）。
+  const seed = "sai3a-test-default-22";
+  const { log } = run(seed, 8, ["BAL"]);
+  const defaultedTurn = log.quarterResults.find((r) => r.paymentDefault)?.turn;
+  assert.ok(defaultedTurn !== undefined, `検証対象のseed=${seed}でpaymentDefaultが発生しなかった（standardBaselineの想定と異なる可能性）`);
+  assert.equal(log.quarterResults.length, 8, "paymentDefault発生後もログが8Qぶん揃っているべき");
+  assert.equal(log.quarterStartStates.length, 8);
+  assert.equal(log.decisionLogs.length, 8);
 });

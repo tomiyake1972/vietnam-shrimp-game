@@ -193,7 +193,7 @@ productionState = state;
   - 商品ごとに「専用ラインが存在するか（Capex投資済みか）」を状態として持ち、存在しない場合は`hoso/pd/vapCapacity`を絶対上限として使わず、Stage 5の労働力プールから直接商品別に配分する経路に切り替える必要がある。
   - 専用ライン建設後は、(a)機械経由の生産量（`hoso/pd/vapCapacity`を上限とし、労働力消費が少ない、または専用の少人数オペレーターのみで足りる）と、(b)人力経由の追加生産量（労働力プールを消費し、機械能力を超えて積み増せる）の二経路を合算するモデルへの拡張が必要。
   - 商品ごとの「人力のみでの生産効率」（1人当たり生産可能トン数）は、現行の`regularEfficiencyPerHeadTons`(6t)/`temporaryEfficiencyPerHeadTons`(3.5t)のような画一係数ではなく、商品別に別途定義する必要がある可能性が高い（VAPはHOSOより人力あたりの複雑度・労働集約度が高いと想定されるため。`baseProcessingCostUsdPerTon`がhoso=350/pd=520/vap=780と商品ごとに異なる設定と整合させる）。
-    **【2026-08-01追記】本項目のうち「商品別の労務負荷差」自体は、ブランチ`feature/v2-product-labor-intensity`で`ProductionParameters.labor.laborIntensityCoefficientByProduct`（HOSO:PD:VAP = 1.0:1.2:3.0）として実装済み（詳細は本書§4・`docs/kb/ShrimpX_03_パラメータ仕様書.md`§5.3参照）。ただし、上記1〜4で提案されている「設備能力上限を超えて人力で積み増せる」という設備・労働力の代替関係そのものは引き続き未実装・未確定であり、本節の課題として残る。**
+    **【2026-08-01追記】本項目のうち「商品別の労務負荷差」自体は、`ProductionParameters.labor.laborIntensityCoefficientByProduct`（HOSO:PD:VAP = 1.0:1.2:3.0）として実装済み（詳細は本書§4・`docs/kb/ShrimpX_03_パラメータ仕様書.md`§5.3参照）。ただし、上記1〜4で提案されている「設備能力上限を超えて人力で積み増せる」という設備・労働力の代替関係そのものは引き続き未実装・未確定であり、本節の課題として残る。**
   - 原料投入側の`commonProcessingCapacity`（Stage 2、原料の物理的な受入・脱穀処理能力）は、この柔軟性の対象外（真の設備上限）として維持するか、これも将来的に労働力代替の対象に含めるかは要検討。
   - 労働コスト低下シナリオ（ベトナム経済危機等）は`rawMaterials`/`scenarioEvent`側の既存の賃金・雇用パラメータとの連携が必要（本書の対象外、`SCENARIO_EVENT_ARCHITECTURE_v0.1.md`側の課題）。
 
