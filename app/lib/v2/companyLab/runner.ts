@@ -149,6 +149,7 @@ import type { QuarterFinancingPlan } from "../financing/liquidityClose";
 import {
   CAPEX_PARAMETERS_V1,
   applyCapexCapacityToFactories,
+  applyNewFactoryConstructionToFactories,
   buildCompanyFactorySpaceState,
   buildFactorySpaceApprovalBudget,
   buildInitialCompanyCapexState,
@@ -993,8 +994,15 @@ export function advanceCompanyLabQuarter(
   // 別の永続状態として二重管理しない（capex/capacityEffect.ts参照）。
   const baseFactories = fixtures.flatMap((f) => f.factories);
   const factoriesWithCapexCapacity = applyCapexCapacityToFactories(baseFactories, state.capexState, state.currentPeriod);
+  // 【Test15新設】稼働開始済みのnewFactoryConstruction案件ぶんの新設Factoryを
+  // 追加する（既存工場への能力加算＝applyCapexCapacityToFactoriesとは独立した
+  // 別処理。capex/factoryConstruction.ts参照）。この時点で追加されたFactoryが
+  // 以降の生産エンジン・工場スペース・投資計画画面のすべてへ自動的に伝播する
+  // （baseFactoriesではなくfactoriesWithCapexCapacityへ以降のすべての箇所が
+  // 揃って接続されているため）。
+  const factoriesWithCapex = applyNewFactoryConstructionToFactories(factoriesWithCapexCapacity, state.capexState, state.currentPeriod);
   const productionInput: ProductionQuarterInput = {
-    factories: factoriesWithCapexCapacity,
+    factories: factoriesWithCapex,
     workerAssignments: decisions.flatMap((d) => d.workerAssignments),
     plans: decisions.flatMap((d) => d.productionPlans),
     companyCountry,
@@ -1266,7 +1274,14 @@ export function advanceCompanyLabQuarter(
       finishedGoodsLotsAtEnd: finishedGoodsLotsAfterExpiry,
       workerAssignments: companyDecision?.workerAssignments ?? [],
       appliedOvertimeRate: companyLoad ? unwrapUnit(companyLoad.overtimeRate) : 0,
-      activeFactoryCount: f.factories.filter((factory) => factory.status === "active").length,
+      // 【Test15修正】f.factories（fixture静的）ではなくfactoriesWithCapex（当期の
+      // 実効Factory[]。稼働開始済みのnewFactoryConstruction案件による新設Factoryを
+      // 含む）を基準にする。新設Factoryはoperational（完成+操業準備期間経過）に
+      // 達するまでfactoriesWithCapexへ一切現れない（applyNewFactoryConstructionToFactories
+      // 参照）ため、この変更だけで「稼働開始後にのみactiveFactoryCountへ計上される」
+      // という要件を満たす。既存のライン増設は主工場の能力を書き換えるだけで
+      // Factory[]の要素数を変えないため、この変更はTest15以前の挙動と完全に一致する。
+      activeFactoryCount: factoriesWithCapex.filter((factory) => factory.companyId === f.companyId && factory.status === "active").length,
       // 【営業人員の追加採用・forward-port】実際に当期SG&Aへ計上する営業人員数は、
       // 前期末までに確定した人数（増員後は翌四半期以降のSG&Aへ自動的に反映
       // される。既存のsalesForceSalaryUsdPerQuarter単価をそのまま使い、新しい
@@ -1324,10 +1339,16 @@ export function advanceCompanyLabQuarter(
         decision: companyDecision!.capexDecision,
         approvalGate: capexApprovalGate,
         // 【Phase 8D-3】工場スペースによる承認ゲート。当期の生産で実際に使った
-        // factoriesWithCapexCapacity（＝稼働開始済み投資を反映済みのFactory）を
-        // 「稼働中設備の使用量」の基準にし、まだ稼働開始していない案件を予約量として
-        // 数える。稼働中と予約が二重に数えられることはない（判定は
-        // isCapexProjectOperationalAt へ一元化されているため）。
+        // factoriesWithCapex（＝稼働開始済み投資を反映済みのFactory。Test15で
+        // 新設Factoryぶんも合成済み）を「稼働中設備の使用量」の基準にし、まだ
+        // 稼働開始していない案件を予約量として数える。稼働中と予約が二重に
+        // 数えられることはない（判定は isCapexProjectOperationalAt へ一元化されて
+        // いるため）。【Test15の既知の制約】buildCompanyFactorySpaceStateは
+        // baseFactories（fixture.factories、静的）とfactoryId一致でのみ工場
+        // スペース状態を組み立てるため、fixtureに存在しない新設Factory自体の
+        // スペース使用率はここには現れない（新設Factoryは既存工場のスペース
+        // プールを消費しない設計。capex/factoryConstruction.ts参照。新設Factory
+        // 自身のスペース状態表示は本タスクの範囲外・将来課題）。
         //
         // 【Phase 8D監査L-1・安全側の仕様（意図的、修正不要）】このスペース枠は
         // state.capexState（＝当四半期のcloseQuarterWithCapex呼び出しより前、
@@ -1340,11 +1361,14 @@ export function advanceCompanyLabQuarter(
           buildCompanyFactorySpaceState({
             companyId: f.companyId,
             baseFactories,
-            currentFactories: factoriesWithCapexCapacity,
+            currentFactories: factoriesWithCapex,
             capexState: state.capexState,
             period: state.currentPeriod,
           })
         ),
+        // 【Test15新設】newFactoryConstruction提案の1社あたり工場数上限（4工場）判定に使う、
+        // この会社の既存（静的fixture）工場数。capex/factoryConstruction.ts参照。
+        existingFactoryCount: f.factories.length,
       },
       FINANCE_PARAMETERS_V1,
       CAPEX_PARAMETERS_V1,

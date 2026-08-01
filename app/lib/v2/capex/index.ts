@@ -7,3 +7,4 @@ export * from "./capexClose";
 export * from "./capacityEffect";
 export * from "./depreciation";
 export * from "./factorySpace";
+export * from "./factoryConstruction";
