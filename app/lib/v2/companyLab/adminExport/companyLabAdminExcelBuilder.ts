@@ -9,7 +9,13 @@
 // 検算式のロジックをexceljsへ移植したもの。
 
 import ExcelJS from "exceljs";
-import type { AllCompaniesExportPayload, CompanyExportPayload } from "../../../../api/v2/exports/_lib/exportDto";
+import type {
+  AllCompaniesExportPayload,
+  CompanyExportPayload,
+  ExportCompanyDecision,
+  ExportCompanyDecisionInfo,
+  ExportCompanySummary,
+} from "../../../../api/v2/exports/_lib/exportDto";
 
 const FONT_NAME = "Arial";
 const HEADER_FONT: Partial<ExcelJS.Font> = { name: FONT_NAME, bold: true, color: { argb: "FFFFFFFF" } };
@@ -262,6 +268,280 @@ function writeCapexSheet(wb: ExcelJS.Workbook, capex: CompanyExportPayload["cape
       const row = ws.addRow([`${p.projectType} (希望予算 ${p.requestedBudgetUsd.toLocaleString()})`, p.reasons.join("; ")]);
       row.getCell(1).font = LABEL_FONT;
       row.getCell(2).font = VALUE_FONT;
+    }
+  }
+}
+
+/**
+ * 【test/sai6-manual-observation-2026-08-01 で追加】この会社・四半期の会社サマリー
+ * （受注残・在庫・稼働率等のKPI）シート。手動観察テストで「四半期実行後のKPI」を
+ * 一覧で確認できるようにするためのもの。CompanyExportPayload.companySummary
+ * （ExportCompanySummary、既存のDTO。exportDto.ts参照）をそのまま転記するだけで、
+ * 値の再計算は一切行わない。
+ */
+function writeCompanySummarySheet(wb: ExcelJS.Workbook, companySummary: CompanyExportPayload["companySummary"]): void {
+  const ws = wb.addWorksheet("Company Summary");
+  ws.columns = [{ width: 42 }, { width: 20 }];
+  writeHeaderRow(ws, ["項目", "値"]);
+  if (!companySummary) {
+    const row = ws.addRow(["このターン・会社の会社サマリーはAPI上に存在しません（データ未作成）"]);
+    row.getCell(1).font = LABEL_FONT;
+    return;
+  }
+  const s: ExportCompanySummary = companySummary;
+
+  const sectionRow = (title: string): void => {
+    const row = ws.addRow([title]);
+    row.getCell(1).font = CHECK_FONT;
+  };
+  const writeRows = (rows: readonly (readonly [string, string | number | null])[]): void => {
+    for (const [label, value] of rows) {
+      const row = ws.addRow([label, value]);
+      row.getCell(1).font = LABEL_FONT;
+      row.getCell(2).font = VALUE_FONT;
+      if (typeof value === "number") row.getCell(2).numFmt = "#,##0.0000";
+    }
+  };
+
+  sectionRow("受注・契約履行（受注残）");
+  writeRows([
+    ["当期新規成約数量(t)", s.newContractedQuantity],
+    ["当期新規成約平均単価(USD/kg)", s.newContractedAveragePrice],
+    ["当期履行数量(t)", s.fulfilledQuantity],
+    ["期末受注残(未履行契約数量、t)", s.outstandingQuantity],
+    ["うち延滞数量(t)", s.overdueQuantity],
+  ]);
+
+  sectionRow("原料調達・原料在庫");
+  writeRows([
+    ["国内買付数量(t)", s.domesticPurchaseQuantity],
+    ["国内買付価格(USD/kg)", s.domesticPurchasePrice],
+    ["輸入中数量(t)", s.importInTransitQuantity],
+    ["輸入到着数量(t)", s.importArrivedQuantity],
+    ["自社養殖池入れ数量(t)", s.aquacultureGrowingQuantity],
+    ["自社養殖収穫数量(t)", s.aquacultureHarvestedQuantity],
+    ["期末原料在庫(t)", s.rawMaterialInventory],
+  ]);
+
+  sectionRow("生産・完成品在庫");
+  writeRows([
+    ["HOSO生産量(t)", s.hosoProduced],
+    ["PD生産量(t)", s.pdProduced],
+    ["VAP生産量(t)", s.vapProduced],
+    ["期末完成品在庫(t)", s.finishedGoodsInventory],
+  ]);
+
+  sectionRow("工場能力・人員・稼働率");
+  writeRows([
+    ["原料不足による生産機会損失(t)", s.rawMaterialShortfall],
+    ["設備能力不足による生産機会損失(t)", s.equipmentShortfall],
+    ["労働力不足による生産機会損失(t)", s.laborShortfall],
+    ["設備稼働率", s.equipmentUtilizationRate],
+    ["労働稼働率", s.laborUtilizationRate],
+    ["残業率", s.overtimeRate],
+    ["臨時ワーカー比率", s.temporaryWorkerShare],
+  ]);
+
+  sectionRow("品質・納期");
+  writeRows([
+    ["格下げ数量(t)", s.downgradeQuantity],
+    ["再加工数量(t)", s.reworkQuantity],
+    ["廃棄数量(t)", s.discardQuantity],
+    ["重大事故件数", s.majorIncidentCount],
+    ["納期遵守率", s.onTimeDeliveryRate],
+  ]);
+
+  if (s.qualityScoreByProduct.length > 0) {
+    sectionRow("商品別品質スコア（当期末時点）");
+    for (const v of s.qualityScoreByProduct) writeRows([[v.product, v.value]]);
+  }
+  if (s.operationalRiskByProduct.length > 0) {
+    sectionRow("商品別操業リスク（当期）");
+    for (const v of s.operationalRiskByProduct) writeRows([[v.product, v.value]]);
+  }
+  if (s.customerTrustByMarket.length > 0) {
+    sectionRow("市場別顧客信頼（当期末時点）");
+    for (const v of s.customerTrustByMarket) writeRows([[v.market, v.value]]);
+  }
+  if (s.deliveryReliabilityByMarket.length > 0) {
+    sectionRow("市場別納期信頼性（当期末時点）");
+    for (const v of s.deliveryReliabilityByMarket) writeRows([[v.market, v.value]]);
+  }
+  if (s.rampWarnings.length > 0) {
+    sectionRow("無理な増産の警告（工場×商品）");
+    writeHeaderRow(ws, ["工場", "商品", "増産ストレス", "", "", "", "", ""]);
+    for (const w of s.rampWarnings) {
+      const row = ws.addRow([w.factoryId, w.product, w.productionRampStress]);
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = VALUE_FONT;
+      });
+      row.getCell(3).numFmt = "0.0000";
+    }
+  }
+  if (s.reasonCodes.length > 0) {
+    sectionRow("当期の理由コード（この会社ぶん）");
+    writeHeaderRow(ws, ["コード", "会社", "説明", "", "", "", "", ""]);
+    for (const r of s.reasonCodes) {
+      const row = ws.addRow([r.code, r.companyId, r.message]);
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = VALUE_FONT;
+      });
+    }
+  }
+}
+
+/**
+ * 【test/sai6-manual-observation-2026-08-01 で追加】この会社・四半期の提出意思決定
+ * （§6 のうち、Standard AIまたはプレイヤーが実際に提出した8領域の意思決定）シート。
+ * CompanyExportPayload.decisionInfo（既存のDTO、exportDto.ts / decisionDto.ts参照）を
+ * そのまま転記するだけで、値の再計算は一切行わない。
+ *
+ * 【スコープ】会社別ブックの入力（CompanyExportPayload）は対象会社1社ぶんのdecisionInfo
+ * しか持たないため、このシートには他社の意思決定は構造上入り得ない。
+ */
+function writeDecisionsSheet(wb: ExcelJS.Workbook, decisionInfo: ExportCompanyDecisionInfo): void {
+  const ws = wb.addWorksheet("Decisions");
+  ws.columns = [{ width: 30 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 40 }];
+
+  const sectionRow = (title: string): void => {
+    const row = ws.addRow([title]);
+    row.getCell(1).font = CHECK_FONT;
+  };
+  const noteRow = (text: string): void => {
+    const row = ws.addRow([text]);
+    row.getCell(1).font = LABEL_FONT;
+  };
+
+  noteRow(`このシートは対象会社の提出意思決定です（isPlayerCompany=${decisionInfo.isPlayerCompany ? "プレイヤー会社" : "AI会社（Standard AI）"}）。`);
+  ws.addRow([]);
+
+  function writeDecision(decision: ExportCompanyDecision): void {
+    sectionRow("① 販売計画（市場別×商品別）");
+    writeHeaderRow(ws, ["市場", "商品", "希望量(t)", "価格調整(USD/kg)", "営業人員(人)", "", "", ""]);
+    for (const p of decision.salesPlans) {
+      const row = ws.addRow([p.market, p.product, p.desiredQuantity, p.priceAdjustmentUsdPerHosoEqKg, p.salesForceHeadcount]);
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = VALUE_FONT;
+      });
+    }
+    if (decision.salesPlans.length === 0) noteRow("販売計画は0件です。");
+    ws.addRow([]);
+
+    sectionRow("② 原料調達（国内買付・輸入・自社養殖）");
+    const dp = decision.domesticPurchasePlan;
+    writeHeaderRow(ws, ["項目", "値", "", "", "", "", "", ""]);
+    for (const [label, value] of [
+      ["国内買付希望量(t)", dp.desiredQuantity],
+      ["国内買付価格調整(USD/kg)", dp.priceAdjustmentUsdPerHosoEqKg],
+      ["調達人員(人)", dp.procurementHeadcount],
+    ] as readonly [string, number][]) {
+      const row = ws.addRow([label, value]);
+      row.getCell(1).font = LABEL_FONT;
+      row.getCell(2).font = VALUE_FONT;
+    }
+    if (decision.importOrders.length > 0) {
+      writeHeaderRow(ws, ["輸入元国", "発注量(t)", "リード期間(四半期)", "上限着地価格(USD/kg)", "", "", "", ""]);
+      for (const o of decision.importOrders) {
+        const row = ws.addRow([o.originCountry, o.orderedQuantity, o.leadTimeTurns ?? "－", o.maxLandedPriceUsdPerHosoEqKg ?? "－"]);
+        row.eachCell((cell) => {
+          if (!cell.font) cell.font = VALUE_FONT;
+        });
+      }
+    } else {
+      noteRow("輸入発注は0件です。");
+    }
+    if (decision.aquacultureStockingPlans.length > 0) {
+      writeHeaderRow(ws, ["池入れ予定生産量(t)", "養殖強度", "バイオセキュリティ水準", "収穫予定四半期", "", "", "", ""]);
+      for (const a of decision.aquacultureStockingPlans) {
+        const row = ws.addRow([a.plannedStockingQuantity, a.aquacultureIntensity, a.bioSecurityLevel, a.harvestPeriod ?? "－"]);
+        row.eachCell((cell) => {
+          if (!cell.font) cell.font = VALUE_FONT;
+        });
+      }
+    } else {
+      noteRow("自社養殖の池入れ計画は0件です。");
+    }
+    ws.addRow([]);
+
+    sectionRow("③ 生産計画（工場別×商品別）");
+    writeHeaderRow(ws, ["工場", "商品", "希望量(t)", "優先順位", "", "", "", ""]);
+    for (const p of decision.productionPlans) {
+      const row = ws.addRow([p.factoryId, p.product, p.desiredQuantity, p.priority]);
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = VALUE_FONT;
+      });
+    }
+    if (decision.productionPlans.length === 0) noteRow("生産計画は0件です。");
+    ws.addRow([]);
+
+    sectionRow("④ 人員配置（工場別・雇用/採用に相当）");
+    writeHeaderRow(ws, ["工場", "正規人員(人)", "臨時人員(人)", "残業率", "出勤可能率", "", "", ""]);
+    for (const w of decision.workerAssignments) {
+      const row = ws.addRow([w.factoryId, w.regularHeadcount, w.temporaryHeadcount, w.overtimeRate, w.attendanceRate]);
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = VALUE_FONT;
+      });
+    }
+    if (decision.workerAssignments.length === 0) noteRow("人員配置は0件です。");
+    ws.addRow([]);
+
+    sectionRow("⑤ 資金調達希望");
+    const fr = decision.financingRequest;
+    for (const [label, value] of [
+      ["希望借入額(USD)", fr.desiredAmountUsd],
+      ["希望借入種別", fr.desiredLoanType],
+      ["希望借入期間(四半期)", fr.desiredTermQuarters],
+      ["希望返済方法", fr.desiredRepaymentMethod],
+      ["任意期限前返済希望額(USD)", fr.desiredPrepaymentUsd],
+      ["緊急融資許容", fr.emergencyAcceptable ? "許容" : "－"],
+    ] as readonly [string, string | number | boolean][]) {
+      const row = ws.addRow([label, value]);
+      row.getCell(1).font = LABEL_FONT;
+      row.getCell(2).font = VALUE_FONT;
+    }
+    ws.addRow([]);
+
+    sectionRow("⑥ 設備投資の意思決定");
+    const cx = decision.capexDecision;
+    if (cx.newProjectProposals.length > 0) {
+      writeHeaderRow(ws, ["新規案件種別", "希望投資額(USD)", "優先順位", "", "", "", "", ""]);
+      for (const p of cx.newProjectProposals) {
+        const row = ws.addRow([p.projectType, p.requestedBudgetUsd ?? "（標準額）", p.priority ?? "（提案順）"]);
+        row.eachCell((cell) => {
+          if (!cell.font) cell.font = VALUE_FONT;
+        });
+      }
+    } else {
+      noteRow("新規設備投資の提案は0件です。");
+    }
+    noteRow(`取消希望案件ID: ${cx.cancelProjectIds.join(", ") || "(なし)"}`);
+    noteRow(`再開希望案件ID: ${cx.resumeProjectIds.join(", ") || "(なし)"}`);
+    ws.addRow([]);
+  }
+
+  if (decisionInfo.submission) {
+    sectionRow("提出意思決定（このターン・この会社が実際に提出し、四半期処理へ使われた内容）");
+    writeDecision(decisionInfo.submission);
+  } else {
+    noteRow("この会社の提出意思決定はAPI上に存在しません（データ未作成）。");
+    ws.addRow([]);
+  }
+
+  sectionRow("Standard AI提案（四半期実行前のAI提案。提出内容と異なる場合のみ意味を持つ）");
+  if (decisionInfo.aiProposal) {
+    writeDecision(decisionInfo.aiProposal);
+  } else {
+    noteRow(decisionInfo.aiProposalUnavailableReason ?? "AI提案は保存されていません。");
+  }
+
+  if (decisionInfo.reasonCodes.length > 0) {
+    sectionRow("当期の理由コード（この会社ぶん）");
+    writeHeaderRow(ws, ["コード", "会社", "説明", "", "", "", "", ""]);
+    for (const r of decisionInfo.reasonCodes) {
+      const row = ws.addRow([r.code, r.companyId, r.message]);
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = VALUE_FONT;
+      });
     }
   }
 }
@@ -802,9 +1082,14 @@ function formatUsdText(value: number): string {
 
 /**
  * Export API（会社スコープ）JSONだけを入力として、Meta/PL/BS/CF/Financing/Capex/
- * Processing Capacity/Sales Contracts/Sales Detail/Marketの10シート構成のExcelワークブックを組み立て、
- * Bufferとして返す。会社スコープのペイロードだけを入力とするため、他社の非公開情報は
- * 構造上ここへ入り得ない。
+ * Company Summary/Processing Capacity/Sales Contracts/Sales Detail/Market/Decisionsの
+ * 12シート構成のExcelワークブックを組み立て、Bufferとして返す。会社スコープの
+ * ペイロードだけを入力とするため、他社の非公開情報は構造上ここへ入り得ない。
+ *
+ * 【test/sai6-manual-observation-2026-08-01 で追加】Company Summary（受注残・在庫・
+ * 稼働率等のKPI）・Decisions（Standard AI/プレイヤーの提出意思決定・AI提案・理由コード）の
+ * 2シートを追加した。いずれも既存のCompanyExportPayload（companySummary・decisionInfo）を
+ * そのまま転記するだけで、新しいデータ収集・値の再計算は一切行っていない。
  */
 export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayload): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
@@ -824,10 +1109,12 @@ export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayl
   }
   writeFinancingSheet(wb, payload.financingResult);
   writeCapexSheet(wb, payload.capexResult);
+  writeCompanySummarySheet(wb, payload.companySummary);
   writeProcessingCapacitySheet(wb, payload.processingCapacity);
   writeSalesContractsSheet(wb, payload.salesContracts);
   writeSalesDetailSheet(wb, payload);
   writeMarketSheet(wb, payload.market);
+  writeDecisionsSheet(wb, payload.decisionInfo);
 
   const arrayBuffer = await wb.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);

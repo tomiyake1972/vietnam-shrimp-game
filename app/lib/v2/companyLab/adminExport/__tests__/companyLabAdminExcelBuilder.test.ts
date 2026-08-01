@@ -10,9 +10,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
 import { buildCompanyExportExcelWorkbook } from "../companyLabAdminExcelBuilder";
-import { SYNTHETIC_CONTRACT, buildSyntheticCompanyExportPayload } from "./syntheticExportPayload";
+import { SYNTHETIC_CONTRACT, SYNTHETIC_PERIOD, buildSyntheticCompanyExportPayload } from "./syntheticExportPayload";
 
-/** Phase 8C-3B（三宅さんの指示 §3・§4）で Sales Detail・Market を追加した後のシート構成。 */
+/**
+ * Phase 8C-3B（三宅さんの指示 §3・§4）で Sales Detail・Market を追加し、
+ * test/sai6-manual-observation-2026-08-01 で Company Summary・Decisions を追加した後の
+ * シート構成。
+ */
 const EXPECTED_SHEET_NAMES = [
   "Meta",
   "PL",
@@ -20,10 +24,12 @@ const EXPECTED_SHEET_NAMES = [
   "CF",
   "Financing",
   "Capex",
+  "Company Summary",
   "Processing Capacity",
   "Sales Contracts",
   "Sales Detail",
   "Market",
+  "Decisions",
 ];
 
 async function loadWorkbook(payload: Parameters<typeof buildCompanyExportExcelWorkbook>[0]): Promise<ExcelJS.Workbook> {
@@ -33,7 +39,7 @@ async function loadWorkbook(payload: Parameters<typeof buildCompanyExportExcelWo
   return wb;
 }
 
-test("buildCompanyExportExcelWorkbook: Meta/PL/BS/CF/Financing/Capex/Sales Contracts/Processing Capacity/Sales Detail/Marketの10シートを生成する", async () => {
+test("buildCompanyExportExcelWorkbook: Meta/PL/BS/CF/Financing/Capex/Company Summary/Sales Contracts/Processing Capacity/Sales Detail/Market/Decisionsの12シートを生成する", async () => {
   const wb = await loadWorkbook(buildSyntheticCompanyExportPayload());
   assert.deepEqual(
     wb.worksheets.map((ws) => ws.name),
@@ -247,4 +253,90 @@ test("buildCompanyExportExcelWorkbook: financialResultがnullの場合でもク�
   assert.ok(pl);
   const firstDataRow = pl!.getRow(1);
   assert.ok(String(firstDataRow.getCell(1).value).includes("存在しません"));
+});
+
+test("buildCompanyExportExcelWorkbook: Company Summaryシートはcompany SummaryがnullならクラッシュせずAPI上未作成の旨を表示する", async () => {
+  const wb = await loadWorkbook(buildSyntheticCompanyExportPayload({ companySummary: null }));
+  const sheet = wb.getWorksheet("Company Summary");
+  assert.ok(sheet);
+  assert.ok(String(sheet!.getRow(2).getCell(1).value).includes("存在しません"));
+});
+
+test("buildCompanyExportExcelWorkbook: Company Summaryシートは受注残・在庫・稼働率のKPIを転記する", async () => {
+  const wb = await loadWorkbook(
+    buildSyntheticCompanyExportPayload({
+      companySummary: {
+        companyId: "BAL",
+        period: SYNTHETIC_PERIOD,
+        newContractedQuantity: 400,
+        newContractedAveragePrice: 5.4,
+        fulfilledQuantity: 300,
+        outstandingQuantity: 250,
+        overdueQuantity: 20,
+        domesticPurchaseQuantity: 2800,
+        domesticPurchasePrice: 2.4,
+        importInTransitQuantity: 500,
+        importArrivedQuantity: 300,
+        aquacultureGrowingQuantity: 100,
+        aquacultureHarvestedQuantity: 90,
+        rawMaterialInventory: 1200,
+        hosoProduced: 700,
+        pdProduced: 100,
+        vapProduced: 50,
+        finishedGoodsInventory: 900,
+        rawMaterialShortfall: 0,
+        equipmentShortfall: 0,
+        laborShortfall: 0,
+        equipmentUtilizationRate: 0.72,
+        laborUtilizationRate: 0.68,
+        overtimeRate: 0.05,
+        temporaryWorkerShare: 0.1,
+        downgradeQuantity: 5,
+        reworkQuantity: 3,
+        discardQuantity: 1,
+        majorIncidentCount: 0,
+        onTimeDeliveryRate: 0.95,
+        qualityScoreByProduct: [],
+        operationalRiskByProduct: [],
+        customerTrustByMarket: [],
+        deliveryReliabilityByMarket: [],
+        rampWarnings: [],
+        reasonCodes: [],
+      },
+    }) as Parameters<typeof buildCompanyExportExcelWorkbook>[0],
+  );
+  const sheet = wb.getWorksheet("Company Summary");
+  assert.ok(sheet);
+  const labels: string[] = [];
+  const values: unknown[] = [];
+  sheet!.eachRow((row) => {
+    labels.push(String(row.getCell(1).value ?? ""));
+    values.push(row.getCell(2).value);
+  });
+  const outstandingIdx = labels.findIndex((l) => l.includes("期末受注残"));
+  assert.ok(outstandingIdx >= 0, "受注残の行が見つかりません");
+  assert.equal(values[outstandingIdx], 250);
+  const utilIdx = labels.findIndex((l) => l.includes("設備稼働率"));
+  assert.ok(utilIdx >= 0, "設備稼働率の行が見つかりません");
+  assert.equal(values[utilIdx], 0.72);
+});
+
+test("buildCompanyExportExcelWorkbook: Decisionsシートは提出意思決定8領域とAI提案未保存理由・理由コードを転記する", async () => {
+  const wb = await loadWorkbook(buildSyntheticCompanyExportPayload());
+  const sheet = wb.getWorksheet("Decisions");
+  assert.ok(sheet);
+  const allText = sheet!
+    .getSheetValues()
+    .flat()
+    .map((v) => (v === undefined || v === null ? "" : String(v)))
+    .join("\n");
+  assert.ok(allText.includes("販売計画"), "販売計画セクションが見つかりません");
+  assert.ok(allText.includes("原料調達"), "原料調達セクションが見つかりません");
+  assert.ok(allText.includes("生産計画"), "生産計画セクションが見つかりません");
+  assert.ok(allText.includes("人員配置"), "人員配置セクションが見つかりません");
+  assert.ok(allText.includes("資金調達希望"), "資金調達希望セクションが見つかりません");
+  assert.ok(allText.includes("設備投資"), "設備投資セクションが見つかりません");
+  assert.ok(allText.includes("テスト用の理由文"), "AI提案未保存理由が転記されていません");
+  assert.ok(allText.includes("SALES_FORCE_SHORTAGE"), "理由コードが転記されていません");
+  assert.ok(allText.includes("IN"), "輸入発注の輸入元国が転記されていません（syntheticのimportOrders）");
 });

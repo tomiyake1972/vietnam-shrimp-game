@@ -140,6 +140,42 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
           </div>
         )}
 
+        {isEditing && viewModel.aiProposalDiagnostics && (
+          <CollapsibleSection
+            title={`Standard AIの提案（turn ${viewModel.currentTurn}・実行前プレビュー）`}
+            tone="info"
+            testId="ai-proposal-diagnostics-section"
+          >
+            <p className="text-xs text-gray-400 mb-2">
+              下の「意思決定編集」欄には、Standard
+              AIが同じ入力（自社状態・公開市場情報）から算出した提案が初期値として入っています。このまま「この内容で提出する」を押せばAI提案どおりに実行され、内容を編集してから提出することもできます。以下はAIがその提案に至った判断理由です（提出後・下書き保存後は表示されません）。
+            </p>
+            {viewModel.aiProposalDiagnostics.entries.length === 0 ? (
+              <p className="text-xs text-gray-500">この四半期は特筆すべき判断理由（警告・閾値超過等）がありません。</p>
+            ) : (
+              <ul className="text-xs text-gray-300 space-y-1.5">
+                {viewModel.aiProposalDiagnostics.entries.map((entry, idx) => (
+                  <li key={`${entry.code}-${idx}`} className="border-b border-gray-700/40 pb-1.5 last:border-b-0">
+                    <span
+                      className={
+                        entry.severity === "critical"
+                          ? "text-rose-300"
+                          : entry.severity === "warning"
+                            ? "text-amber-300"
+                            : "text-gray-400"
+                      }
+                    >
+                      [{entry.domain}/{entry.code}]
+                    </span>{" "}
+                    {entry.message}
+                    {entry.decisionSummary ? ` → ${entry.decisionSummary}` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CollapsibleSection>
+        )}
+
         {!isCompleted && draft && (
           <div className="bg-gray-800 rounded-2xl p-4 sm:p-5">
             <h2 className="text-base font-semibold mb-3">意思決定編集（turn {viewModel.currentTurn}）</h2>

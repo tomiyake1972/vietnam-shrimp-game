@@ -6,6 +6,7 @@ import { CompanyId } from "../../../../../lib/v2/sales/types";
 import { CompanyLabConfig } from "../../../../../lib/v2/companyLab/types";
 import { buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../../../../../lib/v2/companyLab/runner";
 import { generateAutoPolicyDecision } from "../../../../../lib/v2/companyLab/autoPolicy";
+import { generateStandardAiDecision } from "../../../../../lib/v2/companyLab/standardAi/policy";
 import { COMPANY_LAB_COMPANY_IDS } from "../../../../../lib/v2/companyLab/fixtures";
 import { buildInitialDraft } from "../../../../../v2/company-lab/decisionDraft";
 import { buildApiDecisionsProvider } from "../decisionsProvider";
@@ -17,7 +18,7 @@ function config(): CompanyLabConfig {
   return { scenarioId: "baseline", mode: "canonical", seed: "decisions-provider-test-001", turns: 4 };
 }
 
-test("buildApiDecisionsProvider: プレイヤー会社は提出済みdraftから、AI会社は自動方針から意思決定を組み立てる", () => {
+test("buildApiDecisionsProvider: プレイヤー会社は提出済みdraftから、AI会社はStandard AIから意思決定を組み立てる", () => {
   const { state, fixtures } = initializeCompanyLab(config());
   const publicInfo = buildPublicMarketInfo(state);
   const playerFixture = fixtures.find((f) => f.companyId === PLAYER_COMPANY_ID);
@@ -44,12 +45,12 @@ test("buildApiDecisionsProvider: プレイヤー会社は提出済みdraftから
   // プレイヤー会社の意思決定はdraft由来（companyIdが一致）
   assert.equal(decisions[PLAYER_COMPANY_ID].companyId, PLAYER_COMPANY_ID);
 
-  // AI会社（プレイヤー以外）の意思決定は、同じ入力からgenerateAutoPolicyDecisionを
+  // AI会社（プレイヤー以外）の意思決定は、同じ入力からgenerateStandardAiDecisionを
   // 直接呼んだ場合と完全に一致する（同一入力・同一ロジックであれば決定論的に同じ結果になる）。
   for (const fixture of fixtures) {
     if (fixture.companyId === PLAYER_COMPANY_ID) continue;
     const ownState = buildCompanyOwnState(state, fixture);
-    const expected = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+    const expected = generateStandardAiDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
     assert.deepEqual(JSON.parse(JSON.stringify(decisions[fixture.companyId])), JSON.parse(JSON.stringify(expected)));
   }
 });

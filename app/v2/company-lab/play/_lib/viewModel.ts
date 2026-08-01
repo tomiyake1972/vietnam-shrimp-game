@@ -18,7 +18,7 @@
 import { CompanyDecisionDraft, buildInitialDraft } from "../../decisionDraft";
 import { CompanyFixture, CompanyLabState, CompanyOwnState, CompanyQuarterSummary, CompanyReasonEntry, PublicMarketInfo } from "../../../../lib/v2/companyLab/types";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../../lib/v2/companyLab/runner";
-import { generateAutoPolicyDecision } from "../../../../lib/v2/companyLab/autoPolicy";
+import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../../../../lib/v2/companyLab/standardAi/policy";
 import { restoreCompanyLabStateFromRuntimeSnapshot } from "../../../../lib/v2/companyLab/persistence/snapshot";
 import { CompanyLabPersistedStateV1, CompanyLabDraftEnvelope } from "../../../../lib/v2/companyLab/persistence/types";
 import { MarketQuarterResult } from "../../../../lib/v2/market/types";
@@ -102,8 +102,16 @@ export interface PlayerScreenViewModel {
   readonly ownState: CompanyOwnState;
   readonly publicInfo: PublicMarketInfo;
   readonly period: CompanyLabState["currentPeriod"];
-  /** 編集対象のdraft本体（未保存なら自動方針から組み立てた初期値。完了済みならnull）。 */
+  /** 編集対象のdraft本体（未保存ならStandard AIの提案から組み立てた初期値。完了済みならnull）。 */
   readonly draft: CompanyDecisionDraft | null;
+  /**
+   * 【test/sai6-manual-observation-2026-08-01 で追加】draftをStandard AIの提案から
+   * 新規生成した場合のみ設定される診断情報（判断理由コード・圧力値・希望値）。
+   * 既存の保存済みdraftをそのまま表示している場合、および提出済み／完了済みの
+   * 場合は常にnull（保存済みdraftはプレイヤーが既に編集している可能性があり、
+   * その場合に「これはAIの提案です」という診断情報を出すと誤解を招くため）。
+   */
+  readonly aiProposalDiagnostics: StandardAiQuarterDiagnostics | null;
   readonly draftSubmittedAt: string | null;
   readonly draftUpdatedAt: string | null;
   readonly lastQuarterResult: PlayerLastQuarterResult | null;
@@ -119,6 +127,18 @@ export interface PlayerScreenViewModel {
 
 export type PlayerScreenLoadResult = { readonly kind: "ok"; readonly viewModel: PlayerScreenViewModel } | { readonly kind: "notFound" };
 
+/** coerceDraftOrRebuildの戻り値。draftはUIへの表示・編集対象、diagnosticsは新規生成時のみStandard AIの診断情報を持つ。 */
+interface CoercedDraftResult {
+  readonly draft: CompanyDecisionDraft;
+  /**
+   * 【test/sai6-manual-observation-2026-08-01 で追加】この四半期分としてStandard AIの
+   * 提案をその場で新規生成した場合のみ設定される（＝draftが既存の保存済みdraftを
+   * そのまま返した場合はnull。保存済みdraftは既に編集されている可能性があり、
+   * その場合に「これはAIの提案です」という診断情報を出すと誤解を招くため）。
+   */
+  readonly diagnostics: StandardAiQuarterDiagnostics | null;
+}
+
 /** 提出済みでない既存draftが、現在のプレイヤー会社向けとして解釈可能な形かどうか（壊れていれば安全側で再生成する）。 */
 function coerceDraftOrRebuild(
   envelope: CompanyLabDraftEnvelope | null,
@@ -126,18 +146,28 @@ function coerceDraftOrRebuild(
   restoredState: CompanyLabState,
   publicInfo: PublicMarketInfo,
   turn: number
-): CompanyDecisionDraft {
+): CoercedDraftResult {
   if (envelope !== null && isPlausibleCompanyDecisionDraft(envelope.draft, fixture.companyId)) {
-    return envelope.draft;
+    return { draft: envelope.draft, diagnostics: null };
   }
   // draftが無い（新しいturn）か、保存済みだが構造上解釈できない場合は、既存の仮UI
-  // （page.tsx）と同じ手順で自動方針の出力から初期値を組み立てる。
+  // （page.tsx）と同じ手順でStandard AIの提案から初期値を組み立てる
+  // （test/sai6-manual-observation-2026-08-01：手動観察テストのため、プレイヤー
+  // 自身の会社についても「四半期実行前に確認できるStandard AIの提案」として
+  // Standard AIの出力を初期表示する。プレイヤーはこれをそのまま提出することも、
+  // 編集してから提出することもできる＝既存の「提出」操作が変更されるわけではない）。
   const ownState = buildCompanyOwnState(restoredState, fixture);
-  const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, restoredState.currentPeriod, turn);
+  const { decision: aiDecision, diagnostics } = generateStandardAiDecisionWithDiagnostics(
+    fixture,
+    ownState,
+    publicInfo,
+    restoredState.currentPeriod,
+    turn
+  );
   // 【Phase 8D-4】ワーカー人数の出発点は、fixtureの初期値ではなく会社状態として
   // 保持されている前期末の総人数。これを渡さないと、四半期をまたぐたびに人数が
   // 初期値へ戻るというテストプレイで見つかった不具合が再発する。
-  return buildInitialDraft(fixture, autoDecision, ownState.workforceState);
+  return { draft: buildInitialDraft(fixture, aiDecision, ownState.workforceState), diagnostics };
 }
 
 export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies, labId: string): Promise<PlayerScreenLoadResult> {
@@ -168,6 +198,7 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
 
   let phase: PlayerScreenPhase;
   let draft: CompanyDecisionDraft | null;
+  let aiProposalDiagnostics: StandardAiQuarterDiagnostics | null = null;
   if (isComplete) {
     phase = "completed";
     draft = null;
@@ -176,7 +207,9 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
     draft = isPlausibleCompanyDecisionDraft(draftEnvelope.draft, fixture.companyId) ? draftEnvelope.draft : null;
   } else {
     phase = "editing";
-    draft = coerceDraftOrRebuild(draftEnvelope, fixture, restoredState, publicInfo, turn);
+    const coerced = coerceDraftOrRebuild(draftEnvelope, fixture, restoredState, publicInfo, turn);
+    draft = coerced.draft;
+    aiProposalDiagnostics = coerced.diagnostics;
   }
 
   const lastQuarterCapexResult = latestEntry !== null ? extractCompanyCapexResult(latestEntry.record, stored.playerCompanyId) : null;
@@ -251,6 +284,7 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       publicInfo,
       period: restoredState.currentPeriod,
       draft,
+      aiProposalDiagnostics,
       draftSubmittedAt: draftEnvelope?.submittedAt ?? null,
       draftUpdatedAt: draftEnvelope?.updatedAt ?? null,
       lastQuarterResult,

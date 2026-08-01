@@ -77,7 +77,11 @@ export async function buildCompanyLabAdminExportZip(input: BuildExportZipInput):
   if (input.includeExcel) {
     const excelBuffer = await buildCompanyExportExcelWorkbook(input.companyJson);
     zip.file(excelFile, excelBuffer);
-    entries.push({ file: excelFile, sourceApiPath: null, description: `${companyFile}のみを入力として生成した経営データブック（Meta/PL/BS/CF/Financing/Capexの6シート）` });
+    entries.push({
+      file: excelFile,
+      sourceApiPath: null,
+      description: `${companyFile}のみを入力として生成した経営データブック（Meta/PL/BS/CF/Financing/Capex/Company Summary/Processing Capacity/Sales Contracts/Sales Detail/Market/Decisionsの12シート）`,
+    });
 
     // GMブックは会社別ブックと別ファイルとして出力する（1冊に混ぜない）。
     if (input.gmExcelPayload) {

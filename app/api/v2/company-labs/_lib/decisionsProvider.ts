@@ -5,8 +5,17 @@
 //
 //   - プレイヤー会社: 提出済みdraft本体（unknown）を app/v2/company-lab/decisionDraft.ts の
 //     buildDecisionInputFromDraft で CompanyDecisionInput へ変換する。
-//   - AI会社（プレイヤー以外の4社）: 既存の決定論的 generateAutoPolicyDecision を使う
-//     （新しいAI API呼び出しは導入しない。指示§7）。
+//   - AI会社（プレイヤー以外の4社）: Standard AI（app/lib/v2/companyLab/standardAi/policy.ts の
+//     generateStandardAiDecision）を使う（新しいAI API呼び出しは導入しない。指示§7）。
+//
+// 【test/sai6-manual-observation-2026-08-01 での変更】三宅さんの手動観察テスト準備の
+// ため、プレイヤー以外の4社の意思決定生成器を、暫定的なルールベース自動方針
+// （generateAutoPolicyDecision、companyLab/autoPolicy.ts）から、実際に評価対象と
+// なる標準経営AI（generateStandardAiDecision、standardAi/policy.ts）へ切り替えた。
+// Standard AI自体の判断ロジック（standardAi/配下）は一切変更していない。関数
+// シグネチャ（CompanyDecisionProvider）はどちらも同一のため、この配線変更のみで
+// 差し替えが完結する。develop/v2本体の挙動は、このブランチをマージしない限り
+// 変わらない。
 //
 // 【lib/UI分離の維持】本ファイルはapp/api配下（HTTP統合層）にあり、app/lib/v2
 // （フレームワーク・UI非依存のライブラリ層）には置かない。app/v2/company-lab/
@@ -25,7 +34,7 @@
 import { CompanyDecisionInput, CompanyFixture, CompanyLabState } from "../../../../lib/v2/companyLab/types";
 import { CompanyId } from "../../../../lib/v2/sales/types";
 import { buildCompanyOwnState } from "../../../../lib/v2/companyLab/runner";
-import { generateAutoPolicyDecision } from "../../../../lib/v2/companyLab/autoPolicy";
+import { generateStandardAiDecision } from "../../../../lib/v2/companyLab/standardAi/policy";
 import { CompanyLabDecisionContext, CompanyLabDecisionsProvider } from "../../../../lib/v2/companyLab/application/companyLabQuarterFlowService";
 import { CompanyLabQuarterProcessingError } from "../../../../lib/v2/companyLab/persistence/errors";
 import { CompanyDecisionDraft, buildDecisionInputFromDraft } from "../../../../v2/company-lab/decisionDraft";
@@ -71,7 +80,7 @@ function buildPlayerDecision(labId: string, fixture: CompanyFixture, restoredSta
 /**
  * API層用のCompanyLabDecisionsProviderを組み立てる。
  *   - playerCompanyId と一致する会社: 提出済みdraftから変換。
- *   - それ以外の会社（AI会社）: 既存の決定論的generateAutoPolicyDecisionをそのまま使う
+ *   - それ以外の会社（AI会社）: Standard AI（generateStandardAiDecision）をそのまま使う
  *     （プレイヤー以外の4社。新しいAI API呼び出しは導入しない）。
  */
 export function buildApiDecisionsProvider(labId: string): CompanyLabDecisionsProvider {
@@ -83,7 +92,7 @@ export function buildApiDecisionsProvider(labId: string): CompanyLabDecisionsPro
         decisions[fixture.companyId] = buildPlayerDecision(labId, fixture, restoredState, submittedDraftBody);
       } else {
         const ownState = buildCompanyOwnState(restoredState, fixture);
-        decisions[fixture.companyId] = generateAutoPolicyDecision(fixture, ownState, publicInfo, period, turn);
+        decisions[fixture.companyId] = generateStandardAiDecision(fixture, ownState, publicInfo, period, turn);
       }
     }
     return decisions;
