@@ -47,19 +47,21 @@ Phase 6初版には、マージ前に必ず修正すべき2つの根本的な経
 
 配分の手順:
 
-1. 各生産計画（demand）について、労働以外の制約（原料・工場共通処理能力・冷凍包装能力・商品別設備能力）を経た後の候補完成品量（`candidateQuantity`）を、常用のみ・臨時のみでそれぞれ満たすために必要な人数（`headcountDemand`）へ逆算する: `headcountDemand = candidateQuantity / (efficiencyPerHead × attendanceRate × skillLevel(product) × overtimeMultiplier)`。
+1. 各生産計画（demand）について、労働以外の制約（原料・工場共通処理能力・冷凍包装能力・商品別設備能力）を経た後の候補完成品量（`candidateQuantity`）を、常用のみ・臨時のみでそれぞれ満たすために必要な人数（`headcountDemand`）へ逆算する: `headcountDemand = candidateQuantity × laborIntensityCoefficientByProduct[product] / (efficiencyPerHead × attendanceRate × skillLevel(product) × overtimeMultiplier)`。
 2. 常用ワーカーの`headcountDemand`群を、その工場の`regularHeadcount`を予算として優先順位階層配分する。臨時ワーカーも`temporaryHeadcount`を予算として**別々に**同様の配分を行う（常用・臨時は別予算として独立に数量保存される。同じ人を両方でカウントしない）。
 3. 各計画の実際に配分された常用・臨時人数から、`calculateLaborCapacityFromAssignedHeadcount`（低レベル計算式、旧`calculateEffectiveLaborCapacity`相当）で有効労働能力を算出する:
 
 ```
 raw = (assignedRegularHeadcount × regularEfficiencyPerHeadTons + assignedTemporaryHeadcount × temporaryEfficiencyPerHeadTons)
       × attendanceRate × skillLevel(product) × (1 + min(overtimeRate, overtimeRateCap) × overtimeEfficiencyFactor)
-laborCapacity(product) = min(raw, factoryCapacity[product])
+effective = raw / laborIntensityCoefficientByProduct[product]
+laborCapacity(product) = min(effective, factoryCapacity[product])
 ```
 
-- `regularEfficiencyPerHeadTons > temporaryEfficiencyPerHeadTons`（常用ワーカーの方が1人あたり効率が高い、暫定値）。
+- `regularEfficiencyPerHeadTons > temporaryEfficiencyPerHeadTons`（常用ワーカーの方が1人あたり効率が高い、暫定値）。どちらも商品非依存の基礎値である。
+- **【2026-08-01追加】`laborIntensityCoefficientByProduct`（HOSO=1.0・PD=1.2・VAP=3.0）** は「同じHOSO換算数量を処理するときの労務負荷の相対比」を表す除数で、商品非依存の基礎効率をここで初めて商品ごとに割り引く。歩留まり係数・固定費配賦係数・営業工数係数とは別系統であり、混同しないこと（詳細は`docs/kb/ShrimpX_03_パラメータ仕様書.md`§5.3参照）。
 - 残業率は`overtimeRateCap`（暫定0.3）でクリップする。残業を無限に増やしても能力は上限を超えない。
-- `min(raw, factoryCapacity[product])`により、人員増加の効果は当該商品の専用設備能力を超えない。
+- `min(effective, factoryCapacity[product])`により、人員増加の効果は当該商品の専用設備能力を超えない。
 - スキルのない商品（`skills`に該当エントリが無い）は`skillLevel=0`扱いとなり、有効労働能力は0になる。人員が0でも同様に0（設備能力があっても生産できない、労働不足の表面化）。
 - 人件費（USD）は一切算出しない。記録すべき数量（配置人数・臨時ワーカー比率）のみを出力する。
 
@@ -160,7 +162,8 @@ productionState = state;
 
 - `yield.physicalYieldRatio`（HOSO 0.92 / PD 0.80 / VAP 0.70）: 商品別の物理重量歩留まり（参考値のみ。HOSO換算数量計算には使わない。§6参照）。
 - `yield.saleableRecoveryRatio`（HOSO 0.98 / PD 0.97 / VAP 0.95）: 商品別の真の販売可能回収率（HOSO換算量の計算に使う唯一の比率。§6参照）。
-- `labor.regularEfficiencyPerHeadTons`（6）/ `temporaryEfficiencyPerHeadTons`（3.5）: ワーカー1人あたりの基準有効生産能力。
+- `labor.regularEfficiencyPerHeadTons`（6）/ `temporaryEfficiencyPerHeadTons`（3.5）: ワーカー1人あたりの基準有効生産能力（商品非依存の基礎値）。
+- `labor.laborIntensityCoefficientByProduct`（HOSO 1.0 / PD 1.2 / VAP 3.0、2026-08-01追加）: 商品別労務負荷係数。基礎有効生産能力を商品ごとに割り引く除数。詳細は§4・§14参照。
 - `labor.overtimeRateCap`（0.3）/ `overtimeEfficiencyFactor`（0.5）: 残業の上限・効果係数。
 - `cost.baseProcessingCostUsdPerTon`（HOSO 350 / PD 520 / VAP 780）・`hosoEqKgPerTon`（1000）: 記録用の基準加工費・原料取得原価算出のためのトン→kg換算係数（非会計計上）。
 - `finishedGoods.defaultShelfLifeTurns`（4四半期）: 完成品ロットの標準使用期限。
@@ -190,6 +193,7 @@ productionState = state;
   - 商品ごとに「専用ラインが存在するか（Capex投資済みか）」を状態として持ち、存在しない場合は`hoso/pd/vapCapacity`を絶対上限として使わず、Stage 5の労働力プールから直接商品別に配分する経路に切り替える必要がある。
   - 専用ライン建設後は、(a)機械経由の生産量（`hoso/pd/vapCapacity`を上限とし、労働力消費が少ない、または専用の少人数オペレーターのみで足りる）と、(b)人力経由の追加生産量（労働力プールを消費し、機械能力を超えて積み増せる）の二経路を合算するモデルへの拡張が必要。
   - 商品ごとの「人力のみでの生産効率」（1人当たり生産可能トン数）は、現行の`regularEfficiencyPerHeadTons`(6t)/`temporaryEfficiencyPerHeadTons`(3.5t)のような画一係数ではなく、商品別に別途定義する必要がある可能性が高い（VAPはHOSOより人力あたりの複雑度・労働集約度が高いと想定されるため。`baseProcessingCostUsdPerTon`がhoso=350/pd=520/vap=780と商品ごとに異なる設定と整合させる）。
+    **【2026-08-01追記】本項目のうち「商品別の労務負荷差」自体は、ブランチ`feature/v2-product-labor-intensity`で`ProductionParameters.labor.laborIntensityCoefficientByProduct`（HOSO:PD:VAP = 1.0:1.2:3.0）として実装済み（詳細は本書§4・`docs/kb/ShrimpX_03_パラメータ仕様書.md`§5.3参照）。ただし、上記1〜4で提案されている「設備能力上限を超えて人力で積み増せる」という設備・労働力の代替関係そのものは引き続き未実装・未確定であり、本節の課題として残る。**
   - 原料投入側の`commonProcessingCapacity`（Stage 2、原料の物理的な受入・脱穀処理能力）は、この柔軟性の対象外（真の設備上限）として維持するか、これも将来的に労働力代替の対象に含めるかは要検討。
   - 労働コスト低下シナリオ（ベトナム経済危機等）は`rawMaterials`/`scenarioEvent`側の既存の賃金・雇用パラメータとの連携が必要（本書の対象外、`SCENARIO_EVENT_ARCHITECTURE_v0.1.md`側の課題）。
 
