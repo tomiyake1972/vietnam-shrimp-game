@@ -21,7 +21,9 @@ import { generateAutoPolicyDecision } from "../../autoPolicy";
 import { findPreviousQuarterPdUtilization } from "../../pdMechanizationState";
 import { PD_MECHANIZATION_PARAMETERS_V1 } from "../../../capex/pdMechanization";
 import { lookupProductDevelopmentScore } from "../../productDevelopmentState";
-import { CompanyDecisionInput, CompanyFixture, CompanyId } from "../../types";
+import { CompanyDecisionInput, CompanyFixture } from "../../types";
+import { CompanyId } from "../../../sales/types";
+import { score0to100 } from "../../../core/units";
 
 const TURNS = 3;
 const TEST_ENGINE_VERSION = "test-v2-companyLab-engine-test15";
@@ -294,8 +296,8 @@ test("MIG-6: 空でないproductDevelopmentState（複数会社のスコア）�
     ...runtime,
     productDevelopmentState: {
       entries: [
-        { companyId: companyA, score: 72 },
-        { companyId: companyB, score: 31 },
+        { companyId: companyA, score: score0to100(72) },
+        { companyId: companyB, score: score0to100(31) },
       ],
     },
   };
@@ -325,7 +327,7 @@ test("MIG-7（旧形式の安全な既定補完）: pdMechanizationState・produ
   delete legacyRuntime.salesBaseState;
   delete legacyRuntime.marketEvolutionState;
 
-  const stored = buildStored(legacyRuntime as ReturnType<typeof createCompanyLabRuntimeSnapshot>, fixtures, 1);
+  const stored = buildStored(legacyRuntime as unknown as ReturnType<typeof createCompanyLabRuntimeSnapshot>, fixtures, 1);
 
   assert.doesNotThrow(() => decodeCompanyLabPersistedState(encodeCompanyLabPersistedState(stored)));
   const decoded = decodeCompanyLabPersistedState(encodeCompanyLabPersistedState(stored));
@@ -377,7 +379,7 @@ test("MIG-9（フルラウンドトリップ）: save→load→1四半期進行�
   const withState = {
     ...runtimeBefore,
     pdMechanizationState: { entries: [{ factoryId, companyId, previousQuarterPdUtilization: 0.55 }] },
-    productDevelopmentState: { entries: [{ companyId, score: 66 }] },
+    productDevelopmentState: { entries: [{ companyId, score: score0to100(66) }] },
   };
 
   // 1回目のsave→load。

@@ -60,7 +60,7 @@ test("PDS-5: $100,000投資は、標準投資額$250,000に対する比率(0.4)�
 test("PDS-6: spend=0の四半期は、投資量に関わらず必ず中立値へ向けた減衰が適用される（スキップされない）", () => {
   const spendUp = new Map([["C1", 500_000]]);
   let state = updateProductDevelopmentState(undefined, spendUp, ["C1"]);
-  let score = lookupProductDevelopmentScore(state, "C1");
+  const score = lookupProductDevelopmentScore(state, "C1");
   assert.ok(score > 50);
 
   const spendZero = new Map<string, number>(); // C1は今期投資なし
