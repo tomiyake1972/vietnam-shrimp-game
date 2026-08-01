@@ -162,6 +162,23 @@ export const PROJECT_EFFECT_DISCLOSURES: Readonly<Record<CapitalProjectType, Pro
       "Worker意思決定でその工場へ人員を配置する必要があります（本タスク時点では、意思決定画面のWorker・生産計画の行は" +
       "既存fixtureの工場だけを対象に生成されるため、新設工場への配置導線は今後の拡張課題です）。",
   },
+  // 【Test15新設】特定Factory1件を対象に、そのFactoryのPD労働集約度係数だけを引き下げる
+  // （PD生産能力そのものは増やさない。HOSO/VAPには一切影響しない）。
+  pdMechanization: {
+    implementedEffects: [
+      "対象Factory1件だけのPD労働集約度係数を、稼働開始後の習熟進捗×前四半期PD稼働率に応じて段階的に引き下げ（capex/pdMechanization.ts）",
+      "取得原価の固定資産振替と、建物・機械コンポーネント別の減価償却",
+      "稼働開始後の四半期固定保守費",
+    ],
+    notImplementedEffects: [
+      "対象FactoryのPD生産能力（pdCapacity）そのものの増加（このプロジェクトは能力を増やしません）",
+      "HOSO・VAPの労働集約度係数（対象Factoryも含め一切変化しません）",
+      "他社・他工場のPD労働集約度係数",
+    ],
+    notImplementedNote:
+      "この投資の効果は、対象Factoryの前四半期PD稼働率が低いほど小さくなります（稼働率が低い工場では、機械化しても実際の削減効果はほとんど発現しません）。" +
+      "稼働開始直後は習熟期間中のため、フル効果ではありません。",
+  },
 };
 
 // ---------------------------------------------------------------------

@@ -207,6 +207,25 @@ export interface CompanyOwnState {
    * エンジンの実値で確認できるようにするために公開する。
    */
   readonly salesBaseCompetitivenessWeight?: number;
+  /**
+   * 【Test15新設】前四半期末までの自社工場ごとのPD稼働率（pdMechanizationState.ts
+   * findPreviousQuarterPdUtilizationと同じ値。エントリが無い工場は既定値
+   * （PD_MECHANIZATION_PARAMETERS_V1.initialPdUtilizationRatio）とみなす）。
+   * UI側がPD省人化投資の状況（現在の稼働率・想定される機械化効果）を表示する
+   * ために公開する。常に存在する（機能フラグに依存しない常時ゲームルール）。
+   * 【配列形状の理由】factoryIdをオブジェクトキーとして持つRecordにすると、
+   * 「識別情報（factoryId）以外が全社完全に同一」という既存の統合テスト
+   * （standardAi/autoplay/__tests__/heterogeneousProfiles.test.ts の
+   * stripIdentifiers）がfactoryIdを含む動的キー名までは正規化できず誤検知する
+   * ため、workforceState.factoriesと同じ「配列＋factoryIdフィールド」形状にする。
+   */
+  readonly pdUtilizationByFactory: readonly { readonly factoryId: string; readonly previousQuarterPdUtilization: number }[];
+  /**
+   * 【Test15新設】前四半期末までの自社VAP商品開発スコア（0〜100、中立50）。
+   * productDevelopmentState.ts lookupProductDevelopmentScoreと同じ値。
+   * 常に存在する（機能フラグに依存しない常時ゲームルール）。
+   */
+  readonly vapProductDevelopmentScore: number;
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */

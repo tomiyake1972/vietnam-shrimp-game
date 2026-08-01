@@ -88,6 +88,10 @@ const CAPEX_PROJECT_DESCRIPTIONS: Readonly<Record<CapitalProjectType, string>> =
   commonProcessingExpansion: "HOSO/PD/VAP共通の前処理（一次加工）能力を増設します。",
   freezingPackagingExpansion:
     "凍結・包装ラインを増設し、四半期あたりに凍結・包装できる数量（フロー）の上限を引き上げます。生産量の上限として実際に働くのはこちらです。",
+  newFactoryConstruction:
+    "新しい標準工場を1つ建設します。完成・稼働開始後、稼働開始四半期から3段階（50%→75%→100%）でランプアップします。Worker・営業人員・市場需要は自動的には増えません。",
+  pdMechanization:
+    "特定の工場を対象に、PD（殻剥き）工程の機械化投資を行います。対象工場のPD労働集約度係数だけを引き下げます（PD生産能力そのものは増えません）。",
 };
 
 export type CapexDisplayStatus = "planned" | "underConstruction" | "suspended" | "completedPreparing" | "operating" | "cancelled";
@@ -280,6 +284,8 @@ export interface CapexPortfolioRowViewModel {
   readonly quarterlyMachineryDepreciationUsd: number;
   /** cumulativePaidUsd===0かつ完成/取消済みでない案件のみ（projectLifecycle.applyCancelRequestの実際の許可条件と同一）。 */
   readonly cancellable: boolean;
+  /** 【Test15新設】この案件が対象とする特定のFactoryId（pdMechanization案件のみ設定。他の案件種別はundefined）。 */
+  readonly targetFactoryId?: string;
 }
 
 /**
@@ -351,6 +357,7 @@ export function buildCapexPortfolioViewModel(
       quarterlyBuildingDepreciationUsd: dep.buildingUsd,
       quarterlyMachineryDepreciationUsd: dep.machineryUsd,
       cancellable: project.status !== "completed" && project.status !== "cancelled" && project.cumulativePaidUsd === 0,
+      ...(project.targetFactoryId !== undefined ? { targetFactoryId: project.targetFactoryId } : {}),
     };
   });
 }
