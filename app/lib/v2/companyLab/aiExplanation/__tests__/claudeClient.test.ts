@@ -164,7 +164,7 @@ test("generateManagementReport: 正常系(1回で成功、tool_useブロック�
     assert.equal(result.report.headline, "テスト見出し");
     assert.equal(result.usage.inputTokens, 10);
     assert.equal(result.usage.outputTokens, 20);
-    assert.equal(result.usage.model, "claude-haiku-4-6");
+    assert.equal(result.usage.model, "claude-haiku-4-5-20251001");
   }
   assert.equal(callCount(), 1);
 });

@@ -120,7 +120,11 @@ export interface ExplanationModelConfig {
 // 高度な推論能力を必要としない。そのため既定モデルをSonnet系からHaiku系へ
 // 変更し、1レポートあたりのトークン単価を抑える。品質に問題が出た場合は
 // 環境変数STANDARD_AI_EXPLANATION_MODELで個別に上書きできる（コード変更不要）。
-const DEFAULT_EXPLANATION_MODEL = "claude-haiku-4-6";
+//
+// 【2026-08-01・モデルID訂正】前回のclaude-haiku-4-6は実在しないモデルIDで、
+// Anthropic ConsoleのHaiku 4.5カードから正確なAPI用モデルID文字列
+// （claude-haiku-4-5-20251001）を確認・訂正した（三宅さんがConsole画面で確認）。
+const DEFAULT_EXPLANATION_MODEL = "claude-haiku-4-5-20251001";
 
 /**
  * このAI経営説明機能で使うモデル名・最大トークン数の唯一の定義箇所。
