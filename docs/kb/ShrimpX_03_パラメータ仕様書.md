@@ -598,22 +598,33 @@ HOSO原料 100t → 冷凍HOSO 約100 物理t（1.00）
 
 | パラメータ | 値 | 意味 |
 |---|---|---|
-| `regularEfficiencyPerHeadTons` | 6 | 正社員1人あたりの基準処理能力（トン） |
-| `temporaryEfficiencyPerHeadTons` | 3.5 | 臨時工1人あたり（正社員の約58%） |
+| `regularEfficiencyPerHeadTons` | 6 | 正社員1人あたりの基準処理能力（トン、商品非依存の基礎値） |
+| `temporaryEfficiencyPerHeadTons` | 3.5 | 臨時工1人あたり（正社員の約58%、商品非依存の基礎値） |
 | `overtimeRateCap` | 0.3 | 残業率の上限（所定の30%まで） |
 | `overtimeEfficiencyFactor` | 0.5 | 残業時間の能力換算効率 |
+| `laborIntensityCoefficientByProduct` | hoso 1.0 / pd 1.2 / vap 3.0 | **【2026-08-01追加】製品別労務負荷係数** |
+
+**【2026-08-01・製品別労務負荷係数の追加】** 以前は正社員・臨時工の基礎処理能力（上記2値）が商品非依存であり、会社別skillの差だけが商品間の労務負荷差を表していた。これはゲーム設計上の意図（同じHOSO換算生産量を処理するときの労務負荷はHOSO:PD:VAP = 1.0:1.2:3.0であるべき）と一致しておらず、結果として6,000人規模のWorkerに対して必要人数が極端に少なくなる、巨額の遊休人件費が恒常的に発生する等の不具合を引き起こしていた（詳細はブランチ`feature/v2-product-labor-intensity`の完了報告を参照）。
+
+この係数は「同じHOSO換算生産量を処理するときに要する労務量」の相対比であり、**歩留まり係数（`yield.saleableRecoveryRatio`、原料→完成品の物理的回収率）とも、管理会計上の固定費配賦係数（`finance/parameters.ts` `managementAccounting.fixedCostAllocationCoefficientByProduct`、hoso 1.0/pd 1.5/vap 2.4）とも、営業工数係数（`sales/parameters.ts` `salesEffortCoefficients`、hoso 1.0/pd 1.2/vap 3.0、営業活動専用）とも別系統の、労務専用の係数である**。数値がsalesEffortCoefficientsとたまたま同じであっても意味も適用箇所も異なるため混同しないこと。
+
+適用箇所は `production/labor.ts` の `calculateLaborCapacityFromAssignedHeadcount`（配分人数→有効労働能力）と `requiredHeadcountForQuantity`（数量→必要人数）の2関数に一元化されており、UI表示（`investmentPlanningViewModel.ts`）・Standard AI判断（`companyLab/workforce.ts`経由）・生産エンジン（`allocation.ts`）はすべてこの2関数を共有するため、単一の設定値を変えるだけで全体に一貫して反映される。skill・attendance・overtimeの各補正とは独立した乗数（除数）として適用され、二重計上しない。
 
 ```
-1人あたり有効能力 = regularEfficiencyPerHeadTons × 出勤率 × 技能レベル
+1人あたり有効能力（商品pごと） = regularEfficiencyPerHeadTons × 出勤率 × 技能レベル(p) × 残業係数 ÷ laborIntensityCoefficientByProduct[p]
+
+必要人数（商品pの数量qを処理するため） = q × laborIntensityCoefficientByProduct[p] ÷ (regularEfficiencyPerHeadTons × 出勤率 × 技能レベル(p) × 残業係数)
 ```
 
-**導出値（BAL: 出勤率0.95、技能 h0.85/p0.80/v0.75）**:
+端数処理は、商品ごとに算出した有効労働能力・必要人数をその都度丸める（`allocateWorkersToPlans`が返す`laborCapacity`は`roundHosoEqTons`で商品別エントリごとに早期丸めしてから合算する）。商品を合算してから丸める実装にはなっていないため、混合生産時に大きな誤差が生じない。
 
-| 商品 | 1人あたり(t) |
-|---|---|
-| HOSO | 4.845 |
-| PD | 4.560 |
-| VAP | 4.275 |
+**導出値（BAL: 出勤率0.95、技能 h0.85/p0.80/v0.75、製品別労務負荷係数を適用後）**:
+
+| 商品 | 1人あたり(t)（旧・商品非依存） | 1人あたり(t)（新・労務負荷係数適用後） |
+|---|---|---|
+| HOSO | 4.845 | 4.845（÷1.0） |
+| PD | 4.560 | 3.800（÷1.2） |
+| VAP | 4.275 | 1.425（÷3.0） |
 
 ### 5.4 加工原価（`cost`）
 
