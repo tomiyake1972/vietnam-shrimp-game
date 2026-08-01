@@ -291,7 +291,10 @@ test("getExplanationModelConfig: 環境変数未指定時は既定モデルを�
     const { getExplanationModelConfig } = await import("../claudeClient");
     const config = getExplanationModelConfig();
     assert.equal(typeof config.model, "string");
-    assert.equal(config.maxTokens, 1200);
+    // 【2026-08-01・maxTokens不足によるschema_mismatchの修正】実機Previewで
+    // stop_reason="max_tokens"（応答が1200トークンで打ち切られ、recommendations等の
+    // 配列フィールドが丸ごと欠落）を確認したため、4096へ引き上げた。
+    assert.equal(config.maxTokens, 4096);
   } finally {
     if (original !== undefined) process.env.STANDARD_AI_EXPLANATION_MODEL = original;
   }

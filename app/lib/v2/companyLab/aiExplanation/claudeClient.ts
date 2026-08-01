@@ -127,6 +127,18 @@ export interface ExplanationModelConfig {
 // （claude-haiku-4-5-20251001）を確認・訂正した（三宅さんがConsole画面で確認）。
 const DEFAULT_EXPLANATION_MODEL = "claude-haiku-4-5-20251001";
 
+// 【2026-08-01・maxTokens不足によるschema_mismatchの確定と修正】三宅さんの実機
+// Preview確認（Test14/BAL/turn1）で、schema_mismatchが起きたattempt1・attempt2の
+// 両方でAnthropic応答のstop_reasonが"max_tokens"、usage.output_tokensがちょうど
+// maxTokens設定値(1200)と一致していることをVercelランタイムログで確認した
+// （headline・executiveSummaryの2フィールドを書いた時点で1200トークンを使い切り、
+// recommendations/keyRisks/questionsForPlayer/dataLimitationsの4つの配列
+// フィールドが丸ごと出力されずに応答が打ち切られていた）。推測ではなく実データで
+// 「maxTokens不足による打ち切りが原因」と確定したため、既存レポート（8項目構成、
+// recommendationsが複数件・reasonsを含む等）を最後まで出力しきれる余裕を持った
+// 値へ引き上げる。claude-haiku-4-5-20251001の最大出力トークン数には十分収まる値。
+const EXPLANATION_MAX_OUTPUT_TOKENS = 4096;
+
 /**
  * このAI経営説明機能で使うモデル名・最大トークン数の唯一の定義箇所。
  * 環境変数 STANDARD_AI_EXPLANATION_MODEL で上書き可能（未指定時は既定モデル）。
@@ -134,7 +146,7 @@ const DEFAULT_EXPLANATION_MODEL = "claude-haiku-4-5-20251001";
 export function getExplanationModelConfig(): ExplanationModelConfig {
   return {
     model: process.env.STANDARD_AI_EXPLANATION_MODEL ?? DEFAULT_EXPLANATION_MODEL,
-    maxTokens: 1200,
+    maxTokens: EXPLANATION_MAX_OUTPUT_TOKENS,
   };
 }
 
