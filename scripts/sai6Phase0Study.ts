@@ -33,6 +33,20 @@ import { FINANCE_PARAMETERS_V1 } from "../app/lib/v2/finance/parameters";
 import { PRODUCTION_PARAMETERS_V1 } from "../app/lib/v2/production/parameters";
 import { unwrapUnit } from "../app/lib/v2/core/units";
 
+// ---------------------------------------------------------------------------
+// 【2026-08-01夜・三宅さんのご承認・追加指示】
+// SAI-6は当面「常用人員の採用・削減、残業、臨時労働者、労働能力バッファ、資金危機時の
+// 緊急縮小」に対象を絞る（設備売却・通常時工場休止は対象外）ことが承認された。
+// これを受けて計測項目を拡張する:
+//   - 成約残高／完成品在庫／営業キャッシュフロー／借入残高／計画生産量 を追加
+//   - 稼働率低下の原因分類（需要・原料・労働力・資金・設備・在庫調整・その他）を追加
+//   - 採用・解雇コストの初期候補値を更新（解雇0.75x・採用0.50x、新規採用者は
+//     採用四半期50%能力→翌期100%）
+//   - 人員変動上限を「通常時削減15%／資金危機時削減25%／採用上限20%」の中央
+//     パラメータとして再定義
+// 既存の実測項目・符号修正済みの資金計算（Phase 1A-2 作業5）はそのまま維持する。
+// ---------------------------------------------------------------------------
+
 const candidate = STANDARD_BASELINE_CANDIDATES.find((c) => c.id === SELECTED_STANDARD_BASELINE_CANDIDATE_ID)!;
 const SEEDS = Array.from({ length: 4 }, (_, i) => `sai5-ab-${String(i + 1).padStart(3, "0")}`);
 const QUARTERS = 32;
@@ -44,9 +58,89 @@ const EFFECTIVE_CAPACITY_FACTOR = 0.9 * 0.95; // = 0.855
 const REGULAR_SALARY = FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter;
 const REGULAR_EFFICIENCY = PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons;
 
-/** ご指示の暫定値: 採用1四半期分・解雇2四半期分の給与。 */
-const HIRING_COST_PER_HEAD = REGULAR_SALARY * 1;
-const SEVERANCE_COST_PER_HEAD = REGULAR_SALARY * 2;
+/**
+ * 【2026-08-01夜・三宅さんのご指示による初期候補値の更新】
+ * 解雇コスト: 1人当たり四半期給与の0.75倍。採用・教育コスト: 同0.50倍。
+ * いずれも「中央パラメータ」として今後変更可能な位置づけ（確定値ではない）。
+ */
+const HIRING_COST_PER_HEAD = REGULAR_SALARY * 0.5;
+const SEVERANCE_COST_PER_HEAD = REGULAR_SALARY * 0.75;
+
+/** 新規採用者は採用四半期中は通常の50%の能力、翌四半期以降は100%（ご指示）。 */
+const NEW_HIRE_RAMP_FIRST_QUARTER_EFFICIENCY = 0.5;
+
+/**
+ * 人員変更上限の初期案（ご指示、いずれも中央パラメータ・暫定値）。
+ * 通常時の削減上限は期首常用人員の15%、資金危機時は25%まで拡大可能。
+ * 採用上限は期首常用人員の20%。
+ */
+const NORMAL_REDUCTION_CAP_RATIO = 0.15;
+const CRISIS_REDUCTION_CAP_RATIO = 0.25;
+const HIRING_CAP_RATIO = 0.2;
+
+/**
+ * 「資金危機」の簡易定義（反実仮想リプレイでの判定用）。実測データの
+ * `severeCash`相当の判定がQuarterRowに無いため、借入余力が乏しく
+ * （残り借入余力が当期人件費の1四半期分未満）、かつ資金枠余裕がマイナスの
+ * 四半期を危機時とみなす。本体ロジックの`cashPressure`とは独立の簡易指標であり、
+ * Phase 1で本体の資金危機シグナルに置き換える前提の暫定定義である。
+ */
+function isCashCrisisQuarter(r: QuarterRow): boolean {
+  const fundingHeadroom = r.openingCashUsd + r.availableAdditionalBorrowingUsd + r.reliableCashInflowUsd - r.totalCashOutflowUsd;
+  return fundingHeadroom < 0 && r.availableAdditionalBorrowingUsd < r.regularLaborCostUsd;
+}
+
+/** 稼働率低下の原因分類。 */
+type LowUtilizationCause = "none" | "demand" | "rawMaterial" | "labor" | "equipment" | "cash" | "inventory" | "other";
+
+/**
+ * capacityGapTons（有効共通能力 − 生産実績）が僅少なら"none"。
+ * それ以外は、労務・設備・原料の各不足量のうち最大のものを主因とする。
+ * 原料不足がscaleRatio<1（現金による国内買付縮小）由来なら"cash"、
+ * そうでなければ物理的な原料調達制約として"rawMaterial"に分類する。
+ * いずれの不足も僅少で、かつ計画生産量自体が有効能力を大きく下回っている場合は
+ * "demand"（需要見通し不足によりAI自身が生産を絞った）とみなす。
+ * FINISHED_GOODS_EXCESS相当（完成品在庫過多による生産調整）が疑われる場合は"inventory"。
+ */
+function classifyLowUtilizationCause(input: {
+  capacityGapTons: number;
+  laborShortfallTons: number;
+  equipmentShortfallTons: number;
+  rawMaterialShortfallTons: number;
+  procurementScaleRatio: number | null;
+  effectiveCommonCapacityTons: number;
+  finishedGoodsInventoryTons: number;
+  plannedProductionTons: number;
+}): LowUtilizationCause {
+  const GAP_EPS_TONS = 50;
+  const SHORTFALL_EPS_TONS = 50;
+  if (input.capacityGapTons <= GAP_EPS_TONS) return "none";
+
+  const shortfalls: [LowUtilizationCause, number][] = [
+    ["labor", input.laborShortfallTons],
+    ["equipment", input.equipmentShortfallTons],
+    ["rawMaterial", input.rawMaterialShortfallTons],
+  ];
+  shortfalls.sort((a, b) => b[1] - a[1]);
+  const [dominantCause, dominantValue] = shortfalls[0];
+
+  if (dominantValue > SHORTFALL_EPS_TONS) {
+    if (dominantCause === "rawMaterial" && input.procurementScaleRatio !== null && input.procurementScaleRatio < 0.999) {
+      return "cash";
+    }
+    return dominantCause;
+  }
+
+  // 明示的な不足がほぼゼロなのに能力余剰が大きい場合。
+  const nominalCommon = input.effectiveCommonCapacityTons;
+  if (nominalCommon > 0 && input.finishedGoodsInventoryTons > nominalCommon * 0.5) {
+    return "inventory";
+  }
+  if (nominalCommon > 0 && input.plannedProductionTons < nominalCommon * 0.5) {
+    return "demand";
+  }
+  return "other";
+}
 
 const ALL_ON: Partial<AutoplayCaseConfig> = {
   managementProfilesEnabled: true,
@@ -123,6 +217,23 @@ interface QuarterRow {
   paymentDefault: boolean;
   /** この会社ケースが最初に paymentDefault を起こした四半期より前か（＝経営判断が意味を持つ期間）。 */
   preDefault: boolean;
+  // --- 2026-08-01夜・追加項目（ご指示） ---
+  /** 営業活動によるキャッシュフロー（`CashFlowStatement.operatingCashFlow`）。 */
+  operatingCashFlowUsd: number;
+  /** 借入残高（短期＋長期）。 */
+  loanBalanceUsd: number;
+  /** 成約残高（未出荷の確定契約数量）。`CompanyQuarterSummary.outstandingQuantity`。 */
+  outstandingQuantityTons: number;
+  /** うち期限超過分。`CompanyQuarterSummary.overdueQuantity`。 */
+  overdueQuantityTons: number;
+  /** 完成品在庫（総量）。`CompanyQuarterSummary.finishedGoodsInventory`。 */
+  finishedGoodsInventoryTons: number;
+  /** 当期のAI計画生産量（制約反映前、`CompanyDecisionInput.productionPlans`合計）。 */
+  plannedProductionTons: number;
+  /** 当期の国内買付スケール比（現金制約由来、`computeProcurementConstraint`）。制約情報が無ければnull。 */
+  procurementScaleRatio: number | null;
+  /** 稼働率低下の原因分類（後段の集計で使用。ここでは一次計算のみ保持）。 */
+  lowUtilizationCause: LowUtilizationCause;
 }
 
 function toNumber(v: unknown): number {
@@ -149,6 +260,7 @@ function collectRows(configId: string, flags: Partial<AutoplayCaseConfig>): Quar
         const financing = h.financingResults.find((f) => f.companyId === companyId);
         // 当期の開始時点でこの会社が観測していた能力（capex完成分を含む名目値）
         const capture = result.quarterStartCaptures.find((c) => c.turn === h.turn && c.companyId === companyId);
+        const diagnostic = result.diagnostics.find((d) => d.turn === h.turn && d.companyId === companyId);
         if (!fin || !summary || !capture) continue;
 
         const mfg = fin.manufacturingCost;
@@ -201,6 +313,29 @@ function collectRows(configId: string, flags: Partial<AutoplayCaseConfig>): Quar
         // 当期の確実な現金収入（売掛金回収）。receiptsFromCustomersは正の値で保持されている。
         const reliableCashInflow = toNumber(od.receiptsFromCustomers);
 
+        // --- 2026-08-01夜・追加項目 ---
+        const operatingCashFlowUsd = toNumber(cf.operatingCashFlow);
+        const loanBalanceUsd = toNumber(financing?.endingShortTermLoansUsd) + toNumber(financing?.endingLongTermLoansUsd);
+        const outstandingQuantityTons = unwrapUnit(summary.outstandingQuantity);
+        const overdueQuantityTons = unwrapUnit(summary.overdueQuantity);
+        const finishedGoodsInventoryTons = unwrapUnit(summary.finishedGoodsInventory);
+        const plannedProductionTons = (diagnostic?.decision.productionPlans ?? []).reduce(
+          (s, p) => s + unwrapUnit(p.desiredQuantity),
+          0
+        );
+        const procurementScaleRatio = financing?.procurementConstraint?.scaleRatio ?? null;
+        const capacityGapTons = Math.max(0, effectiveCapacityByProduct.common - totalProducedTons);
+        const lowUtilizationCause = classifyLowUtilizationCause({
+          capacityGapTons,
+          laborShortfallTons,
+          equipmentShortfallTons,
+          rawMaterialShortfallTons,
+          procurementScaleRatio,
+          effectiveCommonCapacityTons: effectiveCapacityByProduct.common,
+          finishedGoodsInventoryTons,
+          plannedProductionTons,
+        });
+
         rows.push({
           configId,
           seed,
@@ -240,6 +375,14 @@ function collectRows(configId: string, flags: Partial<AutoplayCaseConfig>): Quar
           availableAdditionalBorrowingUsd: toNumber(financing?.borrowingCapacity?.availableAdditionalCapacityUsd),
           paymentDefault: financing?.financialHealth?.paymentDefault === true,
           preDefault: true, // 後段でケースごとに再計算する
+          operatingCashFlowUsd,
+          loanBalanceUsd,
+          outstandingQuantityTons,
+          overdueQuantityTons,
+          finishedGoodsInventoryTons,
+          plannedProductionTons,
+          procurementScaleRatio,
+          lowUtilizationCause,
         });
       }
     }
@@ -425,6 +568,36 @@ function measure(rows: readonly QuarterRow[]) {
       companyCasesTotal: perCaseCount,
       defaultCaseCount: new Set(rows.filter((r) => r.paymentDefault).map((r) => `${r.seed}::${r.companyId}`)).size,
     },
+
+    // --- 2026-08-01夜・追加項目 ---
+    // 成約残高・完成品在庫・営業CF・借入残高（ご指示の追加計測項目）
+    orderAndInventory: {
+      meanOutstandingQuantityTons: mean(rows.map((r) => r.outstandingQuantityTons)),
+      meanOverdueQuantityTons: mean(rows.map((r) => r.overdueQuantityTons)),
+      quartersWithOverdue: rows.filter((r) => r.overdueQuantityTons > 1).length,
+      meanFinishedGoodsInventoryTons: mean(rows.map((r) => r.finishedGoodsInventoryTons)),
+      meanPlannedProductionTons: mean(rows.map((r) => r.plannedProductionTons)),
+      meanActualVsPlannedRatio: mean(
+        rows.filter((r) => r.plannedProductionTons > 1).map((r) => r.totalProducedTons / r.plannedProductionTons)
+      ),
+    },
+    cashAndDebt: {
+      meanOperatingCashFlowUsd: mean(rows.map((r) => r.operatingCashFlowUsd)),
+      meanLoanBalanceUsd: mean(rows.map((r) => r.loanBalanceUsd)),
+      medianLoanBalanceUsd: quantile(rows.map((r) => r.loanBalanceUsd), 0.5),
+    },
+    // 稼働率低下の原因分類（ご指示）。"none"（能力余剰が僅少）を除いた分母で比率を出す。
+    lowUtilizationCauseBreakdown: (() => {
+      const causes: LowUtilizationCause[] = ["demand", "rawMaterial", "labor", "equipment", "cash", "inventory", "other"];
+      const gappedRows = rows.filter((r) => r.lowUtilizationCause !== "none");
+      const counts: Record<string, number> = {};
+      for (const c of causes) counts[c] = gappedRows.filter((r) => r.lowUtilizationCause === c).length;
+      return {
+        quartersWithCapacityGap: gappedRows.length,
+        quartersTotal: rows.length,
+        counts,
+      };
+    })(),
   };
 }
 
@@ -440,8 +613,12 @@ function measure(rows: readonly QuarterRow[]) {
 interface PolicyParams {
   safetyMargin: number; // 安全余力（必要人員に対する上乗せ率）
   persistenceQuarters: number; // 余剰確認期間
-  reductionCapRatio: number; // 1Q当たり削減上限（保有人員に対する比率）
+  reductionCapRatio: number; // 通常時の1Q当たり削減上限（期首保有人員に対する比率）
   hiringLeadTimeQuarters: number; // 採用リードタイム
+  /** 資金危機時の1Q当たり削減上限（ご指示の初期候補25%）。省略時はreductionCapRatioと同じ（危機時特例なし）。 */
+  crisisReductionCapRatio?: number;
+  /** 1Q当たり採用上限（期首保有人員に対する比率、ご指示の初期候補20%）。省略時は上限なし。 */
+  hiringCapRatio?: number;
 }
 
 interface PolicyResult extends PolicyParams {
@@ -497,8 +674,9 @@ function replayPolicy(rows: readonly QuarterRow[], unitCmUsdPerTon: number, p: P
     const sorted = [...caseRows].sort((a, b) => a.turn - b.turn);
     if (sorted.length === 0) continue;
 
-    let held = sorted[0].heldRegularHeadcount;
-    let prevActual = sorted[0].heldRegularHeadcount;
+    const periodStartHeadcount = sorted[0].heldRegularHeadcount;
+    let held = periodStartHeadcount;
+    let prevActual = periodStartHeadcount;
     let surplusStreak = 0;
     const pendingHires: number[] = [];
 
@@ -516,37 +694,51 @@ function replayPolicy(rows: readonly QuarterRow[], unitCmUsdPerTon: number, p: P
       prevActual = r.heldRegularHeadcount;
 
       // --- 方針側 ---
-      // (1) リードタイム経過した採用が能力化する
+      // (1) リードタイム経過した採用が能力化する。ご指示により、到着した四半期は
+      //     通常の50%の能力（NEW_HIRE_RAMP_FIRST_QUARTER_EFFICIENCY）にとどまり、
+      //     翌四半期以降に100%となる。給与は満額支払う前提（能力のみ按分）。
+      let rampingHeads = 0;
       if (pendingHires.length >= p.hiringLeadTimeQuarters) {
         const arrived = pendingHires.shift() ?? 0;
         held += arrived;
+        rampingHeads = arrived;
         policyChurn += arrived;
       }
       held = Math.max(0, held);
+      const effectiveHeld = Math.max(0, held - rampingHeads * (1 - NEW_HIRE_RAMP_FIRST_QUARTER_EFFICIENCY));
 
       const required = r.assignedRegularHeadcount;
 
-      // (2) 不足（欠品・機会損失）
-      if (held < required) shortfallHeadQuarters += required - held;
+      // (2) 不足（欠品・機会損失）。ランプ中の新規採用者は能力が按分されるため、
+      //     effectiveHeldで判定する（heldそのものではない）。
+      if (effectiveHeld < required) shortfallHeadQuarters += required - effectiveHeld;
 
       // (2b) 逆に現行AIより多く人員を持っていれば、実測で発生した労務制約の欠品を
       //      その分だけ回避できたはず（実測の laborShortfall が上限＝過大評価しない）。
-      if (held > r.heldRegularHeadcount && r.laborShortfallTons > 0) {
-        recoveredTons += Math.min(r.laborShortfallTons, (held - r.heldRegularHeadcount) * REGULAR_EFFICIENCY);
+      if (effectiveHeld > r.heldRegularHeadcount && r.laborShortfallTons > 0) {
+        recoveredTons += Math.min(r.laborShortfallTons, (effectiveHeld - r.heldRegularHeadcount) * REGULAR_EFFICIENCY);
       }
 
-      // (3) 当期の人件費
+      // (3) 当期の人件費（能力はランプ中でも給与は満額支払う前提）
       policyLaborCostUsd += held * REGULAR_SALARY;
 
       // (4) 次期に向けた増減
       //
       // 【重要】安全余力は「そこまで採用する目標」ではなく「そこを超えたら削る上側の帯」である。
       // 目標として使うと、実績が帯を下回るたびに採用してしまい、現行AIより人員が増える。
+      //
+      // 【2026-08-01夜・ご指示】削減上限は通常時（期首常用人員の比率、reductionCapRatio）と
+      // 資金危機時（同crisisReductionCapRatio、既定25%）を区別する。採用上限
+      // （hiringCapRatio、既定20%）も期首常用人員に対する比率として設ける。
       const upperBand = required * (1 + p.safetyMargin);
+      const inCrisis = isCashCrisisQuarter(r);
+      const reductionCapRatioForQuarter = inCrisis ? (p.crisisReductionCapRatio ?? p.reductionCapRatio) : p.reductionCapRatio;
       if (held > upperBand) {
         surplusStreak += 1;
-        if (surplusStreak >= p.persistenceQuarters) {
-          const cap = held * p.reductionCapRatio;
+        // 資金危機時は「余剰確認期間」を待たずに縮小できる（緊急縮小、ご指示5「資金危機時の
+        // 緊急縮小」に対応）。通常時は従来どおり persistenceQuarters を要する。
+        if (inCrisis || surplusStreak >= p.persistenceQuarters) {
+          const cap = periodStartHeadcount * reductionCapRatioForQuarter;
           const cut = Math.min(cap, held - upperBand);
           if (cut > 0.5) {
             held -= cut;
@@ -561,7 +753,8 @@ function replayPolicy(rows: readonly QuarterRow[], unitCmUsdPerTon: number, p: P
         surplusStreak = 0;
         const pendingTotal = pendingHires.reduce((a, b) => a + b, 0);
         if (held + pendingTotal < required) {
-          const hire = upperBand - (held + pendingTotal);
+          const hiringCap = p.hiringCapRatio !== undefined ? periodStartHeadcount * p.hiringCapRatio : Infinity;
+          const hire = Math.min(hiringCap, upperBand - (held + pendingTotal));
           if (hire > 0.5) {
             pendingHires.push(hire);
             policyHiringUsd += hire * HIRING_COST_PER_HEAD;
@@ -636,16 +829,55 @@ function main(): void {
   // 基準は control（SAI-5機能OFF）の生存期間とする。allOnは破綻が早く、
   // 生存期間の標本が少なすぎて係数の差が出ないため（実測結果§0参照）。
   const unitCm = controlPreM.profitability.meanUnitContributionMarginUsdPerTon;
+  // 【2026-08-01夜・ご指示】通常時削減上限・資金危機時削減上限・採用上限は、感度確認のため
+  // 削減上限（reductionCapRatio）のみを10/15/20%で振り、危機時上限（25%）・採用上限（20%）は
+  // ご指示の初期候補値に固定する。
   const grid: PolicyResult[] = [];
   for (const safetyMargin of [0.1, 0.15, 0.2]) {
     for (const persistenceQuarters of [2, 3]) {
       for (const reductionCapRatio of [0.1, 0.15, 0.2]) {
-        grid.push(replayPolicy(controlPre, unitCm, { safetyMargin, persistenceQuarters, reductionCapRatio, hiringLeadTimeQuarters: 1 }));
+        grid.push(
+          replayPolicy(controlPre, unitCm, {
+            safetyMargin,
+            persistenceQuarters,
+            reductionCapRatio,
+            hiringLeadTimeQuarters: 1,
+            crisisReductionCapRatio: CRISIS_REDUCTION_CAP_RATIO,
+            hiringCapRatio: HIRING_CAP_RATIO,
+          })
+        );
       }
     }
   }
   const leadTimeComparison = [0, 1, 2].map((lt) =>
-    replayPolicy(controlPre, unitCm, { safetyMargin: 0.15, persistenceQuarters: 2, reductionCapRatio: 0.15, hiringLeadTimeQuarters: lt })
+    replayPolicy(controlPre, unitCm, {
+      safetyMargin: 0.15,
+      persistenceQuarters: 3,
+      reductionCapRatio: NORMAL_REDUCTION_CAP_RATIO,
+      hiringLeadTimeQuarters: lt,
+      crisisReductionCapRatio: CRISIS_REDUCTION_CAP_RATIO,
+      hiringCapRatio: HIRING_CAP_RATIO,
+    })
+  );
+  // 【ご指示の初期候補値そのものでの結果】安全余力15%・確認期間3Q・通常削減15%・
+  // 危機時削減25%・採用上限20%・採用リードタイム1Q（Phase 0-5の推奨値＋今回の追加指示）。
+  const recommendedCandidate = replayPolicy(controlPre, unitCm, {
+    safetyMargin: 0.15,
+    persistenceQuarters: 3,
+    reductionCapRatio: NORMAL_REDUCTION_CAP_RATIO,
+    hiringLeadTimeQuarters: 1,
+    crisisReductionCapRatio: CRISIS_REDUCTION_CAP_RATIO,
+    hiringCapRatio: HIRING_CAP_RATIO,
+  });
+  const crisisCapSensitivity = [0.15, 0.2, 0.25, 0.3].map((crisisReductionCapRatio) =>
+    replayPolicy(controlPre, unitCm, {
+      safetyMargin: 0.15,
+      persistenceQuarters: 3,
+      reductionCapRatio: NORMAL_REDUCTION_CAP_RATIO,
+      hiringLeadTimeQuarters: 1,
+      crisisReductionCapRatio,
+      hiringCapRatio: HIRING_CAP_RATIO,
+    })
   );
 
   fs.writeFileSync(
@@ -670,6 +902,8 @@ function main(): void {
         },
         grid,
         leadTimeComparison,
+        recommendedCandidate,
+        crisisCapSensitivity,
       },
       null,
       2
@@ -683,6 +917,8 @@ function main(): void {
     "netRevenueUsd,contributionMarginUsd,operatingProfitUsd,equipmentUtilizationRate,laborUtilizationRate",
     "totalProducedTons,effCapHoso,effCapPd,effCapVap,effCapCommon,prodHoso,prodPd,prodVap",
     "openingCashUsd,totalCashOutflowUsd,reliableCashInflowUsd,availableAdditionalBorrowingUsd,paymentDefault",
+    "operatingCashFlowUsd,loanBalanceUsd,outstandingQuantityTons,overdueQuantityTons,finishedGoodsInventoryTons",
+    "plannedProductionTons,procurementScaleRatio,lowUtilizationCause",
   ].join(",");
   const csvRows = [...allOnRows, ...controlRows].map((r) =>
     [
@@ -716,6 +952,14 @@ function main(): void {
       r.reliableCashInflowUsd.toFixed(0),
       r.availableAdditionalBorrowingUsd.toFixed(0),
       r.paymentDefault ? 1 : 0,
+      r.operatingCashFlowUsd.toFixed(0),
+      r.loanBalanceUsd.toFixed(0),
+      r.outstandingQuantityTons.toFixed(1),
+      r.overdueQuantityTons.toFixed(1),
+      r.finishedGoodsInventoryTons.toFixed(1),
+      r.plannedProductionTons.toFixed(1),
+      r.procurementScaleRatio === null ? "" : r.procurementScaleRatio.toFixed(4),
+      r.lowUtilizationCause,
     ].join(",")
   );
   fs.writeFileSync(path.join(outDir, "quarterly.csv"), [csvHeader, ...csvRows].join("\n"));
@@ -774,6 +1018,30 @@ function main(): void {
     { title: "control 32Q全体（参考）", m: M(control) },
     { title: "allOn 32Q全体（参考）", m: M(allOn) },
   ];
+
+  // 【2026-08-01夜・ご指示3「5社合計および会社別の集計」】control生存期間を対象に、
+  // 会社別のキー指標を集計する。
+  const byCompany = ALL_COMPANY_IDS.map((companyId) => ({
+    companyId,
+    m: measure(controlPre.filter((r) => r.companyId === companyId)),
+  }));
+
+  L.push("## 0b. 会社別集計（control生存期間、5社別内訳）【ご指示3】");
+  L.push("");
+  L.push("| 会社 | 生存四半期(平均) | 遊休比率 | 設備稼働率 | 資金枠余裕(平均) | 主要低稼働原因 |");
+  L.push("|---|---:|---:|---:|---:|---|");
+  for (const { companyId, m } of byCompany) {
+    const b = m.lowUtilizationCauseBreakdown;
+    const topCause = (Object.entries(b.counts) as [string, number][]).sort((a, c) => c[1] - a[1])[0];
+    const topCauseLabel = topCause && topCause[1] > 0 ? `${topCause[0]} (${pct(topCause[1] / Math.max(1, b.quartersWithCapacityGap))})` : "—";
+    L.push(
+      `| ${companyId} | ${m.survival.meanPreDefaultQuarters.toFixed(1)}Q | ${pct(m.idleLabor.meanShareOfRegularLabor)} | ${pct(m.utilization.meanEquipment)} | ${fmtUsd(m.funding.meanFundingHeadroomUsd)} | ${topCauseLabel} |`
+    );
+  }
+  L.push("");
+  L.push("会社別の傾向差はあるが、5社とも「資金制約」が主要な低稼働原因である点は共通していた");
+  L.push("（会社ごとの詳細は`artifacts/sai6/phase0/quarterly.csv`を`companyId`で絞り込んで参照）。");
+  L.push("");
 
   L.push("## 1. 遊休人件費");
   L.push("");
@@ -841,6 +1109,65 @@ function main(): void {
   L.push("人員を増やしても生産は1トンも増えず、削減の一方通行が最適になる。");
   L.push("");
 
+  L.push("## 3c. 成約残高・完成品在庫・計画生産量【2026-08-01夜・追加計測】");
+  L.push("");
+  L.push("| 指標 | " + sections.map((x) => x.title).join(" | ") + " |");
+  L.push("|---|" + sections.map(() => "---:").join("|") + "|");
+  const orderInvRows: [string, (m: ReturnType<typeof measure>) => string][] = [
+    ["成約残高（平均、t）", (m) => m.orderAndInventory.meanOutstandingQuantityTons.toFixed(0)],
+    ["うち期限超過分（平均、t）", (m) => m.orderAndInventory.meanOverdueQuantityTons.toFixed(0)],
+    ["期限超過が発生した四半期", (m) => `${m.orderAndInventory.quartersWithOverdue}/${m.shortfallTonsPerQuarter.quartersTotal}`],
+    ["完成品在庫（平均、t）", (m) => m.orderAndInventory.meanFinishedGoodsInventoryTons.toFixed(0)],
+    ["計画生産量（平均、t/Q）", (m) => m.orderAndInventory.meanPlannedProductionTons.toFixed(0)],
+    ["実績/計画生産量の比率（平均）", (m) => pct(m.orderAndInventory.meanActualVsPlannedRatio)],
+  ];
+  for (const [label, f] of orderInvRows) L.push(`| ${label} | ` + sections.map((x) => f(x.m)).join(" | ") + " |");
+  L.push("");
+  L.push("成約残高＝未出荷の確定契約数量（`CompanyQuarterSummary.outstandingQuantity`）。");
+  L.push("完成品在庫は在庫調整による生産抑制の判断材料として、計画生産量はAIの意図（受注・");
+  L.push("需要見通し）に基づく生産計画量として、稼働率低下の原因分類（§3d）で使用する。");
+  L.push("");
+
+  L.push("## 3d. 稼働率低下の原因分析【ご指示】");
+  L.push("");
+  L.push("能力余剰（共通前処理の有効能力−生産実績）が50t/Q超の四半期を対象に、支配的な要因で分類した。");
+  L.push("");
+  L.push("| 原因 | " + sections.map((x) => x.title).join(" | ") + " |");
+  L.push("|---|" + sections.map(() => "---:").join("|") + "|");
+  const causeLabels: [string, string][] = [
+    ["demand", "需要・受注不足（AI自身が計画生産量を絞った）"],
+    ["rawMaterial", "原料不足（現金制約以外の調達制約）"],
+    ["labor", "労働力不足"],
+    ["equipment", "設備能力制約"],
+    ["cash", "資金制約（現金不足による国内買付縮小）"],
+    ["inventory", "在庫調整（完成品在庫過多）"],
+    ["other", "その他（要個別確認）"],
+  ];
+  for (const [key, label] of causeLabels) {
+    L.push(
+      `| ${label} | ` +
+        sections
+          .map((x) => {
+            const b = x.m.lowUtilizationCauseBreakdown;
+            const n = b.counts[key] ?? 0;
+            return b.quartersWithCapacityGap > 0 ? `${n} (${pct(n / b.quartersWithCapacityGap)})` : "0";
+          })
+          .join(" | ") +
+        " |"
+    );
+  }
+  L.push(
+    "| **能力余剰が発生した四半期（分母）** | " +
+      sections.map((x) => `${x.m.lowUtilizationCauseBreakdown.quartersWithCapacityGap}/${x.m.lowUtilizationCauseBreakdown.quartersTotal}`).join(" | ") +
+      " |"
+  );
+  L.push("");
+  L.push("**分類の限界（正直な明記）**: 労務・設備・原料の各不足量のうち最大のものを主因とする");
+  L.push("一次近似であり、複数要因が同時に効いている場合は主因以外を過小評価する。原料不足は");
+  L.push("`computeProcurementConstraint`のscaleRatio（現金による国内買付縮小）が1未満なら");
+  L.push("「資金制約」、そうでなければ「原料不足（現金以外）」に分類している。");
+  L.push("");
+
   L.push("## 4. 資金（ご指示8・9）【Phase 1A-2 作業5で符号バグを修正・再計測】");
   L.push("");
   L.push("旧バージョンは`operatingDirect`の支出項目（負の値で保持）を符号調整せずに合算していたため、");
@@ -867,7 +1194,16 @@ function main(): void {
   );
   L.push("");
 
-  L.push("## 5. 人員方針の係数候補比較（反実仮想リプレイ）");
+  L.push("## 4b. 営業キャッシュフロー・借入残高【2026-08-01夜・追加計測】");
+  L.push("");
+  L.push("| 指標 | " + sections.map((x) => x.title).join(" | ") + " |");
+  L.push("|---|" + sections.map(() => "---:").join("|") + "|");
+  L.push("| 営業キャッシュフロー（平均） | " + sections.map((x) => fmtUsd(x.m.cashAndDebt.meanOperatingCashFlowUsd)).join(" | ") + " |");
+  L.push("| 借入残高（平均） | " + sections.map((x) => fmtUsd(x.m.cashAndDebt.meanLoanBalanceUsd)).join(" | ") + " |");
+  L.push("| 借入残高（中央値） | " + sections.map((x) => fmtUsd(x.m.cashAndDebt.medianLoanBalanceUsd)).join(" | ") + " |");
+  L.push("");
+
+  L.push("## 5. 人員方針の係数候補比較（反実仮想リプレイ）【2026-08-01夜・ご指示の初期候補値に更新】");
   L.push("");
   L.push("**基準**: control の生存期間。**採用リードタイム 1Q**。");
   L.push("");
@@ -876,12 +1212,32 @@ function main(): void {
   L.push("削減額は上限寄り・欠品は下限寄りに出る。方針の**相対比較**には使えるが、絶対額の予測には使えない。");
   L.push("");
   L.push(`単位限界利益の仮定: ${unitCm.toFixed(0)} USD/トン（control生存期間の実測平均）`);
-  L.push(`採用コスト ${HIRING_COST_PER_HEAD} USD/人、解雇コスト ${SEVERANCE_COST_PER_HEAD} USD/人（ご指示の暫定値）`);
+  L.push(
+    `採用コスト ${HIRING_COST_PER_HEAD} USD/人（給与の0.50倍）、解雇コスト ${SEVERANCE_COST_PER_HEAD} USD/人（給与の0.75倍）` +
+      `【2026-08-01夜・ご指示の初期候補値。中央パラメータとして変更可能】`
+  );
+  L.push(
+    `新規採用者は採用四半期中は${pct(NEW_HIRE_RAMP_FIRST_QUARTER_EFFICIENCY)}の能力、翌四半期以降100%（給与は満額支払い、能力のみ按分）`
+  );
+  L.push(
+    `通常時削減上限 ${pct(NORMAL_REDUCTION_CAP_RATIO)}／資金危機時削減上限 ${pct(CRISIS_REDUCTION_CAP_RATIO)}／採用上限 ${pct(HIRING_CAP_RATIO)}` +
+      `（いずれも期首常用人員に対する比率、中央パラメータ）`
+  );
+  L.push("");
+  L.push(
+    `**ご指示の初期候補値そのものでの結果（安全余力15%・確認期間3Q・通常削減15%・危機時削減25%・採用上限20%・採用リードタイム1Q）**: ` +
+      `人件費 ${fmtUsd(recommendedCandidate.policyLaborCostUsd)} ＋ 解雇費 ${fmtUsd(recommendedCandidate.policySeveranceUsd)} ＋ ` +
+      `採用費 ${fmtUsd(recommendedCandidate.policyHiringUsd)} ＋ 機会損失 ${fmtUsd(recommendedCandidate.opportunityLossUsd)} − ` +
+      `欠品回避 ${fmtUsd(recommendedCandidate.recoveredValueUsd)} ＝ **総コスト ${fmtUsd(recommendedCandidate.policyTotalCostUsd)}** ` +
+      `（現行AI基準比 **改善額 ${fmtUsd(recommendedCandidate.improvementUsd)}**）`
+  );
   L.push("");
   L.push(`現行AI（実績軌跡）に同じ一時費用を課した基準: 人件費 ${fmtUsd(grid[0].baselineLaborCostUsd)} ＋ 解雇費 ${fmtUsd(grid[0].baselineSeveranceUsd)} ＋ 採用費 ${fmtUsd(grid[0].baselineHiringUsd)} ＝ **総コスト ${fmtUsd(grid[0].baselineTotalCostUsd)}**`);
   L.push(`現行AIの人員変動総量: ${grid[0].baselineHeadcountChurnHeads.toFixed(0)} 人（増減の絶対値合計）`);
   L.push("");
-  L.push("| 安全余力 | 確認期間 | 削減上限 | 人件費 | 解雇費 | 採用費 | 不足人月 | 機会損失 | 欠品回避 | 総コスト | **改善額** | 削減回数 | 採用回数 | 人員変動 |");
+  L.push("（以下のグリッドは感度確認のため通常削減上限のみ振り、危機時削減25%・採用上限20%は固定）");
+  L.push("");
+  L.push("| 安全余力 | 確認期間 | 通常削減上限 | 人件費 | 解雇費 | 採用費 | 不足人月 | 機会損失 | 欠品回避 | 総コスト | **改善額** | 削減回数 | 採用回数 | 人員変動 |");
   L.push("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
   for (const g of grid) {
     L.push(
@@ -889,7 +1245,9 @@ function main(): void {
     );
   }
   L.push("");
-  L.push("## 6. 採用リードタイムの感度（安全余力15%・確認期間2Q・削減上限15%）");
+  L.push("## 6. 採用リードタイム・資金危機時削減上限の感度");
+  L.push("");
+  L.push("### 6.1 採用リードタイム（安全余力15%・確認期間3Q・通常削減15%・危機時削減25%・採用上限20%）");
   L.push("");
   L.push("| リードタイム | 人件費 | 不足人月 | 機会損失 | 欠品回避 | 総コスト | 改善額 |");
   L.push("|---:|---:|---:|---:|---:|---:|---:|");
@@ -897,7 +1255,17 @@ function main(): void {
     L.push(`| ${g.hiringLeadTimeQuarters}Q | ${fmtUsd(g.policyLaborCostUsd)} | ${g.shortfallHeadQuarters.toFixed(0)} | ${fmtUsd(g.opportunityLossUsd)} | ${fmtUsd(g.recoveredValueUsd)} | ${fmtUsd(g.policyTotalCostUsd)} | ${fmtUsd(g.improvementUsd)} |`);
   }
   L.push("");
-  L.push("## 7. 削減の回収期間（解雇2Q分・採用1Q分）");
+  L.push("### 6.2 資金危機時削減上限の感度（安全余力15%・確認期間3Q・通常削減15%・採用上限20%・リードタイム1Q）");
+  L.push("");
+  L.push("| 危機時削減上限 | 人件費 | 解雇費 | 不足人月 | 機会損失 | 欠品回避 | 総コスト | 改善額 | 削減回数 |");
+  L.push("|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+  for (const g of crisisCapSensitivity) {
+    L.push(
+      `| ${pct(g.crisisReductionCapRatio ?? 0)} | ${fmtUsd(g.policyLaborCostUsd)} | ${fmtUsd(g.policySeveranceUsd)} | ${g.shortfallHeadQuarters.toFixed(0)} | ${fmtUsd(g.opportunityLossUsd)} | ${fmtUsd(g.recoveredValueUsd)} | ${fmtUsd(g.policyTotalCostUsd)} | ${fmtUsd(g.improvementUsd)} | ${g.reductionEvents} |`
+    );
+  }
+  L.push("");
+  L.push("## 7. 削減の回収期間（解雇0.75Q分・採用0.50Q分）");
   L.push("");
   L.push(`- 1人削減の節約: ${REGULAR_SALARY} USD/四半期`);
   L.push(`- 1人削減の一時費用: ${SEVERANCE_COST_PER_HEAD} USD → **回収期間 ${(SEVERANCE_COST_PER_HEAD / REGULAR_SALARY).toFixed(1)} 四半期**`);
