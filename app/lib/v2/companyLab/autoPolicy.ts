@@ -632,5 +632,9 @@ export function generateAutoPolicyDecision(
     workerAssignments,
     financingRequest,
     capexDecision,
+    // 【営業人員の追加採用・forward-port】5社自動方針は常に0（新規採用なし）を
+    // 返す（capexDecisionの新規提案なしと同じ方針。統合テスト・意思決定編集
+    // からの上書きは可能）。Standard AIの営業採用ロジック自体の新設は対象外。
+    salesForceHireCount: 0,
   };
 }

@@ -92,6 +92,7 @@ test("CompanyLabPersistedStateV1（現在状態、draftなし）をencode→deco
     capexState: last.stateAfter.capexState,
     workforceState: last.stateAfter.workforceState,
     consumerMarketState: last.stateAfter.consumerMarketState,
+    salesForceHiringState: last.stateAfter.salesForceHiringState,
     isComplete: last.stateAfter.isComplete,
   });
 
@@ -186,6 +187,7 @@ test("進行中ドラフト（submittedAt=null）を含むCompanyLabPersistedSta
         capexState: last.stateAfter.capexState,
         workforceState: last.stateAfter.workforceState,
         consumerMarketState: last.stateAfter.consumerMarketState,
+        salesForceHiringState: last.stateAfter.salesForceHiringState,
         isComplete: last.stateAfter.isComplete,
       },
       revision: 14,

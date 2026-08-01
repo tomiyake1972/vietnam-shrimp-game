@@ -716,3 +716,128 @@ test("入力（state・fixtures・decisions）を変更しない", () => {
   assert.equal(JSON.stringify(fixtures), beforeFixtures);
   assert.equal(JSON.stringify(decisions), beforeDecisions);
 });
+
+// --- 営業人員の追加採用（forward-port） ---
+
+test("営業人員採用: 当期は配分可能人数・当期SG&Aへ加算されず、次四半期から加算・SG&Aへ反映される（ユーザー提示例: BAL 18人→採用6人→次期24人）", () => {
+  const balId = "BAL";
+
+  function buildTurn1Decisions(
+    state: ReturnType<typeof initializeCompanyLab>["state"],
+    fixtures: ReturnType<typeof initializeCompanyLab>["fixtures"],
+    balHireCount: number
+  ): Record<string, CompanyDecisionInput> {
+    const publicInfo = buildPublicMarketInfo(state);
+    const decisions: Record<string, CompanyDecisionInput> = {};
+    for (const f of fixtures) {
+      const own = buildCompanyOwnState(state, f);
+      const base = generateAutoPolicyDecision(f, own, publicInfo, state.currentPeriod, 1);
+      decisions[f.companyId] = f.companyId === balId ? { ...base, salesForceHireCount: balHireCount } : base;
+    }
+    return decisions;
+  }
+
+  // 「採用あり」ブランチと「採用なし」ブランチを同一シードから独立に走らせ、
+  // 当期・次期のSG&Aを比較する（他の意思決定は完全に同一のため、差はすべて
+  // 営業人員採用の反映タイミングに起因する）。
+  const hired0 = initializeCompanyLab(baseConfig({ seed: "sales-hiring-001", turns: 2 }));
+  const baseline0 = initializeCompanyLab(baseConfig({ seed: "sales-hiring-001", turns: 2 }));
+  const { fixtures } = hired0;
+  const balFixture = fixtures.find((f) => f.companyId === balId)!;
+  assert.equal(balFixture.salesForceHeadcountTotal, 18, "この検証はBALの基準人数18人を前提にしている");
+
+  // 当期(quarter1)開始時点では、採用意思決定を出す前からすでに配分可能人数は18人。
+  assert.equal(buildCompanyOwnState(hired0.state, balFixture).salesForceHiringState.headcount, 18);
+
+  const decisionsHired1 = buildTurn1Decisions(hired0.state, fixtures, 6);
+  const decisionsBaseline1 = buildTurn1Decisions(baseline0.state, fixtures, 0);
+  const hired1State = advanceCompanyLabQuarter(hired0.state, fixtures, decisionsHired1);
+  const baseline1State = advanceCompanyLabQuarter(baseline0.state, fixtures, decisionsBaseline1);
+
+  // 当期のSG&Aは、採用意思決定の有無に関わらず同じ（当期はまだ配分・費用計上に使えない）。
+  const balFrHired1 = hired1State.history[0].financialResults.find((fr) => fr.companyId === balId)!;
+  const balFrBaseline1 = baseline1State.history[0].financialResults.find((fr) => fr.companyId === balId)!;
+  assert.ok(
+    Math.abs((balFrHired1.profitAndLoss.sellingGeneralAdmin as number) - (balFrBaseline1.profitAndLoss.sellingGeneralAdmin as number)) < 0.01,
+    "採用意思決定を出した当期のSG&Aが変化してしまっている（当期に反映されるべきではない）"
+  );
+
+  // 次四半期の期首では、配分可能人数が24人（採用ブランチ）／18人（対照ブランチ）のまま。
+  assert.equal(buildCompanyOwnState(hired1State, balFixture).salesForceHiringState.headcount, 24);
+  assert.equal(buildCompanyOwnState(baseline1State, balFixture).salesForceHiringState.headcount, 18);
+
+  // turn2の意思決定は両ブランチとも自動方針のみ（新規採用なし）で、増員の効果だけを見る。
+  function buildTurn2Decisions(state: typeof hired1State, fixtures: ReturnType<typeof initializeCompanyLab>["fixtures"]) {
+    const publicInfo = buildPublicMarketInfo(state);
+    const decisions: Record<string, CompanyDecisionInput> = {};
+    for (const f of fixtures) {
+      decisions[f.companyId] = generateAutoPolicyDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, 2);
+    }
+    return decisions;
+  }
+
+  const hired2State = advanceCompanyLabQuarter(hired1State, fixtures, buildTurn2Decisions(hired1State, fixtures));
+  const baseline2State = advanceCompanyLabQuarter(baseline1State, fixtures, buildTurn2Decisions(baseline1State, fixtures));
+
+  // 次四半期(quarter2)のSG&Aは、増員6人ぶんの人件費（6人×salesForceSalaryUsdPerQuarter）だけ高くなる。
+  const balFrHired2 = hired2State.history[1].financialResults.find((fr) => fr.companyId === balId)!;
+  const balFrBaseline2 = baseline2State.history[1].financialResults.find((fr) => fr.companyId === balId)!;
+  const sgaDiff = (balFrHired2.profitAndLoss.sellingGeneralAdmin as number) - (balFrBaseline2.profitAndLoss.sellingGeneralAdmin as number);
+  assert.ok(Math.abs(sgaDiff - 6 * 8000) < 0.01, `増員6人ぶんのSG&A差分が想定と異なる: ${sgaDiff}`);
+
+  // 3四半期目以降に採用が無ければ、配分可能人数はそれ以上変化しない（勝手に増減しない）。
+  assert.equal(buildCompanyOwnState(hired2State, balFixture).salesForceHiringState.headcount, 24);
+  assert.equal(buildCompanyOwnState(baseline2State, balFixture).salesForceHiringState.headcount, 18);
+});
+
+test("営業人員採用: 当期の採用予定人数を超える販売計画は、既存のvalidateSalesForceHeadcountBudgetにより従来どおり拒否される", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig({ seed: "sales-hiring-budget-001", turns: 1 }));
+  const balFixture = fixtures.find((f) => f.companyId === "BAL")!;
+  const publicInfo = buildPublicMarketInfo(state);
+  const own = buildCompanyOwnState(state, balFixture);
+  const base = generateAutoPolicyDecision(balFixture, own, publicInfo, state.currentPeriod, 1);
+
+  const decisions: Record<string, CompanyDecisionInput> = {};
+  for (const f of fixtures) {
+    decisions[f.companyId] = generateAutoPolicyDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, 1);
+  }
+  // 採用予定6人を出しつつ、当期の配分は基準人数18人を超える19人ぶんに水増しする。
+  // 採用はまだ配分に使えないため、これは従来どおり拒否されるべき（新機能が
+  // 既存のバジェット検証を緩めていないことの確認）。
+  decisions[balFixture.companyId] = {
+    ...base,
+    salesForceHireCount: 6,
+    salesPlans: [...base.salesPlans, { ...base.salesPlans[0], salesForceHeadcount: 19 }],
+  };
+
+  assert.throws(() => advanceCompanyLabQuarter(state, fixtures, decisions));
+});
+
+test("営業人員採用: 追加採用0人の場合、この機能導入前と完全に同じ結果になる（回帰なし）", () => {
+  const withZeroHire = initializeCompanyLab(baseConfig({ seed: "sales-hiring-zero-001", turns: 3 }));
+  const { fixtures } = withZeroHire;
+
+  function decisionsAllZeroHire(
+    state: ReturnType<typeof initializeCompanyLab>["state"],
+    turn: number
+  ): Record<string, CompanyDecisionInput> {
+    const publicInfo = buildPublicMarketInfo(state);
+    const decisions: Record<string, CompanyDecisionInput> = {};
+    for (const f of fixtures) {
+      // 【回帰確認】salesForceHireCountを明示的に渡さない（omit）。autoPolicy.ts自体が
+      // 常に0を返すため、意思決定側は追加採用0人固定の従来どおりの経路のまま。
+      decisions[f.companyId] = generateAutoPolicyDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, turn);
+    }
+    return decisions;
+  }
+
+  let state = withZeroHire.state;
+  for (let turn = 1; turn <= 3; turn++) {
+    state = advanceCompanyLabQuarter(state, fixtures, decisionsAllZeroHire(state, turn));
+  }
+
+  // 追加採用0人が続く限り、配分可能な営業人員総数はfixtureの基準人数から一切変化しない。
+  for (const f of fixtures) {
+    assert.equal(buildCompanyOwnState(state, f).salesForceHiringState.headcount, f.salesForceHeadcountTotal);
+  }
+});

@@ -359,6 +359,7 @@ test("極端な入力（原料・完成品ゼロ、契約ゼロ、現金が大�
     },
     capexState: { companyId: fixture.companyId, portfolio: { companyId: fixture.companyId, projects: [] }, nextProjectSequence: 1 },
     workforceState: { companyId: fixture.companyId, factories: fixture.workerBaseline.map((w) => ({ factoryId: w.factoryId, regularHeadcount: 0 })) },
+    salesForceHiringState: { companyId: fixture.companyId, headcount: fixture.salesForceHeadcountTotal },
   };
 
   let decision: CompanyDecisionInput | undefined;

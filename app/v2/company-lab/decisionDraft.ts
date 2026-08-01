@@ -153,6 +153,17 @@ export interface CompanyDecisionDraft {
   readonly workerAssignments: readonly WorkerAssignmentDraftRow[];
   readonly financingRequest: FinancingRequestDraft;
   readonly capexDecision: CapexDecisionDraft;
+  /**
+   * 【営業人員の追加採用・forward-port】当期の営業人員の新規採用人数（0以上の
+   * 整数）。今期採用した人数は今期の配分には使えず、四半期確定時に採用が成立し、
+   * 次の四半期の開始時点から配分可能人数へ加算される
+   * （app/lib/v2/companyLab/salesForceHiring.ts参照）。
+   * 新しい四半期のドラフトは常に0から始まる（前四半期の採用決定を引き継がない。
+   * 「今回の採用予定」は毎回新しい意思決定であるため）。
+   * 省略可能なのは、この機能導入前に保存された下書きにこのフィールドが無いため
+   * （読み込み側は `?? 0` として扱う。0で埋めない）。
+   */
+  readonly salesForceHireCount?: number;
 }
 
 // ---------------------------------------------------------------------
@@ -203,6 +214,34 @@ export function summarizeSalesForceAllocation(
 /** 「営業配分をすべて0に戻す」操作。他のドラフト項目には一切触れない。 */
 export function resetAllSalesForceHeadcountToZero(draft: CompanyDecisionDraft): CompanyDecisionDraft {
   return { ...draft, salesPlans: draft.salesPlans.map((row) => ({ ...row, salesForceHeadcount: 0 })) };
+}
+
+// ---------------------------------------------------------------------
+// 【営業人員の追加採用・forward-port】営業人員の追加採用（表示用の単純な合算。判定
+// ロジックは持たない）
+//
+// 「今回の採用予定」（draft.salesForceHireCount）は今期の配分可能人数へは
+// 加算しない（当期の配分可能人数は常に現在の営業人員そのもの）。次期の
+// 営業人員見込みだけが、現在の営業人員＋今回の採用予定の単純な合算になる。
+// ---------------------------------------------------------------------
+
+export interface SalesForceHiringPreview {
+  /** 現在の営業人員（＝当期に配分可能な人数）。 */
+  readonly currentHeadcount: number;
+  /** 今回の採用予定（ドラフトの入力値。0未満・NaN・Infinityは0として扱う）。 */
+  readonly plannedHireCount: number;
+  /** 次期の営業人員見込み＝現在の営業人員＋今回の採用予定。 */
+  readonly nextQuarterHeadcount: number;
+}
+
+export function summarizeSalesForceHiring(currentHeadcount: number, plannedHireCountRaw: number): SalesForceHiringPreview {
+  const safeCurrentHeadcount = Number.isFinite(currentHeadcount) && currentHeadcount > 0 ? Math.round(currentHeadcount) : 0;
+  const plannedHireCount = Number.isFinite(plannedHireCountRaw) && plannedHireCountRaw > 0 ? Math.round(plannedHireCountRaw) : 0;
+  return {
+    currentHeadcount: safeCurrentHeadcount,
+    plannedHireCount,
+    nextQuarterHeadcount: safeCurrentHeadcount + plannedHireCount,
+  };
 }
 
 /**
@@ -347,6 +386,9 @@ export function buildInitialDraft(
     workerAssignments,
     financingRequest,
     capexDecision,
+    // 【営業人員の追加採用・forward-port】新しい四半期のドラフトは常に採用予定
+    // 0人から始まる（前四半期の採用決定を引き継がない）。
+    salesForceHireCount: 0,
   };
 }
 
@@ -458,5 +500,8 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
     workerAssignments,
     financingRequest,
     capexDecision,
+    // 【営業人員の追加採用・forward-port】負値・NaN・Infinityは0へ丸める
+    // （採用人数は常に0以上の整数）。
+    salesForceHireCount: Math.round(safeNonNegative(draft.salesForceHireCount ?? 0)),
   };
 }

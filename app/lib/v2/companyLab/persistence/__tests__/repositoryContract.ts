@@ -63,6 +63,7 @@ function minimalRuntime(overrides: Partial<CompanyLabRuntimeSnapshot> = {}): Com
     capexState: { companies: [] },
     workforceState: { companies: [] },
     consumerMarketState: emptyConsumerMarketStateFixture(),
+    salesForceHiringState: { companies: [] },
     isComplete: false,
     ...overrides,
   };

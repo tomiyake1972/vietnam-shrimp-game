@@ -12,7 +12,7 @@ import { score0to100, unwrapUnit } from "../../../lib/v2/core/units";
 import { buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../../../lib/v2/companyLab/runner";
 import { generateAutoPolicyDecision } from "../../../lib/v2/companyLab/autoPolicy";
 import { CompanyLabConfig, CompanyLabState } from "../../../lib/v2/companyLab/types";
-import { buildDecisionInputFromDraft, buildInitialDraft } from "../decisionDraft";
+import { buildDecisionInputFromDraft, buildInitialDraft, summarizeSalesForceHiring } from "../decisionDraft";
 
 function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig {
   return { scenarioId: "baseline-v0.1", mode: "canonical", seed: "draft-roundtrip-001", turns: 8, ...overrides };
@@ -92,4 +92,81 @@ test("受入確認5b: 自動方針が計画しなかった市場×商品の組�
       assert.equal(unwrapUnit(unplannedRow.qualityReputation!), unwrapUnit(sameProductEntry.qualityReputation));
     }
   }
+});
+
+// ---------------------------------------------------------------------
+// 営業人員の追加採用（forward-port）
+// ---------------------------------------------------------------------
+
+test("summarizeSalesForceHiring: 採用予定0人なら、現在人数と次期見込みが一致する", () => {
+  const preview = summarizeSalesForceHiring(18, 0);
+  assert.deepEqual(preview, { currentHeadcount: 18, plannedHireCount: 0, nextQuarterHeadcount: 18 });
+});
+
+test("summarizeSalesForceHiring: 正の整数の採用予定は現在人数へ単純加算される（ユーザー提示例: 18人→採用6人→次期見込み24人）", () => {
+  const preview = summarizeSalesForceHiring(18, 6);
+  assert.deepEqual(preview, { currentHeadcount: 18, plannedHireCount: 6, nextQuarterHeadcount: 24 });
+});
+
+test("summarizeSalesForceHiring: 負数・NaN・Infinityの採用予定は0として扱う", () => {
+  assert.equal(summarizeSalesForceHiring(18, -3).plannedHireCount, 0);
+  assert.equal(summarizeSalesForceHiring(18, NaN).plannedHireCount, 0);
+  assert.equal(summarizeSalesForceHiring(18, Infinity).plannedHireCount, 0);
+});
+
+test("summarizeSalesForceHiring: 小数の採用予定は四捨五入する", () => {
+  assert.equal(summarizeSalesForceHiring(18, 6.4).plannedHireCount, 6);
+  assert.equal(summarizeSalesForceHiring(18, 6.6).plannedHireCount, 7);
+});
+
+test("buildInitialDraft: 新しい四半期のドラフトは常に採用予定0人から始まる", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig());
+  const fixture = fixtures[0];
+  const ownState = buildCompanyOwnState(state, fixture);
+  const publicInfo = buildPublicMarketInfo(state);
+  const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+  const draft = buildInitialDraft(fixture, autoDecision);
+  assert.equal(draft.salesForceHireCount, 0);
+});
+
+test("draft往復(buildInitialDraft→buildDecisionInputFromDraft): プレイヤーが入力した採用予定人数が消失しない", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig());
+  const fixture = fixtures[0];
+  const ownState = buildCompanyOwnState(state, fixture);
+  const publicInfo = buildPublicMarketInfo(state);
+  const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+
+  const draft = buildInitialDraft(fixture, autoDecision);
+  const editedDraft = { ...draft, salesForceHireCount: 6 };
+  const rebuilt = buildDecisionInputFromDraft(editedDraft, fixture, state.currentPeriod);
+  assert.equal(rebuilt.salesForceHireCount, 6, "draft往復後も採用予定人数6人が消失していない");
+});
+
+test("draft往復: 負数・小数・NaNの採用予定人数は0以上の整数へ丸められて送信される（ハードエラー防止）", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig());
+  const fixture = fixtures[0];
+  const ownState = buildCompanyOwnState(state, fixture);
+  const publicInfo = buildPublicMarketInfo(state);
+  const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+  const draft = buildInitialDraft(fixture, autoDecision);
+
+  assert.equal(buildDecisionInputFromDraft({ ...draft, salesForceHireCount: -5 }, fixture, state.currentPeriod).salesForceHireCount, 0);
+  assert.equal(buildDecisionInputFromDraft({ ...draft, salesForceHireCount: 6.6 }, fixture, state.currentPeriod).salesForceHireCount, 7);
+  assert.equal(buildDecisionInputFromDraft({ ...draft, salesForceHireCount: NaN }, fixture, state.currentPeriod).salesForceHireCount, 0);
+});
+
+test("draft往復: この機能導入前に保存されたドラフト（salesForceHireCountキー自体が無い）は0として扱われる", () => {
+  const { state, fixtures } = initializeCompanyLab(baseConfig());
+  const fixture = fixtures[0];
+  const ownState = buildCompanyOwnState(state, fixture);
+  const publicInfo = buildPublicMarketInfo(state);
+  const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+  const draft = buildInitialDraft(fixture, autoDecision);
+
+  const legacyDraft = { ...draft } as Record<string, unknown>;
+  delete legacyDraft.salesForceHireCount;
+  assert.ok(!("salesForceHireCount" in legacyDraft), "テスト前提: 旧ドラフトにキー自体が無いこと");
+
+  const rebuilt = buildDecisionInputFromDraft(legacyDraft as unknown as typeof draft, fixture, state.currentPeriod);
+  assert.equal(rebuilt.salesForceHireCount, 0);
 });

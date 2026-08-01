@@ -165,3 +165,127 @@ tool_use入力の型情報、`stop_reason`・`output_tokens`をログへ追加�
 - 今回のschema_mismatch対応コミット（`a3a113c`〜`990dba9`）はいずれもこのルート・
   `app/lib/redis.ts`を変更していないため、このビルド失敗は今回の変更で新たに生じたものではなく、
   修正前から存在していた既知の制約がそのまま再現しているだけであると判断する。
+
+## 12. 「営業人員の追加採用」機能のforward-port（Phase 8G §2のみ）
+
+### 12.1 症状・きっかけ
+
+三宅さんより「営業の増員入力が画面から消えている」との報告を受けた。現行の
+`develop/v2`のプレイヤー意思決定画面（`DecisionEditor.tsx`）を確認したところ、
+「営業人員の追加採用」入力欄が実際に存在しなかった。
+
+### 12.2 根本原因（今回の作業による regression ではないことの確認）
+
+`git log`／`git branch --all --contains`で調査した結果、この機能は元々
+`feature/v2-8g-remaining`ブランチ（Phase 8G §2、旧コミット`3f20620`）上に
+実装されていたが、このブランチは一度も`develop/v2`へマージされていない
+orphanなブランチであることが判明した。
+
+- `feature/v2-8g-remaining`は`89172e2`（7月26日頃）で`develop/v2`から分岐しており、
+  その後の`develop/v2`側のSAI-3〜SAI-6の作業には一切合流していない。
+- `git merge-base --is-ancestor 3f20620 f6b4e45`は`false`を返し、今回のセッション開始前の
+  fast-forwardマージ（`test/sai6-manual-observation-2026-08-01`）以前から、この機能は
+  一度も`develop/v2`に存在していなかったことを確認した。
+
+つまり「消えた」のではなく「一度も統合されていなかった」機能であり、
+本セッションのschema_mismatch対応や過去のSAI作業による regression ではない。
+
+### 12.3 対応方針（三宅さんの明示指示）
+
+Phase 8G §2〜§6一式を丸ごと統合するのではなく、「営業人員の追加採用」機能のみを
+現行の`develop/v2`設計にforward-port（現行コードに合わせた再実装）する方針とした。
+`3f20620`のそのままのcherry-pickによるコンフリクト解消は行わず、旧実装は参照資料としてのみ
+用いて、ゼロから現行設計に合わせて実装した。
+
+実際に`3f20620`をそのままcherry-pickして試したところ、`persistence/schema.ts`・
+`persistence/snapshot.ts`・`persistence/types.ts`・`runner.ts`・`types.ts`・
+`DecisionEditor.tsx`・`phase8dPersistence.test.ts`で大量のコンフリクトが発生した
+（`develop/v2`側でpersistenceスキーマバージョンやrunner.tsが複数回リファクタされているため）。
+三宅さんの指示に従い、この方法は採らずに`git reset --hard HEAD`で中断し、
+以降は旧コミットのdiffを設計リファレンスとしてのみ参照する方式に切り替えた。
+
+作業ブランチ：`origin/develop/v2`（HEAD `cac90af`）から新規作成した
+`feature/v2-sales-staff-hiring-forward-port`。`develop/v2`・`main`・
+`feature/v2-8g-remaining`のいずれも変更・削除していない。
+
+### 12.4 旧実装と現行設計の相違点
+
+- **永続化スキーマバージョン**：旧実装はv3→v4への切り替えとして設計されていたが、
+  現行`develop/v2`は既にSAI-5D/5E（消費市場・市場進化）でv4を使用済みのため、
+  そのまま流用すると衝突する。今回はv4→v5として新規追加した
+  （既存の「追記のみ・移行処理不要」という設計方針に従い、バージョン番号自体で分岐せず、
+  キー欠落時は安全なデフォルト値へフォールバックする既存のパターンを維持）。
+- **AIの営業人員配分ロジック**：旧実装・現行実装のいずれも、Standard AIの
+  `allocateHeadcountAcrossMarkets`は常にfixtureの静的な`salesForceHeadcountTotal`を
+  参照しており、動的な採用後人数を反映するようには作られていない。これは今回の
+  forward-portで新たに導入した制約ではなく、旧実装の時点から一貫している挙動である。
+  「新しい営業採用AIロジックの開発は対象外」という三宅さんの指示と合致するため、
+  この挙動はそのまま維持した（Standard AIは常に`salesForceHireCount: 0`を返す）。
+- その他、UIコンポーネント構造（`CollapsibleSection`）・`NumberCell`の入力クランプ方式・
+  `CompanyDecisionDraft`/`CompanyDecisionInput`の往復変換パターンは、旧実装の意図を保ちつつ、
+  現行のコード規約にすべて合わせて再実装した。
+
+### 12.5 実装内容
+
+- 新規ファイル`app/lib/v2/companyLab/salesForceHiring.ts`：会社ごとの営業人員数を
+  管理する純粋関数群（`buildInitialSalesForceHiringState`／`deriveNextSalesForceHiringState`／
+  `isSalesForceHiringStateEmpty`）。
+- `types.ts`／`runner.ts`：`CompanyDecisionInput.salesForceHireCount`（任意、後方互換のため）、
+  `CompanyOwnState.salesForceHiringState`・`CompanyLabState.salesForceHiringState`（必須）を追加。
+  `advanceCompanyLabQuarter`内で、当期の採用意思決定は当期の
+  `validateSalesForceHeadcountBudget`・当期SG&A算出には反映されず（＝当期の販売容量・
+  人件費には影響しない）、次期の`salesForceHiringState`にのみ加算される設計とした
+  （＝「次四半期から反映」の要件を、runner.tsの状態遷移タイミングそのもので保証）。
+- 永続化（`persistence/types.ts`・`schema.ts`・`snapshot.ts`）：
+  `CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION`を4→5へ。既存の保存データに
+  `salesForceHiringState`キーが存在しない場合は`{ companies: [] }`として復元し、
+  `runner.ts`側で会社ごとにfixtureの基準人数へフォールバックするため、
+  既存セーブデータは読み込み可能・リセット不要。
+- UI（`DecisionEditor.tsx`・`decisionDraft.ts`・`PlayerScreenClient.tsx`）：
+  「営業人員の追加採用」セクションを復活。入力単位は人数（0以上の整数、`NumberCell`の
+  既存ソフトクランプ方式で負数・小数・NaNを丸める）、初期値0、現在人数・次期見込み人数を
+  並べて表示、「次の四半期から」反映される旨を明記。
+- `autoPolicy.ts`：Standard AIは常に`salesForceHireCount: 0`を返すよう変更（新規AIロジックは追加せず）。
+
+### 12.6 対象外とした項目（三宅さんの明示指示により今回は含めない）
+
+- Phase 8G §4（消費市場の在庫・前期比表示）
+- Phase 8G §5（輸入コスト・landed cost・入荷タイミング表示）
+- Phase 8G §6（四半期決算のスプレッドシート風UI）
+- コミット`f190d81`（`CollapsibleSection`のdefaultOpenをfalseへ変更する変更）
+- `feature/v2-8g-remaining`ブランチ上のドキュメント系コミットの一括統合
+
+### 12.7 テスト・検証結果
+
+- 新規テストファイル`app/lib/v2/companyLab/__tests__/salesForceHiring.test.ts`（11件）：
+  初期化・0/正/負/小数/NaN/Infinity/超大値・複数四半期累積・未指定会社のフォールバック等。
+- `runner.test.ts`に3件追加：採用当期の販売容量・SG&Aが不変であること、次期に
+  採用人数分だけ人件費（`6人×$8,000/四半期`）が増加すること、AI自動方針は常に0人採用で
+  既存の計算結果に回帰がないこと。
+- `phase8dPersistence.test.ts`に`PS-SFH-1`／`PS-SFH-2`を追加：実際の四半期処理→
+  永続化スナップショット化→JSON往復後も`salesForceHiringState`が消失しないこと、
+  旧スキーマ（v4、`salesForceHiringState`キー欠落）データが読み込み可能で、
+  会社ごとにfixtureの基準人数へ正しくフォールバックすること。
+- `decisionDraft.test.ts`に8件追加：`summarizeSalesForceHiring`のプレビュー計算、
+  draft往復での採用予定人数の保持・丸め、旧draft（キー自体が存在しない場合）の0フォールバック。
+- 既存の型整合性維持のための機械的修正：`CompanyOwnState`／`CompanyLabState`／
+  `CompanyLabRuntimeSnapshot`へ必須フィールドを追加したことに伴う9箇所の既存テスト・
+  ヘルパーファイルの型エラー修正（新フィールドの追加のみ、ロジック変更なし）。
+- 最終検証結果：
+  - `npm test`：**2084件全てpass**（fail 0）。
+  - `npx tsc --noEmit`：**エラー0件**。
+  - `npm run lint`（eslint）：**エラー0件**（既存の警告4件のみ、今回の変更とは無関係）。
+  - `npm run build`：コンパイル・TypeScript型チェックは成功。ページデータ収集段階で
+    `STAGING_KV_REST_API_URL`未設定により失敗（第11節と同一の既知のサンドボックス環境制約、
+    `/api/game/[gameCode]/admin/clone`ルートで発生、今回の変更とは無関係）。
+- 実機確認（Playwright、`COMPANY_LAB_UI_E2E_IN_MEMORY=1`によるローカルdevサーバー）：
+  新規ラボ作成→「営業人員の追加採用」セクションに6人入力→提出→四半期処理→再読込を実施し、
+  turn 2で「配分可能 24人」（採用前18人＋採用6人）へ正しく反映されることを実機で確認した。
+
+### 12.8 今後の検討事項
+
+- 今回はプレイヤーUIの復活のみが対象であり、Standard AI側の動的採用ロジックの新規開発は
+  意図的に対象外とした。将来AIにも採用判断をさせる場合は、別タスクとして
+  `allocateHeadcountAcrossMarkets`呼び出し側の設計から見直す必要がある。
+- 今回の変更は`feature/v2-sales-staff-hiring-forward-port`ブランチ上のみであり、
+  `develop/v2`・`main`へはまだマージしていない（三宅さんの指示によりマージは別タスク）。

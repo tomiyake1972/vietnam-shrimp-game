@@ -60,6 +60,7 @@ import {
   advanceCompanyLabQuarter,
 } from "../../runner";
 import { buildInitialWorkforceState } from "../../workforce";
+import { buildInitialSalesForceHiringState } from "../../salesForceHiring";
 import type { SalesBaseState } from "../../salesBase";
 
 export const ALL_COMPANY_IDS: readonly CompanyId[] = ["BAL", "MASS", "JPQ", "VAP", "CONSV"];
@@ -194,6 +195,7 @@ export function initializeUnifiedCompanyLab(config: CompanyLabConfig, templateCo
     },
     workforceState: buildInitialWorkforceState(fixtures),
     consumerMarketState: buildInitialConsumerMarketCarryStateTable(initialMarketInput.demandMarkets),
+    salesForceHiringState: buildInitialSalesForceHiringState(fixtures),
     history: [],
     isComplete: false,
   };
@@ -324,6 +326,7 @@ export function initializeUnifiedCompanyLabFromTemplate(
     consumerMarketState: buildInitialConsumerMarketCarryStateTable(initialMarketInput.demandMarkets),
     // 【SAI-5B】初期営業基盤（BS非接続の初期差。未指定なら従来どおりキー自体なし）。
     ...(perCompanyOverrides?.initialSalesBaseState ? { salesBaseState: perCompanyOverrides.initialSalesBaseState } : {}),
+    salesForceHiringState: buildInitialSalesForceHiringState(fixtures),
     history: [],
     isComplete: false,
   };

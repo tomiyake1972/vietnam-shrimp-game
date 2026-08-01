@@ -66,6 +66,7 @@ import {
 import { ScenarioMode, ScenarioState } from "../../scenario/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord, Sai5FeatureFlags } from "../types";
 import type { WorkforceState } from "../workforce";
+import type { SalesForceHiringState } from "../salesForceHiring";
 import type { ConsumerMarketCarryState, ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 import type { SalesBaseState } from "../salesBase";
 import type { MarketEvolutionState, SupplyPressureDefinition } from "../marketEvolution";
@@ -694,6 +695,9 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
   // 既存データ）はundefined（機能無効）として復元する。
   const salesBaseState = validateSalesBaseState(obj.salesBaseState, `${path}.salesBaseState`);
   const marketEvolutionState = validateMarketEvolutionState(obj.marketEvolutionState, `${path}.marketEvolutionState`);
+  // 【営業人員の追加採用・forward-port・schemaVersion 5】キー欠落（v1〜v4の
+  // 既存データ）は空（{ companies: [] }）として復元する。
+  const salesForceHiringState = validateSalesForceHiringState(obj.salesForceHiringState, `${path}.salesForceHiringState`);
   const isComplete = requireBoolean(obj.isComplete, `${path}.isComplete`);
 
   return {
@@ -711,7 +715,34 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
     consumerMarketState,
     ...(salesBaseState ? { salesBaseState } : {}),
     ...(marketEvolutionState ? { marketEvolutionState } : {}),
+    salesForceHiringState,
     isComplete,
+  };
+}
+
+/**
+ * 【営業人員の追加採用・forward-port・schemaVersion 5】営業人員総数の検証。
+ *
+ * 【後方互換】キー自体が存在しない schemaVersion:1〜4 のデータでは空を返す
+ * （workforceStateと同じ「キーの有無で判定し、無ければ安全な既定値を補う」方式。
+ * バージョン番号で分岐しないため、マイグレーション処理は不要）。
+ * 空で返した場合、実際の人数は runner.ts側（buildCompanyOwnState・
+ * advanceCompanyLabQuarter）が会社単位でfixture.salesForceHeadcountTotalへ
+ * フォールバックする（推測値は作らない）。
+ */
+function validateSalesForceHiringState(raw: unknown, path: string): SalesForceHiringState {
+  if (raw === undefined || raw === null) return { companies: [] };
+  const obj = requireObject(raw, path);
+  const companiesRaw = requireArray(obj.companies, `${path}.companies`);
+  return {
+    companies: companiesRaw.map((c, i) => {
+      const companyPath = `${path}.companies[${i}]`;
+      const companyObj = requireObject(c, companyPath);
+      return {
+        companyId: requireNonEmptyString(companyObj.companyId, `${companyPath}.companyId`),
+        headcount: requireNonNegativeInteger(companyObj.headcount, `${companyPath}.headcount`),
+      };
+    }),
   };
 }
 

@@ -48,6 +48,8 @@ export function createCompanyLabRuntimeSnapshot(state: CompanyLabState): Company
     // ショットと同一形状）。
     ...(state.salesBaseState ? { salesBaseState: state.salesBaseState } : {}),
     ...(state.marketEvolutionState ? { marketEvolutionState: state.marketEvolutionState } : {}),
+    // 【営業人員の追加採用・forward-port】会社別・営業人員総数。
+    salesForceHiringState: state.salesForceHiringState,
     isComplete: state.isComplete,
   };
 }
@@ -109,6 +111,15 @@ export function restoreCompanyLabStateFromRuntimeSnapshot(
     ...(snapshot.salesBaseState ? { salesBaseState: snapshot.salesBaseState } : {}),
     // 【SAI-5E 後方互換】salesBaseStateと同じ方式（キー欠落=機能無効）。
     ...(snapshot.marketEvolutionState ? { marketEvolutionState: snapshot.marketEvolutionState } : {}),
+    // 【営業人員の追加採用・forward-port 後方互換】この機能導入前に保存された
+    // スナップショットには salesForceHiringState が存在しない（schema側で空
+    // として復元される）。この機能自体が今回新設されたものであり、それ以前の
+    // どの四半期にも「採用」という意思決定は存在し得なかったため、
+    // workforceStateのように履歴から積算し直す必要はない（積算しても結果は0の
+    // まま＝会社単位のフォールバックと完全に一致する）。空のままとし、会社単位
+    // のフォールバック（runner.ts buildCompanyOwnState・advanceCompanyLabQuarter）
+    // が fixture.salesForceHeadcountTotal を使う。
+    salesForceHiringState: snapshot.salesForceHiringState,
     history,
     isComplete: snapshot.isComplete,
   };

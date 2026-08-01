@@ -31,6 +31,7 @@ import { FinancingState } from "../../financing/types";
 import { CapexState } from "../../capex/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord } from "../types";
 import type { WorkforceState } from "../workforce";
+import type { SalesForceHiringState } from "../salesForceHiring";
 import type { SalesBaseState } from "../salesBase";
 import type { MarketEvolutionState } from "../marketEvolution";
 import type { ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
@@ -77,8 +78,22 @@ import type { ConsumerMarketCarryStateTable } from "../../market/consumerInvento
  *        既存データにはキーが存在しない → undefined（機能無効）として復元する。
  *        履歴からの再構築は行わない（機能フラグ無効のラボでは状態が存在しない
  *        ことが正しい状態であり、欠落＝無効と等価なため）。
+ *   v5 … 【営業人員の追加採用・forward-port】CompanyLabRuntimeSnapshot へ
+ *        salesForceHiringState（会社別・営業人員総数）を追加。**追加的変更のみで、
+ *        マイグレーション処理は不要**。schemaVersion:1〜4の既存データには
+ *        salesForceHiringState キーが存在しないため、schema側で空
+ *        （{ companies: [] }）として復元される。この機能自体が今回新設された
+ *        ものであり、それ以前のどの四半期にも「採用」という意思決定は存在し
+ *        得なかったため、workforceState・consumerMarketStateのような確定履歴
+ *        からの再構築（積算・直近1件の復元）は行わない（積算しても結果は0の
+ *        まま＝下記のフォールバックと完全に一致するため不要）。
+ *        restoreCompanyLabStateFromRuntimeSnapshotはスナップショットの値を
+ *        そのまま返し、空の場合は会社単位でrunner.ts側（buildCompanyOwnState・
+ *        advanceCompanyLabQuarter）がfixture.salesForceHeadcountTotalへ
+ *        フォールバックする。併せてCompanyDecisionInput.salesForceHireCountも
+ *        optionalとして追加した（既存の確定履歴エントリにはこのキーが無いため）。
  */
-export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 4;
+export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 5;
 
 // ---------------------------------------------------------------------
 // 1. ランタイムスナップショット（history非包含。§2-1・§2-2）
@@ -159,6 +174,14 @@ export interface CompanyLabRuntimeSnapshot {
    * optional。キー欠落（v1〜v3）はundefined（機能無効）として復元。
    */
   readonly marketEvolutionState?: MarketEvolutionState;
+  /**
+   * 【営業人員の追加採用・forward-port・schemaVersion 5で追加】会社別の営業
+   * 人員総数。会社数ぶんの小さなスカラー集合であり、四半期ごとに増え続ける
+   * ことはない（履歴エントリへ2回複製されても保存量への影響は無視できる）。
+   * schemaVersion:1〜4 のデータにはこのキーが無いため、schema側で空として
+   * 復元する。
+   */
+  readonly salesForceHiringState: SalesForceHiringState;
   readonly isComplete: boolean;
 }
 

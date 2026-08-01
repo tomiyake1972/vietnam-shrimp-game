@@ -127,7 +127,13 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
   // ときだけ意味を持つ。validateSalesForceHeadcountBudget（エンジン側）と同じ
   // 「全社合計」判定をここで先読みし、提出前に警告・提出ボタンの無効化に使う
   // （入力欄自体は無効化しない — 上限超過中も編集は必ず可能）。
-  const salesForceAllocation = draft ? summarizeSalesForceAllocation(draft.salesPlans, viewModel.fixture.salesForceHeadcountTotal) : null;
+  // 【営業人員の追加採用・forward-port】配分可能人数は静的なfixtureの基準値
+  // ではなく、前期末までに確定した会社状態（ownState.salesForceHiringState.
+  // headcount）を使う（DecisionEditor.tsxと同じ理由。増員後は翌四半期以降
+  // こちらが増える）。
+  const salesForceAllocation = draft
+    ? summarizeSalesForceAllocation(draft.salesPlans, viewModel.ownState.salesForceHiringState.headcount)
+    : null;
 
   function handleWithdrawSubmission() {
     setWithdrawMessage(null);
