@@ -678,7 +678,16 @@ function replayPolicy(rows: readonly QuarterRow[], unitCmUsdPerTon: number, p: P
     let held = periodStartHeadcount;
     let prevActual = periodStartHeadcount;
     let surplusStreak = 0;
-    const pendingHires: number[] = [];
+    // 【2026-08-01夜・バグ修正】旧実装は`pendingHires.length >= hiringLeadTimeQuarters`という
+    // 「キューの長さ」で経過四半期数を代用しており、これは要素が1個ずつ処理される典型的な
+    // ケースでは hiringLeadTimeQuarters=0 と 1 が常に同じ結果になる（採用四半期の"翌"四半期の
+    // 判定時点でキュー長は常に0または1にしかならず、"length>=0"と"length>=1"は空でない限り
+    // 区別できない）という構造的なバグを持っていた。三宅さんのご指摘（「採用リードタイム感度が
+    // 同一になった直接原因」）を受けて、各採用ごとに経過四半期数を個別に追跡する方式へ修正した。
+    // 新しい意味づけ: hiringLeadTimeQuarters=0は「意思決定した四半期の翌四半期に到着」
+    // （四半期粒度の意思決定である以上、これが物理的に最短）。0/1/2の値そのものは維持し、
+    // 遅延量は「最短＋hiringLeadTimeQuarters四半期」と定義し直す。
+    const pendingHires: { qty: number; turnsWaited: number }[] = [];
 
     for (let i = 0; i < sorted.length; i++) {
       const r = sorted[i];
@@ -697,13 +706,22 @@ function replayPolicy(rows: readonly QuarterRow[], unitCmUsdPerTon: number, p: P
       // (1) リードタイム経過した採用が能力化する。ご指示により、到着した四半期は
       //     通常の50%の能力（NEW_HIRE_RAMP_FIRST_QUARTER_EFFICIENCY）にとどまり、
       //     翌四半期以降に100%となる。給与は満額支払う前提（能力のみ按分）。
+      // 各採用ごとに経過四半期数を個別に追跡し、turnsWaited >= hiringLeadTimeQuarters
+      // に達したものだけを解放する（前四半期以前にキューされたものが対象。この四半期に
+      // 新たにキューされるものは次の四半期以降でのみ解放対象になる＝最短1四半期delay）。
       let rampingHeads = 0;
-      if (pendingHires.length >= p.hiringLeadTimeQuarters) {
-        const arrived = pendingHires.shift() ?? 0;
-        held += arrived;
-        rampingHeads = arrived;
-        policyChurn += arrived;
+      const stillPending: { qty: number; turnsWaited: number }[] = [];
+      for (const ph of pendingHires) {
+        if (ph.turnsWaited >= p.hiringLeadTimeQuarters) {
+          held += ph.qty;
+          rampingHeads += ph.qty;
+          policyChurn += ph.qty;
+        } else {
+          stillPending.push({ qty: ph.qty, turnsWaited: ph.turnsWaited + 1 });
+        }
       }
+      pendingHires.length = 0;
+      pendingHires.push(...stillPending);
       held = Math.max(0, held);
       const effectiveHeld = Math.max(0, held - rampingHeads * (1 - NEW_HIRE_RAMP_FIRST_QUARTER_EFFICIENCY));
 
@@ -751,12 +769,12 @@ function replayPolicy(rows: readonly QuarterRow[], unitCmUsdPerTon: number, p: P
         }
       } else {
         surplusStreak = 0;
-        const pendingTotal = pendingHires.reduce((a, b) => a + b, 0);
+        const pendingTotal = pendingHires.reduce((a, b) => a + b.qty, 0);
         if (held + pendingTotal < required) {
           const hiringCap = p.hiringCapRatio !== undefined ? periodStartHeadcount * p.hiringCapRatio : Infinity;
           const hire = Math.min(hiringCap, upperBand - (held + pendingTotal));
           if (hire > 0.5) {
-            pendingHires.push(hire);
+            pendingHires.push({ qty: hire, turnsWaited: 0 });
             policyHiringUsd += hire * HIRING_COST_PER_HEAD;
             hiringEvents += 1;
           }
@@ -1249,6 +1267,18 @@ function main(): void {
   L.push("");
   L.push("### 6.1 採用リードタイム（安全余力15%・確認期間3Q・通常削減15%・危機時削減25%・採用上限20%）");
   L.push("");
+  L.push(
+    "**【2026-08-01夜・バグ修正】** 旧実装は採用待ち行列の長さ（`pendingHires.length`）で" +
+      "経過四半期数を代用しており、キューに1件しかない典型的な状況ではリードタイム0Qと1Qが" +
+      "常に同じ結果になる構造的なバグを持っていた（三宅さんのご指摘により発覚）。各採用ごとに" +
+      "経過四半期数を個別に追跡する方式へ修正した。新しい意味づけ: リードタイム0Qは" +
+      "「意思決定した四半期の翌四半期に到着」（四半期粒度の意思決定である以上、これが物理的な" +
+      "最短）で、1Q・2Qはそこにさらに1・2四半期を加える。**それでも下表の結果がリードタイム間で" +
+      "ほぼ差が出ないのは、現在の中央パラメータ（安全余力15%・確認期間3Q）のもとでは採用イベント" +
+      "自体が極めて稀（全208四半期・20会社ケース中わずか数件）であり、リードタイムの差が" +
+      "総コストに与える影響が小さいため**（削減が支配的な方針であることの帰結）。"
+  );
+  L.push("");
   L.push("| リードタイム | 人件費 | 不足人月 | 機会損失 | 欠品回避 | 総コスト | 改善額 |");
   L.push("|---:|---:|---:|---:|---:|---:|---:|");
   for (const g of leadTimeComparison) {
@@ -1270,7 +1300,18 @@ function main(): void {
   L.push(`- 1人削減の節約: ${REGULAR_SALARY} USD/四半期`);
   L.push(`- 1人削減の一時費用: ${SEVERANCE_COST_PER_HEAD} USD → **回収期間 ${(SEVERANCE_COST_PER_HEAD / REGULAR_SALARY).toFixed(1)} 四半期**`);
   L.push(`- 削減して N 四半期後に再採用した場合: 一時費用 ${SEVERANCE_COST_PER_HEAD + HIRING_COST_PER_HEAD} USD、節約 ${REGULAR_SALARY}×N USD`);
-  L.push(`  → **N ≥ ${((SEVERANCE_COST_PER_HEAD + HIRING_COST_PER_HEAD) / REGULAR_SALARY).toFixed(0)} 四半期**でなければ往復が損になる`);
+  // 【2026-08-01夜・訂正】Nは整数の四半期数でなければ意味を持たない（四半期の途中で
+  // 再採用することはできない）。損益分岐点そのものは(解雇費+採用費)/給与=1.25四半期だが、
+  // 「損にならないための最小の整数四半期」はMath.ceil(1.25)=2四半期であり、
+  // toFixed(0)による四捨五入（1.25→"1"）は誤り（1四半期では往復コスト1250USDに対し
+  // 節約1000USDしかなく、まだ250USD分損をしている）。
+  const roundTripBreakEvenQuarters = (SEVERANCE_COST_PER_HEAD + HIRING_COST_PER_HEAD) / REGULAR_SALARY;
+  L.push(
+    `  → 損益分岐点は${roundTripBreakEvenQuarters.toFixed(2)}四半期（非整数）。整数四半期でしか再採用できない` +
+      `ため、**N ≥ ${Math.ceil(roundTripBreakEvenQuarters)} 四半期**でなければ往復が損になる` +
+      `（N=${Math.ceil(roundTripBreakEvenQuarters) - 1}では節約${(REGULAR_SALARY * (Math.ceil(roundTripBreakEvenQuarters) - 1)).toFixed(0)}USD ` +
+      `< 一時費用${(SEVERANCE_COST_PER_HEAD + HIRING_COST_PER_HEAD).toFixed(0)}USDでまだ損）`
+  );
   L.push("");
 
   fs.writeFileSync(path.join(outDir, "summary.md"), L.join("\n"));
