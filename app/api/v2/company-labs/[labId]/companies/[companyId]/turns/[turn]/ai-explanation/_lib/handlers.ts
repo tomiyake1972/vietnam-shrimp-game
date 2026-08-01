@@ -152,6 +152,18 @@ export async function handlePostAiExplanation(
   } catch (e) {
     console.error(`${logPrefix} キャッシュ参照に失敗（キャッシュミス扱いで続行）:`, e instanceof Error ? e.message : String(e));
   }
+  // 【2026-08-01・result="failure"の既存キャッシュはヒットとして扱わない】このコード自身は
+  // 今後失敗結果を新たに保存しなくなったが、それより前に保存された失敗結果（TTLなしで
+  // 無期限にRedisに残っている）は、このデプロイ後も残ったまま。実際に2026-08-01 08:00 UTC
+  // 台のschema_mismatch失敗が、この修正を含むデプロイ後（09:47〜09:51 UTC）でも
+  // 「キャッシュヒットのため応答（Claude呼び出しなし）」としてそのまま返り続けることを
+  // Vercelランタイムログで確認した。「新たに書かない」だけでは既存の不良データを
+  // 治せないため、読み取り側でも result==="failure" のキャッシュはヒットとして
+  // 扱わない（キャッシュミスとして無条件にClaudeを呼び直す）よう変更する。
+  if (cached !== null && cached.result === "failure") {
+    console.log(`${logPrefix} キャッシュに失敗結果が残っていましたが、ヒットとして扱わずClaudeを呼び直します category=${cached.errorCategory}`);
+    cached = null;
+  }
   if (cached !== null) {
     console.log(`${logPrefix} キャッシュヒットのため応答（Claude呼び出しなし）`);
     return { status: 200, body: { cached: true, cacheKey, ...cached } };
@@ -235,6 +247,13 @@ export async function handleGetAiExplanation(
     cached = await loadCachedReport(deps.redisClient, cacheKey);
   } catch (e) {
     console.error(`${logPrefix} キャッシュ参照に失敗（未生成として応答）:`, e instanceof Error ? e.message : String(e));
+  }
+  // 【2026-08-01・result="failure"の既存キャッシュは「生成済み」として返さない】POST側と
+  // 同じ理由で、GET（読み取り専用・副作用なし）でも失敗結果は「まだ生成されていない」
+  // 扱いにする。呼び出し元がGET結果を「保存済みの正しいレポート」と誤認しないようにする。
+  if (cached !== null && cached.result === "failure") {
+    console.log(`${logPrefix} キャッシュに失敗結果が残っていましたが、生成済みとしては扱いません category=${cached.errorCategory}`);
+    cached = null;
   }
   if (cached === null) {
     console.log(`${logPrefix} キャッシュなし`);

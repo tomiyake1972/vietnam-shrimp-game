@@ -227,6 +227,55 @@ test("handlePostAiExplanation: 失敗の後に成功すれば、その成功結�
   assert.equal(getBody.report?.headline, "見出し");
 });
 
+test("handlePostAiExplanation/handleGetAiExplanation: 修正前に保存された既存のresult=failureキャッシュ(TTLなし)が残っていても、ヒットとして扱わずClaudeを呼び直す", async () => {
+  // 【2026-08-01・実際にVercel Previewで確認した再発防止テスト】failure結果を新規に
+  // 保存しないよう修正しても、それより前のデプロイで既にRedisへ保存されていた
+  // failure結果(TTLなし)は残ったまま消えない。実際に本番同等のPreview環境で、
+  // この修正を含むデプロイ後もschema_mismatchの古いキャッシュがヒットし続け、
+  // Claudeが呼ばれないことをVercelランタイムログで確認した。読み取り側でも
+  // result==="failure"のキャッシュはヒットとして扱わないことを確認する。
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-post-8");
+
+  // まずキャッシュキーを実際に導出させるため、失敗する呼び出しを1回行う
+  // （この時点では前のテストで確認済みのとおりRedisへは保存されない）。
+  const failingClient: AnthropicMessagesClient = {
+    messages: {
+      create: async () => {
+        throw Object.assign(new Error("boom"), { status: 500 });
+      },
+    },
+  };
+  const first = await handlePostAiExplanation(deps, "lab-post-8", "BAL", "1", NOW, failingClient);
+  const cacheKey = (first.body as { cacheKey: string }).cacheKey;
+
+  // 修正前の挙動を模して、failure結果を直接Redis(in-memoryフェイク)へ書き込む
+  // （TTLなしで無期限に残っている既存の不良データを再現する）。
+  await deps.redisClient.set(
+    cacheKey,
+    JSON.stringify({
+      generatedAt: NOW,
+      result: "failure",
+      errorCategory: "schema_mismatch",
+      model: "claude-haiku-4-5-20251001",
+      promptVersion: "v1",
+      contextSchemaVersion: 1,
+      contextHash: "dummy",
+    })
+  );
+
+  // GETは「未生成」として404を返す(failureキャッシュを生成済みの結果として返さない)。
+  const getResult = await handleGetAiExplanation(deps, "lab-post-8", "BAL", "1");
+  assert.equal(getResult.status, 404);
+
+  // POSTは既存のfailureキャッシュをヒットとして扱わず、Claudeを呼び直して成功する。
+  const { client: succeedingClient, callCount } = makeCountingClient(toolUseResponse(VALID_REPORT_INPUT));
+  const second = await handlePostAiExplanation(deps, "lab-post-8", "BAL", "1", NOW, succeedingClient);
+  assert.equal((second.body as { result: string; cached: boolean }).result, "success");
+  assert.equal((second.body as { result: string; cached: boolean }).cached, false);
+  assert.equal(callCount(), 1);
+});
+
 test("handleGetAiExplanation: 未生成の場合は404", async () => {
   const deps = makeDeps();
   await createBaselineLab(deps, "lab-get-1");
