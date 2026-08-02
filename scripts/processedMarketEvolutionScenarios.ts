@@ -26,7 +26,7 @@
 
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../app/lib/v2/companyLab/runner";
 import { generateAutoPolicyDecision } from "../app/lib/v2/companyLab/autoPolicy";
-import { CompanyDecisionInput, CompanyLabConfig, CompanyLabState } from "../app/lib/v2/companyLab/types";
+import { CompanyDecisionInput, CompanyLabConfig } from "../app/lib/v2/companyLab/types";
 import { CompanyId } from "../app/lib/v2/sales/types";
 import { DemandMarketId, Product } from "../app/lib/v2/market/types";
 import { buildNewFactoryId, computeEffectiveFactories } from "../app/lib/v2/capex/factoryConstruction";

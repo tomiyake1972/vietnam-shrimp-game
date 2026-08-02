@@ -31,6 +31,10 @@ import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, 
 import { generateAutoPolicyDecision } from "../autoPolicy";
 import { CompanyDecisionInput, CompanyLabConfig } from "../types";
 import { CompanyId } from "../../sales/types";
+import { computeMarketSalesEffort } from "../../sales/marketEffort";
+import { SALES_PARAMETERS_V1 } from "../../sales/parameters";
+import { computeRequiredRegularHeadcount } from "../workforce";
+import { computeEffectivePdCoefficient, PD_MECHANIZATION_PARAMETERS_V1 } from "../../capex/pdMechanization";
 import { createCompanyLabRuntimeSnapshot, restoreCompanyLabStateFromRuntimeSnapshot } from "../persistence/snapshot";
 import { validateCompanyLabPersistedState } from "../persistence/schema";
 import { encodeCompanyLabPersistedState, decodeCompanyLabPersistedState } from "../persistence/codec";
@@ -150,8 +154,6 @@ test("ACC-6: 序盤にベトナムの加工優位が存在する（原料シェ�
 test("ACC-7: VAP投資と営業活動の組み合わせが成約量を押し上げ、単独では最大効果に届かない", () => {
   // 実証は sales/__tests__/salesCapability.test.ts SC-6（2×2実験）。
   // ここでは結論の方向だけを軽量に再確認する（重複実行を避けるため計算のみ）。
-  const { computeMarketSalesEffort } = require("../../sales/marketEffort") as typeof import("../../sales/marketEffort");
-  const { SALES_PARAMETERS_V1 } = require("../../sales/parameters") as typeof import("../../sales/parameters");
   const desired = { hoso: 5000, pd: 5000, vap: 5000 };
   const sellable = (dev: number, staff: number) => {
     const r = computeMarketSalesEffort(staff, desired, SALES_PARAMETERS_V1, {
@@ -171,9 +173,6 @@ test("ACC-7: VAP投資と営業活動の組み合わせが成約量を押し上�
 test("ACC-8: PD省人化は稼働率が高く人員調整が実際に起きる条件下で合理的になる", () => {
   // 実証は companyLab/__tests__/pdMechanizationWorkerConnection.test.ts PMW-2/PMW-5。
   // ここでは「必要人員が実際に減る」ことだけを確認する。
-  const { computeRequiredRegularHeadcount } = require("../workforce") as typeof import("../workforce");
-  const { computeEffectivePdCoefficient, PD_MECHANIZATION_PARAMETERS_V1 } =
-    require("../../capex/pdMechanization") as typeof import("../../capex/pdMechanization");
   const input = {
     quantityByProduct: { hoso: 0, pd: 1000, vap: 0 },
     skillByProduct: { hoso: 0.8, pd: 0.8, vap: 0.8 },
