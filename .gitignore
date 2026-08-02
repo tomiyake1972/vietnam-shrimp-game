@@ -63,3 +63,7 @@ next-env.d.ts
 # 大量のCSV/JSON生成物はGit管理対象にしない
 # （生成スクリプト scripts/processedMarketEvolutionScenarios.ts のみGit管理する）。
 /artifacts/market-evolution/
+
+# PD省人化の比較シミュレーション生成物（診断専用）。
+# 生成スクリプト scripts/pdMechanizationComparison.ts のみGit管理する。
+/artifacts/pd-mechanization/

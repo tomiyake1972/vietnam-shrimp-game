@@ -1158,3 +1158,265 @@ PD/VAPの絶対価格は原料価格の上昇に引っ張られて後半も上�
    構成比の移動幅が最大0.20ptのため、VAP係数の上昇は最大でも+24%。
 8. **EUの品質・サステナビリティ・トレーサビリティによる「門番」は未実装**
    （監査§7の指摘のまま）。
+
+---
+
+# 【実装ラウンド4】商品別労働係数とPD省人化の業務判断化
+
+作成日: 2026-08-02 / ブランチ `feature/v2-product-labor-and-pd-mechanization`
+
+## §1 調査結果: 変更前の計算経路
+
+| 段階 | 場所 | 機械化効果の適用 |
+| --- | --- | --- |
+| 係数の定義 | `production/parameters.ts` `labor.laborIntensityCoefficient`（HOSO1.0/PD1.2/VAP3.0） | — |
+| 係数の参照 | `production/labor.ts` `laborIntensityCoefficientFor` | — |
+| 1人あたり実効効率 | 同 `effectiveEfficiencyPerHeadTons(base, product, params, coefficientOverride?)` | **実効PD係数**を第4引数で上書き |
+| 生産計画→必要労働 | 同 `requiredHeadcountForQuantity` / `allocateWorkersToPlans` 内 `headcountDemandFor` | `d.product === "pd"` のときだけ上書き |
+| 常用/臨時/残業→労働能力 | 同 `calculateLaborCapacityFromAssignedHeadcount` | 同上 |
+| 労働不足による生産制限 | `production/allocation.ts` → `allocateWorkersToPlans` | 上書きマップを受け渡し |
+| 優先度による配分 | `allocateByPriorityTiers`（`headcountDemandFor` の結果を重み・capに使う） | 上書き経由で反映 |
+| 機械化状態 | `companyLab/pdMechanizationState.ts`（工場別の前四半期PD稼働率） | — |
+| 実効係数の算出 | `capex/pdMechanization.ts` `computeEffectivePdCoefficient`（base 1.2 → floor 1.0、独自の補間とクリップ） | **ここが第2の写像だった** |
+| 必要人員の見積り | `companyLab/workforce.ts` `computeRequiredRegularHeadcount` | 前ラウンドで接続済 |
+| Standard AIの人員判断 | `standardAi/decision/labor.ts` | 前ラウンドで接続済 |
+| **画面の処理見込み** | `processingForecastViewModel.buildCompanyProcessingForecast` | **未接続だった** |
+| **画面の投資計画** | `investmentPlanningViewModel`（必要人員・労働能力） | **未接続だった** |
+| **Excelの処理能力見込み** | `exports/_lib/dto/processingCapacityDto.ts` | **未接続だった** |
+| 人件費 | `finance` の `regularWorkerSalaryUsdPerQuarter` ほか（人数連動） | 機械化とは無関係（正しい） |
+
+### 二重適用の調査結果 → **重複適用は無し**
+
+唯一の疑わしい箇所は `allocateWorkersToPlans` で、同じ上書き値が
+`headcountDemandFor`（数量→人数の逆算）と `calculateLaborCapacityFromAssignedHeadcount`
+（人数→数量の順算）の両方に渡っていた。しかしこの2つは互いに逆関数であり、
+配分の重み付けと能力の確定という別の用途に1回ずつ使われているだけで、
+同じ効果が累積するわけではない。PDL-8 がこれを数値で確認している
+（エンジンの実効能力＝係数を1回だけ適用した理論値と一致。二重なら (1.8/1.2)² 倍になる）。
+
+一方で **未適用の箇所が3つ**（画面の処理見込み、画面の投資計画、Excelの処理能力見込み）
+見つかった。これは過去2ラウンドで見つけた同種の取りこぼし（`fixture.salesForceHeadcountTotal`、
+`computeRequiredRegularHeadcount` の係数未接続）と同じパターンである。
+
+## §2 変更後の正典経路
+
+```
+production/parameters.ts
+  laborIntensityCoefficient           = { hoso 1.0, pd 1.8, vap 3.0 }   機械化前
+  mechanizedLaborIntensityCoefficient = { hoso 1.0, pd 1.2, vap 2.6 }   機械化後
+        ↓（この2表からの補間は下の1関数だけが行う）
+production/labor.ts  resolveLaborIntensityCoefficient(product, mechanizationLevel, params)
+        ↓
+production/labor.ts  effectiveEfficiencyPerHeadTons(base, product, params, mechanizationLevel)
+        ↓
+  ├─ requiredHeadcountForQuantity（数量→必要人数）
+  ├─ calculateLaborCapacityFromAssignedHeadcount（人数→処理可能数量）
+  ├─ allocateWorkersToPlans（優先度つき配分・労働不足時の生産制限）
+  ├─ companyLab/workforce.ts computeRequiredRegularHeadcount（必要/余剰人員）
+  ├─ standardAi/decision/labor.ts（増減員判断）
+  ├─ standardAi/decision/marketEvolutionInvestment.ts（投資判断）
+  ├─ 画面: processingForecastViewModel / investmentPlanningViewModel / DecisionEditor
+  ├─ Excel: exports/_lib/dto/processingCapacityDto.ts
+  └─ capex/pdMechanization.ts computeEffectivePdCoefficient（薄いアダプター）
+```
+
+**配管を「実効PD係数」から「機械化レベル(0〜1)」へ全面変更した。** 理由は、機械化が
+PDだけでなくVAPにも及ぶため「PDの実効係数」1つでは表現しきれないこと、そして
+商品ごとの効き方の違いを呼び出し側の分岐として散らばらせないためである。
+`buildPdCoefficientOverridesByFactory` は後方互換のため残しつつ、実配線は
+新設の `buildMechanizationLevelsByFactory` に置き換えた。
+
+> **セマンティクス変更の落とし穴**: 型がどちらも `Map<string, number>` のため
+> tsc では検出できない。実際 `scripts/test15FourCaseSimulation.ts` が実効係数(1.5等)を
+> 渡し続けており、そのままだと「レベル1.0＝完全機械化」と黙って解釈される状態だった。
+> 全呼び出し元を手で追って修正済み。
+
+### 旧フロア／最大削減率機構の始末
+
+`PdMechanizationParameters.floorCoefficient` は従来 `laborIntensityCoefficient.hoso`(1.0)
+を指しており、「PDはHOSOと同じ手間まで下がりうる」という**別の想定**を暗黙に持っていた。
+これを `mechanizedLaborIntensityCoefficient.pd`(1.2) の参照へ置き換え、独立した数値も
+独立したクリップも廃止した。`computeEffectivePdCoefficient` は正典写像を呼ぶだけの
+薄いアダプターになり、`reductionRatioAtFullMaturity` は自動的に 16.67% → **33.33%** になる
+（UI文言も `formatReductionRatioAtFullMaturityLabel` 経由で自動追随）。
+
+## §3 パラメータ変更（before / after）
+
+| パラメータ | before | after | 意味 |
+| --- | --- | --- | --- |
+| `laborIntensityCoefficient.hoso` | 1.0 | 1.0 | 殻剥き工程なし |
+| `laborIntensityCoefficient.pd` | **1.2** | **1.8** | 機械化前の殻剥き・背ワタ除去の人手 |
+| `laborIntensityCoefficient.vap` | 3.0 | 3.0 | 変更なし |
+| `mechanizedLaborIntensityCoefficient.hoso` | （無し） | 1.0 | 機械化の対象外 |
+| `mechanizedLaborIntensityCoefficient.pd` | （floor=1.0 が実質これ） | **1.2** | 殻剥き省人化の到達点 |
+| `mechanizedLaborIntensityCoefficient.vap` | （無し・効果ゼロ） | **2.6** | 前工程の殻剥き共通化ぶんのみ |
+| `PdMechanizationParameters.floorCoefficient` | `laborIntensityCoefficient.hoso`(1.0) | `mechanizedLaborIntensityCoefficient.pd`(1.2) | 参照先の付け替え |
+| 最大削減率（導出値） | 16.67% | **33.33%** | 1 − 1.2/1.8 |
+| 投資額・保守費率・減価償却 | — | **変更なし** | 指示どおり触っていない |
+
+## §4 必要労働と最大生産（前後）
+
+| 指標 | 機械化前 | 機械化後 | 変化 |
+| --- | --- | --- | --- |
+| HOSO 1,000t の必要労働 | 基準 | 同一 | **±0%** |
+| PD 1,000t の必要労働 | 基準×1.8 | 基準×1.2 | **−33.3%** |
+| VAP 1,000t の必要労働 | 基準×3.0 | 基準×2.6 | **−13.3%** |
+| 同一労働で作れるPD | 基準 | 基準×1.5 | **+50%** |
+| 同一労働で作れるVAP | 基準 | 基準×1.154 | +15.4% |
+
+## §5 コスト効果の現れ方（§4要件）
+
+| 経路 | 効果が出るか | 検証 |
+| --- | --- | --- |
+| 常用人員を余剰のまま抱える | **出ない**（常用人件費は満額） | PDB-1 |
+| 常用人員を実際に減らす | 出る（差分＝人数差×給与） | PDB-2 |
+| 臨時ワーカーを削る | 出る | PDB-3 |
+| 残業を削る | 出る（同上の機構） | PDB-3 |
+| 同じ人手で増産する | 単位あたり人件費が 1/1.5 に | PDB-4 |
+| 他商品へ振り替える | 出る（優先度配分経由） | PDL-13 |
+
+## §6 VAPスピルオーバーの分離（§5要件）
+
+PD省人化がVAPに及ぼす影響は **労働係数 3.0 → 2.6 のみ**。
+VAP商品開発スコア・VAP販売力・顧客採用・VAP価格・VAP品質投資のいずれにも
+機械化レベルは入力として存在しない（PDB-5）。したがって
+**PD省人化だけでVAPの需要や価格が上がることはない。**
+
+## §7 Standard AIへの接続（§6要件）
+
+`standardAi/decision/marketEvolutionInvestment.ts` の省人化判断を、次の8条件が
+**すべて**揃ったときにのみ提案する形へ変更した。
+
+| 条件 | 実装 |
+| --- | --- |
+| PDの需要・成約見込み | 需要トレンド ≥ 0 かつ PD供給圧力 ≤ 1.25 |
+| 労働が実際にボトルネック | 稼働率 ≥ しきい値（PDプレミアム低下局面では0.85倍に緩和） |
+| 増えた分を売り切れる営業力 | 営業処理能力 ÷ 現実的な自社取り分 ≥ 1.1 |
+| 完成品在庫が過剰でない | PD完成品過剰率 ≤ 0.8 |
+| 原料を確保できる | 原料在庫ポジション ≥ 0.8 |
+| 投資後も最低現金を維持 | 現金 ≥ 目標最低現金 × 2.0 |
+| 期待回収が許容内 | ≤ 20四半期 |
+| 有利局面が回収期間より長い | プレミアム低下検知時は回収×1.5 ≤ 許容 |
+
+見送り時は各条件の充足状況を診断キー値として出力する（PDB-7/8/9で検証）。
+
+**HOSOについて**: HOSO量販戦略は実装していない。ただし新係数により HOSO は
+「最も労働が軽い／機械化不要／労働不足下で最も作りやすい／低加工・低投資」という
+性格を自然に持つようになり、生産優先度の判断にそのまま効く（PDL-13）。
+累積HOSO数量による販売効率・常設値引き・少人数大量販売モデルは**実装していない**。
+
+## §8 比較シミュレーション（§9要件）
+
+`scripts/pdMechanizationComparison.ts`（baseline・20四半期・5社・3シード平均）
+
+| ケース | PD生産(t) | 契約(t) | 期末在庫(t) | 投資額 | 累積純利益 | 期末現金 |
+| --- | --- | --- | --- | --- | --- | --- |
+| A HOSO中心・省人化なし | 130,090 | 849,195 | 17,385 | 0 | -439,995,768 | -93,425,144 |
+| B PD中心・省人化なし | 256,180 | 698,831 | 18,195 | 0 | -355,619,356 | 1,888,542 |
+| C PD中心・適時省人化 | 256,036 | 698,929 | 18,186 | 6,833,333 | -357,160,282 | -3,203,051 |
+| D PD+VAP・適時省人化 | 228,727 | 668,347 | 18,825 | 7,500,000 | -293,639,898 | 24,798,211 |
+| E 販売見込み無しで省人化 | 113,997 | 401,657 | 13,286 | 5,000,000 | **-826,007,132** | **-181,368,548** |
+
+ケース間の差（累積純利益）:
+- B − A = **+84,376,412**（PD中心はHOSO中心を上回る）
+- C − B = **-1,540,925**（省人化のみでは回収できていない）
+- D − B = **+61,979,459**
+- E − B = **-470,387,776**（**失敗ケースが明確に失敗する**）
+
+### 【理論効果】と【PL/CFに実際に現れた効果】の分離
+
+| ケース | 理論削減労働(人・四半期) | 理論削減額(USD) | 常用余剰(人・四半期) | 実際に現れた効果 |
+| --- | --- | --- | --- | --- |
+| A | 0 | 0 | 242,028 | 機械化なし |
+| B | 0 | 0 | 244,605 | 機械化なし |
+| C | 11,060 | **11,059,866** | 255,247 | **余剰人員として滞留（PLに現れない）** |
+| D | 10,864 | 10,863,534 | 236,971 | 同上 |
+| E | 2,354 | 2,354,178 | 259,282 | 同上 |
+
+**これが本ラウンドの中心的な発見である。** ケースCでは理論上 11,059,866 USD の
+人件費削減余地が生まれたが、常用人件費（630,000,000 USD）も臨時人件費
+（53,408,000 USD）も**1円も減っていない**。理由は明快で、この比較で使っている
+`generateAutoPolicyDecision`（自動方針）が**常用人員を減らす判断を一切しない**ため、
+浮いた人員が余剰として滞留するからである。結果、C は投資額 6,833,333 USD を
+負担しただけになり、B より 1,540,925 USD 悪化した。
+
+減員判断を持つのは Standard AI 側（`decision/labor.ts` の `sustainedExcess` 経路）で、
+前ラウンドでそこへ機械化効果を接続済みである。したがって
+**「省人化投資が回収できるかどうかは、人員を実際に減らす判断とセットで初めて決まる」**
+というのが、実機の数値で確認された結論になる。
+
+## §9 感度分析（§10要件）
+
+`npx tsx scripts/pdMechanizationComparison.ts --sensitivity`
+（コードを編集せず、パラメータ差し替えだけで比較できる。PDL-15/16 も同じ機構を使う）
+
+| 設定 | PD係数(前→後) | PD削減率 | 同一労働の増産倍率 | VAP削減率 | 理論回収(PD要員1,000人) | 理論回収(2,000人) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 旧実装相当 | 1.2 → 1.0 | 16.7% | 1.200 | 0.0% | 15.0四半期 | 7.5四半期 |
+| 保守 | 1.6 → 1.2 | 25.0% | 1.333 | 10.0% | 10.0四半期 | 5.0四半期 |
+| **本設定** | **1.8 → 1.2** | **33.3%** | **1.500** | **13.3%** | **7.5四半期** | **3.7四半期** |
+| 強 | 2.0 → 1.2 | 40.0% | 1.667 | 18.8% | 6.3四半期 | 3.1四半期 |
+
+投資額 2,500,000 USD・常用給与 1,000 USD/人・四半期はいずれも**変更していない**。
+
+**目安（需要・営業・原料・稼働率がすべて十分なとき4〜8四半期）に対する評価**:
+本設定はPD関連の常用要員が1,000人規模で **7.5四半期**、2,000人規模で **3.7四半期** となり、
+目安の範囲におおむね収まる。旧実装相当（15.0四半期）では目安を大きく外れており、
+これがPhase5で「省人化は回収不能」と結論した理由の一つでもある。
+ただし上表はいずれも**理論値**であり、§8のとおり人員を実際に減らさなければ
+この回収は実現しない。
+
+## §10 商品別の累積販売能力（設計メモのみ・未実装）
+
+実装指示 §7 により、以下は**設計メモとしてのみ記録し、コードは一切書いていない**。
+数値・しきい値・成長率も意図的に定めない。
+
+- **HOSO**: 累積取扱数量と大口の継続取引によって蓄積する。少人数の営業で大量に
+  売れる方向へ効く性質。
+- **PD**: 数量に加えて、仕様適合（サイズ・規格）と安定した履行実績によって蓄積する。
+  契約処理能力と継続的な販売力に効く。
+- **VAP**: 商品の採用実績・顧客開発・継続販売によって蓄積する。提案の成約率と
+  提案型販売の成立に効く。
+- **将来の二層構造の可能性**: 現在の営業基盤は「会社×市場×商品」（SAI-5D）だが、
+  「市場ベースの基盤」と「商品ベースの基盤」を別の層として持ち、両者の積で
+  成約競争力を決める形が考えられる。市場をまたいで持ち運べる商品固有の信用と、
+  商品をまたいで効く市場固有の顧客基盤は性質が異なるため。
+
+**HOSO量販モデル（累積数量による販売効率・常設値引き・少人数大量販売）は
+今回スコープ外であり、実装していない。**
+
+## §11 検証結果
+
+| 項目 | 結果 |
+| --- | --- |
+| `npm test` | **2,340 / 2,340 pass, 0 fail** |
+| `npx tsc --noEmit -p .` | **clean（exit 0）** |
+| `npm run lint` | **0 errors, 14 warnings**（すべて既存の未使用変数警告。本ラウンドで追加したファイルにエラー・警告なし） |
+| `npm run build` | **失敗**。`/api/game/[gameCode]/admin/clone` の `STAGING_KV_REST_API_URL` 未設定による既知の環境要因（本ラウンドの変更とは無関係。TypeScriptコンパイル自体は成功） |
+
+### 期待値を更新した既存テスト（旧係数を数値で固定していたもの）
+
+`capex/__tests__/pdMechanization.test.ts`、`companyLab/__tests__/pdMechanizationState.test.ts`、
+`companyLab/__tests__/pdMechanizationWorkerConnection.test.ts`、
+`production/__tests__/labor.test.ts`、`companyLab/__tests__/workforce.test.ts`、
+`companyLab/__tests__/test15FourCaseSimulation.test.ts`、
+`companyLab/__tests__/test15NewFactoryDecisionInput.test.ts`、
+`standardAi/report/__tests__/standardBaseline.test.ts`
+
+## §12 未解決・次の校正候補
+
+1. **標準初期条件（SAI-3A moderate-pressure）の再選定が必要。** PD係数 1.2 → 1.8 により、
+   12シード・8四半期で全社が支払不能に至るようになった。これは旧係数を前提に
+   キャリブレーションされていたことの帰結である。**係数を戻せばテストは通るが、
+   それは設計値をテストに合わせることになるため行わなかった。** 標準初期条件側
+   （初期現金・初期人員・初期契約）の再選定を次の校正候補として記録する。
+2. **自動方針（autoPolicy）が常用人員の減員判断を持たない。** このため比較
+   シミュレーションでは省人化の理論効果が一切PLに現れない。Standard AI 側には
+   減員判断があるので、Standard AI を使った比較でどこまで回収できるかの実測が
+   次の課題。
+3. **残業削減の経路は現状の比較シナリオでは発火していない。** 自動方針が残業率を
+   ほぼ固定で出すため、機械化による残業削減という現れ方を実測できていない。
+4. **比較シミュレーションのケースCが B とほぼ同値（-1.5M）**。これは失敗ではなく
+   「減員しなければ回収できない」ことの正しい表れだが、減員を伴うケースを
+   追加しないと「適時の省人化は報われる」という設計意図の実証にはならない。
+5. **`salesCapacityTons` 等の一部の生データ列が未接続**（前ラウンドからの継続）。
