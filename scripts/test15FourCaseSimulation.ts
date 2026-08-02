@@ -39,6 +39,9 @@
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../app/lib/v2/companyLab/runner";
 import { generateAutoPolicyDecision } from "../app/lib/v2/companyLab/autoPolicy";
 import { CompanyDecisionInput, CompanyLabState, CompanyQuarterRecord } from "../app/lib/v2/companyLab/types";
+import { buildPdCoefficientOverridesByFactory } from "../app/lib/v2/companyLab/pdMechanizationState";
+import { findFactoryRegularHeadcount } from "../app/lib/v2/companyLab/workforce";
+import { computeEffectiveFactories } from "../app/lib/v2/capex/factoryConstruction";
 import { CompanyId } from "../app/lib/v2/sales/types";
 import { extractCompanyFinancialResult } from "../app/v2/company-lab/play/_lib/financialViewSelectors";
 import {
@@ -47,6 +50,10 @@ import {
   computeMechanizationLevel,
   PD_MECHANIZATION_PARAMETERS_V1,
 } from "../app/lib/v2/capex/pdMechanization";
+import { calculateFactoryEffectiveCapacity } from "../app/lib/v2/production/capacity";
+import { effectiveEfficiencyPerHeadTons, requiredHeadcountForQuantity } from "../app/lib/v2/production/labor";
+import { PRODUCTION_PARAMETERS_V1 } from "../app/lib/v2/production/parameters";
+import { unwrapUnit } from "../app/lib/v2/core/units";
 
 const FOCUS_COMPANY_ID = "BAL";
 export const SIMULATION_HORIZON_QUARTERS = 12;
@@ -98,6 +105,48 @@ export interface QuarterEndSnapshot {
   readonly capexAssetsDepreciationUsd: number;
   /** 【Required fix 4】当期の設備投資現金支払合計（診断用、会社全体）。 */
   readonly capexTotalPaidUsd: number;
+
+  // --- 【develop/v2統合・Required fix A-2/A-3】対象工場（targetFactoryId）単位の実績。
+  // すべてrecord.productionAllocation.entries / record.batches /
+  // nextState.workforceState / nextState.pdMechanizationStateという、エンジンが
+  // 実際にその四半期に使った・確定させた値から抽出するだけであり、この
+  // スクリプト内で新たな計算式は一切作らない。 ---
+
+  /** 対象工場のPD生産計画希望量（record.productionAllocation.entriesのdesiredQuantity）。 */
+  readonly targetFactoryPdPlannedQuantityTons: number;
+  /** 対象工場のPD実際生産量（record.batchesのfinishedGoodsQuantity合計、歩留まり適用後）。 */
+  readonly targetFactoryPdActualQuantityTons: number;
+  /** 対象工場のPD処理能力（calculateFactoryEffectiveCapacityの完成品HOSO換算量ベース）。 */
+  readonly targetFactoryPdCapacityTons: number;
+  /**
+   * 対象工場のPD稼働率。nextState.pdMechanizationState.entries（当四半期に確定し、
+   * 次四半期のPD省人化効果算出へ引き継がれる値そのもの）から取得する
+   * （companyLab/pdMechanizationState.ts computeCurrentQuarterPdUtilizationByFactoryの
+   * 出力であり、本スクリプトが稼働率を再計算することはない）。
+   */
+  readonly targetFactoryPdUtilizationRate: number;
+  /**
+   * 対象工場のPD生産計画（希望量）を満たすために必要な常用ワーカー人数
+   * （production/labor.tsのrequiredHeadcountForQuantity・effectiveEfficiencyPerHeadTonsを
+   * そのまま使う。DecisionEditor.tsxの必要Worker人数表示と同じ情報源）。
+   * 当四半期に実際に適用されていた実効PD係数（PD省人化投資が稼働中ならその
+   * 効果込みの係数）で算出する。
+   */
+  readonly targetFactoryPdRequiredWorkers: number;
+  /** 対象工場のPD生産計画へ実際に配分された常用ワーカー人数（productionAllocation.entries.labor）。 */
+  readonly targetFactoryPdAllocatedRegularWorkers: number;
+  /** 対象工場のPD生産計画へ実際に配分された臨時ワーカー人数（productionAllocation.entries.labor）。 */
+  readonly targetFactoryPdAllocatedTemporaryWorkers: number;
+  /** 対象工場の常用ワーカー人数（workforceState、その工場だけの人数。会社全体の合計ではない）。 */
+  readonly targetFactoryRegularHeadcount: number;
+  /** 対象工場の臨時ワーカー入力人数（当四半期のWorkerAssignment.temporaryHeadcount）。 */
+  readonly targetFactoryTemporaryHeadcountInput: number;
+  /** 対象工場のPD生産計画へ実際に適用された残業率（productionAllocation.entries.labor.appliedOvertimeRate）。 */
+  readonly targetFactoryPdOvertimeRate: number;
+  /** 対象工場のPD生産計画の未達量（desiredQuantity - allocatedQuantity、HOSO換算トン）。 */
+  readonly targetFactoryPdShortfallTons: number;
+  /** 対象工場のPD生産計画が未達だった理由コード（rawMaterialShortage/commonCapacityShortage/productCapacityShortage/laborShortage/packagingCapacityShortage）。 */
+  readonly targetFactoryPdShortfallReasons: readonly string[];
 }
 
 export interface FourCaseSimulationResult {
@@ -156,20 +205,29 @@ function applyPdDemandFloor(decision: CompanyDecisionInput, floorByFactory: Read
       desiredQuantity: floor as unknown as CompanyDecisionInput["productionPlans"][number]["desiredQuantity"],
       priority: 1,
     }));
-  // 【実際に生産できる高PD稼働率を作るための追加調達】このシード・シナリオでは
-  // BALは既に原料不足（rawMaterialShortfall）が常態化しており、単にpd生産計画を
-  // 積み増すだけでは原料配分の奪い合いに敗れて実際の生産に反映されない
-  // （比較の意味がなくなる）。そのため、追加したpd希望量ぶんの原料を、
-  // 国内調達希望量へ同量加算する（HOSO換算の粗い1:1近似。歩留まりの精緻な
-  // 計算はこの実験的シナリオの主目的ではない）。この加算はpdMechanizationOn/Off
-  // 両ケースへ同一のfloorByFactoryを渡すため、両ケースへ全く同一に適用され、
-  // どちらか一方だけを有利にするものではない。
+  // 【develop/v2統合・Required fix A-2】実際に生産できる高PD稼働率を作るための
+  // 追加調達。このシード・シナリオでは、BALは既に原料不足
+  // （rawMaterialShortfall）が常態化しており、単にpd生産計画を積み増すだけでは
+  // 原料配分の奪い合いに敗れて実際の生産に反映されない（比較の意味がなくなる）。
+  // そのため、追加したpd希望量ぶんの原料を国内調達希望量へ加算するが、その
+  // 換算には必ずエンジン本体の歩留まり定義
+  // （production/parameters.ts PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio.pd、
+  // production/allocation.tsのrawMaterialRequiredDesiredが使うのと全く同じ式
+  // 「必要原料量 = 完成品希望量 / saleableRecoveryRatio」）を使う。本スクリプトが
+  // 独自の原料換算式を新たに作ることはしない（コーディネーター指示）。
+  // 【校正メモ】現行パラメータではsaleableRecoveryRatio.pd=1.00のため、この換算は
+  // 数値上は従来の1:1加算と一致する。しかしこれは「歩留まりが1.00だから結果的に
+  // 一致する」のであって、式そのものは歩留まりが将来校正されても正しく追従する。
+  // この加算はpdMechanizationOn/Off両ケースへ同一のfloorByFactoryを渡すため、
+  // 両ケースへ全く同一に適用され、どちらか一方だけを有利にするものではない。
   const totalAddedPdFloor = Array.from(floorByFactory.values()).reduce((s, v) => s + v, 0);
+  const pdSaleableRecoveryRatio = PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio.pd;
+  const totalAddedRawMaterialRequired = totalAddedPdFloor > 0 ? totalAddedPdFloor / pdSaleableRecoveryRatio : 0;
   const domesticPurchasePlan =
-    totalAddedPdFloor > 0
+    totalAddedRawMaterialRequired > 0
       ? {
           ...decision.domesticPurchasePlan,
-          desiredQuantity: ((decision.domesticPurchasePlan.desiredQuantity as unknown as number) + totalAddedPdFloor) as unknown as CompanyDecisionInput["domesticPurchasePlan"]["desiredQuantity"],
+          desiredQuantity: ((decision.domesticPurchasePlan.desiredQuantity as unknown as number) + totalAddedRawMaterialRequired) as unknown as CompanyDecisionInput["domesticPurchasePlan"]["desiredQuantity"],
         }
       : decision.domesticPurchasePlan;
   return { ...decision, productionPlans: [...updatedExisting, ...insertedRows], domesticPurchasePlan };
@@ -223,6 +281,20 @@ export function runFourCaseSimulationCase(input: FourCaseSimulationInput): FourC
       }
       decisions[f.companyId] = decision;
     }
+    // 【develop/v2統合・Required fix A-2/A-3】対象工場単位の実績を、advance前の
+    // stateから算出できるもの（当四半期に実際に適用された実効Factory[]・実効PD係数、
+    // いずれもrunner.ts本体の§Phase6生産処理と全く同じ関数・同じ入力）は、advanceの
+    // 直前に確定させておく（runner.ts 1108-1119行目と同一のcomputeEffectiveFactories・
+    // buildPdCoefficientOverridesByFactory呼び出しであり、別の計算経路を作らない）。
+    const balDecisionForQuarter = decisions[FOCUS_COMPANY_ID];
+    const baseFactoriesForQuarter = fixtures.flatMap((f) => f.factories);
+    const effectiveFactoriesForQuarter = computeEffectiveFactories(baseFactoriesForQuarter, state.capexState, state.currentPeriod);
+    const pdCoefficientOverrideByFactoryIdForQuarter = buildPdCoefficientOverridesByFactory(
+      state.capexState,
+      state.pdMechanizationState,
+      state.currentPeriod
+    );
+
     const nextState = advanceCompanyLabQuarter(state, fixtures, decisions);
     const record: CompanyQuarterRecord = nextState.history[nextState.history.length - 1];
     const financial = extractCompanyFinancialResult(record, FOCUS_COMPANY_ID);
@@ -233,6 +305,40 @@ export function runFourCaseSimulationCase(input: FourCaseSimulationInput): FourC
 
     const netIncome = financial ? (financial.profitAndLoss.netIncome as unknown as number) : 0;
     cumulativeNetIncomeUsd += netIncome;
+
+    // --- 対象工場単位の実績抽出（すべてrecord/nextStateの確定値から。新計算式なし） ---
+    const targetFactoryEffective = effectiveFactoriesForQuarter.find((f) => f.factoryId === targetFactoryId);
+    const targetFactoryPdCapacityTons = targetFactoryEffective ? unwrapUnit(calculateFactoryEffectiveCapacity(targetFactoryEffective).pd) : 0;
+    const targetFactoryPdEntry = record.productionAllocation.entries.find((e) => e.factoryId === targetFactoryId && e.product === "pd");
+    const targetFactoryPdPlannedQuantityTons = targetFactoryPdEntry ? unwrapUnit(targetFactoryPdEntry.desiredQuantity) : 0;
+    const targetFactoryPdActualQuantityTons = record.batches
+      .filter((b) => b.factoryId === targetFactoryId && b.product === "pd")
+      .reduce((sum, b) => sum + unwrapUnit(b.finishedGoodsQuantity), 0);
+    // PD稼働率は、当四半期の生産処理直後にrunner.tsが確定させ次期へ繰り越す
+    // nextState.pdMechanizationState.entriesの値をそのまま読む（computeCurrentQuarterPdUtilizationByFactoryの
+    // 出力そのもの。本スクリプトが稼働率を再計算しない）。
+    const targetFactoryPdUtilizationRate =
+      nextState.pdMechanizationState?.entries.find((e) => e.factoryId === targetFactoryId)?.previousQuarterPdUtilization ?? 0;
+    const targetFactoryWorkerAssignment = balDecisionForQuarter.workerAssignments.find((w) => w.factoryId === targetFactoryId);
+    const targetFactoryPdSkillEntry = targetFactoryWorkerAssignment?.skills.find((s) => s.product === "pd");
+    const targetFactoryPdSkillLevel = targetFactoryPdSkillEntry ? unwrapUnit(targetFactoryPdSkillEntry.skillLevel) : 0;
+    const targetFactoryPdCoefficientForQuarter = pdCoefficientOverrideByFactoryIdForQuarter.get(targetFactoryId);
+    const targetFactoryPdEffectiveEfficiencyPerHead = effectiveEfficiencyPerHeadTons(
+      PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons,
+      "pd",
+      PRODUCTION_PARAMETERS_V1,
+      targetFactoryPdCoefficientForQuarter
+    );
+    const targetFactoryPdRequiredWorkers =
+      targetFactoryWorkerAssignment && targetFactoryPdPlannedQuantityTons > 0
+        ? requiredHeadcountForQuantity(
+            targetFactoryPdPlannedQuantityTons,
+            targetFactoryPdEffectiveEfficiencyPerHead,
+            unwrapUnit(targetFactoryWorkerAssignment.attendanceRate),
+            targetFactoryPdSkillLevel,
+            unwrapUnit(targetFactoryWorkerAssignment.overtimeRate)
+          )
+        : 0;
 
     quarters.push({
       turn: record.turn,
@@ -253,6 +359,18 @@ export function runFourCaseSimulationCase(input: FourCaseSimulationInput): FourC
       capexMaintenanceCostUsd: capexResult ? capexResult.capexMaintenanceCostUsd : 0,
       capexAssetsDepreciationUsd: capexResult ? capexResult.capexAssetsDepreciationUsd : 0,
       capexTotalPaidUsd: capexResult ? capexResult.totalPaidThisQuarterUsd : 0,
+      targetFactoryPdPlannedQuantityTons,
+      targetFactoryPdActualQuantityTons,
+      targetFactoryPdCapacityTons,
+      targetFactoryPdUtilizationRate,
+      targetFactoryPdRequiredWorkers,
+      targetFactoryPdAllocatedRegularWorkers: targetFactoryPdEntry ? targetFactoryPdEntry.labor.assignedRegularHeadcount : 0,
+      targetFactoryPdAllocatedTemporaryWorkers: targetFactoryPdEntry ? targetFactoryPdEntry.labor.assignedTemporaryHeadcount : 0,
+      targetFactoryRegularHeadcount: findFactoryRegularHeadcount(nextState.workforceState, FOCUS_COMPANY_ID, targetFactoryId) ?? 0,
+      targetFactoryTemporaryHeadcountInput: targetFactoryWorkerAssignment ? targetFactoryWorkerAssignment.temporaryHeadcount : 0,
+      targetFactoryPdOvertimeRate: targetFactoryPdEntry ? unwrapUnit(targetFactoryPdEntry.labor.appliedOvertimeRate) : 0,
+      targetFactoryPdShortfallTons: targetFactoryPdEntry ? unwrapUnit(targetFactoryPdEntry.shortfallQuantity) : 0,
+      targetFactoryPdShortfallReasons: targetFactoryPdEntry ? targetFactoryPdEntry.shortfallReasons : [],
     });
     state = nextState;
   }
@@ -360,6 +478,19 @@ function fmtUsd(n: number): string {
   return `$${Math.round(n).toLocaleString("en-US")}`;
 }
 
+/**
+ * 【develop/v2統合・Required fix A-2】"高PD稼働率"と呼んでよい下限（比較Bの
+ * 比較窓＝全四半期での平均PD稼働率が、Off/On両ケースともこれ以上でなければ
+ * 「高PD稼働率」という呼称を使わない。コーディネーター指示どおりの閾値。
+ */
+export const HIGH_PD_UTILIZATION_THRESHOLD = 0.7;
+
+/** 比較窓（result.quarters全体）での対象工場PD稼働率の単純平均。 */
+export function computeAveragePdUtilization(result: FourCaseSimulationResult): number {
+  if (result.quarters.length === 0) return 0;
+  return result.quarters.reduce((sum, q) => sum + q.targetFactoryPdUtilizationRate, 0) / result.quarters.length;
+}
+
 function printResultBlock(label: string, result: FourCaseSimulationResult): void {
   const f = result.finalQuarter;
   console.log(`--- ${label} ---`);
@@ -368,7 +499,7 @@ function printResultBlock(label: string, result: FourCaseSimulationResult): void
   console.log(`  最終四半期現金: ${fmtUsd(f.cashUsd)}`);
   console.log(`  最終四半期設備稼働率: ${f.equipmentUtilizationRate !== null ? (f.equipmentUtilizationRate * 100).toFixed(1) + "%" : "－"}`);
   console.log(`  最終四半期労働稼働率: ${f.laborUtilizationRate !== null ? (f.laborUtilizationRate * 100).toFixed(1) + "%" : "－"}`);
-  console.log(`  最終四半期常用Worker人数: ${f.regularHeadcount.toLocaleString("en-US")}人`);
+  console.log(`  最終四半期常用Worker人数（会社全体）: ${f.regularHeadcount.toLocaleString("en-US")}人`);
   console.log(`  最終四半期PD生産量: ${f.pdProducedTons.toFixed(1)} t`);
   console.log(`  最終四半期完成品在庫: ${f.finishedGoodsInventoryTons.toFixed(1)} t`);
   console.log(`  最終四半期原料在庫: ${f.rawMaterialInventoryTons.toFixed(1)} t`);
@@ -378,15 +509,84 @@ function printResultBlock(label: string, result: FourCaseSimulationResult): void
   console.log("");
 }
 
+/**
+ * 【develop/v2統合・Required fix A-2/A-3】pdMechanizationOff/On専用の詳細出力。
+ * 対象工場のPD稼働率（四半期別・平均・最終四半期）と、必要/配置Worker人数の
+ * 内訳を、実際のシミュレーション結果からそのまま表示する。70%閾値を満たさない
+ * 場合は「高PD稼働率」という呼称を使わず、「実際の稼働率における比較」として
+ * 制約要因を診断する。
+ */
+function printPdMechanizationDetail(off: FourCaseSimulationResult, on: FourCaseSimulationResult): void {
+  const offAvg = computeAveragePdUtilization(off);
+  const onAvg = computeAveragePdUtilization(on);
+  const bothHigh = offAvg >= HIGH_PD_UTILIZATION_THRESHOLD && onAvg >= HIGH_PD_UTILIZATION_THRESHOLD;
+
+  console.log(`\n=== 比較B詳細: 対象工場（${off.quarters[0] ? "BALの第1工場" : ""}）のPD稼働率・Worker内訳 ===\n`);
+  console.log(
+    bothHigh
+      ? `  判定: Off/On両ケースとも比較窓平均PD稼働率が${(HIGH_PD_UTILIZATION_THRESHOLD * 100).toFixed(0)}%以上のため、「高PD稼働率」と呼ぶ。`
+      : `  判定: 実際の稼働率における比較（Off/Onの少なくとも一方が比較窓平均PD稼働率${(HIGH_PD_UTILIZATION_THRESHOLD * 100).toFixed(0)}%未満のため、「高PD稼働率」という呼称は使わない）。`
+  );
+  console.log(`  比較窓平均PD稼働率: Off=${(offAvg * 100).toFixed(1)}% / On=${(onAvg * 100).toFixed(1)}%`);
+  console.log(
+    `  最終四半期PD稼働率: Off=${(off.finalQuarter.targetFactoryPdUtilizationRate * 100).toFixed(1)}% / On=${(on.finalQuarter.targetFactoryPdUtilizationRate * 100).toFixed(1)}%`
+  );
+
+  for (const [label, result] of [
+    ["Off", off],
+    ["On", on],
+  ] as const) {
+    console.log(`\n  --- ${label}: 四半期別PD稼働率（対象工場） ---`);
+    for (const q of result.quarters) {
+      console.log(
+        `    turn${q.turn}: 計画${q.targetFactoryPdPlannedQuantityTons.toFixed(1)}t / 実績${q.targetFactoryPdActualQuantityTons.toFixed(1)}t / 能力${q.targetFactoryPdCapacityTons.toFixed(1)}t / 稼働率${(q.targetFactoryPdUtilizationRate * 100).toFixed(1)}%`
+      );
+    }
+  }
+
+  console.log(`\n  --- 最終四半期: 対象工場のWorker内訳・機械化コスト・損益（Off / On） ---`);
+  for (const [label, result] of [
+    ["Off", off],
+    ["On", on],
+  ] as const) {
+    const f = result.finalQuarter;
+    console.log(`  [${label}]`);
+    console.log(`    PD計画量/実績量/能力/稼働率: ${f.targetFactoryPdPlannedQuantityTons.toFixed(1)}t / ${f.targetFactoryPdActualQuantityTons.toFixed(1)}t / ${f.targetFactoryPdCapacityTons.toFixed(1)}t / ${(f.targetFactoryPdUtilizationRate * 100).toFixed(1)}%`);
+    console.log(`    PD計画に必要な常用Worker人数（逆算）: ${f.targetFactoryPdRequiredWorkers.toFixed(1)}人`);
+    console.log(`    PD計画へ実際に配置された常用/臨時Worker人数: ${f.targetFactoryPdAllocatedRegularWorkers.toFixed(1)}人 / ${f.targetFactoryPdAllocatedTemporaryWorkers.toFixed(1)}人`);
+    console.log(`    対象工場の常用Worker人数（工場単位）/臨時Worker入力人数: ${f.targetFactoryRegularHeadcount}人 / ${f.targetFactoryTemporaryHeadcountInput}人`);
+    console.log(`    労働不足の目安（必要 − 配置常用+臨時）: ${Math.max(0, f.targetFactoryPdRequiredWorkers - (f.targetFactoryPdAllocatedRegularWorkers + f.targetFactoryPdAllocatedTemporaryWorkers)).toFixed(1)}人相当`);
+    console.log(`    残業率: ${(f.targetFactoryPdOvertimeRate * 100).toFixed(1)}% / 会社全体残業費: ${fmtUsd(f.overtimeCostUsd)}`);
+    console.log(`    PD計画未達量/理由: ${f.targetFactoryPdShortfallTons.toFixed(1)}t / ${f.targetFactoryPdShortfallReasons.length > 0 ? f.targetFactoryPdShortfallReasons.join(",") : "なし"}`);
+    console.log(`    機械化保守費/減価償却費/支払額: ${fmtUsd(f.capexMaintenanceCostUsd)} / ${fmtUsd(f.capexAssetsDepreciationUsd)} / ${fmtUsd(f.capexTotalPaidUsd)}`);
+    console.log(`    純利益/現金: ${fmtUsd(f.netIncomeUsd)} / ${fmtUsd(f.cashUsd)}`);
+  }
+
+  if (!bothHigh) {
+    console.log(`\n  【Test15校正メモ・A-2】70%以上の平均PD稼働率をOff/On双方で正規の手段のみで実現できなかった。`);
+    console.log(
+      `  診断: 対象工場のPD稼働率は原料在庫・原料調達（domesticPurchasePlan）と工場共通処理能力・PD設備能力・常用/臨時Workerの` +
+        `いずれかが律速となっている可能性がある。原料希望量の追加加算はエンジンの歩留まり式（saleableRecoveryRatio）を` +
+        `正しく反映済みのため、原料換算自体は制約要因ではない。稼働率が伸び悩む主因は、PD希望量の下限` +
+        `（pdDesiredQuantityFloorByFactory）を引き上げると、その原料調達の現金支出がpdMechanization投資自体の分割払い` +
+        `現金を圧迫し投資が完了しなくなる（現金制約）ため、下限を実測で安全な水準（工場PD能力比一定割合）に留めている` +
+        `ことにある。これは需要制約・原料調達制約というより、このシード・シナリオ固有の資金繰り制約（cash-constrained）` +
+        `であり、Test15の校正課題として引き続き扱う。`
+    );
+  }
+}
+
 function printComparisonTable(table: FourCaseComparisonTable): void {
   console.log(`\n=== Test15 4ケース比較（会社=${FOCUS_COMPANY_ID}, 地平線=${SIMULATION_HORIZON_QUARTERS}四半期, 全ケース共通seed=${SINGLE_SEED}）===\n`);
   printResultBlock("参考: baseline（需要制約なし・投資なし）", table.baseline);
   printResultBlock("比較A-1: baselineDemandConstrained（需要制約あり・投資なし）", table.baselineDemandConstrained);
   printResultBlock("比較A-2: newFactoryDemandConstrained（需要制約あり・新工場建設のみ、A-1と同一需要上限）", table.newFactoryDemandConstrained);
-  printResultBlock("比較B-1: pdMechanizationOff（高PD需要下・PD省人化投資なし）", table.pdMechanizationOff);
-  printResultBlock("比較B-2: pdMechanizationOn（高PD需要下・PD省人化投資あり、B-1と同一高PD需要）", table.pdMechanizationOn);
+  printResultBlock("比較B-1: pdMechanizationOff（PD需要下限あり・PD省人化投資なし。実際の稼働率での比較。詳細は下記）", table.pdMechanizationOff);
+  printResultBlock("比較B-2: pdMechanizationOn（PD需要下限あり・PD省人化投資あり、B-1と同一PD需要下限。実際の稼働率での比較。詳細は下記）", table.pdMechanizationOn);
   printResultBlock("参考: both（需要制約なし・新工場建設＋PD省人化投資の両方）", table.both);
   console.log(`基準PD係数: ${PD_MECHANIZATION_PARAMETERS_V1.baseCoefficient}`);
+
+  printPdMechanizationDetail(table.pdMechanizationOff, table.pdMechanizationOn);
 
   console.log(`\n=== PD省人化投資: 稼働率感度分析（補助・純粋関数のみ。習熟完了後・quartersSinceActivation=${PD_MECHANIZATION_PARAMETERS_V1.adoptionRampQuarters}） ===\n`);
   const sensitivity = computePdUtilizationSensitivity(PD_MECHANIZATION_PARAMETERS_V1.adoptionRampQuarters);
