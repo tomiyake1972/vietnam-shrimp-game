@@ -7,6 +7,7 @@
 // 他社の非公開データ・将来の乱数列）に一切アクセスしない（アクセスする手段が
 // 関数シグネチャ上そもそも存在しない）。
 
+import { buildPdCoefficientOverridesByFactory } from "../pdMechanizationState";
 import { unwrapUnit } from "../../core/units";
 import { DEMAND_MARKET_IDS, MarketQuarterResult, Product } from "../../market/types";
 import { deriveMarketReferencePrices } from "../../market/destinationPricing";
@@ -81,6 +82,14 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
   // エンジン側と同じく「その会社の最初の工場（factoryId昇順）」へ加算する。
   const capexEffect = computeCapacityEffectForCompany(ownState.capexState.portfolio.projects, period);
   const firstFactoryId = [...fixture.factories].map((f) => f.factoryId).sort()[0];
+  // 【Test15 PD省人化投資の接続】工場ごとの実効PD労働集約度係数。エンジン側
+  // （runner.ts の pdCoefficientOverrideByFactoryId）とまったく同じ関数を使い、
+  // 判断側が独自の推定式を持たないようにする。
+  const pdCoefficientByFactory = buildPdCoefficientOverridesByFactory(
+    { companies: [ownState.capexState] },
+    { entries: ownState.pdUtilizationByFactory.map((e) => ({ companyId: fixture.companyId, factoryId: e.factoryId, previousQuarterPdUtilization: e.previousQuarterPdUtilization })) },
+    period
+  );
   return fixture.factories.map((f) => {
     const baseline = fixture.workerBaseline.find((w) => w.factoryId === f.factoryId);
     const currentRegularHeadcount =
@@ -104,6 +113,7 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
       currentRegularHeadcount,
       skillByProduct,
       attendanceRate: baseline ? unwrapUnit(baseline.attendanceRate) : 1,
+      ...(pdCoefficientByFactory.has(f.factoryId) ? { effectivePdLaborCoefficient: pdCoefficientByFactory.get(f.factoryId) } : {}),
     };
   });
 }

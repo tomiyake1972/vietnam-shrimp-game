@@ -197,6 +197,18 @@ export interface RequiredHeadcountInput {
   /** すでに配置済みの臨時ワーカー人数（常用の必要人数を減らす）。 */
   readonly temporaryHeadcount: number;
   readonly params?: ProductionParameters;
+  /**
+   * 【Test15 PD省人化投資の接続】この工場の実効PD労働集約度係数
+   * （companyLab/pdMechanizationState.ts buildPdCoefficientOverridesByFactory）。
+   *
+   * 【なぜ必要か】これを渡さないと、省人化投資で実際の必要人員が減っても
+   * 「必要人数」の見積りは既定係数(1.2)のまま変わらないため、判断側の
+   * 「人員過剰」判定が一切発火しない。その結果、余剰人員が配置されたまま
+   * 残り、常用人件費は人数連動なので下がらず、**省人化投資は原理的に
+   * 回収不能**になる（Phase5の損益分岐分析で観測した現象の機構）。
+   * 省略時は既定係数（＝従来挙動）。
+   */
+  readonly pdCoefficientOverride?: number;
 }
 
 export interface RequiredHeadcountResult {
@@ -232,7 +244,12 @@ export function computeRequiredRegularHeadcount(input: RequiredHeadcountInput): 
     // 【Test15】商品別労働集約度係数（HOSO:PD:VAP=1.0:1.2:3.0）を織り込んだ
     // 実効効率で逆算する。唯一の情報源はeffectiveEfficiencyPerHeadTons経由の
     // parameters.ts labor.laborIntensityCoefficientであり、ここでは係数を持たない。
-    const efficiencyPerHead = effectiveEfficiencyPerHeadTons(params.labor.regularEfficiencyPerHeadTons, product, params);
+    const efficiencyPerHead = effectiveEfficiencyPerHeadTons(
+      params.labor.regularEfficiencyPerHeadTons,
+      product,
+      params,
+      product === "pd" ? input.pdCoefficientOverride : undefined
+    );
     const required = requiredHeadcountForQuantity(
       quantity,
       efficiencyPerHead,

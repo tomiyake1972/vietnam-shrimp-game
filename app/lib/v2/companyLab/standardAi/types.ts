@@ -42,6 +42,13 @@ export interface FactoryObservation {
   readonly freezingPackagingCapacity: number;
   readonly currentRegularHeadcount: number;
   readonly skillByProduct: ProductAmount;
+  /**
+   * 【Test15 PD省人化投資の接続】この工場の実効PD労働集約度係数（既定1.2）。
+   * 省人化が進むほど小さくなり、同じPD生産量を少ない人員で処理できる。
+   * 判断側（decision/labor.ts）が必要人員を見積もる際にこの値を使わないと、
+   * 省人化しても人員過剰が検知されず、余剰人員が残り続ける。
+   */
+  readonly effectivePdLaborCoefficient?: number;
   readonly attendanceRate: number;
 }
 

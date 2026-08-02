@@ -77,6 +77,10 @@ export function buildStandardAiWorkerAssignments(
       attendanceRate,
       appliedOvertimeRate: 0,
       temporaryHeadcount: 0,
+      // 【Test15 PD省人化投資の接続】この工場の実効PD係数を反映する。
+      // 省人化が進んでいれば必要人員が下がり、sustainedExcess判定を通じて
+      // 常用ワーカーの段階的縮小（＝人件費の実際の削減）へつながる。
+      pdCoefficientOverride: factoryObs?.effectivePdLaborCoefficient,
     });
     const requiredRegular = required.requiredRegularHeadcount;
 
@@ -96,6 +100,7 @@ export function buildStandardAiWorkerAssignments(
       attendanceRate,
       appliedOvertimeRate: 0,
       temporaryHeadcount: 0,
+      pdCoefficientOverride: factoryObs?.effectivePdLaborCoefficient,
     }).requiredRegularHeadcount;
 
     const isShortage = requiredRegular > currentRegular * (1 + SHORTAGE_MARGIN_RATIO);
