@@ -1,42 +1,97 @@
 // ShrimpX V2 — Test15 4ケース決定論的シミュレーションの検証テスト
 //
-// scripts/test15FourCaseSimulation.ts が実際に生成する数値について、コーディネーターが
-// 明示的に求めた2つの定性的主張が、構築したシナリオで実際に成立することを確認する:
-//   1. 需要制約下では、新工場建設（能力増強）が純利益・現金を悪化させ得る
-//      （ケース2の累計純利益・最終四半期現金が、ケース1（baseline）より悪化する）。
-//   2. PD省人化投資は、稼働率が高いほど投資効果（実効PD係数の削減率）が大きくなる
-//      （capex/pdMechanization.tsの純粋関数へ直接、同一の習熟進捗・異なる稼働率を
-//      渡し、削減率が単調に改善することを確認する）。
+// 【develop/v2統合・Required fix 4で全面見直し】scripts/test15FourCaseSimulation.ts が
+// 実際に生成する数値について、コーディネーターが明示的に求めた方法論・主張が、
+// 実際に成立することを確認する:
+//   0. 方法論: runAllFourCasesが生成する全ケースが同一seedを使うこと（他社方針・
+//      初期状態が完全に同一であること）。
+//   1. 比較A（需要制約下の新工場建設）: baselineDemandConstrainedと
+//      newFactoryDemandConstrainedは同一の需要上限を使い、新工場建設が
+//      累計純利益を悪化させ得る（能力増強が需要制約下では純負になり得ることの実証）。
+//   2. 比較B（高PD稼働率下のPD省人化投資、実シミュレーション）:
+//      pdMechanizationOffとpdMechanizationOnは同一の高PD需要下限を使う。
+//      実際にPD省人化投資のcapex（保守費・減価償却費）が発生し、残業費が
+//      （わずかに）低下することを確認する。ただし本シナリオ・地平線では、
+//      新たに発生するcapexコストを残業費削減が相殺しきれず、純利益は
+//      むしろやや悪化するという結果が実際に得られた。これは「投資が
+//      常に得とは限らない」という誠実な計算結果であり、テストはこの
+//      実測結果をそのまま固定する（無理に「投資が得」という結果を
+//      作らない。コーディネーター指示どおり）。
+//   3. 補助: capex/pdMechanization.tsの純粋関数へ直接、同一の習熟進捗・
+//      異なる稼働率を渡すと、削減率が単調に改善すること。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computePdUtilizationSensitivity, runAllFourCases } from "../../../../../scripts/test15FourCaseSimulation";
 import { PD_MECHANIZATION_PARAMETERS_V1 } from "../../capex/pdMechanization";
 
-test("Test15 4ケースシミュレーション: 4ケースとも例外なく完走し、各ケースの最終四半期スナップショットが揃っている", () => {
-  const table = runAllFourCases("test15-4case-verify");
-  for (const result of [table.baseline, table.newFactoryOnly, table.pdMechanizationOnly, table.both]) {
+const VERIFY_SEED = "test15-4case-verify-seed";
+
+test("Test15 4ケースシミュレーション: 6ケースとも例外なく完走し、各ケースの最終四半期スナップショットが揃っている", () => {
+  const table = runAllFourCases(VERIFY_SEED);
+  for (const result of [
+    table.baseline,
+    table.baselineDemandConstrained,
+    table.newFactoryDemandConstrained,
+    table.pdMechanizationOff,
+    table.pdMechanizationOn,
+    table.both,
+  ]) {
     assert.ok(result.quarters.length > 0, "少なくとも1四半期は進行している");
     assert.ok(Number.isFinite(result.cumulativeNetIncomeUsd));
     assert.ok(Number.isFinite(result.finalQuarter.cashUsd));
   }
 });
 
-test("Test15 4ケースシミュレーション: 需要制約下では、新工場建設(ケース2)がbaseline(ケース1)より累計純利益で悪化する（能力増強が純負になり得ることの実証）", () => {
+test("Test15 4ケースシミュレーション（比較A）: 需要制約下では、新工場建設(newFactoryDemandConstrained)がbaseline(baselineDemandConstrained)より累計純利益で悪化する（能力増強が純負になり得ることの実証）。両ケースは同一seed・同一の需要上限を使う", () => {
   // 【現金（cashUsd）を主張の指標に使わない理由】現金は四半期ごとの資金繰り
   // （借入・返済タイミング等）の影響を強く受け、単一四半期の値では
-  // ノイズにより逆転し得ることを実際に確認した（他のseedで検証済み）。
-  // 累計純利益は「新設工場の減価償却・保守費というコストが、需要制約下では
-  // 追加売上で相殺されない」という主張の直接指標であり、より頑健なため
-  // これを唯一の判定指標とする。
-  const table = runAllFourCases("test15-4case-verify");
+  // ノイズにより逆転し得ることを実際に確認した。累計純利益は「新設工場の
+  // 減価償却・保守費というコストが、需要制約下では追加売上で相殺されない」
+  // という主張の直接指標であり、より頑健なためこれを唯一の判定指標とする。
+  const table = runAllFourCases(VERIFY_SEED);
   assert.ok(
-    table.newFactoryOnly.cumulativeNetIncomeUsd < table.baseline.cumulativeNetIncomeUsd,
-    `需要制約下の新工場建設ケースの累計純利益(${table.newFactoryOnly.cumulativeNetIncomeUsd})はbaseline(${table.baseline.cumulativeNetIncomeUsd})より悪化するはず`,
+    table.newFactoryDemandConstrained.cumulativeNetIncomeUsd < table.baselineDemandConstrained.cumulativeNetIncomeUsd,
+    `需要制約下の新工場建設ケース(${table.newFactoryDemandConstrained.cumulativeNetIncomeUsd})はbaselineDemandConstrained(${table.baselineDemandConstrained.cumulativeNetIncomeUsd})より累計純利益が悪化するはず`,
   );
 });
 
-test("Test15 4ケースシミュレーション: PD省人化投資は、同一の習熟進捗のもとで前四半期PD稼働率が高いほど実効PD係数の削減率が単調に大きくなる（投資効果が稼働率とともに改善することの実証）", () => {
+test("Test15 4ケースシミュレーション（比較B・実シミュレーション）: PD省人化投資は、稼働開始後にcapex保守費・減価償却費が実際に発生し、残業費が(わずかに)低下する。ただし本シナリオでは、新たなcapexコストを残業費削減が相殺しきれず、純利益はむしろ悪化する（誠実な実測結果。無理に投資が得な結果を作らない）", () => {
+  const table = runAllFourCases(VERIFY_SEED);
+  const off = table.pdMechanizationOff;
+  const on = table.pdMechanizationOn;
+
+  // 稼働開始後（最終四半期）は、On側にのみcapex保守費・減価償却費が発生する。
+  assert.ok(on.finalQuarter.capexMaintenanceCostUsd > 0, `On側は稼働開始済みのはず（保守費: ${on.finalQuarter.capexMaintenanceCostUsd}）`);
+  assert.ok(on.finalQuarter.capexAssetsDepreciationUsd > 0, `On側は稼働開始済みのはず（減価償却費: ${on.finalQuarter.capexAssetsDepreciationUsd}）`);
+  assert.equal(off.finalQuarter.capexMaintenanceCostUsd, 0, "Off側はPD省人化投資を行っていないので保守費は発生しないはず");
+  assert.equal(off.finalQuarter.capexAssetsDepreciationUsd, 0, "Off側はPD省人化投資を行っていないので減価償却費は発生しないはず");
+
+  // 同一の高PD需要下限を適用しているため、PD生産量自体はOn/Offでほぼ一致する
+  // （投資は生産量ではなく必要労働力・コストを変える設計のため）。
+  assert.ok(
+    Math.abs(on.finalQuarter.pdProducedTons - off.finalQuarter.pdProducedTons) < Math.max(1, off.finalQuarter.pdProducedTons * 0.05),
+    `同一PD需要下限のもとでは、PD生産量はOn(${on.finalQuarter.pdProducedTons})とOff(${off.finalQuarter.pdProducedTons})でほぼ一致するはず`,
+  );
+
+  // 残業費はOn側でわずかに低い（PD省人化投資が労働集約度を下げる効果の方向は正しい）。
+  assert.ok(
+    on.finalQuarter.overtimeCostUsd < off.finalQuarter.overtimeCostUsd,
+    `On側の残業費(${on.finalQuarter.overtimeCostUsd})はOff側(${off.finalQuarter.overtimeCostUsd})よりわずかに低いはず（機械化の労働集約度低減効果の方向）`,
+  );
+
+  // 【誠実な実測結果】このシナリオ・地平線では、上記の残業費削減額よりも
+  // 新たに発生したcapexコスト（保守費+減価償却費）の方が大きく、累計純利益は
+  // On側の方がむしろ悪化する。これは「PD省人化投資が常に得とは限らない」
+  // というTest15の校正上の発見であり、無理に逆方向のアサーションを作らない
+  // （コーディネーター指示: 結果が"nice"にならない場合はそのまま報告する）。
+  assert.ok(
+    on.cumulativeNetIncomeUsd <= off.cumulativeNetIncomeUsd,
+    `本シナリオでの実測: On(${on.cumulativeNetIncomeUsd})はOff(${off.cumulativeNetIncomeUsd})以下（capexコストが残業費削減を上回る）はず`,
+  );
+});
+
+test("Test15 4ケースシミュレーション（補助・純粋関数）: PD省人化投資は、同一の習熟進捗のもとで前四半期PD稼働率が高いほど実効PD係数の削減率が単調に大きくなる（投資効果が稼働率とともに改善することの実証）", () => {
   const rows = computePdUtilizationSensitivity(PD_MECHANIZATION_PARAMETERS_V1.adoptionRampQuarters, [0.2, 0.5, 0.9]);
   assert.equal(rows.length, 3);
   for (let i = 1; i < rows.length; i++) {
