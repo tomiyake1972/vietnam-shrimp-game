@@ -58,3 +58,8 @@ next-env.d.ts
 # （artifacts/sai5/以下）。同じ理由でGit管理対象にしない
 # （生成スクリプト scripts/sai5Analysis.ts のみGit管理する）。
 /artifacts/sai5/
+
+# Test15前 PD省人化投資プリフライト校正（診断専用、artifacts/test15/preflight-calibration/以下）。
+# 大量のCSV/JSON生成物はGit管理対象にしない
+# （生成スクリプト scripts/test15PdMechanizationPreflightCalibration.ts のみGit管理する）。
+/artifacts/test15/
