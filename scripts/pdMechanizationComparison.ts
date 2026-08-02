@@ -36,7 +36,16 @@ export const SEEDS = ["pd-mech-seed-1", "pd-mech-seed-2", "pd-mech-seed-3"] as c
 export const HORIZON_QUARTERS = 20;
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
-export type CaseId = "A-hoso-no-mech" | "B-pd-no-mech" | "C-pd-mech" | "D-pdvap-mech" | "E-mech-no-sales";
+export type CaseId =
+  | "A-hoso-no-mech"
+  | "B-pd-no-mech"
+  | "C-pd-mech"
+  | "D-pdvap-mech"
+  | "E1-no-sales-ai-declines"
+  | "E2-no-sales-forced-mech"
+  | "E2c-no-sales-control"
+  | "E3-produced-not-sold"
+  | "E3c-produced-not-sold-control";
 
 export interface CaseProfile {
   readonly id: CaseId;
@@ -49,12 +58,44 @@ export interface CaseProfile {
   readonly salesHirePerQuarter: number;
   /** 販売計画の商品別倍率（HOSO中心／PD中心／PD+VAPを表現する）。 */
   readonly salesMultiplier: Readonly<Record<Product, number>>;
+  /**
+   * 【分析専用】Standard AIのゲート判断に関わらず省人化を強制投入するか。
+   *
+   * 【重要】強制はこの分析スクリプトの中だけで行う。ゲートの実装
+   * （standardAi/decision/marketEvolutionInvestment.ts の8条件）には一切手を触れない。
+   * 資金条件で却下されることも避けるため、対象会社へ分析用の現金を付与する
+   * （付与額は forcedMechanizationCashGrantUsd）。
+   */
+  readonly forceMechanization?: boolean;
+  /**
+   * 【分析専用】この会社へ初期時点で付与する診断用の現金。
+   * 強制投入ケースが資金条件で却下されるのを避けるために使う。
+   * **対照ケースにも同額を付与しないと比較が成立しない**（現金付与そのものが
+   * 支払利息・緊急借入を通じて損益へ効いてしまうため）。
+   */
+  readonly analysisCashGrantUsd?: number;
+  /**
+   * 【分析専用】生産計画を販売計画とは独立にこの倍率で拡大する。
+   * 「増えた能力を実際に使って作ったが、売れなかった」状況を作るために使う
+   * （省略時は1.0＝AIが出した生産計画のまま）。
+   */
+  readonly productionMultiplier?: number;
 }
+
+/**
+ * 【分析専用】強制投入ケースで、資金条件による却下を避けるために付与する現金。
+ * これは「販売見込みが無いのに省人化した場合どうなるか」を観測するための
+ * 診断用の措置であり、ゲームのパラメータではない。
+ */
+export const FORCED_MECHANIZATION_CASH_GRANT_USD = 500_000_000;
 
 /**
  * 【ケース設計】turnそのものに意味があるのではなく、「稼働率が上がってから
  * 省人化する（C・D）」と「販売見込みが無いまま省人化する（E）」の対比が本質。
- * Cの turn8 は、この設定でPD稼働率が十分に立ち上がったあとの時期として選んだ。
+ * Cの turn8 は、この設定でPD稼働率が立ち上がったあとの時期として選んだ**候補の一つ**であり、
+ * 「最適な実施時期」ではない。実測では turn8〜12 が有効な実施レンジで、
+ * 測定した候補の中では turn12 の累積効果が最も大きかった。最適点は将来需要・
+ * 労働制約・現金余力・評価期間の取り方で移動する。
  */
 export const CASE_PROFILES: readonly CaseProfile[] = [
   {
@@ -90,12 +131,62 @@ export const CASE_PROFILES: readonly CaseProfile[] = [
     salesMultiplier: { hoso: 0.5, pd: 1.5, vap: 1.4 },
   },
   {
-    id: "E-mech-no-sales",
-    label: "E: 販売見込み無しで省人化",
+    // 【E1】販売見込みが無い戦略のまま、省人化を**Standard AIの判断に委ねる**ケース。
+    // ゲートを一切迂回しない。実際にAIが提案しなければ投資は起きない。
+    id: "E1-no-sales-ai-declines",
+    label: "E1: 販売見込み無し・AI判断に委ねる",
     productionPriority: { hoso: 3, pd: 1, vap: 2 },
-    mechanizationTurn: 2,
+    mechanizationTurn: null,
     salesHirePerQuarter: 0,
     salesMultiplier: { hoso: 0.4, pd: 0.5, vap: 0.3 },
+  },
+  {
+    // 【E2】同じ戦略で、分析目的にのみ省人化を**強制投入**するケース。
+    // 強制はこの分析スクリプトの中だけで行い、ゲートの実装には手を触れない。
+    // E1との差が「能力だけ上げて販売が伴わないときの悪化」を表す。
+    id: "E2-no-sales-forced-mech",
+    label: "E2: 販売見込み無し・省人化を強制投入",
+    productionPriority: { hoso: 3, pd: 1, vap: 2 },
+    mechanizationTurn: 8,
+    salesHirePerQuarter: 0,
+    salesMultiplier: { hoso: 0.4, pd: 0.5, vap: 0.3 },
+    forceMechanization: true,
+    analysisCashGrantUsd: FORCED_MECHANIZATION_CASH_GRANT_USD,
+  },
+  {
+    // 【E2対照】E2とまったく同じ条件（同じ現金付与を含む）で、省人化だけを行わない。
+    // E2 と E2対照 の差が「能力だけ上げて販売が伴わないときの悪化」そのものになる。
+    id: "E2c-no-sales-control",
+    label: "E2対照: 販売見込み無し・省人化なし（同額の現金付与あり）",
+    productionPriority: { hoso: 3, pd: 1, vap: 2 },
+    mechanizationTurn: null,
+    salesHirePerQuarter: 0,
+    salesMultiplier: { hoso: 0.4, pd: 0.5, vap: 0.3 },
+    analysisCashGrantUsd: FORCED_MECHANIZATION_CASH_GRANT_USD,
+  },
+  {
+    // 【E3】増えた能力を実際に使って作るが、販売は伸ばさないケース。
+    // 「能力が上がったのに販売が伴わない」状況そのもの。
+    id: "E3-produced-not-sold",
+    label: "E3: 省人化＋能力を使って増産・販売は伸ばさない",
+    productionPriority: { hoso: 3, pd: 1, vap: 2 },
+    mechanizationTurn: 8,
+    salesHirePerQuarter: 0,
+    salesMultiplier: { hoso: 0.4, pd: 0.5, vap: 0.3 },
+    forceMechanization: true,
+    analysisCashGrantUsd: FORCED_MECHANIZATION_CASH_GRANT_USD,
+    productionMultiplier: 2.5,
+  },
+  {
+    // 【E3対照】E3とまったく同じ増産を行うが、省人化はしない。
+    id: "E3c-produced-not-sold-control",
+    label: "E3対照: 増産のみ・省人化なし（同額の現金付与あり）",
+    productionPriority: { hoso: 3, pd: 1, vap: 2 },
+    mechanizationTurn: null,
+    salesHirePerQuarter: 0,
+    salesMultiplier: { hoso: 0.4, pd: 0.5, vap: 0.3 },
+    analysisCashGrantUsd: FORCED_MECHANIZATION_CASH_GRANT_USD,
+    productionMultiplier: 2.5,
   },
 ];
 
@@ -168,7 +259,21 @@ export function runCase(
 ): readonly QuarterRow[] {
   const config = labConfig(seed);
   const { state: initialState, fixtures } = initializeCompanyLab(config);
-  let state = initialState;
+  // 【分析専用】強制投入ケースでは、資金条件による却下で「投資が起きなかった」
+  // 状態になってしまうと比較そのものが成立しないため、診断用の現金を付与する。
+  const grant = profile.analysisCashGrantUsd ?? 0;
+  let state = grant > 0
+    ? {
+        ...initialState,
+        financeState: {
+          ...initialState.financeState,
+          companies: initialState.financeState.companies.map((c) => ({
+            ...c,
+            cash: ((c.cash as unknown as number) + grant) as typeof c.cash,
+          })),
+        },
+      }
+    : initialState;
   const rows: QuarterRow[] = [];
   const selfProposedMechanizationTurns = new Set<string>();
 
@@ -197,7 +302,13 @@ export function runCase(
           ...p,
           desiredQuantity: ((p.desiredQuantity as unknown as number) * profile.salesMultiplier[p.product]) as typeof p.desiredQuantity,
         })),
-        productionPlans: decision.productionPlans.map((p) => ({ ...p, priority: profile.productionPriority[p.product] })),
+        productionPlans: decision.productionPlans.map((p) => ({
+          ...p,
+          priority: profile.productionPriority[p.product],
+          ...(profile.productionMultiplier && profile.productionMultiplier !== 1
+            ? { desiredQuantity: ((p.desiredQuantity as unknown as number) * profile.productionMultiplier) as typeof p.desiredQuantity }
+            : {}),
+        })),
       };
       if (profile.salesHirePerQuarter > 0) {
         decision = { ...decision, salesForceHireCount: profile.salesHirePerQuarter };
@@ -339,7 +450,16 @@ export interface CaseSummary {
   readonly finalRegularHeadcount: number;
   /** Standard AI が自ら省人化を提案した会社×四半期の件数。 */
   readonly selfProposedMechanizationCount: number;
+  /**
+   * 投資キャッシュアウトの合計。**PD省人化以外のcapex（工場増設等）も含む**ので、
+   * 「省人化投資が起きたか」の判定にこの値を使ってはならない（E3対照では省人化を
+   * していないのに 22,000,000 が立つ）。省人化の実行有無は maxMechanizationLevel で見る。
+   */
   readonly investmentUsd: number;
+  /** 期間中に到達した機械化レベルの最大値（0=一度も省人化していない）。 */
+  readonly maxMechanizationLevel: number;
+  /** 最終四半期の機械化レベル（会社合計ではなく最大値）。 */
+  readonly finalMechanizationLevel: number;
   readonly cumulativeNetIncomeUsd: number;
   readonly cumulativeOperatingCashFlowUsd: number;
   readonly finalCashUsd: number;
@@ -381,6 +501,8 @@ export function summarize(rows: readonly QuarterRow[], params: ProductionParamet
     finalRegularHeadcount: lastRows.reduce((s, r) => s + r.regularHeadcount, 0),
     selfProposedMechanizationCount: rows.filter((r) => r.selfProposedMechanization).length,
     investmentUsd: sum((r) => r.investmentUsd),
+    maxMechanizationLevel: rows.reduce((m, r) => Math.max(m, r.mechanizationLevel), 0),
+    finalMechanizationLevel: lastRows.reduce((m, r) => Math.max(m, r.mechanizationLevel), 0),
     cumulativeNetIncomeUsd: sum((r) => r.netIncomeUsd),
     cumulativeOperatingCashFlowUsd: sum((r) => r.operatingCashFlowUsd),
     finalCashUsd: lastRows.reduce((s, r) => s + r.cashUsd, 0),
@@ -490,7 +612,7 @@ export function runWindowComparison(): readonly {
   const variants: { timing: string; turn: number | null }[] = [
     { timing: "none", turn: null },
     { timing: "t4-tooEarly", turn: 4 },
-    { timing: "t8-sweetSpot", turn: 8 },
+    { timing: "t8-effective", turn: 8 },
     { timing: "t12-lateish", turn: 12 },
     { timing: "t16-tooLate", turn: 16 },
   ];
@@ -572,6 +694,44 @@ if (process.argv[1] && process.argv[1].endsWith("pdMechanizationComparison.ts"))
       );
     }
 
+    // 【三宅さん指示A-1】強制投入ケースは「投資が実際に起きたこと」を非ゼロで確認する。
+    // 資金条件で却下されて投資額0のまま比較していたら、その比較は成立しない。
+    console.log("\n=== 省人化が実際に起きたかの確認（機械化レベル）===");
+    console.log("【注】投資キャッシュアウトには工場増設等の他のcapexも混ざるため、判定には機械化レベルを使う。");
+    console.log("ケース                         | 最大機械化Lv | 期末機械化Lv | 総投資CF(USD) | 強制投入 | 判定");
+    console.log("-------------------------------|--------------|--------------|---------------|----------|------");
+    for (const p of CASE_PROFILES) {
+      const maxLv = avgOf(p.id, (s) => s.maxMechanizationLevel);
+      const finLv = avgOf(p.id, (s) => s.finalMechanizationLevel);
+      const inv = avgOf(p.id, (s) => s.investmentUsd);
+      // 【注】C・Dもスクリプトが省人化提案を注入している（AIの自発提案ではない）。
+      // 違いは「AIが受け入れられる状況で注入したか（C・D）」と
+      // 「販売見込みが無い状況へ分析目的で強制したか（E2・E3）」であり、
+      // どちらもゲート実装そのものには手を触れていない。
+      const injected = p.mechanizationTurn !== null;
+      const verdict = injected
+        ? maxLv > 0
+          ? p.forceMechanization
+            ? "○ 強制投入が成立"
+            : "○ スクリプト注入が成立"
+          : "× 投入されていない（比較不成立）"
+        : maxLv > 0
+          ? "！ 想定外（注入なしで機械化）"
+          : "省人化なし";
+      console.log(
+        `${p.id.padEnd(30)} | ${maxLv.toFixed(3).padStart(12)} | ${finLv.toFixed(3).padStart(12)} | ${fmt(inv).padStart(13)} | ` +
+          `${(p.forceMechanization ? "はい" : "いいえ").padStart(8)} | ${verdict}`
+      );
+      // 【三宅さん指示A-1】強制投入ケースは投資が実際に起きたことを非ゼロで確認する。
+      // 資金条件で却下されて省人化していないまま比較していたら、その比較は成立しない。
+      if (injected && !(maxLv > 0)) {
+        throw new Error(`注入ケース ${p.id} で省人化が実行されていない（機械化レベル0）。現金付与額または投入turnを見直す必要がある。`);
+      }
+      if (!injected && maxLv > 0) {
+        throw new Error(`省人化なしのはずの ${p.id} で機械化レベルが立っている（${maxLv}）。対照が汚染されている。`);
+      }
+    }
+
     console.log("\n=== 【理論効果】と【実際にPLへ現れた効果】の分離 ===");
     console.log("基準は B（PD中心・省人化なし）。人件費の差＝実際に現れた削減額。");
     console.log("ケース              | 理論削減額(USD) | 常用人件費差(USD) | 臨時人件費差(USD) | 残業費差(USD) | 人件費合計差(USD) | 実現率 | 期末常用人員");
@@ -597,7 +757,10 @@ if (process.argv[1] && process.argv[1].endsWith("pdMechanizationComparison.ts"))
     const ni = (id: CaseId) => avgOf(id, (s) => s.cumulativeNetIncomeUsd);
     console.log(`C（PD中心・適時省人化） − B（PD中心・省人化なし） = ${fmt(ni("C-pd-mech") - ni("B-pd-no-mech"))}`);
     console.log(`D（PD+VAP・適時省人化） − B                       = ${fmt(ni("D-pdvap-mech") - ni("B-pd-no-mech"))}`);
-    console.log(`E（販売見込み無しで省人化） − B                    = ${fmt(ni("E-mech-no-sales") - ni("B-pd-no-mech"))}`);
+    console.log(`E1（販売見込み無し・AI判断） − B                  = ${fmt(ni("E1-no-sales-ai-declines") - ni("B-pd-no-mech"))}`);
+    console.log(`E2（省人化を強制投入） − E2対照（同条件・省人化なし） = ${fmt(ni("E2-no-sales-forced-mech") - ni("E2c-no-sales-control"))}`);
+    console.log(`E3（増産して売れない） − B（PD中心・省人化なし）      = ${fmt(ni("E3-produced-not-sold") - ni("B-pd-no-mech"))}`);
+    console.log(`E3（増産して売れない） − E3対照（同増産・省人化なし） = ${fmt(ni("E3-produced-not-sold") - ni("E3c-produced-not-sold-control"))}`);
     console.log(`B（PD中心） − A（HOSO中心）                        = ${fmt(ni("B-pd-no-mech") - ni("A-hoso-no-mech"))}`);
 
     console.log("\n=== 実現回収期間（人件費合計差ベース） ===");
@@ -692,7 +855,8 @@ if (process.argv[1] && process.argv[1].endsWith("pdMechanizationComparison.ts"))
     console.log("\n=== ケース間の差（累積純利益、シード平均）===");
     console.log(`C（PD中心・適時省人化） − B（PD中心・省人化なし） = ${fmt(byId("C-pd-mech") - byId("B-pd-no-mech"))}`);
     console.log(`D（PD+VAP・適時省人化） − B                       = ${fmt(byId("D-pdvap-mech") - byId("B-pd-no-mech"))}`);
-    console.log(`E（販売見込み無しで省人化） − B                    = ${fmt(byId("E-mech-no-sales") - byId("B-pd-no-mech"))}`);
+    console.log(`E1（販売見込み無し・AI判断） − B                  = ${fmt(byId("E1-no-sales-ai-declines") - byId("B-pd-no-mech"))}`);
+    console.log(`E2（省人化を強制投入） − E2対照（同条件・省人化なし） = ${fmt(byId("E2-no-sales-forced-mech") - byId("E2c-no-sales-control"))}`);
     console.log(`B（PD中心） − A（HOSO中心）                        = ${fmt(byId("B-pd-no-mech") - byId("A-hoso-no-mech"))}`);
 
     if (process.argv.includes("--write")) {
