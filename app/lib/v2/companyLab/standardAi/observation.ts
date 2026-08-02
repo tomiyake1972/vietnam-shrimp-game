@@ -218,5 +218,10 @@ export function buildStandardAiObservation(
 
     // 【SAI-5E】商品別供給圧力の公開統計（前四半期末までのEWMA）。
     productSupplyPressureByProduct: publicInfo.productSupplyPressureOutlook,
+
+    // 【加工品市場進化 §e】営業能力再設計（ownState経由の一本道。前四半期末までの値のみ）。
+    salesCapabilityEnabled: ownState.salesCapabilityEnabled,
+    vapCapabilityScore: ownState.vapCapabilityScore,
+    targetDemandTotalByMarket: ownState.targetDemandTotalByMarket,
   };
 }

@@ -18,6 +18,7 @@
 
 import { HosoEqTons, UsdPerHosoEqKg, hosoEqTons, roundHosoEqTons, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { processingCapacity, salesCoverageScore } from "./salesForce";
+import { computeSalesThroughput, SALES_CAPABILITY_PARAMETERS_V1, SalesCapabilityParameters } from "./salesCapability";
 import { CompetitivenessWeights, SalesParameters } from "./parameters";
 import {
   CompanyAllocationEntry,
@@ -222,6 +223,25 @@ function waterFillAllocate(participants: readonly WaterFillParticipant[], totalB
  * 市場×商品区分ごとの成約配分を計算する。5社の入力配列の順序には一切依存しない
  * （内部でcompanyId順にソートしてから処理する）。
  */
+/**
+ * 【加工品市場進化 §e】個社成約上限に使う「営業処理能力」の求め方を切り替えるための設定。
+ * 省略時は従来どおり processingCapacity(headcount)（＝200 + 4800×h/(h+10)、上限5,000t）。
+ *
+ * 【marketEffort.ts のヘッダにあった「二重適用にならない」証明の置き換え】
+ * 旧実装は「applyMarketSalesEffortCapacity 適用後は coef_p·q_p ≤ Σ ≤ C(h) なので
+ * q_p ≤ C(h)/coef_p ≤ C(h)、よって allocation 側の C(h) 上限は非拘束」という
+ * 散文の証明をコメントで持っていた。§e では能力の求め方が変わるため、この証明は
+ * そのままでは成立しない（新しい処理能力は C(h) より大きくなり得る）。
+ * そこで証明を捨て、上限を **throughputCapacity / coef_product** に置き換えたうえで、
+ * 「エンジンを通した後の配分結果がこの上限で打ち切られていないこと」を
+ * salesCapability.test.ts の SC-8 が**直接アサート**する形にした。
+ */
+export interface AllocationSalesCapabilityOptions {
+  /** 当該市場の対象需要（HOSO換算トン、全商品合計）。市場規模係数に使う。 */
+  readonly marketTargetDemandTons?: number;
+  readonly parameters?: SalesCapabilityParameters;
+}
+
 export function allocateMarketProduct(
   market: DemandMarketId,
   product: Product,
@@ -229,7 +249,8 @@ export function allocateMarketProduct(
   entries: readonly CompanySalesPlanEntry[],
   basePrice: UsdPerHosoEqKg,
   targetDemand: HosoEqTons,
-  params: SalesParameters
+  params: SalesParameters,
+  salesCapability?: AllocationSalesCapabilityOptions
 ): MarketProductAllocationResult {
   const relevant = entries.filter((e) => e.market === market && e.product === product);
   const sorted = [...relevant].sort((a, b) => a.companyId.localeCompare(b.companyId));
@@ -252,7 +273,25 @@ export function allocateMarketProduct(
     const askPrice = usdPerHosoEqKg(rawAskPrice);
 
     const coverage = salesCoverageScore(entry.salesForceHeadcount, params);
-    const capacity = processingCapacity(entry.salesForceHeadcount, params);
+    // 【§e】営業能力再設計が有効なら、個社成約上限に使う処理能力も新しい定義へそろえる。
+    // 商品単独で使い切れる上限は throughputCapacity ÷ 当該商品の工数係数。
+    const capacity = salesCapability
+      ? hosoEqTons(
+          roundHosoEqTons(
+            computeSalesThroughput(
+              {
+                salesForceHeadcount: entry.salesForceHeadcount,
+                vapCapabilityScore: entry.vapCapabilityScore !== undefined ? unwrapUnit(entry.vapCapabilityScore) : undefined,
+                qualityReputation: entry.qualityReputation !== undefined ? unwrapUnit(entry.qualityReputation) : undefined,
+                customerRelationship: entry.customerRelationship !== undefined ? unwrapUnit(entry.customerRelationship) : undefined,
+              },
+              salesCapability.marketTargetDemandTons,
+              params,
+              salesCapability.parameters ?? SALES_CAPABILITY_PARAMETERS_V1
+            ).throughputCapacityTons / Math.max(1e-9, params.salesEffortCoefficients[entry.product])
+          )
+        )
+      : processingCapacity(entry.salesForceHeadcount, params);
     const breakdown = computeCompetitivenessBreakdown(entry, askPrice, basePrice, coverage, params);
     // 【SAI-5 監査指摘A・修正】以前はここで内訳を手書きで5項目だけ合計しており、
     // 公開ヘルパーcomputeCompetitivenessWeight（6項目）と実エンジンの計算が

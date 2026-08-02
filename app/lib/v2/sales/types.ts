@@ -77,6 +77,14 @@ export interface CompanySalesPlanEntry {
    */
   readonly vapCapabilityScore?: Score0to100;
   /**
+   * 【加工品市場進化 §e】この商品の販売優先度（正の実数、既定1.0）。
+   * 営業処理能力が不足したとき、優先度の高い商品ほど工数を優先的に割り当てられる
+   * （sales/salesCapability.ts allocateThroughputByPriority）。全商品が同じ値なら
+   * 従来の一律縮小と完全に一致する。「VAPを守ってHOSOを削る」という会社の意思を
+   * 表現するための唯一の入力。
+   */
+  readonly salesPriority?: number;
+  /**
    * 承認済み取引枠・供給信認枠（外部から供給される任意の個社成約上限）。
    * 将来Phase（与信・取引先管理等）から接続される想定の外部入力で、未指定時は
    * SalesParameters.maximumSupplierShareに基づく上限（targetDemand×shareの下限）を
@@ -277,6 +285,11 @@ export interface SalesQuarterInput {
    * deriveTargetDemand へそのまま渡すだけ（省略時は従来の世界平均構成比按分）。
    */
   readonly processingAdvantage?: ProcessingAdvantageOptions;
+  /**
+   * 【加工品市場進化 §e】営業能力再設計（販売処理能力／顧客開発能力の分離）を有効にする。
+   * 未指定・falseなら従来の「200 + 4800×h/(h+10)」による一律縮小とビット単位で一致。
+   */
+  readonly salesCapabilityEnabled?: boolean;
 }
 
 /** 1四半期分の成約計算・契約生成の記録。 */

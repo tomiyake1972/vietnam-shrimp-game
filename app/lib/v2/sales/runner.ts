@@ -16,6 +16,7 @@ import {
 } from "../market/destinationPricingParameters";
 import { allocateMarketProduct } from "./allocation";
 import { createContractsFromAllocation } from "./contracts";
+import { unwrapUnit } from "../core/units";
 import { deriveTargetDemand, deriveVietnamMarketReferencePrices } from "./marketAdapter";
 import { applyMarketSalesEffortCapacity } from "./marketEffort";
 import { SALES_PARAMETERS_V1, SalesParameters } from "./parameters";
@@ -64,7 +65,18 @@ export function advanceSalesQuarter(
   // 営業工数換算能力の制約を一括で適用する（唯一の適用箇所。allocation.ts側の
   // 既存の行単位capacity上限は、適用後の入力に対して数学的に非拘束となるため、
   // 二重適用にはならない。詳細はsales/marketEffort.tsのコメント参照）。
-  const { adjustedPlans, adjustments: salesEffortAdjustments } = applyMarketSalesEffortCapacity(input.plans, params);
+  // 【加工品市場進化 §e】営業能力再設計が有効な場合は、市場ごとの対象需要
+  // （全商品合計）を市場規模係数の入力として渡す。無効時は従来経路のまま。
+  const targetDemandTotalByMarket = input.salesCapabilityEnabled
+    ? (Object.fromEntries(
+        DEMAND_MARKET_IDS.map((m) => [m, PRODUCTS.reduce((sum, p) => sum + unwrapUnit(targetDemandByMarketProduct[m][p]), 0)])
+      ) as Record<DemandMarketId, number>)
+    : undefined;
+  const { adjustedPlans, adjustments: salesEffortAdjustments } = applyMarketSalesEffortCapacity(
+    input.plans,
+    params,
+    targetDemandTotalByMarket ? { targetDemandByMarket: targetDemandTotalByMarket } : undefined
+  );
 
   const combos: Array<{ market: DemandMarketId; product: Product }> = [];
   for (const market of DEMAND_MARKET_IDS) {
@@ -83,7 +95,8 @@ export function advanceSalesQuarter(
         adjustedPlans,
         marketReferencePrices[market][product],
         targetDemandByMarketProduct[market][product],
-        params
+        params,
+        targetDemandTotalByMarket ? { marketTargetDemandTons: targetDemandTotalByMarket[market] } : undefined
       )
     );
 

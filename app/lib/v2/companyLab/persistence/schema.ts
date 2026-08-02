@@ -1062,12 +1062,14 @@ function validateMarketEvolutionFeatureFlags(raw: unknown, path: string): Market
   );
   const tunedProductLifecycle = optionalBoolean(obj.tunedProductLifecycle, `${path}.tunedProductLifecycle`);
   const productWiseCompetitiveness = optionalBoolean(obj.productWiseCompetitiveness, `${path}.productWiseCompetitiveness`);
+  const salesCapability = optionalBoolean(obj.salesCapability, `${path}.salesCapability`);
   return {
     ...(originProcessingCapacity === undefined ? {} : { originProcessingCapacity }),
     ...(perProductDestinationPricing === undefined ? {} : { perProductDestinationPricing }),
     ...(processingAdvantageDemandCapture === undefined ? {} : { processingAdvantageDemandCapture }),
     ...(tunedProductLifecycle === undefined ? {} : { tunedProductLifecycle }),
     ...(productWiseCompetitiveness === undefined ? {} : { productWiseCompetitiveness }),
+    ...(salesCapability === undefined ? {} : { salesCapability }),
   };
 }
 

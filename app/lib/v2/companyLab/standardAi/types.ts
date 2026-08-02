@@ -133,4 +133,12 @@ export interface StandardAiObservation {
   // --- 【SAI-5E】商品別供給圧力の公開統計（前四半期末までのEWMA） ---
   /** 5社提示量÷対象需要のEWMA（1.0=均衡、>1=供給過剰の持続。SAI-5有効時のみ）。 */
   readonly productSupplyPressureByProduct?: Readonly<Record<"pd" | "vap", number>>;
+
+  // --- 【加工品市場進化 §e】営業能力再設計 ---
+  /** ラボが営業能力再設計を有効にしているか（config.marketEvolution.salesCapability）。 */
+  readonly salesCapabilityEnabled?: boolean;
+  /** 自社のVAP能力合成係数（前四半期末まで。companyLab/premiumPolicy.ts）。 */
+  readonly vapCapabilityScore?: number;
+  /** 市場ごとの対象需要合計（HOSO換算トン、公開の業界統計に相当）。市場規模係数の入力。 */
+  readonly targetDemandTotalByMarket?: Readonly<Partial<Record<DemandMarketId, number>>>;
 }

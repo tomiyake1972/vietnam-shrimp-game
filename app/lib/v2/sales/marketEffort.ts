@@ -32,6 +32,14 @@ import { DemandMarketId, Product } from "../market/types";
 import { HosoEqTons, hosoEqTons, roundHosoEqTons, unwrapUnit } from "../core/units";
 import { SalesParameters } from "./parameters";
 import { processingCapacity } from "./salesForce";
+import {
+  allocateThroughputByPriority,
+  computeSalesThroughput,
+  CustomerDevelopmentInputs,
+  SALES_CAPABILITY_PARAMETERS_V1,
+  SalesCapabilityParameters,
+  SalesThroughputResult,
+} from "./salesCapability";
 import { CompanyId, CompanySalesPlanEntry, SalesValidationError } from "./types";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
@@ -42,17 +50,44 @@ export function salesEffortWeightedQuantity(quantityByProduct: Readonly<Record<P
   return PRODUCTS.reduce((sum, p) => sum + params.salesEffortCoefficients[p] * Math.max(0, quantityByProduct[p]), 0);
 }
 
+/**
+ * 【加工品市場進化 §e】営業能力再設計を有効にするための追加文脈。
+ * 省略時は従来の「200 + 4800×h/(h+10)」による一律縮小（既存挙動とビット単位一致）。
+ *
+ * この文脈オブジェクトは**エンジン（本モジュール）と標準AIのミラー実装
+ * （companyLab/standardAi/decision/sales.ts）の双方が同じものを渡す**ことで、
+ * 「AIが提出する計画」と「エンジン適用後の結果」が食い違わないようにする。
+ */
+export interface MarketSalesCapabilityContext {
+  /** 当該市場の対象需要（HOSO換算トン）。市場規模係数の算出に使う。 */
+  readonly marketTargetDemandTons?: number;
+  /** 顧客開発スコアの入力（VAP能力・品質・顧客関係。未接続は中立50）。 */
+  readonly customerDevelopment?: Omit<CustomerDevelopmentInputs, "salesForceHeadcount">;
+  /** 商品別の販売優先度（既定すべて1.0＝従来の一律縮小と一致）。 */
+  readonly priorityByProduct?: Readonly<Partial<Record<Product, number>>>;
+  readonly parameters?: SalesCapabilityParameters;
+}
+
 export interface MarketSalesEffortResult {
   /** その市場の営業人員から導かれる処理能力（HOSO換算トン、= processingCapacity(headcount)）。 */
   readonly capacityHosoEqTons: number;
   /** 縮小前（希望どおり）の営業工数換算数量。 */
   readonly desiredEffortWeightedQuantity: number;
-  /** 縮小係数（1なら無制約、1未満なら能力超過による比例縮小が発生）。 */
+  /**
+   * 縮小係数（1なら無制約、1未満なら能力超過による縮小が発生）。
+   * 【§e有効時】商品別に異なる縮小率になり得るため、この値は
+   * 「工数換算での全体縮小率（= 能力 ÷ 必要工数、上限1）」を表す代表値になる。
+   * 商品別の実際の縮小率は adjustedQuantityByProduct を参照すること。
+   */
   readonly scaleFactor: number;
   /** 縮小後の商品別希望数量。 */
   readonly adjustedQuantityByProduct: Readonly<Record<Product, number>>;
   /** 能力制約が実際に発動したか。 */
   readonly isConstrained: boolean;
+  /** 【§e有効時のみ】販売処理能力の内訳（人数由来／市場規模／顧客開発の分解）。 */
+  readonly throughput?: SalesThroughputResult;
+  /** 【§e有効時のみ】商品別の縮小率（優先度を反映した結果）。 */
+  readonly scaleByProduct?: Readonly<Record<Product, number>>;
 }
 
 /**
@@ -64,10 +99,22 @@ export interface MarketSalesEffortResult {
 export function computeMarketSalesEffort(
   headcount: number,
   desiredQuantityByProduct: Readonly<Record<Product, number>>,
-  params: SalesParameters
+  params: SalesParameters,
+  capability?: MarketSalesCapabilityContext
 ): MarketSalesEffortResult {
-  const capacityHosoEqTons = unwrapUnit(processingCapacity(headcount, params));
+  // 【§e】必要工数の式は変えない（HOSO 1.0 / PD 1.2 / VAP 3.0）。
+  // 変わるのは「その工数を賄える能力がどう決まるか」だけである。
   const desiredEffortWeightedQuantity = salesEffortWeightedQuantity(desiredQuantityByProduct, params);
+
+  const throughput = capability
+    ? computeSalesThroughput(
+        { salesForceHeadcount: headcount, ...capability.customerDevelopment },
+        capability.marketTargetDemandTons,
+        params,
+        capability.parameters ?? SALES_CAPABILITY_PARAMETERS_V1
+      )
+    : undefined;
+  const capacityHosoEqTons = throughput ? throughput.throughputCapacityTons : unwrapUnit(processingCapacity(headcount, params));
 
   if (desiredEffortWeightedQuantity <= capacityHosoEqTons + EPSILON || desiredEffortWeightedQuantity <= EPSILON) {
     return {
@@ -76,15 +123,43 @@ export function computeMarketSalesEffort(
       scaleFactor: 1,
       adjustedQuantityByProduct: { ...desiredQuantityByProduct },
       isConstrained: false,
+      ...(throughput ? { throughput, scaleByProduct: { hoso: 1, pd: 1, vap: 1 } } : {}),
     };
   }
 
   const scaleFactor = capacityHosoEqTons / desiredEffortWeightedQuantity;
   const adjustedQuantityByProduct: Record<Product, number> = { hoso: 0, pd: 0, vap: 0 };
-  for (const p of PRODUCTS) {
-    adjustedQuantityByProduct[p] = Math.max(0, desiredQuantityByProduct[p]) * scaleFactor;
+
+  if (!throughput) {
+    for (const p of PRODUCTS) {
+      adjustedQuantityByProduct[p] = Math.max(0, desiredQuantityByProduct[p]) * scaleFactor;
+    }
+    return { capacityHosoEqTons, desiredEffortWeightedQuantity, scaleFactor, adjustedQuantityByProduct, isConstrained: true };
   }
-  return { capacityHosoEqTons, desiredEffortWeightedQuantity, scaleFactor, adjustedQuantityByProduct, isConstrained: true };
+
+  // 【§e】商品別優先度を考慮した水位法配分。優先度がすべて等しければ一律縮小と一致する。
+  const requiredEffortByProduct = { hoso: 0, pd: 0, vap: 0 } as Record<Product, number>;
+  for (const p of PRODUCTS) {
+    requiredEffortByProduct[p] = params.salesEffortCoefficients[p] * Math.max(0, desiredQuantityByProduct[p]);
+  }
+  const priorityByProduct = {
+    hoso: capability?.priorityByProduct?.hoso ?? 1,
+    pd: capability?.priorityByProduct?.pd ?? 1,
+    vap: capability?.priorityByProduct?.vap ?? 1,
+  } as Record<Product, number>;
+  const scaleByProduct = allocateThroughputByPriority(requiredEffortByProduct, priorityByProduct, capacityHosoEqTons);
+  for (const p of PRODUCTS) {
+    adjustedQuantityByProduct[p] = Math.max(0, desiredQuantityByProduct[p]) * scaleByProduct[p];
+  }
+  return {
+    capacityHosoEqTons,
+    desiredEffortWeightedQuantity,
+    scaleFactor,
+    adjustedQuantityByProduct,
+    isConstrained: true,
+    throughput,
+    scaleByProduct,
+  };
 }
 
 /**
@@ -151,7 +226,16 @@ export interface MarketSalesEffortAdjustment {
  */
 export function applyMarketSalesEffortCapacity(
   plans: readonly CompanySalesPlanEntry[],
-  params: SalesParameters
+  params: SalesParameters,
+  /**
+   * 【加工品市場進化 §e】営業能力再設計を有効にする場合の追加情報。
+   * 省略時は完全に従来経路（既存挙動とビット単位一致）。
+   */
+  capabilityOptions?: {
+    /** 市場ごとの対象需要（HOSO換算トン、全商品合計）。市場規模係数に使う。 */
+    readonly targetDemandByMarket?: Readonly<Partial<Record<DemandMarketId, number>>>;
+    readonly parameters?: SalesCapabilityParameters;
+  }
 ): { readonly adjustedPlans: readonly CompanySalesPlanEntry[]; readonly adjustments: readonly MarketSalesEffortAdjustment[] } {
   const groupKey = (p: CompanySalesPlanEntry) => `${p.companyId}::${p.market}`;
   const groups = new Map<string, CompanySalesPlanEntry[]>();
@@ -177,7 +261,12 @@ export function applyMarketSalesEffortCapacity(
     const desiredByProduct: Record<Product, number> = { hoso: 0, pd: 0, vap: 0 };
     for (const e of entries) desiredByProduct[e.product] = unwrapUnit(e.desiredQuantity);
 
-    const result = computeMarketSalesEffort(headcount, desiredByProduct, params);
+    const result = computeMarketSalesEffort(
+      headcount,
+      desiredByProduct,
+      params,
+      capabilityOptions ? buildCapabilityContext(entries, capabilityOptions) : undefined
+    );
     if (result.isConstrained) {
       adjustments.push({
         companyId: entries[0].companyId,
@@ -211,4 +300,44 @@ export function applyMarketSalesEffortCapacity(
   const sortedAdjustments = [...adjustments].sort((a, b) => a.companyId.localeCompare(b.companyId) || a.market.localeCompare(b.market));
 
   return { adjustedPlans, adjustments: sortedAdjustments };
+}
+
+
+/**
+ * 【加工品市場進化 §e】1つの会社×市場の販売計画行から、営業能力再設計の文脈を組み立てる。
+ *
+ * 顧客開発スコアの入力は次のように取る（未接続はすべて中立50）。
+ *  - vapCapabilityScore: VAP行に注入されている会社レベルのVAP能力合成係数
+ *    （companyLab/runner.ts applyAuthoritativeVapCapabilityScores）。VAP行が無ければ未接続。
+ *  - qualityReputation / customerRelationship: 同一市場の行の最大値
+ *    （商品ごとに異なり得るが、顧客開発は市場単位の概念のため代表値を取る）。
+ *  - salesPriority: 各行の販売優先度（未指定は1.0）。
+ */
+function buildCapabilityContext(
+  entries: readonly CompanySalesPlanEntry[],
+  options: {
+    readonly targetDemandByMarket?: Readonly<Partial<Record<DemandMarketId, number>>>;
+    readonly parameters?: SalesCapabilityParameters;
+  }
+): MarketSalesCapabilityContext {
+  const market = entries[0].market;
+  const vapEntry = entries.find((e) => e.product === "vap");
+  const maxOf = (pick: (e: CompanySalesPlanEntry) => number | undefined): number | undefined => {
+    const values = entries.map(pick).filter((v): v is number => v !== undefined);
+    return values.length > 0 ? Math.max(...values) : undefined;
+  };
+  const priorityByProduct: Partial<Record<Product, number>> = {};
+  for (const e of entries) {
+    if (e.salesPriority !== undefined) priorityByProduct[e.product] = e.salesPriority;
+  }
+  return {
+    marketTargetDemandTons: options.targetDemandByMarket?.[market],
+    customerDevelopment: {
+      vapCapabilityScore: vapEntry?.vapCapabilityScore !== undefined ? unwrapUnit(vapEntry.vapCapabilityScore) : undefined,
+      qualityReputation: maxOf((e) => (e.qualityReputation !== undefined ? unwrapUnit(e.qualityReputation) : undefined)),
+      customerRelationship: maxOf((e) => (e.customerRelationship !== undefined ? unwrapUnit(e.customerRelationship) : undefined)),
+    },
+    priorityByProduct,
+    ...(options.parameters ? { parameters: options.parameters } : {}),
+  };
 }

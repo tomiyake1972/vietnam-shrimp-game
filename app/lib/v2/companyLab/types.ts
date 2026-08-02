@@ -246,6 +246,23 @@ export interface CompanyOwnState {
    */
   readonly salesBaseCompetitivenessWeight?: number;
   /**
+   * 【加工品市場進化 §e】前四半期末までの自社のVAP能力合成係数（0〜100、
+   * companyLab/premiumPolicy.ts calculateCompanyCapabilityCoefficient）。
+   * 顧客開発能力の主要因であり、標準AIが「商品開発投資と営業活動の相乗効果」を
+   * 判断するために公開する。常に存在する（未接続入力は中立50で合成される）。
+   */
+  readonly vapCapabilityScore?: number;
+  /**
+   * 【加工品市場進化 §e】ラボが営業能力再設計を有効にしているか。
+   * 標準AIがエンジンと同じ縮小計算を再現するために必要。
+   */
+  readonly salesCapabilityEnabled?: boolean;
+  /**
+   * 【加工品市場進化 §e】前四半期の市場別対象需要合計（HOSO換算トン）。
+   * 公開の業界統計に相当し、市場規模係数の入力になる。turn1では未設定。
+   */
+  readonly targetDemandTotalByMarket?: Readonly<Partial<Record<DemandMarketId, number>>>;
+  /**
    * 【Test15新設】前四半期末までの自社工場ごとのPD稼働率（pdMechanizationState.ts
    * findPreviousQuarterPdUtilizationと同じ値。エントリが無い工場は既定値
    * （PD_MECHANIZATION_PARAMETERS_V1.initialPdUtilizationRatio）とみなす）。
@@ -535,6 +552,12 @@ export interface MarketEvolutionFeatureFlags {
    * VAP能力が主因となり会社間の実現価格ばらつきが大きくなる。
    */
   readonly productWiseCompetitiveness?: boolean;
+  /**
+   * 営業能力の再設計（sales/salesCapability.ts）。販売処理能力（人数に線形・
+   * 市場規模に比例）と顧客開発能力（人数に逓減・VAP商品開発／品質／顧客関係で
+   * 底上げ）を分離し、後者が前者へ乗算で効く。商品別販売優先度も有効になる。
+   */
+  readonly salesCapability?: boolean;
 }
 
 export interface CompanyLabConfig {

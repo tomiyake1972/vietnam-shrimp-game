@@ -491,6 +491,33 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // 【監査指摘G】営業基盤が当期の成約へ実際にどれだけ効くか（ウェイト）。
     // 機能OFFなら0＝「基盤の高低は成約に一切影響しない」ことが判断側から分かる。
     salesBaseCompetitivenessWeight: salesParametersFor(state.config).competitivenessWeights.salesBase,
+    // 【加工品市場進化 §e】自社のVAP能力合成係数（前四半期末まで）と、
+    // 営業能力再設計の有効/無効、前四半期の市場別対象需要合計。
+    vapCapabilityScore: calculateCompanyCapabilityCoefficient({
+      productDevelopmentScore: score0to100(lookupProductDevelopmentScore(state.productDevelopmentState, fixture.companyId)),
+      salesBaseScore: score0to100(
+        DEMAND_MARKET_IDS.reduce((sum, m) => sum + lookupSalesBaseScore(state.salesBaseState, fixture.companyId, m, "vap"), 0) /
+          Math.max(1, DEMAND_MARKET_IDS.length)
+      ),
+      qualityScore: qualityScoreByProduct.vap,
+      deliveryReliabilityScore: (() => {
+        const values = DEMAND_MARKET_IDS.map((m) => deliveryReliabilityByMarket[m]).filter((v): v is Score0to100 => v !== undefined);
+        return values.length > 0 ? score0to100(values.reduce((s2, v) => s2 + unwrapUnit(v), 0) / values.length) : undefined;
+      })(),
+    }),
+    ...(state.config.marketEvolution?.salesCapability ? { salesCapabilityEnabled: true } : {}),
+    ...(lastRecord?.salesRecord
+      ? {
+          targetDemandTotalByMarket: Object.fromEntries(
+            DEMAND_MARKET_IDS.map((m) => [
+              m,
+              lastRecord.salesRecord.allocations
+                .filter((a) => a.market === m)
+                .reduce((sum, a) => sum + unwrapUnit(a.targetDemand), 0),
+            ])
+          ) as Readonly<Partial<Record<DemandMarketId, number>>>,
+        }
+      : {}),
     // 【Test15新設・develop/v2統合（Required fix 2）】前四半期末までの自社工場
     // ごとのPD稼働率（実効Factory[]、＝稼働開始済みの新設Factoryを含む一覧を
     // 基準にする。fixture.factoriesのままだと新設FactoryのPD省人化投資対象
@@ -1144,6 +1171,8 @@ export function advanceCompanyLabQuarter(
     ...(state.config.marketEvolution?.processingAdvantageDemandCapture
       ? { processingAdvantage: PROCESSING_ADVANTAGE_OPTIONS_V1 }
       : {}),
+    // 【加工品市場進化 §e】営業能力再設計（opt-in）。
+    ...(state.config.marketEvolution?.salesCapability ? { salesCapabilityEnabled: true } : {}),
     parameters: {
       destinationMarketPricing: destinationMarketPricingForThisQuarter,
       // 【SAI-5D】営業基盤ウェイト有効化版のSalesParameters（合計1.0を保った

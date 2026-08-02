@@ -13,11 +13,12 @@
 //     参照価格が高い市場を優先する（pressures.tsのmarketPriceRanking、
 //     公開情報だけで完結する規則）。
 
-import { hosoEqTons } from "../../../core/units";
+import { hosoEqTons, unwrapUnit } from "../../../core/units";
 import { DemandMarketId, Product } from "../../../market/types";
 import { CompanySalesPlanEntry, PlanCostExpectation } from "../../../sales/types";
 import { SalesParameters, SALES_PARAMETERS_V1 } from "../../../sales/parameters";
 import { allocateHeadcountAcrossMarkets, computeMarketSalesEffort, salesEffortWeightedQuantity } from "../../../sales/marketEffort";
+import type { MarketSalesCapabilityContext } from "../../../sales/marketEffort";
 import { minimumAcceptablePremium, orderQuantityFactor } from "../../premiumPolicy";
 import { CompanyFixture } from "../../types";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
@@ -350,7 +351,15 @@ export function buildStandardAiSalesPlans(
   const adjustedByMarketProduct = new Map<DemandMarketId, Record<Product, number>>();
   for (const market of marketsWithDemand) {
     const headcount = headcountByMarket.get(market) ?? 0;
-    const result = computeMarketSalesEffort(headcount, desiredByMarketProduct.get(market)!, salesParams);
+    // 【加工品市場進化 §e・SAI-6.2再突合ポイント3/4】エンジン側
+    // （sales/marketEffort.ts applyMarketSalesEffortCapacity）と**同一の関数・
+    // 同一の文脈**で縮小を再現する。文脈を渡さない場合は従来の一律縮小のまま。
+    const result = computeMarketSalesEffort(
+      headcount,
+      desiredByMarketProduct.get(market)!,
+      salesParams,
+      salesCapabilityContextFor(market, observation)
+    );
     adjustedByMarketProduct.set(market, result.adjustedQuantityByProduct as Record<Product, number>);
     if (result.isConstrained) {
       constrainedMarkets.push({ market, headcount, result });
@@ -466,4 +475,29 @@ export function buildStandardAiSalesPlans(
     }
   }
   return { salesPlans: plans, desiredByProduct, salesWishByMarketProduct, diagnostics };
+}
+
+
+/**
+ * 【加工品市場進化 §e】標準AIがエンジンと同じ営業能力モデルを再現するための文脈。
+ *
+ * observation.salesCapabilityEnabled が立っていない（＝ラボが §e をONにしていない）
+ * 場合は undefined を返し、従来の一律縮小の計算がそのまま使われる。
+ *
+ * 顧客開発スコアの入力は、AIが観測できる自社の前四半期末までの実績のみを使う
+ * （自己申告値の採用禁止という既存規約に従う）。
+ */
+function salesCapabilityContextFor(
+  market: DemandMarketId,
+  observation: StandardAiObservation
+): MarketSalesCapabilityContext | undefined {
+  if (!observation.salesCapabilityEnabled) return undefined;
+  const vapCapabilityScore = observation.vapCapabilityScore;
+  const qualityReputation = observation.qualityScoreByProduct.vap !== undefined ? unwrapUnit(observation.qualityScoreByProduct.vap) : undefined;
+  const customerRelationship =
+    observation.customerTrustByMarket[market] !== undefined ? unwrapUnit(observation.customerTrustByMarket[market]!) : undefined;
+  return {
+    marketTargetDemandTons: observation.targetDemandTotalByMarket?.[market],
+    customerDevelopment: { vapCapabilityScore, qualityReputation, customerRelationship },
+  };
 }

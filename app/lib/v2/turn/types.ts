@@ -151,6 +151,8 @@ export interface TurnOrchestratorInput {
    * sales/types.ts の SalesQuarterInput.processingAdvantage へそのまま渡すだけ。
    */
   readonly processingAdvantage?: ProcessingAdvantageOptions;
+  /** 【加工品市場進化 §e】営業能力再設計を有効にする（sales/types.ts へそのまま渡す）。 */
+  readonly salesCapabilityEnabled?: boolean;
 
   /**
    * 決定論的乱数のシード（Phase1のHOSO価格ショック等に使う）。同じseed・同じ
