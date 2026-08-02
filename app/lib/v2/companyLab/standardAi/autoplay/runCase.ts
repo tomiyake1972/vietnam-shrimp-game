@@ -27,6 +27,12 @@ export interface AutoplayCaseConfig {
   readonly quarters: number;
   readonly companyIds: readonly CompanyId[];
   readonly candidate: StandardBaselineCandidate;
+  /**
+   * 【加工品市場進化】config.marketEvolution 一式を有効にする（既定OFF）。
+   * 有効時は sai5.productLifecycle / supplyPremiumFeedback も併せて必要なため、
+   * 呼び出し側でそれらも true にすること。
+   */
+  readonly marketEvolutionEnabled?: boolean;
   /** 標準候補の営業人数を上書きする場合の値(未指定なら候補既定値のまま)。
    *  SAI-2の80/85/90人比較や、将来のheadcount感度分析をスクリプト固有処理に
    *  せず、この実行基盤から直接指定できるようにする。 */
@@ -135,6 +141,18 @@ export function runAutoplayCase(config: AutoplayCaseConfig): AutoplayCaseResult 
               salesBaseAccumulation: Boolean(config.salesBaseAccumulationEnabled),
               supplyPremiumFeedback: Boolean(config.supplyPremiumFeedbackEnabled),
               ...(config.supplyPressureDefinition ? { supplyPressureDefinition: config.supplyPressureDefinition } : {}),
+            },
+          }
+        : {}),
+      ...(config.marketEvolutionEnabled
+        ? {
+            marketEvolution: {
+              originProcessingCapacity: true,
+              tunedProductLifecycle: true,
+              perProductDestinationPricing: true,
+              processingAdvantageDemandCapture: true,
+              productWiseCompetitiveness: true,
+              salesCapability: true,
             },
           }
         : {}),

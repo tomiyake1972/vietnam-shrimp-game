@@ -52,7 +52,15 @@ export type StandardAiReasonCode =
   | "CAPEX_RESUME_PROPOSED" // 資金回復により中断中の設備投資案件の再開を提案
   | "VAP_GROWTH_ENTRY" // VAP需要の成長局面を捉えるためVAP能力・販売へ参入
   | "VAP_OVERSUPPLY_RETREAT" // VAP供給過剰局面のためVAP拡大を抑制
-  | "PD_CAPACITY_MAINTAINED"; // PD能力の維持を選択（VAP転換へ追随しない）
+  | "PD_CAPACITY_MAINTAINED" // PD能力の維持を選択（VAP転換へ追随しない）
+  // --- 【加工品市場進化 §h】市場認識と投資タイミング判断 ---
+  | "MARKET_OUTLOOK_PERCEIVED" // 予測需要・供給圧力・現金余力からなる市場見通しを認識
+  | "NEW_FACTORY_PROPOSED_FOR_FORECAST_DEMAND" // 予測需要に対する能力不足を見越して新工場建設を提案
+  | "NEW_FACTORY_DEFERRED" // 予測需要は能力超だが稼働率・現金条件を満たさず新工場を見送り
+  | "PD_MECHANIZATION_PROPOSED_FOR_PAYBACK" // 期待回収が許容期間内のためPD省人化投資を提案
+  | "PD_MECHANIZATION_DEFERRED" // 稼働率・回収・現金のいずれかを満たさずPD省人化を見送り
+  | "VAP_DEVELOPMENT_INVESTED_FOR_GROWTH" // VAP需要成長を捉えて商品開発へ投資
+  | "VAP_DEVELOPMENT_DEFERRED_FOR_CASH"; // 現金安全水準を割るためVAP商品開発投資を見送り
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -85,6 +93,13 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "VAP_GROWTH_ENTRY",
   "VAP_OVERSUPPLY_RETREAT",
   "PD_CAPACITY_MAINTAINED",
+  "MARKET_OUTLOOK_PERCEIVED",
+  "NEW_FACTORY_PROPOSED_FOR_FORECAST_DEMAND",
+  "NEW_FACTORY_DEFERRED",
+  "PD_MECHANIZATION_PROPOSED_FOR_PAYBACK",
+  "PD_MECHANIZATION_DEFERRED",
+  "VAP_DEVELOPMENT_INVESTED_FOR_GROWTH",
+  "VAP_DEVELOPMENT_DEFERRED_FOR_CASH",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

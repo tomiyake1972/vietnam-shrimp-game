@@ -29,6 +29,8 @@ import { buildStandardAiProcurementPlan } from "./decision/procurement";
 import { buildStandardAiWorkerAssignments } from "./decision/labor";
 import { buildStandardAiFinancingRequest } from "./decision/finance";
 import { buildStandardAiCapexDecision } from "./decision/capex";
+import { decideMarketEvolutionInvestments } from "./decision/marketEvolutionInvestment";
+import { resolveOrientationProfile } from "./orientationProfile";
 import { sumProductAmount } from "./types";
 import { StandardAiDiagnosticEntry } from "./reasonCodes";
 import { SalesWishEntry } from "./decision/sales";
@@ -122,6 +124,21 @@ export function generateStandardAiDecisionWithDiagnostics(
     params
   );
 
+  // 【加工品市場進化 §h】市場見通しに基づく投資タイミング判断（opt-in）。
+  // observation.salesCapabilityEnabled ではなく、ライフサイクル観測が存在するか
+  // （＝市場進化系の機能が有効なラボか）で判定する。観測が無ければ完全に無効で、
+  // 既存ラボの意思決定はビット単位で一致する。
+  const marketEvolutionActive = observation.lifecycleTrendByMarket !== undefined;
+  const marketEvolutionResult = marketEvolutionActive
+    ? decideMarketEvolutionInvestments(
+        fixture,
+        observation,
+        pressures,
+        resolveOrientationProfile(fixture.companyId),
+        new Set(capexResult.capexDecision.newProjectProposals.map((p) => p.projectType))
+      )
+    : undefined;
+
   const decision: CompanyDecisionInput = {
     companyId: fixture.companyId,
     salesPlans: salesResult.salesPlans,
@@ -131,7 +148,15 @@ export function generateStandardAiDecisionWithDiagnostics(
     productionPlans: productionResult.productionPlans,
     workerAssignments: laborResult.workerAssignments,
     financingRequest: financingResult.financingRequest,
-    capexDecision: capexResult.capexDecision,
+    capexDecision: marketEvolutionResult
+      ? {
+          ...capexResult.capexDecision,
+          newProjectProposals: [...capexResult.capexDecision.newProjectProposals, ...marketEvolutionResult.proposals],
+        }
+      : capexResult.capexDecision,
+    ...(marketEvolutionResult && marketEvolutionResult.vapProductDevelopmentSpendUsd > 0
+      ? { vapProductDevelopmentSpendUsd: marketEvolutionResult.vapProductDevelopmentSpendUsd }
+      : {}),
   };
 
   const entries: StandardAiDiagnosticEntry[] = [
@@ -141,6 +166,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...laborResult.diagnostics,
     ...financingResult.diagnostics,
     ...capexResult.diagnostics,
+    ...(marketEvolutionResult ? marketEvolutionResult.diagnostics : []),
   ];
 
   return {
