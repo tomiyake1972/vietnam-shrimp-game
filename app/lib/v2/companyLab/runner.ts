@@ -163,7 +163,7 @@ import {
 } from "./salesForceHiring";
 import {
   buildInitialPdMechanizationState,
-  buildPdCoefficientOverridesByFactory,
+  buildMechanizationLevelsByFactory,
   computeCurrentQuarterPdUtilizationByFactory,
   deriveNextPdMechanizationState,
   findPreviousQuarterPdUtilization,
@@ -1215,13 +1215,13 @@ export function advanceCompanyLabQuarter(
   // までのPD稼働率」（state.pdMechanizationState）と「前四半期末までのcapex状態」
   // （state.capexState、上のfactoriesWithCapex算出と同じ基準）から算出する。
   // 当期の生産実績を当期の効果算出へ遡及させない（先読み禁止）。
-  const pdCoefficientOverrideByFactoryId = buildPdCoefficientOverridesByFactory(state.capexState, state.pdMechanizationState, state.currentPeriod);
+  const mechanizationLevelByFactoryId = buildMechanizationLevelsByFactory(state.capexState, state.pdMechanizationState, state.currentPeriod);
   const productionInput: ProductionQuarterInput = {
     factories: factoriesWithCapex,
     workerAssignments: decisions.flatMap((d) => d.workerAssignments),
     plans: decisions.flatMap((d) => d.productionPlans),
     companyCountry,
-    pdCoefficientOverrideByFactoryId,
+    mechanizationLevelByFactoryId,
   };
   const { state: productionStateAfter, updatedRawMaterialLots } = advanceProductionQuarter(
     state.productionState,

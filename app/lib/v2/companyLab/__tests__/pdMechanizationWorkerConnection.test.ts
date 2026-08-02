@@ -14,21 +14,22 @@ import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
 
 const SKILL = { hoso: 0.8, pd: 0.8, vap: 0.8 };
 
-function requiredFor(pdQuantity: number, pdCoefficientOverride?: number): number {
+function requiredFor(pdQuantity: number, mechanizationLevel?: number): number {
   return computeRequiredRegularHeadcount({
     quantityByProduct: { hoso: 0, pd: pdQuantity, vap: 0 },
     skillByProduct: SKILL,
     attendanceRate: 0.95,
     appliedOvertimeRate: 0,
     temporaryHeadcount: 0,
-    ...(pdCoefficientOverride === undefined ? {} : { pdCoefficientOverride }),
+    ...(mechanizationLevel === undefined ? {} : { mechanizationLevel }),
   }).requiredRegularHeadcount;
 }
 
-test("PMW-1: 既定ではPD労働集約度係数1.2が使われる（後方互換の基準点）", () => {
-  assert.equal(PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.pd, 1.2);
+test("PMW-1: 既定（未機械化）ではPD労働集約度係数1.8が使われる", () => {
+  assert.equal(PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.pd, 1.8);
+  assert.equal(PRODUCTION_PARAMETERS_V1.labor.mechanizedLaborIntensityCoefficient.pd, 1.2);
   // 明示的に既定値を渡した場合と、渡さない場合が一致する。
-  assert.ok(Math.abs(requiredFor(1000) - requiredFor(1000, 1.2)) < 1e-9);
+  assert.ok(Math.abs(requiredFor(1000) - requiredFor(1000, 0)) < 1e-9);
 });
 
 test("PMW-2: 【接続の中核】省人化で実効PD係数が下がると、必要常用人員が実際に減る", () => {
@@ -58,24 +59,40 @@ test("PMW-3: 機械化レベルが進むほど必要人員が単調に減る", (
   }
 });
 
-test("PMW-4: 省人化はPDのみに効き、HOSO/VAPの必要人員は変わらない", () => {
-  const coefficient = computeEffectivePdCoefficient(1.0, PD_MECHANIZATION_PARAMETERS_V1);
-  const withOverride = computeRequiredRegularHeadcount({
-    quantityByProduct: { hoso: 1000, pd: 0, vap: 1000 },
+test("PMW-4: 省人化はHOSOに一切効かず、VAPには部分的にのみ効く", () => {
+  const base = {
     skillByProduct: SKILL,
     attendanceRate: 0.95,
     appliedOvertimeRate: 0,
     temporaryHeadcount: 0,
-    pdCoefficientOverride: coefficient,
-  });
-  const withoutOverride = computeRequiredRegularHeadcount({
-    quantityByProduct: { hoso: 1000, pd: 0, vap: 1000 },
-    skillByProduct: SKILL,
-    attendanceRate: 0.95,
-    appliedOvertimeRate: 0,
-    temporaryHeadcount: 0,
-  });
-  assert.equal(withOverride.requiredRegularHeadcount, withoutOverride.requiredRegularHeadcount);
+  };
+  // HOSO: 機械化前後とも係数1.0のため、必要人員は完全に不変。
+  const hosoBefore = computeRequiredRegularHeadcount({ ...base, quantityByProduct: { hoso: 1000, pd: 0, vap: 0 } }).requiredRegularHeadcount;
+  const hosoAfter = computeRequiredRegularHeadcount({
+    ...base,
+    quantityByProduct: { hoso: 1000, pd: 0, vap: 0 },
+    mechanizationLevel: 1.0,
+  }).requiredRegularHeadcount;
+  assert.equal(hosoAfter, hosoBefore, "HOSOは殻剥き工程が無いため機械化の影響を受けない");
+
+  // VAP: 前工程の殻剥きを共通化するぶんだけ部分的に減る（3.0 → 2.6 = 13.3%減）。
+  const vapBefore = computeRequiredRegularHeadcount({ ...base, quantityByProduct: { hoso: 0, pd: 0, vap: 1000 } }).requiredRegularHeadcount;
+  const vapAfter = computeRequiredRegularHeadcount({
+    ...base,
+    quantityByProduct: { hoso: 0, pd: 0, vap: 1000 },
+    mechanizationLevel: 1.0,
+  }).requiredRegularHeadcount;
+  assert.ok(vapAfter < vapBefore, "VAPは部分的に省人化される");
+  assert.ok(Math.abs(vapAfter / vapBefore - 2.6 / 3.0) < 1e-9, `VAPの削減率は係数比そのもの（実測 ${vapAfter / vapBefore}）`);
+
+  // PDの削減率のほうがVAPより大きい。
+  const pdBefore = computeRequiredRegularHeadcount({ ...base, quantityByProduct: { hoso: 0, pd: 1000, vap: 0 } }).requiredRegularHeadcount;
+  const pdAfter = computeRequiredRegularHeadcount({
+    ...base,
+    quantityByProduct: { hoso: 0, pd: 1000, vap: 0 },
+    mechanizationLevel: 1.0,
+  }).requiredRegularHeadcount;
+  assert.ok(pdAfter / pdBefore < vapAfter / vapBefore, "PDの削減率はVAPより大きい");
 });
 
 test("PMW-5: 【人員過剰判定への接続】省人化後の必要人員は、標準AIの人員過剰しきい値を実際に割り込む", () => {

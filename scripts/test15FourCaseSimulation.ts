@@ -39,7 +39,7 @@
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../app/lib/v2/companyLab/runner";
 import { generateAutoPolicyDecision } from "../app/lib/v2/companyLab/autoPolicy";
 import { CompanyDecisionInput, CompanyLabState, CompanyQuarterRecord } from "../app/lib/v2/companyLab/types";
-import { buildPdCoefficientOverridesByFactory } from "../app/lib/v2/companyLab/pdMechanizationState";
+import { buildMechanizationLevelsByFactory } from "../app/lib/v2/companyLab/pdMechanizationState";
 import { findFactoryRegularHeadcount } from "../app/lib/v2/companyLab/workforce";
 import { computeEffectiveFactories } from "../app/lib/v2/capex/factoryConstruction";
 import { CompanyId } from "../app/lib/v2/sales/types";
@@ -285,11 +285,11 @@ export function runFourCaseSimulationCase(input: FourCaseSimulationInput): FourC
     // stateから算出できるもの（当四半期に実際に適用された実効Factory[]・実効PD係数、
     // いずれもrunner.ts本体の§Phase6生産処理と全く同じ関数・同じ入力）は、advanceの
     // 直前に確定させておく（runner.ts 1108-1119行目と同一のcomputeEffectiveFactories・
-    // buildPdCoefficientOverridesByFactory呼び出しであり、別の計算経路を作らない）。
+    // buildMechanizationLevelsByFactory呼び出しであり、別の計算経路を作らない）。
     const balDecisionForQuarter = decisions[FOCUS_COMPANY_ID];
     const baseFactoriesForQuarter = fixtures.flatMap((f) => f.factories);
     const effectiveFactoriesForQuarter = computeEffectiveFactories(baseFactoriesForQuarter, state.capexState, state.currentPeriod);
-    const pdCoefficientOverrideByFactoryIdForQuarter = buildPdCoefficientOverridesByFactory(
+    const mechanizationLevelByFactoryIdForQuarter = buildMechanizationLevelsByFactory(
       state.capexState,
       state.pdMechanizationState,
       state.currentPeriod
@@ -322,12 +322,14 @@ export function runFourCaseSimulationCase(input: FourCaseSimulationInput): FourC
     const targetFactoryWorkerAssignment = balDecisionForQuarter.workerAssignments.find((w) => w.factoryId === targetFactoryId);
     const targetFactoryPdSkillEntry = targetFactoryWorkerAssignment?.skills.find((s) => s.product === "pd");
     const targetFactoryPdSkillLevel = targetFactoryPdSkillEntry ? unwrapUnit(targetFactoryPdSkillEntry.skillLevel) : 0;
-    const targetFactoryPdCoefficientForQuarter = pdCoefficientOverrideByFactoryIdForQuarter.get(targetFactoryId);
+    // 【正典経路】機械化レベルをそのまま渡す（実効係数への写像は
+    // production/labor.ts の resolveLaborIntensityCoefficient が唯一行う）。
+    const targetFactoryMechanizationLevelForQuarter = mechanizationLevelByFactoryIdForQuarter.get(targetFactoryId) ?? 0;
     const targetFactoryPdEffectiveEfficiencyPerHead = effectiveEfficiencyPerHeadTons(
       PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons,
       "pd",
       PRODUCTION_PARAMETERS_V1,
-      targetFactoryPdCoefficientForQuarter
+      targetFactoryMechanizationLevelForQuarter
     );
     const targetFactoryPdRequiredWorkers =
       targetFactoryWorkerAssignment && targetFactoryPdPlannedQuantityTons > 0

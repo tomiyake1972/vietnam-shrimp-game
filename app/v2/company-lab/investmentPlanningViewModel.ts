@@ -28,6 +28,7 @@ import { RawMaterialLot } from "../../lib/v2/rawMaterials/types";
 import { CompanyProductionPlanEntry, Factory, FinishedGoodsLot, WorkerAssignment } from "../../lib/v2/production/types";
 import { PRODUCTION_PARAMETERS_V1 } from "../../lib/v2/production/parameters";
 import { calculateLaborCapacityFromAssignedHeadcount } from "../../lib/v2/production/labor";
+import { buildMechanizationLevelsByFactory, PdMechanizationState } from "../../lib/v2/companyLab/pdMechanizationState";
 import {
   buildCompanyColdStorageState,
   CompanyColdStorageState,
@@ -402,6 +403,12 @@ export interface BuildCompanyInvestmentPlanningInput {
   readonly workerAssignments: readonly WorkerAssignment[];
   /** 各工場の前期末Worker総人数（増減差分の表示に使う）。 */
   readonly workforceState?: CompanyWorkforceState;
+  /**
+   * 【PD省人化・唯一の正典経路】前四半期末までの工場別PD稼働率
+   * （CompanyOwnState.pdUtilizationByFactory 由来）。処理見込み・必要人員の
+   * 見積りへ機械化レベルを反映するために使う。省略時は未機械化として扱う。
+   */
+  readonly pdMechanizationState?: PdMechanizationState;
   readonly rawMaterialLots: readonly RawMaterialLot[];
   readonly finishedGoodsLots: readonly FinishedGoodsLot[];
   /** 直近確定四半期の財務結果（投資回収の限界利益に使う）。無ければ回収年数は算定対象外。 */
@@ -491,12 +498,22 @@ export function buildCompanyInvestmentPlanningViewModel(
   // 新設工場が漏れてしまう）。
   const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period);
 
+  // 【PD省人化・唯一の正典経路】この会社の工場ごとの機械化レベル。
+  // 処理見込みにも必要人員の見積りにも同じ値を渡し、画面だけが機械化前の
+  // 数値になる食い違いを構造的に防ぐ（同種の取りこぼしを過去に2件検出している）。
+  const mechanizationLevelByFactoryId = buildMechanizationLevelsByFactory(
+    input.capexState,
+    input.pdMechanizationState,
+    input.period
+  );
+
   // --- 現在の処理見込み（生産エンジンの出力そのもの） ---
   const forecast = buildCompanyProcessingForecast({
     companyId: input.companyId,
     baseFactories: companyBase,
     capexState: input.capexState,
     period: input.period,
+    mechanizationLevelByFactoryId,
     productionPlans: input.productionPlans,
     workerAssignments: input.workerAssignments,
     rawMaterialLots: input.rawMaterialLots,
@@ -680,6 +697,7 @@ export function buildCompanyInvestmentPlanningViewModel(
         baseFactories: hypotheticalFactories,
         capexState: { companies: [] },
         period: input.period,
+        mechanizationLevelByFactoryId,
         productionPlans: input.productionPlans,
         workerAssignments: input.workerAssignments,
         rawMaterialLots: input.rawMaterialLots,

@@ -198,8 +198,11 @@ export interface RequiredHeadcountInput {
   readonly temporaryHeadcount: number;
   readonly params?: ProductionParameters;
   /**
-   * 【Test15 PD省人化投資の接続】この工場の実効PD労働集約度係数
-   * （companyLab/pdMechanizationState.ts buildPdCoefficientOverridesByFactory）。
+   * 【PD省人化投資の接続】この工場の機械化レベル（0〜1、
+   * companyLab/pdMechanizationState.ts buildMechanizationLevelsByFactory）。
+   * 商品別にどれだけ効くかは production/labor.ts の
+   * resolveLaborIntensityCoefficient が一元的に決める（HOSOは不変・PDが最大・
+   * VAPは前工程の殻剥き共通化ぶんだけ部分的）。
    *
    * 【なぜ必要か】これを渡さないと、省人化投資で実際の必要人員が減っても
    * 「必要人数」の見積りは既定係数(1.2)のまま変わらないため、判断側の
@@ -208,7 +211,7 @@ export interface RequiredHeadcountInput {
    * 回収不能**になる（Phase5の損益分岐分析で観測した現象の機構）。
    * 省略時は既定係数（＝従来挙動）。
    */
-  readonly pdCoefficientOverride?: number;
+  readonly mechanizationLevel?: number;
 }
 
 export interface RequiredHeadcountResult {
@@ -248,7 +251,7 @@ export function computeRequiredRegularHeadcount(input: RequiredHeadcountInput): 
       params.labor.regularEfficiencyPerHeadTons,
       product,
       params,
-      product === "pd" ? input.pdCoefficientOverride : undefined
+      input.mechanizationLevel ?? 0
     );
     const required = requiredHeadcountForQuantity(
       quantity,

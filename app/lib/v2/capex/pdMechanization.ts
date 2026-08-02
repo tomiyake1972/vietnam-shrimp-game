@@ -26,7 +26,8 @@
 //   companyLab/pdMechanizationState.ts が明示的に保存・繰り越す（遡及導出しない）。
 
 import { Product } from "../market/types";
-import { PRODUCTION_PARAMETERS_V1 } from "../production/parameters";
+import { resolveLaborIntensityCoefficient } from "../production/labor";
+import { PRODUCTION_PARAMETERS_V1, ProductionParameters } from "../production/parameters";
 
 export interface PdMechanizationParameters {
   readonly parametersVersion: string;
@@ -48,8 +49,16 @@ export interface PdMechanizationParameters {
 
 export const PD_MECHANIZATION_PARAMETERS_V1: PdMechanizationParameters = {
   parametersVersion: "pdMechanization-v0.1",
+  // 【正典の一元化】機械化前後のPD係数は、いずれも production/parameters.ts の
+  // 商品別テーブルから導出する。ここに独立した数値を持たない。
+  //   baseCoefficient  = laborIntensityCoefficient.pd            （機械化前 1.8）
+  //   floorCoefficient = mechanizedLaborIntensityCoefficient.pd  （機械化後 1.2）
+  // 【変更履歴】従来 floorCoefficient は laborIntensityCoefficient.hoso（1.0）を
+  // 指しており、「PDはHOSOと同じ手間まで下がりうる」という別の想定を暗黙に
+  // 持っていた。商品別の到達係数テーブルを導入したことで、この推定は不要になり、
+  // 最大削減率も 16.67%（1.2→1.0）から 33.3%（1.8→1.2）へ変わる。
   baseCoefficient: PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.pd,
-  floorCoefficient: PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.hoso,
+  floorCoefficient: PRODUCTION_PARAMETERS_V1.labor.mechanizedLaborIntensityCoefficient.pd,
   adoptionRampQuarters: 2,
   initialPdUtilizationRatio: 0.0,
   utilizationEpsilon: 1e-6,
@@ -103,11 +112,25 @@ export function computeMechanizationLevel(adoptionRampProgress: number, previous
  * 念のため、いずれの経路でもMath.maxでフロアを下回らないことを最終防御する。
  */
 export function computeEffectivePdCoefficient(mechanizationLevel: number, params: PdMechanizationParameters = PD_MECHANIZATION_PARAMETERS_V1): number {
-  const level = Number.isFinite(mechanizationLevel) ? Math.max(0, Math.min(1, mechanizationLevel)) : 0;
-  if (level <= 0) return params.baseCoefficient;
-  if (level >= 1) return params.floorCoefficient;
-  const reduced = params.baseCoefficient - (params.baseCoefficient - params.floorCoefficient) * level;
-  return Math.max(params.floorCoefficient, reduced);
+  // 【正典の一元化】補間そのものは production/labor.ts の
+  // resolveLaborIntensityCoefficient が唯一行う。ここは「PDについてそれを呼ぶ」
+  // だけの薄いアダプターであり、独自の補間式・フロアクリップを持たない
+  // （持つと、生産エンジンが使う式と別系統になり二重適用・食い違いの温床になる）。
+  //
+  // 既定パラメータ以外（感度分析などでbase/floorを差し替えた場合）は、
+  // その場でテーブルを組み立てて同じ関数へ渡す。
+  const overrideParams: ProductionParameters = {
+    ...PRODUCTION_PARAMETERS_V1,
+    labor: {
+      ...PRODUCTION_PARAMETERS_V1.labor,
+      laborIntensityCoefficient: { ...PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient, pd: params.baseCoefficient },
+      mechanizedLaborIntensityCoefficient: {
+        ...PRODUCTION_PARAMETERS_V1.labor.mechanizedLaborIntensityCoefficient,
+        pd: params.floorCoefficient,
+      },
+    },
+  };
+  return resolveLaborIntensityCoefficient("pd", mechanizationLevel, overrideParams);
 }
 
 /**

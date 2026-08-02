@@ -266,7 +266,19 @@ test("NF-5: 保存(snapshot)→復元(decode)→四半期進行後も、新設Fa
 test("NF-6: 稼働開始済みの新設Factoryを、PD省人化投資（pdMechanization）のtargetFactoryIdとして選択できる（既存工場と同様に拒否されない）", () => {
   const { state: initialState, fixtures } = initializeCompanyLab(baseConfig({ seed: "newfactory-pdtarget-001" }));
   const targetFixture = fixtures.find((f) => f.companyId === TARGET_COMPANY_ID)!;
-  let state = initialState;
+  // 【診断用の資金付与】本テストが確認したいのは「新設Factoryをターゲットに指定できるか」
+  // という受理可否であって、その時点の資金繰りではない。商品別労働係数の見直し
+  // （PD 1.2→1.8）で会社の資金推移が変わり、提案時点の現金不足で案件が却下されると
+  // 検証したい性質と無関係な理由で落ちるため、十分な現金を与えて分離する。
+  let state: typeof initialState = {
+    ...initialState,
+    financeState: {
+      ...initialState.financeState,
+      companies: initialState.financeState.companies.map((c) =>
+        c.companyId === TARGET_COMPANY_ID ? { ...c, cash: ((c.cash as unknown as number) + 500_000_000) as typeof c.cash } : c
+      ),
+    },
+  };
   let newFactoryId: string | undefined;
   let becameOperationalTurn: number | undefined;
 

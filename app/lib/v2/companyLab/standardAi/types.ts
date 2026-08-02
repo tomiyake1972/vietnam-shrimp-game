@@ -43,12 +43,13 @@ export interface FactoryObservation {
   readonly currentRegularHeadcount: number;
   readonly skillByProduct: ProductAmount;
   /**
-   * 【Test15 PD省人化投資の接続】この工場の実効PD労働集約度係数（既定1.2）。
-   * 省人化が進むほど小さくなり、同じPD生産量を少ない人員で処理できる。
+   * 【PD省人化投資の接続】この工場の機械化レベル（0=未機械化、1=完全成熟）。
    * 判断側（decision/labor.ts）が必要人員を見積もる際にこの値を使わないと、
    * 省人化しても人員過剰が検知されず、余剰人員が残り続ける。
+   * 商品別の効き方（HOSO不変・PD最大・VAP部分的）への写像は
+   * production/labor.ts の resolveLaborIntensityCoefficient が唯一担う。
    */
-  readonly effectivePdLaborCoefficient?: number;
+  readonly mechanizationLevel?: number;
   readonly attendanceRate: number;
 }
 

@@ -183,7 +183,7 @@ test("ACC-8: PD省人化は稼働率が高く人員調整が実際に起きる�
   const before = computeRequiredRegularHeadcount(input).requiredRegularHeadcount;
   const after = computeRequiredRegularHeadcount({
     ...input,
-    pdCoefficientOverride: computeEffectivePdCoefficient(1.0, PD_MECHANIZATION_PARAMETERS_V1),
+    mechanizationLevel: 1.0,
   }).requiredRegularHeadcount;
   assert.ok(after < before, `省人化後の必要人員が減るべき（${before} → ${after}）`);
 });

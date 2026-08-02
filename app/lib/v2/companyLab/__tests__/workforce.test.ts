@@ -1,7 +1,7 @@
 // ShrimpX V2 — companyLab/workforce.ts のテスト（Test15新設）
 //
 // 商品別労働集約度係数（production/parameters.ts labor.laborIntensityCoefficient、
-// HOSO:PD:VAP=1.0:1.2:3.0）が、computeRequiredRegularHeadcount（意思決定画面・
+// HOSO:PD:VAP=1.0:1.8:3.0）が、computeRequiredRegularHeadcount（意思決定画面・
 // Standard AIの両方が経由する「必要Worker人数」の唯一の情報源）へ正しく反映されるか
 // を確認する。
 
@@ -34,7 +34,7 @@ test("Test15: 同じ数量を処理する場合、必要常用人数はHOSO<PD<V
 
   assert.ok(hoso.requiredRegularHeadcount < pd.requiredRegularHeadcount);
   assert.ok(pd.requiredRegularHeadcount < vap.requiredRegularHeadcount);
-  assert.ok(Math.abs(pd.requiredRegularHeadcount / hoso.requiredRegularHeadcount - 1.2) < 1e-6);
+  assert.ok(Math.abs(pd.requiredRegularHeadcount / hoso.requiredRegularHeadcount - 1.8) < 1e-6);
   assert.ok(Math.abs(vap.requiredRegularHeadcount / hoso.requiredRegularHeadcount - 3.0) < 1e-6);
 });
 

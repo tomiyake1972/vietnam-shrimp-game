@@ -66,7 +66,7 @@ export function advanceProductionQuarter(
     rawMaterialLots,
     period,
     params,
-    input.pdCoefficientOverrideByFactoryId
+    input.mechanizationLevelByFactoryId
   );
 
   const { batches, updatedRawMaterialLots } = buildProductionBatches(input.plans, allocation.entries, rawMaterialLots, period, params);

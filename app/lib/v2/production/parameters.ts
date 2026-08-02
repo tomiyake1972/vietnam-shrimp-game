@@ -83,6 +83,26 @@ export interface ProductionParameters {
      * 本係数自体は機械化前のベースライン値を表す（本タスクでは機械化倍率は実装しない）。
      */
     readonly laborIntensityCoefficient: Readonly<Record<Product, number>>;
+    /**
+     * 【PD省人化・商品別労働係数】機械化が完全に成熟したときの商品別労働集約度係数。
+     *
+     * 機械化の効果を「PD専用のフロア値」ではなく **商品別の到達係数テーブル** として
+     * 持つことで、次の3つを1箇所で表現する。
+     *   HOSO 1.0 → 1.0 : 殻剥き工程が無いため機械化の対象外（一切変わらない）。
+     *   PD   1.8 → 1.2 : 殻剥き・背ワタ除去の省人化効果を丸ごと受ける。
+     *                    同じPD数量に必要な人手が 1 − 1.2/1.8 = 33.3% 減り、
+     *                    同じ人手で 1.8/1.2 = 1.5 倍のPDを作れる。
+     *   VAP  3.0 → 2.6 : 前工程に殻剥きを含むため部分的に恩恵を受けるが、
+     *                    成形・味付け・加熱・包装・検品は人手のまま残るため
+     *                    PDほどは下がらない（13.3%減）。
+     *
+     * 【重要・二重適用の防止】機械化レベル(0〜1)から実効係数への写像は
+     * production/labor.ts の resolveLaborIntensityCoefficient **1箇所だけ**が行う。
+     * capex/pdMechanization.ts・意思決定画面・Standard AI・Excelはいずれも
+     * この関数（またはこれを内部で使うeffectiveEfficiencyPerHeadTons）を経由し、
+     * 独自に係数を補間・上書きしない。
+     */
+    readonly mechanizedLaborIntensityCoefficient: Readonly<Record<Product, number>>;
   };
 
   readonly cost: {
@@ -137,11 +157,21 @@ export const PRODUCTION_PARAMETERS_V1: ProductionParameters = {
     temporaryEfficiencyPerHeadTons: 3.5,
     overtimeRateCap: 0.3,
     overtimeEfficiencyFactor: 0.5,
-    // 【Test15暫定値・要校正】HOSO:PD:VAP = 1.0 : 1.2 : 3.0
+    // 【要校正】機械化前 HOSO:PD:VAP = 1.0 : 1.8 : 3.0
+    // 【変更履歴】Test15時点は pd=1.2 だったが、これは「機械化後の到達値」に相当する
+    // 水準であり、機械化前の人手の重さを表現できていなかった（機械化の余地が
+    // 1.2→1.0 の16.67%しか無く、投資が構造的に回収不能だった一因）。
+    // 機械化前を1.8へ引き上げ、機械化後の到達値を別テーブルで1.2と定義し直す。
     laborIntensityCoefficient: {
       hoso: 1.0,
-      pd: 1.2,
+      pd: 1.8,
       vap: 3.0,
+    },
+    // 【要校正】機械化後 HOSO:PD:VAP = 1.0 : 1.2 : 2.6
+    mechanizedLaborIntensityCoefficient: {
+      hoso: 1.0,
+      pd: 1.2,
+      vap: 2.6,
     },
   },
 

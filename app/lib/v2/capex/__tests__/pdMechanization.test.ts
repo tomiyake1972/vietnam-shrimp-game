@@ -1,7 +1,7 @@
 // ShrimpX V2 — PD省人化投資（機械化）の効果計算（Test15新設）テスト
 //
 // 対応する要求事項:
-//   - 満成熟時の削減率は「20%」ではなく「1 − 1.0/1.2 = 16.666...%」で、
+//   - 満成熟時の削減率は「1 − 1.2/1.8 = 33.33%」で、
 //     ハードコードではなくTask1の労働集約度係数（PRODUCTION_PARAMETERS_V1）から
 //     導出されること
 //   - mechanizationLevel = adoptionRampProgress × previousQuarterPdUtilization
@@ -22,27 +22,27 @@ import {
 } from "../pdMechanization";
 
 // ---------------------------------------------------------------------
-// 1. 削減率は16.666...%（20%ではない）、Task1の係数から導出される
+// 1. 削減率は33.33%、production/parameters.tsの商品別係数テーブルから導出される
 // ---------------------------------------------------------------------
 
-test("PD-MECH-1: baseCoefficient/floorCoefficientは、Task1のPRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficientをそのまま参照する（再定義しない）", () => {
+test("PD-MECH-1: baseCoefficient/floorCoefficientは、production/parameters.tsの商品別係数テーブルをそのまま参照する（再定義しない）", () => {
   assert.equal(PD_MECHANIZATION_PARAMETERS_V1.baseCoefficient, PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.pd);
-  assert.equal(PD_MECHANIZATION_PARAMETERS_V1.floorCoefficient, PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.hoso);
-  assert.equal(PD_MECHANIZATION_PARAMETERS_V1.baseCoefficient, 1.2);
-  assert.equal(PD_MECHANIZATION_PARAMETERS_V1.floorCoefficient, 1.0);
+  assert.equal(PD_MECHANIZATION_PARAMETERS_V1.floorCoefficient, PRODUCTION_PARAMETERS_V1.labor.mechanizedLaborIntensityCoefficient.pd);
+  assert.equal(PD_MECHANIZATION_PARAMETERS_V1.baseCoefficient, 1.8);
+  assert.equal(PD_MECHANIZATION_PARAMETERS_V1.floorCoefficient, 1.2);
 });
 
-test("PD-MECH-2: 満成熟時の削減率は正確に1/6（16.666...%）であり、0.2（20%）ではない — 厳密分数演算で証明する", () => {
+test("PD-MECH-2: 満成熟時の削減率は正確に1/3（33.33%）である（1 − 1.2/1.8）", () => {
   const ratio = reductionRatioAtFullMaturity();
-  // 1 - 1.0/1.2 = 1/6 を、浮動小数点誤差を許容しつつ厳密に検証する。
-  assert.ok(Math.abs(ratio - 1 / 6) < 1e-12, `削減率が1/6であるはず（実際: ${ratio}）`);
+  // 1 - 1.2/1.8 = 1/3 を、浮動小数点誤差を許容しつつ厳密に検証する。
+  assert.ok(Math.abs(ratio - 1 / 3) < 1e-12, `削減率が1/3であるはず（実際: ${ratio}）`);
   assert.notEqual(ratio, 0.2, "削減率が誤って20%になっていないことの確認");
   assert.ok(Math.abs(ratio - 0.2) > 0.03, "0.2との差は誤差の範囲を大きく超えている");
 });
 
-test("PD-MECH-3: formatReductionRatioAtFullMaturityLabelは「16.67%」を返し、「20%」という文字列を一切含まない", () => {
+test("PD-MECH-3: formatReductionRatioAtFullMaturityLabelは「33.33%」を返す（数値をUI側で直書きしない）", () => {
   const label = formatReductionRatioAtFullMaturityLabel();
-  assert.equal(label, "16.67%");
+  assert.equal(label, "33.33%");
   assert.doesNotMatch(label, /20%/);
 });
 
@@ -50,24 +50,24 @@ test("PD-MECH-3: formatReductionRatioAtFullMaturityLabelは「16.67%」を返し
 // 2. 実効PD係数（フロアの浮動小数点誤差なし保証）
 // ---------------------------------------------------------------------
 
-test("PD-MECH-4: mechanizationLevel=1.0のとき、実効PD係数は誤差なく厳密に1.0（フロア）になる", () => {
+test("PD-MECH-4: mechanizationLevel=1.0のとき、実効PD係数は誤差なく厳密に1.2（機械化後係数）になる", () => {
   const coefficient = computeEffectivePdCoefficient(1.0);
-  assert.equal(coefficient, 1.0, "浮動小数点演算による1.0未満へのドリフトが無いことを保証する");
+  assert.equal(coefficient, 1.2, "浮動小数点演算による機械化後係数未満へのドリフトが無いことを保証する");
   assert.ok(coefficient >= PD_MECHANIZATION_PARAMETERS_V1.floorCoefficient);
 });
 
-test("PD-MECH-5: mechanizationLevel=0のとき、実効PD係数はbaseCoefficient(1.2)のまま", () => {
-  assert.equal(computeEffectivePdCoefficient(0), 1.2);
+test("PD-MECH-5: mechanizationLevel=0のとき、実効PD係数はbaseCoefficient(1.8)のまま", () => {
+  assert.equal(computeEffectivePdCoefficient(0), 1.8);
 });
 
-test("PD-MECH-6: mechanizationLevel=0.5のとき、実効PD係数は1.2と1.0のちょうど中間（1.1）", () => {
+test("PD-MECH-6: mechanizationLevel=0.5のとき、実効PD係数は1.8と1.2のちょうど中間（1.5）", () => {
   const coefficient = computeEffectivePdCoefficient(0.5);
-  assert.ok(Math.abs(coefficient - 1.1) < 1e-9, `実際: ${coefficient}`);
+  assert.ok(Math.abs(coefficient - 1.5) < 1e-9, `実際: ${coefficient}`);
 });
 
 test("PD-MECH-7: 実効PD係数は防御的にクランプされ、level>1やlevel<0を渡しても[floor, base]の範囲を外れない", () => {
-  assert.equal(computeEffectivePdCoefficient(1.5), 1.0);
-  assert.equal(computeEffectivePdCoefficient(-0.5), 1.2);
+  assert.equal(computeEffectivePdCoefficient(1.5), 1.2);
+  assert.equal(computeEffectivePdCoefficient(-0.5), 1.8);
 });
 
 // ---------------------------------------------------------------------
@@ -87,8 +87,8 @@ test("PD-MECH-9: mechanizationLevelの計算式（ワークサンプル） — �
   const level = computeMechanizationLevel(rampProgress, 0.8);
   assert.ok(Math.abs(level - 0.4) < 1e-9, `実際: ${level}`);
   const coefficient = computeEffectivePdCoefficient(level);
-  // 1.2 × (1 - 1/6 × 0.4) = 1.2 × (1 - 0.066666...) = 1.2 × 0.933333... = 1.12
-  assert.ok(Math.abs(coefficient - 1.12) < 1e-9, `実際: ${coefficient}`);
+  // 1.8 - (1.8 - 1.2) × 0.4 = 1.8 - 0.24 = 1.56
+  assert.ok(Math.abs(coefficient - 1.56) < 1e-9, `実際: ${coefficient}`);
 });
 
 test("PD-MECH-10: mechanizationLevelは[0,1]へクランプされ、ランプ進捗・稼働率のいずれかが異常値（NaN・範囲外）でも安全側(0)へ倒れる", () => {

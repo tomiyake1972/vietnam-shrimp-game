@@ -191,10 +191,10 @@ test("PDST-9（タイミング証明）: buildPdCoefficientOverridesByFactoryは
   const overridesHigh = buildPdCoefficientOverridesByFactory(capexState, highPriorState, P4);
 
   assert.notEqual(overridesLow.get("F1"), overridesHigh.get("F1"), "前四半期末の稼働率が異なれば、当四半期のoverrideも異なるはず（＝実際にその値を読んでいる証拠）");
-  // mechanizationLevel = 0.5 × 0.1 = 0.05 → coefficient = 1.2×(1 - 1/6×0.05) ≈ 1.19
-  assert.ok(Math.abs((overridesLow.get("F1") ?? -1) - 1.2 * (1 - (1 / 6) * 0.05)) < 1e-9);
-  // mechanizationLevel = 0.5 × 0.99 = 0.495 → coefficient = 1.2×(1 - 1/6×0.495)
-  assert.ok(Math.abs((overridesHigh.get("F1") ?? -1) - 1.2 * (1 - (1 / 6) * 0.495)) < 1e-9);
+  // mechanizationLevel = 0.5 × 0.1 = 0.05 → coefficient = 1.8 - 0.6×0.05 = 1.77
+  assert.ok(Math.abs((overridesLow.get("F1") ?? -1) - (1.8 - (1.8 - 1.2) * 0.05)) < 1e-9);
+  // mechanizationLevel = 0.5 × 0.99 = 0.495 → coefficient = 1.8 - 0.6×0.495 = 1.503
+  assert.ok(Math.abs((overridesHigh.get("F1") ?? -1) - (1.8 - (1.8 - 1.2) * 0.495)) < 1e-9);
 });
 
 test("PDST-10（タイミング証明・稼働開始前）: 竣工直後・操業準備期間中（稼働開始前）はまだoverrideが発生しない（0%扱いではなく、そもそもマップに現れない＝base係数のまま）", () => {
@@ -208,7 +208,7 @@ test("PDST-10（タイミング証明・稼働開始前）: 竣工直後・操�
   const overridesAtP3 = buildPdCoefficientOverridesByFactory(capexState, priorState, P3); // 稼働開始四半期そのもの（ランプ0四半期目）
   assert.ok(overridesAtP3.has("F1"));
   // 稼働開始四半期そのもの（quartersSinceActivation=0）はランプ進捗0% → 係数はbaseCoefficientのまま。
-  assert.equal(overridesAtP3.get("F1"), 1.2);
+  assert.equal(overridesAtP3.get("F1"), 1.8);
 });
 
 // ---------------------------------------------------------------------
@@ -243,9 +243,9 @@ test("PDST-12（独立性）: 2つのFactory(F1・F2)がそれぞれ独立にPD�
   const coefF1 = overrides.get("F1")!;
   const coefF2 = overrides.get("F2")!;
   assert.notEqual(coefF1, coefF2, "稼働率が異なれば係数も異なるはず");
-  // フルランプ（level=稼働率そのもの）: F1 = 1.2×(1-1/6×0.2)、F2 = 1.2×(1-1/6×0.9)
-  assert.ok(Math.abs(coefF1 - 1.2 * (1 - (1 / 6) * 0.2)) < 1e-9);
-  assert.ok(Math.abs(coefF2 - 1.2 * (1 - (1 / 6) * 0.9)) < 1e-9);
+  // フルランプ（level=稼働率そのもの）: F1 = 1.8-0.6×0.2、F2 = 1.8-0.6×0.9
+  assert.ok(Math.abs(coefF1 - (1.8 - (1.8 - 1.2) * 0.2)) < 1e-9);
+  assert.ok(Math.abs(coefF2 - (1.8 - (1.8 - 1.2) * 0.9)) < 1e-9);
 });
 
 test("PDST-13: HOSO/VAPにはbuildPdCoefficientOverridesByFactoryの効果が一切及ばない（マップのキーはFactoryIdのみで商品別ではなく、labor.ts側でPD以外には適用されない設計）", () => {

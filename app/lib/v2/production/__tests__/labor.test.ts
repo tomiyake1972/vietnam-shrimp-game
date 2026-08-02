@@ -225,7 +225,7 @@ test("入力を変更しない（不変性）", () => {
   assert.equal(JSON.stringify(demands), beforeDemands);
 });
 
-// ---- Test15: 商品別労働集約度係数（HOSO:PD:VAP = 1.0:1.2:3.0）----
+// ---- 商品別労働集約度係数（未機械化 HOSO:PD:VAP = 1.0:1.8:3.0）----
 
 test("Test15: HOSOのみを生産する場合は労働集約度係数を導入する前と同じ有効労働能力になる（回帰確認）", () => {
   // HOSOの係数は1.0のため、product省略時（デフォルトhoso扱い）と明示hoso指定は完全一致するはず。
@@ -242,14 +242,14 @@ test("Test15: HOSOのみを生産する場合は労働集約度係数を導入�
   assert.ok(Math.abs(withHoso - expected) < 1e-9);
 });
 
-test("Test15: 同じ人数配置でもPD・VAPはHOSOより有効労働能力が小さくなる（HOSO:PD:VAP=1.0:1.2:3.0）", () => {
+test("Test15: 同じ人数配置でもPD・VAPはHOSOより有効労働能力が小さくなる（HOSO:PD:VAP=1.0:1.8:3.0）", () => {
   const hoso = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, PRODUCTION_PARAMETERS_V1, "hoso");
   const pd = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, PRODUCTION_PARAMETERS_V1, "pd");
   const vap = calculateLaborCapacityFromAssignedHeadcount(10, 0, 1, 1, 0, 1_000_000, PRODUCTION_PARAMETERS_V1, "vap");
   assert.ok(pd < hoso);
   assert.ok(vap < pd);
-  // 比率がHOSO:PD:VAP=1.0:1.2:3.0の逆数（= 1人あたり有効生産量の比）に一致することを確認する。
-  assert.ok(Math.abs(hoso / pd - 1.2) < 1e-9);
+  // 比率がHOSO:PD:VAP=1.0:1.8:3.0の逆数（= 1人あたり有効生産量の比）に一致することを確認する。
+  assert.ok(Math.abs(hoso / pd - 1.8) < 1e-9);
   assert.ok(Math.abs(hoso / vap - 3.0) < 1e-9);
 });
 
@@ -270,21 +270,21 @@ test("Test15: 同じ完成品数量を処理するのに必要な人数はHOSO<P
 
   assert.ok(hosoHeadcount < pdHeadcount, `HOSOの必要人数(${hosoHeadcount})はPD(${pdHeadcount})より少ないはず`);
   assert.ok(pdHeadcount < vapHeadcount, `PDの必要人数(${pdHeadcount})はVAP(${vapHeadcount})より少ないはず`);
-  assert.ok(Math.abs(pdHeadcount / hosoHeadcount - 1.2) < 1e-6);
+  assert.ok(Math.abs(pdHeadcount / hosoHeadcount - 1.8) < 1e-6);
   assert.ok(Math.abs(vapHeadcount / hosoHeadcount - 3.0) < 1e-6);
 });
 
 test("Test15: laborIntensityCoefficientForはproduction/labor.tsのlaborIntensityCoefficientFor経由でのみパラメータを参照する（唯一の情報源）", () => {
   assert.equal(PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.hoso, 1.0);
-  assert.equal(PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.pd, 1.2);
+  assert.equal(PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.pd, 1.8);
   assert.equal(PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.vap, 3.0);
 });
 
 // ---------------------------------------------------------------------
-// Test15（PD省人化投資）: pdCoefficientOverrideByFactoryIdの配線検証
+// PD省人化投資: mechanizationLevelByFactoryIdの配線検証
 // ---------------------------------------------------------------------
 
-test("Test15-PDOVR-1: pdCoefficientOverrideByFactoryIdでPD係数を1.0（フル機械化フロア）へ上書きすると、同じ完成品数量に必要なPD人数がHOSOと一致する", () => {
+test("PDOVR-1: 機械化レベル1.0（完全成熟）にすると、同じPD数量に必要な人数が機械化前の 1.2/1.8 = 2/3 になる", () => {
   const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), pdCapacity: hosoEqTons(100000), vapCapacity: hosoEqTons(100000) });
   const targetQuantity = 100;
   const assignment = makeAssignment({ regularHeadcount: 1000, temporaryHeadcount: 0 });
@@ -294,34 +294,40 @@ test("Test15-PDOVR-1: pdCoefficientOverrideByFactoryIdでPD係数を1.0（フル
   const hosoHeadcount = hosoResult.entries[0].assignedRegularHeadcount;
 
   const pdDemands = [demand({ id: "pd", product: "pd", candidateQuantity: targetQuantity, priority: 1 })];
-  const overrideToFloor = new Map([["F1", 1.0]]);
-  const pdResultOverridden = allocateWorkersToPlans(pdDemands, [assignment], capacityMapFor(factory), PRODUCTION_PARAMETERS_V1, overrideToFloor);
-  const pdHeadcountOverridden = pdResultOverridden.entries[0].assignedRegularHeadcount;
+  const pdBaseline = allocateWorkersToPlans(pdDemands, [assignment], capacityMapFor(factory)).entries[0].assignedRegularHeadcount;
+  const fullyMechanized = new Map([["F1", 1.0]]);
+  const pdResultMechanized = allocateWorkersToPlans(pdDemands, [assignment], capacityMapFor(factory), PRODUCTION_PARAMETERS_V1, fullyMechanized);
+  const pdHeadcountMechanized = pdResultMechanized.entries[0].assignedRegularHeadcount;
 
-  assert.ok(Math.abs(pdHeadcountOverridden - hosoHeadcount) < 1e-6, `override適用後のPD必要人数(${pdHeadcountOverridden})はHOSO(${hosoHeadcount})と一致するはず`);
+  assert.ok(
+    Math.abs(pdHeadcountMechanized / pdBaseline - 1.2 / 1.8) < 1e-6,
+    `完全機械化後のPD必要人数は機械化前の1.2/1.8倍のはず（実測 ${pdHeadcountMechanized / pdBaseline}）`
+  );
+  // 機械化してもHOSOほど軽くはならない（1.2 > 1.0）。
+  assert.ok(pdHeadcountMechanized > hosoHeadcount, "機械化後もPDはHOSOより人手がかかる");
 });
 
-test("Test15-PDOVR-2: pdCoefficientOverrideByFactoryIdが指定されていないFactoryは、通常どおりベース係数(1.2)のまま計算される（他Factoryへ波及しない）", () => {
+test("PDOVR-2: 機械化レベルが指定されていないFactoryは、未機械化のベース係数(1.8)のまま計算される（他Factoryへ波及しない）", () => {
   const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), pdCapacity: hosoEqTons(100000), vapCapacity: hosoEqTons(100000) });
   const targetQuantity = 100;
   const assignment = makeAssignment({ regularHeadcount: 1000, temporaryHeadcount: 0 });
   const pdDemands = [demand({ id: "pd", product: "pd", candidateQuantity: targetQuantity, priority: 1 })];
 
   const noOverrideResult = allocateWorkersToPlans(pdDemands, [assignment], capacityMapFor(factory));
-  const otherFactoryOverride = new Map([["OTHER-FACTORY", 1.0]]); // F1向けではない
-  const unaffectedResult = allocateWorkersToPlans(pdDemands, [assignment], capacityMapFor(factory), PRODUCTION_PARAMETERS_V1, otherFactoryOverride);
+  const otherFactoryLevel = new Map([["OTHER-FACTORY", 1.0]]); // F1向けではない
+  const unaffectedResult = allocateWorkersToPlans(pdDemands, [assignment], capacityMapFor(factory), PRODUCTION_PARAMETERS_V1, otherFactoryLevel);
 
   assert.ok(
     Math.abs(noOverrideResult.entries[0].assignedRegularHeadcount - unaffectedResult.entries[0].assignedRegularHeadcount) < 1e-9,
-    "自Factory向けでないoverrideは一切影響しないはず"
+    "自Factory向けでない機械化レベルは一切影響しないはず"
   );
 });
 
-test("Test15-PDOVR-3: pdCoefficientOverrideByFactoryIdはHOSO・VAPの必要人数に一切影響しない（PDのみに適用される）", () => {
+test("PDOVR-3: 機械化はHOSOの必要人数を一切変えず、VAPは前工程の共通化ぶん(3.0→2.6)だけ部分的に減る", () => {
   const factory = makeFactory({ hosoCapacity: hosoEqTons(100000), pdCapacity: hosoEqTons(100000), vapCapacity: hosoEqTons(100000) });
   const targetQuantity = 100;
   const assignment = makeAssignment({ regularHeadcount: 1000, temporaryHeadcount: 0 });
-  const override = new Map([["F1", 1.0]]); // PDをフロアへ
+  const override = new Map([["F1", 1.0]]); // 完全機械化
 
   const hosoDemands = [demand({ id: "hoso", product: "hoso", candidateQuantity: targetQuantity, priority: 1 })];
   const vapDemands = [demand({ id: "vap", product: "vap", candidateQuantity: targetQuantity, priority: 1 })];
@@ -333,6 +339,10 @@ test("Test15-PDOVR-3: pdCoefficientOverrideByFactoryIdはHOSO・VAPの必要人�
   const vapWithOverride = allocateWorkersToPlans(vapDemands, [assignment], capacityMapFor(factory), PRODUCTION_PARAMETERS_V1, override).entries[0]
     .assignedRegularHeadcount;
 
-  assert.ok(Math.abs(hosoNoOverride - hosoWithOverride) < 1e-9, "HOSOはPD向けoverrideの影響を受けないはず");
-  assert.ok(Math.abs(vapNoOverride - vapWithOverride) < 1e-9, "VAPはPD向けoverrideの影響を受けないはず");
+  assert.ok(Math.abs(hosoNoOverride - hosoWithOverride) < 1e-9, "HOSOは殻剥き工程が無いため機械化の影響を受けない");
+  assert.ok(vapWithOverride < vapNoOverride, "VAPは前工程の殻剥き共通化ぶんだけ部分的に減る");
+  assert.ok(
+    Math.abs(vapWithOverride / vapNoOverride - 2.6 / 3.0) < 1e-6,
+    `VAPの削減率は係数比そのもの（実測 ${vapWithOverride / vapNoOverride}）`
+  );
 });

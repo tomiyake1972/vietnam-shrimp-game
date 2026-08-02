@@ -39,7 +39,7 @@ import {
   PD_MECHANIZATION_PARAMETERS_V1,
   formatReductionRatioAtFullMaturityLabel,
 } from "../../../lib/v2/capex/pdMechanization";
-import { buildPdMechanizationStatusByFactory } from "../../../lib/v2/companyLab/pdMechanizationState";
+import { buildMechanizationLevelsByFactory, buildPdMechanizationStatusByFactory } from "../../../lib/v2/companyLab/pdMechanizationState";
 import { effectiveEfficiencyPerHeadTons, requiredHeadcountForQuantity } from "../../../lib/v2/production/labor";
 import { PRODUCTION_PARAMETERS_V1 } from "../../../lib/v2/production/parameters";
 import {
@@ -221,11 +221,26 @@ export default function DecisionEditor(props: DecisionEditorProps) {
   // buildCompanyProcessingForecast（内部で allocateProductionPlans を呼ぶ純粋関数）へ渡す。
   // レンダーのたびに再計算されるため、優先度・希望量の入力変更が即座に反映される。
   const decisionInputForForecast = buildDecisionInputFromDraft(draft, fixture, period);
+  // 【PD省人化・唯一の正典経路】画面の処理見込み・投資計画も、エンジンと
+  // まったく同じ機械化レベルを使う（渡さないと画面だけが機械化前の数値になる）。
+  const pdMechanizationStateForView = {
+    entries: ownState.pdUtilizationByFactory.map((e) => ({
+      companyId: fixture.companyId,
+      factoryId: e.factoryId,
+      previousQuarterPdUtilization: e.previousQuarterPdUtilization,
+    })),
+  };
+  const mechanizationLevelByFactoryId = buildMechanizationLevelsByFactory(
+    { companies: [ownState.capexState] },
+    pdMechanizationStateForView,
+    period
+  );
   const processingForecast = buildCompanyProcessingForecast({
     companyId: fixture.companyId,
     baseFactories: fixture.factories,
     capexState: { companies: [ownState.capexState] },
     period,
+    mechanizationLevelByFactoryId,
     productionPlans: decisionInputForForecast.productionPlans,
     workerAssignments: decisionInputForForecast.workerAssignments,
     rawMaterialLots: ownState.rawMaterialLots,
@@ -242,6 +257,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
     productionPlans: decisionInputForForecast.productionPlans,
     workerAssignments: decisionInputForForecast.workerAssignments,
     workforceState: ownState.workforceState,
+    pdMechanizationState: pdMechanizationStateForView,
     rawMaterialLots: ownState.rawMaterialLots,
     finishedGoodsLots: ownState.finishedGoodsLots,
     lastQuarterFinancialResult,

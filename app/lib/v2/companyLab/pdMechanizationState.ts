@@ -155,6 +155,33 @@ export function buildPdCoefficientOverridesByFactory(
   return result;
 }
 
+/**
+ * 【PD省人化・唯一の正典経路】factoryId → 機械化レベル（0〜1）の対応表。
+ *
+ * 生産エンジン（production/labor.ts allocateWorkersToPlans）・必要人員の見積り
+ * （companyLab/workforce.ts）・意思決定画面・Standard AI・Excelは、いずれも
+ * **実効係数ではなくこの「レベル」を受け渡す**。レベルから商品別の実効係数への
+ * 写像は production/labor.ts の resolveLaborIntensityCoefficient 1箇所だけが行う。
+ *
+ * 【なぜ係数ではなくレベルを配るのか】機械化の効果はPDだけでなくVAPにも
+ * （前工程の殻剥き共通化ぶんだけ）及ぶため、「PDの実効係数」という1つの数値では
+ * 表現しきれない。レベルを配れば、商品ごとの効き方の違いは正典の写像関数の中に
+ * 一元的に閉じ込められ、呼び出し側が商品別の分岐を書く必要が無くなる。
+ */
+export function buildMechanizationLevelsByFactory(
+  capexState: CapexState,
+  pdMechanizationState: PdMechanizationState | undefined,
+  period: PeriodV2,
+  params: PdMechanizationParameters = PD_MECHANIZATION_PARAMETERS_V1
+): ReadonlyMap<string, number> {
+  const statusByFactory = buildPdMechanizationStatusByFactory(capexState, pdMechanizationState, period, params);
+  const result = new Map<string, number>();
+  for (const [factoryId, status] of statusByFactory) {
+    result.set(factoryId, status.mechanizationLevel);
+  }
+  return result;
+}
+
 /** 1工場ぶんのPD省人化投資の状況（UI表示・buildPdCoefficientOverridesByFactoryの両方が使う唯一の計算経路）。 */
 export interface PdMechanizationStatus {
   readonly mechanizationLevel: number;

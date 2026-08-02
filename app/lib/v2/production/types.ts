@@ -456,7 +456,7 @@ export interface ProductionQuarterInput {
    * （production/parameters.ts labor.laborIntensityCoefficient.pd）のまま。
    * HOSO/VAPには一切影響しない。
    */
-  readonly pdCoefficientOverrideByFactoryId?: ReadonlyMap<string, number>;
+  readonly mechanizationLevelByFactoryId?: ReadonlyMap<string, number>;
 }
 
 export interface ProductionQuarterRecord {

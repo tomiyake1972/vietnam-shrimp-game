@@ -111,12 +111,12 @@ test("Test15 4ケースシミュレーション（補助・純粋関数）: PD�
     );
     assert.ok(
       rows[i].effectivePdCoefficient < rows[i - 1].effectivePdCoefficient,
-      "稼働率が高いほど実効PD係数は基準1.2からより下がる（＝より軽い労働集約度になる）はず",
+      "稼働率が高いほど実効PD係数は基準1.8からより下がる（＝より軽い労働集約度になる）はず",
     );
   }
-  // 削減率はいずれも基準係数(1.2)とフロア(1.0)の比から導かれる最大削減率(1/6)を超えない。
+  // 削減率はいずれも基準係数(1.8)と機械化後係数(1.2)の比から導かれる最大削減率(1/3)を超えない。
   for (const row of rows) {
-    assert.ok(row.reductionRatio <= 1 / 6 + 1e-9);
+    assert.ok(row.reductionRatio <= 1 / 3 + 1e-9);
   }
 });
 

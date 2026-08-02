@@ -90,7 +90,7 @@ export function allocateProductionPlans(
   params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
   // 【Test15新設・PD省人化投資】capex/pdMechanization.tsが算出した、factoryId→
   // 実効PD労働集約度係数の上書き。allocateWorkersToPlansへそのまま渡す。
-  pdCoefficientOverrideByFactoryId?: ReadonlyMap<string, number>
+  mechanizationLevelByFactoryId?: ReadonlyMap<string, number>
 ): ProductionAllocationResult {
   const epsilon = params.capacity.epsilon;
 
@@ -184,7 +184,7 @@ export function allocateProductionPlans(
     workerAssignments,
     capacityById,
     params,
-    pdCoefficientOverrideByFactoryId
+    mechanizationLevelByFactoryId
   );
   const laborByPlanId = new Map(laborEntries.map((e, i) => [demands[i].id, e]));
   const laborLimited = plans.map((_, i) => unwrapUnit(laborByPlanId.get(ids[i])!.laborCapacity));

@@ -370,6 +370,13 @@ export interface BuildCompanyProcessingForecastInput {
   /** 見込み計算時点で会社が持っている原料ロット。 */
   readonly rawMaterialLots: readonly RawMaterialLot[];
   readonly params?: ProductionParameters;
+  /**
+   * 【PD省人化・唯一の正典経路】factoryId → 機械化レベル（0〜1）。
+   * これを渡さないと、画面の処理見込みだけが機械化を無視した数値になり、
+   * 「画面では足りないと出たのに実際は足りる」という食い違いが起きる
+   * （同種の取りこぼしを過去に2件検出しているため、明示的に接続する）。
+   */
+  readonly mechanizationLevelByFactoryId?: ReadonlyMap<string, number>;
 }
 
 /**
@@ -395,7 +402,15 @@ export function buildCompanyProcessingForecast(input: BuildCompanyProcessingFore
     .filter((l) => l.status === "available")
     .reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
 
-  const allocation = allocateProductionPlans(companyPlans, currentFactories, companyWorkers, companyLots, input.period, params);
+  const allocation = allocateProductionPlans(
+    companyPlans,
+    currentFactories,
+    companyWorkers,
+    companyLots,
+    input.period,
+    params,
+    input.mechanizationLevelByFactoryId
+  );
 
   const minPriorityByFactory = new Map<string, number>();
   for (const p of companyPlans) {

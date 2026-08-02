@@ -321,7 +321,8 @@ export function decideMarketEvolutionInvestments(
   // -------------------------------------------------------------------
   const mechanizationTargets = observation.factories
     .filter((f) => f.capacityByProduct.pd > EPSILON)
-    .filter((f) => (f.effectivePdLaborCoefficient ?? PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.pd) >= PRODUCTION_PARAMETERS_V1.labor.laborIntensityCoefficient.pd - EPSILON)
+    // 既に機械化済み（レベル>0）の工場は投資対象から外す。
+    .filter((f) => (f.mechanizationLevel ?? 0) <= EPSILON)
     .slice()
     .sort((a, b) => (a.factoryId < b.factoryId ? -1 : a.factoryId > b.factoryId ? 1 : 0));
 

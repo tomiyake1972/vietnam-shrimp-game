@@ -48,28 +48,60 @@ export function laborIntensityCoefficientFor(product: Product, params: Productio
 }
 
 /**
+ * 【PD省人化・唯一の正典】機械化レベル(0〜1)から、その商品の実効労働集約度係数を求める。
+ *
+ * 実効係数 = 機械化前係数 − (機械化前係数 − 機械化後係数) × 機械化レベル
+ *
+ * 【この関数がゲーム内で唯一の写像であること（実装指示の必須要件）】
+ * 「機械化レベル → 実効係数」の変換は**この関数だけ**が行う。
+ * 生産の実行（allocateWorkersToPlans）、必要人員の見積り
+ * （companyLab/workforce.ts computeRequiredRegularHeadcount）、意思決定画面の
+ * 表示、Standard AIの判断、Excel/CSV出力はすべて、この関数か、これを内部で呼ぶ
+ * effectiveEfficiencyPerHeadTons を経由する。
+ * したがって「見積り用の式」と「実生産用の式」が別々に存在して食い違うことも、
+ * 同じ効果が2段階で重ねて適用されることも構造的に起こらない。
+ *
+ * 【HOSOについて】機械化前後とも1.0のため、機械化レベルが何であっても
+ * 常に1.0を返す（殻剥き工程が無く機械化の対象外であることを、分岐ではなく
+ * パラメータの値そのもので表現する）。
+ *
+ * @param mechanizationLevel 0=未機械化、1=完全成熟。範囲外は[0,1]へclampする。
+ */
+export function resolveLaborIntensityCoefficient(
+  product: Product,
+  mechanizationLevel: number = 0,
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+): number {
+  const base = laborIntensityCoefficientFor(product, params);
+  const mechanizedRaw = params.labor.mechanizedLaborIntensityCoefficient[product];
+  const mechanized = Number.isFinite(mechanizedRaw) && mechanizedRaw > 0 ? mechanizedRaw : base;
+  const level = Number.isFinite(mechanizationLevel) ? Math.max(0, Math.min(1, mechanizationLevel)) : 0;
+  if (level <= 0) return base;
+  if (level >= 1) return mechanized;
+  // 機械化後係数が機械化前係数より大きい設定は想定外だが、その場合も
+  // 単調な補間として扱う（clampはしない。パラメータ検証側の責務）。
+  return base - (base - mechanized) * level;
+}
+
+/**
  * 【Test15新設】商品別労働集約度を織り込んだ、1人あたりの実効生産力
  * （baseEfficiencyPerHeadTons ÷ 労働集約度係数）。
  * HOSO=1.0を基準に、PD・VAPは同じ人数でより少ない量しか処理できない
  * （＝同じ数量を処理するのにより多くの人手を要する）ことをこの一箇所だけで表現する。
  * calculateLaborCapacityFromAssignedHeadcount・requiredHeadcountForQuantityの
  * 呼び出し側は、いずれもこの関数を通した実効効率を渡す。
+ *
+ * 【PD省人化投資】mechanizationLevel を渡すと、resolveLaborIntensityCoefficient
+ * を通じて商品別の機械化効果が反映される（HOSOは常に不変、PDは最大33.3%減、
+ * VAPは前工程の殻剥き共通化ぶんだけ最大13.3%減）。省略時は未機械化（0）。
  */
 export function effectiveEfficiencyPerHeadTons(
   baseEfficiencyPerHeadTons: number,
   product: Product,
   params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
-  // 【Test15新設・PD省人化投資】工場単位で係数そのものを上書きしたい場合に使う
-  // （companyLab/pdMechanizationState.tsが、稼働中のPD省人化投資案件から算出した
-  // その工場だけの実効PD係数をここへ渡す）。省略時はparams.labor.laborIntensityCoefficient
-  // をそのまま使う（既存挙動）。0以下・非有限値は無視する（防御的）。
-  coefficientOverride?: number
+  mechanizationLevel: number = 0
 ): number {
-  const coefficient =
-    coefficientOverride !== undefined && Number.isFinite(coefficientOverride) && coefficientOverride > 0
-      ? coefficientOverride
-      : laborIntensityCoefficientFor(product, params);
-  return baseEfficiencyPerHeadTons / coefficient;
+  return baseEfficiencyPerHeadTons / resolveLaborIntensityCoefficient(product, mechanizationLevel, params);
 }
 
 /**
@@ -89,13 +121,14 @@ export function calculateLaborCapacityFromAssignedHeadcount(
   // 既存の呼び出し元・既存テストの挙動は変わらない）。商品が分かっている
   // 呼び出し元は必ず対象商品を渡すこと。
   product: Product = "hoso",
-  // 【Test15新設・PD省人化投資】productが"pd"のときだけ意味を持つ、工場単位の
-  // 実効PD係数の上書き（省略時は通常のlaborIntensityCoefficientをそのまま使う）。
-  coefficientOverride?: number
+  // 【PD省人化投資】この工場の機械化レベル（0〜1）。省略時は未機械化。
+  // 商品別にどれだけ効くかは resolveLaborIntensityCoefficient が決める
+  // （HOSOは常に不変、PDが最大、VAPは部分的）。
+  mechanizationLevel: number = 0
 ): number {
   const overtimeMultiplier = 1 + appliedOvertimeRate * params.labor.overtimeEfficiencyFactor;
-  const regularEfficiency = effectiveEfficiencyPerHeadTons(params.labor.regularEfficiencyPerHeadTons, product, params, coefficientOverride);
-  const temporaryEfficiency = effectiveEfficiencyPerHeadTons(params.labor.temporaryEfficiencyPerHeadTons, product, params, coefficientOverride);
+  const regularEfficiency = effectiveEfficiencyPerHeadTons(params.labor.regularEfficiencyPerHeadTons, product, params, mechanizationLevel);
+  const temporaryEfficiency = effectiveEfficiencyPerHeadTons(params.labor.temporaryEfficiencyPerHeadTons, product, params, mechanizationLevel);
   const raw =
     (assignedRegularHeadcount * regularEfficiency + assignedTemporaryHeadcount * temporaryEfficiency) * attendanceRate * skillLevel * overtimeMultiplier;
   return Math.min(Math.max(0, raw), Math.max(0, factoryCapacityForProduct));
@@ -153,10 +186,10 @@ export function allocateWorkersToPlans(
   assignments: readonly WorkerAssignment[],
   factoryCapacities: ReadonlyMap<string, FactoryEffectiveCapacity>,
   params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
-  // 【Test15新設・PD省人化投資】factoryId→そのFactoryの実効PD係数の上書き。
-  // PD以外の商品（HOSO/VAP）のdemandには一切影響しない（headcountDemandFor内で
-  // d.product==="pd"の場合にのみ参照する）。省略時は既存挙動と完全に同じ。
-  pdCoefficientOverrideByFactoryId?: ReadonlyMap<string, number>
+  // 【PD省人化投資】factoryId→そのFactoryの機械化レベル（0〜1）。
+  // 商品別にどれだけ効くかは resolveLaborIntensityCoefficient が一元的に決める
+  // （HOSOは不変・PDが最大・VAPは部分的）。省略時は全工場が未機械化。
+  mechanizationLevelByFactoryId?: ReadonlyMap<string, number>
 ): { readonly entries: readonly WorkerAllocationEntry[]; readonly factorySummaries: readonly FactoryWorkerAllocationSummary[] } {
   // 工場ごとにグループ化して解決するため、結果は一旦demand.id別に記録し、
   // 最後に入力demandsと同じ順序へ復元する（呼び出し側がdemands[i]と
@@ -191,18 +224,14 @@ export function allocateWorkersToPlans(
     // 必要な人数を、水位法配分の重み・capとして使う。
     // 【Phase 8D-4】逆算式は requiredHeadcountForQuantity に一元化した。
     // 意思決定画面の「必要Worker人数」も同じ関数を呼ぶ。
-    // 【Test15・PD省人化投資】このFactoryの実効PD係数の上書き（未設定なら通常のまま）。
-    const pdCoefficientOverride = pdCoefficientOverrideByFactoryId?.get(factoryId);
+    // 【PD省人化投資】このFactoryの機械化レベル（未設定なら未機械化=0）。
+    const mechanizationLevel = mechanizationLevelByFactoryId?.get(factoryId) ?? 0;
 
     function headcountDemandFor(d: (typeof factoryDemands)[number], baseEfficiencyPerHead: number): number {
-      // 【Test15】商品別の労働集約度係数を織り込んだ実効効率で逆算する。
-      // PD省人化投資の効果はd.product==="pd"のときだけ適用される（HOSO/VAPは無関係）。
-      const efficiencyPerHead = effectiveEfficiencyPerHeadTons(
-        baseEfficiencyPerHead,
-        d.product,
-        params,
-        d.product === "pd" ? pdCoefficientOverride : undefined
-      );
+      // 【唯一の正典経路】商品別の労働集約度係数（機械化効果込み）を織り込んだ
+      // 実効効率で逆算する。商品ごとの効き方の違いは resolveLaborIntensityCoefficient
+      // の中だけにあり、ここでは商品による分岐を書かない。
+      const efficiencyPerHead = effectiveEfficiencyPerHeadTons(baseEfficiencyPerHead, d.product, params, mechanizationLevel);
       return requiredHeadcountForQuantity(
         d.candidateQuantity,
         efficiencyPerHead,
@@ -246,7 +275,7 @@ export function allocateWorkersToPlans(
         capacityPool,
         params,
         d.product,
-        d.product === "pd" ? pdCoefficientOverride : undefined
+        mechanizationLevel
       );
 
       entryById.set(d.id, {
