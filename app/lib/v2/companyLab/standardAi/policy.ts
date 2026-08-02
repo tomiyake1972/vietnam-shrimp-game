@@ -36,6 +36,12 @@ import { PressureScores } from "./pressures";
 import { AppliedManagementBiasItem } from "./managementProfile";
 import { buildCurrentPeriodDeliveryDemand, CurrentPeriodDeliveryDemand } from "./diagnosis/currentPeriodDeliveryDemand";
 import { buildStandardAiSituationDiagnosis, StandardAiSituationDiagnosis } from "./diagnosis/situationDiagnosis";
+import {
+  computeBasicCurrentPeriodProductionRequirement,
+  computeEligibleCurrentPeriodDemand,
+  computeFinalProductionRequirement,
+  computeNormalInventoryTargetByProduct,
+} from "./diagnosis/productionRequirement";
 
 // 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
 // 診断情報にこれまで捨てていた圧力スコア(pressures)と、当四半期の意思決定
@@ -122,7 +128,32 @@ export function generateStandardAiDecisionWithDiagnostics(
   const pressures = computePressureScores(observation, fixture, params);
 
   const salesResult = buildStandardAiSalesPlans(fixture, observation, pressures, params);
-  const productionResult = buildStandardAiProductionPlans(fixture, observation, pressures, salesResult.desiredByProduct);
+
+  // 【SAI-6.4】生産計画の営業側inputを、工場能力起点の理論希望量（desiredByProduct）から
+  // Standard AI内部の当期納品需要（currentPeriodDeliveryDemand、SAI-6.3）起点の
+  // 「基本当期生産必要量」へ切り替える。当期納品需要は既にrealisticSalesByProduct
+  // （現実的販売可能量）＋outstandingContractByProduct（既存契約）を含んでいるため、
+  // ここで既存契約を再度加算しない（二重計上防止。実装指示C-2、および
+  // diagnosis/productionRequirement.tsのコメント参照）。
+  //
+  // 【Unit Economics差し込み口（実装指示C-4）】computeEligibleCurrentPeriodDemand()は
+  // 今回identity実装（当期納品需要をそのまま返す）。将来Unit Economics採算フィルターを
+  // 実装する際は、この関数の内部だけを置き換える想定であり、production.ts・policy.tsの
+  // 側は密結合させない。
+  //
+  // 【戦略先行生産（実装指示C-3）】今回は常に0（strategicProductionAdjustmentByProduct省略時
+  // のデフォルト）。Test14 Turn1を含む今回のスコープでは戦略在庫理由が観測されていない。
+  const deliveryDemandResult = buildCurrentPeriodDeliveryDemand(fixture.companyId, observation, salesResult.realisticSalesByProduct);
+  const eligibleCurrentPeriodDemand = computeEligibleCurrentPeriodDemand(deliveryDemandResult.deliveryDemand);
+  const normalInventoryTargetByProduct = computeNormalInventoryTargetByProduct(observation, params);
+  const basicProductionRequirementByProduct = computeBasicCurrentPeriodProductionRequirement(
+    eligibleCurrentPeriodDemand,
+    normalInventoryTargetByProduct,
+    observation.finishedGoodsByProduct
+  );
+  const finalProductionRequirementByProduct = computeFinalProductionRequirement(basicProductionRequirementByProduct);
+
+  const productionResult = buildStandardAiProductionPlans(fixture, observation, pressures, finalProductionRequirementByProduct);
   const requiredRawMaterial = productionResult.productionPlans.reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
   const requiredRawMaterialUnconstrained = sumProductAmount(productionResult.neededByProduct);
 
@@ -150,14 +181,15 @@ export function generateStandardAiDecisionWithDiagnostics(
     capexDecision: capexResult.capexDecision,
   };
 
-  // 【SAI-6.3】Current Period Delivery Demand（当期納品需要、Standard AI内部の
-  // 中間概念）。SAI-6.2で追加したrealisticSalesByProduct（営業人員配分後の
-  // 現実的販売可能量）を入力とする。今回はここで生成した値を意思決定
-  // （上のdecision）へは一切接続しない（診断専用）。
-  const deliveryDemandResult = buildCurrentPeriodDeliveryDemand(fixture.companyId, observation, salesResult.realisticSalesByProduct);
-
-  // 【SAI-6.1】Situation Diagnosis（不足型／過剰型の6カテゴリ診断）。同様に
-  // 診断専用の並行計算であり、上のdecisionには一切影響しない。
+  // 【SAI-6.4改訂】Current Period Delivery Demand（当期納品需要）は、今回から
+  // decision.productionPlansの実際の入力として使われている（上で計算済みの
+  // deliveryDemandResult）。診断出力としても、実際に使われた値をそのまま再利用する
+  // （計算を重複させない）。
+  //
+  // 【SAI-6.1】Situation Diagnosis（不足型／過剰型の6カテゴリ診断）は、依然として
+  // 診断専用の並行計算であり、上のdecisionには影響しない（診断内部で再計算する
+  // 基本当期生産必要量は、上のfinalProductionRequirementByProductと同じ共通実装
+  // diagnosis/productionRequirement.tsを使うため、値は一致する）。
   const situationDiagnosisResult = buildStandardAiSituationDiagnosis(
     fixture,
     observation,

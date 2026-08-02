@@ -1,10 +1,19 @@
 // ShrimpX V2 — Phase SAI-1: 標準経営AI基盤 生産ドメイン
+// 【SAI-6.4改訂】生産計画の営業側inputを、工場能力起点の理論希望量
+// （desiredByProduct）から、Standard AI内部の当期納品需要
+// （currentPeriodDeliveryDemand、SAI-6.3）を起点とした「基本当期生産必要量」
+// （diagnosis/productionRequirement.tsの共通実装、policy.ts側で算出）へ切り替える。
 //
-// 【基本方針（実装指示 §生産）】
-//   - 生産希望量 = 販売希望量 + 未履行契約残 − 完成品在庫（既存在庫が賄う分は
-//     二重に生産しない。受注を止めた商品は生産も自然に止まる）。
+// 【基本方針（改訂）】
+//   - 生産必要量 = 基本当期生産必要量（＝当期納品需要＋通常安全在庫目標－期首完成品
+//     在庫。呼び出し側のpolicy.tsで算出済み）。当期納品需要は既にrealisticSales
+//     ByProduct（現実的販売可能量）＋outstandingContractByProduct（既存契約）を
+//     含んでいるため、ここで未履行契約残・完成品在庫を再度加算・減算しない
+//     （二重計上防止。実装指示C-2）。
 //   - 優先順位: 未履行契約がある商品を最優先、次に在庫が目標を下回る商品、
 //     残りは通常優先度（全社共通の規則。会社IDによる分岐はしない）。
+//     ※優先順位付けのためだけにbacklog（未履行契約残）・在庫超過比率は参照するが、
+//       生産必要量そのものの計算には使わない。
 //   - 各工場の商品別能力でキャップし、複数工場保有時は能力比で按分する。
 
 import { hosoEqTons, unwrapUnit } from "../../../core/units";
@@ -22,20 +31,30 @@ export interface ProductionPlanResult {
   readonly diagnostics: readonly StandardAiDiagnosticEntry[];
 }
 
+/**
+ * @param finalProductionRequirementByProduct SAI-6.4：policy.tsが
+ *   diagnosis/productionRequirement.tsの共通実装で算出した、商品別の
+ *   最終生産必要量（基本当期生産必要量＋戦略先行生産調整。今回は戦略先行生産は常に0）。
+ *   当期納品需要（既存契約分を含む）・通常在庫目標・期首完成品在庫は、この値の
+ *   計算時点で既に反映済みであり、本関数の内部では再加算・再減算しない。
+ */
 export function buildStandardAiProductionPlans(
   fixture: CompanyFixture,
   observation: StandardAiObservation,
   pressures: PressureScores,
-  salesDesiredByProduct: ProductAmount
+  finalProductionRequirementByProduct: ProductAmount
 ): ProductionPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const backlog = observation.outstandingContractByProduct;
   const fg = observation.finishedGoodsByProduct;
   const capacityTotals = observation.totalCapacityByProduct;
 
-  const neededByProduct: ProductAmount = zeroProductAmount();
+  // 【SAI-6.4】neededByProductは、もはや「desiredByProduct+backlog-fg」を計算しない。
+  // 呼び出し側（policy.ts）がcurrentPeriodDeliveryDemand起点で算出した値をそのまま使う
+  // （二重計上防止。実装指示C-2）。優先順位付け・診断メッセージのためにbacklog・fgは
+  // 引き続き参照するが、量そのものには影響させない。
+  const neededByProduct: ProductAmount = finalProductionRequirementByProduct;
   for (const product of ["hoso", "pd", "vap"] as const) {
-    neededByProduct[product] = Math.max(0, salesDesiredByProduct[product] + backlog[product] - fg[product]);
     if (backlog[product] > EPSILON) {
       diagnostics.push({
         code: "CONTRACT_FULFILLMENT_PRIORITY",

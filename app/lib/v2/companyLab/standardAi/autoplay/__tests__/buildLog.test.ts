@@ -164,15 +164,33 @@ test("buildAutoplayCaseLogs: 四半期結果ログのsalesQuantityByProductは�
 });
 
 test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも、ログが欠落しない（8Qぶん全turnのログが揃う）", () => {
-  // "baseline"シナリオの標準候補は、moderate pressure設計によりデフォルトが
-  // 発生しうることが既存テスト（standardBaseline.test.ts）で確認済み。
-  // 実際にdefaultが発生したケースをいくつか試し、発生後もログ件数が
-  // 欠けないことを確認する（発生しなかった場合はそのシードでは検証できないため
-  // skipし、少なくとも1件は発生確認できるシードで検証する）。
+  // 【SAI-6.4での訂正】旧テストは"baseline"標準候補の既定パラメータのまま、複数seedを
+  // 総当たりしてpaymentDefaultが自然発生するケースを探していた。これはSAI-6.4修正前の
+  // 生産計画バグ（工場能力起点の理論希望量desiredByProductをそのまま生産へ流していた
+  // ため、原料を過大に調達し続け資金が枯渇しやすかった）に依存した「たまたま発生
+  // していた」default依存のテストであり、SAI-6.4で生産計画をcurrentPeriodDeliveryDemand
+  // 起点へ修正した結果、同じseed群では8〜16Qの範囲でdefaultが1件も発生しなくなった
+  // （過剰調達による資金枯渇という副作用が正しく解消されたことの裏付けであり、本テストに
+  // とってはリグレッションではない）。
+  //
+  // 本テストの検証対象はあくまで「paymentDefault発生後もログが欠落しないこと」
+  // （ログ組み立てロジックの健全性）であり、標準AIの経済挙動が実際にdefaultへ至るか
+  // どうかではない。したがって、salesForceHeadcountOverride（既存の実行時オプション。
+  // 営業人員の固定費を実需に対し過大にするだけで、標準AIの意思決定ロジック自体は
+  // 一切変更しない）を用いて、確実にdefaultへ至る人工的な資金圧迫シナリオを作り、
+  // ログ組み立ての健全性だけを検証する。
   const seeds = ["sai3a-002", ...Array.from({ length: 8 }, (_, i) => `sai3a-test-default-${i}`)];
   let verifiedAtLeastOne = false;
   for (const seed of seeds) {
-    const { log } = run(seed, 8, ["BAL"]);
+    const caseResult = runAutoplayCase({
+      scenarioId: "baseline",
+      seed,
+      quarters: 8,
+      companyIds: ["BAL"],
+      candidate,
+      salesForceHeadcountOverride: 400,
+    });
+    const log = buildAutoplayCaseLogs(caseResult);
     const defaultedTurn = log.quarterResults.find((r) => r.paymentDefault)?.turn;
     if (defaultedTurn === undefined) continue;
     verifiedAtLeastOne = true;
@@ -180,5 +198,5 @@ test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも�
     assert.equal(log.quarterStartStates.length, 8);
     assert.equal(log.decisionLogs.length, 8);
   }
-  assert.ok(verifiedAtLeastOne, "検証対象のseedでpaymentDefaultが1件も発生しなかった（standardBaselineの想定と異なる可能性）");
+  assert.ok(verifiedAtLeastOne, "検証対象のseedでpaymentDefaultが1件も発生しなかった（人工的な資金圧迫シナリオでも未発生は想定外）");
 });

@@ -116,9 +116,66 @@ source: "CURRENT_SALES_PLAN_PROXY"
 - 診断結果をUI（AI提案文面等）へ表示する実装も今回は行っていない（SAI-6.7で予定）。
 - 生産能力の実効係数0.855をどう扱うかは診断情報として明示したのみで、意思決定・診断の比率計算そのものには反映していない（三宅さんとの優先度判断待ち。設計レポート§19参照）。
 
-## 6. Git状態
+## 6. Git状態（SAI-6.1〜6.3時点）
 
 - `develop/v2`: `083425a`（変更なし）
 - feature branch: `feature/v2-sai6-1-3-diagnosis-delivery-demand`（push予定。develop/v2へはまだマージしない）
 - `test/sai6-manual-observation-2026-08-01`: 変更なし
+
+---
+
+## 7. 追記（同日・SAI-6.1診断修正＋SAI-6.4実装ラウンド）
+
+三宅さんの離席中の自律作業として、SAI-6.1の診断の意味修正、SAI-6.4（Inventory & Production Plan）の実装、Unit Economics事前調査までを一括で実施した。branch: `feature/v2-sai6-4-inventory-production-plan`（`feature/v2-sai6-1-3-diagnosis-delivery-demand`のHEAD `6aedf6f`から作成）。
+
+### 7.1 SAI-6.1 Situation Diagnosisの意味修正
+
+- **原料診断の分離**: `rawMaterialCoverageRatio<1`（期首在庫＋確定入荷だけでは不足）を、それ自体はボトルネックではない「procurement needed」として`RAW_MATERIAL_PROCUREMENT_NEEDED`診断（info）にとどめ、primary/secondary制約候補から外した。真の供給制約（`rawMaterialSupplyConstraintState`）は、現行のStandard AI観測に「当期国内市場から現実的に追加調達可能な量」（`rawMaterials/domesticPurchase.ts`のprocurementCapacity・maximumBuyerShare等）が一切露出していないことを調査で確認した上で、常に`unknown`とし、架空の供給能力を作らなかった（`RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN`診断で明示）。
+- **liquidity診断の意味修正**: `financing/borrowingCapacity.ts`の`computeBorrowingCapacity()`という既存の借入余力計算式は存在するが、その入力（担保価値・EBITDA相当・自己資本・信用区分）が現行のStandard AI観測に一切配線されていないことを確認した。今回は新規にバランスシート項目を観測へ追加する対応（Financial Capacity forward simulation本体の一部）はスコープ外のため、`liquidityCoverageRatio`（手元現金バッファのみ）だけでは資金制約と断定せず、`CASH_BUFFER_BELOW_TARGET`という中立的なwarningに留め、primary/secondary候補から外した。
+- **Production Loadの表現整理**: Test14 Turn1のProduction Load Ratio（≈0.572）は既存閾値（surplus<0.5）では`balanced`のままであり、コードは変更していない（三宅さんの指示どおり閾値をTest14へ合わせて変更していない）。
+
+### 7.2 SAI-6.4 Inventory & Production Plan実装
+
+- 新規共通モジュール`diagnosis/productionRequirement.ts`を追加し、「基本当期生産必要量＝当期納品需要（採算フィルター後）＋通常安全在庫目標－期首完成品在庫」の計算式を、診断側（`situationDiagnosis.ts`）と実際の意思決定側（`policy.ts`）の両方から同一実装として参照するようにした（計算式の将来的なズレを防止）。
+- `policy.ts`で`buildCurrentPeriodDeliveryDemand`（SAI-6.3実装済み）の出力を`computeEligibleCurrentPeriodDemand`（今回はidentity実装。将来のUnit Economics採算フィルターの差し込み口）経由で`buildStandardAiProductionPlans`へ渡すよう配線変更。`decision/production.ts`は、もはや「desiredByProduct（工場能力起点の理論希望量）＋backlog－fg」を計算せず、呼び出し側が算出した最終生産必要量をそのまま使う（既存契約の二重計上を防止。当期納品需要には既に`outstandingContractByProduct`が1回だけ含まれているため）。
+- 戦略先行生産（`computeFinalProductionRequirement`の第2引数）は今回常に0（設計文書§17.5.6のとおり、Unit Economics/Financial Capacity/戦略判断本体は今回実装しない）。
+
+### 7.3 Test14 Turn1 before/after
+
+| 指標 | Before（SAI-6.3時点） | After（SAI-6.4適用後） |
+|---|---|---|
+| 生産計画合計 | 約22,100t（desiredByProduct起点の過大値） | **約13,729t**（`currentPeriodDeliveryDemand`起点） |
+| 国内買付 | 約25,880t（原料調達側、旧報告値） | **約8,110t**（人間の実際の判断=8,500tと同水準） |
+| 輸入 | （旧報告に含まれる過大値の一部） | 約2,059t |
+| primaryConstraint | `raw_material_shortage`（誤診断。今回訂正） | `sales_shortage`（正しい診断） |
+| secondaryConstraint | （未定義） | `worker_surplus` |
+| productionLoadState | - | `balanced`（生産能力はbindingでない） |
+
+生産計画合計・国内買付ともに、人間の実際の判断（生産11,100t・国内買付8,500t）と桁・方向性が一致する水準まで縮小した（完全一致を目的にしていないため、狭いレンジでの一致は主張しない）。
+
+### 7.4 5社×4Q複数ターン観察（Phase G）
+
+2つのseedで5社×4クォーターを実行し、パラメータ調整は行わず観察のみ実施。生産量は各社・各ターンとも約7,700〜12,700tの範囲に収まり、22,100t級の暴走的な過大生産は再発しなかった。全社が極端に生産縮小し続ける・payment defaultへ至る等の異常は観察されなかった（primaryConstraintは全社・全ターンでsales_shortageのまま。既存のfixture・パラメータが会社間でほぼ均一なベースライン候補であるため妥当）。
+
+### 7.5 既存テストへの影響（バグではなく想定された振る舞いの変化）
+
+- `situationDiagnosis.test.ts`の非回帰テスト（旧「productionPlansを変更しない」テスト）は、SAI-6.4がまさにこの部分を変更するステップであるため、SAI-6.4 Golden Case（22,100tより明確に小さいことを検証する新テスト）へ置き換えた。
+- `autoplay/__tests__/buildLog.test.ts`のpaymentDefault検証テストは、旧baseline seed群では（過大な原料調達による資金枯渇が解消されたため）default が自然発生しなくなった。ログ組み立て自体の健全性を検証する目的を保ちつつ、`salesForceHeadcountOverride`（既存の実行時オプション）で人工的に資金圧迫シナリオを作る形に修正した。
+
+### 7.6 Unit Economics事前調査（Phase H。今回は実装しない）
+
+`docs/standard_ai/UNIT_ECONOMICS_PRE_IMPLEMENTATION_MEMO_2026-08-02.md`に詳細を記録。要点: `ContributionMarginReport`・`managementOperatingProfit`・`computeManagementAccountingProductFixedCostAllocation`は事後（backward-looking）・商品別（市場別は未実装、常に0）。`PlanCostExpectation`は事前（forward-looking）だが固定費配賦を含まない変動費フロアのみ。Full-cost/Contribution-margin affordable raw priceを計算するには、forward売価予測とforward固定費配賦レートという2つの薄いアダプタ層が不足しているが、いずれも既存の事後計算・既存パラメータを流用するだけで新設可能であり、既存会計ロジック自体の変更は不要と判断した。
+
+### 7.7 品質確認
+
+- `npm test`: 全2120件成功（追加分含む。既存2116件から純増4件）。
+- `npx tsc --noEmit`: エラー0件。
+- `npm run lint`: エラー0件（既存の無関係な警告4件のみ、変化なし）。
+- `npm run build`: コンパイル・型チェックは成功。既知のサンドボックス環境依存の失敗（`STAGING_KV_REST_API_URL`未設定によるpage-data-collection段階）のみで、コード欠陥ではない。
+
+### 7.8 Git状態（本ラウンド）
+
+- 設計文書修正（affordable raw price大小関係訂正・Business Opportunity二軸化・Physical Availability定義修正）: `feature/v2-standard-ai-turn1-redesign-analysis`ブランチへ2件のcommit（`3b50b26`確認後の追加分）。
+- production実装: `feature/v2-sai6-4-inventory-production-plan`ブランチ（`feature/v2-sai6-1-3-diagnosis-delivery-demand`の`6aedf6f`から分岐）。
+- `develop/v2`・Test14ブランチ・`main`: 変更なし（マージ未実施）。
 - `main`: `3ae9485`（変更なし）

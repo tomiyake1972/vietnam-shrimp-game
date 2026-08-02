@@ -54,12 +54,19 @@ test("Test14 Turn1型ゴールデンケース: 営業が強い制約、生産能
   assert.equal(diagnosis!.workerLoadState, "surplus", `Workerに余力があるはずが、workerLoadState=${diagnosis!.workerLoadState}`);
   assert.notEqual(diagnosis!.inventoryExcessState, "surplus", `在庫に大きな問題は無いはずが、inventoryExcessState=${diagnosis!.inventoryExcessState}`);
 
-  // primaryConstraintは、少なくとも「実際に不足型と診断された」カテゴリの
-  // いずれかであること（営業不足はTest14 Turn1で必ず不足型として診断される
-  // ため、候補に含まれているはず）。
-  assert.ok(
-    diagnosis!.primaryConstraint === "sales_shortage" || diagnosis!.primaryConstraint === "raw_material_shortage",
-    `主要制約が想定外: ${diagnosis!.primaryConstraint}`
+  // 【SAI-6.4修正】原料は「期首在庫＋確定入荷だけでは不足（procurement needed）」であっても、
+  // 「当期国内市場から現実的に追加調達可能な量」が不明（unknown）である限り、真の供給制約
+  // （raw_material_shortage）としてprimary/secondary候補に入らない（三宅さんの指摘・調査結果。
+  // Test14 Turn1では国内原料を当期中に追加調達できるため、これは正しい訂正である）。
+  // したがって、primaryConstraintは営業（sales_shortage）であるべき。
+  assert.equal(diagnosis!.primaryConstraint, "sales_shortage", `主要制約が想定外: ${diagnosis!.primaryConstraint}`);
+  // 原料は「procurement needed」（調達行為が必要）であることは診断されるが、それ自体は
+  // ボトルネックではない。
+  assert.equal(diagnosis!.rawMaterialProcurementNeeded, true, "Test14 Turn1では原料の追加調達が必要と診断されるはず");
+  assert.equal(
+    diagnosis!.rawMaterialSupplyConstraintState,
+    "unknown",
+    "現行のStandard AI観測には国内追加調達可能量が無いため、真の供給制約はunknownであるべき"
   );
 
   // 診断比率は方向性のみを検証する（完全一致は求めない）。
@@ -98,14 +105,52 @@ test("営業人員配分（実際の意思決定）は現在headcountを超え�
   assert.ok(totalReduced <= 6, `減員後(6人)なのに営業人員配分合計が${totalReduced}になっている`);
 });
 
-test("非回帰: 今回の診断追加はStandard AIの最終意思決定（productionPlans等）を変更しない", () => {
+// ---------------------------------------------------------------------
+// SAI-6.4 Golden Case（Test14 Turn1型）: 22,100t過剰生産問題の構造的解消
+//
+// 【三宅さんの指示どおりの方針】人間案（生産11,100t・国内買付8,500t）への
+// 完全一致を目的にしない。ハードコードした数値との一致テストではなく、
+// 「currentPeriodDeliveryDemand + normalInventoryTarget - openingFinishedGoods」
+// という構成要素が実際に生産計画へ反映されていることと、22,100tより明確に
+// 小さくなることを検証する。
+// ---------------------------------------------------------------------
+
+test("SAI-6.4 Golden Case: Test14 Turn1型の生産計画が22,100tより明確に小さくなり、currentPeriodDeliveryDemand起点の式で説明できる", () => {
   const { fixture, ownState, publicInfo, period, turn } = setupBal();
-  const { decision } = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
-  // 意図的に「まだ生産計画そのものは修正しない」（SAI-6.4は別途指示）。
-  // 生産計画が引き続き工場能力にほぼ頭打ちする、過去調査で確認済みの過大な値の
-  // オーダーであることを確認する（完全一致は求めない。SAI-6.4での改善対象）。
+  const { decision, diagnostics } = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
+  const diagnosis = diagnostics.situationDiagnosis!;
+
   const totalProduction = decision.productionPlans.reduce((sum, p) => sum + Number(p.desiredQuantity), 0);
-  assert.ok(totalProduction > 15000, `今回はまだ生産計画を変更していないはずが、想定より小さい: ${totalProduction}`);
+
+  // 【必須（実装指示E-2）】22,100tより明確に小さいこと。
+  assert.ok(totalProduction < 18000, `SAI-6.4適用後もTest14 Turn1相当の生産計画が22,100t付近から明確に縮小していない: ${totalProduction}`);
+
+  // 【必須（実装指示E-2）】人間案11,100t近辺への一致を狭いレンジで要求せず、
+  // 「demand + normal inventory - opening inventory」の構成要素が実際に生産計画の
+  // 合計と一致することを優先して検証する（production capacityがbindingでない
+  // Test14 Turn1では、能力キャップは発生しないため厳密に一致するはず）。
+  const basicRequirementTotal =
+    diagnosis.basicCurrentPeriodProductionRequirementByProduct.hoso +
+    diagnosis.basicCurrentPeriodProductionRequirementByProduct.pd +
+    diagnosis.basicCurrentPeriodProductionRequirementByProduct.vap;
+  assert.ok(
+    Math.abs(totalProduction - basicRequirementTotal) < 1,
+    `生産計画合計(${totalProduction})が基本当期生産必要量(${basicRequirementTotal})と一致しない（能力制約が無いはずのケースで不一致）`
+  );
+
+  // production capacityはbindingでないこと（実装指示B-5・E-1）。
+  assert.notEqual(diagnosis.productionLoadState, "shortage", "Test14 Turn1では生産能力が制約になっていないはず");
+
+  // 戦略在庫理由なしで過剰生産しない（実装指示E-1）: 在庫過多にならない。
+  assert.notEqual(diagnosis.inventoryExcessState, "surplus", "戦略在庫理由がないのに在庫過多と診断されている");
+
+  // Worker余力を認識する（実装指示E-1）。
+  assert.equal(diagnosis.workerLoadState, "surplus");
+
+  // 人間案（生産11,100t・国内買付8,500t）と桁・方向性が整合しているかの参考記録
+  // （断定的な一致テストではない。開発日誌へも同様の値を記録する）。
+  const domesticPurchase = Number(decision.domesticPurchasePlan?.desiredQuantity ?? 0);
+  assert.ok(domesticPurchase > 0, "国内買付が0になっている（原料調達の連動が失われている）");
 });
 
 // ---------------------------------------------------------------------
@@ -161,12 +206,164 @@ test("人工ケース: 在庫過多が診断される（完成品在庫を極端
   assert.equal(diagnostics.situationDiagnosis!.inventoryExcessState, "surplus");
 });
 
-test("人工ケース: 資金不足が診断される（現金を大幅マイナスにする）", () => {
+test("人工ケース: 資金不足が診断される（現金を大幅マイナスにする。primary/secondary候補には入らずCASH_BUFFER_BELOW_TARGETのみ）", () => {
   const { fixture, ownState, publicInfo, period, turn } = setupBal();
   const cashShortOwnState: CompanyOwnState = { ...ownState, financeState: { ...ownState.financeState, cash: usd(-999_999_999) } };
   const { diagnostics } = generateStandardAiDecisionWithDiagnostics(fixture, cashShortOwnState, publicInfo, period, turn);
   assert.equal(diagnostics.situationDiagnosis!.liquidityCoverageState, "shortage");
+  // 【SAI-6.4修正】借入余力を含めた資金調達力全体が今回未接続のため、
+  // liquidityCoverageState==="shortage"だけではprimary/secondary候補に入らない。
+  assert.notEqual(diagnostics.situationDiagnosis!.primaryConstraint, "liquidity_shortage");
+  assert.notEqual(diagnostics.situationDiagnosis!.secondaryConstraint, "liquidity_shortage");
+  assert.ok(
+    diagnostics.entries.some((e) => e.code === "CASH_BUFFER_BELOW_TARGET"),
+    "CASH_BUFFER_BELOW_TARGETのwarningが出ていない"
+  );
 });
+
+// ---------------------------------------------------------------------
+// Phase F（実装指示）: Test14への過学習を避けるための逆方向・人工ケース
+// ---------------------------------------------------------------------
+
+test("F-1. 生産能力制約ケース: 当期納品需要が生産能力を上回る場合、生産がcapacityで上限になり、production capacity constraintが診断される", () => {
+  const { fixture, ownState, publicInfo, period, turn } = setupBal();
+  // 工場能力を極端に縮小し、当期納品需要（実際の販売可能量+既存契約）が
+  // 能力を上回る状況を作る。営業制約ロジックを機械的に適用して販売量まで
+  // 縮小しないことも確認する（実装指示F-1）。
+  const shrunkFixture = {
+    ...fixture,
+    factories: fixture.factories.map((f) => ({ ...f, hosoCapacity: hosoEqTons(50), pdCapacity: hosoEqTons(50), vapCapacity: hosoEqTons(50) })),
+  };
+  const { decision, diagnostics } = generateStandardAiDecisionWithDiagnostics(shrunkFixture, ownState, publicInfo, period, turn);
+  const diagnosis = diagnostics.situationDiagnosis!;
+  assert.equal(diagnosis.productionLoadState, "shortage", "生産能力制約が診断されていない");
+  assert.ok(diagnosis.productionCapacityHeadroom < 0, "生産能力の余力が負になっていない");
+
+  // 生産が能力でキャップされていること（各工場×商品の生産計画が、その工場の
+  // 商品別能力を実質的に超えないこと）。
+  for (const plan of decision.productionPlans) {
+    const factory = shrunkFixture.factories.find((f) => f.factoryId === plan.factoryId)!;
+    const capacity = plan.product === "hoso" ? factory.hosoCapacity : plan.product === "pd" ? factory.pdCapacity : factory.vapCapacity;
+    assert.ok(Number(plan.desiredQuantity) <= Number(capacity) + 1, `生産計画(${plan.desiredQuantity})が能力(${capacity})を超えている`);
+  }
+  assert.ok(
+    diagnostics.entries.some((e) => e.code === "CAPACITY_CONSTRAINT"),
+    "CAPACITY_CONSTRAINT診断が出ていない"
+  );
+
+  // 販売計画自体は、営業制約ロジック（営業人員配分）を機械的に適用して縮小されて
+  // いないこと（=salesPlansはsalesForceHeadcount起因の制約のみで決まり、生産能力
+  // 不足を理由に販売量まで縮小するロジックは今回導入していない）。
+  const salesTotal = decision.salesPlans.reduce((sum, p) => sum + Number(p.desiredQuantity), 0);
+  assert.ok(salesTotal > 0, "販売計画がゼロになっている（生産能力制約が販売側へ誤って伝播している可能性）");
+});
+
+test("F-2. 期首完成品在庫ありケース: 十分なFG在庫があれば、その分だけ生産必要量が減る", () => {
+  const { fixture, ownState, publicInfo, period, turn } = setupBal();
+  const { diagnostics: baseline } = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
+  const baselineHosoRequirement = baseline.situationDiagnosis!.basicCurrentPeriodProductionRequirementByProduct.hoso;
+
+  const extraFgLot: FinishedGoodsLot = {
+    lotId: "sai6-test-f2-lot",
+    companyId: fixture.companyId,
+    factoryId: fixture.factories[0].factoryId,
+    product: "hoso",
+    producedPeriod: period,
+    originalQuantity: hosoEqTons(2000),
+    remainingQuantity: hosoEqTons(2000),
+    sourceRawMaterialLots: [],
+    rawMaterialOriginCountries: [],
+    rawMaterialUnitCost: usdPerHosoEqKg(4.2),
+    baseProcessingCost: usdM(0),
+    availableFromPeriod: period,
+    status: "available",
+  };
+  const withExtraFgOwnState: CompanyOwnState = { ...ownState, finishedGoodsLots: [...ownState.finishedGoodsLots, extraFgLot] };
+  const { diagnostics: withExtraFg } = generateStandardAiDecisionWithDiagnostics(fixture, withExtraFgOwnState, publicInfo, period, turn);
+  const withExtraFgHosoRequirement = withExtraFg.situationDiagnosis!.basicCurrentPeriodProductionRequirementByProduct.hoso;
+
+  assert.ok(
+    withExtraFgHosoRequirement < baselineHosoRequirement,
+    `期首FG在庫を積んだのにHOSOの生産必要量が減っていない（baseline=${baselineHosoRequirement}, withExtraFg=${withExtraFgHosoRequirement}）`
+  );
+  assert.ok(
+    Math.abs(baselineHosoRequirement - withExtraFgHosoRequirement - 2000) < 1,
+    `生産必要量の減少幅がFG在庫積み増し分(2000t)と一致しない（減少幅=${baselineHosoRequirement - withExtraFgHosoRequirement}）`
+  );
+});
+
+test("F-3. 需要ゼロ／極小ケース: 通常在庫以外の理由なき生産をせず、NaN・負値・division by zeroを起こさない", () => {
+  const { fixture, ownState, publicInfo, period, turn } = setupBal();
+  // 全市場の需要をゼロ相当にするため、営業人員をゼロにし、既存契約もゼロにする。
+  const zeroDemandFixture = { ...fixture, salesForceHeadcountTotal: 0 };
+  const zeroDemandOwnState: CompanyOwnState = {
+    ...ownState,
+    salesForceHiringState: { ...ownState.salesForceHiringState, headcount: 0 },
+    contracts: [],
+  };
+  const { decision, diagnostics } = generateStandardAiDecisionWithDiagnostics(zeroDemandFixture, zeroDemandOwnState, publicInfo, period, turn);
+  const diagnosis = diagnostics.situationDiagnosis!;
+
+  for (const key of ["hoso", "pd", "vap"] as const) {
+    assert.ok(Number.isFinite(diagnosis.basicCurrentPeriodProductionRequirementByProduct[key]), `${key}の生産必要量がNaN/Infinity`);
+    assert.ok(diagnosis.basicCurrentPeriodProductionRequirementByProduct[key] >= 0, `${key}の生産必要量が負値`);
+  }
+  for (const plan of decision.productionPlans) {
+    assert.ok(Number.isFinite(Number(plan.desiredQuantity)), "生産計画の数量がNaN/Infinity");
+    assert.ok(Number(plan.desiredQuantity) >= 0, "生産計画の数量が負値");
+  }
+  // 通常在庫目標以外に生産する理由がないため、生産必要量の合計は通常在庫目標の合計を
+  // 大きく超えないはず（需要ゼロなので基本的には通常在庫目標分だけが残る）。
+  const requirementTotal =
+    diagnosis.basicCurrentPeriodProductionRequirementByProduct.hoso +
+    diagnosis.basicCurrentPeriodProductionRequirementByProduct.pd +
+    diagnosis.basicCurrentPeriodProductionRequirementByProduct.vap;
+  const deliveryDemandTotal =
+    diagnosis.currentPeriodDeliveryDemandByProduct.hoso + diagnosis.currentPeriodDeliveryDemandByProduct.pd + diagnosis.currentPeriodDeliveryDemandByProduct.vap;
+  const { diagnostics: baselineForComparison } = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
+  const baselineDeliveryDemandTotal = sumOf(baselineForComparison.currentPeriodDeliveryDemand!.byProduct);
+  // 【注記】営業人員をゼロにしても、市場側の最低受注ライン等により当期納品需要が
+  // 厳密にゼロにはならない場合がある（既存の市場ロジックの仕様であり、今回変更しない）。
+  // ここではNaN/負値が出ないことを主目的とし、需要が通常時より大幅に縮小することのみ検証する。
+  assert.ok(
+    deliveryDemandTotal < baselineDeliveryDemandTotal * 0.3,
+    `営業人員ゼロなのにcurrentPeriodDeliveryDemandが通常時と同水準のまま: baseline=${baselineDeliveryDemandTotal}, zero-demand=${deliveryDemandTotal}`
+  );
+  assert.ok(Number.isFinite(requirementTotal), "生産必要量合計がNaN/Infinity");
+});
+
+test("F-4. 営業人員採用／減員後: 動的headcountからrealisticSalesByProductが変わり、production requirementも自然に変わる", () => {
+  const { fixture, ownState, publicInfo, period, turn } = setupBal();
+  const { diagnostics: baseline } = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
+  const baselineTotal = sumOf(baseline.situationDiagnosis!.basicCurrentPeriodProductionRequirementByProduct);
+
+  const hiredOwnState: CompanyOwnState = {
+    ...ownState,
+    salesForceHiringState: { ...ownState.salesForceHiringState, headcount: ownState.salesForceHiringState.headcount + 20 },
+  };
+  const { diagnostics: hired } = generateStandardAiDecisionWithDiagnostics(fixture, hiredOwnState, publicInfo, period, turn);
+  const hiredTotal = sumOf(hired.situationDiagnosis!.basicCurrentPeriodProductionRequirementByProduct);
+
+  const reducedOwnState: CompanyOwnState = {
+    ...ownState,
+    salesForceHiringState: { ...ownState.salesForceHiringState, headcount: Math.max(1, ownState.salesForceHiringState.headcount - 20) },
+  };
+  const { diagnostics: reduced } = generateStandardAiDecisionWithDiagnostics(fixture, reducedOwnState, publicInfo, period, turn);
+  const reducedTotal = sumOf(reduced.situationDiagnosis!.basicCurrentPeriodProductionRequirementByProduct);
+
+  assert.ok(
+    hiredTotal >= baselineTotal,
+    `営業人員を増員したのに生産必要量が減っている（baseline=${baselineTotal}, hired=${hiredTotal}）`
+  );
+  assert.ok(
+    reducedTotal <= baselineTotal,
+    `営業人員を減員したのに生産必要量が増えている（baseline=${baselineTotal}, reduced=${reducedTotal}）`
+  );
+});
+
+function sumOf(p: { hoso: number; pd: number; vap: number }): number {
+  return p.hoso + p.pd + p.vap;
+}
 
 // ---------------------------------------------------------------------
 // Claude説明生成の失敗時にも、決定論的Standard AIの診断が消えないこと

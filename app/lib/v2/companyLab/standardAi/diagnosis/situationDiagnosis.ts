@@ -21,11 +21,15 @@ import { unwrapUnit } from "../../../core/units";
 import { CompanyFixture } from "../../types";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
-import { computeReferenceProductionByProduct } from "../pressures";
 import { ProductAmount, StandardAiObservation, sumProductAmount, zeroProductAmount } from "../types";
 import { StandardAiDiagnosticEntry, StandardAiReasonCode } from "../reasonCodes";
 import { computeRequiredRegularHeadcount } from "../../workforce";
 import { CurrentPeriodDeliveryDemand } from "./currentPeriodDeliveryDemand";
+import {
+  computeBasicCurrentPeriodProductionRequirement,
+  computeEligibleCurrentPeriodDemand,
+  computeNormalInventoryTargetByProduct,
+} from "./productionRequirement";
 
 const EPSILON = 1e-6;
 
@@ -78,9 +82,25 @@ export interface StandardAiSituationDiagnosis {
   /** 理論必要Worker / 現在Worker（動的state）。高ければ不足、低すぎれば余剰。 */
   readonly workerLoadRatio: number;
   readonly workerLoadState: ConstraintState;
-  /** (当期利用可能原料+当期確実に取得可能な原料) / 必要原料。1未満なら不足。 */
+  /**
+   * 【SAI-6.4修正】(当期利用可能原料+当期確実に取得可能な原料) / 必要原料。1未満は
+   * 「期首在庫＋確定入荷だけでは足りない＝当期中に追加調達が必要」ことを意味するに
+   * すぎず、それ自体はボトルネックではない（通常の調達行為）。真の供給制約かどうかは
+   * `rawMaterialSupplyConstraintState`で別途判定する。
+   */
   readonly rawMaterialCoverageRatio: number;
   readonly rawMaterialCoverageState: ConstraintState;
+  /** rawMaterialCoverageRatio<1のとき true。「調達行為が必要」という中立的な事実であり、単独ではボトルネックと解釈しない。 */
+  readonly rawMaterialProcurementNeeded: boolean;
+  /**
+   * 【SAI-6.4新設】真の原料供給制約（「当期国内市場から現実的に追加調達可能な量」を
+   * 超えて必要になる状態）の判定。現行のStandard AI観測（StandardAiObservation）には
+   * 国内市場の追加調達可能量・シェア上限（rawMaterials/domesticPurchase.tsの
+   * maximumBuyerShare等）が一切露出していないため、今回はこの値を捏造せず常に
+   * "unknown"を返す（=原料不足と断定しない）。将来、当該情報がobservationへ
+   * 追加された場合にのみ"shortage"等を判定できるようにする受け皿。
+   */
+  readonly rawMaterialSupplyConstraintState: ConstraintState;
   /** 期首完成品在庫(通常在庫扱い分) / 通常在庫目標。高すぎる場合に在庫過多。 */
   readonly inventoryExcessRatio: number;
   readonly inventoryExcessState: ConstraintState;
@@ -134,19 +154,6 @@ function classify(ratio: number | undefined, shortageIf: (r: number) => boolean,
   return "balanced";
 }
 
-/** 基本当期生産必要量（§12.1）: 当期納品需要 + 通常安全在庫目標 − 利用可能な期首完成品在庫。下限0。 */
-function computeBasicCurrentPeriodProductionRequirement(
-  deliveryDemandByProduct: ProductAmount,
-  normalInventoryTargetByProduct: ProductAmount,
-  openingFinishedGoodsByProduct: ProductAmount
-): ProductAmount {
-  const result = zeroProductAmount();
-  for (const product of ["hoso", "pd", "vap"] as const) {
-    result[product] = Math.max(0, deliveryDemandByProduct[product] + normalInventoryTargetByProduct[product] - openingFinishedGoodsByProduct[product]);
-  }
-  return result;
-}
-
 /** 基本当期生産必要量を各工場へ能力シェアで配分し、理論必要Workerを合算する（labor.tsと同じ配分方式の再利用。独自の推定方式は増設しない）。 */
 function computeRequiredWorkerTotal(fixture: CompanyFixture, observation: StandardAiObservation, basicRequirementByProduct: ProductAmount): number {
   const capacityTotals = observation.totalCapacityByProduct;
@@ -190,13 +197,13 @@ export function buildStandardAiSituationDiagnosis(
   const salesFulfillmentRatio = theoreticalSalesOpportunity > EPSILON ? realisticSalesTotal / theoreticalSalesOpportunity : NaN;
   const salesFulfillmentState = classify(Number.isFinite(salesFulfillmentRatio) ? salesFulfillmentRatio : undefined, (r) => r < T.salesShortageRatio);
 
-  // --- 基本当期生産必要量（診断専用の並行計算。既存decision/production.tsは変更しない） ---
-  const normalInventoryTargetByProduct = computeReferenceProductionByProduct(observation, params);
-  for (const product of ["hoso", "pd", "vap"] as const) {
-    normalInventoryTargetByProduct[product] *= params.finishedGoodsTargetQuarters;
-  }
+  // --- 基本当期生産必要量（SAI-6.4：productionRequirement.tsの共通実装を診断側でも再利用する。
+  // 実際の生産計画（decision/production.ts）はSAI-6.4でこの同じ実装に配線されるため、
+  // ここで別式を持つと将来の実装ズレを起こす） ---
+  const normalInventoryTargetByProduct = computeNormalInventoryTargetByProduct(observation, params);
+  const eligibleDemandByProduct = computeEligibleCurrentPeriodDemand(deliveryDemand);
   const basicRequirementByProduct = computeBasicCurrentPeriodProductionRequirement(
-    deliveryDemand.byProduct,
+    eligibleDemandByProduct,
     normalInventoryTargetByProduct,
     observation.finishedGoodsByProduct
   );
@@ -249,12 +256,50 @@ export function buildStandardAiSituationDiagnosis(
   const workerHeadroom = currentWorker - requiredWorker;
 
   // --- 4. 原料（Raw Material Coverage Ratio） ---
-  // growingAquaculture（未収穫）は当期利用可能原料に含めない。inTransitImportは
+  // 【SAI-6.4修正】growingAquaculture（未収穫）は当期利用可能原料に含めない。inTransitImportは
   // availableFromPeriod（既存フィールド）が当期以前のものだけを「当期確実に取得可能」に含める。
+  // rawMaterialCoverageRatioが1未満でも、それは「期首在庫＋確定入荷だけでは足りない」という
+  // 事実（＝通常の調達行為が必要）であり、ボトルネックではない。Test14 Turn1のように国内市場
+  // から追加調達できる状況では「原料不足」と断定してはならない（三宅さんの指摘・調査結果）。
+  //
+  // 【調査結果】rawMaterials/domesticPurchase.tsのprocurementCapacity()・maximumBuyerShare・
+  // market/types.tsのvietnamDomesticRawSupply等、国内市場側の「当期追加調達可能な上限」は
+  // 現行のStandardAiObservationには一切露出していない（observation.tsの
+  // procurementHeadcountTotal・totalCommonProcessingCapacityは容量算出の入力にすぎず、
+  // 上限そのものではない）。したがって「真の供給制約」は今回のobservationからは判定不能であり、
+  // 架空の供給能力を作らず常にunknownとする（rawMaterialSupplyConstraintState）。
   const requiredRawMaterial = basicRequirementTotal; // 歩留まり1.0基準（既存procurement.tsと同じ前提）
   const currentlyAvailable = observation.rawMaterialAvailable + observation.rawMaterialCertainInboundThisPeriod;
   const rawMaterialCoverageRatio = requiredRawMaterial > EPSILON ? currentlyAvailable / requiredRawMaterial : NaN;
   const rawMaterialCoverageState = classify(Number.isFinite(rawMaterialCoverageRatio) ? rawMaterialCoverageRatio : undefined, (r) => r < T.rawMaterialShortageRatio);
+  const rawMaterialProcurementNeeded = Number.isFinite(rawMaterialCoverageRatio) && rawMaterialCoverageRatio < T.rawMaterialShortageRatio;
+  // 現行観測に「当期国内市場から現実的に追加調達可能な量」が無いため、真の供給制約は常にunknown。
+  // （ConstraintStateとして明示的に型付けする。将来、当該情報がobservationへ追加された際に
+  //  ここを実際の判定式へ置き換えられるようにするための受け皿であり、リテラル固定ではない。）
+  const rawMaterialSupplyConstraintState: ConstraintState = "unknown" as ConstraintState;
+  if (rawMaterialProcurementNeeded) {
+    diagnostics.push({
+      code: "RAW_MATERIAL_PROCUREMENT_NEEDED",
+      domain: "diagnosis",
+      companyId: fixture.companyId,
+      severity: "info",
+      keyValues: { rawMaterialCoverageRatio, currentlyAvailable, requiredRawMaterial },
+      message:
+        `期首利用可能原料＋当期確実に取得可能な原料（${Math.round(currentlyAvailable)}t）が必要原料（${Math.round(
+          requiredRawMaterial
+        )}t）に届かないため、当期中の追加調達（国内購入・輸入等）が必要（procurement needed）。これは通常の調達行為であり、` +
+        `それ自体をボトルネックとは診断しない。`,
+    });
+    diagnostics.push({
+      code: "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
+      domain: "diagnosis",
+      companyId: fixture.companyId,
+      severity: "info",
+      message:
+        "当期国内市場から現実的に追加調達可能な量（市場全体供給・買い手シェア上限等）は現行のStandard AI観測に露出していないため、" +
+        "真の供給制約（raw material supply constraint）かどうかは不明（unknown）。原料不足と断定していない。",
+    });
+  }
 
   // --- 5. 在庫（Inventory Excess Ratio） ---
   const normalInventoryTargetTotal = sumProductAmount(normalInventoryTargetByProduct);
@@ -271,21 +316,28 @@ export function buildStandardAiSituationDiagnosis(
   );
 
   // --- 6. 資金（Liquidity Coverage Ratio） ---
-  // 【今回のスコープ】既存のfinanceロジック（pressures.targetMinimumCashUsd）から
-  // 取得可能な、説明可能な指標を使う。実行可能借入余力の推定は今回未接続
-  // （§19の未確定事項）であり、liquidityCoverageRatioは現金のみを分子とする
-  // 簡易版であることをdiagnosticsで明示する。借入判断ロジック自体は変更しない。
+  // 【SAI-6.4修正】cash/targetMinimumCashは「手元現金バッファ」の指標であって、
+  // 会社全体の資金調達能力（借入余力を含む）ではない。調査の結果、
+  // financing/borrowingCapacity.tsのcomputeBorrowingCapacity()は既存の資金調達力
+  // 計算式として存在するが、その入力（担保価値・EBITDA相当・自己資本・信用区分等）は
+  // 現行のStandardAiObservation/CompanyFixture/ownStateには露出しておらず、
+  // 今回新規にバランスシート項目をobservationへ配線することはスコープ外（Financial
+  // Capacity forward simulation本体は今回実装しない指示のため）。したがって、
+  // liquidityCoverageRatioが低いことだけをもって「資金制約（primary/secondary候補）」
+  // と断定せず、CASH_BUFFER_BELOW_TARGETという中立的なwarning情報に留める。
   const liquidityCoverageRatio = pressures.targetMinimumCashUsd > EPSILON ? observation.cashUsd / pressures.targetMinimumCashUsd : NaN;
   const liquidityCoverageState = classify(Number.isFinite(liquidityCoverageRatio) ? liquidityCoverageRatio : undefined, (r) => r < T.liquidityShortageRatio);
   if (Number.isFinite(liquidityCoverageRatio)) {
     diagnostics.push({
-      code: "LIQUIDITY_CONSTRAINT",
+      code: "CASH_BUFFER_BELOW_TARGET",
       domain: "diagnosis",
       companyId: fixture.companyId,
       severity: liquidityCoverageState === "shortage" ? "warning" : "info",
       keyValues: { liquidityCoverageRatio, cashUsd: observation.cashUsd, targetMinimumCashUsd: pressures.targetMinimumCashUsd },
       message:
-        "Liquidity Coverage Ratio = 現金 / 会社規模連動の最低現金バッファ（簡易版。実行可能借入余力は今回未接続のため分子に含めていない）。",
+        "Liquidity Coverage Ratio = 現金 / 会社規模連動の最低現金バッファ（手元現金バッファのみの簡易指標）。" +
+        "借入余力（computeBorrowingCapacity相当）は今回Standard AI観測に未接続のため、この比率単独では資金制約と断定せず、" +
+        "primary/secondary制約候補には含めない。",
     });
   }
 
@@ -340,14 +392,18 @@ export function buildStandardAiSituationDiagnosis(
       )}人）を大きく上回るため、Worker余剰と診断する（Worker Load Ratio=${workerLoadRatio.toFixed(2)}）。`,
     });
   }
-  if (rawMaterialCoverageState === "shortage") {
+  // 【SAI-6.4修正】rawMaterialCoverageState==="shortage"（期首在庫＋確定入荷だけでは
+  // 不足）だけではprimary/secondary候補へ入れない。「真の供給制約」
+  // （rawMaterialSupplyConstraintState==="shortage"）だけを候補にする。現行の
+  // Standard AI観測では国内追加調達可能量が不明なため、rawMaterialSupplyConstraintState
+  // は常にunknownであり、この節は今回発火しない（将来、当該情報が観測へ追加された
+  // 場合の受け皿として構造だけを残す）。
+  if (rawMaterialSupplyConstraintState === "shortage") {
     candidates.push({
       category: "raw_material_shortage",
       score: 1 - rawMaterialCoverageRatio,
       code: "RAW_MATERIAL_SHORTAGE",
-      message: `当期利用可能原料＋当期確実に取得可能な原料（${Math.round(currentlyAvailable)}t）が必要原料（${Math.round(
-        requiredRawMaterial
-      )}t）を下回るため、原料不足と診断する（Raw Material Coverage Ratio=${rawMaterialCoverageRatio.toFixed(2)}）。`,
+      message: `真の原料供給制約（当期国内市場からの追加調達可能量を超えて必要）と診断する（Raw Material Coverage Ratio=${rawMaterialCoverageRatio.toFixed(2)}）。`,
     });
   }
   if (inventoryExcessState === "surplus") {
@@ -360,14 +416,9 @@ export function buildStandardAiSituationDiagnosis(
       )}t）を大きく超えるため、在庫過多と診断する（Inventory Excess Ratio=${inventoryExcessRatio.toFixed(2)}）。`,
     });
   }
-  if (liquidityCoverageState === "shortage") {
-    candidates.push({
-      category: "liquidity_shortage",
-      score: (T.liquidityShortageRatio - liquidityCoverageRatio) / T.liquidityShortageRatio,
-      code: "LIQUIDITY_CONSTRAINT",
-      message: `現金が会社規模連動の最低現金バッファを下回る見込みのため、資金制約と診断する（Liquidity Coverage Ratio=${liquidityCoverageRatio.toFixed(2)}）。`,
-    });
-  }
+  // 【SAI-6.4修正】liquidityCoverageState==="shortage"（手元現金バッファ不足）だけでは
+  // primary/secondary候補へ入れない。借入余力を含めた資金調達力全体が今回未接続のため、
+  // CASH_BUFFER_BELOW_TARGETという中立的なwarningに留める（上記で発火済み）。
 
   candidates.sort((a, b) => b.score - a.score);
   const primary = candidates[0];
@@ -404,6 +455,8 @@ export function buildStandardAiSituationDiagnosis(
     workerLoadState,
     rawMaterialCoverageRatio,
     rawMaterialCoverageState,
+    rawMaterialProcurementNeeded,
+    rawMaterialSupplyConstraintState,
     inventoryExcessRatio,
     inventoryExcessState,
     liquidityCoverageRatio,

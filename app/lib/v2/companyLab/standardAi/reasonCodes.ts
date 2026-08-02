@@ -62,7 +62,12 @@ export type StandardAiReasonCode =
   | "INVENTORY_EXCESS" // 完成品在庫が通常在庫目標を大きく超えている（過剰型）
   | "LIQUIDITY_CONSTRAINT" // 資金制約が支配的（不足型）
   | "CURRENT_PERIOD_DELIVERY_DEMAND_PROXY" // currentPeriodDeliveryDemandが暫定proxy（現行salesPlans+当期契約）であることの明示
-  | "PRODUCTION_CAPACITY_RECOGNITION_GAP"; // Standard AIが参照する能力（ノミナル）と実効能力（0.855係数適用後）に差がある
+  | "PRODUCTION_CAPACITY_RECOGNITION_GAP" // Standard AIが参照する能力（ノミナル）と実効能力（0.855係数適用後）に差がある
+  // --- 【SAI-6.4修正】原料診断の意味修正（procurement need と supply constraint の分離） ---
+  | "RAW_MATERIAL_PROCUREMENT_NEEDED" // 期首在庫＋確定入荷だけでは必要量に届かないが、当期中の通常の追加調達行為で解決可能（ボトルネックではない）
+  | "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN" // 当期国内市場から現実的に追加調達可能な量をStandard AIの現行観測から確認できないため、真の供給制約かどうかは不明（原料不足と断定しない）
+  // --- 【SAI-6.4修正】資金診断の意味修正（現金バッファのみでは資金制約と断定しない） ---
+  | "CASH_BUFFER_BELOW_TARGET"; // 現金が会社規模連動の最低現金バッファを下回るが、借入余力を含めた資金調達力全体は今回未接続のため、これのみでは資金制約と断定しない（primary/secondary制約候補には含めない）
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -104,6 +109,9 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "LIQUIDITY_CONSTRAINT",
   "CURRENT_PERIOD_DELIVERY_DEMAND_PROXY",
   "PRODUCTION_CAPACITY_RECOGNITION_GAP",
+  "RAW_MATERIAL_PROCUREMENT_NEEDED",
+  "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
+  "CASH_BUFFER_BELOW_TARGET",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */
