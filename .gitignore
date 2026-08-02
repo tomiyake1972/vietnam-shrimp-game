@@ -58,3 +58,8 @@ next-env.d.ts
 # （artifacts/sai5/以下）。同じ理由でGit管理対象にしない
 # （生成スクリプト scripts/sai5Analysis.ts のみGit管理する）。
 /artifacts/sai5/
+
+# 加工品市場進化の検証シナリオ生成物（診断専用、artifacts/market-evolution/以下）。
+# 大量のCSV/JSON生成物はGit管理対象にしない
+# （生成スクリプト scripts/processedMarketEvolutionScenarios.ts のみGit管理する）。
+/artifacts/market-evolution/
