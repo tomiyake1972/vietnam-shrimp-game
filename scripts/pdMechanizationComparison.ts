@@ -19,6 +19,7 @@
 
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../app/lib/v2/companyLab/runner";
 import { generateAutoPolicyDecision } from "../app/lib/v2/companyLab/autoPolicy";
+import { generateStandardAiDecisionWithDiagnostics } from "../app/lib/v2/companyLab/standardAi/policy";
 import { CompanyDecisionInput, CompanyLabConfig } from "../app/lib/v2/companyLab/types";
 import { CompanyId } from "../app/lib/v2/sales/types";
 import { Product } from "../app/lib/v2/market/types";
@@ -122,6 +123,8 @@ export interface QuarterRow {
   readonly companyId: CompanyId;
   readonly quarter: number;
   readonly mechanizationLevel: number;
+  /** Standard AI が自らこの四半期に省人化を提案したか（ケースEの解釈に使う）。 */
+  readonly selfProposedMechanization: boolean;
   readonly producedHoso: number;
   readonly producedPd: number;
   readonly producedVap: number;
@@ -138,6 +141,9 @@ export interface QuarterRow {
   readonly laborShortfallTons: number;
   readonly regularLaborCostUsd: number;
   readonly temporaryLaborCostUsd: number;
+  /** 残業費 = 常用人数 × 給与 × 残業率 × 残業割増係数（finance/parameters.tsの単価をそのまま使う）。 */
+  readonly overtimeLaborCostUsd: number;
+  readonly totalLaborCostUsd: number;
   readonly investmentUsd: number;
   readonly operatingProfitUsd: number;
   readonly netIncomeUsd: number;
@@ -146,11 +152,25 @@ export interface QuarterRow {
   readonly debtUsd: number;
 }
 
-export function runCase(profile: CaseProfile, seed: string, params: ProductionParameters = PRODUCTION_PARAMETERS_V1): readonly QuarterRow[] {
+/**
+ * 意思決定の生成方式。
+ *  autoPolicy  … 常用人員の減員判断を**持たない**（省人化の効果がPLへ出ない）
+ *  standardAi  … decision/labor.ts の sustainedExcess 経路で減員判断を持つ
+ * この2つの比較そのものが、本ラウンドの中心的な検証項目である。
+ */
+export type DecisionMode = "autoPolicy" | "standardAi";
+
+export function runCase(
+  profile: CaseProfile,
+  seed: string,
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
+  decisionMode: DecisionMode = "autoPolicy"
+): readonly QuarterRow[] {
   const config = labConfig(seed);
   const { state: initialState, fixtures } = initializeCompanyLab(config);
   let state = initialState;
   const rows: QuarterRow[] = [];
+  const selfProposedMechanizationTurns = new Set<string>();
 
   for (let i = 0; i < HORIZON_QUARTERS; i += 1) {
     if (state.isComplete) break;
@@ -160,7 +180,15 @@ export function runCase(profile: CaseProfile, seed: string, params: ProductionPa
 
     for (const fixture of fixtures) {
       const ownState = buildCompanyOwnState(state, fixture);
-      let decision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, turn);
+      let decision =
+        decisionMode === "standardAi"
+          ? generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, state.currentPeriod, turn).decision
+          : generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, turn);
+      // 【重要】Standard AI が自ら省人化を提案した四半期を記録する（ケースEが
+      // 「ゲートを通ったのか、強制的に押し込んだのか」を報告で区別するため）。
+      if (decisionMode === "standardAi" && decision.capexDecision.newProjectProposals.some((p) => p.projectType === "pdMechanization")) {
+        selfProposedMechanizationTurns.add(`${fixture.companyId}@${turn}`);
+      }
 
       // 商品志向（販売計画・生産優先度）。
       decision = {
@@ -176,7 +204,8 @@ export function runCase(profile: CaseProfile, seed: string, params: ProductionPa
       }
       if (profile.mechanizationTurn !== null && turn === profile.mechanizationTurn) {
         const targetFactoryId = fixture.factories[0]?.factoryId;
-        if (targetFactoryId) {
+        const alreadyProposed = decision.capexDecision.newProjectProposals.some((p) => p.projectType === "pdMechanization");
+        if (targetFactoryId && !alreadyProposed) {
           decision = {
             ...decision,
             capexDecision: {
@@ -251,6 +280,7 @@ export function runCase(profile: CaseProfile, seed: string, params: ProductionPa
         companyId: fixture.companyId,
         quarter: turn,
         mechanizationLevel: level,
+        selfProposedMechanization: selfProposedMechanizationTurns.has(`${fixture.companyId}@${turn}`),
         producedHoso: producedByProduct.hoso,
         producedPd: producedByProduct.pd,
         producedVap: producedByProduct.vap,
@@ -267,6 +297,12 @@ export function runCase(profile: CaseProfile, seed: string, params: ProductionPa
         laborShortfallTons: laborShortfall,
         regularLaborCostUsd: regularHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter,
         temporaryLaborCostUsd: temporaryHeadcount * FINANCE_PARAMETERS_V1.labor.temporaryWorkerCostUsdPerQuarter,
+        overtimeLaborCostUsd:
+          regularHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter * overtime * FINANCE_PARAMETERS_V1.labor.overtimePremiumFactor,
+        totalLaborCostUsd:
+          regularHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter +
+          temporaryHeadcount * FINANCE_PARAMETERS_V1.labor.temporaryWorkerCostUsdPerQuarter +
+          regularHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter * overtime * FINANCE_PARAMETERS_V1.labor.overtimePremiumFactor,
         investmentUsd: fin ? Math.abs((fin.cashFlow?.investingCashFlow as unknown as number) ?? 0) : 0,
         operatingProfitUsd: fin ? (fin.profitAndLoss.operatingProfit as unknown as number) : 0,
         netIncomeUsd: fin ? (fin.profitAndLoss.netIncome as unknown as number) : 0,
@@ -295,8 +331,14 @@ export interface CaseSummary {
   /** 【実効果】臨時人件費の削減額（機械化なしケース比ではなく、自ケース内の推移から）。 */
   readonly temporaryLaborCostUsd: number;
   readonly regularLaborCostUsd: number;
+  readonly overtimeLaborCostUsd: number;
+  readonly totalLaborCostUsd: number;
   /** 常用の余剰人員（人・四半期）。ここが大きいほど理論効果が実現していない。 */
   readonly surplusRegularHeadQuarters: number;
+  /** 期末の常用人員（減員が実際に起きたかを見る）。 */
+  readonly finalRegularHeadcount: number;
+  /** Standard AI が自ら省人化を提案した会社×四半期の件数。 */
+  readonly selfProposedMechanizationCount: number;
   readonly investmentUsd: number;
   readonly cumulativeNetIncomeUsd: number;
   readonly cumulativeOperatingCashFlowUsd: number;
@@ -333,7 +375,11 @@ export function summarize(rows: readonly QuarterRow[], params: ProductionParamet
     theoreticalLaborSavingUsd: theoreticalSaved * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter,
     temporaryLaborCostUsd: sum((r) => r.temporaryLaborCostUsd),
     regularLaborCostUsd: sum((r) => r.regularLaborCostUsd),
+    overtimeLaborCostUsd: sum((r) => r.overtimeLaborCostUsd),
+    totalLaborCostUsd: sum((r) => r.totalLaborCostUsd),
     surplusRegularHeadQuarters: sum((r) => r.surplusRegularHeadcount),
+    finalRegularHeadcount: lastRows.reduce((s, r) => s + r.regularHeadcount, 0),
+    selfProposedMechanizationCount: rows.filter((r) => r.selfProposedMechanization).length,
     investmentUsd: sum((r) => r.investmentUsd),
     cumulativeNetIncomeUsd: sum((r) => r.netIncomeUsd),
     cumulativeOperatingCashFlowUsd: sum((r) => r.operatingCashFlowUsd),
@@ -377,11 +423,11 @@ export function theoreticalPaybackQuarters(pdRelatedRegularHeadcount: number, va
 }
 
 const CSV_COLUMNS: readonly (keyof QuarterRow)[] = [
-  "caseId", "seed", "companyId", "quarter", "mechanizationLevel",
+  "caseId", "seed", "companyId", "quarter", "mechanizationLevel", "selfProposedMechanization",
   "producedHoso", "producedPd", "producedVap", "contractedTons", "finishedGoodsTons",
   "requiredLaborHoso", "requiredLaborPd", "requiredLaborVap", "requiredLaborTotal",
   "regularHeadcount", "temporaryHeadcount", "overtimeRate", "surplusRegularHeadcount", "laborShortfallTons",
-  "regularLaborCostUsd", "temporaryLaborCostUsd", "investmentUsd",
+  "regularLaborCostUsd", "temporaryLaborCostUsd", "overtimeLaborCostUsd", "totalLaborCostUsd", "investmentUsd",
   "operatingProfitUsd", "netIncomeUsd", "operatingCashFlowUsd", "cashUsd", "debtUsd",
 ];
 
@@ -393,8 +439,193 @@ function fmt(n: number): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
+/**
+ * 【本ラウンドの中心】Standard AI（減員判断あり）で5ケースを走らせ、
+ * 理論削減額のうち**実際にPLへ現れた額**を、機械化なしケースとの人件費差として測る。
+ */
+export function runStandardAiComparison(): {
+  readonly summaries: readonly CaseSummary[];
+  readonly rows: readonly QuarterRow[];
+} {
+  const rows: QuarterRow[] = [];
+  const summaries: CaseSummary[] = [];
+  for (const profile of CASE_PROFILES) {
+    for (const seed of SEEDS) {
+      const caseRows = runCase(profile, seed, PRODUCTION_PARAMETERS_V1, "standardAi");
+      rows.push(...caseRows);
+      summaries.push(summarize(caseRows));
+    }
+  }
+  return { summaries, rows };
+}
+
+/**
+ * 【有利局面 vs 回収期間の実証（§b）】
+ *
+ * 市場進化により、PDプレミアム比率は序盤〜中盤に高原を作り、他産地の加工参入で
+ * turn16前後から圧縮に入る（docs/v2/design/processed_market_evolution_audit.md §a）。
+ * そこで同じPD中心プロファイルに対して、省人化の実施時期だけを変えて比較する。
+ *
+ *   early … turn4  : 圧縮が始まる前。回収に使える有利局面が十分に長い。
+ *   late  … turn16 : 圧縮が始まったあと。回収前に有利局面が終わる。
+ *
+ * 「有利局面中の収益性」と「有利局面後の収益性」を別々に集計して報告する。
+ */
+export const FAVORABLE_WINDOW_END_TURN = 16;
+
+export function runWindowComparison(): readonly {
+  readonly timing: string;
+  readonly mechanizationTurn: number | null;
+  readonly duringWindowNetIncomeUsd: number;
+  readonly afterWindowNetIncomeUsd: number;
+  readonly cumulativeNetIncomeUsd: number;
+  readonly investmentUsd: number;
+  readonly realizedLaborSavingUsd: number;
+  readonly finalCashUsd: number;
+}[] {
+  const baseProfile = CASE_PROFILES.find((p) => p.id === "B-pd-no-mech")!;
+  // 有利局面（〜turn16）に対する実施時期を掃引する。turn4は「早すぎる」
+  // （PD稼働率がまだ立ち上がっておらず機械化レベルが上がらない）、
+  // turn16は「遅すぎる」（回収に使える四半期が残っていない）ことを見るため。
+  const variants: { timing: string; turn: number | null }[] = [
+    { timing: "none", turn: null },
+    { timing: "t4-tooEarly", turn: 4 },
+    { timing: "t8-sweetSpot", turn: 8 },
+    { timing: "t12-lateish", turn: 12 },
+    { timing: "t16-tooLate", turn: 16 },
+  ];
+  const baselineLaborBySeed = new Map<string, number>();
+  const out: {
+    timing: string;
+    mechanizationTurn: number | null;
+    duringWindowNetIncomeUsd: number;
+    afterWindowNetIncomeUsd: number;
+    cumulativeNetIncomeUsd: number;
+    investmentUsd: number;
+    realizedLaborSavingUsd: number;
+    finalCashUsd: number;
+  }[] = [];
+
+  for (const v of variants) {
+    let during = 0;
+    let after = 0;
+    let cumulative = 0;
+    let investment = 0;
+    let labor = 0;
+    let finalCash = 0;
+    for (const seed of SEEDS) {
+      const rows = runCase({ ...baseProfile, id: "C-pd-mech", mechanizationTurn: v.turn }, seed, PRODUCTION_PARAMETERS_V1, "standardAi");
+      const lastQuarter = Math.max(...rows.map((r) => r.quarter));
+      during += rows.filter((r) => r.quarter <= FAVORABLE_WINDOW_END_TURN).reduce((s, r) => s + r.netIncomeUsd, 0);
+      after += rows.filter((r) => r.quarter > FAVORABLE_WINDOW_END_TURN).reduce((s, r) => s + r.netIncomeUsd, 0);
+      cumulative += rows.reduce((s, r) => s + r.netIncomeUsd, 0);
+      investment += rows.reduce((s, r) => s + r.investmentUsd, 0);
+      const totalLabor = rows.reduce((s, r) => s + r.totalLaborCostUsd, 0);
+      labor += totalLabor;
+      if (v.timing === "none") baselineLaborBySeed.set(seed, totalLabor);
+      finalCash += rows.filter((r) => r.quarter === lastQuarter).reduce((s, r) => s + r.cashUsd, 0);
+    }
+    const n = SEEDS.length;
+    const baselineLabor = Array.from(baselineLaborBySeed.values()).reduce((a, b) => a + b, 0);
+    out.push({
+      timing: v.timing,
+      mechanizationTurn: v.turn,
+      duringWindowNetIncomeUsd: during / n,
+      afterWindowNetIncomeUsd: after / n,
+      cumulativeNetIncomeUsd: cumulative / n,
+      investmentUsd: investment / n,
+      realizedLaborSavingUsd: v.timing === "none" ? 0 : (baselineLabor - labor) / n,
+      finalCashUsd: finalCash / n,
+    });
+  }
+  return out;
+}
+
 if (process.argv[1] && process.argv[1].endsWith("pdMechanizationComparison.ts")) {
-  if (process.argv.includes("--sensitivity")) {
+  if (process.argv.includes("--window")) {
+    console.log(`=== 有利局面 vs 回収期間（Standard AI・${HORIZON_QUARTERS}四半期・5社・${SEEDS.length}シード平均）===`);
+    console.log(`有利局面の終わり = turn${FAVORABLE_WINDOW_END_TURN}（他産地のPD加工参入によりPDプレミアム比率が圧縮に入る時期）\n`);
+    console.log("実施時期    | 省人化turn | 有利局面中の純利益 | 有利局面後の純利益 | 累積純利益       | 投資額      | 実現人件費削減 | 期末現金");
+    console.log("------------|------------|--------------------|--------------------|------------------|-------------|----------------|---------------");
+    for (const r of runWindowComparison()) {
+      console.log(
+        `${r.timing.padEnd(11)} | ${String(r.mechanizationTurn ?? "－").padStart(10)} | ${fmt(r.duringWindowNetIncomeUsd).padStart(18)} | ` +
+          `${fmt(r.afterWindowNetIncomeUsd).padStart(18)} | ${fmt(r.cumulativeNetIncomeUsd).padStart(16)} | ${fmt(r.investmentUsd).padStart(11)} | ` +
+          `${fmt(r.realizedLaborSavingUsd).padStart(14)} | ${fmt(r.finalCashUsd).padStart(13)}`
+      );
+    }
+  } else if (process.argv.includes("--standard-ai")) {
+    const { summaries, rows } = runStandardAiComparison();
+    const avgOf = (id: CaseId, pick: (s: CaseSummary) => number) => {
+      const subset = summaries.filter((s) => s.caseId === id);
+      return subset.reduce((sum, s) => sum + pick(s), 0) / subset.length;
+    };
+
+    console.log(`=== Standard AI（減員判断あり）による5ケース比較（${HORIZON_QUARTERS}四半期・5社・${SEEDS.length}シード平均）===\n`);
+    console.log("ケース              | PD生産(t)  | 契約(t)    | 期末在庫(t) | 投資額        | 累積純利益       | 期末現金");
+    console.log("--------------------|------------|------------|-------------|---------------|------------------|----------------");
+    for (const p of CASE_PROFILES) {
+      console.log(
+        `${p.id.padEnd(19)} | ${fmt(avgOf(p.id, (s) => s.producedPd)).padStart(10)} | ${fmt(avgOf(p.id, (s) => s.contractedTons)).padStart(10)} | ` +
+          `${fmt(avgOf(p.id, (s) => s.finalFinishedGoodsTons)).padStart(11)} | ${fmt(avgOf(p.id, (s) => s.investmentUsd)).padStart(13)} | ` +
+          `${fmt(avgOf(p.id, (s) => s.cumulativeNetIncomeUsd)).padStart(16)} | ${fmt(avgOf(p.id, (s) => s.finalCashUsd)).padStart(14)}`
+      );
+    }
+
+    console.log("\n=== 【理論効果】と【実際にPLへ現れた効果】の分離 ===");
+    console.log("基準は B（PD中心・省人化なし）。人件費の差＝実際に現れた削減額。");
+    console.log("ケース              | 理論削減額(USD) | 常用人件費差(USD) | 臨時人件費差(USD) | 残業費差(USD) | 人件費合計差(USD) | 実現率 | 期末常用人員");
+    console.log("--------------------|-----------------|-------------------|-------------------|---------------|-------------------|--------|-------------");
+    const baseRegular = avgOf("B-pd-no-mech", (s) => s.regularLaborCostUsd);
+    const baseTemp = avgOf("B-pd-no-mech", (s) => s.temporaryLaborCostUsd);
+    const baseOt = avgOf("B-pd-no-mech", (s) => s.overtimeLaborCostUsd);
+    const baseTotal = avgOf("B-pd-no-mech", (s) => s.totalLaborCostUsd);
+    for (const p of CASE_PROFILES) {
+      const theoretical = avgOf(p.id, (s) => s.theoreticalLaborSavingUsd);
+      const dRegular = baseRegular - avgOf(p.id, (s) => s.regularLaborCostUsd);
+      const dTemp = baseTemp - avgOf(p.id, (s) => s.temporaryLaborCostUsd);
+      const dOt = baseOt - avgOf(p.id, (s) => s.overtimeLaborCostUsd);
+      const dTotal = baseTotal - avgOf(p.id, (s) => s.totalLaborCostUsd);
+      const realizationRate = theoretical > 0 ? `${((dTotal / theoretical) * 100).toFixed(0)}%` : "－";
+      console.log(
+        `${p.id.padEnd(19)} | ${fmt(theoretical).padStart(15)} | ${fmt(dRegular).padStart(17)} | ${fmt(dTemp).padStart(17)} | ` +
+          `${fmt(dOt).padStart(13)} | ${fmt(dTotal).padStart(17)} | ${realizationRate.padStart(6)} | ${fmt(avgOf(p.id, (s) => s.finalRegularHeadcount)).padStart(11)}`
+      );
+    }
+
+    console.log("\n=== ケース間の差（累積純利益、シード平均）===");
+    const ni = (id: CaseId) => avgOf(id, (s) => s.cumulativeNetIncomeUsd);
+    console.log(`C（PD中心・適時省人化） − B（PD中心・省人化なし） = ${fmt(ni("C-pd-mech") - ni("B-pd-no-mech"))}`);
+    console.log(`D（PD+VAP・適時省人化） − B                       = ${fmt(ni("D-pdvap-mech") - ni("B-pd-no-mech"))}`);
+    console.log(`E（販売見込み無しで省人化） − B                    = ${fmt(ni("E-mech-no-sales") - ni("B-pd-no-mech"))}`);
+    console.log(`B（PD中心） − A（HOSO中心）                        = ${fmt(ni("B-pd-no-mech") - ni("A-hoso-no-mech"))}`);
+
+    console.log("\n=== 実現回収期間（人件費合計差ベース） ===");
+    for (const p of CASE_PROFILES) {
+      if (p.mechanizationTurn === null) continue;
+      const investment = avgOf(p.id, (s) => s.investmentUsd);
+      const dTotal = baseTotal - avgOf(p.id, (s) => s.totalLaborCostUsd);
+      const quartersWithEffect = HORIZON_QUARTERS - p.mechanizationTurn;
+      const perQuarter = quartersWithEffect > 0 ? dTotal / quartersWithEffect : 0;
+      const payback = perQuarter > 0 ? investment / perQuarter : Infinity;
+      console.log(
+        `${p.id.padEnd(19)}: 投資${fmt(investment)} / 実現削減${fmt(perQuarter)}per四半期 → 実現回収 ` +
+          (Number.isFinite(payback) ? `${payback.toFixed(1)}四半期` : "回収不能（削減が現れていない）")
+      );
+    }
+
+    console.log("\n=== Standard AI が自ら省人化を提案した件数（会社×四半期）===");
+    for (const p of CASE_PROFILES) {
+      console.log(`${p.id.padEnd(19)}: ${avgOf(p.id, (s) => s.selfProposedMechanizationCount).toFixed(1)} 件`);
+    }
+    if (process.argv.includes("--write")) {
+      const outDir = join(process.cwd(), "artifacts", "pd-mechanization");
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(join(outDir, "pd-mechanization-standard-ai.csv"), toCsv(rows), "utf8");
+      writeFileSync(join(outDir, "pd-mechanization-standard-ai-summary.json"), JSON.stringify({ summaries }, null, 2), "utf8");
+      console.log(`\n出力: ${outDir}`);
+    }
+  } else if (process.argv.includes("--sensitivity")) {
     console.log("=== 感度分析: 係数設定ごとの理論効果（コード編集なしで差し替え）===");
     console.log("設定         | PD係数(前→後) | PD削減率 | 同一労働の増産倍率 | VAP削減率 | 理論回収(PD要員1000人) | 理論回収(2000人)");
     console.log("-------------|---------------|----------|--------------------|-----------|------------------------|------------------");
