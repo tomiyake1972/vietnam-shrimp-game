@@ -40,6 +40,8 @@ import {
   formatReductionRatioAtFullMaturityLabel,
 } from "../../../lib/v2/capex/pdMechanization";
 import { buildPdMechanizationStatusByFactory } from "../../../lib/v2/companyLab/pdMechanizationState";
+import { effectiveEfficiencyPerHeadTons, requiredHeadcountForQuantity } from "../../../lib/v2/production/labor";
+import { PRODUCTION_PARAMETERS_V1 } from "../../../lib/v2/production/parameters";
 import {
   PRODUCT_DEVELOPMENT_PARAMETERS_V1,
   updateProductDevelopmentState,
@@ -320,6 +322,53 @@ export default function DecisionEditor(props: DecisionEditorProps) {
       (p) => p.projectType === "pdMechanization" && p.targetFactoryId === factoryId && p.status !== "cancelled"
     );
 
+  // 【develop/v2統合・Required fix 5】投資金額・支払スケジュール・想定稼働開始時期・
+  // 減価償却費・保守費（すべてcapex/parameters.tsのpdMechanizationテンプレート・
+  // componentUsefulLifeQuartersを唯一の情報源とし、この画面で別の数値を作らない）。
+  const pdMechanizationTemplate = CAPEX_PARAMETERS_V1.templatesByType.pdMechanization;
+  const pdMechanizationConstructionQuarters = pdMechanizationTemplate.paymentRatios.length;
+  const pdMechanizationReadinessQuarters = pdMechanizationTemplate.postCompletionReadinessQuarters;
+  const pdMechanizationQuartersUntilActivation = pdMechanizationConstructionQuarters + pdMechanizationReadinessQuarters;
+  const pdMechanizationQuarterlyMaintenanceUsd = pdMechanizationTemplate.standardBudgetUsd * pdMechanizationTemplate.maintenanceRatePerQuarter;
+  const pdMechanizationQuarterlyDepreciationUsd =
+    (pdMechanizationTemplate.standardBudgetUsd * pdMechanizationTemplate.buildingRatio) / CAPEX_PARAMETERS_V1.componentUsefulLifeQuarters.building +
+    (pdMechanizationTemplate.standardBudgetUsd * pdMechanizationTemplate.machineryRatio) / CAPEX_PARAMETERS_V1.componentUsefulLifeQuarters.machinery;
+
+  /**
+   * 【develop/v2統合・Required fix 5】対象工場の「実際の現在の生産計画」（draft.
+   * productionPlansのpd行）から、完全習熟後（実効PD係数がフロア1.0に到達した
+   * 場合）に必要になる常用ワーカー人数の削減見込みを算出する。抽象的な一般値では
+   * なく、この工場の当四半期時点の入力そのものから逆算する（production/labor.ts
+   * のrequiredHeadcountForQuantity・effectiveEfficiencyPerHeadTonsを唯一の
+   * 情報源とし、別の逆算式をこの画面で作らない）。
+   */
+  const estimateWorkerReductionForFactory = (
+    factoryId: string
+  ): { readonly requiredBefore: number; readonly requiredAfterFullMaturity: number; readonly reduction: number } | undefined => {
+    const productionRow = draft.productionPlans.find((p) => p.factoryId === factoryId && p.product === "pd");
+    const workerRow = draft.workerAssignments.find((w) => w.factoryId === factoryId);
+    if (!productionRow || !workerRow || productionRow.desiredQuantity <= 0) return undefined;
+    const skillEntry = workerRow.skills.find((s) => s.product === "pd");
+    const skillLevel = skillEntry ? unwrapUnit(skillEntry.skillLevel) : 0;
+    const efficiencyBefore = effectiveEfficiencyPerHeadTons(PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons, "pd", PRODUCTION_PARAMETERS_V1);
+    const efficiencyAfterFullMaturity = effectiveEfficiencyPerHeadTons(
+      PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons,
+      "pd",
+      PRODUCTION_PARAMETERS_V1,
+      PD_MECHANIZATION_PARAMETERS_V1.floorCoefficient
+    );
+    const requiredBefore = requiredHeadcountForQuantity(productionRow.desiredQuantity, efficiencyBefore, workerRow.attendanceRate, skillLevel, workerRow.overtimeRate);
+    const requiredAfterFullMaturity = requiredHeadcountForQuantity(
+      productionRow.desiredQuantity,
+      efficiencyAfterFullMaturity,
+      workerRow.attendanceRate,
+      skillLevel,
+      workerRow.overtimeRate
+    );
+    return { requiredBefore, requiredAfterFullMaturity, reduction: Math.max(0, requiredBefore - requiredAfterFullMaturity) };
+  };
+  const pdMechanizationWorkerReductionEstimate = estimateWorkerReductionForFactory(pdMechanizationTargetFactoryId);
+
   // --- 【Test15新設】VAP商品開発費（4段階選択・現在スコア・次四半期見込み） ---
   const currentVapProductDevelopmentScore = ownState.vapProductDevelopmentScore;
   const nextQuarterVapProductDevelopmentScorePreview = (spendUsd: number): number => {
@@ -494,6 +543,42 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             </div>
           )}
 
+          {/* 【develop/v2統合・Required fix 5】投資金額・支払スケジュール・想定稼働開始時期・
+              減価償却費・保守費・削減見込み人数（対象工場の実際の生産計画から算出）。 */}
+          <div className="bg-gray-950/40 border border-gray-700/50 rounded px-2 py-1.5 text-[11px] text-gray-300 space-y-0.5" data-testid="pd-mechanization-investment-info">
+            <div>
+              投資金額: <span className="text-gray-100 font-semibold">${pdMechanizationTemplate.standardBudgetUsd.toLocaleString("en-US")}</span>
+              　支払スケジュール: <span className="text-gray-100">{pdMechanizationTemplate.paymentRatios.map((r) => `${(r * 100).toFixed(0)}%`).join(" / ")}</span>
+              （{pdMechanizationConstructionQuarters}四半期に分割）
+            </div>
+            <div>
+              想定稼働開始時期: 提案から<span className="text-gray-100 font-semibold">{pdMechanizationQuartersUntilActivation}四半期後</span>
+              （分割払い{pdMechanizationConstructionQuarters}四半期＋竣工後の操業準備期間{pdMechanizationReadinessQuarters}四半期）
+            </div>
+            <div>
+              稼働開始後の四半期あたり費用: 減価償却費 <span className="text-gray-100 font-semibold">${Math.round(pdMechanizationQuarterlyDepreciationUsd).toLocaleString("en-US")}</span>
+              　保守費 <span className="text-gray-100 font-semibold">${Math.round(pdMechanizationQuarterlyMaintenanceUsd).toLocaleString("en-US")}</span>
+            </div>
+            <div>
+              {pdMechanizationTargetFactoryId === "" ? (
+                "対象工場を選択してください。"
+              ) : pdMechanizationWorkerReductionEstimate ? (
+                <>
+                  完全習熟後の必要常用Worker人数見込み（対象工場・当四半期のpd生産計画希望量ベース）: 現在
+                  <span className="text-gray-100 font-semibold"> {Math.ceil(pdMechanizationWorkerReductionEstimate.requiredBefore).toLocaleString("en-US")}人</span>
+                  {" → "}
+                  完全習熟後
+                  <span className="text-gray-100 font-semibold"> {Math.ceil(pdMechanizationWorkerReductionEstimate.requiredAfterFullMaturity).toLocaleString("en-US")}人</span>
+                  （
+                  <span className="text-teal-300 font-semibold">約{Math.floor(pdMechanizationWorkerReductionEstimate.reduction).toLocaleString("en-US")}人削減見込み</span>
+                  ）
+                </>
+              ) : (
+                "対象工場の当四半期のpd生産計画希望量が0のため、削減見込み人数を算出できません（生産計画セクションでpdの希望量を入力すると表示されます）。"
+              )}
+            </div>
+          </div>
+
           <div className="overflow-x-auto mt-2">
             <table className="min-w-full text-xs text-gray-300">
               <thead>
@@ -599,6 +684,16 @@ export default function DecisionEditor(props: DecisionEditorProps) {
         {draft.vapProductDevelopmentSpendUsd === 0 && (
           <div className="text-[11px] text-amber-300">$0を選択しています。投資を行わない四半期も、スコアは中立値50へ向けて減衰します。</div>
         )}
+        {/* 【develop/v2統合・Required fix 5】上で選択したdraft.vapProductDevelopmentSpendUsd
+            （唯一の情報源。会計計上・キャッシュフロー・スコア更新のすべてが同じこの値を
+            参照する。companyLab/runner.ts・finance/quarterClose.ts参照）が、そのまま
+            当四半期のSG&A・営業キャッシュフロー・現金へ計上される正確な金額であることを
+            明示する。 */}
+        <div className="text-[11px] text-gray-400 bg-gray-950/40 border border-gray-700/50 rounded px-2 py-1" data-testid="vap-spend-cashflow-note">
+          上で選択した金額（${draft.vapProductDevelopmentSpendUsd.toLocaleString("en-US")}）が、そのまま当四半期のSG&A（販管費）へ全額費用化され、
+          同額が当四半期の営業キャッシュフロー・現金の支出となります（資産計上・減価償却はありません）。この金額はVAP商品開発スコアの更新にも
+          使われる唯一の情報源であり、画面上に別の金額が存在することはありません。
+        </div>
       </CollapsibleSection>
 
       {/* 販売計画 */}
