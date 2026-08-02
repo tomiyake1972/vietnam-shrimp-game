@@ -484,33 +484,73 @@ Test14 Turn1は、上記のうち特に#1・#2・#8・#10（営業制約が支�
 
 具体的に、商品pごとに以下の2つのforward-looking指標を新設する（いずれも既存パラメータ・既存コスト見積り関数の再利用のみで算出可能）。
 
-- **Full-cost affordable raw price（フルコスト採算原料価格）**: 販売価格・加工費・（既存の`fixedCostAllocationCoefficientByProduct`から導出する）商品別固定費配賦を所与としたとき、Full-Costマージン（`managementOperatingProfit`相当の商品別版）がゼロになる原料価格。この価格を上回って原料を買えばフルコストベースで赤字になる。
-- **Contribution-margin affordable raw price（変動費採算原料価格）**: 固定費配賦を含めず、販売価格・加工費（変動費相当分）だけを所与としたとき、Contribution Marginがゼロになる原料価格。この価格までは「固定費の再配分先としては赤字だが、それでも生産すれば固定費の一部を回収できる」という、既存契約の履行判断でよく使われる下限ライン。
+- **Full-cost affordable raw price（フルコスト採算原料価格）**: 販売価格・加工費・（既存の`fixedCostAllocationCoefficientByProduct`から導出する）商品別固定費配賦を所与としたとき、Full-Costマージン（`managementOperatingProfit`相当の商品別版）がゼロになる原料価格。この価格を上回って原料を買えばフルコストベースで赤字になる。固定費まで回収する基準であるため、2つの価格のうち**低い方**になる。
+- **Contribution-margin affordable raw price（変動費採算原料価格）**: 固定費配賦を含めず、販売価格・加工費（変動費相当分）だけを所与としたとき、Contribution Marginがゼロになる原料価格。固定費を含めないぶん許容範囲が広く、2つの価格のうち**高い方**になる。この価格までは「固定費の再配分先としては赤字だが、それでも生産すれば固定費の一部を回収できる」という、既存契約の履行判断でよく使われる下限ライン。
 
-2つの価格の間（Contribution-margin affordable raw price ＜ 実際の想定原料価格 ≤ Full-cost affordable raw price）にある案件は「フルコストでは赤字だがContribution Marginは正」という、既存契約の履行では許容し新規商売では慎重になるべき領域として扱う（§17.5.2のBusiness Opportunity分類と直結する）。
+**大小関係（訂正）**: 固定費まで回収するFull-Cost基準の方が判定が厳しいため、原料に支払える上限価格は必ず低くなる。したがって正しい大小関係は
+
+```
+Full-cost affordable raw price  <  Contribution-margin affordable raw price
+```
+
+である（前回の記述では逆になっていたため、本節で訂正する）。この2価格の間（`Full-cost affordable raw price < 実際／想定原料価格 ≤ Contribution-margin affordable raw price`）にある案件が「フルコストでは赤字だがContribution Marginは正」という領域であり、既存契約の履行では許容し新規商売では慎重になるべき領域として扱う（§17.5.2のBusiness Opportunity分類と直結する）。
 
 **重要な注意（三宅さんの指示どおり明記）**: ShrimpXは数量をHOSO換算（HOSO-eq）で統一している。上記の価格計算はすべて「USD/HOSO換算kg」という単価ベースで行い、数量側（トン数）に商品歩留まり補正を重ねて適用しない。歩留まり補正は既に価格・コスト側の換算係数（`expectedProcessingCostUsdPerHosoEqKg`等、HOSO換算kg単位で定義された既存パラメータ）に一度だけ組み込まれているため、数量を再度歩留まりで割ったり掛けたりする実装は二重補正であり誤りである。
 
 **留意点（未解決事項として§19に追記）**: 既存の`fixedCostAllocationCoefficientByProduct`は商品別の配賦係数であり、市場別の直接固定費配賦（例えば市場ごとに異なる物流・信用コスト構造を固定費側で分離する）は現行コードに存在しない。Unit Economics層を市場別に細分化する場合はこのギャップを先に埋める必要があるが、今回のSAI-6.4直前の設計拡張では商品別の粒度で十分と判断する。
 
-### 17.5.2 Business Opportunityの分類（Contracted / Profitable New / Uneconomic New Business）
+### 17.5.2 Business Opportunityの分類（訂正：契約状態×採算状態の二軸）
 
-当期の販売機会を、少なくとも以下の3分類でStandard AI内部で区別する設計とする。
+前回の記述は「Contracted Business」を採算分類（Profitable New / Uneconomic New）と同じ一列の分類に混在させていたが、これは構造として誤りである。契約状態と採算状態は独立な二軸として設計する。
 
-| 分類 | 定義 | 当期の取り扱い |
-|---|---|---|
-| Contracted Business（既存契約） | `outstandingContractByProduct`に基づく履行義務のある契約 | マージンが悪化していても履行優先度は高く維持する（既存契約はUnit Economicsの悪化だけを理由に一方的に縮小しない） |
-| Profitable New Business（採算の合う新規商売） | 未契約の新規販売のうち、想定原料価格がContribution-margin affordable raw price以下（Contribution Marginが正）のもの | 当期の新規`salesPlans`として積極的に計上してよい |
-| Uneconomic New Business（不採算の新規商売） | 未契約の新規販売のうち、Contribution Marginが負（想定原料価格がContribution-margin affordable raw priceを上回る）のもの | 原則として当期（this period）の即時履行としては追求しない |
+**軸1：契約状態（Contract Status）**
 
-Uneconomic New Businessに分類された機会を「捨てる」のではなく、「当期は不採算だが将来は採算が合う可能性がある」機会として次期に回す設計上の受け皿を用意する。具体的には、当期／次期区分機能（本報告§11.1で述べた将来のCowork #04側機能）が実装された段階で、「国内原料ベースでは当期不採算だが、輸入・養殖ベースの原料が使える次期であれば採算が合う」ケースを次期営業（§15.1の【次期営業】セクション）へルーティングできるよう、Business Opportunity分類の結果に「今期不採算だが次期は採算候補」というタグを持たせられる構造にしておく。このルーティング自体の実装はCowork #04側の当期／次期区分機能に依存するため、今回は分類ロジックとタグの受け皿のみを設計し、実装はしない。
+| 状態 | 定義 |
+|---|---|
+| Contracted | `outstandingContractByProduct`に基づく履行義務のある既存契約 |
+| Uncontracted | 未契約の新規販売機会 |
+
+**軸2：採算状態（Profitability Status）** — §17.5.1で訂正した大小関係（Full-cost affordable raw price ＜ Contribution-margin affordable raw price）に基づき、少なくとも3段階とする。
+
+| 状態 | 定義 |
+|---|---|
+| Fully Profitable | `expected raw price ≤ full-cost affordable raw price`。固定費配賦まで含めて利益が出る。 |
+| Contribution Positive | `full-cost affordable raw price < expected raw price ≤ contribution-margin affordable raw price`。フルコストでは赤字でも、追加操業による限界利益（Contribution Margin）は正。 |
+| Uneconomic | `expected raw price > contribution-margin affordable raw price`。追加で売るほど限界利益を悪化させる。 |
+
+この二軸を組み合わせることで、例えば「Contracted × Uneconomic」（既存契約だが採算状態は悪化している）というマスも表現できる。この場合、採算状態だけを見れば履行を止めたくなるが、契約状態がContractedであることにより、
+
+- 契約不履行のペナルティ
+- 顧客信頼（既存の`customerTrustByMarket`）への影響
+- 契約上の義務
+- 将来取引への影響
+
+との比較で、履行優先が正当化される可能性がある。**今回はこの契約違反コストの定量比較までは実装しない**（§17.5.6・SAI-6.4の対象外）。あくまで「契約状態と採算状態は別軸であり、契約状態がUneconomicな採算状態を機械的に上書きしてよい」という設計上の分離だけを、本節で明記する。
+
+「Uncontracted × Uneconomic」に分類された機会は、「当期は不採算だが将来は採算が合う可能性がある」機会として次期に回す設計上の受け皿を用意する。具体的には、当期／次期区分機能（本報告§11.1で述べた将来のCowork #04側機能）が実装された段階で、「国内原料ベースでは当期不採算だが、輸入・養殖ベースの原料が使える次期であれば採算が合う」ケースを次期営業（§15.1の【次期営業】セクション）へルーティングできるよう、分類結果に「今期不採算だが次期は採算候補」というタグを持たせられる構造にしておく。このルーティング自体の実装はCowork #04側の当期／次期区分機能に依存するため、今回は分類ロジックとタグの受け皿のみを設計し、実装はしない。
 
 ### 17.5.3 Raw Material診断：Physical Availability と Economic Availability の分離
 
 現行の原料カバレッジ診断（§10のカテゴリ4）は「量として存在するか（Physical Availability）」のみを見ている。三宅さんの指示に基づき、これに加えて「その量を、採算が崩れない価格で実際に買えるか（Economic Availability）」を分離した診断軸として設計する。
 
-- **Physical Availability**: 既存のSAI-6.1診断がすでに扱う、`rawMaterialAvailable`（現在利用可能）＋`certainInboundImportQuantityThisPeriod`（当期確実に到着する輸入分）等の物理量ベースの指標。`growingAquaculture`（養殖中で当期は未収穫）を除外する既存方針を維持する。
-- **Economic Availability**: 17.5.1のFull-cost / Contribution-margin affordable raw priceを、実際の想定原料価格（国内・国際）と比較し、「物理的には買える量」のうち「採算が崩れない価格で買える量」だけを取り出した指標。例えば国内相場がFull-cost affordable raw priceを超えている場合、Physical Availabilityは十分でもEconomic Availabilityは不足という診断になり得る。
+- **Physical Availability（訂正：期首在庫＋確定入荷だけではない）**: 前回の記述は「現在利用可能な在庫＋当期確実に到着する輸入分」のみを指していたが、これは調達行為そのものを含んでいない狭すぎる定義だった。正しくは、以下の合計として定義する。
+
+  ```
+  Physical Availability
+  = 期首利用可能原料（rawMaterialAvailable）
+  + 当期収穫可能原料（当期中に収穫時期を迎える養殖分。growingAquacultureのうち当期収穫可能な部分のみ。当期中に収穫できない分は除外する既存方針を維持）
+  + 当期到着輸入（certainInboundImportQuantityThisPeriod。既存のavailableFromPeriod判定を再利用）
+  + 当期国内市場から現実的に追加調達可能な量（§17.5.3.1で調査する既存の市場供給ロジックに基づく上限。取得不能なら不明として扱う）
+  + 当期追加輸入可能量（当期到着できる場合のみ。輸入発注から到着までのリードタイムを踏まえ、当期中に間に合わない分は含めない）
+  ```
+
+  数量はいずれもShrimpXの原則どおりHOSO換算（HOSO-eq）で統一する。
+
+- **Economic Availability**: 17.5.1のFull-cost / Contribution-margin affordable raw priceを、実際の想定原料価格（国内・国際）と比較し、上記Physical Availabilityのうち「採算が崩れない価格で取得できる量」だけを取り出した指標。例えば国内相場がContribution-margin affordable raw priceを超えている場合、Physical Availabilityは十分でもEconomic Availabilityは不足という診断になり得る。
+
+#### 17.5.3.1 「当期国内市場から現実的に追加調達可能な量」の取得可能性（SAI-6.4実装時に確認する調査項目）
+
+この量をStandard AIが既存のobservation／public infoから取得できるかどうかは、現行の市場・調達ロジックの調査が前提となる。既存コードに明確な供給上限・市場供給量・調達能力の値が存在する場合はそれを再利用し、架空の供給能力を新設しない。既存コードにその値が存在しない場合は、Physical Availabilityの当該項を「不明（unknown）」として扱い、「原料不足」と断定せず「調達行為が必要（procurement needed）」という中立的な扱いにする。この調査結果はSAI-6.1診断修正（Phase B）で確定させ、本節はその設計上の前提を示すのみとする。
 
 **前提の明記（三宅さんの指示どおり）**: 今回の設計では、Standard AIは国内・国際の原料価格および販売価格について完全な情報を持っているという前提を置く。AIと実際のゲーム世界との間の情報非対称性（例えばAIが将来の価格変動を知らない、契約時点の価格しか見えない等）をモデル化することは、ゲーム側の情報開示仕様に関わるため、今回のスコープには含めず、将来のCowork #04側の機能として扱う。
 
