@@ -67,3 +67,7 @@ next-env.d.ts
 # PD省人化の比較シミュレーション生成物（診断専用）。
 # 生成スクリプト scripts/pdMechanizationComparison.ts のみGit管理する。
 /artifacts/pd-mechanization/
+
+# SAI-3A 標準初期条件の再選定グリッド探索の生成物（診断専用）。
+# 生成スクリプト scripts/sai3aBaselineGridSearch.ts のみGit管理する。
+/artifacts/sai3a-baseline/
