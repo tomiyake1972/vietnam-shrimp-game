@@ -101,7 +101,19 @@ export function lookupProductDevelopmentScore(
 /**
  * 四半期末のVAP商品開発スコア更新（純粋関数・決定論的）。
  *
- *   spend > 0: score += gainCoefficient × min(spend/standardBudgetUsd, investmentRatioCap)
+ * 【develop/v2統合・Required fix 3で修正】以前の実装は
+ *   score += gainCoefficient × min(spend/standardBudgetUsd, investmentRatioCap)
+ * という線形式で、ヘッドルーム（スコアが100に近いほど伸びが縮む効果）が
+ * 欠落していた誤りだった。正しい式は、旧ブランチ
+ * feature/v2-product-strategy-economics の
+ * app/lib/v2/companyLab/productDevelopmentState.ts（updateProductDevelopmentState）
+ * および最終設計提示 task_d_redesign_v2.md §1-1（「式自体（ヘッドルーム式）は
+ * 正しく、ミスは分母の定数だけでした」）で確定した、以下のヘッドルーム付き式：
+ *
+ *   spend > 0: score += gainCoefficient
+ *                        × min(spend/standardBudgetUsd, investmentRatioCap)
+ *                        × headroom（= 1 − score/100。スコアが100に近いほど
+ *                          同じ投資額での増分が縮み、score=100では増分ゼロになる）
  *   spend = 0: score = neutral + (score - neutral) × (1 - idleDecayRatioPerQuarter)
  *              （spend=0のときは必ずこの減衰を適用する。条件によりスキップしない）
  *   その後 [floor, cap] へclamp。
@@ -127,7 +139,8 @@ export function updateProductDevelopmentState(
     const spend = spendByCompanyId.get(companyId) ?? 0;
     if (spend > 0) {
       const investmentRatio = Math.min(spend / params.standardBudgetUsd, params.investmentRatioCap);
-      score += params.gainCoefficient * investmentRatio;
+      const headroom = 1 - score / 100;
+      score += params.gainCoefficient * investmentRatio * headroom;
     } else {
       // spend=0のときは常にこの減衰を適用する（スキップ不可）。
       score = params.neutralScore + (score - params.neutralScore) * (1 - params.idleDecayRatioPerQuarter);
