@@ -1235,6 +1235,7 @@ export async function buildAllCompaniesExportExcelWorkbook(payload: AllCompanies
 
   writeProductionFacilitiesLaborSheet(wb, payload.companies);
   writeAllCompaniesDecisionsSheet(wb, payload.decisionInfo);
+  writeProcessingPremiumSheet(wb, payload);
   writeStandardAiInputSheet(wb, payload);
 
   const arrayBuffer = await wb.xlsx.writeBuffer();
@@ -1431,4 +1432,88 @@ function writeStandardAiInputSheet(wb: ExcelJS.Workbook, payload: AllCompaniesEx
     "市場情報（公開情報のみ）は「Market」相当のデータをそのまま参照してください。本シートは会社別state部分の抜粋です。",
   ]);
   marketNoteRow.getCell(1).font = LABEL_FONT;
+}
+
+/**
+ * 【加工品市場進化】「加工プレミアム」シート。
+ *
+ * 【なぜ必要か】PD/VAPの**絶対価格**は、原料（HOSO基準価格）の上昇に引っ張られて
+ * ゲーム後半も上がり続ける。一方で「他産地のPD加工参入によってプレーンPDが
+ * コモディティ化する」という設計上の変化は、絶対価格ではなく
+ * **HOSO基準価格に対するプレミアムの比率**にしか現れない。
+ * 数値表に絶対価格しか出ていないと、人間には「PDが安くなった」と読み取れない。
+ * そこでこのシートでは比率を明示的に計算して並べる。
+ *
+ *   PDプレミアム比率  = (PD価格  − HOSO価格) ÷ HOSO価格
+ *   VAPプレミアム比率 = (VAP価格 − HOSO価格) ÷ HOSO価格
+ *   VAP/PD比          = VAPプレミアム比率 ÷ PDプレミアム比率（競争軸の移動の指標）
+ *
+ * 世界稼働率（需要÷加工能力）も併記する。PDの稼働率が下がりながらプレミアム比率も
+ * 下がっていれば、それが他産地参入による圧縮である。
+ */
+function writeProcessingPremiumSheet(wb: ExcelJS.Workbook, payload: AllCompaniesExportPayload): void {
+  const ws = wb.addWorksheet("加工プレミアム");
+  ws.columns = [{ width: 34 }, { width: 18 }, { width: 18 }, { width: 46 }];
+
+  const note = ws.addRow([
+    "PD/VAPの絶対価格は原料価格の上昇で後半も上がりますが、加工の付加価値そのものは" +
+      "「HOSO基準価格に対するプレミアム比率」で見る必要があります。比率が下がっていれば" +
+      "（絶対価格が上がっていても）その商品はコモディティ化しています。",
+  ]);
+  note.getCell(1).font = LABEL_FONT;
+  ws.addRow([]);
+
+  const hosoVn = payload.market.hosoPricesByCountry.find((p) => p.country === "VN");
+  const pdVn = payload.market.pdPremium.byCountry.find((p) => p.country === "VN");
+  const vapVn = payload.market.vapPremium.byCountry.find((p) => p.country === "VN");
+  const hosoPrice = hosoVn?.price ?? null;
+  const pdPrice = pdVn?.finalPrice ?? null;
+  const vapPrice = vapVn?.finalPrice ?? null;
+
+  const ratio = (price: number | null): number | null =>
+    price !== null && hosoPrice !== null && hosoPrice > 0 ? (price - hosoPrice) / hosoPrice : null;
+  const pdRatio = ratio(pdPrice);
+  const vapRatio = ratio(vapPrice);
+
+  writeHeaderRow(ws, ["項目", "値", "単位", "読み方"]);
+  const rows: readonly [string, number | null, string, string][] = [
+    ["HOSO基準価格（VN）", hosoPrice, "USD/HOSO換算kg", "加工前の原料相当価値。養殖コストの上昇で長期的に上がる。"],
+    ["PD価格（VN）", pdPrice, "USD/HOSO換算kg", "HOSO基準価格＋PD加工プレミアム。"],
+    ["VAP価格（VN）", vapPrice, "USD/HOSO換算kg", "PD価格＋VAP追加プレミアム。"],
+    ["PDプレミアム（絶対額）", pdPrice !== null && hosoPrice !== null ? pdPrice - hosoPrice : null, "USD/HOSO換算kg", "PD価格−HOSO価格。"],
+    ["VAP追加プレミアム（絶対額）", vapPrice !== null && pdPrice !== null ? vapPrice - pdPrice : null, "USD/HOSO換算kg", "VAP価格−PD価格。"],
+    ["★PDプレミアム比率", pdRatio, "比率", "これが下がっていればプレーンPDのコモディティ化が進んでいる。"],
+    ["★VAPプレミアム比率", vapRatio, "比率", "これが維持・上昇していれば競争軸がVAPへ移っている。"],
+    [
+      "★VAP/PDプレミアム比",
+      pdRatio !== null && vapRatio !== null && pdRatio !== 0 ? vapRatio / pdRatio : null,
+      "倍",
+      "拡大していれば、PDよりVAPで稼ぐ局面へ移行している。",
+    ],
+    ["PD世界稼働率", payload.market.pdPremium.globalUtilization, "比率", "世界PD需要÷4産地のPD加工能力合計。下がるとプレミアムが縮む。"],
+    ["VAP世界稼働率", payload.market.vapPremium.globalUtilization, "比率", "同上（VAP）。1を超えると能力逼迫。"],
+    ["PD世界加工能力", payload.market.pdPremium.globalCapacity, "HOSO換算トン", "他産地の参入で増える。増えるほどPDプレミアムが縮む。"],
+    ["VAP世界加工能力", payload.market.vapPremium.globalCapacity, "HOSO換算トン", "同上（VAP）。"],
+  ];
+  for (const [label, value, unit, howToRead] of rows) {
+    const row = ws.addRow([label, value ?? "－", unit, howToRead]);
+    row.getCell(1).font = LABEL_FONT;
+    row.getCell(2).font = VALUE_FONT;
+    row.getCell(3).font = VALUE_FONT;
+    row.getCell(4).font = VALUE_FONT;
+  }
+
+  ws.addRow([]);
+  const driverRow = ws.addRow([
+    "価格変動の理由コード",
+    [...payload.market.pdPremium.drivers, ...payload.market.vapPremium.drivers].join(", ") || "－",
+  ]);
+  driverRow.getCell(1).font = LABEL_FONT;
+  driverRow.getCell(2).font = VALUE_FONT;
+  const driverHint = ws.addRow([
+    "",
+    "ECUADOR_PD_CAPACITY_EXPANSION と PROCESSING_CAPACITY_OVERSUPPLY が出ていれば、" +
+      "他産地のPD加工参入によるプレミアム圧縮が起きています。",
+  ]);
+  driverHint.getCell(2).font = VALUE_FONT;
 }

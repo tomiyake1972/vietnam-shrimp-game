@@ -233,3 +233,50 @@ test("Test15統合: 監査専用情報の漏洩防止 — StandardAI入力シー
     assert.ok(!pattern.test(joined), `StandardAI入力シートの文言に禁止パターン ${pattern} が出現してはならない`);
   }
 });
+
+test("加工品市場進化: 「加工プレミアム」シートがプレミアム比率を明示的に出力する", async () => {
+  // 【なぜこのシートが必要か】PD/VAPの絶対価格は原料価格の上昇に引っ張られて後半も
+  // 上がり続けるため、絶対価格だけを見ても「プレーンPDがコモディティ化した」ことが
+  // 人間には読み取れない。HOSO基準価格に対するプレミアム**比率**を明示する。
+  const { fixtures, entries } = runQuarters(8);
+  const lastEntry = entries[entries.length - 1];
+  const payload = buildAllCompaniesExportPayload({
+    labId: "test15-excel-integration-lab",
+    entry: lastEntry,
+    companyIds: fixtures.map((f) => f.companyId),
+    generatedAt: new Date().toISOString(),
+    fixtures,
+  });
+
+  const buffer = await buildAllCompaniesExportExcelWorkbook(payload);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+
+  const ws = wb.getWorksheet("加工プレミアム");
+  assert.ok(ws, "加工プレミアムシートが存在する");
+
+  const labels: string[] = [];
+  const valueByLabel = new Map<string, unknown>();
+  ws!.eachRow((row) => {
+    const label = row.getCell(1).value;
+    if (typeof label === "string") {
+      labels.push(label);
+      valueByLabel.set(label, row.getCell(2).value);
+    }
+  });
+
+  for (const required of ["★PDプレミアム比率", "★VAPプレミアム比率", "★VAP/PDプレミアム比", "PD世界稼働率", "VAP世界稼働率"]) {
+    assert.ok(labels.includes(required), `「${required}」の行が必要（実際: ${labels.join(" / ")}）`);
+    const value = valueByLabel.get(required);
+    assert.ok(typeof value === "number" && Number.isFinite(value), `「${required}」が数値でない（${String(value)}）`);
+  }
+
+  // 比率は実際の価格から計算された値と一致すること（別計算式を持ち込んでいないことの確認）。
+  const hosoPrice = payload.market.hosoPricesByCountry.find((p) => p.country === "VN")!.price;
+  const pdPrice = payload.market.pdPremium.byCountry.find((p) => p.country === "VN")!.finalPrice;
+  const expectedPdRatio = (pdPrice - hosoPrice) / hosoPrice;
+  assert.ok(
+    Math.abs((valueByLabel.get("★PDプレミアム比率") as number) - expectedPdRatio) < 1e-9,
+    "PDプレミアム比率がExport DTOの価格から計算した値と一致しない"
+  );
+});
