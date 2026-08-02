@@ -1,0 +1,87 @@
+{
+  "after_SAI64": {
+    "totalProductionTons": 13728.53,
+    "productionPlans": [
+      {
+        "factoryId": "BAL-F1",
+        "product": "hoso",
+        "desiredQuantity": 6628.56
+      },
+      {
+        "factoryId": "BAL-F1",
+        "product": "pd",
+        "desiredQuantity": 4142.85
+      },
+      {
+        "factoryId": "BAL-F1",
+        "product": "vap",
+        "desiredQuantity": 2957.12
+      }
+    ],
+    "domesticPurchasePlan": {
+      "companyId": "BAL",
+      "desiredQuantity": 8109.97,
+      "priceAdjustmentUsdPerHosoEqKg": 0,
+      "procurementHeadcount": 12,
+      "factoryCommonProcessingCapacityTons": 22000
+    },
+    "importOrders": [
+      {
+        "companyId": "BAL",
+        "originCountry": "ID",
+        "orderedQuantity": 2059.28,
+        "orderedPeriod": "2015Q1"
+      }
+    ],
+    "situationDiagnosis": {
+      "salesFulfillmentRatio": 0.22544427083333332,
+      "salesFulfillmentState": "shortage",
+      "productionLoadRatio": 0.5720220833333333,
+      "productionLoadState": "balanced",
+      "workerLoadRatio": 0.4947279254099301,
+      "workerLoadState": "surplus",
+      "rawMaterialCoverageRatio": 0.2185230319633639,
+      "rawMaterialCoverageState": "shortage",
+      "rawMaterialProcurementNeeded": true,
+      "rawMaterialSupplyConstraintState": "unknown",
+      "inventoryExcessRatio": 0,
+      "inventoryExcessState": "balanced",
+      "liquidityCoverageRatio": 0.9667440061871616,
+      "liquidityCoverageState": "shortage",
+      "primaryConstraint": "sales_shortage",
+      "secondaryConstraint": "worker_surplus",
+      "currentPeriodDeliveryDemandByProduct": {
+        "hoso": 4003.56,
+        "pd": 2042.85,
+        "vap": 1382.12
+      },
+      "deliveryDemandSource": "CURRENT_SALES_PLAN_PROXY",
+      "productionCapacityHeadroom": 10271.470000000001,
+      "workerHeadroom": 3031.6324475404194,
+      "basicCurrentPeriodProductionRequirementByProduct": {
+        "hoso": 6628.5599999999995,
+        "pd": 4142.85,
+        "vap": 2957.12
+      },
+      "requiredRawMaterial": 13728.529999999999,
+      "requiredWorker": 2968.3675524595806,
+      "capacityRecognitionGap": {
+        "nominalCapacityTotal": 24000,
+        "effectiveCapacityTotal": 20520
+      }
+    },
+    "currentPeriodDeliveryDemand": {
+      "byProduct": {
+        "hoso": 4003.56,
+        "pd": 2042.85,
+        "vap": 1382.12
+      },
+      "source": "CURRENT_SALES_PLAN_PROXY"
+    }
+  },
+  "before_SAI64_reference": {
+    "note": "SAI-6.3時点（本ラウンド以前）は生産計画の入力がdesiredByProduct（工場能力起点の理論希望量）のままだったため、生産計画合計は約22,100t、国内買付は約25,880t相当だった（前回報告書の実測値。今回のコードでは再現しない仕様のため、参考値として記録）。",
+    "totalProductionTonsApprox": 22100,
+    "domesticPurchaseApprox": 25880
+  }
+}
