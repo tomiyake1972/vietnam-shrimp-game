@@ -469,6 +469,89 @@ Test14 Turn1は、上記のうち特に#1・#2・#8・#10（営業制約が支�
 
 ---
 
+## 17.5 追記（三宅さん承認済み・SAI-6.4着手前の設計拡張）：Unit Economics層・Business Opportunity分類・トン数換算・Financial Capacity段階案
+
+（本節は2026-08-02の意見交換で三宅さんが「方向性に賛成」とした、ChatGPT側提案を踏まえた設計拡張である。**今回は設計文書の更新のみで、production codeの変更は行っていない。** SAI-6.1〜6.3の実装（既存コード確認済み）を土台に、SAI-6.4着手前に受け皿の設計を固めるための追記であり、既存の§10〜§18の内容を置き換えるものではなく、その上に積む拡張として位置づける。）
+
+### 17.5.1 Unit Economics層（Full-Cost margin / Contribution Margin 二段階判定）
+
+三宅さんの指示は「新規のコスト認識システムを作らず、既存を最大限再利用する」ことである。実際にコードを確認したところ、必要な部品はすでに存在している。
+
+- `app/lib/v2/finance/types.ts`・`quarterClose.ts`の`ContributionMarginReport`／`managementOperatingProfit`／`computeManagementAccountingProductFixedCostAllocation`（商品別固定費配賦係数`fixedCostAllocationCoefficientByProduct`を含む）: 四半期決算後の**事後（backward-looking）**・**商品別（市場別の直接固定費配賦は未実装）**な管理会計出力。
+- `decision/sales.ts`の`buildCostExpectation`が返す`PlanCostExpectation`（`sales/types.ts`）: `expectedRawMaterialPriceUsdPerHosoEqKg`・`expectedProcessingCostUsdPerHosoEqKg`・`minimumAcceptablePriceUsdPerHosoEqKg`という、すでに**事前（forward-looking）**の商品別コスト見積り構造。
+
+この2つを踏まえ、Unit Economics層は「新しい事後会計を作る」のではなく「既存の事前コスト見積り構造（`PlanCostExpectation`）を、Standard AIの当期の販売・原料判断向けに、Full-Cost基準とContribution Margin基準の2種類の価格しきい値として明示する」層として設計する。
+
+具体的に、商品pごとに以下の2つのforward-looking指標を新設する（いずれも既存パラメータ・既存コスト見積り関数の再利用のみで算出可能）。
+
+- **Full-cost affordable raw price（フルコスト採算原料価格）**: 販売価格・加工費・（既存の`fixedCostAllocationCoefficientByProduct`から導出する）商品別固定費配賦を所与としたとき、Full-Costマージン（`managementOperatingProfit`相当の商品別版）がゼロになる原料価格。この価格を上回って原料を買えばフルコストベースで赤字になる。
+- **Contribution-margin affordable raw price（変動費採算原料価格）**: 固定費配賦を含めず、販売価格・加工費（変動費相当分）だけを所与としたとき、Contribution Marginがゼロになる原料価格。この価格までは「固定費の再配分先としては赤字だが、それでも生産すれば固定費の一部を回収できる」という、既存契約の履行判断でよく使われる下限ライン。
+
+2つの価格の間（Contribution-margin affordable raw price ＜ 実際の想定原料価格 ≤ Full-cost affordable raw price）にある案件は「フルコストでは赤字だがContribution Marginは正」という、既存契約の履行では許容し新規商売では慎重になるべき領域として扱う（§17.5.2のBusiness Opportunity分類と直結する）。
+
+**重要な注意（三宅さんの指示どおり明記）**: ShrimpXは数量をHOSO換算（HOSO-eq）で統一している。上記の価格計算はすべて「USD/HOSO換算kg」という単価ベースで行い、数量側（トン数）に商品歩留まり補正を重ねて適用しない。歩留まり補正は既に価格・コスト側の換算係数（`expectedProcessingCostUsdPerHosoEqKg`等、HOSO換算kg単位で定義された既存パラメータ）に一度だけ組み込まれているため、数量を再度歩留まりで割ったり掛けたりする実装は二重補正であり誤りである。
+
+**留意点（未解決事項として§19に追記）**: 既存の`fixedCostAllocationCoefficientByProduct`は商品別の配賦係数であり、市場別の直接固定費配賦（例えば市場ごとに異なる物流・信用コスト構造を固定費側で分離する）は現行コードに存在しない。Unit Economics層を市場別に細分化する場合はこのギャップを先に埋める必要があるが、今回のSAI-6.4直前の設計拡張では商品別の粒度で十分と判断する。
+
+### 17.5.2 Business Opportunityの分類（Contracted / Profitable New / Uneconomic New Business）
+
+当期の販売機会を、少なくとも以下の3分類でStandard AI内部で区別する設計とする。
+
+| 分類 | 定義 | 当期の取り扱い |
+|---|---|---|
+| Contracted Business（既存契約） | `outstandingContractByProduct`に基づく履行義務のある契約 | マージンが悪化していても履行優先度は高く維持する（既存契約はUnit Economicsの悪化だけを理由に一方的に縮小しない） |
+| Profitable New Business（採算の合う新規商売） | 未契約の新規販売のうち、想定原料価格がContribution-margin affordable raw price以下（Contribution Marginが正）のもの | 当期の新規`salesPlans`として積極的に計上してよい |
+| Uneconomic New Business（不採算の新規商売） | 未契約の新規販売のうち、Contribution Marginが負（想定原料価格がContribution-margin affordable raw priceを上回る）のもの | 原則として当期（this period）の即時履行としては追求しない |
+
+Uneconomic New Businessに分類された機会を「捨てる」のではなく、「当期は不採算だが将来は採算が合う可能性がある」機会として次期に回す設計上の受け皿を用意する。具体的には、当期／次期区分機能（本報告§11.1で述べた将来のCowork #04側機能）が実装された段階で、「国内原料ベースでは当期不採算だが、輸入・養殖ベースの原料が使える次期であれば採算が合う」ケースを次期営業（§15.1の【次期営業】セクション）へルーティングできるよう、Business Opportunity分類の結果に「今期不採算だが次期は採算候補」というタグを持たせられる構造にしておく。このルーティング自体の実装はCowork #04側の当期／次期区分機能に依存するため、今回は分類ロジックとタグの受け皿のみを設計し、実装はしない。
+
+### 17.5.3 Raw Material診断：Physical Availability と Economic Availability の分離
+
+現行の原料カバレッジ診断（§10のカテゴリ4）は「量として存在するか（Physical Availability）」のみを見ている。三宅さんの指示に基づき、これに加えて「その量を、採算が崩れない価格で実際に買えるか（Economic Availability）」を分離した診断軸として設計する。
+
+- **Physical Availability**: 既存のSAI-6.1診断がすでに扱う、`rawMaterialAvailable`（現在利用可能）＋`certainInboundImportQuantityThisPeriod`（当期確実に到着する輸入分）等の物理量ベースの指標。`growingAquaculture`（養殖中で当期は未収穫）を除外する既存方針を維持する。
+- **Economic Availability**: 17.5.1のFull-cost / Contribution-margin affordable raw priceを、実際の想定原料価格（国内・国際）と比較し、「物理的には買える量」のうち「採算が崩れない価格で買える量」だけを取り出した指標。例えば国内相場がFull-cost affordable raw priceを超えている場合、Physical Availabilityは十分でもEconomic Availabilityは不足という診断になり得る。
+
+**前提の明記（三宅さんの指示どおり）**: 今回の設計では、Standard AIは国内・国際の原料価格および販売価格について完全な情報を持っているという前提を置く。AIと実際のゲーム世界との間の情報非対称性（例えばAIが将来の価格変動を知らない、契約時点の価格しか見えない等）をモデル化することは、ゲーム側の情報開示仕様に関わるため、今回のスコープには含めず、将来のCowork #04側の機能として扱う。
+
+### 17.5.4 各制約のトン数換算（Technical Capacity と Economic Capacity）
+
+Situation Diagnosis（§10・SAI-6.1で実装済み）が返す6カテゴリの比率を、それぞれ「その制約単独では何トンまでの商売が可能か」というトン数表現へ拡張する設計とする。想定するフィールド例（実装時に命名は調整可能）は以下の通り。
+
+| 制約カテゴリ | トン数換算の例 | 備考 |
+|---|---|---|
+| 営業（Sales） | Sales Capacity（t） | 現在の動的営業人員数×商品構成から導出できる、既存の`realisticSalesByProduct`の上限相当 |
+| 原料（物理） | Physical Raw Capacity（t） | 17.5.3のPhysical Availabilityをそのままトン数化したもの |
+| 原料（経済） | Economic Raw Capacity（t） | 17.5.3のEconomic Availabilityをトン数化したもの。Physical Raw Capacityの部分集合となる |
+| 生産能力 | Production Capacity（t） | 既存の`totalCapacityByProduct`・稼働率ベースの上限 |
+| Worker | Worker Capacity（t） | 現在の動的Worker人数から導出できる生産可能トン数の上限 |
+| 資金 | Financial Capacity（t） | §17.5.5で設計する、現金＋借入余力から導出する商売規模の上限 |
+
+**重要な注意（三宅さんの指示どおり明記）**: これらのトン数はあくまで「各制約を単独で見たときの上限」の情報であり、単純にこれらの`min()`を取って「今期の生産量はこれ」と決定してよいものではない。実際の商売規模の決定は、既存契約の履行優先度（§17.5.2のContracted Business）・商品別の採算性（§17.5.1のUnit Economics）・市場優先度（既存の`marketPriceRanking`）を踏まえた選別を、Integrated Operating Plan（将来のSAI-6.7以降で具体化する統合判断層）が行う。各制約のトン数換算は、その選別の**前段の情報**として提供するものであり、選別ロジックそのものを代替しない。
+
+### 17.5.5 Financial Capacity（資金制約のトン数換算）：2段階の実装計画
+
+三宅さんの指示に基づき、Financial Capacityの算出を以下の2段階に分ける。
+
+- **第1段階（近い将来に実装可能な簡易モデル）**: 「追加で1,000tの商売を行うために必要な追加ワーキングキャピタル（原料調達の立替から売上回収までの間、追加で必要になる現金）」を、既存の原料コスト・加工コスト・（分かる範囲での）回収サイクル前提から簡易に見積もり、`(現金 + 利用可能な借入余力) ÷ (1,000tあたりの追加ワーキングキャピタル)` という比率でFinancial Capacity（t）を算出する線形近似モデル。既存の`cashUsd`・`existingLoanBalanceUsd`・借入判断ロジック（既存の`decision/finance.ts`）を変更せず、診断用の付加情報としてのみ算出する。
+- **第2段階（将来拡張。今回は実装しない）**: 売掛金／買掛金の支払タイミング、輸入・養殖のリードタイムを反映したAR/AP時点認識、複数シナリオ（楽観／中立／悲観の需要・価格シナリオ）でのforward cash-flowシミュレーション。三宅さんの指示どおり、**今回はこのフルシミュレーションを実装しない**。第1段階の簡易モデルは、第2段階への置き換えを前提とした暫定値として設計する（§11.1の`deliveryDemandSource`と同様、暫定計算であることを明示するフラグを持たせる想定）。
+
+### 17.5.6 SAI-6.4との関係の再定義
+
+本追記により、SAI-6.4は単純な「`currentPeriodDeliveryDemand`をproductionへ配線し直すだけのステップ」ではなく、以下の将来の連鎖の入口として理解し直す。
+
+```
+currentPeriodDeliveryDemand（SAI-6.3で実装済み）
+  → Unit Economicsによる採算フィルター（§17.5.1・§17.5.2。Uneconomic New Businessの除外）
+  → Operational / Financial Constraints（§17.5.4のトン数換算・§17.5.5のFinancial Capacity。前段情報として提供）
+  → Integrated Operating Plan（既存契約優先度・商品別採算性・市場優先度を踏まえた統合選別。将来のSAI-6.7以降で具体化）
+  → Production Plan（§12.1の生産必要量概念式へ反映）
+```
+
+この再定義はSAI-6.4の実装範囲を今回拡大するものではない。SAI-6.4自体は依然として「§12.1の生産必要量概念式への切替」という当初スコープのまま着手してよいが、その配線先（生産必要量の入力元）が将来的にはUnit Economics採算フィルター後の値になることを見据えた設計にする、という設計上の方向づけである。実装順序としては、まずSAI-6.4（現行の`desiredByProduct`起点の生産計画を`currentPeriodDeliveryDemand`起点へ切替）を単独で完成させ、その後にUnit Economics採算フィルター（本節の新設ロジック）を別ステップとして接続する2段階の進め方を想定する。
+
+---
+
 ## 18. 実装計画（改訂版：Current Period Delivery Demand層を明示的なステップに分離）
 
 前回案（SAI-6.3で`salesPlans`をそのままproductionへ渡す）を、当期／次期区分の将来拡張を前提とした恒久的な構造にするため、Current Period Delivery Demand層の新設を独立したステップとして切り出す。既存ロードマップとの整合のため、SAI-6の内部ステップとして番号付けする。
@@ -478,7 +561,7 @@ Test14 Turn1は、上記のうち特に#1・#2・#8・#10（営業制約が支�
 | SAI-6.1 | Situation Diagnosis（§10の6カテゴリ・不足型/過剰型の比率算出のみ。既存の意思決定へは接続しない） | 新設モジュール（読み取り専用、既存フローに影響なし） | 低（既存出力への副作用なし） |
 | SAI-6.2 | Commercial Plan整理（`salesResult`に、生産へ渡すべき「商品別合計販売可能量」を明示的なフィールドとして追加。既存の`desiredByProduct`はそのまま「参考値」として残す。営業人員配分の動的headcount参照化§14もここで実施） | `decision/sales.ts`・`observation.ts`・`autoPolicy.ts` | 低〜中（fixture依存解消は既存回避コード除去を含む） |
 | SAI-6.3 | **Current Period Delivery Demand層**（§11.1の新設。`currentPeriodDeliveryDemand`という中間概念を新設し、暫定計算式（`≒salesPlans`＋当期履行の既存契約）と`deliveryDemandSource`フラグを実装。将来の当期／次期区分機能の受け皿を作る） | 新設モジュール。`policy.ts`の配線をこの層経由に変更 | **中**（本報告の核心の修正の土台。既存のゴールデンケーステスト§16の整備が前提） |
-| SAI-6.4 | Inventory & Production Plan（§12.1の生産必要量概念式へ切替。`policy.ts`の配線を`salesResult.desiredByProduct`からSAI-6.3の`currentPeriodDeliveryDemand`ベースの値へ切り替え。戦略先行生産の別枠加算構造もここで実装、Test14 Turn1では常に0） | `policy.ts`・`decision/production.ts`の入力元変更 | **中〜高**（既存の全5社の生産結果を変える唯一の変更） |
+| SAI-6.4 | Inventory & Production Plan（§12.1の生産必要量概念式へ切替。`policy.ts`の配線を`salesResult.desiredByProduct`からSAI-6.3の`currentPeriodDeliveryDemand`ベースの値へ切り替え。戦略先行生産の別枠加算構造もここで実装、Test14 Turn1では常に0。**§17.5.6の追記により、本ステップ自体は当初スコープのまま単独で先行実装し、Unit Economics採算フィルター（§17.5.1〜17.5.5）は別ステップとして後続接続する2段階進行を想定**） | `policy.ts`・`decision/production.ts`の入力元変更 | **中〜高**（既存の全5社の生産結果を変える唯一の変更） |
 | SAI-6.5 | Supply Plan連動（procurement.ts自体は変更不要な想定だが、SAI-6.4後の数値で再検証） | 主にテスト追加 | 低〜中 |
 | SAI-6.6 | Worker / Sales Force（Required Worker/Target Worker二層§13の構造実装。削減率上限・採用ペース上限は§19で校正予定のパラメータ枠として実装、初期値は保守的な値を暫定設定） | `decision/labor.ts` | 中 |
 | SAI-6.7 | Financial / Capex / Strategic Adjustment（Layer 3：戦略在庫のシグナル検知式・資金制約フィードバック・SAI-6当初スコープの設備投資判断） | `decision/finance.ts`・`decision/capex.ts`（新設ロジック） | 中〜高（当初スコープの本体） |
@@ -501,6 +584,9 @@ Test14 Turn1は、上記のうち特に#1・#2・#8・#10（営業制約が支�
 5. **SAI-6の当初スコープ（設備投資／供給過剰対応／価格戦略強化）と、本報告が追加した範囲（生産・原料の因果順序修正、当期／次期区分の受け皿）の優先順位**: 本報告はCurrent Period Delivery Demand層＋Inventory & Production Plan（SAI-6.3〜6.4）を最優先にすべきという分析結果だが、当初スコープとの時間配分は三宅さんの判断による。
 6. **優先順位判断の反映方式（§11.4）**: 「複合制約・上位1〜2件方式」を提案したが、固定モード方式（完全に別ロジックへ分岐）の方がテスト・説明が単純になる場面（例: 資金制約型が発生した場合は他のルールを一時停止する、等）もありうる。どこまで複合を許容するかは、実際に複数制約が同時発生する教師ケース（§17）が増えてから最終判断したい。
 7. **`currentPeriodDeliveryDemand`の当期／次期区分機能そのものの実装スケジュール**（§11.1）: 今回はStandard AI側に「受け皿となる中間層」を用意するのみで、営業希望数量を当期／次期に分ける機能自体（ゲーム側の営業活動UI・データモデルの変更）は別のCoworkスコープ（おそらくCowork #04またはゲーム基盤側）になる可能性がある。実装順序・担当の切り分けを三宅さんと確認したい。
+8. **市場別の直接固定費配賦の未実装ギャップ**（§17.5.1）: 既存の`fixedCostAllocationCoefficientByProduct`は商品別のみで市場別の粒度を持たない。Unit Economics層を将来市場別に細分化する必要が生じた場合、この配賦ロジック自体の拡張が別途必要になる。
+9. **Economic Availability・Uneconomic New Businessの判定しきい値の校正**（§17.5.2・§17.5.3）: 「Contribution Marginが負なら当期は追求しない」という方向は確定したが、境界付近（ほぼゼロ）のケースをどう扱うか、既存契約との優先度比較をどう数値化するかは、実際の複数教師ケースが増えてから校正したい。
+10. **Financial Capacity第1段階→第2段階への移行タイミング**（§17.5.5）: 第1段階の簡易な線形近似モデルをどの程度の期間運用してから、AR/AP時点認識・複数シナリオのforward simulation（第2段階）へ拡張すべきかは、三宅さんの優先度判断と、他のSAI-6ステップの進行状況に依存する。
 
 ---
 
