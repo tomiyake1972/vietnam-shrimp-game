@@ -36,14 +36,23 @@
 // guarantees valid JSON shape-wise per the schema you declare, but keep our own runtime
 // Zod check as defense in depth」）。
 //
-// システムプロンプト文字列自体（STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V1）は一切変更
-// しない（spec §3で一字一句固定と規定されているため）。tool定義は`system`とは独立した
-// 別のリクエストパラメータ（`tools`/`tool_choice`）として追加するだけである。
+// システムプロンプト文字列（v1）は一切変更しない（spec §3で一字一句固定と規定されて
+// いたため）。tool定義は`system`とは独立した別のリクエストパラメータ（`tools`/
+// `tool_choice`）として追加するだけである。
+//
+// 【2026-08-02・25秒問題対応・出力量削減】三宅さんの明示指示に基づき、出力トークン量を
+// 削減するための最小修正を行う。system promptをv2へ切替（簡潔さ・件数目安の指示を追加。
+// systemPrompt.ts参照）、tool定義のJSON SchemaへmaxItems・description（件数目安・
+// 簡潔さの指示）を追加、EXPLANATION_MAX_OUTPUT_TOKENSを縮小する。timeout=25000・
+// maxRetries=0・model=claude-haiku-4-5-20251001はいずれも変更しない（今回の比較の
+// ため固定）。reportSchema.tsのZod検証には件数上限を追加しない（理由はreportSchema.ts
+// のEXPLANATION_OUTPUT_LIMITSのコメント参照。目安をわずかに超えただけでschema_mismatch
+// による2回目呼び出し＝遅延倍増を招かないため）。
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V1 } from "./systemPrompt";
-import { StandardAiManagementReport, standardAiManagementReportSchema } from "./reportSchema";
+import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2 } from "./systemPrompt";
+import { EXPLANATION_OUTPUT_LIMITS, StandardAiManagementReport, standardAiManagementReportSchema } from "./reportSchema";
 import { ExplanationContext } from "./buildExplanationContext";
 
 /**
@@ -57,14 +66,25 @@ export const EXPLANATION_REPORT_TOOL_NAME = "submit_management_report";
  * 新規依存追加のコストに見合わないと判断し、この機能専用の小さな固定スキーマとして
  * 手書きする。reportSchema.ts側の形を変更した場合は、このJSON Schemaも合わせて
  * 更新すること（reportSchema.test.tsのテストが両者の食い違いを検出する）。
+ *
+ * 【2026-08-02・25秒問題対応・出力量削減】各配列にmaxItems、各フィールドに
+ * descriptionを追加した。これらはAnthropicのtool-use機構に対する「お願い」であり
+ * ハードな検証ではない（Zod側では意図的に強制しない。reportSchema.tsの
+ * EXPLANATION_OUTPUT_LIMITSのコメント参照）が、Claudeへ出力量を絞るよう明示的に
+ * 伝えることで、実際の生成トークン量を減らし、25秒timeout内に収まりやすくすることを
+ * 狙っている。件数の数値はEXPLANATION_OUTPUT_LIMITS（reportSchema.ts）を単一の定義元
+ * とし、systemPrompt.tsのV2文言とここで同じ値を参照することで、schemaのmaxItemsと
+ * promptの件数指示が常にずれないようにしている。
  */
-const EXPLANATION_REPORT_TOOL_INPUT_SCHEMA = {
+export const EXPLANATION_REPORT_TOOL_INPUT_SCHEMA = {
   type: "object",
   properties: {
-    headline: { type: "string" },
-    executiveSummary: { type: "string" },
+    headline: { type: "string", description: "1文のみ。簡潔な見出し。" },
+    executiveSummary: { type: "string", description: "2〜4文程度の短い経営要約。診断JSONの逐語的な言い換えではなく要点のみ。" },
     recommendations: {
       type: "array",
+      maxItems: EXPLANATION_OUTPUT_LIMITS.maxRecommendations,
+      description: `最大${EXPLANATION_OUTPUT_LIMITS.maxRecommendations}件。主要な打ち手のみに絞る。`,
       items: {
         type: "object",
         properties: {
@@ -73,6 +93,8 @@ const EXPLANATION_REPORT_TOOL_INPUT_SCHEMA = {
           action: { type: "string" },
           reasons: {
             type: "array",
+            maxItems: EXPLANATION_OUTPUT_LIMITS.maxReasonsPerRecommendation,
+            description: `最大${EXPLANATION_OUTPUT_LIMITS.maxReasonsPerRecommendation}件。各reasonは短文で。`,
             items: {
               type: "object",
               properties: {
@@ -88,6 +110,8 @@ const EXPLANATION_REPORT_TOOL_INPUT_SCHEMA = {
     },
     keyRisks: {
       type: "array",
+      maxItems: EXPLANATION_OUTPUT_LIMITS.maxKeyRisks,
+      description: `最大${EXPLANATION_OUTPUT_LIMITS.maxKeyRisks}件。重要リスクのみに絞る。`,
       items: {
         type: "object",
         properties: {
@@ -98,8 +122,18 @@ const EXPLANATION_REPORT_TOOL_INPUT_SCHEMA = {
         required: ["severity", "title", "description"],
       },
     },
-    questionsForPlayer: { type: "array", items: { type: "string" } },
-    dataLimitations: { type: "array", items: { type: "string" } },
+    questionsForPlayer: {
+      type: "array",
+      maxItems: EXPLANATION_OUTPUT_LIMITS.maxQuestionsForPlayer,
+      description: `最大${EXPLANATION_OUTPUT_LIMITS.maxQuestionsForPlayer}件。`,
+      items: { type: "string" },
+    },
+    dataLimitations: {
+      type: "array",
+      maxItems: EXPLANATION_OUTPUT_LIMITS.maxDataLimitations,
+      description: `最大${EXPLANATION_OUTPUT_LIMITS.maxDataLimitations}件。`,
+      items: { type: "string" },
+    },
   },
   required: ["headline", "executiveSummary", "recommendations", "keyRisks", "questionsForPlayer", "dataLimitations"],
 } as const;
@@ -146,17 +180,27 @@ export interface ExplanationModelConfig {
 // （claude-haiku-4-5-20251001）を確認・訂正した（三宅さんがConsole画面で確認）。
 const DEFAULT_EXPLANATION_MODEL = "claude-haiku-4-5-20251001";
 
-// 【2026-08-01・maxTokens不足によるschema_mismatchの確定と修正】三宅さんの実機
-// Preview確認（Test14/BAL/turn1）で、schema_mismatchが起きたattempt1・attempt2の
+// 【2026-08-01・maxTokens不足によるschema_mismatchの確定と修正（経緯・履歴）】三宅さんの
+// 実機Preview確認（Test14/BAL/turn1）で、schema_mismatchが起きたattempt1・attempt2の
 // 両方でAnthropic応答のstop_reasonが"max_tokens"、usage.output_tokensがちょうど
 // maxTokens設定値(1200)と一致していることをVercelランタイムログで確認した
 // （headline・executiveSummaryの2フィールドを書いた時点で1200トークンを使い切り、
 // recommendations/keyRisks/questionsForPlayer/dataLimitationsの4つの配列
-// フィールドが丸ごと出力されずに応答が打ち切られていた）。推測ではなく実データで
-// 「maxTokens不足による打ち切りが原因」と確定したため、既存レポート（8項目構成、
-// recommendationsが複数件・reasonsを含む等）を最後まで出力しきれる余裕を持った
-// 値へ引き上げる。claude-haiku-4-5-20251001の最大出力トークン数には十分収まる値。
-const EXPLANATION_MAX_OUTPUT_TOKENS = 4096;
+// フィールドが丸ごと出力されずに応答が打ち切られていた）。この経緯があるため、
+// 今回（25秒問題対応）も1200へは戻さない（三宅さんの明示指示）。
+//
+// 【2026-08-02・25秒問題対応・出力量削減】4096は「打ち切られない」ことを優先して
+// 大きめに設定した値だが、出力側の生成完了待ち（非streaming）が25秒timeoutを
+// 超える一因になっていると考えられるため、出力量そのものを絞る対応（システム
+// プロンプトv2・tool定義のmaxItems/description）と併せて、maxTokensも縮小する。
+// 選定理由: 新しい件数目安（recommendations最大3件×reasons最大2件、keyRisks最大3件、
+// questionsForPlayer最大2件、dataLimitations最大2件、headline1文、executiveSummary
+// 2〜4文）で実際に必要な日本語出力量を概算すると、本文相当のテキストで概ね
+// 1,300文字前後（JSON構造のオーバーヘッドを含めても実トークン数はおおよそ
+// 1,300〜1,800程度と想定）に収まる見込みであり、2,000であれば十分な余裕を持ちつつ
+// 4,096の半分以下に絞れる。三宅さんの指示範囲（1,600〜2,200）の中で、上記の想定
+// 生成量に対して余裕を持たせつつも4,096より大幅に小さい2,000を選んだ。
+const EXPLANATION_MAX_OUTPUT_TOKENS = 2000;
 
 /**
  * このAI経営説明機能で使うモデル名・最大トークン数の唯一の定義箇所。
@@ -352,10 +396,10 @@ async function attemptOnce(
       {
         model: config.model,
         max_tokens: config.maxTokens,
-        system: STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V1,
+        system: STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2,
         messages: [{ role: "user", content: JSON.stringify(context) }],
-        // 【構造化出力対応】システムプロンプト文字列自体は変更せず、tool定義と
-        // tool_choiceだけを別パラメータとして追加し、応答をこのtool呼び出しに強制する。
+        // 【構造化出力対応】tool定義とtool_choiceを別パラメータとして追加し、
+        // 応答をこのtool呼び出しに強制する。
         tools: [
           {
             name: EXPLANATION_REPORT_TOOL_NAME,
@@ -422,8 +466,13 @@ async function attemptOnce(
     return { kind: "failure", errorCategory: "schema_mismatch", detail: validated.error.message };
   }
 
+  // 【2026-08-02・25秒問題対応・観測性強化】成功時にもelapsedMs(=latencyMs)と
+  // outputTokensをログへ出す（API key・prompt本文は含めない）。出力量削減
+  // （システムプロンプトv2・tool定義のmaxItems・maxTokens縮小）が実際に成功時の
+  // 所要時間・出力トークン数を減らせているかを、Vercelランタイムログから
+  // 直接確認できるようにするため。
   console.log(
-    `[claudeClient] attempt ${logTag.attempt} 成功 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn} inputTokens=${response.usage?.input_tokens ?? 0} outputTokens=${response.usage?.output_tokens ?? 0}`
+    `[claudeClient] attempt ${logTag.attempt} 成功 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn} elapsedMs=${latencyMs} inputTokens=${response.usage?.input_tokens ?? 0} outputTokens=${response.usage?.output_tokens ?? 0}`
   );
   return {
     kind: "success",

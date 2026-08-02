@@ -20,9 +20,12 @@ import {
   buildAnthropicClientOptions,
   EXPLANATION_CLAUDE_MAX_RETRIES,
   EXPLANATION_CLAUDE_TIMEOUT_MS,
+  EXPLANATION_REPORT_TOOL_INPUT_SCHEMA,
   EXPLANATION_REPORT_TOOL_NAME,
   generateManagementReport,
 } from "../claudeClient";
+import { EXPLANATION_OUTPUT_LIMITS } from "../reportSchema";
+import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2 } from "../systemPrompt";
 import { ExplanationContext } from "../buildExplanationContext";
 
 const FAKE_API_KEY = "test-fake-key-not-real";
@@ -324,6 +327,68 @@ test("generateManagementReport: タイムアウト相当のnetwork_error発生�
   assert.ok(elapsedMs < 5_000, `想定外に時間がかかった elapsedMs=${elapsedMs}`);
 });
 
+// 【2026-08-02・25秒問題対応・出力量削減の回帰テスト】tool定義のmaxItemsと
+// systemPrompt V2の件数指示が、単一の定義元(EXPLANATION_OUTPUT_LIMITS)からずれずに
+// 一致していることを確認する。三宅さんの指示7「schemaの件数上限と生成指示が一致
+// している」ことの検証。
+test("EXPLANATION_REPORT_TOOL_INPUT_SCHEMA: 各配列のmaxItemsがEXPLANATION_OUTPUT_LIMITSと一致する", () => {
+  const schema = EXPLANATION_REPORT_TOOL_INPUT_SCHEMA.properties;
+  assert.equal(schema.recommendations.maxItems, EXPLANATION_OUTPUT_LIMITS.maxRecommendations);
+  assert.equal(schema.recommendations.items.properties.reasons.maxItems, EXPLANATION_OUTPUT_LIMITS.maxReasonsPerRecommendation);
+  assert.equal(schema.keyRisks.maxItems, EXPLANATION_OUTPUT_LIMITS.maxKeyRisks);
+  assert.equal(schema.questionsForPlayer.maxItems, EXPLANATION_OUTPUT_LIMITS.maxQuestionsForPlayer);
+  assert.equal(schema.dataLimitations.maxItems, EXPLANATION_OUTPUT_LIMITS.maxDataLimitations);
+});
+
+test("STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2: 件数指示がEXPLANATION_OUTPUT_LIMITSの値と一致する文言を含む(schemaとpromptのドリフト防止)", () => {
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxRecommendations}件`));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxReasonsPerRecommendation}件`));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxKeyRisks}件`));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxQuestionsForPlayer}件`));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxDataLimitations}件`));
+  // 簡潔さの指示（concise/do not repeat diagnostic values/do not explain every field/
+  // focus on primary constraint等）が日本語で含まれていることも確認する。
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes("簡潔"));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes("主要制約"));
+});
+
+test("generateManagementReport: timeout/maxRetries/modelは今回変更していない(25秒問題対応の比較のため固定)", () => {
+  assert.equal(EXPLANATION_CLAUDE_TIMEOUT_MS, 25_000);
+  assert.equal(EXPLANATION_CLAUDE_MAX_RETRIES, 0);
+  const options = buildAnthropicClientOptions("some-fake-key");
+  assert.equal(options.timeout, 25_000);
+  assert.equal(options.maxRetries, 0);
+});
+
+test("generateManagementReport: 目安件数を超えた正常なtool_use応答でも引き続きok:trueで成功する(Zod側は件数を強制しないため既存の正常parseは壊れない)", async () => {
+  const bigButValidInput = {
+    headline: "テスト見出し",
+    executiveSummary: "テスト要約",
+    recommendations: Array.from({ length: EXPLANATION_OUTPUT_LIMITS.maxRecommendations + 3 }, (_, i) => ({
+      area: "sales",
+      title: `提案${i}`,
+      action: "action",
+      reasons: [{ label: "l", value: "v" }],
+    })),
+    keyRisks: [],
+    questionsForPlayer: [],
+    dataLimitations: [],
+  };
+  const { client, callCount } = makeClient([toolUseResponse(bigButValidInput)]);
+  const result = await generateManagementReport(minimalContext(), client);
+  assert.equal(result.ok, true);
+  assert.equal(callCount(), 1);
+});
+
+test("generateManagementReport: schema mismatch時のfallback(1回だけリトライ→最終的にok:false)は今回の変更後も維持されている", async () => {
+  const badInput = { executiveSummary: "見出しがありません" };
+  const { client, callCount } = makeClient([toolUseResponse(badInput), toolUseResponse(badInput)]);
+  const result = await generateManagementReport(minimalContext(), client);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.errorCategory, "schema_mismatch");
+  assert.equal(callCount(), 2);
+});
+
 test("getExplanationModelConfig: 環境変数未指定時は既定モデルを返す", async () => {
   const original = process.env.STANDARD_AI_EXPLANATION_MODEL;
   delete process.env.STANDARD_AI_EXPLANATION_MODEL;
@@ -333,8 +398,10 @@ test("getExplanationModelConfig: 環境変数未指定時は既定モデルを�
     assert.equal(typeof config.model, "string");
     // 【2026-08-01・maxTokens不足によるschema_mismatchの修正】実機Previewで
     // stop_reason="max_tokens"（応答が1200トークンで打ち切られ、recommendations等の
-    // 配列フィールドが丸ごと欠落）を確認したため、4096へ引き上げた。
-    assert.equal(config.maxTokens, 4096);
+    // 配列フィールドが丸ごと欠落）を確認したため、4096へ引き上げた（1200には戻さない）。
+    // 【2026-08-02・25秒問題対応・出力量削減】出力量を件数目安つきで絞ったため、
+    // 4096は過大と判断し2000へ縮小した（EXPLANATION_MAX_OUTPUT_TOKENSのコメント参照）。
+    assert.equal(config.maxTokens, 2000);
   } finally {
     if (original !== undefined) process.env.STANDARD_AI_EXPLANATION_MODEL = original;
   }

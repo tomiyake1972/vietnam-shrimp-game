@@ -2,7 +2,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { standardAiManagementReportSchema } from "../reportSchema";
+import { EXPLANATION_OUTPUT_LIMITS, standardAiManagementReportSchema } from "../reportSchema";
 
 function validPayload() {
   return {
@@ -75,4 +75,34 @@ test("reportSchema: 余分なトップレベルフィールドがあっても既
 test("reportSchema: nullペイロードは失敗する", () => {
   const result = standardAiManagementReportSchema.safeParse(null);
   assert.equal(result.success, false);
+});
+
+// 【2026-08-02・25秒問題対応・出力量削減の回帰テスト】EXPLANATION_OUTPUT_LIMITSは
+// あくまでClaudeへの目安指示（tool定義のmaxItems・systemPromptの文言）であり、
+// Zod検証側では意図的に件数上限を強制しない（reportSchema.tsのコメント参照）。
+// このテストは、目安件数をわずかに超えた既存の正常な形の応答が、今回の変更後も
+// 引き続きparseに成功すること（＝新たなschema_mismatchを生まないこと）を確認する。
+test("reportSchema: EXPLANATION_OUTPUT_LIMITSの目安件数を超えていても、形が正しければ引き続きパースに成功する(Zod側は件数を強制しない)", () => {
+  const payload = {
+    headline: "見出し",
+    executiveSummary: "要約。",
+    recommendations: Array.from({ length: EXPLANATION_OUTPUT_LIMITS.maxRecommendations + 2 }, (_, i) => ({
+      area: "sales",
+      title: `提案${i}`,
+      action: "action",
+      reasons: Array.from({ length: EXPLANATION_OUTPUT_LIMITS.maxReasonsPerRecommendation + 2 }, (_, j) => ({
+        label: `label${j}`,
+        value: `value${j}`,
+      })),
+    })),
+    keyRisks: Array.from({ length: EXPLANATION_OUTPUT_LIMITS.maxKeyRisks + 2 }, (_, i) => ({
+      severity: "low" as const,
+      title: `risk${i}`,
+      description: "desc",
+    })),
+    questionsForPlayer: Array.from({ length: EXPLANATION_OUTPUT_LIMITS.maxQuestionsForPlayer + 2 }, (_, i) => `q${i}`),
+    dataLimitations: Array.from({ length: EXPLANATION_OUTPUT_LIMITS.maxDataLimitations + 2 }, (_, i) => `d${i}`),
+  };
+  const result = standardAiManagementReportSchema.safeParse(payload);
+  assert.equal(result.success, true, "目安件数を超えた応答でも、意図的にschema_mismatchにはしない設計であるはず");
 });
