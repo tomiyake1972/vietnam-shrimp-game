@@ -24,6 +24,11 @@ import { PressureScores } from "../standardAi/pressures";
 import { StandardAiObservation } from "../standardAi/types";
 import { CompanyFixture } from "../types";
 import { DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../market/types";
+import { allocateProductionPlans } from "../../production/allocation";
+import { Factory, CompanyProductionPlanEntry, WorkerAssignment } from "../../production/types";
+import { RawMaterialLot as RawMaterialRLot } from "../../rawMaterials/types";
+import { hosoEqTons, ratio, unwrapUnit, usdPerHosoEqKg } from "../../core/units";
+import { period } from "../../core/period";
 
 const TOL = 1e-9;
 const SKILL = { hoso: 0.9, pd: 0.9, vap: 0.9 };
@@ -254,50 +259,180 @@ test("PDB-10: 判断はターン番号を参照しない（時期直書きの規
 // §c 残業削減の経路（単体レベルの実証）
 // ---------------------------------------------------------------------
 
-test("PDB-11: 【残業削減の機構】残業で埋めていた不足を機械化が解消すると、残業費が実際に減る", () => {
-  // 【この検証の位置づけ】比較シミュレーション（run レベル）では、
-  // autoPolicy も Standard AI も残業率をほぼ一定で出すため、
-  // 「機械化により残業を削った」という現れ方が観測できていない。
-  // ここでは機構そのものが正しく効くことを単体レベルで示す。
-  const regularHeadcount = 600;
-  const pdQuantity = 3000;
-  const skill = 0.9;
-  const attendance = 0.95;
+test("PDB-11: 【因果テスト】同一PD生産量・同一常用人員で、実際の生産・労務エンジンを通したとき、機械化が残業/臨時/生産未達を実際に改善する", () => {
+  // 【この検証の作り】定数の付け替えではなく、
+  //   労働係数 → 必要労働 → 労働制約 → 生産結果 → コスト
+  // という実際の経路をそのまま通す。機械化レベル以外の入力は完全に同一にする。
+  const factoryId = "F-CAUSAL";
+  const companyId = "BAL";
+  const pdQuantity = 2_000;
+  const regularHeadcount = 300;
 
-  // 機械化前: 常用600人＋残業30%でようやく処理できる量、と仮定する。
-  const requiredNoOvertimeBefore = computeRequiredRegularHeadcount({
-    quantityByProduct: { pd: pdQuantity },
-    skillByProduct: { hoso: skill, pd: skill, vap: skill },
-    attendanceRate: attendance,
-    appliedOvertimeRate: 0,
-    temporaryHeadcount: 0,
-    mechanizationLevel: 0,
-  }).requiredRegularHeadcount;
-  assert.ok(requiredNoOvertimeBefore > regularHeadcount, "前提: 機械化前は残業なしでは人員が足りない");
+  const factory: Factory = {
+    factoryId,
+    companyId,
+    status: "active",
+    commonProcessingCapacity: hosoEqTons(1_000_000),
+    hosoCapacity: hosoEqTons(1_000_000),
+    pdCapacity: hosoEqTons(1_000_000),
+    vapCapacity: hosoEqTons(1_000_000),
+    freezingPackagingCapacity: hosoEqTons(1_000_000),
+    coldStorageCapacity: hosoEqTons(1_000_000),
+    baseUtilizationRate: ratio(1),
+    equipmentAvailabilityRate: ratio(1),
+  } as Factory;
 
-  // 機械化後: 同じ量が残業なしの常用だけで賄えるようになる。
-  const requiredNoOvertimeAfter = computeRequiredRegularHeadcount({
-    quantityByProduct: { pd: pdQuantity },
-    skillByProduct: { hoso: skill, pd: skill, vap: skill },
-    attendanceRate: attendance,
-    appliedOvertimeRate: 0,
-    temporaryHeadcount: 0,
-    mechanizationLevel: 1,
-  }).requiredRegularHeadcount;
-  assert.ok(requiredNoOvertimeAfter < requiredNoOvertimeBefore, "機械化で必要人員が下がる");
+  const lots: readonly RawMaterialRLot[] = [
+    {
+      lotId: "L-CAUSAL",
+      companyId,
+      source: "domestic",
+      originCountry: "VN",
+      inboundPeriod: period(2026, 1),
+      originalQuantity: hosoEqTons(1_000_000),
+      remainingQuantity: hosoEqTons(1_000_000),
+      unitCost: usdPerHosoEqKg(5),
+      availableFromPeriod: period(2026, 1),
+      status: "available",
+    } as RawMaterialRLot,
+  ];
 
-  // 残業費 = 常用人数 × 給与 × 残業率 × 割増係数（finance/parameters.tsの単価をそのまま使う）。
-  const overtimeCost = (rate: number) =>
-    regularHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter * rate * FINANCE_PARAMETERS_V1.labor.overtimePremiumFactor;
-  const before = overtimeCost(0.3);
-  const after = overtimeCost(0);
-  assert.ok(before > 0, "前提: 機械化前は残業費が発生している");
-  assert.equal(after, 0, "残業を止めれば残業費はゼロになる");
-  assert.ok(before - after > 0, `残業削減による削減額は ${before - after} USD`);
+  /** 機械化レベルと労務条件だけを変えて、実エンジンを通す。 */
+  function run(mechanizationLevel: number, temporaryHeadcount: number, overtimeRate: number) {
+    const assignment: WorkerAssignment = {
+      factoryId,
+      companyId,
+      regularHeadcount,
+      temporaryHeadcount,
+      skills: (["hoso", "pd", "vap"] as const).map((product) => ({ product, skillLevel: ratio(0.9) })),
+      overtimeRate: ratio(overtimeRate),
+      attendanceRate: ratio(0.95),
+    } as WorkerAssignment;
+    const plans: readonly CompanyProductionPlanEntry[] = [
+      { companyId, factoryId, product: "pd", desiredQuantity: hosoEqTons(pdQuantity), priority: 1 },
+    ];
+    const result = allocateProductionPlans(
+      plans,
+      [factory],
+      [assignment],
+      lots,
+      period(2026, 1),
+      PRODUCTION_PARAMETERS_V1,
+      new Map([[factoryId, mechanizationLevel]])
+    );
+    const entry = result.entries[0];
+    const produced = unwrapUnit(entry.allocatedQuantity);
+    return {
+      produced,
+      shortfall: pdQuantity - produced,
+      laborLimited: unwrapUnit(entry.stages.laborLimited),
+      cost:
+        computeQuarterlyLaborCost(regularHeadcount, temporaryHeadcount).totalCostUsd +
+        regularHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter * overtimeRate * FINANCE_PARAMETERS_V1.labor.overtimePremiumFactor,
+    };
+  }
 
-  // 常用人件費そのものは変わらない（人数を減らしていないため）。
-  assert.equal(
-    computeQuarterlyLaborCost(regularHeadcount, 0).regularCostUsd,
-    computeQuarterlyLaborCost(regularHeadcount, 0).regularCostUsd
+  // (1) 機械化前・残業も臨時もなし → 労働制約で生産未達が出ることを前提として確認する。
+  const beforePlain = run(0, 0, 0);
+  assert.ok(beforePlain.shortfall > 0, `前提: 機械化前は労働制約で生産未達が出る（未達 ${beforePlain.shortfall}t）`);
+  assert.ok(beforePlain.laborLimited < pdQuantity, "労働段階で候補量が削られている");
+
+  // (2) 機械化後・同じ人員/残業/臨時 → 同じ計画がより多く処理でき、未達が改善する。
+  const afterPlain = run(1, 0, 0);
+  assert.ok(
+    afterPlain.produced > beforePlain.produced,
+    `機械化後は同じ人員でより多く作れるはず（${beforePlain.produced} → ${afterPlain.produced}）`
   );
+  assert.ok(afterPlain.shortfall < beforePlain.shortfall, "生産未達が改善する");
+  assert.ok(
+    Math.abs(afterPlain.produced / beforePlain.produced - 1.5) < 1e-3,
+    `増加率は係数比1.8/1.2=1.5倍のはず（実測 ${afterPlain.produced / beforePlain.produced}）`
+  );
+  assert.equal(afterPlain.cost, beforePlain.cost, "この経路では人件費は変わらない（同じ人員・残業・臨時のまま）");
+
+  // (3) 機械化前に未達をゼロにするには、残業・臨時のどちらかが必要になる。
+  const beforeWithOvertime = run(0, 0, PRODUCTION_PARAMETERS_V1.labor.overtimeRateCap);
+  const beforeWithTemporary = run(0, 200, 0);
+  assert.ok(beforeWithOvertime.produced > beforePlain.produced, "機械化前は残業で生産量を押し上げられる");
+  assert.ok(beforeWithTemporary.produced > beforePlain.produced, "機械化前は臨時で生産量を押し上げられる");
+  assert.ok(beforeWithOvertime.cost > beforePlain.cost, "残業にはコストがかかる");
+  assert.ok(beforeWithTemporary.cost > beforePlain.cost, "臨時にはコストがかかる");
+
+  // (4) 【因果の核心】機械化前に残業/臨時で到達していた生産量を、
+  //     機械化後は残業ゼロ・臨時ゼロで超えられる ＝ その分のコストを落とせる。
+  assert.ok(
+    afterPlain.produced >= beforeWithOvertime.produced,
+    `機械化後（残業0）が、機械化前の残業${PRODUCTION_PARAMETERS_V1.labor.overtimeRateCap * 100}%と同等以上の生産量になるはず` +
+      `（機械化後 ${afterPlain.produced} vs 機械化前+残業 ${beforeWithOvertime.produced}）`
+  );
+  assert.ok(
+    afterPlain.cost < beforeWithOvertime.cost,
+    `同等の生産量を、より低い人件費で達成できる（${beforeWithOvertime.cost} → ${afterPlain.cost}）`
+  );
+  assert.ok(
+    afterPlain.produced >= beforeWithTemporary.produced && afterPlain.cost < beforeWithTemporary.cost,
+    "臨時ワーカーで埋めていた場合も同様に、より低い人件費で同等以上を達成できる"
+  );
+});
+
+test("PDB-12: 【因果テスト・PD以外への波及がないこと】同じ経路でHOSOは一切変わらず、VAPは係数比ぶんだけ変わる", () => {
+  const factoryId = "F-CAUSAL2";
+  const companyId = "BAL";
+  const factory: Factory = {
+    factoryId,
+    companyId,
+    status: "active",
+    commonProcessingCapacity: hosoEqTons(1_000_000),
+    hosoCapacity: hosoEqTons(1_000_000),
+    pdCapacity: hosoEqTons(1_000_000),
+    vapCapacity: hosoEqTons(1_000_000),
+    freezingPackagingCapacity: hosoEqTons(1_000_000),
+    coldStorageCapacity: hosoEqTons(1_000_000),
+    baseUtilizationRate: ratio(1),
+    equipmentAvailabilityRate: ratio(1),
+  } as Factory;
+  const lots: readonly RawMaterialRLot[] = [
+    {
+      lotId: "L-CAUSAL2",
+      companyId,
+      source: "domestic",
+      originCountry: "VN",
+      inboundPeriod: period(2026, 1),
+      originalQuantity: hosoEqTons(1_000_000),
+      remainingQuantity: hosoEqTons(1_000_000),
+      unitCost: usdPerHosoEqKg(5),
+      availableFromPeriod: period(2026, 1),
+      status: "available",
+    } as RawMaterialRLot,
+  ];
+  const assignment: WorkerAssignment = {
+    factoryId,
+    companyId,
+    regularHeadcount: 300,
+    temporaryHeadcount: 0,
+    skills: (["hoso", "pd", "vap"] as const).map((product) => ({ product, skillLevel: ratio(0.9) })),
+    overtimeRate: ratio(0),
+    attendanceRate: ratio(0.95),
+  } as WorkerAssignment;
+
+  const producedFor = (product: Product, mechanizationLevel: number) => {
+    const result = allocateProductionPlans(
+      [{ companyId, factoryId, product, desiredQuantity: hosoEqTons(100_000), priority: 1 }],
+      [factory],
+      [assignment],
+      lots,
+      period(2026, 1),
+      PRODUCTION_PARAMETERS_V1,
+      new Map([[factoryId, mechanizationLevel]])
+    );
+    return unwrapUnit(result.entries[0].allocatedQuantity);
+  };
+
+  assert.equal(producedFor("hoso", 1), producedFor("hoso", 0), "HOSOは機械化の影響を一切受けない");
+  const vapBefore = producedFor("vap", 0);
+  const vapAfter = producedFor("vap", 1);
+  assert.ok(vapAfter > vapBefore, "VAPは前工程の殻剥き共通化ぶんだけ増える");
+  assert.ok(Math.abs(vapAfter / vapBefore - 3.0 / 2.6) < 1e-3, `VAPの増加率は係数比3.0/2.6のはず（実測 ${vapAfter / vapBefore}）`);
+  const pdRatio = producedFor("pd", 1) / producedFor("pd", 0);
+  assert.ok(pdRatio > vapAfter / vapBefore, "PDの改善率のほうがVAPより大きい");
 });
