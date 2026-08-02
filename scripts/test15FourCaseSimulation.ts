@@ -38,7 +38,7 @@
 
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../app/lib/v2/companyLab/runner";
 import { generateAutoPolicyDecision } from "../app/lib/v2/companyLab/autoPolicy";
-import { CompanyDecisionInput, CompanyFixture, CompanyLabState, CompanyQuarterRecord } from "../app/lib/v2/companyLab/types";
+import { CompanyDecisionInput, CompanyLabState, CompanyQuarterRecord } from "../app/lib/v2/companyLab/types";
 import { CompanyId } from "../app/lib/v2/sales/types";
 import { extractCompanyFinancialResult } from "../app/v2/company-lab/play/_lib/financialViewSelectors";
 import {
