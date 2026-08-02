@@ -101,7 +101,7 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
   };
   const salesStateAfter = advanceSalesQuarter(
     salesStateBefore,
-    { plans: input.salesPlans, marketResult, marketInput: overriddenMarketInput, marketWeights: input.marketWeights, marketProductMix: input.marketProductMix },
+    { plans: input.salesPlans, marketResult, marketInput: overriddenMarketInput, marketWeights: input.marketWeights, marketProductMix: input.marketProductMix, processingAdvantage: input.processingAdvantage },
     salesParams,
     destinationMarketPriceCoefficients
   );

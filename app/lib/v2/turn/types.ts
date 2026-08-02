@@ -16,6 +16,7 @@ import { CountryId, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Pro
 import { MarketParameters } from "../market/parameters";
 import { DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
 import { CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
+import type { ProcessingAdvantageOptions } from "../sales/marketAdapter";
 import { SalesParameters } from "../sales/parameters";
 import {
   AquacultureHarvestResult,
@@ -145,6 +146,11 @@ export interface TurnOrchestratorInput {
    * （省略時はsales側の既存の世界一律商品構成比へフォールバック。後方互換）。
    */
   readonly marketProductMix?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
+  /**
+   * 【加工品市場進化 §d】ベトナムの加工優位を対象需要の商品構成へ反映する設定。
+   * sales/types.ts の SalesQuarterInput.processingAdvantage へそのまま渡すだけ。
+   */
+  readonly processingAdvantage?: ProcessingAdvantageOptions;
 
   /**
    * 決定論的乱数のシード（Phase1のHOSO価格ショック等に使う）。同じseed・同じ

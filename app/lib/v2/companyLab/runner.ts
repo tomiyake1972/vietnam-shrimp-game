@@ -63,6 +63,7 @@ import {
   PRODUCT_LIFECYCLE_PARAMETERS_V1,
 } from "../market/productLifecycle";
 import { deriveProductWiseDestinationPriceCoefficients } from "../market/destinationPricingEvolution";
+import { PROCESSING_ADVANTAGE_OPTIONS_V1 } from "../sales/marketAdapter";
 import {
   applyProcessingCapacityEvolutionToMarketInput,
   computeProcessingCapacityRatios,
@@ -1135,6 +1136,14 @@ export function advanceCompanyLabQuarter(
     marketWeights: consumerMarketWeights,
     // 【SAI-5C】市場×商品の需要構成比行列（undefinedなら従来の世界一律構成比）。
     marketProductMix: lifecycleMix,
+    // 【加工品市場進化 §d】ベトナムの加工優位を対象需要の商品構成へ反映する
+    // （opt-in）。ここで渡す marketInput は既に applyProductionSupplySignals-
+    // ToMarketInput を通っており、VNのPD/VAP加工能力は**5社が実際に計画した
+    // 生産量**へ置き換わっている。したがって「ベトナムだから」ではなく
+    // 「5社が実際に加工能力を積んでいるから」対象需要が広がる構造になる。
+    ...(state.config.marketEvolution?.processingAdvantageDemandCapture
+      ? { processingAdvantage: PROCESSING_ADVANTAGE_OPTIONS_V1 }
+      : {}),
     parameters: {
       destinationMarketPricing: destinationMarketPricingForThisQuarter,
       // 【SAI-5D】営業基盤ウェイト有効化版のSalesParameters（合計1.0を保った

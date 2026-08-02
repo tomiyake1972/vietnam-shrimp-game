@@ -18,6 +18,7 @@ import { HosoEqTons, Score0to100, UsdPerHosoEqKg } from "../core/units";
 import { PeriodV2 } from "../core/period";
 import { DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import type { MarketSalesEffortAdjustment } from "./marketEffort";
+import type { ProcessingAdvantageOptions } from "./marketAdapter";
 
 export class SalesValidationError extends Error {
   constructor(message: string) {
@@ -271,6 +272,11 @@ export interface SalesQuarterInput {
    * （省略時は既存の世界一律商品構成比へフォールバックする。後方互換）。
    */
   readonly marketProductMix?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
+  /**
+   * 【加工品市場進化 §d】ベトナムの加工優位を対象需要の商品構成へ反映する設定。
+   * deriveTargetDemand へそのまま渡すだけ（省略時は従来の世界平均構成比按分）。
+   */
+  readonly processingAdvantage?: ProcessingAdvantageOptions;
 }
 
 /** 1四半期分の成約計算・契約生成の記録。 */
