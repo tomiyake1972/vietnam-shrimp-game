@@ -46,12 +46,13 @@ function buildStored(runtime: ReturnType<typeof createCompanyLabRuntimeSnapshot>
 // 1. バージョン番号そのもの
 // ---------------------------------------------------------------------
 
-test("MIG-1: 変更前に確認したバージョン(4)から、変更後は5へちょうど1つ増えている", () => {
-  // このブランチ作業開始時点でCURRENT_COMPANY_LAB_PERSISTED_STATE_VERSIONは4だった
-  // （persistence/types.tsのバージョン履歴コメントv1〜v4参照）。Test15はこれに
-  // pdMechanizationState・productDevelopmentStateという2つのoptionalフィールドを
-  // 追加したため5へ上げた（見つけた値+1。ハードコードした固定値ではない）。
-  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 5);
+test("MIG-1: 統合後の現行バージョンは7（develop/v2側で#05営業人員機能が4→5→6、Test15統合で6→7に再採番）", () => {
+  // Test15の作業ブランチ単独では4→5だったが、develop/v2側で#05（営業人員の
+  // 追加採用・減員）が独立に4→5→6を使用済みで、develop/v2へ先にマージされて
+  // いたため、本統合作業でTest15側の変更を5→7へ再採番した
+  // （persistence/types.tsのバージョン履歴コメント参照。5→6への単純な読み替え
+  // ではなく、develop/v2の6の続き番号として7を採番）。
+  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 7);
 });
 
 // ---------------------------------------------------------------------
@@ -423,4 +424,173 @@ test("MIG-9（フルラウンドトリップ）: save→load→1四半期進行�
   const projectCountBefore = restored1.capexState.companies.reduce((s, c) => s + c.portfolio.projects.length, 0);
   const projectCountAfter = restored2.capexState.companies.reduce((s, c) => s + c.portfolio.projects.length, 0);
   assert.equal(projectCountAfter, projectCountBefore, "capex案件数が往復の途中で増減していないこと（自動方針は新規提案しないため）");
+});
+
+// ---------------------------------------------------------------------
+// 8. develop/v2統合（Required fix 1）: v4/v5/v6/v7形式の実データが
+//    それぞれ正しく読み込み・アップグレードされることの確認
+//
+//    このコードベースの実際の履歴に基づく、各バージョンの実際の形状:
+//      v4 … #05（営業人員の追加採用・減員）・Test15のどちらも導入前。
+//           salesForceHiringState・pdMechanizationState・productDevelopmentState
+//           のいずれのキーも存在しない。
+//      v5 … 【#05・追加採用のみ】salesForceHiringStateキーが追加されたが、
+//           CompanyDecisionInput.salesForceLayoffCount（減員）はまだ無い。
+//           pdMechanizationState・productDevelopmentStateはまだ無い。
+//      v6 … 【#05・減員/退職金forward-port続き】salesForceHiringStateの構造は
+//           v5と同一（三宅さんの指示により構造変更なしでバージョン番号だけ
+//           v5→v6。schema.tsコメント参照）。CompanyDecisionInputに
+//           salesForceLayoffCountが追加された（意思決定側のみの変更で、
+//           ランタイムスナップショット自体の形は変わらない）。
+//           pdMechanizationState・productDevelopmentStateはまだ無い。
+//      v7 … 【Test15統合後・現行】v6の状態に、pdMechanizationState・
+//           productDevelopmentStateが追加される（本ブランチの内容）。
+// ---------------------------------------------------------------------
+
+test("MIG-10（v4形式の読み込み）: #05・Test15のどちらの導入前のv4形式データも例外を投げず、後方互換の既定値で読み込める", () => {
+  const { fixtures, quarters } = runRealQuartersWithAutoPolicy(baseTestConfig({ turns: TURNS }), TURNS);
+  const last = quarters[quarters.length - 1];
+  const runtime = createCompanyLabRuntimeSnapshot(last.stateAfter);
+
+  // v4形式を再現: salesForceHiringState・pdMechanizationState・
+  // productDevelopmentStateのいずれのキーも存在しない。
+  const v4Runtime: Record<string, unknown> = { ...runtime };
+  delete v4Runtime.salesForceHiringState;
+  delete v4Runtime.pdMechanizationState;
+  delete v4Runtime.productDevelopmentState;
+
+  const stored = buildStored(v4Runtime as unknown as ReturnType<typeof createCompanyLabRuntimeSnapshot>, fixtures, 4);
+  assert.doesNotThrow(() => decodeCompanyLabPersistedState(encodeCompanyLabPersistedState(stored)));
+  const decoded = decodeCompanyLabPersistedState(encodeCompanyLabPersistedState(stored));
+
+  // salesForceHiringStateはrequiredフィールドだが、キー欠落時は空
+  // （{ companies: [] }）として復元される（schema.ts validateSalesForceHiringState）。
+  assert.deepEqual(decoded.currentState.runtime.salesForceHiringState, { companies: [] });
+  assert.equal(decoded.currentState.runtime.pdMechanizationState, undefined);
+  assert.equal(decoded.currentState.runtime.productDevelopmentState, undefined);
+
+  const restored = restoreCompanyLabStateFromRuntimeSnapshot(stored.config, decoded.currentState.runtime, [last.record]);
+  // 会社単位のフォールバック（fixture.salesForceHeadcountTotal）が使われる。
+  const own = buildCompanyOwnState(restored, fixtures[0]);
+  assert.equal(own.financeState.companyId, fixtures[0].companyId);
+  assert.equal(lookupProductDevelopmentScore(restored.productDevelopmentState, fixtures[0].companyId), 50, "v4データはVAPスコア中立値50へ");
+  const anyFactoryId = fixtures[0].factories[0]?.factoryId ?? "NO-FACTORY";
+  assert.equal(
+    findPreviousQuarterPdUtilization(restored.pdMechanizationState, anyFactoryId),
+    PD_MECHANIZATION_PARAMETERS_V1.initialPdUtilizationRatio,
+    "v4データはPD稼働率実績なし扱い"
+  );
+});
+
+test("MIG-11（v5形式の読み込み）: 営業人員の追加採用機能導入後・Test15導入前のv5形式データが、営業人員数を保ったまま読み込める", () => {
+  const { fixtures, quarters } = runRealQuartersWithAutoPolicy(baseTestConfig({ turns: TURNS }), TURNS);
+  const last = quarters[quarters.length - 1];
+  const runtime = createCompanyLabRuntimeSnapshot(last.stateAfter);
+  const targetCompanyId = fixtures[0].companyId;
+  const hiredHeadcount = fixtures[0].salesForceHeadcountTotal + 3; // 採用が積み上がった状態を模擬
+
+  // v5形式を再現: salesForceHiringStateはあるが、pdMechanizationState・
+  // productDevelopmentStateはまだ無い。
+  const v5Runtime: Record<string, unknown> = {
+    ...runtime,
+    salesForceHiringState: {
+      companies: fixtures.map((f) => ({
+        companyId: f.companyId,
+        headcount: f.companyId === targetCompanyId ? hiredHeadcount : f.salesForceHeadcountTotal,
+      })),
+    },
+  };
+  delete v5Runtime.pdMechanizationState;
+  delete v5Runtime.productDevelopmentState;
+
+  const stored = buildStored(v5Runtime as unknown as ReturnType<typeof createCompanyLabRuntimeSnapshot>, fixtures, 5);
+  const decoded = decodeCompanyLabPersistedState(encodeCompanyLabPersistedState(stored));
+
+  const decodedSalesForce = decoded.currentState.runtime.salesForceHiringState.companies.find((c) => c.companyId === targetCompanyId);
+  assert.ok(decodedSalesForce, "v5データのsalesForceHiringStateが保持されていません");
+  assert.equal(decodedSalesForce!.headcount, hiredHeadcount, "採用済みの営業人員数がリセットされていません");
+  assert.equal(decoded.currentState.runtime.pdMechanizationState, undefined);
+  assert.equal(decoded.currentState.runtime.productDevelopmentState, undefined);
+
+  const restored = restoreCompanyLabStateFromRuntimeSnapshot(stored.config, decoded.currentState.runtime, [last.record]);
+  const own = buildCompanyOwnState(restored, fixtures.find((f) => f.companyId === targetCompanyId)!);
+  assert.equal(own.companyId, targetCompanyId);
+});
+
+test("MIG-12（v6形式の読み込み）: 営業人員の減員・退職金機能導入後・Test15導入前のv6形式データが、salesForceHiringStateの構造そのままで読み込める", () => {
+  const { fixtures, quarters } = runRealQuartersWithAutoPolicy(baseTestConfig({ turns: TURNS }), TURNS);
+  const last = quarters[quarters.length - 1];
+  const runtime = createCompanyLabRuntimeSnapshot(last.stateAfter);
+  const targetCompanyId = fixtures[0].companyId;
+  const reducedHeadcount = Math.max(0, fixtures[0].salesForceHeadcountTotal - 2);
+
+  // v6形式を再現: salesForceHiringStateの構造はv5と同一（三宅さんの指示により
+  // 構造変更なしでバージョン番号だけ進めた回）。pdMechanizationState・
+  // productDevelopmentStateはまだ無い。
+  const v6Runtime: Record<string, unknown> = {
+    ...runtime,
+    salesForceHiringState: {
+      companies: fixtures.map((f) => ({
+        companyId: f.companyId,
+        headcount: f.companyId === targetCompanyId ? reducedHeadcount : f.salesForceHeadcountTotal,
+      })),
+    },
+  };
+  delete v6Runtime.pdMechanizationState;
+  delete v6Runtime.productDevelopmentState;
+
+  const stored = buildStored(v6Runtime as unknown as ReturnType<typeof createCompanyLabRuntimeSnapshot>, fixtures, 6);
+  const decoded = decodeCompanyLabPersistedState(encodeCompanyLabPersistedState(stored));
+
+  const decodedSalesForce = decoded.currentState.runtime.salesForceHiringState.companies.find((c) => c.companyId === targetCompanyId);
+  assert.ok(decodedSalesForce, "v6データのsalesForceHiringStateが保持されていません");
+  assert.equal(decodedSalesForce!.headcount, reducedHeadcount, "減員後の営業人員数がリセットされていません");
+  assert.equal(decoded.currentState.runtime.pdMechanizationState, undefined);
+  assert.equal(decoded.currentState.runtime.productDevelopmentState, undefined);
+
+  // v6形式の意思決定履歴にはsalesForceLayoffCountが含まれうる（検証はそのまま
+  // 元オブジェクトを通す実装のため、古い履歴にキーが無くても例外にならない）。
+  assert.doesNotThrow(() => restoreCompanyLabStateFromRuntimeSnapshot(stored.config, decoded.currentState.runtime, [last.record]));
+});
+
+test("MIG-13（v7形式の読み込み）: 現行のv7形式データは、営業人員状態・Test15状態の両方を完全に保ったまま読み込める（統合の中心的な確認）", () => {
+  const { fixtures, quarters } = runRealQuartersWithAutoPolicy(baseTestConfig({ turns: TURNS }), TURNS);
+  const last = quarters[quarters.length - 1];
+  const runtime = createCompanyLabRuntimeSnapshot(last.stateAfter);
+  const targetCompanyId = fixtures[0].companyId;
+  const hiredHeadcount = fixtures[0].salesForceHeadcountTotal + 5;
+  const targetFactoryId = fixtures[0].factories[0]?.factoryId ?? "F1";
+
+  const v7Runtime = {
+    ...runtime,
+    salesForceHiringState: {
+      companies: fixtures.map((f) => ({
+        companyId: f.companyId,
+        headcount: f.companyId === targetCompanyId ? hiredHeadcount : f.salesForceHeadcountTotal,
+      })),
+    },
+    pdMechanizationState: { entries: [{ factoryId: targetFactoryId, companyId: targetCompanyId, previousQuarterPdUtilization: 0.61 }] },
+    productDevelopmentState: { entries: [{ companyId: targetCompanyId, score: score0to100(84) }] },
+  };
+
+  const stored = buildStored(v7Runtime, fixtures, CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION);
+  assert.equal(stored.schemaVersion, 7);
+  const decoded = decodeCompanyLabPersistedState(encodeCompanyLabPersistedState(stored));
+
+  const decodedSalesForce = decoded.currentState.runtime.salesForceHiringState.companies.find((c) => c.companyId === targetCompanyId);
+  assert.equal(decodedSalesForce!.headcount, hiredHeadcount, "v7データの営業人員数が保持されていません");
+  assert.equal(
+    findPreviousQuarterPdUtilization(decoded.currentState.runtime.pdMechanizationState, targetFactoryId),
+    0.61,
+    "v7データのPD稼働率が保持されていません"
+  );
+  assert.equal(
+    lookupProductDevelopmentScore(decoded.currentState.runtime.productDevelopmentState, targetCompanyId),
+    84,
+    "v7データのVAPスコアが保持されていません"
+  );
+
+  const restored = restoreCompanyLabStateFromRuntimeSnapshot(stored.config, decoded.currentState.runtime, [last.record]);
+  const own = buildCompanyOwnState(restored, fixtures.find((f) => f.companyId === targetCompanyId)!);
+  assert.equal(own.vapProductDevelopmentScore, 84, "buildCompanyOwnStateが復元後のVAPスコアを正しく反映していない");
 });
