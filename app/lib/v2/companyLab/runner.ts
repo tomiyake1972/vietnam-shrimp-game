@@ -168,8 +168,7 @@ import type { CompanyFinancingState, FinancingQuarterResult, FinancingState } fr
 import type { QuarterFinancingPlan } from "../financing/liquidityClose";
 import {
   CAPEX_PARAMETERS_V1,
-  applyCapexCapacityToFactories,
-  applyNewFactoryConstructionToFactories,
+  computeEffectiveFactories,
   buildCompanyFactorySpaceState,
   buildFactorySpaceApprovalBudget,
   buildInitialCompanyCapexState,
@@ -448,6 +447,13 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
   const salesForceHiringStateForCompany =
     state.salesForceHiringState?.companies.find((c) => c.companyId === fixture.companyId) ??
     buildInitialSalesForceHiringState([fixture]).companies[0];
+  // 【Test15・develop/v2統合（Required fix 2）】この会社ぶんだけのbaseFactories・
+  // capexStateを渡して計算する（computeEffectiveFactories内部の両関数は会社IDで
+  // フィルタして処理するため、全社ぶんまとめて渡しても1社だけ渡しても、その
+  // 会社に関する結果は一致する）。advanceCompanyLabQuarterと同じ「前四半期末
+  // までのcapex状態」（state.capexState）を基準にする（当期の意思決定を作る
+  // 本関数呼び出し時点では、当期のcapexクローズはまだ実行されていないため）。
+  const effectiveFactories = computeEffectiveFactories(fixture.factories, { companies: [capexStateForCompany] }, state.currentPeriod);
 
   return {
     companyId: fixture.companyId,
@@ -470,13 +476,24 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // 【監査指摘G】営業基盤が当期の成約へ実際にどれだけ効くか（ウェイト）。
     // 機能OFFなら0＝「基盤の高低は成約に一切影響しない」ことが判断側から分かる。
     salesBaseCompetitivenessWeight: salesParametersFor(state.config).competitivenessWeights.salesBase,
-    // 【Test15新設】前四半期末までの自社工場ごとのPD稼働率・VAP商品開発スコア
-    // （UI側の意思決定画面が状況表示に使う。常時ゲームルールのため常に設定する）。
-    pdUtilizationByFactory: fixture.factories.map((f) => ({
-      factoryId: f.factoryId,
-      previousQuarterPdUtilization: findPreviousQuarterPdUtilization(state.pdMechanizationState, f.factoryId),
-    })),
+    // 【Test15新設・develop/v2統合（Required fix 2）】前四半期末までの自社工場
+    // ごとのPD稼働率（実効Factory[]、＝稼働開始済みの新設Factoryを含む一覧を
+    // 基準にする。fixture.factoriesのままだと新設FactoryのPD省人化投資対象
+    // 選択肢に一切現れない欠落があったため、effectiveFactoriesと同じ基準へ揃えた）。
+    pdUtilizationByFactory: effectiveFactories
+      .filter((f) => f.companyId === fixture.companyId)
+      .map((f) => ({
+        factoryId: f.factoryId,
+        previousQuarterPdUtilization: findPreviousQuarterPdUtilization(state.pdMechanizationState, f.factoryId),
+      })),
     vapProductDevelopmentScore: lookupProductDevelopmentScore(state.productDevelopmentState, fixture.companyId),
+    // 【Test15・develop/v2統合（Required fix 2）】唯一の計算箇所
+    // computeEffectiveFactories（companyLab/runner.ts先頭のimport参照）を通した、
+    // この会社の実効Factory[]。advanceCompanyLabQuarterが生産エンジンへ渡す
+    // Factory[]と完全に同じ基準（当会社ぶんのbaseFactories・当会社ぶんの
+    // capexStateだけを渡しても、両関数は会社IDでフィルタして処理するため結果は
+    // 一致する）。
+    effectiveFactories,
   };
 }
 
@@ -1089,17 +1106,15 @@ export function advanceCompanyLabQuarter(
   // 案件ぶんの累計能力増加だけを毎期再導出してFactoryへ加算する。能力増加残高を
   // 別の永続状態として二重管理しない（capex/capacityEffect.ts参照）。
   const baseFactories = fixtures.flatMap((f) => f.factories);
-  const factoriesWithCapexCapacity = applyCapexCapacityToFactories(baseFactories, state.capexState, state.currentPeriod);
-  // 【Test15新設】稼働開始済みのnewFactoryConstruction案件ぶんの新設Factoryを
-  // 追加する（既存工場への能力加算＝applyCapexCapacityToFactoriesとは独立した
-  // 別処理。capex/factoryConstruction.ts参照）。この時点で追加されたFactoryが
-  // 以降の生産エンジン・工場スペース・投資計画画面のすべてへ自動的に伝播する
-  // （baseFactoriesではなくfactoriesWithCapexCapacityへ以降のすべての箇所が
-  // 揃って接続されているため）。
-  const factoriesWithCapex = applyNewFactoryConstructionToFactories(factoriesWithCapexCapacity, state.capexState, state.currentPeriod);
+  // 【Test15・develop/v2統合（Required fix 2）】「実効Factory[]」（既存工場への
+  // 能力加算＋稼働開始済み新設Factoryの合成）の計算は、必ず
+  // capex/factoryConstruction.ts の computeEffectiveFactories（唯一の計算箇所）を
+  // 経由する。buildCompanyOwnState（意思決定側）も同じ関数を呼ぶため、
+  // プレイヤー入力画面とこのエンジン処理が異なるFactory[]を見ることは構造的にない。
+  const factoriesWithCapex = computeEffectiveFactories(baseFactories, state.capexState, state.currentPeriod);
   // 【Test15新設・PD省人化投資】当四半期の実効PD係数の上書きは、必ず「前四半期末
   // までのPD稼働率」（state.pdMechanizationState）と「前四半期末までのcapex状態」
-  // （state.capexState、上のfactoriesWithCapexCapacity算出と同じ基準）から算出する。
+  // （state.capexState、上のfactoriesWithCapex算出と同じ基準）から算出する。
   // 当期の生産実績を当期の効果算出へ遡及させない（先読み禁止）。
   const pdCoefficientOverrideByFactoryId = buildPdCoefficientOverridesByFactory(state.capexState, state.pdMechanizationState, state.currentPeriod);
   const productionInput: ProductionQuarterInput = {

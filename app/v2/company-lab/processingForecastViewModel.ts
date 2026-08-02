@@ -63,8 +63,7 @@ import {
 import { allocateProductionPlans } from "../../lib/v2/production/allocation";
 import { calculateFactoryEffectiveCapacity } from "../../lib/v2/production/capacity";
 import { PRODUCTION_PARAMETERS_V1, ProductionParameters } from "../../lib/v2/production/parameters";
-import { CapexState } from "../../lib/v2/capex";
-import { applyCapexCapacityToFactories } from "../../lib/v2/capex/capacityEffect";
+import { CapexState, computeEffectiveFactories } from "../../lib/v2/capex";
 import { formatHosoEqTons } from "../../lib/v2/industryLab/ui/formatters";
 import { CAPACITY_POOL_DESCRIPTIONS, CAPACITY_POOL_LABELS, CAPACITY_POOL_KEYS, CapacityPoolKey } from "./processingCapacityViewModel";
 import { PRODUCT_LABELS } from "./marketPriceViewModel";
@@ -381,7 +380,11 @@ export interface BuildCompanyProcessingForecastInput {
 export function buildCompanyProcessingForecast(input: BuildCompanyProcessingForecastInput): CompanyProcessingForecast {
   const params = input.params ?? PRODUCTION_PARAMETERS_V1;
   const companyBase = input.baseFactories.filter((f) => f.companyId === input.companyId);
-  const currentFactories = applyCapexCapacityToFactories(companyBase, input.capexState, input.period);
+  // 【Test15・develop/v2統合（Required fix 2）】唯一の計算箇所computeEffectiveFactories
+  // を使う（applyCapexCapacityToFactoriesだけだと、稼働開始済みの新設Factory向けの
+  // 生産計画・ワーカー配置が、下のfactoryById.has()フィルタで丸ごと除外されてしまい、
+  // 「新設工場へ入力しても処理見込みに反映されない」という不整合が生じるため）。
+  const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period);
   const factoryById = new Map(currentFactories.map((f) => [f.factoryId, f]));
 
   const companyPlans = input.productionPlans.filter((p) => p.companyId === input.companyId && factoryById.has(p.factoryId));

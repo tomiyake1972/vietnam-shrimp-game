@@ -40,7 +40,8 @@ import {
   SpaceConsumingPoolKey,
 } from "../../lib/v2/production/factorySpace";
 import { CapexParameters, CAPEX_PARAMETERS_V1, CapexState, CapitalProjectType, CAPITAL_PROJECT_TYPES } from "../../lib/v2/capex";
-import { applyCapexCapacityToFactories, computeCapacityEffectForCompany } from "../../lib/v2/capex/capacityEffect";
+import { computeCapacityEffectForCompany } from "../../lib/v2/capex/capacityEffect";
+import { computeEffectiveFactories } from "../../lib/v2/capex/factoryConstruction";
 import { buildCompanyFactorySpaceState, computeCandidateProjectSpaceUnits } from "../../lib/v2/capex/factorySpace";
 import { CompanyFinancialQuarterResult } from "../../lib/v2/finance/types";
 import { FINANCE_PARAMETERS_V1 } from "../../lib/v2/finance/parameters";
@@ -484,7 +485,11 @@ export function buildCompanyInvestmentPlanningViewModel(
 ): CompanyInvestmentPlanningViewModel {
   const capexParams = input.capexParams ?? CAPEX_PARAMETERS_V1;
   const companyBase = input.baseFactories.filter((f) => f.companyId === input.companyId);
-  const currentFactories = applyCapexCapacityToFactories(companyBase, input.capexState, input.period);
+  // 【Test15・develop/v2統合（Required fix 2）】唯一の計算箇所computeEffectiveFactories
+  // を使う（applyCapexCapacityToFactoriesだけだと、稼働開始済みの新設Factoryが
+  // currentFactoriesへ現れず、投資計画・工場スペース・Worker必要人数の各表示から
+  // 新設工場が漏れてしまう）。
+  const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period);
 
   // --- 現在の処理見込み（生産エンジンの出力そのもの） ---
   const forecast = buildCompanyProcessingForecast({
