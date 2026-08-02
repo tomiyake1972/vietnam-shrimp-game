@@ -35,8 +35,17 @@ import { PD_MECHANIZATION_PARAMETERS_V1, computeEffectivePdCoefficient } from ".
 import { CAPEX_PARAMETERS_V1 } from "../../../capex/parameters";
 import { FINANCE_PARAMETERS_V1 } from "../../../finance/parameters";
 import { PRODUCTION_PARAMETERS_V1 } from "../../../production/parameters";
+import { SALES_CAPABILITY_PARAMETERS_V1 } from "../../../sales/salesCapability";
 
 const EPSILON = 1e-9;
+
+/**
+ * 【§6】営業1人あたりの四半期処理能力の目安（HOSO換算工数トン）。
+ * sales/salesCapability.ts の throughputTonsPerHead と同じ水準を、判断側の
+ * 概算として参照する（正確な処理能力は市場規模係数・顧客開発倍率にも依存するため、
+ * ここでは「売り切れる見込みがあるか」の粗い足切りとしてのみ使う）。
+ */
+const SALES_THROUGHPUT_TONS_PER_HEAD_APPROX = SALES_CAPABILITY_PARAMETERS_V1.throughputTonsPerHead;
 
 export interface MarketEvolutionInvestmentParameters {
   // --- 需要予測 ---
@@ -69,6 +78,23 @@ export interface MarketEvolutionInvestmentParameters {
   readonly mechanizationMaxPaybackQuarters: number;
   /** 投資後に残すべき現金の、目標最低現金に対する倍率。 */
   readonly mechanizationCashSafetyMultiple: number;
+  /**
+   * 【§6】追加出力を売り切れるかの判定に使う、営業対応力の余裕率のしきい値。
+   * 「対象需要のうち自社が現実的に狙える取り分」に対して、営業処理能力がこの倍率
+   * 以上あることを求める。1.0未満なら「今すでに営業が律速で、増産しても売れない」。
+   */
+  readonly mechanizationMinSalesHeadroomRatio: number;
+  /**
+   * 完成品在庫が「対象需要のうち自社の現実的な取り分」の何倍を超えたら
+   * 「すでに売れ残っている＝増産しても意味がない」とみなすか。
+   */
+  readonly mechanizationMaxFinishedGoodsRatio: number;
+  /**
+   * PDの有利な市場局面が、回収期間より何倍長く続く見込みを要求するか。
+   * 1.5なら「回収に8四半期かかるなら、少なくとも12四半期ぶんの有利局面が要る」。
+   * 有利局面の長さは、PD供給圧力とPD需要トレンドから推定する（将来の真値は見ない）。
+   */
+  readonly mechanizationMarketWindowSafetyMultiple: number;
 
   // --- VAP商品開発 ---
   /**
@@ -99,6 +125,9 @@ export const MARKET_EVOLUTION_INVESTMENT_PARAMETERS_V1: MarketEvolutionInvestmen
   mechanizationMinPdUtilization: 0.6,
   mechanizationMaxPaybackQuarters: 20,
   mechanizationCashSafetyMultiple: 2.0,
+  mechanizationMinSalesHeadroomRatio: 1.1,
+  mechanizationMaxFinishedGoodsRatio: 0.8,
+  mechanizationMarketWindowSafetyMultiple: 1.5,
 
   vapDevelopmentTrendThreshold: 0.004,
   vapDevelopmentCashSafetyMultiple: 1.5,
@@ -346,7 +375,41 @@ export function decideMarketEvolutionInvestments(
     const paybackQuarters = quarterlySavingUsd > EPSILON ? CAPEX_PARAMETERS_V1.templatesByType.pdMechanization.standardBudgetUsd / quarterlySavingUsd : Infinity;
 
     const paybackOk = paybackQuarters <= params.mechanizationMaxPaybackQuarters;
-    if (pdUtilization >= minPdUtilization && paybackOk && cashSafeForMechanization) {
+
+    // 【§6】「係数が下がる」「現金がある」だけでは投資しない。増えた分を
+    // 実際に売り切れるか・原料を確保できるか・有利局面が回収期間より長いかを
+    // すべて満たしたときにのみ提案する。
+    //
+    // (a) PDの需要・成約見込みがあるか（需要トレンドが負でない、かつ供給過剰でない）
+    const pdDemandProspect =
+      outlook.pdDemandTrendPerQuarter >= 0 && (outlook.pdSupplyPressure === undefined || outlook.pdSupplyPressure <= 1.25);
+    // (b) 労働が実際にボトルネックか（設備がまだ空いているのに人手だけ足りない状態）
+    const laborIsBottleneck = pdUtilization >= minPdUtilization;
+    // (c) 増えた分を売り切れるか（営業対応力に余裕があるか）
+    const totalTargetDemand = observation.targetDemandTotalByMarket
+      ? DEMAND_MARKET_IDS.reduce((sum, m) => sum + (observation.targetDemandTotalByMarket![m] ?? 0), 0)
+      : undefined;
+    // 5社＋外部選択肢で分け合うため、自社が現実的に狙える取り分は対象需要の1/6程度。
+    const realisticOwnDemand = totalTargetDemand !== undefined ? totalTargetDemand / 6 : undefined;
+    const salesCapacityTons = observation.salesForceHeadcountTotal * SALES_THROUGHPUT_TONS_PER_HEAD_APPROX;
+    const salesHeadroomOk =
+      realisticOwnDemand === undefined || realisticOwnDemand <= EPSILON
+        ? true // 対象需要が観測できない（turn1等）ときは、この条件では止めない
+        : salesCapacityTons / realisticOwnDemand >= params.mechanizationMinSalesHeadroomRatio;
+    // (d) 完成品在庫が既に積み上がっていないか
+    const finishedGoodsExcess = pressures.finishedGoodsExcessRatioByProduct?.pd ?? 0;
+    const inventoryOk = finishedGoodsExcess <= params.mechanizationMaxFinishedGoodsRatio;
+    // (e) 原料を確保できるか
+    const rawMaterialOk = !outlook.rawMaterialConstrained;
+    // (f) 有利局面が回収期間より十分長いか。
+    //     PDプレミアムの低下が既に観測されている局面では、残り時間が回収期間の
+    //     safetyMultiple倍に満たないとみなす（将来の真値は一切参照しない）。
+    const marketWindowOk = !outlook.pdPremiumErosionDetected || paybackQuarters * params.mechanizationMarketWindowSafetyMultiple <= params.mechanizationMaxPaybackQuarters;
+
+    const allConditionsMet =
+      pdDemandProspect && laborIsBottleneck && paybackOk && cashSafeForMechanization && salesHeadroomOk && inventoryOk && rawMaterialOk && marketWindowOk;
+
+    if (allConditionsMet) {
       proposals.push({ projectType: "pdMechanization", targetFactoryId: target.factoryId });
       diagnostics.push({
         code: "PD_MECHANIZATION_PROPOSED_FOR_PAYBACK",
@@ -366,8 +429,21 @@ export function decideMarketEvolutionInvestments(
         domain: "capex",
         companyId: fixture.companyId,
         severity: "info",
-        keyValues: { pdUtilization, minPdUtilization, paybackQuarters, cashSafe: cashSafeForMechanization ? 1 : 0 },
-        message: "PD稼働率・期待回収・現金余力のいずれかの条件を満たさないため、PD省人化投資を見送る。",
+        keyValues: {
+          pdUtilization,
+          minPdUtilization,
+          paybackQuarters,
+          cashSafe: cashSafeForMechanization ? 1 : 0,
+          pdDemandProspect: pdDemandProspect ? 1 : 0,
+          laborIsBottleneck: laborIsBottleneck ? 1 : 0,
+          salesHeadroomOk: salesHeadroomOk ? 1 : 0,
+          inventoryOk: inventoryOk ? 1 : 0,
+          rawMaterialOk: rawMaterialOk ? 1 : 0,
+          marketWindowOk: marketWindowOk ? 1 : 0,
+        },
+        message:
+          "PD需要見込み・労働ボトルネック・期待回収・現金余力・営業対応力の余裕・完成品在庫・原料確保・" +
+          "有利局面の長さのいずれかの条件を満たさないため、PD省人化投資を見送る。",
       });
     }
   }
