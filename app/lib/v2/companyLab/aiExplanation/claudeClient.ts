@@ -110,6 +110,25 @@ const EXPLANATION_REPORT_TOOL_INPUT_SCHEMA = {
  */
 export const EXPLANATION_CLAUDE_TIMEOUT_MS = 25_000;
 
+/**
+ * 【2026-08-02・76秒問題の修正】Anthropic SDK（@anthropic-ai/sdk）は既定で
+ * maxRetries=2（＝タイムアウト等のリトライ可能なエラーで、SDK内部が最大2回・
+ * 合計3回まで自動的に再試行する）。EXPLANATION_CLAUDE_TIMEOUT_MS（25秒）と
+ * この既定のmaxRetries=2が組み合わさると、SDK内部だけで最大 3×25秒＝75秒
+ * （＋バックオフ）を消費してから、ようやく呼び出し側のcatchへ例外が届く。
+ * 三宅さんの実機Preview確認（2026-08-02）で、2回とも失敗までの所要時間が
+ * ほぼ同一（76,305ms・76,289ms）だったことをVercelランタイムログで確認し、
+ * 3×25秒+バックオフという計算とほぼ一致することから、この既定retryが実際の
+ * ユーザー待ち時間を意図せず3倍化させていたと判断した。
+ *
+ * 【今回の対応方針（三宅さんの明示指示）】まずSDK側の自動retryを完全に無効化し
+ * （maxRetries: 0）、EXPLANATION_CLAUDE_TIMEOUT_MS（25秒）がそのままユーザーの
+ * 実待ち時間として機能する状態を作る。アプリ側で別途retry方針を設計するまでは、
+ * SDKへ暗黙のretryを一切任せない。timeout値自体（25秒が短すぎるかどうか）の
+ * 見直しは、この変更後の実測を見てから別途判断する（今回はtimeout値は変更しない）。
+ */
+export const EXPLANATION_CLAUDE_MAX_RETRIES = 0;
+
 export interface ExplanationModelConfig {
   readonly model: string;
   readonly maxTokens: number;
@@ -220,11 +239,29 @@ export interface AnthropicMessageResponse {
   readonly stop_reason?: string | null;
 }
 
+/**
+ * 実Anthropicクライアントへ渡すコンストラクタオプション。テストで
+ * timeout/maxRetriesの値がずれていないことを直接検証できるよう、
+ * クライアント生成本体（createRealClient）から分離してexportする。
+ */
+export interface AnthropicClientOptions {
+  readonly apiKey: string;
+  readonly timeout: number;
+  readonly maxRetries: number;
+}
+
+export function buildAnthropicClientOptions(apiKey: string): AnthropicClientOptions {
+  return { apiKey, timeout: EXPLANATION_CLAUDE_TIMEOUT_MS, maxRetries: EXPLANATION_CLAUDE_MAX_RETRIES };
+}
+
 function createRealClient(apiKey: string): AnthropicMessagesClient {
   // 【タイムアウト対応】クライアント構築時にも既定タイムアウトを短縮しておく
   // （呼び出し側のper-request timeoutと二重に設定しておくことで、どちらか片方の
   // 指定漏れがあっても10分ハングへ戻らないようにする多重防御）。
-  return new Anthropic({ apiKey, timeout: EXPLANATION_CLAUDE_TIMEOUT_MS }) as unknown as AnthropicMessagesClient;
+  // 【2026-08-02・76秒問題の修正】maxRetries: 0を明示し、SDK既定のmaxRetries=2による
+  // 暗黙の自動retry（timeout×3倍化の原因）を無効化する（EXPLANATION_CLAUDE_MAX_RETRIES
+  // のコメント参照）。
+  return new Anthropic(buildAnthropicClientOptions(apiKey)) as unknown as AnthropicMessagesClient;
 }
 
 /** content配列から、tool_choiceで強制したtool呼び出しのtool_useブロックを探す。 */

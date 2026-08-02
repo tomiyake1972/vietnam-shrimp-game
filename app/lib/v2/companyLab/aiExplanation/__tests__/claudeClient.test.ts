@@ -17,6 +17,9 @@ import assert from "node:assert/strict";
 import {
   AnthropicMessageResponse,
   AnthropicMessagesClient,
+  buildAnthropicClientOptions,
+  EXPLANATION_CLAUDE_MAX_RETRIES,
+  EXPLANATION_CLAUDE_TIMEOUT_MS,
   EXPLANATION_REPORT_TOOL_NAME,
   generateManagementReport,
 } from "../claudeClient";
@@ -282,6 +285,43 @@ test("generateManagementReport: エラー詳細にAPIキー値やヘッダーが
   } finally {
     delete process.env.ANTHROPIC_API_KEY;
   }
+});
+
+test("buildAnthropicClientOptions: timeout=25000・maxRetries=0が実クライアント構築オプションへ渡る(76秒問題の修正確認)", () => {
+  // 【2026-08-02・76秒問題の修正】Anthropic SDKの既定maxRetries=2とtimeout=25000が
+  // 組み合わさり、実測76秒級の失敗検知latency（約3倍化）を引き起こしていた問題への
+  // 対応。今回はtimeout値自体は変更せず、まずSDK側のmaxRetriesを明示的に0へ固定して
+  // 暗黙のリトライを無効化する。このテストは、実クライアント（createRealClient）へ渡す
+  // コンストラクタオプションが確実にこの2値を維持していることを直接検証する
+  // （実際のAnthropicコンストラクタは呼ばない。値の組み立てのみを検証）。
+  const options = buildAnthropicClientOptions("some-fake-key");
+  assert.equal(options.timeout, 25_000);
+  assert.equal(options.maxRetries, 0);
+  assert.equal(options.apiKey, "some-fake-key");
+  // 定数そのものも想定値のままであることを確認する(今回timeoutは変更しない指示のため)。
+  assert.equal(EXPLANATION_CLAUDE_TIMEOUT_MS, 25_000);
+  assert.equal(EXPLANATION_CLAUDE_MAX_RETRIES, 0);
+});
+
+test("generateManagementReport: タイムアウト相当のnetwork_error発生時、フォールバック(ok:false)へ速やかに到達し、後続処理を止めない(76秒級の実待機を伴わない)", async () => {
+  // 【2026-08-02・76秒問題の修正の回帰テスト】SDK自体のmaxRetries設定はこのモック
+  // クライアントには効かない（モックがSDK内部のretryループを再現していないため）が、
+  // 「AnthropicMessagesClient.messages.createがタイムアウト相当のエラーで例外を投げた
+  // 場合、generateManagementReportがhttp_error/network_errorとしてリトライせず即座に
+  // ok:falseを返す」という、アプリ側の既存方針(第一段落・attemptOnceのコメント参照)を
+  // 明示的に固定する。実際のタイムアウト(25秒)を待たずにテストが完了することも、
+  // このテスト自体の実行時間の短さで示される(実待機なし)。
+  const timeoutLikeError = Object.assign(new Error("Request timed out."), { code: "ETIMEDOUT" });
+  const startedAt = Date.now();
+  const { client, callCount } = makeClient([timeoutLikeError]);
+  const result = await generateManagementReport(minimalContext(), client);
+  const elapsedMs = Date.now() - startedAt;
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.errorCategory, "network_error");
+  // リトライしない(呼び出しは1回のみ)ため、mockが即座に例外を投げる限りテスト自体も
+  // 高速に完了する。実際の25秒timeoutを待つ必要はない。
+  assert.equal(callCount(), 1);
+  assert.ok(elapsedMs < 5_000, `想定外に時間がかかった elapsedMs=${elapsedMs}`);
 });
 
 test("getExplanationModelConfig: 環境変数未指定時は既定モデルを返す", async () => {

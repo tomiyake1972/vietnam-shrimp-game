@@ -170,8 +170,26 @@ export async function handlePostAiExplanation(
   }
   console.log(`${logPrefix} キャッシュミス。Claude呼び出しを開始します`);
 
+  // 【2026-08-02・76秒問題の修正後の観測性強化】ここでの経過時間は、claudeClient.ts側の
+  // attempt単位のelapsedMs（SDK呼び出し1回ぶんの計測。attempt開始/応答受信/失敗ログに
+  // 既に含まれる）とは別に、「Claude呼び出し開始（1回目attempt開始の直前）から
+  // フォールバック判断までにどれだけかかったか」をハンドラー側でも計測するもの。
+  // API key・prompt本文などの機密情報は含めない（labId/companyId/turn/カテゴリ/経過時間のみ）。
+  const claudeCallStartedAt = Date.now();
   const generated = await generateManagementReport(context, anthropicClient);
-  console.log(`${logPrefix} Claude呼び出し完了 ok=${generated.ok}${generated.ok ? "" : ` category=${generated.errorCategory}`}`);
+  const claudeCallElapsedMs = Date.now() - claudeCallStartedAt;
+  console.log(
+    `${logPrefix} Claude呼び出し完了 ok=${generated.ok}${generated.ok ? "" : ` category=${generated.errorCategory}`} elapsedMs=${claudeCallElapsedMs}`
+  );
+
+  if (!generated.ok) {
+    // 【フォールバック開始】Claude呼び出しが失敗として確定した時点（missing_api_key /
+    // http_error / invalid_json / schema_mismatch / empty_response / network_error の
+    // いずれか）で、UI側が例外ではなく構造化された失敗結果（result: "failure"）を
+    // 受け取れるフォールバック経路へ入る。この関数は例外を投げず、必ずstatus 200の
+    // 構造化応答を返し続ける（呼び出し元の他の処理を壊さない）。
+    console.log(`${logPrefix} フォールバック開始 category=${generated.errorCategory} elapsedMs=${claudeCallElapsedMs}`);
+  }
 
   const stored: StoredExplanationReport = generated.ok
     ? {
@@ -216,6 +234,11 @@ export async function handlePostAiExplanation(
     }
   } else {
     console.log(`${logPrefix} 失敗結果はキャッシュへ保存しません(次回リクエストで再試行可能にするため) category=${generated.errorCategory}`);
+    // 【フォールバック完了】ここまでで、失敗結果を構造化オブジェクトとして組み立て終えた
+    // （例外は投げていない）。elapsedMsはClaude呼び出し開始からこの時点までの経過時間で、
+    // 「25秒timeout×maxRetries=0」で頭打ちになっているかどうかを、実際のPreview環境の
+    // ランタイムログから確認できるようにするためのもの。
+    console.log(`${logPrefix} フォールバック完了 category=${generated.errorCategory} elapsedMs=${claudeCallElapsedMs}`);
   }
 
   // 失敗時もHTTP自体は200で「構造化された失敗」を返す（呼び出し側が例外ではなく
