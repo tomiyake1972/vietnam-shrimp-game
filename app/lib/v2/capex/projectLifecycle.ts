@@ -81,6 +81,14 @@ export interface ProposalFactoryCountGate {
 export interface ProposalFactoryMechanizationGate {
   /** すでに同じFactoryを対象とする、取消・完成以外（＝進行中）のpdMechanization案件が存在するか。 */
   readonly hasActiveProjectForSameFactory: boolean;
+  /**
+   * 【develop/v2統合・Phase2監査2-3】targetFactoryIdが、この会社の当四半期時点の
+   * 実在Factory（稼働開始済み新設Factoryを含む、computeEffectiveFactories基準）に
+   * 実在するか。省略時（呼び出し元が渡さない場合）は既存挙動どおり判定しない
+   * （後方互換。既存テストを壊さない）。falseの場合、存在しないFactoryIDへの
+   * 投資提案を拒否理由つきで却下する（例外は投げない。他の拒否理由と同じ扱い）。
+   */
+  readonly targetFactoryExists?: boolean;
 }
 
 /** 特定Factoryに、進行中（approved/underConstruction/suspended）のpdMechanization案件が既に存在するか判定する。 */
@@ -151,6 +159,13 @@ export function evaluateProposal(
   // （1工場につき同時に1件まで）。
   if (proposal.projectType === "pdMechanization" && mechanizationGate?.hasActiveProjectForSameFactory) {
     reasons.push(`工場"${proposal.targetFactoryId}"には既に進行中のPD省人化投資があるため、新規承認を見送り。`);
+  }
+  // 【develop/v2統合・Phase2監査2-3】targetFactoryIdが実在しないFactoryを指す提案は
+  // 拒否する（存在しないFactoryへの投資が承認され、支払だけ発生して効果が
+  // 永久に発現しない、という静かな不整合を防ぐ）。mechanizationGate.targetFactoryExistsが
+  // 省略された呼び出し元（後方互換）では、この判定自体を行わない。
+  if (proposal.projectType === "pdMechanization" && mechanizationGate?.targetFactoryExists === false) {
+    reasons.push(`対象Factory"${proposal.targetFactoryId}"はこの会社に存在しないため、PD省人化投資の新規承認を見送り。`);
   }
 
   if (reasons.length > 0) {

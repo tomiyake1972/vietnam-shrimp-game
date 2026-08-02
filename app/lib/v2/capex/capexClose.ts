@@ -81,6 +81,13 @@ export interface CloseQuarterWithCapexInput {
    * 上限判定が甘くなるため、新工場建設を扱う呼び出し元は必ず渡すこと）。
    */
   readonly existingFactoryCount?: number;
+  /**
+   * 【develop/v2統合・Phase2監査2-3】この会社の当四半期時点の実在Factory ID一覧
+   * （稼働開始済み新設Factoryを含む、呼び出し元がcomputeEffectiveFactories基準で
+   * 算出したもの）。pdMechanization提案のtargetFactoryIdが実在するかどうかの
+   * 判定に使う。省略時はこの判定を行わない（既存呼び出し元・既存テストとの後方互換）。
+   */
+  readonly validFactoryIds?: readonly string[];
 }
 
 export interface CloseQuarterWithCapexOutput {
@@ -166,7 +173,14 @@ export function closeQuarterWithCapex(
     // 同じFactoryへ2件提案しても2件目は正しく拒否される。
     const mechanizationGate: ProposalFactoryMechanizationGate | undefined =
       proposal.projectType === "pdMechanization" && proposal.targetFactoryId !== undefined
-        ? { hasActiveProjectForSameFactory: hasActivePdMechanizationProjectForFactory(projects, proposal.targetFactoryId) }
+        ? {
+            hasActiveProjectForSameFactory: hasActivePdMechanizationProjectForFactory(projects, proposal.targetFactoryId),
+            // 【develop/v2統合・Phase2監査2-3】validFactoryIdsが渡されている場合だけ判定する
+            // （省略時はundefinedのまま＝評価しない。既存呼び出し元との後方互換）。
+            ...(input.validFactoryIds !== undefined
+              ? { targetFactoryExists: input.validFactoryIds.includes(proposal.targetFactoryId) }
+              : {}),
+          }
         : undefined;
     const outcome = evaluateProposal(
       companyId,

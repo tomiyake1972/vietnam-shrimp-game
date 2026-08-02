@@ -219,3 +219,45 @@ test("受入確認CI-7: 提案していない4社はcapexAssetsDepreciationUsd/c
     }
   }
 });
+
+// 【develop/v2統合・Phase2監査2-3】pdMechanization提案が実在しないFactoryIDを
+// 参照した場合の、companyLab実ラン（runner.ts配線を含む）レベルでの防御的検証。
+// projectLifecycle.test.tsのCX-26は関数単体の検証、こちらはrunner.tsの
+// closeQuarterWithCapex呼び出し（validFactoryIdsの配線）まで含めた統合検証。
+function decisionProviderWithBogusPdMechanizationTarget(
+  fixture: CompanyFixture,
+  ownState: CompanyOwnState,
+  publicInfo: PublicMarketInfo,
+  period: PeriodV2,
+  turn: number
+): CompanyDecisionInput {
+  const base = generateAutoPolicyDecision(fixture, ownState, publicInfo, period, turn);
+  if (fixture.companyId !== "BAL" || turn !== 1) return base;
+  const capexDecision: CapexDecisionInput = {
+    companyId: fixture.companyId,
+    newProjectProposals: [{ projectType: "pdMechanization", targetFactoryId: "BAL-NOT-A-REAL-FACTORY" }],
+    cancelRequests: [],
+    resumeRequests: [],
+  };
+  return { ...base, capexDecision };
+}
+
+test("受入確認CI-8（Phase2監査2-3）: 実在しないFactoryIDを対象とするpdMechanization提案は、companyLabの実ランで例外を投げず、拒否理由つきで却下される（承認されて無効果な投資が発生しない）", () => {
+  assert.doesNotThrow(() => {
+    const result = runCompanyLabWithAutoPolicyForAllCompanies(
+      baseConfig({ turns: 3, seed: "capex-int-bogus-target-001" }),
+      decisionProviderWithBogusPdMechanizationTarget
+    );
+    const turn1Record = result.history[0];
+    const balCapexResult = turn1Record.capexResults.find((c) => c.companyId === "BAL")!;
+    assert.equal(balCapexResult.rejectedProposals.length, 1, "実在しないFactoryIDへの提案は拒否されるはず");
+    assert.match(balCapexResult.rejectedProposals[0].reasons.join(" "), /存在しない/);
+    // 却下されているため、以降の四半期でも保守費・減価償却費は一切発生しない
+    // （支払だけ発生して効果が永久に発現しない、という不整合が起きないことの確認）。
+    for (const record of result.history) {
+      const cr = record.capexResults.find((c) => c.companyId === "BAL")!;
+      assert.equal(cr.capexMaintenanceCostUsd, 0);
+      assert.equal(cr.capexAssetsDepreciationUsd, 0);
+    }
+  });
+});

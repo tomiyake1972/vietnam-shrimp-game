@@ -1490,6 +1490,10 @@ export function advanceCompanyLabQuarter(
         // 【Test15新設】newFactoryConstruction提案の1社あたり工場数上限（4工場）判定に使う、
         // この会社の既存（静的fixture）工場数。capex/factoryConstruction.ts参照。
         existingFactoryCount: f.factories.length,
+        // 【develop/v2統合・Phase2監査2-3】pdMechanization提案のtargetFactoryIdが実在するか
+        // どうかの判定に使う、この会社の当四半期時点の実効Factory ID一覧（稼働開始済み
+        // 新設Factoryを含む。factoriesWithCapexはcomputeEffectiveFactoriesの出力そのもの）。
+        validFactoryIds: factoriesWithCapex.filter((factory) => factory.companyId === f.companyId).map((factory) => factory.factoryId),
       },
       FINANCE_PARAMETERS_V1,
       CAPEX_PARAMETERS_V1,

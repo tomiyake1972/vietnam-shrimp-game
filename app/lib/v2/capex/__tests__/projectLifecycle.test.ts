@@ -314,3 +314,62 @@ test("受入確認CX-25: 別のFactoryを対象とするpdMechanization提案は
   );
   assert.ok("approved" in outcome);
 });
+
+// 【develop/v2統合・Phase2監査2-3】targetFactoryIdが実在しないFactoryを指す提案の
+// 防御的検証（実在しないFactory IDへの承認→支払だけ発生し効果が永久に発現しない、
+// という静かな不整合を防ぐ）。
+test("受入確認CX-26（Phase2監査2-3）: targetFactoryExists=falseのmechanizationGateを渡すと、実在しないFactoryIDへのpdMechanization提案は拒否される（例外は投げない）", () => {
+  assert.doesNotThrow(() => {
+    const outcome = evaluateProposal(
+      "TEST",
+      proposal({ projectType: "pdMechanization", targetFactoryId: "NOT-A-REAL-FACTORY" }),
+      0,
+      HEALTHY_GATE,
+      CAPEX_PARAMETERS_V1,
+      P1,
+      "X-4",
+      4,
+      undefined,
+      undefined,
+      { hasActiveProjectForSameFactory: false, targetFactoryExists: false }
+    );
+    assert.ok("rejected" in outcome);
+    if ("rejected" in outcome) {
+      assert.ok(outcome.rejected.reasons.some((r) => r.includes("存在しない")));
+    }
+  });
+});
+
+test("受入確認CX-27（Phase2監査2-3）: targetFactoryExists=trueのmechanizationGateを渡すと、実在するFactoryIDへの提案は通常どおり承認される", () => {
+  const outcome = evaluateProposal(
+    "TEST",
+    proposal({ projectType: "pdMechanization", targetFactoryId: "F1" }),
+    0,
+    HEALTHY_GATE,
+    CAPEX_PARAMETERS_V1,
+    P1,
+    "X-5",
+    5,
+    undefined,
+    undefined,
+    { hasActiveProjectForSameFactory: false, targetFactoryExists: true }
+  );
+  assert.ok("approved" in outcome);
+});
+
+test("受入確認CX-28（Phase2監査2-3・後方互換）: mechanizationGate.targetFactoryExistsを省略（未指定）した場合は、実在性チェックを行わず従来どおり承認される", () => {
+  const outcome = evaluateProposal(
+    "TEST",
+    proposal({ projectType: "pdMechanization", targetFactoryId: "ANY-ID-NOT-CHECKED" }),
+    0,
+    HEALTHY_GATE,
+    CAPEX_PARAMETERS_V1,
+    P1,
+    "X-6",
+    6,
+    undefined,
+    undefined,
+    { hasActiveProjectForSameFactory: false }
+  );
+  assert.ok("approved" in outcome, "targetFactoryExistsを省略した既存呼び出し元の挙動は変わらないはず（後方互換）");
+});
