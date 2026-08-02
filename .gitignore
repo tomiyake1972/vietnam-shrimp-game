@@ -71,3 +71,7 @@ next-env.d.ts
 # SAI-3A 標準初期条件の再選定グリッド探索の生成物（診断専用）。
 # 生成スクリプト scripts/sai3aBaselineGridSearch.ts のみGit管理する。
 /artifacts/sai3a-baseline/
+
+# PD価値ベース価格モデルの数値プロトタイプ生成物（診断専用）。
+# 生成スクリプト scripts/pdValueBasedPricingPrototype.ts のみGit管理する。
+/artifacts/pd-value-pricing/
