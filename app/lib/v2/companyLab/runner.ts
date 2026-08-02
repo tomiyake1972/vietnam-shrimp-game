@@ -55,7 +55,13 @@ import {
   settleConsumerMarketQuarter,
 } from "../market/consumerInventory";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
-import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../market/productLifecycle";
+import {
+  applyLifecycleDemandToMarketInput,
+  computeMarketProductMix,
+  MarketProductMix,
+  PRODUCT_LIFECYCLE_PARAMETERS_MARKET_EVOLUTION_V1,
+  PRODUCT_LIFECYCLE_PARAMETERS_V1,
+} from "../market/productLifecycle";
 import {
   applyProcessingCapacityEvolutionToMarketInput,
   computeProcessingCapacityRatios,
@@ -914,7 +920,13 @@ export function advanceCompanyLabQuarter(
     const shiftByMarket = Object.fromEntries(
       DEMAND_MARKET_IDS.map((m) => [m, { pd: appliedAdoptionTurnShift.pd, vap: appliedAdoptionTurnShift.vap }])
     ) as Readonly<Partial<Record<DemandMarketId, { pd: number; vap: number }>>>;
-    const baseMix = computeMarketProductMix(turn, PRODUCT_LIFECYCLE_PARAMETERS_V1, shiftByMarket);
+    // 【加工品市場進化 §b】config.marketEvolution.tunedProductLifecycle が有効なら、
+    // 実機出力を実装指示§3の市場別記述と突き合わせて調整した表を使う
+    // （変更点はUS市場のPD/VAP加速turnの分離のみ。productLifecycle.ts参照）。
+    const lifecycleParameters = state.config.marketEvolution?.tunedProductLifecycle
+      ? PRODUCT_LIFECYCLE_PARAMETERS_MARKET_EVOLUTION_V1
+      : PRODUCT_LIFECYCLE_PARAMETERS_V1;
+    const baseMix = computeMarketProductMix(turn, lifecycleParameters, shiftByMarket);
     const substitution = applyProductSubstitution(baseMix, lastRecord?.marketResult, sai5ReferencePremiumRatios);
     lifecycleMix = substitution.mix;
     substitutionShareShift = substitution.substitutionShareShift;

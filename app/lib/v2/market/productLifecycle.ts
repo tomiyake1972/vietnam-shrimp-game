@@ -95,6 +95,47 @@ export const PRODUCT_LIFECYCLE_PARAMETERS_V1: ProductLifecycleParameters = {
   maxAdoptionTurnShift: 4,
 };
 
+/**
+ * 【加工品市場進化 §b】実機出力を実装指示§3の市場別記述と突き合わせて調整した版。
+ *
+ * 【V1からの変更点と、その根拠（実測ベース。before/after は
+ *  docs/v2/design/processed_market_evolution_audit.md §b に記録）】
+ *
+ * 変更したのは **US市場のPD/VAP加速開始turnの分離** だけである。
+ *
+ *   before: US.pd accelStartTurn=8 / US.vap accelStartTurn=8
+ *           → 実測で PD・VAP の最大伸長がどちらも turn12 に重なり、
+ *             「米国はPDが伸びたあとVAPが強く伸びる」という時間差が消えていた。
+ *   after:  US.pd accelStartTurn=6 / US.vap accelStartTurn=12
+ *           → PDの最大伸長 turn9、VAPの最大伸長 turn16 と分離される。
+ *
+ * 【V1のまま据え置いた市場と、その理由（実測で指示と一致していたため）】
+ *  - JP: PD 0.34→0.40（大きいまま安定）／VAP 0.10→0.30（3倍成長、最大伸長turn8）。
+ *        「日本は安定的に大きいPDに加えて、人手不足・厨房コストを背景に
+ *         VAPが伸びる」という記述と一致。PDとVAPの加速turnが同じでも、
+ *         PD側の伸び幅が小さい（+0.06）ため「PDは安定・VAPが伸びる」に見える。
+ *  - EU: PD 0.28→0.34／VAP 0.05→0.18（3.6倍）。PD/VAPへの移行は成立している。
+ *        「品質・サステナビリティ・トレーサビリティが誰がプレミアムを取るかを
+ *         左右する」部分は構成比ではなく成約・価格側の論点（監査§7）。
+ *  - CN: HOSO 0.87→0.60 と全市場で最も高いHOSO比率を最後まで維持し、
+ *        PDの最大伸長 turn21・VAPの最大伸長 turn26 と最も遅い。
+ *        「中国はHOSO中心の期間が長い」と一致。
+ *  - OTHER: 平均的な後発として妥当（PD最大伸長turn17）。
+ *
+ * 【安全性】V1は削除せず残す（全体実装計画書 §20「旧版を削除しない」）。
+ * この表は config.marketEvolution.tunedProductLifecycle を有効にしたラボだけが使う。
+ */
+export const PRODUCT_LIFECYCLE_PARAMETERS_MARKET_EVOLUTION_V1: ProductLifecycleParameters = {
+  ...PRODUCT_LIFECYCLE_PARAMETERS_V1,
+  byMarket: {
+    ...PRODUCT_LIFECYCLE_PARAMETERS_V1.byMarket,
+    US: {
+      pd: { ...PRODUCT_LIFECYCLE_PARAMETERS_V1.byMarket.US.pd, accelStartTurn: 6 },
+      vap: { ...PRODUCT_LIFECYCLE_PARAMETERS_V1.byMarket.US.vap, accelStartTurn: 12 },
+    },
+  },
+};
+
 /** 市場×商品の需要構成比行列（各市場の行和=1）。 */
 export type MarketProductMix = Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
 

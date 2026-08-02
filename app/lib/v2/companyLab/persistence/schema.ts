@@ -1060,10 +1060,12 @@ function validateMarketEvolutionFeatureFlags(raw: unknown, path: string): Market
     obj.processingAdvantageDemandCapture,
     `${path}.processingAdvantageDemandCapture`
   );
+  const tunedProductLifecycle = optionalBoolean(obj.tunedProductLifecycle, `${path}.tunedProductLifecycle`);
   return {
     ...(originProcessingCapacity === undefined ? {} : { originProcessingCapacity }),
     ...(perProductDestinationPricing === undefined ? {} : { perProductDestinationPricing }),
     ...(processingAdvantageDemandCapture === undefined ? {} : { processingAdvantageDemandCapture }),
+    ...(tunedProductLifecycle === undefined ? {} : { tunedProductLifecycle }),
   };
 }
 

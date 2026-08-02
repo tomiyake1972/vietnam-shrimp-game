@@ -521,6 +521,13 @@ export interface MarketEvolutionFeatureFlags {
    * PD/VAP需要をより多く獲得する。
    */
   readonly processingAdvantageDemandCapture?: boolean;
+  /**
+   * 商品ライフサイクルの調整済みパラメータ表を使う
+   * （market/productLifecycle.ts PRODUCT_LIFECYCLE_PARAMETERS_MARKET_EVOLUTION_V1）。
+   * sai5.productLifecycle が有効なときにのみ意味を持つ（どの表を使うかの選択であり、
+   * ライフサイクル機能そのものの有効化ではない）。未指定なら従来のV1表。
+   */
+  readonly tunedProductLifecycle?: boolean;
 }
 
 export interface CompanyLabConfig {
