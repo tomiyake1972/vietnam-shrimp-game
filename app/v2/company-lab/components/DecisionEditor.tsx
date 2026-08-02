@@ -308,7 +308,11 @@ export default function DecisionEditor(props: DecisionEditorProps) {
     period,
     PD_MECHANIZATION_PARAMETERS_V1
   );
-  const [pdMechanizationTargetFactoryId, setPdMechanizationTargetFactoryId] = useState<string>(fixture.factories[0]?.factoryId ?? "");
+  // 【Test15・develop/v2統合（Required fix 2）】PD省人化投資の対象工場選択肢は
+  // ownState.effectiveFactories（稼働開始済みの新設Factoryを含む）を基準にする。
+  // fixture.factoriesの静的一覧のままだと、新設Factoryが稼働開始しても対象として
+  // 選択できない欠落があった。
+  const [pdMechanizationTargetFactoryId, setPdMechanizationTargetFactoryId] = useState<string>(ownState.effectiveFactories[0]?.factoryId ?? "");
   const pdMechanizationBlockedForSelectedFactory =
     pdMechanizationTargetFactoryId !== "" && isPdMechanizationBlockedForFactory(draft, ownState.capexState.portfolio.projects, pdMechanizationTargetFactoryId);
   const pdMechanizationExistingProjectForFactory = (factoryId: string) =>
@@ -468,7 +472,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                 onChange={(e) => setPdMechanizationTargetFactoryId(e.target.value)}
                 className={INPUT_CONTROL_CLASS}
               >
-                {fixture.factories.map((f) => (
+                {ownState.effectiveFactories.map((f) => (
                   <option key={f.factoryId} value={f.factoryId}>
                     {f.factoryId}
                   </option>
@@ -503,7 +507,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                 </tr>
               </thead>
               <tbody>
-                {fixture.factories.map((f) => {
+                {ownState.effectiveFactories.map((f) => {
                   const utilization =
                     ownState.pdUtilizationByFactory.find((e) => e.factoryId === f.factoryId)?.previousQuarterPdUtilization ??
                     PD_MECHANIZATION_PARAMETERS_V1.initialPdUtilizationRatio;

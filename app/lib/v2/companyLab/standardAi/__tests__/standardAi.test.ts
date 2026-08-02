@@ -363,6 +363,10 @@ test("極端な入力（原料・完成品ゼロ、契約ゼロ、現金が大�
     // 【Test15新設・tsc修正】PD稼働率実績なし・VAP商品開発スコアは中立値50（未投資の既定値）。
     pdUtilizationByFactory: [],
     vapProductDevelopmentScore: 50,
+    // 【develop/v2統合・Required fix 2】極端な入力の再現テストのため、実効Factory[]は
+    // fixture.factoriesそのまま（capex案件が一切無い状態を模擬しているため、
+    // computeEffectiveFactoriesを通しても結果は同じ）。
+    effectiveFactories: fixture.factories,
   };
 
   let decision: CompanyDecisionInput | undefined;

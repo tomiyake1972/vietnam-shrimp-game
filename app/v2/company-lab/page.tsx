@@ -81,7 +81,10 @@ function buildDraftForState(state: CompanyLabState, fixtures: readonly CompanyFi
   const publicInfo = buildPublicMarketInfo(state);
   const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, state.scenarioState.currentTurn);
   // 【Phase 8D-4】ワーカー人数の出発点は、会社状態として保持されている前期末の総人数。
-  return buildInitialDraft(fixture, autoDecision, ownState.workforceState);
+  // 【Test15・develop/v2統合（Required fix 2）】生産計画・ワーカー配置の入力行は
+  // ownState.effectiveFactories（稼働開始済みの新設Factoryを含む実効Factory[]）を
+  // 基準に生成する。
+  return buildInitialDraft(fixture, autoDecision, ownState.workforceState, ownState.effectiveFactories);
 }
 
 export default function CompanyLabPage() {

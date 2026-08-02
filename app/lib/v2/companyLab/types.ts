@@ -264,6 +264,24 @@ export interface CompanyOwnState {
    * 常に存在する（機能フラグに依存しない常時ゲームルール）。
    */
   readonly vapProductDevelopmentScore: number;
+  /**
+   * 【Test15・develop/v2統合（Required fix 2）】当四半期時点で実際に入力・生産の
+   * 対象にできる、この会社の「実効Factory[]」（既存工場への能力加算＋稼働開始済み
+   * newFactoryConstruction案件による新設Factoryの両方を反映済み）。
+   *
+   * 【唯一の計算箇所】必ず capex/factoryConstruction.ts の computeEffectiveFactories
+   * を経由する（companyLab/runner.ts の advanceCompanyLabQuarter が生産エンジンへ
+   * 渡すFactory[]と、この buildCompanyOwnState が意思決定側へ渡すFactory[]が
+   * 別々に計算されて食い違う、という統合前の欠落（fixture.factoriesを直接読んで
+   * いたためUIから新設Factoryへ入力できなかった問題）を構造的に防ぐ）。
+   *
+   * fixture.factories（作成時点の静的な初期工場一覧）を意思決定側で直接読む
+   * 代わりに、常にこちらを使うこと。新設Factoryは稼働開始（完成＋操業準備期間
+   * 経過）するまでこの配列に一切現れない。稼働開始した瞬間、ワーカー配置・
+   * 生産計画・PD省人化投資対象の各入力行はゼロ人・ゼロ生産の状態からこの配列へ
+   * 現れる（ワーカー・営業人員・需要が自動的に積み増されることはない）。
+   */
+  readonly effectiveFactories: readonly Factory[];
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */

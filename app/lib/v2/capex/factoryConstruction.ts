@@ -23,7 +23,7 @@ import { hosoEqTons, ratio } from "../core/units";
 import { CompanyId } from "../sales/types";
 import { Factory } from "../production/types";
 import { deriveDefaultFactorySpaceUnits } from "../production/factorySpace";
-import { computeOperationalStartPeriod, isCapexProjectOperationalAt } from "./capacityEffect";
+import { applyCapexCapacityToFactories, computeOperationalStartPeriod, isCapexProjectOperationalAt } from "./capacityEffect";
 import { isActiveStatus } from "./projectLifecycle";
 import { CapexState, CapitalProject } from "./types";
 
@@ -195,6 +195,33 @@ export function applyNewFactoryConstructionToFactories(factories: readonly Facto
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------
+// 3b. 当四半期の「実効Factory[]」の唯一の計算箇所（develop/v2統合・Required fix 2）
+// ---------------------------------------------------------------------
+
+/**
+ * ある四半期時点で実際に使える「実効Factory[]」（既存工場への能力加算＋稼働開始済み
+ * 新設Factoryの合成の両方を反映した最終形）を計算する、唯一の場所。
+ *
+ * 【背景（develop/v2統合時に発見・修正）】companyLab/runner.ts の advanceCompanyLabQuarter
+ * は、この2関数（applyCapexCapacityToFactories → applyNewFactoryConstructionToFactories）
+ * を毎期この順で呼んで実効Factory[]を求めていたが、意思決定側
+ * （companyLab/types.ts CompanyOwnState・app/v2/company-lab/decisionDraft.ts・
+ * DecisionEditor.tsx）は同じ計算をせず、fixture.factories（静的・作成時点の初期工場
+ * だけ）を直接参照していた。このため、新工場建設が稼働開始しても、プレイヤーは
+ * その工場へ生産計画・ワーカー配置を入力する手段がなかった（新設Factory自体は
+ * エンジン内では正しく生産されるが、UIからは触れなかった）。
+ *
+ * この関数をCompanyOwnState.effectiveFactories（companyLab/runner.ts
+ * buildCompanyOwnState）・advanceCompanyLabQuarter自身の両方から呼ぶことで、
+ * 「今使えるFactory[]」の計算箇所を本関数の1箇所へ統一し、両者が食い違うことを
+ * 構造的に防ぐ（実装指示「ONE canonical place」）。
+ */
+export function computeEffectiveFactories(baseFactories: readonly Factory[], capexState: CapexState, period: PeriodV2): readonly Factory[] {
+  const withCapexCapacity = applyCapexCapacityToFactories(baseFactories, capexState, period);
+  return applyNewFactoryConstructionToFactories(withCapexCapacity, capexState, period);
 }
 
 // ---------------------------------------------------------------------
