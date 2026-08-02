@@ -13,7 +13,7 @@
 //     参照価格が高い市場を優先する（pressures.tsのmarketPriceRanking、
 //     公開情報だけで完結する規則）。
 
-import { hosoEqTons } from "../../../core/units";
+import { hosoEqTons, unwrapUnit } from "../../../core/units";
 import { DemandMarketId, Product } from "../../../market/types";
 import { CompanySalesPlanEntry, PlanCostExpectation } from "../../../sales/types";
 import { SalesParameters, SALES_PARAMETERS_V1 } from "../../../sales/parameters";
@@ -101,7 +101,27 @@ export interface SalesWishEntry {
 
 export interface SalesPlanResult {
   readonly salesPlans: readonly CompanySalesPlanEntry[];
+  /**
+   * 【要注意・意味の明確化（SAI-6.2）】工場能力×稼働率目標×受注量係数だけで
+   * 決まる、営業人員制約を一度も経由していない「理論上の販売希望量」。
+   * 市場・価格・実在する営業人員のいずれにも依存しない。
+   *
+   * 【生産計画への入力として使ってはならない】この値は診断専用の参考値
+   * （「営業人員が仮に無制限だった場合の理論上限」）であり、生産計画・原料調達
+   * 計画の入力には使わないこと。過去のTest14 Turn1調査
+   * （docs/standard_ai/TEST14_TURN1_STANDARD_AI_REDESIGN_ANALYSIS.md §6）で、
+   * この値を生産計画へ直結する配線ミスが、販売可能量の約2〜2.7倍という
+   * 過剰生産・過剰原料調達を引き起こしていたことが判明している。生産計画の
+   * 入力には`realisticSalesByProduct`（下記）を使うこと。
+   */
   readonly desiredByProduct: ProductAmount;
+  /**
+   * 【SAI-6.2新設】営業人員配分・市場別工数制約を反映した後の、現実的に販売可能な
+   * 商品別合計数量（＝`salesPlans`の商品別合計。新しい計算は行わず、既に確定した
+   * `salesPlans`を単純合計するだけ）。生産計画（将来のCurrent Period Delivery
+   * Demand層・SAI-6.3以降）が参照すべきはこちらであり、`desiredByProduct`ではない。
+   */
+  readonly realisticSalesByProduct: ProductAmount;
   /** 【SAI-3A】営業工数制約適用前の、会社×市場×商品ぶんの希望販売数量一覧。 */
   readonly salesWishByMarketProduct: readonly SalesWishEntry[];
   readonly diagnostics: readonly StandardAiDiagnosticEntry[];
@@ -339,7 +359,11 @@ export function buildStandardAiSalesPlans(
   const effortDemandByMarket = new Map<DemandMarketId, number>(
     marketsWithDemand.map((market) => [market, salesEffortWeightedQuantity(desiredByMarketProduct.get(market)!, salesParams)])
   );
-  const headcountByMarket = allocateHeadcountAcrossMarkets(fixture.salesForceHeadcountTotal, effortDemandByMarket);
+  // 【SAI-6.2】fixture.salesForceHeadcountTotal（静的な基準値）ではなく、
+  // observation.salesForceHeadcountTotal（observation.tsでownState.salesForceHiringState.headcount
+  // へ既に読み替え済みの動的な現在人数）を参照する。turn1ではfixture値と同一のため
+  // 既存挙動は変わらない（設計レポート§14参照）。
+  const headcountByMarket = allocateHeadcountAcrossMarkets(observation.salesForceHeadcountTotal, effortDemandByMarket);
 
   // 配分された人数では当該市場の営業工数換算需要を賄いきれない場合、標準AIが
   // 自ら（エンジン側のsales/marketEffort.tsと全く同じ計算式で）市場内の全商品の
@@ -366,8 +390,8 @@ export function buildStandardAiSalesPlans(
         domain: "sales",
         companyId: fixture.companyId,
         severity: "warning",
-        keyValues: { salesForceHeadcountTotal: fixture.salesForceHeadcountTotal, constrainedMarketCount: constrainedMarkets.length },
-        message: `実在する営業人員総数（${fixture.salesForceHeadcountTotal}人）では、全${marketsWithDemand.length}市場の希望販売量（商品別営業工数を加味）を賄いきれず、すべての市場で販売計画を縮小した。`,
+        keyValues: { salesForceHeadcountTotal: observation.salesForceHeadcountTotal, constrainedMarketCount: constrainedMarkets.length },
+        message: `実在する営業人員総数（${observation.salesForceHeadcountTotal}人）では、全${marketsWithDemand.length}市場の希望販売量（商品別営業工数を加味）を賄いきれず、すべての市場で販売計画を縮小した。`,
       });
     }
     for (const { market, headcount, result } of constrainedMarkets) {
@@ -465,5 +489,13 @@ export function buildStandardAiSalesPlans(
       });
     }
   }
-  return { salesPlans: plans, desiredByProduct, salesWishByMarketProduct, diagnostics };
+  // 【SAI-6.2新設】realisticSalesByProduct = 確定したsalesPlans（営業人員配分・
+  // 市場工数制約適用後）の商品別合計。新しい計算は行わず、既存のplansをそのまま
+  // 合計するだけ（desiredByProductとは異なる値であることをここで明示する）。
+  const realisticSalesByProduct: ProductAmount = zeroProductAmount();
+  for (const p of plans) {
+    realisticSalesByProduct[p.product] += unwrapUnit(p.desiredQuantity);
+  }
+
+  return { salesPlans: plans, desiredByProduct, realisticSalesByProduct, salesWishByMarketProduct, diagnostics };
 }

@@ -779,11 +779,27 @@ test("営業人員採用: 当期は配分可能人数・当期SG&Aへ加算さ�
   const hired2State = advanceCompanyLabQuarter(hired1State, fixtures, buildTurn2Decisions(hired1State, fixtures));
   const baseline2State = advanceCompanyLabQuarter(baseline1State, fixtures, buildTurn2Decisions(baseline1State, fixtures));
 
-  // 次四半期(quarter2)のSG&Aは、増員6人ぶんの人件費（6人×salesForceSalaryUsdPerQuarter）だけ高くなる。
+  // 次四半期(quarter2)のSG&Aは、少なくとも増員6人ぶんの人件費（6人×salesForceSalaryUsdPerQuarter）だけ高くなる。
+  //
+  // 【SAI-6.2修正による期待値の変更】以前はautoPolicy.tsの営業人員配分が
+  // fixture.salesForceHeadcountTotal（静的な基準値・常に18）を参照していたため、
+  // turn2で採用ブランチの配分可能人数が24人になっても市場配分には反映されず、
+  // 両ブランチの販売量（soldTons）が完全に一致し、SG&A差分は人件費のみ
+  // （6人×$8,000＝$48,000）に厳密一致していた。
+  // SAI-6.2でこの静的参照を修正し、ownState.salesForceHiringState.headcount
+  // （動的な現在人数）を参照するようにしたため、採用ブランチは実際に24人分の
+  // 営業capacityを市場配分に活かせるようになり、販売量が増え、それに比例する
+  // 変動費（sellingLogisticsUsdPerTon×soldTons）ぶんSG&Aがさらに増加する
+  // （これは意図した挙動の改善であり、退行ではない。設計レポート§14参照）。
+  // したがって「人件費ぶんだけ増える」という厳密一致ではなく、「少なくとも
+  // 人件費ぶんは増える」という不等式で検証する。
   const balFrHired2 = hired2State.history[1].financialResults.find((fr) => fr.companyId === balId)!;
   const balFrBaseline2 = baseline2State.history[1].financialResults.find((fr) => fr.companyId === balId)!;
   const sgaDiff = (balFrHired2.profitAndLoss.sellingGeneralAdmin as number) - (balFrBaseline2.profitAndLoss.sellingGeneralAdmin as number);
-  assert.ok(Math.abs(sgaDiff - 6 * 8000) < 0.01, `増員6人ぶんのSG&A差分が想定と異なる: ${sgaDiff}`);
+  assert.ok(
+    sgaDiff >= 6 * 8000 - 0.01,
+    `増員6人ぶんの人件費（$48,000）を少なくとも上回るはずのSG&A差分が、それ未満になっている: ${sgaDiff}`
+  );
 
   // 3四半期目以降に採用が無ければ、配分可能人数はそれ以上変化しない（勝手に増減しない）。
   assert.equal(buildCompanyOwnState(hired2State, balFixture).salesForceHiringState.headcount, 24);
@@ -891,14 +907,17 @@ test("営業人員減員: 当期は配分可能人数・当期の通常SG&Aか�
   assert.equal(buildCompanyOwnState(baseline1State, balFixture).salesForceHiringState.headcount, 18);
 
   // turn2は両ブランチとも自動方針のみ（新規の採用・減員なし）で、減員の効果だけを見る。
-  // 【注記】generateAutoPolicyDecisionの営業配分（allocateHeadcountAcrossMarkets）は
-  // 既存仕様どおりfixture.salesForceHeadcountTotal（静的な基準値・BALは18）を参照し、
-  // 動的な減員後人数には追随しない（プレイヤーが減員後にDecisionEditorで再編集する
-  // ことを前提にした既存の設計。今回のforward-portが新たに変えた挙動ではない）。
-  // このため減員後（12人）のBALへ自動方針をそのまま渡すとバジェット検証で拒否
-  // されるため、この統合テストではBALの販売計画の営業配分だけを0にクランプする
-  // （SG&Aは販売計画の営業配分ではなくsalesForceHiringState.headcountから算出される
-  // ため、この操作は本テストが検証したいSG&A差分には影響しない）。
+  // 【SAI-6.2修正済みの注記】generateAutoPolicyDecisionの営業配分
+  // （allocateHeadcountAcrossMarkets）は、以前はfixture.salesForceHeadcountTotal
+  // （静的な基準値・BALは常に18）を参照しており、動的な減員後人数（12）には
+  // 追随しなかった。SAI-6.2でownState.salesForceHiringState.headcount（動的な
+  // 現在人数）を参照するよう修正済みのため、この不整合自体はもう発生しない
+  // （減員後の12人へ正しく制約されるようになった。設計レポート§14参照）。
+  // ただし本テストは「退職金・通常給与ぶんのSG&A差分だけ」を厳密に検証したい
+  // （販売量の変化に由来する変動費まで混ぜたくない）ため、意図的にBALの販売計画の
+  // 営業配分だけを0にクランプしている（SG&Aは販売計画の営業配分ではなく
+  // salesForceHiringState.headcountから算出されるため、この操作は本テストが
+  // 検証したいSG&A差分には影響しない）。
   function buildTurn2Decisions(state: typeof laidOff1State, fixtures: ReturnType<typeof initializeCompanyLab>["fixtures"]) {
     const publicInfo = buildPublicMarketInfo(state);
     const decisions: Record<string, CompanyDecisionInput> = {};

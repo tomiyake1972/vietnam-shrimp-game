@@ -34,6 +34,8 @@ import { StandardAiDiagnosticEntry } from "./reasonCodes";
 import { SalesWishEntry } from "./decision/sales";
 import { PressureScores } from "./pressures";
 import { AppliedManagementBiasItem } from "./managementProfile";
+import { buildCurrentPeriodDeliveryDemand, CurrentPeriodDeliveryDemand } from "./diagnosis/currentPeriodDeliveryDemand";
+import { buildStandardAiSituationDiagnosis, StandardAiSituationDiagnosis } from "./diagnosis/situationDiagnosis";
 
 // 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
 // 診断情報にこれまで捨てていた圧力スコア(pressures)と、当四半期の意思決定
@@ -60,6 +62,20 @@ export interface StandardAiQuarterDiagnostics {
    * 全テストへの影響はゼロ）。実装指示§8「基準値→バイアス後」の追跡用。
    */
   readonly managementProfile?: StandardAiManagementProfileDiagnostics;
+  /**
+   * 【SAI-6.1・6.3追加】Situation Diagnosis（不足型／過剰型の6カテゴリ診断）と
+   * Current Period Delivery Demand（当期納品需要、Standard AI内部の中間概念）。
+   * 診断専用の並行計算であり、本インターフェースの`decision`（実際の意思決定）には
+   * 一切影響しない（今回のスコープでは意思決定ロジックを変更していない）。
+   *
+   * 【永続化の後方互換】optionalとしているのは、Phase Aで永続化を始めた
+   * 既存の`aiProposalDiagnostics`（persistence/types.ts）に、この変更より前に
+   * 保存されたドラフトが存在する場合、これらのフィールドを持たないため
+   * （persistence/schema.tsのshallow validatorはこの2フィールドを必須にしていない）。
+   * generateStandardAiDecisionWithDiagnosticsが新規生成する値では常に設定される。
+   */
+  readonly situationDiagnosis?: StandardAiSituationDiagnosis;
+  readonly currentPeriodDeliveryDemand?: CurrentPeriodDeliveryDemand;
 }
 
 /**
@@ -134,6 +150,24 @@ export function generateStandardAiDecisionWithDiagnostics(
     capexDecision: capexResult.capexDecision,
   };
 
+  // 【SAI-6.3】Current Period Delivery Demand（当期納品需要、Standard AI内部の
+  // 中間概念）。SAI-6.2で追加したrealisticSalesByProduct（営業人員配分後の
+  // 現実的販売可能量）を入力とする。今回はここで生成した値を意思決定
+  // （上のdecision）へは一切接続しない（診断専用）。
+  const deliveryDemandResult = buildCurrentPeriodDeliveryDemand(fixture.companyId, observation, salesResult.realisticSalesByProduct);
+
+  // 【SAI-6.1】Situation Diagnosis（不足型／過剰型の6カテゴリ診断）。同様に
+  // 診断専用の並行計算であり、上のdecisionには一切影響しない。
+  const situationDiagnosisResult = buildStandardAiSituationDiagnosis(
+    fixture,
+    observation,
+    pressures,
+    salesResult.desiredByProduct,
+    salesResult.realisticSalesByProduct,
+    deliveryDemandResult.deliveryDemand,
+    params
+  );
+
   const entries: StandardAiDiagnosticEntry[] = [
     ...salesResult.diagnostics,
     ...productionResult.diagnostics,
@@ -141,6 +175,8 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...laborResult.diagnostics,
     ...financingResult.diagnostics,
     ...capexResult.diagnostics,
+    ...deliveryDemandResult.diagnostics,
+    ...situationDiagnosisResult.diagnostics,
   ];
 
   return {
@@ -151,6 +187,8 @@ export function generateStandardAiDecisionWithDiagnostics(
       period,
       entries,
       pressures,
+      situationDiagnosis: situationDiagnosisResult.diagnosis,
+      currentPeriodDeliveryDemand: deliveryDemandResult.deliveryDemand,
       decision,
       salesWishByMarketProduct: salesResult.salesWishByMarketProduct,
     },

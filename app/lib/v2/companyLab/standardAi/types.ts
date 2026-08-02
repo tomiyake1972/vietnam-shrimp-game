@@ -72,6 +72,12 @@ export interface StandardAiObservation {
   readonly rawMaterialAvailable: number;
   /** 輸送中輸入・養殖中など、将来利用可能になる予定の原料量。 */
   readonly rawMaterialPipeline: number;
+  /** 【SAI-6.1新設】rawMaterialPipelineの内訳: 輸送中輸入のみ（養殖中を含まない）。 */
+  readonly rawMaterialInTransitImportQuantity: number;
+  /** 【SAI-6.1新設】rawMaterialPipelineの内訳: 養殖中（未収穫）のみ。当期利用可能原料には含めない。 */
+  readonly rawMaterialGrowingAquacultureQuantity: number;
+  /** 【SAI-6.1新設】輸送中輸入のうち、availableFromPeriodが当期以前（＝当期確実に取得可能）な量。 */
+  readonly rawMaterialCertainInboundThisPeriod: number;
 
   // --- 能力 ---
   readonly factories: readonly FactoryObservation[];

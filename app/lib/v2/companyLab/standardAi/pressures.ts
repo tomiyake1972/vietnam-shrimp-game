@@ -43,6 +43,20 @@ function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
 }
 
+/**
+ * 【SAI-6.1切り出し】目標在庫の基準となる「前期実績生産量（未知ならフィクスチャ
+ * 能力×典型稼働率）」を計算する。従来computePressureScores内部だけに存在した
+ * ロジックを、新設のSituation Diagnosis（situationDiagnosis.ts）でも同じ基準値を
+ * 再利用できるようexportする（挙動・数値は一切変更しない。単純な抽出）。
+ */
+export function computeReferenceProductionByProduct(observation: StandardAiObservation, params: StandardAiParameters): ProductAmount {
+  return {
+    hoso: observation.lastQuarterActualProductionByProduct.hoso ?? observation.totalCapacityByProduct.hoso * params.typicalUtilizationForCashEstimate,
+    pd: observation.lastQuarterActualProductionByProduct.pd ?? observation.totalCapacityByProduct.pd * params.typicalUtilizationForCashEstimate,
+    vap: observation.lastQuarterActualProductionByProduct.vap ?? observation.totalCapacityByProduct.vap * params.typicalUtilizationForCashEstimate,
+  };
+}
+
 export function computePressureScores(
   observation: StandardAiObservation,
   fixture: CompanyFixture,
@@ -56,11 +70,7 @@ export function computePressureScores(
 
   // 目標在庫は「前期実績生産量（未知ならフィクスチャ能力×典型稼働率）」を基準に、
   // 目標四半期数を掛けて算出する（当期の生産計画とは循環参照させない一次近似）。
-  const referenceProductionByProduct: ProductAmount = {
-    hoso: observation.lastQuarterActualProductionByProduct.hoso ?? observation.totalCapacityByProduct.hoso * params.typicalUtilizationForCashEstimate,
-    pd: observation.lastQuarterActualProductionByProduct.pd ?? observation.totalCapacityByProduct.pd * params.typicalUtilizationForCashEstimate,
-    vap: observation.lastQuarterActualProductionByProduct.vap ?? observation.totalCapacityByProduct.vap * params.typicalUtilizationForCashEstimate,
-  };
+  const referenceProductionByProduct: ProductAmount = computeReferenceProductionByProduct(observation, params);
   const finishedGoodsExcessRatioByProduct: ProductAmount = {
     hoso: observation.finishedGoodsByProduct.hoso / Math.max(EPSILON, referenceProductionByProduct.hoso * params.finishedGoodsTargetQuarters),
     pd: observation.finishedGoodsByProduct.pd / Math.max(EPSILON, referenceProductionByProduct.pd * params.finishedGoodsTargetQuarters),

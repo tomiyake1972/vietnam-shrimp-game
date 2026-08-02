@@ -30,6 +30,36 @@ function pipelineRawMaterialQuantity(ownState: CompanyOwnState): number {
     .reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
 }
 
+/**
+ * 【SAI-6.1新設】輸送中輸入原料のみの残数量（養殖中を含めない）。Raw Material
+ * Coverage Ratio（situationDiagnosis.ts）が「当期確実に取得可能な原料」を
+ * growingAquaculture（未収穫の養殖投入。当期の生産には使えない）と区別して
+ * 扱うために必要。既存のrawMaterialPipeline（両者の合計。既存コードが参照する
+ * ため削除しない）とは独立した、新しい在庫認識ロジックを増設するのではなく、
+ * 既存のRawMaterialLot.statusによる分類をそのまま使うだけの内訳の追加。
+ */
+function inTransitImportRawMaterialQuantity(ownState: CompanyOwnState): number {
+  return ownState.rawMaterialLots.filter((l) => l.status === "inTransitImport").reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
+}
+
+/** 【SAI-6.1新設】養殖中（未収穫）の残数量のみ。当期利用可能原料には含めない。 */
+function growingAquacultureRawMaterialQuantity(ownState: CompanyOwnState): number {
+  return ownState.rawMaterialLots.filter((l) => l.status === "growingAquaculture").reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
+}
+
+/**
+ * 【SAI-6.1新設】輸送中輸入原料のうち、既存のRawMaterialLot.availableFromPeriod
+ * （到着・収穫予定四半期。既存フィールドをそのまま使う。新しいタイミング管理は
+ * 増設しない）が当期以前の輸入ロットだけを「当期確実に取得可能」として集計する。
+ * PeriodV2は"YYYYQn"形式の文字列であり、この範囲では文字列比較がそのまま
+ * 時系列比較になる（既存のperiod.tsにcompare関数が無いための最小限の代替）。
+ */
+function certainInboundImportQuantityThisPeriod(ownState: CompanyOwnState, period: PeriodV2): number {
+  return ownState.rawMaterialLots
+    .filter((l) => l.status === "inTransitImport" && l.availableFromPeriod <= period)
+    .reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
+}
+
 function outstandingContractByProduct(ownState: CompanyOwnState): ProductAmount {
   const result = { hoso: 0, pd: 0, vap: 0 };
   for (const c of ownState.contracts) {
@@ -168,12 +198,22 @@ export function buildStandardAiObservation(
     finishedGoodsByProduct: finishedGoodsByProduct(ownState),
     rawMaterialAvailable: availableRawMaterialQuantity(ownState),
     rawMaterialPipeline: pipelineRawMaterialQuantity(ownState),
+    // 【SAI-6.1新設】既存のrawMaterialPipeline（輸送中輸入＋養殖中の合計）の内訳。
+    // Situation Diagnosisのみが参照する（既存のpressures.rawMaterialInventoryPosition
+    // 等の計算は変更しない）。
+    rawMaterialInTransitImportQuantity: inTransitImportRawMaterialQuantity(ownState),
+    rawMaterialGrowingAquacultureQuantity: growingAquacultureRawMaterialQuantity(ownState),
+    rawMaterialCertainInboundThisPeriod: certainInboundImportQuantityThisPeriod(ownState, period),
 
     factories,
     totalCapacityByProduct: totalCapacityByProduct(factories),
     totalCommonProcessingCapacity: factories.reduce((s, f) => s + f.commonProcessingCapacity, 0),
     aquacultureCapacity: unwrapUnit(fixture.aquacultureCapacity),
-    salesForceHeadcountTotal: fixture.salesForceHeadcountTotal,
+    // 【SAI-6.2】fixture.salesForceHeadcountTotal（静的な基準値）ではなく、
+    // ownState.salesForceHiringState.headcount（前期末までに実際に確定した動的な
+    // 現在人数）を観測する。turn1ではfixture値と同一のため既存挙動は変わらない
+    // （設計レポート§14参照）。
+    salesForceHeadcountTotal: ownState.salesForceHiringState.headcount,
     procurementHeadcountTotal: fixture.procurementHeadcountTotal,
 
     lastQuarterEquipmentUtilizationRate: averageEquipmentUtilization(ownState),

@@ -6,7 +6,7 @@
 // 圧力値フレームワーク・AI取締役会機能・プレイヤー向け説明・テスト結果分析で
 // 再利用できるよう、意図的に汎用的な構造にしてある。
 
-export type StandardAiDomain = "procurement" | "sales" | "production" | "labor" | "finance" | "capex";
+export type StandardAiDomain = "procurement" | "sales" | "production" | "labor" | "finance" | "capex" | "diagnosis";
 
 export type StandardAiSeverity = "info" | "warning" | "critical";
 
@@ -52,7 +52,17 @@ export type StandardAiReasonCode =
   | "CAPEX_RESUME_PROPOSED" // 資金回復により中断中の設備投資案件の再開を提案
   | "VAP_GROWTH_ENTRY" // VAP需要の成長局面を捉えるためVAP能力・販売へ参入
   | "VAP_OVERSUPPLY_RETREAT" // VAP供給過剰局面のためVAP拡大を抑制
-  | "PD_CAPACITY_MAINTAINED"; // PD能力の維持を選択（VAP転換へ追随しない）
+  | "PD_CAPACITY_MAINTAINED" // PD能力の維持を選択（VAP転換へ追随しない）
+  // --- 【SAI-6.1新設】Situation Diagnosis（不足型／過剰型の6カテゴリ診断） ---
+  | "SALES_FORCE_BINDING_CONSTRAINT" // 営業（現実的販売可能量が理論販売機会を大きく下回る）が支配的制約
+  | "PRODUCTION_CAPACITY_HEADROOM" // 生産能力に余力がある（過剰型）
+  | "PRODUCTION_CAPACITY_BINDING_CONSTRAINT" // 生産能力が支配的制約（不足型）
+  | "WORKER_SURPLUS" // Workerに余力がある（過剰型）
+  | "WORKER_SHORTAGE_DIAGNOSED" // Worker不足が診断された（不足型。labor.tsの既存WORKER_CAPACITY_SHORTAGEとは独立した診断層側の判定）
+  | "INVENTORY_EXCESS" // 完成品在庫が通常在庫目標を大きく超えている（過剰型）
+  | "LIQUIDITY_CONSTRAINT" // 資金制約が支配的（不足型）
+  | "CURRENT_PERIOD_DELIVERY_DEMAND_PROXY" // currentPeriodDeliveryDemandが暫定proxy（現行salesPlans+当期契約）であることの明示
+  | "PRODUCTION_CAPACITY_RECOGNITION_GAP"; // Standard AIが参照する能力（ノミナル）と実効能力（0.855係数適用後）に差がある
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -85,6 +95,15 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "VAP_GROWTH_ENTRY",
   "VAP_OVERSUPPLY_RETREAT",
   "PD_CAPACITY_MAINTAINED",
+  "SALES_FORCE_BINDING_CONSTRAINT",
+  "PRODUCTION_CAPACITY_HEADROOM",
+  "PRODUCTION_CAPACITY_BINDING_CONSTRAINT",
+  "WORKER_SURPLUS",
+  "WORKER_SHORTAGE_DIAGNOSED",
+  "INVENTORY_EXCESS",
+  "LIQUIDITY_CONSTRAINT",
+  "CURRENT_PERIOD_DELIVERY_DEMAND_PROXY",
+  "PRODUCTION_CAPACITY_RECOGNITION_GAP",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

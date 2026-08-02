@@ -39,6 +39,19 @@ function setup(seed = "sai2-standardai-effort-001", fixtureOverride: (f: Company
   return { fixture, ownState, publicInfo, period: state.currentPeriod, turn: 1 };
 }
 
+/**
+ * 【SAI-6.2追記】standardAi/observation.tsは営業人員配分の基準を
+ * fixture.salesForceHeadcountTotal（静的値）からownState.salesForceHiringState.headcount
+ * （動的な現在人数）へ読み替えるよう修正済み（設計レポート§14）。fixtureだけを
+ * オーバーライドしてもownState側の人数が追随しないため、「営業人員が少ない」
+ * 状況を再現するテストは、fixtureとownStateの両方を一致させて上書きする必要がある。
+ */
+function setupWithSalesForceHeadcount(seed: string, headcount: number) {
+  const { fixture, ownState, publicInfo, period, turn } = setup(seed, (f) => ({ ...f, salesForceHeadcountTotal: headcount }));
+  const adjustedOwnState = { ...ownState, salesForceHiringState: { ...ownState.salesForceHiringState, headcount } };
+  return { fixture, ownState: adjustedOwnState, publicInfo, period, turn };
+}
+
 test("7a. 標準AIの意思決定において、同一市場内のHOSO/PD/VAP行はすべて同一のsalesForceHeadcountを持つ（市場単位配分であり行単位ではない）", () => {
   const { fixture, ownState, publicInfo, period, turn } = setup();
   const { decision } = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
@@ -76,10 +89,7 @@ test("7c. 営業人員総数が全社的に不足する場合、標準AIはSALES
   // 営業人員をゼロ人近くまで絞ることで、どんな市場配分をしても全市場が
   // 制約に達する状況を作る（基礎能力200t/市場は残るが、5市場に分散すれば
   // 通常の希望販売量は上回れないはず）。
-  const { fixture, ownState, publicInfo, period, turn } = setup("sai2-standardai-effort-002", (f) => ({
-    ...f,
-    salesForceHeadcountTotal: 1,
-  }));
+  const { fixture, ownState, publicInfo, period, turn } = setupWithSalesForceHeadcount("sai2-standardai-effort-002", 1);
   const { decision, diagnostics } = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
   const codes = diagnostics.entries.map((d) => d.code);
   assert.ok(
@@ -98,10 +108,7 @@ test("7d. VAP比率が高い商品構成のほうが、同じ営業人員数・�
   // ほぼゼロになるケースがあるため、まずベース会社の実際の販売計画を見て、
   // VAPが十分な量で提案されているケースに限定して確認する（提案がゼロなら
   // 比較不能なためスキップ）。
-  const { fixture, ownState, publicInfo, period, turn } = setup("sai2-standardai-effort-003", (f) => ({
-    ...f,
-    salesForceHeadcountTotal: 6,
-  }));
+  const { fixture, ownState, publicInfo, period, turn } = setupWithSalesForceHeadcount("sai2-standardai-effort-003", 6);
   const { decision, diagnostics } = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
   const vapPlans = decision.salesPlans.filter((p) => p.product === "vap" && unwrapUnit(p.desiredQuantity) > 0);
   if (vapPlans.length === 0) {
