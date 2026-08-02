@@ -353,7 +353,11 @@ function buildSalesPlans(
   const effortDemandByMarket = new Map<DemandMarketId, number>(
     marketsWithDemand.map((market) => [market, salesEffortWeightedQuantity(desiredByMarketProduct.get(market)!, SALES_PARAMETERS_V1)])
   );
-  const headcountByMarket = allocateHeadcountAcrossMarkets(fixture.salesForceHeadcountTotal, effortDemandByMarket);
+  // 【営業人員採用の反映】fixture の静的な基準値ではなく、採用・退職を反映した
+  // 現在の人数を使う（standardAi/observation.ts と同じ修正。develop/v2のSAI-6.2は
+  // 標準AI側だけを直しており、autoPolicy側は同じ取りこぼしが残っていた）。
+  const headcountTotal = ownState.salesForceHiringState?.headcount ?? fixture.salesForceHeadcountTotal;
+  const headcountByMarket = allocateHeadcountAcrossMarkets(headcountTotal, effortDemandByMarket);
 
   for (const market of marketsWithDemand) {
     const byProduct = desiredByMarketProduct.get(market)!;

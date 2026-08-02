@@ -340,7 +340,9 @@ export function buildStandardAiSalesPlans(
   const effortDemandByMarket = new Map<DemandMarketId, number>(
     marketsWithDemand.map((market) => [market, salesEffortWeightedQuantity(desiredByMarketProduct.get(market)!, salesParams)])
   );
-  const headcountByMarket = allocateHeadcountAcrossMarkets(fixture.salesForceHeadcountTotal, effortDemandByMarket);
+  // 【営業人員採用の反映・SAI-6.2再突合ポイント2】observation 側で採用実績を
+  // 反映済みの現在人数を使う（develop/v2 の SAI-6.2 が入れたのと同じ修正）。
+  const headcountByMarket = allocateHeadcountAcrossMarkets(observation.salesForceHeadcountTotal, effortDemandByMarket);
 
   // 配分された人数では当該市場の営業工数換算需要を賄いきれない場合、標準AIが
   // 自ら（エンジン側のsales/marketEffort.tsと全く同じ計算式で）市場内の全商品の
@@ -375,8 +377,8 @@ export function buildStandardAiSalesPlans(
         domain: "sales",
         companyId: fixture.companyId,
         severity: "warning",
-        keyValues: { salesForceHeadcountTotal: fixture.salesForceHeadcountTotal, constrainedMarketCount: constrainedMarkets.length },
-        message: `実在する営業人員総数（${fixture.salesForceHeadcountTotal}人）では、全${marketsWithDemand.length}市場の希望販売量（商品別営業工数を加味）を賄いきれず、すべての市場で販売計画を縮小した。`,
+        keyValues: { salesForceHeadcountTotal: observation.salesForceHeadcountTotal, constrainedMarketCount: constrainedMarkets.length },
+        message: `実在する営業人員総数（${observation.salesForceHeadcountTotal}人）では、全${marketsWithDemand.length}市場の希望販売量（商品別営業工数を加味）を賄いきれず、すべての市場で販売計画を縮小した。`,
       });
     }
     for (const { market, headcount, result } of constrainedMarkets) {

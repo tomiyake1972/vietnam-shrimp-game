@@ -800,7 +800,28 @@ test("営業人員採用: 当期は配分可能人数・当期SG&Aへ加算さ�
   const balFrHired2 = hired2State.history[1].financialResults.find((fr) => fr.companyId === balId)!;
   const balFrBaseline2 = baseline2State.history[1].financialResults.find((fr) => fr.companyId === balId)!;
   const sgaDiff = (balFrHired2.profitAndLoss.sellingGeneralAdmin as number) - (balFrBaseline2.profitAndLoss.sellingGeneralAdmin as number);
-  assert.ok(Math.abs(sgaDiff - 6 * 8000) < 0.01, `増員6人ぶんのSG&A差分が想定と異なる: ${sgaDiff}`);
+  // 【期待値の更新理由】以前は「増員6人ぶんの給与(6×8,000)だけ増える」ことを厳密に
+  // 検証していた。これは**採用した営業人員が販売計画へ一切反映されていなかった**
+  // ため、給与以外に何の差も生じなかったことの裏返しだった（今回その取りこぼしを
+  // 修正した。autoPolicy.ts / standardAi/observation.ts 参照）。修正後は増員した
+  // 人員が実際に販売活動へ加わるため、給与に加えて販売量増加ぶんの変動販管費が
+  // 上乗せされる。したがって「給与ぶん以上」であることと、実際に販売量が
+  // 増えていることの両方を検証する形へ改める。
+  assert.ok(
+    sgaDiff >= 6 * 8000 - 0.01,
+    `増員6人ぶんの給与(${6 * 8000})を下回っている: ${sgaDiff}`
+  );
+  const hiredContracted = hired2State.history[1].salesRecord.allocations
+    .flatMap((a) => a.companies.filter((c) => c.companyId === balId))
+    .reduce((sum, c) => sum + (c.allocatedQuantity as unknown as number), 0);
+  const baselineContracted = baseline2State.history[1].salesRecord.allocations
+    .flatMap((a) => a.companies.filter((c) => c.companyId === balId))
+    .reduce((sum, c) => sum + (c.allocatedQuantity as unknown as number), 0);
+  assert.ok(
+    hiredContracted > baselineContracted,
+    `営業人員を6人増やしたのに成約量が増えていない（増員=${hiredContracted} 対照=${baselineContracted}）` +
+      "＝採用が販売計画へ反映されていない"
+  );
 
   // 3四半期目以降に採用が無ければ、配分可能人数はそれ以上変化しない（勝手に増減しない）。
   assert.equal(buildCompanyOwnState(hired2State, balFixture).salesForceHiringState.headcount, 24);

@@ -34,7 +34,14 @@ function setup(seed = "sai2-standardai-effort-001", fixtureOverride: (f: Company
   const { state, fixtures } = initializeCompanyLab(baseConfig({ seed }));
   const original = fixtures.find((f) => f.companyId === "BAL")!;
   const fixture = fixtureOverride(original);
-  const ownState = buildCompanyOwnState(state, fixture);
+  // 【営業人員採用の反映】標準AIが参照する営業人員総数の正典は、fixtureの静的な
+  // 基準値ではなく採用・退職を反映した salesForceHiringState.headcount になった。
+  // fixtureを上書きするテストでは、こちらも同じ人数へそろえる必要がある。
+  const base = buildCompanyOwnState(state, fixture);
+  const ownState = {
+    ...base,
+    salesForceHiringState: { ...base.salesForceHiringState, headcount: fixture.salesForceHeadcountTotal },
+  };
   const publicInfo = buildPublicMarketInfo(state);
   return { fixture, ownState, publicInfo, period: state.currentPeriod, turn: 1 };
 }

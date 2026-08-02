@@ -173,7 +173,12 @@ export function buildStandardAiObservation(
     totalCapacityByProduct: totalCapacityByProduct(factories),
     totalCommonProcessingCapacity: factories.reduce((s, f) => s + f.commonProcessingCapacity, 0),
     aquacultureCapacity: unwrapUnit(fixture.aquacultureCapacity),
-    salesForceHeadcountTotal: fixture.salesForceHeadcountTotal,
+    // 【営業人員採用の反映・SAI-6.2再突合ポイント1】fixture の静的な基準値ではなく、
+    // 採用・退職を反映した**現在の人数**（companyLab/salesForceHiring.ts）を使う。
+    // これを直さないと、営業人員を追加採用しても販売計画へ一切反映されず、
+    // 「VAP投資 → 営業増員 → 販売増」というループが構造的に成立しない
+    // （実測: 毎四半期+3人を32四半期続けても契約数量がビット単位で不変だった）。
+    salesForceHeadcountTotal: ownState.salesForceHiringState?.headcount ?? fixture.salesForceHeadcountTotal,
     procurementHeadcountTotal: fixture.procurementHeadcountTotal,
 
     lastQuarterEquipmentUtilizationRate: averageEquipmentUtilization(ownState),
