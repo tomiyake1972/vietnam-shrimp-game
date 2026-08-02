@@ -56,6 +56,12 @@ import {
 } from "../market/consumerInventory";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
 import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../market/productLifecycle";
+import {
+  applyProcessingCapacityEvolutionToMarketInput,
+  computeProcessingCapacityRatios,
+  deriveProcessingCapacityVariation,
+  PROCESSING_CAPACITY_EVOLUTION_PARAMETERS_V1,
+} from "../market/processingCapacityEvolution";
 import { lookupSalesBaseScore, salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
 import {
   buildInitialProductDevelopmentState,
@@ -914,6 +920,22 @@ export function advanceCompanyLabQuarter(
     substitutionShareShift = substitution.substitutionShareShift;
   }
   const lifecycleAdjustedMarketInput = lifecycleMix ? applyLifecycleDemandToMarketInput(baseMarketInput, lifecycleMix) : baseMarketInput;
+
+  // --- 【加工品市場進化 §a】産地別PD/VAP加工能力の時間発展（opt-in） ---
+  // 各国の加工能力を「生産量×固定比率(0.30/0.10)」から「生産量×参入時期つき
+  // S字カーブ比率」へ置き換える。生産量そのものには触れない。参入時期・ランプ
+  // 速度はラボのseedから決定論的に導くが、上下限つきなので参入が起きること自体は
+  // どのseedでも保証される（market/processingCapacityEvolution.tsヘッダ参照）。
+  const processingCapacityRatios = state.config.marketEvolution?.originProcessingCapacity
+    ? computeProcessingCapacityRatios(
+        turn,
+        PROCESSING_CAPACITY_EVOLUTION_PARAMETERS_V1,
+        deriveProcessingCapacityVariation(state.config.seed)
+      )
+    : undefined;
+  const processingCapacityAdjustedMarketInput = processingCapacityRatios
+    ? applyProcessingCapacityEvolutionToMarketInput(lifecycleAdjustedMarketInput, processingCapacityRatios)
+    : lifecycleAdjustedMarketInput;
   // 【SAI-5E】前期末までの供給圧力EWMAから導いた、当期のPD/VAPベースプレミアム
   // 比率の倍率（当期の契約単価への遡及は構造上ない。成約単価は成約時スナップショット）。
   const appliedPremiumRatioMultipliers = state.config.sai5?.supplyPremiumFeedback
@@ -923,7 +945,7 @@ export function advanceCompanyLabQuarter(
   // --- 実装指示 §3: PD/VAP供給計画（会社の生産計画）の集計 → 市場入力への適用 ---
   const companyCountry = buildCompanyCountryMap(fixtures);
   const supplySignals = buildSupplySignalInputs(decisions, state.lastQuarterActualProduction);
-  const marketInput = applyProductionSupplySignalsToMarketInput(lifecycleAdjustedMarketInput, supplySignals, companyCountry);
+  const marketInput = applyProductionSupplySignalsToMarketInput(processingCapacityAdjustedMarketInput, supplySignals, companyCountry);
 
   // --- 【Phase 8F-1】消費国在庫・購買循環モデル: 当期の計画(実購買量が確定する前) ---
   // 市場価格形成（globalDemand.ts・hosoPricing.ts）は一切変更しない。ここで計算する

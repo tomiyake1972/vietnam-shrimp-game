@@ -64,7 +64,14 @@ import {
   CompanyCapexState,
 } from "../../capex/types";
 import { ScenarioMode, ScenarioState } from "../../scenario/types";
-import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterRecord, Sai5FeatureFlags } from "../types";
+import {
+  CompanyDecisionInput,
+  CompanyFixture,
+  CompanyLabConfig,
+  CompanyQuarterRecord,
+  MarketEvolutionFeatureFlags,
+  Sai5FeatureFlags,
+} from "../types";
 import type { WorkforceState } from "../workforce";
 import type { SalesForceHiringState } from "../salesForceHiring";
 import type { ConsumerMarketCarryState, ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
@@ -1022,17 +1029,48 @@ function validateSai5FeatureFlags(raw: unknown, path: string): Sai5FeatureFlags 
     obj.supplyPressureDefinition === undefined
       ? undefined
       : requireEnum(obj.supplyPressureDefinition, SUPPLY_PRESSURE_DEFINITIONS, `${path}.supplyPressureDefinition`);
+  // 【今回の監査で発見した既存の取りこぼし】vapProductDevelopmentCompetitiveness は
+  // 既定ONのフラグだが、ここで復元されていなかったため「明示的にfalseで保存した
+  // ラボを読み直すとONに戻る」という不整合があった（監査指摘Eと同種の漏れ）。
+  const vapProductDevelopmentCompetitiveness = optionalBoolean(
+    obj.vapProductDevelopmentCompetitiveness,
+    `${path}.vapProductDevelopmentCompetitiveness`
+  );
   return {
     ...(productLifecycle === undefined ? {} : { productLifecycle }),
     ...(salesBaseAccumulation === undefined ? {} : { salesBaseAccumulation }),
     ...(supplyPremiumFeedback === undefined ? {} : { supplyPremiumFeedback }),
     ...(supplyPressureDefinition === undefined ? {} : { supplyPressureDefinition }),
+    ...(vapProductDevelopmentCompetitiveness === undefined ? {} : { vapProductDevelopmentCompetitiveness }),
+  };
+}
+
+/**
+ * 【加工品市場進化】CompanyLabConfig.marketEvolution の復元。
+ * 未指定（既存の保存データすべて）は undefined を返し、従来どおり全機能OFFの
+ * 挙動になる（後方互換。マイグレーション不要）。
+ */
+function validateMarketEvolutionFeatureFlags(raw: unknown, path: string): MarketEvolutionFeatureFlags | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = requireObject(raw, path);
+  const optionalBoolean = (value: unknown, p: string): boolean | undefined => (value === undefined ? undefined : requireBoolean(value, p));
+  const originProcessingCapacity = optionalBoolean(obj.originProcessingCapacity, `${path}.originProcessingCapacity`);
+  const perProductDestinationPricing = optionalBoolean(obj.perProductDestinationPricing, `${path}.perProductDestinationPricing`);
+  const processingAdvantageDemandCapture = optionalBoolean(
+    obj.processingAdvantageDemandCapture,
+    `${path}.processingAdvantageDemandCapture`
+  );
+  return {
+    ...(originProcessingCapacity === undefined ? {} : { originProcessingCapacity }),
+    ...(perProductDestinationPricing === undefined ? {} : { perProductDestinationPricing }),
+    ...(processingAdvantageDemandCapture === undefined ? {} : { processingAdvantageDemandCapture }),
   };
 }
 
 function validateCompanyLabConfig(raw: unknown, path: string): CompanyLabConfig {
   const obj = requireObject(raw, path);
   const sai5 = validateSai5FeatureFlags(obj.sai5, `${path}.sai5`);
+  const marketEvolution = validateMarketEvolutionFeatureFlags(obj.marketEvolution, `${path}.marketEvolution`);
   return {
     scenarioId: requireNonEmptyString(obj.scenarioId, `${path}.scenarioId`),
     mode: requireEnum(obj.mode, SCENARIO_MODES, `${path}.mode`),
@@ -1043,6 +1081,7 @@ function validateCompanyLabConfig(raw: unknown, path: string): CompanyLabConfig 
       return n;
     })(),
     ...(sai5 === undefined ? {} : { sai5 }),
+    ...(marketEvolution === undefined ? {} : { marketEvolution }),
   };
 }
 

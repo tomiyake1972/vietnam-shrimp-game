@@ -489,6 +489,40 @@ export interface Sai5FeatureFlags {
   readonly vapProductDevelopmentCompetitiveness?: boolean;
 }
 
+/**
+ * 【加工品市場進化】PD/VAPを中長期戦略の中心に据える市場構造の機能フラグ。
+ *
+ * 【なぜ sai5 とは別グループなのか（コーディネーター判断1、オーナー上書き可）】
+ * Test15の既存環境・保存データを壊さないことが上位制約であり、SAI-5の既定値は
+ * 一切変更しない。加工品市場進化は「新しいラボ（Test16環境）が明示的に
+ * opt-inする」性質のもので、SAI-5の各フラグとは有効化の単位も時期も異なるため、
+ * 独立したグループとして持つ。未指定（＝既存の全ラボ）なら各挿入点で従来の
+ * コードパスをそのまま通り、挙動はビット単位で一致する。
+ */
+export interface MarketEvolutionFeatureFlags {
+  /**
+   * 産地別PD/VAP加工能力の時間発展（market/processingCapacityEvolution.ts）。
+   * 有効時、各国の加工能力が「生産量×固定比率(0.30/0.10)」から
+   * 「生産量×参入時期つきS字カーブ比率」へ置き換わり、他産地のPD加工参入が
+   * 世界稼働率経由でプレーンPDプレミアムを後半に圧縮する。
+   */
+  readonly originProcessingCapacity?: boolean;
+  /**
+   * 商品別の仕向市場価格係数の時間発展
+   * （market/consumerInventory.ts deriveNextQuarterDestinationPriceCoefficients）。
+   * 有効時、HOSO基礎価値／PDプレミアム／VAPプレミアムの各係数が**別々に**
+   * 動く（無効時は従来どおり3係数へ同一倍率を掛ける）。
+   */
+  readonly perProductDestinationPricing?: boolean;
+  /**
+   * ベトナムの加工優位を「獲得需要の商品構成」へ反映する
+   * （sales/marketAdapter.ts deriveVietnamDemandByProduct）。
+   * 有効時、原料供給シェアと加工品供給シェアが分離され、加工能力が大きい産地が
+   * PD/VAP需要をより多く獲得する。
+   */
+  readonly processingAdvantageDemandCapture?: boolean;
+}
+
 export interface CompanyLabConfig {
   readonly scenarioId: string;
   readonly mode: ScenarioMode;
@@ -496,6 +530,8 @@ export interface CompanyLabConfig {
   readonly turns: number;
   /** 【SAI-5】市場進化モデルの機能フラグ（optional。未指定=全OFF=従来挙動）。 */
   readonly sai5?: Sai5FeatureFlags;
+  /** 【加工品市場進化】PD/VAP市場構造の機能フラグ（optional。未指定=全OFF=従来挙動）。 */
+  readonly marketEvolution?: MarketEvolutionFeatureFlags;
 }
 
 export interface CompanyLabState {
