@@ -78,8 +78,27 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
   // できないため、ここでもPromise.raceによるクライアント側タイムアウトを設け、
   // 「経営説明を生成しています…」の無限ループを二重に防ぐ（実装指示§「API失敗が
   // 意思決定画面を絶対にブロックしない」の趣旨を、ローディング表示自体にも適用する）。
-  const AI_EXPLANATION_CLIENT_TIMEOUT_MS = 20_000;
+  //
+  // 【2026-08-02・三宅さんの実機確認で発見（経緯）】この値が20秒だったため、
+  // サーバー側のexplicitなtimeout（claudeClient.tsのEXPLANATION_CLAUDE_TIMEOUT_MS
+  // ＝25秒）や、schema_mismatch時の1回リトライ（実測で最大約36秒かかったケースを
+  // Vercelランタイムログで確認）よりも先にこのクライアント側タイムアウトが発火し、
+  // サーバー側では最終的に成功していたにもかかわらず、画面には「失敗しました」と
+  // 表示されてしまう事例が実機で発生した。三宅さんの明示指示により、今回は
+  // 「時間がかかること自体は問題にしない。ただし止まっているのか動いているのかが
+  // 分かるよう、経過秒数を表示してほしい」という方針へ変更する。そのため
+  // この安全策タイムアウト自体は、サーバー側の理論上の最大値（1回目25秒＋
+  // schema_mismatch時のリトライでもう1回25秒＝最大50秒程度）に十分な余裕を
+  // 持たせた60秒へ引き上げ、「動いている」ことを伝える経過秒数表示（下記
+  // aiExplanationElapsedSeconds）と併用する。60秒を超えてもなお応答が無い場合のみ、
+  // 本当にハングしているとみなしfailure扱いにする（この安全策自体の目的は維持する）。
+  const AI_EXPLANATION_CLIENT_TIMEOUT_MS = 60_000;
   const [aiExplanationState, setAiExplanationState] = useState<AiExplanationLoadState>({ kind: "loading" });
+  // 【2026-08-02・経過秒数表示】「生成に時間がかかっても構わないが、止まっているのか
+  // 動いているのかが分からないと不安」という三宅さんのご要望に対応し、loading中は
+  // 1秒ごとに経過秒数だけをカウントアップ表示する（正確な残り時間の予測はできない
+  // ため、目安へのカウントダウンではなく単純な経過時間のカウントアップとする）。
+  const [aiExplanationElapsedSeconds, setAiExplanationElapsedSeconds] = useState(0);
   useEffect(() => {
     if (!isEditing || !viewModel.aiProposalDiagnostics) return;
     // 【初期状態について】aiExplanationStateの初期値は既にuseState({kind:"loading"})。
@@ -89,6 +108,12 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
     // 不要なレンダーカスケードをlintが指摘するため、意図的に呼ばない）。
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const tickStartedAt = Date.now();
+    const tickIntervalId: ReturnType<typeof setInterval> = setInterval(() => {
+      if (cancelled) return;
+      setAiExplanationElapsedSeconds(Math.floor((Date.now() - tickStartedAt) / 1000));
+    }, 1000);
 
     const timeoutPromise = new Promise<{ readonly kind: "timeout" }>((resolve) => {
       timeoutId = setTimeout(() => resolve({ kind: "timeout" }), AI_EXPLANATION_CLIENT_TIMEOUT_MS);
@@ -102,9 +127,9 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
       .then((outcome) => {
         if (cancelled) return;
         if (outcome.kind === "timeout") {
-          // サーバー側からの応答が一定時間内に届かなかった（何らかの理由でハングしている）。
-          // 意思決定画面自体は既に正常に表示され続けているため、この説明文ブロックだけを
-          // failure扱いにする。
+          // サーバー側からの応答が一定時間内（60秒）に届かなかった（何らかの理由で
+          // 本当にハングしている）。意思決定画面自体は既に正常に表示され続けているため、
+          // この説明文ブロックだけをfailure扱いにする。
           setAiExplanationState({ kind: "failure" });
           return;
         }
@@ -119,6 +144,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
     return () => {
       cancelled = true;
       if (timeoutId !== null) clearTimeout(timeoutId);
+      clearInterval(tickIntervalId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditing, viewModel.labId, viewModel.playerCompanyId, viewModel.currentTurn, Boolean(viewModel.aiProposalDiagnostics)]);
@@ -275,7 +301,9 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
                 AIが算出したもので、Claudeはそれを変更していません。
               </p>
 
-              {aiExplanationState.kind === "loading" && <p className="text-xs text-indigo-200/70">経営説明を生成しています…</p>}
+              {aiExplanationState.kind === "loading" && (
+                <p className="text-xs text-indigo-200/70">経営説明を生成しています…（経過 {aiExplanationElapsedSeconds}秒）</p>
+              )}
 
               {aiExplanationState.kind === "failure" && (
                 <p className="text-xs text-amber-300">経営説明の生成に失敗しました（詳細な判断ログは下記でご確認いただけます）。</p>
