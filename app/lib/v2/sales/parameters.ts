@@ -10,6 +10,28 @@
 import { Score0to100, score0to100 } from "../core/units";
 import { Product } from "../market/types";
 
+/**
+ * 成約競争力の合成ウェイト（sales/allocation.ts の computeCompetitivenessBreakdown が使う）。
+ * 合計1.0を推奨（externalOptionWeightとの相対バランスを保つため）。
+ */
+export interface CompetitivenessWeights {
+    readonly price: number;
+    readonly coverage: number;
+    readonly relationship: number;
+    readonly quality: number;
+    readonly deliveryReliability: number;
+    /** 【SAI-5D】営業基盤（会社×市場×商品の蓄積ストック、companyLab/salesBase.ts）
+     *  のウェイト。既定0（＝寄与が厳密に0でビット単位の後方互換）。有効化時は
+     *  SALES_PARAMETERS_SAI5_SALES_BASE_V1（合計1.0を保ってcoverage/relationship/
+     *  qualityから切り出して再配分）をturnInput.parameters.sales経由で渡す。 */
+    readonly salesBase: number;
+    /** 【Test15新設】VAP能力合成係数（companyLab/premiumPolicy.tsの
+     *  calculateCompanyCapabilityCoefficient、VAP商品開発スコア等の合成）の
+     *  ウェイト。既定0（＝寄与が厳密に0でビット単位の後方互換）。product==="vap"の
+     *  entryにのみ効く設計（allocation.ts参照。HOSO/PDのentryでは常に寄与0）。 */
+    readonly vapCapability: number;
+}
+
 export interface SalesParameters {
   readonly parametersVersion: string;
 
@@ -40,23 +62,30 @@ export interface SalesParameters {
   readonly salesEffortCoefficients: Readonly<Record<Product, number>>;
 
   // --- 成約競争力の合成ウェイト（合計1.0を推奨） ---
-  readonly competitivenessWeights: {
-    readonly price: number;
-    readonly coverage: number;
-    readonly relationship: number;
-    readonly quality: number;
-    readonly deliveryReliability: number;
-    /** 【SAI-5D】営業基盤（会社×市場×商品の蓄積ストック、companyLab/salesBase.ts）
-     *  のウェイト。既定0（＝寄与が厳密に0でビット単位の後方互換）。有効化時は
-     *  SALES_PARAMETERS_SAI5_SALES_BASE_V1（合計1.0を保ってcoverage/relationship/
-     *  qualityから切り出して再配分）をturnInput.parameters.sales経由で渡す。 */
-    readonly salesBase: number;
-    /** 【Test15新設】VAP能力合成係数（companyLab/premiumPolicy.tsの
-     *  calculateCompanyCapabilityCoefficient、VAP商品開発スコア等の合成）の
-     *  ウェイト。既定0（＝寄与が厳密に0でビット単位の後方互換）。product==="vap"の
-     *  entryにのみ効く設計（allocation.ts参照。HOSO/PDのentryでは常に寄与0）。 */
-    readonly vapCapability: number;
-  };
+  readonly competitivenessWeights: CompetitivenessWeights;
+
+  /**
+   * 【加工品市場進化 §c】商品別の成約競争力ウェイト上書き（optional）。
+   *
+   * 未指定なら competitivenessWeights がそのまま全商品へ適用される
+   * （＝既存挙動とビット単位で一致）。指定された商品だけ、その商品の成約配分で
+   * competitivenessWeights の代わりにこちらが使われる。
+   *
+   * 【なぜ必要か】実装指示の必須要件「PDはよりコモディティ的（同一市場内の
+   * 会社間価格ばらつきが小さい）、VAPは営業・商品開発・品質・関係性に駆動された
+   * 大きなばらつきを示す」を満たすには、価格と非価格要因の相対的な重みが
+   * 商品ごとに異なる必要がある。全商品で同じウェイトを使う限り、PDとVAPの
+   * ばらつきの差は構造的に生まれない。
+   *
+   * 【重要・値上げの抜け道を作らないこと】どの商品プロファイルでも price の
+   * ウェイトを 0 にはしない。VAPでも価格は競争力の一因子として残り、
+   * priceScore = exp(-priceSensitivity × 価格乖離) の弾力性がそのまま効く。
+   * したがって「能力の低い会社が値上げしただけで高く売れる」ことは起きない
+   * （能力が低い＝非価格ウェイトの寄与が小さいうえに、値上げで価格寄与も減る）。
+   */
+  readonly competitivenessWeightsByProduct?: Readonly<
+    Partial<Record<Product, CompetitivenessWeights>>
+  >;
 
   /**
    * 価格競争力の感度係数。priceScore = exp(-priceSensitivity * (askPrice - basePrice) / basePrice)。
@@ -213,5 +242,44 @@ export const SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1: SalesPara
     deliveryReliability: 0.1,
     salesBase: 0.08,
     vapCapability: 0.08,
+  },
+};
+
+/**
+ * 【加工品市場進化 §c】商品別ウェイトプロファイル版。
+ *
+ * すべてのプロファイルで合計1.0を維持し、externalOptionWeight(0.35)との相対
+ * バランスを変えない（＝5社合計の成約量が構造的に増減しない）。
+ *
+ * | 商品 | price | coverage | relationship | quality | delivery | salesBase | vapCapability |
+ * |------|-------|----------|--------------|---------|----------|-----------|---------------|
+ * | hoso | 0.50  | 0.25     | 0.10         | 0.08    | 0.07     | 0         | 0             |
+ * | pd   | 0.45  | 0.24     | 0.12         | 0.11    | 0.08     | 0         | 0             |
+ * | vap  | 0.20  | 0.18     | 0.20         | 0.18    | 0.09     | 0         | 0.15          |
+ *
+ * 【設計意図】
+ *  - HOSO/PD: 価格ウェイトが高い（0.45〜0.50）＝コモディティ。会社が価格を
+ *    上げると競争力が急速に落ちるため、実現価格は基準価格の周辺に収束し、
+ *    会社間のばらつきが小さくなる。PDはHOSOよりわずかに品質・関係性を効かせる
+ *    （「プレーンPDでも取引継続性は効く」）。
+ *  - VAP: 価格ウェイトが0.20まで下がり、関係性(0.20)・品質(0.18)・
+ *    商品開発を含むVAP能力(0.15)・カバレッジ(0.18)が主因になる。能力の高い
+ *    会社は値上げしても競争力を保てるため、実現価格のばらつきが大きくなる。
+ *  - ただしVAPでも price=0.20 は残る。能力が中立(50)の会社が値上げすれば
+ *    価格寄与が減るだけで、他に埋め合わせる要素が無いため成約量は必ず落ちる。
+ *
+ * 【Test15既定との関係】このプロファイルは
+ * config.marketEvolution.productWiseCompetitiveness を有効にしたラボだけが使う。
+ * 未指定のラボは従来どおり全商品共通のウェイト。
+ *
+ * 【要校正】三宅さんのTest16プレイデータを見てから再検討する前提の暫定値。
+ */
+export const SALES_PARAMETERS_MARKET_EVOLUTION_PRODUCT_WISE_V1: SalesParameters = {
+  ...SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1,
+  parametersVersion: "sales-v0.1+market-evolution-product-wise",
+  competitivenessWeightsByProduct: {
+    hoso: { price: 0.5, coverage: 0.25, relationship: 0.1, quality: 0.08, deliveryReliability: 0.07, salesBase: 0, vapCapability: 0 },
+    pd: { price: 0.45, coverage: 0.24, relationship: 0.12, quality: 0.11, deliveryReliability: 0.08, salesBase: 0, vapCapability: 0 },
+    vap: { price: 0.2, coverage: 0.18, relationship: 0.2, quality: 0.18, deliveryReliability: 0.09, salesBase: 0, vapCapability: 0.15 },
   },
 };

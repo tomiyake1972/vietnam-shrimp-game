@@ -18,7 +18,7 @@
 
 import { HosoEqTons, UsdPerHosoEqKg, hosoEqTons, roundHosoEqTons, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { processingCapacity, salesCoverageScore } from "./salesForce";
-import { SalesParameters } from "./parameters";
+import { CompetitivenessWeights, SalesParameters } from "./parameters";
 import {
   CompanyAllocationEntry,
   CompanySalesPlanEntry,
@@ -65,7 +65,9 @@ export function computeCompetitivenessBreakdown(
   coverageScore: number,
   params: SalesParameters
 ): CompetitivenessWeightBreakdown {
-  const w = params.competitivenessWeights;
+  // 【加工品市場進化 §c】商品別ウェイトプロファイルが指定されていればそれを使う
+  // （未指定なら従来どおり全商品共通のウェイト＝既存挙動とビット単位で一致）。
+  const w = params.competitivenessWeightsByProduct?.[entry.product] ?? params.competitivenessWeights;
   const rawPriceScore = priceScore(unwrapUnit(askPrice), unwrapUnit(basePrice), params);
   // 安値による過剰受注（値下げすればするほど際限なく成約力が伸びる「抜け道」）を防ぐため、
   // priceScoreの結果に下限・上限を設ける（【暫定値・要校正】parameters.ts参照）。
@@ -115,7 +117,7 @@ export function computeCompetitivenessBreakdown(
  * したがって浮動小数の丸めまで含めて既存結果とビット単位で一致する。
  */
 const COMPETITIVENESS_CONTRIBUTION_KEYS: {
-  readonly [K in keyof SalesParameters["competitivenessWeights"]]: `${K}Contribution` & keyof CompetitivenessWeightBreakdown;
+  readonly [K in keyof CompetitivenessWeights]: `${K}Contribution` & keyof CompetitivenessWeightBreakdown;
 } = {
   price: "priceContribution",
   coverage: "coverageContribution",

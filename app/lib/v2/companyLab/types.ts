@@ -528,6 +528,13 @@ export interface MarketEvolutionFeatureFlags {
    * ライフサイクル機能そのものの有効化ではない）。未指定なら従来のV1表。
    */
   readonly tunedProductLifecycle?: boolean;
+  /**
+   * 商品別の成約競争力ウェイトプロファイル
+   * （sales/parameters.ts SALES_PARAMETERS_MARKET_EVOLUTION_PRODUCT_WISE_V1）を使う。
+   * 有効時、HOSO/PDは価格ウェイトが高くコモディティ的に、VAPは関係性・品質・
+   * VAP能力が主因となり会社間の実現価格ばらつきが大きくなる。
+   */
+  readonly productWiseCompetitiveness?: boolean;
 }
 
 export interface CompanyLabConfig {

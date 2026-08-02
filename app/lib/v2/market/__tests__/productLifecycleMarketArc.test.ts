@@ -58,8 +58,8 @@ test("PLA-2: 調整はUS市場のみで、他の4市場はV1と完全に一致�
   for (const market of DEMAND_MARKET_IDS) {
     if (market === "US") continue;
     for (let turn = 1; turn <= HORIZON; turn += 1) {
-      const v1 = computeMarketProductMix(turn, PRODUCT_LIFECYCLE_PARAMETERS_V1)[market];
-      const tuned = computeMarketProductMix(turn, TUNED)[market];
+      const v1: Readonly<Record<'hoso' | 'pd' | 'vap', number>> = computeMarketProductMix(turn, PRODUCT_LIFECYCLE_PARAMETERS_V1)[market];
+      const tuned: Readonly<Record<'hoso' | 'pd' | 'vap', number>> = computeMarketProductMix(turn, TUNED)[market];
       assert.deepEqual(tuned, v1, `${market} turn=${turn}: 調整対象外の市場が変化している`);
     }
   }

@@ -62,6 +62,7 @@ import {
   PRODUCT_LIFECYCLE_PARAMETERS_MARKET_EVOLUTION_V1,
   PRODUCT_LIFECYCLE_PARAMETERS_V1,
 } from "../market/productLifecycle";
+import { deriveProductWiseDestinationPriceCoefficients } from "../market/destinationPricingEvolution";
 import {
   applyProcessingCapacityEvolutionToMarketInput,
   computeProcessingCapacityRatios,
@@ -77,6 +78,7 @@ import {
 } from "./productDevelopmentState";
 import { calculateCompanyCapabilityCoefficient } from "./premiumPolicy";
 import {
+  SALES_PARAMETERS_MARKET_EVOLUTION_PRODUCT_WISE_V1,
   SALES_PARAMETERS_SAI5_SALES_BASE_V1,
   SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1,
   SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1,
@@ -519,6 +521,12 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
  * （両ウェイトを保持したまま合計1.0を維持する組み合わせ版）を使う。
  */
 function salesParametersFor(config: CompanyLabConfig): SalesParameters {
+  // 【加工品市場進化 §c】商品別ウェイトプロファイルは他のどの組み合わせよりも
+  // 優先する（PDのコモディティ性・VAPのばらつきという構造的要件を担う表であり、
+  // vapCapability単独版・salesBase版のウェイトを内包しているため）。
+  if (config.marketEvolution?.productWiseCompetitiveness) {
+    return SALES_PARAMETERS_MARKET_EVOLUTION_PRODUCT_WISE_V1;
+  }
   const vapCapabilityOn = config.sai5?.vapProductDevelopmentCompetitiveness !== false;
   const salesBaseOn = !!config.sai5?.salesBaseAccumulation;
   if (vapCapabilityOn && salesBaseOn) return SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1;
@@ -969,13 +977,32 @@ export function advanceCompanyLabQuarter(
   const consumerMarketPlanning = planConsumerMarketQuarterTable(state.currentPeriod, state.consumerMarketState, marketInput.demandMarkets);
   const consumerMarketWeights = deriveMarketWeightsFromDesiredPurchase(consumerMarketPlanning);
   const lastConsumerMarketRecords = lastRecord?.consumerMarketRecords;
-  const destinationMarketPricingForThisQuarter: DestinationMarketPriceCoefficientTable =
+  const commonAdjustedDestinationPricing: DestinationMarketPriceCoefficientTable =
     lastConsumerMarketRecords && lastConsumerMarketRecords.length > 0
       ? deriveNextQuarterDestinationPriceCoefficients(
           consumerMarketRecordsToTable(lastConsumerMarketRecords),
           CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS
         )
       : CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS;
+  // 【加工品市場進化 §c】商品別の係数発展。従来は3係数へ同一倍率を掛けていたため
+  // 「PDは圧縮されるがVAPは維持・上昇」を表現できなかった（監査§3）。
+  // 共通倍率（在庫・購買圧力）の上に、市場ごとの需要構成の移動（turn1比）を
+  // 商品別の傾きとして掛ける。有効時はライフサイクル構成比が必要なため、
+  // lifecycleMix が存在するときのみ適用する。
+  const lifecycleParametersForPricing = state.config.marketEvolution?.tunedProductLifecycle
+    ? PRODUCT_LIFECYCLE_PARAMETERS_MARKET_EVOLUTION_V1
+    : PRODUCT_LIFECYCLE_PARAMETERS_V1;
+  const destinationPricingEvolution =
+    state.config.marketEvolution?.perProductDestinationPricing && lifecycleMix
+      ? deriveProductWiseDestinationPriceCoefficients(
+          CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS,
+          commonAdjustedDestinationPricing,
+          lifecycleMix,
+          computeMarketProductMix(1, lifecycleParametersForPricing)
+        )
+      : undefined;
+  const destinationMarketPricingForThisQuarter: DestinationMarketPriceCoefficientTable =
+    destinationPricingEvolution?.coefficients ?? commonAdjustedDestinationPricing;
 
   // --- Phase1・Phase4・Phase5（既存turn/runner.tsをそのまま呼び出す） ---
   // 【Phase 6.3（実装指示 §5）】外部加工業者需要。5社の買付意向だけで
