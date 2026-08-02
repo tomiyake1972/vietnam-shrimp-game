@@ -48,7 +48,12 @@ import {
   PRIORITY_RULE_TEXT,
   YIELD_APPLICATION_TEXT,
 } from "../../../../../v2/company-lab/processingForecastViewModel";
-import { buildPdMechanizationStatusByFactory, findPreviousQuarterPdUtilization, PdMechanizationState } from "../../../../../lib/v2/companyLab/pdMechanizationState";
+import {
+  buildMechanizationLevelsByFactory,
+  buildPdMechanizationStatusByFactory,
+  findPreviousQuarterPdUtilization,
+  PdMechanizationState,
+} from "../../../../../lib/v2/companyLab/pdMechanizationState";
 import { PD_MECHANIZATION_PARAMETERS_V1 } from "../../../../../lib/v2/capex/pdMechanization";
 
 /** 能力プール（商品別加工能力）1つぶんの内訳。 */
@@ -245,6 +250,12 @@ export function buildExportProcessingCapacity(input: BuildExportProcessingCapaci
     period: input.asOfPeriod,
   });
   // 画面（DecisionEditor）とまったく同じ純粋関数を呼ぶ。ここで別計算をしない。
+  //
+  // 【PD省人化・唯一の正典経路】機械化レベルも画面と同じものを渡す。
+  // これを渡し忘れると、画面は機械化後の処理見込みを出しているのに Excel だけが
+  // 機械化前の数値になる、という食い違いが生じる（実際に一度その状態になっていた）。
+  // レベル→商品別実効係数の写像は production/labor.ts の
+  // resolveLaborIntensityCoefficient が唯一行う。
   const forecastVm = buildCompanyProcessingForecast({
     companyId: input.companyId,
     baseFactories,
@@ -253,6 +264,11 @@ export function buildExportProcessingCapacity(input: BuildExportProcessingCapaci
     productionPlans: input.productionPlans ?? [],
     workerAssignments: input.workerAssignments ?? [],
     rawMaterialLots: input.rawMaterialLots ?? [],
+    mechanizationLevelByFactoryId: buildMechanizationLevelsByFactory(
+      input.capexState,
+      input.pdMechanizationState,
+      input.asOfPeriod
+    ),
   });
   return {
     companyId: vm.companyId,

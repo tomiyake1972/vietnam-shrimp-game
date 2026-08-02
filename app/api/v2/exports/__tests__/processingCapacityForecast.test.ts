@@ -18,6 +18,7 @@ import { CompanyProductionPlanEntry, WorkerAssignment } from "../../../../lib/v2
 import { RawMaterialLot } from "../../../../lib/v2/rawMaterials/types";
 import { buildExportProcessingCapacity } from "../_lib/dto/processingCapacityDto";
 import { buildCompanyProcessingForecast } from "../../../../v2/company-lab/processingForecastViewModel";
+import { buildMechanizationLevelsByFactory } from "../../../../lib/v2/companyLab/pdMechanizationState";
 
 const START = period(2015, 1);
 const AS_OF = period(2015, 2);
@@ -148,4 +149,125 @@ test("EXPFC-5: 生産計画を渡さない経路では見込み行を0で埋め�
   });
   assert.deepEqual(exported.forecast.rows, []);
   assert.equal(exported.forecast.companyRateTable.rows.length, 5, "能力の説明は計画が無くても出す");
+});
+
+// ---------------------------------------------------------------------
+// 【PD省人化】Excel と画面が、機械化を含めて同じ処理見込みを返すこと
+// ---------------------------------------------------------------------
+//
+// 【この検証が必要になった経緯】画面（DecisionEditor / investmentPlanningViewModel）
+// には機械化レベルを渡す修正を入れたのに、Excel側（buildExportProcessingCapacity）
+// へ渡し忘れていた時期があった。その状態では画面だけが機械化後の処理見込みを出し、
+// Excelは機械化前の数値を出すという食い違いが起きる。tscでは検出できない
+// （どちらも省略可能な引数のため）ので、テストで固定する。
+
+/** 稼働中のPD省人化投資を1件持つcapexStateを組み立てる（完成・操業準備完了済み）。 */
+function capexStateWithOperationalMechanization(): Parameters<typeof buildExportProcessingCapacity>[0]["capexState"] {
+  return {
+    companies: [
+      {
+        companyId: "BAL",
+        portfolio: {
+          companyId: "BAL",
+          projects: [
+            {
+              projectId: "BAL-PDMECH-1",
+              companyId: "BAL",
+              projectType: "pdMechanization",
+              targetFactoryId: BAL_FACTORY_ID,
+              status: "completed",
+              proposedPeriod: period(2014, 1),
+              completedPeriod: period(2014, 2),
+              budgetUsd: 2_500_000,
+              paidUsd: 2_500_000,
+              remainingPaymentsUsd: 0,
+              paymentSchedule: [],
+              futureCapacityEffect: { capacityIncreaseTonsPerQuarter: 0, readinessQuartersAfterCompletion: 1 },
+            },
+          ],
+        },
+      },
+    ],
+  } as unknown as Parameters<typeof buildExportProcessingCapacity>[0]["capexState"];
+}
+
+/** 前四半期のPD稼働率（機械化レベルの算出に使う）。 */
+const PD_MECHANIZATION_STATE = {
+  entries: [{ companyId: "BAL", factoryId: BAL_FACTORY_ID, previousQuarterPdUtilization: 0.9 }],
+};
+
+test("PD省人化: Excelの処理見込みが、機械化レベルを反映した画面の処理見込みと完全に一致する", () => {
+  const capexState = capexStateWithOperationalMechanization();
+
+  const exported = buildExportProcessingCapacity({
+    companyId: "BAL",
+    fixtures: FIXTURES,
+    capexState,
+    asOfPeriod: AS_OF,
+    productionPlans: PLANS,
+    workerAssignments: WORKERS,
+    rawMaterialLots: LOTS,
+    pdMechanizationState: PD_MECHANIZATION_STATE,
+  });
+
+  // 画面側は buildMechanizationLevelsByFactory で求めたレベルを渡す。
+  const levels = buildMechanizationLevelsByFactory(capexState, PD_MECHANIZATION_STATE, AS_OF);
+  const screen = buildCompanyProcessingForecast({
+    companyId: "BAL",
+    baseFactories: FIXTURES.flatMap((f) => f.factories),
+    capexState,
+    period: AS_OF,
+    productionPlans: PLANS,
+    workerAssignments: WORKERS,
+    rawMaterialLots: LOTS,
+    mechanizationLevelByFactoryId: levels,
+  });
+
+  assert.ok(levels.size > 0, "前提: このcapexStateでは機械化レベルが算出される");
+  assert.equal(exported.forecast.rows.length, screen.rows.length, "行数が一致する");
+  for (let i = 0; i < screen.rows.length; i += 1) {
+    assert.equal(
+      exported.forecast.rows[i].forecastProcessedTons,
+      screen.rows[i].forecastProcessedTons,
+      `${screen.rows[i].product}: Excelと画面の処理見込みが一致しない（Excelへ機械化レベルが渡っていない可能性）`
+    );
+  }
+});
+
+test("PD省人化: 機械化レベルを渡さないExcel出力は、機械化ありの出力と異なる（＝渡し忘れが検出できる）", () => {
+  const capexState = capexStateWithOperationalMechanization();
+  // 労働が律速になる状況を作る（人員を絞り、PDのみを計画する）。
+  // 設備・原料が先に律速だったり、優先度の高い他商品が人員を使い切ったりすると
+  // 機械化しても処理見込みが変わらず、この検証が成立しないため。
+  const scarceWorkers: readonly WorkerAssignment[] = WORKERS.map((w) => ({ ...w, regularHeadcount: 40 }));
+  const pdOnlyPlans: readonly CompanyProductionPlanEntry[] = [
+    { companyId: "BAL", factoryId: BAL_FACTORY_ID, product: "pd", desiredQuantity: hosoEqTons(3_000), priority: 1 },
+  ];
+  const withState = buildExportProcessingCapacity({
+    companyId: "BAL",
+    fixtures: FIXTURES,
+    capexState,
+    asOfPeriod: AS_OF,
+    productionPlans: pdOnlyPlans,
+    workerAssignments: scarceWorkers,
+    rawMaterialLots: LOTS,
+    pdMechanizationState: PD_MECHANIZATION_STATE,
+  });
+  const withoutState = buildExportProcessingCapacity({
+    companyId: "BAL",
+    fixtures: FIXTURES,
+    capexState,
+    asOfPeriod: AS_OF,
+    productionPlans: pdOnlyPlans,
+    workerAssignments: scarceWorkers,
+    rawMaterialLots: LOTS,
+    // pdMechanizationState を渡さない＝機械化レベル0扱い
+  });
+
+  const pdOf = (r: typeof withState) => r.forecast.rows.find((x) => x.product === "pd")?.forecastProcessedTons ?? 0;
+  assert.ok(
+    pdOf(withState) !== pdOf(withoutState),
+    "機械化状態の有無でPDの処理見込みが変わるべき（変わらないなら機械化がExcelへ効いていない）"
+  );
+  assert.ok(pdOf(withState) > pdOf(withoutState), "機械化ありのほうが同じ人員で多く処理できる");
 });
