@@ -50,7 +50,15 @@ test("Test14 Turn1型ゴールデンケース: 営業が強い制約、生産能
 
   assert.equal(diagnosis!.salesFulfillmentState, "shortage", `営業が強い制約になるはずが、salesFulfillmentState=${diagnosis!.salesFulfillmentState}`);
   assert.notEqual(diagnosis!.productionLoadState, "shortage", `生産能力が制約になっているはずがないが、productionLoadState=${diagnosis!.productionLoadState}`);
-  assert.ok(diagnosis!.productionLoadRatio < 0.8, `生産能力に余力があるはずが、Production Load Ratio=${diagnosis!.productionLoadRatio}`);
+  // 【2026-08-02・能力認識監査Phase 3対応】Production Load Ratioの分母が、名目能力
+  // （capex加算後のみ）から、実効能力・共有ボトルネック（共通前処理・凍結包装）を
+  // 反映したbinding capacityへ変わったため、比率自体は名目ベースの時より高くなる
+  // （0.855の稼働率derate＋共有ボトルネックの分だけ分母が小さくなるため）。ここでの
+  // 検証意図（生産能力がshortageの制約にならないこと）はproductionLoadState
+  // アサーションで既に確認済みであり、この比率の閾値は「shortage判定閾値
+  // （0.9）を明確に下回ること」の確認に更新する（0.8という固定値は名目capacity
+  // ベースの旧仕様に依存した値だったため、意味のある閾値へ引き直した）。
+  assert.ok(diagnosis!.productionLoadRatio < 0.9, `生産能力がshortage閾値に達していないはずが、Production Load Ratio=${diagnosis!.productionLoadRatio}`);
   assert.equal(diagnosis!.workerLoadState, "surplus", `Workerに余力があるはずが、workerLoadState=${diagnosis!.workerLoadState}`);
   assert.notEqual(diagnosis!.inventoryExcessState, "surplus", `在庫に大きな問題は無いはずが、inventoryExcessState=${diagnosis!.inventoryExcessState}`);
 

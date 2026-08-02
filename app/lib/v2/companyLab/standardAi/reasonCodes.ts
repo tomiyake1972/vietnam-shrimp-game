@@ -19,6 +19,7 @@ export type StandardAiReasonCode =
   | "CONTRACT_FULFILLMENT_PRIORITY" // 未履行契約の履行を優先
   | "FINISHED_GOODS_EXCESS" // 完成品在庫過剰
   | "CAPACITY_CONSTRAINT" // 設備・原料・労働能力による制約
+  | "SHARED_CAPACITY_CONSTRAINT" // 【2026-08-02新設】共通前処理・凍結包装等の共有ボトルネックの実効能力により生産計画全体を縮小
   // --- 原料調達 ---
   | "RAW_MATERIAL_SHORTAGE" // 原料不足
   | "PROCUREMENT_INCREASED_FOR_SHORTAGE" // 原料不足のため調達量を増加
@@ -65,7 +66,8 @@ export type StandardAiReasonCode =
   | "PRODUCTION_CAPACITY_RECOGNITION_GAP" // Standard AIが参照する能力（ノミナル）と実効能力（0.855係数適用後）に差がある
   // --- 【SAI-6.4修正】原料診断の意味修正（procurement need と supply constraint の分離） ---
   | "RAW_MATERIAL_PROCUREMENT_NEEDED" // 期首在庫＋確定入荷だけでは必要量に届かないが、当期中の通常の追加調達行為で解決可能（ボトルネックではない）
-  | "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN" // 当期国内市場から現実的に追加調達可能な量をStandard AIの現行観測から確認できないため、真の供給制約かどうかは不明（原料不足と断定しない）
+  | "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN" // 前四半期の国内市場公開清算結果が観測に存在しない（turn1等）ため、真の供給制約かどうかは不明（原料不足と断定しない）
+  | "RAW_MATERIAL_SUPPLY_CONSTRAINT_ASSESSED" // 【2026-08-02新設】前四半期の国内市場売れ残り供給（unsoldSupply）と当期の追加調達必要量を比較し、真の供給制約か否かを評価（会社個別の購買上限は未考慮の市場全体目安）
   // --- 【SAI-6.4修正】資金診断の意味修正（現金バッファのみでは資金制約と断定しない） ---
   | "CASH_BUFFER_BELOW_TARGET"; // 現金が会社規模連動の最低現金バッファを下回るが、借入余力を含めた資金調達力全体は今回未接続のため、これのみでは資金制約と断定しない（primary/secondary制約候補には含めない）
 
@@ -73,6 +75,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
   "FINISHED_GOODS_EXCESS",
   "CAPACITY_CONSTRAINT",
+  "SHARED_CAPACITY_CONSTRAINT",
   "RAW_MATERIAL_SHORTAGE",
   "PROCUREMENT_INCREASED_FOR_SHORTAGE",
   "PROCUREMENT_REDUCED_FOR_EXCESS",
@@ -111,6 +114,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "PRODUCTION_CAPACITY_RECOGNITION_GAP",
   "RAW_MATERIAL_PROCUREMENT_NEEDED",
   "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
+  "RAW_MATERIAL_SUPPLY_CONSTRAINT_ASSESSED",
   "CASH_BUFFER_BELOW_TARGET",
 ];
 

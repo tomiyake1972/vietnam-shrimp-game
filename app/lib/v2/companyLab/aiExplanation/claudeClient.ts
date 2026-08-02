@@ -51,7 +51,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2 } from "./systemPrompt";
+import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3 } from "./systemPrompt";
 import { EXPLANATION_OUTPUT_LIMITS, StandardAiManagementReport, standardAiManagementReportSchema } from "./reportSchema";
 import { ExplanationContext } from "./buildExplanationContext";
 
@@ -396,7 +396,7 @@ async function attemptOnce(
       {
         model: config.model,
         max_tokens: config.maxTokens,
-        system: STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2,
+        system: STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3,
         messages: [{ role: "user", content: JSON.stringify(context) }],
         // 【構造化出力対応】tool定義とtool_choiceを別パラメータとして追加し、
         // 応答をこのtool呼び出しに強制する。

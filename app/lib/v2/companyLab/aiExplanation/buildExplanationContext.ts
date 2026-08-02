@@ -26,14 +26,17 @@ import {
   computeLaborProductivityByProduct,
   computeOpeningBalanceSheetSummary,
   computeSalesForceCapacitySummary,
+  FactoryCapacitySummary,
   groupRawMaterialLotsByAvailability,
 } from "../openingStateSummary";
 import { buildLifecycleTrendRows, buildSupplyPressureRows, LifecycleTrendRow, SupplyPressureRow } from "../aiMarketInfoSummary";
 import { getExplanationModelConfig } from "./claudeClient";
 import { EXPLANATION_PROMPT_VERSION } from "./systemPrompt";
 
-/** このExplanationContextの構造バージョン。フィールドの追加・削除・意味変更のたびに上げる。 */
-export const EXPLANATION_CONTEXT_SCHEMA_VERSION = 1;
+/** このExplanationContextの構造バージョン。フィールドの追加・削除・意味変更のたびに上げる。
+ * 【2026-08-02】1→2（能力認識監査Phase 2・3：productionCapacitySummary・
+ * vietnamDomesticPriorMarketフィールドを追加）。 */
+export const EXPLANATION_CONTEXT_SCHEMA_VERSION = 2;
 
 export interface ExplanationContextIdentity {
   readonly labId: string;
@@ -99,6 +102,29 @@ export interface ExplanationContextSalesForce {
   readonly currentProcessingCapacityTons: number;
 }
 
+/**
+ * 【2026-08-02・能力認識監査Phase 3新設】factoryCapacity（工場別のnominal/effective）を
+ * 会社全体で合算し、さらに共通前処理・凍結包装の共有ボトルネックまで考慮した
+ * 「実行可能な生産上限（binding capacity）」を明示する。Claudeが工場別のnominal/
+ * effectiveの数字を自分で合算・比較して誤読する（例：nominalの合計だけを見て
+ * 「24,000t生産可能」と説明する）ことを防ぐための、単一の要約値。
+ */
+export interface ExplanationContextProductionCapacitySummary {
+  /** 商品別能力（HOSO+PD+VAP）の名目合計（capex加算後、稼働率等は未適用）。 */
+  readonly nominalTotalTons: number;
+  /** 商品別能力の実効合計（稼働率×設備利用可能率適用後。共有ボトルネック考慮前）。 */
+  readonly effectiveTotalTons: number;
+  /**
+   * 実際に実行可能な生産上限（binding capacity）＝
+   * min(effectiveTotalTons, 共通前処理の実効能力合計, 凍結包装の実効能力合計)。
+   * Standard AIの生産意思決定（decision/production.ts）が実際にキャップとして使うのと
+   * 同じ考え方（新しい算出ロジックの増設ではなく、既存のnominal/effectiveの再利用）。
+   */
+  readonly bindingTotalTons: number;
+  /** bindingTotalTonsを実際に決めている制約の名称（"商品別実効能力"|"共通前処理"|"凍結・包装"）。 */
+  readonly bindingConstraintLabel: string;
+}
+
 export interface ExplanationContextOwnState {
   readonly balanceSheet: ExplanationContextBalanceSheet;
   readonly contractBacklog: readonly ExplanationContextBacklogEntry[];
@@ -108,12 +134,29 @@ export interface ExplanationContextOwnState {
   };
   readonly finishedGoodsInventoryUsd: number;
   readonly factoryCapacity: readonly ExplanationContextFactoryCapacity[];
+  /** 【2026-08-02新設】factoryCapacityの会社全体合計＋binding capacity（詳細は型コメント参照）。 */
+  readonly productionCapacitySummary: ExplanationContextProductionCapacitySummary;
   readonly laborProductivity: readonly ExplanationContextLaborProductivity[];
   readonly workforce: ExplanationContextWorkforce;
   readonly salesForce: ExplanationContextSalesForce;
   readonly qualityScoreByProduct: Readonly<Partial<Record<Product, number>>>;
   readonly customerTrustByMarket: Readonly<Partial<Record<DemandMarketId, number>>>;
   readonly deliveryReliabilityByMarket: Readonly<Partial<Record<DemandMarketId, number>>>;
+}
+
+/**
+ * 【2026-08-02・能力認識監査Phase 2新設】ベトナム国内未凍結原料市場の、前四半期の
+ * 公開清算結果（数量側）。既にPublicMarketInfo.lastMarketResult.vietnamDomesticに
+ * 存在していた値を転記するだけであり、新しい市場ルールは追加していない。
+ */
+export interface ExplanationContextVietnamDomesticMarket {
+  readonly supplyTons: number;
+  readonly effectiveDemandTons: number;
+  readonly transactedVolumeTons: number;
+  /** 農家が売却しなかった（できなかった）潜在供給量。この会社が実際に購入できる上限
+   *  （買い手シェア上限等）は現行のゲーム側公開情報に存在しないため含まない。市場全体の
+   *  目安として提示する（会社個別の購買上限を推測・捏造しない）。 */
+  readonly unsoldSupplyTons: number;
 }
 
 export interface ExplanationContextMarketInfo {
@@ -123,6 +166,8 @@ export interface ExplanationContextMarketInfo {
   /** 【安全対策】publicInfo.vietnamDomesticPriorPriceはturn1では意味を持たない副作用的な0のため、
    *  hasPriorMarketData=falseのときは必ずnull（0を代入しない）。 */
   readonly vietnamDomesticPriorPriceUsd: number | null;
+  /** 【2026-08-02新設】上記価格と対になる数量側の公開情報。turn1等はnull。 */
+  readonly vietnamDomesticPriorMarket: ExplanationContextVietnamDomesticMarket | null;
   readonly lifecycleTrends: readonly LifecycleTrendRow[] | null;
   readonly supplyPressure: readonly SupplyPressureRow[] | null;
 }
@@ -203,6 +248,7 @@ function buildOwnStateContext(fixture: CompanyFixture, ownState: CompanyOwnState
       nominal: { ...c.nominal },
       effective: { ...c.effective },
     })),
+    productionCapacitySummary: computeProductionCapacitySummary(factoryCapacity),
     laborProductivity: laborProductivity.map((p) => ({
       factoryId: p.factoryId,
       product: p.product,
@@ -218,6 +264,32 @@ function buildOwnStateContext(fixture: CompanyFixture, ownState: CompanyOwnState
     customerTrustByMarket: numberRecordOf(ownState.customerTrustByMarket),
     deliveryReliabilityByMarket: numberRecordOf(ownState.deliveryReliabilityByMarket),
   };
+}
+
+/**
+ * 【2026-08-02新設】computeFactoryCapacitySummaries（既存の共有関数。production/capacity.ts
+ * のcalculateFactoryEffectiveCapacityをそのまま使う）の結果から、会社全体のnominal/
+ * effective/binding合計を算出する。新しい能力算出ロジックは増設せず、既に算出済みの
+ * 値を合算・比較するだけ。
+ */
+function computeProductionCapacitySummary(factoryCapacity: readonly FactoryCapacitySummary[]): ExplanationContextProductionCapacitySummary {
+  const nominalTotalTons = factoryCapacity.reduce((s, c) => s + (c.nominal.hoso ?? 0) + (c.nominal.pd ?? 0) + (c.nominal.vap ?? 0), 0);
+  const effectiveTotalTons = factoryCapacity.reduce((s, c) => s + (c.effective.hoso ?? 0) + (c.effective.pd ?? 0) + (c.effective.vap ?? 0), 0);
+  const effectiveCommonProcessingTotal = factoryCapacity.reduce((s, c) => s + (c.effective.commonProcessing ?? 0), 0);
+  const effectiveFreezingPackagingTotal = factoryCapacity.reduce((s, c) => s + (c.effective.freezingPackaging ?? 0), 0);
+
+  let bindingTotalTons = effectiveTotalTons;
+  let bindingConstraintLabel = "商品別実効能力";
+  if (effectiveCommonProcessingTotal > 1e-6 && effectiveCommonProcessingTotal < bindingTotalTons) {
+    bindingTotalTons = effectiveCommonProcessingTotal;
+    bindingConstraintLabel = "共通前処理";
+  }
+  if (effectiveFreezingPackagingTotal > 1e-6 && effectiveFreezingPackagingTotal < bindingTotalTons) {
+    bindingTotalTons = effectiveFreezingPackagingTotal;
+    bindingConstraintLabel = "凍結・包装";
+  }
+
+  return { nominalTotalTons, effectiveTotalTons, bindingTotalTons, bindingConstraintLabel };
 }
 
 /** Score0to100等のbrand付き数値レコードを、プレーンなnumberレコードへ変換する（値そのものは変えない）。 */
@@ -246,15 +318,27 @@ function buildMarketInfoContext(publicInfo: PublicMarketInfo): ExplanationContex
       // 【安全対策】publicInfo.vietnamDomesticPriorPriceはturn1では実在する価格ではなく
       // 副作用的な0であるため、ここでは絶対に参照・転記しない。
       vietnamDomesticPriorPriceUsd: null,
+      vietnamDomesticPriorMarket: null,
       lifecycleTrends,
       supplyPressure,
     };
   }
 
+  const vietnamDomestic = publicInfo.lastMarketResult!.vietnamDomestic;
   return {
     hasPriorMarketData: true,
     dataLimitationNote: null,
     vietnamDomesticPriorPriceUsd: publicInfo.vietnamDomesticPriorPrice,
+    // 【2026-08-02・能力認識監査Phase 2】publicInfo.lastMarketResult（既存のMarketQuarterResult）
+    // は元からvietnamDomestic（supply/effectiveDemand/transactedVolume/unsoldSupply）を
+    // 保持していた。従来はvietnamDomesticPriorPrice（価格のみ）しか転記しておらず、既に
+    // 画面へ公開表示されている数量側の情報がClaudeへの説明入力に一切露出していなかった。
+    vietnamDomesticPriorMarket: {
+      supplyTons: vietnamDomestic.supply,
+      effectiveDemandTons: vietnamDomestic.effectiveDemand,
+      transactedVolumeTons: vietnamDomestic.transactedVolume,
+      unsoldSupplyTons: vietnamDomestic.unsoldSupply,
+    },
     lifecycleTrends,
     supplyPressure,
   };

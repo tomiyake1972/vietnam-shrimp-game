@@ -78,15 +78,21 @@ test("buildExplanationContext: standardAiはdecisionとdiagnosticEntriesのみ�
 test("buildExplanationContext: marketInfoのキー集合は固定", () => {
   const rig = buildRig();
   const context = buildExplanationContext(inputFrom(rig));
+  // 【2026-08-02・能力認識監査Phase 2】vietnamDomesticPriorMarketを追加
+  // （前四半期のベトナム国内市場公開清算結果。既存のPublicMarketInfo.lastMarketResultから
+  // 読み出すだけで、新しい市場ルールは追加していない）。
   assert.deepEqual(
     Object.keys(context.marketInfo).sort(),
-    ["dataLimitationNote", "hasPriorMarketData", "lifecycleTrends", "supplyPressure", "vietnamDomesticPriorPriceUsd"].sort()
+    ["dataLimitationNote", "hasPriorMarketData", "lifecycleTrends", "supplyPressure", "vietnamDomesticPriorPriceUsd", "vietnamDomesticPriorMarket"].sort()
   );
 });
 
 test("buildExplanationContext: ownStateのキー集合は固定（許可された自社状態の範囲のみ）", () => {
   const rig = buildRig();
   const context = buildExplanationContext(inputFrom(rig));
+  // 【2026-08-02・能力認識監査Phase 3】productionCapacitySummaryを追加
+  // （factoryCapacityの会社全体合計＋binding capacity。既存のnominal/effectiveを
+  // 合算・比較するだけで、新しい能力算出ロジックは追加していない）。
   assert.deepEqual(
     Object.keys(context.ownState).sort(),
     [
@@ -95,6 +101,7 @@ test("buildExplanationContext: ownStateのキー集合は固定（許可され�
       "customerTrustByMarket",
       "deliveryReliabilityByMarket",
       "factoryCapacity",
+      "productionCapacitySummary",
       "finishedGoodsInventoryUsd",
       "laborProductivity",
       "qualityScoreByProduct",

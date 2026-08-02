@@ -25,7 +25,7 @@ import {
   generateManagementReport,
 } from "../claudeClient";
 import { EXPLANATION_OUTPUT_LIMITS } from "../reportSchema";
-import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2 } from "../systemPrompt";
+import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3 } from "../systemPrompt";
 import { ExplanationContext } from "../buildExplanationContext";
 
 const FAKE_API_KEY = "test-fake-key-not-real";
@@ -62,6 +62,7 @@ function minimalContext(): ExplanationContext {
       rawMaterialInventory: { totalTons: 0, groups: [] },
       finishedGoodsInventoryUsd: 0,
       factoryCapacity: [],
+      productionCapacitySummary: { nominalTotalTons: 0, effectiveTotalTons: 0, bindingTotalTons: 0, bindingConstraintLabel: "商品別実効能力" },
       laborProductivity: [],
       workforce: { totalRegularHeadcount: 0, byFactory: [] },
       salesForce: { headcountTotal: 0, coverageScore: 0, currentProcessingCapacityTons: 0 },
@@ -73,6 +74,7 @@ function minimalContext(): ExplanationContext {
       hasPriorMarketData: false,
       dataLimitationNote: "turn1のため前四半期データなし",
       vietnamDomesticPriorPriceUsd: null,
+      vietnamDomesticPriorMarket: null,
       lifecycleTrends: null,
       supplyPressure: null,
     },
@@ -340,16 +342,16 @@ test("EXPLANATION_REPORT_TOOL_INPUT_SCHEMA: 各配列のmaxItemsがEXPLANATION_O
   assert.equal(schema.dataLimitations.maxItems, EXPLANATION_OUTPUT_LIMITS.maxDataLimitations);
 });
 
-test("STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2: 件数指示がEXPLANATION_OUTPUT_LIMITSの値と一致する文言を含む(schemaとpromptのドリフト防止)", () => {
-  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxRecommendations}件`));
-  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxReasonsPerRecommendation}件`));
-  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxKeyRisks}件`));
-  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxQuestionsForPlayer}件`));
-  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxDataLimitations}件`));
+test("STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3: 件数指示がEXPLANATION_OUTPUT_LIMITSの値と一致する文言を含む(schemaとpromptのドリフト防止)", () => {
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxRecommendations}件`));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxReasonsPerRecommendation}件`));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxKeyRisks}件`));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxQuestionsForPlayer}件`));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3.includes(`最大${EXPLANATION_OUTPUT_LIMITS.maxDataLimitations}件`));
   // 簡潔さの指示（concise/do not repeat diagnostic values/do not explain every field/
   // focus on primary constraint等）が日本語で含まれていることも確認する。
-  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes("簡潔"));
-  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2.includes("主要制約"));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3.includes("簡潔"));
+  assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3.includes("主要制約"));
 });
 
 test("generateManagementReport: timeout/maxRetries/modelは今回変更していない(25秒問題対応の比較のため固定)", () => {
