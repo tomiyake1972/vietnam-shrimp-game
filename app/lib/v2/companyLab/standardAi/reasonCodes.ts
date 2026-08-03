@@ -71,7 +71,11 @@ export type StandardAiReasonCode =
   | "DOMESTIC_MARKET_PUBLIC_TIGHT" // 【2026-08-03新設】前四半期の国内市場売れ残り供給が当期の調達不足分に届かない（市場全体もタイト。真の供給制約の可能性）
   | "DOMESTIC_COMPANY_PURCHASE_CAP_UNKNOWN" // 【2026-08-03新設】この会社が実際に国内市場から購入できる上限（買い手シェア上限等）は常にunknown（市場全体がsurplusでも会社個別の確実な調達可能性は保証しない）
   // --- 【SAI-6.4修正】資金診断の意味修正（現金バッファのみでは資金制約と断定しない） ---
-  | "CASH_BUFFER_BELOW_TARGET"; // 現金が会社規模連動の最低現金バッファを下回るが、借入余力を含めた資金調達力全体は今回未接続のため、これのみでは資金制約と断定しない（primary/secondary制約候補には含めない）
+  | "CASH_BUFFER_BELOW_TARGET" // 現金が会社規模連動の最低現金バッファを下回るが、借入余力を含めた資金調達力全体は今回未接続のため、これのみでは資金制約と断定しない（primary/secondary制約候補には含めない）
+  // --- 【2026-08-03新設・Phase B】Forward Unit Economics 3区分採算分類 ---
+  | "FULL_COST_PROFITABLE" // 製造フルコスト（変動費＋配賦固定費）を上回る参照売価で、貢献利益・フルコストマージンともに正
+  | "CONTRIBUTION_ONLY_OPPORTUNITY" // 貢献利益は正だが製造フルコスト（配賦固定費込み）は下回る（短期的には受注価値があるが、フルコスト回収には至らない）
+  | "UNECONOMIC_NEW_SALES"; // 貢献利益自体が負（原料費＋原料以外の変動費すら参照売価で回収できない）で、新規販売は非経済的
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -120,6 +124,9 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "DOMESTIC_MARKET_PUBLIC_TIGHT",
   "DOMESTIC_COMPANY_PURCHASE_CAP_UNKNOWN",
   "CASH_BUFFER_BELOW_TARGET",
+  "FULL_COST_PROFITABLE",
+  "CONTRIBUTION_ONLY_OPPORTUNITY",
+  "UNECONOMIC_NEW_SALES",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */
