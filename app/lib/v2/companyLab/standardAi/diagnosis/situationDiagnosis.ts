@@ -319,8 +319,15 @@ export function buildStandardAiSituationDiagnosis(
         `それ自体をボトルネックとは診断しない。`,
     });
     if (observation.vietnamDomesticPriorMarket) {
+      // 【2026-08-03・Phase A hardening】三宅さんの指摘: unsoldSupply（市場全体の
+      // 売れ残り供給）が当期の調達不足分を上回っていても、それは「この会社が確実に
+      // その数量を購入できる」ことを意味しない（買い手シェア上限等は依然unknown）。
+      // 以前の単一メッセージ（RAW_MATERIAL_SUPPLY_CONSTRAINT_ASSESSED）はこの注意書きを
+      // 文中に含めていたが、機械可読な診断コードとしては1本にまとまっていたため、
+      // 「市場全体の緩さ」と「会社個別の調達可能性は不明」を別々のreason codeへ分離する
+      // （AI説明・テスト・分析Excelから、後者を見落とさず参照できるようにする）。
       diagnostics.push({
-        code: "RAW_MATERIAL_SUPPLY_CONSTRAINT_ASSESSED",
+        code: rawMaterialSupplyConstraintState === "surplus" ? "DOMESTIC_MARKET_PUBLIC_SURPLUS" : "DOMESTIC_MARKET_PUBLIC_TIGHT",
         domain: "diagnosis",
         companyId: fixture.companyId,
         severity: rawMaterialSupplyConstraintState === "shortage" ? "warning" : "info",
@@ -334,13 +341,26 @@ export function buildStandardAiSituationDiagnosis(
                 observation.vietnamDomesticPriorMarket.unsoldSupply
               )}t）が当期の追加調達必要量（不足分、${Math.round(
                 rawMaterialShortfall
-              )}t）を上回るため、期首在庫だけでは不足していても真の供給制約とは診断しない（surplus）。` +
-              `（注：この会社が実際に購入できる上限（買い手シェア上限等）は現行観測に無いため未考慮。市場全体の目安のみ）。`
+              )}t）を上回る。市場全体としては緩い（loose）状態であり、公開市場データは需給不足を示していない（does not indicate aggregate shortage）。` +
+              `期首在庫だけでは不足していても、これのみを理由に真の供給制約とは診断しない（surplus）。`
             : `前四半期のベトナム国内市場の売れ残り供給（${Math.round(
                 observation.vietnamDomesticPriorMarket.unsoldSupply
               )}t）が当期の追加調達必要量（${Math.round(
                 rawMaterialShortfall
-              )}t）に届かないため、真の供給制約（shortage）の可能性がある。`,
+              )}t）に届かない。市場全体としてもタイトな状態であり、真の供給制約（shortage）の可能性がある。`,
+      });
+      // 【常に発火】このcompanyが実際にどれだけ購入できるか（買い手シェア上限・
+      // 承認済み購買枠等）は、上のDOMESTIC_MARKET_PUBLIC_SURPLUS/TIGHTの判定とは
+      // 独立して常にunknownである（ゲーム側で未公開・未確定のため）。surplus判定が
+      // 出ていても「company can definitely procure full requirement」とは断定しない。
+      diagnostics.push({
+        code: "DOMESTIC_COMPANY_PURCHASE_CAP_UNKNOWN",
+        domain: "diagnosis",
+        companyId: fixture.companyId,
+        severity: "info",
+        message:
+          "この会社が国内市場から実際に購入できる上限（買い手シェア上限・承認済み購買枠等）は、現行のStandard AI観測に露出していないため常にunknown。" +
+          "市場全体が緩い（public surplus）と判定されても、company-specific availabilityが保証されるわけではない（捏造しない）。",
       });
     } else {
       diagnostics.push({

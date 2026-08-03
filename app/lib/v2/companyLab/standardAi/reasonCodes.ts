@@ -67,7 +67,9 @@ export type StandardAiReasonCode =
   // --- 【SAI-6.4修正】原料診断の意味修正（procurement need と supply constraint の分離） ---
   | "RAW_MATERIAL_PROCUREMENT_NEEDED" // 期首在庫＋確定入荷だけでは必要量に届かないが、当期中の通常の追加調達行為で解決可能（ボトルネックではない）
   | "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN" // 前四半期の国内市場公開清算結果が観測に存在しない（turn1等）ため、真の供給制約かどうかは不明（原料不足と断定しない）
-  | "RAW_MATERIAL_SUPPLY_CONSTRAINT_ASSESSED" // 【2026-08-02新設】前四半期の国内市場売れ残り供給（unsoldSupply）と当期の追加調達必要量を比較し、真の供給制約か否かを評価（会社個別の購買上限は未考慮の市場全体目安）
+  | "DOMESTIC_MARKET_PUBLIC_SURPLUS" // 【2026-08-03新設】前四半期の国内市場売れ残り供給が当期の調達不足分を上回る（市場全体は緩い。company-specific availabilityは別途unknown）
+  | "DOMESTIC_MARKET_PUBLIC_TIGHT" // 【2026-08-03新設】前四半期の国内市場売れ残り供給が当期の調達不足分に届かない（市場全体もタイト。真の供給制約の可能性）
+  | "DOMESTIC_COMPANY_PURCHASE_CAP_UNKNOWN" // 【2026-08-03新設】この会社が実際に国内市場から購入できる上限（買い手シェア上限等）は常にunknown（市場全体がsurplusでも会社個別の確実な調達可能性は保証しない）
   // --- 【SAI-6.4修正】資金診断の意味修正（現金バッファのみでは資金制約と断定しない） ---
   | "CASH_BUFFER_BELOW_TARGET"; // 現金が会社規模連動の最低現金バッファを下回るが、借入余力を含めた資金調達力全体は今回未接続のため、これのみでは資金制約と断定しない（primary/secondary制約候補には含めない）
 
@@ -114,7 +116,9 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "PRODUCTION_CAPACITY_RECOGNITION_GAP",
   "RAW_MATERIAL_PROCUREMENT_NEEDED",
   "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
-  "RAW_MATERIAL_SUPPLY_CONSTRAINT_ASSESSED",
+  "DOMESTIC_MARKET_PUBLIC_SURPLUS",
+  "DOMESTIC_MARKET_PUBLIC_TIGHT",
+  "DOMESTIC_COMPANY_PURCHASE_CAP_UNKNOWN",
   "CASH_BUFFER_BELOW_TARGET",
 ];
 
