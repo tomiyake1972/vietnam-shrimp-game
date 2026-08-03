@@ -160,6 +160,37 @@ export interface StandardAiObservation {
   readonly cashUsd: number;
   readonly existingLoanBalanceUsd: number;
   readonly regularHeadcountTotal: number;
+  /**
+   * 【2026-08-03新設・Phase E】売掛金のうち、当期が決済予定期（dueSettlementPeriod）に
+   * 一致するもの（＝当期の決算処理で現金化される予定）の合計。既存の
+   * ReceivableRecord.dueSettlementPeriod（finance/types.ts、既にownState.financeState.
+   * receivablesに存在する値）をそのまま集計するだけで、新しい回収ルールは作らない。
+   * 【重要】売掛金の帳簿残高全体を当期使える現金として扱ってはならない
+   * （arCollectionQuarters=1により、当期発生の売上は当期中は現金化されない）。
+   */
+  readonly receivablesDueThisPeriodUsd: number;
+  /** 売掛金のうち、決済予定期がまだ来ていないものの合計（将来の現金化予定）。 */
+  readonly receivablesNotYetDueUsd: number;
+  /** 買掛金のうち、当期が決済予定期に一致するもの（当期の現金支出予定）の合計。 */
+  readonly payablesDueThisPeriodUsd: number;
+  /** 買掛金のうち、決済予定期がまだ来ていないものの合計。 */
+  readonly payablesNotYetDueUsd: number;
+  /**
+   * 【2026-08-03新設・Phase E】既存融資（ownState.financingState.loanPortfolio.loans）に
+   * financing/loanSchedule.tsのcomputeLoanQuarterlyInterest（実際の四半期決算が使う
+   * 利息計算そのもの）をそのまま適用して合計した、当期発生予定利息（USD）。
+   */
+  readonly existingLoanInterestUsdThisQuarterEstimate: number;
+  /** 同様にcomputeScheduledPrincipalDueをそのまま適用して合計した、当期予定元本返済額（USD）。 */
+  readonly existingLoanScheduledPrincipalDueUsdThisQuarterEstimate: number;
+  /**
+   * 【捏造しない】追加借入可能額（available borrowing headroom）は、
+   * financing/borrowingCapacity.tsのcomputeBorrowingCapacityが信用スコア・EBITDA・
+   * 担保USD評価額・財務制限条項等、現時点でStandardAiObservationに配線されていない
+   * 複数の入力を要求するため、恒常的にundefinedとする（憶測で近似値を作らない）。
+   * 将来、これらの入力を配線した時点でこのコメントと合わせて実装する。
+   */
+  readonly availableBorrowingHeadroomUsd?: number;
 
   // --- 設備投資 ---
   readonly activeCapexProjectTargets: ReadonlySet<Product | "commonProcessing" | "freezingPackaging" | "coldStorage">;

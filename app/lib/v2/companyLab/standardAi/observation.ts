@@ -17,6 +17,7 @@ import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../types";
 import { findFactoryRegularHeadcount } from "../workforce";
 import { computeCapacityEffectForCompany, isCapexProjectOperationalAt } from "../../capex/capacityEffect";
 import { calculateFactoryEffectiveCapacity } from "../../production/capacity";
+import { computeLoanQuarterlyInterest, computeScheduledPrincipalDue } from "../../financing/loanSchedule";
 import { FactoryObservation, MarketObservationEntry, ProductAmount, StandardAiObservation, zeroProductAmount } from "./types";
 
 const EPSILON = 1e-6;
@@ -294,6 +295,32 @@ export function buildStandardAiObservation(
     cashUsd: unwrapUsd(ownState.financeState.cash),
     existingLoanBalanceUsd: ownState.financingState.loanPortfolio.loans.reduce((s, l) => s + l.currentPrincipalUsd, 0),
     regularHeadcountTotal: factories.reduce((s, f) => s + f.currentRegularHeadcount, 0),
+
+    // 【2026-08-03新設・Phase E】ReceivableRecord/PayableRecordの既存
+    // dueSettlementPeriodをそのまま当期と比較して集計するだけで、新しい回収・支払
+    // ルールは作らない。
+    receivablesDueThisPeriodUsd: ownState.financeState.receivables
+      .filter((r) => r.dueSettlementPeriod === period)
+      .reduce((s, r) => s + unwrapUsd(r.amount), 0),
+    receivablesNotYetDueUsd: ownState.financeState.receivables
+      .filter((r) => r.dueSettlementPeriod !== period)
+      .reduce((s, r) => s + unwrapUsd(r.amount), 0),
+    payablesDueThisPeriodUsd: ownState.financeState.payables
+      .filter((p) => p.dueSettlementPeriod === period)
+      .reduce((s, p) => s + unwrapUsd(p.amount), 0),
+    payablesNotYetDueUsd: ownState.financeState.payables
+      .filter((p) => p.dueSettlementPeriod !== period)
+      .reduce((s, p) => s + unwrapUsd(p.amount), 0),
+    existingLoanInterestUsdThisQuarterEstimate: ownState.financingState.loanPortfolio.loans.reduce(
+      (s, l) => s + computeLoanQuarterlyInterest(l, period),
+      0
+    ),
+    existingLoanScheduledPrincipalDueUsdThisQuarterEstimate: ownState.financingState.loanPortfolio.loans.reduce(
+      (s, l) => s + computeScheduledPrincipalDue(l, period),
+      0
+    ),
+    // availableBorrowingHeadroomUsd: 意図的に未設定（undefined）。ファイル冒頭の
+    // types.tsコメント参照（捏造しない）。
 
     activeCapexProjectTargets: activeCapexTargets(ownState, period),
     // 【SAI-5F】中断中案件（projectId昇順の決定論的順序。resume提案の対象）。
