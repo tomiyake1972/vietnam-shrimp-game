@@ -97,6 +97,23 @@ export interface StandardAiMarketOpportunityEntry {
   readonly contributionMarginUsdPerKg: number | null;
   readonly contributionMarginUsdPerIncrementalTon: number | null;
 
+  /**
+   * 【Phase F-6】この商品1トンを売るために消費する営業工数（effort係数、
+   * sales/parameters.ts SALES_PARAMETERS_V1.salesEffortCoefficients。HOSO=1.0/
+   * PD=1.2/VAP=3.0）。既存パラメータをそのまま転記しただけであり、新しい
+   * 係数は作っていない。
+   */
+  readonly salesEffortConsumptionCoefficient: number;
+  /**
+   * 【Phase F-6・新規診断指標】希少な営業工数1単位あたりの貢献利益
+   * （= contributionMarginUsdPerIncrementalTon / salesEffortConsumptionCoefficient）。
+   * 「どの市場×商品に、限られた営業工数の次の1単位を投じるべきか」を比較する
+   * ための診断専用の相対指標であり、生産・販売配分の目的関数へはまだ接続していない
+   * （Phase D Shadow Allocationのcontribution-oriented判定式とは独立な、
+   * 表示・比較専用の値）。CM<=0の場合は0（無意味な負の「優先度」を示さない）。
+   */
+  readonly contributionPerSalesEffortUnitUsd: number | null;
+
   readonly dataQuality: {
     readonly targetDemandUnobservableReason: string;
   };
@@ -177,6 +194,10 @@ export function buildStandardAiMarketOpportunity(
       const unservedOpportunityWithinCurrentCapacityTons = Math.max(0, singleProductCeilingTons - currentRealisticSalesTons);
 
       const ueEntry = unitEconomics.entries.find((e) => e.market === market && e.product === product);
+      const effortCoefficient = salesParams.salesEffortCoefficients[product];
+      const cmPerIncrementalTon = ueEntry?.contributionMarginUsdPerKg != null ? ueEntry.contributionMarginUsdPerKg * 1000 : null;
+      const contributionPerSalesEffortUnitUsd =
+        cmPerIncrementalTon != null && cmPerIncrementalTon > 0 ? cmPerIncrementalTon / effortCoefficient : cmPerIncrementalTon != null ? 0 : null;
 
       entries.push({
         companyId: observation.companyId,
@@ -194,7 +215,9 @@ export function buildStandardAiMarketOpportunity(
         unservedOpportunityWithinCurrentCapacityTons,
         profitabilityClass: ueEntry?.profitabilityClass ?? null,
         contributionMarginUsdPerKg: ueEntry?.contributionMarginUsdPerKg ?? null,
-        contributionMarginUsdPerIncrementalTon: ueEntry?.contributionMarginUsdPerKg != null ? ueEntry.contributionMarginUsdPerKg * 1000 : null,
+        contributionMarginUsdPerIncrementalTon: cmPerIncrementalTon,
+        salesEffortConsumptionCoefficient: effortCoefficient,
+        contributionPerSalesEffortUnitUsd,
         dataQuality: { targetDemandUnobservableReason: TARGET_DEMAND_UNOBSERVABLE_REASON },
       });
     }

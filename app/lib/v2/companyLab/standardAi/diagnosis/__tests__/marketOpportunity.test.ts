@@ -140,3 +140,23 @@ test("contributionMarginUsdPerIncrementalTon = contributionMarginUsdPerKg × 100
     }
   }
 });
+
+test("【Phase F-6】contributionPerSalesEffortUnitUsd = contributionMarginUsdPerIncrementalTon / effort係数（VAPほど係数が大きいため、CM$/kgが同じでも実効優先度は下がりうる）", () => {
+  const { observation2, currentSalesPlans } = setupTurn2();
+  const ue = buildStandardAiUnitEconomics(observation2);
+  const result = buildStandardAiMarketOpportunity(observation2, ue, currentSalesPlans);
+  for (const e of result.entries) {
+    assert.ok(e.salesEffortConsumptionCoefficient > 0);
+    if (e.contributionMarginUsdPerIncrementalTon === null) {
+      assert.equal(e.contributionPerSalesEffortUnitUsd, null);
+    } else if (e.contributionMarginUsdPerIncrementalTon <= 0) {
+      assert.equal(e.contributionPerSalesEffortUnitUsd, 0);
+    } else {
+      assert.ok(
+        Math.abs(
+          e.contributionPerSalesEffortUnitUsd! - e.contributionMarginUsdPerIncrementalTon / e.salesEffortConsumptionCoefficient
+        ) < 1e-6
+      );
+    }
+  }
+});

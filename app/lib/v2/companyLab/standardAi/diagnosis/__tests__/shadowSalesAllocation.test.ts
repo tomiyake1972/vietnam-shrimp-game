@@ -124,6 +124,53 @@ test("会社IDが一致し、他社データが混入しない", () => {
   assert.equal(result.companyId, "MASS");
 });
 
+test("【Phase F-15】38人（Test14実測headcount）でCurrent再現→JP集中を、Volume-shadowもContribution-shadowも正当化しない限り縮小する", () => {
+  // 【38人の作り方】18→38への出力の比例縮小/拡大ではなく、observationのheadcount
+  // フィールドだけを38へ差し替えて、本番の buildStandardAiSalesPlans を38人で
+  // 再実行する（既存の「headcount総数が0なら」テストと同じフィールド上書き手法）。
+  const { state, fixtures } = initializeCompanyLab(baseConfig({ seed: "shadow-sales-001" }));
+  const fixture = fixtures.find((f) => f.companyId === "BAL")!;
+  const publicInfo1 = buildPublicMarketInfo(state);
+  const decisionsTurn1: Record<string, ReturnType<typeof generateStandardAiDecisionWithDiagnostics>["decision"]> = {};
+  for (const f of fixtures) {
+    const own = buildCompanyOwnState(state, f);
+    decisionsTurn1[f.companyId] = generateStandardAiDecisionWithDiagnostics(f, own, publicInfo1, state.currentPeriod, 1).decision;
+  }
+  const nextState = advanceCompanyLabQuarter(state, fixtures, decisionsTurn1);
+  const ownState2 = buildCompanyOwnState(nextState, fixture);
+  const publicInfo2 = buildPublicMarketInfo(nextState);
+  const observation2raw = buildStandardAiObservation(fixture, ownState2, publicInfo2, nextState.currentPeriod, 2);
+  const observation38 = { ...observation2raw, salesForceHeadcountTotal: 38 };
+  const pressures38 = computePressureScores(observation38, fixture);
+  const salesResult38 = buildStandardAiSalesPlans(fixture, observation38, pressures38);
+
+  const jpPlan = salesResult38.salesPlans.find((p) => p.market === "JP");
+  assert.ok(jpPlan, "JP行が存在すること");
+  const currentJpHeadcount = jpPlan!.salesForceHeadcount;
+
+  const ue = buildStandardAiUnitEconomics(observation38);
+  const comparison = buildShadowSalesAllocationComparison(
+    observation38,
+    ue,
+    salesResult38.desiredByProduct,
+    salesResult38.salesPlans
+  );
+  const volumeJp = comparison.volumeOriented.marketSummaries.find((m) => m.market === "JP")!;
+  const contributionJp = comparison.contributionOriented.marketSummaries.find((m) => m.market === "JP")!;
+
+  // JPのCTS効果の優位（Phase C診断で確認済み: 他市場より僅かに高い程度）は、
+  // 50%集中を正当化する規模ではないため、両shadowともJPのheadcountを
+  // current（38人ケースでは19人）より減らすはずである。
+  assert.ok(
+    volumeJp.shadowHeadcount < currentJpHeadcount,
+    `volume-shadowのJP headcount(${volumeJp.shadowHeadcount})はcurrent(${currentJpHeadcount})より少ないはず`
+  );
+  assert.ok(
+    contributionJp.shadowHeadcount < currentJpHeadcount,
+    `contribution-shadowのJP headcount(${contributionJp.shadowHeadcount})はcurrent(${currentJpHeadcount})より少ないはず`
+  );
+});
+
 test("本番の意思決定(decision/production.ts等)は本テストのshadow計算を一切呼び出していない（production decisions are not yet changed by shadow diagnostics）", () => {
   // 構造的な確認: shadowSalesAllocation.tsをimportしているのはこのテストファイルと
   // 将来のレポート生成コードのみであるべきで、decision/配下のいずれのファイルからも
