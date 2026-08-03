@@ -176,3 +176,56 @@ test("FINDIAG-7: 借入余力は既存債務に対して単調非増加である
   }
   assert.equal(prev, 0, "債務95,000,000では余力0");
 });
+
+// ---------------------------------------------------------------------
+// 【診断報告の是正・2026-08-03】三宅さんの数値整合性指摘への回答として追加。
+// 前回報告の候補比較表がturn3で0を出力していた（三宅さんの手計算では約45.7Mが正しい）
+// 原因は、候補計算スクリプト側の手入力EBITDA値が実際の引受用EBITDAと異なっていたこと
+// （computeBorrowingCapacity本体にバグはない）。以下はそれをcharacterizeし、
+// 今後この整合性が壊れないことを保証するテスト。
+// ---------------------------------------------------------------------
+
+test("FINDIAG-8: 【是正確認】四半期EBITDA×multiplierという式に忠実である限り、multiplierを引き上げれば収益ベース上限は線形に伸びる（三宅さんの手計算99,403,344の再現）", () => {
+  // turn3実測相当: 引受用EBITDA(前期営業利益+前期減価償却)=12,425,418、既存債務=53,700,000、担保上限=44,707,642。
+  const ebitdaQ = 12_425_418;
+  const debt = 53_700_000;
+  const capBase = capacity({ receivables: 53_093_502, rawAvail: 19_465_090, fg: 8_912_823, equity: 109_030_429, debt, ebitdaQ, tier: "B" });
+  assert.equal(capBase.earningsBasedLimitUsd, ebitdaQ * 2.0, "現行multiplier=2.0での収益ベース上限");
+
+  const paramsAt8 = { ...P, borrowingCapacity: { ...P.borrowingCapacity, earningsMultiple: 8.0 } };
+  const capAt8 = computeBorrowingCapacity(
+    {
+      companyId: "BAL",
+      period: PERIOD,
+      collateral: { receivablesUsd: 53_093_502, rawMaterialAvailableUsd: 19_465_090, rawMaterialInTransitUsd: 0, finishedGoodsUsd: 8_912_823 },
+      ebitdaLikeQuarterlyUsd: ebitdaQ,
+      totalEquityUsd: 109_030_429,
+      existingLoanBalanceUsd: debt,
+      creditTier: "B",
+      severeArrears: false,
+      insolvent: false,
+    },
+    paramsAt8
+  );
+  assert.equal(capAt8.earningsBasedLimitUsd, ebitdaQ * 8.0);
+  assert.equal(capAt8.earningsBasedLimitUsd, 99_403_344, "三宅さんの手計算(99.403M)と一致する");
+  assert.equal(capAt8.grossLimitUsd, Math.min(Math.max(capAt8.collateralBasedLimitUsd, capAt8.earningsBasedLimitUsd), capAt8.creditTierCapUsd));
+  assert.equal(capAt8.availableAdditionalCapacityUsd, capAt8.grossLimitUsd - debt);
+  assert.ok(capAt8.availableAdditionalCapacityUsd > 45_000_000, `追加借入可能額が約45.7M付近であること。実測 ${capAt8.availableAdditionalCapacityUsd}`);
+});
+
+test("FINDIAG-9: 【是正確認】existingLoanBalanceUsdは前期末残高そのものであり、当期の元金返済後B/S残高とは別の時点の値である（参照時点の混在の再発防止）", () => {
+  // turn4末残高52,050,000がturn5の引受にそのままexistingLoanBalanceとして使われ、
+  // turn5当期中に25,650,000の返済が起きても、引受時点の値自体は返済の影響を受けない
+  // （返済は引受確定後に発生するため）。
+  const priorQuarterEndBalance = 52_050_000;
+  const cap = capacity({ receivables: 44_324_321, equity: 111_511_931, debt: priorQuarterEndBalance, tier: "A" });
+  assert.equal(cap.existingLoanBalanceUsd, priorQuarterEndBalance, "existingLoanBalanceUsdは渡した前期末残高そのまま。当期の返済状況を一切反映しない");
+
+  const postRepaymentBalance = 27_280_739; // turn5当期末（返済後）の実測残高。引受には無関係。
+  assert.notEqual(
+    cap.existingLoanBalanceUsd,
+    postRepaymentBalance,
+    "引受時のexistingLoanBalanceと当期返済後B/S残高は別時点の値であり、一致しなくて正しい"
+  );
+});
