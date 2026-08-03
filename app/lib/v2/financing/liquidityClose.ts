@@ -37,7 +37,7 @@ import {
 import { closeFinancialQuarter, CompanyQuarterBusinessActuals } from "../finance/quarterClose";
 import { FinanceParameters } from "../finance/parameters";
 import { Product } from "../market/types";
-import { computeBorrowingCapacity, CollateralInput } from "./borrowingCapacity";
+import { computeBorrowingCapacity, CollateralInput, BorrowingCapacityInput } from "./borrowingCapacity";
 import { computeCreditScore, CreditScoreInput } from "./creditScore";
 import { checkCovenants } from "./covenant";
 import { underwriteLoanApplication } from "./bankUnderwriting";
@@ -59,6 +59,83 @@ import {
   ProcurementConstraintResult,
   UnderwritingDecision,
 } from "./types";
+
+// ---------------------------------------------------------------------
+// 【診断専用・observation-only】与信スナップショット／ローン残高ロールフォワード
+// の観測フック（2026-08-03、財務診断ブランチ）。
+//
+// 目的: computeBorrowingCapacity へ実際に渡された入力オブジェクト（同一参照）と、
+// closeQuarterWithFinancing 内でのローン残高の遷移（前期末→通常融資実行→
+// 緊急融資実行→元金返済→当期末）を、実行中のその時点で・加工せずそのまま
+// 捕捉するための登録式コールバック。
+//
+// 【本番挙動への影響なし】
+//   - オブザーバーが未登録(undefined)の場合、既存コードと完全に同一の
+//     処理・戻り値・副作用のみが発生する（if (observer) の内側でしか
+//     呼ばれないコールバックを追加しただけ）。
+//   - コールバックはRNGを消費せず、会社状態・意思決定・戻り値を書き換えない
+//     （読み取り専用。渡すオブジェクトはconst代入したものをそのまま使うだけで、
+//     computeBorrowingCapacity等への実引数の組み立て方自体は変更していない）。
+//   - このファイルの他のエクスポート・計算式は一切変更していない。
+// ---------------------------------------------------------------------
+
+/** computeBorrowingCapacity へ実際に渡された入力・結果を、その呼び出し直後にそのまま捕捉したもの。 */
+export interface UnderwritingSnapshot {
+  readonly companyId: CompanyId;
+  readonly period: PeriodV2;
+  /** computeBorrowingCapacityへ実際に渡された引数オブジェクトそのもの（同一参照）。 */
+  readonly borrowingCapacityInput: BorrowingCapacityInput;
+  /** computeBorrowingCapacityの戻り値そのもの（同一参照）。 */
+  readonly borrowingCapacityResult: BorrowingCapacityResult;
+  readonly creditScore: CreditScoreResult;
+  readonly covenant: CovenantCheckResult;
+  readonly underwriting: UnderwritingDecision;
+  readonly requestedAmountUsd: number;
+  readonly applicationType: FinancingRequestInput["desiredLoanType"];
+}
+
+/** closeQuarterWithFinancing内でのローン残高の遷移を、実際の計算過程からそのまま捕捉したもの。 */
+export interface LoanRollForwardSnapshot {
+  readonly companyId: CompanyId;
+  readonly period: PeriodV2;
+  /** (1)(2)(3) 前期末＝引受時点＝返済前残高（設計上単一の値。ST/LT内訳つき）。 */
+  readonly priorShortTermLoansUsd: number;
+  readonly priorLongTermLoansUsd: number;
+  readonly priorTotalLoanBalanceUsd: number;
+  /** (4)相当: 通常融資の実行額（緊急融資を含まない）。 */
+  readonly normalDrawUsd: number;
+  /** (5)相当: 緊急融資の実行額。 */
+  readonly emergencyDrawUsd: number;
+  readonly totalLoanDrawUsd: number;
+  readonly scheduledPrincipalDueUsd: number;
+  readonly scheduledInterestDueUsd: number;
+  /** (6)相当: 実際に支払われた元本額（scheduledPrincipalDueUsd以下のことがある＝現金不足時）。 */
+  readonly principalPaidCashUsd: number;
+  readonly interestPaidCashUsd: number;
+  /** (7) 当期末残高（ST/LT内訳つき）。 */
+  readonly endingShortTermLoansUsd: number;
+  readonly endingLongTermLoansUsd: number;
+  readonly endingTotalLoanBalanceUsd: number;
+}
+
+let underwritingSnapshotObserver: ((snapshot: UnderwritingSnapshot) => void) | undefined;
+let loanRollForwardObserver: ((snapshot: LoanRollForwardSnapshot) => void) | undefined;
+
+/**
+ * 【診断専用】与信スナップショットの観測フックを登録する。
+ * `undefined`を渡せば解除（デフォルトは未登録＝本番挙動と完全に同一）。
+ */
+export function setUnderwritingSnapshotObserver(observer: ((snapshot: UnderwritingSnapshot) => void) | undefined): void {
+  underwritingSnapshotObserver = observer;
+}
+
+/**
+ * 【診断専用】ローン残高ロールフォワードの観測フックを登録する。
+ * `undefined`を渡せば解除（デフォルトは未登録＝本番挙動と完全に同一）。
+ */
+export function setLoanRollForwardObserver(observer: ((snapshot: LoanRollForwardSnapshot) => void) | undefined): void {
+  loanRollForwardObserver = observer;
+}
 
 // ---------------------------------------------------------------------
 // 1. 期首の与信判断（planQuarterFinancing）
@@ -143,20 +220,21 @@ export function planQuarterFinancing(input: QuarterFinancingPlanInput, financePa
   );
 
   const severeArrears = fin.history.consecutiveArrearsQuarters >= params.liquidity.paymentDefaultConsecutiveQuartersThreshold;
-  const borrowingCapacity = computeBorrowingCapacity(
-    {
-      companyId: input.companyId,
-      period: input.period,
-      collateral: input.collateral,
-      ebitdaLikeQuarterlyUsd: ebitdaLike,
-      totalEquityUsd: totalEquity,
-      existingLoanBalanceUsd: existingLoanBalance,
-      creditTier: creditScore.tier,
-      severeArrears,
-      insolvent,
-    },
-    params
-  );
+  // 【診断用】computeBorrowingCapacityへ渡す引数を一度constへ束縛してから呼ぶ
+  // （呼び方自体は従来と同じインライン組み立てを変数化しただけで、値・評価順序は不変）。
+  // これにより、下のオブザーバーへ「実際に渡されたのと同一の参照」をそのまま渡せる。
+  const borrowingCapacityInput: BorrowingCapacityInput = {
+    companyId: input.companyId,
+    period: input.period,
+    collateral: input.collateral,
+    ebitdaLikeQuarterlyUsd: ebitdaLike,
+    totalEquityUsd: totalEquity,
+    existingLoanBalanceUsd: existingLoanBalance,
+    creditTier: creditScore.tier,
+    severeArrears,
+    insolvent,
+  };
+  const borrowingCapacity = computeBorrowingCapacity(borrowingCapacityInput, params);
 
   const underwriting = underwriteLoanApplication(
     input.companyId,
@@ -169,6 +247,20 @@ export function planQuarterFinancing(input: QuarterFinancingPlanInput, financePa
     params,
     `${fin.loanPortfolio.loans.length}`
   );
+
+  if (underwritingSnapshotObserver) {
+    underwritingSnapshotObserver({
+      companyId: input.companyId,
+      period: input.period,
+      borrowingCapacityInput,
+      borrowingCapacityResult: borrowingCapacity,
+      creditScore,
+      covenant,
+      underwriting,
+      requestedAmountUsd: input.financingRequest.desiredAmountUsd,
+      applicationType: input.financingRequest.desiredLoanType,
+    });
+  }
 
   return { creditScore, borrowingCapacity, covenant, underwriting };
 }
@@ -573,6 +665,30 @@ export function closeQuarterWithFinancing(
     endingLongTermLoansUsd,
     endingAccruedInterestPayableUsd,
   };
+
+  if (loanRollForwardObserver) {
+    const priorShortTermLoansUsd = priorLoans
+      .filter((l) => l.loanType === "workingCapital" || l.loanType === "emergency")
+      .reduce((s, l) => s + l.currentPrincipalUsd, 0);
+    const priorLongTermLoansUsd = priorLoans.filter((l) => l.loanType === "termLoan").reduce((s, l) => s + l.currentPrincipalUsd, 0);
+    loanRollForwardObserver({
+      companyId,
+      period,
+      priorShortTermLoansUsd,
+      priorLongTermLoansUsd,
+      priorTotalLoanBalanceUsd: priorShortTermLoansUsd + priorLongTermLoansUsd,
+      normalDrawUsd,
+      emergencyDrawUsd,
+      totalLoanDrawUsd,
+      scheduledPrincipalDueUsd: scheduledPrincipalDue,
+      scheduledInterestDueUsd: fullAccruedInterest,
+      principalPaidCashUsd,
+      interestPaidCashUsd,
+      endingShortTermLoansUsd,
+      endingLongTermLoansUsd,
+      endingTotalLoanBalanceUsd: endingShortTermLoansUsd + endingLongTermLoansUsd,
+    });
+  }
 
   return {
     financeResult: passTwo.result,
