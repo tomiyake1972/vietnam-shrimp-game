@@ -122,8 +122,49 @@ let underwritingSnapshotObserver: ((snapshot: UnderwritingSnapshot) => void) | u
 let loanRollForwardObserver: ((snapshot: LoanRollForwardSnapshot) => void) | undefined;
 
 /**
+ * 【診断専用・observer隔離】オブザーバーコールバック自体が例外を投げても、
+ * 本番の四半期クローズ処理へは一切伝播させない（診断コードの不具合で
+ * ゲームが止まる事態を構造的に防ぐ）。失敗した場合はconsole.errorへ
+ * 記録するだけで処理を継続する。SNAP-12テストでこの隔離を検証する。
+ */
+function invokeObserverSafely<T>(observer: ((snapshot: T) => void) | undefined, snapshot: T, observerName: string): void {
+  if (!observer) return;
+  try {
+    observer(snapshot);
+  } catch (err) {
+    console.error(`[診断専用オブザーバーで例外を捕捉・隔離しました: ${observerName}]`, err);
+  }
+}
+
+/**
  * 【診断専用】与信スナップショットの観測フックを登録する。
  * `undefined`を渡せば解除（デフォルトは未登録＝本番挙動と完全に同一）。
+ *
+ * 【登録/解除の作法】呼び出し側は必ず`try { ...実行... } finally { setUnderwritingSnapshotObserver(undefined); }`
+ * のように、finally節で解除すること（`scripts/financingSnapshotDiagnosis.ts`の
+ * `collectSnapshots`、`app/lib/v2/financing/__tests__/underwritingSnapshotRealPath.test.ts`の
+ * `runOnce`を参照）。これにより、シミュレーション実行中に例外が投げられても
+ * オブザーバーが登録されたまま残ることがない（他のテスト・他のスクリプト実行への
+ * 汚染を防ぐ）。
+ *
+ * 【テスト分離】このモジュールスコープの`let`変数はプロセス内でグローバルに
+ * 共有される。Node.jsの`node --test`はデフォルトで同一プロセス内の複数テストを
+ * 並行実行しうるため、複数テストが同時に別々のオブザーバーを登録すると
+ * 競合しうる。本ブランチのテスト（SNAP-*）は各テストが`runOnce()`の中で
+ * 登録→実行→finally解除を1つの同期的な関数呼び出しの中で完結させており、
+ * かつ`node:test`のテスト関数はデフォルトで直列実行されるため、現状の
+ * テストスイートでは競合は発生しない。ただし将来「複数テストを並行実行する
+ * オプション」を有効化する場合は、このグローバル状態が競合点になりうる点に
+ * 注意（対策案: テストごとに一意なCompanyLabConfig.seedを使い分けて
+ * 実行そのものを直列化するか、observerを配列化してテストID付きで
+ * フィルタするなどの追加対応が必要）。
+ *
+ * 【二段呼び出し(Pass1/Pass2)との関係】closeQuarterWithFinancing内部では
+ * finance/quarterClose.tsのcloseFinancialQuarterをPass1(予備)・Pass2(確定)の
+ * 2回呼ぶが、loanRollForwardObserverの発火はこの2回呼び出しの**外側**、
+ * closeQuarterWithFinancing全体の最後（return直前）に1箇所だけ置かれている。
+ * したがって1社×1turnの引受判断につき、オブザーバーは必ず**1回だけ**発火する
+ * （Pass1/Pass2それぞれで発火するわけではない）。
  */
 export function setUnderwritingSnapshotObserver(observer: ((snapshot: UnderwritingSnapshot) => void) | undefined): void {
   underwritingSnapshotObserver = observer;
@@ -248,19 +289,21 @@ export function planQuarterFinancing(input: QuarterFinancingPlanInput, financePa
     `${fin.loanPortfolio.loans.length}`
   );
 
-  if (underwritingSnapshotObserver) {
-    underwritingSnapshotObserver({
-      companyId: input.companyId,
-      period: input.period,
-      borrowingCapacityInput,
-      borrowingCapacityResult: borrowingCapacity,
-      creditScore,
-      covenant,
-      underwriting,
-      requestedAmountUsd: input.financingRequest.desiredAmountUsd,
-      applicationType: input.financingRequest.desiredLoanType,
-    });
-  }
+  // 【診断専用・observer隔離】未登録時(underwritingSnapshotObserver===undefined)は
+  // invokeObserverSafely内で即returnし、以降の処理は一切発生しない
+  // （本番挙動への上乗せコストなし。observerが登録されている場合のみ、
+  // 例外を隔離した上でコールバックを呼ぶ）。
+  invokeObserverSafely(underwritingSnapshotObserver, {
+    companyId: input.companyId,
+    period: input.period,
+    borrowingCapacityInput,
+    borrowingCapacityResult: borrowingCapacity,
+    creditScore,
+    covenant,
+    underwriting,
+    requestedAmountUsd: input.financingRequest.desiredAmountUsd,
+    applicationType: input.financingRequest.desiredLoanType,
+  }, "setUnderwritingSnapshotObserver");
 
   return { creditScore, borrowingCapacity, covenant, underwriting };
 }
@@ -666,12 +709,18 @@ export function closeQuarterWithFinancing(
     endingAccruedInterestPayableUsd,
   };
 
+  // 【診断専用・observer隔離】未登録時は外側のif自体がfalseになりブロック内の
+  // 計算（priorShortTermLoansUsd等の集計）ごと一切実行されない（本番挙動への
+  // 上乗せコストなし）。登録時のみ、例外を隔離した上でinvokeObserverSafely経由で
+  // コールバックを呼ぶ。closeQuarterWithFinancing全体でこの呼び出しは1箇所のみ
+  // （Pass1/Pass2の内側ではなく、両パス完了後の最後に1回だけ）であり、
+  // 1社×1turnの引受判断につき必ず1回だけ発火する。
   if (loanRollForwardObserver) {
     const priorShortTermLoansUsd = priorLoans
       .filter((l) => l.loanType === "workingCapital" || l.loanType === "emergency")
       .reduce((s, l) => s + l.currentPrincipalUsd, 0);
     const priorLongTermLoansUsd = priorLoans.filter((l) => l.loanType === "termLoan").reduce((s, l) => s + l.currentPrincipalUsd, 0);
-    loanRollForwardObserver({
+    invokeObserverSafely(loanRollForwardObserver, {
       companyId,
       period,
       priorShortTermLoansUsd,
@@ -687,7 +736,7 @@ export function closeQuarterWithFinancing(
       endingShortTermLoansUsd,
       endingLongTermLoansUsd,
       endingTotalLoanBalanceUsd: endingShortTermLoansUsd + endingLongTermLoansUsd,
-    });
+    }, "setLoanRollForwardObserver");
   }
 
   return {
