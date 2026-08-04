@@ -76,4 +76,6 @@ Claudeの前回提案（「単一の追加入力」）を修正し、少なく�
 
 ## 6. 次のアクション
 
-本文書時点では実装未着手。次回、三宅さんの指示があれば第1段階（Business Scale Profile、診断専用）から着手する。
+**2026-08-04更新: 第1段階（Business Scale Profile）着手・完了。** `diagnosis/businessScaleProfile.ts`（5軸、単一値へ潰さない）・`diagnosis/businessScaleScenarios.ts`（Conservative/Base/Growth、型と生成ルール案）を実装し、テスト18件・全2194件pass・tsc/lintクリーンを確認して`feature/v2-standard-ai-unit-economics-shadow-allocation`へpush済み。実測38人ケースへの適用結果は`TEST14_TURN2_BUSINESS_SCALE_PROFILE.md`・`TEST14_TURN2_BUSINESS_SCALE_SCENARIOS.md`、既存Profile監査は`EXISTING_MANAGEMENT_ORIENTATION_PROFILE_AUDIT.md`、Mission/Vision/Policyドラフトと将来のVision Progress Diagnosis設計は`STANDARD_COMPANY_MISSION_VISION_POLICY_DRAFT.md`、observation gapと#04引き渡しは`BUSINESS_SCALE_OBSERVATION_GAPS_AND_04_HANDOFF.md`を参照。
+
+次回は第2段階以降（Mission/Visionデータ構造の実装、Vision Progress Diagnosisモジュールの実装）に進む前に、三宅さんの確認・優先順位付けを待つ。本番decisionへの接続（第7段階）は依然未着手。
