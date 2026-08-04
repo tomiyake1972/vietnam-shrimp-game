@@ -119,8 +119,15 @@ turn5 で初期短期借入（満期4四半期の満期一括）が満期到来�
 | 7 | 15 | 14 | 0 | 0 | 9,548,660 |
 | 8 | 15 | 15 | 0 | 0 | 93,125,854 |
 
-**凍結件数は全期間で0。** 却下はすべて `bindingConstraint = collateralBased` による
-余力ゼロであり、信用区分は却下61件のうち A が31件・B が30件、
+**凍結件数は全期間で0。**
+【用語是正・§11-6参照】却下は全て、既存借入残高(`existingLoanBalance`)が
+`grossLimit`を上回った（＝`availableAdditionalCapacityUsd = max(0, grossLimit -
+existingLoanBalance)`がゼロになった）ことによる。この`grossLimit`の算定基準
+として`collateralBasedLimit`が選ばれていた（`bindingConstraint = collateralBased`）
+というのは「担保が絞っている」ことを意味しない——`max(collateral, earnings)`の
+うち担保ベース値の方が大きかったというだけであり、余力をゼロにした真因は
+既存債務控除の方である（詳細は§11-6・§12の用語是正を参照）。
+信用区分は却下61件のうち A が31件・B が30件、
 つまり**却下されたのはすべて信用区分AまたはBの健全企業**である。
 
 ---
@@ -137,7 +144,7 @@ turn5 で初期短期借入（満期4四半期の満期一括）が満期到来�
 | DSCR・自己資本比率・流動比率・負債比率の分子分母 | covenant側。本件では `anyBreach = false` が全期間continuedで、拘束していない |
 | 借入前後の状態の取り違え | なし。`prevFinanceState`（前期末）を使用。銀行が当期実績を見ない設計はコメントでも明示 |
 | 参照タイミング | 正しい。期首に確定し、当期のturnResultは受け取れない関数シグネチャ |
-| 既存債務の二重控除 | 拘束経路（担保ベース）では**なし**。純資産経路は純資産が債務控除後なので二重性はあるが、その経路は一度も拘束していない |
+| 既存債務の二重控除 | grossLimitの算定基準として選ばれた経路（担保ベース）では**なし**。純資産経路（tierCap）は純資産が債務控除後の値なので二重性はあるが、tierCapがgrossLimitを実際に縮小した行は§13の集計で0件（develop/v2）〜15件（pd_labor）であり、大半の行では影響しない |
 | undefined・初期値による自動却下 | turn1の `earningsBasedLimit = 0`（前期実績が無いため）は事実。ただし担保ベースが常に上回るため原因ではない |
 | **健全な初期企業も却下されるか** | **却下される。これが本件の核心**（§3） |
 | 承認されたのに実行されない経路 | **ない。** turn6: 承認 11,321,353 → `loanDrawUsd` 11,321,353 → 短期借入 2,530,739 → 13,852,092 と正しく反映 |
@@ -165,10 +172,16 @@ turn5 で初期短期借入（満期4四半期の満期一括）が満期到来�
 | **grossLimit** | 37,270,400 | 44,707,642 | 37,079,958 |
 | **既存借入残高** | **57,000,000** | **53,700,000** | **50,400,000** |
 | **追加借入可能額** | **0** | **0** | **0** |
-| 拘束条件 / 凍結 | collateralBased / false | collateralBased / false | collateralBased / false |
+| grossLimit算定基準※ / 凍結 | collateralBased / false | collateralBased / false | collateralBased / false |
 | 承認額 / 否決額 | 0 / 10,558,600 | 0 / 15,361,893 | 0 / 6,046,231 |
 | 実行（通常 / 緊急） | 0 / 0 | 0 / 0 | **0 / 2,530,739** |
 | 財務制限条項違反 | false | false | false |
+
+※コード上のフィールド名は`bindingConstraint`だが、`grossLimit = min(max(担保,収益),
+tierCap)`の`max()`部分でどちらが選ばれたかを表すだけであり、「担保が絞っている」
+ことを意味しない（用語の是正は§11-6・§12参照）。このturn1〜5では
+`grossLimit = 担保ベース上限`と一致しており、tierCapによる縮小も発生していない
+（§13参照）。
 
 **緊急融資へ落ちた理由**: turn5 は初期短期借入 24,000,000 の満期到来期であり、
 約定元本＋利息の支払で現金が0になった。通常融資は余力0で承認されないため、
@@ -474,11 +487,17 @@ turn5: 33,233,948/75,050,923/116,867,897）は、今回の全中間値つき再�
 
 **結論**: PD係数1.8は引受用EBITDA（前期営業利益+前期減価償却）の値を明確に下げ、
 一部turnではゼロまで落とす（**測定可能な間接効果あり**）。しかし
-`bindingConstraint`はdevelop/v2・pd_labor両方で一貫して`collateralBased`（担保上限が律速）
-であり、`earningsBased`（収益上限）が律速になった行は3シード×8ターン×5社のいずれにも
+【用語是正・§11-6・§12参照】`grossLimit`の算定基準（`bindingConstraint`）は
+develop/v2・pd_labor両方で一貫して`collateralBased`——すなわち
+**担保ベース値が収益ベース値を上回り、grossLimit算定の基礎値として選択され続けた**
+（担保が「絞っている」「律速している」わけではない。§13の集計では実際、
+両スタックとも120行中0件が`grossLimit>0`かつtierCapに縮められる状態にすら
+至っておらず、`grossLimit`自体はほぼ全行で担保ベース値と同値だった）。
+収益ベース値が担保ベース値を上回った行は3シード×8ターン×5社のいずれにも
 存在しなかった。したがって**「PD係数1.8がEBITDA経由で承認可否に直接影響する」という
 仮説は今回のデータでは棄却される**——影響は数値レベルでは存在するが、
-現行の与信構造（担保上限が支配的）の下では承認結果を左右していない。
+`grossLimit`の算定基準が一貫して担保ベース値である現行の状態では、
+承認結果を左右していない。
 
 一方で、pd_labor側は**8四半期を通じて一度も承認が回復しない**（develop/v2はturn6で回復）。
 これはEBITDA経由の間接効果ではなく、担保上限側の推移の違い（原料在庫・完成品在庫の
@@ -533,7 +552,7 @@ observation-onlyフック（デフォルト未登録＝既存動作と完全に�
    内側でしか呼ばれないため、未登録時は既存コードと完全に同一の処理しかしない。
 2. コールバックは値を読み取って配列にpushするだけで、会社状態・返り値・RNGを
    一切書き換えない。
-3. `SNAP-1`テスト（`app/lib/v2/financing/__tests__/underwritingSnapshotRealPath.test.ts`）で、
+3. `SNAP-1`テスト（`app/lib/v2/financing/__tests__/underwritingSnapshotInvariants.test.ts`）で、
    同一seedをオブザーバー登録あり/なしで実行し、`result.history`
    （財務・資金繰り・生産・市場等の全結果）が**完全に同一**であることを検証済み
    （`JSON.stringify`による厳密比較）。
@@ -548,6 +567,54 @@ observation-onlyフック（デフォルト未登録＝既存動作と完全に�
 同一の`state.financingState.companies`から取得した同一の`prevFinancingState`参照を
 渡されて呼ばれ、両呼び出しの間でこの配列は変更されない。`SNAP-4`で
 `companyId`/`period`の対応関係を検証済み）。
+
+### 11-2a オブザーバー機構のコードレビュー向け詳細（三宅さんの是正指示・2026-08-04）
+
+**登録/解除の方法**: `setUnderwritingSnapshotObserver(fn)` / `setLoanRollForwardObserver(fn)`
+にコールバックを渡すと登録、`undefined`を渡すと解除。呼び出し側は必ず
+`try { ...シミュレーション実行... } finally { setXxxObserver(undefined); }`の形で、
+finally節で解除する（`scripts/financingSnapshotDiagnosis.ts`の`collectSnapshots`、
+`app/lib/v2/financing/__tests__/underwritingSnapshotTestHelpers.ts`の`runOnce`を参照）。
+これにより、シミュレーション実行中に例外が投げられても、オブザーバーが
+登録されたまま他の実行・他のテストへ残ることがない。
+
+**オブザーバー自体が例外を投げた場合**: `liquidityClose.ts`内の`invokeObserverSafely`
+ヘルパー関数が、オブザーバー呼び出しを`try/catch`で囲む。オブザーバーが例外を
+投げても`console.error`に記録するだけで処理を継続し、**本番の四半期クローズ処理
+（`planQuarterFinancing`・`closeQuarterWithFinancing`の残りの計算・戻り値）へは
+一切伝播しない**。これは今回追加した安全対策であり（三宅さんの是正指示4番への
+対応）、`SNAP-12`テストで、意図的に例外を投げるオブザーバーを登録した状態で
+8四半期のシミュレーションを実行し、(a) シミュレーション全体が例外を投げずに
+最後まで完了すること、(b) オブザーバーは実際に呼ばれたこと（例外を投げる前の
+処理は実行されたこと）を確認済み。
+
+**テスト分離**: `underwritingSnapshotObserver`/`loanRollForwardObserver`は
+モジュールスコープの`let`変数であり、プロセス内でグローバルに共有される。
+本ブランチのテスト（`underwritingSnapshotInvariants.test.ts`等）は、各テストが
+`runOnce()`という1つの同期的な関数呼び出しの中で「登録→実行→finally解除」を
+完結させており、かつ`node --test`はデフォルトで同一ファイル内のテストを
+直列実行するため、現状のテストスイートでは競合は発生しない。
+**将来「複数テストを並行実行するオプション」を有効化する場合は、この
+グローバル状態が競合点になりうる**（対策案は`liquidityClose.ts`の
+`setUnderwritingSnapshotObserver`のドキュメントコメントに記載）。
+
+**Pass1/Pass2との関係（二重捕捉の防止）**: `closeQuarterWithFinancing`内部では
+`finance/quarterClose.ts`の`closeFinancialQuarter`をPass1（予備）・Pass2（確定）の
+2回呼ぶが、`loanRollForwardObserver`の発火はこの2回呼び出しの**外側**、
+`closeQuarterWithFinancing`全体の最後（return直前）に1箇所だけ置かれている。
+したがって1社×1turnの引受判断につき、オブザーバーは**必ず1回だけ**発火する
+（Pass1/Pass2それぞれで発火するわけではなく、二重捕捉は構造的に発生しない）。
+
+**未登録時の挙動（改めて明示）**: `setUnderwritingSnapshotObserver`は
+`planQuarterFinancing`内で`invokeObserverSafely(underwritingSnapshotObserver, ...)`
+として呼ばれるが、`invokeObserverSafely`の実装は`if (!observer) return;`から
+始まる——未登録時（`observer === undefined`）はこの1行のガード以外、
+一切の追加処理（オブジェクト構築・関数呼び出し）を行わない。
+`setLoanRollForwardObserver`側は、外側の`if (loanRollForwardObserver)`ガードが
+既にこの役割を果たしており（未登録時は`priorShortTermLoansUsd`等の集計
+そのものがスキップされる）、`invokeObserverSafely`はその内側で追加の
+例外隔離のみを行う。**いずれの経路でも、未登録時に本番処理へ追加される
+コストはガード判定1回のみ（実質ゼロ）である。**
 
 ### 11-3 同一時点検証: 現行パラメータでの完全一致
 
@@ -640,11 +707,27 @@ observation-onlyフック（デフォルト未登録＝既存動作と完全に�
 
 ### 11-7 候補1（初期債務・fixtureの調整）— 現金と分離した単独変化
 
+**【方法論の明示（三宅さんの是正指示）】本セクションの全ての数値は、
+静的スナップショット再計算（§11-3〜11-6・11-8〜11-10と同じ、1時点の
+`borrowingCapacityInput`を仮の値で置き換えて`computeBorrowingCapacity`を
+呼び直すだけの手法）では**ない**。`scripts/financingCreditDiagnosis.ts`の
+`collectTrace(seed, override)`は、`override`で初期fixtureの`shortTermLoans`/
+`longTermLoans`/`cash`を実際に変更した上で、`initializeUnifiedCompanyLabFromTemplate`
+から`runFromInit`まで**8四半期分をturnごとに実際に再シミュレーション**する
+（AIの意思決定・市場・生産・与信判断の全てが、変更した初期状態から
+改めて計算し直される）。したがって「緊急融資0件」「turn1平均available」
+「承認44→75件」等の数値は、**将来時点（turn2以降）の挙動を含む本番の
+再シミュレーション結果**であり、静的な1時点の再計算では原理的に
+観測できない性質の値である。**この区別により、以下の全ての数値は
+「本番再シミュレーション結果」に分類される（Exact live valueの一種。
+§14参照）。**
+
 前回までは初期現金と初期債務を同時に動かした変異点（P3/P4/R1〜R6/P5〜P7）が
 混在しており、「何が効いているか」を切り分けられていなかった。今回は
 **債務だけを動かす変異**と**現金だけを動かす変異**を完全に分離して再測定した
 （`scripts/financingCreditDiagnosis.ts`の`collectTrace`に`FinanceFixtureOverride`で
-片方だけを渡す。3シード×8四半期×5社=120行）。
+片方だけを渡す。3シード×8四半期×5社=120行、全て実際にターンごとに
+再シミュレーションした結果）。
 
 **債務のみ変化（現金20Mで固定）**
 
@@ -782,12 +865,29 @@ observation-onlyフック（デフォルト未登録＝既存動作と完全に�
 
 ## 13. develop/v2 と 48コミットスタック（PD係数1.8）の比較（読み取り専用測定）
 
+**テストの実行方法（両スタックで別々に実行し、両方ともgreenになることが合格条件）**:
+
+```
+# develop/v2側（本ブランチ、/tmp/fin_diag）— スタック非依存の不変条件 + develop/v2固有の期待値
+cd /tmp/fin_diag
+node --test --import tsx app/lib/v2/financing/__tests__/underwritingSnapshotInvariants.test.ts   # 10/10 pass
+node --test --import tsx app/lib/v2/financing/__tests__/underwritingSnapshotDevelopV2.test.ts     # 3/3 pass
+
+# pd_labor側（48コミットスタック、/tmp/pd_labor）— 診断オーバーレイを一時コピーして実行、終了後に復元
+# (underwritingSnapshotPdLabor.overlay.tsの冒頭コメントに手順の詳細あり)
+cd /tmp/pd_labor
+node --test --import tsx app/lib/v2/financing/__tests__/underwritingSnapshotInvariants.test.ts   # 10/10 pass（同じ不変条件ファイルをコピーして実行）
+node --test --import tsx app/lib/v2/financing/__tests__/underwritingSnapshotPdLabor.overlay.ts       # 4/4 pass
+```
+
 `/tmp/pd_labor`（`feature/v2-product-labor-and-pd-mechanization`、HEAD `5f1fa87`）へ
 `liquidityClose.ts`の観測フック・`financingSnapshotDiagnosis.ts`・
-`underwritingSnapshotRealPath.test.ts`を**一時的にコピー**して測定し、
+`underwritingSnapshotTestHelpers.ts`・`underwritingSnapshotInvariants.test.ts`・
+`underwritingSnapshotPdLabor.overlay.ts`を**一時的にコピー**して測定し、
 測定後に全て削除、`git checkout --`でliquidityClose.tsを復元し、
 `git status`が`nothing to commit, working tree clean`・HEAD `5f1fa87`が
-不変であることを確認済み（**コミットは一切行っていない**）。
+不変であることを確認済み（**コミットは一切行っていない**。手順の詳細は
+`underwritingSnapshotPdLabor.overlay.ts`冒頭のコメントを参照）。
 
 | 測定項目 | develop/v2（本ブランチ） | 48コミットスタック（PD係数1.8） |
 | --- | --- | --- |
@@ -814,6 +914,40 @@ observation-onlyフック（デフォルト未登録＝既存動作と完全に�
 これは担保上限側の推移の違い（原料在庫・完成品在庫の価値がPD係数1.8下でどう
 積み上がるかの違い）に起因する可能性が高いが、**この一段深い原因分析は
 本タスクのスコープ外**（PD係数の変更は禁止されており、本タスクは測定のみが範囲）。
+
+### 13-1 grossLimit算定基準・既存債務控除・凍結の内訳集計（両スタック側並び）
+
+3シード×8四半期×5社＝120行（`UnderwritingSnapshot`、両スタックとも同一手法・
+同一シード集合）を対象に、以下5種類の行数を集計した
+（用語は§11-6・§12の是正を反映——「担保が絞る」ではなく「grossLimitの算定基準として
+選択された」という表現を用いる）。
+
+| 集計項目 | develop/v2 | pd_labor（PD係数1.8） |
+| --- | --- | --- |
+| `max(collateralBasedLimit, earningsBasedLimit) > creditTierCap`（tierCapが実際にgrossLimitを縮小した行） | **0** | **15** |
+| `collateralBasedLimit ≥ earningsBasedLimit`（担保ベース値がgrossLimitの算定基準として選択された行） | 120 | 120 |
+| `earningsBasedLimit > collateralBasedLimit`（収益ベース値が算定基準として選択された行） | 0 | 0 |
+| `grossLimit > 0` かつ `grossLimit − existingLoanBalance ≤ 0`（余力自体はあったが既存債務控除で0になった行） | 76 | **120（全行）** |
+| `underwritingFrozen`（信用区分E／重大延滞／支払不能によるブロック） | 0 | 0 |
+
+読み取り:
+
+- **両スタックとも、収益ベース値がgrossLimitの算定基準として選ばれた行は1件もない**
+  ——担保ベース値が常に収益ベース値以上だった（PD係数1.8下でもEBITDAが
+  収益ベース値を担保ベース値まで押し上げるには至っていない）。
+- **develop/v2ではtierCapが実際にgrossLimitを縮小した行は0件**（§11-6・§15問い7で
+  指摘した「tierCapがほぼ常に非拘束」という観察を、今回120行全数の集計で確認）。
+  一方**pd_laborでは15件**、tierCapが実際にgrossLimitを縮小している
+  ——PD係数1.8下でEBITDAが下押しされる一方、担保上限側の相対的な低下により
+  tierCapとの大小関係が変わる状態が一部turn/一部社で発生していると推測される
+  （原因の深掘りは§13の既存記述どおり本タスクのスコープ外）。
+- **「余力はあったが既存債務控除で0になった」行が、develop/v2では76/120（63%）に
+  対し、pd_laborでは120/120（100%）**——pd_laborは8四半期を通じて
+  一貫してこの状態にあり、これが§13で報告した「pd_laborは一度も承認が回復しない」
+  という観察の内訳である。
+- `underwritingFrozen`はどちらのスタックでも0件——信用区分E・重大延滞・
+  支払不能による申請ブロックは、標準初期条件のシミュレーション期間内では
+  一度も発生しなかった（両スタック共通）。
 
 ---
 
