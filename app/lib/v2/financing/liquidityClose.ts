@@ -116,6 +116,22 @@ export interface LoanRollForwardSnapshot {
   readonly endingShortTermLoansUsd: number;
   readonly endingLongTermLoansUsd: number;
   readonly endingTotalLoanBalanceUsd: number;
+  /**
+   * 【2026-08-04追加・observation-only】緊急融資判定に実際に使われた
+   * 本番の不足額（`shortfallBeforeEmergency`）そのもの。診断スクリプト側の
+   * 近似計算（`scheduledPrincipal + scheduledInterest - normalDraw`）とは
+   * 別物であり、本番の式は
+   * `max(0, fullAccruedInterest + scheduledPrincipalDue - max(0, availableForDebtServiceBeforeEmergency))`
+   * （`availableForDebtServiceBeforeEmergency`はPass1後のキャッシュ残高。
+   * 単純な`normalDraw`ではなく、期首現金＋当期の営業・投資キャッシュフロー
+   * ＋通常融資実行額を反映した値）。緊急融資が発動しなかった四半期でも
+   * 0以上の値として常に記録する（対象外なら0）。
+   */
+  readonly shortfallBeforeEmergencyUsd: number;
+  /** Pass1後（通常融資は実行済み・利息元本現金支払前）の現金残高。緊急融資判定の直接入力。 */
+  readonly cashBeforeEmergencyDecisionUsd: number;
+  /** 緊急融資枠の上限（絶対上限と担保比率上限の小さい方）。緊急融資が発動しなかった四半期は0。 */
+  readonly emergencyCapUsd: number;
 }
 
 let underwritingSnapshotObserver: ((snapshot: UnderwritingSnapshot) => void) | undefined;
@@ -736,6 +752,9 @@ export function closeQuarterWithFinancing(
       endingShortTermLoansUsd,
       endingLongTermLoansUsd,
       endingTotalLoanBalanceUsd: endingShortTermLoansUsd + endingLongTermLoansUsd,
+      shortfallBeforeEmergencyUsd: shortfallBeforeEmergency,
+      cashBeforeEmergencyDecisionUsd: availableForDebtServiceBeforeEmergency,
+      emergencyCapUsd: emergencyLoan?.capUsd ?? 0,
     }, "setLoanRollForwardObserver");
   }
 
