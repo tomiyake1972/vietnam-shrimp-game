@@ -13,14 +13,13 @@
 | Future labor（次期の正社員人数） | **#05だけで安全に配線可能（未実施）** | 同上。`decision/labor.ts`のロジックから、次期の目標headcountを事前計算する関数を切り出せば配線可能と推定される。 |
 | Capex activation timing（設備投資の稼働開始時期） | **既にengineにあるがAIへ部分的に未配線** | `capex/parameters.ts`の`standardConstructionQuarters`+`postCompletionReadinessQuarters`は既存だが、「現在進行中のcapexプロジェクトが実際に何四半期後に稼働するか」という進行中プロジェクトごとの動的な残り期間は、`observation.activeCapexProjectTargets`（対象商品の集合のみ）からは直接読み取れない。 |
 
-## 2. Raw-material-supported Scaleが常に低くなりがちな理由（今回判明した設計上の限界）
+## 2. RawMaterial軸のsupportedScaleTonsをnullとした理由（2026-08-04修正）
 
-Business Scale ProfileのRawMaterial軸は、5社×4Q回帰で確認したとおり、turn2（原料パイプラインがまだ立ち上がっていない期）でほぼ全社0tになり、turn3〜4でも数千t程度の低い値に留まる。これは以下の複合的な理由による。
+**修正前の設計の問題（三宅さんの指摘、2026-08-04）**: 当初、Business Scale ProfileのRawMaterial軸は`certainSecuredRawTons`（期首在庫＋当期確実な入荷）を直接`supportedScaleTons`として使っていた。5社×4Q回帰で確認したとおり、turn2（原料パイプラインがまだ立ち上がっていない期）でほぼ全社0tになり、turn3〜4でも数千t程度の低い値に留まる。これを「Raw軸がbinding」と読むと、ShrimpXのように毎期市場から原料を買って加工する会社（原料在庫を大量に持つ会社ではない）では、正常な状態でもRaw軸が常に最も厳しい制約に見えてしまう。三宅さんの指摘どおり、これは「保守的な推計」ではなく「分からない」を「0tしかできない」という数値で表現してしまう設計上の誤りだった。
 
-1. `certainSecuredRawTons`の定義（期首在庫＋当期確実な入荷）が意図的に保守的である（三宅さんの指示どおり、市場全体の余剰から会社固有の値を推計しない）。
-2. このゲームの原料調達は「毎期新規に決める」運転資金型のフローであり、複数四半期分の原料を事前に確保しておくという設計になっていない（本モジュールの計算誤りではなく、ゲームのビジネスモデル自体の反映）。
+**修正内容**: RawMaterial軸を`securedRawScaleTons`（今すぐ確実に使える下限）／`procurementNeededScaleTons`（他4軸の最小値まで届くために必要な追加調達量）／`publicMarketAvailabilityState`（市場全体の余剰・タイト判定）／`companyPurchasableScaleTons`（会社固有の追加購入可能上限、常にunknown=null）へ分解した。`companyPurchasableScaleTons`が観測構造上恒常的にunknownである以上、RawMaterial軸の`supportedScaleTons`自体をnull（confidence=UNKNOWN）とし、Business Scaleのbinding判定（他4軸のmin()比較）から自動的に除外するようにした。
 
-この結果、RawMaterial軸は「典型的に持続可能な原料規模」ではなく「今すぐ確実に使える原料の下限」を表す値になっている。#04確認事項として、会社固有の調達可能上限をゲームルールとして定義するかどうかを判断いただきたい（上記1の項目と同じ）。定義されれば、この軸の診断価値は大きく向上する。
+この結果、RawMaterial軸は「原料が事業規模の上限を決めている」という誤った印象を与えなくなった。ただし根本原因（会社固有の調達可能上限がゲームルールとして未定義）は解消していない。#04確認事項として、会社固有の調達可能上限をゲームルールとして定義するかどうかを判断いただきたい。定義されれば、`companyPurchasableScaleTons`に実際の値が入り、この軸も他4軸と同様にbinding判定に参加できるようになる。
 
 ## 3. #04 Handoff（変更せず引き渡し）
 

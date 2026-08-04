@@ -76,6 +76,16 @@ Claudeの前回提案（「単一の追加入力」）を修正し、少なく�
 
 ## 6. 次のアクション
 
-**2026-08-04更新: 第1段階（Business Scale Profile）着手・完了。** `diagnosis/businessScaleProfile.ts`（5軸、単一値へ潰さない）・`diagnosis/businessScaleScenarios.ts`（Conservative/Base/Growth、型と生成ルール案）を実装し、テスト18件・全2194件pass・tsc/lintクリーンを確認して`feature/v2-standard-ai-unit-economics-shadow-allocation`へpush済み。実測38人ケースへの適用結果は`TEST14_TURN2_BUSINESS_SCALE_PROFILE.md`・`TEST14_TURN2_BUSINESS_SCALE_SCENARIOS.md`、既存Profile監査は`EXISTING_MANAGEMENT_ORIENTATION_PROFILE_AUDIT.md`、Mission/Vision/Policyドラフトと将来のVision Progress Diagnosis設計は`STANDARD_COMPANY_MISSION_VISION_POLICY_DRAFT.md`、observation gapと#04引き渡しは`BUSINESS_SCALE_OBSERVATION_GAPS_AND_04_HANDOFF.md`を参照。
+**2026-08-04更新: 第1段階（Business Scale Profile）着手・完了。** `diagnosis/businessScaleProfile.ts`（5軸、単一値へ潰さない）・`diagnosis/businessScaleScenarios.ts`（Conservative/Base/Growth、型と生成ルール案）を実装し、テスト18件・全2194件pass・tsc/lintクリーンを確認して`feature/v2-standard-ai-unit-economics-shadow-allocation`へpush済み。Test14 Turn2 reconstructed case（38人）への適用結果は`TEST14_TURN2_BUSINESS_SCALE_PROFILE.md`・`TEST14_TURN2_BUSINESS_SCALE_SCENARIOS.md`、既存Profile監査は`EXISTING_MANAGEMENT_ORIENTATION_PROFILE_AUDIT.md`、Mission/Vision/Policyドラフトと将来のVision Progress Diagnosis設計は`STANDARD_COMPANY_MISSION_VISION_POLICY_DRAFT.md`、observation gapと#04引き渡しは`BUSINESS_SCALE_OBSERVATION_GAPS_AND_04_HANDOFF.md`を参照。
 
 次回は第2段階以降（Mission/Visionデータ構造の実装、Vision Progress Diagnosisモジュールの実装）に進む前に、三宅さんの確認・優先順位付けを待つ。本番decisionへの接続（第7段階）は依然未着手。
+
+## 7. 2026-08-04 三宅さんレビューによる3点修正（Vision Progress Diagnosisへ進む前提条件）
+
+三宅さんはBusiness Scale Profile本体を受入としつつ、Vision/Mission層へ進む前に次の3点を修正するよう指示し、実施した。
+
+1. **Raw軸の0＝binding問題の修正**: `businessScaleProfile.ts`のRawMaterial軸を`securedRawScaleTons`/`procurementNeededScaleTons`/`publicMarketAvailabilityState`/`companyPurchasableScaleTons`（常にnull）へ分解し、`companyPurchasableScaleTons`がunknownである間は軸の`supportedScaleTons`自体をnull（confidence=UNKNOWN）とすることで、Business Scaleのbinding判定（min()計算）から自動的に除外されるようにした。「分からない」と「0tしかできない」を型レベルで区別する修正であり、securedRawScaleTons（今すぐ確実に使える下限）は別のdetailフィールドとして保持している。
+2. **Scenario暫定ヒューリスティックの明確化**: `businessScaleScenarios.ts`のGrowth Scenario定数を`GROWTH_SALES_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION`/`GROWTH_LABOR_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION`へ改名し、`BusinessScaleScenarioResult`に新フィールド`isPlaceholderHeuristic: boolean`を追加（Growth=true、Conservative/Base=false）。+20%/+10%がStandard AIの経営思想として固定された値ではなく、将来Vision達成経路から逆算する方式に置き換える前提の暫定プレースホルダであることを型レベルで明示した。
+3. **用語統一（Test14 Turn2 reconstructed case）**: 「実測38人ケース」等の表現は、実際のTest14保存状態（Redis等）へのアクセスを示唆し誤解を招くため、「Test14 Turn2 reconstructed case」へ統一した。ファイル`TEST14_TURN2_REAL_38_HEADCOUNT_SHADOW_ANALYSIS.md`は`TEST14_TURN2_RECONSTRUCTED_CASE_38_HEADCOUNT_SHADOW_ANALYSIS.md`へ改名し、関連6文書の本文表現も修正した。
+
+この3点は診断内容の誤りではなく、設計精度・表記一貫性の修正である。#04からのBorrowing Capacity/Raw/Worker/Market Demand回答は引き続き外部待ちであり、Vision Progress Diagnosis（第4段階）は本修正完了後も、三宅さんの次回指示を待って着手する。
