@@ -89,3 +89,24 @@ Claudeの前回提案（「単一の追加入力」）を修正し、少なく�
 3. **用語統一（Test14 Turn2 reconstructed case）**: 「実測38人ケース」等の表現は、実際のTest14保存状態（Redis等）へのアクセスを示唆し誤解を招くため、「Test14 Turn2 reconstructed case」へ統一した。ファイル`TEST14_TURN2_REAL_38_HEADCOUNT_SHADOW_ANALYSIS.md`は`TEST14_TURN2_RECONSTRUCTED_CASE_38_HEADCOUNT_SHADOW_ANALYSIS.md`へ改名し、関連6文書の本文表現も修正した。
 
 この3点は診断内容の誤りではなく、設計精度・表記一貫性の修正である。#04からのBorrowing Capacity/Raw/Worker/Market Demand回答は引き続き外部待ちであり、Vision Progress Diagnosis（第4段階）は本修正完了後も、三宅さんの次回指示を待って着手する。
+
+## 8. 2026-08-04 三宅さんによる3点修正の受入・現時点のBusiness Scale Profileの構造（合意事項）
+
+三宅さんは上記§7の3点修正を受入とし、特にRaw軸の分解（secured／procurement need／market state／company cap=unknown）を「かなり自然になった」「ShrimpXのビジネスモデル（毎期原料市場から買って回す会社）にsecured rawだけで企業規模を測ると必ず歪む」という理由で高く評価した。Test14 Turn2 reconstructed case（38人、BAL）における現時点のBusiness Scale Profileの構造は次のとおり（三宅さんの整理をそのまま記録）。
+
+- **Sales**: 約9,961t → 現在の実質的な制約（binding axis）
+- **Finance**: 約15,151t → Salesを伸ばした次の制約候補
+- **Production**: 約17,100t → さらに成長した次の制約候補
+- **Labor**: 約27,576t → 現行ゲームルールでは余裕大
+- **Raw**: 会社固有購入可能量が不明なのでbinding判定保留
+
+これは「今の会社ならどのくらいの規模のビジネスを回せるかを見当づける」という、Business Scale Profileの当初の狙いがかなり具体的な形になった状態と位置づける。三宅さんの言葉を借りれば「現在地を測る器」はこの段階でかなり出来ている。
+
+**次のブロッカー（#04からの4点、優先順位付き）**:
+
+1. Borrowing Capacityを正式にObservationへ渡せるか（Finance軸の精度に直結）
+2. Market absolute demandをどこまで公開するか（Sales軸の「需要上限」を区別できるようになるかに直結）
+3. Rawの会社固有購入上限をゲームルールとして持つか（Raw軸がbinding判定に参加できるかに直結）
+4. VAP Worker負荷をどう確定するか（Labor軸の現実性に直結）
+
+この4点が固まればBusiness Scale Profileの精度が一段上がり、そのあとVision Progress Diagnosis（第4段階）に進むのが自然、という三宅さんの方針を確認済み。現段階ではMission/Vision実装（第3段階以降）は急がず、三宅さんの次回指示を待って着手する。
