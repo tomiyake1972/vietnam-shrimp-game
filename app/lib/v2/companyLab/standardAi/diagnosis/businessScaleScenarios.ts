@@ -39,6 +39,17 @@ export interface BusinessScaleScenarioResult {
   /** 最も厳しい制約の値（tons）。5軸すべてがnullでない前提が崩れる場合はnull。 */
   readonly bindingScaleTons: number | null;
   readonly mainRisks: readonly string[];
+  /**
+   * 【2026-08-04追加・三宅さんの指摘】このScenarioの前提が、Standard AIの経営思想として
+   * 固定してよい値なのか、それとも将来Mission/Vision（Vision達成経路から逆算する必要規模）
+   * が確定するまでの暫定ヒューリスティックに過ぎないのかを、型レベルで明示するフラグ。
+   * true の場合、`assumptions`内の数値（例: Growth Scenarioの+20%/+10%）は
+   * 「なぜその%なのか」がまだMission/Visionから導かれておらず、次段階（Vision Progress
+   * Diagnosis実装後）で「Vision達成経路 → 必要規模 → Business Scale Profileと比較 →
+   * 必要なSales/Labor/Capexを逆算」という順序に置き換える前提の、説明用プレースホルダである。
+   * Conservative/Baseは既存データからの直接算出（暫定ではない）ため常にfalse。
+   */
+  readonly isPlaceholderHeuristic: boolean;
 }
 
 function bindingAxesOf(profile: BusinessScaleProfile): { axes: BusinessScaleAxis[]; scaleTons: number | null } {
@@ -80,6 +91,7 @@ function buildConservativeScenario(
     bindingAxes: axes,
     bindingScaleTons: scaleTons,
     mainRisks: axes.map((a) => `${a}軸が現状のまま制約として残る`),
+    isPlaceholderHeuristic: false,
   };
 }
 
@@ -119,17 +131,24 @@ function buildBaseScenario(
     bindingAxes: axes,
     bindingScaleTons: scaleTons,
     mainRisks: axes.map((a) => `${a}軸がBase規模でも制約として残る`),
+    isPlaceholderHeuristic: false,
   };
 }
 
 /**
  * Growth Scenario: Expandable制約（採用・capex・借入）の一部を、暫定的な
  * 「1段階分の適度な増分」で緩めた場合の規模。三宅さんの指示どおり、最大成長ではない。
- * 増分の大きさ（+20%営業人員・+10%労務人員）はイラストレーションであり、Mission/Vision
- * 由来のModerate Growth Target設計が確定するまでの暫定値である。
+ *
+ * 【2026-08-04・三宅さんの指摘、明確化】増分の大きさ（+20%営業人員・+10%労務人員）は
+ * Standard AIの経営思想として固定してはならない、単なる説明用のプレースホルダである。
+ * なぜ20%／10%なのかは、まだMission/Visionから導かれていない。定数名に
+ * "_PLACEHOLDER_PENDING_VISION" を付け、コード上でもこれが暫定値であることが
+ * 一目で分かるようにしている。将来、Vision Progress Diagnosis実装後は、
+ * 「Vision達成経路から見て必要な規模 → Business Scale Profileと比較 →
+ * その規模へ行くために必要なSales/Labor/Capexを逆算」という順序に置き換える。
  */
-const GROWTH_SALES_HEADCOUNT_STEP_RATIO = 0.2;
-const GROWTH_LABOR_HEADCOUNT_STEP_RATIO = 0.1;
+const GROWTH_SALES_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION = 0.2;
+const GROWTH_LABOR_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION = 0.1;
 
 function buildGrowthScenario(
   fixture: CompanyFixture,
@@ -137,8 +156,12 @@ function buildGrowthScenario(
   currentSalesPlans: readonly CompanySalesPlanEntry[],
   desiredByProduct: ProductAmount
 ): BusinessScaleScenarioResult {
-  const grownSalesHeadcount = Math.round(observation.salesForceHeadcountTotal * (1 + GROWTH_SALES_HEADCOUNT_STEP_RATIO));
-  const grownRegularHeadcount = Math.round(observation.regularHeadcountTotal * (1 + GROWTH_LABOR_HEADCOUNT_STEP_RATIO));
+  const grownSalesHeadcount = Math.round(
+    observation.salesForceHeadcountTotal * (1 + GROWTH_SALES_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION)
+  );
+  const grownRegularHeadcount = Math.round(
+    observation.regularHeadcountTotal * (1 + GROWTH_LABOR_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION)
+  );
   const grownObservation: StandardAiObservation = {
     ...observation,
     salesForceHeadcountTotal: grownSalesHeadcount,
@@ -158,22 +181,32 @@ function buildGrowthScenario(
 
   return {
     scenarioId: "growth",
-    label: "Growth Scale（Moderate、最大成長ではない）",
+    label: "Growth Scale（Moderate、最大成長ではない・暫定ヒューリスティック）",
     description:
-      `営業人員+${Math.round(GROWTH_SALES_HEADCOUNT_STEP_RATIO * 100)}%・正社員+${Math.round(
-        GROWTH_LABOR_HEADCOUNT_STEP_RATIO * 100
-      )}%（いずれも暫定的なイラストレーション、Mission/Vision確定後に再設計）を仮定した場合の規模。` +
+      `【暫定プレースホルダ、Standard AIの経営思想として未確定】営業人員+${Math.round(
+        GROWTH_SALES_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION * 100
+      )}%・正社員+${Math.round(
+        GROWTH_LABOR_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION * 100
+      )}%（なぜこの%かはまだMission/Visionから導かれていない、説明用のイラストレーション）を` +
+      "仮定した場合の規模。将来、Vision達成経路から必要な規模を逆算する方式に置き換える予定。" +
       "生産・原料・財務の実効能力は今回拡張していない（capex・追加調達余地は現状値のまま）ため、" +
       "採用だけでは解消しない制約が新たにbindingになる可能性がある。",
     assumptions: [
-      { label: `営業人員 +${Math.round(GROWTH_SALES_HEADCOUNT_STEP_RATIO * 100)}%（暫定）`, isProvisionalIllustration: true },
-      { label: `正社員 +${Math.round(GROWTH_LABOR_HEADCOUNT_STEP_RATIO * 100)}%（暫定）`, isProvisionalIllustration: true },
+      {
+        label: `営業人員 +${Math.round(GROWTH_SALES_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION * 100)}%（暫定プレースホルダ、Vision確定後に再設計）`,
+        isProvisionalIllustration: true,
+      },
+      {
+        label: `正社員 +${Math.round(GROWTH_LABOR_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION * 100)}%（暫定プレースホルダ、Vision確定後に再設計）`,
+        isProvisionalIllustration: true,
+      },
       { label: "生産設備・原料調達余地・借入可能額は今回拡張していない（現状値のまま）", isProvisionalIllustration: false },
     ],
     profile,
     bindingAxes: axes,
     bindingScaleTons: scaleTons,
     mainRisks: axes.map((a) => `${a}軸が採用増だけでは解消せず、Growth Scaleのbinding制約になる`),
+    isPlaceholderHeuristic: true,
   };
 }
 

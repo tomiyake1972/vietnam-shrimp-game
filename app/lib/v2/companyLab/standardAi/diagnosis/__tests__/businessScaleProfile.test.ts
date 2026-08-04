@@ -58,7 +58,30 @@ test("Business Scale Profileは単一の合成値を一切出さない（5軸を
 
 test("会社固有の国内原料購入上限は常にnull（市場全体の余剰から会社固有の値を推計しない）", () => {
   const { profile } = setupTurn2();
-  assert.equal(profile.rawMaterialDetail.companySpecificPurchasableCapTons, null);
+  assert.equal(profile.rawMaterialDetail.companyPurchasableScaleTons, null);
+});
+
+test("【2026-08-04修正】RawMaterial軸のsupportedScaleTonsはcompanyPurchasableScaleTonsがunknownの間は常にnullであり、0tと混同しない", () => {
+  const { profile } = setupTurn2();
+  // companyPurchasableScaleTonsが常にnull（未知）の現状では、Raw軸の
+  // supportedScaleTonsも「分からない」を表すnullでなければならない。
+  // securedRawScaleTons（今すぐ確実に使える下限）は別のdetailフィールドとして
+  // 保持されるが、それをbinding判定用のsupportedScaleTonsに転用してはならない。
+  const rawAxis = profile.axes.find((a) => a.axis === "rawMaterial")!;
+  assert.equal(rawAxis.supportedScaleTons, null);
+  assert.equal(rawAxis.confidence, "UNKNOWN");
+  assert.ok(Number.isFinite(profile.rawMaterialDetail.securedRawScaleTons));
+  assert.ok(profile.rawMaterialDetail.securedRawScaleTons >= 0);
+  assert.ok(["SURPLUS", "TIGHT", "UNKNOWN"].includes(profile.rawMaterialDetail.publicMarketAvailabilityState));
+});
+
+test("【2026-08-04修正】supportedScaleTonsがnullの軸（Raw）はbindingAxes相当のmin()計算から自動的に除外される", () => {
+  const { profile } = setupTurn2();
+  const knownAxes = profile.axes.filter((a) => a.supportedScaleTons !== null);
+  // Raw軸は現状常にnullのため、min()計算に参加する軸の中に含まれてはならない。
+  assert.ok(!knownAxes.some((a) => a.axis === "rawMaterial"));
+  // 他の4軸（sales/production/labor/finance）は数値を持つはず。
+  assert.equal(knownAxes.length, 4);
 });
 
 test("名目生産能力はsupported scaleに使われていない（実効能力のみ使用）", () => {

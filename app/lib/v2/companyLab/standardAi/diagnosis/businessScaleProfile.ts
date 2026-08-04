@@ -112,16 +112,32 @@ export interface ProductionSupportedScaleDetail {
 }
 
 /** RawMaterial軸専用の詳細分解（三宅さんの指示§6: 市場全体の余剰と会社固有調達能力を分離）。 */
+/**
+ * 【2026-08-04修正】三宅さんの指摘: ShrimpXは原料在庫を大量に持つ会社ではなく、
+ * 毎期市場から購入して加工する運転資金型ビジネスモデルである。したがって
+ * 「期首在庫＋当期確実な入荷」だけをRaw-supported scaleとして使うと、正常な
+ * 会社でも毎期0近辺になり、「保守的な推計」ではなく「Business Scaleの意味と
+ * ずれた」誤解を招く。「分からない」（companyPurchasableScaleTons=unknown）と
+ * 「0tしかできない」は明確に区別する。
+ */
 export interface RawMaterialSupportedScaleDetail {
-  /** 期首在庫＋当期確実な入荷（既存observationの値をそのまま合算。新しい調達ルールは作らない）。 */
-  readonly certainSecuredRawTons: number;
-  /** 市場全体（会社を問わない）の前期不動在庫（unsoldSupply）。会社がこの量を
-   *  確実に買えることを意味しない（会社固有の購入上限は別項目で常にnull）。turn1等で
-   *  前期市場結果が無い場合はnull。 */
-  readonly publicMarketIndicatedSurplusTons: number | null;
+  /** 期首在庫＋当期確実な入荷（既存observationの値をそのまま合算。新しい調達ルールは
+   *  作らない）。これは「今すぐ手元にある確実な量」であり、Raw-supported scale
+   *  そのものではない（会社は毎期新規購入で追加調達するため）。 */
+  readonly securedRawScaleTons: number;
+  /** 他4軸（sales/production/labor/finance）のうち最も厳しい制約の規模に対して、
+   *  securedRawScaleTonsだけでは足りない差分（=今期あと何トン調達できれば
+   *  他の制約と同水準まで到達するか）。他4軸がいずれもnull（算定不能）ならnull。 */
+  readonly procurementNeededScaleTons: number | null;
+  /** 市場全体（会社を問わない）の前期公開清算結果からみた、原料調達環境の状態。
+   *  既存のvietnamDomesticPriorMarket.unsoldSupplyをそのまま参照する軽量な信号
+   *  （situationDiagnosis.tsのDOMESTIC_MARKET_PUBLIC_SURPLUS/TIGHT判定とは
+   *  独立した、本モジュール専用の単純化版。新しい市場ルールは作っていない）。
+   *  turn1等で前期市場結果が無い場合はUNKNOWN。 */
+  readonly publicMarketAvailabilityState: "SURPLUS" | "TIGHT" | "UNKNOWN";
   /** 会社固有の国内購入可能上限。恒常的にnull（観測に存在しないため憶測しない。
    *  「市場に10万t余っているから自社が14,000t買える」という推論は禁止）。 */
-  readonly companySpecificPurchasableCapTons: null;
+  readonly companyPurchasableScaleTons: null;
 }
 
 /** Finance軸専用の詳細分解（三宅さんの指示§7: cash negativeとbelow-target-bufferを区別）。 */
@@ -343,28 +359,41 @@ function buildLaborSupportedScale(
 // ---------------------------------------------------------------------
 
 function buildRawMaterialSupportedScale(
-  observation: StandardAiObservation
+  observation: StandardAiObservation,
+  /** 他4軸（sales/production/labor/finance）のうち最も厳しい制約の規模。
+   *  procurementNeededScaleTonsの算定にのみ使用する（診断専用の参考値であり、
+   *  この値自体をRaw軸のsupportedScaleTonsとして扱わない）。 */
+  otherAxesMinScaleTons: number | null
 ): { estimate: SupportedScaleEstimate; detail: RawMaterialSupportedScaleDetail } {
-  const certainSecuredRawTons = observation.rawMaterialAvailable + observation.rawMaterialCertainInboundThisPeriod;
-  const publicMarketIndicatedSurplusTons = observation.vietnamDomesticPriorMarket?.unsoldSupply ?? null;
+  const securedRawScaleTons = observation.rawMaterialAvailable + observation.rawMaterialCertainInboundThisPeriod;
+  const priorMarket = observation.vietnamDomesticPriorMarket;
+  const publicMarketAvailabilityState: RawMaterialSupportedScaleDetail["publicMarketAvailabilityState"] =
+    priorMarket === undefined ? "UNKNOWN" : priorMarket.unsoldSupply > 0 ? "SURPLUS" : "TIGHT";
+  const procurementNeededScaleTons =
+    otherAxesMinScaleTons === null ? null : Math.max(0, otherAxesMinScaleTons - securedRawScaleTons);
 
   const detail: RawMaterialSupportedScaleDetail = {
-    certainSecuredRawTons,
-    publicMarketIndicatedSurplusTons,
-    companySpecificPurchasableCapTons: null,
+    securedRawScaleTons,
+    procurementNeededScaleTons,
+    publicMarketAvailabilityState,
+    companyPurchasableScaleTons: null,
   };
 
   const estimate: SupportedScaleEstimate = {
     axis: "rawMaterial",
-    // 【単一の数字を無理に出さない】確実な原料(certainSecuredRawTons)だけをsupportedScaleTonsとし、
-    // 市場全体の余剰(publicMarketIndicatedSurplusTons)を会社固有の調達可能量へ変換しない
-    // （三宅さんの指示: 「市場に10万t余っているから自社が14,000t買える」という推論は禁止）。
-    supportedScaleTons: certainSecuredRawTons,
-    confidence: "LOW",
+    // 【2026-08-04修正】「分からない」と「0tしかできない」を区別する。会社固有の
+    // 購入可能上限が観測不能である以上、Raw軸の真のsupported scaleは算定不能
+    // （null）とし、securedRawScaleTons（手元の確実な量）をそのままsupportedScaleTonsに
+    // 転記しない。これにより、Raw軸がBusiness Scale Profileのbinding軸判定
+    // （他モジュールのbindingAxesOf等、supportedScaleTons!==nullのみを対象とする）
+    // から自動的に除外される（「毎期新規購入するビジネスモデル」で正常な会社が
+    // 常にRawをbinding扱いされる、という誤解を防ぐ）。
+    supportedScaleTons: null,
+    confidence: "UNKNOWN",
     limitingReason:
-      "期首在庫＋当期確実な入荷（輸送中輸入・養殖の確定収穫等）のみを確実な原料量として計上。" +
-      "会社固有の国内追加購入可能量は観測構造上不明であり、市場全体の前期不動在庫が存在しても、" +
-      "それが自社の追加購入余地であることを意味しない。",
+      "会社固有の国内追加購入可能量が観測構造上不明であり、Raw-supported scaleそのものを算定できない。" +
+      `手元の確実な原料量はsecuredRawScaleTons=${securedRawScaleTons.toFixed(1)}tだが、これは` +
+      "「毎期新規購入で追加調達する」運転資金型ビジネスモデルにおける下限に過ぎず、真の上限ではない。",
     constraintFlexibility: "UNCERTAIN",
     expansionOptions: [
       {
@@ -377,7 +406,8 @@ function buildRawMaterialSupportedScale(
     ],
     source: "observation.rawMaterialAvailable / rawMaterialCertainInboundThisPeriod / vietnamDomesticPriorMarket.unsoldSupply",
     dataQuality: {
-      note: "会社固有の国内購入可能上限は恒常的にnull（憶測しない）。",
+      note: "会社固有の国内購入可能上限は恒常的にnull（憶測しない）。Raw軸のsupportedScaleTonsも" +
+        "同じ理由でnull（0tではない）。",
       knownGaps: ["company-specific domestic raw material purchase cap not observable"],
     },
   };
@@ -514,8 +544,15 @@ export function buildBusinessScaleProfile(input: BuildBusinessScaleProfileInput)
   const sales = buildSalesSupportedScale(observation, unitEconomics, currentSalesPlans, desiredByProduct);
   const production = buildProductionSupportedScale(observation, productMixAssumption);
   const labor = buildLaborSupportedScale(observation, productMixAssumption);
-  const rawMaterial = buildRawMaterialSupportedScale(observation);
   const finance = buildFinanceSupportedScale(observation, pressures, productMixAssumption, domesticRawShareOfProduction);
+
+  // 【procurementNeededScaleTons算定用】Raw以外の4軸のうち、算定可能な値の最小値。
+  // 1軸でも算定できていればそれを使う（全軸nullの場合のみnull）。
+  const otherKnownScales = [sales.estimate.supportedScaleTons, production.estimate.supportedScaleTons, labor.supportedScaleTons, finance.estimate.supportedScaleTons].filter(
+    (v): v is number => v !== null
+  );
+  const otherAxesMinScaleTons = otherKnownScales.length > 0 ? Math.min(...otherKnownScales) : null;
+  const rawMaterial = buildRawMaterialSupportedScale(observation, otherAxesMinScaleTons);
 
   return {
     companyId: observation.companyId,

@@ -44,6 +44,21 @@ test("Growth Scenarioは最大成長ではない（Sales/Labor headcountは物�
   assert.ok(growthSales.supportedScaleTons! >= baseSales.supportedScaleTons! - 1e-6);
 });
 
+test("【2026-08-04修正】isPlaceholderHeuristicフラグにより、Growthの増分がStandard AIの経営思想として固定されていないことが型レベルで明示される", () => {
+  const { fixture, observation2, pressures2, salesResult2 } = setupTurn2();
+  const comparison = buildBusinessScaleScenarioComparison(
+    fixture,
+    observation2,
+    pressures2,
+    salesResult2.salesPlans,
+    salesResult2.desiredByProduct
+  );
+  assert.equal(comparison.growth.isPlaceholderHeuristic, true);
+  // Conservative/Baseは既存データからの直接算出であり、暫定ヒューリスティックではない。
+  assert.equal(comparison.conservative.isPlaceholderHeuristic, false);
+  assert.equal(comparison.base.isPlaceholderHeuristic, false);
+});
+
 test("Conservative/Base/Growthのいずれも、5軸を単一値へ潰していない", () => {
   const { fixture, observation2, pressures2, salesResult2 } = setupTurn2();
   const comparison = buildBusinessScaleScenarioComparison(
