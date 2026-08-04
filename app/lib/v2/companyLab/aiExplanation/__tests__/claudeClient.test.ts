@@ -391,6 +391,53 @@ test("generateManagementReport: schema mismatch時のfallback(1回だけリト�
   assert.equal(callCount(), 2);
 });
 
+test("generateManagementReport: 実際のTurn3失敗ログと同じ形状(questionsForPlayer/dataLimitationsがオブジェクト配列)でも、追加API呼び出しなしでその場正規化され成功する(2026-08-05修正の回帰テスト)", async () => {
+  // 【根拠】Vercel実ランタイムログ（2026-08-04T15:36:43、lab=Test14 company=BAL turn=3）の
+  // attempt1で実際に観測された不一致パターンをそのまま再現する:
+  // issues=[{"path":"questionsForPlayer.0","code":"invalid_type","expected":"string"}, ...]
+  const realFailurePatternInput = {
+    headline: "テスト見出し",
+    executiveSummary: "テスト要約",
+    recommendations: [],
+    keyRisks: [],
+    questionsForPlayer: [{ question: "在庫をどう処理しますか？" }, { question: "営業を増員しますか？" }],
+    dataLimitations: [{ limitation: "養殖原価は観測に露出していません" }, { limitation: "追加借入可能額は未接続です" }],
+  };
+  const { client, callCount } = makeClient([toolUseResponse(realFailurePatternInput)]);
+  const result = await generateManagementReport(minimalContext(), client);
+  assert.equal(result.ok, true, "オブジェクト配列も正規化され、1回目の呼び出しだけで成功するはず（2回目のAPI呼び出しは発生しない）");
+  if (result.ok) {
+    assert.deepEqual(result.report.questionsForPlayer, ["在庫をどう処理しますか？", "営業を増員しますか？"]);
+    assert.deepEqual(result.report.dataLimitations, ["養殖原価は観測に露出していません", "追加借入可能額は未接続です"]);
+  }
+  assert.equal(callCount(), 1, "recoverableな要素レベルの型不一致は、2回目のAPI呼び出し(コスト・時間の倍増)なしに解決されるべき");
+});
+
+test("generateManagementReport: 正規化しても文字列を抽出できない要素はJSON文字列化され、情報を欠落させない", async () => {
+  const inputWithUnrecognizedShape = {
+    headline: "テスト見出し",
+    executiveSummary: "テスト要約",
+    recommendations: [],
+    keyRisks: [],
+    questionsForPlayer: [{ foo: "bar", num: 42 }],
+    dataLimitations: [],
+  };
+  const { client } = makeClient([toolUseResponse(inputWithUnrecognizedShape)]);
+  const result = await generateManagementReport(minimalContext(), client);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(typeof result.report.questionsForPlayer[0], "string");
+    assert.ok(result.report.questionsForPlayer[0].includes("bar"), "既知キーが見つからない場合はJSON文字列化して内容を保持するはず");
+  }
+});
+
+test("normalizeExplanationToolInput: 全要素が既に文字列の場合は元の配列をそのまま返す(不要な再構築をしない)", async () => {
+  const { normalizeExplanationToolInput } = await import("../claudeClient");
+  const input = { questionsForPlayer: ["a", "b"], dataLimitations: ["c"] };
+  const result = normalizeExplanationToolInput(input);
+  assert.equal(result, input, "変更不要な入力はオブジェクトの参照ごと同一であるべき（不要な差分・再検証コストを避ける）");
+});
+
 test("getExplanationModelConfig: 環境変数未指定時は既定モデルを返す", async () => {
   const original = process.env.STANDARD_AI_EXPLANATION_MODEL;
   delete process.env.STANDARD_AI_EXPLANATION_MODEL;

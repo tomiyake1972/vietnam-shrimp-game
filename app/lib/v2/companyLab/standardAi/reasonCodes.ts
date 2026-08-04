@@ -75,7 +75,16 @@ export type StandardAiReasonCode =
   // --- 【2026-08-03新設・Phase B】Forward Unit Economics 3区分採算分類 ---
   | "FULL_COST_PROFITABLE" // 製造フルコスト（変動費＋配賦固定費）を上回る参照売価で、貢献利益・フルコストマージンともに正
   | "CONTRIBUTION_ONLY_OPPORTUNITY" // 貢献利益は正だが製造フルコスト（配賦固定費込み）は下回る（短期的には受注価値があるが、フルコスト回収には至らない）
-  | "UNECONOMIC_NEW_SALES"; // 貢献利益自体が負（原料費＋原料以外の変動費すら参照売価で回収できない）で、新規販売は非経済的
+  | "UNECONOMIC_NEW_SALES" // 貢献利益自体が負（原料費＋原料以外の変動費すら参照売価で回収できない）で、新規販売は非経済的
+  // --- 【2026-08-05新設】営業採用・減員（Standard AI経営ボトルネック判定） ---
+  | "SALES_HIRING_PROFITABLE_UNSERVED_OPPORTUNITY" // 収益性のある未充足の販売機会があり、生産・原料・資金のいずれのボトルネックにも達しないため営業採用を提案
+  | "SALES_HIRING_BLOCKED_BY_PRODUCTION" // 販売機会はあるが生産能力(binding capacity)に余力がないため営業採用を見送り
+  | "SALES_HIRING_BLOCKED_BY_LIQUIDITY" // 追加採用の給与コストが当期の最低現金バッファ余力を超えるため営業採用を見送り
+  | "SALES_HIRING_BLOCKED_BY_RAW_SUPPLY_UNCERTAINTY" // 追加販売に必要な新規生産の原料について真の供給制約が診断されているため営業採用を見送り
+  | "SALES_HIRING_NOT_ECONOMIC" // 追加1人あたりのmarginal contributionが給与を下回るため営業採用が経済的でない
+  | "SALES_FORCE_EXCESS_CAPACITY" // 持続的な営業容量過剰（追加販売機会が乏しく在庫も制約でない）と診断
+  | "SALES_LAYOFF_ECONOMIC_AFTER_SEVERANCE" // 退職金を考慮しても節約効果が上回るため営業減員が経済的
+  | "SALES_LAYOFF_DEFERRED_STRATEGIC_CAPACITY"; // 在庫が販売のボトルネックになっているため、容量過剰に見えても減員を見送り（戦略的容量の保持）
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -127,6 +136,14 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "FULL_COST_PROFITABLE",
   "CONTRIBUTION_ONLY_OPPORTUNITY",
   "UNECONOMIC_NEW_SALES",
+  "SALES_HIRING_PROFITABLE_UNSERVED_OPPORTUNITY",
+  "SALES_HIRING_BLOCKED_BY_PRODUCTION",
+  "SALES_HIRING_BLOCKED_BY_LIQUIDITY",
+  "SALES_HIRING_BLOCKED_BY_RAW_SUPPLY_UNCERTAINTY",
+  "SALES_HIRING_NOT_ECONOMIC",
+  "SALES_FORCE_EXCESS_CAPACITY",
+  "SALES_LAYOFF_ECONOMIC_AFTER_SEVERANCE",
+  "SALES_LAYOFF_DEFERRED_STRATEGIC_CAPACITY",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

@@ -42,6 +42,9 @@ import {
   computeFinalProductionRequirement,
   computeNormalInventoryTargetByProduct,
 } from "./diagnosis/productionRequirement";
+import { buildStandardAiUnitEconomics } from "./diagnosis/forwardUnitEconomics";
+import { buildStandardAiSalesForceHiringDecision } from "./decision/salesForceHiring";
+import { SALES_PARAMETERS_V1 } from "../../sales/parameters";
 
 // 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
 // 診断情報にこれまで捨てていた圧力スコア(pressures)と、当四半期の意思決定
@@ -169,18 +172,6 @@ export function generateStandardAiDecisionWithDiagnostics(
     params
   );
 
-  const decision: CompanyDecisionInput = {
-    companyId: fixture.companyId,
-    salesPlans: salesResult.salesPlans,
-    domesticPurchasePlan: procurementResult.domesticPurchasePlan,
-    importOrders: procurementResult.importOrders,
-    aquacultureStockingPlans: procurementResult.aquacultureStockingPlans,
-    productionPlans: productionResult.productionPlans,
-    workerAssignments: laborResult.workerAssignments,
-    financingRequest: financingResult.financingRequest,
-    capexDecision: capexResult.capexDecision,
-  };
-
   // 【SAI-6.4改訂】Current Period Delivery Demand（当期納品需要）は、今回から
   // decision.productionPlansの実際の入力として使われている（上で計算済みの
   // deliveryDemandResult）。診断出力としても、実際に使われた値をそのまま再利用する
@@ -200,6 +191,39 @@ export function generateStandardAiDecisionWithDiagnostics(
     params
   );
 
+  // 【2026-08-05新設・営業採用/減員】market opportunity(Forward Unit Economics)→
+  // sales capacity→production capacity→raw material→cashの連鎖で、1人ずつの
+  // marginal economicsを確認しながらsalesForceHireCount/salesForceLayoffCountを
+  // 決定する。production decision・Worker decision・procurement decision・
+  // finance decisionのいずれの計算結果も変更しない（既に計算済みの値を読むだけ）。
+  const unitEconomicsResult = buildStandardAiUnitEconomics(observation);
+  const salesForceHiringResult = buildStandardAiSalesForceHiringDecision({
+    fixture,
+    observation,
+    pressures,
+    params,
+    salesParams: SALES_PARAMETERS_V1,
+    salesWishByMarketProduct: salesResult.salesWishByMarketProduct,
+    finalProductionRequirementByProduct: finalProductionRequirementByProduct,
+    totalEffectiveCapacityByProduct: observation.totalEffectiveCapacityByProduct,
+    unitEconomics: unitEconomicsResult,
+    rawMaterialSupplyConstraintState: situationDiagnosisResult.diagnosis.rawMaterialSupplyConstraintState,
+  });
+
+  const decision: CompanyDecisionInput = {
+    companyId: fixture.companyId,
+    salesPlans: salesResult.salesPlans,
+    salesForceHireCount: salesForceHiringResult.salesForceHireCount > 0 ? salesForceHiringResult.salesForceHireCount : undefined,
+    salesForceLayoffCount: salesForceHiringResult.salesForceLayoffCount > 0 ? salesForceHiringResult.salesForceLayoffCount : undefined,
+    domesticPurchasePlan: procurementResult.domesticPurchasePlan,
+    importOrders: procurementResult.importOrders,
+    aquacultureStockingPlans: procurementResult.aquacultureStockingPlans,
+    productionPlans: productionResult.productionPlans,
+    workerAssignments: laborResult.workerAssignments,
+    financingRequest: financingResult.financingRequest,
+    capexDecision: capexResult.capexDecision,
+  };
+
   const entries: StandardAiDiagnosticEntry[] = [
     ...salesResult.diagnostics,
     ...productionResult.diagnostics,
@@ -209,6 +233,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...capexResult.diagnostics,
     ...deliveryDemandResult.diagnostics,
     ...situationDiagnosisResult.diagnostics,
+    ...salesForceHiringResult.diagnostics,
   ];
 
   return {
