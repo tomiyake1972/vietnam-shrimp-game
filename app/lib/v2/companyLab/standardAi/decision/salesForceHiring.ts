@@ -38,6 +38,7 @@ import { ProductAmount, StandardAiObservation } from "../types";
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
 import { SalesWishEntry } from "./sales";
 import { StandardAiUnitEconomicsResult } from "../diagnosis/forwardUnitEconomics";
+import { TargetScaleBand } from "../targetScale";
 
 const EPSILON = 1e-6;
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
@@ -82,7 +83,9 @@ export interface MarginalSalespersonEvaluation {
     | "SALES_HIRING_NOT_ECONOMIC"
     | "SALES_HIRING_BLOCKED_BY_PRODUCTION"
     | "SALES_HIRING_BLOCKED_BY_LIQUIDITY"
-    | "SALES_HIRING_BLOCKED_BY_RAW_SUPPLY_UNCERTAINTY";
+    | "SALES_HIRING_BLOCKED_BY_RAW_SUPPLY_UNCERTAINTY"
+    | "SALES_HIRING_LIMITED_BY_TARGET_SCALE"
+    | "SALES_HIRING_DEFERRED_UNTIL_CAPACITY_EXPANSION";
 }
 
 export interface SalesForceHiringDecisionResult {
@@ -209,6 +212,22 @@ export interface SalesForceHiringDecisionInput {
    * （§憶測しない、という本セッション全体の原則を維持）。
    */
   readonly rawMaterialSupplyConstraintState: "shortage" | "balanced" | "surplus" | "unknown";
+  /**
+   * 【2026-08-05新設・三宅さんご指示】Target Sales Force算定の中心をmarginal-positive
+   * loopから、「Target Scaleに必要な営業能力に対して何人不足しているか」へ移す。
+   * targetScale.tsで算定したTarget Scale Band（8期程度先の会社像。市場精密予測では
+   * ない）を受け取り、min(strategic target scale, production-supported scale)を
+   * 販売量の上限として使う（market opportunity側の上限は、既存のwishベースの
+   * realisticSalesAtHeadcountが自然に飽和するため、ここでは別途キャップしない）。
+   */
+  readonly targetScaleBand: TargetScaleBand;
+  /**
+   * 4Q以内に稼働見込みの自社設備投資案件があるか（targetCapability.ts算出）。
+   * trueの場合、現在の生産能力を超えてもTarget Scale（max）までの営業採用の
+   * 先行を許容する（三宅さんご指示§14）。falseの場合は現在の実効生産能力を
+   * 販売量上限のキャップとして使い、production_capacity_gapとして診断する。
+   */
+  readonly hasNearTermCapexUnderConstruction: boolean;
 }
 
 /**
@@ -226,12 +245,10 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
     totalEffectiveCapacityByProduct,
     unitEconomics,
     rawMaterialSupplyConstraintState,
+    targetScaleBand,
+    hasNearTermCapexUnderConstruction,
+    params,
   } = input;
-  // 【将来の拡張点】input.paramsは現時点で未使用（marginal contributionの経済性判定は
-  // finance/production/sales共有パラメータのみで完結するため）。将来、経営性格プロファイル
-  // （managementProfile.ts）由来の営業採用バイアスをこのモジュールへ接続する際の受け皿として、
-  // SalesForceHiringDecisionInputのフィールド自体は維持する。
-  void input.params;
 
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const evaluations: MarginalSalespersonEvaluation[] = [];
@@ -265,10 +282,33 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
   // 現在人数の大小に関わらず正しく計算するため、ここで打ち切ってはならない。
   const naturalStopCeiling = NATURAL_STOP_SAFETY_ITERATION_CEILING;
 
+  // 【2026-08-05新設・三宅さんご指示】Target Sales Volume（販売量ベースの上限）。
+  // min(strategic target scale, production-supported scale)を使う。市場機会側の
+  // 上限は、realisticSalesAtHeadcountがwish（希望量）で自然に飽和するため、
+  // ここで別途キャップしない（§12「min(strategic target scale, realistic
+  // obtainable market opportunity, production-supported sales scale)」のうち、
+  // market opportunity項は既存のwish飽和メカニズムがそのまま担う）。
+  const effectiveCapacityTons = PRODUCTS.reduce((s, p) => s + totalEffectiveCapacityByProduct[p], 0);
+  const productionSupportedScaleTons = hasNearTermCapexUnderConstruction ? targetScaleBand.quarterlySalesTons.max : effectiveCapacityTons;
+  const targetSalesVolumeTons = Math.min(targetScaleBand.quarterlySalesTons.max, productionSupportedScaleTons);
+  const cappedByProductionNotStrategicTarget = productionSupportedScaleTons < targetScaleBand.quarterlySalesTons.max;
+
   // --- 採用方向（+1ずつ、自然停止条件まで評価し、Target Sales Forceを求める） ---
   let hireCount = 0;
   let salesAtCurrent = realisticSalesAtHeadcount(currentHeadcount + hireCount, wishByMarket, salesParams);
+  let stoppedByTargetScaleCeiling = false;
   for (let i = 0; i < naturalStopCeiling; i++) {
+    // Target Sales Volume（Target Scale帯・production-supported scaleの小さい方）に
+    // 既に到達している場合、限界利益が正であってもこれ以上は採用しない
+    // （三宅さんご指示§9「まず『何人必要か』→その範囲内でmarginal economicsを確認」。
+    // 逆順にしない、という明示的な指示への対応。市場機会飽和による自然停止（A）とは
+    // 独立した、Target Scale側からの上限）。
+    const currentTotal = salesAtCurrent.hoso + salesAtCurrent.pd + salesAtCurrent.vap;
+    if (currentTotal >= targetSalesVolumeTons - EPSILON) {
+      stoppedByTargetScaleCeiling = true;
+      break;
+    }
+
     const before = currentHeadcount + hireCount;
     const after = before + 1;
     const salesAfter = realisticSalesAtHeadcount(after, wishByMarket, salesParams);
@@ -498,6 +538,77 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
       severity: "info",
       keyValues: { targetSalesForceHeadcount, hireCountThisQuarter },
       message: codeToMessage[lastEval.blockedReasonCode ?? "SALES_HIRING_NOT_ECONOMIC"],
+    });
+  }
+
+  // 【2026-08-05新設】ループがTarget Sales Volumeの上限（Target Scale帯または
+  // production-supported scaleの小さい方）に到達して自然停止した場合、その旨を
+  // 診断として明示する（三宅さんご指示§28のreason code）。
+  if (stoppedByTargetScaleCeiling) {
+    if (cappedByProductionNotStrategicTarget) {
+      diagnostics.push({
+        code: "SALES_HIRING_DEFERRED_UNTIL_CAPACITY_EXPANSION",
+        domain: "sales",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: { targetSalesForceHeadcount, productionSupportedScaleTons, targetScaleMaxTons: targetScaleBand.quarterlySalesTons.max },
+        message: `Target Scale（max ${Math.round(
+          targetScaleBand.quarterlySalesTons.max
+        )}t/期）自体には届いていないが、現在の生産能力（稼働中の設備投資も無い）が${Math.round(
+          productionSupportedScaleTons
+        )}t/期にとどまるため、営業採用をこれ以上Target Scale方向へ進めることを見送る（production capacity gapが先に解消されるべき）。`,
+      });
+    } else {
+      diagnostics.push({
+        code: "SALES_HIRING_LIMITED_BY_TARGET_SCALE",
+        domain: "sales",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: { targetSalesForceHeadcount, targetSalesVolumeTons },
+        message: `Target Scale帯の上限相当の販売量（約${Math.round(
+          targetSalesVolumeTons
+        )}t/期）に既に達しているため、追加1人の限界利益が正であってもこれ以上の営業採用は提案しない（会社が目指す規模を超えて無意味に増員しないため）。`,
+      });
+    }
+  }
+
+  // 【2026-08-05新設】現在の営業人員数が実現する販売量が、Target Scale帯の
+  // どこにあるか（不足/範囲内/過剰）を診断する（三宅さんご指示§24「現在38人が
+  // Target Scaleから見て不足/適正/過剰のどれか」）。
+  {
+    const currentSalesVolumeTons = (() => {
+      const s = realisticSalesAtHeadcount(currentHeadcount, wishByMarket, salesParams);
+      return s.hoso + s.pd + s.vap;
+    })();
+    const band = targetScaleBand.quarterlySalesTons;
+    const tolerance = params.targetScaleWithinBandTolerance;
+    const minWithTolerance = band.min * (1 - tolerance);
+    const maxWithTolerance = band.max * (1 + tolerance);
+    let code: "SALES_CAPACITY_BELOW_TARGET_SCALE" | "SALES_CAPACITY_WITHIN_TARGET_BAND" | "SALES_CAPACITY_ABOVE_TARGET_SCALE";
+    let message: string;
+    if (currentSalesVolumeTons < minWithTolerance) {
+      code = "SALES_CAPACITY_BELOW_TARGET_SCALE";
+      message = `現在の営業人員（${currentHeadcount}人）が実現する販売量（約${Math.round(
+        currentSalesVolumeTons
+      )}t/期）は、Target Scale帯（${Math.round(band.min)}〜${Math.round(band.max)}t/期）のminを下回っている（不足）。`;
+    } else if (currentSalesVolumeTons > maxWithTolerance) {
+      code = "SALES_CAPACITY_ABOVE_TARGET_SCALE";
+      message = `現在の営業人員（${currentHeadcount}人）が実現する販売量（約${Math.round(
+        currentSalesVolumeTons
+      )}t/期）は、Target Scale帯（${Math.round(band.min)}〜${Math.round(band.max)}t/期）のmaxを上回っている（過剰）。`;
+    } else {
+      code = "SALES_CAPACITY_WITHIN_TARGET_BAND";
+      message = `現在の営業人員（${currentHeadcount}人）が実現する販売量（約${Math.round(
+        currentSalesVolumeTons
+      )}t/期）は、Target Scale帯（${Math.round(band.min)}〜${Math.round(band.max)}t/期）の範囲内にある（適正）。`;
+    }
+    diagnostics.push({
+      code,
+      domain: "sales",
+      companyId: fixture.companyId,
+      severity: "info",
+      keyValues: { currentHeadcount, currentSalesVolumeTons, targetMinTons: band.min, targetMaxTons: band.max },
+      message,
     });
   }
 

@@ -84,7 +84,17 @@ export type StandardAiReasonCode =
   | "SALES_HIRING_NOT_ECONOMIC" // 追加1人あたりのmarginal contributionが給与を下回るため営業採用が経済的でない
   | "SALES_FORCE_EXCESS_CAPACITY" // 持続的な営業容量過剰（追加販売機会が乏しく在庫も制約でない）と診断
   | "SALES_LAYOFF_ECONOMIC_AFTER_SEVERANCE" // 退職金を考慮しても節約効果が上回るため営業減員が経済的
-  | "SALES_LAYOFF_DEFERRED_STRATEGIC_CAPACITY"; // 在庫が販売のボトルネックになっているため、容量過剰に見えても減員を見送り（戦略的容量の保持）
+  | "SALES_LAYOFF_DEFERRED_STRATEGIC_CAPACITY" // 在庫が販売のボトルネックになっているため、容量過剰に見えても減員を見送り（戦略的容量の保持）
+  // --- 【2026-08-05新設】Strategic Intent / Target Scale Band ---
+  | "STRATEGIC_TARGET_SCALE_SET" // Strategic Intent（成長姿勢）からTarget Scale Bandを算定した
+  | "SALES_CAPACITY_BELOW_TARGET_SCALE" // 現在の実効営業能力（realistic sales相当）がTarget Scale帯のminを下回る
+  | "SALES_CAPACITY_WITHIN_TARGET_BAND" // 現在の実効営業能力がTarget Scale帯の範囲内（許容乖離込み）にある
+  | "SALES_CAPACITY_ABOVE_TARGET_SCALE" // 現在の実効営業能力がTarget Scale帯のmaxを上回る
+  | "PRODUCTION_CAPACITY_BELOW_TARGET_SCALE" // 現在の実効生産能力がTarget Scale（preferred）を下回り、稼働中の設備投資も無い
+  | "FUTURE_CAPEX_SUPPORTS_TARGET_SCALE" // 現在の実効生産能力はTarget Scaleに届かないが、稼働中の設備投資案件がありその不足を将来解消する見込み
+  | "SALES_HIRING_LIMITED_BY_TARGET_SCALE" // Target Scale帯の上限相当の販売量に既に達しているため、限界利益が正でもこれ以上の営業採用を提案しない
+  | "SALES_HIRING_DEFERRED_UNTIL_CAPACITY_EXPANSION" // 生産能力側がTarget Scaleに届いておらず、かつ近い将来の設備拡張の見込みも無いため、営業採用をTarget Scale方向へ進めることを見送る
+  | "FINANCEABLE_SCALE_BELOW_STRATEGIC_TARGET"; // Target Scale自体は維持しつつ、現在の資金体力から見た現実的な規模はそれを下回ると診断する
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -144,6 +154,15 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "SALES_FORCE_EXCESS_CAPACITY",
   "SALES_LAYOFF_ECONOMIC_AFTER_SEVERANCE",
   "SALES_LAYOFF_DEFERRED_STRATEGIC_CAPACITY",
+  "STRATEGIC_TARGET_SCALE_SET",
+  "SALES_CAPACITY_BELOW_TARGET_SCALE",
+  "SALES_CAPACITY_WITHIN_TARGET_BAND",
+  "SALES_CAPACITY_ABOVE_TARGET_SCALE",
+  "PRODUCTION_CAPACITY_BELOW_TARGET_SCALE",
+  "FUTURE_CAPEX_SUPPORTS_TARGET_SCALE",
+  "SALES_HIRING_LIMITED_BY_TARGET_SCALE",
+  "SALES_HIRING_DEFERRED_UNTIL_CAPACITY_EXPANSION",
+  "FINANCEABLE_SCALE_BELOW_STRATEGIC_TARGET",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

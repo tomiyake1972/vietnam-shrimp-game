@@ -23,6 +23,8 @@ import {
 import { buildStandardAiUnitEconomics } from "../diagnosis/forwardUnitEconomics";
 import { buildStandardAiSalesForceHiringDecision, SalesForceHiringDecisionInput } from "../decision/salesForceHiring";
 import { generateStandardAiDecisionWithDiagnostics } from "../policy";
+import { computeTargetScaleBand } from "../targetScale";
+import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "../strategicIntent";
 
 function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig {
   return { scenarioId: "baseline", mode: "canonical", seed: "sai-hiring-unit-001", turns: 8, ...overrides };
@@ -50,8 +52,9 @@ function setupBalContext(seed = "sai-hiring-unit-001") {
   );
   const finalProductionRequirementByProduct = computeFinalProductionRequirement(basicProductionRequirementByProduct);
   const unitEconomics = buildStandardAiUnitEconomics(observation);
+  const targetScaleResult = computeTargetScaleBand(fixture, observation, STANDARD_AI_STRATEGIC_INTENT_V1, STANDARD_AI_PARAMETERS_V1);
 
-  return { fixture, observation, pressures, salesResult, finalProductionRequirementByProduct, unitEconomics };
+  return { fixture, observation, pressures, salesResult, finalProductionRequirementByProduct, unitEconomics, targetScaleResult };
 }
 
 function buildInput(ctx: ReturnType<typeof setupBalContext>, overrides: Partial<SalesForceHiringDecisionInput> = {}): SalesForceHiringDecisionInput {
@@ -66,6 +69,8 @@ function buildInput(ctx: ReturnType<typeof setupBalContext>, overrides: Partial<
     totalEffectiveCapacityByProduct: ctx.observation.totalEffectiveCapacityByProduct,
     unitEconomics: ctx.unitEconomics,
     rawMaterialSupplyConstraintState: "unknown",
+    targetScaleBand: ctx.targetScaleResult.targetScaleBand,
+    hasNearTermCapexUnderConstruction: false,
     ...overrides,
   };
 }
@@ -86,6 +91,18 @@ test("収益性のある未充足の販売機会が無い場合（希望量が�
   const input = buildInput(ctx, { salesWishByMarketProduct: [] });
   const result = buildStandardAiSalesForceHiringDecision(input);
   assert.equal(result.salesForceHireCount, 0);
+});
+
+test("2026-08-05新設: Target Scale帯の上限に既に達している場合、限界利益が正であってもそれ以上の営業採用を提案しない（三宅さんご指示§9・§31）", () => {
+  const ctx = setupBalContext();
+  // Target Scale帯を極端に小さく（現在の実現販売量と同水準）override し、
+  // 「会社が目指す規模を超えて無意味に増員しない」ことを確認する。
+  const tinyBand = { quarterlySalesTons: { min: 0, preferred: 0, max: 1 } };
+  const input = buildInput(ctx, { targetScaleBand: tinyBand, hasNearTermCapexUnderConstruction: true });
+  const result = buildStandardAiSalesForceHiringDecision(input);
+  assert.equal(result.salesForceHireCount, 0, "Target Scale帯の上限（max=1t）に対し現在の販売量が既に上回っているため、採用0件のはず");
+  const limitedByTargetScale = result.diagnostics.some((d) => d.code === "SALES_HIRING_LIMITED_BY_TARGET_SCALE");
+  assert.ok(limitedByTargetScale, "SALES_HIRING_LIMITED_BY_TARGET_SCALE診断が発行されるはず");
 });
 
 test("生産能力に全く余力がない場合、営業採用は生産ボトルネックでブロックされる（大量採用しない）", () => {

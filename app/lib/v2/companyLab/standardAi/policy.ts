@@ -45,6 +45,9 @@ import {
 import { buildStandardAiUnitEconomics } from "./diagnosis/forwardUnitEconomics";
 import { buildStandardAiSalesForceHiringDecision } from "./decision/salesForceHiring";
 import { SALES_PARAMETERS_V1 } from "../../sales/parameters";
+import { computeTargetScaleBand } from "./targetScale";
+import { computeTargetCapability } from "./targetCapability";
+import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "./strategicIntent";
 
 // 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
 // 診断情報にこれまで捨てていた圧力スコア(pressures)と、当四半期の意思決定
@@ -197,6 +200,29 @@ export function generateStandardAiDecisionWithDiagnostics(
   // 決定する。production decision・Worker decision・procurement decision・
   // finance decisionのいずれの計算結果も変更しない（既に計算済みの値を読むだけ）。
   const unitEconomicsResult = buildStandardAiUnitEconomics(observation);
+
+  // 【2026-08-05新設・Strategic Intent / Target Scale】三宅さんご指示により、
+  // 「限界利益が正な間は増員」ではなく「この会社が目指す規模（Target Scale Band）
+  // に必要な人数」を営業採用判断の中心に据える。Strategic Intentは今回、Standard AI
+  // 共通のBALANCED_GROWTHを使う（会社別性格への拡張は将来、この定数を差し替える
+  // だけで済む設計）。8期先市場の精密予測は行わず、現在の会社規模・実効生産能力・
+  // 成長姿勢から算定する（targetScale.ts参照）。
+  const targetScaleResult = computeTargetScaleBand(fixture, observation, STANDARD_AI_STRATEGIC_INTENT_V1, params);
+  const liquidityFloorUsdForCapability = observation.cashUsd - pressures.targetMinimumCashUsd;
+  const approxVariableCostUsdPerTon =
+    (observation.productEconomics.expectedProcessingCostUsdPerHosoEqKg.hoso +
+      observation.productEconomics.expectedProcessingCostUsdPerHosoEqKg.pd +
+      observation.productEconomics.expectedProcessingCostUsdPerHosoEqKg.vap) /
+    3 /
+    1000; // USD/kg -> USD/トン簡易換算（3商品単純平均。精密な商品別配分はここでは行わない）。
+  const targetCapabilityResult = computeTargetCapability({
+    fixture,
+    observation,
+    targetScaleBand: targetScaleResult.targetScaleBand,
+    liquidityFloorUsd: liquidityFloorUsdForCapability,
+    approxVariableCostUsdPerTon,
+  });
+
   const salesForceHiringResult = buildStandardAiSalesForceHiringDecision({
     fixture,
     observation,
@@ -208,6 +234,8 @@ export function generateStandardAiDecisionWithDiagnostics(
     totalEffectiveCapacityByProduct: observation.totalEffectiveCapacityByProduct,
     unitEconomics: unitEconomicsResult,
     rawMaterialSupplyConstraintState: situationDiagnosisResult.diagnosis.rawMaterialSupplyConstraintState,
+    targetScaleBand: targetScaleResult.targetScaleBand,
+    hasNearTermCapexUnderConstruction: targetCapabilityResult.hasNearTermCapexUnderConstruction,
   });
 
   const decision: CompanyDecisionInput = {
@@ -224,6 +252,31 @@ export function generateStandardAiDecisionWithDiagnostics(
     capexDecision: capexResult.capexDecision,
   };
 
+  const strategicTargetScaleDiagnostic: StandardAiDiagnosticEntry = {
+    code: "STRATEGIC_TARGET_SCALE_SET",
+    domain: "diagnosis",
+    companyId: fixture.companyId,
+    severity: "info",
+    keyValues: {
+      targetMinTons: targetScaleResult.targetScaleBand.quarterlySalesTons.min,
+      targetPreferredTons: targetScaleResult.targetScaleBand.quarterlySalesTons.preferred,
+      targetMaxTons: targetScaleResult.targetScaleBand.quarterlySalesTons.max,
+      currentSustainableScaleTons: targetScaleResult.currentSustainableScaleTons,
+    },
+    decisionSummary: `Target Scale Band: ${Math.round(targetScaleResult.targetScaleBand.quarterlySalesTons.min)}〜${Math.round(
+      targetScaleResult.targetScaleBand.quarterlySalesTons.max
+    )}t/期（preferred ${Math.round(targetScaleResult.targetScaleBand.quarterlySalesTons.preferred)}t/期）`,
+    message: `Strategic Intent（${STANDARD_AI_STRATEGIC_INTENT_V1.growthPosture}）と現在の持続可能規模（約${Math.round(
+      targetScaleResult.currentSustainableScaleTons
+    )}t/期）から、Target Scale Bandを${Math.round(targetScaleResult.targetScaleBand.quarterlySalesTons.min)}〜${Math.round(
+      targetScaleResult.targetScaleBand.quarterlySalesTons.max
+    )}t/期（preferred ${Math.round(
+      targetScaleResult.targetScaleBand.quarterlySalesTons.preferred
+    )}t/期）と算定した。8期先市場の精密予測ではなく、現時点の会社規模・実効生産能力・成長姿勢からの逆算である${
+      targetScaleResult.marketOpportunityDirection ? `（補助情報: 市場機会の方向性=${targetScaleResult.marketOpportunityDirection}）` : ""
+    }。`,
+  };
+
   const entries: StandardAiDiagnosticEntry[] = [
     ...salesResult.diagnostics,
     ...productionResult.diagnostics,
@@ -233,6 +286,8 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...capexResult.diagnostics,
     ...deliveryDemandResult.diagnostics,
     ...situationDiagnosisResult.diagnostics,
+    strategicTargetScaleDiagnostic,
+    ...targetCapabilityResult.diagnostics,
     ...salesForceHiringResult.diagnostics,
   ];
 
