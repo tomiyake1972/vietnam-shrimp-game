@@ -40,28 +40,42 @@ Decision（CompanyDecisionInput）確定
 
 ## 2. Marginal Salesperson評価の意思決定木（1人ずつ、hire方向）
 
+【2026-08-05修正・三宅さんレビュー反映】旧版はこの意思決定木を「安全上限（現在人数の50%）」で打ち切っていたが、その安全上限自体が現在人数に対する相対値だったため、採用のたびに次四半期の上限も膨張し、8ターン×5社シミュレーションで複利的な指数増加（BAL: 18→27→41→62→93→140人）が発生した。修正後は、以下の意思決定木を**自然停止条件（A/D/E/G/H）に到達するまで打ち切らずに評価**し、その結果を「Target Sales Force（必要な将来営業能力）」として先に確定させる。1四半期に実際へ反映する人数は、その後に別途、静的な会社基準規模に対するガバナーでキャップする（§2.1参照）。
+
 ```
-現在の営業人員数 h から h+1 を試す
+現在の営業人員数 h から h+1 を試す（安全弁として反復上限2000のみ設定。ビジネス判断ではない）
   │
   ├─ incremental sales ≈ 0 ?
-  │     Yes → 停止（A. profitable unserved opportunity消滅）
+  │     Yes → 停止（A. profitable unserved opportunity消滅）→ h = Target Sales Force
   │
   ├─ marginalContributionAfterSalesSalary <= 0 ?
-  │     Yes → 停止（D. SALES_HIRING_NOT_ECONOMIC）
+  │     Yes → 停止（D. SALES_HIRING_NOT_ECONOMIC）→ h = Target Sales Force
   │
   ├─ 新規生産が必要な増分 > 会社全体の生産余力合計 ?
-  │     Yes → 停止（E. SALES_HIRING_BLOCKED_BY_PRODUCTION）
+  │     Yes → 停止（E. SALES_HIRING_BLOCKED_BY_PRODUCTION）→ h = Target Sales Force
   │
   ├─ 新規生産が必要 かつ rawMaterialSupplyConstraintState == "shortage" ?
-  │     Yes → 停止（G. SALES_HIRING_BLOCKED_BY_RAW_SUPPLY_UNCERTAINTY）
+  │     Yes → 停止（G. SALES_HIRING_BLOCKED_BY_RAW_SUPPLY_UNCERTAINTY）→ h = Target Sales Force
   │
   ├─ 現金の最低バッファ余力 - 累積追加給与 < 0 ?
-  │     Yes → 停止（H. SALES_HIRING_BLOCKED_BY_LIQUIDITY）
+  │     Yes → 停止（H. SALES_HIRING_BLOCKED_BY_LIQUIDITY）→ h = Target Sales Force
   │
-  └─ すべて通過 → この1人を受理し、h+1 → h+2 へ進む（安全上限まで）
+  └─ すべて通過 → この1人を「必要な将来営業能力の一部」として受理し、h+1 → h+2 へ進む
 ```
 
-減員方向（layoff）は、hireCount=0の場合のみ評価し、末尾1人のmarginal contributionが給与以下かつ既存FGが販売のボトルネックでない場合のみ、退職金（2四半期分の給与）を考慮した上で受理する。
+### 2.1 Target Sales Force → 今四半期の実際の採用数
+
+```
+targetGap = Target Sales Force − 現在人数
+governorCap = max(5, round(fixture.salesForceHeadcountTotal（静的な会社基準規模）× 0.5))
+salesForceHireCount（今四半期） = min(targetGap, governorCap)
+残り（targetGap − salesForceHireCount）は次四半期以降、その時点の最新wish/observationで
+target を再計算する形で持ち越される（単純なキューではない）。
+```
+
+`governorCap`の基準が「現在人数」ではなく「静的な会社基準規模」であるため、採用が続いてもガバナー自体は膨張しない。これが複利成長を構造的に排除する修正の核心である。
+
+減員方向（layoff）は、hireCount=0の場合のみ評価し、末尾1人のmarginal contributionが給与以下かつ既存FGが販売のボトルネックでない場合のみ、退職金（2四半期分の給与）を考慮した上で受理する。減員側にも同じ`governorCap`を対称的に適用する。
 
 ## 3. 現行Situation Diagnosisとの関係（三宅さんご指示§3の対応状況）
 

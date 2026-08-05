@@ -70,7 +70,13 @@ export interface MarginalSalespersonEvaluation {
   readonly rawMaterialPathUncertain: boolean;
   readonly liquidityAfterHiringUsd: number | null;
   readonly liquidityOk: boolean;
+  /** 生産・原料・資金・経済性のいずれの制約にも達しない、「必要な将来営業能力」の一部として正当化されたかどうか。 */
   readonly accepted: boolean;
+  /**
+   * acceptedはtrueだが、1四半期あたりの反映人数ガバナー（quarterlyGovernorCap）に
+   * より、今四半期の実際の採用数には含まれず、次四半期以降へ繰り越された候補。
+   */
+  readonly deferredByQuarterlyGovernor?: boolean;
   /** acceptedがfalseの場合、その理由コード（受理された場合はundefined）。 */
   readonly blockedReasonCode?:
     | "SALES_HIRING_NOT_ECONOMIC"
@@ -80,27 +86,55 @@ export interface MarginalSalespersonEvaluation {
 }
 
 export interface SalesForceHiringDecisionResult {
+  /** 今四半期に実際へ反映する採用数（quarterlyGovernorCap適用後）。 */
   readonly salesForceHireCount: number;
   readonly salesForceLayoffCount: number;
+  /**
+   * 生産・原料・資金・経済性のいずれの制約にも達しない、「必要な将来営業能力」
+   * （Target Sales Force）。currentHeadcount + targetSalesForceHeadcountGap。
+   * salesForceHireCountはこの目標に対する今四半期の反映分（ガバナー適用後）であり、
+   * 目標そのものではない（目標 > 反映分の場合、残りは次四半期以降に繰り越される）。
+   */
+  readonly targetSalesForceHeadcount: number;
   readonly evaluations: readonly MarginalSalespersonEvaluation[];
   readonly diagnostics: readonly StandardAiDiagnosticEntry[];
 }
 
 /**
- * 【新設パラメータ・安全上限】1四半期あたりStandard AIが提案する営業人員の
- * 増員・減員数の上限。ゲームバランス上のcapacity式のパラメータではなく、
- * 「AIが1回の判断で極端な人数を動かさない」ための意思決定ガバナー
- * （rate limiter）であり、#04の営業capacity仕様そのものとは独立している。
- * 三宅さんのご指示（§6「maximum limitを新たに発明する場合は慎重に」）に対応する
- * 最小限の安全策として、既存の会社規模（現在の営業人員数）に対する相対値とし、
- * 固定の大きな絶対値を発明しない。
+ * 【2026-08-05修正・三宅さんレビュー反映】旧設計では「1回の判断で極端な人数を
+ * 動かさない」ための安全上限を「現在の（既に増員済みの）営業人員数」に対する
+ * 相対値としていた。これは実際には安全上限として機能せず、採用が起きるたびに
+ * 次の四半期の上限自体も膨張する複利成長の式になっていた（8Qシミュレーションで
+ * 18→27→41→62→93→140人という指数的増加が実際に発生し、三宅さんより
+ * 「バグというより設計通り暴走した」とご指摘を受けた）。
+ *
+ * 修正方針（三宅さんご指示）:
+ *   1) まず生産・原料・資金いずれの制約にも達しないマージナル経済性の
+ *      自然停止点まで評価し、「必要な将来営業能力（Target Sales Force）」を
+ *      先に計算する。
+ *   2) 必要人数 − 現在人数 = 採用必要数（不足分）を求める。
+ *   3) 1四半期に実際へ反映する人数の上限（ガバナー）は、「その四半期ごとに
+ *      膨張する現在人数」ではなく、会社の静的な基準規模
+ *      （fixture.salesForceHeadcountTotal、会社設立時の値でターンをまたいでも
+ *      変わらない）に対する相対値とする。これにより採用が起きても次四半期の
+ *      ガバナー自体は膨張せず、複利成長を構造的に排除する。
  */
 const MAX_HIRE_PER_QUARTER_ABSOLUTE_FLOOR = 5;
-const MAX_HIRE_PER_QUARTER_RELATIVE_RATIO = 0.5; // 現在人数の50%まで、かつ絶対floor以上
+const MAX_HIRE_PER_QUARTER_RELATIVE_RATIO = 0.5; // 静的な基準規模の50%まで、かつ絶対floor以上
 
-function maxHireCountThisQuarter(currentHeadcount: number): number {
-  return Math.max(MAX_HIRE_PER_QUARTER_ABSOLUTE_FLOOR, Math.round(currentHeadcount * MAX_HIRE_PER_QUARTER_RELATIVE_RATIO));
+/** ガバナーの基準人数。会社の静的な基準規模（ターンをまたいでも変わらない）を用いる。 */
+function quarterlyGovernorCap(staticBaselineHeadcount: number): number {
+  return Math.max(MAX_HIRE_PER_QUARTER_ABSOLUTE_FLOOR, Math.round(staticBaselineHeadcount * MAX_HIRE_PER_QUARTER_RELATIVE_RATIO));
 }
+
+/**
+ * マージナル経済性ループ自体の反復回数上限。ビジネス上の意思決定ガバナーでは
+ * なく、純粋な暴走防止のための機械的セーフガード（万一のロジック不具合で
+ * 無限ループにならないための安全弁）。実際の停止は、A（機会消滅）・
+ * D（非経済的）・E（生産余力超）・G（原料供給制約）・H（資金バッファ超）の
+ * いずれかの自然な停止条件で先に発生する想定。
+ */
+const NATURAL_STOP_SAFETY_ITERATION_CEILING = 2000;
 
 /** 会社×市場×商品の希望量マップ（salesWishByMarketProductから再構成）。 */
 function buildWishMap(salesWish: readonly SalesWishEntry[]): Map<DemandMarketId, Record<Product, number>> {
@@ -225,12 +259,16 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
   const liquidityFloorUsd = observation.cashUsd - pressures.targetMinimumCashUsd;
 
   const currentFg = observation.finishedGoodsByProduct;
-  const maxHire = maxHireCountThisQuarter(currentHeadcount);
+  // 【2026-08-05修正】ここは「今四半期に反映してよい上限」ではなく、マージナル
+  // 経済性ループが自然停止条件（A/D/E/G/H）へ到達するまで評価を続けるための
+  // 純粋な暴走防止セーフガード。Target Sales Force（必要な将来営業能力）を
+  // 現在人数の大小に関わらず正しく計算するため、ここで打ち切ってはならない。
+  const naturalStopCeiling = NATURAL_STOP_SAFETY_ITERATION_CEILING;
 
-  // --- 採用方向（+1ずつ） ---
+  // --- 採用方向（+1ずつ、自然停止条件まで評価し、Target Sales Forceを求める） ---
   let hireCount = 0;
   let salesAtCurrent = realisticSalesAtHeadcount(currentHeadcount + hireCount, wishByMarket, salesParams);
-  for (let i = 0; i < maxHire; i++) {
+  for (let i = 0; i < naturalStopCeiling; i++) {
     const before = currentHeadcount + hireCount;
     const after = before + 1;
     const salesAfter = realisticSalesAtHeadcount(after, wishByMarket, salesParams);
@@ -401,19 +439,52 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
     });
   }
 
-  if (hireCount > 0) {
+  // hireCountはここまでで、生産・原料・資金・経済性いずれの制約にも達しない
+  // 「必要な将来営業能力」（Target Sales Force）の不足分＝targetGapである。
+  const targetGap = hireCount;
+  const targetSalesForceHeadcount = currentHeadcount + targetGap;
+
+  // 【2026-08-05修正】1四半期に実際へ反映する人数は、targetGapそのものではなく、
+  // 会社の静的な基準規模に対するガバナー上限でキャップする。上限を超えた分は
+  // 「今四半期は反映しない（次四半期以降に繰り越し。次四半期はその時点の新しい
+  // wish/observationで target を再計算するため、単純な繰り越しキューではない）」
+  // として扱う。
+  const governorCap = quarterlyGovernorCap(fixture.salesForceHeadcountTotal);
+  const hireCountThisQuarter = Math.min(targetGap, governorCap);
+  const deferredCount = targetGap - hireCountThisQuarter;
+
+  // 採用方向の評価一覧のうち、ガバナー上限を超えた分（acceptedだが今四半期は
+  // 反映しない候補）にdeferredByQuarterlyGovernorを付与する。
+  let acceptedSeen = 0;
+  for (const evalEntry of evaluations) {
+    if (evalEntry.direction !== "hire" || !evalEntry.accepted) continue;
+    acceptedSeen += 1;
+    if (acceptedSeen > hireCountThisQuarter) {
+      (evalEntry as { deferredByQuarterlyGovernor?: boolean }).deferredByQuarterlyGovernor = true;
+    }
+  }
+
+  hireCount = hireCountThisQuarter;
+
+  if (targetGap > 0) {
     diagnostics.push({
       code: "SALES_HIRING_PROFITABLE_UNSERVED_OPPORTUNITY",
       domain: "sales",
       companyId: fixture.companyId,
       severity: "info",
-      keyValues: { hireCount, currentHeadcount },
-      decisionSummary: `営業${hireCount}人の新規採用を提案`,
-      message: `収益性のある未充足の販売機会があり、追加${hireCount}人まではmarginal contributionが給与を上回り、生産・原料・資金のいずれのボトルネックにも達しないため、営業採用を提案する。`,
+      keyValues: { targetGap, targetSalesForceHeadcount, currentHeadcount, hireCountThisQuarter, deferredCount, governorCap },
+      decisionSummary:
+        deferredCount > 0
+          ? `Target Sales Force ${targetSalesForceHeadcount}人（不足${targetGap}人）のうち、今四半期は${hireCountThisQuarter}人を採用（${deferredCount}人は次四半期以降へ繰り越し）`
+          : `Target Sales Force ${targetSalesForceHeadcount}人へ向け、営業${hireCountThisQuarter}人の新規採用を提案`,
+      message:
+        deferredCount > 0
+          ? `収益性のある未充足の販売機会があり、必要な将来営業能力（Target Sales Force）は${targetSalesForceHeadcount}人（現在${currentHeadcount}人比+${targetGap}人）と評価されたが、1四半期あたりの採用ガバナー（静的な会社規模基準の${governorCap}人）により、今四半期は${hireCountThisQuarter}人のみ採用し、残り${deferredCount}人は次四半期以降の再評価に委ねる。`
+          : `収益性のある未充足の販売機会があり、必要な将来営業能力（Target Sales Force）${targetSalesForceHeadcount}人まではmarginal contributionが給与を上回り、生産・原料・資金のいずれのボトルネックにも達しないため、営業${hireCountThisQuarter}人の新規採用を提案する。`,
     });
   }
   const lastEval = evaluations[evaluations.length - 1];
-  if (lastEval && !lastEval.accepted) {
+  if (lastEval && lastEval.direction === "hire" && !lastEval.accepted) {
     const codeToMessage: Record<string, string> = {
       SALES_HIRING_NOT_ECONOMIC: "これ以上の営業採用は、追加1人あたりのmarginal contributionが給与を下回るため経済的でない。",
       SALES_HIRING_BLOCKED_BY_PRODUCTION: "販売機会はあるが、生産能力（binding capacity）に余力がないため、これ以上の営業採用を見送る。",
@@ -425,7 +496,7 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
       domain: "sales",
       companyId: fixture.companyId,
       severity: "info",
-      keyValues: { hireCountAccepted: hireCount },
+      keyValues: { targetSalesForceHeadcount, hireCountThisQuarter },
       message: codeToMessage[lastEval.blockedReasonCode ?? "SALES_HIRING_NOT_ECONOMIC"],
     });
   }
@@ -438,7 +509,7 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
   if (hireCount === 0 && currentHeadcount > 0) {
     let headcountForLayoffEval = currentHeadcount;
     const inventoryIsLimiting = PRODUCTS.some((p) => currentFg[p] <= EPSILON) || pressures.finishedGoodsExcessRatioByProduct.hoso < 0.5;
-    for (let i = 0; i < maxHire && headcountForLayoffEval > 0; i++) {
+    for (let i = 0; i < naturalStopCeiling && headcountForLayoffEval > 0; i++) {
       const after = headcountForLayoffEval - 1;
       const salesAtCurrentH = realisticSalesAtHeadcount(headcountForLayoffEval, wishByMarket, salesParams);
       const salesAtLower = realisticSalesAtHeadcount(after, wishByMarket, salesParams);
@@ -495,17 +566,35 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
         blockedReasonCode: undefined,
       });
     }
+    // 採用側と対称に、1四半期に実際へ反映する減員数も静的な基準規模に対する
+    // ガバナーでキャップする（大量解雇の一括実行を避けるため）。
+    const layoffGovernorCap = quarterlyGovernorCap(fixture.salesForceHeadcountTotal);
+    const layoffCountThisQuarter = Math.min(layoffCount, layoffGovernorCap);
+    const layoffDeferredCount = layoffCount - layoffCountThisQuarter;
+    if (layoffDeferredCount > 0) {
+      let acceptedLayoffSeen = 0;
+      for (const evalEntry of evaluations) {
+        if (evalEntry.direction !== "layoff" || !evalEntry.accepted) continue;
+        acceptedLayoffSeen += 1;
+        if (acceptedLayoffSeen > layoffCountThisQuarter) {
+          (evalEntry as { deferredByQuarterlyGovernor?: boolean }).deferredByQuarterlyGovernor = true;
+        }
+      }
+    }
+    layoffCount = layoffCountThisQuarter;
     if (layoffCount > 0) {
       diagnostics.push({
         code: "SALES_FORCE_EXCESS_CAPACITY",
         domain: "sales",
         companyId: fixture.companyId,
         severity: "info",
-        keyValues: { layoffCount, currentHeadcount, severanceUsdPerPerson },
+        keyValues: { layoffCount, currentHeadcount, severanceUsdPerPerson, layoffDeferredCount },
         decisionSummary: `営業${layoffCount}人の減員を提案`,
         message: `持続的な営業容量過剰（追加販売機会が乏しく、在庫も販売のボトルネックになっていない）と診断し、退職金（1人あたり${Math.round(
           severanceUsdPerPerson
-        )}USD）を考慮しても節約効果が上回るため、営業${layoffCount}人の減員を提案する。`,
+        )}USD）を考慮しても節約効果が上回るため、営業${layoffCount}人の減員を提案する${
+          layoffDeferredCount > 0 ? `（さらに${layoffDeferredCount}人は次四半期以降の再評価に委ねる）` : ""
+        }。`,
       });
     }
   }
@@ -513,6 +602,7 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
   return {
     salesForceHireCount: hireCount,
     salesForceLayoffCount: layoffCount,
+    targetSalesForceHeadcount,
     evaluations,
     diagnostics,
   };

@@ -56,9 +56,27 @@ market opportunity → sales capacity → production capacity → Worker
 7. **停止条件（raw supply uncertainty）**: 新規生産が必要かつ`situationDiagnosis.rawMaterialSupplyConstraintState === "shortage"`（真の供給制約が診断済み）の場合のみ`SALES_HIRING_BLOCKED_BY_RAW_SUPPLY_UNCERTAINTY`で停止。`"unknown"`（大半のケース、観測未接続のため）では断定せずブロックしない（既存の憶測しない設計方針を継承）。
 8. **停止条件（liquidity buffer）**: 現金の最低バッファ余力から、これまでの累積追加給与を引いた値が負になったら`SALES_HIRING_BLOCKED_BY_LIQUIDITY`で停止。**簡略化**: 当四半期の給与増分のみで判定する単四半期近似であり、複数四半期先のキャッシュタイミングは投影していない（Financial Capacity診断モジュールとの厳密な統合は次のステップ）。
 
-## 4. 安全上限（maximum reasonable hiring limit）
+## 4. Target Sales Force方式・安全上限（2026-08-05修正、三宅さんレビュー反映）
 
-新設パラメータ`MAX_HIRE_PER_QUARTER_ABSOLUTE_FLOOR=5`・`MAX_HIRE_PER_QUARTER_RELATIVE_RATIO=0.5`により、1四半期の提案上限を`max(5, 現在人数×50%)`とした。これは**ゲームバランス上のcapacity式のパラメータではなく**、「AIが1回の判断で極端な人数を動かさない」ための意思決定ガバナー（rate limiter）であり、三宅さんご指示§6「新たに発明する場合は慎重に」に対応する最小限の安全策として、既存の会社規模に対する相対値のみを使っている。
+### 4.1 旧設計の問題（三宅さんレビューで指摘）
+
+初版では、1四半期の採用ループを「限界利益がプラスな間は増員」しつつ、`max(5, 現在人数×50%)`という反復回数上限で打ち切る設計にしていた。この上限の基準が**現在の（既に増員済みの）営業人員数**だったため、採用が起きるたびに次四半期の上限自体も膨張し、8ターン×5社シミュレーションでBAL社が18→27→41→62→93→140人という複利的な指数増加を示した（`STANDARD_AI_8Q_SIMULATION_SUMMARY_2026-08-05.md`参照）。三宅さんより「バグというより設計通り暴走した」とのご指摘を受けた。
+
+### 4.2 修正後の設計: Target Sales Force方式
+
+「限界利益がプラスな間は増員」を意思決定の中心に置くのをやめ、以下の2段階へ変更した。
+
+1. **Target Sales Force（必要な将来営業能力）の計算**: マージナル経済性ループを、反復回数の恣意的な上限では打ち切らず、A（機会消滅）・D（非経済的）・E（生産余力超）・G（原料供給制約）・H（資金バッファ超）のいずれかの**自然停止条件**に到達するまで評価する。この結果得られる人数を`targetSalesForceHeadcount`とする。ループ自体には`NATURAL_STOP_SAFETY_ITERATION_CEILING=2000`という、ビジネス判断ではなく純粋な暴走防止のための機械的セーフガードのみを設ける。
+2. **不足分の計算と、1四半期あたりのガバナー適用**: `targetGap = targetSalesForceHeadcount - 現在人数`を求め、1四半期に実際へ反映する人数（`salesForceHireCount`）は、`targetGap`を**会社の静的な基準規模（`fixture.salesForceHeadcountTotal`、会社設立時の値でターンをまたいでも変わらない）** に対するガバナー`max(5, round(静的基準規模×50%))`でキャップする。ガバナーを超えた分は今四半期には反映せず、次四半期以降、その時点の最新のwish/observationで目標を再計算する形で持ち越される（単純なキューではない）。
+
+この修正により、ガバナー自体が「採用の結果として」膨張することがなくなり、複利成長が構造的に排除される。8ターン再実行では、BAL（静的基準18人・ガバナー9人/期）が18→27→36→45→54→63→72人という**線形**な増加になり、JPQ/VAP（基準14人・ガバナー7人/期）・CONSV（基準10人・ガバナー5人/期）も同様に線形化した。指数的増加は確認されなくなった（回帰テスト`salesForceHiring.test.ts`「複利成長しない」で固定化）。
+
+減員方向にも対称的に同じガバナーを適用した（`layoffCountThisQuarter`）。
+
+### 4.3 既知の限界（今回も残る設計上の簡略化）
+
+- ガバナーが「静的な基準規模」を用いるため、会社規模が非常に小さい状態から急成長すべき正当な理由がある場合でも、ガバナーが基準規模のままで動かない（意図的な保守設計。基準規模自体を動的に更新するかどうかは三宅さんの追加ご判断が必要）。
+- Target Sales Force自体は、当四半期のwish/observationに基づく評価であり、複数四半期先を見据えた需要予測ではない（次四半期は改めてゼロから評価し直す）。
 
 ## 5. Sales Layoff Decision（§7）
 
@@ -87,5 +105,5 @@ market opportunity → sales capacity → production capacity → Worker
 - 資金余力チェックが単四半期近似（Financial Capacity診断モジュールとの厳密統合は次のステップ）。
 - 減員側の理由コード発行（`SALES_LAYOFF_ECONOMIC_AFTER_SEVERANCE`/`SALES_LAYOFF_DEFERRED_STRATEGIC_CAPACITY`）は型定義のみで、実際の発行ロジックは未実装。
 - `situationDiagnosis.ts`の`DiagnosisConstraintCategory`を「sales_capacity_shortage」と「market_opportunity_shortage」に分割する提案（三宅さんご指示§3）は、既存の広範なテスト資産への影響リスクを避けるため、今回は見送った（既存の`sales_shortage`はそのまま維持）。分割は#05の次のタスクとして推奨する。
-- **【重大・要報告】安全上限（§4）が「現在の（既に膨張した）人数」に対する相対値であるため、8ターン×5社の実行検証でBAL/JPQ/VAP/CONSVの営業人員数が複利的に指数増加した（BAL: 18→18→27→41→62→93→140→140）。三宅さんご指示§22で明示的に警告されていた「salespeople endlessly increasing」の失敗モードに該当する。詳細と実データは`docs/standard_ai/STANDARD_AI_8Q_SIMULATION_SUMMARY_2026-08-05.md`を参照。**三宅さんのご指示「チューニングしすぎないでください。まず問題を報告してください。」に従い、今回はこの安全上限の修正は行っていない。**worker_shortageという独立した制約が最終的に採用を停止させている（turn7以降）ため、無限に増加し続けるわけではないが、中間ターンでの増加ペースは意図した「1回の判断で極端な人数を動かさない」というガバナー本来の趣旨から外れている。
-- 同シミュレーションでMASSが8ターン全てで採用ゼロ（headcount=22固定）だった。原因未調査（上記報告書§3参照）。
+- 【2026-08-05修正済み】旧安全上限（現在人数に対する相対値）による複利的な指数増加は、§4.2のTarget Sales Force方式への変更により解消した。詳細は`docs/standard_ai/STANDARD_AI_8Q_SIMULATION_SUMMARY_2026-08-05.md`の追記を参照。
+- 【2026-08-05解明済み】MASSが8ターン全て採用ゼロだった理由は、診断reason codeの追跡により判明した。turn1は`SALES_HIRING_NOT_ECONOMIC`（限界貢献利益が給与を下回る）、turn2〜8は`SALES_HIRING_BLOCKED_BY_LIQUIDITY`（現金の最低バッファ余力不足。実際MASSはturn6で現金がほぼ0まで低下していた）。詳細は上記報告書を参照。

@@ -190,3 +190,42 @@ test("8ターンの標準AI実行で、salesForceHireCount/salesForceLayoffCount
     current = advanceCompanyLabQuarter(current, fixtures, decisionsByCompanyId);
   }
 });
+
+test("2026-08-05修正: 1四半期あたりの採用ガバナーは静的な基準規模（fixture.salesForceHeadcountTotal）に対する相対値であり、複利成長しない（三宅さんレビュー指摘の回帰防止）", () => {
+  // 旧設計（ガバナーが「現在の（既に膨張した）人数」の50%）では、8ターン実行時に
+  // BAL社の営業人員数が 18→18→27→41→62→93→140 と複利的に膨張した。
+  // 修正後は、静的な基準規模（BAL=18人）に対するガバナー（max(5, round(18*0.5))=9人）が
+  // 毎四半期一定であるため、増員が続く限りの増分は常に9人以下・単調に非増加であるべきで、
+  // 「前四半期より増分が大きくなる」複利成長は発生しないはずである。
+  const { state, fixtures } = initializeCompanyLab(baseConfig());
+  const bal = fixtures.find((f) => f.companyId === "BAL")!;
+  const staticBaseline = bal.salesForceHeadcountTotal;
+  let current = state;
+  const hireByTurn: number[] = [];
+  for (let turn = 1; turn <= 8 && !current.isComplete; turn++) {
+    const decisionsByCompanyId: Record<string, ReturnType<typeof generateStandardAiDecisionWithDiagnostics>["decision"]> = {};
+    for (const fixture of fixtures) {
+      const ownState = buildCompanyOwnState(current, fixture);
+      const publicInfo = buildPublicMarketInfo(current);
+      const { decision } = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, current.currentPeriod, turn);
+      decisionsByCompanyId[fixture.companyId] = decision;
+      if (fixture.companyId === "BAL") {
+        hireByTurn.push(decision.salesForceHireCount ?? 0);
+      }
+    }
+    current = advanceCompanyLabQuarter(current, fixtures, decisionsByCompanyId);
+  }
+  const governorCap = Math.max(5, Math.round(staticBaseline * 0.5));
+  for (const hire of hireByTurn) {
+    assert.ok(hire <= governorCap, `1四半期あたりの採用数(${hire})は静的な基準規模由来のガバナー上限(${governorCap})を超えてはならない`);
+  }
+  const positiveHires = hireByTurn.filter((h) => h > 0);
+  if (positiveHires.length >= 2) {
+    for (let i = 1; i < positiveHires.length; i++) {
+      assert.ok(
+        positiveHires[i] <= positiveHires[i - 1] + 1,
+        `複利成長していないことの確認: ${i}番目の採用数(${positiveHires[i]})が直前(${positiveHires[i - 1]})より大幅に増えていない`
+      );
+    }
+  }
+});
