@@ -76,6 +76,62 @@ $1,200,000という数字は、無関係な製造部門の工場固定費（`fac
 | factoryUtilityFixedUsdPerQuarter | 250,000 | USD/四半期 | `app/lib/v2/finance/parameters.ts` |
 | factoryUtilityVariableUsdPerTon | 25 | USD/トン | `app/lib/v2/finance/parameters.ts` |
 
+## 【生産・労務】（2026-08-05 Test15読み込みラウンドで追加、`/tmp/pd_labor` HEAD `5f1fa87`で確認）
+
+| パラメータ | 現行本番値 | 単位 | ソースファイル | 経済的意味 |
+|---|---|---|---|---|
+| 商品別労働集約度係数（機械化前） | HOSO:PD:VAP = 1.0 : **1.8** : 3.0 | 係数 | `app/lib/v2/production/parameters.ts:166-169`（`labor.laborIntensityCoefficient`） | 同じ人数でHOSOを基準にPD/VAPは処理量が少ない（人手がより多く必要）ことを表す。コード内コメントに「要校正」注記あり |
+| 商品別労働集約度係数（機械化後・完全成熟） | HOSO:PD:VAP = 1.0 : 1.2 : **2.6** | 係数 | `app/lib/v2/production/parameters.ts:172-175`（`labor.mechanizedLaborIntensityCoefficient`） | PD省人化投資が完全に成熟した工場での到達値 |
+| 唯一の変換関数 | `resolveLaborIntensityCoefficient(product, mechanizationLevel, params)` | - | `app/lib/v2/production/labor.ts:70-82` | 生産実行（`allocateWorkersToPlans`）・必要人員見積り（`companyLab/workforce.ts`）・意思決定画面表示・Standard AI判断・Excel出力の**すべてがこの一つの関数を経由**する設計（コード内コメントで明示） |
+
+**重要な訂正**：三宅さんが記憶されている「HOSO:PD:VAP = 1.0:1.2:3.0」という数値は、
+現行コードのどの単一の状態（機械化前・機械化後いずれ）とも完全には一致しない。
+コード上の実際の値は機械化前が1.0:1.8:3.0、機械化後が1.0:1.2:2.6であり、
+「1.2」は機械化後PDの値、「3.0」は機械化前VAPの値と、**異なる2つの状態の数値が
+混在した記憶**である可能性が高い（`production/parameters.ts`のコード内コメントに
+よれば、旧Test15時点では実際に pd=1.2 を機械化前の値として使っていたが、これは
+「機械化後の到達値」に相当する水準であり、機械化前の人手の重さを表現できず
+投資回収が構造的に成立しない一因になっていたため、後の作業で1.8へ引き上げる
+再校正が行われた、という変更履歴がコード内に記録されている）。
+
+## 【新工場建設】（`newFactoryConstruction`）
+
+| パラメータ | 現行本番値 | 単位 | ソースファイル |
+|---|---|---|---|
+| 投資額 | 22,000,000 | USD | `app/lib/v2/capex/parameters.ts:275-303` |
+| 支払スケジュール | 30% / 35% / 35%（3四半期） | 比率 | 同上 |
+| 竣工後操業準備期間 | 1 | 四半期 | 同上 |
+| 建物比率／機械比率 | 45% / 55% | 比率 | 同上 |
+| 保守費率 | 0.75%/四半期 | 比率 | 同上 |
+| フル稼働時能力（HOSO/PD/VAP/共通前処理/凍結包装） | 10,000 / 8,000 / 6,000 / 22,000 / 20,000 | トン/四半期 | 同上 |
+| ランプアップ倍率 | 稼働開始四半期50%→75%→100% | 比率 | 同上 |
+| 実測（UI）投資額・今期支払・保守費・減価償却 | $22,000,000／$6,600,000／$165,000／四半期／$401,500/四半期 | USD | 本ラウンドPlaywright実測（`/v2/company-lab`意思決定画面） |
+
+## 【PD省人化投資】（`pdMechanization`）
+
+| パラメータ | 現行本番値 | 単位 | ソースファイル |
+|---|---|---|---|
+| 投資額 | 2,500,000 | USD | `app/lib/v2/capex/parameters.ts:305-330` |
+| 支払スケジュール | 40% / 60%（2四半期） | 比率 | 同上 |
+| 竣工後操業準備期間 | 1 | 四半期 | 同上 |
+| 建物比率／機械比率 | 10% / 90% | 比率 | 同上 |
+| 保守費率 | 1%/四半期 | 比率 | 同上 |
+| 対象範囲 | 工場（Factory）単位、PD係数のみ低減。HOSO/VAPには無影響 | - | `app/lib/v2/capex/pdMechanization.ts` |
+| 達成可能な最大削減率 | 約16.67%（1/6、基準係数と機械化後係数フロアの比から導出。ハードコードなし） | 比率 | `app/lib/v2/capex/pdMechanization.ts:reductionRatioAtFullMaturity()` |
+
+## 【VAP商品開発】（`vapProductDevelopmentSpendUsd`）
+
+| パラメータ | 現行本番値 | 単位 | ソースファイル |
+|---|---|---|---|
+| 選択可能投資額（4段階） | $0 / $100,000 / $250,000 / $500,000 | USD/四半期 | `app/lib/v2/companyLab/productDevelopmentState.ts:31` |
+| 中立スコア | 50 | 0-100 | 同上（`neutralScore`） |
+| 標準投資額 | 250,000 | USD/四半期 | 同上（`standardBudgetUsd`） |
+| 標準投資時の四半期スコア増加量 | 4.0 | ポイント | 同上（`gainCoefficient`） |
+| 投資比率上限 | 2.0（＝$500,000÷$250,000） | 比率 | 同上（`investmentRatioCap`） |
+| 無投資時の減衰率 | 6%/四半期（中立値50へ収束） | 比率 | 同上（`idleDecayRatioPerQuarter`） |
+| P&L計上 | 選択額を全額当四半期SG&Aへ費用化・同額が営業CF流出。資産計上・減価償却なし | - | UI実測（本ラウンドPlaywright確認）＋`companyLab/runner.ts` |
+| 効果の接続先 | `sales/allocation.ts`の合成競争力ウェイト（`vapCapability`経由、`premiumPolicy.ts`の`calculateCompanyCapabilityCoefficient`経由）のみ。市場価格観測等の共有データは書き換えない | - | 同上 |
+
 ---
 
 ## 検証方法
