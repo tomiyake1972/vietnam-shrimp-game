@@ -10,6 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { hosoEqTons, unwrapUnit } from "../../core/units";
 import { PeriodV2 } from "../../core/period";
+import { Product } from "../../market/types";
 import {
   salesEffortWeightedQuantity,
   computeMarketSalesEffort,
@@ -25,12 +26,22 @@ import { runIndustrySimulation } from "../../industryLab/simulationRunner";
 
 const PARAMS = SALES_PARAMETERS_V1;
 
-// desiredQuantityはhosoEqTons()へ入る時点でroundHosoEqTons（小数第2位丸め）を通る。
-// 「縮小後の効果換算合計＝市場の営業能力」の一致確認は、この丸めぶんの誤差を必ず
-// 含むため、1e-6のような厳密許容では能力値がたまたま割り切れる係数のときしか
-// 通らない（＝パラメータ校正のたびに壊れる脆いテストになる）。商品3種×小数第2位
-// （0.01）×最大係数3.0 ＝ 0.09 を上回る 0.1 を許容誤差とする。
-const ROUNDING_TOLERANCE_TONS = 0.1;
+// desiredQuantityはhosoEqTons()へ入る時点でroundHosoEqTons（= roundTo(n, 2)、
+// 小数第2位への四捨五入）を通る。このため「縮小後の効果換算合計＝市場の営業能力」
+// の一致確認は必ず丸めぶんの誤差を含み、1e-6のような厳密許容では能力値がたまたま
+// 割り切れる係数のときしか通らない（＝パラメータ校正のたびに壊れる脆いテスト）。
+//
+// 必要な許容誤差は「丸め誤差 × 営業工数係数」の積の合計で厳密に決まる:
+//   - 小数第2位への四捨五入の誤差は1商品あたり最大 0.005t（half ULP）
+//   - 効果換算合計にはそれが salesEffortCoefficients 倍で効く
+// したがって対象商品ぶんだけを数えれば足り、それ以上広げるとテストの意味が弱まる。
+// （例: VAP単独なら 0.005×3.0 = 0.015、HOSO+VAPなら 0.005×(1.0+3.0) = 0.020）
+const HOSO_EQ_TONS_ROUNDING_HALF_ULP = 0.005;
+
+/** 対象商品の営業工数係数から、丸め誤差を吸収できる最小限の許容誤差を導出する。 */
+function effortRoundingTolerance(...products: readonly Product[]): number {
+  return products.reduce((sum, p) => sum + HOSO_EQ_TONS_ROUNDING_HALF_ULP * PARAMS.salesEffortCoefficients[p], 0);
+}
 
 function entry(overrides: Partial<CompanySalesPlanEntry> = {}): CompanySalesPlanEntry {
   return {
@@ -131,7 +142,8 @@ test("5. 会社×市場ごとに独立して制約が適用される（CN市場�
   // US市場の縮小後の量は、US市場自身の能力（CN市場の余剰を含まない）で決まる。
   const usCapacity = unwrapUnit(processingCapacity(1, PARAMS));
   assert.ok(
-    Math.abs(unwrapUnit(us.desiredQuantity) * 3 - usCapacity) < ROUNDING_TOLERANCE_TONS,
+    // 対象はVAP1商品のみ → 許容誤差 0.005 × 3.0 = 0.015t。
+    Math.abs(unwrapUnit(us.desiredQuantity) * 3 - usCapacity) <= effortRoundingTolerance("vap"),
     "US市場(VAP)の縮小後効果換算量は自市場の能力と一致するはず"
   );
   // 調整記録にはUS市場のみが含まれ、CN市場は含まれない。
@@ -153,7 +165,8 @@ test("6. 営業工数換算能力が不足する場合、成約配分に渡る�
     const coef = p.product === "vap" ? 3 : p.product === "pd" ? 1.2 : 1;
     return sum + coef * unwrapUnit(p.desiredQuantity);
   }, 0);
-  assert.ok(totalEffortAfter <= capacity + ROUNDING_TOLERANCE_TONS, "縮小後の効果換算合計が市場の能力を超えている");
+  // 対象はHOSOとVAPの2商品 → 許容誤差 0.005 × (1.0 + 3.0) = 0.020t。
+  assert.ok(totalEffortAfter <= capacity + effortRoundingTolerance("hoso", "vap"), "縮小後の効果換算合計が市場の能力を超えている");
   // 元の希望量よりは必ず縮小されている。
   for (const p of adjustedPlans) assert.ok(unwrapUnit(p.desiredQuantity) < 2000);
 });
