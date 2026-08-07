@@ -59,7 +59,17 @@ test("Test14 Turn1型ゴールデンケース: 営業が強い制約、生産能
   // （0.9）を明確に下回ること」の確認に更新する（0.8という固定値は名目capacity
   // ベースの旧仕様に依存した値だったため、意味のある閾値へ引き直した）。
   assert.ok(diagnosis!.productionLoadRatio < 0.9, `生産能力がshortage閾値に達していないはずが、Production Load Ratio=${diagnosis!.productionLoadRatio}`);
-  assert.equal(diagnosis!.workerLoadState, "surplus", `Workerに余力があるはずが、workerLoadState=${diagnosis!.workerLoadState}`);
+  // 【Test15統合branchでのgolden更新: surplus → balanced】
+  // 商品別労働集約度（HOSO:PD:VAP = 1.0:1.2:3.0）はTest15の採用仕様であり、
+  // PD・VAPが同じトン数でもHOSOより多くの労働を要するようになった。Test14 Turn1の
+  // 商品構成（HOSO/PD/VAPを併産）では必要労働が増え、workerLoadRatioが上がって
+  // surplus判定閾値を外れ、balancedになった。これは労働集約度導入の直接的な帰結
+  // であり、診断ロジックの退行ではない（労働集約度係数そのものは変更していない）。
+  //
+  // 本テストの検証意図は「Workerが制約になっていないこと」であり、その意味は
+  // balancedでも保たれている（shortageでないことは下のassertで明示的に固定する）。
+  assert.equal(diagnosis!.workerLoadState, "balanced", `Workerの負荷状態が想定外: workerLoadState=${diagnosis!.workerLoadState}`);
+  assert.notEqual(diagnosis!.workerLoadState, "shortage", "Workerが制約（shortage）になっているはずがない");
   assert.notEqual(diagnosis!.inventoryExcessState, "surplus", `在庫に大きな問題は無いはずが、inventoryExcessState=${diagnosis!.inventoryExcessState}`);
 
   // 【SAI-6.4修正】原料は「期首在庫＋確定入荷だけでは不足（procurement needed）」であっても、
@@ -152,8 +162,14 @@ test("SAI-6.4 Golden Case: Test14 Turn1型の生産計画が22,100tより明確�
   // 戦略在庫理由なしで過剰生産しない（実装指示E-1）: 在庫過多にならない。
   assert.notEqual(diagnosis.inventoryExcessState, "surplus", "戦略在庫理由がないのに在庫過多と診断されている");
 
-  // Worker余力を認識する（実装指示E-1）。
-  assert.equal(diagnosis.workerLoadState, "surplus");
+  // Workerが制約になっていないことを認識する（実装指示E-1）。
+  // 【Test15統合branchでのgolden更新: surplus → balanced】商品別労働集約度
+  // （HOSO:PD:VAP = 1.0:1.2:3.0、Test15採用仕様）の導入によりPD・VAPの必要労働が
+  // 増え、Test14 Turn1型の商品構成ではworkerLoadRatioがsurplus閾値を外れて
+  // balancedになった。労働集約度導入の直接的な帰結であり、実装指示E-1の意図
+  // （Workerがボトルネックではないと認識できること）はbalancedでも満たされる。
+  assert.equal(diagnosis.workerLoadState, "balanced");
+  assert.notEqual(diagnosis.workerLoadState, "shortage", "Workerが制約（shortage）になっているはずがない");
 
   // 人間案（生産11,100t・国内買付8,500t）と桁・方向性が整合しているかの参考記録
   // （断定的な一致テストではない。開発日誌へも同様の値を記録する）。

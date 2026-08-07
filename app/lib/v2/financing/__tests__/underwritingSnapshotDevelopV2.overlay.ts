@@ -3,12 +3,32 @@
 // 【位置づけ】ここに含めるのは、develop/v2の現行fixture・パラメータ下でのみ
 // 成立する具体的な数値（承認件数・EBITDA金額等）を主張するテスト。
 // 48コミットスタック(pd_labor、PD係数1.8)では異なる実測値になるため、
-// pd_labor向けの等価テストは underwritingSnapshotPdLabor.test.ts に分離している
+// pd_labor向けの等価テストは underwritingSnapshotPdLabor.overlay.ts に分離している
 // （旧underwritingSnapshotRealPath.test.tsのSNAP-8・SNAP-11がこの分離前の形で、
 // pd_laborでは実際にfailしていた）。
 //
-// 【実行方法】develop/v2ワークツリー(/tmp/fin_diag)でのみ実行する:
-//   cd /tmp/fin_diag && node --test --import tsx app/lib/v2/financing/__tests__/underwritingSnapshotDevelopV2.test.ts
+// 【Test15統合branchでの拡張子変更（.test.ts → .overlay.ts）】
+// このファイルはdevelop/v2固有の実測値を固定する回帰ロックであり、その意味は
+// 「develop/v2ではこの値になる」ことそのものにある。Test15統合branchでは
+// 営業処理能力曲線の再校正（capacityMaxIncrementTons=24000 /
+// capacitySaturationHeadcount=70）と商品別労働集約度（HOSO:PD:VAP=1.0:1.2:3.0）
+// により会社の財務トラジェクトリが変わるため、DEVV2-2・DEVV2-3の金額は
+// develop/v2とは一致しなくなる。
+//
+// ここで統合branchの実測値へ書き換えてしまうと「develop/v2固有の値を固定する」
+// というテストの意味自体が失われるため、期待値は一切変更していない。かわりに、
+// 既にある underwritingSnapshotPdLabor.overlay.ts と同じ方式で、拡張子を
+// `.test.ts` から `.overlay.ts` へ変えて既定のtest glob（package.jsonの
+// `test`スクリプトは `**/*.test.ts` でしか収集しない）から外している。
+// node:testはglob発見ではなく明示パス指定なら拡張子を問わず実行できるため、
+// develop/v2ワークツリー上では従来どおり検証できる。
+//
+// なお、ブランチに依存しない不変条件（observation-only性・決定性・再計算一致・
+// ロールフォワード整合など10件）は underwritingSnapshotInvariants.test.ts 側に
+// あり、そちらは統合branchでも通常のtest globで実行され続ける。
+//
+// 【実行方法】develop/v2ワークツリーでのみ実行する:
+//   cd <develop/v2 worktree> && node --test --import tsx app/lib/v2/financing/__tests__/underwritingSnapshotDevelopV2.overlay.ts
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
