@@ -1,0 +1,112 @@
+# Mission / Vision / Business Scale Profile 設計提案（合意事項メモ）
+
+2026-08-04 Cowork #05（AI設定） 三宅さんとの設計議論の合意事項
+
+**位置づけ**: 本文書はまだ実装指示ではない。Standard AI診断基盤（Phase B〜F）の上位に置く「企業理念→経営方針→事業規模診断→シナリオ評価」という階層構造について、三宅さんとClaude（Cowork #05）の間で合意した設計方針を記録したものである。実装は本文書のあとの回で、下記の段階順に着手する。
+
+## 1. 既存コードとの関係（今回の議論で確認済みの重要な事実）
+
+`managementProfile.ts`（Phase SAI-4、経営性格プロファイル：balanced/growth/conservative/valueAdded/opportunistic、±5〜10%の小幅バイアス、安全ガードは対象外）と`orientationProfile.ts`（Phase SAI-5A、市場・商品志向プロファイル：市場別・商品別の重み付け）が既に存在し、`policy.ts`の`resolveParams`という単一の注入フックを通じて全社共通ロジック（`decision/*.ts`は一切companyId分岐を持たない）へ適用されている。
+
+今回設計するMission/Vision/Strategic Principles/Business Scale Profileは、この既存2層をゼロから置き換えるものではなく、(a) 既存2層に「なぜこの数値バイアスなのか」という意味付けを与える、(b) 既存2層の上に「事業規模の現在地」と「Visionとの進捗差」という新しい診断入力を追加する、という位置づけである。
+
+## 2. 全体構造（合意版）
+
+```
+Mission（何のために存在する会社か）
+  ↓
+Vision（5〜7年後にどこへ行くか）
+  ↓
+Vision Progress Diagnosis（今、その道筋に対して進んでいるか遅れているか）
+  ↓
+Strategic Principles（既存のManagementProfile/OrientationProfileに意味を与える）
+  ↓
+Business Scale Profile（Sales/Production/Labor/Raw/Financeの現在の企業体力）
+  ↓
+Conservative / Base / Growth Scenario
+  ↓
+Scenario Evaluation（Vision・利益・財務安全性・戦略整合性から比較）
+  ↓
+意思決定（本ラウンドでは未接続）
+```
+
+## 3. 前回提案からの3点の修正（三宅さんの指摘、採用）
+
+### 3.1 Vision軌道は単線ではなく「達成帯」を持つ
+
+三宅さんのVisionは「5〜7年で規模倍増」であり、固定CAGR（例: 7年=2.6%/四半期）を1本の基準線として課すのは機械的すぎる。代わりに、5年ライン（≈3.5%/四半期）と7年ライン（≈2.5%/四半期）の間を「達成帯」として持ち、現在の実績がこの帯に対してどこにあるかで評価する。
+
+- 5年ラインより速い → **Ahead**
+- 5〜7年ラインの帯内 → **On Track**
+- 7年ラインより遅い → **Behind**
+
+### 3.2 利益80Mは単四半期ではなくTrailing 4 Quartersで見る
+
+エビ産業の四半期変動を考慮し、単一四半期の利益で「Vision未達」と判断しない。Visionの二大指標は次の2つとする。
+
+- 事業規模: 年間換算またはTrailing 4Q販売量
+- 収益力: Trailing 4Q税引後利益
+
+### 3.3 Vision進捗診断は単一スコアへ潰さない
+
+Claudeの前回提案（「単一の追加入力」）を修正し、少なくとも次の4つを分離して保持する。
+
+- Scale trajectory gap（事業規模の進捗差）
+- Profit trajectory gap（収益力の進捗差）
+- Future capacity readiness（将来の成長に対する能力の準備度）
+- Financial readiness（投資・成長に使える財務余力）
+
+この分離により、「売上規模はVisionより遅れているが利益はVisionより進んでいる。設備は2年後の成長には不足。財務には投資余力あり」というような組み合わせを表現でき、「利益力を維持しながら能力投資を行い、次の成長に備える」という、単純な「安売りして販売量を増やせ」ではない判断が可能になる。これが今回目指す経営AIの核心的な価値である。
+
+## 4. 実装段階（合意版、全段階が診断専用）
+
+1. **第1段階**: Business Scale Profile — Sales/Production/Labor/Raw/Financeの5つの企業体力を診断（診断専用、既存モジュールの出力集約が中心）。
+2. **第2段階**: Conservative / Base / Growth Scenario の生成（診断専用）。
+3. **第3段階**: Mission / Visionのデータ構造（テキスト＋Vision達成帯の2大指標）。
+4. **第4段階**: Vision Progress Diagnosis（§3.1〜3.3の設計を反映、4分離指標）。
+5. **第5段階**: 既存Management/Orientation Profileとの接続（Mission/Visionによる意味付け。数値ロジック自体は既存の安全弁付きバイアス機構を流用）。
+6. **第6段階**: Scenario Evaluation（Principlesによる支持/反対フラグ付け、単一合成スコアへは潰さない）。
+7. **第7段階**: 本番decisionへの接続（本ラウンドでは着手しない）。
+
+**Business Scale Profileを最初に置く理由**: Mission/Visionは「会社がどこへ行きたいか」、Business Scale Profileは「今どこにいるか」。現在地が診断できていなければVisionとの差（進捗診断）自体が測れないため、依存関係上Business Scale Profileが必ず先行する。
+
+## 5. 将来展望として合意した副次効果
+
+現行の5社差別化（balanced/growth/conservative/valueAdded/opportunistic × 市場・商品志向）は、単なる係数差ではなく「各社の暗黙のMission/Vision」の数値化だったと捉え直せる。将来、5社それぞれに簡潔なMission/Vision文を後付けで与えれば、「なぜGrowth社はGrowth型なのか」を説明できるようになり、5社差別化が係数差から企業戦略差へ昇格する。これはゲームデザインとしても価値が高いと合意した。
+
+## 6. 次のアクション
+
+**2026-08-04更新: 第1段階（Business Scale Profile）着手・完了。** `diagnosis/businessScaleProfile.ts`（5軸、単一値へ潰さない）・`diagnosis/businessScaleScenarios.ts`（Conservative/Base/Growth、型と生成ルール案）を実装し、テスト18件・全2194件pass・tsc/lintクリーンを確認して`feature/v2-standard-ai-unit-economics-shadow-allocation`へpush済み。Test14 Turn2 reconstructed case（38人）への適用結果は`TEST14_TURN2_BUSINESS_SCALE_PROFILE.md`・`TEST14_TURN2_BUSINESS_SCALE_SCENARIOS.md`、既存Profile監査は`EXISTING_MANAGEMENT_ORIENTATION_PROFILE_AUDIT.md`、Mission/Vision/Policyドラフトと将来のVision Progress Diagnosis設計は`STANDARD_COMPANY_MISSION_VISION_POLICY_DRAFT.md`、observation gapと#04引き渡しは`BUSINESS_SCALE_OBSERVATION_GAPS_AND_04_HANDOFF.md`を参照。
+
+次回は第2段階以降（Mission/Visionデータ構造の実装、Vision Progress Diagnosisモジュールの実装）に進む前に、三宅さんの確認・優先順位付けを待つ。本番decisionへの接続（第7段階）は依然未着手。
+
+## 7. 2026-08-04 三宅さんレビューによる3点修正（Vision Progress Diagnosisへ進む前提条件）
+
+三宅さんはBusiness Scale Profile本体を受入としつつ、Vision/Mission層へ進む前に次の3点を修正するよう指示し、実施した。
+
+1. **Raw軸の0＝binding問題の修正**: `businessScaleProfile.ts`のRawMaterial軸を`securedRawScaleTons`/`procurementNeededScaleTons`/`publicMarketAvailabilityState`/`companyPurchasableScaleTons`（常にnull）へ分解し、`companyPurchasableScaleTons`がunknownである間は軸の`supportedScaleTons`自体をnull（confidence=UNKNOWN）とすることで、Business Scaleのbinding判定（min()計算）から自動的に除外されるようにした。「分からない」と「0tしかできない」を型レベルで区別する修正であり、securedRawScaleTons（今すぐ確実に使える下限）は別のdetailフィールドとして保持している。
+2. **Scenario暫定ヒューリスティックの明確化**: `businessScaleScenarios.ts`のGrowth Scenario定数を`GROWTH_SALES_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION`/`GROWTH_LABOR_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION`へ改名し、`BusinessScaleScenarioResult`に新フィールド`isPlaceholderHeuristic: boolean`を追加（Growth=true、Conservative/Base=false）。+20%/+10%がStandard AIの経営思想として固定された値ではなく、将来Vision達成経路から逆算する方式に置き換える前提の暫定プレースホルダであることを型レベルで明示した。
+3. **用語統一（Test14 Turn2 reconstructed case）**: 「実測38人ケース」等の表現は、実際のTest14保存状態（Redis等）へのアクセスを示唆し誤解を招くため、「Test14 Turn2 reconstructed case」へ統一した。ファイル`TEST14_TURN2_REAL_38_HEADCOUNT_SHADOW_ANALYSIS.md`は`TEST14_TURN2_RECONSTRUCTED_CASE_38_HEADCOUNT_SHADOW_ANALYSIS.md`へ改名し、関連6文書の本文表現も修正した。
+
+この3点は診断内容の誤りではなく、設計精度・表記一貫性の修正である。#04からのBorrowing Capacity/Raw/Worker/Market Demand回答は引き続き外部待ちであり、Vision Progress Diagnosis（第4段階）は本修正完了後も、三宅さんの次回指示を待って着手する。
+
+## 8. 2026-08-04 三宅さんによる3点修正の受入・現時点のBusiness Scale Profileの構造（合意事項）
+
+三宅さんは上記§7の3点修正を受入とし、特にRaw軸の分解（secured／procurement need／market state／company cap=unknown）を「かなり自然になった」「ShrimpXのビジネスモデル（毎期原料市場から買って回す会社）にsecured rawだけで企業規模を測ると必ず歪む」という理由で高く評価した。Test14 Turn2 reconstructed case（38人、BAL）における現時点のBusiness Scale Profileの構造は次のとおり（三宅さんの整理をそのまま記録）。
+
+- **Sales**: 約9,961t → 現在の実質的な制約（binding axis）
+- **Finance**: 約15,151t → Salesを伸ばした次の制約候補
+- **Production**: 約17,100t → さらに成長した次の制約候補
+- **Labor**: 約27,576t → 現行ゲームルールでは余裕大
+- **Raw**: 会社固有購入可能量が不明なのでbinding判定保留
+
+これは「今の会社ならどのくらいの規模のビジネスを回せるかを見当づける」という、Business Scale Profileの当初の狙いがかなり具体的な形になった状態と位置づける。三宅さんの言葉を借りれば「現在地を測る器」はこの段階でかなり出来ている。
+
+**次のブロッカー（#04からの4点、優先順位付き）**:
+
+1. Borrowing Capacityを正式にObservationへ渡せるか（Finance軸の精度に直結）
+2. Market absolute demandをどこまで公開するか（Sales軸の「需要上限」を区別できるようになるかに直結）
+3. Rawの会社固有購入上限をゲームルールとして持つか（Raw軸がbinding判定に参加できるかに直結）
+4. VAP Worker負荷をどう確定するか（Labor軸の現実性に直結）
+
+この4点が固まればBusiness Scale Profileの精度が一段上がり、そのあとVision Progress Diagnosis（第4段階）に進むのが自然、という三宅さんの方針を確認済み。現段階ではMission/Vision実装（第3段階以降）は急がず、三宅さんの次回指示を待って着手する。

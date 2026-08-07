@@ -17,7 +17,6 @@
 // 実際の生産計画がこの「基本当期生産必要量」を参照するように配線を切り替える
 // 予定だが、それは別途指示があるまで着手しない。
 
-import { unwrapUnit } from "../../../core/units";
 import { CompanyFixture } from "../../types";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
@@ -210,37 +209,51 @@ export function buildStandardAiSituationDiagnosis(
   const basicRequirementTotal = sumProductAmount(basicRequirementByProduct);
 
   // --- 2. 生産能力（Production Load Ratio） ---
+  // 【2026-08-02・能力認識監査Phase 3対応】従来はここでnominalCapacityTotal（名目、
+  // capex加算後だが稼働率・設備利用可能率未適用）をProduction Load Ratioの分母に
+  // 使っており、これがTest14 Turn2で「24,000t生産可能」という過大な能力認識の
+  // 根本原因の一つだった（PRODUCTION_CAPACITY_RECOGNITION_GAPとして差分は診断情報
+  // に出していたが、比率計算自体には反映していなかった）。今回、observation側に
+  // 追加したtotalEffectiveCapacityByProduct/totalEffectiveCommonProcessingCapacity/
+  // totalEffectiveFreezingPackagingCapacity（いずれもproduction/capacity.tsの
+  // calculateFactoryEffectiveCapacityをそのまま再利用して算出。新しい能力算出ロジックは
+  // 増設していない）を使い、「実効能力」（商品別稼働率適用後）と「共有ボトルネックの
+  // 実効能力」（共通前処理・凍結包装）のうち最も厳しい値を「binding capacity」として
+  // Production Load Ratioの分母に採用する。
   const nominalCapacityTotal = sumProductAmount(observation.totalCapacityByProduct);
-  const productionLoadRatio = nominalCapacityTotal > EPSILON ? basicRequirementTotal / nominalCapacityTotal : NaN;
+  const effectiveCapacityTotal = sumProductAmount(observation.totalEffectiveCapacityByProduct);
+  const bindingCapacityTotal = Math.min(
+    effectiveCapacityTotal,
+    observation.totalEffectiveCommonProcessingCapacity > EPSILON ? observation.totalEffectiveCommonProcessingCapacity : effectiveCapacityTotal,
+    observation.totalEffectiveFreezingPackagingCapacity > EPSILON ? observation.totalEffectiveFreezingPackagingCapacity : effectiveCapacityTotal
+  );
+  const productionLoadRatio = bindingCapacityTotal > EPSILON ? basicRequirementTotal / bindingCapacityTotal : NaN;
   const productionLoadState = classify(
     Number.isFinite(productionLoadRatio) ? productionLoadRatio : undefined,
     (r) => r > T.productionShortageRatio,
     (r) => r < T.productionSurplusRatio
   );
-  const productionCapacityHeadroom = nominalCapacityTotal - basicRequirementTotal;
+  const productionCapacityHeadroom = bindingCapacityTotal - basicRequirementTotal;
 
-  // 【実装指示§4対応】能力認識ギャップの明示（0.855＝baseUtilizationRate×equipmentAvailabilityRate。
-  // ゲーム側の能力定義は一切変更しない。診断情報として差だけを出す）。
+  // 【実装指示§4対応、2026-08-02更新】能力認識ギャップの明示。今回からProduction Load
+  // Ratio自体がbindingCapacityTotal（実効・共有ボトルネック考慮後）を使うようになった
+  // ため、このdiagnosticは「差はもう意思決定へ反映済みである」ことを明示する内容へ更新する
+  // （ゲーム側の能力定義・engine本体は変更していない。既存の共有関数を再利用しただけ）。
   let capacityRecognitionGap: StandardAiSituationDiagnosis["capacityRecognitionGap"];
-  const effectiveCapacityTotal = fixture.factories.reduce((sum, f) => {
-    const utilization = unwrapUnit(f.baseUtilizationRate);
-    const availability = unwrapUnit(f.equipmentAvailabilityRate);
-    const nominalForFactory = unwrapUnit(f.hosoCapacity) + unwrapUnit(f.pdCapacity) + unwrapUnit(f.vapCapacity);
-    return sum + nominalForFactory * utilization * availability;
-  }, 0);
-  if (effectiveCapacityTotal > EPSILON && Math.abs(effectiveCapacityTotal - nominalCapacityTotal) > nominalCapacityTotal * 0.01) {
-    capacityRecognitionGap = { nominalCapacityTotal, effectiveCapacityTotal };
+  if (nominalCapacityTotal > EPSILON && Math.abs(nominalCapacityTotal - bindingCapacityTotal) > nominalCapacityTotal * 0.01) {
+    capacityRecognitionGap = { nominalCapacityTotal, effectiveCapacityTotal: bindingCapacityTotal };
     diagnostics.push({
       code: "PRODUCTION_CAPACITY_RECOGNITION_GAP",
       domain: "diagnosis",
       companyId: fixture.companyId,
       severity: "info",
-      keyValues: { nominalCapacityTotal, effectiveCapacityTotal },
+      keyValues: { nominalCapacityTotal, effectiveCapacityTotal: bindingCapacityTotal },
       message:
-        `Standard AIが現在参照する生産能力（ノミナル合計${Math.round(nominalCapacityTotal)}t）は、` +
-        `労務起因の実効係数（baseUtilizationRate×equipmentAvailabilityRate）適用後の実効能力（合計${Math.round(
-          effectiveCapacityTotal
-        )}t）より大きい。今回はゲーム側の能力定義・意思決定ロジックを変更していないため、この差はProduction Load Ratioの計算には反映していない（診断情報としての明示のみ）。`,
+        `設備の名目能力合計（${Math.round(nominalCapacityTotal)}t）は、稼働率・設備利用可能率および共通前処理・凍結` +
+        `包装の共有ボトルネックを反映した実行可能な生産上限（binding capacity、合計${Math.round(
+          bindingCapacityTotal
+        )}t）より大きい。2026-08-02の能力認識監査対応以降、Production Load Ratio・生産計画（decision/production.ts）は` +
+        `いずれもこのbinding capacityを使う（名目値をそのまま生産可能量として扱わない）。`,
     });
   }
 
@@ -261,22 +274,37 @@ export function buildStandardAiSituationDiagnosis(
   // rawMaterialCoverageRatioが1未満でも、それは「期首在庫＋確定入荷だけでは足りない」という
   // 事実（＝通常の調達行為が必要）であり、ボトルネックではない。Test14 Turn1のように国内市場
   // から追加調達できる状況では「原料不足」と断定してはならない（三宅さんの指摘・調査結果）。
-  //
-  // 【調査結果】rawMaterials/domesticPurchase.tsのprocurementCapacity()・maximumBuyerShare・
-  // market/types.tsのvietnamDomesticRawSupply等、国内市場側の「当期追加調達可能な上限」は
-  // 現行のStandardAiObservationには一切露出していない（observation.tsの
-  // procurementHeadcountTotal・totalCommonProcessingCapacityは容量算出の入力にすぎず、
-  // 上限そのものではない）。したがって「真の供給制約」は今回のobservationからは判定不能であり、
-  // 架空の供給能力を作らず常にunknownとする（rawMaterialSupplyConstraintState）。
   const requiredRawMaterial = basicRequirementTotal; // 歩留まり1.0基準（既存procurement.tsと同じ前提）
   const currentlyAvailable = observation.rawMaterialAvailable + observation.rawMaterialCertainInboundThisPeriod;
   const rawMaterialCoverageRatio = requiredRawMaterial > EPSILON ? currentlyAvailable / requiredRawMaterial : NaN;
   const rawMaterialCoverageState = classify(Number.isFinite(rawMaterialCoverageRatio) ? rawMaterialCoverageRatio : undefined, (r) => r < T.rawMaterialShortageRatio);
   const rawMaterialProcurementNeeded = Number.isFinite(rawMaterialCoverageRatio) && rawMaterialCoverageRatio < T.rawMaterialShortageRatio;
-  // 現行観測に「当期国内市場から現実的に追加調達可能な量」が無いため、真の供給制約は常にunknown。
-  // （ConstraintStateとして明示的に型付けする。将来、当該情報がobservationへ追加された際に
-  //  ここを実際の判定式へ置き換えられるようにするための受け皿であり、リテラル固定ではない。）
-  const rawMaterialSupplyConstraintState: ConstraintState = "unknown" as ConstraintState;
+  const rawMaterialShortfall = Math.max(0, requiredRawMaterial - currentlyAvailable);
+
+  // 【2026-08-02・能力認識監査Phase 2・4対応】従来はrawMaterialSupplyConstraintStateを
+  // 常にunknownで固定していた（当時はStandardAiObservationに国内市場の追加調達可能量が
+  // 一切露出していなかったため）。今回observationへvietnamDomesticPriorMarket（前四半期の
+  // ベトナム国内未凍結原料市場の公開清算結果：supply/effectiveDemand/transactedVolume/
+  // unsoldSupply。既にPublicMarketInfo.lastMarketResultに存在していた値をそのまま転記した
+  // だけであり、新しい市場ルールは追加していない）を追加したため、この判定を更新する。
+  //
+  // 【重要・意図的な保守性】maximumBuyerShare・approvedPurchaseCap・company-specific
+  // purchase capacityといった、ゲーム側でまだ公開・確定していない「この会社が実際に買える
+  // 上限」は依然として観測に存在せず、推測で作らない（実装指示の明示的な禁止事項）。
+  // したがって「前四半期、市場全体でどれだけ農家の供給が売れ残ったか（unsoldSupply）」を
+  // 「当期、市場全体にどれだけ買う余地があるかの目安（前期ベースの参考値）」として使い、
+  // 会社個別の購買上限は一切仮定しない。この目安が今期の必要調達量（不足分＝
+  // rawMaterialShortfall）を上回る場合にのみ「真の供給制約ではない（surplus）」と判定し、
+  // 下回る場合にのみ「真の供給制約の可能性がある（shortage）」と判定する。市場公開情報が
+  // 存在しない場合（turn1等）は、引き続きunknownのまま（捏造しない）。
+  let rawMaterialSupplyConstraintState: ConstraintState = "unknown";
+  if (!rawMaterialProcurementNeeded) {
+    // 調達行為自体が不要（期首在庫＋確定入荷だけで足りる）場合、真の供給制約も当然発生しない。
+    rawMaterialSupplyConstraintState = "balanced";
+  } else if (observation.vietnamDomesticPriorMarket) {
+    rawMaterialSupplyConstraintState = observation.vietnamDomesticPriorMarket.unsoldSupply >= rawMaterialShortfall ? "surplus" : "shortage";
+  }
+
   if (rawMaterialProcurementNeeded) {
     diagnostics.push({
       code: "RAW_MATERIAL_PROCUREMENT_NEEDED",
@@ -290,15 +318,61 @@ export function buildStandardAiSituationDiagnosis(
         )}t）に届かないため、当期中の追加調達（国内購入・輸入等）が必要（procurement needed）。これは通常の調達行為であり、` +
         `それ自体をボトルネックとは診断しない。`,
     });
-    diagnostics.push({
-      code: "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
-      domain: "diagnosis",
-      companyId: fixture.companyId,
-      severity: "info",
-      message:
-        "当期国内市場から現実的に追加調達可能な量（市場全体供給・買い手シェア上限等）は現行のStandard AI観測に露出していないため、" +
-        "真の供給制約（raw material supply constraint）かどうかは不明（unknown）。原料不足と断定していない。",
-    });
+    if (observation.vietnamDomesticPriorMarket) {
+      // 【2026-08-03・Phase A hardening】三宅さんの指摘: unsoldSupply（市場全体の
+      // 売れ残り供給）が当期の調達不足分を上回っていても、それは「この会社が確実に
+      // その数量を購入できる」ことを意味しない（買い手シェア上限等は依然unknown）。
+      // 以前の単一メッセージ（RAW_MATERIAL_SUPPLY_CONSTRAINT_ASSESSED）はこの注意書きを
+      // 文中に含めていたが、機械可読な診断コードとしては1本にまとまっていたため、
+      // 「市場全体の緩さ」と「会社個別の調達可能性は不明」を別々のreason codeへ分離する
+      // （AI説明・テスト・分析Excelから、後者を見落とさず参照できるようにする）。
+      diagnostics.push({
+        code: rawMaterialSupplyConstraintState === "surplus" ? "DOMESTIC_MARKET_PUBLIC_SURPLUS" : "DOMESTIC_MARKET_PUBLIC_TIGHT",
+        domain: "diagnosis",
+        companyId: fixture.companyId,
+        severity: rawMaterialSupplyConstraintState === "shortage" ? "warning" : "info",
+        keyValues: {
+          rawMaterialShortfall,
+          domesticUnsoldSupply: observation.vietnamDomesticPriorMarket.unsoldSupply,
+        },
+        message:
+          rawMaterialSupplyConstraintState === "surplus"
+            ? `前四半期のベトナム国内市場の売れ残り供給（unsold supply、${Math.round(
+                observation.vietnamDomesticPriorMarket.unsoldSupply
+              )}t）が当期の追加調達必要量（不足分、${Math.round(
+                rawMaterialShortfall
+              )}t）を上回る。市場全体としては緩い（loose）状態であり、公開市場データは需給不足を示していない（does not indicate aggregate shortage）。` +
+              `期首在庫だけでは不足していても、これのみを理由に真の供給制約とは診断しない（surplus）。`
+            : `前四半期のベトナム国内市場の売れ残り供給（${Math.round(
+                observation.vietnamDomesticPriorMarket.unsoldSupply
+              )}t）が当期の追加調達必要量（${Math.round(
+                rawMaterialShortfall
+              )}t）に届かない。市場全体としてもタイトな状態であり、真の供給制約（shortage）の可能性がある。`,
+      });
+      // 【常に発火】このcompanyが実際にどれだけ購入できるか（買い手シェア上限・
+      // 承認済み購買枠等）は、上のDOMESTIC_MARKET_PUBLIC_SURPLUS/TIGHTの判定とは
+      // 独立して常にunknownである（ゲーム側で未公開・未確定のため）。surplus判定が
+      // 出ていても「company can definitely procure full requirement」とは断定しない。
+      diagnostics.push({
+        code: "DOMESTIC_COMPANY_PURCHASE_CAP_UNKNOWN",
+        domain: "diagnosis",
+        companyId: fixture.companyId,
+        severity: "info",
+        message:
+          "この会社が国内市場から実際に購入できる上限（買い手シェア上限・承認済み購買枠等）は、現行のStandard AI観測に露出していないため常にunknown。" +
+          "市場全体が緩い（public surplus）と判定されても、company-specific availabilityが保証されるわけではない（捏造しない）。",
+      });
+    } else {
+      diagnostics.push({
+        code: "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
+        domain: "diagnosis",
+        companyId: fixture.companyId,
+        severity: "info",
+        message:
+          "前四半期のベトナム国内市場の公開清算結果（vietnamDomesticPriorMarket）が観測に存在しないため（turn1等）、" +
+          "真の供給制約（raw material supply constraint）かどうかは不明（unknown）。原料不足と断定していない。",
+      });
+    }
   }
 
   // --- 5. 在庫（Inventory Excess Ratio） ---
@@ -359,8 +433,8 @@ export function buildStandardAiSituationDiagnosis(
       category: "production_capacity_shortage",
       score: (productionLoadRatio - T.productionShortageRatio) / T.productionShortageRatio,
       code: "PRODUCTION_CAPACITY_BINDING_CONSTRAINT",
-      message: `基本当期生産必要量（${Math.round(basicRequirementTotal)}t）が生産能力（${Math.round(
-        nominalCapacityTotal
+      message: `基本当期生産必要量（${Math.round(basicRequirementTotal)}t）が実行可能な生産上限（binding capacity、${Math.round(
+        bindingCapacityTotal
       )}t）に対し高水準のため、生産能力が制約となりうる（Production Load Ratio=${productionLoadRatio.toFixed(2)}）。`,
     });
   } else if (productionLoadState === "surplus") {
@@ -368,7 +442,7 @@ export function buildStandardAiSituationDiagnosis(
       category: "production_capacity_surplus",
       score: (T.productionSurplusRatio - productionLoadRatio) / T.productionSurplusRatio,
       code: "PRODUCTION_CAPACITY_HEADROOM",
-      message: `生産能力（${Math.round(nominalCapacityTotal)}t）に対し基本当期生産必要量（${Math.round(
+      message: `実行可能な生産上限（binding capacity、${Math.round(bindingCapacityTotal)}t）に対し基本当期生産必要量（${Math.round(
         basicRequirementTotal
       )}t）は小さく、生産能力に余力がある（Production Load Ratio=${productionLoadRatio.toFixed(2)}）。`,
     });

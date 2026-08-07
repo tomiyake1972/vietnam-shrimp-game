@@ -51,7 +51,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2 } from "./systemPrompt";
+import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3 } from "./systemPrompt";
 import { EXPLANATION_OUTPUT_LIMITS, StandardAiManagementReport, standardAiManagementReportSchema } from "./reportSchema";
 import { ExplanationContext } from "./buildExplanationContext";
 
@@ -125,14 +125,24 @@ export const EXPLANATION_REPORT_TOOL_INPUT_SCHEMA = {
     questionsForPlayer: {
       type: "array",
       maxItems: EXPLANATION_OUTPUT_LIMITS.maxQuestionsForPlayer,
-      description: `最大${EXPLANATION_OUTPUT_LIMITS.maxQuestionsForPlayer}件。`,
-      items: { type: "string" },
+      description:
+        `最大${EXPLANATION_OUTPUT_LIMITS.maxQuestionsForPlayer}件。各要素は必ずプレーンな文字列（string）そのものにすること。` +
+        `{"question": "..."}のようなオブジェクトにしてはならない。質問文そのものを1つの文字列として書くこと。`,
+      items: {
+        type: "string",
+        description: "質問文そのもの（プレーンな文字列。オブジェクトではない）。",
+      },
     },
     dataLimitations: {
       type: "array",
       maxItems: EXPLANATION_OUTPUT_LIMITS.maxDataLimitations,
-      description: `最大${EXPLANATION_OUTPUT_LIMITS.maxDataLimitations}件。`,
-      items: { type: "string" },
+      description:
+        `最大${EXPLANATION_OUTPUT_LIMITS.maxDataLimitations}件。各要素は必ずプレーンな文字列（string）そのものにすること。` +
+        `{"limitation": "..."}のようなオブジェクトにしてはならない。制約の説明文そのものを1つの文字列として書くこと。`,
+      items: {
+        type: "string",
+        description: "データの限界・前提の説明文そのもの（プレーンな文字列。オブジェクトではない）。",
+      },
     },
   },
   required: ["headline", "executiveSummary", "recommendations", "keyRisks", "questionsForPlayer", "dataLimitations"],
@@ -315,6 +325,59 @@ function findToolUseInput(response: AnthropicMessageResponse): unknown | undefin
 }
 
 /**
+ * 【2026-08-05・questionsForPlayer/dataLimitations schema_mismatch対策】
+ * Vercel実ログ（2026-08-02T11:24:23〜2026-08-04T15:36:43、複数回再発）で確認した
+ * 実際の不一致は「questionsForPlayer/dataLimitationsの各要素がstringではなく
+ * オブジェクトになっている」という一貫したパターンだった。input_schemaで
+ * `items: {type: "string"}`と明示していても、モデルが（recommendations/keyRisksが
+ * オブジェクト配列であることに引き寄せられて）同様にオブジェクトを返すことがある
+ * ため、安全なnormalization（recoverable mismatchとして、追加のAPI呼び出しなしで
+ * その場で修復する）を、Zod検証の前に1回だけ適用する。
+ *
+ * 【捏造しない】オブジェクトから文字列を抽出する際、一般的なキー名
+ * （question/text/label/value/content/limitation/description等）を優先して探すが、
+ * 見つからない場合はJSON.stringifyでその要素の内容をそのまま文字列化する
+ * （情報を欠落させない。空文字列や決め打ちの代替テキストへ差し替えない）。
+ * 文字列側の要素は変更しない。配列以外の型（そもそも配列でない等）は変更せず、
+ * 後続のZod検証にそのまま委ねる（この関数はrecoverableな要素レベルの型不一致
+ * だけを対象とし、構造そのものの誤りを隠さない）。
+ */
+const STRING_ARRAY_FIELDS_TO_NORMALIZE = ["questionsForPlayer", "dataLimitations"] as const;
+const STRING_EXTRACTION_KEY_CANDIDATES = ["question", "text", "label", "value", "content", "limitation", "description", "message"] as const;
+
+function coerceArrayItemToString(item: unknown): string {
+  if (typeof item === "string") return item;
+  if (item !== null && typeof item === "object") {
+    for (const key of STRING_EXTRACTION_KEY_CANDIDATES) {
+      const value = (item as Record<string, unknown>)[key];
+      if (typeof value === "string" && value.length > 0) return value;
+    }
+  }
+  // 抽出できる文字列フィールドが無い場合は、内容を欠落させないためJSON文字列化する。
+  try {
+    return JSON.stringify(item);
+  } catch {
+    return String(item);
+  }
+}
+
+export function normalizeExplanationToolInput(toolInput: unknown): unknown {
+  if (toolInput === null || typeof toolInput !== "object") return toolInput;
+  const record = toolInput as Record<string, unknown>;
+  let changed = false;
+  const next: Record<string, unknown> = { ...record };
+  for (const field of STRING_ARRAY_FIELDS_TO_NORMALIZE) {
+    const value = record[field];
+    if (!Array.isArray(value)) continue;
+    const needsNormalization = value.some((v) => typeof v !== "string");
+    if (!needsNormalization) continue;
+    next[field] = value.map(coerceArrayItemToString);
+    changed = true;
+  }
+  return changed ? next : toolInput;
+}
+
+/**
  * 【2026-08-01・schema_mismatch診断強化】これまでschema_mismatch発生時、Vercelログには
  * 「スキーマ不一致」というタグしか出ておらず、実際にどのfield・pathで何が起きたのかが
  * ログから一切分からなかった（validated.error.messageはGenerateManagementReportResultの
@@ -396,7 +459,7 @@ async function attemptOnce(
       {
         model: config.model,
         max_tokens: config.maxTokens,
-        system: STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V2,
+        system: STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3,
         messages: [{ role: "user", content: JSON.stringify(context) }],
         // 【構造化出力対応】tool定義とtool_choiceを別パラメータとして追加し、
         // 応答をこのtool呼び出しに強制する。
@@ -448,11 +511,25 @@ async function attemptOnce(
     return { kind: "failure", errorCategory: "invalid_json" };
   }
 
+  // 【2026-08-05・recoverable mismatchのその場修復】questionsForPlayer/dataLimitationsの
+  // 要素がstringでなくオブジェクトで返ってきた場合、追加のAPI呼び出し（2回目のattempt）
+  // をせずにこの場でstringへ正規化する。既知の再発パターン（8/2〜8/4に複数回発生した
+  // 実ログ）にのみ対応する狭い修復であり、他のフィールド・構造上の不一致は一切隠さず
+  // 通常のZod検証（下記）へそのまま委ねる。
+  const normalizedToolInput = normalizeExplanationToolInput(toolInput);
+  if (normalizedToolInput !== toolInput) {
+    console.log(
+      `[claudeClient] attempt ${logTag.attempt} questionsForPlayer/dataLimitationsの要素をstringへ正規化（recoverable mismatch、再API呼び出しなし） ` +
+        `lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn}`
+    );
+  }
+
   // 【多重防御】tool_choiceで強制したtool呼び出しはinput_schemaに沿った形であるはずだが、
   // スキーマ宣言側の取りこぼし・SDKの将来的な仕様変化等に備え、reportSchema.tsの
   // Zod検証は引き続き必ず通す（「tool-useはshape的に保証するが、独自のZodチェックも
-  // 多重防御として維持する」という方針）。
-  const validated = standardAiManagementReportSchema.safeParse(toolInput);
+  // 多重防御として維持する」という方針）。正規化後の値を検証する（正規化されなかった
+  // 場合はtoolInputそのものと同一のため、挙動は変わらない）。
+  const validated = standardAiManagementReportSchema.safeParse(normalizedToolInput);
   if (!validated.success) {
     // 【診断強化】本文（headline/executiveSummary等の実際の文章）は出さず、
     // トップレベルの型形状とZodのissues（path/code/expected/received等の構造情報のみ）

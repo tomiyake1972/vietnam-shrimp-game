@@ -37,12 +37,42 @@ export function sumProductAmount(a: ProductAmount): number {
 /** 1工場ぶんの、Observation用に整形した能力・労働の現況。 */
 export interface FactoryObservation {
   readonly factoryId: string;
+  /** 名目能力（capex加算後、稼働率・設備利用可能率は未適用）。 */
   readonly capacityByProduct: ProductAmount;
   readonly commonProcessingCapacity: number;
   readonly freezingPackagingCapacity: number;
+  /**
+   * 【2026-08-02・能力認識監査Phase 3】production/capacity.tsの
+   * calculateFactoryEffectiveCapacity（生産エンジン本体が実際の生産制約として使う
+   * のと同じ純粋関数）を適用した実効能力（baseUtilizationRate×
+   * equipmentAvailabilityRate適用後）。上のcapacityByProduct等の「名目能力」とは
+   * 明確に区別する。
+   */
+  readonly effectiveCapacityByProduct: ProductAmount;
+  readonly effectiveCommonProcessingCapacity: number;
+  readonly effectiveFreezingPackagingCapacity: number;
   readonly currentRegularHeadcount: number;
   readonly skillByProduct: ProductAmount;
   readonly attendanceRate: number;
+}
+
+/**
+ * 【2026-08-02・能力認識監査Phase 2新設】ベトナム国内未凍結原料市場の、前四半期の
+ * 公開清算結果（数量側）。vietnamDomesticPriorPrice（価格のみ、既存）と対になる。
+ * market/types.tsのVietnamDomesticResultのうち、既に画面へ公開表示されている
+ * 数量系フィールドだけを転記する（新しい市場ルールは作らない。既存の
+ * PublicMarketInfo.lastMarketResult.vietnamDomesticから読み出すだけ）。
+ * turn1等、前四半期の市場結果が存在しない場合はundefined。
+ */
+export interface VietnamDomesticPriorMarketObservation {
+  /** 前四半期の農家側供給量（HOSO換算トン）。 */
+  readonly supply: number;
+  /** 前四半期の（プロラタ最低引取ルール適用後）実効需要。 */
+  readonly effectiveDemand: number;
+  /** 前四半期に実際に取引が成立した数量。 */
+  readonly transactedVolume: number;
+  /** 前四半期、農家が売却しなかった（できなかった）潜在供給量 = supply - transactedVolume。 */
+  readonly unsoldSupply: number;
 }
 
 /**
@@ -81,8 +111,19 @@ export interface StandardAiObservation {
 
   // --- 能力 ---
   readonly factories: readonly FactoryObservation[];
+  /** 名目能力の会社合計（capex加算後）。 */
   readonly totalCapacityByProduct: ProductAmount;
   readonly totalCommonProcessingCapacity: number;
+  /**
+   * 【2026-08-02・能力認識監査Phase 3新設】実効能力（factories[].effective*の会社合計）。
+   * production/capacity.tsのcalculateFactoryEffectiveCapacityをそのまま再利用して
+   * 算出（新しい能力算出ロジックは増設していない）。生産意思決定・診断は、原則
+   * こちらを「現在の実行可能な生産上限」として参照する（totalCapacityByProduct等の
+   * 名目値は設備設計値の参考情報として保持するのみ）。
+   */
+  readonly totalEffectiveCapacityByProduct: ProductAmount;
+  readonly totalEffectiveCommonProcessingCapacity: number;
+  readonly totalEffectiveFreezingPackagingCapacity: number;
   readonly aquacultureCapacity: number;
   readonly salesForceHeadcountTotal: number;
   readonly procurementHeadcountTotal: number;
@@ -100,6 +141,13 @@ export interface StandardAiObservation {
   /** 商品別の市場プレミアム（前期実績、VN。turn1等は未定義）。 */
   readonly marketPremiumByProduct: Readonly<{ pd?: number; vap?: number }>;
   readonly vietnamDomesticPriorPrice?: number;
+  /**
+   * 【2026-08-02・能力認識監査Phase 2新設】ベトナム国内未凍結原料市場の、前四半期の
+   * 公開清算結果（数量側）。price（vietnamDomesticPriorPrice、既存）と対になる。
+   * 既にPublicMarketInfo.lastMarketResult.vietnamDomesticとして渡ってきていた値を
+   * observationへ転記するだけであり、新しい市場ルールは追加していない。
+   */
+  readonly vietnamDomesticPriorMarket?: VietnamDomesticPriorMarketObservation;
   /** HOSO国際基準価格（前期実績、VN）。契約時予想原価の下限目安に使う。 */
   readonly lastHosoPriceVn?: number;
 
@@ -112,6 +160,37 @@ export interface StandardAiObservation {
   readonly cashUsd: number;
   readonly existingLoanBalanceUsd: number;
   readonly regularHeadcountTotal: number;
+  /**
+   * 【2026-08-03新設・Phase E】売掛金のうち、当期が決済予定期（dueSettlementPeriod）に
+   * 一致するもの（＝当期の決算処理で現金化される予定）の合計。既存の
+   * ReceivableRecord.dueSettlementPeriod（finance/types.ts、既にownState.financeState.
+   * receivablesに存在する値）をそのまま集計するだけで、新しい回収ルールは作らない。
+   * 【重要】売掛金の帳簿残高全体を当期使える現金として扱ってはならない
+   * （arCollectionQuarters=1により、当期発生の売上は当期中は現金化されない）。
+   */
+  readonly receivablesDueThisPeriodUsd: number;
+  /** 売掛金のうち、決済予定期がまだ来ていないものの合計（将来の現金化予定）。 */
+  readonly receivablesNotYetDueUsd: number;
+  /** 買掛金のうち、当期が決済予定期に一致するもの（当期の現金支出予定）の合計。 */
+  readonly payablesDueThisPeriodUsd: number;
+  /** 買掛金のうち、決済予定期がまだ来ていないものの合計。 */
+  readonly payablesNotYetDueUsd: number;
+  /**
+   * 【2026-08-03新設・Phase E】既存融資（ownState.financingState.loanPortfolio.loans）に
+   * financing/loanSchedule.tsのcomputeLoanQuarterlyInterest（実際の四半期決算が使う
+   * 利息計算そのもの）をそのまま適用して合計した、当期発生予定利息（USD）。
+   */
+  readonly existingLoanInterestUsdThisQuarterEstimate: number;
+  /** 同様にcomputeScheduledPrincipalDueをそのまま適用して合計した、当期予定元本返済額（USD）。 */
+  readonly existingLoanScheduledPrincipalDueUsdThisQuarterEstimate: number;
+  /**
+   * 【捏造しない】追加借入可能額（available borrowing headroom）は、
+   * financing/borrowingCapacity.tsのcomputeBorrowingCapacityが信用スコア・EBITDA・
+   * 担保USD評価額・財務制限条項等、現時点でStandardAiObservationに配線されていない
+   * 複数の入力を要求するため、恒常的にundefinedとする（憶測で近似値を作らない）。
+   * 将来、これらの入力を配線した時点でこのコメントと合わせて実装する。
+   */
+  readonly availableBorrowingHeadroomUsd?: number;
 
   // --- 設備投資 ---
   readonly activeCapexProjectTargets: ReadonlySet<Product | "commonProcessing" | "freezingPackaging" | "coldStorage">;

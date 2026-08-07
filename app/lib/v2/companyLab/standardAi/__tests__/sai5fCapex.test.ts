@@ -55,6 +55,13 @@ function observation(overrides: Partial<StandardAiObservation> = {}): StandardAi
     factories: [],
     totalCapacityByProduct: { hoso: 10000, pd: 8000, vap: 6000 },
     totalCommonProcessingCapacity: 22000,
+    // 【2026-08-03・Phase Aハードニング】capex.tsのボトルネック判定が
+    // totalEffectiveCapacityByProduct/totalEffectiveCommonProcessingCapacityを
+    // 参照するよう変更されたため、合成observationにも実効能力を追加する。
+    // 本テストの意図（capex提案条件の分岐検証）はノミナル値と実効値の差の検証では
+    // ないため、同値をそのまま実効能力として与える。
+    totalEffectiveCapacityByProduct: { hoso: 10000, pd: 8000, vap: 6000 },
+    totalEffectiveCommonProcessingCapacity: 22000,
     aquacultureCapacity: 4000,
     salesForceHeadcountTotal: 80,
     procurementHeadcountTotal: 12,

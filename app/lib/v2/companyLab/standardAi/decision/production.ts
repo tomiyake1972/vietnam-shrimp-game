@@ -20,7 +20,7 @@ import { hosoEqTons, unwrapUnit } from "../../../core/units";
 import { CompanyProductionPlanEntry } from "../../../production/types";
 import { CompanyFixture } from "../../types";
 import { PressureScores } from "../pressures";
-import { ProductAmount, StandardAiObservation, zeroProductAmount } from "../types";
+import { ProductAmount, StandardAiObservation, sumProductAmount, zeroProductAmount } from "../types";
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
 
 const EPSILON = 1e-6;
@@ -84,29 +84,90 @@ export function buildStandardAiProductionPlans(
     else priorityByProduct[product] = 3;
   }
 
+  // 【2026-08-02・能力認識監査Phase 3対応】従来はここでfixture.factories（capex加算前の
+  // 名目能力）を直接読み、稼働率・設備利用可能率（baseUtilizationRate×
+  // equipmentAvailabilityRate＝0.855）を一切適用していなかった（Test14 Turn2で
+  // 24,000tが生産可能と誤認識していた根本原因）。observation.factories[].
+  // effectiveCapacityByProductは、production/capacity.tsのcalculateFactoryEffectiveCapacity
+  // （生産エンジン本体・allocation.tsが実際の生産制約として使うのと同じ純粋関数）を
+  // 適用済みの実効能力であり、これをそのまま使う（新しい能力算出ロジックは増設しない）。
   const plans: CompanyProductionPlanEntry[] = [];
   let anyCapacityConstraint = false;
-  for (const f of fixture.factories) {
-    const capacityByProduct: ProductAmount = {
-      hoso: unwrapUnit(f.hosoCapacity),
-      pd: unwrapUnit(f.pdCapacity),
-      vap: unwrapUnit(f.vapCapacity),
-    };
+  for (const factoryObs of observation.factories) {
     for (const product of ["hoso", "pd", "vap"] as const) {
-      const capacity = capacityByProduct[product];
+      const capacity = factoryObs.effectiveCapacityByProduct[product];
       if (capacity <= EPSILON || neededByProduct[product] <= EPSILON) continue;
-      const share = capacityTotals[product] > EPSILON ? capacity / capacityTotals[product] : 0;
+      // 【重要】シェア（share）自体は名目capacityByProduct（=能力の相対比。
+      // observation.factories[].capacityByProduct、capex加算後の名目値）で按分する。
+      // 各工場の実効能力比は名目能力比と（全工場が同じbaseUtilizationRate・
+      // equipmentAvailabilityRateを持つ限り）同一であるため、名目比で按分しても
+      // 実効capacityでキャップする限り結果は変わらない。既存の按分方式は変更しない
+      // （実装指示Phase 3「新しいロジックを作らない」）。
+      const share = capacityTotals[product] > EPSILON ? factoryObs.capacityByProduct[product] / capacityTotals[product] : 0;
       const desired = Math.min(capacity, neededByProduct[product] * share);
       if (desired <= EPSILON) continue;
       if (neededByProduct[product] * share > capacity + EPSILON) anyCapacityConstraint = true;
       plans.push({
         companyId: fixture.companyId,
-        factoryId: f.factoryId,
+        factoryId: factoryObs.factoryId,
         product,
         desiredQuantity: hosoEqTons(Math.round(desired * 100) / 100),
         priority: priorityByProduct[product],
       });
     }
+  }
+
+  // 【2026-08-02・能力認識監査Phase 3対応】共通前処理（commonProcessing）・凍結包装
+  // （freezingPackaging）は、HOSO/PD/VAP商品別能力とは別に、3商品合計へ効く共有の
+  // ボトルネックである（production/allocation.tsの段階3〜4が実際に使う制約と同じ
+  // 意味）。エンジン本体の水配分（water-filling）アルゴリズムをここで複製する
+  // （新しい配分ロジックを作る）のではなく、既に商品別能力でキャップ済みの計画合計が
+  // 共有ボトルネックを超える場合にだけ、全商品を同一比率で単純に縮小する保守的な
+  // 安全弁として実装する（実際の配分順序・優先度による精緻な配分はエンジン本体
+  // （allocation.ts）が別途行う。ここでの目的は「Standard AIが共有ボトルネックを
+  // 超える生産量を『実行可能』として意思決定・原価計算・説明に使ってしまうこと」を
+  // 防ぐことに限定する）。
+  const totalDesired = sumProductAmount(
+    plans.reduce(
+      (acc, p) => {
+        acc[p.product] += unwrapUnit(p.desiredQuantity);
+        return acc;
+      },
+      zeroProductAmount()
+    )
+  );
+  const sharedCaps: { readonly label: string; readonly cap: number }[] = [
+    { label: "共通前処理", cap: observation.totalEffectiveCommonProcessingCapacity },
+    { label: "凍結・包装", cap: observation.totalEffectiveFreezingPackagingCapacity },
+  ];
+  let scaleFactor = 1;
+  const bindingCaps: string[] = [];
+  for (const { label, cap } of sharedCaps) {
+    if (cap > EPSILON && totalDesired * scaleFactor > cap + EPSILON) {
+      scaleFactor = Math.min(scaleFactor, cap / totalDesired);
+      bindingCaps.push(label);
+    }
+  }
+  let finalPlans = plans;
+  if (scaleFactor < 1) {
+    finalPlans = plans.map((p) => ({
+      ...p,
+      desiredQuantity: hosoEqTons(Math.round(unwrapUnit(p.desiredQuantity) * scaleFactor * 100) / 100),
+    }));
+    anyCapacityConstraint = true;
+    diagnostics.push({
+      code: "SHARED_CAPACITY_CONSTRAINT",
+      domain: "production",
+      companyId: fixture.companyId,
+      severity: "warning",
+      keyValues: { totalDesired, scaleFactor },
+      message:
+        `商品別実効能力の合計だけでは足りず、共有ボトルネック（${bindingCaps.join(
+          "/"
+        )}）の実効能力がさらに強い制約となるため、生産計画全体を比率${scaleFactor.toFixed(
+          3
+        )}で縮小した（簡易な保守的キャップ。工場・優先度別の精緻な配分は生産エンジン本体が別途行う）。`,
+    });
   }
 
   if (anyCapacityConstraint) {
@@ -115,9 +176,9 @@ export function buildStandardAiProductionPlans(
       domain: "production",
       companyId: fixture.companyId,
       severity: "warning",
-      message: "設備能力が必要生産量を下回るため、当期の生産計画は能力上限でキャップされる。",
+      message: "設備能力（実効能力・共有ボトルネック含む）が必要生産量を下回るため、当期の生産計画は能力上限でキャップされる。",
     });
   }
 
-  return { productionPlans: plans, neededByProduct, diagnostics };
+  return { productionPlans: finalPlans, neededByProduct, diagnostics };
 }

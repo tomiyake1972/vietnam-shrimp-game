@@ -179,6 +179,14 @@ test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも�
   // 営業人員の固定費を実需に対し過大にするだけで、標準AIの意思決定ロジック自体は
   // 一切変更しない）を用いて、確実にdefaultへ至る人工的な資金圧迫シナリオを作り、
   // ログ組み立ての健全性だけを検証する。
+  //
+  // 【2026-08-02・能力認識監査Phase 3での再訂正】overrideを400から600へ引き上げた。
+  // Phase 3の生産能力認識修正（名目capacityではなく実効・共有ボトルネック考慮後の
+  // binding capacityを生産計画の上限に使うよう修正）により、生産計画・原料調達量が
+  // 従来より小さくなり、400では9seed中0件しかdefaultへ至らなくなった（過大調達による
+  // 資金枯渇という副作用がさらに減った、というPhase 3の意図どおりの効果であり、本テスト
+  // にとってはリグレッションではない）。600以上では9seed全てで確実にdefaultへ至ることを
+  // 実測で確認した上で600へ更新した。
   const seeds = ["sai3a-002", ...Array.from({ length: 8 }, (_, i) => `sai3a-test-default-${i}`)];
   let verifiedAtLeastOne = false;
   for (const seed of seeds) {
@@ -188,7 +196,7 @@ test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも�
       quarters: 8,
       companyIds: ["BAL"],
       candidate,
-      salesForceHeadcountOverride: 400,
+      salesForceHeadcountOverride: 600,
     });
     const log = buildAutoplayCaseLogs(caseResult);
     const defaultedTurn = log.quarterResults.find((r) => r.paymentDefault)?.turn;

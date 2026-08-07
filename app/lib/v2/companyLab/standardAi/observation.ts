@@ -7,7 +7,7 @@
 // 他社の非公開データ・将来の乱数列）に一切アクセスしない（アクセスする手段が
 // 関数シグネチャ上そもそも存在しない）。
 
-import { unwrapUnit } from "../../core/units";
+import { hosoEqTons, unwrapUnit } from "../../core/units";
 import { DEMAND_MARKET_IDS, MarketQuarterResult, Product } from "../../market/types";
 import { deriveMarketReferencePrices } from "../../market/destinationPricing";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS } from "../../market/destinationPricingParameters";
@@ -16,6 +16,8 @@ import { unwrapUsd } from "../../finance/types";
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../types";
 import { findFactoryRegularHeadcount } from "../workforce";
 import { computeCapacityEffectForCompany, isCapexProjectOperationalAt } from "../../capex/capacityEffect";
+import { calculateFactoryEffectiveCapacity } from "../../production/capacity";
+import { computeLoanQuarterlyInterest, computeScheduledPrincipalDue } from "../../financing/loanSchedule";
 import { FactoryObservation, MarketObservationEntry, ProductAmount, StandardAiObservation, zeroProductAmount } from "./types";
 
 const EPSILON = 1e-6;
@@ -122,15 +124,43 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
       }
     }
     const isMainFactory = f.factoryId === firstFactoryId;
+    const nominalHoso = unwrapUnit(f.hosoCapacity) + (isMainFactory ? capexEffect.hoso : 0);
+    const nominalPd = unwrapUnit(f.pdCapacity) + (isMainFactory ? capexEffect.pd : 0);
+    const nominalVap = unwrapUnit(f.vapCapacity) + (isMainFactory ? capexEffect.vap : 0);
+    const nominalCommon = unwrapUnit(f.commonProcessingCapacity) + (isMainFactory ? capexEffect.commonProcessing : 0);
+    const nominalFreezing = unwrapUnit(f.freezingPackagingCapacity) + (isMainFactory ? capexEffect.freezingPackaging : 0);
+
+    // 【2026-08-02・能力認識監査対応】上のcapacityByProduct/commonProcessingCapacity/
+    // freezingPackagingCapacityは「名目能力」（capex加算後、稼働率・設備利用可能率は
+    // 未適用）である。これがStandard AIに「24,000t生産可能」のような過大な能力認識を
+    // させていた（能力認識監査 Phase 3 参照）。ここで、production/capacity.tsの
+    // calculateFactoryEffectiveCapacity（生産エンジン本体・allocation.tsが実際の生産
+        // 制約として使うのと全く同じ純粋関数）を、capex加算後の名目値を持つ合成Factory
+    // オブジェクトへ適用し、「実効能力」（baseUtilizationRate×equipmentAvailabilityRate
+    // 適用後）を新たに算出する。新しい能力算出ロジックを増設するのではなく、既存の
+    // 共有関数をそのまま再利用する（実装指示Phase 3「能力を単純に足し算して新しい
+    // ロジックを作らず、production engineの共有能力制約を可能な限り再利用してください」）。
+    const effective = calculateFactoryEffectiveCapacity({
+      ...f,
+      hosoCapacity: hosoEqTons(nominalHoso),
+      pdCapacity: hosoEqTons(nominalPd),
+      vapCapacity: hosoEqTons(nominalVap),
+      commonProcessingCapacity: hosoEqTons(nominalCommon),
+      freezingPackagingCapacity: hosoEqTons(nominalFreezing),
+    });
+
     return {
       factoryId: f.factoryId,
-      capacityByProduct: {
-        hoso: unwrapUnit(f.hosoCapacity) + (isMainFactory ? capexEffect.hoso : 0),
-        pd: unwrapUnit(f.pdCapacity) + (isMainFactory ? capexEffect.pd : 0),
-        vap: unwrapUnit(f.vapCapacity) + (isMainFactory ? capexEffect.vap : 0),
+      capacityByProduct: { hoso: nominalHoso, pd: nominalPd, vap: nominalVap },
+      commonProcessingCapacity: nominalCommon,
+      freezingPackagingCapacity: nominalFreezing,
+      effectiveCapacityByProduct: {
+        hoso: unwrapUnit(effective.hoso),
+        pd: unwrapUnit(effective.pd),
+        vap: unwrapUnit(effective.vap),
       },
-      commonProcessingCapacity: unwrapUnit(f.commonProcessingCapacity) + (isMainFactory ? capexEffect.commonProcessing : 0),
-      freezingPackagingCapacity: unwrapUnit(f.freezingPackagingCapacity) + (isMainFactory ? capexEffect.freezingPackaging : 0),
+      effectiveCommonProcessingCapacity: unwrapUnit(effective.commonProcessing),
+      effectiveFreezingPackagingCapacity: unwrapUnit(effective.freezingPackaging),
       currentRegularHeadcount,
       skillByProduct,
       attendanceRate: baseline ? unwrapUnit(baseline.attendanceRate) : 1,
@@ -144,6 +174,18 @@ function totalCapacityByProduct(factories: readonly FactoryObservation[]): Produ
       hoso: acc.hoso + f.capacityByProduct.hoso,
       pd: acc.pd + f.capacityByProduct.pd,
       vap: acc.vap + f.capacityByProduct.vap,
+    }),
+    zeroProductAmount()
+  );
+}
+
+/** 【2026-08-02新設】実効能力（商品別）の会社合計。名目のtotalCapacityByProductと対になる。 */
+function totalEffectiveCapacityByProduct(factories: readonly FactoryObservation[]): ProductAmount {
+  return factories.reduce(
+    (acc, f) => ({
+      hoso: acc.hoso + f.effectiveCapacityByProduct.hoso,
+      pd: acc.pd + f.effectiveCapacityByProduct.pd,
+      vap: acc.vap + f.effectiveCapacityByProduct.vap,
     }),
     zeroProductAmount()
   );
@@ -208,6 +250,9 @@ export function buildStandardAiObservation(
     factories,
     totalCapacityByProduct: totalCapacityByProduct(factories),
     totalCommonProcessingCapacity: factories.reduce((s, f) => s + f.commonProcessingCapacity, 0),
+    totalEffectiveCapacityByProduct: totalEffectiveCapacityByProduct(factories),
+    totalEffectiveCommonProcessingCapacity: factories.reduce((s, f) => s + f.effectiveCommonProcessingCapacity, 0),
+    totalEffectiveFreezingPackagingCapacity: factories.reduce((s, f) => s + f.effectiveFreezingPackagingCapacity, 0),
     aquacultureCapacity: unwrapUnit(fixture.aquacultureCapacity),
     // 【SAI-6.2】fixture.salesForceHeadcountTotal（静的な基準値）ではなく、
     // ownState.salesForceHiringState.headcount（前期末までに実際に確定した動的な
@@ -226,6 +271,21 @@ export function buildStandardAiObservation(
       vap: lastMarketResult ? unwrapUnit(lastMarketResult.vapPremium.byCountry.VN.premium) : undefined,
     },
     vietnamDomesticPriorPrice: publicInfo.vietnamDomesticPriorPrice > EPSILON ? publicInfo.vietnamDomesticPriorPrice : undefined,
+    // 【2026-08-02・能力認識監査Phase 2】publicInfo.lastMarketResult（既存の
+    // MarketQuarterResult）は元からvietnamDomestic（VietnamDomesticResult。
+    // supply/effectiveDemand/transactedVolume/unsoldSupplyを含む）を保持していた。
+    // 従来はここでvietnamDomesticPriorPrice（価格のみ）しか転記しておらず、既に
+    // 画面へ公開表示されている数量側の情報がStandardAiObservationに一切露出して
+    // いなかった（能力認識監査Phase 4で確認した配線ギャップ）。新しい市場ルールは
+    // 追加せず、既存のlastMarketResult.vietnamDomesticから読み出すだけの追加。
+    vietnamDomesticPriorMarket: lastMarketResult
+      ? {
+          supply: unwrapUnit(lastMarketResult.vietnamDomestic.supply),
+          effectiveDemand: unwrapUnit(lastMarketResult.vietnamDomestic.effectiveDemand),
+          transactedVolume: unwrapUnit(lastMarketResult.vietnamDomestic.transactedVolume),
+          unsoldSupply: unwrapUnit(lastMarketResult.vietnamDomestic.unsoldSupply),
+        }
+      : undefined,
     lastHosoPriceVn: lastMarketResult ? unwrapUnit(lastMarketResult.hosoPrices.VN.price) : undefined,
 
     productEconomics: {
@@ -235,6 +295,32 @@ export function buildStandardAiObservation(
     cashUsd: unwrapUsd(ownState.financeState.cash),
     existingLoanBalanceUsd: ownState.financingState.loanPortfolio.loans.reduce((s, l) => s + l.currentPrincipalUsd, 0),
     regularHeadcountTotal: factories.reduce((s, f) => s + f.currentRegularHeadcount, 0),
+
+    // 【2026-08-03新設・Phase E】ReceivableRecord/PayableRecordの既存
+    // dueSettlementPeriodをそのまま当期と比較して集計するだけで、新しい回収・支払
+    // ルールは作らない。
+    receivablesDueThisPeriodUsd: ownState.financeState.receivables
+      .filter((r) => r.dueSettlementPeriod === period)
+      .reduce((s, r) => s + unwrapUsd(r.amount), 0),
+    receivablesNotYetDueUsd: ownState.financeState.receivables
+      .filter((r) => r.dueSettlementPeriod !== period)
+      .reduce((s, r) => s + unwrapUsd(r.amount), 0),
+    payablesDueThisPeriodUsd: ownState.financeState.payables
+      .filter((p) => p.dueSettlementPeriod === period)
+      .reduce((s, p) => s + unwrapUsd(p.amount), 0),
+    payablesNotYetDueUsd: ownState.financeState.payables
+      .filter((p) => p.dueSettlementPeriod !== period)
+      .reduce((s, p) => s + unwrapUsd(p.amount), 0),
+    existingLoanInterestUsdThisQuarterEstimate: ownState.financingState.loanPortfolio.loans.reduce(
+      (s, l) => s + computeLoanQuarterlyInterest(l, period),
+      0
+    ),
+    existingLoanScheduledPrincipalDueUsdThisQuarterEstimate: ownState.financingState.loanPortfolio.loans.reduce(
+      (s, l) => s + computeScheduledPrincipalDue(l, period),
+      0
+    ),
+    // availableBorrowingHeadroomUsd: 意図的に未設定（undefined）。ファイル冒頭の
+    // types.tsコメント参照（捏造しない）。
 
     activeCapexProjectTargets: activeCapexTargets(ownState, period),
     // 【SAI-5F】中断中案件（projectId昇順の決定論的順序。resume提案の対象）。

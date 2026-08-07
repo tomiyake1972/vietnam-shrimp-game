@@ -74,7 +74,15 @@ export function buildStandardAiCapexDecision(
   };
 
   for (const product of ["hoso", "pd", "vap"] as const) {
-    const capacity = observation.totalCapacityByProduct[product];
+    // 【2026-08-03・Phase Aハードニング】ボトルネック判定条件1（「対象能力が、
+    // 今期・実際に観測されたボトルネックである」）の分母を、ノミナル能力
+    // （capex増設前提の理論値）ではなく実効能力（capex反映後の実際に使える能力）
+    // へ変更する。ノミナルのままだと実際より能力を高く見積もり、真にボトルネック
+    // なのにshortfallRatioが低く出て投資提案が発火しない（sales/production側の
+    // 「24,000t」問題とは逆方向だが、同じ「ノミナルを実行可能量として使う」誤り）。
+    // Standard AI側の判断ロジックのみの修正であり、capexゲームエンジン自体は
+    // 変更しない。
+    const capacity = observation.totalEffectiveCapacityByProduct[product];
     if (capacity <= EPSILON) continue;
     const shortfallRatio = productionNeededByProductBeforeCap[product] / capacity;
     const noExcess = observation.finishedGoodsByProduct[product] <= capacity * params.finishedGoodsTargetQuarters * params.excessInventoryRatioForDiscount;
@@ -223,7 +231,10 @@ export function buildStandardAiCapexDecision(
   // VAPへ新規投資するより、すでに投資済みで自力採算の取れているPDを回し続ける
   // 方が良い」という限界的な判断であり、(d)+(e)がそれを表す。
   if (ext && params.growthTrendResponsiveness > 0) {
-    const pdCapacity = observation.totalCapacityByProduct.pd;
+    // 【2026-08-03・Phase Aハードニング】(d)「PD能力が遊んでおらず」の判定
+    // (pdInUse)は実際に使える能力に対する稼働率であるべきなので、ここも
+    // ノミナルではなく実効能力を使う。
+    const pdCapacity = observation.totalEffectiveCapacityByProduct.pd;
     const vapProposed = proposals.some((p) => p.projectType === LINE_EXPANSION_BY_PRODUCT.vap);
     // 前期の公開プレミアムが未取得（turn1等）なら判断材料が無いので発火させない。
     const pdPremium = observation.marketPremiumByProduct.pd;
@@ -266,7 +277,9 @@ export function buildStandardAiCapexDecision(
     }
   }
 
-  const commonCapacity = observation.totalCommonProcessingCapacity;
+  // 【2026-08-03・Phase Aハードニング】共通前処理能力のボトルネック判定も、
+  // capex反映後の実効能力を分母に使う（ノミナルのままだと同様に過大評価する）。
+  const commonCapacity = observation.totalEffectiveCommonProcessingCapacity;
   if (commonCapacity > EPSILON) {
     const commonShortfallRatio = requiredRawMaterialUnconstrained / commonCapacity;
     const alreadyPlannedCommon = observation.activeCapexProjectTargets.has("commonProcessing");

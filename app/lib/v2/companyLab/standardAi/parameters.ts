@@ -171,6 +171,35 @@ export interface StandardAiParameters {
    *  が「PD・VAP能力不足が継続した場合の設備投資判断を少し早める」を、HOSOには
    *  影響させずPD/VAPだけに適用するための差し込み口。 */
   readonly capexShortfallThresholdBiasByProduct: Readonly<Partial<Record<Product, number>>>;
+
+  // --- 【2026-08-05新設】Strategic Intent / Target Scale Band ---
+  /**
+   * 成長姿勢（strategicIntent.tsのStrategicGrowthPosture）ごとの、Target Scale Bandの
+   * 算定倍率。基準（currentSustainableScaleTons、targetScale.ts参照）に対する
+   * min/preferred/maxの倍率。8期先市場を精密予測しての決定ではなく、「経営感覚」
+   * としての幅を表す（三宅さんご指示§4「だいたい16,000〜20,000t程度」のイメージ）。
+   * 明示パラメータ化・文書化（STANDARD_AI_STRATEGIC_INTENT_AND_TARGET_SCALE.md）・
+   * テスト（targetScale.test.ts）を必須とする（新しい恣意的なmagic numberの
+   * 多用を避けるため、この1箇所に集約する）。
+   */
+  readonly targetScaleGrowthBandMultiplierByPosture: Readonly<
+    Record<"DEFENSIVE" | "BALANCED_GROWTH" | "AGGRESSIVE_GROWTH", { readonly min: number; readonly preferred: number; readonly max: number }>
+  >;
+  /**
+   * Target Scale算定時、当期実現売上（lastQuarterActualProductionByProduct等）と
+   * 現在の実効生産能力のどちらを「現在の持続可能規模」の基準にするかを決める、
+   * 生産能力側への重み（0〜1。0=実績のみ、1=能力のみ）。実績は変動が大きく
+   * （新設会社のturn1は0等）、能力は据え置き型のため、両者を混合して急激な
+   * ブレを避ける。
+   */
+  readonly targetScaleCapacityWeightInBaseline: number;
+  /**
+   * Target Scaleに対する現四半期の実効営業能力（realistic salesの総量換算）を、
+   * 「Target Scale帯の範囲内」とみなす許容乖離（比率）。この範囲内であれば
+   * SALES_CAPACITY_WITHIN_TARGET_BANDとし、追加の採用/減員提案は行わない
+   * （三宅さんご指示§23 capacity bufferに対応する簡易版）。
+   */
+  readonly targetScaleWithinBandTolerance: number;
 }
 
 /**
@@ -232,6 +261,20 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   severeCashPressureThreshold: 0.7,
 
   capexShortfallThresholdBiasByProduct: {},
+
+  targetScaleGrowthBandMultiplierByPosture: {
+    DEFENSIVE: { min: 0.9, preferred: 1.0, max: 1.1 },
+    BALANCED_GROWTH: { min: 1.0, preferred: 1.15, max: 1.35 },
+    AGGRESSIVE_GROWTH: { min: 1.1, preferred: 1.35, max: 1.6 },
+  },
+  // 【2026-08-05・三宅さんご指示§18対応】当初0.5（実績と能力の折半）としていたが、
+  // 実績側（lastQuarterActualProductionByProduct）は四半期ごとの変動が大きく、
+  // Target Scale Bandが毎期大きく動いてしまう（三宅さんご指示§18「Target Scaleは
+  // 毎期激しく変えない」に抵触する挙動が実測で確認された）。実効生産能力
+  // （effectiveCapacityByProduct）はcapex完了時以外変化しないため、これを基準の
+  // 主軸とすることでTarget Scale Bandの粘着性を構造的に確保する（1.0=能力のみ）。
+  targetScaleCapacityWeightInBaseline: 1.0,
+  targetScaleWithinBandTolerance: 0.05,
 };
 
 // ---------------------------------------------------------------------
