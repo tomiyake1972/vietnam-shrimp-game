@@ -138,6 +138,10 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
     // 1社あたりの最大買付シェア（maximumBuyerShare）の基準は、会社向け原資ではなく
     // 国内市場全体の供給量のまま維持する（Phase 6.3）。
     shareCapReferenceSupply: marketResult.vietnamDomestic.supply,
+    // 【Test15 turn1導入ルール】呼び出し側（companyLab/runner.ts）がturn1のみ設定する。
+    ...(input.domesticPurchaseGuaranteedBidFloor !== undefined
+      ? { domesticPurchaseGuaranteedBidFloor: input.domesticPurchaseGuaranteedBidFloor }
+      : {}),
     originHosoFobPrice: Object.fromEntries(
       Object.entries(marketResult.hosoPrices).map(([country, r]) => [country, r.price])
     ) as RawMaterialsQuarterInput["originHosoFobPrice"],

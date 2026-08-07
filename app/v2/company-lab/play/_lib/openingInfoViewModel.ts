@@ -23,6 +23,7 @@ import { PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../../../../lib/v2/market/produ
 import { DEMAND_MARKET_IDS, DemandMarketId } from "../../../../lib/v2/market/types";
 import { SALES_PARAMETERS_V1 } from "../../../../lib/v2/sales/parameters";
 import type { CapitalProject } from "../../../../lib/v2/capex/types";
+import type { DomesticReferencePrice } from "../../../../lib/v2/companyLab/domesticReferencePrice";
 
 // ---------------------------------------------------------------------
 // 1. 期初BS（A-1）
@@ -410,6 +411,11 @@ export function buildOpeningMarketInfo(
 export interface OpeningInfoViewModel {
   readonly period: PeriodV2;
   readonly turn: number;
+  /**
+   * 【Test15】国内原料の参考買付価格。市場エンジンの清算価格をそのまま読み出したもの。
+   * 取得できなかった場合はnull（画面は「－」を表示し、価格を捏造しない）。
+   */
+  readonly domesticReferencePrice: DomesticReferencePrice | null;
   readonly balanceSheet: OpeningBalanceSheet;
   readonly depreciableAssets: DepreciableAssetsBreakdown;
   readonly marketInfo: OpeningMarketInfo;

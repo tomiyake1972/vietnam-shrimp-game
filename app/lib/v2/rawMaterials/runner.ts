@@ -46,7 +46,8 @@ export function advanceRawMaterialsQuarter(
     input.vietnamDomesticPrice,
     input.vietnamDomesticSupply,
     params,
-    input.shareCapReferenceSupply ?? input.vietnamDomesticSupply
+    input.shareCapReferenceSupply ?? input.vietnamDomesticSupply,
+    input.domesticPurchaseGuaranteedBidFloor
   );
   const domesticLots = createDomesticPurchaseLots(domesticAllocation, params);
 

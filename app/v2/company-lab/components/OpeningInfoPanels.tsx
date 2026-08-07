@@ -15,6 +15,7 @@ import type {
   OpeningBalanceSheetRow,
   OpeningMarketInfo,
 } from "../play/_lib/openingInfoViewModel";
+import type { DomesticReferencePrice } from "../../../lib/v2/companyLab/domesticReferencePrice";
 
 const DASH = "－";
 
@@ -161,7 +162,13 @@ export function DepreciableAssetsPanel({ assets }: { readonly assets: Depreciabl
   );
 }
 
-export function OpeningMarketInfoPanel({ info }: { readonly info: OpeningMarketInfo }) {
+export function OpeningMarketInfoPanel({
+  info,
+  referencePrice,
+}: {
+  readonly info: OpeningMarketInfo;
+  readonly referencePrice: DomesticReferencePrice | null;
+}) {
   const rm = info.rawMaterial;
   return (
     <CollapsibleSection
@@ -179,6 +186,18 @@ export function OpeningMarketInfoPanel({ info }: { readonly info: OpeningMarketI
       <div className="space-y-4">
         <details className="bg-gray-900/40 rounded-lg p-3">
           <summary className="text-xs font-semibold text-gray-300 cursor-pointer">原料市場</summary>
+          {referencePrice && (
+            <div className="mt-2 rounded-lg border border-teal-700/60 bg-teal-950/30 p-2">
+              <div className="text-sm font-semibold text-teal-200">
+                国内原料参考価格：${referencePrice.referencePriceUsdPerHosoEqKg.toFixed(2)}/kg
+              </div>
+              <p className="text-[11px] text-teal-100/80 mt-1">
+                {referencePrice.guaranteeActive
+                  ? "Turn1はこの価格以上を提示すれば、通常条件で必要量を購入できます（供給量・調達処理能力・買い占め防止シェア上限35%の範囲内）。"
+                  : "Turn2以降はこの保証はありません。成立価格・配分は需給と競合各社の買付により変動します。"}
+              </p>
+            </div>
+          )}
           <table className="w-full text-xs mt-2">
             <tbody>
               <tr>

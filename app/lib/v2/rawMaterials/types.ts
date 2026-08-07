@@ -239,6 +239,12 @@ export interface RawMaterialsQuarterInput {
    * 維持する。
    */
   readonly shareCapReferenceSupply?: HosoEqTons;
+  /**
+   * 【Test15 turn1導入ルール】この価格以上を提示した会社を、競争配分より先に
+   * 個社の配分上限まで確定させる（allocateDomesticPurchaseのguaranteedFulfillmentBidFloor）。
+   * turn1のみ呼び出し側が設定し、未指定なら従来どおり全社が競争配分になる。
+   */
+  readonly domesticPurchaseGuaranteedBidFloor?: UsdPerHosoEqKg;
   /** Phase1の国別HOSO FOB価格（輸入着地価格の起点）。 */
   readonly originHosoFobPrice: Readonly<Record<CountryId, UsdPerHosoEqKg>>;
   /** Phase1の国別exportableSupply（輸入上限算出の起点）。 */

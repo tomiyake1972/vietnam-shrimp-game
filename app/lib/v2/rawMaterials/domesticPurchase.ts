@@ -33,6 +33,10 @@ import { waterFillAllocate } from "./waterFill";
 
 const EPSILON = 1e-6;
 
+/** 提示価格と参考価格の比較に使う許容誤差（USD/kg）。浮動小数の丸めで
+ *  「ちょうど参考価格ちょうど」の提示が保証対象から外れるのを防ぐ。 */
+const PRICE_EPSILON = 1e-9;
+
 function assertNonNegativeIntegerHeadcount(headcount: number): void {
   if (!Number.isInteger(headcount) || headcount < 0) {
     throw new RawMaterialsValidationError(`procurementHeadcount は0以上の整数である必要があります。受け取った値: ${headcount}`);
@@ -205,7 +209,19 @@ export function allocateDomesticPurchase(
   // 【Phase 6.3】maximumBuyerShareの基準供給量。未指定時はavailableSupply（後方互換）。
   // 外部加工業者需要の導入後、availableSupplyは「会社側の配分原資」に縮小されるため、
   // 市場全体に対する買い占め防止上限の基準は別引数で渡せるようにする。
-  shareCapReferenceSupply: HosoEqTons = availableSupply
+  shareCapReferenceSupply: HosoEqTons = availableSupply,
+  /**
+   * 【Test15 turn1導入ルール】この価格以上を提示した会社は、競争配分（水位法）より先に
+   * 上限いっぱいまで配分される。turn1のみ呼び出し側（companyLab/runner.ts）が設定し、
+   * turn2以降は未指定＝従来どおり全社が競争配分になる。
+   *
+   * 【「必要量を確実に購入できる」の正確な意味】ここで優先配分されるのは、あくまで
+   * 個社の配分上限 cap = min(希望量, 調達処理能力, 買い占め防止シェア上限, 承認枠) までである。
+   * 国内供給量そのものを超えて配分することはなく、調達人員が足りない会社が希望量を
+   * 満たせるようになるわけでもない（物理的な制約は turn1 でも一切緩めない）。
+   * 「通常条件では」とはこれらの制約に当たらない範囲、という意味である。
+   */
+  guaranteedFulfillmentBidFloor?: UsdPerHosoEqKg
 ): DomesticPurchaseAllocationResult {
   const sorted = [...entries].sort((a, b) => a.companyId.localeCompare(b.companyId));
 
@@ -237,8 +253,34 @@ export function allocateDomesticPurchase(
     return { entry, bidPrice, coverage, weight, cap };
   });
 
-  const participants = prepared.map((p) => ({ id: p.entry.companyId, weight: p.weight, cap: p.cap }));
-  const { allocated } = waterFillAllocate(participants, unwrapUnit(availableSupply));
+  // 【Test15 turn1導入ルール】参考価格以上を提示した会社を先に上限まで確定させ、
+  // 残った供給量だけを従来どおりの水位法で配分する。floorが未指定（turn2以降）なら
+  // guaranteed は空になり、処理は従来と完全に同一になる。
+  const floor = guaranteedFulfillmentBidFloor !== undefined ? unwrapUnit(guaranteedFulfillmentBidFloor) : undefined;
+  const guaranteed = floor === undefined ? [] : prepared.filter((p) => unwrapUnit(p.bidPrice) >= floor - PRICE_EPSILON);
+  const guaranteedIds = new Set(guaranteed.map((p) => p.entry.companyId));
+
+  const allocated = new Map<string, number>();
+  let remainingSupply = unwrapUnit(availableSupply);
+  if (guaranteed.length > 0) {
+    // 供給量が保証対象の合計上限に満たない場合は、上限比で按分する
+    // （保証は供給量そのものを増やさない。物理的に存在しない原料は配分できない）。
+    const totalGuaranteedCap = guaranteed.reduce((s, p) => s + p.cap, 0);
+    const scale = totalGuaranteedCap > remainingSupply && totalGuaranteedCap > 0 ? remainingSupply / totalGuaranteedCap : 1;
+    for (const p of guaranteed) {
+      const amount = p.cap * scale;
+      allocated.set(p.entry.companyId, amount);
+      remainingSupply -= amount;
+    }
+    remainingSupply = Math.max(0, remainingSupply);
+  }
+
+  const competitive = prepared.filter((p) => !guaranteedIds.has(p.entry.companyId));
+  if (competitive.length > 0) {
+    const participants = competitive.map((p) => ({ id: p.entry.companyId, weight: p.weight, cap: p.cap }));
+    const { allocated: competitiveAllocated } = waterFillAllocate(participants, remainingSupply);
+    for (const [id, amount] of competitiveAllocated) allocated.set(id, amount);
+  }
 
   const companies: CompanyDomesticPurchaseAllocationEntry[] = prepared.map((p) => ({
     companyId: p.entry.companyId,

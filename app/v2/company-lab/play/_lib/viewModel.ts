@@ -24,6 +24,7 @@ import { CompanyLabPersistedStateV1, CompanyLabDraftEnvelope } from "../../../..
 import { DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterResult } from "../../../../lib/v2/market/types";
 import { unwrapUnit } from "../../../../lib/v2/core/units";
 import { getScenarioTurnInput } from "../../../../lib/v2/scenario/scenarioEngine";
+import { computeDomesticReferencePrice } from "../../../../lib/v2/companyLab/domesticReferencePrice";
 import {
   OpeningInfoViewModel,
   buildDepreciableAssets,
@@ -350,6 +351,7 @@ function buildOpeningInfo(
   return {
     period: restoredState.currentPeriod,
     turn,
+    domesticReferencePrice: computeDomesticReferencePrice(restoredState, turn),
     balanceSheet: buildOpeningBalanceSheet(ownState),
     depreciableAssets: buildDepreciableAssets(ownState, turn),
     marketInfo: buildOpeningMarketInfo(publicInfo.vietnamDomesticPriorPrice, priorByMarket),

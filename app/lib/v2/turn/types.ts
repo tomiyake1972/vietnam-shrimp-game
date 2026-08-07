@@ -110,6 +110,12 @@ export interface TurnOrchestratorInput {
 
   /** 当該ターンのシナリオ由来の外部入力（疾病圧力等）。省略可。 */
   readonly scenarioVariables?: TurnScenarioVariables;
+  /**
+   * 【Test15 turn1導入ルール】国内買付で「この価格以上を提示した会社は競争配分より先に
+   * 個社の配分上限まで確定させる」参考価格。companyLab/runner.tsがturn1のみ設定する。
+   * 未指定なら従来どおり全社が競争配分になる（既存の呼び出し元は影響を受けない）。
+   */
+  readonly domesticPurchaseGuaranteedBidFloor?: UsdPerHosoEqKg;
 
   /** 会社別の販売計画（Phase4）。未提出の会社は含めない。 */
   readonly salesPlans: readonly CompanySalesPlanEntry[];

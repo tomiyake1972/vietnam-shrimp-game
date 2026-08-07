@@ -41,6 +41,7 @@
 
 import { PeriodV2 } from "../core/period";
 import { HosoEqTons, hosoEqTons, ratio, roundHosoEqTons, Score0to100, score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
+import { DOMESTIC_PURCHASE_GUARANTEE_TURN, clearDomesticReferencePrice } from "./domesticReferencePrice";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import {
   CONSUMER_MARKET_INVENTORY_PARAMETERS_V1,
@@ -1058,6 +1059,19 @@ export function advanceCompanyLabQuarter(
     currentPeriod: state.currentPeriod,
     marketInput,
     scenarioVariables: { diseasePressure: scenarioTurnInput.countries.VN.diseasePressure },
+    // 【Test15 turn1導入ルール】turn1は「参考価格以上を提示すれば通常条件で必要量を
+    // 購入できる」導入ターンにする。参考価格はここで新しく作るのではなく、
+    // domesticReferencePrice.ts が既存の市場エンジン（clearVietnamRawMarket）へ
+    // シナリオのturn1入力をそのまま渡して清算させた値である。turn2以降は
+    // 未設定のままとし、従来どおり需給と競合の買付で成立価格・配分が決まる。
+    ...(turn === DOMESTIC_PURCHASE_GUARANTEE_TURN
+      ? {
+          domesticPurchaseGuaranteedBidFloor: usdPerHosoEqKg(
+            clearDomesticReferencePrice(previousMarketContext.priorHosoFobPrice.VN, baseMarketInput.vietnamDomestic)
+              .referencePriceUsdPerHosoEqKg
+          ),
+        }
+      : {}),
     salesPlans: decisions.flatMap((d) => d.salesPlans),
     domesticPurchaseIntentSource: {
       type: "companyPlans",

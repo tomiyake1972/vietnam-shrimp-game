@@ -249,7 +249,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
           <>
             <OpeningBalanceSheetPanel bs={viewModel.openingInfo.balanceSheet} turn={viewModel.openingInfo.turn} />
             <DepreciableAssetsPanel assets={viewModel.openingInfo.depreciableAssets} />
-            <OpeningMarketInfoPanel info={viewModel.openingInfo.marketInfo} />
+            <OpeningMarketInfoPanel info={viewModel.openingInfo.marketInfo} referencePrice={viewModel.openingInfo.domesticReferencePrice} />
           </>
         )}
 
@@ -463,6 +463,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
         {!isCompleted && draft && (
           <div className="bg-gray-800 rounded-2xl p-4 sm:p-5">
             <h2 className="text-base font-semibold mb-3">意思決定編集（turn {viewModel.currentTurn}）</h2>
+            <DomesticReferencePriceBanner reference={viewModel.openingInfo.domesticReferencePrice} turn={viewModel.currentTurn} />
             <DecisionEditor
               fixture={viewModel.fixture}
               ownState={viewModel.ownState}
@@ -641,6 +642,47 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
           </Link>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 【Test15】国内原料の参考買付価格バナー（意思決定編集の直前＝原料調達入力の近くに出す）。
+ *
+ * 国内買付は「市場清算価格に対する価格調整」で入力するため、基準となる価格が
+ * 見えないと買付価格を決められない。ここに出す価格は市場エンジン
+ * （clearVietnamRawMarket）の清算価格そのものであり、画面用に作った値ではない。
+ */
+function DomesticReferencePriceBanner({
+  reference,
+  turn,
+}: {
+  readonly reference: PlayerScreenViewModel["openingInfo"]["domesticReferencePrice"];
+  readonly turn: number;
+}) {
+  if (!reference) return null;
+  return (
+    <div className="mb-3 rounded-lg border border-teal-700/60 bg-teal-950/30 p-3" data-testid="domestic-reference-price">
+      <div className="text-sm font-semibold text-teal-100">
+        国内原料参考価格：${reference.referencePriceUsdPerHosoEqKg.toFixed(2)}/kg
+      </div>
+      <ul className="list-disc list-inside text-[11px] text-teal-100/80 mt-1 space-y-0.5">
+        {reference.guaranteeActive ? (
+          <li>
+            <span className="font-semibold">Turn{turn}はこの価格以上を提示すれば、通常条件で必要量を購入できます。</span>
+            （国内供給量・自社の調達処理能力・買い占め防止シェア上限35%の範囲内。これらに当たる場合は上限までの購入になります）
+          </li>
+        ) : (
+          <li>
+            <span className="font-semibold">Turn2以降は固定価格の保証はありません。</span>
+            成立価格・配分は、市場の需給と競合各社の買付によって変動します。
+          </li>
+        )}
+        <li>
+          買付上限 ${reference.buyingCeilingUsdPerHosoEqKg.toFixed(2)}/kg ／ 農家留保価格 $
+          {reference.farmerReservationPriceUsdPerHosoEqKg.toFixed(2)}/kg。留保価格を下回る提示は、取引数量そのものが減ります。
+        </li>
+      </ul>
     </div>
   );
 }
