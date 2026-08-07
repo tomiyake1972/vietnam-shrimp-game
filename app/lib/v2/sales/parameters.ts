@@ -23,9 +23,44 @@ export interface SalesParameters {
     readonly coverageSaturationHeadcount: number;
     /** headcount=0 のときの処理能力（HOSO換算トン、既存顧客分）。 */
     readonly baselineCapacityTons: number;
-    /** 処理能力逓減曲線の漸近的な増分上限（HOSO換算トン）。 */
+    /**
+     * 処理能力逓減曲線の漸近的な増分上限（HOSO換算トン）。
+     *
+     * 【Test15事前校正】4800→24000へ変更。capacitySaturationHeadcountとは必ず
+     * 対で調整すること（下記参照）。
+     */
     readonly capacityMaxIncrementTons: number;
-    /** 処理能力逓減曲線の半飽和点（この人数で増分上限の半分に到達）。 */
+    /**
+     * 処理能力逓減曲線の半飽和点（この人数で増分上限の半分に到達）。
+     *
+     * 【Test15事前校正】10→70へ変更（capacityMaxIncrementTons 4800→24000 と対）。
+     *
+     * 【変更理由】旧値（k=10, M=4800）では、会社が実際に運用する人数帯
+     * （市場あたり2〜20人）が既に曲線の飽和域に入っており、営業人員を増やしても
+     * 処理能力がほとんど伸びなかった（限界生産性が h=19 で 57t/人まで低下）。
+     * このため「営業を20人増員しても成約が約2,000tしか増えない」という、
+     * 営業投資の判断がゲームとして成立しない状態になっていた（Test14で観測）。
+     *
+     * 【なぜkとMを対で動かすのか】C(h) = base + M·h/(h+k) の原点付近の傾き
+     * （＝営業1人あたりの限界成約力）は M/k で決まる。kだけを外へ動かすと
+     * 曲線は「線形に近く」なるが同時に全域で沈み、傾きが 480→68.6 t/人へ
+     * 落ちて増員の見返りはかえって小さくなる（回帰テストで実測: +20人の
+     * 成約増が +2,236t → +663t へ悪化し、設備稼働率も3%まで低下した）。
+     * kを運用人数帯の外側へ動かしつつ M も対で引き上げることで、実運用域
+     * （0〜40人）では概ね線形な応答＝増員が素直に報われる形になる。
+     *
+     * 【M=24000の選定根拠】M を上げるほど増員の見返りは大きくなるが、成約量に
+     * 比例して運転資金（原料買付）も増えるため、上げすぎると会社が現金不足に陥る。
+     * M=33600では BAL の現金が枯渇し、設備投資案件が16四半期かけても完成しなく
+     * なった（capexIntegrationの受入確認テストが失敗）。M=24000は、現行の
+     * 成約絶対水準をほぼ維持したまま（BAL turn2: 4,329t → 4,290t）増員の
+     * 見返りだけを改善する水準として実測で選定した（+20人の成約増:
+     * +2,236t → +3,159t、設備稼働率 38.1% → 44.4%）。
+     *
+     * 【青天井にならないこと】曲線の形状（Michaelis-Menten型の凹関数）は
+     * 変えていないため、漸近上限 baselineCapacityTons + capacityMaxIncrementTons
+     * は有限のまま（=24,200t/市場）で、逓減も維持される。
+     */
     readonly capacitySaturationHeadcount: number;
   };
 
@@ -106,8 +141,8 @@ export const SALES_PARAMETERS_V1: SalesParameters = {
     baselineCoverageAtZeroHeadcount: 0.15,
     coverageSaturationHeadcount: 6,
     baselineCapacityTons: 200,
-    capacityMaxIncrementTons: 4800,
-    capacitySaturationHeadcount: 10,
+    capacityMaxIncrementTons: 24000,
+    capacitySaturationHeadcount: 70,
   },
 
   salesEffortCoefficients: {
