@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0.0",
+  "appCommitId": "5c1d62eced12225be512da4e4b6c4ed126377c8e",
+  "executedAtIso": "2026-07-29T15:59:37.837Z",
+  "runId": "sample",
+  "scenarioId": "baseline",
+  "standardBaselineId": "moderate-pressure",
+  "seeds": [
+    "sai3a-sample-001"
+  ],
+  "quarters": 2,
+  "companyIds": [
+    "BAL"
+  ],
+  "aiPolicyVersion": "STANDARD_AI_PARAMETERS_V1",
+  "salesForceHeadcountTotal": 80,
+  "keyParameters": {
+    "salesForceHeadcountOverrideSpecified": false
+  },
+  "outputFormats": [
+    "json",
+    "csv"
+  ]
+}

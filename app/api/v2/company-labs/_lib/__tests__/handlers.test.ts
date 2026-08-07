@@ -1,0 +1,545 @@
+// ShrimpX V2 — 会社ラボ API ハンドラー結合テスト（Phase 8C-3A §11）
+//
+// NextRequest/NextResponseを一切使わず、handlers.tsの各関数をin-memory Repository＋
+// 実際のCompanyLabQuarterFlowServiceに対して直接呼び出す（withApiContext・
+// dependencies.ts＝実Redis接続は経由しない）。これにより、実Upstash認証情報が
+// 無い本テスト実行環境でも、API層の主要経路をエンドツーエンドで検証できる
+// （指示§11「route handlerへ依存関係を注入し、実Upstash認証情報なしでもAPIの
+// 主要経路を検証できるようにする」）。
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { createInMemoryCompanyLabStateRepository } from "../../../../../lib/v2/companyLab/persistence/repository";
+import { createCompanyLabQuarterFlowService } from "../../../../../lib/v2/companyLab/application/companyLabQuarterFlowService";
+import { buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../../../../../lib/v2/companyLab/runner";
+import { generateAutoPolicyDecision } from "../../../../../lib/v2/companyLab/autoPolicy";
+import { COMPANY_LAB_COMPANY_IDS } from "../../../../../lib/v2/companyLab/fixtures";
+import { buildInitialDraft } from "../../../../../v2/company-lab/decisionDraft";
+import { CompanyLabApiDependencies } from "../dependencies";
+import {
+  handleCreateLab,
+  handleGetHistoryEntry,
+  handleGetHistoryPage,
+  handleGetLabState,
+  handleListLabs,
+  handleProcessQuarter,
+  handleSaveDraft,
+  handleSubmitDraft,
+  handleWithdrawDraft,
+} from "../handlers";
+
+const NOW = "2026-01-01T00:00:00.000Z";
+
+function makeDeps(): CompanyLabApiDependencies {
+  const repository = createInMemoryCompanyLabStateRepository();
+  const service = createCompanyLabQuarterFlowService({ repository });
+  return { repository, service };
+}
+
+function baseCreateBody(overrides: Partial<{ labId: string; turns: number; seed: string; playerCompanyId: string }> = {}) {
+  // 【Phase 8C-3B §6】playerCompanyIdは必須。VALID_PLAYER_DRAFT_BODY（下記）が
+  // "BAL"向けに組み立てられているため、既定値もBALに揃える。
+  return { scenarioId: "baseline", mode: "canonical", seed: "handlers-test-001", turns: 4, playerCompanyId: "BAL", ...overrides };
+}
+
+/**
+ * decisionsProviderが実際にhandleProcessQuarter経由で呼ばれるため（本番相当の配線を
+ * そのまま使う設計。decisionsProvider.test.ts参照）、テスト用のdraft本体も
+ * handlers.tsのDEFAULT_PLAYER_COMPANY_ID（"BAL"）向けの妥当なCompanyDecisionDraft
+ * である必要がある。turn・periodに依存しない構造のため、1回だけ生成して使い回す
+ * （どのturnで使っても構造検証・エンジン実行には成功する。値の意味は問わない）。
+ */
+function buildValidPlayerDraftBodyFor(companyId: string): unknown {
+  const { state, fixtures } = initializeCompanyLab({ scenarioId: "baseline", mode: "canonical", seed: "draft-fixture-seed", turns: 4 });
+  const publicInfo = buildPublicMarketInfo(state);
+  const fixture = fixtures.find((f) => f.companyId === companyId);
+  if (!fixture) throw new Error(`テスト用フィクスチャに${companyId}が見つかりません`);
+  const ownState = buildCompanyOwnState(state, fixture);
+  const autoDecision = generateAutoPolicyDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+  return buildInitialDraft(fixture, autoDecision);
+}
+
+function buildValidPlayerDraftBody(): unknown {
+  return buildValidPlayerDraftBodyFor("BAL");
+}
+
+const VALID_PLAYER_DRAFT_BODY = buildValidPlayerDraftBody();
+
+/** draft保存→提出、を1回ぶん実行するヘルパー（handleProcessQuarterが実際にdecisionsProviderを
+ * 通すため、draft本体はBAL向けの妥当なCompanyDecisionDraftを使う）。 */
+async function saveAndSubmitDraft(deps: CompanyLabApiDependencies, labId: string) {
+  const saveResult = await handleSaveDraft(deps, labId, { draft: VALID_PLAYER_DRAFT_BODY }, NOW);
+  assert.equal(saveResult.status, 200, JSON.stringify(saveResult.body));
+  const submitResult = await handleSubmitDraft(deps, labId, NOW);
+  assert.equal(submitResult.status, 200, JSON.stringify(submitResult.body));
+}
+
+// -------------------------------------------------------------------
+// 正常系
+// -------------------------------------------------------------------
+
+test("handleCreateLab: labId省略時はサーバーが生成し、201でラボ要約を返す", async () => {
+  const deps = makeDeps();
+  const result = await handleCreateLab(deps, baseCreateBody(), NOW);
+  assert.equal(result.status, 201);
+  const body = result.body as { lab: { labId: string; revision: number; currentTurn: number; isComplete: boolean } };
+  assert.ok(body.lab.labId.length > 0);
+  assert.equal(body.lab.revision, 0);
+  assert.equal(body.lab.currentTurn, 1);
+  assert.equal(body.lab.isComplete, false);
+});
+
+test("handleCreateLab: labIdを指定した場合はそのlabIdで作成される", async () => {
+  const deps = makeDeps();
+  const result = await handleCreateLab(deps, baseCreateBody({ labId: "my-explicit-lab" }), NOW);
+  assert.equal(result.status, 201);
+  const body = result.body as { lab: { labId: string } };
+  assert.equal(body.lab.labId, "my-explicit-lab");
+});
+
+test("handleCreateLab: 不正なリクエストボディは400になる", async () => {
+  const deps = makeDeps();
+  const result = await handleCreateLab(deps, { scenarioId: "" }, NOW);
+  assert.equal(result.status, 400);
+});
+
+test("handleCreateLab: 実在しないscenarioIdはCompanyLabError経由で400になる", async () => {
+  const deps = makeDeps();
+  const result = await handleCreateLab(deps, baseCreateBody({ labId: "lab-bad-scenario" }), NOW);
+  // まず正しいscenarioIdで動作確認したうえで、不正値を試す
+  assert.equal(result.status, 201);
+  const badResult = await handleCreateLab(deps, { scenarioId: "no-such-scenario-xyz", mode: "canonical", seed: "s", turns: 1 }, NOW);
+  assert.equal(badResult.status, 400);
+});
+
+test("handleListLabs / handleGetLabState: 作成したラボが一覧・単体取得の両方に現れる", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-list-1" }), NOW);
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-list-2" }), NOW);
+
+  const listResult = await handleListLabs(deps);
+  assert.equal(listResult.status, 200);
+  const listBody = listResult.body as { labs: { labId: string }[] };
+  assert.deepEqual(
+    listBody.labs.map((l) => l.labId).sort(),
+    ["lab-list-1", "lab-list-2"]
+  );
+
+  const stateResult = await handleGetLabState(deps, "lab-list-1");
+  assert.equal(stateResult.status, 200);
+  const stateBody = stateResult.body as { lab: { labId: string; draft: unknown } };
+  assert.equal(stateBody.lab.labId, "lab-list-1");
+  assert.equal(stateBody.lab.draft, null);
+});
+
+test("handleSaveDraft → handleSubmitDraft → handleProcessQuarter: turn 1を最初から最後まで処理できる", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-full-flow" }), NOW);
+
+  const saveResult = await handleSaveDraft(deps, "lab-full-flow", { draft: VALID_PLAYER_DRAFT_BODY }, NOW);
+  assert.equal(saveResult.status, 200);
+  const saveBody = saveResult.body as { draft: { turnId: string; submittedAt: string | null } };
+  assert.equal(saveBody.draft.turnId, "turn-1");
+  assert.equal(saveBody.draft.submittedAt, null);
+
+  const submitResult = await handleSubmitDraft(deps, "lab-full-flow", NOW);
+  assert.equal(submitResult.status, 200);
+  const submitBody = submitResult.body as { draft: { submittedAt: string | null } };
+  assert.notEqual(submitBody.draft.submittedAt, null);
+
+  const processResult = await handleProcessQuarter(deps, "lab-full-flow", {}, NOW);
+  assert.equal(processResult.status, 200, JSON.stringify(processResult.body));
+  const processBody = processResult.body as { status: string; revision: number; turn: number; turnId: string };
+  assert.equal(processBody.status, "processed");
+  assert.equal(processBody.revision, 1);
+  assert.equal(processBody.turn, 1);
+  assert.equal(processBody.turnId, "turn-1");
+
+  const stateResult = await handleGetLabState(deps, "lab-full-flow");
+  const stateBody = stateResult.body as { lab: { revision: number; currentTurn: number; draft: unknown } };
+  assert.equal(stateBody.lab.revision, 1);
+  assert.equal(stateBody.lab.currentTurn, 2);
+  assert.equal(stateBody.lab.draft, null, "処理成功後はdraftが削除されているべき");
+});
+
+test("turn 1・turn 2を連続処理でき、current・履歴ページングが正しく更新される", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-two-turns" }), NOW);
+  await saveAndSubmitDraft(deps, "lab-two-turns");
+  const p1 = await handleProcessQuarter(deps, "lab-two-turns", {}, NOW);
+  assert.equal(p1.status, 200);
+
+  await saveAndSubmitDraft(deps, "lab-two-turns");
+  const p2 = await handleProcessQuarter(deps, "lab-two-turns", {}, NOW);
+  assert.equal(p2.status, 200);
+  const p2Body = p2.body as { turn: number; turnId: string };
+  assert.equal(p2Body.turn, 2);
+  assert.equal(p2Body.turnId, "turn-2");
+
+  const historyResult = await handleGetHistoryPage(deps, "lab-two-turns", new URLSearchParams("limit=10"));
+  assert.equal(historyResult.status, 200);
+  const historyBody = historyResult.body as { entries: { turn: number; turnId: string }[]; nextAfterTurn: number | null };
+  assert.deepEqual(
+    historyBody.entries.map((e) => e.turn),
+    [1, 2]
+  );
+  assert.equal(historyBody.nextAfterTurn, null);
+
+  const entryResult = await handleGetHistoryEntry(deps, "lab-two-turns", "1");
+  assert.equal(entryResult.status, 200);
+  const entryBody = entryResult.body as { entry: { turn: number; record: { turn: number } } };
+  assert.equal(entryBody.entry.turn, 1);
+  assert.equal(entryBody.entry.record.turn, 1);
+});
+
+test("handleGetHistoryPage: limitによるページングが正しく機能する", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-paging", turns: 3 }), NOW);
+  for (let i = 0; i < 3; i++) {
+    await saveAndSubmitDraft(deps, "lab-paging");
+    const r = await handleProcessQuarter(deps, "lab-paging", {}, NOW);
+    assert.equal(r.status, 200);
+  }
+  const page1 = await handleGetHistoryPage(deps, "lab-paging", new URLSearchParams("limit=2"));
+  const page1Body = page1.body as { entries: { turn: number }[]; nextAfterTurn: number | null };
+  assert.deepEqual(
+    page1Body.entries.map((e) => e.turn),
+    [1, 2]
+  );
+  assert.equal(page1Body.nextAfterTurn, 2);
+
+  const page2 = await handleGetHistoryPage(deps, "lab-paging", new URLSearchParams(`afterTurn=${page1Body.nextAfterTurn}&limit=2`));
+  const page2Body = page2.body as { entries: { turn: number }[]; nextAfterTurn: number | null };
+  assert.deepEqual(
+    page2Body.entries.map((e) => e.turn),
+    [3]
+  );
+  assert.equal(page2Body.nextAfterTurn, null);
+});
+
+// -------------------------------------------------------------------
+// 冪等性
+// -------------------------------------------------------------------
+
+test("handleProcessQuarter: 同一turnIdでの再試行はalreadyProcessedを200で返し、revision・履歴が二重にならない", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-idempotent" }), NOW);
+  await saveAndSubmitDraft(deps, "lab-idempotent");
+  const first = await handleProcessQuarter(deps, "lab-idempotent", {}, NOW);
+  assert.equal(first.status, 200);
+  const firstBody = first.body as { status: string; revision: number };
+  assert.equal(firstBody.status, "processed");
+  assert.equal(firstBody.revision, 1);
+
+  // draftは既に削除済みだが、同じ（サーバー導出される）turnIdでの再送はエラーにならない
+  const retry = await handleProcessQuarter(deps, "lab-idempotent", {}, NOW);
+  assert.equal(retry.status, 200, JSON.stringify(retry.body));
+  const retryBody = retry.body as { status: string; revision: number };
+  assert.equal(retryBody.status, "alreadyProcessed");
+  assert.equal(retryBody.revision, 1);
+
+  const historyResult = await handleGetHistoryPage(deps, "lab-idempotent", new URLSearchParams("limit=10"));
+  const historyBody = historyResult.body as { entries: unknown[] };
+  assert.equal(historyBody.entries.length, 1, "再試行によって履歴が二重作成されている");
+});
+
+test("handleProcessQuarter: 明示的turnIdを指定した再試行も同様に冪等になる", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-idempotent-explicit" }), NOW);
+  await saveAndSubmitDraft(deps, "lab-idempotent-explicit");
+  const first = await handleProcessQuarter(deps, "lab-idempotent-explicit", { turnId: "turn-1" }, NOW);
+  assert.equal(first.status, 200);
+  const retry = await handleProcessQuarter(deps, "lab-idempotent-explicit", { turnId: "turn-1" }, NOW);
+  assert.equal(retry.status, 200);
+  const retryBody = retry.body as { status: string };
+  assert.equal(retryBody.status, "alreadyProcessed");
+});
+
+// -------------------------------------------------------------------
+// 競合・入力異常
+// -------------------------------------------------------------------
+
+test("存在しないlabIdへの各操作は404になる", async () => {
+  const deps = makeDeps();
+  assert.equal((await handleGetLabState(deps, "no-such-lab")).status, 404);
+  assert.equal((await handleSaveDraft(deps, "no-such-lab", { draft: {} }, NOW)).status, 404);
+  assert.equal((await handleSubmitDraft(deps, "no-such-lab", NOW)).status, 404);
+  assert.equal((await handleProcessQuarter(deps, "no-such-lab", {}, NOW)).status, 404);
+  assert.equal((await handleGetHistoryPage(deps, "no-such-lab", new URLSearchParams())).status, 404);
+  assert.equal((await handleGetHistoryEntry(deps, "no-such-lab", "1")).status, 404);
+});
+
+test("重複labIdでのラボ作成は409になる", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-dup" }), NOW);
+  const dup = await handleCreateLab(deps, baseCreateBody({ labId: "lab-dup", seed: "different-seed" }), NOW);
+  assert.equal(dup.status, 409);
+});
+
+test("draftなし・未提出draftでの四半期処理はそれぞれ409になる", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-draft-guard" }), NOW);
+
+  const noDraftResult = await handleProcessQuarter(deps, "lab-draft-guard", {}, NOW);
+  assert.equal(noDraftResult.status, 409);
+
+  await handleSaveDraft(deps, "lab-draft-guard", { draft: {} }, NOW);
+  const unsubmittedResult = await handleProcessQuarter(deps, "lab-draft-guard", {}, NOW);
+  assert.equal(unsubmittedResult.status, 409);
+});
+
+test("process-quarterで、現在処理対象のturnと異なるturnIdを明示指定すると409（TURN_MISMATCH）になる", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-turn-mismatch" }), NOW);
+  await saveAndSubmitDraft(deps, "lab-turn-mismatch");
+  const result = await handleProcessQuarter(deps, "lab-turn-mismatch", { turnId: "turn-99" }, NOW);
+  assert.equal(result.status, 409);
+  const body = result.body as { error: { code: string } };
+  assert.equal(body.error.code, "TURN_MISMATCH");
+  // 状態が変更されていないことも確認する
+  const stateResult = await handleGetLabState(deps, "lab-turn-mismatch");
+  const stateBody = stateResult.body as { lab: { revision: number } };
+  assert.equal(stateBody.lab.revision, 0);
+});
+
+test("draft保存で、現在処理対象のturnと異なるturnIdを明示指定すると409（TURN_MISMATCH）になる", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-save-turn-mismatch" }), NOW);
+  const result = await handleSaveDraft(deps, "lab-save-turn-mismatch", { draft: {}, turnId: "turn-99" }, NOW);
+  assert.equal(result.status, 409);
+});
+
+test("完了済みラボの四半期処理・draft保存・draft提出は409になり、状態は変更されない", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-done", turns: 1 }), NOW);
+  await saveAndSubmitDraft(deps, "lab-done");
+  const processResult = await handleProcessQuarter(deps, "lab-done", {}, NOW);
+  assert.equal(processResult.status, 200);
+  const stateAfter = await handleGetLabState(deps, "lab-done");
+  const stateAfterBody = stateAfter.body as { lab: { isComplete: boolean } };
+  assert.equal(stateAfterBody.lab.isComplete, true);
+
+  const saveAfterDone = await handleSaveDraft(deps, "lab-done", { draft: {} }, NOW);
+  assert.equal(saveAfterDone.status, 409);
+
+  const submitAfterDone = await handleSubmitDraft(deps, "lab-done", NOW);
+  // saveを拒否しているためdraftが存在せずDraftNotFound(409)になるが、いずれにせよ409で拒否される
+  assert.equal(submitAfterDone.status, 409);
+});
+
+test("入力形式が不正な場合は400になる（labId不正・draft本体欠落等）", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-bad-input" }), NOW);
+  assert.equal((await handleSaveDraft(deps, "lab-bad-input", {}, NOW)).status, 400);
+  assert.equal((await handleSaveDraft(deps, "has:colon", { draft: {} }, NOW)).status, 400);
+  assert.equal((await handleGetHistoryPage(deps, "lab-bad-input", new URLSearchParams("limit=0"))).status, 400);
+  assert.equal((await handleGetHistoryEntry(deps, "lab-bad-input", "not-a-number")).status, 400);
+});
+
+test("内部エラー応答はRedisキー・スタックトレース等の内部詳細を含まない", async () => {
+  const deps = makeDeps();
+  // わざとRepositoryにエラーを起こさせて、応答に内部詳細が漏れないことを確認する。
+  const brokenDeps: CompanyLabApiDependencies = {
+    ...deps,
+    repository: {
+      ...deps.repository,
+      loadCurrentState: async () => {
+        throw new Error("internal redis connection string leaked: rediss://user:secret@host:1234");
+      },
+    },
+  };
+  const result = await handleGetLabState(brokenDeps, "any-lab");
+  assert.equal(result.status, 500);
+  const body = result.body as { error: { message: string } };
+  assert.ok(!body.error.message.includes("secret"), "内部エラー詳細がAPI応答に漏れている");
+});
+
+// -------------------------------------------------------------------
+// draft提出取り消し（withdrawDraft）（Phase 8G §1・Test13の詰み状態対応）
+// -------------------------------------------------------------------
+
+test("handleWithdrawDraft: 提出済みdraftを取り消すとsubmittedAtがnullに戻り、draft本体は変わらない", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-withdraw-basic" }), NOW);
+  await handleSaveDraft(deps, "lab-withdraw-basic", { draft: VALID_PLAYER_DRAFT_BODY }, NOW);
+  const submitResult = await handleSubmitDraft(deps, "lab-withdraw-basic", NOW);
+  assert.equal(submitResult.status, 200);
+  const submitBody = submitResult.body as { draft: { submittedAt: string | null } };
+  assert.notEqual(submitBody.draft.submittedAt, null);
+
+  const withdrawResult = await handleWithdrawDraft(deps, "lab-withdraw-basic", NOW);
+  assert.equal(withdrawResult.status, 200, JSON.stringify(withdrawResult.body));
+  const withdrawBody = withdrawResult.body as { draft: { submittedAt: string | null; draft: unknown } };
+  assert.equal(withdrawBody.draft.submittedAt, null, "取り消し後はsubmittedAtがnullへ戻るべき");
+  assert.deepEqual(withdrawBody.draft.draft, VALID_PLAYER_DRAFT_BODY, "取り消しはdraft本体を変更しない");
+
+  // 取り消し後は再編集・再提出・処理まで到達できる
+  const submitAgain = await handleSubmitDraft(deps, "lab-withdraw-basic", NOW);
+  assert.equal(submitAgain.status, 200);
+  const processResult = await handleProcessQuarter(deps, "lab-withdraw-basic", {}, NOW);
+  assert.equal(processResult.status, 200, JSON.stringify(processResult.body));
+});
+
+test("handleWithdrawDraft: 未提出draftに対する取り消しは冪等に成功する（submittedAtは既にnull）", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-withdraw-unsubmitted" }), NOW);
+  await handleSaveDraft(deps, "lab-withdraw-unsubmitted", { draft: VALID_PLAYER_DRAFT_BODY }, NOW);
+
+  const withdrawResult = await handleWithdrawDraft(deps, "lab-withdraw-unsubmitted", NOW);
+  assert.equal(withdrawResult.status, 200, JSON.stringify(withdrawResult.body));
+  const withdrawBody = withdrawResult.body as { draft: { submittedAt: string | null } };
+  assert.equal(withdrawBody.draft.submittedAt, null);
+});
+
+test("handleWithdrawDraft: draftが存在しないラボへの取り消しは409になる", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-withdraw-no-draft" }), NOW);
+  const withdrawResult = await handleWithdrawDraft(deps, "lab-withdraw-no-draft", NOW);
+  assert.equal(withdrawResult.status, 409, JSON.stringify(withdrawResult.body));
+});
+
+test("handleWithdrawDraft: 存在しないlabIdへの取り消しは404になる", async () => {
+  const deps = makeDeps();
+  const withdrawResult = await handleWithdrawDraft(deps, "no-such-lab", NOW);
+  assert.equal(withdrawResult.status, 404);
+});
+
+test("handleWithdrawDraft: 完了済みラボへの取り消しは409になり、状態は変更されない", async () => {
+  const deps = makeDeps();
+  await handleCreateLab(deps, baseCreateBody({ labId: "lab-withdraw-done", turns: 1 }), NOW);
+  await saveAndSubmitDraft(deps, "lab-withdraw-done");
+  const processResult = await handleProcessQuarter(deps, "lab-withdraw-done", {}, NOW);
+  assert.equal(processResult.status, 200);
+
+  const withdrawResult = await handleWithdrawDraft(deps, "lab-withdraw-done", NOW);
+  assert.equal(withdrawResult.status, 409, JSON.stringify(withdrawResult.body));
+});
+
+test("回帰: 四半期処理失敗（営業配分超過）でも、handleWithdrawDraft経由で編集に戻り修正・再提出・処理できる", async () => {
+  const deps = makeDeps();
+  const labId = "lab-withdraw-over-allocation";
+  await handleCreateLab(deps, baseCreateBody({ labId }), NOW);
+
+  // BAL向けの妥当なdraftを、営業人員配分だけ実在人数を超えるよう改変する
+  const overBudgetDraft = VALID_PLAYER_DRAFT_BODY as { salesPlans: { salesForceHeadcount: number }[] };
+  const overloaded = {
+    ...overBudgetDraft,
+    salesPlans: overBudgetDraft.salesPlans.map((p) => ({ ...p, salesForceHeadcount: p.salesForceHeadcount + 1000 })),
+  };
+
+  await handleSaveDraft(deps, labId, { draft: overloaded }, NOW);
+  await handleSubmitDraft(deps, labId, NOW);
+
+  const failedProcess = await handleProcessQuarter(deps, labId, {}, NOW);
+  assert.equal(failedProcess.status, 422, JSON.stringify(failedProcess.body));
+
+  // 失敗後もsubmittedAtは残ったまま（handlers.ts側では戻さない設計）
+  const stateAfterFailure = await handleGetLabState(deps, labId);
+  const stateAfterFailureBody = stateAfterFailure.body as { lab: { draft: { submittedAt: string | null } | null } };
+  assert.notEqual(stateAfterFailureBody.lab.draft?.submittedAt, null, "処理失敗後もdraftはsubmitted状態のまま残る");
+
+  const withdrawResult = await handleWithdrawDraft(deps, labId, NOW);
+  assert.equal(withdrawResult.status, 200, JSON.stringify(withdrawResult.body));
+  const withdrawBody = withdrawResult.body as { draft: { submittedAt: string | null } };
+  assert.equal(withdrawBody.draft.submittedAt, null);
+
+  // 修正した正しいdraftへ差し替えて再提出・再処理
+  await handleSaveDraft(deps, labId, { draft: VALID_PLAYER_DRAFT_BODY }, NOW);
+  await handleSubmitDraft(deps, labId, NOW);
+  const retryProcess = await handleProcessQuarter(deps, labId, {}, NOW);
+  assert.equal(retryProcess.status, 200, JSON.stringify(retryProcess.body));
+});
+
+// -------------------------------------------------------------------
+// playerCompanyId（Phase 8C-3B §6・§13.1）
+// -------------------------------------------------------------------
+
+test("handleCreateLab: 5社それぞれをplayerCompanyIdに指定して作成でき、state DTOへ正しく反映される", async () => {
+  for (const companyId of COMPANY_LAB_COMPANY_IDS) {
+    const deps = makeDeps();
+    const labId = `lab-player-${companyId}`;
+    const created = await handleCreateLab(deps, baseCreateBody({ labId, playerCompanyId: companyId }), NOW);
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const createdBody = created.body as { lab: { playerCompanyId: string } };
+    assert.equal(createdBody.lab.playerCompanyId, companyId);
+
+    // reload相当（別のGET呼び出し）でも維持されている
+    const stateResult = await handleGetLabState(deps, labId);
+    assert.equal(stateResult.status, 200);
+    const stateBody = stateResult.body as { lab: { playerCompanyId: string } };
+    assert.equal(stateBody.lab.playerCompanyId, companyId);
+  }
+});
+
+test("handleCreateLab: 未知のplayerCompanyIdは400で拒否される", async () => {
+  const deps = makeDeps();
+  const result = await handleCreateLab(deps, baseCreateBody({ labId: "lab-unknown-company", playerCompanyId: "NO-SUCH-CO" }), NOW);
+  assert.equal(result.status, 400);
+});
+
+test("handleCreateLab: playerCompanyId省略は400で拒否される（サイレントなBAL/先頭会社fallbackはしない）", async () => {
+  const deps = makeDeps();
+  const bodyWithoutPlayerCompanyId: Record<string, unknown> = { ...baseCreateBody({ labId: "lab-no-player-company" }) };
+  delete bodyWithoutPlayerCompanyId.playerCompanyId;
+  const result = await handleCreateLab(deps, bodyWithoutPlayerCompanyId, NOW);
+  assert.equal(result.status, 400);
+});
+
+test("decisionsProvider配線: playerCompanyIdにMASSを指定すると、提出済みdraftはMASSの意思決定として処理され、BALはAI自動方針になる", async () => {
+  const deps = makeDeps();
+  const labId = "lab-player-mass";
+  await handleCreateLab(deps, baseCreateBody({ labId, playerCompanyId: "MASS" }), NOW);
+
+  const massDraft = buildValidPlayerDraftBodyFor("MASS");
+  const saveResult = await handleSaveDraft(deps, labId, { draft: massDraft }, NOW);
+  assert.equal(saveResult.status, 200, JSON.stringify(saveResult.body));
+  await handleSubmitDraft(deps, labId, NOW);
+
+  const processResult = await handleProcessQuarter(deps, labId, {}, NOW);
+  assert.equal(processResult.status, 200, JSON.stringify(processResult.body));
+
+  const entryResult = await handleGetHistoryEntry(deps, labId, "1");
+  assert.equal(entryResult.status, 200);
+  const entryBody = entryResult.body as { entry: { playerSubmission: { companyId: string }; otherCompaniesDecisions: { companyId: string }[] } };
+  assert.equal(entryBody.entry.playerSubmission.companyId, "MASS", "playerSubmissionはstored.playerCompanyId（MASS）の意思決定であるべき");
+  assert.ok(
+    !entryBody.entry.otherCompaniesDecisions.some((d) => d.companyId === "MASS"),
+    "MASSがplayerSubmissionとotherCompaniesDecisionsの両方に重複して現れている"
+  );
+  assert.ok(
+    entryBody.entry.otherCompaniesDecisions.some((d) => d.companyId === "BAL"),
+    "プレイヤー以外のBALはAI自動方針としてotherCompaniesDecisionsに含まれるべき"
+  );
+});
+
+test("decisionsProvider配線: playerCompanyId(MASS)と異なる会社(BAL)向けのdraftを提出すると、companyId不一致として422になる", async () => {
+  const deps = makeDeps();
+  const labId = "lab-player-company-mismatch";
+  await handleCreateLab(deps, baseCreateBody({ labId, playerCompanyId: "MASS" }), NOW);
+
+  const balDraft = buildValidPlayerDraftBodyFor("BAL"); // 誤って別会社向けのdraftを提出
+  await handleSaveDraft(deps, labId, { draft: balDraft }, NOW);
+  await handleSubmitDraft(deps, labId, NOW);
+
+  const processResult = await handleProcessQuarter(deps, labId, {}, NOW);
+  assert.equal(processResult.status, 422, JSON.stringify(processResult.body));
+});
+
+test("process-quarterリクエストにplayerCompanyIdを紛れ込ませても無視され、作成時に保存された会社のまま処理される", async () => {
+  const deps = makeDeps();
+  const labId = "lab-player-no-override";
+  await handleCreateLab(deps, baseCreateBody({ labId, playerCompanyId: "MASS" }), NOW);
+
+  const massDraft = buildValidPlayerDraftBodyFor("MASS");
+  await handleSaveDraft(deps, labId, { draft: massDraft }, NOW);
+  await handleSubmitDraft(deps, labId, NOW);
+
+  // process-quarterのリクエストボディはturnIdしか受け付けないため、余分なplayerCompanyIdフィールドは
+  // validateProcessQuarterRequestBodyの時点で無視される（差し替え手段が存在しないことの確認）。
+  const processResult = await handleProcessQuarter(deps, labId, { playerCompanyId: "BAL" } as unknown, NOW);
+  assert.equal(processResult.status, 200, JSON.stringify(processResult.body));
+
+  const entryResult = await handleGetHistoryEntry(deps, labId, "1");
+  const entryBody = entryResult.body as { entry: { playerSubmission: { companyId: string } } };
+  assert.equal(entryBody.entry.playerSubmission.companyId, "MASS", "リクエストボディのplayerCompanyIdによって差し替えられてはならない");
+});

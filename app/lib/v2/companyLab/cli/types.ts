@@ -1,0 +1,59 @@
+// ShrimpX V2 — 会社経営統合テスト環境（Phase 6.2） CLI 共通型
+//
+// industryLab/cli/types.tsと同じ方針。経済ロジック・シナリオ内容に関する
+// 新しい型は一切追加せず、既存の CompanyLabConfig / CompanyLabResult /
+// CompanyQuarterSummary をそのまま利用する。
+
+export class CliArgumentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CliArgumentError";
+  }
+}
+
+export type CliOutputFormat = "summary" | "json" | "csv" | "pricing-csv";
+
+/**
+ * 【Phase 8P-0A】"pricing-csv" は商品×仕向市場の参照価格診断専用の詳細CSV
+ * （companyLab/cli/output.ts の formatDestinationPricingDiagnosticCsv）。
+ * 既存の "csv"（会社×四半期の集約サマリー）とは別出力にすることで、通常の
+ * CSV出力の列数を増やさない（実装指示 §18「通常の出力を過度に巨大化させない。
+ * 必要なら詳細価格診断をオプション化する」に対応）。
+ */
+export const CLI_OUTPUT_FORMATS: readonly CliOutputFormat[] = ["summary", "json", "csv", "pricing-csv"];
+
+/** --company の特殊値。全社比較表示を意味する。 */
+export const ALL_COMPANIES = "all" as const;
+
+/**
+ * 【Phase SAI-1】意思決定生成方式。"autoPolicy"（既定値、既存の交換可能な
+ * 決定論的ルールベース暫定方針）または "standardAi"（標準経営AI基盤、
+ * companyLab/standardAi/。5社すべてに同一ロジック・同一閾値を適用する）。
+ */
+export type CliDecisionProvider = "autoPolicy" | "standardAi";
+export const CLI_DECISION_PROVIDERS: readonly CliDecisionProvider[] = ["autoPolicy", "standardAi"];
+
+export interface ParsedCompanyLabCliArgs {
+  readonly help: boolean;
+  readonly scenario: string;
+  readonly mode: "canonical" | "variation";
+  readonly seed: string;
+  readonly turns: number;
+  readonly format: CliOutputFormat;
+  /** 表示対象会社（"all" または fixtures.ts のCompanyId。指定が無ければ"all"）。 */
+  readonly company: string;
+  /** 【Phase SAI-1】意思決定生成方式（既定値"autoPolicy"、既存動作を変えない）。 */
+  readonly provider: CliDecisionProvider;
+}
+
+/**
+ * CLIプロセス全体の実行結果。標準出力・標準エラー出力・終了コードを
+ * 値として返すだけの純粋な戻り値にすることで、実際に process.stdout へ
+ * 書き込む・process.exitするのは scripts/v2CompanySimulate.ts の薄い
+ * エントリポイントだけにし、CLIのロジック自体は副作用なしでテストできる。
+ */
+export interface CliInvocationResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}

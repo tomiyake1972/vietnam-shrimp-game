@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 export default function Home() {
   const [gameCode, setGameCode] = useState("");
   const [error, setError] = useState("");
@@ -29,7 +30,7 @@ export default function Home() {
           {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
         </div>
         <div className="text-center">
-          <a href="/gm" className="text-gray-400 hover:text-white text-sm underline">GMコンソール（ゲームマスター専用）→</a>
+          <Link href="/gm" className="text-gray-400 hover:text-white text-sm underline">GMコンソール（ゲームマスター専用）→</Link>
         </div>
       </div>
     </main>

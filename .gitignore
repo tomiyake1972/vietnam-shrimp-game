@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +40,21 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Phase SAI-3A: 標準AI自動テストプレイの大量実行生成物（artifacts/sai3a/<run-id>/以下）。
+# 小さなサンプルfixtureのみ、明示的にgit addして例外的にコミットする
+# （例: docs/v2/sai3a/fixtures/配下）。
+/artifacts/sai3a/
+
+# Phase SAI-3B-1: Excel経営分析ブック生成物（artifacts/sai3b/以下）。
+# 大量の生成.xlsxはGit管理対象にしない（三宅さんの指示§7）。
+/artifacts/sai3b/
+
+# Phase SAI-4: 標準AI異質5社テスト・養殖上限4,000トン試験の生成物
+# （artifacts/sai4/以下）。同じ理由でGit管理対象にしない。
+/artifacts/sai4/
+
+# Phase SAI-5: 市場進化モデル（A/B比較・因果トレース）の生成物
+# （artifacts/sai5/以下）。同じ理由でGit管理対象にしない
+# （生成スクリプト scripts/sai5Analysis.ts のみGit管理する）。
+/artifacts/sai5/

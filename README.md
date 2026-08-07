@@ -1,5 +1,11 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## ドキュメント
+
+- [docs/game_design_principles.md](docs/game_design_principles.md) — ゲーム全体の設計思想
+- [docs/staging_environment.md](docs/staging_environment.md) — テスト環境の構築・運用手順
+- [docs/staging_test_checklist.md](docs/staging_test_checklist.md) — テスト環境の動作確認チェックリスト
+
 ## Getting Started
 
 First, run the development server:

@@ -1,0 +1,38 @@
+{
+  "runSummary": {
+    "runId": "sample",
+    "totalCases": 1,
+    "completedCases": 1,
+    "errorCases": 0,
+    "paymentDefaultRate": 0,
+    "underwritingFrozenRate": 0,
+    "averageCumulativeRevenueUsd": 103853357.08022138,
+    "averageCumulativeGrossProfitUsd": 15849042.20377288,
+    "averageCumulativeOperatingProfitUsd": 10839055.20377288,
+    "averageFinalCashUsd": 10775095.342446,
+    "topReasonCodeCounts": [
+      {
+        "code": "RAW_MATERIAL_SHORTAGE",
+        "count": 1
+      },
+      {
+        "code": "LABOR_SHORTAGE",
+        "count": 1
+      },
+      {
+        "code": "DOMESTIC_COMPETITION_INTENSE",
+        "count": 1
+      },
+      {
+        "code": "IMPORT_IN_TRANSIT",
+        "count": 1
+      },
+      {
+        "code": "AQUACULTURE_HARVEST_ON_TRACK",
+        "count": 1
+      }
+    ],
+    "totalWarningCount": 14
+  },
+  "errors": []
+}
