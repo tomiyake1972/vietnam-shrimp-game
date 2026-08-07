@@ -37,7 +37,7 @@ import {
 import { closeFinancialQuarter, CompanyQuarterBusinessActuals } from "../finance/quarterClose";
 import { FinanceParameters } from "../finance/parameters";
 import { Product } from "../market/types";
-import { computeBorrowingCapacity, CollateralInput } from "./borrowingCapacity";
+import { computeBorrowingCapacity, CollateralInput, BorrowingCapacityInput } from "./borrowingCapacity";
 import { computeCreditScore, CreditScoreInput } from "./creditScore";
 import { checkCovenants } from "./covenant";
 import { underwriteLoanApplication } from "./bankUnderwriting";
@@ -59,6 +59,140 @@ import {
   ProcurementConstraintResult,
   UnderwritingDecision,
 } from "./types";
+
+// ---------------------------------------------------------------------
+// 【診断専用・observation-only】与信スナップショット／ローン残高ロールフォワード
+// の観測フック（2026-08-03、財務診断ブランチ）。
+//
+// 目的: computeBorrowingCapacity へ実際に渡された入力オブジェクト（同一参照）と、
+// closeQuarterWithFinancing 内でのローン残高の遷移（前期末→通常融資実行→
+// 緊急融資実行→元金返済→当期末）を、実行中のその時点で・加工せずそのまま
+// 捕捉するための登録式コールバック。
+//
+// 【本番挙動への影響なし】
+//   - オブザーバーが未登録(undefined)の場合、既存コードと完全に同一の
+//     処理・戻り値・副作用のみが発生する（if (observer) の内側でしか
+//     呼ばれないコールバックを追加しただけ）。
+//   - コールバックはRNGを消費せず、会社状態・意思決定・戻り値を書き換えない
+//     （読み取り専用。渡すオブジェクトはconst代入したものをそのまま使うだけで、
+//     computeBorrowingCapacity等への実引数の組み立て方自体は変更していない）。
+//   - このファイルの他のエクスポート・計算式は一切変更していない。
+// ---------------------------------------------------------------------
+
+/** computeBorrowingCapacity へ実際に渡された入力・結果を、その呼び出し直後にそのまま捕捉したもの。 */
+export interface UnderwritingSnapshot {
+  readonly companyId: CompanyId;
+  readonly period: PeriodV2;
+  /** computeBorrowingCapacityへ実際に渡された引数オブジェクトそのもの（同一参照）。 */
+  readonly borrowingCapacityInput: BorrowingCapacityInput;
+  /** computeBorrowingCapacityの戻り値そのもの（同一参照）。 */
+  readonly borrowingCapacityResult: BorrowingCapacityResult;
+  readonly creditScore: CreditScoreResult;
+  readonly covenant: CovenantCheckResult;
+  readonly underwriting: UnderwritingDecision;
+  readonly requestedAmountUsd: number;
+  readonly applicationType: FinancingRequestInput["desiredLoanType"];
+}
+
+/** closeQuarterWithFinancing内でのローン残高の遷移を、実際の計算過程からそのまま捕捉したもの。 */
+export interface LoanRollForwardSnapshot {
+  readonly companyId: CompanyId;
+  readonly period: PeriodV2;
+  /** (1)(2)(3) 前期末＝引受時点＝返済前残高（設計上単一の値。ST/LT内訳つき）。 */
+  readonly priorShortTermLoansUsd: number;
+  readonly priorLongTermLoansUsd: number;
+  readonly priorTotalLoanBalanceUsd: number;
+  /** (4)相当: 通常融資の実行額（緊急融資を含まない）。 */
+  readonly normalDrawUsd: number;
+  /** (5)相当: 緊急融資の実行額。 */
+  readonly emergencyDrawUsd: number;
+  readonly totalLoanDrawUsd: number;
+  readonly scheduledPrincipalDueUsd: number;
+  readonly scheduledInterestDueUsd: number;
+  /** (6)相当: 実際に支払われた元本額（scheduledPrincipalDueUsd以下のことがある＝現金不足時）。 */
+  readonly principalPaidCashUsd: number;
+  readonly interestPaidCashUsd: number;
+  /** (7) 当期末残高（ST/LT内訳つき）。 */
+  readonly endingShortTermLoansUsd: number;
+  readonly endingLongTermLoansUsd: number;
+  readonly endingTotalLoanBalanceUsd: number;
+  /**
+   * 【2026-08-04追加・observation-only】緊急融資判定に実際に使われた
+   * 本番の不足額（`shortfallBeforeEmergency`）そのもの。診断スクリプト側の
+   * 近似計算（`scheduledPrincipal + scheduledInterest - normalDraw`）とは
+   * 別物であり、本番の式は
+   * `max(0, fullAccruedInterest + scheduledPrincipalDue - max(0, availableForDebtServiceBeforeEmergency))`
+   * （`availableForDebtServiceBeforeEmergency`はPass1後のキャッシュ残高。
+   * 単純な`normalDraw`ではなく、期首現金＋当期の営業・投資キャッシュフロー
+   * ＋通常融資実行額を反映した値）。緊急融資が発動しなかった四半期でも
+   * 0以上の値として常に記録する（対象外なら0）。
+   */
+  readonly shortfallBeforeEmergencyUsd: number;
+  /** Pass1後（通常融資は実行済み・利息元本現金支払前）の現金残高。緊急融資判定の直接入力。 */
+  readonly cashBeforeEmergencyDecisionUsd: number;
+  /** 緊急融資枠の上限（絶対上限と担保比率上限の小さい方）。緊急融資が発動しなかった四半期は0。 */
+  readonly emergencyCapUsd: number;
+}
+
+let underwritingSnapshotObserver: ((snapshot: UnderwritingSnapshot) => void) | undefined;
+let loanRollForwardObserver: ((snapshot: LoanRollForwardSnapshot) => void) | undefined;
+
+/**
+ * 【診断専用・observer隔離】オブザーバーコールバック自体が例外を投げても、
+ * 本番の四半期クローズ処理へは一切伝播させない（診断コードの不具合で
+ * ゲームが止まる事態を構造的に防ぐ）。失敗した場合はconsole.errorへ
+ * 記録するだけで処理を継続する。SNAP-12テストでこの隔離を検証する。
+ */
+function invokeObserverSafely<T>(observer: ((snapshot: T) => void) | undefined, snapshot: T, observerName: string): void {
+  if (!observer) return;
+  try {
+    observer(snapshot);
+  } catch (err) {
+    console.error(`[診断専用オブザーバーで例外を捕捉・隔離しました: ${observerName}]`, err);
+  }
+}
+
+/**
+ * 【診断専用】与信スナップショットの観測フックを登録する。
+ * `undefined`を渡せば解除（デフォルトは未登録＝本番挙動と完全に同一）。
+ *
+ * 【登録/解除の作法】呼び出し側は必ず`try { ...実行... } finally { setUnderwritingSnapshotObserver(undefined); }`
+ * のように、finally節で解除すること（`scripts/financingSnapshotDiagnosis.ts`の
+ * `collectSnapshots`、`app/lib/v2/financing/__tests__/underwritingSnapshotRealPath.test.ts`の
+ * `runOnce`を参照）。これにより、シミュレーション実行中に例外が投げられても
+ * オブザーバーが登録されたまま残ることがない（他のテスト・他のスクリプト実行への
+ * 汚染を防ぐ）。
+ *
+ * 【テスト分離】このモジュールスコープの`let`変数はプロセス内でグローバルに
+ * 共有される。Node.jsの`node --test`はデフォルトで同一プロセス内の複数テストを
+ * 並行実行しうるため、複数テストが同時に別々のオブザーバーを登録すると
+ * 競合しうる。本ブランチのテスト（SNAP-*）は各テストが`runOnce()`の中で
+ * 登録→実行→finally解除を1つの同期的な関数呼び出しの中で完結させており、
+ * かつ`node:test`のテスト関数はデフォルトで直列実行されるため、現状の
+ * テストスイートでは競合は発生しない。ただし将来「複数テストを並行実行する
+ * オプション」を有効化する場合は、このグローバル状態が競合点になりうる点に
+ * 注意（対策案: テストごとに一意なCompanyLabConfig.seedを使い分けて
+ * 実行そのものを直列化するか、observerを配列化してテストID付きで
+ * フィルタするなどの追加対応が必要）。
+ *
+ * 【二段呼び出し(Pass1/Pass2)との関係】closeQuarterWithFinancing内部では
+ * finance/quarterClose.tsのcloseFinancialQuarterをPass1(予備)・Pass2(確定)の
+ * 2回呼ぶが、loanRollForwardObserverの発火はこの2回呼び出しの**外側**、
+ * closeQuarterWithFinancing全体の最後（return直前）に1箇所だけ置かれている。
+ * したがって1社×1turnの引受判断につき、オブザーバーは必ず**1回だけ**発火する
+ * （Pass1/Pass2それぞれで発火するわけではない）。
+ */
+export function setUnderwritingSnapshotObserver(observer: ((snapshot: UnderwritingSnapshot) => void) | undefined): void {
+  underwritingSnapshotObserver = observer;
+}
+
+/**
+ * 【診断専用】ローン残高ロールフォワードの観測フックを登録する。
+ * `undefined`を渡せば解除（デフォルトは未登録＝本番挙動と完全に同一）。
+ */
+export function setLoanRollForwardObserver(observer: ((snapshot: LoanRollForwardSnapshot) => void) | undefined): void {
+  loanRollForwardObserver = observer;
+}
 
 // ---------------------------------------------------------------------
 // 1. 期首の与信判断（planQuarterFinancing）
@@ -143,20 +277,21 @@ export function planQuarterFinancing(input: QuarterFinancingPlanInput, financePa
   );
 
   const severeArrears = fin.history.consecutiveArrearsQuarters >= params.liquidity.paymentDefaultConsecutiveQuartersThreshold;
-  const borrowingCapacity = computeBorrowingCapacity(
-    {
-      companyId: input.companyId,
-      period: input.period,
-      collateral: input.collateral,
-      ebitdaLikeQuarterlyUsd: ebitdaLike,
-      totalEquityUsd: totalEquity,
-      existingLoanBalanceUsd: existingLoanBalance,
-      creditTier: creditScore.tier,
-      severeArrears,
-      insolvent,
-    },
-    params
-  );
+  // 【診断用】computeBorrowingCapacityへ渡す引数を一度constへ束縛してから呼ぶ
+  // （呼び方自体は従来と同じインライン組み立てを変数化しただけで、値・評価順序は不変）。
+  // これにより、下のオブザーバーへ「実際に渡されたのと同一の参照」をそのまま渡せる。
+  const borrowingCapacityInput: BorrowingCapacityInput = {
+    companyId: input.companyId,
+    period: input.period,
+    collateral: input.collateral,
+    ebitdaLikeQuarterlyUsd: ebitdaLike,
+    totalEquityUsd: totalEquity,
+    existingLoanBalanceUsd: existingLoanBalance,
+    creditTier: creditScore.tier,
+    severeArrears,
+    insolvent,
+  };
+  const borrowingCapacity = computeBorrowingCapacity(borrowingCapacityInput, params);
 
   const underwriting = underwriteLoanApplication(
     input.companyId,
@@ -169,6 +304,22 @@ export function planQuarterFinancing(input: QuarterFinancingPlanInput, financePa
     params,
     `${fin.loanPortfolio.loans.length}`
   );
+
+  // 【診断専用・observer隔離】未登録時(underwritingSnapshotObserver===undefined)は
+  // invokeObserverSafely内で即returnし、以降の処理は一切発生しない
+  // （本番挙動への上乗せコストなし。observerが登録されている場合のみ、
+  // 例外を隔離した上でコールバックを呼ぶ）。
+  invokeObserverSafely(underwritingSnapshotObserver, {
+    companyId: input.companyId,
+    period: input.period,
+    borrowingCapacityInput,
+    borrowingCapacityResult: borrowingCapacity,
+    creditScore,
+    covenant,
+    underwriting,
+    requestedAmountUsd: input.financingRequest.desiredAmountUsd,
+    applicationType: input.financingRequest.desiredLoanType,
+  }, "setUnderwritingSnapshotObserver");
 
   return { creditScore, borrowingCapacity, covenant, underwriting };
 }
@@ -573,6 +724,39 @@ export function closeQuarterWithFinancing(
     endingLongTermLoansUsd,
     endingAccruedInterestPayableUsd,
   };
+
+  // 【診断専用・observer隔離】未登録時は外側のif自体がfalseになりブロック内の
+  // 計算（priorShortTermLoansUsd等の集計）ごと一切実行されない（本番挙動への
+  // 上乗せコストなし）。登録時のみ、例外を隔離した上でinvokeObserverSafely経由で
+  // コールバックを呼ぶ。closeQuarterWithFinancing全体でこの呼び出しは1箇所のみ
+  // （Pass1/Pass2の内側ではなく、両パス完了後の最後に1回だけ）であり、
+  // 1社×1turnの引受判断につき必ず1回だけ発火する。
+  if (loanRollForwardObserver) {
+    const priorShortTermLoansUsd = priorLoans
+      .filter((l) => l.loanType === "workingCapital" || l.loanType === "emergency")
+      .reduce((s, l) => s + l.currentPrincipalUsd, 0);
+    const priorLongTermLoansUsd = priorLoans.filter((l) => l.loanType === "termLoan").reduce((s, l) => s + l.currentPrincipalUsd, 0);
+    invokeObserverSafely(loanRollForwardObserver, {
+      companyId,
+      period,
+      priorShortTermLoansUsd,
+      priorLongTermLoansUsd,
+      priorTotalLoanBalanceUsd: priorShortTermLoansUsd + priorLongTermLoansUsd,
+      normalDrawUsd,
+      emergencyDrawUsd,
+      totalLoanDrawUsd,
+      scheduledPrincipalDueUsd: scheduledPrincipalDue,
+      scheduledInterestDueUsd: fullAccruedInterest,
+      principalPaidCashUsd,
+      interestPaidCashUsd,
+      endingShortTermLoansUsd,
+      endingLongTermLoansUsd,
+      endingTotalLoanBalanceUsd: endingShortTermLoansUsd + endingLongTermLoansUsd,
+      shortfallBeforeEmergencyUsd: shortfallBeforeEmergency,
+      cashBeforeEmergencyDecisionUsd: availableForDebtServiceBeforeEmergency,
+      emergencyCapUsd: emergencyLoan?.capUsd ?? 0,
+    }, "setLoanRollForwardObserver");
+  }
 
   return {
     financeResult: passTwo.result,
