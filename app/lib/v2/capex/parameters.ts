@@ -27,7 +27,8 @@
 // 遡って新しい値が適用される。readiness/能力効果はスナップショットで不変・
 // 構成比/保守費率はライブ参照、という非対称性は実装指示の要求どおりであり意図的）。
 
-import { CapexValidationError, CapitalProjectType, FutureCapacityEffectPlaceholder } from "./types";
+import { COLD_STORAGE_PARAMETERS_V1 } from "../production/coldStorage";
+import { CapexValidationError, CapitalProjectType, FutureCapacityEffectPlaceholder, NewFactoryEffectPlaceholder } from "./types";
 
 export interface CapexProjectTemplate {
   readonly projectType: CapitalProjectType;
@@ -65,6 +66,11 @@ export interface CapexProjectTemplate {
   readonly maintenanceRatePerQuarter: number;
   /** Phase 8B-2Bで能力増加・稼働開始時期の算出に使う予約メタデータ。 */
   readonly futureCapacityEffect: FutureCapacityEffectPlaceholder;
+  /**
+   * 【Test15新設】newFactoryConstruction専用。完成・稼働開始時に新設するFactoryの
+   * フルランプ能力・ランプアップ倍率テーブル。他のテンプレートは未設定（undefined）。
+   */
+  readonly newFactoryEffect?: NewFactoryEffectPlaceholder;
 }
 
 export interface CapexParameters {
@@ -100,7 +106,8 @@ function template(
   buildingRatio: number,
   machineryRatio: number,
   maintenanceRatePerQuarter: number,
-  futureCapacityEffect: FutureCapacityEffectPlaceholder
+  futureCapacityEffect: FutureCapacityEffectPlaceholder,
+  newFactoryEffect?: NewFactoryEffectPlaceholder
 ): CapexProjectTemplate {
   return {
     projectType,
@@ -114,6 +121,7 @@ function template(
     machineryRatio,
     maintenanceRatePerQuarter,
     futureCapacityEffect,
+    ...(newFactoryEffect !== undefined ? { newFactoryEffect } : {}),
   };
 }
 
@@ -256,6 +264,76 @@ export const CAPEX_PARAMETERS_V1: CapexParameters = {
       // 構造にする。予算・工期・保守費率・建物/機械構成比はhosoLineExpansion/
       // pdLineExpansionと同水準（前工程も本質的には同種の加工設備であるため）。
       { targetProduct: "commonProcessing", capacityIncreaseTonsPerQuarter: 700, readinessQuartersAfterCompletion: 1 }
+    ),
+    // 【Test15新設】新工場建設（標準工場）。既存工場の能力増強ではなく、完成・
+    // 稼働開始時にFactory[]へ新しいFactoryそのものを1つ追加する（他のテンプレートと
+    // 異なり targetProduct は使わず、newFactoryEffect が別途、合成するFactoryの
+    // フルランプ能力・ランプアップ倍率を保持する。capex/factoryConstruction.ts参照）。
+    // 建設期間3四半期・支払比率30/35/35%、竣工後1四半期の操業準備期間、
+    // 建物比率45%／機械比率55%、保守費率0.75%/四半期はTest15の設計提示どおり。
+    // 【Test15暫定値・要校正】投資額22,000,000USDは実装指示どおりの固定値。
+    newFactoryConstruction: template(
+      "newFactoryConstruction",
+      "新工場建設（標準工場）",
+      22_000_000,
+      [0.3, 0.35, 0.35],
+      "productionEquipment",
+      1,
+      0.45, // 建物45%（実装指示どおり）
+      0.55, // 機械55%（実装指示どおり）
+      0.0075, // 0.75%/四半期（実装指示どおり）
+      // 新工場建設はtargetProduct方式の単一プール加算ではないため、既存の
+      // FutureCapacityEffectPlaceholder側は「能力を増やさない案件」と同じ
+      // 空の指定にする（targetProduct省略・capacityIncreaseTonsPerQuarter=0）。
+      // これによりcapacityEffect.ts側の既存の「主工場への単一プール加算」ロジックが
+      // 新工場建設案件を誤って処理することもない（isFixedSpaceOnlyProject等の
+      // 既存判定にも自然に乗り、二重計上を防ぐ）。
+      { capacityIncreaseTonsPerQuarter: 0, readinessQuartersAfterCompletion: 1 },
+      {
+        // 【Test15暫定値・要校正】実装指示の標準工場能力（HOSO換算トン/四半期）。
+        // commonProcessing/hoso/pd/vap/freezingPackagingは実装指示の指定値をそのまま
+        // 使用。coldStorageのみFactory側に明示値が無いため、既存の標準初期工場
+        // （companyLab/fixtures.tsのBAL-F1、freezingPackagingCapacity=20,000）と
+        // 完全に同じ導出式（production/coldStorage.ts
+        // deriveDefaultColdStorageCapacityTons = freezingPackaging ×
+        // defaultStorageToFlowRatio）で算出し、値を独自に決め打ちしない。
+        fullCapacities: {
+          commonProcessing: 22_000,
+          hoso: 10_000,
+          pd: 8_000,
+          vap: 6_000,
+          freezingPackaging: 20_000,
+          coldStorage: 20_000 * COLD_STORAGE_PARAMETERS_V1.defaultStorageToFlowRatio,
+        },
+        // 【Test15暫定値・要校正】稼働開始から0四半期目=50%、1四半期目=75%、
+        // 2四半期目以降=100%（配列末尾を超える四半期は最後の値=1.0を使う）。
+        rampMultipliers: [0.5, 0.75, 1.0],
+      }
+    ),
+    // 【Test15新設】PD省人化投資（機械化）。特定Factory（targetFactoryId、
+    // capex/types.ts CapitalProject.targetFactoryId）だけを対象に、そのFactoryの
+    // PD労働集約度係数を引き下げる（capex/pdMechanization.ts参照）。PD生産能力・
+    // HOSO/VAPの労働集約度には一切影響しない。
+    // 【重要】達成可能な最大削減率は「20%」ではなく、フロア(HOSO=1.0)を下回れない
+    // ことから決まる「約16.67%（正確には1/6）」である。この数値はここでは
+    // 一切ハードコードせず、capex/pdMechanization.ts の
+    // reductionRatioAtFullMaturity()（基準係数1.2とフロア1.0の比から導出）を
+    // 唯一の情報源とする。
+    pdMechanization: template(
+      "pdMechanization",
+      "PD省人化投資（機械化）",
+      2_500_000,
+      [0.4, 0.6],
+      "productionEquipment",
+      1, // 竣工後1四半期の操業準備期間（実装指示どおり）
+      0.1, // 建物10%（実装指示どおり）
+      0.9, // 機械90%（実装指示どおり）
+      0.01, // 保守費率1%/四半期（実装指示どおり）
+      // PD生産能力は増やさない（targetProduct省略・capacityIncreaseTonsPerQuarter=0）。
+      // 労働集約度係数の引き下げという効果は、futureCapacityEffect/newFactoryEffectの
+      // どちらの枠組みにも属さない別種の効果のため、companyLab層が
+      // capex/pdMechanization.tsの関数群を通じて別途算出する（唯一の計算箇所）。
+      { capacityIncreaseTonsPerQuarter: 0, readinessQuartersAfterCompletion: 1 }
     ),
   },
 

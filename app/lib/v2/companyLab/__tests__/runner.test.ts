@@ -697,7 +697,24 @@ test("プレイヤー入力は選択会社だけに適用される（他社の�
   };
 
   const after = advanceCompanyLabQuarter(state, fixtures, decisions);
-  assert.equal(after.history[0].decisions.find((d) => d.companyId === otherCompanyId), originalOtherPlans);
+  const otherAfter = after.history[0].decisions.find((d) => d.companyId === otherCompanyId)!;
+  // 【Test15対応】vapProductDevelopmentCompetitivenessは既定ONのため、他社の
+  // VAP販売計画にも正典のvapCapabilityScoreが（applyAuthoritativeVapCapabilityScores
+  // により）新たに付与される。これはTest15の意図した挙動（会社Aへの入力とは無関係に、
+  // 全社のVAP能力スコアが常に正典で上書きされる）であり、参照同一性が崩れること
+  // 自体は問題ではない。ここでは「その1フィールド以外は一切変わっていない」ことを
+  // 値で検証する（reference equalityではなくvalue equalityへ変更、コーディネーター
+  // 指示に基づく修正）。
+  const stripVapCapabilityScore = (d: CompanyDecisionInput): CompanyDecisionInput => ({
+    ...d,
+    salesPlans: d.salesPlans.map((p) => {
+      if (p.vapCapabilityScore === undefined) return p;
+      const rest = { ...p };
+      delete (rest as { vapCapabilityScore?: unknown }).vapCapabilityScore;
+      return rest;
+    }),
+  });
+  assert.deepEqual(stripVapCapabilityScore(otherAfter), stripVapCapabilityScore(originalOtherPlans));
 });
 
 test("入力（state・fixtures・decisions）を変更しない", () => {

@@ -167,7 +167,10 @@ function coerceDraftOrRebuild(
   // 【Phase 8D-4】ワーカー人数の出発点は、fixtureの初期値ではなく会社状態として
   // 保持されている前期末の総人数。これを渡さないと、四半期をまたぐたびに人数が
   // 初期値へ戻るというテストプレイで見つかった不具合が再発する。
-  return { draft: buildInitialDraft(fixture, aiDecision, ownState.workforceState), diagnostics };
+  // 【Test15・develop/v2統合（Required fix 2）】生産計画・ワーカー配置の入力行は
+  // ownState.effectiveFactories（稼働開始済みの新設Factoryを含む実効Factory[]）を
+  // 基準に生成する。
+  return { draft: buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories), diagnostics };
 }
 
 export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies, labId: string): Promise<PlayerScreenLoadResult> {

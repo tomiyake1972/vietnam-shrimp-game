@@ -37,6 +37,42 @@ function capacityPoolFor(factoryCapacity: FactoryEffectiveCapacity, product: Pro
 }
 
 /**
+ * 【Test15新設】商品別の労働集約度係数の唯一の情報源（parameters.ts）を返す。
+ * production/labor.ts・companyLab/workforce.ts・意思決定画面・Standard AIは、
+ * 商品別の1人あたり生産力を求める際に必ずこの関数（またはこれを内部で使う
+ * effectiveEfficiencyPerHeadTons）を経由し、係数を個別にハードコードしない。
+ */
+export function laborIntensityCoefficientFor(product: Product, params: ProductionParameters = PRODUCTION_PARAMETERS_V1): number {
+  const coefficient = params.labor.laborIntensityCoefficient[product];
+  return Number.isFinite(coefficient) && coefficient > 0 ? coefficient : 1;
+}
+
+/**
+ * 【Test15新設】商品別労働集約度を織り込んだ、1人あたりの実効生産力
+ * （baseEfficiencyPerHeadTons ÷ 労働集約度係数）。
+ * HOSO=1.0を基準に、PD・VAPは同じ人数でより少ない量しか処理できない
+ * （＝同じ数量を処理するのにより多くの人手を要する）ことをこの一箇所だけで表現する。
+ * calculateLaborCapacityFromAssignedHeadcount・requiredHeadcountForQuantityの
+ * 呼び出し側は、いずれもこの関数を通した実効効率を渡す。
+ */
+export function effectiveEfficiencyPerHeadTons(
+  baseEfficiencyPerHeadTons: number,
+  product: Product,
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
+  // 【Test15新設・PD省人化投資】工場単位で係数そのものを上書きしたい場合に使う
+  // （companyLab/pdMechanizationState.tsが、稼働中のPD省人化投資案件から算出した
+  // その工場だけの実効PD係数をここへ渡す）。省略時はparams.labor.laborIntensityCoefficient
+  // をそのまま使う（既存挙動）。0以下・非有限値は無視する（防御的）。
+  coefficientOverride?: number
+): number {
+  const coefficient =
+    coefficientOverride !== undefined && Number.isFinite(coefficientOverride) && coefficientOverride > 0
+      ? coefficientOverride
+      : laborIntensityCoefficientFor(product, params);
+  return baseEfficiencyPerHeadTons / coefficient;
+}
+
+/**
  * 配分された常用・臨時ワーカー人数から、1商品ぶんの有効労働能力を算出する
  * （純粋な計算式のみを担う低レベル関数。ワーカーの奪い合い解決は
  * allocateWorkersToPlansが行う）。
@@ -48,14 +84,20 @@ export function calculateLaborCapacityFromAssignedHeadcount(
   skillLevel: number,
   appliedOvertimeRate: number,
   factoryCapacityForProduct: number,
-  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
+  // 【Test15新設】省略時はHOSO扱い（laborIntensityCoefficient.hoso=1.0のため
+  // 既存の呼び出し元・既存テストの挙動は変わらない）。商品が分かっている
+  // 呼び出し元は必ず対象商品を渡すこと。
+  product: Product = "hoso",
+  // 【Test15新設・PD省人化投資】productが"pd"のときだけ意味を持つ、工場単位の
+  // 実効PD係数の上書き（省略時は通常のlaborIntensityCoefficientをそのまま使う）。
+  coefficientOverride?: number
 ): number {
   const overtimeMultiplier = 1 + appliedOvertimeRate * params.labor.overtimeEfficiencyFactor;
+  const regularEfficiency = effectiveEfficiencyPerHeadTons(params.labor.regularEfficiencyPerHeadTons, product, params, coefficientOverride);
+  const temporaryEfficiency = effectiveEfficiencyPerHeadTons(params.labor.temporaryEfficiencyPerHeadTons, product, params, coefficientOverride);
   const raw =
-    (assignedRegularHeadcount * params.labor.regularEfficiencyPerHeadTons + assignedTemporaryHeadcount * params.labor.temporaryEfficiencyPerHeadTons) *
-    attendanceRate *
-    skillLevel *
-    overtimeMultiplier;
+    (assignedRegularHeadcount * regularEfficiency + assignedTemporaryHeadcount * temporaryEfficiency) * attendanceRate * skillLevel * overtimeMultiplier;
   return Math.min(Math.max(0, raw), Math.max(0, factoryCapacityForProduct));
 }
 
@@ -110,7 +152,11 @@ export function allocateWorkersToPlans(
   demands: readonly WorkerDemandItem[],
   assignments: readonly WorkerAssignment[],
   factoryCapacities: ReadonlyMap<string, FactoryEffectiveCapacity>,
-  params: ProductionParameters = PRODUCTION_PARAMETERS_V1
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
+  // 【Test15新設・PD省人化投資】factoryId→そのFactoryの実効PD係数の上書き。
+  // PD以外の商品（HOSO/VAP）のdemandには一切影響しない（headcountDemandFor内で
+  // d.product==="pd"の場合にのみ参照する）。省略時は既存挙動と完全に同じ。
+  pdCoefficientOverrideByFactoryId?: ReadonlyMap<string, number>
 ): { readonly entries: readonly WorkerAllocationEntry[]; readonly factorySummaries: readonly FactoryWorkerAllocationSummary[] } {
   // 工場ごとにグループ化して解決するため、結果は一旦demand.id別に記録し、
   // 最後に入力demandsと同じ順序へ復元する（呼び出し側がdemands[i]と
@@ -145,7 +191,18 @@ export function allocateWorkersToPlans(
     // 必要な人数を、水位法配分の重み・capとして使う。
     // 【Phase 8D-4】逆算式は requiredHeadcountForQuantity に一元化した。
     // 意思決定画面の「必要Worker人数」も同じ関数を呼ぶ。
-    function headcountDemandFor(d: (typeof factoryDemands)[number], efficiencyPerHead: number): number {
+    // 【Test15・PD省人化投資】このFactoryの実効PD係数の上書き（未設定なら通常のまま）。
+    const pdCoefficientOverride = pdCoefficientOverrideByFactoryId?.get(factoryId);
+
+    function headcountDemandFor(d: (typeof factoryDemands)[number], baseEfficiencyPerHead: number): number {
+      // 【Test15】商品別の労働集約度係数を織り込んだ実効効率で逆算する。
+      // PD省人化投資の効果はd.product==="pd"のときだけ適用される（HOSO/VAPは無関係）。
+      const efficiencyPerHead = effectiveEfficiencyPerHeadTons(
+        baseEfficiencyPerHead,
+        d.product,
+        params,
+        d.product === "pd" ? pdCoefficientOverride : undefined
+      );
       return requiredHeadcountForQuantity(
         d.candidateQuantity,
         efficiencyPerHead,
@@ -187,7 +244,9 @@ export function allocateWorkersToPlans(
         skillByDemand.get(d.id) ?? 0,
         appliedOvertimeByDemand.get(d.id) ?? 0,
         capacityPool,
-        params
+        params,
+        d.product,
+        d.product === "pd" ? pdCoefficientOverride : undefined
       );
 
       entryById.set(d.id, {

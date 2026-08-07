@@ -22,6 +22,7 @@ import { rawMaterialInventoryValueUsd } from "../finance/initialState";
 import { totalUnitCostPerTon } from "../finance/types";
 import { Product } from "../market/types";
 import { calculateFactoryEffectiveCapacity } from "../production/capacity";
+import { effectiveEfficiencyPerHeadTons } from "../production/labor";
 import { PRODUCTION_PARAMETERS_V1, ProductionParameters } from "../production/parameters";
 import { Factory, FactoryEffectiveCapacity, WorkerAssignment } from "../production/types";
 import { RawMaterialLot, RawMaterialLotStatus } from "../rawMaterials/types";
@@ -297,7 +298,9 @@ export function computeLaborProductivityByProduct(
         product,
         skillLevel,
         attendanceRate,
-        tonsPerRegularWorker: params.labor.regularEfficiencyPerHeadTons * attendanceRate * skillLevel,
+        // 【Test15】商品別労働集約度係数（HOSO:PD:VAP=1.0:1.2:3.0）を織り込んだ
+        // 実効効率を使う（唯一の情報源はproduction/labor.tsのeffectiveEfficiencyPerHeadTons）。
+        tonsPerRegularWorker: effectiveEfficiencyPerHeadTons(params.labor.regularEfficiencyPerHeadTons, product, params) * attendanceRate * skillLevel,
       });
     }
   }

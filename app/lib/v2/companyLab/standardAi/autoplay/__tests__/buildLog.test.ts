@@ -164,6 +164,12 @@ test("buildAutoplayCaseLogs: 四半期結果ログのsalesQuantityByProductは�
 });
 
 test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも、ログが欠落しない（8Qぶん全turnのログが揃う）", () => {
+  // 【Test15統合branchでの競合解決】このテストは、develop/v2側（SAI-6.4・能力認識
+  // 監査Phase 3）とTest15 preflight calibration側（商品別労働集約度の導入）の双方で
+  // 「経済パラメータが変わってpaymentDefaultが自然発生しなくなった」という同じ理由の
+  // 修正を独立に受けていた。どちらの経緯も失わないよう両方のコメントを残し、seedリスト
+  // は双方の和集合とする（salesForceHeadcountOverride=600 も維持する）。
+  //
   // 【SAI-6.4での訂正】旧テストは"baseline"標準候補の既定パラメータのまま、複数seedを
   // 総当たりしてpaymentDefaultが自然発生するケースを探していた。これはSAI-6.4修正前の
   // 生産計画バグ（工場能力起点の理論希望量desiredByProductをそのまま生産へ流していた
@@ -187,7 +193,23 @@ test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも�
   // 資金枯渇という副作用がさらに減った、というPhase 3の意図どおりの効果であり、本テスト
   // にとってはリグレッションではない）。600以上では9seed全てで確実にdefaultへ至ることを
   // 実測で確認した上で600へ更新した。
-  const seeds = ["sai3a-002", ...Array.from({ length: 8 }, (_, i) => `sai3a-test-default-${i}`)];
+  //
+  // 【Test15追記】商品別労働集約度係数（HOSO:PD:VAP=1.0:1.2:3.0）の導入により
+  // 会社の財務トラジェクトリが変化し、従来のseedリスト（sai3a-002等）では
+  // 8四半期以内にpaymentDefaultへ至らなくなった。同じ検証意図（defaultが
+  // 発生した後もログが欠落しないこと）を保つため、新しい経済パラメータの下で
+  // BAL単独・8四半期・baselineシナリオでpaymentDefaultが確認できるseedを
+  // 総当たりで探し直した（test15-bal-scan-181, test15-bal-scan-754）。
+  //
+  // seedリストは双方の和集合。どのseedでdefaultへ至るかはパラメータ次第で変わるが、
+  // 「少なくとも1件で発生を確認できればよい」という検証構造なので、候補を残して
+  // おくこと自体に害はなく、将来の再校正への耐性が上がる。
+  const seeds = [
+    "sai3a-002",
+    ...Array.from({ length: 8 }, (_, i) => `sai3a-test-default-${i}`),
+    "test15-bal-scan-181",
+    "test15-bal-scan-754",
+  ];
   let verifiedAtLeastOne = false;
   for (const seed of seeds) {
     const caseResult = runAutoplayCase({

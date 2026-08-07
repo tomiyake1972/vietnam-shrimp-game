@@ -8,7 +8,7 @@
 // 警告表示のみ行い、送信はブロックしない（ソフト警告）。計算ロジックは
 // 一切持たない（表示・編集のみ）。
 
-import { unwrapUnit } from "../../../lib/v2/core/units";
+import { score0to100, unwrapUnit } from "../../../lib/v2/core/units";
 import { PeriodV2 } from "../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab";
 import { CAPEX_PARAMETERS_V1, CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../lib/v2/capex";
@@ -20,15 +20,33 @@ import {
   summarizeSalesForceAllocation,
   summarizeSalesForceHiring,
   syncMarketSalesForceHeadcount,
+  VAP_PRODUCT_DEVELOPMENT_SPEND_TIER_OPTIONS_USD,
 } from "../decisionDraft";
 import {
   addCapexCancelRequestToDraft,
   addCapexProposalToDraft,
   isDuplicateProjectTypeInDraft,
+  isNewFactoryConstructionBlockedByCap,
+  isPdMechanizationBlockedForFactory,
+  newFactoryConstructionCapBlockedReason,
   removeCapexCancelRequestFromDraft,
   removeCapexProposalFromDraft,
+  setVapProductDevelopmentSpendInDraft,
 } from "../capexDraftActions";
 import { buildAllCapexCandidateViewModels, buildCapexPortfolioViewModel, CAPEX_EXPLANATION_DETAIL_TEXT, CAPEX_EXPLANATION_TEXT } from "../capexViewModel";
+import { countProspectiveFactories, MAX_FACTORIES_PER_COMPANY } from "../../../lib/v2/capex/factoryConstruction";
+import {
+  PD_MECHANIZATION_PARAMETERS_V1,
+  formatReductionRatioAtFullMaturityLabel,
+} from "../../../lib/v2/capex/pdMechanization";
+import { buildPdMechanizationStatusByFactory } from "../../../lib/v2/companyLab/pdMechanizationState";
+import { effectiveEfficiencyPerHeadTons, requiredHeadcountForQuantity } from "../../../lib/v2/production/labor";
+import { PRODUCTION_PARAMETERS_V1 } from "../../../lib/v2/production/parameters";
+import {
+  PRODUCT_DEVELOPMENT_PARAMETERS_V1,
+  updateProductDevelopmentState,
+} from "../../../lib/v2/companyLab/productDevelopmentState";
+import { useState } from "react";
 import { buildCompanyProcessingCapacityViewModel, CapacityPoolKey } from "../processingCapacityViewModel";
 import { buildCompanyProcessingForecast } from "../processingForecastViewModel";
 import { buildCompanyInvestmentPlanningViewModel } from "../investmentPlanningViewModel";
@@ -260,6 +278,110 @@ export default function DecisionEditor(props: DecisionEditorProps) {
   const existingLoanBalanceUsd = existingLoans.reduce((sum, l) => sum + l.currentPrincipalUsd, 0);
   const accruedInterestPayableUsd = ownState.financingState.accruedInterestPayableUsd;
 
+  // --- 【Test15新設】新工場建設（4工場上限のブロック判定） ---
+  const newFactoryConstructionBlocked = isNewFactoryConstructionBlockedByCap(draft, fixture.factories.length, ownState.capexState.portfolio.projects);
+  const newFactoryConstructionDraftPendingCount = draft.capexDecision.newProjectProposals.filter((p) => p.projectType === "newFactoryConstruction").length;
+  const investmentCardExtraBlockedReason = (projectType: (typeof capexCandidates)[number]["projectType"]): string | undefined => {
+    if (projectType !== "newFactoryConstruction") return undefined;
+    return newFactoryConstructionBlocked
+      ? newFactoryConstructionCapBlockedReason(fixture.factories.length, ownState.capexState.portfolio.projects, newFactoryConstructionDraftPendingCount)
+      : undefined;
+  };
+  const prospectiveFactoryCount = countProspectiveFactories(fixture.factories.length, ownState.capexState.portfolio.projects) + newFactoryConstructionDraftPendingCount;
+
+  // --- 【Test15新設】PD省人化投資（工場単位の対象選択・状況表示） ---
+  // buildPdMechanizationStatusByFactoryは複数会社ぶんのcapexState/pdMechanizationStateを
+  // 受け取る前提の関数だが、この画面は自社ぶんのownStateしか持たないため、既存の
+  // capacityViewModel等と同じ「{ companies: [ownState.capexState] }」パターンで自社
+  // 1社ぶんだけを渡す。pdMechanizationStateも同様に、ownState.pdUtilizationByFactory
+  // （runner.ts buildCompanyOwnStateが公開済みの自社工場別・前四半期PD稼働率）から
+  // 自社ぶんのPdMechanizationStateを組み立て直す（計算式自体は一切再実装せず、
+  // 既存の純粋関数へそのまま渡すだけ）。
+  const ownPdMechanizationStateForStatus = {
+    entries: ownState.pdUtilizationByFactory.map((e) => ({
+      factoryId: e.factoryId,
+      companyId: fixture.companyId,
+      previousQuarterPdUtilization: e.previousQuarterPdUtilization,
+    })),
+  };
+  const pdMechanizationStatusByFactory = buildPdMechanizationStatusByFactory(
+    { companies: [ownState.capexState] },
+    ownPdMechanizationStateForStatus,
+    period,
+    PD_MECHANIZATION_PARAMETERS_V1
+  );
+  // 【Test15・develop/v2統合（Required fix 2）】PD省人化投資の対象工場選択肢は
+  // ownState.effectiveFactories（稼働開始済みの新設Factoryを含む）を基準にする。
+  // fixture.factoriesの静的一覧のままだと、新設Factoryが稼働開始しても対象として
+  // 選択できない欠落があった。
+  const [pdMechanizationTargetFactoryId, setPdMechanizationTargetFactoryId] = useState<string>(ownState.effectiveFactories[0]?.factoryId ?? "");
+  const pdMechanizationBlockedForSelectedFactory =
+    pdMechanizationTargetFactoryId !== "" && isPdMechanizationBlockedForFactory(draft, ownState.capexState.portfolio.projects, pdMechanizationTargetFactoryId);
+  const pdMechanizationExistingProjectForFactory = (factoryId: string) =>
+    ownState.capexState.portfolio.projects.find(
+      (p) => p.projectType === "pdMechanization" && p.targetFactoryId === factoryId && p.status !== "cancelled"
+    );
+
+  // 【develop/v2統合・Required fix 5】投資金額・支払スケジュール・想定稼働開始時期・
+  // 減価償却費・保守費（すべてcapex/parameters.tsのpdMechanizationテンプレート・
+  // componentUsefulLifeQuartersを唯一の情報源とし、この画面で別の数値を作らない）。
+  const pdMechanizationTemplate = CAPEX_PARAMETERS_V1.templatesByType.pdMechanization;
+  const pdMechanizationConstructionQuarters = pdMechanizationTemplate.paymentRatios.length;
+  const pdMechanizationReadinessQuarters = pdMechanizationTemplate.postCompletionReadinessQuarters;
+  const pdMechanizationQuartersUntilActivation = pdMechanizationConstructionQuarters + pdMechanizationReadinessQuarters;
+  const pdMechanizationQuarterlyMaintenanceUsd = pdMechanizationTemplate.standardBudgetUsd * pdMechanizationTemplate.maintenanceRatePerQuarter;
+  const pdMechanizationQuarterlyDepreciationUsd =
+    (pdMechanizationTemplate.standardBudgetUsd * pdMechanizationTemplate.buildingRatio) / CAPEX_PARAMETERS_V1.componentUsefulLifeQuarters.building +
+    (pdMechanizationTemplate.standardBudgetUsd * pdMechanizationTemplate.machineryRatio) / CAPEX_PARAMETERS_V1.componentUsefulLifeQuarters.machinery;
+
+  /**
+   * 【develop/v2統合・Required fix 5】対象工場の「実際の現在の生産計画」（draft.
+   * productionPlansのpd行）から、完全習熟後（実効PD係数がフロア1.0に到達した
+   * 場合）に必要になる常用ワーカー人数の削減見込みを算出する。抽象的な一般値では
+   * なく、この工場の当四半期時点の入力そのものから逆算する（production/labor.ts
+   * のrequiredHeadcountForQuantity・effectiveEfficiencyPerHeadTonsを唯一の
+   * 情報源とし、別の逆算式をこの画面で作らない）。
+   */
+  const estimateWorkerReductionForFactory = (
+    factoryId: string
+  ): { readonly requiredBefore: number; readonly requiredAfterFullMaturity: number; readonly reduction: number } | undefined => {
+    const productionRow = draft.productionPlans.find((p) => p.factoryId === factoryId && p.product === "pd");
+    const workerRow = draft.workerAssignments.find((w) => w.factoryId === factoryId);
+    if (!productionRow || !workerRow || productionRow.desiredQuantity <= 0) return undefined;
+    const skillEntry = workerRow.skills.find((s) => s.product === "pd");
+    const skillLevel = skillEntry ? unwrapUnit(skillEntry.skillLevel) : 0;
+    const efficiencyBefore = effectiveEfficiencyPerHeadTons(PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons, "pd", PRODUCTION_PARAMETERS_V1);
+    const efficiencyAfterFullMaturity = effectiveEfficiencyPerHeadTons(
+      PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons,
+      "pd",
+      PRODUCTION_PARAMETERS_V1,
+      PD_MECHANIZATION_PARAMETERS_V1.floorCoefficient
+    );
+    const requiredBefore = requiredHeadcountForQuantity(productionRow.desiredQuantity, efficiencyBefore, workerRow.attendanceRate, skillLevel, workerRow.overtimeRate);
+    const requiredAfterFullMaturity = requiredHeadcountForQuantity(
+      productionRow.desiredQuantity,
+      efficiencyAfterFullMaturity,
+      workerRow.attendanceRate,
+      skillLevel,
+      workerRow.overtimeRate
+    );
+    return { requiredBefore, requiredAfterFullMaturity, reduction: Math.max(0, requiredBefore - requiredAfterFullMaturity) };
+  };
+  const pdMechanizationWorkerReductionEstimate = estimateWorkerReductionForFactory(pdMechanizationTargetFactoryId);
+
+  // --- 【Test15新設】VAP商品開発費（4段階選択・現在スコア・次四半期見込み） ---
+  const currentVapProductDevelopmentScore = ownState.vapProductDevelopmentScore;
+  const nextQuarterVapProductDevelopmentScorePreview = (spendUsd: number): number => {
+    const spendByCompanyId = new Map([[fixture.companyId, spendUsd]]);
+    const previewState = updateProductDevelopmentState(
+      { entries: [{ companyId: fixture.companyId, score: score0to100(currentVapProductDevelopmentScore) }] },
+      spendByCompanyId,
+      [fixture.companyId]
+    );
+    const entry = previewState.entries.find((e) => e.companyId === fixture.companyId);
+    return entry ? unwrapUnit(entry.score) : PRODUCT_DEVELOPMENT_PARAMETERS_V1.neutralScore;
+  };
+
   return (
     <div className="space-y-3">
       <div className="space-y-2 bg-gray-900/60 rounded-lg px-3 py-2">
@@ -361,17 +483,142 @@ export default function DecisionEditor(props: DecisionEditorProps) {
           <FactorySpacePanel state={planning.factorySpace} />
         </div>
 
-        {/* 【Phase 8D-2】投資カード（再設計版） */}
+        {/* 【Phase 8D-2】投資カード（再設計版）。【Test15】pdMechanizationは対象工場の選択が
+            必須のため、この一覧からは除外し、下の専用セクションでのみ追加できる。 */}
         <div className="space-y-1.5">
-          <h4 className="text-xs font-semibold text-gray-300">投資案件候補（{capexCandidates.length}種類）</h4>
+          <h4 className="text-xs font-semibold text-gray-300">投資案件候補（{capexCandidates.length - 1}種類。PD省人化投資は下の専用セクションから）</h4>
+          {newFactoryConstructionBlocked && (
+            <div className="bg-amber-950/40 border border-amber-700/50 rounded px-2 py-1 text-[11px] text-amber-200">
+              {newFactoryConstructionCapBlockedReason(fixture.factories.length, ownState.capexState.portfolio.projects, newFactoryConstructionDraftPendingCount)}
+              （現在・進行中・今期提案 合計 {prospectiveFactoryCount} / 上限 {MAX_FACTORIES_PER_COMPANY}工場）
+            </div>
+          )}
           <InvestmentCardList
-            cards={planning.investmentCards}
+            cards={planning.investmentCards.filter((c) => c.projectType !== "pdMechanization")}
             currentCashUsd={currentCashUsd}
             draftPaymentThisQuarterUsd={capexDraftThisQuarterPaymentUsd}
             isDuplicate={(projectType) => isDuplicateProjectTypeInDraft(draft, projectType)}
             onAdd={(projectType) => onChange(addCapexProposalToDraft(draft, projectType))}
+            extraBlockedReasonByType={investmentCardExtraBlockedReason}
             disabled={disabled}
           />
+        </div>
+
+        {/* 【Test15新設】PD省人化投資（工場単位の対象選択・状況表示専用セクション） */}
+        <div className="space-y-1.5 bg-gray-900/40 border border-gray-700/60 rounded-lg px-3 py-2" data-testid="pd-mechanization-section">
+          <h4 className="text-xs font-semibold text-gray-300">PD省人化投資（対象工場を選択）</h4>
+          <p className="text-[11px] text-gray-400">
+            特定の工場を対象に、PD（殻剥き）工程の労働集約度係数だけを引き下げます（基準1.2 → フロア1.0。PD生産能力そのものは増えません。
+            HOSO/VAPには一切影響しません）。効果は稼働開始後の習熟期間と、対象工場の前四半期PD稼働率に応じて段階的に発現します
+            （稼働率が低い工場では、機械化しても実際の削減効果はほとんど発現しません）。
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-xs text-gray-300">
+              対象工場
+              <select
+                value={pdMechanizationTargetFactoryId}
+                disabled={disabled}
+                onChange={(e) => setPdMechanizationTargetFactoryId(e.target.value)}
+                className={INPUT_CONTROL_CLASS}
+              >
+                {ownState.effectiveFactories.map((f) => (
+                  <option key={f.factoryId} value={f.factoryId}>
+                    {f.factoryId}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={disabled || pdMechanizationTargetFactoryId === "" || pdMechanizationBlockedForSelectedFactory}
+              onClick={() => onChange(addCapexProposalToDraft(draft, "pdMechanization", pdMechanizationTargetFactoryId))}
+              className="text-[11px] px-2 py-1 rounded bg-sky-900/70 border border-sky-500/70 text-sky-50 hover:bg-sky-800/70 disabled:opacity-50 disabled:bg-gray-800 disabled:border-gray-600 disabled:text-gray-400"
+            >
+              この工場でPD省人化投資をドラフトへ追加
+            </button>
+          </div>
+          {pdMechanizationBlockedForSelectedFactory && (
+            <div className="bg-amber-950/40 border border-amber-700/50 rounded px-2 py-1 text-[11px] text-amber-200">
+              この工場にはすでに進行中（または今期ドラフト内で提案済み）のPD省人化投資案件があります。工場ごとに同時に1件までです。
+            </div>
+          )}
+
+          {/* 【develop/v2統合・Required fix 5】投資金額・支払スケジュール・想定稼働開始時期・
+              減価償却費・保守費・削減見込み人数（対象工場の実際の生産計画から算出）。 */}
+          <div className="bg-gray-950/40 border border-gray-700/50 rounded px-2 py-1.5 text-[11px] text-gray-300 space-y-0.5" data-testid="pd-mechanization-investment-info">
+            <div>
+              投資金額: <span className="text-gray-100 font-semibold">${pdMechanizationTemplate.standardBudgetUsd.toLocaleString("en-US")}</span>
+              　支払スケジュール: <span className="text-gray-100">{pdMechanizationTemplate.paymentRatios.map((r) => `${(r * 100).toFixed(0)}%`).join(" / ")}</span>
+              （{pdMechanizationConstructionQuarters}四半期に分割）
+            </div>
+            <div>
+              想定稼働開始時期: 提案から<span className="text-gray-100 font-semibold">{pdMechanizationQuartersUntilActivation}四半期後</span>
+              （分割払い{pdMechanizationConstructionQuarters}四半期＋竣工後の操業準備期間{pdMechanizationReadinessQuarters}四半期）
+            </div>
+            <div>
+              稼働開始後の四半期あたり費用: 減価償却費 <span className="text-gray-100 font-semibold">${Math.round(pdMechanizationQuarterlyDepreciationUsd).toLocaleString("en-US")}</span>
+              　保守費 <span className="text-gray-100 font-semibold">${Math.round(pdMechanizationQuarterlyMaintenanceUsd).toLocaleString("en-US")}</span>
+            </div>
+            <div>
+              {pdMechanizationTargetFactoryId === "" ? (
+                "対象工場を選択してください。"
+              ) : pdMechanizationWorkerReductionEstimate ? (
+                <>
+                  完全習熟後の必要常用Worker人数見込み（対象工場・当四半期のpd生産計画希望量ベース）: 現在
+                  <span className="text-gray-100 font-semibold"> {Math.ceil(pdMechanizationWorkerReductionEstimate.requiredBefore).toLocaleString("en-US")}人</span>
+                  {" → "}
+                  完全習熟後
+                  <span className="text-gray-100 font-semibold"> {Math.ceil(pdMechanizationWorkerReductionEstimate.requiredAfterFullMaturity).toLocaleString("en-US")}人</span>
+                  （
+                  <span className="text-teal-300 font-semibold">約{Math.floor(pdMechanizationWorkerReductionEstimate.reduction).toLocaleString("en-US")}人削減見込み</span>
+                  ）
+                </>
+              ) : (
+                "対象工場の当四半期のpd生産計画希望量が0のため、削減見込み人数を算出できません（生産計画セクションでpdの希望量を入力すると表示されます）。"
+              )}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto mt-2">
+            <table className="min-w-full text-xs text-gray-300">
+              <thead>
+                <tr className={INFO_TABLE_HEAD_CLASS}>
+                  <th className="pr-3 py-1">工場</th>
+                  <th className="pr-3 py-1">前四半期PD稼働率</th>
+                  <th className="pr-3 py-1">進行中案件</th>
+                  <th className="pr-3 py-1">現在のmechanizationLevel</th>
+                  <th className="pr-3 py-1">現在の実効PD係数（基準1.2）</th>
+                  <th className="pr-3 py-1">削減率</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ownState.effectiveFactories.map((f) => {
+                  const utilization =
+                    ownState.pdUtilizationByFactory.find((e) => e.factoryId === f.factoryId)?.previousQuarterPdUtilization ??
+                    PD_MECHANIZATION_PARAMETERS_V1.initialPdUtilizationRatio;
+                  const status = pdMechanizationStatusByFactory.get(f.factoryId);
+                  const project = pdMechanizationExistingProjectForFactory(f.factoryId);
+                  const isLowUtilization = utilization < 0.3;
+                  return (
+                    <tr key={f.factoryId} className={INFO_TABLE_ROW_CLASS}>
+                      <td className="pr-3 py-1">{f.factoryId}</td>
+                      <td className={`pr-3 py-1 ${isLowUtilization ? "text-amber-300" : ""}`}>
+                        {(utilization * 100).toFixed(1)}%{isLowUtilization && "（低稼働率のため効果が小さくなります）"}
+                      </td>
+                      <td className="pr-3 py-1">{project ? `${project.projectId}（${project.status}）` : NO_VALUE_TEXT}</td>
+                      <td className="pr-3 py-1">{status ? `${(status.mechanizationLevel * 100).toFixed(1)}%` : NO_VALUE_TEXT}</td>
+                      <td className="pr-3 py-1">{status ? status.effectivePdCoefficient.toFixed(3) : `${PD_MECHANIZATION_PARAMETERS_V1.baseCoefficient.toFixed(3)}（未稼働）`}</td>
+                      <td className="pr-3 py-1">
+                        {status
+                          ? `${((1 - status.effectivePdCoefficient / PD_MECHANIZATION_PARAMETERS_V1.baseCoefficient) * 100).toFixed(2)}%`
+                          : `最大 ${formatReductionRatioAtFullMaturityLabel()}`}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div className="space-y-1.5">
@@ -396,6 +643,56 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             onUndoCancelRequest={(projectId) => onChange(removeCapexCancelRequestFromDraft(draft, projectId))}
             disabled={disabled}
           />
+        </div>
+      </CollapsibleSection>
+
+      {/* 【Test15新設】VAP商品開発費 */}
+      <CollapsibleSection
+        title="VAP商品開発"
+        tone="input"
+        testId="vap-product-development-section"
+        summaryRight={`現在スコア ${currentVapProductDevelopmentScore.toFixed(1)} / 100`}
+      >
+        <p className="text-[11px] text-gray-400">
+          VAP商品開発スコアは、成約競争力（vapCapability）へのみ接続します（市場価格観測等の他の共有データは書き換えません）。
+          $0を選択した場合でも、毎四半期一定割合で中立値50へ向かって減衰します（投資を止めると徐々にスコアが下がります）。
+        </p>
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="flex flex-col gap-1 text-xs text-gray-300">
+            今四半期のVAP商品開発費
+            <select
+              value={draft.vapProductDevelopmentSpendUsd}
+              disabled={disabled}
+              onChange={(e) => onChange(setVapProductDevelopmentSpendInDraft(draft, Number(e.target.value)))}
+              className={INPUT_CONTROL_CLASS}
+            >
+              {VAP_PRODUCT_DEVELOPMENT_SPEND_TIER_OPTIONS_USD.map((tier) => (
+                <option key={tier} value={tier}>
+                  {tier === 0 ? "$0（投資しない）" : `$${tier.toLocaleString("en-US")}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="text-xs text-gray-300">
+            現在のスコア: <span className="text-gray-100 font-semibold">{currentVapProductDevelopmentScore.toFixed(1)}</span> / 100
+          </div>
+          <div className="text-xs text-gray-300">
+            この選択のまま四半期を進めた場合の次四半期末スコア見込み:{" "}
+            <span className="text-teal-300 font-semibold">{nextQuarterVapProductDevelopmentScorePreview(draft.vapProductDevelopmentSpendUsd).toFixed(1)}</span> / 100
+          </div>
+        </div>
+        {draft.vapProductDevelopmentSpendUsd === 0 && (
+          <div className="text-[11px] text-amber-300">$0を選択しています。投資を行わない四半期も、スコアは中立値50へ向けて減衰します。</div>
+        )}
+        {/* 【develop/v2統合・Required fix 5】上で選択したdraft.vapProductDevelopmentSpendUsd
+            （唯一の情報源。会計計上・キャッシュフロー・スコア更新のすべてが同じこの値を
+            参照する。companyLab/runner.ts・finance/quarterClose.ts参照）が、そのまま
+            当四半期のSG&A・営業キャッシュフロー・現金へ計上される正確な金額であることを
+            明示する。 */}
+        <div className="text-[11px] text-gray-400 bg-gray-950/40 border border-gray-700/50 rounded px-2 py-1" data-testid="vap-spend-cashflow-note">
+          上で選択した金額（${draft.vapProductDevelopmentSpendUsd.toLocaleString("en-US")}）が、そのまま当四半期のSG&A（販管費）へ全額費用化され、
+          同額が当四半期の営業キャッシュフロー・現金の支出となります（資産計上・減価償却はありません）。この金額はVAP商品開発スコアの更新にも
+          使われる唯一の情報源であり、画面上に別の金額が存在することはありません。
         </div>
       </CollapsibleSection>
 

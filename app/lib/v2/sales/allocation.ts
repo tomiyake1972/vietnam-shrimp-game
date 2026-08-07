@@ -80,6 +80,11 @@ export function computeCompetitivenessBreakdown(
   // 既定パラメータでは寄与は厳密に0（0×x=0、末尾への加算は合計をビット単位で
   // 変えない＝既存の全計算・全テストと完全に一致する）。
   const salesBase = (entry.salesBaseScore !== undefined ? unwrapUnit(entry.salesBaseScore) : unwrapUnit(params.neutralScore)) / 100;
+  // 【Test15新設】VAP能力合成係数。product!=="vap"のentryでは、値が設定されて
+  // いても構造的に寄与0とする（HOSO/PDのentryはvapCapabilityScoreを一切読まない。
+  // ウェイトが0であることに依存せず、商品ゲートそのものでHOSO/PD非影響を保証する）。
+  const vapCapabilityRaw = (entry.vapCapabilityScore !== undefined ? unwrapUnit(entry.vapCapabilityScore) : unwrapUnit(params.neutralScore)) / 100;
+  const vapCapability = entry.product === "vap" ? vapCapabilityRaw : 0;
 
   return {
     priceContribution: w.price * priceContributionRatio,
@@ -88,6 +93,7 @@ export function computeCompetitivenessBreakdown(
     qualityContribution: w.quality * quality,
     deliveryReliabilityContribution: w.deliveryReliability * reliability,
     salesBaseContribution: w.salesBase * salesBase,
+    vapCapabilityContribution: w.vapCapability * vapCapability,
     rawPriceScore,
     clampedPriceScore,
     isPriceScoreAtCeiling: clampedPriceScore >= params.maximumPriceCompetitiveness - EPSILON,
@@ -117,6 +123,7 @@ const COMPETITIVENESS_CONTRIBUTION_KEYS: {
   quality: "qualityContribution",
   deliveryReliability: "deliveryReliabilityContribution",
   salesBase: "salesBaseContribution",
+  vapCapability: "vapCapabilityContribution",
 };
 
 /**

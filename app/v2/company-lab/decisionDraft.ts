@@ -17,9 +17,13 @@ import { LoanType, RepaymentMethod } from "../../lib/v2/financing/types";
 import { CapitalProjectType } from "../../lib/v2/capex/types";
 import { PlanCostExpectation } from "../../lib/v2/sales/types";
 import { Score0to100 } from "../../lib/v2/core/units";
-import { WorkerSkillEntry } from "../../lib/v2/production/types";
+import { Factory, WorkerSkillEntry } from "../../lib/v2/production/types";
+import { isValidVapProductDevelopmentSpendTier, VAP_PRODUCT_DEVELOPMENT_SPEND_TIERS_USD } from "../../lib/v2/companyLab/productDevelopmentState";
 
 export const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
+
+/** 【Test15新設】VAP商品開発費の4段階選択肢を画面側へ再輸出する（唯一の情報源はproductDevelopmentState.ts）。 */
+export const VAP_PRODUCT_DEVELOPMENT_SPEND_TIER_OPTIONS_USD = VAP_PRODUCT_DEVELOPMENT_SPEND_TIERS_USD;
 
 function safeNonNegative(n: number): number {
   return Number.isFinite(n) && n >= 0 ? n : 0;
@@ -132,6 +136,8 @@ export interface CapexProjectProposalDraftRow {
   readonly projectType: CapitalProjectType;
   readonly requestedBudgetUsd?: number;
   readonly priority?: number;
+  /** 【Test15新設】pdMechanization提案の対象Factory（他の案件種別では未設定）。 */
+  readonly targetFactoryId?: string;
 }
 
 export interface CapexProjectReferenceDraftRow {
@@ -179,6 +185,11 @@ export interface CompanyDecisionDraft {
    * 保存された下書きにこのフィールドが無いため（読み込み側は `?? 0` として扱う）。
    */
   readonly salesForceLayoffCount?: number;
+  /**
+   * 【Test15新設】今四半期のVAP商品開発費（$0/$100,000/$250,000/$500,000の4段階のみ）。
+   * 未設定（自動方針が値を生成しなかった場合）は0として扱う。
+   */
+  readonly vapProductDevelopmentSpendUsd: number;
 }
 
 // ---------------------------------------------------------------------
@@ -319,8 +330,18 @@ export function buildInitialDraft(
    * 省略された場合は従来どおり自動方針／fixtureの基準人数を出発点とする
    * （Phase 8D以前の呼び出し元・既存テストとの後方互換）。
    */
-  workforceState?: CompanyWorkforceState
+  workforceState?: CompanyWorkforceState,
+  /**
+   * 【Test15・develop/v2統合（Required fix 2）】当四半期時点の実効Factory[]
+   * （CompanyOwnState.effectiveFactories。稼働開始済みの新設Factoryを含む）。
+   * 渡された場合、生産計画・ワーカー配置の入力行はこの一覧を基準に生成される
+   * （fixture.factoriesという静的な初期一覧だけでは、稼働開始した新設Factoryへ
+   * 入力する手段が無かった、という統合前の欠落を解消する）。省略された場合は
+   * 従来どおりfixture.factoriesを使う（後方互換・既存テスト向け）。
+   */
+  effectiveFactories?: readonly Factory[]
 ): CompanyDecisionDraft {
+  const inputFactories = effectiveFactories ?? fixture.factories;
   const salesPlans: SalesPlanDraftRow[] = DEMAND_MARKET_IDS.flatMap((market) =>
     PRODUCTS.map((product) => {
       const found = autoDecision.salesPlans.find((p) => p.market === market && p.product === product);
@@ -370,7 +391,7 @@ export function buildInitialDraft(
         ]
       : [];
 
-  const productionPlans: ProductionPlanDraftRow[] = fixture.factories.flatMap((f) =>
+  const productionPlans: ProductionPlanDraftRow[] = inputFactories.flatMap((f) =>
     PRODUCTS.map((product) => {
       const found = autoDecision.productionPlans.find((p) => p.factoryId === f.factoryId && p.product === product);
       return {
@@ -382,21 +403,47 @@ export function buildInitialDraft(
     })
   );
 
-  const workerAssignments: WorkerAssignmentDraftRow[] = fixture.workerBaseline.map((base) => {
-    const found = autoDecision.workerAssignments.find((w) => w.factoryId === base.factoryId);
+  const workerAssignments: WorkerAssignmentDraftRow[] = inputFactories.map((f) => {
+    const base = fixture.workerBaseline.find((b) => b.factoryId === f.factoryId);
+    const found = autoDecision.workerAssignments.find((w) => w.factoryId === f.factoryId);
     // 【Phase 8D-4】出発点は「会社状態として保持されている前期末の総人数」。
     // これが無い場合にかぎり、従来どおり自動方針／fixtureの基準人数へフォールバックする。
-    const persisted = workforceState?.factories.find((f) => f.factoryId === base.factoryId)?.regularHeadcount;
-    const regularHeadcountBefore = persisted ?? (found ? found.regularHeadcount : base.regularHeadcount);
+    const persisted = workforceState?.factories.find((wf) => wf.factoryId === f.factoryId)?.regularHeadcount;
+    // 【Test15・develop/v2統合（Required fix 2・【Test15暫定値・要校正】】稼働開始
+    // したばかりの新設Factoryにはfixture.workerBaselineの対応行が存在しない
+    // （新設Factoryは作成時点のfixtureには含まれないため）。この場合、実装指示
+    // 「新設Factoryはゼロ人・ゼロ生産から始まる。総ワーカー・営業人員・需要を
+    // 自動的に積み増さない」に従い、常用人数0・臨時人数0・残業率0から出発する
+    // （persistedがあれば新設Factoryでも前期末実績を優先する。一度でも配置された
+    // 実績があれば、その実績を尊重するのは既存工場と同じ扱い）。
+    //
+    // 技能水準（skillLevel）は、当初は「未経験＝0」としていたが、この製品コード
+    // ベースにはワーカーの技能を四半期を追うごとに向上させる仕組み（訓練・OJT等）
+    // が一切存在しない（production/labor.tsのskillLevelFor参照。fixture作成時の
+    // 値のまま変化しない）。skillLevel=0だとその工場は稼働開始後も未来永劫
+    // 生産量ゼロのまま（technicallyワーカー・生産計画を入力できても実際には
+    // 何も生産できない）になってしまい、「稼働開始後は既存工場と同じカテゴリの
+    // 意思決定を入力でき、実際に生産できる」という要件を満たせない。
+    // そのため、新設Factoryの初期技能水準は「標準的な即戦力人材を採用した」
+    // という想定で、全品目一律0.7（中程度の習熟度）を暫定的に使う（校正待ち。
+    // 既存工場のfixture値0.75〜0.85よりやや低い水準）。稼働可能率は他工場と
+    // 同じ既定値0.95を暫定的に使う（校正待ち。companyLab/fixtures.ts
+    // workerBaseline()の既定値と同じ）。
+    const NEW_FACTORY_DEFAULT_SKILL_LEVEL = 0.7;
+    const defaultSkillsForNewFactory: readonly WorkerSkillEntry[] = PRODUCTS.map((product) => ({
+      product,
+      skillLevel: ratio(NEW_FACTORY_DEFAULT_SKILL_LEVEL),
+    }));
+    const regularHeadcountBefore = persisted ?? (found ? found.regularHeadcount : base ? base.regularHeadcount : 0);
     return {
-      factoryId: base.factoryId,
+      factoryId: f.factoryId,
       regularHeadcount: regularHeadcountBefore,
       regularHeadcountBefore,
       regularHeadcountChange: 0,
       temporaryHeadcount: found ? found.temporaryHeadcount : 0,
       overtimeRate: found ? unwrapUnit(found.overtimeRate) : 0,
-      skills: base.skills,
-      attendanceRate: unwrapUnit(base.attendanceRate),
+      skills: base ? base.skills : defaultSkillsForNewFactory,
+      attendanceRate: base ? unwrapUnit(base.attendanceRate) : 0.95,
     };
   });
 
@@ -414,6 +461,7 @@ export function buildInitialDraft(
       projectType: p.projectType,
       ...(p.requestedBudgetUsd !== undefined ? { requestedBudgetUsd: p.requestedBudgetUsd } : {}),
       ...(p.priority !== undefined ? { priority: p.priority } : {}),
+      ...(p.targetFactoryId !== undefined ? { targetFactoryId: p.targetFactoryId } : {}),
     })),
     cancelRequests: autoDecision.capexDecision.cancelRequests.map((c) => ({ projectId: c.projectId })),
     resumeRequests: autoDecision.capexDecision.resumeRequests.map((r) => ({ projectId: r.projectId })),
@@ -434,6 +482,7 @@ export function buildInitialDraft(
     // 「今回の採用・減員予定」は毎回新しい意思決定であるため）。
     salesForceHireCount: 0,
     salesForceLayoffCount: 0,
+    vapProductDevelopmentSpendUsd: autoDecision.vapProductDevelopmentSpendUsd ?? 0,
   };
 }
 
@@ -530,6 +579,7 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
       projectType: p.projectType,
       ...(p.requestedBudgetUsd !== undefined && Number.isFinite(p.requestedBudgetUsd) ? { requestedBudgetUsd: p.requestedBudgetUsd } : {}),
       ...(p.priority !== undefined && Number.isFinite(p.priority) ? { priority: p.priority } : {}),
+      ...(p.targetFactoryId !== undefined ? { targetFactoryId: p.targetFactoryId } : {}),
     })),
     cancelRequests: draft.capexDecision.cancelRequests.map((c) => ({ projectId: c.projectId })),
     resumeRequests: draft.capexDecision.resumeRequests.map((r) => ({ projectId: r.projectId })),
@@ -551,5 +601,6 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
     // 持たない方針のため。runner.ts advanceCompanyLabQuarterが唯一の検証箇所）。
     salesForceHireCount: Math.round(safeNonNegative(draft.salesForceHireCount ?? 0)),
     salesForceLayoffCount: Math.round(safeNonNegative(draft.salesForceLayoffCount ?? 0)),
+    vapProductDevelopmentSpendUsd: isValidVapProductDevelopmentSpendTier(draft.vapProductDevelopmentSpendUsd) ? draft.vapProductDevelopmentSpendUsd : 0,
   };
 }

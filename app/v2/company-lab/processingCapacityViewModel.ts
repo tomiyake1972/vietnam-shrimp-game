@@ -48,12 +48,9 @@ import {
   CapitalProject,
   CapitalProjectType,
   CAPEX_PARAMETERS_V1,
+  computeEffectiveFactories,
 } from "../../lib/v2/capex";
-import {
-  applyCapexCapacityToFactories,
-  computeOperationalStartPeriod,
-  isCapexProjectOperationalAt,
-} from "../../lib/v2/capex/capacityEffect";
+import { computeOperationalStartPeriod, isCapexProjectOperationalAt } from "../../lib/v2/capex/capacityEffect";
 import { CapexDisplayStatus, CAPEX_DISPLAY_STATUS_LABELS, computeCapexDisplayStatus, TARGET_PRODUCT_LABELS } from "./capexViewModel";
 
 // ---------------------------------------------------------------------
@@ -234,11 +231,23 @@ export function buildCompanyProcessingCapacityViewModel(input: {
 }): CompanyProcessingCapacityViewModel {
   const params = input.params ?? CAPEX_PARAMETERS_V1;
   const companyBase = input.baseFactories.filter((f) => f.companyId === input.companyId);
-  const currentFactories = applyCapexCapacityToFactories(companyBase, input.capexState, input.period);
+  // 【Test15・develop/v2統合（Required fix 2）】唯一の計算箇所
+  // capex/factoryConstruction.ts computeEffectiveFactoriesを使う（applyCapexCapacityToFactories
+  // だけだと、稼働開始済みの新設Factory自体がcurrentFactoriesへ一切現れず、画面の
+  // 加工能力一覧から新設工場が丸ごと消えてしまう欠落があった）。
+  const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period);
   const currentById = new Map(currentFactories.map((f) => [f.factoryId, f]));
 
-  const factories: FactoryCapacityViewModel[] = companyBase.map((base) => {
-    const current = currentById.get(base.factoryId) ?? base;
+  // 【Test15・develop/v2統合（Required fix 2）】companyBaseだけでなく、稼働開始
+  // 済みの新設Factory（companyBaseには存在しないfactoryId）も含めて一覧化する。
+  // 新設Factoryにはbaseに相当する「加算前の値」が存在しない（新設Factory自体が
+  // すでに完成済み能力そのものであるため）ため、baseNominalTons=0・全量を
+  // addedByOperationalCapexTonsとして扱う（新設Factoryは既存工場の能力増強とは
+  // 別枠、という設計に合わせた自然な表現）。
+  const allFactoryIds = Array.from(new Set([...companyBase.map((f) => f.factoryId), ...currentFactories.map((f) => f.factoryId)]));
+  const factories: FactoryCapacityViewModel[] = allFactoryIds.map((factoryId) => {
+    const base = companyBase.find((f) => f.factoryId === factoryId);
+    const current = currentById.get(factoryId) ?? base!;
     const effective = calculateFactoryEffectiveCapacity(current);
     const effectiveByPool: Readonly<Record<CapacityPoolKey, number>> = {
       commonProcessing: unwrapOrZero(effective.commonProcessing),
@@ -249,7 +258,12 @@ export function buildCompanyProcessingCapacityViewModel(input: {
     };
 
     const pools: CapacityPoolBreakdown[] = CAPACITY_POOL_KEYS.map((poolKey) => {
-      const baseNominalTons = poolNominalTons(base, poolKey);
+      // 【Test15・develop/v2統合（Required fix 2）】稼働開始したばかりの新設
+      // Factoryにはbase（加算前の値）が存在しない。新設Factory自体がすでに
+      // 完成済み能力そのものであるため、baseNominalTonsは0とし、現在能力の
+      // 全量をaddedByOperationalCapexTons（＝この四半期までに新たに加わった量）
+      // として扱う。
+      const baseNominalTons = base ? poolNominalTons(base, poolKey) : 0;
       const currentNominalTons = poolNominalTons(current, poolKey);
       return {
         poolKey,
@@ -262,11 +276,11 @@ export function buildCompanyProcessingCapacityViewModel(input: {
     });
 
     return {
-      factoryId: base.factoryId,
-      companyId: base.companyId,
-      status: base.status,
-      baseUtilizationRate: unwrapUnit(base.baseUtilizationRate),
-      equipmentAvailabilityRate: unwrapUnit(base.equipmentAvailabilityRate),
+      factoryId: current.factoryId,
+      companyId: current.companyId,
+      status: current.status,
+      baseUtilizationRate: unwrapUnit(current.baseUtilizationRate),
+      equipmentAvailabilityRate: unwrapUnit(current.equipmentAvailabilityRate),
       receivesCapexCapacity: pools.some((p) => p.addedByOperationalCapexTons !== 0),
       pools,
     };

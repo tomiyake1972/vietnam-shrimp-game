@@ -86,10 +86,13 @@ function concentrateOn(product: "pd" | "vap", factor: number, otherFactor = 0.05
 }
 
 /**
- * 内訳の6項目を**テスト側で独立に**合計する。
+ * 内訳の7項目を**テスト側で独立に**合計する。
  * 実装の sumCompetitivenessContributions をそのまま使うと、実装側で項を落とす
  * リグレッションを入れたときに両辺が同時に変わって検出できない（監査再指摘）。
  * ここは意図的に手書きで、実装とは別経路にしておく。
+ * 【Test15新設】vapCapabilityContributionを追加（既定ONのため、この項を
+ * 落とすと本テストが確実に落ちる＝合計処理から項が抜けるリグレッションの検出は
+ * 維持されている）。
  */
 function sumBreakdownIndependently(b: CompetitivenessWeightBreakdown): number {
   return (
@@ -98,7 +101,8 @@ function sumBreakdownIndependently(b: CompetitivenessWeightBreakdown): number {
     b.relationshipContribution +
     b.qualityContribution +
     b.deliveryReliabilityContribution +
-    b.salesBaseContribution
+    b.salesBaseContribution +
+    b.vapCapabilityContribution
   );
 }
 

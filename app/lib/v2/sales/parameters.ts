@@ -86,6 +86,11 @@ export interface SalesParameters {
      *  SALES_PARAMETERS_SAI5_SALES_BASE_V1（合計1.0を保ってcoverage/relationship/
      *  qualityから切り出して再配分）をturnInput.parameters.sales経由で渡す。 */
     readonly salesBase: number;
+    /** 【Test15新設】VAP能力合成係数（companyLab/premiumPolicy.tsの
+     *  calculateCompanyCapabilityCoefficient、VAP商品開発スコア等の合成）の
+     *  ウェイト。既定0（＝寄与が厳密に0でビット単位の後方互換）。product==="vap"の
+     *  entryにのみ効く設計（allocation.ts参照。HOSO/PDのentryでは常に寄与0）。 */
+    readonly vapCapability: number;
   };
 
   /**
@@ -158,6 +163,7 @@ export const SALES_PARAMETERS_V1: SalesParameters = {
     quality: 0.15,
     deliveryReliability: 0.1,
     salesBase: 0,
+    vapCapability: 0,
   },
 
   priceSensitivity: 3.0,
@@ -197,5 +203,50 @@ export const SALES_PARAMETERS_SAI5_SALES_BASE_V1: SalesParameters = {
     quality: 0.13,
     deliveryReliability: 0.1,
     salesBase: 0.08,
+    vapCapability: 0,
+  },
+};
+
+/**
+ * 【Test15新設】VAP能力ウェイト有効化版（テスト・将来のconfig接続用の参考実装）。
+ * vapCapability=0.08を、coverage(0.25→0.21)・relationship(0.15→0.13)・
+ * quality(0.15→0.13)から切り出して合計1.0を維持する（SAI-5Dのsalesbase版と
+ * 同じ切り出し方針）。product!=="vap"のentryには構造的に影響しない
+ * （allocation.ts参照）ため、HOSO/PDの配分結果はこのパラメータでも不変。
+ * 【Test15暫定値・要校正】
+ */
+export const SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1: SalesParameters = {
+  ...SALES_PARAMETERS_V1,
+  parametersVersion: "sales-v0.1+test15-vap-capability",
+  competitivenessWeights: {
+    price: 0.35,
+    coverage: 0.21,
+    relationship: 0.13,
+    quality: 0.13,
+    deliveryReliability: 0.1,
+    salesBase: 0,
+    vapCapability: 0.08,
+  },
+};
+
+/**
+ * 【Test15新設・コーディネーター指示による既定ON対応】vapProductDevelopmentCompetitiveness
+ * （既定ON）とsalesBaseAccumulation（既定OFF、明示opt-in）の両方が有効なときに使う
+ * 組み合わせ版。salesBase=0.08・vapCapability=0.08の両方をcoverage/relationship/
+ * qualityから切り出す（各項目につき上のSAI-5D版・Test15単独版の切り出し幅を
+ * 単純に2倍し、合計1.0を維持する）。
+ * 【Test15暫定値・要校正】
+ */
+export const SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1: SalesParameters = {
+  ...SALES_PARAMETERS_V1,
+  parametersVersion: "sales-v0.1+test15-vap-capability+sai5-sales-base",
+  competitivenessWeights: {
+    price: 0.35,
+    coverage: 0.17,
+    relationship: 0.11,
+    quality: 0.11,
+    deliveryReliability: 0.1,
+    salesBase: 0.08,
+    vapCapability: 0.08,
   },
 };

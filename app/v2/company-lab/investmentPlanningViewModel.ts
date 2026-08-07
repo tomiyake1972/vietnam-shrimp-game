@@ -40,7 +40,8 @@ import {
   SpaceConsumingPoolKey,
 } from "../../lib/v2/production/factorySpace";
 import { CapexParameters, CAPEX_PARAMETERS_V1, CapexState, CapitalProjectType, CAPITAL_PROJECT_TYPES } from "../../lib/v2/capex";
-import { applyCapexCapacityToFactories, computeCapacityEffectForCompany } from "../../lib/v2/capex/capacityEffect";
+import { computeCapacityEffectForCompany } from "../../lib/v2/capex/capacityEffect";
+import { computeEffectiveFactories } from "../../lib/v2/capex/factoryConstruction";
 import { buildCompanyFactorySpaceState, computeCandidateProjectSpaceUnits } from "../../lib/v2/capex/factorySpace";
 import { CompanyFinancialQuarterResult } from "../../lib/v2/finance/types";
 import { FINANCE_PARAMETERS_V1 } from "../../lib/v2/finance/parameters";
@@ -140,6 +141,44 @@ export const PROJECT_EFFECT_DISCLOSURES: Readonly<Record<CapitalProjectType, Pro
       NOT_CONNECTED_NOTE +
       "環境・排水に関するロジックは、現時点のエンジンにひとつも実装されていません（能力・事故・行政処分・監査のいずれも存在しません）。" +
       "したがって現時点でこの投資は、減価償却費と保守費というコストだけが発生し、操業上の便益はありません。",
+  },
+  // 【Test15新設】既存工場の能力増強ではなく、完成・稼働開始後（操業準備期間経過後）に
+  // 会社のFactory[]へ新しいFactoryそのものを1つ追加する（capex/factoryConstruction.ts参照）。
+  // 稼働開始後は50%→75%→100%の3段階でランプアップする点が、他の案件種別（即座にフル効果）と異なる。
+  newFactoryConstruction: {
+    implementedEffects: [
+      "完成・稼働開始後、会社のFactory[]へ新しい工場（標準工場）を1つ追加",
+      "稼働開始四半期からの3段階ランプアップ（1四半期目50%・2四半期目75%・3四半期目以降100%の実効能力）",
+      "取得原価の固定資産振替と、建物・機械コンポーネント別の減価償却",
+      "稼働開始後の四半期固定保守費",
+      "稼働中工場数（activeFactoryCount）としての四半期固定費への算入（稼働開始後のみ）",
+    ],
+    notImplementedEffects: [
+      "新設工場ぶんのWorker（常用・臨時）の自動配置・自動採用（従来どおりWorker意思決定で別途配置が必要）",
+      "新設工場ぶんの営業人員・販売能力・市場需要の自動増加（従来どおり営業人員の意思決定で別途対応が必要）",
+      "既存工場のスペースプールとの連動（新設工場は既存工場のtotalFactorySpaceUnitsを消費しない別枠として扱われます）",
+    ],
+    notImplementedNote:
+      "新設工場の能力は、稼働開始後もWorker・営業人員・市場需要と自動的には連動しません。新設工場を実際に稼働させるには、" +
+      "Worker意思決定でその工場へ人員を配置する必要があります（本タスク時点では、意思決定画面のWorker・生産計画の行は" +
+      "既存fixtureの工場だけを対象に生成されるため、新設工場への配置導線は今後の拡張課題です）。",
+  },
+  // 【Test15新設】特定Factory1件を対象に、そのFactoryのPD労働集約度係数だけを引き下げる
+  // （PD生産能力そのものは増やさない。HOSO/VAPには一切影響しない）。
+  pdMechanization: {
+    implementedEffects: [
+      "対象Factory1件だけのPD労働集約度係数を、稼働開始後の習熟進捗×前四半期PD稼働率に応じて段階的に引き下げ（capex/pdMechanization.ts）",
+      "取得原価の固定資産振替と、建物・機械コンポーネント別の減価償却",
+      "稼働開始後の四半期固定保守費",
+    ],
+    notImplementedEffects: [
+      "対象FactoryのPD生産能力（pdCapacity）そのものの増加（このプロジェクトは能力を増やしません）",
+      "HOSO・VAPの労働集約度係数（対象Factoryも含め一切変化しません）",
+      "他社・他工場のPD労働集約度係数",
+    ],
+    notImplementedNote:
+      "この投資の効果は、対象Factoryの前四半期PD稼働率が低いほど小さくなります（稼働率が低い工場では、機械化しても実際の削減効果はほとんど発現しません）。" +
+      "稼働開始直後は習熟期間中のため、フル効果ではありません。",
   },
 };
 
@@ -446,7 +485,11 @@ export function buildCompanyInvestmentPlanningViewModel(
 ): CompanyInvestmentPlanningViewModel {
   const capexParams = input.capexParams ?? CAPEX_PARAMETERS_V1;
   const companyBase = input.baseFactories.filter((f) => f.companyId === input.companyId);
-  const currentFactories = applyCapexCapacityToFactories(companyBase, input.capexState, input.period);
+  // 【Test15・develop/v2統合（Required fix 2）】唯一の計算箇所computeEffectiveFactories
+  // を使う（applyCapexCapacityToFactoriesだけだと、稼働開始済みの新設Factoryが
+  // currentFactoriesへ現れず、投資計画・工場スペース・Worker必要人数の各表示から
+  // 新設工場が漏れてしまう）。
+  const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period);
 
   // --- 現在の処理見込み（生産エンジンの出力そのもの） ---
   const forecast = buildCompanyProcessingForecast({
@@ -530,7 +573,8 @@ export function buildCompanyInvestmentPlanningViewModel(
           skillByProduct[product] ?? 0,
           overtimeRate,
           factory ? poolNominalTons(factory, product as SpaceConsumingPoolKey) : 0,
-          PRODUCTION_PARAMETERS_V1
+          PRODUCTION_PARAMETERS_V1,
+          product
         );
       }
 

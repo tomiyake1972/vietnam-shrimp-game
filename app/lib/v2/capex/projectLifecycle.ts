@@ -60,6 +60,43 @@ export function formatSpaceShortageReason(gate: ProposalSpaceGate): string {
 }
 
 /**
+ * 【Test15新設】新工場建設（newFactoryConstruction）専用の工場数上限ゲート。
+ * 呼び出し側（capexClose.ts）が、この提案を承認すると会社の工場数（既存工場＋
+ * 取消以外のnewFactoryConstruction案件）が上限を超えるかどうかを事前に判定して渡す。
+ * newFactoryConstruction以外の提案には一切関係しない（gate自体を渡さなければ判定しない）。
+ */
+export interface ProposalFactoryCountGate {
+  /** この提案を承認すると工場数が上限を超えるか（capex/factoryConstruction.tsのwouldExceedMaxFactoriesの結果）。 */
+  readonly wouldExceedMax: boolean;
+  /** 拒否理由の説明文に使う上限値。 */
+  readonly maxFactoriesPerCompany: number;
+}
+
+/**
+ * 【Test15新設】pdMechanization（PD省人化投資）専用の工場単位ゲート。
+ * 「1つのFactoryには同時に1件のPD省人化投資しか進行できない」を判定する。
+ * 呼び出し側（capexClose.ts）が、その会社の現在の案件一覧（同一四半期内で
+ * すでに承認した分を含む）を渡す。
+ */
+export interface ProposalFactoryMechanizationGate {
+  /** すでに同じFactoryを対象とする、取消・完成以外（＝進行中）のpdMechanization案件が存在するか。 */
+  readonly hasActiveProjectForSameFactory: boolean;
+  /**
+   * 【develop/v2統合・Phase2監査2-3】targetFactoryIdが、この会社の当四半期時点の
+   * 実在Factory（稼働開始済み新設Factoryを含む、computeEffectiveFactories基準）に
+   * 実在するか。省略時（呼び出し元が渡さない場合）は既存挙動どおり判定しない
+   * （後方互換。既存テストを壊さない）。falseの場合、存在しないFactoryIDへの
+   * 投資提案を拒否理由つきで却下する（例外は投げない。他の拒否理由と同じ扱い）。
+   */
+  readonly targetFactoryExists?: boolean;
+}
+
+/** 特定Factoryに、進行中（approved/underConstruction/suspended）のpdMechanization案件が既に存在するか判定する。 */
+export function hasActivePdMechanizationProjectForFactory(portfolio: readonly CapitalProject[], targetFactoryId: string): boolean {
+  return portfolio.some((p) => p.projectType === "pdMechanization" && p.targetFactoryId === targetFactoryId && isActiveStatus(p.status));
+}
+
+/**
  * 1件の新規提案を評価する。承認条件（実装指示§12。会社IDでの特殊扱いは
  * 一切行わない。財務・信用診断だけで判定する）:
  *   - 銀行引受停止・重大資金繰り不安（前期末までの情報のみ）の会社は新規承認しない。
@@ -80,7 +117,9 @@ export function evaluateProposal(
   period: PeriodV2,
   projectId: string,
   priority: number,
-  spaceGate?: ProposalSpaceGate
+  spaceGate?: ProposalSpaceGate,
+  factoryCountGate?: ProposalFactoryCountGate,
+  mechanizationGate?: ProposalFactoryMechanizationGate
 ): { readonly approved: CapitalProject } | { readonly rejected: CapexRejectedProposal } {
   const template: CapexProjectTemplate | undefined = params.templatesByType[proposal.projectType];
   if (!template) {
@@ -106,6 +145,27 @@ export function evaluateProposal(
   // 同じ扱い。docs/v2/CAPITAL_INVESTMENT_ARCHITECTURE_v0.1.md §エラー処理方針）。
   if (spaceGate !== undefined && spaceGate.requiredSpaceUnits > spaceGate.remainingSpaceUnits + spaceGate.epsilonSpaceUnits) {
     reasons.push(formatSpaceShortageReason(spaceGate));
+  }
+  // 【Test15新設】新工場建設のみ、1社あたり最大工場数の上限（既存工場＋取消以外の
+  // newFactoryConstruction案件の合計、capex/factoryConstruction.ts参照）で拒否する。
+  if (factoryCountGate !== undefined && factoryCountGate.wouldExceedMax) {
+    reasons.push(`工場数が上限(${factoryCountGate.maxFactoriesPerCompany})に達しているため、新工場建設の新規承認を見送り。`);
+  }
+  // 【Test15新設】pdMechanizationはtargetFactoryIdが必須（工場単位の投資のため）。
+  if (proposal.projectType === "pdMechanization" && !proposal.targetFactoryId) {
+    reasons.push("PD省人化投資は対象Factory（targetFactoryId）の指定が必須です。");
+  }
+  // 【Test15新設】同一Factoryに進行中のpdMechanization案件が既にある場合は拒否する
+  // （1工場につき同時に1件まで）。
+  if (proposal.projectType === "pdMechanization" && mechanizationGate?.hasActiveProjectForSameFactory) {
+    reasons.push(`工場"${proposal.targetFactoryId}"には既に進行中のPD省人化投資があるため、新規承認を見送り。`);
+  }
+  // 【develop/v2統合・Phase2監査2-3】targetFactoryIdが実在しないFactoryを指す提案は
+  // 拒否する（存在しないFactoryへの投資が承認され、支払だけ発生して効果が
+  // 永久に発現しない、という静かな不整合を防ぐ）。mechanizationGate.targetFactoryExistsが
+  // 省略された呼び出し元（後方互換）では、この判定自体を行わない。
+  if (proposal.projectType === "pdMechanization" && mechanizationGate?.targetFactoryExists === false) {
+    reasons.push(`対象Factory"${proposal.targetFactoryId}"はこの会社に存在しないため、PD省人化投資の新規承認を見送り。`);
   }
 
   if (reasons.length > 0) {
@@ -134,6 +194,12 @@ export function evaluateProposal(
     approvedPeriod: period,
     priority: proposal.priority ?? priority,
     ...(template.futureCapacityEffect !== undefined ? { futureCapacityEffect: template.futureCapacityEffect } : {}),
+    // 【Test15新設】newFactoryConstruction案件のみ、新設Factory合成用の情報を
+    // 承認時にテンプレートからスナップショットする（他の案件種別は常にundefined）。
+    ...(template.newFactoryEffect !== undefined ? { newFactoryEffect: template.newFactoryEffect } : {}),
+    // 【Test15新設】pdMechanization等、特定Factoryを対象とする案件のtargetFactoryIdを
+    // 承認時にスナップショットする。
+    ...(proposal.targetFactoryId !== undefined ? { targetFactoryId: proposal.targetFactoryId } : {}),
     lastDiagnosticReasons: ["承認され、着工待ち（当四半期の支払処理で初回支払を試行する）。"],
   };
   return { approved };

@@ -48,6 +48,8 @@ import type { CompanyWorkforceState, WorkforceState } from "./workforce";
 // CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
 import type { CompanySalesForceHiringState, SalesForceHiringState } from "./salesForceHiring";
 import type { SalesBaseState } from "./salesBase";
+import type { PdMechanizationState } from "./pdMechanizationState";
+import type { ProductDevelopmentState } from "./productDevelopmentState";
 import type { MarketEvolutionState, Sai5MarketEvolutionRecord, SupplyPressureDefinition } from "./marketEvolution";
 
 export class CompanyLabError extends Error {
@@ -171,6 +173,17 @@ export interface CompanyDecisionInput {
    * 旧保存データでは減員予定0人）。
    */
   readonly salesForceLayoffCount?: number;
+  /**
+   * 【Test15新設】当期のVAP商品開発費。companyLab/productDevelopmentState.tsの
+   * VAP_PRODUCT_DEVELOPMENT_SPEND_TIERS_USD（$0/$100,000/$250,000/$500,000）の
+   * いずれか（自由入力ではない4段階選択。isValidVapProductDevelopmentSpendTier
+   * 参照）。全額が当期SG&Aへ費用化され、同額が当期キャッシュフローの支出となる
+   * （資産計上・減価償却なし。finance/quarterClose.ts参照）。同じ値がVAP商品開発
+   * スコアの更新（companyLab/productDevelopmentState.ts）にも使われる、唯一の
+   * 情報源（companyLab/runner.ts参照）。省略時は0（後方互換、既存の意思決定
+   * 構築箇所を壊さない）。
+   */
+  readonly vapProductDevelopmentSpendUsd?: number;
 }
 
 // ---------------------------------------------------------------------
@@ -232,6 +245,43 @@ export interface CompanyOwnState {
    * エンジンの実値で確認できるようにするために公開する。
    */
   readonly salesBaseCompetitivenessWeight?: number;
+  /**
+   * 【Test15新設】前四半期末までの自社工場ごとのPD稼働率（pdMechanizationState.ts
+   * findPreviousQuarterPdUtilizationと同じ値。エントリが無い工場は既定値
+   * （PD_MECHANIZATION_PARAMETERS_V1.initialPdUtilizationRatio）とみなす）。
+   * UI側がPD省人化投資の状況（現在の稼働率・想定される機械化効果）を表示する
+   * ために公開する。常に存在する（機能フラグに依存しない常時ゲームルール）。
+   * 【配列形状の理由】factoryIdをオブジェクトキーとして持つRecordにすると、
+   * 「識別情報（factoryId）以外が全社完全に同一」という既存の統合テスト
+   * （standardAi/autoplay/__tests__/heterogeneousProfiles.test.ts の
+   * stripIdentifiers）がfactoryIdを含む動的キー名までは正規化できず誤検知する
+   * ため、workforceState.factoriesと同じ「配列＋factoryIdフィールド」形状にする。
+   */
+  readonly pdUtilizationByFactory: readonly { readonly factoryId: string; readonly previousQuarterPdUtilization: number }[];
+  /**
+   * 【Test15新設】前四半期末までの自社VAP商品開発スコア（0〜100、中立50）。
+   * productDevelopmentState.ts lookupProductDevelopmentScoreと同じ値。
+   * 常に存在する（機能フラグに依存しない常時ゲームルール）。
+   */
+  readonly vapProductDevelopmentScore: number;
+  /**
+   * 【Test15・develop/v2統合（Required fix 2）】当四半期時点で実際に入力・生産の
+   * 対象にできる、この会社の「実効Factory[]」（既存工場への能力加算＋稼働開始済み
+   * newFactoryConstruction案件による新設Factoryの両方を反映済み）。
+   *
+   * 【唯一の計算箇所】必ず capex/factoryConstruction.ts の computeEffectiveFactories
+   * を経由する（companyLab/runner.ts の advanceCompanyLabQuarter が生産エンジンへ
+   * 渡すFactory[]と、この buildCompanyOwnState が意思決定側へ渡すFactory[]が
+   * 別々に計算されて食い違う、という統合前の欠落（fixture.factoriesを直接読んで
+   * いたためUIから新設Factoryへ入力できなかった問題）を構造的に防ぐ）。
+   *
+   * fixture.factories（作成時点の静的な初期工場一覧）を意思決定側で直接読む
+   * 代わりに、常にこちらを使うこと。新設Factoryは稼働開始（完成＋操業準備期間
+   * 経過）するまでこの配列に一切現れない。稼働開始した瞬間、ワーカー配置・
+   * 生産計画・PD省人化投資対象の各入力行はゼロ人・ゼロ生産の状態からこの配列へ
+   * 現れる（ワーカー・営業人員・需要が自動的に積み増されることはない）。
+   */
+  readonly effectiveFactories: readonly Factory[];
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */
@@ -429,6 +479,14 @@ export interface Sai5FeatureFlags {
    * 定義候補の実測比較（scripts/sai5SupplyPressureStudy.ts）以外では指定しない。
    */
   readonly supplyPressureDefinition?: SupplyPressureDefinition;
+  /**
+   * 【Test15新設】VAP能力合成係数（companyLab/premiumPolicy.tsの
+   * calculateCompanyCapabilityCoefficient）を成約競争力へ接続する
+   * （sales/allocation.tsのvapCapabilityウェイト）。未指定・falseなら既存の
+   * salesBaseAccumulationと同じく「ビット単位で既存挙動と一致」する
+   * （ウェイト0・販売計画へvapCapabilityScoreを一切付けない）。
+   */
+  readonly vapProductDevelopmentCompetitiveness?: boolean;
 }
 
 export interface CompanyLabConfig {
@@ -457,6 +515,18 @@ export interface CompanyLabState {
   /** 【SAI-5E】市場進化carry state（供給圧力EWMA・プレミアム倍率・割安シグナル。
    *  config.sai5.productLifecycle/supplyPremiumFeedback有効時のみ保持）。 */
   readonly marketEvolutionState?: MarketEvolutionState;
+  /**
+   * 【Test15新設】Factory単位のPD稼働率（PD省人化投資の効果算出に使う、前四半期末
+   * までの値）。省略時は全Factoryがcapex/pdMechanization.ts
+   * initialPdUtilizationRatio扱い（後方互換：Phase Test15以前に作成されたラボにも
+   * この状態は存在しない）。
+   */
+  readonly pdMechanizationState?: PdMechanizationState;
+  /**
+   * 【Test15新設】会社単位のVAP商品開発スコア（前四半期末までの値、companyLab/
+   * productDevelopmentState.ts）。省略時は全会社が中立値50扱い（後方互換）。
+   */
+  readonly productDevelopmentState?: ProductDevelopmentState;
   /** 【Phase 8A】会社別の財務状態（現金・売掛/買掛・借入・固定資産・完成品原価台帳等。ターンをまたいで保持）。 */
   readonly financeState: FinanceState;
   /** 【Phase 8B-1】会社別の資金繰り状態（融資ポートフォリオ・未払利息・信用/延滞履歴。ターンをまたいで保持）。 */

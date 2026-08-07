@@ -40,7 +40,7 @@
 // 必須の配線）。
 
 import { PeriodV2 } from "../core/period";
-import { HosoEqTons, hosoEqTons, ratio, roundHosoEqTons, Score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
+import { HosoEqTons, hosoEqTons, ratio, roundHosoEqTons, Score0to100, score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import {
   CONSUMER_MARKET_INVENTORY_PARAMETERS_V1,
@@ -56,8 +56,21 @@ import {
 } from "../market/consumerInventory";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
 import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../market/productLifecycle";
-import { salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
-import { SALES_PARAMETERS_SAI5_SALES_BASE_V1, SALES_PARAMETERS_V1, SalesParameters } from "../sales/parameters";
+import { lookupSalesBaseScore, salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
+import {
+  buildInitialProductDevelopmentState,
+  lookupProductDevelopmentScore,
+  ProductDevelopmentState,
+  updateProductDevelopmentState,
+} from "./productDevelopmentState";
+import { calculateCompanyCapabilityCoefficient } from "./premiumPolicy";
+import {
+  SALES_PARAMETERS_SAI5_SALES_BASE_V1,
+  SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1,
+  SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1,
+  SALES_PARAMETERS_V1,
+  SalesParameters,
+} from "../sales/parameters";
 import { MARKET_PARAMETERS_V1 } from "../market/parameters";
 import {
   applyProductSubstitution,
@@ -133,6 +146,13 @@ import {
   computeEffectiveSalesForceLayoffCount,
   deriveNextSalesForceHiringState,
 } from "./salesForceHiring";
+import {
+  buildInitialPdMechanizationState,
+  buildPdCoefficientOverridesByFactory,
+  computeCurrentQuarterPdUtilizationByFactory,
+  deriveNextPdMechanizationState,
+  findPreviousQuarterPdUtilization,
+} from "./pdMechanizationState";
 import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { unwrapUsd } from "../finance/types";
@@ -148,7 +168,7 @@ import type { CompanyFinancingState, FinancingQuarterResult, FinancingState } fr
 import type { QuarterFinancingPlan } from "../financing/liquidityClose";
 import {
   CAPEX_PARAMETERS_V1,
-  applyCapexCapacityToFactories,
+  computeEffectiveFactories,
   buildCompanyFactorySpaceState,
   buildFactorySpaceApprovalBudget,
   buildInitialCompanyCapexState,
@@ -368,6 +388,11 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
     // 【Phase 8D-4】Worker総人数の初期状態。fixture.workerBaselineの常用人数を
     // そのまま初期値とするため、Phase 8D以前と初期人数は完全に同じ。
     workforceState: buildInitialWorkforceState(fixtures),
+    // 【Test15新設】Factory単位のPD稼働率の初期状態（疎配列・空。全FactoryがPD
+    // 省人化投資パラメータのinitialPdUtilizationRatio扱いになる）。
+    pdMechanizationState: buildInitialPdMechanizationState(),
+    // 【Test15新設】VAP商品開発スコアの初期状態（疎配列・空。全会社が中立値50扱い）。
+    productDevelopmentState: buildInitialProductDevelopmentState(),
     // 【Phase 8F-1】市場別（CN/US/EU/JP/OTHER）の消費国在庫・購買循環モデルの
     // 初期carry state。
     consumerMarketState: buildInitialConsumerMarketCarryStateTable(initialMarketInput.demandMarkets),
@@ -422,6 +447,13 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
   const salesForceHiringStateForCompany =
     state.salesForceHiringState?.companies.find((c) => c.companyId === fixture.companyId) ??
     buildInitialSalesForceHiringState([fixture]).companies[0];
+  // 【Test15・develop/v2統合（Required fix 2）】この会社ぶんだけのbaseFactories・
+  // capexStateを渡して計算する（computeEffectiveFactories内部の両関数は会社IDで
+  // フィルタして処理するため、全社ぶんまとめて渡しても1社だけ渡しても、その
+  // 会社に関する結果は一致する）。advanceCompanyLabQuarterと同じ「前四半期末
+  // までのcapex状態」（state.capexState）を基準にする（当期の意思決定を作る
+  // 本関数呼び出し時点では、当期のcapexクローズはまだ実行されていないため）。
+  const effectiveFactories = computeEffectiveFactories(fixture.factories, { companies: [capexStateForCompany] }, state.currentPeriod);
 
   return {
     companyId: fixture.companyId,
@@ -444,12 +476,42 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // 【監査指摘G】営業基盤が当期の成約へ実際にどれだけ効くか（ウェイト）。
     // 機能OFFなら0＝「基盤の高低は成約に一切影響しない」ことが判断側から分かる。
     salesBaseCompetitivenessWeight: salesParametersFor(state.config).competitivenessWeights.salesBase,
+    // 【Test15新設・develop/v2統合（Required fix 2）】前四半期末までの自社工場
+    // ごとのPD稼働率（実効Factory[]、＝稼働開始済みの新設Factoryを含む一覧を
+    // 基準にする。fixture.factoriesのままだと新設FactoryのPD省人化投資対象
+    // 選択肢に一切現れない欠落があったため、effectiveFactoriesと同じ基準へ揃えた）。
+    pdUtilizationByFactory: effectiveFactories
+      .filter((f) => f.companyId === fixture.companyId)
+      .map((f) => ({
+        factoryId: f.factoryId,
+        previousQuarterPdUtilization: findPreviousQuarterPdUtilization(state.pdMechanizationState, f.factoryId),
+      })),
+    vapProductDevelopmentScore: lookupProductDevelopmentScore(state.productDevelopmentState, fixture.companyId),
+    // 【Test15・develop/v2統合（Required fix 2）】唯一の計算箇所
+    // computeEffectiveFactories（companyLab/runner.ts先頭のimport参照）を通した、
+    // この会社の実効Factory[]。advanceCompanyLabQuarterが生産エンジンへ渡す
+    // Factory[]と完全に同じ基準（当会社ぶんのbaseFactories・当会社ぶんの
+    // capexStateだけを渡しても、両関数は会社IDでフィルタして処理するため結果は
+    // 一致する）。
+    effectiveFactories,
   };
 }
 
-/** 当期の成約配分に使うSalesParameters（SAI-5D有効時のみ営業基盤ウェイトが正）。 */
+/**
+ * 当期の成約配分に使うSalesParameters（SAI-5D有効時のみ営業基盤ウェイトが正、
+ * 【Test15新設・コーディネーター指示により既定ON】vapProductDevelopmentCompetitiveness
+ * はTest15の正式なゲームルールであり、明示的に false を指定しない限り常時有効
+ * （config.sai5そのものが未指定の場合も含めて既定ON。他の機能フラグ
+ * （salesBaseAccumulation等、既定OFF＝opt-in）とは既定値の向きが異なる点に注意）。
+ * 両方同時有効時はSALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1
+ * （両ウェイトを保持したまま合計1.0を維持する組み合わせ版）を使う。
+ */
 function salesParametersFor(config: CompanyLabConfig): SalesParameters {
-  return config.sai5?.salesBaseAccumulation ? SALES_PARAMETERS_SAI5_SALES_BASE_V1 : SALES_PARAMETERS_V1;
+  const vapCapabilityOn = config.sai5?.vapProductDevelopmentCompetitiveness !== false;
+  const salesBaseOn = !!config.sai5?.salesBaseAccumulation;
+  if (vapCapabilityOn && salesBaseOn) return SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1;
+  if (vapCapabilityOn) return SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1;
+  return salesBaseOn ? SALES_PARAMETERS_SAI5_SALES_BASE_V1 : SALES_PARAMETERS_V1;
 }
 
 /** 自動方針・プレイヤー入力の双方が参照してよい公開市場情報を組み立てる。 */
@@ -489,6 +551,58 @@ function applyAuthoritativeSalesBaseScores(state: CompanyLabState, decision: Com
         return rest;
       }
       return { ...plan, salesBaseScore: score };
+    }),
+  };
+}
+
+/**
+ * 【Test15新設・コーディネーター指示により既定ON】販売計画のVAP entryへ、正典の
+ * VAP能力合成係数（companyLab/premiumPolicy.tsのcalculateCompanyCapabilityCoefficient）
+ * を上書きで設定する。applyAuthoritativeSalesBaseScoresと同じ設計方針（自己申告の
+ * 採用禁止・商品ゲート・前四半期末までの値のみ）を踏襲しつつ、これはTest15の
+ * 正式なゲームルールであるため既定で常時有効（config.sai5.vapProductDevelopmentCompetitiveness
+ * を明示的にfalseにしたときだけ無効化できる）。
+ *
+ * 「未接続（vapCapabilityScore不設定）のCOMPANYは中立扱い」という後方互換規約は、
+ * calculateCompanyCapabilityCoefficient側の「入力未接続→中立値50」という設計で
+ * 満たされる（本関数自体の有効/無効は、個社の未接続とは別の話）。
+ */
+function applyAuthoritativeVapCapabilityScores(state: CompanyLabState, decision: CompanyDecisionInput): CompanyDecisionInput {
+  // 明示的にfalseを指定したときだけ無効化する（既定ON）。
+  if (state.config.sai5?.vapProductDevelopmentCompetitiveness === false) return decision;
+  const hasVapPlan = decision.salesPlans.some((p) => p.product === "vap");
+  if (!hasVapPlan) return decision;
+
+  const productDevelopmentScore = score0to100(lookupProductDevelopmentScore(state.productDevelopmentState, decision.companyId));
+
+  const vapSalesBaseScores = DEMAND_MARKET_IDS.map((market) => lookupSalesBaseScore(state.salesBaseState, decision.companyId, market, "vap"));
+  const salesBaseAvg = vapSalesBaseScores.reduce((s, v) => s + v, 0) / Math.max(1, vapSalesBaseScores.length);
+
+  const qualityEntry = state.qualityState.qualityByCompanyProduct.find((q) => q.companyId === decision.companyId && q.product === "vap");
+  const qualityScore = qualityEntry?.qualityScore;
+
+  const trustEntries = state.qualityState.trustByCompanyMarket.filter((t) => t.companyId === decision.companyId);
+  const deliveryAvg =
+    trustEntries.length > 0 ? trustEntries.reduce((s, t) => s + unwrapUnit(t.deliveryReliabilityScore), 0) / trustEntries.length : undefined;
+
+  const coefficient = calculateCompanyCapabilityCoefficient({
+    productDevelopmentScore,
+    salesBaseScore: score0to100(salesBaseAvg),
+    qualityScore,
+    deliveryReliabilityScore: deliveryAvg !== undefined ? score0to100(deliveryAvg) : undefined,
+  });
+  const vapCapabilityScore = score0to100(coefficient);
+
+  return {
+    ...decision,
+    salesPlans: decision.salesPlans.map((plan) => {
+      if (plan.product !== "vap") {
+        if (plan.vapCapabilityScore === undefined) return plan;
+        const rest = { ...plan };
+        delete (rest as { vapCapabilityScore?: unknown }).vapCapabilityScore;
+        return rest;
+      }
+      return { ...plan, vapCapabilityScore };
     }),
   };
 }
@@ -755,7 +869,7 @@ export function advanceCompanyLabQuarter(
       const message = err instanceof Error ? err.message : String(err);
       throw new CompanyLabError(`会社 "${f.companyId}" の意思決定が不正です: ${message}`);
     }
-    return applyAuthoritativeSalesBaseScores(state, d);
+    return applyAuthoritativeVapCapabilityScores(state, applyAuthoritativeSalesBaseScores(state, d));
   });
 
   // --- Phase2: シナリオ → 市場入力（industryLab/simulationRunner.tsと同じ手順） ---
@@ -992,12 +1106,23 @@ export function advanceCompanyLabQuarter(
   // 案件ぶんの累計能力増加だけを毎期再導出してFactoryへ加算する。能力増加残高を
   // 別の永続状態として二重管理しない（capex/capacityEffect.ts参照）。
   const baseFactories = fixtures.flatMap((f) => f.factories);
-  const factoriesWithCapexCapacity = applyCapexCapacityToFactories(baseFactories, state.capexState, state.currentPeriod);
+  // 【Test15・develop/v2統合（Required fix 2）】「実効Factory[]」（既存工場への
+  // 能力加算＋稼働開始済み新設Factoryの合成）の計算は、必ず
+  // capex/factoryConstruction.ts の computeEffectiveFactories（唯一の計算箇所）を
+  // 経由する。buildCompanyOwnState（意思決定側）も同じ関数を呼ぶため、
+  // プレイヤー入力画面とこのエンジン処理が異なるFactory[]を見ることは構造的にない。
+  const factoriesWithCapex = computeEffectiveFactories(baseFactories, state.capexState, state.currentPeriod);
+  // 【Test15新設・PD省人化投資】当四半期の実効PD係数の上書きは、必ず「前四半期末
+  // までのPD稼働率」（state.pdMechanizationState）と「前四半期末までのcapex状態」
+  // （state.capexState、上のfactoriesWithCapex算出と同じ基準）から算出する。
+  // 当期の生産実績を当期の効果算出へ遡及させない（先読み禁止）。
+  const pdCoefficientOverrideByFactoryId = buildPdCoefficientOverridesByFactory(state.capexState, state.pdMechanizationState, state.currentPeriod);
   const productionInput: ProductionQuarterInput = {
-    factories: factoriesWithCapexCapacity,
+    factories: factoriesWithCapex,
     workerAssignments: decisions.flatMap((d) => d.workerAssignments),
     plans: decisions.flatMap((d) => d.productionPlans),
     companyCountry,
+    pdCoefficientOverrideByFactoryId,
   };
   const { state: productionStateAfter, updatedRawMaterialLots } = advanceProductionQuarter(
     state.productionState,
@@ -1266,7 +1391,14 @@ export function advanceCompanyLabQuarter(
       finishedGoodsLotsAtEnd: finishedGoodsLotsAfterExpiry,
       workerAssignments: companyDecision?.workerAssignments ?? [],
       appliedOvertimeRate: companyLoad ? unwrapUnit(companyLoad.overtimeRate) : 0,
-      activeFactoryCount: f.factories.filter((factory) => factory.status === "active").length,
+      // 【Test15修正】f.factories（fixture静的）ではなくfactoriesWithCapex（当期の
+      // 実効Factory[]。稼働開始済みのnewFactoryConstruction案件による新設Factoryを
+      // 含む）を基準にする。新設Factoryはoperational（完成+操業準備期間経過）に
+      // 達するまでfactoriesWithCapexへ一切現れない（applyNewFactoryConstructionToFactories
+      // 参照）ため、この変更だけで「稼働開始後にのみactiveFactoryCountへ計上される」
+      // という要件を満たす。既存のライン増設は主工場の能力を書き換えるだけで
+      // Factory[]の要素数を変えないため、この変更はTest15以前の挙動と完全に一致する。
+      activeFactoryCount: factoriesWithCapex.filter((factory) => factory.companyId === f.companyId && factory.status === "active").length,
       // 【営業人員の追加採用・forward-port】実際に当期SG&Aへ計上する営業人員数は、
       // 前期末までに確定した人数（増員後は翌四半期以降のSG&Aへ自動的に反映
       // される。既存のsalesForceSalaryUsdPerQuarter単価をそのまま使い、新しい
@@ -1280,6 +1412,10 @@ export function advanceCompanyLabQuarter(
       // として一度だけ費用・支出計上する。
       salesForceSeveranceCount: salesForceEffectiveLayoffCountByCompanyId.get(f.companyId) ?? 0,
       procurementHeadcount: f.procurementHeadcountTotal,
+      // 【Test15新設】会計計上（SG&A・キャッシュフロー）とVAP商品開発スコア更新の
+      // 唯一の情報源。companyDecision.vapProductDevelopmentSpendUsdをそのまま渡す
+      // （未設定時は0。ここで別の金額を作らない）。
+      vapProductDevelopmentSpendUsd: companyDecision?.vapProductDevelopmentSpendUsd ?? 0,
     });
     const plan = financingPlanByCompanyId.get(f.companyId)!;
     const collateral = collateralByCompanyId.get(f.companyId)!;
@@ -1324,10 +1460,16 @@ export function advanceCompanyLabQuarter(
         decision: companyDecision!.capexDecision,
         approvalGate: capexApprovalGate,
         // 【Phase 8D-3】工場スペースによる承認ゲート。当期の生産で実際に使った
-        // factoriesWithCapexCapacity（＝稼働開始済み投資を反映済みのFactory）を
-        // 「稼働中設備の使用量」の基準にし、まだ稼働開始していない案件を予約量として
-        // 数える。稼働中と予約が二重に数えられることはない（判定は
-        // isCapexProjectOperationalAt へ一元化されているため）。
+        // factoriesWithCapex（＝稼働開始済み投資を反映済みのFactory。Test15で
+        // 新設Factoryぶんも合成済み）を「稼働中設備の使用量」の基準にし、まだ
+        // 稼働開始していない案件を予約量として数える。稼働中と予約が二重に
+        // 数えられることはない（判定は isCapexProjectOperationalAt へ一元化されて
+        // いるため）。【Test15の既知の制約】buildCompanyFactorySpaceStateは
+        // baseFactories（fixture.factories、静的）とfactoryId一致でのみ工場
+        // スペース状態を組み立てるため、fixtureに存在しない新設Factory自体の
+        // スペース使用率はここには現れない（新設Factoryは既存工場のスペース
+        // プールを消費しない設計。capex/factoryConstruction.ts参照。新設Factory
+        // 自身のスペース状態表示は本タスクの範囲外・将来課題）。
         //
         // 【Phase 8D監査L-1・安全側の仕様（意図的、修正不要）】このスペース枠は
         // state.capexState（＝当四半期のcloseQuarterWithCapex呼び出しより前、
@@ -1340,11 +1482,18 @@ export function advanceCompanyLabQuarter(
           buildCompanyFactorySpaceState({
             companyId: f.companyId,
             baseFactories,
-            currentFactories: factoriesWithCapexCapacity,
+            currentFactories: factoriesWithCapex,
             capexState: state.capexState,
             period: state.currentPeriod,
           })
         ),
+        // 【Test15新設】newFactoryConstruction提案の1社あたり工場数上限（4工場）判定に使う、
+        // この会社の既存（静的fixture）工場数。capex/factoryConstruction.ts参照。
+        existingFactoryCount: f.factories.length,
+        // 【develop/v2統合・Phase2監査2-3】pdMechanization提案のtargetFactoryIdが実在するか
+        // どうかの判定に使う、この会社の当四半期時点の実効Factory ID一覧（稼働開始済み
+        // 新設Factoryを含む。factoriesWithCapexはcomputeEffectiveFactoriesの出力そのもの）。
+        validFactoryIds: factoriesWithCapex.filter((factory) => factory.companyId === f.companyId).map((factory) => factory.factoryId),
       },
       FINANCE_PARAMETERS_V1,
       CAPEX_PARAMETERS_V1,
@@ -1463,6 +1612,25 @@ export function advanceCompanyLabQuarter(
       state.workforceState ?? buildInitialWorkforceState(fixtures),
       fixtures,
       new Map(decisions.map((d) => [d.companyId, d.workerAssignments]))
+    ),
+    // 【Test15新設】次期へ繰り越すFactory単位のPD稼働率。当四半期に確定した
+    // 実績（factoriesWithCapex・productionRecord.batches）から算出する。ここで
+    // 算出した値は「次期の」pdCoefficientOverrideByFactoryId算出でのみ読まれ、
+    // 当期の効果算出（既にproductionInput構築前に終わっている）には遡及しない。
+    pdMechanizationState: deriveNextPdMechanizationState(
+      state.pdMechanizationState,
+      factoriesWithCapex,
+      computeCurrentQuarterPdUtilizationByFactory(factoriesWithCapex, productionRecord.batches)
+    ),
+    // 【Test15新設】次期へ繰り越すVAP商品開発スコア。当四半期のdecisions（会計計上と
+    // 同一のvapProductDevelopmentSpendUsd）から算出する。今期の効果算出
+    // （applyAuthoritativeVapCapabilityScores呼び出し）は既に本関数の先頭で
+    // state.productDevelopmentState（前四半期末までの値）だけを使って終わっている
+    // ため、ここでの更新が今期の成約へ遡及することはない。
+    productDevelopmentState: updateProductDevelopmentState(
+      state.productDevelopmentState,
+      new Map(decisions.map((d) => [d.companyId, d.vapProductDevelopmentSpendUsd ?? 0])),
+      fixtures.map((f) => f.companyId)
     ),
     // 【Phase 8F-1】次期へ繰り越す市場別の消費国在庫carry state。
     consumerMarketState: consumerMarketStateAfter,
