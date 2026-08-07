@@ -20,8 +20,9 @@ import { generateAutoPolicyDecision } from "../../autoPolicy";
 import { createCompanyLabRuntimeSnapshot } from "../../persistence/snapshot";
 import { CompanyLabQuarterHistoryEntry } from "../../persistence/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabState } from "../../types";
-import { buildAllCompaniesExportPayload } from "../../../../../api/v2/exports/_lib/exportDto";
-import { buildAllCompaniesExportExcelWorkbook } from "../companyLabAdminExcelBuilder";
+import { buildAllCompaniesExportPayload, buildCompanyExportPayload } from "../../../../../api/v2/exports/_lib/exportDto";
+import { buildAllCompaniesExportExcelWorkbook, buildCompanyExportExcelWorkbook } from "../companyLabAdminExcelBuilder";
+import type { CompanyId } from "../../../sales/types";
 
 const TEST_CONFIG = { scenarioId: "baseline" as const, mode: "canonical" as const, seed: "test15-excel-integration-001", turns: 10 };
 
@@ -232,4 +233,302 @@ test("Test15統合: 監査専用情報の漏洩防止 — StandardAI入力シー
   for (const pattern of forbiddenKeyPatterns) {
     assert.ok(!pattern.test(joined), `StandardAI入力シートの文言に禁止パターン ${pattern} が出現してはならない`);
   }
+});
+
+// =====================================================================
+// 【Test15】Company Lab画面からのExcelダウンロード機能の追加テスト
+//
+// 実際の複数四半期シミュレーションから、自社ブック（16シート）・業界比較ブック（10シート）を
+// 生成し、生成物を読み直して検証する。実行が重いため、シミュレーションは
+// buildOnce() で1回だけ回して全テストで使い回す（既存テストと同じ方針）。
+// =====================================================================
+
+const EXPECTED_COMPANY_SHEETS = [
+  "Meta", "PL", "製造原価計算書", "BS", "CF", "Financing", "Capex", "Company Summary",
+  "Processing Capacity", "Sales Contracts", "生データ_成約明細", "販売数量分析",
+  "Sales Detail", "Market", "Decisions", "推移サマリー",
+] as const;
+
+const EXPECTED_INDUSTRY_SHEETS = [
+  "00_凡例", "01_全社比較", "02_市場シェア", "03_全社の意思決定", "04_Turn推移",
+  "Meta", "生産・設備・労務", "意思決定項目", "StandardAI入力",
+] as const;
+
+let cachedRun: ReturnType<typeof runQuarters> | null = null;
+function sharedRun(): ReturnType<typeof runQuarters> {
+  if (!cachedRun) cachedRun = runQuarters(8);
+  return cachedRun;
+}
+
+function buildCompanyPayloadFor(entry: CompanyLabQuarterHistoryEntry, fixtures: readonly CompanyFixture[], companyId: string) {
+  return buildCompanyExportPayload({
+    labId: "test15-excel-integration-lab",
+    companyId: companyId as CompanyId,
+    entry,
+    generatedAt: new Date().toISOString(),
+    fixtures,
+  });
+}
+
+function buildAllPayloadFor(entry: CompanyLabQuarterHistoryEntry, fixtures: readonly CompanyFixture[]) {
+  return buildAllCompaniesExportPayload({
+    labId: "test15-excel-integration-lab",
+    entry,
+    companyIds: fixtures.map((f) => f.companyId),
+    generatedAt: new Date().toISOString(),
+    fixtures,
+  });
+}
+
+async function loadWorkbook(buffer: Buffer): Promise<ExcelJS.Workbook> {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+  return wb;
+}
+
+function cellText(ws: ExcelJS.Worksheet, row: number, col: number): string {
+  const v = ws.getRow(row).getCell(col).value as unknown;
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object" && v !== null && "formula" in (v as Record<string, unknown>)) return `=${(v as { formula: string }).formula}`;
+  return String(v);
+}
+
+function findRowByLabel(ws: ExcelJS.Worksheet, label: string): number | null {
+  for (let r = 1; r <= ws.rowCount; r++) {
+    if (cellText(ws, r, 1).startsWith(label)) return r;
+  }
+  return null;
+}
+
+test("Test15 Excel: 自社データブックが生成でき、再読込でき、期待16シートがすべて存在する", async () => {
+  const { fixtures, entries } = sharedRun();
+  const lastEntry = entries[entries.length - 1];
+  const payload = buildCompanyPayloadFor(lastEntry, fixtures, "BAL");
+  const history = entries.map((e) => ({
+    turn: e.turn,
+    period: String(e.period),
+    payload: buildCompanyPayloadFor(e, fixtures, "BAL"),
+  }));
+
+  const buffer = await buildCompanyExportExcelWorkbook(payload, history);
+  const wb = await loadWorkbook(buffer);
+  const names = wb.worksheets.map((ws) => ws.name);
+  for (const expected of EXPECTED_COMPANY_SHEETS) {
+    assert.ok(names.includes(expected), `自社ブックに「${expected}」シートが存在するはず（実際: ${names.join(", ")}）`);
+  }
+  assert.equal(EXPECTED_COMPANY_SHEETS.length, 16, "自社ブックの期待シート数は16");
+});
+
+test("Test15 Excel: 業界比較ブックが生成でき、参考4シート＋Turn推移＋既存5シートの計10シートが存在する", async () => {
+  const { fixtures, entries } = sharedRun();
+  const lastEntry = entries[entries.length - 1];
+  const payload = buildAllPayloadFor(lastEntry, fixtures);
+  const history = entries.map((e) => ({ turn: e.turn, period: String(e.period), payload: buildAllPayloadFor(e, fixtures) }));
+
+  const buffer = await buildAllCompaniesExportExcelWorkbook(payload, history);
+  const wb = await loadWorkbook(buffer);
+  const names = wb.worksheets.map((ws) => ws.name);
+  for (const expected of EXPECTED_INDUSTRY_SHEETS) {
+    assert.ok(names.includes(expected), `業界比較ブックに「${expected}」シートが存在するはず（実際: ${names.join(", ")}）`);
+  }
+  // Capacity_<会社ID> が5社ぶん出る（既存5シートのうちの1つ）。
+  const capacitySheets = names.filter((n) => n.startsWith("Capacity_"));
+  assert.equal(capacitySheets.length, fixtures.length, "会社数ぶんのCapacityシートが出る");
+  assert.equal(names.length, EXPECTED_INDUSTRY_SHEETS.length + fixtures.length, "参考4＋Turn推移1＋既存（Meta/生産・設備・労務/意思決定項目/StandardAI入力）4＋Capacity5＝合計10相当");
+});
+
+test("Test15 Excel: MetaのlabId・turn・companyIdが指定どおりで、他社の非公開情報が自社ブックに混入しない", async () => {
+  const { fixtures, entries } = sharedRun();
+  const lastEntry = entries[entries.length - 1];
+  const payload = buildCompanyPayloadFor(lastEntry, fixtures, "BAL");
+  const buffer = await buildCompanyExportExcelWorkbook(payload, []);
+  const wb = await loadWorkbook(buffer);
+
+  const meta = wb.getWorksheet("Meta")!;
+  const labRow = findRowByLabel(meta, "labId");
+  assert.ok(labRow, "MetaにlabId行がある");
+  assert.equal(cellText(meta, labRow!, 2), "test15-excel-integration-lab");
+  const turnRow = findRowByLabel(meta, "turn");
+  assert.equal(cellText(meta, turnRow!, 2), String(lastEntry.turn));
+  const scopeRow = findRowByLabel(meta, "scope");
+  assert.ok(cellText(meta, scopeRow!, 2).includes("BAL"), "scopeが対象会社BALである");
+
+  // 自社ブックのどのシートにも他社IDが現れないこと（スコープ隔離の回帰テスト）。
+  // 会社ID "VAP" だけは商品区分名のVAP（VAP商品開発・VAP生産量等）と綴りが完全に衝突し、
+  // 単純な文字列走査では商品名を他社IDとして誤検知する。会社スコープの隔離は
+  // CompanyExportPayload / AllCompaniesExportPayload という別型で構造的に保証されており
+  // （会社別ブック側から全社ペイロードへ到達できない）、このテキスト走査はその補助的な
+  // 二重確認にすぎないため、衝突するIDだけを対象外にする。
+  const otherCompanyIds = fixtures
+    .map((f) => f.companyId)
+    .filter((id) => id !== "BAL" && id !== "VAP");
+  for (const ws of wb.worksheets) {
+    for (let r = 1; r <= ws.rowCount; r++) {
+      for (let c = 1; c <= Math.min(ws.columnCount, 20); c++) {
+        const text = cellText(ws, r, c);
+        for (const other of otherCompanyIds) {
+          assert.ok(!text.split(/\W/).includes(other), `自社ブックのシート「${ws.name}」(${r},${c})に他社ID「${other}」が混入している: ${text}`);
+        }
+      }
+    }
+  }
+});
+
+test("Test15 Excel: 業界比較ブックの01_全社比較に5社ぶんの列が出て、値がExport payloadと一致する", async () => {
+  const { fixtures, entries } = sharedRun();
+  const lastEntry = entries[entries.length - 1];
+  const payload = buildAllPayloadFor(lastEntry, fixtures);
+  const buffer = await buildAllCompaniesExportExcelWorkbook(payload, []);
+  const wb = await loadWorkbook(buffer);
+  const ws = wb.getWorksheet("01_全社比較")!;
+
+  const headerRow = findRowByLabel(ws, "指標");
+  assert.ok(headerRow, "ヘッダー行がある");
+  const sortedIds = [...payload.companies].map((c) => c.companyId).sort();
+  for (const [i, id] of sortedIds.entries()) {
+    assert.equal(cellText(ws, headerRow!, i + 2), id, `${i + 1}列目の会社IDが一致する`);
+  }
+  assert.equal(sortedIds.length, 5, "5社比較が5社ぶん出る");
+
+  // 純売上高の値がpayloadと一致する（数値の突合）。
+  const netRevenueRow = findRowByLabel(ws, "純売上高");
+  assert.ok(netRevenueRow, "純売上高行がある");
+  for (const [i, id] of sortedIds.entries()) {
+    const expected = payload.companies.find((c) => c.companyId === id)!.financialResult?.profitAndLoss.netRevenue;
+    const actual: unknown = ws.getRow(netRevenueRow!).getCell(i + 2).value;
+    if (expected === undefined || expected === null) {
+      assert.equal(actual, "－", "値が無いセルは0ではなく「－」");
+    } else {
+      assert.ok(typeof actual === "number" && Math.abs(actual - expected) < 1e-6, `${id}の純売上高がpayloadと一致する`);
+    }
+  }
+});
+
+test("Test15 Excel: 推移サマリー・04_Turn推移のTurn列が昇順に並ぶ", async () => {
+  const { fixtures, entries } = sharedRun();
+  const lastEntry = entries[entries.length - 1];
+
+  const companyHistory = entries.map((e) => ({ turn: e.turn, period: String(e.period), payload: buildCompanyPayloadFor(e, fixtures, "BAL") }));
+  const companyWb = await loadWorkbook(await buildCompanyExportExcelWorkbook(buildCompanyPayloadFor(lastEntry, fixtures, "BAL"), companyHistory));
+  const trend = companyWb.getWorksheet("推移サマリー")!;
+  const trendHeader = findRowByLabel(trend, "指標")!;
+  const companyTurns: number[] = [];
+  for (let c = 2; c <= trend.columnCount; c++) {
+    const m = /^Turn (\d+)$/.exec(cellText(trend, trendHeader, c));
+    if (m) companyTurns.push(Number(m[1]));
+  }
+  assert.ok(companyTurns.length >= 2, "複数Turnが並ぶ");
+  assert.deepEqual(companyTurns, [...companyTurns].sort((a, b) => a - b), "推移サマリーのTurn列が昇順");
+
+  const allHistory = entries.map((e) => ({ turn: e.turn, period: String(e.period), payload: buildAllPayloadFor(e, fixtures) }));
+  const gmWb = await loadWorkbook(await buildAllCompaniesExportExcelWorkbook(buildAllPayloadFor(lastEntry, fixtures), allHistory));
+  const gmTrend = gmWb.getWorksheet("04_Turn推移")!;
+  const gmHeader = findRowByLabel(gmTrend, "指標")!;
+  const gmTurns: number[] = [];
+  for (let c = 3; c <= gmTrend.columnCount; c++) {
+    const m = /^Turn (\d+)$/.exec(cellText(gmTrend, gmHeader, c));
+    if (m) gmTurns.push(Number(m[1]));
+  }
+  assert.deepEqual(gmTurns, [...gmTurns].sort((a, b) => a - b), "04_Turn推移のTurn列が昇順");
+});
+
+test("Test15 Excel: 製造原価計算書のkg単価 = 製造原価合計 ÷ 製造数量kg であり、生産数量0でもNaN/Infinityにならない", async () => {
+  const { fixtures, entries } = sharedRun();
+  const lastEntry = entries[entries.length - 1];
+  const payload = buildCompanyPayloadFor(lastEntry, fixtures, "BAL");
+  const buffer = await buildCompanyExportExcelWorkbook(payload, []);
+  const wb = await loadWorkbook(buffer);
+  const ws = wb.getWorksheet("製造原価計算書")!;
+
+  const qtyRow = findRowByLabel(ws, "生産数量")!;
+  const totalRow = findRowByLabel(ws, "商品別 製造原価合計")!;
+  const unitRow = findRowByLabel(ws, "　うち kgあたり製造原価")!;
+
+  for (const col of [2, 3, 4]) {
+    const qty = Number(ws.getRow(qtyRow).getCell(col).value ?? 0);
+    const unitCell = ws.getRow(unitRow).getCell(col).value;
+    if (qty <= 0) {
+      assert.equal(typeof unitCell, "string", "生産数量0の商品のkg単価は文字列（「－」）である");
+      continue;
+    }
+    assert.equal(typeof unitCell, "number", "生産数量>0の商品のkg単価は数値である");
+    const unit = unitCell as number;
+    assert.ok(Number.isFinite(unit), "kg単価が有限（NaN/Infinityでない）");
+    // 合計行はExcel数式なので、期待値はpayloadから独立に再計算して突合する。
+    const totalFormula = ws.getRow(totalRow).getCell(col).value;
+    assert.ok(typeof totalFormula === "object" && totalFormula !== null, "製造原価合計はExcel数式である");
+    // kg単価 × 数量kg が、加工費+ユーティリティ+直接固定費の合計と一致すること。
+    const mc = payload.financialResult!.manufacturingCost;
+    const summary = payload.companySummary!;
+    const produced = [summary.hosoProduced, summary.pdProduced, summary.vapProduced];
+    const totalProduced = produced.reduce((s, v) => s + v, 0);
+    const idx = col - 2;
+    const base = totalProduced > 0 ? (mc.hosoProcessingCost * produced[idx]) / totalProduced : 0;
+    const additional = idx === 1 ? mc.pdAdditionalProcessingCost : idx === 2 ? mc.vapAdditionalProcessingCost : 0;
+    const utility = totalProduced > 0 ? (mc.utilityVariableCost * produced[idx]) / totalProduced : 0;
+    const key = ["hoso", "pd", "vap"][idx];
+    const directFixed = payload.financialResult!.contributionMargin.byProduct.find((d) => d.key === key)?.directFixedCost ?? 0;
+    const expectedTotal = base + additional + utility + directFixed;
+    assert.ok(Math.abs(unit * qty * 1000 - expectedTotal) < 1e-3, `kg単価×数量kgが製造原価合計と一致する（${key}）`);
+  }
+});
+
+test("Test15 Excel: 同一payloadから2回生成すると、シート名・セル内容が完全に一致する（決定論性）", async () => {
+  const { fixtures, entries } = sharedRun();
+  const lastEntry = entries[entries.length - 1];
+  const payload = buildCompanyPayloadFor(lastEntry, fixtures, "BAL");
+
+  const wbA = await loadWorkbook(await buildCompanyExportExcelWorkbook(payload, []));
+  const wbB = await loadWorkbook(await buildCompanyExportExcelWorkbook(payload, []));
+  assert.deepEqual(
+    wbA.worksheets.map((w) => w.name),
+    wbB.worksheets.map((w) => w.name),
+    "シート名が一致する"
+  );
+  for (const wsA of wbA.worksheets) {
+    const wsB = wbB.getWorksheet(wsA.name)!;
+    assert.equal(wsA.rowCount, wsB.rowCount, `シート「${wsA.name}」の行数が一致する`);
+    for (let r = 1; r <= wsA.rowCount; r++) {
+      for (let c = 1; c <= Math.min(wsA.columnCount, 16); c++) {
+        assert.equal(cellText(wsA, r, c), cellText(wsB, r, c), `シート「${wsA.name}」(${r},${c})の内容が一致する`);
+      }
+    }
+  }
+});
+
+test("Test15 Excel: 財務結果がnullのペイロードでも例外を投げず、シート構成を保ったまま生成できる（Excel生成失敗がゲーム進行を壊さない）", async () => {
+  const { fixtures, entries } = sharedRun();
+  const lastEntry = entries[entries.length - 1];
+  const base = buildCompanyPayloadFor(lastEntry, fixtures, "BAL");
+  // 財務結果・会社サマリーが欠けた状態を人工的に作る（データ未作成のturnを想定）。
+  const degraded = { ...base, financialResult: null, companySummary: null, processingCapacity: null };
+
+  const buffer = await buildCompanyExportExcelWorkbook(degraded, []);
+  const wb = await loadWorkbook(buffer);
+  const names = wb.worksheets.map((ws) => ws.name);
+  for (const expected of EXPECTED_COMPANY_SHEETS) {
+    assert.ok(names.includes(expected), `欠損時でも「${expected}」シートは存在する`);
+  }
+  const mcSheet = wb.getWorksheet("製造原価計算書")!;
+  assert.ok(cellText(mcSheet, 1, 1).includes("存在しない"), "製造原価計算書には欠損である旨が書かれる（0で埋めない）");
+});
+
+test("Test15 Excel: 販売数量分析のSUMIFSが生データ_成約明細シートを正しく参照している", async () => {
+  const { fixtures, entries } = sharedRun();
+  const lastEntry = entries[entries.length - 1];
+  const payload = buildCompanyPayloadFor(lastEntry, fixtures, "BAL");
+  const wb = await loadWorkbook(await buildCompanyExportExcelWorkbook(payload, []));
+  const ws = wb.getWorksheet("販売数量分析")!;
+
+  let sumifsCount = 0;
+  for (let r = 1; r <= ws.rowCount; r++) {
+    for (let c = 2; c <= 4; c++) {
+      const text = cellText(ws, r, c);
+      if (text.startsWith("=SUMIFS(")) {
+        assert.ok(text.includes("生データ_成約明細"), "SUMIFSが生データ_成約明細シートを参照している");
+        sumifsCount += 1;
+      }
+    }
+  }
+  assert.ok(sumifsCount > 0, "SUMIFS数式が少なくとも1件ある");
 });

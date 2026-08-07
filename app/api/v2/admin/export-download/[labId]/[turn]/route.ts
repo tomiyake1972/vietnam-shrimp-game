@@ -28,10 +28,60 @@ import {
   fetchMarketTurnExport,
 } from "../../../../../../lib/v2/companyLab/adminExport/companyLabAdminExportSource";
 import { buildCompanyLabAdminExportZip } from "../../../../../../lib/v2/companyLab/adminExport/companyLabAdminExportZip";
+import {
+  buildAllCompaniesExportExcelWorkbook,
+  buildCompanyExportExcelWorkbook,
+} from "../../../../../../lib/v2/companyLab/adminExport/companyLabAdminExcelBuilder";
 import { listCompanyOptionsForUi } from "../../../../../../v2/company-lab/play/_lib/companyOptions";
 import type { AllCompaniesExportPayload, CompanyExportPayload } from "../../../../../v2/exports/_lib/exportDto";
 
-type ExportMode = "bundle" | "company" | "all" | "market";
+type ExportMode = "bundle" | "company" | "all" | "market" | "excel-company" | "excel-industry";
+
+const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/**
+ * 【Test15】Turn1〜対象Turnまでの履歴をまとめて取得する。
+ *
+ * 1本でも失敗したらExcel全体を諦める、ということはしない（履歴が欠けても他のシートは
+ * 有効なため）。取得できたturnだけを昇順で返し、欠けたturnは単に含めない。
+ * 取得は既存の読み取り専用Export API経由のみで、Redis・Repositoryへは触れない。
+ */
+async function fetchTurnHistory<T>(
+  availableTurns: readonly number[],
+  upToTurn: number,
+  fetchOne: (turn: number) => Promise<{ readonly ok: boolean; readonly data?: unknown }>,
+  periodOf: (data: unknown) => string
+): Promise<readonly { readonly turn: number; readonly period: string; readonly payload: T }[]> {
+  const targets = availableTurns.filter((t) => t <= upToTurn).sort((a, b) => a - b);
+  const results = await Promise.all(
+    targets.map(async (turn) => {
+      try {
+        const r = await fetchOne(turn);
+        if (!r.ok || r.data === undefined) return null;
+        return { turn, period: periodOf(r.data), payload: r.data as T };
+      } catch {
+        return null;
+      }
+    })
+  );
+  return results.filter((r): r is { turn: number; period: string; payload: T } => r !== null);
+}
+
+function periodFromPayload(data: unknown): string {
+  const meta = (data as { meta?: { period?: unknown } } | null)?.meta;
+  return typeof meta?.period === "string" ? meta.period : "";
+}
+
+function xlsxDownloadResponse(buffer: Buffer, fileName: string): NextResponse {
+  return new NextResponse(new Uint8Array(buffer), {
+    status: 200,
+    headers: {
+      "content-type": XLSX_CONTENT_TYPE,
+      "content-disposition": `attachment; filename="${fileName}"`,
+      "cache-control": "no-store",
+    },
+  });
+}
 
 function friendlyErrorPage(status: number, title: string, message: string): NextResponse {
   const html = `<!DOCTYPE html>
@@ -43,6 +93,8 @@ function friendlyErrorPage(status: number, title: string, message: string): Next
 
 function parseMode(value: string | null): ExportMode {
   if (value === "company" || value === "all" || value === "market") return value;
+  // 【Test15】Company Lab / Test15画面のボタンから直接xlsxを取得するモード。
+  if (value === "excel-company" || value === "excel-industry") return value;
   return "bundle";
 }
 
@@ -99,6 +151,44 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ labI
     const result = await fetchMarketTurnExport(origin, labId, turn);
     if (!result.ok) return friendlyErrorPage(502, "ダウンロード生成に失敗しました", result.userMessage);
     return jsonDownloadResponse(result.data, `${labId}_turn${turn}_market.json`);
+  }
+
+  // 【Test15】自社データブック（xlsx直接ダウンロード）。
+  if (mode === "excel-company") {
+    const result = await fetchCompanyTurnExport(origin, labId, turn, requestedCompanyId);
+    if (!result.ok) return friendlyErrorPage(502, "ダウンロード生成に失敗しました", result.userMessage);
+    const history = await fetchTurnHistory<CompanyExportPayload>(
+      indexResult.data.availableTurns,
+      turn,
+      (t) => fetchCompanyTurnExport(origin, labId, t, requestedCompanyId),
+      periodFromPayload
+    );
+    try {
+      const buffer = await buildCompanyExportExcelWorkbook(result.data as CompanyExportPayload, history);
+      return xlsxDownloadResponse(buffer, `Test15_${requestedCompanyId}_Turn${turn}_Databook.xlsx`);
+    } catch (e) {
+      console.error("[admin export-download] 自社データブックの生成に失敗しました:", e);
+      return friendlyErrorPage(500, "ダウンロード生成に失敗しました", "Excelの生成中にエラーが発生しました。時間をおいて再度お試しください。");
+    }
+  }
+
+  // 【Test15】業界比較ブック（xlsx直接ダウンロード。全5社の非公開意思決定を含む）。
+  if (mode === "excel-industry") {
+    const result = await fetchAllCompaniesTurnExport(origin, labId, turn);
+    if (!result.ok) return friendlyErrorPage(502, "ダウンロード生成に失敗しました", result.userMessage);
+    const history = await fetchTurnHistory<AllCompaniesExportPayload>(
+      indexResult.data.availableTurns,
+      turn,
+      (t) => fetchAllCompaniesTurnExport(origin, labId, t),
+      periodFromPayload
+    );
+    try {
+      const buffer = await buildAllCompaniesExportExcelWorkbook(result.data as AllCompaniesExportPayload, history);
+      return xlsxDownloadResponse(buffer, `Test15_Industry_Turn${turn}.xlsx`);
+    } catch (e) {
+      console.error("[admin export-download] 業界比較ブックの生成に失敗しました:", e);
+      return friendlyErrorPage(500, "ダウンロード生成に失敗しました", "Excelの生成中にエラーが発生しました。時間をおいて再度お試しください。");
+    }
   }
 
   // mode === "bundle"（一括ダウンロード）

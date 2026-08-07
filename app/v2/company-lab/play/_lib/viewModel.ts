@@ -21,7 +21,15 @@ import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../../lib/v2/
 import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../../../../lib/v2/companyLab/standardAi/policy";
 import { restoreCompanyLabStateFromRuntimeSnapshot } from "../../../../lib/v2/companyLab/persistence/snapshot";
 import { CompanyLabPersistedStateV1, CompanyLabDraftEnvelope } from "../../../../lib/v2/companyLab/persistence/types";
-import { MarketQuarterResult } from "../../../../lib/v2/market/types";
+import { DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterResult } from "../../../../lib/v2/market/types";
+import { unwrapUnit } from "../../../../lib/v2/core/units";
+import { getScenarioTurnInput } from "../../../../lib/v2/scenario/scenarioEngine";
+import {
+  OpeningInfoViewModel,
+  buildDepreciableAssets,
+  buildOpeningBalanceSheet,
+  buildOpeningMarketInfo,
+} from "./openingInfoViewModel";
 import { ConsumerMarketQuarterRecord } from "../../../../lib/v2/market/consumerInventory";
 import { CapexProjectQuarterEvent, CapexQuarterResult, CapexRejectedProposal } from "../../../../lib/v2/capex";
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
@@ -121,6 +129,12 @@ export interface PlayerScreenViewModel {
   readonly previousQuarterFinancials: PlayerPreviousQuarterFinancials | null;
   /** 前期（turn-1）ぶんの公開市場結果（市場情報パネルの前四半期比表示用）。前期が存在しなければnull。 */
   readonly previousQuarterMarket: PlayerPreviousQuarterMarket | null;
+  /**
+   * 【Test15】期初情報（BS・償却資産明細・市場情報）。turn1でも必ず値が入る
+   * （前四半期の実績には依存しない）。Company Lab / Test15画面専用の表示用データで、
+   * 通常プレイヤー画面には出さない。
+   */
+  readonly openingInfo: OpeningInfoViewModel;
   /** 履歴要約（診断用のhistory/[turn]は使わない。§6.6・§8.2）。最新10件まで。 */
   readonly recentHistory: readonly CompanyLabHistoryEntrySummaryDto[];
 }
@@ -295,7 +309,49 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,
       previousQuarterFinancials,
       previousQuarterMarket,
+      openingInfo: buildOpeningInfo(ownState, publicInfo, restoredState, turn),
       recentHistory: historyPage.entries.map(toHistoryEntrySummaryDto),
     },
+  };
+}
+
+/**
+ * 【Test15】期初情報（BS・償却資産明細・市場情報）を組み立てる。
+ *
+ * turn1でも必ず値が出ることがこの機能の目的なので、前四半期の実績（lastMarketResult）には
+ * 依存させない。市場別の前期消費量はシナリオ定義が当該turnぶんを持っているため、
+ * getScenarioTurnInput（純粋関数）から読み出す。シナリオ側で取得に失敗した場合でも
+ * 画面全体を壊さないよう、その項目だけundefinedにして続行する（0で埋めない）。
+ */
+function buildOpeningInfo(
+  ownState: CompanyOwnState,
+  publicInfo: PublicMarketInfo,
+  restoredState: CompanyLabState,
+  turn: number
+): OpeningInfoViewModel {
+  let priorByMarket:
+    | Partial<Record<DemandMarketId, { priorPeriodConsumption: number; economicIndex: number; populationGrowthRate: number }>>
+    | undefined;
+  try {
+    const scenarioTurnInput = getScenarioTurnInput(restoredState.scenarioState, turn);
+    priorByMarket = {};
+    for (const market of DEMAND_MARKET_IDS) {
+      const m = scenarioTurnInput.demandMarkets[market];
+      priorByMarket[market] = {
+        priorPeriodConsumption: unwrapUnit(m.priorPeriodConsumption),
+        economicIndex: m.economicIndex,
+        populationGrowthRate: m.populationGrowthRate,
+      };
+    }
+  } catch {
+    priorByMarket = undefined;
+  }
+
+  return {
+    period: restoredState.currentPeriod,
+    turn,
+    balanceSheet: buildOpeningBalanceSheet(ownState),
+    depreciableAssets: buildDepreciableAssets(ownState, turn),
+    marketInfo: buildOpeningMarketInfo(publicInfo.vietnamDomesticPriorPrice, priorByMarket),
   };
 }

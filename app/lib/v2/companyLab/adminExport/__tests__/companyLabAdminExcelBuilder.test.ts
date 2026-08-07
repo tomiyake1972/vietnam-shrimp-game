@@ -17,9 +17,14 @@ import { SYNTHETIC_CONTRACT, SYNTHETIC_PERIOD, buildSyntheticCompanyExportPayloa
  * test/sai6-manual-observation-2026-08-01 で Company Summary・Decisions を追加した後の
  * シート構成。
  */
+// 【Test15】製造原価計算書・生データ_成約明細・販売数量分析・推移サマリーの4シートを追加した
+// （Company Lab画面からのExcelダウンロード機能。参考ブックBAL_Test14_turn2_databook.xlsxの
+// 構成に合わせ、製造原価計算書はPLの直後、生データ_成約明細と販売数量分析はSales Detailの
+// 手前、推移サマリーは末尾）。順序も含めて固定する。
 const EXPECTED_SHEET_NAMES = [
   "Meta",
   "PL",
+  "製造原価計算書",
   "BS",
   "CF",
   "Financing",
@@ -27,9 +32,12 @@ const EXPECTED_SHEET_NAMES = [
   "Company Summary",
   "Processing Capacity",
   "Sales Contracts",
+  "生データ_成約明細",
+  "販売数量分析",
   "Sales Detail",
   "Market",
   "Decisions",
+  "推移サマリー",
 ];
 
 async function loadWorkbook(payload: Parameters<typeof buildCompanyExportExcelWorkbook>[0]): Promise<ExcelJS.Workbook> {
@@ -39,7 +47,7 @@ async function loadWorkbook(payload: Parameters<typeof buildCompanyExportExcelWo
   return wb;
 }
 
-test("buildCompanyExportExcelWorkbook: Meta/PL/BS/CF/Financing/Capex/Company Summary/Sales Contracts/Processing Capacity/Sales Detail/Market/Decisionsの12シートを生成する", async () => {
+test("buildCompanyExportExcelWorkbook: 参考ブックと同じ順序で16シートを生成する", async () => {
   const wb = await loadWorkbook(buildSyntheticCompanyExportPayload());
   assert.deepEqual(
     wb.worksheets.map((ws) => ws.name),

@@ -27,6 +27,7 @@ import DecisionEditor from "../../components/DecisionEditor";
 import OpeningCompanyStatePanel from "../../components/OpeningCompanyStatePanel";
 import AiMarketInfoPanel from "../../components/AiMarketInfoPanel";
 import CollapsibleSection from "../../components/CollapsibleSection";
+import { DepreciableAssetsPanel, OpeningBalanceSheetPanel, OpeningMarketInfoPanel } from "../../components/OpeningInfoPanels";
 import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
 import FinancialResultsSection from "../../components/financial/FinancialResultsSection";
@@ -241,10 +242,22 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
           </div>
         </div>
 
+        {/* 【Test15】期初情報。情報量が多いため3パネルとも既定で閉じ、意思決定フォームを
+            画面下へ押し下げないようにする（プレイヤーからの「できるだけ折りたたんでほしい」
+            という要望に合わせ、既存の期初セクションも既定で閉じる方針へ揃えた）。 */}
+        {!isCompleted && (
+          <>
+            <OpeningBalanceSheetPanel bs={viewModel.openingInfo.balanceSheet} turn={viewModel.openingInfo.turn} />
+            <DepreciableAssetsPanel assets={viewModel.openingInfo.depreciableAssets} />
+            <OpeningMarketInfoPanel info={viewModel.openingInfo.marketInfo} />
+          </>
+        )}
+
         {!isCompleted && (
           <CollapsibleSection
             title={`自社の状態（turn ${viewModel.currentTurn} 開始時点）`}
             tone="info"
+            defaultOpen={false}
             testId="opening-company-state-section"
           >
             <OpeningCompanyStatePanel ownState={viewModel.ownState} fixture={viewModel.fixture} turn={viewModel.currentTurn} />
@@ -277,6 +290,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
           <CollapsibleSection
             title={`Standard AIの提案（turn ${viewModel.currentTurn}・実行前プレビュー）`}
             tone="info"
+            defaultOpen={false}
             testId="ai-proposal-diagnostics-section"
           >
             <p className="text-xs text-gray-400 mb-2">
@@ -565,7 +579,12 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
         {viewModel.lastQuarterResult && (
           <div className="space-y-5">
             <h2 className="text-base font-semibold">直近の四半期結果（turn {viewModel.lastQuarterResult.turn}）</h2>
-            <CollapsibleSection title="市場情報" tone="info" testId="market-section">
+            <ExcelDownloadButtons
+              labId={viewModel.labId}
+              turn={viewModel.lastQuarterResult.turn}
+              companyId={viewModel.playerCompanyId}
+            />
+            <CollapsibleSection title="市場情報" tone="info" defaultOpen={false} testId="market-section">
               <MarketPanel
                 marketResult={viewModel.lastQuarterResult.marketResult}
                 globalReasonCodes={viewModel.lastQuarterResult.globalReasonCodes}
@@ -575,11 +594,11 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               />
             </CollapsibleSection>
             {viewModel.lastQuarterResult.playerSummary && (
-              <CollapsibleSection title="自社の四半期結果" tone="info" testId="player-results-section">
+              <CollapsibleSection title="自社の四半期結果" tone="info" defaultOpen={false} testId="player-results-section">
                 <ResultsPanel summary={viewModel.lastQuarterResult.playerSummary} displayName={viewModel.playerDisplayName} />
               </CollapsibleSection>
             )}
-            <CollapsibleSection title="財務結果" tone="info" testId="financial-results-section">
+            <CollapsibleSection title="財務結果" tone="info" defaultOpen={false} testId="financial-results-section">
             <FinancialResultsSection
               displayName={viewModel.playerDisplayName}
               companyId={viewModel.playerCompanyId}
@@ -622,6 +641,51 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
           </Link>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 【Test15】Excelダウンロードボタン（Company Lab / Test15画面限定）。
+ *
+ * 既存の管理者Export UI（/v2/company-lab/play/export/[labId]）と同じく、素の
+ * <a href download> でサーバー側のダウンロードrouteを開くだけにする。JSでBlobを
+ * 組み立てないため、iPad Safariでもタップだけで保存でき、認証（staging署名Cookie）も
+ * ブラウザ標準のCookie送出にそのまま乗る。Excelの生成・トークンの読み取りは
+ * すべてサーバー側（route.ts → companyLabAdminExportSource → Excel builder）で行われ、
+ * このコンポーネントは秘密情報に一切触れない。
+ */
+function ExcelDownloadButtons({
+  labId,
+  turn,
+  companyId,
+}: {
+  readonly labId: string;
+  readonly turn: number;
+  readonly companyId: string;
+}) {
+  const base = `/api/v2/admin/export-download/${encodeURIComponent(labId)}/${encodeURIComponent(String(turn))}`;
+  return (
+    <div className="bg-gray-800 rounded-2xl p-3 sm:p-4 space-y-2" data-testid="excel-download-buttons">
+      <div className="flex flex-col sm:flex-row gap-2">
+        <a
+          href={`${base}?mode=excel-company&companyId=${encodeURIComponent(companyId)}`}
+          download
+          className="flex-1 bg-teal-700/80 hover:bg-teal-600 rounded-lg px-4 py-3 text-sm font-semibold text-white text-center"
+        >
+          📊 自社データブック
+        </a>
+        <a
+          href={`${base}?mode=excel-industry`}
+          download
+          className="flex-1 bg-indigo-700/80 hover:bg-indigo-600 rounded-lg px-4 py-3 text-sm font-semibold text-white text-center"
+        >
+          🌐 業界比較ブック
+        </a>
+      </div>
+      <p className="text-[11px] text-gray-400">
+        Turn1〜現在Turnの履歴を含むExcelです。業界比較ブックには全5社の非公開の意思決定が含まれるため、プレイヤーへ配布しないでください。
+      </p>
     </div>
   );
 }

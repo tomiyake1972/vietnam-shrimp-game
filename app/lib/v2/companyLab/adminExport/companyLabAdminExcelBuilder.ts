@@ -1160,7 +1160,10 @@ function formatUsdText(value: number): string {
  * 2シートを追加した。いずれも既存のCompanyExportPayload（companySummary・decisionInfo）を
  * そのまま転記するだけで、新しいデータ収集・値の再計算は一切行っていない。
  */
-export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayload): Promise<Buffer> {
+export async function buildCompanyExportExcelWorkbook(
+  payload: CompanyExportPayload,
+  history?: readonly CompanyTurnHistoryEntry[]
+): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "ShrimpX V2 Company Lab — Export API (自動生成)";
   wb.created = new Date(payload.meta.generatedAt);
@@ -1168,11 +1171,14 @@ export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayl
   writeMetaSheet(wb, payload);
   if (payload.financialResult) {
     writePlSheet(wb, payload.financialResult);
+    // 【Test15】製造原価計算書はPLの直後（参考ブックと同じ位置）。
+    writeManufacturingCostSheet(wb, payload);
     const bsCashRowNumber = writeBsSheet(wb, payload.financialResult);
     writeCfSheet(wb, payload.financialResult, bsCashRowNumber);
   } else {
     const plWs = wb.addWorksheet("PL");
     plWs.addRow(["このターン・会社の財務結果はAPI上に存在しません（データ未作成）"]);
+    writeManufacturingCostSheet(wb, payload);
     wb.addWorksheet("BS").addRow(["このターン・会社の財務結果はAPI上に存在しません（データ未作成）"]);
     wb.addWorksheet("CF").addRow(["このターン・会社の財務結果はAPI上に存在しません（データ未作成）"]);
   }
@@ -1181,9 +1187,15 @@ export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayl
   writeCompanySummarySheet(wb, payload.companySummary);
   writeProcessingCapacitySheet(wb, payload.processingCapacity);
   writeSalesContractsSheet(wb, payload.salesContracts);
+  // 【Test15】生データ_成約明細 → 販売数量分析 の順（後者が前者をSUMIFSで参照する）。
+  writeRawAllocationDetailSheet(wb, payload);
+  writeSalesVolumeAnalysisSheet(wb, payload);
   writeSalesDetailSheet(wb, payload);
   writeMarketSheet(wb, payload.market);
   writeDecisionsSheet(wb, payload.decisionInfo);
+  // 【Test15】Turn履歴。historyが渡されない呼び出し経路（既存のZIP生成等）でも
+  // シート自体は必ず作り、「履歴が取得できなかった」旨を書く（シート数を安定させる）。
+  writeCompanyTrendSheet(wb, history ?? []);
 
   const arrayBuffer = await wb.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);
@@ -1201,10 +1213,22 @@ export async function buildCompanyExportExcelWorkbook(payload: CompanyExportPayl
  * 【再計算しない】各社の値は Export JSON の processingCapacity（＝意思決定画面と同じ
  * processingForecastViewModel の出力）をそのまま書き写す。ここで配分計算をしない。
  */
-export async function buildAllCompaniesExportExcelWorkbook(payload: AllCompaniesExportPayload): Promise<Buffer> {
+export async function buildAllCompaniesExportExcelWorkbook(
+  payload: AllCompaniesExportPayload,
+  history?: readonly AllCompaniesTurnHistoryEntry[]
+): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "ShrimpX V2 Company Lab — Export API (自動生成・GM用)";
   wb.created = new Date(payload.meta.generatedAt);
+
+  // 【Test15】参考GMブック（Sample Test13_GM分析ブック）の4シートを先頭へ置く。
+  // 既存の5シート（Meta / Capacity_各社 / 生産・設備・労務 / 意思決定項目 / StandardAI入力）は
+  // Test15の投資機能（PD省人化・VAP開発・工場建設）の確認手段なので削除せず後段に残す。
+  writeGmLegendSheet(wb, payload);
+  writeGmCrossCompanySheet(wb, payload);
+  writeGmMarketShareSheet(wb, payload);
+  writeGmAllDecisionsSheet(wb, payload);
+  writeGmTurnTrendSheet(wb, history ?? []);
 
   const ws = wb.addWorksheet("Meta");
   ws.columns = [{ width: 34 }, { width: 60 }];
@@ -1431,4 +1455,720 @@ function writeStandardAiInputSheet(wb: ExcelJS.Workbook, payload: AllCompaniesEx
     "市場情報（公開情報のみ）は「Market」相当のデータをそのまま参照してください。本シートは会社別state部分の抜粋です。",
   ]);
   marketNoteRow.getCell(1).font = LABEL_FONT;
+}
+
+// =====================================================================
+// 【Test15】追加シート群
+//
+// 参考ブック（BAL_Test14_turn2_databook.xlsx / Sample Test13_GM分析ブック_turn4.xlsx）の
+// シート構成・列順・数式を踏襲して実装する。これらの参考ブックはPython/openpyxlで
+// 後処理して作られていたため、同じ内容をこのTypeScript側の生成器へ取り込み、
+// ゲーム画面から直接ダウンロードできるようにする。
+//
+// 【この追加分がやらないこと】
+//   - Export JSON に存在しない値を推測・按分しない。商品別に配賦ルールが存在しない
+//     費目は「共通費・商品別非配賦」として明示し、商品列を空欄のままにする。
+//   - 数量0での除算をしない（kg単価は safeUnitCostPerKg 経由でのみ算出する）。
+// =====================================================================
+
+/**
+ * kgあたり単価 = 金額 ÷ (トン数 × 1000)。
+ * トン数が0・負・非有限のときは undefined を返す（NaN/Infinityをシートへ書かない）。
+ */
+function safeUnitCostPerKg(totalUsd: number, quantityTons: number): number | undefined {
+  if (!Number.isFinite(totalUsd) || !Number.isFinite(quantityTons) || quantityTons <= 0) return undefined;
+  const kg = quantityTons * 1000;
+  if (kg <= 0) return undefined;
+  const v = totalUsd / kg;
+  return Number.isFinite(v) ? v : undefined;
+}
+
+const PRODUCT_KEYS = ["hoso", "pd", "vap"] as const;
+type ProductKey = (typeof PRODUCT_KEYS)[number];
+
+/**
+ * 【Test15新規】製造原価計算書シート。
+ *
+ * 商品別（HOSO/PD/VAP）に「製造数量(t)・製造原価合計(USD)・製造原価(USD/kg)」を必ず出す
+ * （三宅さんの指示B-2）。内訳のうち商品別に帰属・配賦できるものだけを商品列へ書き、
+ * Export APIに商品別内訳が存在しない費目（材料費・遊休労務費・臨時工費・残業費・再加工費）は
+ * 勝手に按分せず「IV. 共通費（商品別非配賦）」として会社合計のみを書く。
+ */
+function writeManufacturingCostSheet(wb: ExcelJS.Workbook, payload: CompanyExportPayload): void {
+  const ws = wb.addWorksheet("製造原価計算書");
+  ws.columns = [{ width: 62 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 20 }, { width: 18 }];
+
+  const financial = payload.financialResult;
+  const summary = payload.companySummary;
+  if (!financial || !summary) {
+    ws.addRow(["このターン・会社の財務結果または会社サマリーがAPI上に存在しないため、製造原価計算書を作成できません（データ未作成）"]).getCell(1).font = LABEL_FONT;
+    return;
+  }
+  const mc = financial.manufacturingCost;
+  if (!mc) {
+    ws.addRow(["このターン・会社の製造原価内訳（manufacturingCost）がAPI上に存在しません（データ未作成）"]).getCell(1).font = LABEL_FONT;
+    return;
+  }
+
+  const producedByProduct: Readonly<Record<ProductKey, number>> = {
+    hoso: summary.hosoProduced,
+    pd: summary.pdProduced,
+    vap: summary.vapProduced,
+  };
+  const totalProduced = PRODUCT_KEYS.reduce((s, p) => s + producedByProduct[p], 0);
+
+  writeHeaderRow(ws, ["科目", "HOSO", "PD", "VAP", "共通（商品別非配賦）", "会社合計"]);
+
+  const qtyRow = ws.addRow(["生産数量 (t)", producedByProduct.hoso, producedByProduct.pd, producedByProduct.vap, null, totalProduced]);
+  qtyRow.getCell(1).font = LABEL_FONT;
+  for (const c of [2, 3, 4, 6]) qtyRow.getCell(c).numFmt = "#,##0.00";
+
+  ws.addRow([]);
+
+  // --- I. 加工費 ---
+  ws.addRow(["I. 加工費（Processing Cost）"]).getCell(1).font = CHECK_FONT;
+  // HOSO基礎相当加工費は全商品へ同一単価で適用され、生産量比で配賦される
+  // （原価計算エンジンのルール。ここで按分率を発明していない）。
+  const baseProcessingByProduct = PRODUCT_KEYS.map((p) =>
+    totalProduced > 0 ? (mc.hosoProcessingCost * producedByProduct[p]) / totalProduced : 0
+  );
+  const baseRow = ws.addRow([
+    "HOSO基礎相当加工費（全商品へ同一単価。生産量比で配賦）",
+    baseProcessingByProduct[0],
+    baseProcessingByProduct[1],
+    baseProcessingByProduct[2],
+    null,
+    mc.hosoProcessingCost,
+  ]);
+  const addRow = ws.addRow([
+    "PD/VAP追加加工費（商品へ直接帰属）",
+    0,
+    mc.pdAdditionalProcessingCost,
+    mc.vapAdditionalProcessingCost,
+    null,
+    mc.pdAdditionalProcessingCost + mc.vapAdditionalProcessingCost,
+  ]);
+  const processingTotalRow = ws.addRow(["加工費合計 (I)", null, null, null, null, null]);
+  for (const col of [2, 3, 4, 6]) {
+    const L = colLetter(col);
+    processingTotalRow.getCell(col).value = { formula: `${L}${baseRow.number}+${L}${addRow.number}` };
+  }
+  processingTotalRow.font = CHECK_FONT;
+
+  // --- II. ユーティリティ変動費 ---
+  ws.addRow([]);
+  ws.addRow(["II. ユーティリティ変動費（全商品へ同一単価。生産量比で配賦）"]).getCell(1).font = CHECK_FONT;
+  const utilityByProduct = PRODUCT_KEYS.map((p) =>
+    totalProduced > 0 ? (mc.utilityVariableCost * producedByProduct[p]) / totalProduced : 0
+  );
+  const utilityRow = ws.addRow([
+    "ユーティリティ変動費 (II)",
+    utilityByProduct[0],
+    utilityByProduct[1],
+    utilityByProduct[2],
+    null,
+    mc.utilityVariableCost,
+  ]);
+
+  // --- III. 配賦済み直接固定費 ---
+  ws.addRow([]);
+  ws.addRow([
+    "III. 配賦済み直接固定費（労務費生産分は実配属人数比、工場固定費等は加工度ウェイト付き数量比。エンジンの配賦結果をそのまま転記）",
+  ]).getCell(1).font = CHECK_FONT;
+  const byProduct = financial.contributionMargin?.byProduct ?? [];
+  const directFixedByProduct = PRODUCT_KEYS.map((p) => byProduct.find((d) => d.key === p)?.directFixedCost ?? 0);
+  const directFixedRow = ws.addRow([
+    "配賦済み直接固定費 (III)",
+    directFixedByProduct[0],
+    directFixedByProduct[1],
+    directFixedByProduct[2],
+    null,
+    directFixedByProduct.reduce((s, v) => s + v, 0),
+  ]);
+
+  // --- 商品別 製造原価合計・kg単価 ---
+  ws.addRow([]);
+  const productTotalRow = ws.addRow(["商品別 製造原価合計 (I+II+III)", null, null, null, null, null]);
+  for (const col of [2, 3, 4, 6]) {
+    const L = colLetter(col);
+    productTotalRow.getCell(col).value = {
+      formula: `${L}${processingTotalRow.number}+${L}${utilityRow.number}+${L}${directFixedRow.number}`,
+    };
+  }
+  productTotalRow.font = CHECK_FONT;
+
+  // kg単価は必ず「製造原価合計 ÷ (製造数量t × 1000)」。生産数量0の商品は「－」を書く
+  // （safeUnitCostPerKgがundefinedを返すため、NaN・Infinityがセルへ入ることはない）。
+  // 数式ではなく実数値を書くのは、生成後のブックを読み直すだけで単価を検証できるようにするため。
+  const productTotalsUsd = PRODUCT_KEYS.map(
+    (p, i) => baseProcessingByProduct[i] + (p === "pd" ? mc.pdAdditionalProcessingCost : p === "vap" ? mc.vapAdditionalProcessingCost : 0) + utilityByProduct[i] + directFixedByProduct[i]
+  );
+  const unitRow = ws.addRow(["　うち kgあたり製造原価 (USD/kg)", null, null, null, null, null]);
+  for (const [idx, col] of [2, 3, 4].entries()) {
+    const unit = safeUnitCostPerKg(productTotalsUsd[idx], producedByProduct[PRODUCT_KEYS[idx]]);
+    if (unit === undefined) {
+      unitRow.getCell(col).value = "－（生産数量0のため算出不可）";
+    } else {
+      unitRow.getCell(col).value = unit;
+      unitRow.getCell(col).numFmt = "0.0000";
+    }
+  }
+  const totalUnit = safeUnitCostPerKg(
+    productTotalsUsd.reduce((s, v) => s + v, 0),
+    totalProduced
+  );
+  if (totalUnit === undefined) {
+    unitRow.getCell(6).value = "－（生産数量0のため算出不可）";
+  } else {
+    unitRow.getCell(6).value = totalUnit;
+    unitRow.getCell(6).numFmt = "0.0000";
+  }
+
+  // --- IV. 共通費（商品別非配賦） ---
+  ws.addRow([]);
+  ws.addRow(["IV. 共通費（Export APIに商品別内訳が存在しないため、按分せず会社合計のみ表示）"]).getCell(1).font = CHECK_FONT;
+  const commonRows: readonly (readonly [string, number])[] = [
+    ["材料費－国内 (domesticRawMaterialCost)", mc.domesticRawMaterialCost],
+    ["材料費－輸入 (importedRawMaterialCost)", mc.importedRawMaterialCost],
+    ["材料費－養殖 (aquacultureRawMaterialCost)", mc.aquacultureRawMaterialCost],
+    ["遊休労務費 (idleLaborCost)：エンジンの設計上、どの商品にも配賦しない", mc.idleLaborCost],
+    ["臨時工費 (temporaryWorkerCost)", mc.temporaryWorkerCost],
+    ["残業費 (overtimeCost)", mc.overtimeCost],
+    ["再加工費 (reworkCost)", mc.reworkCost],
+  ];
+  const commonFirstRow = ws.rowCount + 1;
+  for (const [label, value] of commonRows) {
+    const r = ws.addRow([label, null, null, null, value, null]);
+    r.getCell(1).font = LABEL_FONT;
+    r.getCell(5).numFmt = USD_FORMAT;
+  }
+  const commonLastRow = ws.rowCount;
+  const commonTotalRow = ws.addRow(["共通費合計 (IV)", null, null, null, null, null]);
+  commonTotalRow.getCell(5).value = { formula: `SUM(E${commonFirstRow}:E${commonLastRow})` };
+  commonTotalRow.font = CHECK_FONT;
+
+  // --- 当期総製造費用と検算 ---
+  ws.addRow([]);
+  const grandTotalRow = ws.addRow(["当期総製造費用（Σ商品別合計 ＋ 共通費合計）", null, null, null, null, null]);
+  grandTotalRow.getCell(6).value = { formula: `F${productTotalRow.number}+E${commonTotalRow.number}` };
+  grandTotalRow.font = CHECK_FONT;
+
+  const referenceTotal =
+    mc.domesticRawMaterialCost + mc.importedRawMaterialCost + mc.aquacultureRawMaterialCost +
+    mc.idleLaborCost + mc.temporaryWorkerCost + mc.overtimeCost + mc.reworkCost +
+    mc.hosoProcessingCost + mc.pdAdditionalProcessingCost + mc.vapAdditionalProcessingCost +
+    mc.utilityVariableCost + directFixedByProduct.reduce((s, v) => s + v, 0);
+  const refRow = ws.addRow(["参照値（同じ費目をExport JSONから独立に再集計）", null, null, null, null, referenceTotal]);
+  refRow.getCell(6).numFmt = USD_FORMAT;
+  const diffRow = ws.addRow(["差額（0であることを確認）", null, null, null, null, null]);
+  diffRow.getCell(6).value = { formula: `F${grandTotalRow.number}-F${refRow.number}` };
+  diffRow.font = CHECK_FONT;
+
+  for (const col of [2, 3, 4, 5, 6]) {
+    ws.getColumn(col).numFmt = ws.getColumn(col).numFmt ?? USD_FORMAT;
+  }
+
+  ws.addRow([]);
+  const note = ws.addRow([
+    "注記: 加工費・ユーティリティ変動費は「全商品へ同一の$/t単価を適用し、生産量比で配賦する」という原価計算エンジン（finance/quarterClose.ts）のルールに基づいて配賦しています（推計ではありません）。配賦済み直接固定費は同エンジンのcontributionMargin.byProduct[].directFixedCostをそのまま転記しています。材料費・遊休労務費・臨時工費・残業費・再加工費は、Export API（/api/v2/exports/**）が商品別内訳を公開していないため、按分せず共通費として表示しています。kgあたり製造原価は必ず「製造原価合計 ÷ (製造数量t × 1000)」で算出し、生産数量0の商品は「－」と表示します（NaN・Infinityを書きません）。",
+  ]);
+  note.getCell(1).font = LABEL_FONT;
+  note.getCell(1).alignment = { wrapText: true, vertical: "top" };
+}
+
+/** 1始まりの列番号をExcelの列記号（A, B, ... AA）へ変換する。 */
+function colLetter(col: number): string {
+  let n = col;
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+/**
+ * 【Test15新規】生データ_成約明細シート。参考ブックの16列構成をそのまま踏襲する。
+ * 販売数量分析シートがこのシートをSUMIFSで参照するため、列位置は変更しないこと。
+ */
+function writeRawAllocationDetailSheet(wb: ExcelJS.Workbook, payload: CompanyExportPayload): void {
+  const ws = wb.addWorksheet("生データ_成約明細");
+  ws.columns = [
+    { width: 8 }, { width: 8 }, { width: 15 }, { width: 15 }, { width: 14 }, { width: 14 },
+    { width: 14 }, { width: 15 }, { width: 12 }, { width: 13 }, { width: 13 }, { width: 18 },
+    { width: 12 }, { width: 14 }, { width: 11 }, { width: 11 },
+  ];
+  writeHeaderRow(ws, [
+    "市場", "商品", "基準価格(USD/kg)", "対象需要(t)", "外部流出(t)", "販売希望量(t)",
+    "価格調整(USD/kg)", "提示価格(USD/kg)", "営業人員(人)", "成約量(t)", "未成約量(t)", "成約金額相当(USD)",
+    "カバレッジ", "競争力ウェイト", "成約率", "シェア",
+  ]);
+  const planByKey = new Map(payload.salesPlans.map((p) => [`${p.market} ${p.product}`, p]));
+  let rowCount = 0;
+  for (const allocation of payload.marketProductAllocations) {
+    const own = allocation.companies[0] ?? null;
+    const plan = planByKey.get(`${allocation.market} ${allocation.product}`) ?? null;
+    if (!own && !plan) continue;
+    const row = ws.addRow([
+      allocation.market, allocation.product, allocation.basePrice, allocation.targetDemand, allocation.externalOptionQuantity,
+      plan ? plan.desiredQuantity : null,
+      plan ? plan.priceAdjustmentUsdPerHosoEqKg : null,
+      own ? own.askPrice : null,
+      plan ? plan.salesForceHeadcount : null,
+      own ? own.allocatedQuantity : null,
+      null, null,
+      own ? own.coverageScore : null,
+      own ? own.competitivenessWeight : null,
+      null, null,
+    ]);
+    const r = row.number;
+    row.getCell(11).value = { formula: `IF(F${r}="","",F${r}-J${r})` };
+    row.getCell(12).value = { formula: `IF(OR(H${r}="",J${r}=""),"",J${r}*H${r}*1000)` };
+    // 成約率＝成約量÷販売希望量、シェア＝成約量÷対象需要。分母0のときは空欄。
+    row.getCell(15).value = { formula: `IF(OR(F${r}="",F${r}=0),"",J${r}/F${r})` };
+    row.getCell(16).value = { formula: `IF(OR(D${r}="",D${r}=0),"",J${r}/D${r})` };
+    for (const col of [3, 7, 8]) row.getCell(col).numFmt = "$#,##0.0000";
+    for (const col of [4, 5, 6, 10, 11]) row.getCell(col).numFmt = "#,##0.00";
+    row.getCell(12).numFmt = USD_FORMAT;
+    for (const col of [13, 14, 15, 16]) row.getCell(col).numFmt = "0.0000";
+    rowCount += 1;
+  }
+  if (rowCount === 0) {
+    ws.addRow(["このターン・会社の販売計画および成約配分は0件です"]).getCell(1).font = LABEL_FONT;
+  }
+}
+
+/**
+ * 【Test15新規】販売数量分析シート。生データ_成約明細をSUMIFSで市場×商品へ集計する。
+ * Excelネイティブのピボットテーブルではなく数式による集計表（参考ブックと同じ方式。
+ * 生データ側へ行を足しても列全体参照が自動で拾うため再集計操作が要らない）。
+ */
+function writeSalesVolumeAnalysisSheet(wb: ExcelJS.Workbook, payload: CompanyExportPayload): void {
+  const ws = wb.addWorksheet("販売数量分析");
+  ws.columns = [{ width: 16 }, { width: 16 }, { width: 16 }, { width: 15 }, { width: 13 }, { width: 14 }];
+
+  const markets: string[] = [];
+  for (const a of payload.marketProductAllocations) {
+    if (!markets.includes(a.market)) markets.push(a.market);
+  }
+
+  ws.addRow(["市場×商品ごとの販売数量分析（生データ_成約明細シートをSUMIFSで集計）"]).getCell(1).font = CHECK_FONT;
+  ws.addRow([]);
+  writeHeaderRow(ws, ["行ラベル", "対象需要(t)", "販売希望量(t)", "成約量(t)", "市場シェア", "成約成功率"]);
+
+  const SRC = "生データ_成約明細";
+  const marketTotalRows: number[] = [];
+  for (const market of markets) {
+    const marketRow = ws.addRow([market, null, null, null, null, null]);
+    marketRow.font = CHECK_FONT;
+    const marketRowNumber = marketRow.number;
+    marketTotalRows.push(marketRowNumber);
+
+    const productRowNumbers: number[] = [];
+    for (const product of PRODUCT_KEYS) {
+      const pr = ws.addRow([`  ${product}`, null, null, null, null, null]);
+      const n = pr.number;
+      productRowNumbers.push(n);
+      // 対象需要・販売希望量・成約量を、市場（A列）と商品（B列）でSUMIFS集計する。
+      pr.getCell(2).value = { formula: `SUMIFS('${SRC}'!$D:$D,'${SRC}'!$A:$A,$A${marketRowNumber},'${SRC}'!$B:$B,"${product}")` };
+      pr.getCell(3).value = { formula: `SUMIFS('${SRC}'!$F:$F,'${SRC}'!$A:$A,$A${marketRowNumber},'${SRC}'!$B:$B,"${product}")` };
+      pr.getCell(4).value = { formula: `SUMIFS('${SRC}'!$J:$J,'${SRC}'!$A:$A,$A${marketRowNumber},'${SRC}'!$B:$B,"${product}")` };
+      pr.getCell(5).value = { formula: `IF(B${n}=0,"",D${n}/B${n})` };
+      pr.getCell(6).value = { formula: `IF(C${n}=0,"",D${n}/C${n})` };
+      for (const col of [2, 3, 4]) pr.getCell(col).numFmt = "#,##0.00";
+      for (const col of [5, 6]) pr.getCell(col).numFmt = "0.0000";
+    }
+    const first = productRowNumbers[0];
+    const last = productRowNumbers[productRowNumbers.length - 1];
+    for (const col of [2, 3, 4]) {
+      marketRow.getCell(col).value = { formula: `SUM(${colLetter(col)}${first}:${colLetter(col)}${last})` };
+      marketRow.getCell(col).numFmt = "#,##0.00";
+    }
+    marketRow.getCell(5).value = { formula: `IF(B${marketRowNumber}=0,"",D${marketRowNumber}/B${marketRowNumber})` };
+    marketRow.getCell(6).value = { formula: `IF(C${marketRowNumber}=0,"",D${marketRowNumber}/C${marketRowNumber})` };
+    for (const col of [5, 6]) marketRow.getCell(col).numFmt = "0.0000";
+  }
+
+  if (marketTotalRows.length > 0) {
+    const grand = ws.addRow(["総計", null, null, null, null, null]);
+    const gn = grand.number;
+    for (const col of [2, 3, 4]) {
+      const L = colLetter(col);
+      grand.getCell(col).value = { formula: marketTotalRows.map((r) => `${L}${r}`).join("+") };
+      grand.getCell(col).numFmt = "#,##0.00";
+    }
+    grand.getCell(5).value = { formula: `IF(B${gn}=0,"",D${gn}/B${gn})` };
+    grand.getCell(6).value = { formula: `IF(C${gn}=0,"",D${gn}/C${gn})` };
+    for (const col of [5, 6]) grand.getCell(col).numFmt = "0.0000";
+    grand.font = CHECK_FONT;
+  } else {
+    ws.addRow(["集計対象の成約明細が0件です"]).getCell(1).font = LABEL_FONT;
+  }
+
+  ws.addRow([]);
+  const note = ws.addRow([
+    "注記: Excelネイティブのピボットテーブルではなく、SUMIFS数式による集計表です。生データ_成約明細シートに行を追加した場合も、列全体参照（$D:$D等）が自動的に拾うため再集計の操作は不要です。分母が0の比率は空欄になります（ゼロ除算エラーを出しません）。",
+  ]);
+  note.getCell(1).font = LABEL_FONT;
+  note.getCell(1).alignment = { wrapText: true, vertical: "top" };
+}
+
+// ---------------------------------------------------------------------
+// 【Test15】Turn履歴（推移サマリー / 04_Turn推移）
+// ---------------------------------------------------------------------
+
+/** 会社スコープの履歴1件（Turn別のExport JSON）。turn昇順で渡すこと。 */
+export interface CompanyTurnHistoryEntry {
+  readonly turn: number;
+  readonly period: string;
+  readonly payload: CompanyExportPayload;
+}
+
+/** 全社スコープの履歴1件（Turn別のExport JSON）。turn昇順で渡すこと。 */
+export interface AllCompaniesTurnHistoryEntry {
+  readonly turn: number;
+  readonly period: string;
+  readonly payload: AllCompaniesExportPayload;
+}
+
+/** 推移シートで横比較するKPIの定義（1行ぶん）。値が取れないturnはnull（0で埋めない）。 */
+interface TrendMetric {
+  readonly label: string;
+  readonly numFmt: string;
+  readonly pick: (p: CompanyExportPayload) => number | null;
+}
+
+const TREND_METRICS: readonly TrendMetric[] = [
+  { label: "【損益】純売上高", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.profitAndLoss.netRevenue ?? null },
+  { label: "【損益】売上原価", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.profitAndLoss.totalCostOfSales ?? null },
+  { label: "【損益】売上総利益", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.profitAndLoss.grossProfit ?? null },
+  { label: "【損益】営業利益", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.profitAndLoss.operatingProfit ?? null },
+  { label: "【損益】当期純利益", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.profitAndLoss.netIncome ?? null },
+  { label: "【損益】うち遊休労務費", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.profitAndLoss.costOfSales.idleLaborCost ?? null },
+  { label: "【BS】期末現金", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.balanceSheet.cash ?? null },
+  { label: "【BS】売掛金", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.balanceSheet.accountsReceivable ?? null },
+  { label: "【BS】原料在庫(簿価)", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.balanceSheet.rawMaterialInventory ?? null },
+  { label: "【BS】完成品在庫(簿価)", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.balanceSheet.finishedGoodsInventory ?? null },
+  { label: "【BS】固定資産純額", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.balanceSheet.fixedAssetsNet ?? null },
+  { label: "【BS】建設中勘定", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.balanceSheet.constructionInProgress ?? null },
+  { label: "【BS】総資産", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.balanceSheet.totalAssets ?? null },
+  { label: "【BS】短期借入金", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.balanceSheet.shortTermLoans ?? null },
+  { label: "【BS】長期借入金", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.balanceSheet.longTermLoans ?? null },
+  { label: "【BS】純資産", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.balanceSheet.totalEquity ?? null },
+  { label: "【CF】営業CF", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.cashFlow.operatingCashFlow ?? null },
+  { label: "【CF】投資CF", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.cashFlow.investingCashFlow ?? null },
+  { label: "【CF】財務CF", numFmt: USD_FORMAT, pick: (p) => p.financialResult?.cashFlow.financingCashFlow ?? null },
+  { label: "【資金】信用スコア", numFmt: "0.00", pick: (p) => p.financingResult?.creditScore.score0to100 ?? null },
+  { label: "【資金】追加借入可能額", numFmt: USD_FORMAT, pick: (p) => p.financingResult?.borrowingCapacity.availableAdditionalCapacityUsd ?? null },
+  { label: "【営業】新規成約数量(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.newContractedQuantity ?? null },
+  { label: "【営業】新規成約平均価格(USD/kg)", numFmt: "0.0000", pick: (p) => p.companySummary?.newContractedAveragePrice ?? null },
+  { label: "【営業】納品数量(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.fulfilledQuantity ?? null },
+  { label: "【営業】期末受注残(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.outstandingQuantity ?? null },
+  { label: "【生産】HOSO生産量(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.hosoProduced ?? null },
+  { label: "【生産】PD生産量(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.pdProduced ?? null },
+  { label: "【生産】VAP生産量(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.vapProduced ?? null },
+  { label: "【生産】期末完成品在庫(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.finishedGoodsInventory ?? null },
+  { label: "【原料】期末原料在庫(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.rawMaterialInventory ?? null },
+  { label: "【原料】国内買付数量(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.domesticPurchaseQuantity ?? null },
+  { label: "【稼働】設備稼働率", numFmt: "0.0000", pick: (p) => p.companySummary?.equipmentUtilizationRate ?? null },
+  { label: "【稼働】労働稼働率", numFmt: "0.0000", pick: (p) => p.companySummary?.laborUtilizationRate ?? null },
+  { label: "【稼働】原料不足による機会損失(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.rawMaterialShortfall ?? null },
+  { label: "【稼働】設備能力不足による機会損失(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.equipmentShortfall ?? null },
+  { label: "【稼働】労働力不足による機会損失(t)", numFmt: "#,##0.00", pick: (p) => p.companySummary?.laborShortfall ?? null },
+];
+
+/**
+ * 【Test15新規】推移サマリーシート（自社ブック）。
+ * 行＝KPI、列＝Turn。Turn別の明細シートを増殖させず、時系列を1シートへまとめる。
+ * historyが空（履歴が取得できなかった）場合でも例外を投げず、その旨の行だけを書く。
+ */
+function writeCompanyTrendSheet(wb: ExcelJS.Workbook, history: readonly CompanyTurnHistoryEntry[]): void {
+  const ws = wb.addWorksheet("推移サマリー");
+  const sorted = [...history].sort((a, b) => a.turn - b.turn);
+  ws.columns = [{ width: 38 }, ...sorted.map(() => ({ width: 18 }))];
+
+  if (sorted.length === 0) {
+    ws.addRow(["Turn履歴が取得できなかったため、推移サマリーを作成できません（このシートは空です。他のシートは通常どおり利用できます）"]).getCell(1).font = LABEL_FONT;
+    return;
+  }
+
+  writeHeaderRow(ws, ["指標", ...sorted.map((h) => `Turn ${h.turn}`)]);
+  const periodRow = ws.addRow(["期(period)", ...sorted.map((h) => h.period)]);
+  periodRow.getCell(1).font = LABEL_FONT;
+
+  for (const metric of TREND_METRICS) {
+    const row = ws.addRow([metric.label, ...sorted.map((h) => metric.pick(h.payload))]);
+    row.getCell(1).font = LABEL_FONT;
+    for (let i = 0; i < sorted.length; i++) {
+      const cell = row.getCell(i + 2);
+      if (cell.value === null || cell.value === undefined) cell.value = "－";
+      else cell.numFmt = metric.numFmt;
+    }
+  }
+
+  ws.addRow([]);
+  const note = ws.addRow([
+    "注記: 行＝指標、列＝Turn（昇順）です。値が存在しないTurnは「－」と表示し、0で埋めていません。各Turnの値は、そのTurnのExport API JSONをそのまま転記したものです（このシートで再計算していません）。",
+  ]);
+  note.getCell(1).font = LABEL_FONT;
+  note.getCell(1).alignment = { wrapText: true, vertical: "top" };
+}
+
+// ---------------------------------------------------------------------
+// 【Test15】GM分析ブック 参考4シート（00_凡例 / 01_全社比較 / 02_市場シェア / 03_全社の意思決定）
+// ---------------------------------------------------------------------
+
+/** 01_全社比較で使うKPI（全社横並び）。値が無ければnull。 */
+interface CrossCompanyMetric {
+  readonly label: string;
+  readonly numFmt: string;
+  readonly pick: (c: AllCompaniesExportPayload["companies"][number]) => number | string | null;
+}
+
+const CROSS_COMPANY_SECTIONS: readonly { readonly heading: string; readonly metrics: readonly CrossCompanyMetric[] }[] = [
+  {
+    heading: "損益（USD）",
+    metrics: [
+      { label: "純売上高", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.profitAndLoss.netRevenue ?? null },
+      { label: "売上原価", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.profitAndLoss.totalCostOfSales ?? null },
+      { label: "売上総利益", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.profitAndLoss.grossProfit ?? null },
+      { label: "販管費", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.profitAndLoss.sellingGeneralAdmin ?? null },
+      { label: "営業利益", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.profitAndLoss.operatingProfit ?? null },
+      { label: "当期純利益", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.profitAndLoss.netIncome ?? null },
+      { label: "うち遊休労務費", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.profitAndLoss.costOfSales.idleLaborCost ?? null },
+    ],
+  },
+  {
+    heading: "財務（USD）",
+    metrics: [
+      { label: "期末現金", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.balanceSheet.cash ?? null },
+      { label: "総資産", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.balanceSheet.totalAssets ?? null },
+      { label: "純資産", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.balanceSheet.totalEquity ?? null },
+      { label: "短期借入金", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.balanceSheet.shortTermLoans ?? null },
+      { label: "長期借入金", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.balanceSheet.longTermLoans ?? null },
+      { label: "営業CF", numFmt: USD_FORMAT, pick: (c) => c.financialResult?.cashFlow.operatingCashFlow ?? null },
+      { label: "信用スコア", numFmt: "0.00", pick: (c) => c.financingResult?.creditScore.score0to100 ?? null },
+      { label: "信用区分", numFmt: "@", pick: (c) => c.financingResult?.creditScore.tier ?? null },
+      { label: "追加借入可能額", numFmt: USD_FORMAT, pick: (c) => c.financingResult?.borrowingCapacity.availableAdditionalCapacityUsd ?? null },
+    ],
+  },
+  {
+    heading: "営業・生産（トン）",
+    metrics: [
+      { label: "新規成約数量", numFmt: "#,##0.00", pick: (c) => c.companySummary?.newContractedQuantity ?? null },
+      { label: "新規成約平均価格(USD/kg)", numFmt: "0.0000", pick: (c) => c.companySummary?.newContractedAveragePrice ?? null },
+      { label: "納品数量", numFmt: "#,##0.00", pick: (c) => c.companySummary?.fulfilledQuantity ?? null },
+      { label: "期末受注残", numFmt: "#,##0.00", pick: (c) => c.companySummary?.outstandingQuantity ?? null },
+      { label: "HOSO生産量", numFmt: "#,##0.00", pick: (c) => c.companySummary?.hosoProduced ?? null },
+      { label: "PD生産量", numFmt: "#,##0.00", pick: (c) => c.companySummary?.pdProduced ?? null },
+      { label: "VAP生産量", numFmt: "#,##0.00", pick: (c) => c.companySummary?.vapProduced ?? null },
+      { label: "期末原料在庫(即時利用可)", numFmt: "#,##0.00", pick: (c) => c.companySummary?.rawMaterialInventory ?? null },
+      { label: "期末完成品在庫", numFmt: "#,##0.00", pick: (c) => c.companySummary?.finishedGoodsInventory ?? null },
+      { label: "設備稼働率", numFmt: "0.0000", pick: (c) => c.companySummary?.equipmentUtilizationRate ?? null },
+      { label: "VAP商品開発スコア", numFmt: "0.00", pick: (c) => c.vapProductDevelopmentScore },
+    ],
+  },
+];
+
+/** 00_凡例シート（GMブックの先頭。取扱注意の警告を必ず出す）。 */
+function writeGmLegendSheet(wb: ExcelJS.Workbook, payload: AllCompaniesExportPayload): void {
+  const ws = wb.addWorksheet("00_凡例");
+  ws.columns = [{ width: 120 }];
+  const title = ws.addRow(["GM（ゲームマスター）用 分析ブック — 取扱注意"]);
+  title.getCell(1).font = { ...CHECK_FONT, size: 14 };
+  ws.addRow([]);
+  const warn = ws.addRow(["このブックには全5社の非公開の意思決定が含まれます。プレイヤーへ配布しないでください。"]);
+  warn.getCell(1).font = { ...CHECK_FONT, color: { argb: "FFC00000" } };
+  ws.addRow([]);
+  ws.addRow([`ラボ: ${payload.meta.labId}　／　対象: Turn ${payload.meta.turn}（${payload.meta.period}）　／　エンジン版: ${payload.meta.engineVersion}`]);
+  ws.addRow([`Export生成日時(UTC): ${payload.meta.generatedAt}`]);
+  ws.addRow([`収録会社: ${payload.companies.map((c) => c.companyId).join(", ")}`]);
+  ws.addRow([]);
+  ws.addRow(["「－」… データなし（0ではありません）。値が存在しない項目を0で埋めていません。"]);
+  ws.addRow(["データ入力元: Export API JSON（全社スコープ）のみ。Redis・Repository・画面表示値は参照していません。"]);
+  ws.addRow([]);
+  ws.addRow(["シート構成: 00_凡例 / 01_全社比較 / 02_市場シェア / 03_全社の意思決定 / 04_Turn推移 / Meta / Capacity_各社 / 生産・設備・労務 / 意思決定項目 / StandardAI入力"]);
+}
+
+/** 01_全社比較シート（行＝指標、列＝会社）。 */
+function writeGmCrossCompanySheet(wb: ExcelJS.Workbook, payload: AllCompaniesExportPayload): void {
+  const ws = wb.addWorksheet("01_全社比較");
+  const companies = [...payload.companies].sort((a, b) => a.companyId.localeCompare(b.companyId));
+  ws.columns = [{ width: 32 }, ...companies.map(() => ({ width: 20 }))];
+
+  ws.addRow([`全社比較（${payload.meta.period}・Turn ${payload.meta.turn}）`]).getCell(1).font = { ...CHECK_FONT, size: 13 };
+  ws.addRow([]);
+  writeHeaderRow(ws, ["指標", ...companies.map((c) => c.companyId)]);
+
+  for (const section of CROSS_COMPANY_SECTIONS) {
+    const head = ws.addRow([section.heading]);
+    head.getCell(1).font = CHECK_FONT;
+    const sectionRowNumbers = new Map<string, number>();
+    for (const metric of section.metrics) {
+      const row = ws.addRow([metric.label, ...companies.map((c) => metric.pick(c))]);
+      row.getCell(1).font = LABEL_FONT;
+      sectionRowNumbers.set(metric.label, row.number);
+      for (let i = 0; i < companies.length; i++) {
+        const cell = row.getCell(i + 2);
+        if (cell.value === null || cell.value === undefined) cell.value = "－";
+        else if (metric.numFmt !== "@") cell.numFmt = metric.numFmt;
+      }
+    }
+    // 損益セクションだけ、利益率をExcel数式として追加する（参考ブックと同じ）。
+    if (section.heading.startsWith("損益")) {
+      const netRevenueRow = sectionRowNumbers.get("純売上高");
+      const grossProfitRow = sectionRowNumbers.get("売上総利益");
+      const operatingProfitRow = sectionRowNumbers.get("営業利益");
+      if (netRevenueRow && grossProfitRow && operatingProfitRow) {
+        for (const [label, numeratorRow] of [
+          ["　売上総利益率", grossProfitRow],
+          ["　営業利益率", operatingProfitRow],
+        ] as const) {
+          const r = ws.addRow([label]);
+          r.getCell(1).font = LABEL_FONT;
+          for (let i = 0; i < companies.length; i++) {
+            const L = colLetter(i + 2);
+            r.getCell(i + 2).value = { formula: `IF(OR(${L}${netRevenueRow}="－",${L}${netRevenueRow}=0),"－",${L}${numeratorRow}/${L}${netRevenueRow})` };
+            r.getCell(i + 2).numFmt = "0.00%";
+          }
+        }
+      }
+    }
+    ws.addRow([]);
+  }
+}
+
+/** 02_市場シェアシート（市場×商品×会社の成約結果。全社の提示価格・競争力を含む）。 */
+function writeGmMarketShareSheet(wb: ExcelJS.Workbook, payload: AllCompaniesExportPayload): void {
+  const ws = wb.addWorksheet("02_市場シェア");
+  ws.columns = [
+    { width: 8 }, { width: 8 }, { width: 10 }, { width: 16 }, { width: 16 }, { width: 16 },
+    { width: 14 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 14 }, { width: 13 }, { width: 18 },
+  ];
+  ws.addRow([`市場×商品ごとの5社成約結果（${payload.meta.period}・Turn ${payload.meta.turn}）`]).getCell(1).font = { ...CHECK_FONT, size: 13 };
+  writeHeaderRow(ws, [
+    "市場", "商品", "会社", "基準価格(USD/kg)", "提示価格(USD/kg)", "対象需要(t)",
+    "外部流出(t)", "営業処理能力(t)", "競争力ウェイト", "成約数量(t)", "5社合計(t)", "5社内シェア", "需要に対する取り込み率",
+  ]);
+
+  let rowCount = 0;
+  for (const allocation of payload.marketProductAllocations) {
+    const total = allocation.companies.reduce((s, c) => s + c.allocatedQuantity, 0);
+    const sortedCompanies = [...allocation.companies].sort((a, b) => a.companyId.localeCompare(b.companyId));
+    for (const c of sortedCompanies) {
+      const row = ws.addRow([
+        allocation.market, allocation.product, c.companyId,
+        allocation.basePrice, c.askPrice, allocation.targetDemand, allocation.externalOptionQuantity,
+        c.processingCapacity, c.competitivenessWeight, c.allocatedQuantity, total, null, null,
+      ]);
+      const r = row.number;
+      row.getCell(12).value = { formula: `IF(K${r}=0,"－",J${r}/K${r})` };
+      row.getCell(13).value = { formula: `IF(F${r}=0,"－",J${r}/F${r})` };
+      for (const col of [4, 5]) row.getCell(col).numFmt = "$#,##0.0000";
+      for (const col of [6, 7, 8, 10, 11]) row.getCell(col).numFmt = "#,##0.00";
+      for (const col of [9, 12, 13]) row.getCell(col).numFmt = "0.0000";
+      rowCount += 1;
+    }
+  }
+  if (rowCount === 0) {
+    ws.addRow(["このターンの成約配分は0件です"]).getCell(1).font = LABEL_FONT;
+  }
+}
+
+/** 03_全社の意思決定シート（営業計画／生産計画／人員配置。非公開情報）。 */
+function writeGmAllDecisionsSheet(wb: ExcelJS.Workbook, payload: AllCompaniesExportPayload): void {
+  const ws = wb.addWorksheet("03_全社の意思決定");
+  ws.columns = [{ width: 10 }, { width: 14 }, { width: 10 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 20 }];
+
+  const submissions = [...payload.decisionInfo.submissions].sort((a, b) => a.companyId.localeCompare(b.companyId));
+
+  ws.addRow([`全社の営業計画（${payload.meta.period}）※非公開情報`]).getCell(1).font = { ...CHECK_FONT, size: 13 };
+  writeHeaderRow(ws, ["会社", "市場", "商品", "販売希望量(t)", "価格調整(USD/kg)", "営業人数"]);
+  let salesRows = 0;
+  for (const s of submissions) {
+    const plans = [...s.salesPlans].sort((a, b) => a.market.localeCompare(b.market) || a.product.localeCompare(b.product));
+    for (const p of plans) {
+      const row = ws.addRow([s.companyId, p.market, p.product, p.desiredQuantity, p.priceAdjustmentUsdPerHosoEqKg, p.salesForceHeadcount]);
+      row.getCell(4).numFmt = "#,##0.00";
+      row.getCell(5).numFmt = "0.0000";
+      salesRows += 1;
+    }
+  }
+  if (salesRows === 0) ws.addRow(["営業計画が0件です"]).getCell(1).font = LABEL_FONT;
+
+  ws.addRow([]);
+  ws.addRow([]);
+  ws.addRow([`全社の生産計画（${payload.meta.period}）※非公開情報`]).getCell(1).font = { ...CHECK_FONT, size: 13 };
+  writeHeaderRow(ws, ["会社", "工場", "商品", "希望生産量(t)", "優先度"]);
+  let productionRows = 0;
+  for (const s of submissions) {
+    const plans = [...s.productionPlans].sort((a, b) => a.factoryId.localeCompare(b.factoryId) || a.product.localeCompare(b.product));
+    for (const p of plans) {
+      const row = ws.addRow([s.companyId, p.factoryId, p.product, p.desiredQuantity, p.priority]);
+      row.getCell(4).numFmt = "#,##0.00";
+      productionRows += 1;
+    }
+  }
+  if (productionRows === 0) ws.addRow(["生産計画が0件です"]).getCell(1).font = LABEL_FONT;
+
+  ws.addRow([]);
+  ws.addRow([]);
+  ws.addRow([`全社の人員配置（${payload.meta.period}）※非公開情報`]).getCell(1).font = { ...CHECK_FONT, size: 13 };
+  writeHeaderRow(ws, ["会社", "工場", "正社員(人)", "臨時工(人)", "残業率", "出勤率"]);
+  let workerRows = 0;
+  for (const s of submissions) {
+    const assignments = [...s.workerAssignments].sort((a, b) => a.factoryId.localeCompare(b.factoryId));
+    for (const w of assignments) {
+      const row = ws.addRow([s.companyId, w.factoryId, w.regularHeadcount, w.temporaryHeadcount, w.overtimeRate, w.attendanceRate]);
+      for (const col of [5, 6]) row.getCell(col).numFmt = "0.0000";
+      workerRows += 1;
+    }
+  }
+  if (workerRows === 0) ws.addRow(["人員配置が0件です"]).getCell(1).font = LABEL_FONT;
+}
+
+/** 04_Turn推移シート（KPIごとに 行＝会社、列＝Turn）。 */
+function writeGmTurnTrendSheet(wb: ExcelJS.Workbook, history: readonly AllCompaniesTurnHistoryEntry[]): void {
+  const ws = wb.addWorksheet("04_Turn推移");
+  const sorted = [...history].sort((a, b) => a.turn - b.turn);
+  ws.columns = [{ width: 30 }, { width: 10 }, ...sorted.map(() => ({ width: 18 }))];
+
+  if (sorted.length === 0) {
+    ws.addRow(["Turn履歴が取得できなかったため、Turn推移を作成できません（このシートは空です。他のシートは通常どおり利用できます）"]).getCell(1).font = LABEL_FONT;
+    return;
+  }
+
+  const companyIds = Array.from(new Set(sorted.flatMap((h) => h.payload.companies.map((c) => c.companyId)))).sort();
+
+  ws.addRow(["Turn推移（KPIごとに 行＝会社、列＝Turn）"]).getCell(1).font = { ...CHECK_FONT, size: 13 };
+  ws.addRow([]);
+  writeHeaderRow(ws, ["指標", "会社", ...sorted.map((h) => `Turn ${h.turn}`)]);
+
+  for (const section of CROSS_COMPANY_SECTIONS) {
+    for (const metric of section.metrics) {
+      for (const companyId of companyIds) {
+        const row = ws.addRow([
+          metric.label,
+          companyId,
+          ...sorted.map((h) => {
+            const c = h.payload.companies.find((x) => x.companyId === companyId);
+            return c ? metric.pick(c) : null;
+          }),
+        ]);
+        row.getCell(1).font = LABEL_FONT;
+        for (let i = 0; i < sorted.length; i++) {
+          const cell = row.getCell(i + 3);
+          if (cell.value === null || cell.value === undefined) cell.value = "－";
+          else if (metric.numFmt !== "@") cell.numFmt = metric.numFmt;
+        }
+      }
+    }
+  }
+
+  ws.addRow([]);
+  const note = ws.addRow([
+    "注記: 各Turnの値は、そのTurnのExport API JSON（全社スコープ）をそのまま転記したものです。値が存在しないTurn・会社は「－」と表示し、0で埋めていません。",
+  ]);
+  note.getCell(1).font = LABEL_FONT;
 }

@@ -1,0 +1,320 @@
+// ShrimpX V2 — Company Lab / Test15 期初情報パネル（財務状況・償却資産明細・市場情報）
+//
+// 【表示方針】情報量が多いため、3パネルとも既定で「閉じた」状態にする
+// （意思決定フォームを画面下へ押し下げないため。開閉は既存のCollapsibleSectionに任せ、
+// 独自の折りたたみ実装は書かない）。折りたたんだままでも判断の出発点が分かるよう、
+// 見出し右端のsummaryRightへ最重要の1〜2値だけを出す。
+//
+// 【この層がやらないこと】値の計算をしない。openingInfoViewModel.tsが組み立てた
+// 数値をそのまま整形して並べるだけ（undefinedは「－」と表示し、0で埋めない）。
+
+import CollapsibleSection from "./CollapsibleSection";
+import type {
+  DepreciableAssetsBreakdown,
+  OpeningBalanceSheet,
+  OpeningBalanceSheetRow,
+  OpeningMarketInfo,
+} from "../play/_lib/openingInfoViewModel";
+
+const DASH = "－";
+
+function usd(v: number | undefined): string {
+  if (v === undefined || !Number.isFinite(v)) return DASH;
+  return `$${Math.round(v).toLocaleString()}`;
+}
+function ratio(v: number | undefined, digits = 2): string {
+  if (v === undefined || !Number.isFinite(v)) return DASH;
+  return v.toFixed(digits);
+}
+function pct(v: number | undefined, digits = 1): string {
+  if (v === undefined || !Number.isFinite(v)) return DASH;
+  return `${(v * 100).toFixed(digits)}%`;
+}
+function tons(v: number | undefined): string {
+  if (v === undefined || !Number.isFinite(v)) return DASH;
+  return `${Math.round(v).toLocaleString()} t`;
+}
+
+function BsRows({ rows }: { readonly rows: readonly OpeningBalanceSheetRow[] }) {
+  return (
+    <table className="w-full text-xs">
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.label} className={r.emphasis ? "border-t border-gray-600/60 font-semibold" : ""}>
+            <td className="py-0.5 pr-2 text-gray-300">{r.label}</td>
+            <td className="py-0.5 text-right tabular-nums text-gray-100">{usd(r.value)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+export function OpeningBalanceSheetPanel({ bs, turn }: { readonly bs: OpeningBalanceSheet; readonly turn: number }) {
+  return (
+    <CollapsibleSection
+      title={`財務状況（turn ${turn} 開始時点のBS）`}
+      description="四半期処理前の確定値です。PL・CFは当期の実績が確定してから「直近の四半期結果」に表示されます。"
+      tone="info"
+      defaultOpen={false}
+      testId="opening-balance-sheet"
+      summaryRight={
+        <span className="text-xs text-gray-400">
+          現金 {usd(bs.assets[0]?.value)} ／ 総資産 {usd(bs.totalAssets)} ／ D/E {ratio(bs.debtEquityRatio)}
+        </span>
+      }
+    >
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <h4 className="text-xs font-semibold text-gray-400 mb-1">資産</h4>
+          <BsRows rows={bs.assets} />
+        </div>
+        <div>
+          <h4 className="text-xs font-semibold text-gray-400 mb-1">負債</h4>
+          <BsRows rows={bs.liabilities} />
+        </div>
+        <div>
+          <h4 className="text-xs font-semibold text-gray-400 mb-1">純資産</h4>
+          <BsRows rows={bs.equity} />
+          <table className="w-full text-xs mt-3">
+            <tbody>
+              <tr className="border-t border-gray-600/60">
+                <td className="py-0.5 pr-2 text-gray-300">D/E（有利子負債 ÷ 純資産）</td>
+                <td className="py-0.5 text-right tabular-nums text-gray-100">{ratio(bs.debtEquityRatio)}</td>
+              </tr>
+              <tr>
+                <td className="py-0.5 pr-2 text-gray-500">貸借差額（0であること）</td>
+                <td className="py-0.5 text-right tabular-nums text-gray-500">{usd(bs.balanceDifference)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+export function DepreciableAssetsPanel({ assets }: { readonly assets: DepreciableAssetsBreakdown }) {
+  return (
+    <CollapsibleSection
+      title="償却資産明細"
+      description="既存資産は建物・機械の2区分へ簡便配分した簡略モデルです（finance/parameters.ts）。個別の取得履歴は保持されていないため、区分より細かい内訳は表示しません。"
+      tone="info"
+      defaultOpen={false}
+      testId="depreciable-assets"
+      summaryRight={<span className="text-xs text-gray-400">簿価合計 {usd(assets.totalNetBookValue)}</span>}
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs min-w-[720px]">
+          <thead>
+            <tr className="text-gray-400 border-b border-gray-700">
+              <th className="text-left py-1 pr-2">区分</th>
+              <th className="text-right py-1 pr-2">取得原価</th>
+              <th className="text-right py-1 pr-2">償却累計</th>
+              <th className="text-right py-1 pr-2">簿価</th>
+              <th className="text-left py-1 pr-2">状態</th>
+              <th className="text-right py-1 pr-2">完成予定</th>
+              <th className="text-right py-1 pr-2">残存(四半期)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {assets.rows.map((r) => (
+              <tr key={r.category} className="border-b border-gray-800/60 align-top">
+                <td className="py-1 pr-2 text-gray-200">
+                  {r.category}
+                  <div className="text-[10px] text-gray-500 mt-0.5">{r.note}</div>
+                </td>
+                <td className="py-1 pr-2 text-right tabular-nums">{usd(r.grossBookValue)}</td>
+                <td className="py-1 pr-2 text-right tabular-nums">{usd(r.accumulatedDepreciation)}</td>
+                <td className="py-1 pr-2 text-right tabular-nums font-semibold">{usd(r.netBookValue)}</td>
+                <td className="py-1 pr-2">{r.status}</td>
+                <td className="py-1 pr-2 text-right tabular-nums">
+                  {r.expectedCompletionTurn === undefined ? DASH : `turn ${r.expectedCompletionTurn}`}
+                </td>
+                <td className="py-1 pr-2 text-right tabular-nums">{r.remainingLifeQuarters ?? DASH}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="font-semibold">
+              <td className="py-1 pr-2">明細 簿価合計</td>
+              <td colSpan={2} />
+              <td className="py-1 pr-2 text-right tabular-nums">{usd(assets.totalNetBookValue)}</td>
+              <td colSpan={3} />
+            </tr>
+            <tr className="text-gray-500">
+              <td className="py-1 pr-2">BS側（固定資産純額＋建設中勘定）</td>
+              <td colSpan={2} />
+              <td className="py-1 pr-2 text-right tabular-nums">{usd(assets.balanceSheetFixedAssetsNetPlusCip)}</td>
+              <td colSpan={3} />
+            </tr>
+            <tr className="text-gray-500">
+              <td className="py-1 pr-2">差額（0であること）</td>
+              <td colSpan={2} />
+              <td className="py-1 pr-2 text-right tabular-nums">{usd(assets.reconciliationDifference)}</td>
+              <td colSpan={3} />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+export function OpeningMarketInfoPanel({ info }: { readonly info: OpeningMarketInfo }) {
+  const rm = info.rawMaterial;
+  return (
+    <CollapsibleSection
+      title="市場情報（原料・販売市場の初期条件）"
+      description="ゲームエンジンが持っている確定パラメータと前期実績です。将来の予測ではありません。"
+      tone="info"
+      defaultOpen={false}
+      testId="opening-market-info"
+      summaryRight={
+        <span className="text-xs text-gray-400">
+          国内原料 ${rm.vietnamDomesticPriorPrice.toFixed(2)}/kg ／ HOSO参考 ${info.referencePriceByProduct.hoso.toFixed(2)}/kg
+        </span>
+      }
+    >
+      <div className="space-y-4">
+        <details className="bg-gray-900/40 rounded-lg p-3">
+          <summary className="text-xs font-semibold text-gray-300 cursor-pointer">原料市場</summary>
+          <table className="w-full text-xs mt-2">
+            <tbody>
+              <tr>
+                <td className="py-0.5 pr-2 text-gray-300">前期のベトナム国内原料価格</td>
+                <td className="py-0.5 text-right tabular-nums">${rm.vietnamDomesticPriorPrice.toFixed(4)} /HOSO換算kg</td>
+              </tr>
+              <tr>
+                <td className="py-0.5 pr-2 text-gray-300">
+                  農家留保価格 合計（養殖原価 ${rm.farmerReservationPrice.farmingCost.toFixed(2)} ＋ 疾病リスク $
+                  {rm.farmerReservationPrice.diseaseRiskAllowance.toFixed(2)} ＋ 最低マージン $
+                  {rm.farmerReservationPrice.minimumMargin.toFixed(2)}）
+                </td>
+                <td className="py-0.5 text-right tabular-nums">${rm.farmerReservationPrice.total.toFixed(2)} /kg</td>
+              </tr>
+              <tr>
+                <td className="py-0.5 pr-2 text-gray-300">1社あたり国内買付の最大シェア</td>
+                <td className="py-0.5 text-right tabular-nums">{pct(rm.maximumBuyerShare, 0)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <h5 className="text-[11px] font-semibold text-gray-400 mt-3 mb-1">産地国別 HOSO FOB 初期価格（輸入検討の出発点）</h5>
+          <table className="w-full text-xs">
+            <tbody>
+              {Object.entries(rm.initialHosoFobPriceByCountry).map(([country, price]) => (
+                <tr key={country}>
+                  <td className="py-0.5 pr-2 text-gray-300">{country}</td>
+                  <td className="py-0.5 text-right tabular-nums">${price.toFixed(2)} /kg</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <ul className="list-disc list-inside text-[11px] text-gray-400 mt-2 space-y-0.5">
+            {rm.notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        </details>
+
+        <details className="bg-gray-900/40 rounded-lg p-3">
+          <summary className="text-xs font-semibold text-gray-300 cursor-pointer">販売市場（5市場）</summary>
+          <div className="overflow-x-auto mt-2">
+            <table className="w-full text-xs min-w-[760px]">
+              <thead>
+                <tr className="text-gray-400 border-b border-gray-700">
+                  <th className="text-left py-1 pr-2">市場</th>
+                  <th className="text-right py-1 pr-2">前期消費量</th>
+                  <th className="text-right py-1 pr-2">景気指数</th>
+                  <th className="text-right py-1 pr-2">人口成長率</th>
+                  <th className="text-right py-1 pr-2">初期構成比 HOSO/PD/VAP</th>
+                  <th className="text-right py-1 pr-2">成熟構成比 HOSO/PD/VAP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {info.salesMarkets.map((m) => (
+                  <tr key={m.market} className="border-b border-gray-800/60 align-top">
+                    <td className="py-1 pr-2 text-gray-200">
+                      {m.displayName}
+                      <div className="text-[10px] text-gray-500 mt-0.5">{m.characteristics}</div>
+                    </td>
+                    <td className="py-1 pr-2 text-right tabular-nums">{tons(m.priorPeriodConsumption)}</td>
+                    <td className="py-1 pr-2 text-right tabular-nums">{ratio(m.economicIndex, 3)}</td>
+                    <td className="py-1 pr-2 text-right tabular-nums">{pct(m.populationGrowthRate, 2)}</td>
+                    <td className="py-1 pr-2 text-right tabular-nums">
+                      {pct(m.initialShareByProduct.hoso, 0)} / {pct(m.initialShareByProduct.pd, 0)} / {pct(m.initialShareByProduct.vap, 0)}
+                    </td>
+                    <td className="py-1 pr-2 text-right tabular-nums">
+                      {pct(m.matureShareByProduct.hoso, 0)} / {pct(m.matureShareByProduct.pd, 0)} / {pct(m.matureShareByProduct.vap, 0)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details className="bg-gray-900/40 rounded-lg p-3">
+          <summary className="text-xs font-semibold text-gray-300 cursor-pointer">参考価格・需要ウェイト・営業工数</summary>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+            <div>
+              <h5 className="text-[11px] font-semibold text-gray-400 mb-1">参考市場価格（USD/HOSO換算kg）</h5>
+              <table className="w-full text-xs">
+                <tbody>
+                  <tr>
+                    <td className="py-0.5 pr-2 text-gray-300">HOSO</td>
+                    <td className="py-0.5 text-right tabular-nums">${info.referencePriceByProduct.hoso.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-0.5 pr-2 text-gray-300">PD（+{pct(info.productPremiumRatio.pd, 0)}）</td>
+                    <td className="py-0.5 text-right tabular-nums">${info.referencePriceByProduct.pd.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-0.5 pr-2 text-gray-300">VAP（+{pct(info.productPremiumRatio.vap, 0)}）</td>
+                    <td className="py-0.5 text-right tabular-nums">${info.referencePriceByProduct.vap.toFixed(2)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p className="text-[10px] text-gray-500 mt-1">産地FOB初期価格の世界影響度加重平均をHOSO基準とし、PD/VAPは市場エンジンと同じプレミアム率を適用した参考値です。</p>
+            </div>
+            <div>
+              <h5 className="text-[11px] font-semibold text-gray-400 mb-1">成約競争力の需要ウェイト</h5>
+              <table className="w-full text-xs">
+                <tbody>
+                  {Object.entries(info.competitivenessWeights).map(([k, v]) => (
+                    <tr key={k}>
+                      <td className="py-0.5 pr-2 text-gray-300">{k}</td>
+                      <td className="py-0.5 text-right tabular-nums">{pct(v, 0)}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t border-gray-700">
+                    <td className="py-0.5 pr-2 text-gray-400">外部選択肢のウェイト</td>
+                    <td className="py-0.5 text-right tabular-nums">{ratio(info.externalOptionWeight)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-0.5 pr-2 text-gray-400">1社の最大成約シェア</td>
+                    <td className="py-0.5 text-right tabular-nums">{pct(info.maximumSupplierShare, 0)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div>
+              <h5 className="text-[11px] font-semibold text-gray-400 mb-1">商品別 営業工数係数</h5>
+              <table className="w-full text-xs">
+                <tbody>
+                  {Object.entries(info.salesEffortCoefficients).map(([k, v]) => (
+                    <tr key={k}>
+                      <td className="py-0.5 pr-2 text-gray-300">{k.toUpperCase()}</td>
+                      <td className="py-0.5 text-right tabular-nums">×{ratio(v, 1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-[10px] text-gray-500 mt-1">同じトン数でもVAPはHOSOの3倍の営業工数を消費します。営業人員の配分計画に影響します。</p>
+            </div>
+          </div>
+        </details>
+      </div>
+    </CollapsibleSection>
+  );
+}
