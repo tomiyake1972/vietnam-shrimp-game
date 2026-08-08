@@ -52,9 +52,16 @@ Functionのタイムアウトを超えうる。超えると利用者から見て
 Server Action は「そのページのFunction」の中で実行されるため、
 API route にだけ設定しても UI 経路には効かない。両方に設定した。
 
-**240秒という値について**: Vercelの許容上限はプランに依存し、超えるとビルドが明示的に失敗する。
-この値は **プレビューデプロイのビルド成否で検証する必要がある**（本書の作成時点では
-ローカルの `next build` が通ることまで確認済み。プラン上限の検証はプレビューで行う）。
+**240秒という値について（検証済み）**: Vercelの許容上限はプランに依存し、
+超えると **ビルドが明示的に失敗する**。したがってビルドの成否がそのまま検証になる。
+
+- deployment: `dpl_ANLjMfquYx3k21U5bERjf3FUPjp8`（commit `2af0089`）
+- 結果: **READY**（ビルド成功）→ 240秒はこのプランの上限内である
+- 副次的な観測: `lambdaRuntimeStats` が `{"nodejs":2}` → `{"nodejs":4}` へ増えた。
+  Vercelは `maxDuration` の異なるルートを別Functionとしてbundleするため、
+  `maxDuration=240` を設定した2ルートが分離されたことと整合する
+  （＝設定が実際に効いていることの傍証）。
+- Preview URL: `https://vietnam-shrimp-game-staging-git-feature-v2-mana-bf6594-tomiyake.vercel.app`
 
 ### 1.2 max_tokens
 
@@ -240,8 +247,7 @@ UI は Server Action 経由で呼ぶため、本番の Server Action 経路で�
 1. **`ANTHROPIC_API_KEY` のある環境で Q1–Q12 と反論2件を実行**し、
    `ADVISOR_SONNET5_QA_SAMPLES.md` の評価フォームを埋める。
    ここまでやって初めて「品質が上がったか」を言える。
-2. プレビューデプロイで **`maxDuration = 240` がプラン上限内か**を確認する
-   （超えていればビルドが失敗するので、失敗したら成立する最大値へ下げる）。
+2. ~~プレビューデプロイで `maxDuration = 240` がプラン上限内か確認する~~ → **確認済み（ビルド成功）**。
 3. 実測ログから判断する項目:
    - `stopReason=max_tokens` が出るか → 出れば max_tokens を 6,144 へ
    - `elapsedMs` の分布 → 120秒/150秒が過大なら下げる
