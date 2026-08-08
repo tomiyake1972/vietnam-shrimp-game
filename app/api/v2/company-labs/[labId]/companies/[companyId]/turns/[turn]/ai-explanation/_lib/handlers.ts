@@ -176,7 +176,8 @@ export async function handlePostAiExplanation(
   // フォールバック判断までにどれだけかかったか」をハンドラー側でも計測するもの。
   // API key・prompt本文などの機密情報は含めない（labId/companyId/turn/カテゴリ/経過時間のみ）。
   const claudeCallStartedAt = Date.now();
-  const generated = await generateManagementReport(context, anthropicClient);
+  // 【2026-08-08】contextHashを渡し、失敗ログからも入力を一意に辿れるようにする。
+  const generated = await generateManagementReport(context, anthropicClient, resolved.value.contextHash);
   const claudeCallElapsedMs = Date.now() - claudeCallStartedAt;
   console.log(
     `${logPrefix} Claude呼び出し完了 ok=${generated.ok}${generated.ok ? "" : ` category=${generated.errorCategory}`} elapsedMs=${claudeCallElapsedMs}`

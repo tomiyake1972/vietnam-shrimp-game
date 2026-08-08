@@ -41,7 +41,33 @@ import { fetchAiExplanationAction, processQuarterAction, saveDraftAction, submit
 type AiExplanationLoadState =
   | { readonly kind: "loading" }
   | { readonly kind: "success"; readonly report: StandardAiManagementReport }
-  | { readonly kind: "failure" };
+  /**
+   * 【2026-08-08】失敗理由（errorCategory）を保持する。従来は捨てていたため、
+   * 利用者が「通信・timeoutの問題」なのか「応答形式の問題」なのかを区別できなかった。
+   * 内部スタック・APIキー・プロンプト本文は一切保持・表示しない。
+   */
+  | { readonly kind: "failure"; readonly errorCategory?: string };
+
+/**
+ * 【2026-08-08】errorCategoryを利用者向けの短い日本語へ変換する。
+ * 目的は「timeout/network か、応答形式(schema)か、その他か」を区別できること。
+ * 未知のカテゴリはそのまま表示せず「その他」に丸める（内部情報を出さないため）。
+ */
+const AI_EXPLANATION_ERROR_LABELS: Readonly<Record<string, string>> = {
+  network_error: "通信エラーまたはタイムアウト",
+  http_error: "APIエラー",
+  schema_mismatch: "応答形式の不一致",
+  invalid_json: "応答形式の不一致",
+  empty_response: "応答が空",
+  missing_api_key: "APIキー未設定",
+  unauthorized: "認証エラー",
+  internal_error: "サーバー内部エラー",
+};
+
+function aiExplanationErrorLabel(category: string | undefined): string {
+  if (!category) return "不明";
+  return AI_EXPLANATION_ERROR_LABELS[category] ?? "その他";
+}
 
 interface PlayerScreenClientProps {
   readonly viewModel: PlayerScreenViewModel;
@@ -131,15 +157,19 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
           // サーバー側からの応答が一定時間内（60秒）に届かなかった（何らかの理由で
           // 本当にハングしている）。意思決定画面自体は既に正常に表示され続けているため、
           // この説明文ブロックだけをfailure扱いにする。
-          setAiExplanationState({ kind: "failure" });
+          setAiExplanationState({ kind: "failure", errorCategory: "network_error" });
           return;
         }
         const { result } = outcome;
-        setAiExplanationState(result.ok && result.report ? { kind: "success", report: result.report } : { kind: "failure" });
+        setAiExplanationState(
+          result.ok && result.report
+            ? { kind: "success", report: result.report }
+            : { kind: "failure", errorCategory: result.errorCategory }
+        );
       })
       .catch(() => {
         if (cancelled) return;
-        setAiExplanationState({ kind: "failure" });
+        setAiExplanationState({ kind: "failure", errorCategory: "internal_error" });
       });
 
     return () => {
@@ -320,7 +350,16 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               )}
 
               {aiExplanationState.kind === "failure" && (
-                <p className="text-xs text-amber-300">経営説明の生成に失敗しました（詳細な判断ログは下記でご確認いただけます）。</p>
+                <div className="space-y-1" data-testid="ai-explanation-failure">
+                  <p className="text-xs text-amber-300">経営説明の生成に失敗しました（詳細な判断ログは下記でご確認いただけます）。</p>
+                  <p className="text-[11px] text-amber-300/80" data-testid="ai-explanation-error-category">
+                    原因: {aiExplanationErrorLabel(aiExplanationState.errorCategory)}
+                    {aiExplanationState.errorCategory ? `（${aiExplanationState.errorCategory}）` : ""}
+                  </p>
+                  <p className="text-[11px] text-gray-400">
+                    Standard AIの数値提案は正常に生成されています。この失敗は説明文の生成のみに影響します。画面を再読み込みすると再試行されます。
+                  </p>
+                </div>
               )}
 
               {aiExplanationState.kind === "success" && (

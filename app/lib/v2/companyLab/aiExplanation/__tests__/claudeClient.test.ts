@@ -23,6 +23,8 @@ import {
   EXPLANATION_REPORT_TOOL_INPUT_SCHEMA,
   EXPLANATION_REPORT_TOOL_NAME,
   generateManagementReport,
+  getExplanationModelConfig,
+  normalizeExplanationToolInput,
 } from "../claudeClient";
 import { EXPLANATION_OUTPUT_LIMITS } from "../reportSchema";
 import { STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3 } from "../systemPrompt";
@@ -292,19 +294,19 @@ test("generateManagementReport: エラー詳細にAPIキー値やヘッダーが
   }
 });
 
-test("buildAnthropicClientOptions: timeout=25000・maxRetries=0が実クライアント構築オプションへ渡る(76秒問題の修正確認)", () => {
-  // 【2026-08-02・76秒問題の修正】Anthropic SDKの既定maxRetries=2とtimeout=25000が
-  // 組み合わさり、実測76秒級の失敗検知latency（約3倍化）を引き起こしていた問題への
-  // 対応。今回はtimeout値自体は変更せず、まずSDK側のmaxRetriesを明示的に0へ固定して
-  // 暗黙のリトライを無効化する。このテストは、実クライアント（createRealClient）へ渡す
-  // コンストラクタオプションが確実にこの2値を維持していることを直接検証する
-  // （実際のAnthropicコンストラクタは呼ばない。値の組み立てのみを検証）。
+test("buildAnthropicClientOptions: timeout=40000・maxRetries=0が実クライアント構築オプションへ渡る", () => {
+  // 【2026-08-02・76秒問題の修正】Anthropic SDKの既定maxRetries=2が、timeoutと
+  // 組み合わさって失敗検知latencyを約3倍化していた問題への対応。maxRetriesは0のまま。
+  // 【2026-08-08】timeoutは25秒→40秒へ延長した（Test15 turn4で正常時19秒に対し
+  // 25,003msのtimeoutが実発生したため。claudeClient.tsの定数コメント参照）。
+  // このテストは、実クライアント（createRealClient）へ渡すコンストラクタオプションが
+  // 確実にこの2値を維持していることを直接検証する（実際のAnthropicコンストラクタは
+  // 呼ばない。値の組み立てのみを検証）。
   const options = buildAnthropicClientOptions("some-fake-key");
-  assert.equal(options.timeout, 25_000);
+  assert.equal(options.timeout, 40_000);
   assert.equal(options.maxRetries, 0);
   assert.equal(options.apiKey, "some-fake-key");
-  // 定数そのものも想定値のままであることを確認する(今回timeoutは変更しない指示のため)。
-  assert.equal(EXPLANATION_CLAUDE_TIMEOUT_MS, 25_000);
+  assert.equal(EXPLANATION_CLAUDE_TIMEOUT_MS, 40_000);
   assert.equal(EXPLANATION_CLAUDE_MAX_RETRIES, 0);
 });
 
@@ -354,11 +356,12 @@ test("STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3: 件数指示がEXPLANATION_OUTPU
   assert.ok(STANDARD_AI_EXPLANATION_SYSTEM_PROMPT_V3.includes("主要制約"));
 });
 
-test("generateManagementReport: timeout/maxRetries/modelは今回変更していない(25秒問題対応の比較のため固定)", () => {
-  assert.equal(EXPLANATION_CLAUDE_TIMEOUT_MS, 25_000);
+test("generateManagementReport: timeout=40秒・maxRetries=0が定数と構築オプションで一致している", () => {
+  // 【2026-08-08】timeoutを25秒→40秒へ延長。maxRetries=0（SDKの暗黙retry無効化）は維持。
+  assert.equal(EXPLANATION_CLAUDE_TIMEOUT_MS, 40_000);
   assert.equal(EXPLANATION_CLAUDE_MAX_RETRIES, 0);
   const options = buildAnthropicClientOptions("some-fake-key");
-  assert.equal(options.timeout, 25_000);
+  assert.equal(options.timeout, 40_000);
   assert.equal(options.maxRetries, 0);
 });
 
@@ -448,10 +451,194 @@ test("getExplanationModelConfig: 環境変数未指定時は既定モデルを�
     // 【2026-08-01・maxTokens不足によるschema_mismatchの修正】実機Previewで
     // stop_reason="max_tokens"（応答が1200トークンで打ち切られ、recommendations等の
     // 配列フィールドが丸ごと欠落）を確認したため、4096へ引き上げた（1200には戻さない）。
-    // 【2026-08-02・25秒問題対応・出力量削減】出力量を件数目安つきで絞ったため、
-    // 4096は過大と判断し2000へ縮小した（EXPLANATION_MAX_OUTPUT_TOKENSのコメント参照）。
-    assert.equal(config.maxTokens, 2000);
+    // 【2026-08-02】出力量を件数目安つきで絞ったため一度2000へ縮小したが、
+    // 【2026-08-08】Test15 turn4で stopReason=max_tokens / outputTokens=2000 の
+    // 打ち切りが実発生したため、実績のある4096へ戻した
+    // （EXPLANATION_MAX_OUTPUT_TOKENSのコメント参照。1200・2000には戻さない）。
+    assert.equal(config.maxTokens, 4096);
   } finally {
     if (original !== undefined) process.env.STANDARD_AI_EXPLANATION_MODEL = original;
   }
+});
+
+// =====================================================================
+// 【2026-08-08】Test15 Turn4のExplanation生成失敗（実ログで確定）への回帰テスト
+//
+// Vercelランタイムログ（lab=Test15 company=BAL turn=4）で確認した実際の失敗:
+//   04:06:19 attempt1 stopReason=max_tokens outputTokens=2000 maxTokens=2000
+//            → dataLimitations が丸ごと欠落（打ち切り）
+//   04:06:19 attempt2 stopReason=tool_use outputTokens=1747
+//            → recommendations が array ではなく string
+//   04:09:42 attempt1 elapsedMs=25,003 → network_error（timeout張り付き）
+// =====================================================================
+
+/** stop_reason・usageを指定できるtool_use応答（打ち切り再現用）。 */
+function toolUseResponseWith(
+  input: unknown,
+  options: { readonly stopReason?: string; readonly outputTokens?: number; readonly inputTokens?: number }
+): AnthropicMessageResponse {
+  return {
+    content: [{ type: "tool_use", input }],
+    usage: { input_tokens: options.inputTokens ?? 6800, output_tokens: options.outputTokens ?? 20 },
+    stop_reason: options.stopReason,
+  } as AnthropicMessageResponse;
+}
+
+test("【回帰1】max_tokens到達で後方fieldが欠落した応答は、truncationとしてログされschema_mismatchになる", async () => {
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map((a) => String(a)).join(" "));
+  };
+  try {
+    // 実ログと同じ形: dataLimitations だけが欠落し、stop_reason=max_tokens で
+    // outputTokens が maxTokens と一致している。
+    const truncated = {
+      headline: "見出し",
+      executiveSummary: "要約",
+      recommendations: [],
+      keyRisks: [],
+      questionsForPlayer: [],
+      // dataLimitations が無い
+    };
+    const config = getExplanationModelConfig();
+    const response = toolUseResponseWith(truncated, { stopReason: "max_tokens", outputTokens: config.maxTokens });
+    const { client } = makeClient([response, response]);
+    const result = await generateManagementReport(minimalContext(), client, "hash-abc");
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.errorCategory, "schema_mismatch");
+
+    const truncationLog = errors.find((e) => e.includes("failureCause=MAX_TOKENS_TRUNCATION"));
+    assert.ok(truncationLog, `truncationとしてログされること。実際のログ: ${errors.join(" / ")}`);
+    // 診断に必要な項目が揃っていること。
+    for (const key of ["stopReason=max_tokens", `outputTokens=${config.maxTokens}`, `maxTokens=${config.maxTokens}`, "contextHash=hash-abc", "promptVersion=", "contextSchemaVersion=", "inputTokens=", "elapsedMs=", "attempt="]) {
+      assert.ok(truncationLog!.includes(key), `ログに ${key} が含まれること`);
+    }
+    assert.ok(truncationLog!.includes('"path":"dataLimitations"'), "欠落したfieldがZod issuesとして分かること");
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("【回帰2】recommendationsがJSON配列文字列で返るケースを正規化で救済し、成功にできる", async () => {
+  const recommendations = [
+    { area: "販売", title: "施策", action: "実行", reasons: [{ label: "根拠", value: "値" }] },
+  ];
+  const deviated = {
+    headline: "見出し",
+    executiveSummary: "要約",
+    // 実ログと同じ逸脱: 配列そのものがJSON文字列で返る
+    recommendations: JSON.stringify(recommendations),
+    keyRisks: [],
+    questionsForPlayer: [],
+    dataLimitations: [],
+  };
+  const { client, callCount } = makeClient([toolUseResponseWith(deviated, { stopReason: "tool_use", outputTokens: 1747 })]);
+  const result = await generateManagementReport(minimalContext(), client, "hash-abc");
+
+  assert.equal(result.ok, true, "JSON配列文字列は救済されて成功すること");
+  if (result.ok) {
+    assert.equal(result.report.recommendations.length, 1);
+    assert.equal(result.report.recommendations[0].title, "施策");
+  }
+  assert.equal(callCount(), 1, "救済できたので再API呼び出しは発生しないこと");
+});
+
+test("【回帰3】JSONとして不正な文字列は救済せず、従来どおりschema_mismatchになる", async () => {
+  for (const broken of [
+    "[{\"area\":\"販売\"", // 閉じていない
+    "これは配列ではない説明文です",
+    "{\"area\":\"販売\"}", // オブジェクト（配列ではない）
+  ]) {
+    const deviated = {
+      headline: "見出し",
+      executiveSummary: "要約",
+      recommendations: broken,
+      keyRisks: [],
+      questionsForPlayer: [],
+      dataLimitations: [],
+    };
+    const response = toolUseResponseWith(deviated, { stopReason: "tool_use" });
+    const { client } = makeClient([response, response]);
+    const result = await generateManagementReport(minimalContext(), client, "hash-abc");
+    assert.equal(result.ok, false, `救済してはいけない値: ${broken}`);
+    if (!result.ok) assert.equal(result.errorCategory, "schema_mismatch");
+  }
+});
+
+test("【回帰3b】正規化は内容を捏造しない（単なる文字列を1要素配列にしない）", () => {
+  const input = { recommendations: "販売を強化すべきです", keyRisks: [], questionsForPlayer: [], dataLimitations: [] };
+  const normalized = normalizeExplanationToolInput(input) as Record<string, unknown>;
+  assert.equal(normalized.recommendations, "販売を強化すべきです", "文字列のまま（配列化しない）");
+});
+
+test("【回帰4】attempt1とattempt2で異なる失敗が起きた場合、各attemptのログが両方残る", async () => {
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map((a) => String(a)).join(" "));
+  };
+  try {
+    const config = getExplanationModelConfig();
+    // attempt1: 打ち切り（dataLimitations欠落）
+    const first = toolUseResponseWith(
+      { headline: "h", executiveSummary: "s", recommendations: [], keyRisks: [], questionsForPlayer: [] },
+      { stopReason: "max_tokens", outputTokens: config.maxTokens }
+    );
+    // attempt2: 打ち切りではないが型が違う（救済もできない形）
+    const second = toolUseResponseWith(
+      { headline: "h", executiveSummary: "s", recommendations: 123, keyRisks: [], questionsForPlayer: [], dataLimitations: [] },
+      { stopReason: "tool_use", outputTokens: 1747 }
+    );
+    const { client, callCount } = makeClient([first, second]);
+    const result = await generateManagementReport(minimalContext(), client, "hash-abc");
+
+    assert.equal(callCount(), 2, "schema_mismatchでは1回だけ再試行する");
+    assert.equal(result.ok, false);
+
+    const attempt1Log = errors.find((e) => e.includes("attempt=1"));
+    const attempt2Log = errors.find((e) => e.includes("attempt=2"));
+    assert.ok(attempt1Log, "attempt1のログが残ること");
+    assert.ok(attempt2Log, "attempt2のログが残ること");
+    assert.ok(attempt1Log!.includes("failureCause=MAX_TOKENS_TRUNCATION"), "attempt1は打ち切りとして記録される");
+    assert.ok(attempt2Log!.includes("failureCause=MODEL_SCHEMA_DEVIATION"), "attempt2は型逸脱として記録され、打ち切りと区別できる");
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("【回帰5】network_error（timeout相当）ではリトライしない", async () => {
+  const timeoutError = new Error("Request timed out.");
+  const { client, callCount } = makeClient([timeoutError, timeoutError]);
+  const result = await generateManagementReport(minimalContext(), client, "hash-abc");
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.errorCategory, "network_error");
+  assert.equal(callCount(), 1, "network_errorは1回で打ち切る（既存方針を維持）");
+});
+
+test("【回帰5b】usageが取れない失敗では、実測値ではなく推定値を別fieldで記録する", async () => {
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map((a) => String(a)).join(" "));
+  };
+  try {
+    const { client } = makeClient([new Error("Request timed out.")]);
+    await generateManagementReport(minimalContext(), client, "hash-abc");
+    const log = errors.find((e) => e.includes("errorCategory=network_error"));
+    assert.ok(log, "失敗ログが出ること");
+    assert.ok(log!.includes("inputTokens=(不明)"), "実測できないinputTokensは(不明)とすること（0で埋めない）");
+    assert.ok(/estimatedInputTokens=\d+/.test(log!), "推定値は別fieldで記録すること");
+    assert.ok(log!.includes("failureCause=TIMEOUT_OR_NETWORK"), "timeout/network由来と分かること");
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("【回帰8】timeout定数が40秒、max_tokensが4096である", () => {
+  assert.equal(EXPLANATION_CLAUDE_TIMEOUT_MS, 40_000);
+  assert.equal(getExplanationModelConfig().maxTokens, 4096);
+  // クライアント側のtimeout(60秒)の内側に収まること。
+  assert.ok(EXPLANATION_CLAUDE_TIMEOUT_MS < 60_000, "クライアント側60秒より短いこと");
 });

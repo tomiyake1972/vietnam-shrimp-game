@@ -151,8 +151,19 @@ export const EXPLANATION_REPORT_TOOL_INPUT_SCHEMA = {
 /**
  * Claude呼び出し1回あたりの明示的なタイムアウト（ミリ秒）。SDKの既定（10分）は
  * 長すぎるため、クライアント構築時・各呼び出し時の両方でこの値を指定する。
+ *
+ * 【2026-08-08・25秒→40秒へ延長（Test15 turn4のnetwork_error実測に基づく）】
+ * Vercelランタイムログで、Test15/BAL/turn4の実失敗を2件確認した。
+ *   - 04:06:19 の成功応答2回は latencyMs=19,686 / 18,922（＝正常時でも約19秒）
+ *   - 04:09:42 は elapsedMs=25,003 でtimeoutし category=network_error
+ * 正常時19秒に対して25秒では余裕が5〜6秒しかなく、わずかな遅延で即timeoutする
+ * 水準だった。40秒であれば正常時に対して倍以上の余裕があり、かつ
+ * 呼び出し元（PlayerScreenClient.tsxのAI_EXPLANATION_CLIENT_TIMEOUT_MS=60秒）の
+ * 内側に確実に収まる（schema_mismatchで2回試行しても40×2=80秒になり得るが、
+ * その場合はクライアント側60秒が先に発火してfailure表示になるだけで、
+ * 画面が固まることはない）。
  */
-export const EXPLANATION_CLAUDE_TIMEOUT_MS = 25_000;
+export const EXPLANATION_CLAUDE_TIMEOUT_MS = 40_000;
 
 /**
  * 【2026-08-02・76秒問題の修正】Anthropic SDK（@anthropic-ai/sdk）は既定で
@@ -210,7 +221,20 @@ const DEFAULT_EXPLANATION_MODEL = "claude-haiku-4-5-20251001";
 // 1,300〜1,800程度と想定）に収まる見込みであり、2,000であれば十分な余裕を持ちつつ
 // 4,096の半分以下に絞れる。三宅さんの指示範囲（1,600〜2,200）の中で、上記の想定
 // 生成量に対して余裕を持たせつつも4,096より大幅に小さい2,000を選んだ。
-const EXPLANATION_MAX_OUTPUT_TOKENS = 2000;
+//
+// 【2026-08-08・2000→4096へ戻す（Test15 turn4のmax_tokens到達を実測で確認）】
+// 上記の「25秒問題対応」で4096→2000へ縮小した結果、Turn4で打ち切りが再発した。
+// Vercelランタイムログの実測（Test15/BAL/turn4, 04:06:19 attempt1）:
+//   stopReason=max_tokens outputTokens=2000 maxTokens=2000
+//   shape={"headline","executiveSummary","recommendations(3)","keyRisks(3)",
+//          "questionsForPlayer(2)"}   ← 最後のdataLimitationsが丸ごと欠落
+//   issues=[{"path":"dataLimitations","code":"invalid_type","expected":"array"}]
+// 出力トークンが上限にちょうど張り付いており、tool schemaの最後のフィールドを
+// 書く前に停止していた。2026-08-01にmaxTokens=1200で起きたのと同一の症状であり、
+// そのとき4096へ引き上げて解消した実績がある。3000等の中間値ではなく、実績のある
+// 4096へ戻す（#05の明示指示）。timeoutは同時に40秒へ延ばしているため、
+// 「出力量を絞って25秒に収める」という縮小の動機自体が不要になっている。
+const EXPLANATION_MAX_OUTPUT_TOKENS = 4096;
 
 /**
  * このAI経営説明機能で使うモデル名・最大トークン数の唯一の定義箇所。
@@ -361,19 +385,70 @@ function coerceArrayItemToString(item: unknown): string {
   }
 }
 
+/**
+ * 【2026-08-08新設】スキーマ上arrayであるトップレベルfieldの一覧。
+ * 下の「JSON配列文字列をparseしてarrayへ戻す」救済の対象を、この4つに限定する。
+ */
+const ARRAY_FIELDS = ["recommendations", "keyRisks", "questionsForPlayer", "dataLimitations"] as const;
+
+/**
+ * 【2026-08-08新設】値がstringで、かつその中身がJSON配列として正しくparseできる場合
+ * だけarrayへ戻す。それ以外は一切触らない。
+ *
+ * 【この救済が対象とする実際の失敗】Vercelランタイムログ（Test15/BAL/turn4,
+ * 04:06:19 attempt2）で、stopReason=tool_use（＝打ち切りではなく正常完了）
+ * outputTokens=1747 にもかかわらず
+ *   shape={... "recommendations":"string" ...}
+ *   issues=[{"path":"recommendations","code":"invalid_type","expected":"array"}]
+ * となり、Claudeが配列そのものをJSON文字列として返していた。
+ *
+ * 【意図的にやらないこと（#05の明示指示）】
+ *   - 単なる文字列を勝手に1要素の配列にしない（内容を捏造しないため）
+ *   - JSONとしてparseできない文字列を黙って修正しない
+ *   - parse結果が配列でない場合（オブジェクト・数値等）は採用しない
+ *   - Zod検証そのものは一切緩めない（救済後の値を通常どおり検証する）
+ * parse不能ならこの関数は何もせず、従来どおりZodのschema_mismatchになる。
+ */
+function tryParseJsonArrayString(value: unknown): readonly unknown[] | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  // 「[」で始まらないものはJSON配列ではないので、parseを試みるまでもない
+  // （通常の説明文をparseして偶然通ってしまう事故を避ける）。
+  if (!trimmed.startsWith("[")) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function normalizeExplanationToolInput(toolInput: unknown): unknown {
   if (toolInput === null || typeof toolInput !== "object") return toolInput;
   const record = toolInput as Record<string, unknown>;
   let changed = false;
   const next: Record<string, unknown> = { ...record };
+
+  // (a) 【2026-08-08新設】array fieldがJSON配列文字列で来た場合だけarrayへ戻す。
+  //     要素の中身には触れない（この後の(b)と、最終的なZod検証に委ねる）。
+  for (const field of ARRAY_FIELDS) {
+    const parsed = tryParseJsonArrayString(next[field]);
+    if (parsed === undefined) continue;
+    next[field] = [...parsed];
+    changed = true;
+  }
+
+  // (b) 【既存】questionsForPlayer/dataLimitationsの要素がstringでない場合にstring化する。
+  //     (a)でarrayへ戻した直後の値に対しても適用されるよう、(a)の後に実行する。
   for (const field of STRING_ARRAY_FIELDS_TO_NORMALIZE) {
-    const value = record[field];
+    const value = next[field];
     if (!Array.isArray(value)) continue;
     const needsNormalization = value.some((v) => typeof v !== "string");
     if (!needsNormalization) continue;
     next[field] = value.map(coerceArrayItemToString);
     changed = true;
   }
+
   return changed ? next : toolInput;
 }
 
@@ -441,6 +516,68 @@ interface AttemptLogTag {
   readonly companyId: string;
   readonly turn: number;
   readonly attempt: 1 | 2;
+  /** 【2026-08-08】失敗時にも同定情報を残すためのメタ（本文・秘密情報は含まない）。 */
+  readonly contextHash: string;
+  readonly promptVersion: string;
+  readonly contextSchemaVersion: number;
+}
+
+/**
+ * 【2026-08-08新設】1回の試行の観測値を、成功・失敗いずれの経路でも同じ形で
+ * ログへ出すための共通部分。実測できた値と推定値を混同しないため、
+ * SDKのusageから取れた値だけを inputTokens/outputTokens として出し、
+ * 取れない場合は "(不明)" と書く（0で埋めない）。
+ */
+function formatAttemptLogFields(
+  logTag: AttemptLogTag,
+  config: ExplanationModelConfig,
+  fields: {
+    readonly elapsedMs: number;
+    readonly inputTokens?: number;
+    readonly outputTokens?: number;
+    readonly stopReason?: string | null;
+    readonly errorCategory?: string;
+    readonly failureCause?: string;
+    readonly estimatedInputTokens?: number;
+  }
+): string {
+  const parts = [
+    `attempt=${logTag.attempt}`,
+    `lab=${logTag.labId}`,
+    `company=${logTag.companyId}`,
+    `turn=${logTag.turn}`,
+    `model=${config.model}`,
+    `maxTokens=${config.maxTokens}`,
+    `timeoutMs=${EXPLANATION_CLAUDE_TIMEOUT_MS}`,
+    `elapsedMs=${fields.elapsedMs}`,
+    `inputTokens=${fields.inputTokens ?? "(不明)"}`,
+    `outputTokens=${fields.outputTokens ?? "(不明)"}`,
+    `stopReason=${fields.stopReason ?? "(なし)"}`,
+    `promptVersion=${logTag.promptVersion}`,
+    `contextSchemaVersion=${logTag.contextSchemaVersion}`,
+    `contextHash=${logTag.contextHash}`,
+  ];
+  if (fields.errorCategory !== undefined) parts.push(`errorCategory=${fields.errorCategory}`);
+  if (fields.failureCause !== undefined) parts.push(`failureCause=${fields.failureCause}`);
+  // 【実測値と推定値を混同しない】SDKのusageが取れなかった場合のみ、別fieldとして
+  // 推定値を出す（inputTokensとして出さない）。
+  if (fields.estimatedInputTokens !== undefined) parts.push(`estimatedInputTokens=${fields.estimatedInputTokens}`);
+  return parts.join(" ");
+}
+
+/**
+ * 【2026-08-08新設】usageが取得できなかった失敗（timeout・HTTPエラー等）でも
+ * 入力規模を事後に把握できるようにするための推定値。実測値ではないことが
+ * 分かるよう、必ず estimatedInputTokens という別fieldで記録する。
+ * 日本語混在JSONは概ね1トークン≒2.8文字であるという経験則のみを使う。
+ */
+const ESTIMATED_CHARS_PER_TOKEN = 2.8;
+export function estimateContextInputTokens(context: ExplanationContext): number {
+  try {
+    return Math.round(JSON.stringify(context).length / ESTIMATED_CHARS_PER_TOKEN);
+  } catch {
+    return -1;
+  }
 }
 
 async function attemptOnce(
@@ -483,8 +620,16 @@ async function attemptOnce(
     const status = typeof e === "object" && e !== null && "status" in e ? (e as { status?: unknown }).status : undefined;
     const detail = e instanceof Error ? e.message : String(e);
     const errorCategory: GenerateManagementReportErrorCategory = typeof status === "number" ? "http_error" : "network_error";
+    // 【2026-08-08】この経路ではAnthropicのusageが取得できない（応答自体が無い）。
+    // inputTokensは"(不明)"のままにし、推定値は estimatedInputTokens として別に出す。
     console.error(
-      `[claudeClient] attempt ${logTag.attempt} 失敗 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn} category=${errorCategory} elapsedMs=${Date.now() - startedAt}`
+      `[claudeClient] 試行失敗 ` +
+        formatAttemptLogFields(logTag, config, {
+          elapsedMs: Date.now() - startedAt,
+          errorCategory,
+          failureCause: errorCategory === "network_error" ? "TIMEOUT_OR_NETWORK" : `HTTP_${String(status)}`,
+          estimatedInputTokens: estimateContextInputTokens(context),
+        })
     );
     return { kind: "failure", errorCategory, detail };
   }
@@ -506,7 +651,15 @@ async function attemptOnce(
     // 引き続きinvalid_jsonとして分類する（呼び出し元の既存のリトライ・エラー分類方針を
     // 変えないため）。
     console.error(
-      `[claudeClient] attempt ${logTag.attempt} tool_useブロックが見つかりません lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn}`
+      `[claudeClient] tool_useブロックが見つかりません ` +
+        formatAttemptLogFields(logTag, config, {
+          elapsedMs: latencyMs,
+          inputTokens: response.usage?.input_tokens,
+          outputTokens: response.usage?.output_tokens,
+          stopReason: response.stop_reason,
+          errorCategory: "invalid_json",
+          failureCause: response.stop_reason === "max_tokens" ? "MAX_TOKENS_TRUNCATION" : "NO_TOOL_USE_BLOCK",
+        })
     );
     return { kind: "failure", errorCategory: "invalid_json" };
   }
@@ -535,10 +688,23 @@ async function attemptOnce(
     // トップレベルの型形状とZodのissues（path/code/expected/received等の構造情報のみ）
     // だけをログへ出す。これで次回の実失敗時、Vercelランタイムログから実際に
     // どのfield・どんな型/enum不一致だったかを推測ではなく確認できるようにする。
+    // 【2026-08-08・truncation由来の明示】stop_reason=max_tokens かつ出力が上限に
+    // 張り付いている場合、errorCategoryは既存方針どおりschema_mismatchのまま
+    // （retry方針を変えない）だが、failureCause=MAX_TOKENS_TRUNCATION をログへ出し、
+    // 「モデルが型を間違えた」のか「単に途中で切れた」のかをログだけで区別できるようにする。
+    const outputTokens = response.usage?.output_tokens;
+    const truncated = response.stop_reason === "max_tokens";
     console.error(
-      `[claudeClient] attempt ${logTag.attempt} スキーマ不一致 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn} ` +
-        `stopReason=${response.stop_reason ?? "(なし)"} outputTokens=${response.usage?.output_tokens ?? "(不明)"} maxTokens=${config.maxTokens} ` +
-        `shape=${summarizeTopLevelShapeForLog(toolInput)} issues=${summarizeZodIssuesForLog(validated.error)}`
+      `[claudeClient] スキーマ不一致 ` +
+        formatAttemptLogFields(logTag, config, {
+          elapsedMs: latencyMs,
+          inputTokens: response.usage?.input_tokens,
+          outputTokens,
+          stopReason: response.stop_reason,
+          errorCategory: "schema_mismatch",
+          failureCause: truncated ? "MAX_TOKENS_TRUNCATION" : "MODEL_SCHEMA_DEVIATION",
+        }) +
+        ` shape=${summarizeTopLevelShapeForLog(toolInput)} issues=${summarizeZodIssuesForLog(validated.error)}`
     );
     return { kind: "failure", errorCategory: "schema_mismatch", detail: validated.error.message };
   }
@@ -549,7 +715,13 @@ async function attemptOnce(
   // 所要時間・出力トークン数を減らせているかを、Vercelランタイムログから
   // 直接確認できるようにするため。
   console.log(
-    `[claudeClient] attempt ${logTag.attempt} 成功 lab=${logTag.labId} company=${logTag.companyId} turn=${logTag.turn} elapsedMs=${latencyMs} inputTokens=${response.usage?.input_tokens ?? 0} outputTokens=${response.usage?.output_tokens ?? 0}`
+    `[claudeClient] 成功 ` +
+      formatAttemptLogFields(logTag, config, {
+        elapsedMs: latencyMs,
+        inputTokens: response.usage?.input_tokens,
+        outputTokens: response.usage?.output_tokens,
+        stopReason: response.stop_reason,
+      })
   );
   return {
     kind: "success",
@@ -577,7 +749,14 @@ async function attemptOnce(
  */
 export async function generateManagementReport(
   context: ExplanationContext,
-  client?: AnthropicMessagesClient
+  client?: AnthropicMessagesClient,
+  /**
+   * 【2026-08-08】失敗ログから「どの入力に対する失敗か」を一意に辿るための識別子。
+   * 呼び出し元（handlers.ts）が既にキャッシュキー生成のために算出済みの値をそのまま
+   * 渡す（このモジュールがキャッシュ層へ依存しないようにするため、ここでは再計算しない）。
+   * 省略時は "(未指定)" とし、ログの他の項目には影響させない。
+   */
+  contextHash?: string
 ): Promise<GenerateManagementReportResult> {
   let resolvedClient = client;
   if (!resolvedClient) {
@@ -592,7 +771,15 @@ export async function generateManagementReport(
   }
 
   const config = getExplanationModelConfig();
-  const logBase = { labId: context.identity.labId, companyId: context.identity.companyId, turn: context.identity.turn };
+  const logBase = {
+    labId: context.identity.labId,
+    companyId: context.identity.companyId,
+    turn: context.identity.turn,
+    // 【2026-08-08】失敗ログからも「どの入力に対する失敗か」を一意に辿れるようにする。
+    contextHash: contextHash ?? "(未指定)",
+    promptVersion: context.identity.promptVersion,
+    contextSchemaVersion: context.identity.contextSchemaVersion,
+  };
 
   const first = await attemptOnce(resolvedClient, context, config, { ...logBase, attempt: 1 });
   if (first.kind === "success") {
