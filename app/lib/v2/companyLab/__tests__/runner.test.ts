@@ -761,10 +761,13 @@ test("営業人員採用: 当期は配分可能人数・当期SG&Aへ加算さ�
   const baseline0 = initializeCompanyLab(baseConfig({ seed: "sales-hiring-001", turns: 2 }));
   const { fixtures } = hired0;
   const balFixture = fixtures.find((f) => f.companyId === balId)!;
-  assert.equal(balFixture.salesForceHeadcountTotal, 18, "この検証はBALの基準人数18人を前提にしている");
+  // 【2026-08-08】初期営業人数はfixture側で変更されうる（30〜40へ再設定）。
+  // この検証は「採用は当期に反映されず次期から反映される」という仕組みの検証であり、
+  // 特定の人数に依存しない。基準人数はfixtureから読み、定数を直書きしない。
+  const balBase = balFixture.salesForceHeadcountTotal;
 
   // 当期(quarter1)開始時点では、採用意思決定を出す前からすでに配分可能人数は18人。
-  assert.equal(buildCompanyOwnState(hired0.state, balFixture).salesForceHiringState.headcount, 18);
+  assert.equal(buildCompanyOwnState(hired0.state, balFixture).salesForceHiringState.headcount, balBase);
 
   const decisionsHired1 = buildTurn1Decisions(hired0.state, fixtures, 6);
   const decisionsBaseline1 = buildTurn1Decisions(baseline0.state, fixtures, 0);
@@ -780,8 +783,8 @@ test("営業人員採用: 当期は配分可能人数・当期SG&Aへ加算さ�
   );
 
   // 次四半期の期首では、配分可能人数が24人（採用ブランチ）／18人（対照ブランチ）のまま。
-  assert.equal(buildCompanyOwnState(hired1State, balFixture).salesForceHiringState.headcount, 24);
-  assert.equal(buildCompanyOwnState(baseline1State, balFixture).salesForceHiringState.headcount, 18);
+  assert.equal(buildCompanyOwnState(hired1State, balFixture).salesForceHiringState.headcount, balBase + 6);
+  assert.equal(buildCompanyOwnState(baseline1State, balFixture).salesForceHiringState.headcount, balBase);
 
   // turn2の意思決定は両ブランチとも自動方針のみ（新規採用なし）で、増員の効果だけを見る。
   function buildTurn2Decisions(state: typeof hired1State, fixtures: ReturnType<typeof initializeCompanyLab>["fixtures"]) {
@@ -819,8 +822,8 @@ test("営業人員採用: 当期は配分可能人数・当期SG&Aへ加算さ�
   );
 
   // 3四半期目以降に採用が無ければ、配分可能人数はそれ以上変化しない（勝手に増減しない）。
-  assert.equal(buildCompanyOwnState(hired2State, balFixture).salesForceHiringState.headcount, 24);
-  assert.equal(buildCompanyOwnState(baseline2State, balFixture).salesForceHiringState.headcount, 18);
+  assert.equal(buildCompanyOwnState(hired2State, balFixture).salesForceHiringState.headcount, balBase + 6);
+  assert.equal(buildCompanyOwnState(baseline2State, balFixture).salesForceHiringState.headcount, balBase);
 });
 
 test("営業人員採用: 当期の採用予定人数を超える販売計画は、既存のvalidateSalesForceHeadcountBudgetにより従来どおり拒否される", () => {
@@ -901,7 +904,10 @@ test("営業人員減員: 当期は配分可能人数・当期の通常SG&Aか�
   const baseline0 = initializeCompanyLab(baseConfig({ seed: "sales-layoff-001", turns: 2 }));
   const { fixtures } = laidOff0;
   const balFixture = fixtures.find((f) => f.companyId === balId)!;
-  assert.equal(balFixture.salesForceHeadcountTotal, 18, "この検証はBALの基準人数18人を前提にしている");
+  // 【2026-08-08】初期営業人数はfixture側で変更されうる（30〜40へ再設定）。
+  // この検証は「採用は当期に反映されず次期から反映される」という仕組みの検証であり、
+  // 特定の人数に依存しない。基準人数はfixtureから読み、定数を直書きしない。
+  const balBase = balFixture.salesForceHeadcountTotal;
 
   const decisionsLaidOff1 = buildTurn1Decisions(laidOff0.state, fixtures, 6);
   const decisionsBaseline1 = buildTurn1Decisions(baseline0.state, fixtures, 0);
@@ -920,8 +926,8 @@ test("営業人員減員: 当期は配分可能人数・当期の通常SG&Aか�
   );
 
   // 次四半期の期首では、配分可能人数が12人（減員ブランチ）／18人（対照ブランチ）。
-  assert.equal(buildCompanyOwnState(laidOff1State, balFixture).salesForceHiringState.headcount, 12);
-  assert.equal(buildCompanyOwnState(baseline1State, balFixture).salesForceHiringState.headcount, 18);
+  assert.equal(buildCompanyOwnState(laidOff1State, balFixture).salesForceHiringState.headcount, balBase - 6);
+  assert.equal(buildCompanyOwnState(baseline1State, balFixture).salesForceHiringState.headcount, balBase);
 
   // turn2は両ブランチとも自動方針のみ（新規の採用・減員なし）で、減員の効果だけを見る。
   // 【SAI-6.2修正済みの注記】generateAutoPolicyDecisionの営業配分
@@ -959,20 +965,22 @@ test("営業人員減員: 当期は配分可能人数・当期の通常SG&Aか�
   assert.ok(Math.abs(sgaDiffTurn2 - 6 * 8000) < 0.01, `減員6人ぶんの通常給与SG&A差分が想定と異なる: ${sgaDiffTurn2}`);
 
   // 3四半期目以降に追加の採用・減員が無ければ、配分可能人数はそれ以上変化しない。
-  assert.equal(buildCompanyOwnState(laidOff2State, balFixture).salesForceHiringState.headcount, 12);
-  assert.equal(buildCompanyOwnState(baseline2State, balFixture).salesForceHiringState.headcount, 18);
+  assert.equal(buildCompanyOwnState(laidOff2State, balFixture).salesForceHiringState.headcount, balBase - 6);
+  assert.equal(buildCompanyOwnState(baseline2State, balFixture).salesForceHiringState.headcount, balBase);
 });
 
 test("営業人員減員: 現在人数を超える減員を入力しても営業人員は0人未満にならず、退職金は実際に減員される人数（現在人数）ぶんのみ発生する", () => {
   const { state, fixtures } = initializeCompanyLab(baseConfig({ seed: "sales-layoff-overshoot-001", turns: 1 }));
   const balFixture = fixtures.find((f) => f.companyId === "BAL")!;
-  assert.equal(balFixture.salesForceHeadcountTotal, 18);
+  // 初期営業人数はfixture側で変わりうるため、定数を直書きせずfixtureから読む。
+  const balBase = balFixture.salesForceHeadcountTotal;
   const publicInfo = buildPublicMarketInfo(state);
 
   const decisions: Record<string, CompanyDecisionInput> = {};
   for (const f of fixtures) {
     const base = generateAutoPolicyDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, 1);
-    decisions[f.companyId] = f.companyId === "BAL" ? { ...base, salesForceLayoffCount: 30 } : base;
+    // 現在人数を確実に超える減員を要求する（人数はfixture由来なので定数を直書きしない）。
+    decisions[f.companyId] = f.companyId === "BAL" ? { ...base, salesForceLayoffCount: balBase + 12 } : base;
   }
   const nextState = advanceCompanyLabQuarter(state, fixtures, decisions);
 
@@ -986,8 +994,8 @@ test("営業人員減員: 現在人数を超える減員を入力しても営業
   const balFrBaseline = baselineState.history[0].financialResults.find((fr) => fr.companyId === "BAL")!;
   const sgaDiff = (balFr.profitAndLoss.sellingGeneralAdmin as number) - (balFrBaseline.profitAndLoss.sellingGeneralAdmin as number);
   assert.ok(
-    Math.abs(sgaDiff - 18 * 2 * 8000) < 0.01,
-    `退職金は実際に減員される人数(18人=現在人数で頭打ち)ぶんのみのはず。差分: ${sgaDiff}`
+    Math.abs(sgaDiff - balBase * 2 * 8000) < 0.01,
+    `退職金は実際に減員される人数(${balBase}人=現在人数で頭打ち)ぶんのみのはず。差分: ${sgaDiff}`
   );
 });
 
