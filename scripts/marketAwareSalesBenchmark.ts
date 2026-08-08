@@ -67,6 +67,7 @@ interface TurnRow {
   readonly equipmentShortfall: number | null;
   readonly laborShortfall: number | null;
   readonly revenue: number | null;
+  readonly salesPayroll: number | null;
   readonly operatingIncome: number | null;
   readonly netIncome: number | null;
   readonly cash: number | null;
@@ -85,7 +86,7 @@ function run(): void {
   for (let turn = 1; turn <= TURNS && !state.isComplete; turn++) {
     const publicInfo = buildPublicMarketInfo(state);
     const decisions: Record<string, CompanyDecisionInput> = {};
-    const perCompany: Record<string, Omit<TurnRow, "contractedVolume" | "fulfilledVolume" | "outstandingVolume" | "finishedGoodsInventory" | "rawMaterialShortfall" | "equipmentShortfall" | "laborShortfall" | "revenue" | "operatingIncome" | "netIncome" | "cash">> = {};
+    const perCompany: Record<string, Omit<TurnRow, "contractedVolume" | "fulfilledVolume" | "outstandingVolume" | "finishedGoodsInventory" | "rawMaterialShortfall" | "equipmentShortfall" | "laborShortfall" | "revenue" | "salesPayroll" | "operatingIncome" | "netIncome" | "cash">> = {};
 
     for (const fixture of fixtures) {
       const ownState = buildCompanyOwnState(state, fixture);
@@ -164,8 +165,9 @@ function run(): void {
         rawMaterialShortfall: numberOrNull(summary?.rawMaterialShortfall),
         equipmentShortfall: numberOrNull(summary?.equipmentShortfall),
         laborShortfall: numberOrNull(summary?.laborShortfall),
-        revenue: numberOrNull(fin?.profitAndLoss?.revenue),
-        operatingIncome: numberOrNull(fin?.profitAndLoss?.operatingIncome),
+        revenue: numberOrNull(fin?.profitAndLoss?.netRevenue),
+        operatingIncome: numberOrNull(fin?.profitAndLoss?.operatingProfit),
+        salesPayroll: numberOrNull(fin?.profitAndLoss?.sellingGeneralAdmin),
         netIncome: numberOrNull(fin?.profitAndLoss?.netIncome),
         cash: numberOrNull(fin?.balanceSheet?.cash),
       });

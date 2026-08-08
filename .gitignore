@@ -63,4 +63,3 @@ next-env.d.ts
 # 大量のCSV/JSON生成物はGit管理対象にしない
 # （生成スクリプト scripts/test15PdMechanizationPreflightCalibration.ts のみGit管理する）。
 /artifacts/test15/
-artifacts/

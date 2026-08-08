@@ -61,10 +61,34 @@ function ratioAdjustmentToUsd(ratioAdjustment: number, referencePrice: number | 
  * 観測需要が公開されていない場合（旧スナップショット等）は undefined を返し、
  * 呼び出し側は従来の重みへフォールバックする（挙動を壊さない）。
  */
+/**
+ * 【説明可能性のための内訳（2026-08-08追加）】重みそのものは変えず、
+ * 重みを構成した決定論的な計算値をそのまま外へ出すための器。
+ * 「なぜ日本に3人で中国に13人なのか」を実数で辿れるようにするためのものであり、
+ * この値から重みを再計算したり、生成AIに理由を考えさせたりはしない。
+ */
+export interface MarketOpportunityComponent {
+  readonly market: DemandMarketId;
+  readonly product: Product;
+  /** 観測需要（原則2四半期前の実績。hidden true demandではない）。 */
+  readonly observedDemand: number;
+  /** 獲得可能需要 = observedDemand × maximumSupplierShare。 */
+  readonly attainableDemand: number;
+  /** 参照売価（未観測ならnull。推測で埋めない）。 */
+  readonly referencePriceUsdPerHosoEqKg: number | null;
+  /** 期待貢献 = 参照売価 − 加工コスト（参照売価が未観測なら1として規模のみで按分）。 */
+  readonly expectedContributionUsdPerHosoEqKg: number;
+  /** 正規化前の機会スコア = attainableDemand × expectedContribution。 */
+  readonly opportunityScore: number;
+  /** 正規化後の按分重み（この商品の全市場合計が1）。 */
+  readonly normalizedWeight: number;
+}
+
 function buildMarketOpportunityWeights(
   observation: StandardAiObservation,
   markets: readonly DemandMarketId[],
-  salesParams: SalesParameters
+  salesParams: SalesParameters,
+  componentsOut?: MarketOpportunityComponent[]
 ): Record<Product, number[]> | undefined {
   const hasObservedDemand = observation.markets.some((m) => m.observedDemandByProduct !== undefined);
   if (!hasObservedDemand) return undefined;
@@ -74,22 +98,36 @@ function buildMarketOpportunityWeights(
 
   for (const product of ["hoso", "pd", "vap"] as const) {
     const processingCost = observation.productEconomics.expectedProcessingCostUsdPerHosoEqKg[product];
-    const scores = markets.map((market) => {
+    const detail = markets.map((market) => {
       const entry = observation.markets.find((m) => m.market === market);
       const observedDemand = entry?.observedDemandByProduct?.[product] ?? 0;
-      if (observedDemand <= EPSILON) return 0;
       const obtainable = observedDemand * share;
       const referencePrice = entry?.referencePriceByProduct?.[product];
       // 参照売価が未観測（turn1等）のときは採算差が付けられないため、
       // 規模のみで按分する（価格を推測して捏造しない）。
       const contributionPerKg = referencePrice === undefined ? 1 : referencePrice - processingCost;
-      if (contributionPerKg <= 0) return 0;
-      return obtainable * contributionPerKg;
+      const score = observedDemand <= EPSILON || contributionPerKg <= 0 ? 0 : obtainable * contributionPerKg;
+      return { market, observedDemand, obtainable, referencePrice, contributionPerKg, score };
     });
+    const scores = detail.map((d) => d.score);
     const total = scores.reduce((sum, v) => sum + v, 0);
     // 全市場のスコアが0（＝どこも採算が合わない／需要が観測できない）の場合は
     // 均等配分にフォールバックする（販売をゼロにする判断はここではしない）。
     result[product] = total > EPSILON ? scores.map((v) => v / total) : markets.map(() => 1 / markets.length);
+    if (componentsOut) {
+      detail.forEach((d, i) => {
+        componentsOut.push({
+          market: d.market,
+          product,
+          observedDemand: d.observedDemand,
+          attainableDemand: d.obtainable,
+          referencePriceUsdPerHosoEqKg: d.referencePrice ?? null,
+          expectedContributionUsdPerHosoEqKg: d.contributionPerKg,
+          opportunityScore: d.score,
+          normalizedWeight: result[product][i],
+        });
+      });
+    }
   }
   return result;
 }
@@ -340,7 +378,8 @@ export function buildStandardAiSalesPlans(
   // Batch 002で市場×商品別の観測需要（2四半期前の実績）が公開されたため、
   // 市場規模と採算性の両方を反映した機会スコアで按分する。
   // 観測需要が無い場合（旧スナップショット等）は従来の重みへフォールバックする。
-  const opportunityWeights = buildMarketOpportunityWeights(observation, markets, salesParams);
+  const opportunityComponents: MarketOpportunityComponent[] = [];
+  const opportunityWeights = buildMarketOpportunityWeights(observation, markets, salesParams, opportunityComponents);
   const legacyWeights = markets.map((_, idx) => (idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1)));
   if (opportunityWeights) {
     diagnostics.push({
@@ -356,6 +395,32 @@ export function buildStandardAiSalesPlans(
       message:
         "市場別の販売目標を、観測需要（原則2四半期前の実績）と採算性から求めた機会スコアで按分した（価格順位だけの按分は使わない）。",
     });
+    // 【説明可能性（2026-08-08）】重みの内訳を市場ごとに1件ずつ残す。
+    // 「なぜ日本に3人、中国に13人なのか」へ実数で答えるための決定論的な計算値であり、
+    // 生成AI側が理由を creating しないための一次情報である。
+    // HOSO換算の代表値としてhosoの内訳を出す（商品別の全量を出すと診断が膨らむため）。
+    for (const comp of opportunityComponents.filter((c) => c.product === "hoso")) {
+      diagnostics.push({
+        code: "MARKET_OPPORTUNITY_COMPONENTS",
+        domain: "sales",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: {
+          observedDemand: comp.observedDemand,
+          attainableDemand: comp.attainableDemand,
+          maximumSupplierShare: salesParams.maximumSupplierShare,
+          referencePriceUsdPerHosoEqKg: comp.referencePriceUsdPerHosoEqKg ?? -1,
+          expectedContributionUsdPerHosoEqKg: comp.expectedContributionUsdPerHosoEqKg,
+          opportunityScore: comp.opportunityScore,
+          normalizedWeight: comp.normalizedWeight,
+        },
+        message:
+          `${comp.market}市場: 観測需要${Math.round(comp.observedDemand)}t × 取得可能シェア` +
+          `${(salesParams.maximumSupplierShare * 100).toFixed(0)}% = 獲得可能需要${Math.round(comp.attainableDemand)}t、` +
+          `期待貢献${comp.expectedContributionUsdPerHosoEqKg.toFixed(2)}USD/kg。` +
+          `機会スコアから按分重み${(comp.normalizedWeight * 100).toFixed(1)}%と算出した。`,
+      });
+    }
   }
 
   const desiredByMarketProduct = new Map<DemandMarketId, Record<Product, number>>();
