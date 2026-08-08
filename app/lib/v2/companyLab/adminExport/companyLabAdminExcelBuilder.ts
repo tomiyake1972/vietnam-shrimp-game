@@ -9,6 +9,11 @@
 // 検算式のロジックをexceljsへ移植したもの。
 
 import ExcelJS from "exceljs";
+import {
+  appendManufacturingCostManagementSections,
+  writeDecisionWorksheetSheet,
+  writeFixedVariableAnalysisSheet,
+} from "./test15ManagementSheets";
 import { execFileSync } from "node:child_process";
 import type {
   AllCompaniesExportPayload,
@@ -1173,12 +1178,15 @@ export async function buildCompanyExportExcelWorkbook(
     writePlSheet(wb, payload.financialResult);
     // 【Test15】製造原価計算書はPLの直後（参考ブックと同じ位置）。
     writeManufacturingCostSheet(wb, payload);
+    // 【Test15管理会計】製造原価計算書の直後に固変分解（市場×商品別の採算性）。
+    writeFixedVariableAnalysisSheet(wb, payload);
     const bsCashRowNumber = writeBsSheet(wb, payload.financialResult);
     writeCfSheet(wb, payload.financialResult, bsCashRowNumber);
   } else {
     const plWs = wb.addWorksheet("PL");
     plWs.addRow(["このターン・会社の財務結果はAPI上に存在しません（データ未作成）"]);
     writeManufacturingCostSheet(wb, payload);
+    writeFixedVariableAnalysisSheet(wb, payload);
     wb.addWorksheet("BS").addRow(["このターン・会社の財務結果はAPI上に存在しません（データ未作成）"]);
     wb.addWorksheet("CF").addRow(["このターン・会社の財務結果はAPI上に存在しません（データ未作成）"]);
   }
@@ -1193,6 +1201,8 @@ export async function buildCompanyExportExcelWorkbook(
   writeSalesDetailSheet(wb, payload);
   writeMarketSheet(wb, payload.market);
   writeDecisionsSheet(wb, payload.decisionInfo);
+  // 【Test15管理会計】Decisionsの直後に、次期意思決定のワーキングシート。
+  writeDecisionWorksheetSheet(wb, payload);
   // 【Test15】Turn履歴。historyが渡されない呼び出し経路（既存のZIP生成等）でも
   // シート自体は必ず作り、「履歴が取得できなかった」旨を書く（シート数を安定させる）。
   writeCompanyTrendSheet(wb, history ?? []);
@@ -1501,12 +1511,15 @@ function writeManufacturingCostSheet(wb: ExcelJS.Workbook, payload: CompanyExpor
   const financial = payload.financialResult;
   const summary = payload.companySummary;
   if (!financial || !summary) {
-    ws.addRow(["このターン・会社の財務結果または会社サマリーがAPI上に存在しないため、製造原価計算書を作成できません（データ未作成）"]).getCell(1).font = LABEL_FONT;
+    ws.addRow(["このターン・会社の財務結果または会社サマリーがAPI上に存在しないため、商品別製造原価を作成できません（データ未作成）"]).getCell(1).font = LABEL_FONT;
+    // 商品別製造原価が作れなくても、調達・納入・期末在庫は独立に取得できるため必ず出す。
+    appendManufacturingCostManagementSections(ws, payload);
     return;
   }
   const mc = financial.manufacturingCost;
   if (!mc) {
     ws.addRow(["このターン・会社の製造原価内訳（manufacturingCost）がAPI上に存在しません（データ未作成）"]).getCell(1).font = LABEL_FONT;
+    appendManufacturingCostManagementSections(ws, payload);
     return;
   }
 
@@ -1674,6 +1687,9 @@ function writeManufacturingCostSheet(wb: ExcelJS.Workbook, payload: CompanyExpor
   ]);
   note.getCell(1).font = LABEL_FONT;
   note.getCell(1).alignment = { wrapText: true, vertical: "top" };
+
+  // 【Test15管理会計】原料調達（調達元別）・商品別実納入量・商品別期末在庫評価を追記する。
+  appendManufacturingCostManagementSections(ws, payload);
 }
 
 /** 1始まりの列番号をExcelの列記号（A, B, ... AA）へ変換する。 */

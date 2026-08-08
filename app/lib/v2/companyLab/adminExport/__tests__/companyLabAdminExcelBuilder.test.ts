@@ -25,6 +25,7 @@ const EXPECTED_SHEET_NAMES = [
   "Meta",
   "PL",
   "製造原価計算書",
+  "固変分解",
   "BS",
   "CF",
   "Financing",
@@ -37,6 +38,7 @@ const EXPECTED_SHEET_NAMES = [
   "Sales Detail",
   "Market",
   "Decisions",
+  "意思決定計算",
   "推移サマリー",
 ];
 
@@ -47,7 +49,7 @@ async function loadWorkbook(payload: Parameters<typeof buildCompanyExportExcelWo
   return wb;
 }
 
-test("buildCompanyExportExcelWorkbook: 参考ブックと同じ順序で16シートを生成する", async () => {
+test("buildCompanyExportExcelWorkbook: 経営資料として自然な順序で18シートを生成する（管理会計2シートを追加）", async () => {
   const wb = await loadWorkbook(buildSyntheticCompanyExportPayload());
   assert.deepEqual(
     wb.worksheets.map((ws) => ws.name),

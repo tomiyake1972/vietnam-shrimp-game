@@ -131,6 +131,7 @@ import { ExportProcessingCapacity, buildExportProcessingCapacity } from "./dto/p
 import { lookupProductDevelopmentScore } from "../../../../lib/v2/companyLab/productDevelopmentState";
 import { CompanyProductionPlanEntry, WorkerAssignment } from "../../../../lib/v2/production/types";
 import { RawMaterialLot } from "../../../../lib/v2/rawMaterials/types";
+import { summarizeInventoryValuation } from "../../../../lib/v2/companyLab/adminExport/managementAccountingModel";
 import {
   ExportAllCompaniesDecisionInfo,
   ExportCompanyDecisionInfo,
@@ -275,6 +276,15 @@ export interface ExportBalanceSheet {
   readonly totalLiabilitiesAndEquity: number;
   /** 貸借差額（0近傍であること。整合性チェックはこの値を使う）。 */
   readonly balanceDifference: number;
+}
+
+/** 商品別の期末完成品在庫評価（原料費部分と加工費等部分に分解）。 */
+export interface ExportFinishedGoodsInventoryByProduct {
+  readonly product: string;
+  readonly quantityTons: number;
+  readonly rawMaterialCostUsd: number;
+  readonly processingAndOtherCostUsd: number;
+  readonly totalValueUsd: number;
 }
 
 export function buildExportBalanceSheet(bs: BalanceSheet): ExportBalanceSheet {
@@ -1087,6 +1097,34 @@ export interface CompanyExportPayload {
   readonly operations: ExportOperationsSection;
   /** §6 この会社の提出意思決定とAI提案（他社の意思決定は含まない）。 */
   readonly decisionInfo: ExportCompanyDecisionInfo;
+  /**
+   * 【Test15管理会計】完成品原価台帳（四半期処理後のfinanceState）から集計した、
+   * 商品別の期末在庫評価。finance側の在庫評価ロジックをそのまま集計しただけで、
+   * Excel用の別原価ロジックではない。Σ(totalValueUsd) は
+   * financialResult.balanceSheet.finishedGoodsInventory と一致する。
+   * 台帳が取得できない呼び出し経路では空配列（0で埋めない）。
+   */
+  readonly finishedGoodsInventoryByProduct: readonly ExportFinishedGoodsInventoryByProduct[];
+}
+
+/**
+ * 【Test15管理会計】四半期処理後の完成品原価台帳から、対象会社の商品別期末在庫評価を作る。
+ * 台帳が存在しない（旧スナップショット等）場合は空配列を返し、値を捏造しない。
+ */
+export function buildExportFinishedGoodsInventoryByProduct(
+  entry: CompanyLabQuarterHistoryEntry,
+  companyId: CompanyId
+): readonly ExportFinishedGoodsInventoryByProduct[] {
+  const state = entry.postProcessingStateSnapshot?.financeState?.companies?.find((c) => c.companyId === companyId);
+  const ledger = state?.finishedGoodsCostLedger;
+  if (!ledger || ledger.length === 0) return [];
+  return summarizeInventoryValuation(ledger).map((v) => ({
+    product: v.product,
+    quantityTons: v.quantityTons,
+    rawMaterialCostUsd: v.rawMaterialCostUsd,
+    processingAndOtherCostUsd: v.processingAndOtherCostUsd,
+    totalValueUsd: v.totalValueUsd,
+  }));
 }
 
 /**
@@ -1170,6 +1208,7 @@ export function buildCompanyExportPayload(input: BuildCompanyExportPayloadInput)
     market: buildExportMarketResult(entry.record.marketResult),
     operations: buildExportOperationsSection(entry, companyId),
     decisionInfo: buildExportCompanyDecisionInfo(entry, companyId),
+    finishedGoodsInventoryByProduct: buildExportFinishedGoodsInventoryByProduct(entry, companyId),
   };
 }
 

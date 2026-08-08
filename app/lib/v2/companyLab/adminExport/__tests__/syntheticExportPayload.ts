@@ -26,6 +26,7 @@ import type {
   ExportCompanyDecision,
   ExportCompanyDecisionInfo,
   ExportContractFulfillmentUsage,
+  ExportCostRecord,
   ExportMarketProductAllocation,
   ExportMarketResult,
   ExportOperationsSection,
@@ -37,6 +38,8 @@ import { COUNTRY_IDS } from "../../../market/types";
 import type { PeriodV2 } from "../../../core/period";
 
 export const SYNTHETIC_PERIOD: PeriodV2 = "2015Q1" as PeriodV2;
+/** 【Test15管理会計】翌四半期（標準リードタイム1四半期に対応する納期）。 */
+const SYNTHETIC_NEXT_PERIOD: PeriodV2 = "2015Q2" as PeriodV2;
 
 /** §2 契約ロールフォワード1件（期首300 + 新規200 - 履行300 = 期末200）。 */
 export const SYNTHETIC_CONTRACT: ExportSalesContract = {
@@ -68,6 +71,55 @@ export const SYNTHETIC_CONTRACT: ExportSalesContract = {
 
 const SYNTHETIC_FULFILLMENT_USAGE: readonly ExportContractFulfillmentUsage[] = [
   { contractId: "BAL-2015Q1-CN-hoso-001", companyId: "BAL", product: "hoso", lotId: "BAL-FG-2015Q1-001", quantity: 300 },
+  // 【Test15管理会計】同一商品を複数市場へ納入した実績。市場別の限界利益差
+  // （販売価格・物流費の違い）を検証するために必要。
+  { contractId: "BAL-2015Q1-US-hoso-001", companyId: "BAL", product: "hoso", lotId: "BAL-FG-2015Q1-001", quantity: 200 },
+  { contractId: "BAL-2015Q1-JP-pd-001", companyId: "BAL", product: "pd", lotId: "BAL-FG-2015Q1-002", quantity: 150 },
+];
+
+/** 【Test15管理会計】期首成約残と当期納入を持つ契約（意思決定計算の期首成約残の検証にも使う）。 */
+const SYNTHETIC_SALES_CONTRACTS_FOR_MANAGEMENT: readonly ExportSalesContract[] = [
+  {
+    contractId: "BAL-2015Q1-CN-hoso-001", companyId: "BAL", market: "CN", product: "hoso",
+    contractedPeriod: SYNTHETIC_PERIOD, dueDate: SYNTHETIC_NEXT_PERIOD, originalQuantity: 300, unitPrice: 4.2,
+    beginningOutstandingQuantity: 120, newContractedQuantity: 300, fulfilledQuantity: 300,
+    endingOutstandingQuantity: 120, status: "partiallyFulfilled",
+    statusAtBeginning: "open", existsAtBeginning: true, existsAtEnd: true, isNewThisQuarter: false, isOverdueAtEnd: false, costSnapshot: null,
+  },
+  {
+    contractId: "BAL-2015Q1-US-hoso-001", companyId: "BAL", market: "US", product: "hoso",
+    contractedPeriod: SYNTHETIC_PERIOD, dueDate: SYNTHETIC_NEXT_PERIOD, originalQuantity: 200, unitPrice: 4.6,
+    beginningOutstandingQuantity: 80, newContractedQuantity: 200, fulfilledQuantity: 200,
+    endingOutstandingQuantity: 80, status: "partiallyFulfilled",
+    statusAtBeginning: "open", existsAtBeginning: true, existsAtEnd: true, isNewThisQuarter: false, isOverdueAtEnd: false, costSnapshot: null,
+  },
+  {
+    contractId: "BAL-2015Q1-JP-pd-001", companyId: "BAL", market: "JP", product: "pd",
+    contractedPeriod: SYNTHETIC_PERIOD, dueDate: SYNTHETIC_NEXT_PERIOD, originalQuantity: 150, unitPrice: 6.1,
+    beginningOutstandingQuantity: 45, newContractedQuantity: 150, fulfilledQuantity: 150,
+    endingOutstandingQuantity: 45, status: "partiallyFulfilled",
+    statusAtBeginning: "open", existsAtBeginning: true, existsAtEnd: true, isNewThisQuarter: false, isOverdueAtEnd: false, costSnapshot: null,
+  },
+];
+
+/**
+ * 【Test15管理会計】固変分解の検証に使うコスト記録。
+ * 変動費／固定費の区分と、売上原価側／販管費側の勘定を両方含める。
+ * market が設定された変動費（物流費）は、市場別の限界利益差の源になる。
+ */
+const SYNTHETIC_COST_RECORDS: readonly ExportCostRecord[] = [
+  { account: "rawMaterial", behavior: "variable", fixedPortion: 0, variablePortion: 300, driver: "producedTons", driverQuantity: 500, driverUnitRate: 0.6, product: "hoso", market: null, factoryId: "BAL-F1", period: SYNTHETIC_PERIOD, shortTermReducibility: "reducible", sourceRef: "synthetic:raw" },
+  { account: "processingVariable", behavior: "variable", fixedPortion: 0, variablePortion: 100, driver: "producedTons", driverQuantity: 500, driverUnitRate: 0.2, product: "pd", market: null, factoryId: "BAL-F1", period: SYNTHETIC_PERIOD, shortTermReducibility: "reducible", sourceRef: "synthetic:proc" },
+  { account: "sellingLogistics", behavior: "variable", fixedPortion: 0, variablePortion: 12, driver: "soldTons", driverQuantity: 300, driverUnitRate: 0.04, product: null, market: "CN", factoryId: null, period: SYNTHETIC_PERIOD, shortTermReducibility: "reducible", sourceRef: "synthetic:logi-cn" },
+  { account: "sellingLogistics", behavior: "variable", fixedPortion: 0, variablePortion: 20, driver: "soldTons", driverQuantity: 200, driverUnitRate: 0.1, product: null, market: "US", factoryId: null, period: SYNTHETIC_PERIOD, shortTermReducibility: "reducible", sourceRef: "synthetic:logi-us" },
+  { account: "sellingLogistics", behavior: "variable", fixedPortion: 0, variablePortion: 18, driver: "soldTons", driverQuantity: 150, driverUnitRate: 0.12, product: null, market: "JP", factoryId: null, period: SYNTHETIC_PERIOD, shortTermReducibility: "reducible", sourceRef: "synthetic:logi-jp" },
+  // 固定費（売上原価側）
+  { account: "regularLaborCost", behavior: "stepFixed", fixedPortion: 90, variablePortion: 0, driver: "headcount", driverQuantity: 30, driverUnitRate: 0, product: null, market: null, factoryId: "BAL-F1", period: SYNTHETIC_PERIOD, shortTermReducibility: "committed", sourceRef: "synthetic:labor" },
+  { account: "factoryFixedCost", behavior: "fixed", fixedPortion: 52, variablePortion: 0, driver: "none", driverQuantity: 0, driverUnitRate: 0, product: null, market: null, factoryId: "BAL-F1", period: SYNTHETIC_PERIOD, shortTermReducibility: "committed", sourceRef: "synthetic:factory" },
+  { account: "depreciation", behavior: "fixed", fixedPortion: 40, variablePortion: 0, driver: "none", driverQuantity: 0, driverUnitRate: 0, product: null, market: null, factoryId: "BAL-F1", period: SYNTHETIC_PERIOD, shortTermReducibility: "committed", sourceRef: "synthetic:dep" },
+  // 固定費（販管費側）
+  { account: "salesForceSalary", behavior: "stepFixed", fixedPortion: 60, variablePortion: 0, driver: "headcount", driverQuantity: 5, driverUnitRate: 0, product: null, market: null, factoryId: null, period: SYNTHETIC_PERIOD, shortTermReducibility: "committed", sourceRef: "synthetic:sales" },
+  { account: "adminFixed", behavior: "fixed", fixedPortion: 40, variablePortion: 0, driver: "none", driverQuantity: 0, driverUnitRate: 0, product: null, market: null, factoryId: null, period: SYNTHETIC_PERIOD, shortTermReducibility: "committed", sourceRef: "synthetic:admin" },
 ];
 
 const SYNTHETIC_SALES_PLANS: readonly ExportSalesPlanEntry[] = [
@@ -783,7 +835,7 @@ export function buildSyntheticCompanyExportPayload(
         reworkQuantityTons: 1,
         downgradeQuantitySoldTons: 2,
       },
-      costRecords: [],
+      costRecords: SYNTHETIC_COST_RECORDS,
       contributionMargin: {
         grossRevenue: 1000,
         salesDeduction: 10,
@@ -806,8 +858,16 @@ export function buildSyntheticCompanyExportPayload(
         marginOfSafetyRatio: null,
         operatingLeverage: null,
         assumedProductMix: [],
-        byProduct: [],
-        byMarket: [],
+        byProduct: [
+          { key: "hoso", grossRevenue: 3020, salesDeduction: 0, netRevenue: 3020, variableCost: 1560, contributionMargin: 1460, contributionMarginRatio: 1460 / 3020, directFixedCost: 110 },
+          { key: "pd", grossRevenue: 915, salesDeduction: 0, netRevenue: 915, variableCost: 520, contributionMargin: 395, contributionMarginRatio: 395 / 915, directFixedCost: 72 },
+          { key: "vap", grossRevenue: 0, salesDeduction: 0, netRevenue: 0, variableCost: 0, contributionMargin: 0, contributionMarginRatio: null, directFixedCost: 0 },
+        ],
+        byMarket: [
+          { key: "CN", grossRevenue: 1260, salesDeduction: 0, netRevenue: 1260, variableCost: 660, contributionMargin: 600, contributionMarginRatio: 600 / 1260, directFixedCost: 0 },
+          { key: "US", grossRevenue: 920, salesDeduction: 0, netRevenue: 920, variableCost: 460, contributionMargin: 460, contributionMarginRatio: 460 / 920, directFixedCost: 0 },
+          { key: "JP", grossRevenue: 915, salesDeduction: 0, netRevenue: 915, variableCost: 520, contributionMargin: 395, contributionMarginRatio: 395 / 915, directFixedCost: 0 },
+        ],
         commonFixedCost: 282,
         commonVariableCost: 0,
       },
@@ -828,7 +888,7 @@ export function buildSyntheticCompanyExportPayload(
     financingResult: null,
     capexResult: null,
     companySummary: null,
-    salesContracts: [],
+    salesContracts: SYNTHETIC_SALES_CONTRACTS_FOR_MANAGEMENT,
     processingCapacity: SYNTHETIC_PROCESSING_CAPACITY,
     vapProductDevelopmentScore: 50,
     contractFulfillmentUsage: SYNTHETIC_FULFILLMENT_USAGE,
@@ -837,6 +897,13 @@ export function buildSyntheticCompanyExportPayload(
     market: SYNTHETIC_MARKET,
     operations: SYNTHETIC_OPERATIONS,
     decisionInfo: SYNTHETIC_DECISION_INFO,
+    // 【Test15管理会計】商品別の期末在庫評価（原料費部分＋加工費等部分＝評価額合計）。
+    // 数量0のVAPも含めて3商品ぶん用意し、ゼロ除算・欠損の扱いをテストできるようにする。
+    finishedGoodsInventoryByProduct: [
+      { product: "hoso", quantityTons: 120, rawMaterialCostUsd: 360_000, processingAndOtherCostUsd: 96_000, totalValueUsd: 456_000 },
+      { product: "pd", quantityTons: 80, rawMaterialCostUsd: 264_000, processingAndOtherCostUsd: 112_000, totalValueUsd: 376_000 },
+      { product: "vap", quantityTons: 0, rawMaterialCostUsd: 0, processingAndOtherCostUsd: 0, totalValueUsd: 0 },
+    ],
   };
   return { ...base, ...overrides };
 }
