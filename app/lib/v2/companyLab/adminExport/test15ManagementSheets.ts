@@ -109,10 +109,12 @@ export function appendManufacturingCostManagementSections(ws: ExcelJS.Worksheet,
   header(ws, ["調達元", "調達数量 (t)", "平均単価 (USD/kg)", "原料費総額 (USD)", "", ""]);
 
   const procurement = summarizeRawProcurement(payload.operations.rawMaterialLots.ending, payload.meta.period);
+  // 原料ロットの source はエンジン側の値をそのまま使う（rawMaterials/types.ts の
+  // RawMaterialLot.source: "domestic" | "import" | "aquaculture"）。
   const sourceLabel: Readonly<Record<string, string>> = {
     import: "輸入原料",
     aquaculture: "自社養殖",
-    domesticPurchase: "国内調達",
+    domestic: "国内調達",
   };
   for (const s of procurement.bySource) {
     const row = ws.addRow([sourceLabel[s.source] ?? s.source, s.quantityTons, orDash(s.averageUnitCostUsdPerKg), s.totalCostUsd]);
@@ -781,13 +783,15 @@ function beginningBacklogByProduct(payload: CompanyExportPayload): Record<string
   return out;
 }
 
-/** 商品別の実効設備能力（processingCapacityが無ければ0を返さず「－」相当の0にしない）。 */
+/**
+ * 商品別の実効設備能力。processingCapacity.companyTotals の poolKey（hoso/pd/vap）から
+ * currentEffectiveTons（名目 × 基準稼働率 × 設備利用可能率）をそのまま読む。
+ * 取得できない場合は「－」を返し、0で埋めない。
+ */
 function effectiveCapacityFor(capacity: CompanyExportPayload["processingCapacity"], product: string): number | string {
   if (!capacity) return DASH;
-  const byProduct = capacity as unknown as Record<string, unknown>;
-  const key = `${product}Capacity`;
-  const v = byProduct[key];
-  return typeof v === "number" && Number.isFinite(v) ? v : DASH;
+  const pool = capacity.companyTotals.find((p) => p.poolKey === product);
+  return pool && Number.isFinite(pool.currentEffectiveTons) ? pool.currentEffectiveTons : DASH;
 }
 
 /** 当期の常用Worker配置人数（意思決定から読む）。 */
@@ -809,7 +813,7 @@ function writeRawProcurementPlanSection(ws: ExcelJS.Worksheet, payload: CompanyE
 
   const sources: readonly { readonly key: string; readonly label: string }[] = [
     { key: "aquaculture", label: "自社養殖 投入予定" },
-    { key: "domesticPurchase", label: "国内原料 調達予定" },
+    { key: "domestic", label: "国内原料 調達予定" },
     { key: "import", label: "輸入原料 調達予定" },
   ];
   const firstSourceRow = ws.rowCount + 1;

@@ -635,3 +635,43 @@ test("意思決定計算: トン当たり必要Worker数が実効処理量の逆
   assert.ok(cell && typeof cell === "object" && "formula" in cell);
   assert.match(cell.formula, /1\//, "実効処理量の逆数であること");
 });
+
+test("実効設備能力が processingCapacity.companyTotals の poolKey から取得できる（「－」にならない）", async () => {
+  const payload = buildSyntheticCompanyExportPayload();
+  const wb = await loadWorkbook(payload);
+  const ws = wb.getWorksheet("意思決定計算")!;
+  const row = findRow(ws, "実効設備能力（参考）")!;
+  const pools = payload.processingCapacity?.companyTotals ?? [];
+  for (const [col, product] of [[2, "hoso"], [3, "pd"], [4, "vap"]] as const) {
+    const pool = pools.find((p) => p.poolKey === product);
+    if (!pool) continue;
+    assert.equal(
+      cellNumber(row, col),
+      pool.currentEffectiveTons,
+      `${product}: 実効設備能力が companyTotals[poolKey].currentEffectiveTons と一致する`
+    );
+  }
+});
+
+test("原料調達の調達元キーがエンジンの RawMaterialLot.source と一致する（domestic / import / aquaculture）", async () => {
+  const payload = buildSyntheticCompanyExportPayload();
+  // fixtureに存在する調達元は必ず参考単価が引ける（「－」にならない）こと。
+  const summary = summarizeRawProcurement(payload.operations.rawMaterialLots.ending, payload.meta.period);
+  const wb = await loadWorkbook(payload);
+  const ws = wb.getWorksheet("意思決定計算")!;
+  const labelBySource: Record<string, string> = {
+    aquaculture: "自社養殖 投入予定",
+    domestic: "国内原料 調達予定",
+    import: "輸入原料 調達予定",
+  };
+  for (const s of summary.bySource) {
+    const label = labelBySource[s.source];
+    assert.ok(label, `未知の調達元 "${s.source}" — エンジンのsource値と表のキーがずれている`);
+    const row = findRow(ws, label)!;
+    assert.equal(
+      cellNumber(row, 5),
+      s.averageUnitCostUsdPerKg,
+      `${s.source}: 参考単価が実績の加重平均と一致する（キーのずれで「－」になっていない）`
+    );
+  }
+});
