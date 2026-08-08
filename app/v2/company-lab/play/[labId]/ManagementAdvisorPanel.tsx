@@ -25,8 +25,32 @@ import { askAdvisorAction, clearAdvisorConversationAction, loadAdvisorConversati
 
 const MAX_QUESTION_LENGTH = 1_000;
 
-/** クライアント側の安全策タイムアウト。サーバー側（40秒＋最大1回リトライ）の外側に置く。 */
-const ADVISOR_CLIENT_TIMEOUT_MS = 90_000;
+/**
+ * クライアント側の安全策タイムアウト（品質強化Batch 1・§1）。
+ * サーバー側は 1試行120秒／全体予算150秒で必ず打ち切る。それより十分長く、
+ * かつ Vercel Function の maxDuration(240秒) より短い値にする。
+ * 値の根拠は advisorClient.ts の ADVISOR_CLIENT_TIMEOUT_MS のコメントを参照。
+ */
+const ADVISOR_CLIENT_TIMEOUT_MS = 180_000;
+
+/**
+ * 【正直な進捗表示（§19）】相談役AIは最大で2分以上かかることがある。
+ * 「考えています…」だけだと固まったように見えるため、経過秒数を出す。
+ *
+ * 【fake progressの禁止】「PL分析中」「市場分析中」のような、実際には取得していない
+ * 進捗を表示しない。クライアントが本当に知っているのは「送信した」「何秒経った」だけである。
+ * したがって表示するのもそれだけにする。
+ */
+function elapsedHintText(elapsedSeconds: number): string {
+  if (elapsedSeconds < 20) return "相談役AIへ質問を送信しました。";
+  if (elapsedSeconds < 60) return "回答を生成しています。長めの質問では1〜2分かかることがあります。";
+  return "まだ生成中です。応答が無い場合は最大3分で自動的に打ち切ります。";
+}
+
+/** 1回の送信を識別するID。二重送信の判定にサーバー側で使う。 */
+function newRequestId(): string {
+  return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 const ADVISOR_ERROR_LABELS: Readonly<Record<string, string>> = {
   network_error: "通信エラーまたはタイムアウト",
@@ -91,6 +115,8 @@ export default function ManagementAdvisorPanel({ labId, companyId, turn }: Manag
   const [question, setQuestion] = useState("");
   const [entries, setEntries] = useState<readonly AdvisorEntry[]>([]);
   const [pending, setPending] = useState(false);
+  /** 生成中の経過秒数（実測のみ。推定進捗率は出さない）。 */
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [errorCategory, setErrorCategory] = useState<string | null>(null);
   const [lastFailedQuestion, setLastFailedQuestion] = useState<string | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
@@ -133,6 +159,17 @@ export default function ManagementAdvisorPanel({ labId, companyId, turn }: Manag
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [entries, pending]);
 
+  // 経過秒数の計測。pendingでない間はタイマーを動かさない。
+  useEffect(() => {
+    if (!pending) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const id = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [pending]);
+
   const submitQuestion = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
@@ -143,7 +180,14 @@ export default function ManagementAdvisorPanel({ labId, companyId, turn }: Manag
       const timeoutPromise = new Promise<{ readonly kind: "timeout" }>((resolve) =>
         setTimeout(() => resolve({ kind: "timeout" }), ADVISOR_CLIENT_TIMEOUT_MS)
       );
-      const actionPromise = askAdvisorAction(labId, companyId, turn, trimmed).then((result) => ({ kind: "resolved" as const, result }));
+      // 【二重送信防止（§18）】1回の送信につき1つのIDを発行する。
+      // 「同じ質問を再送する」でここを通ると新しいIDになるため、再送は必ず本当に実行される
+      // （失敗をキャッシュして同じ失敗を返し続けることは無い。§20）。
+      const requestId = newRequestId();
+      const actionPromise = askAdvisorAction(labId, companyId, turn, trimmed, undefined, requestId).then((result) => ({
+        kind: "resolved" as const,
+        result,
+      }));
 
       try {
         const outcome = await Promise.race([actionPromise, timeoutPromise]);
@@ -314,6 +358,13 @@ export default function ManagementAdvisorPanel({ labId, companyId, turn }: Manag
                                   .join(" / ")}
                               </p>
                             )}
+                            {/* 【数値の根拠（§14・§15）】相談役AIが申告した参照フィールド。
+                                サーバー側でパスの厳密照合はしていないため「検証済み」とは書かない。 */}
+                            {(section.evidenceRefs?.length ?? 0) > 0 && (
+                              <p className="text-[10px] text-gray-500 break-all" data-testid="advisor-evidence-ref">
+                                数値の参照元（相談役AIの申告）: {section.evidenceRefs.join(" / ")}
+                              </p>
+                            )}
                             {section.sourceTypes.length > 0 && (
                               <p className="text-[10px] text-gray-600 break-all">{section.sourceTypes.join(", ")}</p>
                             )}
@@ -354,9 +405,12 @@ export default function ManagementAdvisorPanel({ labId, companyId, turn }: Manag
         ))}
 
         {pending && (
-          <p className="text-xs text-sky-200/70" data-testid="advisor-loading">
-            相談役AIが考えています…
-          </p>
+          <div className="space-y-0.5" data-testid="advisor-loading">
+            <p className="text-xs text-sky-200/70">相談役AIが考えています…（経過 {elapsedSeconds} 秒）</p>
+            <p className="text-[10px] text-gray-500" data-testid="advisor-progress-hint">
+              {elapsedHintText(elapsedSeconds)}
+            </p>
+          </div>
         )}
 
         {errorCategory !== null && (

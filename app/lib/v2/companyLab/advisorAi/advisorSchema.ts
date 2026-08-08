@@ -16,6 +16,7 @@ export const ADVISOR_OUTPUT_LIMITS = {
   maxSourcesPerSection: 3,
   maxRelatedReasonCodes: 6,
   maxSuggestedFollowUps: 3,
+  maxEvidenceRefsPerSection: 5,
 } as const;
 
 /**
@@ -46,6 +47,24 @@ const advisorSectionSchema = z.object({
   text: z.string(),
   sourceTypes: z.array(z.enum(SOURCE_TYPES)),
   sources: z.array(advisorSourceRefSchema),
+  /**
+   * 【数値の根拠追跡（品質強化Batch 1・§14）】
+   * その節が数値を述べた場合に、その数値がcontextのどのフィールド由来かを書かせる。
+   * 例: "liveGameState.financials.current.operatingIncomeUsd"
+   *
+   * 【なぜ必要か】相談役AIの最も危険な失敗は「もっともらしい数値を作ること」である。
+   * 出典文書（sources）は文章の根拠しか辿れず、数値には効かない。数値については
+   * 「contextのどのキーを読んだか」を書かせることで、後から機械的に検証できる形にする。
+   *
+   * 【なぜ検証を強制しないか（MVPの範囲）】contextは入れ子のJSONであり、Claudeが書く
+   * パス表記は完全一致しないことがある。今回は「必ず書かせて、書かれていない
+   * FACT節の件数をログへ出す」ところまでを行い、パスの厳密照合はまだ行わない
+   * （厳密照合を先に入れると、正しい回答を誤って落とすリスクの方が大きい）。
+   * 【捏造禁止】検証していないものを「検証済み」としてUIへ出さないこと。
+   *
+   * 古い保存済み会話にはこのフィールドが無いため、既定値を空配列にしてある。
+   */
+  evidenceRefs: z.array(z.string()).default([]),
 });
 
 export const advisorAnswerSchema = z.object({
@@ -103,8 +122,19 @@ export const ADVISOR_ANSWER_TOOL_INPUT_SCHEMA = {
               required: ["title", "path", "authority"],
             },
           },
+          evidenceRefs: {
+            type: "array",
+            maxItems: ADVISOR_OUTPUT_LIMITS.maxEvidenceRefsPerSection,
+            description:
+              "この節で述べた数値の出所を、渡されたcontextのフィールドパスで書く" +
+              "（例: liveGameState.financials.current.operatingIncomeUsd、" +
+              "standardAiState.chatContext.bottleneck）。" +
+              "数値を1つでも述べたなら必ず1つ以上書くこと。数値を述べていない節では空配列でよい。" +
+              "contextに存在しないパスを書いてはいけない。",
+            items: { type: "string" },
+          },
         },
-        required: ["type", "text", "sourceTypes", "sources"],
+        required: ["type", "text", "sourceTypes", "sources", "evidenceRefs"],
       },
     },
     relatedReasonCodes: {

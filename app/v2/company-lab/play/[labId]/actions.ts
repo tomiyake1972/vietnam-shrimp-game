@@ -202,7 +202,13 @@ export async function askAdvisorAction(
   companyId: string,
   turn: number,
   question: string,
-  currentViewContext?: string
+  currentViewContext?: string,
+  /**
+   * 【二重送信防止（品質強化Batch 1・§18）】クライアントが1回の送信ごとに発行するID。
+   * 同じIDが再送された場合、サーバー側はClaudeを呼び直さず保存済みの回答を返す。
+   * 「同じ質問を再送する」ボタンは新しいIDを発行するため、必ず本当に再実行される。
+   */
+  requestId?: string
 ): Promise<AdvisorActionResult> {
   const logPrefix = `[askAdvisorAction] lab=${labId} company=${companyId} turn=${turn}`;
   try {
@@ -210,7 +216,14 @@ export async function askAdvisorAction(
     if (!g.ok) return { ok: false, errorCategory: "unauthorized" };
 
     const deps = await resolveAiExplanationUiDependencies();
-    const result = await handlePostAdvisor(deps, labId, companyId, String(turn), { question, currentViewContext }, new Date().toISOString());
+    const result = await handlePostAdvisor(
+      deps,
+      labId,
+      companyId,
+      String(turn),
+      { question, currentViewContext, requestId },
+      new Date().toISOString()
+    );
 
     if (result.status !== 200) {
       const body = result.body as { error?: { message?: string } } | undefined;

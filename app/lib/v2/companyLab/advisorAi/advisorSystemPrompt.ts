@@ -106,7 +106,15 @@ export function buildAdvisorSystemPrompt(role: AdvisorRole = "ADVISOR"): string 
     `・sections: 最大${ADVISOR_OUTPUT_LIMITS.maxSections}件。FACT / STANDARD_AI_VIEW / ADVISOR_INFERENCE /`,
     "  DEVELOPMENT_RATIONALE / UNCERTAINTY を必ず区別する。開発文書を根拠にした節では、",
     "  渡された抜粋のpathだけをsourcesへ書く（存在しないpathを作らない）。",
-    `・relatedReasonCodes: 最大${ADVISOR_OUTPUT_LIMITS.maxRelatedReasonCodes}件。diagnosticEntriesに実在するcodeだけ。`,
+    `・relatedReasonCodes: 最大${ADVISOR_OUTPUT_LIMITS.maxRelatedReasonCodes}件。`,
+    "  <available_reason_codes> ブロックに列挙されたcodeだけを書くこと。1つでも列挙外のcodeを書くと、",
+    "  サーバー側の検証で回答が作り直しになる（利用者を無駄に待たせる）。該当が無ければ空配列にする。",
+    `・evidenceRefs: 節ごとに最大${ADVISOR_OUTPUT_LIMITS.maxEvidenceRefsPerSection}件。`,
+    "  数値を述べた節では、その数値がcontextのどのフィールド由来かをパスで必ず書くこと",
+    "  （例: liveGameState.financials.current.operatingIncomeUsd、",
+    "   liveGameState.observed.ownState.…、standardAiState.chatContext.bottleneck.primaryConstraint）。",
+    "  数値を述べていない節では空配列でよい。contextに存在しないパスを書かないこと。",
+    "  パスを書けない数値は、そもそも根拠が無い＝書いてはいけない数値である。",
     `・suggestedFollowUps: 最大${ADVISOR_OUTPUT_LIMITS.maxSuggestedFollowUps}件。`,
   ].join("\n");
 }
@@ -118,4 +126,4 @@ export const ADVISOR_SYSTEM_PROMPT = buildAdvisorSystemPrompt("ADVISOR");
  * プロンプト文言・出力スキーマ・contextの組を識別するバージョン。
  * いずれかを変更したら必ず新しくすること。
  */
-export const ADVISOR_PROMPT_VERSION = "advisor-v1";
+export const ADVISOR_PROMPT_VERSION = "advisor-v2";

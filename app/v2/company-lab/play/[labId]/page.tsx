@@ -12,6 +12,23 @@ import { resolveCompanyLabUiDependencies } from "../_lib/uiDependencies";
 import { loadPlayerScreenViewModel } from "../_lib/viewModel";
 import PlayerScreenClient from "./PlayerScreenClient";
 
+/**
+ * 【Server Actionのタイムアウト（品質強化Batch 1・§1）】
+ * 相談役AIのUIは fetch ではなく Server Action（askAdvisorAction）を呼ぶ。
+ * Server Actionは「そのページのFunction」の中で実行されるため、
+ * /api/.../advisor 側に maxDuration を設定しても、この経路には効かない。
+ * したがってこのページにも同じ値を設定する必要がある。
+ *
+ * 【副作用の範囲】この設定はこのページのFunctionのタイムアウト上限を延ばすだけで、
+ * 通常のページ表示・他のServer Actionの実行時間を長くするものではない
+ * （上限であって待ち時間ではない）。
+ *
+ * 値の根拠は app/lib/v2/companyLab/advisorAi/advisorClient.ts の
+ * ADVISOR_FUNCTION_MAX_DURATION_SECONDS のコメントを参照。
+ * route segment configはビルド時に静的解析されるため、必ずリテラルで書く。
+ */
+export const maxDuration = 240;
+
 interface PlayerPageProps {
   readonly params: Promise<{ readonly labId: string }>;
 }

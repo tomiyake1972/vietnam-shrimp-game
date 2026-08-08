@@ -66,9 +66,23 @@ export interface AdvisorRequestBody {
   readonly question?: unknown;
   /** 【実装指示§7】今見ている画面。MVPではoptional。 */
   readonly currentViewContext?: unknown;
+  /** 【品質強化Batch 1・§18】1回の送信を識別するID。二重送信の判定に使う。 */
+  readonly requestId?: unknown;
 }
 
-function parseQuestion(body: unknown): { readonly ok: true; readonly question: string; readonly view: AdvisorCurrentViewContext } | { readonly ok: false; readonly result: AiExplanationApiResult } {
+/** requestIdの最大長。ログとRedisへ入るため、無制限の文字列を受け取らない。 */
+const MAX_REQUEST_ID_LENGTH = 64;
+
+interface ParsedAdvisorRequest {
+  readonly question: string;
+  readonly view: AdvisorCurrentViewContext;
+  /** クライアントが送ってきたID。無ければnull（＝二重送信判定を行わない）。 */
+  readonly requestId: string | null;
+}
+
+function parseQuestion(
+  body: unknown
+): { readonly ok: true; readonly value: ParsedAdvisorRequest } | { readonly ok: false; readonly result: AiExplanationApiResult } {
   if (body === null || typeof body !== "object") return { ok: false, result: badRequest("リクエストボディが不正です。") };
   const b = body as AdvisorRequestBody;
   if (typeof b.question !== "string") return { ok: false, result: badRequest("question は文字列である必要があります。") };
@@ -78,7 +92,43 @@ function parseQuestion(body: unknown): { readonly ok: true; readonly question: s
     return { ok: false, result: badRequest(`質問は${ADVISOR_MAX_QUESTION_LENGTH}文字以内で入力してください。`) };
   }
   const view = CURRENT_VIEW_CONTEXTS.find((v) => v === b.currentViewContext) ?? "unknown";
-  return { ok: true, question, view };
+  const rawRequestId = typeof b.requestId === "string" ? b.requestId.trim() : "";
+  const requestId = rawRequestId.length > 0 && rawRequestId.length <= MAX_REQUEST_ID_LENGTH ? rawRequestId : null;
+  return { ok: true, value: { question, view, requestId } };
+}
+
+/**
+ * 【二重送信の合流（品質強化Batch 1・§18）】
+ * 同一プロセス内で同じrequestIdの処理が走っている間は、2つ目以降の呼び出しを
+ * 同じPromiseへ合流させる。ボタン連打・ネットワーク再送で同じ質問がClaudeへ
+ * 2回投げられるのを防ぐ。
+ *
+ * 【限界の明示（推測で「防げます」と書かない）】Vercelのserverless関数は
+ * インスタンスが複数ありうるため、この仕組みだけでは全ての重複は防げない。
+ * インスタンスをまたぐ場合は、保存済み会話のlastSucceededRequestIdによる
+ * 判定（下のhandlePostAdvisor冒頭）が効く。両者の併用でも「同時・別インスタンス」の
+ * 重複だけは通りうる。これは既知の残課題として記録しておく。
+ */
+const inFlightAdvisorRequests = new Map<string, Promise<AiExplanationApiResult>>();
+
+/** 完了済みの成功回答を、保存済み会話からそのまま組み立て直す（Claudeを呼ばない）。 */
+function replayStoredAnswer(conversation: AdvisorConversation): AiExplanationApiResult | null {
+  const last = conversation.messages[conversation.messages.length - 1];
+  if (!last || last.role !== "advisor" || !last.answer) return null;
+  return {
+    status: 200,
+    body: {
+      result: "success",
+      answer: last.answer,
+      conversationId: conversation.conversationId,
+      category: last.category,
+      contextHash: last.contextHash,
+      model: last.model,
+      generatedAt: last.timestamp,
+      /** 同じrequestIdの再送だったため、保存済みの回答を返したことの明示。 */
+      deduplicated: true,
+    },
+  };
 }
 
 /**
@@ -112,10 +162,37 @@ export async function handlePostAdvisor(
   now: string,
   anthropicClient?: AnthropicMessagesClient
 ): Promise<AiExplanationApiResult> {
-  const logPrefix = `[advisor handlePost] lab=${labId} company=${companyId} turn=${turnParam}`;
-
   const parsed = parseQuestion(body);
   if (!parsed.ok) return parsed.result;
+  const { requestId } = parsed.value;
+
+  if (requestId === null) {
+    return runAdvisorRequest(deps, labId, companyId, turnParam, parsed.value, now, anthropicClient);
+  }
+
+  const key = `${labId}:${companyId}:${requestId}`;
+  const existing = inFlightAdvisorRequests.get(key);
+  if (existing) {
+    console.log(`[advisor handlePost] 同一requestIdの処理中に合流しました lab=${labId} requestId=${requestId}`);
+    return existing;
+  }
+  const promise = runAdvisorRequest(deps, labId, companyId, turnParam, parsed.value, now, anthropicClient).finally(() => {
+    inFlightAdvisorRequests.delete(key);
+  });
+  inFlightAdvisorRequests.set(key, promise);
+  return promise;
+}
+
+async function runAdvisorRequest(
+  deps: AiExplanationApiDependencies,
+  labId: string,
+  companyId: string,
+  turnParam: string,
+  parsed: ParsedAdvisorRequest,
+  now: string,
+  anthropicClient?: AnthropicMessagesClient
+): Promise<AiExplanationApiResult> {
+  const logPrefix = `[advisor handlePost] lab=${labId} company=${companyId} turn=${turnParam}`;
 
   const resolved = await resolveRequestContext(deps, labId, companyId, turnParam);
   if (resolved.kind === "error") {
@@ -174,9 +251,27 @@ export async function handlePostAdvisor(
   // 会話履歴の読み込み（失敗しても新規会話として続行する）。
   const existing = await loadAdvisorConversation(deps.redisClient, labId, companyId);
   const conversation: AdvisorConversation = existing ?? createEmptyConversation(labId, companyId, viewModel.currentTurn, now);
+
+  // 【二重送信（§18）】直前に成功した同じrequestIdなら、Claudeを呼ばずに保存済み回答を返す。
+  // 失敗したrequestIdは記録していないため、再送ボタンは常に本当に再実行される（§20）。
+  if (parsed.requestId !== null && conversation.lastSucceededRequestId === parsed.requestId) {
+    const replayed = replayStoredAnswer(conversation);
+    if (replayed !== null) {
+      console.log(`${logPrefix} 同一requestIdの再送のため保存済み回答を返しました requestId=${parsed.requestId}`);
+      return replayed;
+    }
+  }
+
   const history = toHistoryTurns(conversation, ADVISOR_MAX_HISTORY_TURNS);
 
-  const generated = await generateAdvisorAnswer({ context, question: parsed.question, history, contextHash }, anthropicClient);
+  // questionIdはログ追跡専用の識別子。クライアントのrequestIdがあればそれを使い、
+  // 無ければcontextHashの先頭から作る（質問文そのものはログへ残さない）。
+  const questionId = parsed.requestId ?? `ctx-${contextHash.slice(0, 12)}`;
+
+  const generated = await generateAdvisorAnswer(
+    { context, question: parsed.question, history, contextHash, questionId },
+    anthropicClient
+  );
 
   const userMessage: AdvisorStoredMessage = {
     role: "user",
@@ -231,8 +326,17 @@ export async function handlePostAdvisor(
     ...conversation,
     updatedAt: now,
     messages: [...conversation.messages, userMessage, advisorMessage],
+    // 成功したときだけIDを記録する（失敗はキャッシュしない。§20）。
+    ...(parsed.requestId !== null ? { lastSucceededRequestId: parsed.requestId } : {}),
   };
   await saveAdvisorConversation(deps.redisClient, updated);
+
+  console.log(
+    `${logPrefix} 成功 questionId=${questionId} category=${plan.category} retryCount=${generated.retryCount} ` +
+      `stripped=${generated.strippedFabricatedReferences === true} ` +
+      `fabricatedReasonCodes=${generated.grounding.fabricatedReasonCodes.length} ` +
+      `sourceDocs=${meta.sourceDocuments.length} reasonCodes=${generated.answer.relatedReasonCodes.length}`
+  );
 
   return {
     status: 200,

@@ -7,28 +7,31 @@
 //     できるよう、環境変数 STANDARD_AI_ADVISOR_MODEL で個別に上書きできる口だけ用意する
 //     （未設定時はExplanation層と同じモデル。コード変更なしで比較実験ができる）。
 //
-// 【max_tokens = 3072 の選定理由（実装指示§42「理由を文書化」）】
+// 【max_tokens の選定理由（実装指示§42「理由を文書化」）】
 //   ・Explanation本体は6フィールドを1回で書き切る必要があり実測で最大約2,300tok（上限4,096）。
 //   ・Standard AI Q&Aは短い定型回答のため1,536。
 //   ・相談役AIはこの中間ではなく、両者と性質が違う。自由回答のanswer本文（日本語で
 //     600〜1,000字程度＝概ね600〜1,000tok）に加え、sections最大6件（各100〜200字＋
-//     sourceTypes/sources）、relatedReasonCodes、suggestedFollowUpsを書く。
-//     概算で 1,600〜2,400tok。打ち切りは2026-08-08に実際に事故を起こしているため、
-//     必要量の上限側2,400に対して概ね1.3倍の余裕がある3,072を初期値とする。
-//   ・4,096にしない理由: 上限を上げるほどモデルは長く書きがちで、相談役の回答としては
-//     冗長になりやすい。まず3,072で運用し、実ログでstopReason=max_tokensが出たら上げる
-//     （その判断ができるよう、outputTokensとstopReasonを必ずログへ出す）。
+//     sourceTypes/sources）、relatedReasonCodes、suggestedFollowUpsを書く。概算 1,600〜2,400tok。
+//   ・初期値は3,072だったが、Sonnet 5ではthinkingが同じmax_tokensを消費するため
+//     2026-08-08の品質強化Batch 1で4,096へ引き上げた（下の定数コメント参照）。
 //
-// 【timeout = 40秒】Explanation層で安定化した値をそのまま参照する（再定義しない）。
+// 【2026-08-08 品質強化Batch 1】max_tokens・timeoutは下の定数コメントを参照
+// （Explanation層の値の参照をやめ、相談役AI専用の値に切り離した）。
 
 import {
   AnthropicMessagesClient,
   AnthropicMessageResponse,
   createRealClient,
-  EXPLANATION_CLAUDE_TIMEOUT_MS,
   GenerateManagementReportErrorCategory,
 } from "../aiExplanation/claudeClient";
 import { ADVISOR_ANSWER_TOOL_INPUT_SCHEMA, ADVISOR_ANSWER_TOOL_NAME, AdvisorAnswer, advisorAnswerSchema } from "./advisorSchema";
+import {
+  AnswerGroundingReport,
+  collectKnownReasonCodes,
+  inspectAnswerGrounding,
+  stripFabricatedReferences,
+} from "./answerGrounding";
 import { ADVISOR_SYSTEM_PROMPT } from "./advisorSystemPrompt";
 import { AdvisorContext } from "./buildAdvisorContext";
 
@@ -51,22 +54,72 @@ import { AdvisorContext } from "./buildAdvisorContext";
 const DEFAULT_ADVISOR_MODEL = "claude-sonnet-5";
 
 /**
- * 【maxTokensについて（重要・実装指示§6）】3072を維持する。モデルをSonnetへ
- * 変更したことを理由に自動で増やさない。
+ * 【2026-08-08 品質強化Batch 1・§2】3,072 → 4,096 へ引き上げる。
  *
- * ただし1点、Sonnet 5固有の注意がある。**Sonnet 5では `thinking` を指定しない場合
- * adaptive thinkingが既定で有効**であり、thinkingトークンは max_tokens を
- * 回答本文と共有する（Haiku 4.5では `thinking` 未指定＝thinkingなし だったため、
- * 同じmax_tokensでも使われ方が変わる）。
- * 見込み回答量1,600〜2,400tok に thinking が加わるため、3,072に対する余裕は
- * Haiku時より確実に小さい。§6の指示どおり値は変更せず、
- * `stopReason` と `outputTokens` を必ずログへ出して実測で判断する
- * （stopReason=max_tokens が観測された場合に初めて引き上げを提案する）。
+ * 【引き上げる根拠（推測ではなく構造的な理由）】
+ * Sonnet 5では `thinking` を指定しない場合 adaptive thinking が既定で有効であり、
+ * **thinkingトークンは max_tokens を回答本文と共有する**（Haiku 4.5では `thinking`
+ * 未指定＝thinkingなしだったため、同じmax_tokensでも使われ方が違う）。
+ * 相談役AIの回答本体の見込みは 1,600〜2,400tok。そこにthinkingが加算されるため、
+ * 3,072では「本文が完成する前にmax_tokensへ到達する」余地が構造的に残る。
+ * max_tokens打ち切りは2026-08-08にExplanation層で実際に事故を起こしている
+ * （回答が途中で切れ、tool_useのJSONが壊れて schema_mismatch になる）ため、
+ * 応答完走率を最優先する本Batchでは余裕側へ倒す。
+ *
+ * 【6,144にしない理由】§2は「打ち切りが観測された場合に6,144」としている。
+ * 打ち切りはまだ実測されていないので、実測なしに最大値へ飛ばさない。
+ * stopReason=max_tokens をログへ必ず出しているので、観測されたら根拠付きで上げられる。
  */
-export const ADVISOR_MAX_OUTPUT_TOKENS = 3072;
+export const ADVISOR_MAX_OUTPUT_TOKENS = 4096;
 
-/** 相談役AIのtimeout。Explanation層で安定化した値をそのまま参照する。 */
-export const ADVISOR_CLAUDE_TIMEOUT_MS = EXPLANATION_CLAUDE_TIMEOUT_MS;
+/**
+ * 相談役AIのAPI timeout（1試行あたり）。
+ *
+ * 【Explanation層から切り離した理由】これまでは EXPLANATION_CLAUDE_TIMEOUT_MS（40秒）を
+ * 参照していた。相談役AIだけを長くするため、ここで独立した定数にする。
+ * Explanation / Standard AI Q&A のtimeoutは40秒のまま一切変わらない（§26の変更禁止範囲）。
+ *
+ * 【120,000msの根拠】
+ *   ・相談役AIは Sonnet 5 + adaptive thinking で、max_tokens 4,096を使い切る場合がある。
+ *     40秒はHaikuの短い定型出力に合わせた値であり、thinkingを伴う長文生成には足りない。
+ *   ・上限側の制約は Vercel Function の maxDuration。route handlerとplay pageに
+ *     ADVISOR_FUNCTION_MAX_DURATION_SECONDS を明示している（下記）。
+ *   ・「無制限に待たない」（§0）ため、1試行120秒・全体150秒で必ず打ち切る。
+ */
+export const ADVISOR_CLAUDE_TIMEOUT_MS = 120_000;
+
+/**
+ * 1リクエスト全体（初回＋リトライ）で許す上限。
+ *
+ * 【なぜ per-attempt timeout だけでは足りないか】リトライは最大1回あるので、
+ * per-attemptの120秒だけを見ると最悪240秒かかりうる。これはFunctionのmaxDurationを
+ * 超え、利用者から見れば「何も返らないまま切れる」最悪の失敗になる。
+ * そこで全体予算を持ち、2回目の試行は「残り予算」をtimeoutとして使う。
+ */
+export const ADVISOR_TOTAL_BUDGET_MS = 150_000;
+
+/**
+ * 残り予算がこれ未満ならリトライしない（始めても間に合わないリトライを打たない）。
+ * 20秒は「thinkingを伴わない短い再生成なら成立しうるが、それ未満は望み薄」という線。
+ */
+export const ADVISOR_MIN_RETRY_BUDGET_MS = 20_000;
+
+/**
+ * Vercel Functionのタイムアウト（秒）。route handler と play page の
+ * `export const maxDuration` で使う値と一致させること。
+ *
+ * 【240秒の根拠】サーバー側の全体予算150秒に対し、context組み立て・Redis I/O・
+ * 会話保存・レスポンス直列化の分を足しても十分に収まる値を選ぶ。
+ * Vercelの許容上限はプランに依存する（超えるとビルドが明示的に失敗する）ため、
+ * この値はプレビューデプロイのビルド成否で実際に検証する。
+ */
+export const ADVISOR_FUNCTION_MAX_DURATION_SECONDS = 240;
+
+/**
+ * クライアント側の安全策タイムアウト。サーバー側の全体予算(150秒)より十分長く、
+ * かつ Function の maxDuration(240秒) より短くする。
+ */
+export const ADVISOR_CLIENT_TIMEOUT_MS = 180_000;
 
 /** 同一会話で保持する往復数の上限（実装指示§32）。 */
 export const ADVISOR_MAX_HISTORY_TURNS = 12;
@@ -149,6 +202,8 @@ export interface GenerateAdvisorAnswerInput {
   readonly question: string;
   readonly history: readonly AdvisorHistoryTurn[];
   readonly contextHash: string;
+  /** ログ上で1つの質問の全試行を追跡するためのID（§4）。質問文は含めない。 */
+  readonly questionId: string;
 }
 
 export type GenerateAdvisorAnswerResult =
@@ -156,6 +211,12 @@ export type GenerateAdvisorAnswerResult =
       readonly ok: true;
       readonly answer: AdvisorAnswer;
       readonly usage: { readonly inputTokens: number; readonly outputTokens: number; readonly latencyMs: number; readonly model: string };
+      /** 根拠検証の結果（品質評価とログのため。UIへ「検証済み」とは表示しない）。 */
+      readonly grounding: AnswerGroundingReport;
+      /** 実際に行った再生成の回数（0 or 1）。 */
+      readonly retryCount: number;
+      /** 実在しない理由コード・文書パスを除去して返したか。 */
+      readonly strippedFabricatedReferences?: boolean;
     }
   | { readonly ok: false; readonly errorCategory: GenerateManagementReportErrorCategory };
 
@@ -165,6 +226,7 @@ export type GenerateAdvisorAnswerResult =
  */
 export function buildAdvisorUserMessage(input: GenerateAdvisorAnswerInput): string {
   const ctx = input.context;
+  const knownReasonCodes = [...collectKnownReasonCodes(ctx)];
   const historyBlock =
     input.history.length === 0
       ? "（この質問がこの会話での最初の質問です）"
@@ -195,6 +257,17 @@ export function buildAdvisorUserMessage(input: GenerateAdvisorAnswerInput): stri
     "Standard AIの提案・診断・ボトルネック判定。",
     JSON.stringify(ctx.standardAiState),
     "</B_standard_ai_state>",
+    "",
+    // 【根拠追跡の強化（品質強化Batch 1・§13）】理由コードは上のJSONの深い位置に
+    // 埋まっており、モデルが見落として「それらしいコード名」を作る余地がある。
+    // 使ってよいコードの全集合を、独立したブロックとして明示する。
+    // サーバー側でも実在チェックを行っており、実在しないコードは利用者へ届かない。
+    "<available_reason_codes>",
+    "relatedReasonCodes に書いてよいのは、次のコードだけです。ここに無いコード名を作ってはいけません。",
+    knownReasonCodes.length === 0
+      ? "（この四半期の診断エントリは0件です。この場合 relatedReasonCodes は必ず空配列にしてください）"
+      : knownReasonCodes.join(", "),
+    "</available_reason_codes>",
     "",
     "<C_formal_specification>",
     ctx.formalSpecification === null
@@ -234,6 +307,7 @@ export function buildAdvisorUserMessage(input: GenerateAdvisorAnswerInput): stri
 interface AttemptSuccess {
   readonly kind: "success";
   readonly answer: AdvisorAnswer;
+  readonly grounding: AnswerGroundingReport;
   readonly usage: { readonly inputTokens: number; readonly outputTokens: number; readonly latencyMs: number; readonly model: string };
 }
 interface AttemptFailure {
@@ -249,6 +323,14 @@ interface AdvisorLogTag {
   readonly contextHash: string;
   readonly promptVersion: string;
   readonly category: string;
+  /**
+   * 1リクエストを一意に識別するID（品質強化Batch 1・§4）。
+   * 初回とリトライで同じ値になるため、ログ上で1つの質問の全試行を追跡できる。
+   * 質問文そのものは含めない（ログに個人の入力を残さない方針を維持する）。
+   */
+  readonly questionId: string;
+  /** この質問で実際にpromptへ入れた開発文書の抜粋件数（0なら文書を引けていない）。 */
+  readonly retrievedExcerptCount: number;
 }
 
 /**
@@ -262,29 +344,44 @@ function formatAdvisorLogFields(
   config: AdvisorModelConfig,
   fields: {
     readonly elapsedMs: number;
+    readonly timeoutMs: number;
     readonly inputTokens?: number;
     readonly outputTokens?: number;
     readonly stopReason?: string | null;
     readonly errorCategory?: string;
     readonly failureCause?: string;
+    readonly grounding?: AnswerGroundingReport;
+    readonly sourceDocumentCount?: number;
+    readonly relatedReasonCodeCount?: number;
   }
 ): string {
   const parts = [
     `attempt=${tag.attempt}`,
+    `questionId=${tag.questionId}`,
     `lab=${tag.labId}`,
     `company=${tag.companyId}`,
     `turn=${tag.turn}`,
     `category=${tag.category}`,
     `model=${config.model}`,
     `maxTokens=${config.maxTokens}`,
-    `timeoutMs=${ADVISOR_CLAUDE_TIMEOUT_MS}`,
+    `timeoutMs=${fields.timeoutMs}`,
     `elapsedMs=${fields.elapsedMs}`,
     `inputTokens=${fields.inputTokens ?? "(不明)"}`,
     `outputTokens=${fields.outputTokens ?? "(不明)"}`,
     `stopReason=${fields.stopReason ?? "(なし)"}`,
+    `retrievedExcerpts=${tag.retrievedExcerptCount}`,
     `promptVersion=${tag.promptVersion}`,
     `contextHash=${tag.contextHash}`,
   ];
+  // 【実測できないものは書かない】cache read/write・thinkingトークンは、この
+  // SDKバージョンのusageからは取得できない。取れない値を推定で埋めない（§4）。
+  if (fields.sourceDocumentCount !== undefined) parts.push(`answerSourceDocs=${fields.sourceDocumentCount}`);
+  if (fields.relatedReasonCodeCount !== undefined) parts.push(`answerReasonCodes=${fields.relatedReasonCodeCount}`);
+  if (fields.grounding !== undefined) {
+    parts.push(`fabricatedReasonCodes=${fields.grounding.fabricatedReasonCodes.length}`);
+    parts.push(`fabricatedSourcePaths=${fields.grounding.fabricatedSourcePathCount}`);
+    parts.push(`factSectionsMissingEvidence=${fields.grounding.factSectionsMissingEvidenceRefs}`);
+  }
   if (fields.errorCategory !== undefined) parts.push(`errorCategory=${fields.errorCategory}`);
   if (fields.failureCause !== undefined) parts.push(`failureCause=${fields.failureCause}`);
   return parts.join(" ");
@@ -298,7 +395,8 @@ async function attemptOnce(
   client: AnthropicMessagesClient,
   input: GenerateAdvisorAnswerInput,
   config: AdvisorModelConfig,
-  tag: AdvisorLogTag
+  tag: AdvisorLogTag,
+  timeoutMs: number
 ): Promise<AttemptSuccess | AttemptFailure> {
   const startedAt = Date.now();
   let response: AnthropicMessageResponse;
@@ -318,7 +416,7 @@ async function attemptOnce(
         ],
         tool_choice: { type: "tool", name: ADVISOR_ANSWER_TOOL_NAME },
       },
-      { timeout: ADVISOR_CLAUDE_TIMEOUT_MS }
+      { timeout: timeoutMs }
     );
   } catch (e) {
     const status = typeof e === "object" && e !== null && "status" in e ? (e as { status?: unknown }).status : undefined;
@@ -327,6 +425,7 @@ async function attemptOnce(
       `[advisorClient] 試行失敗 ` +
         formatAdvisorLogFields(tag, config, {
           elapsedMs: Date.now() - startedAt,
+          timeoutMs,
           errorCategory,
           failureCause: errorCategory === "network_error" ? "TIMEOUT_OR_NETWORK" : `HTTP_${String(status)}`,
         })
@@ -341,6 +440,7 @@ async function attemptOnce(
       `[advisorClient] tool_useブロックが見つかりません ` +
         formatAdvisorLogFields(tag, config, {
           elapsedMs: latencyMs,
+          timeoutMs,
           inputTokens: response.usage?.input_tokens,
           outputTokens: response.usage?.output_tokens,
           stopReason: response.stop_reason,
@@ -359,6 +459,7 @@ async function attemptOnce(
       `[advisorClient] スキーマ不一致 ` +
         formatAdvisorLogFields(tag, config, {
           elapsedMs: latencyMs,
+          timeoutMs,
           inputTokens: response.usage?.input_tokens,
           outputTokens: response.usage?.output_tokens,
           stopReason: response.stop_reason,
@@ -369,18 +470,29 @@ async function attemptOnce(
     return { kind: "failure", errorCategory: "schema_mismatch" };
   }
 
+  // 【根拠の機械検証（§13）】promptの禁止だけに頼らず、実在しない理由コード・
+  // 渡していない文書パスをここで検出する。検出しても回答は捨てず、呼び出し側が
+  // 「1回だけ再生成 → それでも残れば除去」を判断できるよう結果を返す。
+  const grounding = inspectAnswerGrounding(validated.data, input.context);
+
   console.log(
     `[advisorClient] 成功 ` +
       formatAdvisorLogFields(tag, config, {
         elapsedMs: latencyMs,
+        timeoutMs,
         inputTokens: response.usage?.input_tokens,
         outputTokens: response.usage?.output_tokens,
         stopReason: response.stop_reason,
+        grounding,
+        sourceDocumentCount: new Set(validated.data.sections.flatMap((s) => s.sources.map((r) => r.path).filter((p): p is string => !!p)))
+          .size,
+        relatedReasonCodeCount: validated.data.relatedReasonCodes.length,
       })
   );
   return {
     kind: "success",
     answer: validated.data,
+    grounding,
     usage: {
       inputTokens: response.usage?.input_tokens ?? 0,
       outputTokens: response.usage?.output_tokens ?? 0,
@@ -392,7 +504,16 @@ async function attemptOnce(
 
 /**
  * 相談役AIの回答を生成する。
- * retry方針はExplanation層と同一（invalid_json / schema_mismatch / empty_response のみ1回）。
+ *
+ * 【リトライ方針（品質強化Batch 1で拡張）】
+ *   ・invalid_json / schema_mismatch … 1回だけ再生成（従来どおり）
+ *   ・根拠の捏造（実在しない理由コード・渡していない文書パス）… 1回だけ再生成（新規）
+ *   ・http_error / network_error … 再生成しない（同じ失敗を繰り返して待たせるだけ）
+ *
+ * 【全体予算（§0「無制限に待つ設計にはしない」）】
+ * 初回とリトライの合計を ADVISOR_TOTAL_BUDGET_MS で必ず打ち切る。
+ * リトライ時のtimeoutは「残り予算」であり、残りが ADVISOR_MIN_RETRY_BUDGET_MS 未満なら
+ * リトライを開始しない（開始しても間に合わないため）。
  */
 export async function generateAdvisorAnswer(
   input: GenerateAdvisorAnswerInput,
@@ -409,6 +530,8 @@ export async function generateAdvisorAnswer(
   }
 
   const config = getAdvisorModelConfig();
+  const excerptCount =
+    (input.context.formalSpecification?.excerpts.length ?? 0) + (input.context.developmentKnowledge?.excerpts.length ?? 0);
   const base = {
     labId: input.context.identity.labId,
     companyId: input.context.identity.companyId,
@@ -416,15 +539,76 @@ export async function generateAdvisorAnswer(
     contextHash: input.contextHash,
     promptVersion: input.context.promptVersion,
     category: input.context.retrievalPlan.category,
+    questionId: input.questionId,
+    retrievedExcerptCount: excerptCount,
   };
 
-  const first = await attemptOnce(resolvedClient, input, config, { ...base, attempt: 1 });
-  if (first.kind === "success") return { ok: true, answer: first.answer, usage: first.usage };
-  if (first.errorCategory === "http_error" || first.errorCategory === "network_error") {
+  const startedAt = Date.now();
+  const remainingBudget = (): number => ADVISOR_TOTAL_BUDGET_MS - (Date.now() - startedAt);
+  const firstTimeout = Math.min(ADVISOR_CLAUDE_TIMEOUT_MS, ADVISOR_TOTAL_BUDGET_MS);
+
+  const first = await attemptOnce(resolvedClient, input, config, { ...base, attempt: 1 }, firstTimeout);
+
+  // 成功かつ捏造なし → そのまま返す（最も普通の経路）。
+  if (first.kind === "success" && !first.grounding.hasFabrication) {
+    return { ok: true, answer: first.answer, usage: first.usage, grounding: first.grounding, retryCount: 0 };
+  }
+
+  // 通信・HTTP系はリトライしない。
+  if (first.kind === "failure" && (first.errorCategory === "http_error" || first.errorCategory === "network_error")) {
     return { ok: false, errorCategory: first.errorCategory };
   }
 
-  const second = await attemptOnce(resolvedClient, input, config, { ...base, attempt: 2 });
-  if (second.kind === "success") return { ok: true, answer: second.answer, usage: second.usage };
+  const retryTimeout = Math.min(ADVISOR_CLAUDE_TIMEOUT_MS, remainingBudget());
+  if (retryTimeout < ADVISOR_MIN_RETRY_BUDGET_MS) {
+    console.warn(
+      `[advisorClient] 残り予算が不足のためリトライしません questionId=${input.questionId} remainingMs=${retryTimeout}`
+    );
+    // 【予算切れ時の扱い】初回が「捏造ありの成功」なら、捏造部分を落として返す方が
+    // 何も返さないより良い（応答完走率が最優先）。初回が失敗なら失敗として返す。
+    if (first.kind === "success") {
+      return {
+        ok: true,
+        answer: stripFabricatedReferences(first.answer, input.context),
+        usage: first.usage,
+        grounding: first.grounding,
+        retryCount: 0,
+        strippedFabricatedReferences: true,
+      };
+    }
+    return { ok: false, errorCategory: first.errorCategory };
+  }
+
+  const second = await attemptOnce(resolvedClient, input, config, { ...base, attempt: 2 }, retryTimeout);
+  if (second.kind === "success") {
+    if (!second.grounding.hasFabrication) {
+      return { ok: true, answer: second.answer, usage: second.usage, grounding: second.grounding, retryCount: 1 };
+    }
+    console.warn(
+      `[advisorClient] 再生成後も捏造が残るため参照を除去して返します questionId=${input.questionId} ` +
+        `fabricatedReasonCodes=${second.grounding.fabricatedReasonCodes.join(",")} ` +
+        `fabricatedSourcePaths=${second.grounding.fabricatedSourcePathCount}`
+    );
+    return {
+      ok: true,
+      answer: stripFabricatedReferences(second.answer, input.context),
+      usage: second.usage,
+      grounding: second.grounding,
+      retryCount: 1,
+      strippedFabricatedReferences: true,
+    };
+  }
+
+  // 2回目が失敗。1回目が「捏造ありの成功」だったなら、それを除去して返す。
+  if (first.kind === "success") {
+    return {
+      ok: true,
+      answer: stripFabricatedReferences(first.answer, input.context),
+      usage: first.usage,
+      grounding: first.grounding,
+      retryCount: 1,
+      strippedFabricatedReferences: true,
+    };
+  }
   return { ok: false, errorCategory: second.errorCategory };
 }

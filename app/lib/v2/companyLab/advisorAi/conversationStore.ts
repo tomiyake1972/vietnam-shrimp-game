@@ -53,6 +53,16 @@ export interface AdvisorConversation {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly messages: readonly AdvisorStoredMessage[];
+  /**
+   * 【二重送信防止（品質強化Batch 1・§18）】直近で**成功**したリクエストのID。
+   * 同じIDが再送された場合、Claudeを呼び直さず保存済みの回答をそのまま返す。
+   *
+   * 【失敗を記録しない理由（§20）】失敗したrequestIdを覚えてしまうと、
+   * 「同じ質問を再送する」ボタンが永久に同じ失敗を返すようになる。
+   * これは既存Explanation層で実際に起きた失敗キャッシュ問題であり、再導入しない。
+   * したがってここには成功時のIDだけを書く。
+   */
+  readonly lastSucceededRequestId?: string;
 }
 
 /** 会話の保存キー。既存の会社ラボRedisキー命名（companylab:v2:...）を踏襲する。 */
