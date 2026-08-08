@@ -567,3 +567,71 @@ test("整合性: 営業能力パラメータをExcel生成コードへ別途ハ�
     );
   }
 });
+
+test("固変分解: 試作ブック由来の公開情報列（対象需要・外部流出・販売希望量・価格調整・提示価格）が実データと一致する", async () => {
+  const payload = buildSyntheticCompanyExportPayload();
+  const wb = await loadWorkbook(payload);
+  const ws = wb.getWorksheet("固変分解")!;
+  let checked = 0;
+  ws.eachRow((row) => {
+    const market = row.getCell(2).value;
+    const product = row.getCell(3).value;
+    if (typeof market !== "string" || !["CN", "US", "EU", "JP", "OTHER"].includes(market)) return;
+    if (typeof product !== "string") return;
+    const alloc = payload.marketProductAllocations.find((a) => a.market === market && a.product === product.toLowerCase());
+    const plan = payload.salesPlans.find((p) => p.market === market && p.product === product.toLowerCase());
+    if (!alloc) return;
+    assert.equal(cellNumber(row, 16), alloc.targetDemand, `${market}/${product}: 対象需要が実データと一致`);
+    assert.equal(cellNumber(row, 17), alloc.externalOptionQuantity, `${market}/${product}: 外部流出が実データと一致`);
+    if (plan) {
+      assert.equal(cellNumber(row, 18), plan.desiredQuantity, `${market}/${product}: 販売希望量が実データと一致`);
+      assert.equal(cellNumber(row, 19), plan.priceAdjustmentUsdPerHosoEqKg, `${market}/${product}: 価格調整が実データと一致`);
+      // 提示価格 = 基準価格 + 価格調整（試作ブックのN列と同じ定義）。
+      assert.ok(
+        Math.abs((cellNumber(row, 20) ?? 0) - (alloc.basePrice + plan.priceAdjustmentUsdPerHosoEqKg)) < 1e-9,
+        `${market}/${product}: 提示価格 = 基準価格 + 価格調整`
+      );
+    }
+    checked += 1;
+  });
+  assert.ok(checked > 0, "検証できた明細行が存在する");
+});
+
+test("固変分解: 市場別集計ブロックが存在し、明細をSUMIFSで集計している", async () => {
+  const wb = await loadWorkbook();
+  const ws = wb.getWorksheet("固変分解")!;
+  let found = 0;
+  ws.eachRow((row) => {
+    if (row.getCell(1).value !== "" || typeof row.getCell(2).value !== "string") return;
+    const market = row.getCell(2).value as string;
+    if (!["CN", "US", "EU", "JP", "OTHER"].includes(market)) return;
+    const cell = row.getCell(4).value;
+    if (cell && typeof cell === "object" && "formula" in cell) {
+      assert.match((cell as ExcelJS.CellFormulaValue).formula, /^SUMIFS\(/, "市場別集計はSUMIFS");
+      found += 1;
+    }
+  });
+  assert.equal(found, 5, "5市場ぶんの集計行がある");
+});
+
+test("意思決定計算: 営業新規採用の入力欄があり、当期の配分可能人数とは別枠になっている", async () => {
+  const wb = await loadWorkbook();
+  const ws = wb.getWorksheet("意思決定計算")!;
+  const hire = findRow(ws, "【入力】営業 新規採用人数")!;
+  assert.ok(hire, "営業採用の入力行が存在する");
+  assert.equal((hire.getCell(2).fill as ExcelJS.FillPattern)?.fgColor?.argb, "FFFFF2CC", "入力セルは黄色");
+  assert.ok(hire.getCell(2).value === null || hire.getCell(2).value === undefined, "初期は空欄");
+
+  const after = findRow(ws, "採用後の営業人員合計")!;
+  const cell = after.getCell(2).value as ExcelJS.CellFormulaValue;
+  assert.ok(cell && typeof cell === "object" && "formula" in cell, "採用後合計はExcel数式");
+});
+
+test("意思決定計算: トン当たり必要Worker数が実効処理量の逆数として数式で出る", async () => {
+  const wb = await loadWorkbook();
+  const ws = wb.getWorksheet("意思決定計算")!;
+  const row = findRow(ws, "トン当たり必要Worker数")!;
+  const cell = row.getCell(2).value as ExcelJS.CellFormulaValue;
+  assert.ok(cell && typeof cell === "object" && "formula" in cell);
+  assert.match(cell.formula, /1\//, "実効処理量の逆数であること");
+});

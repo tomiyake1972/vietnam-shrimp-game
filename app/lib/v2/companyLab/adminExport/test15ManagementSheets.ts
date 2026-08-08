@@ -22,6 +22,7 @@ import type { CompanyExportPayload } from "../../../../../app/api/v2/exports/_li
 import { SALES_PARAMETERS_V1 } from "../../sales/parameters";
 import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
 import {
+  MARKETS,
   PRODUCTS,
   buildMarketProductMarginModel,
   effectiveTonsPerRegularWorker,
@@ -231,6 +232,7 @@ export function writeFixedVariableAnalysisSheet(wb: ExcelJS.Workbook, payload: C
     { width: 8 }, { width: 10 }, { width: 10 }, { width: 14 }, { width: 15 }, { width: 16 },
     { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 17 }, { width: 16 },
     { width: 13 }, { width: 16 }, { width: 17 },
+    { width: 15 }, { width: 15 }, { width: 15 }, { width: 15 }, { width: 16 },
   ];
 
   const financial = payload.financialResult;
@@ -258,10 +260,17 @@ export function writeFixedVariableAnalysisSheet(wb: ExcelJS.Workbook, payload: C
     "Turn", "Market", "Product", "販売数量(t)", "販売単価(USD/kg)", "売上高(USD)",
     "売上原価単価(USD/kg)", "売上原価(USD)", "変動費単価(USD/kg)", "変動費(USD)",
     "限界利益単価(USD/kg)", "限界利益(USD)", "限界利益率", "売上総利益(USD)", "売上総利益(USD/kg)",
+    // 【試作ブック踏襲】市場の大きさと自社の立ち位置を並べて見るための公開情報。
+    "対象需要(t)", "外部流出(t)", "販売希望量(t)", "価格調整(USD/kg)", "提示価格(USD/kg)",
   ]);
 
   const firstDetailRow = ws.rowCount + 1;
   for (const r of model.rows) {
+    // 公開の市場情報（対象需要・外部流出）と、自社の提示（希望量・価格調整・提示価格）。
+    const alloc = payload.marketProductAllocations.find((a) => a.market === r.market && a.product === r.product);
+    const plan = payload.salesPlans.find((p) => p.market === r.market && p.product === r.product);
+    const askPrice =
+      alloc && plan ? alloc.basePrice + plan.priceAdjustmentUsdPerHosoEqKg : alloc ? alloc.basePrice : undefined;
     const row = ws.addRow([
       payload.meta.turn, r.market, r.product.toUpperCase(),
       r.quantityTons, orDash(r.sellingPriceUsdPerKg), r.netRevenueUsd,
@@ -269,10 +278,13 @@ export function writeFixedVariableAnalysisSheet(wb: ExcelJS.Workbook, payload: C
       orDash(r.variableCostUnitUsdPerKg), r.variableCostAmountUsd,
       orDash(r.contributionMarginUnitUsdPerKg), r.contributionMarginUsd,
       orDash(r.contributionMarginRatio), orDash(r.grossProfitUsd), orDash(r.grossProfitUnitUsdPerKg),
+      orDash(alloc?.targetDemand), orDash(alloc?.externalOptionQuantity),
+      orDash(plan?.desiredQuantity), orDash(plan?.priceAdjustmentUsdPerHosoEqKg), orDash(askPrice),
     ]);
     row.getCell(4).numFmt = TON_FMT;
-    for (const c of [5, 7, 9, 11, 15]) row.getCell(c).numFmt = USD_KG_FMT;
+    for (const c of [5, 7, 9, 11, 15, 19, 20]) row.getCell(c).numFmt = USD_KG_FMT;
     for (const c of [6, 8, 10, 12, 14]) row.getCell(c).numFmt = USD_FMT;
+    for (const c of [16, 17, 18]) row.getCell(c).numFmt = TON_FMT;
     row.getCell(13).numFmt = PCT_FMT;
   }
   const lastDetailRow = ws.rowCount;
@@ -321,6 +333,32 @@ export function writeFixedVariableAnalysisSheet(wb: ExcelJS.Workbook, payload: C
     ws,
     "商品別・全社合計は明細をSUMIFS／SUMで集計しています（Excel上で計算関係を追えるようにするため）。直接固定費は限界利益レポートの byProduct[].directFixedCost をそのまま転記しています（限界利益の計算には含みません）。"
   );
+
+  ws.addRow([]);
+
+  // --- 市場別集計（試作ブックの「市場別」ブロック相当。エンジンのbyMarketをそのまま使う） ---
+  sectionTitle(ws, "市場別集計");
+  header(ws, ["", "Market", "", "販売数量(t)", "", "売上高(USD)", "", "", "", "変動費(USD)", "", "限界利益(USD)", "限界利益率", "", ""]);
+  for (const market of MARKETS) {
+    const dim = financial.contributionMargin.byMarket.find((m) => m.key === market);
+    const row = ws.addRow([
+      "", market, "",
+      { formula: `SUMIFS(D${firstDetailRow}:D${lastDetailRow},B${firstDetailRow}:B${lastDetailRow},"${market}")` },
+      "",
+      { formula: `SUMIFS(F${firstDetailRow}:F${lastDetailRow},B${firstDetailRow}:B${lastDetailRow},"${market}")` },
+      "", "", "",
+      { formula: `SUMIFS(J${firstDetailRow}:J${lastDetailRow},B${firstDetailRow}:B${lastDetailRow},"${market}")` },
+      "",
+      { formula: `SUMIFS(L${firstDetailRow}:L${lastDetailRow},B${firstDetailRow}:B${lastDetailRow},"${market}")` },
+      dim?.contributionMarginRatio ?? DASH,
+      "", "",
+    ]);
+    row.getCell(2).font = BOLD_FONT;
+    row.getCell(4).numFmt = TON_FMT;
+    for (const c of [6, 10, 12]) row.getCell(c).numFmt = USD_FMT;
+    row.getCell(13).numFmt = PCT_FMT;
+  }
+  noteRow(ws, "市場別の直接固定費配賦はゲームエンジン側で未実装のため（byMarket[].directFixedCostは常に0）、市場別の営業利益は表示していません。配賦していないものを配賦したように見せないためです。");
 
   ws.addRow([]);
 
@@ -505,6 +543,19 @@ export function writeDecisionWorksheetSheet(wb: ExcelJS.Workbook, payload: Compa
   shRow.getCell(1).font = LABEL_FONT;
   paint(shRow.getCell(2), "actual", "#,##0");
 
+  // 【試作ブック踏襲】営業の新規雇用は当期に配分できる人数へは加算されない
+  // （companyLab/salesForceHiring.ts の規約）ため、配置とは別枠の入力にする。
+  const hireRow = ws.rowCount + 1;
+  const hRow = ws.addRow(["【入力】営業 新規採用人数（次期以降に配分可能）", null]);
+  paint(hRow.getCell(1), "input");
+  paint(hRow.getCell(2), "input", "#,##0");
+  const afterHireRow = ws.addRow([
+    "採用後の営業人員合計（次期の配分可能人数）",
+    { formula: `IF(ISNUMBER(B${hireRow}),${currentSalesForce ?? 0}+B${hireRow},"${DASH}")` },
+  ]);
+  paint(afterHireRow.getCell(1), "formula");
+  paint(afterHireRow.getCell(2), "formula", "#,##0");
+
   ws.addRow([]);
 
   // --- §4-4 / §4-5 生産計画・予定期末在庫 ---
@@ -584,6 +635,19 @@ function writeProductionPlanSection(
   const intRow = ws.addRow(["労働集約度係数（参考）", laborIntensity.hoso, laborIntensity.pd, laborIntensity.vap, ""]);
   paint(intRow.getCell(1), "actual");
   for (const c of [2, 3, 4]) paint(intRow.getCell(c), "actual", "#,##0.00");
+
+  // 【試作ブック踏襲】1トンあたりに必要なWorker数（上の実効処理量の逆数）。
+  const perTonRow = ws.rowCount + 1;
+  const ptRow2 = ws.addRow([
+    "トン当たり必要Worker数（参考）",
+    { formula: `IF(B${laborRow}=0,"${DASH}",1/B${laborRow})` },
+    { formula: `IF(C${laborRow}=0,"${DASH}",1/C${laborRow})` },
+    { formula: `IF(D${laborRow}=0,"${DASH}",1/D${laborRow})` },
+    "",
+  ]);
+  paint(ptRow2.getCell(1), "formula");
+  for (const c of [2, 3, 4]) paint(ptRow2.getCell(c), "formula", "#,##0.000");
+  void perTonRow;
 
   // B. 新規販売希望（販売計画セクションから自動参照）
   const newDemandRow = ws.rowCount + 1;
