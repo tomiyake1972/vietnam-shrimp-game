@@ -290,20 +290,72 @@ Explanation層で確立した禁止事項を踏襲。応答の正規化・救済
 
 | 項目 | 値 | 根拠 |
 | --- | --- | --- |
-| model | 既存Explanation層と同一（既定 `claude-haiku-4-5-20251001`） | 勝手に変更しない |
-| モデル上書き | 環境変数 `STANDARD_AI_ADVISOR_MODEL` | 将来のモデル比較実験用（コード変更不要） |
+| model | **`claude-sonnet-5`**（相談役AIのみ） | 下記「役割ごとのモデル分離」 |
+| モデル上書き | 環境変数 `STANDARD_AI_ADVISOR_MODEL` | 将来のOpus比較用（コード変更不要）。相談役AIにのみ効く |
 | timeout | `ADVISOR_CLAUDE_TIMEOUT_MS = EXPLANATION_CLAUDE_TIMEOUT_MS`（40,000ms） | 定数を参照。片方だけずれない |
 | SDK自動retry | 0（`createRealClient` 再利用） | 76秒問題の再発防止 |
 | アプリ側retry | invalid_json / schema_mismatch / empty_response のみ1回 | Explanation層と同一 |
 | max_tokens | **3,072** | 下記 |
+| effort / thinking | **送っていない**（モデル既定に委ねる） | 下記「effort設定について」 |
+
+### 役割ごとのモデル分離（2026-08-08）
+
+| 機能 | モデル | 理由 |
+| --- | --- | --- |
+| AIによる説明文（Explanation） | Haiku 4.5 | 決まった情報の説明・軽量な言い換え |
+| Standard AIに質問する（Q&A） | Haiku 4.5 | 短い定型回答 |
+| **相談役AI** | **Sonnet 5** | 経営課題の構造化・Standard AIへの批判・複数制約の比較・開発文書の読解・ゲーム設計意図の整理。単純な説明生成より高い推論品質を優先する |
+
+`DEFAULT_ADVISOR_MODEL` は `advisorClient.ts` の相談役専用定数であり、
+Explanation側の `DEFAULT_EXPLANATION_MODEL`（`claudeClient.ts`）とは独立している。
+相談役の環境変数を設定してもExplanation / Q&Aのモデルは変わらない（回帰テストで固定）。
+
+**model identifierの確認方法**: 推測ではなく、このリポジトリが実際に使っている
+`@anthropic-ai/sdk` 0.65.0 の型定義を確認した。
+`src/resources/messages/messages.ts` の `Model` 型は既知IDのunionの末尾に
+`| (string & {})` を持つため、SDKに列挙されていない新しいモデルIDもそのままAPIへ送出される。
+正式なAPI identifierは `claude-sonnet-5`（日付サフィックスを付けない固定ID）。
+
+### effort設定について（§7の判断）
+
+**このSDKバージョンからはeffortを設定できない。** 実装前に確認した結果:
+
+- `@anthropic-ai/sdk` 0.65.0 の `MessageCreateParams` に `output_config` / `effort` は存在しない
+- 同SDKの `ThinkingConfigParam` は `enabled(budget_tokens) | disabled` のみで `adaptive` がない
+
+SDKのアップグレードはExplanation / Q&Aの呼び出し経路にも影響する変更であり、
+「Explanation / Chatの内容・modelを変更しない」という制約に対するリスクが大きいため、
+**今回はSDKを上げず、effortを送らない**。結果として相談役AIは Sonnet 5 のAPI既定値
+（adaptive thinking有効・effort=high）で動作する。effortの最上位は `max` であり、
+既定の `high` はそれではないため「最上位effortを常用しない」という方針には反しない。
+
+将来effortを比較可能にする場合は、SDKを更新したうえで
+`ADVISOR_EFFORT_ENV_VAR_RESERVED`（= `STANDARD_AI_ADVISOR_EFFORT`）の名前で追加する。
+今回は「効かない設定項目」を作らないため未実装。
+
+### max_tokens = 3,072 を維持することの注意（Sonnet 5固有）
 
 **max_tokens = 3,072 の選定理由**:
 自由回答の `answer` 本文（日本語600〜1,000字＝概ね600〜1,000tok）＋sections最大6件
 （各100〜200字＋メタデータ）＋reasonCodes＋followUps で、概算 1,600〜2,400tok。
 2026-08-08にmax_tokens到達で実際に事故を起こしているため、必要量の上限側2,400に対して
 約1.3倍の余裕がある3,072を初期値とする。4,096にしないのは、上限を上げるほど冗長に
-書きがちで相談役の回答としては読みにくくなるため。実ログで `stopReason=max_tokens` が
-出たら上げる（そのため outputTokens と stopReason を必ずログへ出している）。
+書きがちで相談役の回答としては読みにくくなるため。
+
+**⚠️ Sonnet 5固有の注意（未実測のリスク）**:
+Sonnet 5では `thinking` を指定しない場合 **adaptive thinkingが既定で有効** であり、
+thinkingトークンは `max_tokens` を回答本文と共有する。
+Haiku 4.5では `thinking` 未指定＝thinkingなしだったため、同じ3,072でも使われ方が変わる。
+
+    回答本文の見込み  1,600〜2,400 tok
+    ＋ thinking       ？（実測なし。effort=high の既定で動作する）
+    ─────────────────────────
+    上限              3,072 tok
+
+「Sonnetへ変更したことを理由にmax_tokensを自動で増やさない」という指示に従い
+**値は変更していない**。実ログで `stopReason=max_tokens` が観測された場合に初めて
+引き上げを提案する（そのため outputTokens と stopReason を必ずログへ出している）。
+Preview確認時は、この2項目を最優先で見ること。
 
 ---
 

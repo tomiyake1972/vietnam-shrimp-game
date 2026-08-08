@@ -95,6 +95,9 @@ export default function ManagementAdvisorPanel({ labId, companyId, turn }: Manag
   const [lastFailedQuestion, setLastFailedQuestion] = useState<string | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [restored, setRestored] = useState(false);
+  /** 【実装指示§15】Game Owner Mode向けに、現在使われているモデルの表示名を小さく出す。
+   *  モデル名はUIへハードコードせず、必ずサーバーから受け取った値を表示する（§13）。 */
+  const [modelDisplayName, setModelDisplayName] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // 【会話の復元（§34）】パネルを開いたとき、保存済み会話をサーバーから読み直す。
@@ -105,6 +108,7 @@ export default function ManagementAdvisorPanel({ labId, companyId, turn }: Manag
     void loadAdvisorConversationAction(labId, companyId, turn).then((result) => {
       if (cancelled) return;
       setRestored(true);
+      if (result.modelDisplayName) setModelDisplayName(result.modelDisplayName);
       const messages = result.conversation?.messages ?? [];
       const rebuilt: AdvisorEntry[] = [];
       let pendingQuestion: { message: string; turn: number } | null = null;
@@ -214,8 +218,15 @@ export default function ManagementAdvisorPanel({ labId, companyId, turn }: Manag
           <div className="text-[11px] text-sky-300/80 break-words" data-testid="advisor-header-context">
             {companyId} / Turn {turn}
           </div>
-          <div className="mt-0.5 inline-block rounded border border-amber-700/70 bg-amber-950/50 px-1 py-0.5 text-[10px] text-amber-300" data-testid="advisor-owner-mode-badge">
-            Game Owner Mode
+          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+            <span className="inline-block rounded border border-amber-700/70 bg-amber-950/50 px-1 py-0.5 text-[10px] text-amber-300" data-testid="advisor-owner-mode-badge">
+              Game Owner Mode
+            </span>
+            {modelDisplayName !== null && (
+              <span className="inline-block rounded border border-gray-700/70 bg-gray-800/70 px-1 py-0.5 text-[10px] text-gray-400" data-testid="advisor-model-name">
+                {modelDisplayName}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">

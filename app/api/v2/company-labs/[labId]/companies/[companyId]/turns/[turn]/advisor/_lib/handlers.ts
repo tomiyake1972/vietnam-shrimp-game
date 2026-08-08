@@ -17,6 +17,7 @@ import {
   ADVISOR_MAX_QUESTION_LENGTH,
   generateAdvisorAnswer,
   getAdvisorModelConfig,
+  getAdvisorModelDisplayName,
 } from "../../../../../../../../../../lib/v2/companyLab/advisorAi/advisorClient";
 import {
   AdvisorCurrentViewContext,
@@ -265,6 +266,9 @@ export async function handleGetAdvisorConversation(
       conversation: conversation ?? null,
       currentTurn: resolved.value.viewModel.currentTurn,
       companyId: resolved.value.viewModel.playerCompanyId,
+      // 【実装指示§15】現在使われているモデルを確認できるようにする。
+      // model identifier全文ではなく人間向けの表示名を返す。
+      modelDisplayName: getAdvisorModelDisplayName(),
     },
   };
 }

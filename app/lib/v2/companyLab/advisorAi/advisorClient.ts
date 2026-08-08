@@ -27,12 +27,42 @@ import {
   createRealClient,
   EXPLANATION_CLAUDE_TIMEOUT_MS,
   GenerateManagementReportErrorCategory,
-  getExplanationModelConfig,
 } from "../aiExplanation/claudeClient";
 import { ADVISOR_ANSWER_TOOL_INPUT_SCHEMA, ADVISOR_ANSWER_TOOL_NAME, AdvisorAnswer, advisorAnswerSchema } from "./advisorSchema";
 import { ADVISOR_SYSTEM_PROMPT } from "./advisorSystemPrompt";
 import { AdvisorContext } from "./buildAdvisorContext";
 
+/**
+ * 【2026-08-08・相談役AIのみSonnet 5へ】相談役専用のモデル既定値。
+ *
+ * 【なぜ相談役だけ別モデルか】相談役AIは経営課題の構造化・Standard AIへの批判・
+ * 複数制約の比較・開発文書の読解・ゲーム設計意図の整理を担当するため、
+ * 「決まった情報を説明する」Explanation / Q&Aより高い推論品質を優先する。
+ * Explanation / Standard AI Q&A は既存のHaiku 4.5のまま変更しない
+ * （それぞれ claudeClient.ts の DEFAULT_EXPLANATION_MODEL / chatClient.ts が参照）。
+ *
+ * 【model identifierの確認方法（推測していないことの記録）】
+ * 実装前に、このリポジトリが実際に使用している @anthropic-ai/sdk（0.65.0）の
+ * 型定義を確認した。src/resources/messages/messages.ts の `Model` 型は既知IDの
+ * union の末尾に `| (string & {})` を持つため、SDKに列挙されていない新しいモデルIDも
+ * そのままAPIへ送出される（このSDKはSonnet 5より前のバージョンだが、送出は妨げない）。
+ * 正式なAPI identifierは `claude-sonnet-5`（日付サフィックスを付けない固定ID）。
+ */
+const DEFAULT_ADVISOR_MODEL = "claude-sonnet-5";
+
+/**
+ * 【maxTokensについて（重要・実装指示§6）】3072を維持する。モデルをSonnetへ
+ * 変更したことを理由に自動で増やさない。
+ *
+ * ただし1点、Sonnet 5固有の注意がある。**Sonnet 5では `thinking` を指定しない場合
+ * adaptive thinkingが既定で有効**であり、thinkingトークンは max_tokens を
+ * 回答本文と共有する（Haiku 4.5では `thinking` 未指定＝thinkingなし だったため、
+ * 同じmax_tokensでも使われ方が変わる）。
+ * 見込み回答量1,600〜2,400tok に thinking が加わるため、3,072に対する余裕は
+ * Haiku時より確実に小さい。§6の指示どおり値は変更せず、
+ * `stopReason` と `outputTokens` を必ずログへ出して実測で判断する
+ * （stopReason=max_tokens が観測された場合に初めて引き上げを提案する）。
+ */
 export const ADVISOR_MAX_OUTPUT_TOKENS = 3072;
 
 /** 相談役AIのtimeout。Explanation層で安定化した値をそのまま参照する。 */
@@ -50,16 +80,61 @@ export interface AdvisorModelConfig {
 }
 
 /**
- * 【実装指示§41】MVPは既存モデルで実装する。ただし将来
- * 「Haiku vs 上位Claude model」で経営対話品質を比較できるよう、
- * 環境変数での上書き口だけ用意しておく（既定は既存Explanation層と同一モデル）。
+ * 相談役AIのモデル設定。既定は Sonnet 5。
+ *
+ * 【環境変数による上書き】STANDARD_AI_ADVISOR_MODEL を設定した場合のみ上書きされる。
+ * 将来 Sonnet 5 と Opus 4.8 を同一質問・同一contextで比較できるようにするための口であり、
+ * モデル名をUIやロジックへハードコードしない（実装指示§13）。
+ * この上書きは相談役AIにのみ効く。Explanation / Standard AI Q&A のモデルには影響しない。
  */
 export function getAdvisorModelConfig(): AdvisorModelConfig {
   return {
-    model: process.env.STANDARD_AI_ADVISOR_MODEL ?? getExplanationModelConfig().model,
+    model: process.env.STANDARD_AI_ADVISOR_MODEL ?? DEFAULT_ADVISOR_MODEL,
     maxTokens: ADVISOR_MAX_OUTPUT_TOKENS,
   };
 }
+
+/**
+ * 【実装指示§15】UIへ出す人間向けの表示名。model identifier全文は出さない。
+ * 未知のモデルIDには識別子を露出させず「カスタム設定」と表示する
+ * （環境変数で任意の文字列を入れられるため、そのまま画面へ出さない）。
+ */
+const ADVISOR_MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  "claude-sonnet-5": "Sonnet 5",
+  "claude-opus-4-8": "Opus 4.8",
+  "claude-opus-5": "Opus 5",
+  "claude-haiku-4-5-20251001": "Haiku 4.5",
+};
+
+export function getAdvisorModelDisplayName(model: string = getAdvisorModelConfig().model): string {
+  return ADVISOR_MODEL_DISPLAY_NAMES[model] ?? "カスタム設定";
+}
+
+/**
+ * 【effort / thinking設定について（実装指示§7の判断と記録）】
+ *
+ * 実装前に、このリポジトリの @anthropic-ai/sdk（0.65.0）の型定義を確認した結果:
+ *   - MessageCreateParams に `output_config` / `effort` は **存在しない**
+ *     （effortはこのSDKより後に追加されたAPI surface）。
+ *   - `ThinkingConfigParam` は enabled(budget_tokens) | disabled のみで、
+ *     `adaptive` は存在しない。
+ * したがって **このSDKバージョンからはeffortを設定できない**。
+ *
+ * §7は「設定可能な場合は…medium相当を優先」という条件付きの指示であり、
+ * かつ「今回のために大規模な設定系変更は不要」とある。SDKのアップグレードは
+ * Explanation / Standard AI Q&A の呼び出し経路にも影響する変更であり、
+ * §16の「Explanation / Chatの内容・modelを変更しない」に対するリスクが大きい。
+ * よって **今回はSDKを上げず、effortを送らない**。
+ *
+ * その結果、相談役AIは Sonnet 5 のAPI既定値
+ * （adaptive thinking有効・effort=high）で動作する。
+ * effortの最上位は `max` であり、既定の `high` はそれではないため、
+ * 「最上位effortを常用しない」という§7の趣旨には反しない。
+ *
+ * 将来 effort を比較可能にする場合は、SDKを更新したうえでこの定数名で
+ * 環境変数を追加する（今回は「効かない設定項目」を作らないため未実装）。
+ */
+export const ADVISOR_EFFORT_ENV_VAR_RESERVED = "STANDARD_AI_ADVISOR_EFFORT";
 
 /** 1往復ぶんの会話。 */
 export interface AdvisorHistoryTurn {

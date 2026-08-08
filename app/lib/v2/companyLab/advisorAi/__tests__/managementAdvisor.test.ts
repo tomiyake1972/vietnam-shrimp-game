@@ -30,7 +30,7 @@ import { buildDriveAccessDeclaration } from "../knowledge/driveWorkingMaterials"
 import { planRetrieval } from "../questionRouting";
 import { buildAdvisorLiveGameState, buildAdvisorStandardAiState, toCompetitorSummaries } from "../gameState/advisorGameState";
 import { buildAdvisorContext, computeAdvisorContextHash } from "../buildAdvisorContext";
-import { ADVISOR_MAX_HISTORY_TURNS, ADVISOR_MAX_OUTPUT_TOKENS, ADVISOR_CLAUDE_TIMEOUT_MS, buildAdvisorUserMessage, generateAdvisorAnswer, getAdvisorModelConfig } from "../advisorClient";
+import { ADVISOR_MAX_HISTORY_TURNS, ADVISOR_MAX_OUTPUT_TOKENS, ADVISOR_CLAUDE_TIMEOUT_MS, buildAdvisorUserMessage, generateAdvisorAnswer, getAdvisorModelConfig, getAdvisorModelDisplayName } from "../advisorClient";
 import { ADVISOR_SYSTEM_PROMPT, ADVISOR_PROMPT_VERSION, buildAdvisorSystemPrompt } from "../advisorSystemPrompt";
 import { advisorAnswerSchema } from "../advisorSchema";
 import { AUTHORITY_RANK, SOURCE_AUTHORITIES, SOURCE_TYPES } from "../sourceTags";
@@ -688,24 +688,179 @@ test("【§54-28・§54-29】既存のExplanation層・Standard AI Q&Aの設定�
 // モデル・トークン・ログ（§40〜§42）
 // ---------------------------------------------------------------------
 
-test("【§40・§41・§42】モデルは既存と同一、timeoutは既存定数を参照、max_tokensの根拠がある", async () => {
-  const { getExplanationModelConfig, EXPLANATION_CLAUDE_TIMEOUT_MS } = await import("../../aiExplanation/claudeClient");
-  const previousOverride = process.env.STANDARD_AI_ADVISOR_MODEL;
-  delete process.env.STANDARD_AI_ADVISOR_MODEL;
+/** 環境変数を一時的に差し替えて実行する（テスト間で漏れないように必ず復元する）。 */
+function withEnv<T>(key: string, value: string | undefined, fn: () => T): T {
+  const previous = process.env[key];
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
   try {
-    assert.equal(getAdvisorModelConfig().model, getExplanationModelConfig().model, "既定では既存Explanation層と同一モデルであること");
+    return fn();
   } finally {
-    if (previousOverride !== undefined) process.env.STANDARD_AI_ADVISOR_MODEL = previousOverride;
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
   }
-  // 将来のモデル比較のため、環境変数で差し替えられること。
-  process.env.STANDARD_AI_ADVISOR_MODEL = "test-model-x";
-  assert.equal(getAdvisorModelConfig().model, "test-model-x", "環境変数でモデルを比較実験できること");
-  delete process.env.STANDARD_AI_ADVISOR_MODEL;
+}
 
+test("【モデル分離1・2】相談役AIの既定modelがSonnet 5で、環境変数を設定した場合のみoverrideされる", () => {
+  withEnv("STANDARD_AI_ADVISOR_MODEL", undefined, () => {
+    assert.equal(getAdvisorModelConfig().model, "claude-sonnet-5", "既定はSonnet 5であること");
+  });
+  withEnv("STANDARD_AI_ADVISOR_MODEL", "claude-opus-4-8", () => {
+    assert.equal(getAdvisorModelConfig().model, "claude-opus-4-8", "環境変数でのみ上書きされること（将来のOpus比較用）");
+  });
+  // 上書きが後続へ漏れていないこと。
+  withEnv("STANDARD_AI_ADVISOR_MODEL", undefined, () => {
+    assert.equal(getAdvisorModelConfig().model, "claude-sonnet-5");
+  });
+});
+
+test("【モデル分離3・4】Explanation / Standard AI Q&A のmodelは変更されていない", async () => {
+  const { getExplanationModelConfig } = await import("../../aiExplanation/claudeClient");
+  const { getChatModelConfig } = await import("../../aiExplanation/chat/chatClient");
+
+  withEnv("STANDARD_AI_ADVISOR_MODEL", undefined, () => {
+    withEnv("STANDARD_AI_EXPLANATION_MODEL", undefined, () => {
+      assert.equal(getExplanationModelConfig().model, "claude-haiku-4-5-20251001", "ExplanationはHaikuのまま");
+      assert.equal(getChatModelConfig().model, "claude-haiku-4-5-20251001", "Standard AI Q&AもHaikuのまま");
+      assert.notEqual(getAdvisorModelConfig().model, getExplanationModelConfig().model, "相談役だけが別モデルであること");
+    });
+  });
+
+  // 相談役の環境変数を設定しても、Explanation / Q&A のモデルには影響しないこと。
+  withEnv("STANDARD_AI_ADVISOR_MODEL", "claude-opus-4-8", () => {
+    withEnv("STANDARD_AI_EXPLANATION_MODEL", undefined, () => {
+      assert.equal(getExplanationModelConfig().model, "claude-haiku-4-5-20251001");
+      assert.equal(getChatModelConfig().model, "claude-haiku-4-5-20251001");
+    });
+  });
+});
+
+test("【モデル分離5・6】相談役のmodel変更でStandard AI decisionもゲームstateも変化しない", async () => {
+  const [row] = buildFixtures();
+  const context = buildContextFor(row, "この会社の最大の問題は何？");
+  const decisionBefore = JSON.stringify(row.decision);
+  const contextBefore = JSON.stringify(context);
+
+  const client: AnthropicMessagesClient = {
+    messages: { create: async () => { throw new Error("Request timed out."); } },
+  };
+  for (const model of [undefined, "claude-opus-4-8", "claude-sonnet-5"]) {
+    await withEnv("STANDARD_AI_ADVISOR_MODEL", model, async () => {
+      const result = await generateAdvisorAnswer({ context, question: "q", history: [], contextHash: "h" }, client);
+      assert.equal(result.ok, false);
+    });
+    assert.equal(JSON.stringify(row.decision), decisionBefore, `model=${model}: 意思決定が変化していないこと`);
+    assert.equal(JSON.stringify(context), contextBefore, `model=${model}: 入力contextが変化していないこと`);
+  }
+  // ゲームstateそのもの（fixtureが保持する会社状態）も、相談役の呼び出しでは触れられない。
+  assert.equal(JSON.stringify(row.explanation), JSON.stringify(context.liveGameState.observed));
+});
+
+test("【モデル分離7・8】max_tokensは3072、timeoutは40秒（既存定数を参照）のまま", async () => {
+  const { EXPLANATION_CLAUDE_TIMEOUT_MS } = await import("../../aiExplanation/claudeClient");
+  assert.equal(ADVISOR_MAX_OUTPUT_TOKENS, 3072, "Sonnetへの変更を理由にmax_tokensを増やしていないこと");
+  assert.equal(ADVISOR_CLAUDE_TIMEOUT_MS, 40_000, "timeoutは40秒のまま");
   assert.equal(ADVISOR_CLAUDE_TIMEOUT_MS, EXPLANATION_CLAUDE_TIMEOUT_MS, "timeoutは既存定数を参照していること（片方だけずれない）");
-  assert.equal(ADVISOR_MAX_OUTPUT_TOKENS, 3072);
-  // 見込み必要量（1,600〜2,400tok）に対して余裕があること。
-  assert.ok(ADVISOR_MAX_OUTPUT_TOKENS >= 2400 * 1.25, "見込み必要量の上限に対して1.25倍以上の余裕があること");
+  // クライアント側の安全策タイムアウトの内側に収まっていること。
+  const panel = readSource(...PANEL_PATH);
+  const match = /ADVISOR_CLIENT_TIMEOUT_MS\s*=\s*([\d_]+)/.exec(panel);
+  assert.ok(match, "クライアント側タイムアウト定数が見つかること");
+  assert.ok(
+    ADVISOR_CLAUDE_TIMEOUT_MS < Number(match![1].replace(/_/g, "")),
+    "サーバー側timeoutがクライアント側より短いこと"
+  );
+});
+
+test("【モデル分離9・10】model名がログへ出て、会話にも保存される", async () => {
+  const [row] = buildFixtures();
+  const context = buildContextFor(row, "この会社の最大の問題は何？");
+
+  // ログ出力にmodel/latency/token数が含まれること（コスト観測・§14）。
+  const logged: string[] = [];
+  const originalLog = console.log;
+  console.log = (...args: unknown[]) => {
+    logged.push(args.map(String).join(" "));
+  };
+  try {
+    const client: AnthropicMessagesClient = {
+      messages: {
+        create: async () => ({
+          content: [{ type: "tool_use", input: { answer: "a", sections: [], relatedReasonCodes: [], suggestedFollowUps: [] } }],
+          usage: { input_tokens: 7000, output_tokens: 900 },
+          stop_reason: "end_turn",
+        }),
+      },
+    };
+    await withEnv("STANDARD_AI_ADVISOR_MODEL", "claude-sonnet-5", () =>
+      generateAdvisorAnswer({ context, question: "q", history: [], contextHash: "hash-x" }, client)
+    );
+  } finally {
+    console.log = originalLog;
+  }
+
+  const successLine = logged.find((l) => l.includes("[advisorClient] 成功"));
+  assert.ok(successLine, "成功ログが出ること");
+  assert.ok(successLine!.includes("model=claude-sonnet-5"), "modelがログへ出ること");
+  for (const field of ["elapsedMs=", "inputTokens=7000", "outputTokens=900", "stopReason=end_turn"]) {
+    assert.ok(successLine!.includes(field), `${field} がログへ出ること（コスト観測・打ち切り検知に使う）`);
+  }
+
+  // 会話へ保存されるmessageにmodelフィールドがあること（後からモデル比較できるように）。
+  const storeSource = readSource("..", "conversationStore.ts");
+  assert.ok(/readonly model\?: string/.test(storeSource), "保存メッセージがmodelを保持する型であること");
+  const handlerSource = readSource(
+    "..", "..", "..", "..", "..",
+    "api", "v2", "company-labs", "[labId]", "companies", "[companyId]", "turns", "[turn]", "advisor", "_lib", "handlers.ts"
+  );
+  assert.ok(/model:\s*generated\.usage\.model/.test(handlerSource), "成功時に実際に使われたmodelを保存すること");
+});
+
+test("【モデル分離11】UIのmodel表示は人間向け表示名で、identifier全文を出さない", () => {
+  // 表示名の変換（§15：identifier全文ではなく人間向け表示名）。
+  assert.equal(getAdvisorModelDisplayName("claude-sonnet-5"), "Sonnet 5");
+  assert.equal(getAdvisorModelDisplayName("claude-opus-4-8"), "Opus 4.8");
+  // 環境変数で任意の文字列を入れられるため、未知のIDはそのまま画面へ出さない。
+  assert.equal(getAdvisorModelDisplayName("some-internal-model-id"), "カスタム設定");
+  withEnv("STANDARD_AI_ADVISOR_MODEL", undefined, () => {
+    assert.equal(getAdvisorModelDisplayName(), "Sonnet 5", "既定は引数なしでもSonnet 5と表示されること");
+  });
+
+  const panel = readSource(...PANEL_PATH);
+  assert.ok(panel.includes('data-testid="advisor-model-name"'), "モデル表示要素があること");
+  // §13：モデル名をUIへハードコードしないこと。
+  assert.ok(!panel.includes("Sonnet 5"), "UIにモデル名をハードコードしていないこと");
+  assert.ok(!/claude-[a-z0-9-]+/.test(panel), "UIにmodel identifierを書いていないこと");
+  assert.ok(panel.includes("modelDisplayName"), "サーバーから受け取った表示名を出していること");
+});
+
+test("【§7】effortはこのSDKバージョンからは設定できず、実際にリクエストへ含めていない", async () => {
+  // 【判断の記録】@anthropic-ai/sdk 0.65.0 の MessageCreateParams には
+  // output_config / effort が存在しないため、今回は送らない（SDK更新はExplanation・
+  // Q&Aの呼び出し経路にも影響するため、§16のリスクを避けて見送った）。
+  const [row] = buildFixtures();
+  const context = buildContextFor(row, "この会社の最大の問題は何？");
+  let captured: Record<string, unknown> | null = null;
+  const client: AnthropicMessagesClient = {
+    messages: {
+      create: async (params) => {
+        captured = params as unknown as Record<string, unknown>;
+        return {
+          content: [{ type: "tool_use", input: { answer: "a", sections: [], relatedReasonCodes: [], suggestedFollowUps: [] } }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        };
+      },
+    },
+  };
+  await generateAdvisorAnswer({ context, question: "q", history: [], contextHash: "h" }, client);
+  assert.notEqual(captured, null);
+  assert.ok(!("output_config" in captured!), "effortを送っていないこと（SDK未対応のため）");
+  assert.ok(!("thinking" in captured!), "thinking設定も送っていないこと（モデル既定に委ねる）");
+  // 送っているのは既存Explanation層と同じ最小パラメータのみ。
+  assert.deepEqual(
+    Object.keys(captured!).sort(),
+    ["max_tokens", "messages", "model", "system", "tool_choice", "tools"]
+  );
+  assert.equal(captured!.max_tokens, 3072);
 });
 
 test("【将来の役員AI分割】role promptとknowledge retrievalが分離されている", () => {

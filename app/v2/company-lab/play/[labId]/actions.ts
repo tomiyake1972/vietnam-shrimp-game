@@ -234,6 +234,8 @@ export async function askAdvisorAction(
 export interface AdvisorConversationActionResult {
   readonly ok: boolean;
   readonly conversation?: AdvisorConversation | null;
+  /** 【実装指示§15】現在使われているモデルの人間向け表示名（identifier全文ではない）。 */
+  readonly modelDisplayName?: string;
   readonly errorCategory?: string;
 }
 
@@ -246,8 +248,8 @@ export async function loadAdvisorConversationAction(labId: string, companyId: st
     const deps = await resolveAiExplanationUiDependencies();
     const result = await handleGetAdvisorConversation(deps, labId, companyId, String(turn));
     if (result.status !== 200) return { ok: false, errorCategory: "internal_error" };
-    const body = result.body as { conversation?: AdvisorConversation | null } | undefined;
-    return { ok: true, conversation: body?.conversation ?? null };
+    const body = result.body as { conversation?: AdvisorConversation | null; modelDisplayName?: string } | undefined;
+    return { ok: true, conversation: body?.conversation ?? null, modelDisplayName: body?.modelDisplayName };
   } catch (e) {
     unstable_rethrow(e);
     return { ok: false, errorCategory: "internal_error" };
