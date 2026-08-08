@@ -37,7 +37,7 @@ export function collectKnownReasonCodes(context: AdvisorContext): ReadonlySet<st
 /** contextで実際に渡した文書パス一覧（sourcesの捏造検出用）。 */
 export function collectKnownDocumentPaths(context: AdvisorContext): ReadonlySet<string> {
   const paths = new Set<string>();
-  for (const section of [context.formalSpecification, context.developmentKnowledge]) {
+  for (const section of [context.formalSpecification, context.currentImplementation, context.developmentKnowledge]) {
     if (section === null) continue;
     for (const excerpt of section.excerpts) paths.add(excerpt.path);
   }

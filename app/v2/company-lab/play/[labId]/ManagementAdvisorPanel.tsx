@@ -160,11 +160,9 @@ export default function ManagementAdvisorPanel({ labId, companyId, turn }: Manag
   }, [entries, pending]);
 
   // 経過秒数の計測。pendingでない間はタイマーを動かさない。
+  // （0へのリセットは送信開始時に行う。effect内でsetStateを直接呼ばない。）
   useEffect(() => {
-    if (!pending) {
-      setElapsedSeconds(0);
-      return;
-    }
+    if (!pending) return;
     const startedAt = Date.now();
     const id = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
     return () => clearInterval(id);
@@ -175,6 +173,7 @@ export default function ManagementAdvisorPanel({ labId, companyId, turn }: Manag
       const trimmed = text.trim();
       if (trimmed.length === 0 || pending) return;
       setPending(true);
+      setElapsedSeconds(0);
       setErrorCategory(null);
 
       const timeoutPromise = new Promise<{ readonly kind: "timeout" }>((resolve) =>

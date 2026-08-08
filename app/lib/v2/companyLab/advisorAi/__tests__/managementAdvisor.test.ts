@@ -25,7 +25,7 @@ import { CompanyDecisionInput, CompanyLabState, CompanyQuarterSummary } from "..
 
 import { classifyDocument, isUsableAsCurrentSpecification } from "../knowledge/docCatalog";
 import { loadDocumentCorpus, resetDocumentCorpusCache, splitMarkdownIntoChunks } from "../knowledge/docStore";
-import { getDevelopmentRationale, getFormalSpecification, searchDevelopmentDocs, tokenize } from "../knowledge/retrieval";
+import { getCurrentImplementation, getDevelopmentRationale, getFormalSpecification, searchDevelopmentDocs, tokenize } from "../knowledge/retrieval";
 import { buildDriveAccessDeclaration } from "../knowledge/driveWorkingMaterials";
 import { planRetrieval } from "../questionRouting";
 import { buildAdvisorLiveGameState, buildAdvisorStandardAiState, toCompetitorSummaries } from "../gameState/advisorGameState";
@@ -137,6 +137,7 @@ function buildContextFor(row: Fixture, question: string, ownerMode = true) {
     liveGameState,
     standardAiState: buildAdvisorStandardAiState(row.explanation, row.diagnostics),
     formalSpecification: plan.includeFormalSpecification ? getFormalSpecification(question, { limit: 4 }) : null,
+    currentImplementation: plan.includeCurrentImplementation ? getCurrentImplementation(question) : null,
     developmentKnowledge: plan.includeDevelopmentKnowledge
       ? getDevelopmentRationale(question, { limit: 4, includeHistorical: plan.includeHistoricalDocuments })
       : null,
@@ -946,6 +947,7 @@ test("【4層の分離】contextが4層を別フィールドとして保持し�
     Object.keys(context).sort(),
     [
       "contextSchemaVersion",
+      "currentImplementation",
       "developmentKnowledge",
       "driveAccess",
       "formalSpecification",

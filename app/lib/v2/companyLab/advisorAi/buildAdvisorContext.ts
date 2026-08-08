@@ -62,6 +62,11 @@ export interface AdvisorContext {
   readonly standardAiState: AdvisorStandardAiState;
   /** C層。現行仕様として使ってよい文書だけ。含めない場合はnull。 */
   readonly formalSpecification: AdvisorDocumentSection | null;
+  /**
+   * C'層。現行実装のソースコード抜粋（品質強化Batch 1・§9）。含めない場合はnull。
+   * sourcePolicyが最上位に置いている情報源であり、文書と食い違う場合はこちらが正である。
+   */
+  readonly currentImplementation: AdvisorDocumentSection | null;
   /** D層。開発背景。含めない場合はnull。 */
   readonly developmentKnowledge: AdvisorDocumentSection | null;
   /** Google Driveの扱い（MVPでは未接続であることの宣言）。 */
@@ -92,6 +97,7 @@ export interface BuildAdvisorContextInput {
   readonly liveGameState: AdvisorLiveGameState;
   readonly standardAiState: AdvisorStandardAiState;
   readonly formalSpecification: RetrievalResult | null;
+  readonly currentImplementation: RetrievalResult | null;
   readonly developmentKnowledge: RetrievalResult | null;
   readonly retrievalPlan: AdvisorRetrievalPlan;
 }
@@ -122,6 +128,7 @@ export function buildAdvisorContext(input: BuildAdvisorContextInput): AdvisorCon
     liveGameState: input.liveGameState,
     standardAiState: input.standardAiState,
     formalSpecification: toDocumentSection(input.formalSpecification),
+    currentImplementation: toDocumentSection(input.currentImplementation),
     developmentKnowledge: toDocumentSection(input.developmentKnowledge),
     driveAccess: buildDriveAccessDeclaration(),
     retrievalPlan: input.retrievalPlan,

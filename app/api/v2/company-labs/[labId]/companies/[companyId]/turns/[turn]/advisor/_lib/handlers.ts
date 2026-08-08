@@ -30,6 +30,7 @@ import {
   FinancialResultLike,
 } from "../../../../../../../../../../lib/v2/companyLab/advisorAi/gameState/advisorGameState";
 import {
+  getCurrentImplementation,
   getDevelopmentRationale,
   getFormalSpecification,
 } from "../../../../../../../../../../lib/v2/companyLab/advisorAi/knowledge/retrieval";
@@ -228,6 +229,8 @@ async function runAdvisorRequest(
 
   // 【実装指示§16】開発文書全文をpromptへ入れず、質問に応じた抜粋だけを取得する。
   const formalSpecification = plan.includeFormalSpecification ? getFormalSpecification(plan.documentQuery, { limit: 5 }) : null;
+  // 【品質強化Batch 1・§9】sourcePolicyが最上位に置く「現行実装」を実際に引く。
+  const currentImplementation = plan.includeCurrentImplementation ? getCurrentImplementation(plan.documentQuery) : null;
   const developmentKnowledge = plan.includeDevelopmentKnowledge
     ? getDevelopmentRationale(plan.documentQuery, { limit: 6, includeHistorical: plan.includeHistoricalDocuments })
     : null;
@@ -243,6 +246,7 @@ async function runAdvisorRequest(
     liveGameState,
     standardAiState,
     formalSpecification,
+    currentImplementation,
     developmentKnowledge,
     retrievalPlan: plan,
   });

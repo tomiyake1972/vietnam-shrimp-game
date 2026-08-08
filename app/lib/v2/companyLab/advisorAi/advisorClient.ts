@@ -278,6 +278,18 @@ export function buildAdvisorUserMessage(input: GenerateAdvisorAnswerInput): stri
         : JSON.stringify(ctx.formalSpecification.excerpts),
     "</C_formal_specification>",
     "",
+    "<C2_current_implementation>",
+    "現行実装のソースコード抜粋です。sourcePolicyの最上位の情報源であり、",
+    "文書の記述と食い違う場合はこちらが現在の実装です（統合せず「現行実装では〜」と分けて示すこと）。",
+    ctx.currentImplementation === null
+      ? "（この質問では実装コードの検索を行っていません）"
+      : ctx.currentImplementation.excerpts.length === 0
+        ? `（該当する実装コードは見つかりませんでした。検索対象ファイル数=${ctx.currentImplementation.searchedDocumentCount}` +
+          `${ctx.currentImplementation.unavailableReason ? ` / ${ctx.currentImplementation.unavailableReason}` : ""}）` +
+          "この場合、現行実装の挙動を断定してはいけません。"
+        : JSON.stringify(ctx.currentImplementation.excerpts),
+    "</C2_current_implementation>",
+    "",
     "<D_development_knowledge>",
     ctx.developmentKnowledge === null
       ? "（この質問では開発記録の検索を行っていません）"
@@ -531,7 +543,9 @@ export async function generateAdvisorAnswer(
 
   const config = getAdvisorModelConfig();
   const excerptCount =
-    (input.context.formalSpecification?.excerpts.length ?? 0) + (input.context.developmentKnowledge?.excerpts.length ?? 0);
+    (input.context.formalSpecification?.excerpts.length ?? 0) +
+    (input.context.currentImplementation?.excerpts.length ?? 0) +
+    (input.context.developmentKnowledge?.excerpts.length ?? 0);
   const base = {
     labId: input.context.identity.labId,
     companyId: input.context.identity.companyId,

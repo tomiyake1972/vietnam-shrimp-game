@@ -34,6 +34,12 @@ export interface AdvisorRetrievalPlan {
   readonly includeCompetitorAndInternal: boolean;
   /** C. FORMAL GAME SPECIFICATION。 */
   readonly includeFormalSpecification: boolean;
+  /**
+   * C'. 現行実装のソースコード（品質強化Batch 1・§9）。
+   * sourcePolicyが最上位に置く情報源。仕様・設計・「なぜ」の質問でのみ引く
+   * （経営相談ではコードは答えにならず、promptを太らせるだけなので引かない）。
+   */
+  readonly includeCurrentImplementation: boolean;
   /** D. DEVELOPMENT KNOWLEDGE。 */
   readonly includeDevelopmentKnowledge: boolean;
   /** D. のうち古い資料も対象にするか（過去経緯の質問のみ）。 */
@@ -108,6 +114,7 @@ export function planRetrieval(question: string, options: { readonly ownerMode: b
     includeStandardAiState: true,
     includeCompetitorAndInternal: options.ownerMode && (hitsCompetitor || hitsGameDesign || hitsInternalTruth),
     includeFormalSpecification: needsDocs,
+    includeCurrentImplementation: needsDocs,
     includeDevelopmentKnowledge: needsDocs,
     // 過去経緯を明示的に聞かれた場合だけ古い資料を対象にする。
     includeHistoricalDocuments: hitsDevelopment,

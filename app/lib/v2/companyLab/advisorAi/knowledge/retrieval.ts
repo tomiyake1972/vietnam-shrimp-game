@@ -17,6 +17,7 @@
 // 「なぜ歩留まりを簡略化したのか」のような具体語を含む質問には十分に機能する。
 
 import { AdvisorDocumentChunk, AdvisorDocumentCorpus, loadDocumentCorpus } from "./docStore";
+import { loadSourceCodeCorpus } from "./sourceCodeStore";
 import { AdvisorDocumentType, isUsableAsCurrentSpecification } from "./docCatalog";
 import { AUTHORITY_RANK } from "../sourceTags";
 
@@ -226,6 +227,27 @@ export function getRecentDesignDecision(topic: string, options: RetrievalOptions
     preferRecent: true,
     includeHistorical: false,
     documentTypes: options.documentTypes ?? ["DEVELOPMENT_DIARY", "DESIGN_DOC", "PHASE_REPORT"],
+  });
+}
+
+/**
+ * 現行実装のソースコードを引く（品質強化Batch 1・§9〜§11）。
+ *
+ * 【docs検索と同じスコアリングを使う】corpusを差し替えるだけで、検索アルゴリズム・
+ * 依存関係は1つも増やしていない。
+ *
+ * 【既定limitが小さい理由（§10）】コードは1件が長く、情報密度もdocsと違う。
+ * promptへ入る量を構造的に絞るため既定3件（最大でも約3.6KB）にしてある。
+ */
+export function getCurrentImplementation(topic: string, options: RetrievalOptions = {}): RetrievalResult {
+  const corpus = options.corpus ?? loadSourceCodeCorpus();
+  return searchDevelopmentDocs(topic, {
+    ...options,
+    limit: options.limit ?? 3,
+    // ソースは全てauthority=CURRENT_IMPLEMENTATIONであり、HISTORICAL除外の影響を受けない。
+    includeHistorical: true,
+    documentTypes: undefined,
+    corpus,
   });
 }
 

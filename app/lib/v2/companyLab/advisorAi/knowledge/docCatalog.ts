@@ -30,6 +30,12 @@ export type AdvisorDocumentType =
   | "KNOWLEDGE_BASE"
   /** 運用・環境まわり。 */
   | "OPERATIONS"
+  /**
+   * 現行実装のソースコード（品質強化Batch 1・§9）。
+   * sourcePolicyが最上位に置いている「現行実装」そのもの。文書ではないため
+   * docCatalogの分類規則の対象外で、sourceCodeStore.tsが直接この種別を付ける。
+   */
+  | "SOURCE_CODE"
   /** 上記のいずれでもないもの。 */
   | "OTHER";
 
