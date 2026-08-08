@@ -35,6 +35,7 @@ import PlayLabBanner from "../components/PlayLabBanner";
 import { CompanyDecisionDraft, summarizeSalesForceAllocation, summarizeSalesForceHiring } from "../../decisionDraft";
 import { PlayerScreenViewModel } from "../_lib/viewModel";
 import StandardAiChatPanel from "./StandardAiChatPanel";
+import ManagementAdvisorPanel from "./ManagementAdvisorPanel";
 import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
 import { fetchAiExplanationAction, processQuarterAction, saveDraftAction, submitDraftAction, withdrawDraftAction } from "./actions";
 
@@ -690,6 +691,13 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
           </Link>
         </div>
       </div>
+
+      {/* 【相談役AI（Game Owner Mode）】画面右下に固定し、どの画面を見ていても相談できる。
+          提案カード内の「AIによる説明文」「Standard AIに質問する」とは役割が異なるため、
+          カードの中ではなく画面固定のパネルにしてある（実装指示§3・§49）。
+          このコンポーネントはdraft/setDraftを受け取らないため、構造的に意思決定値を
+          書き換えられない（read-only。実装指示§48）。 */}
+      <ManagementAdvisorPanel labId={viewModel.labId} companyId={viewModel.playerCompanyId} turn={viewModel.currentTurn} />
     </div>
   );
 }

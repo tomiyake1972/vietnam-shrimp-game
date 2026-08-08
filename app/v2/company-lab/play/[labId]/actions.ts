@@ -28,6 +28,13 @@ import { handlePostAiExplanation } from "../../../../api/v2/company-labs/[labId]
 import { handlePostAiExplanationChat } from "../../../../api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/ai-explanation/chat/_lib/handlers";
 import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
 import { StandardAiChatAnswer } from "../../../../lib/v2/companyLab/aiExplanation/chat/chatSchema";
+import {
+  handleDeleteAdvisorConversation,
+  handleGetAdvisorConversation,
+  handlePostAdvisor,
+} from "../../../../api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/advisor/_lib/handlers";
+import { AdvisorAnswer } from "../../../../lib/v2/companyLab/advisorAi/advisorSchema";
+import { AdvisorConversation } from "../../../../lib/v2/companyLab/advisorAi/conversationStore";
 
 export interface PlayerActionResult {
   readonly ok: boolean;
@@ -171,6 +178,97 @@ export interface AiExplanationActionResult {
   readonly ok: boolean;
   readonly report?: StandardAiManagementReport;
   readonly errorCategory?: string;
+}
+
+// ---------------------------------------------------------------------
+// 相談役AI（Management Advisor AI）MVP — Game Owner Mode
+// ---------------------------------------------------------------------
+//
+// 【方式】既存のAI機能と全く同じ配線（guard→resolveAiExplanationUiDependencies→
+// APIハンドラーを直接呼ぶ）。ANTHROPIC_API_KEYはサーバー側の環境変数からのみ読まれ、
+// クライアントへは一切渡らない。相談役AIはread-onlyであり、意思決定・ゲーム状態を
+// 変更するAction経路を持たない（書き込むのは会話ログのみ）。
+
+export interface AdvisorActionResult {
+  readonly ok: boolean;
+  readonly answer?: AdvisorAnswer;
+  readonly conversationId?: string;
+  readonly category?: string;
+  readonly errorCategory?: string;
+}
+
+export async function askAdvisorAction(
+  labId: string,
+  companyId: string,
+  turn: number,
+  question: string,
+  currentViewContext?: string
+): Promise<AdvisorActionResult> {
+  const logPrefix = `[askAdvisorAction] lab=${labId} company=${companyId} turn=${turn}`;
+  try {
+    const g = await guard();
+    if (!g.ok) return { ok: false, errorCategory: "unauthorized" };
+
+    const deps = await resolveAiExplanationUiDependencies();
+    const result = await handlePostAdvisor(deps, labId, companyId, String(turn), { question, currentViewContext }, new Date().toISOString());
+
+    if (result.status !== 200) {
+      const body = result.body as { error?: { message?: string } } | undefined;
+      console.log(`${logPrefix} 非200応答 status=${result.status} message=${body?.error?.message ?? "(なし)"}`);
+      return { ok: false, errorCategory: result.status === 400 ? "invalid_request" : "internal_error" };
+    }
+    const body = result.body as
+      | { result?: "success" | "failure"; answer?: AdvisorAnswer; conversationId?: string; category?: string; errorCategory?: string }
+      | undefined;
+    if (body?.result === "success" && body.answer) {
+      return { ok: true, answer: body.answer, conversationId: body.conversationId, category: body.category };
+    }
+    return { ok: false, errorCategory: body?.errorCategory ?? "unknown", conversationId: body?.conversationId };
+  } catch (e) {
+    unstable_rethrow(e);
+    console.error(`${logPrefix} 予期しない例外を捕捉しました:`, e instanceof Error ? e.message : String(e));
+    return { ok: false, errorCategory: "internal_error" };
+  }
+}
+
+export interface AdvisorConversationActionResult {
+  readonly ok: boolean;
+  readonly conversation?: AdvisorConversation | null;
+  readonly errorCategory?: string;
+}
+
+/** 保存済み会話の復元（リロード・close→reopen用）。 */
+export async function loadAdvisorConversationAction(labId: string, companyId: string, turn: number): Promise<AdvisorConversationActionResult> {
+  try {
+    const g = await guard();
+    if (!g.ok) return { ok: false, errorCategory: "unauthorized" };
+
+    const deps = await resolveAiExplanationUiDependencies();
+    const result = await handleGetAdvisorConversation(deps, labId, companyId, String(turn));
+    if (result.status !== 200) return { ok: false, errorCategory: "internal_error" };
+    const body = result.body as { conversation?: AdvisorConversation | null } | undefined;
+    return { ok: true, conversation: body?.conversation ?? null };
+  } catch (e) {
+    unstable_rethrow(e);
+    return { ok: false, errorCategory: "internal_error" };
+  }
+}
+
+/** 会話の消去（確認UIはクライアント側の責務）。 */
+export async function clearAdvisorConversationAction(labId: string, companyId: string, turn: number): Promise<AdvisorConversationActionResult> {
+  try {
+    const g = await guard();
+    if (!g.ok) return { ok: false, errorCategory: "unauthorized" };
+
+    const deps = await resolveAiExplanationUiDependencies();
+    const result = await handleDeleteAdvisorConversation(deps, labId, companyId, String(turn), new Date().toISOString());
+    if (result.status !== 200) return { ok: false, errorCategory: "internal_error" };
+    const body = result.body as { conversation?: AdvisorConversation } | undefined;
+    return { ok: true, conversation: body?.conversation ?? null };
+  } catch (e) {
+    unstable_rethrow(e);
+    return { ok: false, errorCategory: "internal_error" };
+  }
 }
 
 // ---------------------------------------------------------------------
