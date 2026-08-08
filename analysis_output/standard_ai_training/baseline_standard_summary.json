@@ -1,0 +1,63 @@
+{
+  "label": "baseline",
+  "profile": {
+    "name": "standard",
+    "quarters": 32,
+    "seedCount": 10,
+    "scenarioId": "baseline",
+    "description": "5社 × 32四半期 × 10seed。keep/revert判定に使う既定のベンチマーク。"
+  },
+  "fingerprint": {
+    "environmentFingerprint": "aabcadf67e6f4444",
+    "standardAiFingerprint": "bf652be765da8e3c",
+    "repositoryHead": "d69648ae6e7b57dba55ef58f837abaf8401343aa",
+    "branch": "feature/v2-standard-ai-training-harness",
+    "workingTreeDirty": true,
+    "parameterVersions": {
+      "market": "market-params-2015-baseline-v0.1",
+      "sales": "sales-v0.1",
+      "rawMaterials": "raw-materials-v0.1",
+      "production": "production-v0.2",
+      "finance": "finance-v0.1",
+      "persistedStateVersion": 7
+    }
+  },
+  "generatedAt": "2026-08-08T00:06:12.627Z",
+  "summary": {
+    "total": 4067,
+    "bySeverity": {
+      "P0": 0,
+      "P1": 2090,
+      "P2": 377,
+      "P3": 1600
+    },
+    "byRule": {
+      "A01_SALES_FORCE_CONCENTRATION_WITHOUT_OPPORTUNITY": 1550,
+      "A06_PRODUCTION_WITH_RAW_SHORTAGE": 280,
+      "A07_SALES_WITHOUT_DELIVERY_CAPABILITY": 250,
+      "A13_CONTRACT_FAILURE_REPEATED": 10,
+      "A04_REPEATED_FG_ACCUMULATION": 40,
+      "A08_LABOR_SHORTAGE_IGNORED": 274,
+      "A14_MARGINAL_SALESFORCE_VALUE_NEGATIVE": 63,
+      "B_STRATEGIC_MARKET_CONCENTRATION": 1600
+    }
+  },
+  "aggregates": {
+    "companyQuarters": 1600,
+    "defaults": 0,
+    "insolvencies": 164,
+    "overdueQuarters": 250,
+    "emergencyBorrowQuarters": 0,
+    "totalContracted": 11039964.090000002,
+    "totalOperatingProfit": -180928718.7395125,
+    "totalNetIncome": -1464985412.7802587,
+    "avgFinishedGoodsInventory": 4643.929837500005,
+    "avgRawMaterialInventory": 2886.58390625001,
+    "totalRawShortfall": 6792567.519999999,
+    "avgEquipmentUtilization": 0.42018737500000003,
+    "avgLaborUtilization": 0.8513403749999996,
+    "totalIdleLaborCost": 971418194.9159999,
+    "totalCapexProposals": 0,
+    "minCash": -99951400
+  }
+}

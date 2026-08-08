@@ -1,0 +1,9 @@
+# 生データ（records.json）と findings.json は1ファイル 30MB / 4.5MB 級のため
+# リポジトリへは入れない。ベンチマークは決定論的（同一seed→バイト単位で同一出力。
+# training/__tests__/trainingHarness.test.ts で固定）なので、同じ
+# environmentFingerprint / standardAiFingerprint の作業ツリーで
+#   npx tsx scripts/standardAiTraining.ts --profile standard --label baseline
+# を実行すれば完全に同じ内容が再生成できる。
+# summary.json（集計・fingerprint）と findings.csv（指摘一覧）は追跡する。
+*_records.json
+*_findings.json

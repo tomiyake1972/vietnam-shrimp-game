@@ -38,6 +38,38 @@ export interface ProductionPlanResult {
  *   当期納品需要（既存契約分を含む）・通常在庫目標・期首完成品在庫は、この値の
  *   計算時点で既に反映済みであり、本関数の内部では再加算・再減算しない。
  */
+/**
+ * 【SAI-T1】当期に現実に確保できる原料量（HOSO換算トン）の上限を返す。
+ *
+ * = 手元で使える原料 ＋ 当期到着が確定している輸入 ＋ 当期の資金で買い増せる量
+ *
+ * 【資金の定義】当期に支払いへ充当できるのは現金だけではないため、既存の観測値
+ * receivablesDueThisPeriodUsd（当期決済予定の売掛金＝当期の確定入金）を加え、
+ * payablesDueThisPeriodUsd（当期決済予定の買掛金＝先に出ていく確定支出）を
+ * 差し引いた正味の流動資源を使う。現金残高だけを見ると、入出金のタイミングだけで
+ * 計画上限が四半期ごとに大きく振れ、健全な会社の生産計画まで振り子状に
+ * 揺らしてしまう（実測で確認した）。
+ *
+ * 「市場にどれだけ供給があるか」「自社がどれだけ配分されるか」は仮定しない
+ * （観測に無い値を捏造しないため、その分はここでは制約せず、実際の配分結果に
+ * 委ねる）。したがってこれは真の調達可能量の **上限側の見積り** であり、
+ * 資金的に無理のない範囲の計画を不必要に縮めることはない。
+ *
+ * 参照価格が観測できない（turn1等）場合はundefinedを返し、従来どおり無制約とする。
+ */
+function computeRawMaterialFeasibilityCeiling(observation: StandardAiObservation): number | undefined {
+  const referencePriceUsdPerKg = observation.vietnamDomesticPriorPrice;
+  if (referencePriceUsdPerKg === undefined || referencePriceUsdPerKg <= EPSILON) return undefined;
+  const onHand = observation.rawMaterialAvailable + observation.rawMaterialCertainInboundThisPeriod;
+  // 正味の流動資源。債務超過等でマイナスなら買い増せる量は0。
+  const usableFunds = Math.max(
+    0,
+    observation.cashUsd + observation.receivablesDueThisPeriodUsd - observation.payablesDueThisPeriodUsd
+  );
+  const affordableTons = usableFunds / (referencePriceUsdPerKg * 1000);
+  return onHand + affordableTons;
+}
+
 export function buildStandardAiProductionPlans(
   fixture: CompanyFixture,
   observation: StandardAiObservation,
@@ -53,7 +85,44 @@ export function buildStandardAiProductionPlans(
   // 呼び出し側（policy.ts）がcurrentPeriodDeliveryDemand起点で算出した値をそのまま使う
   // （二重計上防止。実装指示C-2）。優先順位付け・診断メッセージのためにbacklog・fgは
   // 引き続き参照するが、量そのものには影響させない。
-  const neededByProduct: ProductAmount = finalProductionRequirementByProduct;
+  // 【SAI-T1（Training Harness Cycle 1）】原料調達可能性による生産計画の上限。
+  //
+  // 【対象欠陥】従来、生産計画は設備能力と販売需要だけで決まり、「その原料を実際に
+  // 入手できるか」を一切考慮していなかった。Training Harness baseline（32Q×10seed）
+  // では、現金が枯渇したMASSが原料在庫0のまま29,070トンの生産計画を立て続け、
+  // その架空の計画から逆算した必要人員（>2,100人）を根拠にworker_shortageと自己診断し、
+  // 常用2,100人・臨時735人を20四半期にわたり保持したまま生産量0を続けた
+  // （四半期あたり210万USDの遊休労務費が資金枯渇をさらに悪化させる正のフィードバック）。
+  // 生産計画が実行不能であることが、労働・調達・販売の全ての下流判断を汚染していた。
+  //
+  // 【観測境界】使うのは既存の観測値のみ（新しい情報源・ゲームルールは追加しない）:
+  //   - rawMaterialAvailable / rawMaterialCertainInboundThisPeriod（当期確実に使える原料）
+  //   - cashUsd（当期の支払能力）と vietnamDomesticPriorPrice（前期の公開参照価格）
+  // 「買えない原料は生産計画に載せない」という当然の制約であり、市場の供給量・
+  // 買付ルール・シェア上限には一切触れていない。
+  const feasibility = computeRawMaterialFeasibilityCeiling(observation);
+  const requestedTotal = sumProductAmount(finalProductionRequirementByProduct);
+  let neededByProduct: ProductAmount = finalProductionRequirementByProduct;
+  if (feasibility !== undefined && requestedTotal > feasibility + EPSILON) {
+    // 商品構成は変えず、比例配分で全体を実行可能な水準まで縮める
+    // （どの商品を削るかという経営判断はここでは行わない）。
+    const scale = feasibility / requestedTotal;
+    const scaled = zeroProductAmount();
+    for (const product of ["hoso", "pd", "vap"] as const) {
+      scaled[product] = finalProductionRequirementByProduct[product] * scale;
+    }
+    neededByProduct = scaled;
+    diagnostics.push({
+      code: "PRODUCTION_LIMITED_BY_RAW_MATERIAL_FEASIBILITY",
+      domain: "production",
+      companyId: fixture.companyId,
+      severity: "warning",
+      keyValues: { requestedTotal, feasibleTotal: feasibility, scale },
+      message: `当期に確実に入手・購入できる原料量（${Math.round(feasibility)}トン）を上回る生産計画（${Math.round(
+        requestedTotal
+      )}トン）は実行できないため、生産計画を実行可能な水準へ縮小する。`,
+    });
+  }
   for (const product of ["hoso", "pd", "vap"] as const) {
     if (backlog[product] > EPSILON) {
       diagnostics.push({

@@ -1,0 +1,63 @@
+{
+  "label": "c03-raw-feasibility",
+  "profile": {
+    "name": "standard",
+    "quarters": 32,
+    "seedCount": 10,
+    "scenarioId": "baseline",
+    "description": "5社 × 32四半期 × 10seed。keep/revert判定に使う既定のベンチマーク。"
+  },
+  "fingerprint": {
+    "environmentFingerprint": "aabcadf67e6f4444",
+    "standardAiFingerprint": "e11f7c6f79c3b5b5",
+    "repositoryHead": "d69648ae6e7b57dba55ef58f837abaf8401343aa",
+    "branch": "feature/v2-standard-ai-training-harness",
+    "workingTreeDirty": true,
+    "parameterVersions": {
+      "market": "market-params-2015-baseline-v0.1",
+      "sales": "sales-v0.1",
+      "rawMaterials": "raw-materials-v0.1",
+      "production": "production-v0.2",
+      "finance": "finance-v0.1",
+      "persistedStateVersion": 7
+    }
+  },
+  "generatedAt": "2026-08-08T00:19:11.345Z",
+  "summary": {
+    "total": 3954,
+    "bySeverity": {
+      "P0": 0,
+      "P1": 1908,
+      "P2": 446,
+      "P3": 1600
+    },
+    "byRule": {
+      "A01_SALES_FORCE_CONCENTRATION_WITHOUT_OPPORTUNITY": 1550,
+      "A06_PRODUCTION_WITH_RAW_SHORTAGE": 98,
+      "A07_SALES_WITHOUT_DELIVERY_CAPABILITY": 250,
+      "A13_CONTRACT_FAILURE_REPEATED": 10,
+      "A04_REPEATED_FG_ACCUMULATION": 40,
+      "A08_LABOR_SHORTAGE_IGNORED": 343,
+      "A14_MARGINAL_SALESFORCE_VALUE_NEGATIVE": 63,
+      "B_STRATEGIC_MARKET_CONCENTRATION": 1600
+    }
+  },
+  "aggregates": {
+    "companyQuarters": 1600,
+    "defaults": 0,
+    "insolvencies": 133,
+    "overdueQuarters": 250,
+    "emergencyBorrowQuarters": 0,
+    "totalContracted": 11044082.849999998,
+    "totalOperatingProfit": 460106219.2892589,
+    "totalNetIncome": -730808453.4908516,
+    "avgFinishedGoodsInventory": 4642.830974999997,
+    "avgRawMaterialInventory": 2896.073481250006,
+    "totalRawShortfall": 351045.58,
+    "avgEquipmentUtilization": 0.4199768750000002,
+    "avgLaborUtilization": 0.8794123750000005,
+    "totalIdleLaborCost": 534300316.57399994,
+    "totalCapexProposals": 0,
+    "minCash": -47237026.6850889
+  }
+}

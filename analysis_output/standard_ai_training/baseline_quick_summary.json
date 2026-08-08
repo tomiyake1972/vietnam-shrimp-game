@@ -1,0 +1,62 @@
+{
+  "label": "baseline",
+  "profile": {
+    "name": "quick",
+    "quarters": 8,
+    "seedCount": 3,
+    "scenarioId": "baseline",
+    "description": "5社 × 8四半期 × 3seed。開発中の高速な往復用。"
+  },
+  "fingerprint": {
+    "environmentFingerprint": "aabcadf67e6f4444",
+    "standardAiFingerprint": "bf652be765da8e3c",
+    "repositoryHead": "d69648ae6e7b57dba55ef58f837abaf8401343aa",
+    "branch": "feature/v2-standard-ai-training-harness",
+    "workingTreeDirty": true,
+    "parameterVersions": {
+      "market": "market-params-2015-baseline-v0.1",
+      "sales": "sales-v0.1",
+      "rawMaterials": "raw-materials-v0.1",
+      "production": "production-v0.2",
+      "finance": "finance-v0.1",
+      "persistedStateVersion": 7
+    }
+  },
+  "generatedAt": "2026-08-08T00:06:05.979Z",
+  "summary": {
+    "total": 300,
+    "bySeverity": {
+      "P0": 0,
+      "P1": 120,
+      "P2": 60,
+      "P3": 120
+    },
+    "byRule": {
+      "A01_SALES_FORCE_CONCENTRATION_WITHOUT_OPPORTUNITY": 105,
+      "A06_PRODUCTION_WITH_RAW_SHORTAGE": 12,
+      "A07_SALES_WITHOUT_DELIVERY_CAPABILITY": 3,
+      "A04_REPEATED_FG_ACCUMULATION": 3,
+      "A08_LABOR_SHORTAGE_IGNORED": 38,
+      "A14_MARGINAL_SALESFORCE_VALUE_NEGATIVE": 19,
+      "B_STRATEGIC_MARKET_CONCENTRATION": 120
+    }
+  },
+  "aggregates": {
+    "companyQuarters": 120,
+    "defaults": 0,
+    "insolvencies": 0,
+    "overdueQuarters": 3,
+    "emergencyBorrowQuarters": 0,
+    "totalContracted": 679463.0800000002,
+    "totalOperatingProfit": -69773738.98103388,
+    "totalNetIncome": -177673797.6444499,
+    "avgFinishedGoodsInventory": 2234.4769999999994,
+    "avgRawMaterialInventory": 2324.220333333334,
+    "totalRawShortfall": 89755.23999999999,
+    "avgEquipmentUtilization": 0.35910666666666674,
+    "avgLaborUtilization": 0.979785,
+    "totalIdleLaborCost": 126063097.38799998,
+    "totalCapexProposals": 0,
+    "minCash": 0
+  }
+}
