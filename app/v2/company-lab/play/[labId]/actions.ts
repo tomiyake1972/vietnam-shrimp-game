@@ -25,7 +25,9 @@ import { resolveCompanyLabUiDependencies } from "../_lib/uiDependencies";
 import { resolveAiExplanationUiDependencies } from "../_lib/aiExplanationUiDependencies";
 import { ApiResult, handleProcessQuarter, handleSaveDraft, handleSubmitDraft, handleWithdrawDraft } from "../../../../api/v2/company-labs/_lib/handlers";
 import { handlePostAiExplanation } from "../../../../api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/ai-explanation/_lib/handlers";
+import { handlePostAiExplanationChat } from "../../../../api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/ai-explanation/chat/_lib/handlers";
 import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
+import { StandardAiChatAnswer } from "../../../../lib/v2/companyLab/aiExplanation/chat/chatSchema";
 
 export interface PlayerActionResult {
   readonly ok: boolean;
@@ -169,6 +171,71 @@ export interface AiExplanationActionResult {
   readonly ok: boolean;
   readonly report?: StandardAiManagementReport;
   readonly errorCategory?: string;
+}
+
+// ---------------------------------------------------------------------
+// 「Standard AIに質問する」対話機能（Phase 1 MVP）
+// ---------------------------------------------------------------------
+//
+// 【方式】fetchAiExplanationActionと全く同じ配線（guard→resolveAiExplanationUiDependencies
+// →APIハンドラーを直接呼ぶ）。ANTHROPIC_API_KEYはサーバー側の環境変数からのみ読まれ、
+// クライアントへは一切渡らない。この機能はStandard AIのdecisionを一切変更しない
+// （ハンドラー側もdecisionを返さない）。
+
+export interface StandardAiChatActionResult {
+  readonly ok: boolean;
+  readonly answer?: StandardAiChatAnswer;
+  readonly contextHash?: string;
+  readonly errorCategory?: string;
+  /** ゲームstateが変化して会話を続けられない場合のみtrue（HTTP 409相当）。 */
+  readonly contextChanged?: boolean;
+}
+
+export async function askStandardAiChatAction(
+  labId: string,
+  companyId: string,
+  turn: number,
+  question: string,
+  history: readonly { readonly question: string; readonly answerConclusion: string }[],
+  expectedContextHash: string | null
+): Promise<StandardAiChatActionResult> {
+  const logPrefix = `[askStandardAiChatAction] lab=${labId} company=${companyId} turn=${turn}`;
+  try {
+    const g = await guard();
+    if (!g.ok) return { ok: false, errorCategory: "unauthorized" };
+
+    const deps = await resolveAiExplanationUiDependencies();
+    const result = await handlePostAiExplanationChat(
+      deps,
+      labId,
+      companyId,
+      String(turn),
+      { question, history, expectedContextHash: expectedContextHash ?? undefined },
+      new Date().toISOString()
+    );
+
+    if (result.status === 409) {
+      return { ok: false, contextChanged: true, errorCategory: "context_changed" };
+    }
+    if (result.status !== 200) {
+      const body = result.body as { error?: { message?: string } } | undefined;
+      console.log(`${logPrefix} 非200応答 status=${result.status} message=${body?.error?.message ?? "(なし)"}`);
+      return { ok: false, errorCategory: result.status === 400 ? "invalid_request" : "internal_error" };
+    }
+
+    const body = result.body as
+      | { result?: "success" | "failure"; answer?: StandardAiChatAnswer; errorCategory?: string; contextHash?: string }
+      | undefined;
+    if (body?.result === "success" && body.answer) {
+      return { ok: true, answer: body.answer, contextHash: body.contextHash };
+    }
+    return { ok: false, errorCategory: body?.errorCategory ?? "unknown", contextHash: body?.contextHash };
+  } catch (e) {
+    // redirect()等のNext.js制御用例外はそのまま再送出する。
+    unstable_rethrow(e);
+    console.error(`${logPrefix} 予期しない例外を捕捉しました:`, e instanceof Error ? e.message : String(e));
+    return { ok: false, errorCategory: "internal_error" };
+  }
 }
 
 export async function fetchAiExplanationAction(labId: string, companyId: string, turn: number): Promise<AiExplanationActionResult> {

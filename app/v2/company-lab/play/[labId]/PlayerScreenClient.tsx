@@ -34,6 +34,7 @@ import FinancialResultsSection from "../../components/financial/FinancialResults
 import PlayLabBanner from "../components/PlayLabBanner";
 import { CompanyDecisionDraft, summarizeSalesForceAllocation, summarizeSalesForceHiring } from "../../decisionDraft";
 import { PlayerScreenViewModel } from "../_lib/viewModel";
+import StandardAiChatPanel from "./StandardAiChatPanel";
 import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
 import { fetchAiExplanationAction, processQuarterAction, saveDraftAction, submitDraftAction, withdrawDraftAction } from "./actions";
 
@@ -459,6 +460,14 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* 【Standard AIに質問する（Phase 1 MVP）】上のClaude生成の説明文（一方向のレポート）
+                とは別機能であることが分かるよう、emerald系の別ブロックとして直下に置く。
+                このコンポーネントはdraft/setDraftを受け取らないため、構造的に意思決定値を
+                書き換えられない（実装指示§0・§2）。 */}
+            <div className="mt-3">
+              <StandardAiChatPanel labId={viewModel.labId} companyId={viewModel.playerCompanyId} turn={viewModel.currentTurn} />
             </div>
 
             {/* ⑧ 詳細な判断ログ — 既存の内容をそのまま維持し、折りたたみへ移動しただけ（削除・改変なし）。 */}
