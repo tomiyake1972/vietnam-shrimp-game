@@ -30,6 +30,7 @@ export type StandardAiReasonCode =
   | "PRICE_REDUCTION_FOR_EXCESS_STOCK" // 完成品在庫過剰のため値引き
   | "SALES_REDUCED_FOR_SUPPLY_LIMIT" // 供給余力不足のため販売希望量を抑制
   | "LOW_ORDER_BOOK_PREMIUM_FLOOR" // 市場プレミアムが最低受注水準未満のため販売提案を停止
+  | "MARKET_ALLOCATION_BY_OBSERVED_OPPORTUNITY" // 【Batch 002】観測需要（2Q遅行）と採算性から市場別按分重みを決定
   // --- 販売（SAI-2追加作業: 市場別営業配置・商品別営業工数） ---
   | "SALES_HEADCOUNT_INSUFFICIENT_TOTAL" // 実在する営業人員総数が全市場の必要工数に対し不足
   | "VAP_MIX_INCREASES_SALES_EFFORT_NEED" // VAP比率上昇により当該市場の必要営業工数が増加
@@ -110,6 +111,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "PRICE_REDUCTION_FOR_EXCESS_STOCK",
   "SALES_REDUCED_FOR_SUPPLY_LIMIT",
   "LOW_ORDER_BOOK_PREMIUM_FLOOR",
+  "MARKET_ALLOCATION_BY_OBSERVED_OPPORTUNITY",
   "SALES_HEADCOUNT_INSUFFICIENT_TOTAL",
   "VAP_MIX_INCREASES_SALES_EFFORT_NEED",
   "WORKER_CAPACITY_SHORTAGE",

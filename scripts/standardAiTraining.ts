@@ -15,7 +15,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { BENCHMARK_PROFILES, BenchmarkProfile, runBenchmark } from "../app/lib/v2/companyLab/standardAi/training/benchmark";
-import { auditBenchmarkRows, summarizeFindings } from "../app/lib/v2/companyLab/standardAi/training/audit";
+import { auditBenchmarkRows, buildConstraintChain, summarizeFindings } from "../app/lib/v2/companyLab/standardAi/training/audit";
 import { SALES_PARAMETERS_V1 } from "../app/lib/v2/sales/parameters";
 import { FINANCE_PARAMETERS_V1 } from "../app/lib/v2/finance/parameters";
 
@@ -40,7 +40,9 @@ console.log(`[training] profile=${profile.name} quarters=${profile.quarters} see
 
 const run = runBenchmark(profile, new Date().toISOString());
 console.log(`[training] simulation完了: ${run.rows.length} company-quarter 行（${((Date.now() - startedAt) / 1000).toFixed(1)}秒）`);
-console.log(`[training] environmentFingerprint=${run.fingerprint.environmentFingerprint} standardAiFingerprint=${run.fingerprint.standardAiFingerprint}`);
+console.log(
+  `[training] gameMechanics=${run.fingerprint.gameMechanicsFingerprint} informationSet=${run.fingerprint.informationSetFingerprint} standardAi=${run.fingerprint.standardAiFingerprint}`
+);
 
 const findings = auditBenchmarkRows(run.rows, {
   maximumSupplierShare: SALES_PARAMETERS_V1.maximumSupplierShare,
@@ -52,6 +54,26 @@ console.log(`[training] findings: total=${summary.total} P0=${summary.bySeverity
 for (const [rule, count] of Object.entries(summary.byRule).sort((a, b) => b[1] - a[1])) {
   console.log(`           ${rule}: ${count}`);
 }
+
+// 【Batch 002 §H】制約の移り変わり（constraint migration）
+const chain = buildConstraintChain(run.rows);
+console.log(`[training] 主ボトルネック内訳: ${JSON.stringify(chain.primaryCounts)}`);
+console.log(`[training] 制約遷移 上位: ${chain.migrations.slice(0, 6).map((m) => `${m.from}->${m.to}:${m.count}`).join(" ")}`);
+
+// 【Batch 002】JP集中率（JP19問題の定点観測）
+const jpConcentration = (() => {
+  let sum = 0;
+  let n = 0;
+  for (const r of run.rows) {
+    const hc = r.decision.salesHeadcountByMarket;
+    const total = Object.values(hc).reduce((s, v) => s + v, 0);
+    if (total <= 0) continue;
+    sum += (hc.JP ?? 0) / total;
+    n += 1;
+  }
+  return n > 0 ? sum / n : 0;
+})();
+console.log(`[training] JP営業集中率（平均）: ${(jpConcentration * 100).toFixed(1)}%`);
 
 // 集計指標（Before/After比較の土台）
 const rows = run.rows;
@@ -80,7 +102,19 @@ fs.writeFileSync(`${base}_records.json`, JSON.stringify(run, null, 2), "utf8");
 fs.writeFileSync(`${base}_findings.json`, JSON.stringify(findings, null, 2), "utf8");
 fs.writeFileSync(
   `${base}_summary.json`,
-  JSON.stringify({ label, profile, fingerprint: run.fingerprint, generatedAt: run.generatedAt, summary, aggregates: agg }, null, 2),
+  JSON.stringify(
+    {
+      label,
+      profile,
+      fingerprint: run.fingerprint,
+      generatedAt: run.generatedAt,
+      summary,
+      aggregates: { ...agg, jpSalesForceConcentration: jpConcentration },
+      constraintChain: { primaryCounts: chain.primaryCounts, migrations: chain.migrations },
+    },
+    null,
+    2
+  ),
   "utf8"
 );
 

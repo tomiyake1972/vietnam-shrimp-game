@@ -598,6 +598,219 @@ function auditLevelB(row: CompanyQuarterRecordRow): AuditFinding[] {
 }
 
 // ---------------------------------------------------------------------
+// 【Batch 002】観測需要の利用に関する監査（A15 / A16）
+// ---------------------------------------------------------------------
+
+const MARKETS = ["CN", "US", "EU", "JP", "OTHER"] as const;
+
+function headcountShares(row: CompanyQuarterRecordRow): Record<string, number> {
+  const hc = row.decision.salesHeadcountByMarket;
+  const total = Object.values(hc).reduce((s, v) => s + v, 0);
+  const out: Record<string, number> = {};
+  for (const m of MARKETS) out[m] = total > 0 ? (hc[m] ?? 0) / total : 0;
+  return out;
+}
+
+/**
+ * A15: 2四半期遅れの観測需要へ過剰反応して、営業配置が四半期ごとに大きく振動していないか。
+ *
+ * 遅行情報は本質的にノイズを含む。それに毎期フルに追随すると、実際の市場は動いて
+ * いないのに配置だけが揺れ、営業基盤・顧客関係の蓄積を自ら壊すことになる。
+ * ここでは「連続する四半期で、いずれかの市場の営業人員シェアが25ポイント超動いた」
+ * 場合を過剰反応の候補として拾う。
+ */
+function auditA15(rows: readonly CompanyQuarterRecordRow[]): AuditFinding[] {
+  const SHARE_SWING_THRESHOLD = 0.25;
+  const findings: AuditFinding[] = [];
+  const byKey = new Map<string, CompanyQuarterRecordRow[]>();
+  for (const row of rows) {
+    const key = `${row.seed}|${row.companyId}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key)!.push(row);
+  }
+  for (const series of byKey.values()) {
+    const sorted = [...series].sort((a, b) => a.turn - b.turn);
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = headcountShares(sorted[i - 1]);
+      const cur = headcountShares(sorted[i]);
+      let worstMarket = "";
+      let worstSwing = 0;
+      for (const m of MARKETS) {
+        const swing = Math.abs(cur[m] - prev[m]);
+        if (swing > worstSwing) {
+          worstSwing = swing;
+          worstMarket = m;
+        }
+      }
+      if (worstSwing <= SHARE_SWING_THRESHOLD) continue;
+      const row = sorted[i];
+      findings.push({
+        findingId: `A15-${row.seed}-${row.companyId}-${row.turn}`,
+        rule: "A15_STALE_MARKET_INFORMATION_OVERREACTION",
+        severity: "P2",
+        seed: row.seed,
+        company: row.companyId,
+        quarter: row.turn,
+        observation: `${worstMarket}市場の営業人員シェアが前四半期の${(prev[worstMarket] * 100).toFixed(0)}%から${(cur[worstMarket] * 100).toFixed(0)}%へ${(worstSwing * 100).toFixed(0)}ポイント動いた（観測需要は2四半期遅れであり、実市場が同じだけ動いた証拠は無い）。`,
+        decision: `営業配置 ${JSON.stringify(row.decision.salesHeadcountByMarket)}（観測需要の出所: ${row.decision.marketDemandObservationSource ?? "不明"}）`,
+        result: `新規成約 ${Math.round(row.result.newContractedQuantity)}t`,
+        counterfactual: "遅行情報の変動へ毎期フル追随せず、配置変更を平滑化すれば、営業基盤・顧客関係の蓄積を保てた可能性がある。",
+        suspectedRootCause: "市場別按分重みが当期の観測値だけで決まり、前期配置からの継続性を考慮していない。",
+        relevantFiles: ["app/lib/v2/companyLab/standardAi/decision/sales.ts"],
+        confidence: 0.5,
+        classification: "STANDARD_AI_DESIGN_WEAKNESS",
+      });
+    }
+  }
+  return findings;
+}
+
+/**
+ * A16: 市場×商品別の観測需要が利用可能なのに、営業配分が実質的に価格順位だけで
+ * 決まっていないか。
+ *
+ * 判定は「観測需要が公開されている」かつ「営業人員シェアと観測需要シェアの
+ * 順位相関が低い」かつ「最大シェアの市場が観測需要では最大でない」場合。
+ * Batch 002以降でこのruleが多発する場合、観測を配線したのに判断側が使っていない
+ * ことを意味する（配線と判断の乖離を検出するためのrule）。
+ */
+function auditA16(row: CompanyQuarterRecordRow): AuditFinding[] {
+  const observed = row.decision.observedDemandByMarket;
+  if (!observed || Object.keys(observed).length === 0) return [];
+  const demandTotals: Record<string, number> = {};
+  let demandSum = 0;
+  for (const m of MARKETS) {
+    const byProduct = observed[m];
+    const total = byProduct ? Object.values(byProduct).reduce((s, v) => s + v, 0) : 0;
+    demandTotals[m] = total;
+    demandSum += total;
+  }
+  if (demandSum <= 0) return [];
+
+  const shares = headcountShares(row);
+  const totalHeadcount = Object.values(row.decision.salesHeadcountByMarket).reduce((s, v) => s + v, 0);
+  if (totalHeadcount <= 0) return [];
+
+  const topByHeadcount = MARKETS.reduce((a, b) => (shares[a] >= shares[b] ? a : b));
+  const topByDemand = MARKETS.reduce((a, b) => (demandTotals[a] >= demandTotals[b] ? a : b));
+  const demandShareOfTopHeadcount = demandTotals[topByHeadcount] / demandSum;
+
+  // 「最も人を置いた市場」が観測需要では最大でなく、かつその市場の需要シェアが
+  // 人員シェアの半分未満（＝規模に対して明らかに置きすぎ）の場合のみ指摘する。
+  if (topByHeadcount === topByDemand) return [];
+  if (demandShareOfTopHeadcount >= shares[topByHeadcount] * 0.5) return [];
+
+  return [
+    {
+      findingId: `A16-${row.seed}-${row.companyId}-${row.turn}`,
+      rule: "A16_MARKET_SIZE_IGNORED",
+      severity: "P1",
+      seed: row.seed,
+      company: row.companyId,
+      quarter: row.turn,
+      observation: `観測需要（${row.decision.marketDemandObservationSource ?? "不明"}）では${topByDemand}が最大（${Math.round(demandTotals[topByDemand])}t）だが、営業人員は${topByHeadcount}へ最も多く（${(shares[topByHeadcount] * 100).toFixed(0)}%）配置している。${topByHeadcount}の観測需要シェアは${(demandShareOfTopHeadcount * 100).toFixed(0)}%に過ぎない。`,
+      decision: `営業配置 ${JSON.stringify(row.decision.salesHeadcountByMarket)}`,
+      result: `新規成約 ${Math.round(row.result.newContractedQuantity)}t`,
+      counterfactual: `観測需要と採算性で按分していれば、${topByDemand}へより多くの営業力が向き、同じ人員でより多くの成約機会に接触できた可能性がある。`,
+      suspectedRootCause: "市場×商品別の観測需要が公開されているにもかかわらず、市場別按分が価格順位など規模非依存の規則で決まっている。",
+      relevantFiles: ["app/lib/v2/companyLab/standardAi/decision/sales.ts", "app/lib/v2/companyLab/marketDemandObservation.ts"],
+      confidence: 0.7,
+      classification: "STANDARD_AI_DESIGN_WEAKNESS",
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------
+// 【Batch 002 §H】Constraint Chain（制約の移り変わり）
+// ---------------------------------------------------------------------
+
+export type BottleneckCategory =
+  | "MARKET"
+  | "SALES_FORCE"
+  | "PRODUCTION_CAPACITY"
+  | "RAW_MATERIAL"
+  | "LABOR"
+  | "CASH"
+  | "BORROWING"
+  | "INVENTORY"
+  | "NONE";
+
+/**
+ * Standard AI自身の診断（primaryConstraint / secondaryConstraint）を、共通の
+ * ボトルネック語彙へ写像する。新しい診断ロジックは作らず、既存の診断結果を
+ * 読み替えるだけ（AIが何を制約と考えていたかを、そのまま時系列で追うため）。
+ */
+export function toBottleneckCategory(constraint: string | null): BottleneckCategory {
+  if (!constraint) return "NONE";
+  const c = constraint.toLowerCase();
+  if (c.includes("sales_shortage") || c.includes("sales_force")) return "SALES_FORCE";
+  if (c.includes("production_capacity")) return "PRODUCTION_CAPACITY";
+  if (c.includes("raw")) return "RAW_MATERIAL";
+  if (c.includes("worker") || c.includes("labor")) return "LABOR";
+  if (c.includes("liquidity") || c.includes("cash")) return "CASH";
+  if (c.includes("borrow")) return "BORROWING";
+  if (c.includes("inventory")) return "INVENTORY";
+  if (c.includes("market")) return "MARKET";
+  return "NONE";
+}
+
+export interface ConstraintChainEntry {
+  readonly seed: string;
+  readonly companyId: string;
+  readonly turn: number;
+  readonly primary: BottleneckCategory;
+  readonly secondary: BottleneckCategory;
+}
+
+export interface ConstraintMigration {
+  readonly from: BottleneckCategory;
+  readonly to: BottleneckCategory;
+  readonly count: number;
+}
+
+/** company-quarterごとのボトルネックと、その遷移回数を集計する。 */
+export function buildConstraintChain(rows: readonly CompanyQuarterRecordRow[]): {
+  readonly entries: readonly ConstraintChainEntry[];
+  readonly primaryCounts: Readonly<Record<string, number>>;
+  readonly migrations: readonly ConstraintMigration[];
+} {
+  const entries: ConstraintChainEntry[] = rows.map((row) => ({
+    seed: row.seed,
+    companyId: row.companyId,
+    turn: row.turn,
+    primary: toBottleneckCategory(row.decision.primaryConstraint),
+    secondary: toBottleneckCategory(row.decision.secondaryConstraint),
+  }));
+
+  const primaryCounts: Record<string, number> = {};
+  for (const e of entries) primaryCounts[e.primary] = (primaryCounts[e.primary] ?? 0) + 1;
+
+  const migrationCounts = new Map<string, number>();
+  const byKey = new Map<string, ConstraintChainEntry[]>();
+  for (const e of entries) {
+    const key = `${e.seed}|${e.companyId}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key)!.push(e);
+  }
+  for (const series of byKey.values()) {
+    const sorted = [...series].sort((a, b) => a.turn - b.turn);
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i - 1].primary === sorted[i].primary) continue;
+      const key = `${sorted[i - 1].primary}>${sorted[i].primary}`;
+      migrationCounts.set(key, (migrationCounts.get(key) ?? 0) + 1);
+    }
+  }
+  const migrations = [...migrationCounts.entries()]
+    .map(([key, count]) => {
+      const [from, to] = key.split(">") as [BottleneckCategory, BottleneckCategory];
+      return { from, to, count };
+    })
+    .sort((a, b) => b.count - a.count);
+
+  return { entries, primaryCounts, migrations };
+}
+
+// ---------------------------------------------------------------------
 // エントリポイント
 // ---------------------------------------------------------------------
 
@@ -624,12 +837,14 @@ export function auditBenchmarkRows(rows: readonly CompanyQuarterRecordRow[], opt
     findings.push(...auditA11(row));
     findings.push(...auditA12(row));
     findings.push(...auditA14(row, options.salesForceSalaryUsdPerQuarter));
+    findings.push(...auditA16(row));
     if (options.includeLevelB !== false) findings.push(...auditLevelB(row));
   }
   // 時系列を要するルール
   findings.push(...auditA04(rows));
   findings.push(...auditA09(rows));
   findings.push(...auditA13(rows));
+  findings.push(...auditA15(rows));
 
   return findings.sort((a, b) => {
     const order: Record<FindingSeverity, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };

@@ -23,30 +23,43 @@ const AUDIT_OPTIONS = {
   salesForceSalaryUsdPerQuarter: FINANCE_PARAMETERS_V1.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter,
 };
 
-test("fingerprint: environmentFingerprintとstandardAiFingerprintは別の値であり、両方とも安定して算出できる", () => {
+test("fingerprint: 3層（mechanics / informationSet / standardAi）が別々の値として安定して算出できる", () => {
   const a = computeEnvironmentFingerprint();
   const b = computeEnvironmentFingerprint();
-  assert.equal(a.environmentFingerprint, b.environmentFingerprint, "同一作業ツリーでは環境fingerprintは再現する");
+  assert.equal(a.gameMechanicsFingerprint, b.gameMechanicsFingerprint, "同一作業ツリーではメカニクスfingerprintは再現する");
+  assert.equal(a.informationSetFingerprint, b.informationSetFingerprint, "同一作業ツリーでは情報公開層fingerprintは再現する");
   assert.equal(a.standardAiFingerprint, b.standardAiFingerprint, "同一作業ツリーではAI fingerprintは再現する");
-  assert.notEqual(a.environmentFingerprint, a.standardAiFingerprint, "環境とAIは別々のハッシュでなければ分離の意味がない");
-  assert.match(a.environmentFingerprint, /^[0-9a-f]{16}$/);
-  assert.match(a.standardAiFingerprint, /^[0-9a-f]{16}$/);
+  // 3層が互いに異なること（同じ値なら分離できていない）。
+  const values = [a.gameMechanicsFingerprint, a.informationSetFingerprint, a.standardAiFingerprint];
+  assert.equal(new Set(values).size, 3, "3層は別々のハッシュでなければ分離の意味がない");
+  for (const v of values) assert.match(v, /^[0-9a-f]{16}$/);
+  // 後方互換: environmentFingerprint は gameMechanicsFingerprint と同義。
+  assert.equal(a.environmentFingerprint, a.gameMechanicsFingerprint);
 });
 
-test("fingerprint: 環境ハッシュの対象ソースにstandardAi配下が含まれない（AI変更で環境が動いたと誤判定しない）", () => {
-  // fingerprint.ts自身の定義を読み、standardAiを対象に含めていないことを構造として固定する。
+test("fingerprint: メカニクスハッシュの対象にstandardAi配下（AI判断ロジック）が含まれない", () => {
+  // fingerprint.ts自身の定義を読み、メカニクス対象にstandardAiを含めていないことを
+  // 構造として固定する。情報公開層（INFORMATION_SET_SOURCE_FILES）はstandardAi配下の
+  // observation.ts/types.tsを意図的に含むが、これはメカニクス側からは除外される。
   const source = fs.readFileSync(path.resolve(__dirname, "..", "fingerprint.ts"), "utf8");
   const dirsBlock = source.slice(
     source.indexOf("const ENVIRONMENT_SOURCE_DIRS"),
-    source.indexOf("const ENVIRONMENT_SOURCE_FILES")
+    source.indexOf("const INFORMATION_SET_SOURCE_FILES")
   );
   const filesBlock = source.slice(
     source.indexOf("const ENVIRONMENT_SOURCE_FILES"),
     source.indexOf("export interface EnvironmentFingerprint")
   );
   assert.ok(dirsBlock.length > 0 && filesBlock.length > 0, "対象定義ブロックが読み取れること");
-  assert.ok(!dirsBlock.includes("standardAi"), "環境対象ディレクトリにstandardAiを含めてはならない");
-  assert.ok(!filesBlock.includes("standardAi"), "環境対象ファイルにstandardAiを含めてはならない");
+  assert.ok(!dirsBlock.includes("standardAi"), "メカニクス対象ディレクトリにstandardAiを含めてはならない");
+  assert.ok(!filesBlock.includes("standardAi"), "メカニクス対象ファイルにstandardAiを含めてはならない");
+  // 情報公開層は、AI判断ロジック（decision/配下）を含んではならない。
+  const infoBlock = source.slice(
+    source.indexOf("const INFORMATION_SET_SOURCE_FILES"),
+    source.indexOf("/** ディレクトリ単位ではなく個別に含めるゲームエンジンのファイル。 */")
+  );
+  assert.ok(infoBlock.length > 0);
+  assert.ok(!infoBlock.includes("decision/"), "情報公開層にAIの判断ロジック（decision/配下）を含めてはならない");
 });
 
 test("benchmark: 同じseedを2回走らせると完全に同じ結果になる（決定論性）", () => {

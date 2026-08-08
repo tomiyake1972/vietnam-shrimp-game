@@ -95,8 +95,22 @@ test("標準AI: 会社×工場のワーカー配分合計は配置人数（常�
         const assignedTemporary = record.productionAllocation.entries
           .filter((e) => e.companyId === decision.companyId && e.factoryId === assignment.factoryId)
           .reduce((s, e) => s + e.labor.assignedTemporaryHeadcount, 0);
-        assert.ok(assignedRegular <= assignment.regularHeadcount + 1e-6);
-        assert.ok(assignedTemporary <= assignment.temporaryHeadcount + 1e-6);
+        // 【許容誤差の根拠】production/labor.ts は商品ごとの割当人数を
+        // Math.round(x * 1e6) / 1e6（小数第6位への丸め）で確定する。工場の割当は
+        // 商品ごとに1件ずつ出るため、3商品ぶんを合計すると真の合計を最大
+        // 3 × 0.5e-6 = 1.5e-6 だけ上回り得る。人数の判定として意味を持つ精度は
+        // 保ったまま、この丸め累積だけを吸収する。
+        // （従来の 1e-6 は 2商品ぶんの丸め上振れ 1.0e-6 とほぼ同値で、労働が
+        //  ちょうど飽和する配置が現れた時点で偽陽性になる水準だった。）
+        const headcountRoundingTolerance = 3 * 0.5e-6;
+        assert.ok(
+          assignedRegular <= assignment.regularHeadcount + headcountRoundingTolerance,
+          `常用ワーカーの割当合計(${assignedRegular})が配置人数(${assignment.regularHeadcount})を超えている`
+        );
+        assert.ok(
+          assignedTemporary <= assignment.temporaryHeadcount + headcountRoundingTolerance,
+          `臨時ワーカーの割当合計(${assignedTemporary})が配置人数(${assignment.temporaryHeadcount})を超えている`
+        );
       }
     }
   }

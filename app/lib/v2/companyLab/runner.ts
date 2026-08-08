@@ -42,6 +42,7 @@
 import { PeriodV2 } from "../core/period";
 import { HosoEqTons, hosoEqTons, ratio, roundHosoEqTons, Score0to100, score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { DOMESTIC_PURCHASE_GUARANTEE_TURN, clearDomesticReferencePrice } from "./domesticReferencePrice";
+import { buildObservedMarketDemand } from "./marketDemandObservation";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import {
   CONSUMER_MARKET_INVENTORY_PARAMETERS_V1,
@@ -656,6 +657,10 @@ export function buildPublicMarketInfo(state: CompanyLabState): PublicMarketInfo 
   return {
     lastMarketResult: lastRecord?.marketResult,
     vietnamDomesticPriorPrice: lastRecord ? unwrapUnit(lastRecord.marketResult.vietnamDomestic.price) : 0,
+    // 【Batch 002】市場×商品別需要数量の遅行公開（2四半期前の実績。turn1・turn2は
+    // ゲーム開始時点の既知市場情報）。プレイヤーUIとStandard AI Observationは
+    // 必ずこの同一の値を参照する（information setの同一性）。
+    observedMarketDemand: buildObservedMarketDemand(state, state.scenarioState.currentTurn),
     ...(productLifecycleOutlook ? { productLifecycleOutlook } : {}),
     // 【SAI-5E】前四半期末までの商品別供給圧力EWMA（公開の業界需給統計に相当）。
     ...(state.marketEvolutionState

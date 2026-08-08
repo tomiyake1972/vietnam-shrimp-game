@@ -39,7 +39,16 @@ test("buildAutoplayCaseLogs: 事前希望案（salesQuantityTraceのdesiredQuant
   const constrained = log.salesQuantityTrace.filter((t) => t.desiredQuantityBeforeEffortConstraint > t.finalPlannedQuantity + EPSILON);
   assert.ok(constrained.length > 0, "営業工数制約により希望>最終となったエントリが1件も見つからない（標準候補は営業人員不足を想定しているはず）");
   for (const t of log.salesQuantityTrace) {
-    assert.ok(t.finalPlannedQuantity <= t.desiredQuantityBeforeEffortConstraint + EPSILON, `最終計画数量が希望数量を上回っている: ${JSON.stringify(t)}`);
+    // 【許容誤差の根拠】finalPlannedQuantityはroundHosoEqTons（小数第2位への丸め）を
+    // 通った値、desiredQuantityBeforeEffortConstraintは丸め前の値である。
+    // 営業工数制約が効いていない行（scaleFactor=1）では両者は同じ量を指すため、
+    // 丸め上振れの半ULP（0.005）だけ最終側が大きくなり得る。制約が効いた行では
+    // 差はこれより桁違いに大きいので、この許容幅でテストの意味は弱まらない。
+    const HOSO_EQ_TONS_ROUNDING_HALF_ULP = 0.005;
+    assert.ok(
+      t.finalPlannedQuantity <= t.desiredQuantityBeforeEffortConstraint + HOSO_EQ_TONS_ROUNDING_HALF_ULP,
+      `最終計画数量が希望数量を上回っている: ${JSON.stringify(t)}`
+    );
   }
 });
 

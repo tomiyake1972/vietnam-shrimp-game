@@ -354,6 +354,7 @@ function buildOpeningInfo(
     domesticReferencePrice: computeDomesticReferencePrice(restoredState, turn),
     balanceSheet: buildOpeningBalanceSheet(ownState),
     depreciableAssets: buildDepreciableAssets(ownState, turn),
+    observedMarketDemand: publicInfo.observedMarketDemand,
     marketInfo: buildOpeningMarketInfo(publicInfo.vietnamDomesticPriorPrice, priorByMarket),
   };
 }

@@ -1,0 +1,142 @@
+{
+  "label": "batch002-lagged-demand",
+  "profile": {
+    "name": "standard",
+    "quarters": 32,
+    "seedCount": 10,
+    "scenarioId": "baseline",
+    "description": "5社 × 32四半期 × 10seed。keep/revert判定に使う既定のベンチマーク。"
+  },
+  "fingerprint": {
+    "environmentFingerprint": "f34f5465ca1fb52c",
+    "gameMechanicsFingerprint": "f34f5465ca1fb52c",
+    "informationSetFingerprint": "08c9ca59d35e5c6c",
+    "standardAiFingerprint": "f5e17aff9363e7fa",
+    "repositoryHead": "ee8745a6a6f9b385bd8c028e00f8a58c321794b2",
+    "branch": "feature/v2-standard-ai-training-harness",
+    "workingTreeDirty": true,
+    "parameterVersions": {
+      "market": "market-params-2015-baseline-v0.1",
+      "sales": "sales-v0.1",
+      "rawMaterials": "raw-materials-v0.1",
+      "production": "production-v0.2",
+      "finance": "finance-v0.1",
+      "persistedStateVersion": 7
+    }
+  },
+  "generatedAt": "2026-08-08T02:04:59.604Z",
+  "summary": {
+    "total": 2555,
+    "bySeverity": {
+      "P0": 0,
+      "P1": 365,
+      "P2": 948,
+      "P3": 1242
+    },
+    "byRule": {
+      "A06_PRODUCTION_WITH_RAW_SHORTAGE": 98,
+      "A07_SALES_WITHOUT_DELIVERY_CAPABILITY": 257,
+      "A13_CONTRACT_FAILURE_REPEATED": 10,
+      "A04_REPEATED_FG_ACCUMULATION": 34,
+      "A08_LABOR_SHORTAGE_IGNORED": 150,
+      "A14_MARGINAL_SALESFORCE_VALUE_NEGATIVE": 754,
+      "A15_STALE_MARKET_INFORMATION_OVERREACTION": 10,
+      "B_STRATEGIC_MARKET_CONCENTRATION": 1242
+    }
+  },
+  "aggregates": {
+    "companyQuarters": 1600,
+    "defaults": 0,
+    "insolvencies": 131,
+    "overdueQuarters": 257,
+    "emergencyBorrowQuarters": 0,
+    "totalContracted": 14897199.510000015,
+    "totalOperatingProfit": 8292997450.442809,
+    "totalNetIncome": 5649409431.246535,
+    "avgFinishedGoodsInventory": 1667.9221999999988,
+    "avgRawMaterialInventory": 3751.7461250000056,
+    "totalRawShortfall": 355142.6500000004,
+    "avgEquipmentUtilization": 0.5481019374999991,
+    "avgLaborUtilization": 0.8930319374999997,
+    "totalIdleLaborCost": 479936529.87599903,
+    "totalCapexProposals": 0,
+    "minCash": -47256104.12234774,
+    "jpSalesForceConcentration": 0.02760729729705906
+  },
+  "constraintChain": {
+    "primaryCounts": {
+      "SALES_FORCE": 325,
+      "LABOR": 730,
+      "PRODUCTION_CAPACITY": 354,
+      "INVENTORY": 29,
+      "NONE": 162
+    },
+    "migrations": [
+      {
+        "from": "SALES_FORCE",
+        "to": "LABOR",
+        "count": 73
+      },
+      {
+        "from": "NONE",
+        "to": "LABOR",
+        "count": 39
+      },
+      {
+        "from": "LABOR",
+        "to": "NONE",
+        "count": 36
+      },
+      {
+        "from": "INVENTORY",
+        "to": "SALES_FORCE",
+        "count": 29
+      },
+      {
+        "from": "LABOR",
+        "to": "SALES_FORCE",
+        "count": 23
+      },
+      {
+        "from": "LABOR",
+        "to": "PRODUCTION_CAPACITY",
+        "count": 21
+      },
+      {
+        "from": "SALES_FORCE",
+        "to": "INVENTORY",
+        "count": 19
+      },
+      {
+        "from": "SALES_FORCE",
+        "to": "NONE",
+        "count": 16
+      },
+      {
+        "from": "SALES_FORCE",
+        "to": "PRODUCTION_CAPACITY",
+        "count": 11
+      },
+      {
+        "from": "PRODUCTION_CAPACITY",
+        "to": "SALES_FORCE",
+        "count": 11
+      },
+      {
+        "from": "LABOR",
+        "to": "INVENTORY",
+        "count": 10
+      },
+      {
+        "from": "NONE",
+        "to": "SALES_FORCE",
+        "count": 6
+      },
+      {
+        "from": "PRODUCTION_CAPACITY",
+        "to": "NONE",
+        "count": 1
+      }
+    ]
+  }
+}

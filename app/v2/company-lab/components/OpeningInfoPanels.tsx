@@ -16,6 +16,7 @@ import type {
   OpeningMarketInfo,
 } from "../play/_lib/openingInfoViewModel";
 import type { DomesticReferencePrice } from "../../../lib/v2/companyLab/domesticReferencePrice";
+import type { ObservedMarketDemand } from "../../../lib/v2/companyLab/marketDemandObservation";
 
 const DASH = "－";
 
@@ -334,6 +335,65 @@ export function OpeningMarketInfoPanel({
           </div>
         </details>
       </div>
+    </CollapsibleSection>
+  );
+}
+
+/**
+ * 【Batch 002】市場×商品別の市場規模（原則2四半期前の実績）。
+ *
+ * 【重要】ここに出るのは「現在の確定需要」ではない。経営者が現実に手にできるのは
+ * 約6か月前に確認された市場規模であり、現在の市場はそこから動いている可能性がある。
+ * turn1・turn2はゲーム開始時点の既知市場情報を表示する。
+ *
+ * この表はStandard AIが参照するのと完全に同じ値を表示している（プレイヤーだけが
+ * 不利／有利になることが無いようにするため）。
+ */
+export function ObservedMarketDemandPanel({ observed }: { readonly observed: ObservedMarketDemand | undefined }) {
+  if (!observed) return null;
+  const isInitial = observed.observationSource === "INITIAL_MARKET_INFORMATION";
+  const heading = isInitial
+    ? "ゲーム開始時点の既知市場情報"
+    : `${observed.observationLagQuarters}四半期前（第${observed.sourceQuarter}ターン）の実績`;
+  const total = observed.entries.reduce((sum, e) => sum + e.observedTotalDemand, 0);
+  return (
+    <CollapsibleSection
+      title={`市場規模（${heading}）`}
+      description={
+        isInitial
+          ? "まだ実績が2四半期ぶん蓄積していないため、ゲーム開始時点で分かっている市場情報を表示しています。現在の確定需要ではありません。"
+          : `約6か月遅れの市場情報です。現在の確定需要ではなく、${observed.sourceQuarter}ターン時点で確認された市場規模です。市場はその後動いている可能性があります。`
+      }
+      tone="info"
+      defaultOpen={false}
+      testId="observed-market-demand"
+      summaryRight={<span className="text-xs text-gray-400">合計 {tons(total)}</span>}
+    >
+      <table className="w-full text-xs" data-testid="observed-market-demand-table">
+        <thead>
+          <tr className="border-b border-gray-700 text-gray-400">
+            <th className="py-1 pr-2 text-left font-semibold">市場</th>
+            <th className="py-1 pr-2 text-right font-semibold">HOSO</th>
+            <th className="py-1 pr-2 text-right font-semibold">PD</th>
+            <th className="py-1 pr-2 text-right font-semibold">VAP</th>
+            <th className="py-1 text-right font-semibold">合計</th>
+          </tr>
+        </thead>
+        <tbody>
+          {observed.entries.map((e) => (
+            <tr key={e.market} data-testid={`observed-market-demand-row-${e.market}`}>
+              <td className="py-0.5 pr-2 text-gray-300">{e.market}</td>
+              <td className="py-0.5 pr-2 text-right tabular-nums">{tons(e.observedDemandByProduct.hoso)}</td>
+              <td className="py-0.5 pr-2 text-right tabular-nums">{tons(e.observedDemandByProduct.pd)}</td>
+              <td className="py-0.5 pr-2 text-right tabular-nums">{tons(e.observedDemandByProduct.vap)}</td>
+              <td className="py-0.5 text-right tabular-nums font-semibold">{tons(e.observedTotalDemand)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="text-[10px] text-gray-500 mt-2">
+        この数値は標準AI（他の4社）が見ている情報とまったく同じです。市場の現在の実需要を直接知る手段は、プレイヤーにも標準AIにもありません。
+      </p>
     </CollapsibleSection>
   );
 }

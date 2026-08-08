@@ -124,7 +124,7 @@ test("会社IDが一致し、他社データが混入しない", () => {
   assert.equal(result.companyId, "MASS");
 });
 
-test("【Phase F-15】38人（Test14実測headcount）でCurrent再現→JP集中を、Volume-shadowもContribution-shadowも正当化しない限り縮小する", () => {
+test("【Phase F-15 / Batch 002更新】38人（Test14実測headcount）でJPへの営業集中が起きない（観測需要ベース配分後の回帰）", () => {
   // 【38人の作り方】18→38への出力の比例縮小/拡大ではなく、observationのheadcount
   // フィールドだけを38へ差し替えて、本番の buildStandardAiSalesPlans を38人で
   // 再実行する（既存の「headcount総数が0なら」テストと同じフィールド上書き手法）。
@@ -158,16 +158,28 @@ test("【Phase F-15】38人（Test14実測headcount）でCurrent再現→JP集�
   const volumeJp = comparison.volumeOriented.marketSummaries.find((m) => m.market === "JP")!;
   const contributionJp = comparison.contributionOriented.marketSummaries.find((m) => m.market === "JP")!;
 
-  // JPのCTS効果の優位（Phase C診断で確認済み: 他市場より僅かに高い程度）は、
-  // 50%集中を正当化する規模ではないため、両shadowともJPのheadcountを
-  // current（38人ケースでは19人）より減らすはずである。
+  // 【このテストの経緯】Batch 002以前、市場別按分は「前期参照価格が首位の市場へ50%」
+  // という規模非依存の規則だったため、38人ケースではJPへ約19人（50%）が入っていた。
+  // 本テストは元々、その集中をvolume/contributionのshadow配分が正当化しないこと
+  // （＝shadow < current）を示して問題の存在を実証するためのものだった。
+  //
+  // Batch 002で市場×商品別の観測需要（2四半期遅行）に基づく按分へ変更した結果、
+  // currentのJP配置自体が規模相応まで下がり、前提が逆転した。したがって
+  // 「shadowより多すぎないこと」を確認する形へ更新する。テストの目的
+  // （JPへの不合理な集中を検出する）は変えていない。
+  const JP_OVER_CONCENTRATION_SHARE = 0.25;
   assert.ok(
-    volumeJp.shadowHeadcount < currentJpHeadcount,
-    `volume-shadowのJP headcount(${volumeJp.shadowHeadcount})はcurrent(${currentJpHeadcount})より少ないはず`
+    currentJpHeadcount / 38 < JP_OVER_CONCENTRATION_SHARE,
+    `JPへ営業人員が集中していないこと（current=${currentJpHeadcount}人/38人）。旧挙動では約19人（50%）だった`
+  );
+  // shadow配分（診断専用の別方式）と比べても、currentがJPへ余分に置いていないこと。
+  assert.ok(
+    currentJpHeadcount <= volumeJp.shadowHeadcount,
+    `currentのJP headcount(${currentJpHeadcount})がvolume-shadow(${volumeJp.shadowHeadcount})を上回らないこと`
   );
   assert.ok(
-    contributionJp.shadowHeadcount < currentJpHeadcount,
-    `contribution-shadowのJP headcount(${contributionJp.shadowHeadcount})はcurrent(${currentJpHeadcount})より少ないはず`
+    currentJpHeadcount <= contributionJp.shadowHeadcount,
+    `currentのJP headcount(${currentJpHeadcount})がcontribution-shadow(${contributionJp.shadowHeadcount})を上回らないこと`
   );
 });
 

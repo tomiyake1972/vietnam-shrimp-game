@@ -85,6 +85,19 @@ export interface MarketObservationEntry {
   readonly market: DemandMarketId;
   /** 前期実績の商品別参照価格（USD/HOSO換算kg）。前期実績が無い場合はundefined。 */
   readonly referencePriceByProduct?: ProductAmount;
+  /**
+   * 【Batch 002】市場×商品別の観測需要（HOSO換算トン）。**現在の確定需要ではなく、
+   * 原則2四半期前（約6か月前）に確認された市場規模**である。turn1・turn2では
+   * ゲーム開始時点の既知市場情報。プレイヤー画面が見るのと完全に同じ値であり、
+   * Standard AIだけが当期のtrue demandを見ることはできない。
+   *
+   * 単位は sales/allocation.ts の targetDemand と同じ（＝ベトナム産がその市場×商品で
+   * 獲得できる対象需要）なので、observedDemand × maximumSupplierShare が
+   * そのまま自社の取り得る上限の目安になる。
+   *
+   * 公開情報が存在しない旧スナップショット等ではundefined。
+   */
+  readonly observedDemandByProduct?: ProductAmount;
 }
 
 /**
@@ -138,6 +151,15 @@ export interface StandardAiObservation {
 
   // --- 市場（公開情報） ---
   readonly markets: readonly MarketObservationEntry[];
+  /**
+   * 【Batch 002】markets[].observedDemandByProduct の観測遅延（四半期）。
+   * 今回は常に2。将来1Q/3Qを比較できるようパラメータとして観測へ載せる。
+   */
+  readonly marketDemandObservationLagQuarters?: number;
+  /** 観測需要がどのturnの実績か。ゲーム開始時点の既知市場情報の場合はnull。 */
+  readonly marketDemandSourceQuarter?: number | null;
+  /** 観測需要の出所（初期市場情報か、2四半期前の実績か）。 */
+  readonly marketDemandObservationSource?: "INITIAL_MARKET_INFORMATION" | "LAGGED_MARKET_RESULT";
   /** 商品別の市場プレミアム（前期実績、VN。turn1等は未定義）。 */
   readonly marketPremiumByProduct: Readonly<{ pd?: number; vap?: number }>;
   readonly vietnamDomesticPriorPrice?: number;

@@ -17,6 +17,7 @@ import { CountryId, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Pro
 import { ConsumerMarketCarryStateTable, ConsumerMarketQuarterRecord } from "../market/consumerInventory";
 import { ScenarioMode, ScenarioState } from "../scenario/types";
 import { CompanyId, CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
+import type { ObservedMarketDemand } from "./marketDemandObservation";
 import {
   AquacultureStockingPlanEntry,
   DomesticPurchaseAllocationResult,
@@ -302,6 +303,14 @@ export interface PublicMarketInfo {
    * 個社の非公開計画は含まない。1.0=需給均衡、>1=供給過剰の持続。
    */
   readonly productSupplyPressureOutlook?: Readonly<Record<"pd" | "vap", number>>;
+  /**
+   * 【Batch 002】市場×商品別需要数量の遅行公開情報。原則2四半期前の実績であり、
+   * 「現在の確定需要」ではない（turn1・turn2はゲーム開始時点の既知市場情報）。
+   * プレイヤー画面とStandard AI Observationは必ず同じこの値を参照する
+   * （どちらか一方だけが当期のtrue demandを見ることを構造的に防ぐ）。
+   * 旧スナップショットからの復元では未設定になり得るためオプショナル。
+   */
+  readonly observedMarketDemand?: ObservedMarketDemand;
 }
 
 /** 【SAI-5C】前四半期までのライフサイクル構成比と四半期トレンド（公開情報）。 */

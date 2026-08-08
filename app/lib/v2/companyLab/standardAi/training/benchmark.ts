@@ -12,6 +12,7 @@
 //   - 値の再計算をしない。記録するのはエンジンが返した値そのもの。
 
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../../runner";
+import type { PublicMarketInfo } from "../../types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState } from "../../types";
 import { generateStandardAiDecisionWithDiagnostics } from "../policy";
 import { computeEnvironmentFingerprint, EnvironmentFingerprint } from "./fingerprint";
@@ -104,6 +105,15 @@ export interface RecordedDecision {
   readonly vapProductDevelopmentSpendUsd: number;
   // Standard AI internals
   readonly reasonCodes: readonly { readonly code: string; readonly domain: string; readonly severity: string; readonly message: string }[];
+  /**
+   * 【Batch 002】この四半期に公開されていた市場×商品別観測需要（2四半期前の実績、
+   * またはゲーム開始時点の既知市場情報）。AIが実際に見ていた情報を記録することで、
+   * 「見えていたのに使わなかった」のか「そもそも見えていなかった」のかを
+   * 監査で区別できるようにする。
+   */
+  readonly observedDemandByMarket: Readonly<Record<string, Readonly<Record<string, number>>>>;
+  readonly marketDemandObservationSource: string | null;
+  readonly marketDemandSourceQuarter: number | null;
   readonly primaryConstraint: string | null;
   readonly secondaryConstraint: string | null;
   readonly salesFulfillmentState: string | null;
@@ -184,7 +194,21 @@ function sumBy<T>(items: readonly T[], pick: (t: T) => number): number {
   return items.reduce((s, t) => s + pick(t), 0);
 }
 
-function recordDecision(decision: CompanyDecisionInput, diagnostics: ReturnType<typeof generateStandardAiDecisionWithDiagnostics>["diagnostics"]): RecordedDecision {
+function recordDecision(
+  decision: CompanyDecisionInput,
+  diagnostics: ReturnType<typeof generateStandardAiDecisionWithDiagnostics>["diagnostics"],
+  publicInfo: PublicMarketInfo
+): RecordedDecision {
+  const observed = publicInfo.observedMarketDemand;
+  const observedDemandByMarket: Record<string, Record<string, number>> = {};
+  for (const e of observed?.entries ?? []) {
+    observedDemandByMarket[String(e.market)] = {
+      hoso: e.observedDemandByProduct.hoso,
+      pd: e.observedDemandByProduct.pd,
+      vap: e.observedDemandByProduct.vap,
+    };
+  }
+
   const salesPlans = (decision.salesPlans ?? []).map((p) => ({
     market: String(p.market),
     product: String(p.product),
@@ -242,6 +266,9 @@ function recordDecision(decision: CompanyDecisionInput, diagnostics: ReturnType<
       severity: String(e.severity),
       message: String(e.message),
     })),
+    observedDemandByMarket,
+    marketDemandObservationSource: observed ? String(observed.observationSource) : null,
+    marketDemandSourceQuarter: observed?.sourceQuarter ?? null,
     primaryConstraint: sd ? String(sd.primaryConstraint) : null,
     secondaryConstraint: sd?.secondaryConstraint ? String(sd.secondaryConstraint) : null,
     salesFulfillmentState: sd ? String(sd.salesFulfillmentState) : null,
@@ -345,7 +372,7 @@ export function runSingleSeed(profile: BenchmarkProfile, seed: string): readonly
       const ownState = buildCompanyOwnState(state, f);
       const { decision, diagnostics } = generateStandardAiDecisionWithDiagnostics(f, ownState, publicInfo, state.currentPeriod, turn);
       decisions[f.companyId] = decision;
-      recordedDecisions[f.companyId] = recordDecision(decision, diagnostics);
+      recordedDecisions[f.companyId] = recordDecision(decision, diagnostics, publicInfo);
     }
 
     const nextState = advanceCompanyLabQuarter(state, fixtures, decisions);
