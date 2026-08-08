@@ -332,7 +332,12 @@ export function buildAnthropicClientOptions(apiKey: string): AnthropicClientOpti
   return { apiKey, timeout: EXPLANATION_CLAUDE_TIMEOUT_MS, maxRetries: EXPLANATION_CLAUDE_MAX_RETRIES };
 }
 
-function createRealClient(apiKey: string): AnthropicMessagesClient {
+/**
+ * 【2026-08-08・チャット機能（Q&A）からの再利用のためexport】Anthropic SDKクライアントの
+ * 生成箇所をこの1箇所に保つ（timeout・maxRetriesの設定がExplanationとQ&Aで
+ * ドリフトしないようにするため）。新しい接続経路・別モデルの導入ではない。
+ */
+export function createRealClient(apiKey: string): AnthropicMessagesClient {
   // 【タイムアウト対応】クライアント構築時にも既定タイムアウトを短縮しておく
   // （呼び出し側のper-request timeoutと二重に設定しておくことで、どちらか片方の
   // 指定漏れがあっても10分ハングへ戻らないようにする多重防御）。

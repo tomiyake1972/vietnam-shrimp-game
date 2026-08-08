@@ -66,7 +66,7 @@ export interface StoredExplanationReport {
  * が常に同じ順序でキーを組み立てている前提に依存しすぎないよう、キーを再帰的に
  * ソートしてから直列化する（同一内容なら常に同一文字列になることを保証する）。
  */
-function stableStringify(value: unknown): string {
+export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map((v) => stableStringify(v)).join(",")}]`;
   }

@@ -55,8 +55,13 @@ interface ResolvedRequestContext {
 
 type ResolveResult = { readonly kind: "ok"; readonly value: ResolvedRequestContext } | { readonly kind: "error"; readonly result: AiExplanationApiResult };
 
-/** viewModel取得〜ExplanationContext・キャッシュキー組み立てまでの共通処理（GET/POST共用）。 */
-async function resolveRequestContext(
+/**
+ * viewModel取得〜ExplanationContext・キャッシュキー組み立てまでの共通処理（GET/POST共用）。
+ * 【2026-08-08】「Standard AIに質問する」対話機能（chat/_lib/handlers.ts）からも同じ経路を
+ * 使うためexportする。状態読み込み経路をこの1本に保つことで、Explanationとチャットが
+ * 別々の状態を見てしまう（＝説明と回答が食い違う）ことを構造的に防ぐ。
+ */
+export async function resolveRequestContext(
   deps: AiExplanationApiDependencies,
   labId: string,
   companyId: string,
