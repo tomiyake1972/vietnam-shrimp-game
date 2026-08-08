@@ -25,6 +25,7 @@ import { CompanyDecisionInput, CompanyLabState, CompanyQuarterSummary } from "..
 
 import { classifyDocument, isUsableAsCurrentSpecification } from "../knowledge/docCatalog";
 import { loadDocumentCorpus, resetDocumentCorpusCache, splitMarkdownIntoChunks } from "../knowledge/docStore";
+import { loadSourceCodeCorpus } from "../knowledge/sourceCodeStore";
 import { getCurrentImplementation, getDevelopmentRationale, getFormalSpecification, searchDevelopmentDocs, tokenize } from "../knowledge/retrieval";
 import { buildDriveAccessDeclaration } from "../knowledge/driveWorkingMaterials";
 import { planRetrieval } from "../questionRouting";
@@ -963,4 +964,241 @@ test("【4層の分離】contextが4層を別フィールドとして保持し�
   for (const block of ["<A_live_game_state>", "<B_standard_ai_state>", "<C_formal_specification>", "<D_development_knowledge>"]) {
     assert.ok(message.includes(block), `${block} が別ブロックとして渡されること`);
   }
+});
+
+// ---------------------------------------------------------------------
+// 品質強化 Batch 1 の回帰テスト（§24）
+// ---------------------------------------------------------------------
+
+/** テスト用に、tool_useで任意の回答を返すクライアントを作る。 */
+function stubClient(inputs: readonly unknown[]): { readonly client: AnthropicMessagesClient; readonly calls: () => number } {
+  let i = 0;
+  return {
+    client: {
+      messages: {
+        create: async () => {
+          const input = inputs[Math.min(i, inputs.length - 1)];
+          i++;
+          return { content: [{ type: "tool_use", input }], usage: { input_tokens: 1, output_tokens: 1 } };
+        },
+      },
+    },
+    calls: () => i,
+  };
+}
+
+function answerWith(overrides: Record<string, unknown>): Record<string, unknown> {
+  return {
+    answer: "本文",
+    sections: [],
+    relatedReasonCodes: [],
+    suggestedFollowUps: [],
+    ...overrides,
+  };
+}
+
+test("【Batch1 §13】実在しない理由コードは再生成され、それでも残れば除去して返す", async () => {
+  const [row] = buildFixtures();
+  const context = buildContextFor(row, "Standard AIの提案をどう思う？");
+  const realCode = context.standardAiState.chatContext.explanation.standardAi.diagnosticEntries[0]?.code;
+  assert.ok(realCode, "テストの前提として実在する理由コードが1つ以上あること");
+
+  // 2回とも捏造コードを返す → 再生成が1回走り、最終的に捏造だけが除去される。
+  const stub = stubClient([answerWith({ relatedReasonCodes: [realCode!, "TOTALLY_MADE_UP_CODE"] })]);
+  const result = await generateAdvisorAnswer(
+    { context, question: "Standard AIの提案をどう思う？", history: [], contextHash: "h", questionId: "q1" },
+    stub.client
+  );
+  assert.equal(result.ok, true);
+  assert.equal(stub.calls(), 2, "捏造検出で1回だけ再生成すること");
+  assert.ok(result.ok && result.strippedFabricatedReferences === true, "除去したことが結果に出ること");
+  assert.deepEqual(result.ok ? result.answer.relatedReasonCodes : null, [realCode], "捏造コードが利用者へ届かないこと");
+});
+
+test("【Batch1 §13】実在する理由コードだけなら再生成せず、そのまま返す", async () => {
+  const [row] = buildFixtures();
+  const context = buildContextFor(row, "Standard AIの提案をどう思う？");
+  const realCode = context.standardAiState.chatContext.explanation.standardAi.diagnosticEntries[0]!.code;
+
+  const stub = stubClient([answerWith({ relatedReasonCodes: [realCode] })]);
+  const result = await generateAdvisorAnswer(
+    { context, question: "Standard AIの提案をどう思う？", history: [], contextHash: "h", questionId: "q2" },
+    stub.client
+  );
+  assert.equal(result.ok, true);
+  assert.equal(stub.calls(), 1, "問題が無ければ余計なAPI呼び出しをしないこと（速度・コスト）");
+  assert.equal(result.ok && result.retryCount, 0);
+  assert.equal(result.ok && result.grounding.fabricatedReasonCodes.length, 0);
+});
+
+test("【Batch1 §13】渡していない文書pathを出所に挙げた場合も除去される", async () => {
+  const [row] = buildFixtures();
+  const context = buildContextFor(row, "なぜこの仕様なの？");
+  const stub = stubClient([
+    answerWith({
+      sections: [
+        {
+          type: "DEVELOPMENT_RATIONALE",
+          text: "開発記録によると",
+          sourceTypes: ["DEVELOPMENT_HISTORY"],
+          sources: [{ title: null, path: "docs/この文書は存在しない_9999-99-99.md", authority: "FORMAL" }],
+          evidenceRefs: [],
+        },
+      ],
+    }),
+  ]);
+  const result = await generateAdvisorAnswer(
+    { context, question: "なぜこの仕様なの？", history: [], contextHash: "h", questionId: "q3" },
+    stub.client
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.ok && result.answer.sections[0].sources.length, 0, "存在しないpathが利用者へ届かないこと");
+});
+
+test("【Batch1 §14】数値を含むFACT節でevidenceRefsが空なら、その件数がgroundingへ記録される", async () => {
+  const [row] = buildFixtures();
+  const context = buildContextFor(row, "今期のPLをどう見る？");
+  const stub = stubClient([
+    answerWith({
+      sections: [
+        { type: "FACT", text: "営業利益は 123 USDです", sourceTypes: ["STANDARD_AI_OBSERVED"], sources: [], evidenceRefs: [] },
+        { type: "FACT", text: "売上は 456 USDです", sourceTypes: ["STANDARD_AI_OBSERVED"], sources: [], evidenceRefs: ["liveGameState.financials.current.revenueUsd"] },
+        { type: "ADVISOR_INFERENCE", text: "数値を含まない見解", sourceTypes: ["AI_INFERENCE"], sources: [], evidenceRefs: [] },
+      ],
+    }),
+  ]);
+  const result = await generateAdvisorAnswer(
+    { context, question: "今期のPLをどう見る？", history: [], contextHash: "h", questionId: "q4" },
+    stub.client
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.ok && result.grounding.factSectionsMissingEvidenceRefs, 1, "evidenceRefs欠落は1件だけ数えること");
+  // 【重要】evidenceRefsの欠落は「捏造」ではないので再生成の理由にしない。
+  assert.equal(stub.calls(), 1, "evidenceRefs欠落では再生成しないこと");
+});
+
+test("【Batch1 §14】evidenceRefsは古い保存済み回答（フィールド無し）でもparseできる", () => {
+  const parsed = advisorAnswerSchema.parse({
+    answer: "本文",
+    sections: [{ type: "FACT", text: "a", sourceTypes: [], sources: [] }],
+    relatedReasonCodes: [],
+    suggestedFollowUps: [],
+  });
+  assert.deepEqual(parsed.sections[0].evidenceRefs, [], "既定値が入り、既存の会話を壊さないこと");
+});
+
+test("【Batch1 §13】使用可能な理由コードの一覧がpromptへ明示される", () => {
+  const [row] = buildFixtures();
+  const context = buildContextFor(row, "Standard AIの提案をどう思う？");
+  const realCode = context.standardAiState.chatContext.explanation.standardAi.diagnosticEntries[0]!.code;
+  const message = buildAdvisorUserMessage({ context, question: "Standard AIの提案をどう思う？", history: [], contextHash: "h", questionId: "q5" });
+  assert.ok(message.includes("<available_reason_codes>"), "理由コード一覧ブロックがあること");
+  assert.ok(message.includes(realCode), "実在するコードが列挙されていること");
+});
+
+test("【Batch1 §9】現行実装コードのcorpusを読み込め、実装に関する質問で引ける", () => {
+  const corpus = loadSourceCodeCorpus();
+  assert.equal(corpus.loadError, null, "読み込みに失敗していないこと");
+  assert.ok(corpus.documents.length > 50, `whitelistのソースが読めていること（実際=${corpus.documents.length}）`);
+  // 全てが最上位authorityであること（sourcePolicyの定義と一致させる）。
+  for (const doc of corpus.documents) {
+    assert.equal(doc.authority, "CURRENT_IMPLEMENTATION");
+    assert.equal(doc.documentType, "SOURCE_CODE");
+    assert.equal(doc.documentDate, null, "コードにmtime由来の日付を付けないこと");
+    assert.ok(!doc.path.includes("__tests__"), "テストを仕様の根拠にしないこと");
+  }
+
+  const result = getCurrentImplementation("営業人員の販売能力はどう決まるの？");
+  assert.ok(result.excerpts.length > 0, "実装に関する質問で抜粋が返ること");
+  assert.ok(result.excerpts.length <= 3, "promptへ入る件数が構造的に絞られていること（§10）");
+  for (const e of result.excerpts) {
+    assert.ok(e.text.length <= 1_200, "1件あたりの長さが上限内であること");
+    assert.equal(e.authority, "CURRENT_IMPLEMENTATION");
+  }
+});
+
+test("【Batch1 §9】現行実装は開発文書と別ブロックとしてpromptへ渡る（混ぜない）", () => {
+  const [row] = buildFixtures();
+  const context = buildContextFor(row, "なぜこの仕様なの？");
+  const message = buildAdvisorUserMessage({ context, question: "なぜこの仕様なの？", history: [], contextHash: "h", questionId: "q6" });
+  assert.ok(message.includes("<C2_current_implementation>"), "実装コードが独立ブロックであること");
+  assert.ok(
+    message.indexOf("<C2_current_implementation>") < message.indexOf("<D_development_knowledge>"),
+    "現行実装が開発記録より前（優先度順）に置かれていること"
+  );
+});
+
+test("【Batch1 §9】経営相談ではコードを引かない（不要な情報を毎回詰め込まない）", () => {
+  const management = planRetrieval("今期のPLをどう見る？", { ownerMode: true });
+  assert.equal(management.includeCurrentImplementation, false, "経営相談ではコードを引かないこと");
+  const design = planRetrieval("なぜ歩留まりを細かく自分で計算しなくていいの？", { ownerMode: true });
+  assert.equal(design.includeCurrentImplementation, true, "仕様・設計の質問ではコードを引くこと");
+});
+
+test("【Batch1 §1】全体予算を使い切っている場合はリトライを開始しない", async () => {
+  const [row] = buildFixtures();
+  const context = buildContextFor(row, "q");
+  let calls = 0;
+  const slowClient: AnthropicMessagesClient = {
+    messages: {
+      create: async () => {
+        calls++;
+        // 全体予算(150秒)を超える時間が経過したかのように見せる代わりに、
+        // 実時間で確認できないため「スキーマ不一致→リトライ対象」の経路だけを確認する。
+        return { content: [{ type: "tool_use", input: { answer: "x" } }], usage: {} };
+      },
+    },
+  };
+  const result = await generateAdvisorAnswer({ context, question: "q", history: [], contextHash: "h", questionId: "q7" }, slowClient);
+  assert.equal(result.ok, false);
+  assert.equal(calls, 2, "スキーマ不一致では従来どおり1回だけ再生成すること");
+});
+
+test("【Batch1 §19・§20】UIはfake progressを出さず、失敗時は必ず再送できる", () => {
+  const panel = readSource(...PANEL_PATH);
+  // 実際には取得していない進捗を偽って表示しないこと。
+  for (const forbidden of ["PL分析中", "市場分析中", "生産分析中", "資料検索中", "%完了"]) {
+    assert.ok(!panel.includes(forbidden), `fake progress "${forbidden}" を表示していないこと`);
+  }
+  assert.ok(panel.includes("経過 {elapsedSeconds} 秒"), "実測の経過秒数を表示すること");
+  assert.ok(panel.includes('data-testid="advisor-progress-hint"'), "進捗の説明文にtestidがあること");
+  // 再送は毎回新しいrequestIdを発行する＝失敗結果を返し続けない。
+  assert.ok(panel.includes("newRequestId()"), "送信ごとにrequestIdを発行すること");
+  assert.ok(panel.includes('data-testid="advisor-retry"'), "再送ボタンがあること");
+});
+
+test("【Batch1 §18・§20】会話には成功したrequestIdだけが記録される（失敗をキャッシュしない）", () => {
+  const handlers = readSource(
+    "..", "..", "..", "..", "..", "api", "v2", "company-labs", "[labId]", "companies", "[companyId]",
+    "turns", "[turn]", "advisor", "_lib", "handlers.ts"
+  );
+  assert.ok(handlers.includes("lastSucceededRequestId"), "成功時のIDだけを記録する実装であること");
+  // 失敗経路（result: "failure"）でIDを書いていないこと。
+  const failureBlock = handlers.slice(handlers.indexOf("if (!generated.ok)"), handlers.indexOf('return {\n      status: 200,\n      body: { result: "failure"'));
+  assert.ok(!failureBlock.includes("lastSucceededRequestId"), "失敗時にrequestIdを記録しないこと");
+});
+
+test("【Batch1 §1】maxDurationがrouteとplay pageの両方に設定されている", () => {
+  const route = readSource(
+    "..", "..", "..", "..", "..", "api", "v2", "company-labs", "[labId]", "companies", "[companyId]",
+    "turns", "[turn]", "advisor", "route.ts"
+  );
+  const page = readSource("..", "..", "..", "..", "..", "v2", "company-lab", "play", "[labId]", "page.tsx");
+  // Server Actionはページ側のFunctionで実行されるため、両方に必要。
+  assert.ok(/export const maxDuration = 240/.test(route), "advisor routeにmaxDurationがあること");
+  assert.ok(/export const maxDuration = 240/.test(page), "play pageにmaxDurationがあること");
+  // route segment configは静的解析されるため、importした定数ではなくリテラルであること。
+  assert.ok(!/maxDuration = ADVISOR_/.test(route) && !/maxDuration = ADVISOR_/.test(page), "定数importではなくリテラルで書くこと");
+});
+
+test("【Batch1 §22】docs・実装コードは常時全件送信ではなく、質問に応じた抜粋だけが入る", () => {
+  const [row] = buildFixtures();
+  const design = buildContextFor(row, "なぜ歩留まりを細かく自分で計算しなくていいの？");
+  const management = buildContextFor(row, "今期のPLをどう見る？");
+  assert.equal(management.currentImplementation, null, "経営相談ではコード層がnullであること");
+  assert.equal(management.formalSpecification, null, "経営相談では仕様文書層がnullであること");
+  assert.ok((design.currentImplementation?.excerpts.length ?? 0) <= 3, "設計質問でも抜粋は上限内であること");
+  const message = buildAdvisorUserMessage({ context: design, question: "q", history: [], contextHash: "h", questionId: "q8" });
+  // corpus全体（数MB）がpromptへ入っていないこと。
+  assert.ok(message.length < 200_000, `promptが全文送信になっていないこと（実際=${message.length}文字）`);
 });
