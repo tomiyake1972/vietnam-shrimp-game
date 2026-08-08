@@ -3,6 +3,11 @@
 // プレイヤーからの要望「画面が縦長になっていくので、各情報は折りたためるように
 // 設定してください」に対する、画面全体で唯一の折りたたみ実装である。
 //
+// 【既定は「閉じている」】2026-08-08、プレイヤーの要望により defaultOpen の既定を
+// true→false へ変更した。画面を開いた直後は全セクションがたたまれた状態になる。
+// 意思決定編集以外のセクションは元から defaultOpen={false} を明示していたため、
+// この変更で挙動が変わるのは DecisionEditor の13セクションだけである。
+//
 // 【なぜ native <details> なのか】
 //   useStateで開閉を持つと、PlayerScreenClientが
 //     key={`${labId}:${currentTurn}:${revision}:${phase}:${draftUpdatedAt}`}
@@ -27,7 +32,16 @@ export interface CollapsibleSectionProps {
   readonly description?: string;
   /** 入力エリアか情報エリアか（色分けの根拠）。 */
   readonly tone: AreaTone;
-  /** 初期状態で開いているか（既定: 開いている）。 */
+  /**
+   * 初期状態で開いているか（既定: **閉じている**）。
+   *
+   * 【2026-08-08 既定をtrue→falseへ変更】turn5時点で意思決定編集のセクションが13個あり、
+   * 全部開いた状態で画面を開くと、どこに何があるか一覧できないほど縦に長くなっていた。
+   * プレイヤーの要望により「開いたときは全部たたまれている」を既定にする。
+   *
+   * 見出し行には summaryRight（営業人員 配分済み◯人／保管使用率◯% 等）が出るため、
+   * たたんだままでも各セクションの状態は読める。
+   */
   readonly defaultOpen?: boolean;
   /** 見出し行の右端に出す要約情報（折りたたんだままでも読めるようにするための一行）。 */
   readonly summaryRight?: ReactNode;
@@ -40,7 +54,7 @@ export default function CollapsibleSection(props: CollapsibleSectionProps) {
   const tone = AREA_TONES[props.tone];
   return (
     <details
-      open={props.defaultOpen ?? true}
+      open={props.defaultOpen ?? false}
       data-testid={props.testId}
       data-area-tone={props.tone}
       className={`group rounded-xl ${tone.section}`}
@@ -76,7 +90,7 @@ export function AreaToneLegend() {
           </span>
         );
       })}
-      <span className="text-gray-500">見出しの ▶ を押すと各セクションを折りたためます。</span>
+      <span className="text-gray-500">各セクションは折りたたまれています。見出しの ▶ を押すと開閉できます。</span>
     </div>
   );
 }
