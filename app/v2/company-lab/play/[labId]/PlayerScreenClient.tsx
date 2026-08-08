@@ -27,7 +27,7 @@ import DecisionEditor from "../../components/DecisionEditor";
 import OpeningCompanyStatePanel from "../../components/OpeningCompanyStatePanel";
 import AiMarketInfoPanel from "../../components/AiMarketInfoPanel";
 import CollapsibleSection from "../../components/CollapsibleSection";
-import { DepreciableAssetsPanel, OpeningBalanceSheetPanel, OpeningMarketInfoPanel } from "../../components/OpeningInfoPanels";
+import { DepreciableAssetsPanel, ObservedMarketDemandPanel, OpeningBalanceSheetPanel, OpeningMarketInfoPanel } from "../../components/OpeningInfoPanels";
 import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
 import FinancialResultsSection from "../../components/financial/FinancialResultsSection";
@@ -280,6 +280,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
             <OpeningBalanceSheetPanel bs={viewModel.openingInfo.balanceSheet} turn={viewModel.openingInfo.turn} />
             <DepreciableAssetsPanel assets={viewModel.openingInfo.depreciableAssets} />
             <OpeningMarketInfoPanel info={viewModel.openingInfo.marketInfo} referencePrice={viewModel.openingInfo.domesticReferencePrice} />
+            <ObservedMarketDemandPanel observed={viewModel.openingInfo.observedMarketDemand} />
           </>
         )}
 

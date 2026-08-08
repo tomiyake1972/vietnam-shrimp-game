@@ -39,6 +39,61 @@ function ratioAdjustmentToUsd(ratioAdjustment: number, referencePrice: number | 
  * （STANDARD_AI_PARAMETERS_V1.salesUtilizationTarget = 0.8のため、パラメータ未指定・
  * 未バイアス時は従来と完全に同じ挙動）。5社異質モデルの差し込み口。
  */
+/**
+ * 【Batch 002】市場×商品別の観測需要と採算性から、市場間の按分重みを求める。
+ *
+ * 【なぜ必要か】従来の按分は「前期参照価格が首位の市場へ50%、残り4市場へ均等」で、
+ * 市場規模を一切見ていなかった。単価が高く規模の小さい日本市場に営業力の半分が
+ * 機械的に集中する（JP19問題）のは、この規則の直接の帰結である。
+ *
+ * 【スコアの定義（§11）】
+ *   marketOpportunityScore = 観測上の獲得可能需要 × 期待貢献利益
+ *     獲得可能需要 = observedDemand × maximumSupplierShare
+ *     期待貢献利益 = 参照売価 − 想定加工費（1トンあたり、負なら機会なしとして0）
+ *
+ * maximumSupplierShare は sales/parameters.ts の共有パラメータをそのまま参照する
+ * （AI側に 0.35 をhard-codeしない）。
+ *
+ * 【hard capを置いていない】特定市場の人数上限・単一市場シェア上限のような
+ * 恣意的な上限は設けない。観測需要が大きい市場の重みが自然に大きくなるだけであり、
+ * 市場規模が変われば重みも連続的に変わる。
+ *
+ * 観測需要が公開されていない場合（旧スナップショット等）は undefined を返し、
+ * 呼び出し側は従来の重みへフォールバックする（挙動を壊さない）。
+ */
+function buildMarketOpportunityWeights(
+  observation: StandardAiObservation,
+  markets: readonly DemandMarketId[],
+  salesParams: SalesParameters
+): Record<Product, number[]> | undefined {
+  const hasObservedDemand = observation.markets.some((m) => m.observedDemandByProduct !== undefined);
+  if (!hasObservedDemand) return undefined;
+
+  const share = salesParams.maximumSupplierShare;
+  const result = { hoso: [] as number[], pd: [] as number[], vap: [] as number[] };
+
+  for (const product of ["hoso", "pd", "vap"] as const) {
+    const processingCost = observation.productEconomics.expectedProcessingCostUsdPerHosoEqKg[product];
+    const scores = markets.map((market) => {
+      const entry = observation.markets.find((m) => m.market === market);
+      const observedDemand = entry?.observedDemandByProduct?.[product] ?? 0;
+      if (observedDemand <= EPSILON) return 0;
+      const obtainable = observedDemand * share;
+      const referencePrice = entry?.referencePriceByProduct?.[product];
+      // 参照売価が未観測（turn1等）のときは採算差が付けられないため、
+      // 規模のみで按分する（価格を推測して捏造しない）。
+      const contributionPerKg = referencePrice === undefined ? 1 : referencePrice - processingCost;
+      if (contributionPerKg <= 0) return 0;
+      return obtainable * contributionPerKg;
+    });
+    const total = scores.reduce((sum, v) => sum + v, 0);
+    // 全市場のスコアが0（＝どこも採算が合わない／需要が観測できない）の場合は
+    // 均等配分にフォールバックする（販売をゼロにする判断はここではしない）。
+    result[product] = total > EPSILON ? scores.map((v) => v / total) : markets.map(() => 1 / markets.length);
+  }
+  return result;
+}
+
 function orderFactorsByProduct(fixture: CompanyFixture, observation: StandardAiObservation, params: StandardAiParameters): ProductAmount {
   // 【SAI-4変更】PD/VAPの受注量係数に、valueAddedOrderFactorBoost（既定0）を加算する。
   // HOSOには適用しない（HOSOはpremiumPolicy.tsの対象外＝常に1のため、そもそも
@@ -277,10 +332,32 @@ export function buildStandardAiSalesPlans(
 
   const markets = pressures.marketPriceRanking as readonly DemandMarketId[];
 
-  // --- 【SAI-2追加作業: 市場別営業配置・商品別営業工数】市場×商品の希望販売量を、
-  // 従来と同じ「上位市場50%・残りを均等割り」の重みでまず商品別に按分する
-  // （この按分ロジック自体は変更しない）。営業人員は行ごとではなく、この市場別
-  // 希望量から導かれる「営業工数換算需要」に応じて市場単位で配分する。
+  // --- 【Batch 002】市場×商品の希望販売量の按分重み ---
+  // 従来は「前期参照価格が首位の市場に50%、残り4市場へ均等（各12.5%）」という、
+  // 市場規模を一切見ない規則だった。単価が高く規模の小さい日本市場へ営業力の
+  // 半分が機械的に集中する（Test15のJP19問題）直接原因である。
+  //
+  // Batch 002で市場×商品別の観測需要（2四半期前の実績）が公開されたため、
+  // 市場規模と採算性の両方を反映した機会スコアで按分する。
+  // 観測需要が無い場合（旧スナップショット等）は従来の重みへフォールバックする。
+  const opportunityWeights = buildMarketOpportunityWeights(observation, markets, salesParams);
+  const legacyWeights = markets.map((_, idx) => (idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1)));
+  if (opportunityWeights) {
+    diagnostics.push({
+      code: "MARKET_ALLOCATION_BY_OBSERVED_OPPORTUNITY",
+      domain: "sales",
+      companyId: fixture.companyId,
+      severity: "info",
+      keyValues: {
+        observationLagQuarters: observation.marketDemandObservationLagQuarters ?? -1,
+        sourceQuarter: observation.marketDemandSourceQuarter ?? -1,
+        ...Object.fromEntries(markets.map((m, i) => [`weight_${m}`, opportunityWeights.hoso[i]])),
+      },
+      message:
+        "市場別の販売目標を、観測需要（原則2四半期前の実績）と採算性から求めた機会スコアで按分した（価格順位だけの按分は使わない）。",
+    });
+  }
+
   const desiredByMarketProduct = new Map<DemandMarketId, Record<Product, number>>();
   for (const market of markets) {
     desiredByMarketProduct.set(market, { hoso: 0, pd: 0, vap: 0 });
@@ -288,10 +365,10 @@ export function buildStandardAiSalesPlans(
   for (const product of ["hoso", "pd", "vap"] as const) {
     const totalDesired = plannedSalesQuantityByProduct[product];
     if (totalDesired <= EPSILON) continue;
+    const productBaseWeights = opportunityWeights ? opportunityWeights[product] : legacyWeights;
     if (!orientationActive) {
       markets.forEach((market, idx) => {
-        const weight = idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1);
-        const desiredQuantity = totalDesired * weight;
+        const desiredQuantity = totalDesired * productBaseWeights[idx];
         if (desiredQuantity <= EPSILON) return;
         desiredByMarketProduct.get(market)![product] = desiredQuantity;
       });
@@ -305,7 +382,7 @@ export function buildStandardAiSalesPlans(
     //     移動が支配的になる＝他市場へ自然に移れる。
     //   - 需要ゼロ・プレミアム下限割れで基礎重み0の行は0のまま（志向だけを理由に
     //     販売を強制しない）。
-    const baseWeights = markets.map((_, idx) => (idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1)));
+    const baseWeights = productBaseWeights;
     const adjustedWeights = markets.map((market, idx) => {
       const combined = clampCombinedMult((marketOrientation[market] ?? 1) * (productOrientation[product] ?? 1));
       return baseWeights[idx] * combined;

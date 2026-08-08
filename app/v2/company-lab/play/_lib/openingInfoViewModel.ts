@@ -24,6 +24,7 @@ import { DEMAND_MARKET_IDS, DemandMarketId } from "../../../../lib/v2/market/typ
 import { SALES_PARAMETERS_V1 } from "../../../../lib/v2/sales/parameters";
 import type { CapitalProject } from "../../../../lib/v2/capex/types";
 import type { DomesticReferencePrice } from "../../../../lib/v2/companyLab/domesticReferencePrice";
+import type { ObservedMarketDemand } from "../../../../lib/v2/companyLab/marketDemandObservation";
 
 // ---------------------------------------------------------------------
 // 1. 期初BS（A-1）
@@ -419,4 +420,10 @@ export interface OpeningInfoViewModel {
   readonly balanceSheet: OpeningBalanceSheet;
   readonly depreciableAssets: DepreciableAssetsBreakdown;
   readonly marketInfo: OpeningMarketInfo;
+  /**
+   * 【Batch 002】市場×商品別の観測需要（原則2四半期前の実績。turn1・turn2は
+   * ゲーム開始時点の既知市場情報）。Standard AIが見るのと完全に同じ値を、
+   * publicInfoからそのまま渡す（画面側で再計算しない）。
+   */
+  readonly observedMarketDemand: ObservedMarketDemand | undefined;
 }

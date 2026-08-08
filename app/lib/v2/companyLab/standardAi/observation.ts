@@ -98,10 +98,26 @@ function referencePricesByMarketProduct(
 
 function buildMarkets(publicInfo: PublicMarketInfo): readonly MarketObservationEntry[] {
   const byMarket = referencePricesByMarketProduct(publicInfo.lastMarketResult);
-  return DEMAND_MARKET_IDS.map((market) => ({
-    market,
-    referencePriceByProduct: byMarket ? byMarket[market] : undefined,
-  }));
+  // 【Batch 002】市場×商品別の観測需要（2四半期前の実績、またはゲーム開始時点の
+  // 既知市場情報）。publicInfo（＝プレイヤー画面が見るのと同一の公開情報）から
+  // そのまま転記するだけで、当期の実需要・将来の需要には一切アクセスしない。
+  const observed = publicInfo.observedMarketDemand;
+  return DEMAND_MARKET_IDS.map((market) => {
+    const entry = observed?.entries.find((e) => e.market === market);
+    return {
+      market,
+      referencePriceByProduct: byMarket ? byMarket[market] : undefined,
+      ...(entry
+        ? {
+            observedDemandByProduct: {
+              hoso: entry.observedDemandByProduct.hoso,
+              pd: entry.observedDemandByProduct.pd,
+              vap: entry.observedDemandByProduct.vap,
+            },
+          }
+        : {}),
+    };
+  });
 }
 
 function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnState, period: PeriodV2): readonly FactoryObservation[] {
@@ -266,6 +282,11 @@ export function buildStandardAiObservation(
     lastQuarterActualProductionByProduct: ownState.lastQuarterActualProductionByProduct,
 
     markets: buildMarkets(publicInfo),
+    // 【Batch 002】観測需要のlag・出所を判断側から確認できるようにする
+    // （「これは現在の確定需要ではない」ことを型の上で明示する）。
+    marketDemandObservationLagQuarters: publicInfo.observedMarketDemand?.observationLagQuarters,
+    marketDemandSourceQuarter: publicInfo.observedMarketDemand?.sourceQuarter ?? null,
+    marketDemandObservationSource: publicInfo.observedMarketDemand?.observationSource,
     marketPremiumByProduct: {
       pd: lastMarketResult ? unwrapUnit(lastMarketResult.pdPremium.byCountry.VN.premium) : undefined,
       vap: lastMarketResult ? unwrapUnit(lastMarketResult.vapPremium.byCountry.VN.premium) : undefined,
