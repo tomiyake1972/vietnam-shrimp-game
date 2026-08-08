@@ -73,6 +73,70 @@ export function isSalesForceHiringStateEmpty(state: SalesForceHiringState | unde
   return state === undefined || state.companies.length === 0;
 }
 
+// ---------------------------------------------------------------------
+// 営業組織の増員速度制約（ゲーム共通ルール・2026-08-08追加）
+// ---------------------------------------------------------------------
+//
+// 【これはゲームルールであり、Standard AI専用の制約ではない】
+// 人間プレイヤーの入力にも、Standard AIの提案にも、同一の式が適用される。
+// Standard AI側でこの式を再実装してはいけない（Single Source of Truth）。
+//
+// 【何を表現しているか】
+// 「採用市場に人がいない」という意味ではない。営業組織を一度に大きく増やすと、
+// 顧客の引継ぎ・育成・管理者のspan of control・商談情報の共有・商品知識・
+// 顧客との関係構築が追いつかず、増えた人数が有効な営業戦力として機能しない、
+// という組織の吸収能力（organizational absorption capacity）を表現する。
+//
+// 【MVPで入れないもの】
+// 「営業1人あたりの習熟度」パラメータは追加しない。まず人数の増加速度だけで
+// 表現する。将来必要になれば salesforce ramp-up / productivity を検討する。
+//
+// 【減員には適用しない】
+// 人数としては任意に減らせる（上限なし）。ただし退職金・当期/翌期の反映遅延・
+// 給与処理は既存ルールのまま維持される。「自由に減らせる」ことと「費用ゼロ」は別。
+
+/** 増員上限の絶対下限。人数が少ない会社でも最低これだけは増やせる。 */
+export const MIN_SALES_HIRES_PER_QUARTER = 3;
+
+/** 増員上限の相対比率（現在の稼働営業人員に対して）。 */
+export const SALES_HIRE_RAMP_RATIO = 0.3;
+
+/**
+ * 1四半期に追加できる営業人数の上限。
+ *
+ *   max(3, ceil(現在の稼働営業人員 × 0.30))
+ *
+ * 【ceilを採用した理由】三宅さんご指示の第一候補がceilであり、既存の人数処理
+ * （sanitizeNonNegativeCountのround、computeEffectiveSalesForceLayoffCountのmin）
+ * と矛盾しない。これらは「入力値の正規化」と「頭打ち」であって丸め方向の規約では
+ * ないため、ここでceilを使っても既存ルールと衝突しない。
+ * ceilにより、20人→+6（19人→+6）のように「あと少しで1人増える」場合に
+ * 切り上がる。上限を切り下げて成長を余計に縛らない方向である。
+ *
+ * 実測例:
+ *   5人 → +3 / 10人 → +3 / 20人 → +6 / 30人 → +9 / 40人 → +12 / 74人 → +23
+ */
+export function computeMaxSalesHiresPerQuarter(currentActiveHeadcount: number): number {
+  const safe = sanitizeNonNegativeCount(currentActiveHeadcount);
+  return Math.max(MIN_SALES_HIRES_PER_QUARTER, Math.ceil(safe * SALES_HIRE_RAMP_RATIO));
+}
+
+/**
+ * 実際に採用できる人数（希望採用数を組織の吸収能力で頭打ちにした値）。
+ * 経済合理性で決めた希望人数を、この関数に通してから意思決定へ反映する。
+ *
+ *   Economic Desired Hiring → Organizational Ramp Constraint → Actual Hiring
+ */
+export function applySalesHireRampLimit(
+  currentActiveHeadcount: number,
+  desiredHireCount: number
+): { readonly actualHireCount: number; readonly limit: number; readonly deferredCount: number } {
+  const limit = computeMaxSalesHiresPerQuarter(currentActiveHeadcount);
+  const desired = sanitizeNonNegativeCount(desiredHireCount);
+  const actualHireCount = Math.min(desired, limit);
+  return { actualHireCount, limit, deferredCount: Math.max(0, desired - actualHireCount) };
+}
+
 /** 会社1社ぶんの当期の営業人員増減意思決定（採用数・減員数、いずれも0以上）。 */
 export interface SalesForceHiringLayoffDecision {
   readonly hireCount: number;

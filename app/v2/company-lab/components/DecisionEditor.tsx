@@ -51,6 +51,7 @@ import { buildCompanyProcessingCapacityViewModel, CapacityPoolKey } from "../pro
 import { buildCompanyProcessingForecast } from "../processingForecastViewModel";
 import { buildCompanyInvestmentPlanningViewModel } from "../investmentPlanningViewModel";
 import { applyHeadcountChange, WORKFORCE_EXPLANATION_TEXT } from "../../../lib/v2/companyLab/workforce";
+import { computeMaxSalesHiresPerQuarter } from "../../../lib/v2/companyLab/salesForceHiring";
 import { CompanyFinancialQuarterResult } from "../../../lib/v2/finance/types";
 import CapacityEffectiveRatePanel from "./CapacityEffectiveRatePanel";
 import ProcessingForecastPanel from "./ProcessingForecastPanel";
@@ -188,6 +189,8 @@ export default function DecisionEditor(props: DecisionEditorProps) {
   // （現在の営業人員＋今回の採用予定−今回の減員予定、退職金見積り、同時入力
   // 禁止の判定を含む）。
   const salesForceHiring = summarizeSalesForceHiring(currentSalesForceHeadcount, draft.salesForceHireCount ?? 0, draft.salesForceLayoffCount ?? 0);
+  // 増員上限はゲーム共通ルール（Standard AI・四半期処理の検証と同一の関数）。
+  const salesForceHireLimit = computeMaxSalesHiresPerQuarter(salesForceHiring.currentHeadcount);
 
   const rawMaterialInventory = ownState.rawMaterialLots
     .filter((l) => l.status === "available")
@@ -821,6 +824,9 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                   <td className="pr-3 py-1 text-gray-400">当期に配分可能</td>
                   <td className="pr-3 py-1">{salesForceHiring.currentHeadcount}人</td>
                 </tr>
+                {/* 【営業組織の増員速度制約・ゲーム共通ルール】上限値はStandard AIと
+                    同じ salesForceHiring.ts の関数から取る（UI側で式を再実装しない）。
+                    単に「最大+N」ではなく、なぜ上限があるのかが分かる文言にする。 */}
                 <tr className="border-t border-gray-700/60">
                   <td className="pr-3 py-1 text-gray-400">営業人員採用数（今回の採用予定）</td>
                   <td className="pr-3 py-1">
@@ -829,6 +835,16 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                       disabled={disabled}
                       onChange={(n) => onChange({ ...draft, salesForceHireCount: Math.round(Math.max(0, n)) })}
                     />
+                    <div className="mt-0.5 text-[10px] text-gray-500" data-testid="sales-hire-ramp-limit">
+                      営業組織の受入能力上、今期の増員上限は {salesForceHireLimit}人です
+                      （現在{salesForceHiring.currentHeadcount}人の30%、最低3人）。
+                      一度に増やしすぎると顧客の引継ぎ・育成・商談情報の共有が追いつきません。
+                    </div>
+                    {(draft.salesForceHireCount ?? 0) > salesForceHireLimit && (
+                      <div className="mt-0.5 text-[10px] text-amber-300" data-testid="sales-hire-ramp-exceeded">
+                        上限を超えています。このままでは四半期処理でエラーになります。
+                      </div>
+                    )}
                   </td>
                 </tr>
                 <tr className="border-t border-gray-700/60">

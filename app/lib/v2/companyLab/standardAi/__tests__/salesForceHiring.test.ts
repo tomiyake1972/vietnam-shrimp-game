@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../../runner";
+import { computeMaxSalesHiresPerQuarter } from "../../salesForceHiring";
 import { CompanyLabConfig } from "../../types";
 import { buildStandardAiObservation } from "../observation";
 import { computePressureScores } from "../pressures";
@@ -208,12 +209,12 @@ test("8ターンの標準AI実行で、salesForceHireCount/salesForceLayoffCount
   }
 });
 
-test("2026-08-05修正: 1四半期あたりの採用ガバナーは静的な基準規模（fixture.salesForceHeadcountTotal）に対する相対値であり、複利成長しない（三宅さんレビュー指摘の回帰防止）", () => {
+test("2026-08-08: 1四半期あたりの採用は組織吸収能力の上限 max(3, ceil(現在人員×30%)) 以内であり、複利的な暴走をしない（三宅さんレビュー指摘の回帰防止）", () => {
   // 旧設計（ガバナーが「現在の（既に膨張した）人数」の50%）では、8ターン実行時に
   // BAL社の営業人員数が 18→18→27→41→62→93→140 と複利的に膨張した。
   // 修正後は、静的な基準規模（BAL=18人）に対するガバナー（max(5, round(18*0.5))=9人）が
-  // 毎四半期一定であるため、増員が続く限りの増分は常に9人以下・単調に非増加であるべきで、
-  // 「前四半期より増分が大きくなる」複利成長は発生しないはずである。
+  // 増分は常に「その時点の人数の30%」以内に収まり、1回の判断で組織が倍増するような
+  // 複利的な暴走（旧設計で 18→27→41→62→93→140人 が実際に発生した）は起きないはずである。
   const { state, fixtures } = initializeCompanyLab(baseConfig());
   const bal = fixtures.find((f) => f.companyId === "BAL")!;
   const staticBaseline = bal.salesForceHeadcountTotal;
@@ -232,17 +233,31 @@ test("2026-08-05修正: 1四半期あたりの採用ガバナーは静的な基�
     }
     current = advanceCompanyLabQuarter(current, fixtures, decisionsByCompanyId);
   }
-  const governorCap = Math.max(5, Math.round(staticBaseline * 0.5));
+  // 【2026-08-08】静的な会社規模ガバナーは、ゲーム共通の組織吸収能力ルール
+  //   max(3, ceil(現在の稼働営業人員 × 30%))
+  // へ置換された。基準が「会社設立時の静的規模」から「現在人数」へ変わったため、
+  // 上限は会社の成長に応じて増える。ただし増分は常に現在人数の30%以内であり、
+  // 「1回の判断で組織を倍にする」ような複利的な暴走は構造的に起きない。
+  void staticBaseline;
+  let headcountForLimit = bal.salesForceHeadcountTotal;
   for (const hire of hireByTurn) {
-    assert.ok(hire <= governorCap, `1四半期あたりの採用数(${hire})は静的な基準規模由来のガバナー上限(${governorCap})を超えてはならない`);
+    const limit = computeMaxSalesHiresPerQuarter(headcountForLimit);
+    assert.ok(
+      hire <= limit,
+      `1四半期あたりの採用数(${hire})は組織吸収能力の上限(${limit}: 現在${headcountForLimit}人の30%)を超えてはならない`
+    );
+    headcountForLimit += hire;
   }
-  const positiveHires = hireByTurn.filter((h) => h > 0);
-  if (positiveHires.length >= 2) {
-    for (let i = 1; i < positiveHires.length; i++) {
-      assert.ok(
-        positiveHires[i] <= positiveHires[i - 1] + 1,
-        `複利成長していないことの確認: ${i}番目の採用数(${positiveHires[i]})が直前(${positiveHires[i - 1]})より大幅に増えていない`
-      );
-    }
-  }
+  // 【旧アサーションを置き換えた理由】旧ルールは上限が毎期一定だったため
+  // 「採用数が前期より増えない」ことを不変条件にできた。新ルールでは上限が
+  // 現在人数に比例するため、会社が成長すれば採用数が増えるのは正常である
+  // （実測でも 6人→8人 と増えた）。したがって不変条件を「増分が増えないこと」から
+  // 「増分が常に現在人数の30%以内に収まること」へ移す。上のループで検証済みなので、
+  // ここでは8四半期を通じた総成長が理論上限を超えないことだけを確認する。
+  const theoreticalMax = bal.salesForceHeadcountTotal * Math.pow(1 + 0.3, hireByTurn.length);
+  const finalHeadcount = bal.salesForceHeadcountTotal + hireByTurn.reduce((a, b) => a + b, 0);
+  assert.ok(
+    finalHeadcount <= theoreticalMax,
+    `8四半期後の営業人員(${finalHeadcount})が理論上限(${Math.round(theoreticalMax)})を超えていない`
+  );
 });

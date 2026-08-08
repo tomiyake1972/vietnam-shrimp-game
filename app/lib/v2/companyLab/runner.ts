@@ -146,6 +146,7 @@ import { buildInitialWorkforceState, deriveNextWorkforceState } from "./workforc
 import {
   buildInitialSalesForceHiringState,
   computeEffectiveSalesForceLayoffCount,
+  computeMaxSalesHiresPerQuarter,
   deriveNextSalesForceHiringState,
 } from "./salesForceHiring";
 import {
@@ -868,6 +869,20 @@ export function advanceCompanyLabQuarter(
       throw new CompanyLabError(
         `会社 "${f.companyId}" の意思決定が不正です: 営業人員の採用（${d.salesForceHireCount}人）と減員（${d.salesForceLayoffCount}人）を同一四半期に同時入力することはできません。いずれか一方を0にしてください。`
       );
+    }
+    // 【営業組織の増員速度制約・ゲーム共通ルール（2026-08-08）】
+    // 人間プレイヤーの入力にも、Standard AIの提案にも、同一の上限を適用する。
+    // 減員には上限を掛けない（salesForceHiring.ts のコメント参照）。
+    {
+      const currentHeadcount = salesForceHeadcountByCompanyId.get(f.companyId) ?? f.salesForceHeadcountTotal;
+      const hireLimit = computeMaxSalesHiresPerQuarter(currentHeadcount);
+      if ((d.salesForceHireCount ?? 0) > hireLimit) {
+        throw new CompanyLabError(
+          `会社 "${f.companyId}" の意思決定が不正です: 営業人員の採用は1四半期あたり${hireLimit}人までです` +
+            `（現在の営業人員${currentHeadcount}人の30%、最低3人）。入力値は${d.salesForceHireCount}人でした。` +
+            `営業組織を一度に大きく増やすと、顧客の引継ぎ・育成・商談情報の共有が追いつかず、増えた人数が戦力として機能しないためです。`
+        );
+      }
     }
     try {
       validateSalesForceHeadcountBudget(d.salesPlans, salesForceHeadcountByCompanyId.get(f.companyId) ?? f.salesForceHeadcountTotal);

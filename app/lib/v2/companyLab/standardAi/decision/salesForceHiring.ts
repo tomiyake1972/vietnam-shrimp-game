@@ -36,6 +36,7 @@ import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
 import { ProductAmount, StandardAiObservation } from "../types";
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
+import { applySalesHireRampLimit } from "../../salesForceHiring";
 import { SalesWishEntry } from "./sales";
 import { StandardAiUnitEconomicsResult } from "../diagnosis/forwardUnitEconomics";
 import { TargetScaleBand } from "../targetScale";
@@ -74,10 +75,11 @@ export interface MarginalSalespersonEvaluation {
   /** 生産・原料・資金・経済性のいずれの制約にも達しない、「必要な将来営業能力」の一部として正当化されたかどうか。 */
   readonly accepted: boolean;
   /**
-   * acceptedはtrueだが、1四半期あたりの反映人数ガバナー（quarterlyGovernorCap）に
-   * より、今四半期の実際の採用数には含まれず、次四半期以降へ繰り越された候補。
+   * acceptedはtrueだが、営業組織の増員速度制約（ゲーム共通ルール
+   * computeMaxSalesHiresPerQuarter）により、今四半期の実際の採用数には含まれず、
+   * 次四半期以降へ繰り越された候補。
    */
-  readonly deferredByQuarterlyGovernor?: boolean;
+  readonly deferredByOrganizationalRamp?: boolean;
   /** acceptedがfalseの場合、その理由コード（受理された場合はundefined）。 */
   readonly blockedReasonCode?:
     | "SALES_HIRING_NOT_ECONOMIC"
@@ -89,7 +91,7 @@ export interface MarginalSalespersonEvaluation {
 }
 
 export interface SalesForceHiringDecisionResult {
-  /** 今四半期に実際へ反映する採用数（quarterlyGovernorCap適用後）。 */
+  /** 今四半期に実際へ反映する採用数（組織吸収能力の上限を適用した後）。 */
   readonly salesForceHireCount: number;
   readonly salesForceLayoffCount: number;
   /**
@@ -122,13 +124,22 @@ export interface SalesForceHiringDecisionResult {
  *      変わらない）に対する相対値とする。これにより採用が起きても次四半期の
  *      ガバナー自体は膨張せず、複利成長を構造的に排除する。
  */
-const MAX_HIRE_PER_QUARTER_ABSOLUTE_FLOOR = 5;
-const MAX_HIRE_PER_QUARTER_RELATIVE_RATIO = 0.5; // 静的な基準規模の50%まで、かつ絶対floor以上
+/**
+ * 【2026-08-08・ゲーム共通ルールへの置換】上記の静的な会社規模ベースのガバナー
+ * （max(5, 静的基準規模 × 50%)。BALなら 18 × 0.5 = 9人）は **廃止した**。
+ *
+ * 理由:
+ *   ・あれはStandard AI内部だけの自制であり、人間プレイヤーには適用されなかった。
+ *     同じゲームで主体によって増員速度が違うのは、ゲームルールとして一貫していない。
+ *   ・基準が「会社設立時の静的な規模」だったため、会社が実際に成長しても
+ *     1四半期の増員上限が永久に変わらなかった（74人になっても上限9人のまま）。
+ *
+ * 置換後は salesForceHiring.ts（ゲーム共通ロジック）の
+ * computeMaxSalesHiresPerQuarter = max(3, ceil(現在の稼働人員 × 30%)) を使う。
+ * Standard AI側でこの式を再実装しない（Single Source of Truth）。
+ * 二重制限を避けるため、旧ガバナーは残していない。
+ */
 
-/** ガバナーの基準人数。会社の静的な基準規模（ターンをまたいでも変わらない）を用いる。 */
-function quarterlyGovernorCap(staticBaselineHeadcount: number): number {
-  return Math.max(MAX_HIRE_PER_QUARTER_ABSOLUTE_FLOOR, Math.round(staticBaselineHeadcount * MAX_HIRE_PER_QUARTER_RELATIVE_RATIO));
-}
 
 /**
  * マージナル経済性ループ自体の反復回数上限。ビジネス上の意思決定ガバナーでは
@@ -489,18 +500,23 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
   // 「今四半期は反映しない（次四半期以降に繰り越し。次四半期はその時点の新しい
   // wish/observationで target を再計算するため、単純な繰り越しキューではない）」
   // として扱う。
-  const governorCap = quarterlyGovernorCap(fixture.salesForceHeadcountTotal);
-  const hireCountThisQuarter = Math.min(targetGap, governorCap);
-  const deferredCount = targetGap - hireCountThisQuarter;
+  // 【Economic Desired Hiring → Organizational Ramp Constraint → Actual Hiring】
+  // targetGapは経済合理性（marginal contribution・生産余力・原料・資金）だけで
+  // 決まった希望採用数。そこへゲーム共通の組織吸収能力の上限を掛ける。
+  // 基準は「会社設立時の静的規模」ではなく「現在の稼働営業人員」である。
+  const ramp = applySalesHireRampLimit(currentHeadcount, targetGap);
+  const organizationalHireLimit = ramp.limit;
+  const hireCountThisQuarter = ramp.actualHireCount;
+  const deferredCount = ramp.deferredCount;
 
   // 採用方向の評価一覧のうち、ガバナー上限を超えた分（acceptedだが今四半期は
-  // 反映しない候補）にdeferredByQuarterlyGovernorを付与する。
+  // 反映しない候補）にdeferredByOrganizationalRampを付与する。
   let acceptedSeen = 0;
   for (const evalEntry of evaluations) {
     if (evalEntry.direction !== "hire" || !evalEntry.accepted) continue;
     acceptedSeen += 1;
     if (acceptedSeen > hireCountThisQuarter) {
-      (evalEntry as { deferredByQuarterlyGovernor?: boolean }).deferredByQuarterlyGovernor = true;
+      (evalEntry as { deferredByOrganizationalRamp?: boolean }).deferredByOrganizationalRamp = true;
     }
   }
 
@@ -512,14 +528,21 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
       domain: "sales",
       companyId: fixture.companyId,
       severity: "info",
-      keyValues: { targetGap, targetSalesForceHeadcount, currentHeadcount, hireCountThisQuarter, deferredCount, governorCap },
+      keyValues: {
+        economicallyDesiredHireCount: targetGap,
+        organizationalHireLimit,
+        actualHireCount: hireCountThisQuarter,
+        deferredByOrganizationalRamp: deferredCount,
+        targetSalesForceHeadcount,
+        currentHeadcount,
+      },
       decisionSummary:
         deferredCount > 0
           ? `Target Sales Force ${targetSalesForceHeadcount}人（不足${targetGap}人）のうち、今四半期は${hireCountThisQuarter}人を採用（${deferredCount}人は次四半期以降へ繰り越し）`
           : `Target Sales Force ${targetSalesForceHeadcount}人へ向け、営業${hireCountThisQuarter}人の新規採用を提案`,
       message:
         deferredCount > 0
-          ? `収益性のある未充足の販売機会があり、必要な将来営業能力（Target Sales Force）は${targetSalesForceHeadcount}人（現在${currentHeadcount}人比+${targetGap}人）と評価されたが、1四半期あたりの採用ガバナー（静的な会社規模基準の${governorCap}人）により、今四半期は${hireCountThisQuarter}人のみ採用し、残り${deferredCount}人は次四半期以降の再評価に委ねる。`
+          ? `収益性のある未充足の販売機会があり、必要な将来営業能力（Target Sales Force）は${targetSalesForceHeadcount}人（現在${currentHeadcount}人比+${targetGap}人）と評価されたが、営業組織が1四半期に吸収できる人数の上限（現在${currentHeadcount}人の30%＝${organizationalHireLimit}人）により、今四半期は${hireCountThisQuarter}人までに抑え、残り${deferredCount}人は次四半期以降の再評価に委ねる。`
           : `収益性のある未充足の販売機会があり、必要な将来営業能力（Target Sales Force）${targetSalesForceHeadcount}人まではmarginal contributionが給与を上回り、生産・原料・資金のいずれのボトルネックにも達しないため、営業${hireCountThisQuarter}人の新規採用を提案する。`,
     });
   }
@@ -677,35 +700,25 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
         blockedReasonCode: undefined,
       });
     }
-    // 採用側と対称に、1四半期に実際へ反映する減員数も静的な基準規模に対する
-    // ガバナーでキャップする（大量解雇の一括実行を避けるため）。
-    const layoffGovernorCap = quarterlyGovernorCap(fixture.salesForceHeadcountTotal);
-    const layoffCountThisQuarter = Math.min(layoffCount, layoffGovernorCap);
-    const layoffDeferredCount = layoffCount - layoffCountThisQuarter;
-    if (layoffDeferredCount > 0) {
-      let acceptedLayoffSeen = 0;
-      for (const evalEntry of evaluations) {
-        if (evalEntry.direction !== "layoff" || !evalEntry.accepted) continue;
-        acceptedLayoffSeen += 1;
-        if (acceptedLayoffSeen > layoffCountThisQuarter) {
-          (evalEntry as { deferredByQuarterlyGovernor?: boolean }).deferredByQuarterlyGovernor = true;
-        }
-      }
-    }
-    layoffCount = layoffCountThisQuarter;
+    // 【2026-08-08】減員側のガバナーは廃止した。
+    // 組織の吸収能力の制約は「増やす方向」にのみ働く。人を減らすことは、
+    // 引継ぎ・育成・関係構築の追いつかなさとは別問題であり、人数としては
+    // 任意に減らせる（ゲーム共通ルール。salesForceHiring.ts のコメント参照）。
+    //
+    // ただし「自由に減らせる」ことと「費用ゼロ」は別である。退職金（1人あたり
+    // 四半期給与2四半期分）・当期は戦力と給与に残るという反映遅延は、
+    // いずれも既存ルールのまま変更していない。
     if (layoffCount > 0) {
       diagnostics.push({
         code: "SALES_FORCE_EXCESS_CAPACITY",
         domain: "sales",
         companyId: fixture.companyId,
         severity: "info",
-        keyValues: { layoffCount, currentHeadcount, severanceUsdPerPerson, layoffDeferredCount },
+        keyValues: { layoffCount, currentHeadcount, severanceUsdPerPerson },
         decisionSummary: `営業${layoffCount}人の減員を提案`,
         message: `持続的な営業容量過剰（追加販売機会が乏しく、在庫も販売のボトルネックになっていない）と診断し、退職金（1人あたり${Math.round(
           severanceUsdPerPerson
-        )}USD）を考慮しても節約効果が上回るため、営業${layoffCount}人の減員を提案する${
-          layoffDeferredCount > 0 ? `（さらに${layoffDeferredCount}人は次四半期以降の再評価に委ねる）` : ""
-        }。`,
+        )}USD）を考慮しても節約効果が上回るため、営業${layoffCount}人の減員を提案する。`,
       });
     }
   }
