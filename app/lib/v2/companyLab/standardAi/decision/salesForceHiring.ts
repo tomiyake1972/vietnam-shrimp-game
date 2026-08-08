@@ -307,6 +307,43 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
   // --- 採用方向（+1ずつ、自然停止条件まで評価し、Target Sales Forceを求める） ---
   let hireCount = 0;
   let salesAtCurrent = realisticSalesAtHeadcount(currentHeadcount + hireCount, wishByMarket, salesParams);
+
+  // 【営業能力の実測と未使用量（2026-08-08・指示6）】
+  // 能力式は realisticSalesAtHeadcount（既存のsales capability計算）をそのまま使う。
+  // 診断用に能力式を再実装しない（Single Source of Truth）。
+  //
+  //   totalSalesCapacity … 現在の営業人員が売り切れる量
+  //   usedSalesCapacity  … そのうち実際に販売計画（wish）で使っている量
+  //   unusedSalesCapacity… 使い切れていない営業能力
+  //
+  // 「営業人数だけ増えて成約が伸びない」状態を後から機械的に検出するための一次情報。
+  const currentSalesCapacityTons = salesAtCurrent.hoso + salesAtCurrent.pd + salesAtCurrent.vap;
+  const totalWishTons = [...wishByMarket.values()].reduce(
+    (sum, byProduct) => sum + PRODUCTS.reduce((s, p) => s + (byProduct[p] ?? 0), 0),
+    0
+  );
+  // 販売計画は営業能力を超えられないため、使用量は能力で頭打ちにする。
+  const usedSalesCapacityTons = Math.min(currentSalesCapacityTons, totalWishTons);
+  const unusedSalesCapacityTons = Math.max(0, currentSalesCapacityTons - usedSalesCapacityTons);
+  diagnostics.push({
+    code: "SALES_CAPACITY_UTILIZATION",
+    domain: "sales",
+    companyId: fixture.companyId,
+    severity: "info",
+    keyValues: {
+      currentHeadcount,
+      totalSalesCapacityTons: currentSalesCapacityTons,
+      usedSalesCapacityTons,
+      unusedSalesCapacityTons,
+      salesCapacityUtilization: currentSalesCapacityTons > EPSILON ? usedSalesCapacityTons / currentSalesCapacityTons : 0,
+      totalDesiredSalesTons: totalWishTons,
+    },
+    message:
+      `営業人員${currentHeadcount}人の販売能力は約${Math.round(currentSalesCapacityTons)}t/期。` +
+      `販売計画で使っているのは約${Math.round(usedSalesCapacityTons)}t（稼働率` +
+      `${currentSalesCapacityTons > EPSILON ? Math.round((usedSalesCapacityTons / currentSalesCapacityTons) * 100) : 0}%）、` +
+      `未使用は約${Math.round(unusedSalesCapacityTons)}t。`,
+  });
   let stoppedByTargetScaleCeiling = false;
   for (let i = 0; i < naturalStopCeiling; i++) {
     // Target Sales Volume（Target Scale帯・production-supported scaleの小さい方）に
@@ -530,11 +567,22 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
       severity: "info",
       keyValues: {
         economicallyDesiredHireCount: targetGap,
+        economicallyDesiredTotalHeadcount: targetSalesForceHeadcount,
         organizationalHireLimit,
         actualHireCount: hireCountThisQuarter,
         deferredByOrganizationalRamp: deferredCount,
         targetSalesForceHeadcount,
         currentHeadcount,
+        // 【なぜその人数なのか（2026-08-08追加）】
+        // 目標人数は「目標販売量を売り切るのに何人必要か」から逆算される。
+        // その2つの入力値を必ず一緒に残す（後から人数だけ見て理由を推測させない）。
+        currentSalesCapacityTons: currentSalesCapacityTons,
+        targetSalesVolumeTons,
+        unusedSalesCapacityTons: unusedSalesCapacityTons,
+        // 目標販売量がどちらの上限で決まったか（生産能力か戦略Target Scaleか）。
+        productionSupportedScaleTons,
+        targetScaleMaxTons: targetScaleBand.quarterlySalesTons.max,
+        cappedByProduction: cappedByProductionNotStrategicTarget ? 1 : 0,
       },
       decisionSummary:
         deferredCount > 0

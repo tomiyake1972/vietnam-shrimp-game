@@ -31,7 +31,9 @@ export type StandardAiReasonCode =
   | "LOW_ORDER_BOOK_PREMIUM_FLOOR" // 市場プレミアムが最低受注水準未満のため販売提案を停止
   | "MARKET_ALLOCATION_BY_OBSERVED_OPPORTUNITY"
   /** 市場別の機会スコアの内訳（観測需要・獲得可能需要・期待貢献・重み）。説明可能性のための一次情報。 */
-  | "MARKET_OPPORTUNITY_COMPONENTS" // 【Batch 002】観測需要（2Q遅行）と採算性から市場別按分重みを決定
+  | "MARKET_OPPORTUNITY_COMPONENTS"
+  /** 営業能力の総量・使用量・未使用量（採りすぎ／遊休の機械的検出用）。 */
+  | "SALES_CAPACITY_UTILIZATION" // 【Batch 002】観測需要（2Q遅行）と採算性から市場別按分重みを決定
   // --- 販売（SAI-2追加作業: 市場別営業配置・商品別営業工数） ---
   | "SALES_HEADCOUNT_INSUFFICIENT_TOTAL" // 実在する営業人員総数が全市場の必要工数に対し不足
   | "VAP_MIX_INCREASES_SALES_EFFORT_NEED" // VAP比率上昇により当該市場の必要営業工数が増加
@@ -113,6 +115,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "LOW_ORDER_BOOK_PREMIUM_FLOOR",
   "MARKET_ALLOCATION_BY_OBSERVED_OPPORTUNITY",
   "MARKET_OPPORTUNITY_COMPONENTS",
+  "SALES_CAPACITY_UTILIZATION",
   "SALES_HEADCOUNT_INSUFFICIENT_TOTAL",
   "VAP_MIX_INCREASES_SALES_EFFORT_NEED",
   "WORKER_CAPACITY_SHORTAGE",
