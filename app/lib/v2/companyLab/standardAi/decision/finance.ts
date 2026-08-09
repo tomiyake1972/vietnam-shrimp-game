@@ -14,29 +14,98 @@ import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
 import { StandardAiObservation } from "../types";
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
+import { assessWorkingCapitalNeed, ProcurementCashPlanInput, WorkingCapitalAssessment } from "./workingCapital";
 
 export interface FinancingPlanResult {
   readonly financingRequest: FinancingRequestInput;
   readonly diagnostics: readonly StandardAiDiagnosticEntry[];
+  /** 【Test16】短期運転資金の評価結果（診断・UI・監査で参照する）。調達計画未接続ならundefined。 */
+  readonly workingCapital?: WorkingCapitalAssessment;
 }
 
 export function buildStandardAiFinancingRequest(
   observation: StandardAiObservation,
   pressures: PressureScores,
-  params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1
+  params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
+  /**
+   * 【Test16】当期の原料調達計画。**これを渡すことで初めて「原料を買うのに
+   * 資金が要る」ことが借入判断へ入る。** 未指定なら従来どおり最低現金バッファ
+   * だけで判断する（既存呼び出し元・テストとの後方互換）。
+   */
+  procurementCashPlan?: ProcurementCashPlanInput
 ): FinancingPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const cashUsd = observation.cashUsd;
   const targetMinimumCashUsd = pressures.targetMinimumCashUsd;
   const voluntaryPrepaymentThresholdCashUsd = targetMinimumCashUsd * params.voluntaryPrepaymentMultiple;
 
-  const desiredAmountUsd = cashUsd < targetMinimumCashUsd ? targetMinimumCashUsd - cashUsd : 0;
+  // 【従来の判断】最低現金バッファの不足額。
+  const bufferShortfallUsd = cashUsd < targetMinimumCashUsd ? targetMinimumCashUsd - cashUsd : 0;
+
+  // 【Test16の追加判断】短期運転資金の不足額。
+  // 原料購入・人件費・買掛決済・元利返済という当面の資金使途に対し、
+  // 手元現金と売掛回収見込みで足りるかを評価する。
+  const workingCapital = procurementCashPlan
+    ? assessWorkingCapitalNeed(observation, procurementCashPlan, targetMinimumCashUsd)
+    : undefined;
+
+  // 借入希望額は両者の大きい方。バッファ不足のほうが大きい局面もあるため
+  // 「置き換え」ではなく「いずれか大きい方」とし、既存の安全側の判断を失わない。
+  const desiredAmountUsd = Math.max(bufferShortfallUsd, workingCapital?.economicallyDesiredBorrowingUsd ?? 0);
+
+  // 【重要】運転資金が不足しているときは期限前返済を行わない。
+  // 返済して現金を減らした直後に原料が買えなくなる、という自己矛盾を防ぐ。
+  const hasWorkingCapitalGap = (workingCapital?.projectedWorkingCapitalGapUsd ?? 0) > 0;
   const desiredPrepaymentUsd =
-    cashUsd > voluntaryPrepaymentThresholdCashUsd && observation.existingLoanBalanceUsd > 0
+    !hasWorkingCapitalGap && cashUsd > voluntaryPrepaymentThresholdCashUsd && observation.existingLoanBalanceUsd > 0
       ? Math.min(cashUsd - voluntaryPrepaymentThresholdCashUsd, observation.existingLoanBalanceUsd)
       : 0;
 
-  if (desiredAmountUsd > 0) {
+  if (workingCapital) {
+    const w = workingCapital;
+    diagnostics.push({
+      code: "WORKING_CAPITAL_ASSESSED",
+      domain: "finance",
+      companyId: observation.companyId,
+      severity: w.economicallyDesiredBorrowingUsd > 0 ? "warning" : "info",
+      keyValues: {
+        cashOnHand: w.cashOnHandUsd,
+        minimumCashBuffer: w.minimumCashBufferUsd,
+        expectedARCollection: w.expectedArCollectionUsd,
+        plannedRawProcurementCost: w.plannedRawProcurementCostUsd,
+        plannedDomesticRawProcurementCost: w.plannedDomesticRawProcurementCostUsd,
+        plannedImportRawProcurementCost: w.plannedImportRawProcurementCostUsd,
+        payroll: w.payrollUsd,
+        payablesDue: w.payablesDueUsd,
+        debtService: w.debtServiceUsd,
+        otherNearTermOperatingNeeds: w.payrollUsd + w.payablesDueUsd + w.debtServiceUsd,
+        nearTermOperatingCashNeeds: w.nearTermOperatingCashNeedsUsd,
+        cashUsableForDomesticProcurement: w.cashUsableForDomesticProcurementUsd,
+        domesticProcurementFundingGap: w.domesticProcurementFundingGapUsd,
+        overallCashGap: w.overallCashGapUsd,
+        projectedWorkingCapitalGap: w.projectedWorkingCapitalGapUsd,
+        economicallyDesiredBorrowing: w.economicallyDesiredBorrowingUsd,
+        cashBufferShortfall: bufferShortfallUsd,
+        // 実際に申請する額。承認額（＝actualBorrowing）は financing エンジンの
+        // 審査結果であり、この時点では確定しないため保存しない（捏造しない）。
+        requestedBorrowing: desiredAmountUsd,
+        unfundedWorkingCapitalGapIfNotApproved: Math.max(0, w.economicallyDesiredBorrowingUsd - desiredAmountUsd),
+      },
+      decisionSummary:
+        w.economicallyDesiredBorrowingUsd > 0
+          ? `短期運転資金が ${Math.round(w.economicallyDesiredBorrowingUsd).toLocaleString()} USD 不足するため借入を申請`
+          : "短期運転資金は手元現金と売掛回収見込みで充足",
+      message:
+        `当面の資金需要 ${Math.round(w.nearTermOperatingCashNeedsUsd).toLocaleString()} USD` +
+        `（うち原料調達 ${Math.round(w.plannedRawProcurementCostUsd).toLocaleString()}、人件費 ${Math.round(w.payrollUsd).toLocaleString()}、` +
+        `買掛決済 ${Math.round(w.payablesDueUsd).toLocaleString()}、元利返済 ${Math.round(w.debtServiceUsd).toLocaleString()}）に` +
+        `最低現金バッファ ${Math.round(w.minimumCashBufferUsd).toLocaleString()} を加えた額に対し、` +
+        `手元現金 ${Math.round(w.cashOnHandUsd).toLocaleString()} と売掛回収見込み ${Math.round(w.expectedArCollectionUsd).toLocaleString()} で` +
+        `${w.projectedWorkingCapitalGapUsd > 0 ? `${Math.round(w.projectedWorkingCapitalGapUsd).toLocaleString()} USD 不足する` : "充足する"}。`,
+    });
+  }
+
+  if (bufferShortfallUsd > 0) {
     diagnostics.push({
       code: "CASH_BUFFER_SHORTAGE",
       domain: "finance",
@@ -67,5 +136,6 @@ export function buildStandardAiFinancingRequest(
       emergencyAcceptable: true,
     },
     diagnostics,
+    workingCapital,
   };
 }

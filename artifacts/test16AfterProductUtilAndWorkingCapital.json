@@ -1,0 +1,4211 @@
+{
+  "label": "x",
+  "turns": 8,
+  "rows": [
+    {
+      "turn": 1,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2838.8300000000004
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2719.4500000000003
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1385.58
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1430.7500000000002
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3255.4799999999996
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "CN": 0.3789111747851003,
+        "US": 0.23472779369627503,
+        "EU": 0.19965616045845266,
+        "JP": 0.05776504297994268,
+        "OTHER": 0.12893982808022922
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 0t ÷ 実効能力 6,840t = 0.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 0,
+            "relevantUtilization": 0,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 0,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 46431000,
+            "cashUsd": 30000000,
+            "borrowingPressure": 0.7538067239559777,
+            "legacyOverallEquipmentUtilization": 0.7,
+            "shortfallRatio": 1.3184152046783624,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 0t ÷ 実効能力 5,985t = 0.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5985,
+            "relevantActualProduction": 0,
+            "relevantUtilization": 0,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 0,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 46431000,
+            "cashUsd": 30000000,
+            "borrowingPressure": 0.7538067239559777,
+            "legacyOverallEquipmentUtilization": 0.7,
+            "shortfallRatio": 1.082125313283208,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 11231.21,
+      "fulfilledVolume": 11572.42,
+      "outstandingVolume": 2758.79,
+      "finishedGoodsInventory": 158.5,
+      "rawMaterialShortfall": 5284,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 64886264.28495906,
+      "operatingIncome": 9200703.7882059,
+      "salesPayroll": 2521242,
+      "netIncome": 7360563.03056472,
+      "cash": 59093575.373301044
+    },
+    {
+      "turn": 1,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 13,
+          "desiredQuantity": 3476.1800000000003
+        },
+        {
+          "market": "EU",
+          "headcount": 14,
+          "desiredQuantity": 2835.24
+        },
+        {
+          "market": "JP",
+          "headcount": 7,
+          "desiredQuantity": 1351.41
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1788.76
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3443.09
+        }
+      ],
+      "japanShare": 0.11666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "CN": 0.3789111747851003,
+        "US": 0.23472779369627503,
+        "EU": 0.19965616045845266,
+        "JP": 0.05776504297994268,
+        "OTHER": 0.12893982808022922
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 0t ÷ 実効能力 10,260t = 0.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 10260,
+            "relevantActualProduction": 0,
+            "relevantUtilization": 0,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 0,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 0,
+            "financialGateRequiredCashUsd": 53896500,
+            "cashUsd": 30000000,
+            "borrowingPressure": 1,
+            "legacyOverallEquipmentUtilization": 0.7,
+            "shortfallRatio": 1.3472066276803119,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12702.69,
+      "fulfilledVolume": 12112.16,
+      "outstandingVolume": 4190.53,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 6507.34,
+      "equipmentShortfall": 0,
+      "laborShortfall": 2600.84,
+      "revenue": 59335304.524567515,
+      "operatingIncome": -2176901.9514324814,
+      "salesPayroll": 2631216,
+      "netIncome": -2176901.9514324814,
+      "cash": 33953418.524000004
+    },
+    {
+      "turn": 1,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2840.3399999999997
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2757.58
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1411.4700000000003
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1443.44
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3306.5
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "CN": 0.3789111747851003,
+        "US": 0.23472779369627503,
+        "EU": 0.19965616045845266,
+        "JP": 0.05776504297994268,
+        "OTHER": 0.12893982808022922
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 0t ÷ 実効能力 6,840t = 0.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 0,
+            "relevantUtilization": 0,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 0,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 47811750,
+            "cashUsd": 25000000,
+            "borrowingPressure": 0.4392225760404085,
+            "legacyOverallEquipmentUtilization": 0.7,
+            "shortfallRatio": 1.2347353801169592,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 11416.85,
+      "fulfilledVolume": 8904.17,
+      "outstandingVolume": 4412.68,
+      "finishedGoodsInventory": 437.64,
+      "rawMaterialShortfall": 8146.24,
+      "equipmentShortfall": 0,
+      "laborShortfall": 5047.34,
+      "revenue": 50954932.72439276,
+      "operatingIncome": 5915204.809682906,
+      "salesPayroll": 2240417,
+      "netIncome": 4732163.847746325,
+      "cash": 30566173.87990618
+    },
+    {
+      "turn": 1,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 10,
+          "desiredQuantity": 2560.4500000000003
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2562.9700000000003
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1301.2400000000002
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1361.31
+        },
+        {
+          "market": "US",
+          "headcount": 21,
+          "desiredQuantity": 3174.75
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "CN": 0.3789111747851003,
+        "US": 0.23472779369627503,
+        "EU": 0.19965616045845266,
+        "JP": 0.05776504297994268,
+        "OTHER": 0.12893982808022922
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 0t ÷ 実効能力 5,130t = 0.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 0,
+            "relevantUtilization": 0,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 0,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 47019000,
+            "cashUsd": 22000000,
+            "borrowingPressure": 0.6699419383653417,
+            "legacyOverallEquipmentUtilization": 0.7,
+            "shortfallRatio": 1.1759259259259258,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 10273.04,
+      "fulfilledVolume": 7491.34,
+      "outstandingVolume": 4431.7,
+      "finishedGoodsInventory": 241.2,
+      "rawMaterialShortfall": 9011.7,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 49529866.06558493,
+      "operatingIncome": 7417777.91699367,
+      "salesPayroll": 2099134,
+      "netIncome": 5934222.333594936,
+      "cash": 33605496.280867934
+    },
+    {
+      "turn": 1,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2911.6600000000003
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2860.17
+        },
+        {
+          "market": "JP",
+          "headcount": 7,
+          "desiredQuantity": 1308.13
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1699.65
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3429.5499999999997
+        }
+      ],
+      "japanShare": 0.11666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "CN": 0.3789111747851003,
+        "US": 0.23472779369627503,
+        "EU": 0.19965616045845266,
+        "JP": 0.05776504297994268,
+        "OTHER": 0.12893982808022922
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 0t ÷ 実効能力 6,840t = 0.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 0,
+            "relevantUtilization": 0,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 0,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 42698250,
+            "cashUsd": 35000000,
+            "borrowingPressure": 0.131152916103119,
+            "legacyOverallEquipmentUtilization": 0.7,
+            "shortfallRatio": 1.2257748538011695,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 0t ÷ 実効能力 5,985t = 0.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5985,
+            "relevantActualProduction": 0,
+            "relevantUtilization": 0,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 0,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 42698250,
+            "cashUsd": 35000000,
+            "borrowingPressure": 0.131152916103119,
+            "legacyOverallEquipmentUtilization": 0.7,
+            "shortfallRatio": 1.1059933166248956,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 0t ÷ 実効能力 3,420t = 0.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 3420,
+            "relevantActualProduction": 0,
+            "relevantUtilization": 0,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 0,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 42698250,
+            "cashUsd": 35000000,
+            "borrowingPressure": 0.131152916103119,
+            "legacyOverallEquipmentUtilization": 0.7,
+            "shortfallRatio": 1.0505818713450292,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12004.09,
+      "fulfilledVolume": 13084.36,
+      "outstandingVolume": 319.73,
+      "finishedGoodsInventory": 1651.1,
+      "rawMaterialShortfall": 1384.71,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1384.71,
+      "revenue": 69160270.3799044,
+      "operatingIncome": 11675517.043843515,
+      "salesPayroll": 2644436,
+      "netIncome": 9340413.635074813,
+      "cash": 18219829.31019044
+    },
+    {
+      "turn": 2,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 18,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2856.07
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2708.77
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1377.32
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1445.8
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3270.08
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": 21,
+      "organizationalHireLimit": 18,
+      "actualHireCount": 18,
+      "deferredByOrganizationalRamp": 3,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05882184525694222,
+        "EU": 0.20236461070459263,
+        "US": 0.2351930845884804,
+        "CN": 0.3765145269159946,
+        "OTHER": 0.12710593253399025
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 4,692t ÷ 実効能力 6,840t = 68.6%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 4692.37,
+            "relevantUtilization": 0.6860190058479532,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 1,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 52105898.41624999,
+            "cashUsd": 59093575.373301044,
+            "borrowingPressure": 0.7058317986612096,
+            "legacyOverallEquipmentUtilization": 0.4607,
+            "shortfallRatio": 1.261094956140351,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 1,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 11394.84,
+      "fulfilledVolume": 13951.93,
+      "outstandingVolume": 201.7,
+      "finishedGoodsInventory": 1888.34,
+      "rawMaterialShortfall": 739.03,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 69409596.11985976,
+      "operatingIncome": 12876894.24498035,
+      "salesPayroll": 2759193,
+      "netIncome": 9367915.39598428,
+      "cash": 46057278.12314642
+    },
+    {
+      "turn": 2,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 13,
+          "desiredQuantity": 3493.46
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2981.17
+        },
+        {
+          "market": "JP",
+          "headcount": 7,
+          "desiredQuantity": 1341.37
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1589.22
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3459.18
+        }
+      ],
+      "japanShare": 0.11666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.058807359941991016,
+        "EU": 0.20232846337531885,
+        "US": 0.2351837499752458,
+        "CN": 0.3765525595985238,
+        "OTHER": 0.12712786710892068
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 10,186t ÷ 実効能力 10,260t = 99.3%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 10260,
+            "relevantActualProduction": 10186.13,
+            "relevantUtilization": 0.9928001949317738,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 60138888.25787499,
+            "cashUsd": 33953418.524000004,
+            "borrowingPressure": 0.90498846215158,
+            "legacyOverallEquipmentUtilization": 0.4756,
+            "shortfallRatio": 1.0833173001949317,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 1,156t ÷ 実効能力 5,130t = 22.5%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 1156.24,
+            "relevantUtilization": 0.2253879142300195,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 60138888.25787499,
+            "cashUsd": 33953418.524000004,
+            "borrowingPressure": 0.90498846215158,
+            "legacyOverallEquipmentUtilization": 0.4756,
+            "shortfallRatio": 1.2142035087719298,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 770t ÷ 実効能力 3,420t = 22.5%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 3420,
+            "relevantActualProduction": 769.79,
+            "relevantUtilization": 0.22508479532163742,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 60138888.25787499,
+            "cashUsd": 33953418.524000004,
+            "borrowingPressure": 0.90498846215158,
+            "legacyOverallEquipmentUtilization": 0.4756,
+            "shortfallRatio": 1.1551130116959065,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12712.55,
+      "fulfilledVolume": 9802.06,
+      "outstandingVolume": 7101.02,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 8923.09,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 49661163.73281145,
+      "operatingIncome": 3193004.4510830045,
+      "salesPayroll": 2400206,
+      "netIncome": 1154903.5608664036,
+      "cash": 31840542.07662247
+    },
+    {
+      "turn": 2,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2857.16
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2746.9500000000003
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1402.95
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1458.22
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3321.08
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05885193736645475,
+        "EU": 0.20243970395556832,
+        "US": 0.23521247651780047,
+        "CN": 0.37643551699100636,
+        "OTHER": 0.12706036516917005
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 1,585t ÷ 実効能力 6,840t = 23.2%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 1585.27,
+            "relevantUtilization": 0.23176461988304092,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 53770393.337062486,
+            "cashUsd": 30566173.87990618,
+            "borrowingPressure": 0.40747330715354885,
+            "legacyOverallEquipmentUtilization": 0.3673,
+            "shortfallRatio": 1.1842053362573102,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 973t ÷ 実効能力 4,275t = 22.8%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 4275,
+            "relevantActualProduction": 973.31,
+            "relevantUtilization": 0.22767485380116959,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 53770393.337062486,
+            "cashUsd": 30566173.87990618,
+            "borrowingPressure": 0.40747330715354885,
+            "legacyOverallEquipmentUtilization": 0.3673,
+            "shortfallRatio": 1.0635902923976608,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 11541.01,
+      "fulfilledVolume": 11500.27,
+      "outstandingVolume": 4453.42,
+      "finishedGoodsInventory": 267.14,
+      "rawMaterialShortfall": 6044.37,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 59899358.35561472,
+      "operatingIncome": 10459229.504766576,
+      "salesPayroll": 2500027,
+      "netIncome": 7810883.603813261,
+      "cash": 25229095.509737514
+    },
+    {
+      "turn": 2,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 18,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 10,
+          "desiredQuantity": 2577.3700000000003
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2553.2
+        },
+        {
+          "market": "JP",
+          "headcount": 9,
+          "desiredQuantity": 1426.94
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1376.17
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3075.13
+        }
+      ],
+      "japanShare": 0.15,
+      "economicallyDesiredHireCount": 31,
+      "organizationalHireLimit": 18,
+      "actualHireCount": 18,
+      "deferredByOrganizationalRamp": 13,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.058858143138253424,
+        "EU": 0.2024551901274162,
+        "US": 0.23521647563551096,
+        "CN": 0.3764192230996093,
+        "OTHER": 0.12705096799921017
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 0t ÷ 実効能力 6,840t = 0.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 0,
+            "relevantUtilization": 0,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 52693898.41624999,
+            "cashUsd": 33605496.280867934,
+            "borrowingPressure": 0.5778657665345498,
+            "legacyOverallEquipmentUtilization": 0.3033,
+            "shortfallRatio": 1.3007324561403506,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 10630.61,
+      "fulfilledVolume": 9370.62,
+      "outstandingVolume": 5691.69,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 6651.19,
+      "equipmentShortfall": 0,
+      "laborShortfall": 3311.52,
+      "revenue": 44774439.01123294,
+      "operatingIncome": 2529539.5180127323,
+      "salesPayroll": 2287062,
+      "netIncome": 1240631.6144101857,
+      "cash": 29312654.656772174
+    },
+    {
+      "turn": 2,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2927.39
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2849.25
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1452.6799999999998
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1509.44
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3444.52
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05882774193703898,
+        "EU": 0.20237932555461818,
+        "US": 0.23519688452160276,
+        "CN": 0.3764990445766148,
+        "OTHER": 0.12709700341012523
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 11965.08,
+      "fulfilledVolume": 12284.81,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 1292.57,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 3615.25,
+      "revenue": 60949897.69794572,
+      "operatingIncome": 9378706.785697594,
+      "salesPayroll": 2564481,
+      "netIncome": 7232768.553558076,
+      "cash": 33666359.700204715
+    },
+    {
+      "turn": 3,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 2,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 29,
+          "desiredQuantity": 4647.95
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2793.0499999999997
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 1250.49
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1788.71
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3379.08
+        }
+      ],
+      "japanShare": 0.07692307692307693,
+      "economicallyDesiredHireCount": 2,
+      "organizationalHireLimit": 24,
+      "actualHireCount": 2,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.07625135307367326,
+        "EU": 0.1899651233982744,
+        "US": 0.23777819791787316,
+        "CN": 0.38298949991801867,
+        "OTHER": 0.11301582569216052
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 6,782t ÷ 実効能力 6,840t = 99.1%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 6781.86,
+            "relevantUtilization": 0.9914999999999999,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 46644929.72721288,
+            "cashUsd": 46057278.12314642,
+            "borrowingPressure": 0.765956776201468,
+            "legacyOverallEquipmentUtilization": 0.6165,
+            "shortfallRatio": 1.1862896198830408,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 13859.28,
+      "fulfilledVolume": 14060.98,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 4086.28,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 72692891.61842902,
+      "operatingIncome": 10462877.96697887,
+      "salesPayroll": 2914098,
+      "netIncome": 7463702.373583096,
+      "cash": 37616834.83478075
+    },
+    {
+      "turn": 3,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 22,
+          "desiredQuantity": 4227.2699999999995
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2587.0800000000004
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1248.8799999999999
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1692.24
+        },
+        {
+          "market": "US",
+          "headcount": 14,
+          "desiredQuantity": 2951.1900000000005
+        }
+      ],
+      "japanShare": 0.08333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.07623064693934418,
+        "EU": 0.18992793350548237,
+        "US": 0.237768669987456,
+        "CN": 0.383034559885788,
+        "OTHER": 0.11303818968192947
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 5,353t ÷ 実効能力 10,260t = 52.2%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 10260,
+            "relevantActualProduction": 5352.95,
+            "relevantUtilization": 0.5217300194931773,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 54131822.69993418,
+            "cashUsd": 31840542.07662247,
+            "borrowingPressure": 0.9763203484382997,
+            "legacyOverallEquipmentUtilization": 0.3855,
+            "shortfallRatio": 1.0716483918128654,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 2,669t ÷ 実効能力 5,130t = 52.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 2669.47,
+            "relevantUtilization": 0.5203645224171539,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 54131822.69993418,
+            "cashUsd": 31840542.07662247,
+            "borrowingPressure": 0.9763203484382997,
+            "legacyOverallEquipmentUtilization": 0.3855,
+            "shortfallRatio": 1.4725369395711498,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 1,780t ÷ 実効能力 3,420t = 52.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 3420,
+            "relevantActualProduction": 1779.64,
+            "relevantUtilization": 0.5203625730994152,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 54131822.69993418,
+            "cashUsd": 31840542.07662247,
+            "borrowingPressure": 0.9763203484382997,
+            "legacyOverallEquipmentUtilization": 0.3855,
+            "shortfallRatio": 1.3711035087719299,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12706.66,
+      "fulfilledVolume": 12807.63,
+      "outstandingVolume": 7000.05,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 5893.87,
+      "equipmentShortfall": 0,
+      "laborShortfall": 4822.26,
+      "revenue": 61716720.96096732,
+      "operatingIncome": 16028.123476080596,
+      "salesPayroll": 2700763,
+      "netIncome": -1682721.8765239194,
+      "cash": 20113473.33642702
+    },
+    {
+      "turn": 3,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 22,
+          "desiredQuantity": 3860.5600000000004
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2364.7599999999998
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1141.77
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1545.37
+        },
+        {
+          "market": "US",
+          "headcount": 14,
+          "desiredQuantity": 2696.33
+        }
+      ],
+      "japanShare": 0.08333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.07629454749663767,
+        "EU": 0.19004270407720417,
+        "US": 0.23779807383724444,
+        "CN": 0.3828955017203996,
+        "OTHER": 0.11296917286851421
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 6,765t ÷ 実効能力 6,840t = 98.9%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 6764.76,
+            "relevantUtilization": 0.989,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 48036376.21357354,
+            "cashUsd": 25229095.509737514,
+            "borrowingPressure": 0.5414140367092782,
+            "legacyOverallEquipmentUtilization": 0.4466,
+            "shortfallRatio": 1.1061266081871344,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 337t ÷ 実効能力 6,840t = 4.9%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 337.03,
+            "relevantUtilization": 0.04927339181286549,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 48036376.21357354,
+            "cashUsd": 25229095.509737514,
+            "borrowingPressure": 0.5414140367092782,
+            "legacyOverallEquipmentUtilization": 0.4466,
+            "shortfallRatio": 1.2005614766081871,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 11608.79,
+      "fulfilledVolume": 13438.63,
+      "outstandingVolume": 2623.58,
+      "finishedGoodsInventory": 1583.62,
+      "rawMaterialShortfall": 2149.91,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 66544888.63425658,
+      "operatingIncome": 6172528.193121947,
+      "salesPayroll": 2693863,
+      "netIncome": 4317278.525560248,
+      "cash": 27693565.727684304
+    },
+    {
+      "turn": 3,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 29,
+          "desiredQuantity": 4396.44
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2641.48
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 1242.13
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1780.52
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3195.76
+        }
+      ],
+      "japanShare": 0.07692307692307693,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.07630348551336345,
+        "EU": 0.1900587574785065,
+        "US": 0.23780218666680872,
+        "CN": 0.3828760511199551,
+        "OTHER": 0.11295951922136628
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 6,789t ÷ 実効能力 6,840t = 99.3%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 6789.38,
+            "relevantUtilization": 0.9925994152046784,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 47232929.72721288,
+            "cashUsd": 29312654.656772174,
+            "borrowingPressure": 0.6224470971797758,
+            "legacyOverallEquipmentUtilization": 0.3586,
+            "shortfallRatio": 1.4300340643274856,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 1,165t ÷ 実効能力 5,130t = 22.7%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 1165.06,
+            "relevantUtilization": 0.2271072124756335,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 47232929.72721288,
+            "cashUsd": 29312654.656772174,
+            "borrowingPressure": 0.6224470971797758,
+            "legacyOverallEquipmentUtilization": 0.3586,
+            "shortfallRatio": 1.2378637426900583,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 1,175t ÷ 実効能力 5,130t = 22.9%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 1174.98,
+            "relevantUtilization": 0.22904093567251463,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 47232929.72721288,
+            "cashUsd": 29312654.656772174,
+            "borrowingPressure": 0.6224470971797758,
+            "legacyOverallEquipmentUtilization": 0.3586,
+            "shortfallRatio": 1.1718602339181288,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 13246.61,
+      "fulfilledVolume": 12500.93,
+      "outstandingVolume": 6437.37,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 4292.2,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 64064291.73877052,
+      "operatingIncome": 4952313.347732529,
+      "salesPayroll": 2744093,
+      "netIncome": 3205850.678186023,
+      "cash": 15867240.700781828
+    },
+    {
+      "turn": 3,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 10,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 22,
+          "desiredQuantity": 4008.5
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2456.5499999999997
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1185.49
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1604.7
+        },
+        {
+          "market": "US",
+          "headcount": 14,
+          "desiredQuantity": 2800.5600000000004
+        }
+      ],
+      "japanShare": 0.08333333333333333,
+      "economicallyDesiredHireCount": 10,
+      "organizationalHireLimit": 18,
+      "actualHireCount": 10,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.07625979812980402,
+        "EU": 0.1899802914024578,
+        "US": 0.23778208391155525,
+        "CN": 0.38297112208123785,
+        "OTHER": 0.11300670447494512
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12055.8,
+      "fulfilledVolume": 12055.8,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 2846.12,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1203.66,
+      "revenue": 61507910.844339184,
+      "operatingIncome": 7296283.635869451,
+      "salesPayroll": 2541580,
+      "netIncome": 5331948.7393605355,
+      "cash": 31194990.189282075
+    },
+    {
+      "turn": 4,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 80,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 28,
+          "desiredQuantity": 4537.91
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2938.2400000000002
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 1140.24
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1876.6200000000001
+        },
+        {
+          "market": "US",
+          "headcount": 21,
+          "desiredQuantity": 3643.15
+        }
+      ],
+      "japanShare": 0.075,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.0695428317102663,
+        "EU": 0.19489377908705866,
+        "US": 0.26016367395139445,
+        "CN": 0.3567808685820321,
+        "OTHER": 0.11861884666924848
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 14134.68,
+      "fulfilledVolume": 14134.68,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 5432.82,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 70852462.48028915,
+      "operatingIncome": 9466727.00076127,
+      "salesPayroll": 2937468,
+      "netIncome": 6692260.624782208,
+      "cash": 39406396.25715204
+    },
+    {
+      "turn": 4,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 21,
+          "desiredQuantity": 4085.71
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2587.4
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 1038.95
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1692.75
+        },
+        {
+          "market": "US",
+          "headcount": 16,
+          "desiredQuantity": 3278.66
+        }
+      ],
+      "japanShare": 0.06666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06952352455451355,
+        "EU": 0.19485488206892132,
+        "US": 0.26015347412397166,
+        "CN": 0.35682484721338575,
+        "OTHER": 0.11864327203920766
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 6,986t ÷ 実効能力 10,260t = 68.1%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 10260,
+            "relevantActualProduction": 6985.98,
+            "relevantUtilization": 0.6808947368421052,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 53268974.6505841,
+            "cashUsd": 20113473.33642702,
+            "borrowingPressure": 0.9625678049246581,
+            "legacyOverallEquipmentUtilization": 0.5036,
+            "shortfallRatio": 1.1204125730994152,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 3,493t ÷ 実効能力 5,130t = 68.1%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 3492.99,
+            "relevantUtilization": 0.6808947368421052,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 53268974.6505841,
+            "cashUsd": 20113473.33642702,
+            "borrowingPressure": 0.9625678049246581,
+            "legacyOverallEquipmentUtilization": 0.5036,
+            "shortfallRatio": 1.5220811890838206,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 2,329t ÷ 実効能力 3,420t = 68.1%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 3420,
+            "relevantActualProduction": 2328.66,
+            "relevantUtilization": 0.6808947368421052,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 53268974.6505841,
+            "cashUsd": 20113473.33642702,
+            "borrowingPressure": 0.9625678049246581,
+            "legacyOverallEquipmentUtilization": 0.5036,
+            "shortfallRatio": 1.4217780701754386,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12683.46,
+      "fulfilledVolume": 10438.48,
+      "outstandingVolume": 9245.03,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 8290.52,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1507.37,
+      "revenue": 51328009.38582272,
+      "operatingIncome": -1072746.410250403,
+      "salesPayroll": 2463848,
+      "netIncome": -2720871.410250403,
+      "cash": 28578799.19482791
+    },
+    {
+      "turn": 4,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 18,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 21,
+          "desiredQuantity": 3731.1699999999996
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2365.1099999999997
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 949.88
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1545.79
+        },
+        {
+          "market": "US",
+          "headcount": 16,
+          "desiredQuantity": 2995.52
+        }
+      ],
+      "japanShare": 0.06666666666666667,
+      "economicallyDesiredHireCount": 28,
+      "organizationalHireLimit": 18,
+      "actualHireCount": 18,
+      "deferredByOrganizationalRamp": 10,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06958315379497033,
+        "EU": 0.1949750136759413,
+        "US": 0.2601849758101755,
+        "CN": 0.3566890212834803,
+        "OTHER": 0.11856783543543264
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 6,156t ÷ 実効能力 6,840t = 90.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 6156,
+            "relevantUtilization": 0.9,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 47212748.53010301,
+            "cashUsd": 27693565.727684304,
+            "borrowingPressure": 0.6646535583648471,
+            "legacyOverallEquipmentUtilization": 0.6048,
+            "shortfallRatio": 1.243548245614035,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 11587.47,
+      "fulfilledVolume": 14211.05,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 1511.37,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1869.92,
+      "revenue": 72516702.6118429,
+      "operatingIncome": 9510891.869929425,
+      "salesPayroll": 2771105,
+      "netIncome": 6901868.559188381,
+      "cash": 33652504.3152601
+    },
+    {
+      "turn": 4,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 27,
+          "desiredQuantity": 4184.83
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2778.84
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 1142.79
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1780.9899999999998
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3322.36
+        }
+      ],
+      "japanShare": 0.07692307692307693,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06959150523273809,
+        "EU": 0.194991838838098,
+        "US": 0.2601893878129093,
+        "CN": 0.3566699980359566,
+        "OTHER": 0.11855727008029794
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 5,089t ÷ 実効能力 6,840t = 74.4%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 5089.31,
+            "relevantUtilization": 0.7440511695906433,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 46448522.409621924,
+            "cashUsd": 15867240.700781828,
+            "borrowingPressure": 0.6103531076830816,
+            "legacyOverallEquipmentUtilization": 0.4913,
+            "shortfallRatio": 1.3708141081871346,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 3,807t ÷ 実効能力 5,130t = 74.2%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 3807.37,
+            "relevantUtilization": 0.74217738791423,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 46448522.409621924,
+            "cashUsd": 15867240.700781828,
+            "borrowingPressure": 0.6103531076830816,
+            "legacyOverallEquipmentUtilization": 0.4913,
+            "shortfallRatio": 1.4482084795321637,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 3,604t ÷ 実効能力 5,130t = 70.3%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 3604.25,
+            "relevantUtilization": 0.7025828460038986,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 46448522.409621924,
+            "cashUsd": 15867240.700781828,
+            "borrowingPressure": 0.6103531076830816,
+            "legacyOverallEquipmentUtilization": 0.4913,
+            "shortfallRatio": 1.4067889863547758,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 13149.74,
+      "fulfilledVolume": 12115.05,
+      "outstandingVolume": 7472.06,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 4699.47,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 62427687.15729152,
+      "operatingIncome": 7210623.444641583,
+      "salesPayroll": 2705505,
+      "netIncome": 5039498.755713266,
+      "cash": 30070820.616832078
+    },
+    {
+      "turn": 4,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 70,
+      "hiresThisTurn": 2,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 25,
+          "desiredQuantity": 4398.93
+        },
+        {
+          "market": "EU",
+          "headcount": 14,
+          "desiredQuantity": 2779.7400000000002
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1081.01
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1784.46
+        },
+        {
+          "market": "US",
+          "headcount": 18,
+          "desiredQuantity": 3407.4
+        }
+      ],
+      "japanShare": 0.07142857142857142,
+      "economicallyDesiredHireCount": 2,
+      "organizationalHireLimit": 21,
+      "actualHireCount": 2,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06955071029171803,
+        "EU": 0.19490965161274545,
+        "US": 0.2601678361476379,
+        "CN": 0.3567629224260218,
+        "OTHER": 0.118608879521877
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 13451.54,
+      "fulfilledVolume": 13451.54,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 3301.13,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1340.43,
+      "revenue": 66330067.06638841,
+      "operatingIncome": 7732491.7926622555,
+      "salesPayroll": 2761154,
+      "netIncome": 5688115.26479478,
+      "cash": 30931011.191387635
+    },
+    {
+      "turn": 5,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 80,
+      "hiresThisTurn": 4,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 25,
+          "desiredQuantity": 4191.43
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2938.78
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 1098.8799999999999
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1997.7400000000002
+        },
+        {
+          "market": "US",
+          "headcount": 23,
+          "desiredQuantity": 3896.23
+        }
+      ],
+      "japanShare": 0.075,
+      "economicallyDesiredHireCount": 4,
+      "organizationalHireLimit": 24,
+      "actualHireCount": 4,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.067035178163894,
+        "EU": 0.19753854653079808,
+        "US": 0.2828256937765961,
+        "CN": 0.3262550635195955,
+        "OTHER": 0.12634551800911625
+      },
+      "primaryConstraint": "none",
+      "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 14123.06,
+      "fulfilledVolume": 14123.06,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 5308.38,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 70667991.61232182,
+      "operatingIncome": 9068834.181538813,
+      "salesPayroll": 2936306,
+      "netIncome": 6400946.369404242,
+      "cash": 22061591.24028813
+    },
+    {
+      "turn": 5,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 19,
+          "desiredQuantity": 3791.99
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2587.7599999999998
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 1039.0300000000002
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1892.35
+        },
+        {
+          "market": "US",
+          "headcount": 17,
+          "desiredQuantity": 3437.34
+        }
+      ],
+      "japanShare": 0.06666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06701594114008337,
+        "EU": 0.197497961553667,
+        "US": 0.28281496306057485,
+        "CN": 0.32629805718407534,
+        "OTHER": 0.1263730770615993
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 5,694t ÷ 実効能力 10,260t = 55.5%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 10260,
+            "relevantActualProduction": 5693.72,
+            "relevantUtilization": 0.5549434697855751,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51194253.30563425,
+            "cashUsd": 28578799.19482791,
+            "borrowingPressure": 0.9708120890695792,
+            "legacyOverallEquipmentUtilization": 0.4101,
+            "shortfallRatio": 1.1989173489278753,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 2,847t ÷ 実効能力 5,130t = 55.5%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 2846.86,
+            "relevantUtilization": 0.5549434697855751,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51194253.30563425,
+            "cashUsd": 28578799.19482791,
+            "borrowingPressure": 0.9708120890695792,
+            "legacyOverallEquipmentUtilization": 0.4101,
+            "shortfallRatio": 1.600785769980507,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 1,898t ÷ 実効能力 3,420t = 55.5%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 3420,
+            "relevantActualProduction": 1897.9,
+            "relevantUtilization": 0.5549415204678363,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51194253.30563425,
+            "cashUsd": 28578799.19482791,
+            "borrowingPressure": 0.9708120890695792,
+            "legacyOverallEquipmentUtilization": 0.4101,
+            "shortfallRatio": 1.501182748538012,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12748.47,
+      "fulfilledVolume": 11855.39,
+      "outstandingVolume": 10138.11,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 6859.01,
+      "equipmentShortfall": 0,
+      "laborShortfall": 5611.92,
+      "revenue": 56837699.62817842,
+      "operatingIncome": 1324018.1895493567,
+      "salesPayroll": 2605539,
+      "netIncome": -273481.8104506433,
+      "cash": 0
+    },
+    {
+      "turn": 5,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 13,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 25,
+          "desiredQuantity": 4238.21
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2972.7599999999998
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1142.07
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 2077.55
+        },
+        {
+          "market": "US",
+          "headcount": 22,
+          "desiredQuantity": 3814.55
+        }
+      ],
+      "japanShare": 0.0641025641025641,
+      "economicallyDesiredHireCount": 13,
+      "organizationalHireLimit": 24,
+      "actualHireCount": 13,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06707542350767312,
+        "EU": 0.19762345344638904,
+        "US": 0.28284814326563984,
+        "CN": 0.3261651174435106,
+        "OTHER": 0.12628786233678743
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 6,789t ÷ 実効能力 6,840t = 99.3%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 6788.7,
+            "relevantUtilization": 0.9924999999999999,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 45232332.700832695,
+            "cashUsd": 33652504.3152601,
+            "borrowingPressure": 0.7902743409989924,
+            "legacyOverallEquipmentUtilization": 0.5558,
+            "shortfallRatio": 1.076692251461988,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 14245.14,
+      "fulfilledVolume": 14245.14,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 2503.64,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1780.35,
+      "revenue": 71173893.82310824,
+      "operatingIncome": 10005858.545043424,
+      "salesPayroll": 2918514,
+      "netIncome": 7228999.088886206,
+      "cash": 26493255.261321127
+    },
+    {
+      "turn": 5,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 25,
+          "desiredQuantity": 3964.51
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2779.45
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1067.73
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1943.0300000000002
+        },
+        {
+          "market": "US",
+          "headcount": 22,
+          "desiredQuantity": 3566.98
+        }
+      ],
+      "japanShare": 0.0641025641025641,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.0670837708625578,
+        "EU": 0.1976410641334909,
+        "US": 0.28285279955216713,
+        "CN": 0.3261464615755999,
+        "OTHER": 0.1262759038761843
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 4,927t ÷ 実効能力 6,840t = 72.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 4927.47,
+            "relevantUtilization": 0.720390350877193,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 44562412.096031144,
+            "cashUsd": 30070820.616832078,
+            "borrowingPressure": 0.7291240026234457,
+            "legacyOverallEquipmentUtilization": 0.4755,
+            "shortfallRatio": 1.4208310672514621,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 3,696t ÷ 実効能力 5,130t = 72.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 3695.61,
+            "relevantUtilization": 0.7203918128654971,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 44562412.096031144,
+            "cashUsd": 30070820.616832078,
+            "borrowingPressure": 0.7291240026234457,
+            "legacyOverallEquipmentUtilization": 0.4755,
+            "shortfallRatio": 1.499117641325536,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 3,492t ÷ 実効能力 5,130t = 68.1%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 3491.97,
+            "relevantUtilization": 0.6806959064327485,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 44562412.096031144,
+            "cashUsd": 30070820.616832078,
+            "borrowingPressure": 0.7291240026234457,
+            "legacyOverallEquipmentUtilization": 0.4755,
+            "shortfallRatio": 1.4863683235867446,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 13321.7,
+      "fulfilledVolume": 13235.57,
+      "outstandingVolume": 7558.19,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 3567.47,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 67084275.377503455,
+      "operatingIncome": 8385210.474448152,
+      "salesPayroll": 2817557,
+      "netIncome": 5894921.430829657,
+      "cash": 17384273.518012658
+    },
+    {
+      "turn": 5,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 72,
+      "hiresThisTurn": 3,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 23,
+          "desiredQuantity": 4143.74
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2935.96
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1041.85
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1899.6999999999998
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3691.25
+        }
+      ],
+      "japanShare": 0.06944444444444445,
+      "economicallyDesiredHireCount": 3,
+      "organizationalHireLimit": 22,
+      "actualHireCount": 3,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06704303433238688,
+        "EU": 0.19755512094593428,
+        "US": 0.2828300760715884,
+        "CN": 0.32623750542559893,
+        "OTHER": 0.12633426322449146
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 13712.5,
+      "fulfilledVolume": 13712.5,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 3230.43,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1516.56,
+      "revenue": 67505460.02581859,
+      "operatingIncome": 8822591.409947157,
+      "salesPayroll": 2803250,
+      "netIncome": 6567394.958622701,
+      "cash": 27211792.23507835
+    },
+    {
+      "turn": 6,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 84,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 27,
+          "desiredQuantity": 4423.96
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2791.26
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 904.9
+        },
+        {
+          "market": "OTHER",
+          "headcount": 11,
+          "desiredQuantity": 2040.24
+        },
+        {
+          "market": "US",
+          "headcount": 26,
+          "desiredQuantity": 4252.68
+        }
+      ],
+      "japanShare": 0.05952380952380952,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.055157197887540726,
+        "EU": 0.17128139772152948,
+        "US": 0.3124770667544654,
+        "CN": 0.33214412010182937,
+        "OTHER": 0.12894021753463514
+      },
+      "primaryConstraint": "none",
+      "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 14413.04,
+      "fulfilledVolume": 14413.04,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 4788.38,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 73596617.21851696,
+      "operatingIncome": 10371100.083506271,
+      "salesPayroll": 2997304,
+      "netIncome": 7890359.09097821,
+      "cash": 33427359.26048491
+    },
+    {
+      "turn": 6,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 19,
+          "desiredQuantity": 3790.21
+        },
+        {
+          "market": "EU",
+          "headcount": 11,
+          "desiredQuantity": 2410.19
+        },
+        {
+          "market": "JP",
+          "headcount": 3,
+          "desiredQuantity": 822.7800000000001
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1891.4499999999998
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3740.5099999999998
+        }
+      ],
+      "japanShare": 0.05,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05514082932435396,
+        "EU": 0.17124456637717922,
+        "US": 0.3124623538939382,
+        "CN": 0.33218500036262893,
+        "OTHER": 0.12896725004189963
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 6,467t ÷ 実効能力 10,260t = 63.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 10260,
+            "relevantActualProduction": 6466.57,
+            "relevantUtilization": 0.6302699805068226,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51369144.08482924,
+            "cashUsd": 0,
+            "borrowingPressure": 0.6190011943704099,
+            "legacyOverallEquipmentUtilization": 0.4659,
+            "shortfallRatio": 1.2674726608187135,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 3,233t ÷ 実効能力 5,130t = 63.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 3233.29,
+            "relevantUtilization": 0.630270955165692,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51369144.08482924,
+            "cashUsd": 0,
+            "borrowingPressure": 0.6190011943704099,
+            "legacyOverallEquipmentUtilization": 0.4659,
+            "shortfallRatio": 1.6696377192982457,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 2,156t ÷ 実効能力 3,420t = 63.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 3420,
+            "relevantActualProduction": 2155.53,
+            "relevantUtilization": 0.6302719298245615,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51369144.08482924,
+            "cashUsd": 0,
+            "borrowingPressure": 0.6190011943704099,
+            "legacyOverallEquipmentUtilization": 0.4659,
+            "shortfallRatio": 1.57108932748538,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "共通原料処理能力は今期不足だが、持続性・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "relevantCapacity": 25650,
+            "relevantActualProduction": 11855.390000000001,
+            "relevantUtilization": 0.462198440545809,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51369144.08482924,
+            "cashUsd": 0,
+            "borrowingPressure": 0.6190011943704099,
+            "legacyOverallEquipmentUtilization": 0.4659,
+            "commonShortfallRatio": 1.0503951851851852,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12655.14,
+      "fulfilledVolume": 5439.22,
+      "outstandingVolume": 17354.03,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 13325.8,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 25873382.89193283,
+      "operatingIncome": -11190284.059662022,
+      "salesPayroll": 1963922,
+      "netIncome": -12460444.156055458,
+      "cash": 19148081.60365826
+    },
+    {
+      "turn": 6,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 91,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 30,
+          "desiredQuantity": 4811.19
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2930.47
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 949.97
+        },
+        {
+          "market": "OTHER",
+          "headcount": 11,
+          "desiredQuantity": 2142.3999999999996
+        },
+        {
+          "market": "US",
+          "headcount": 29,
+          "desiredQuantity": 4641.639999999999
+        }
+      ],
+      "japanShare": 0.054945054945054944,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.055191446802508544,
+        "EU": 0.17135846212641384,
+        "US": 0.31250785134462017,
+        "CN": 0.33205858390906684,
+        "OTHER": 0.12888365581739059
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 5,414t ÷ 実効能力 6,840t = 79.2%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 5413.9,
+            "relevantUtilization": 0.7915058479532163,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 45399273.899155185,
+            "cashUsd": 26493255.261321127,
+            "borrowingPressure": 0.6705932058196544,
+            "legacyOverallEquipmentUtilization": 0.5995,
+            "shortfallRatio": 1.0701059941520468,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 15475.67,
+      "fulfilledVolume": 15475.67,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 2634.65,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1987.7,
+      "revenue": 78922617.77522056,
+      "operatingIncome": 13026021.413450994,
+      "salesPayroll": 3145567,
+      "netIncome": 9808912.36574504,
+      "cash": 23953866.16432687
+    },
+    {
+      "turn": 6,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 25,
+          "desiredQuantity": 3962.6800000000003
+        },
+        {
+          "market": "EU",
+          "headcount": 14,
+          "desiredQuantity": 2501.1000000000004
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 887.73
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1942.13
+        },
+        {
+          "market": "US",
+          "headcount": 25,
+          "desiredQuantity": 3911.44
+        }
+      ],
+      "japanShare": 0.05128205128205128,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.055198551209686454,
+        "EU": 0.1713744479441175,
+        "US": 0.3125142371312494,
+        "CN": 0.3320408407501258,
+        "OTHER": 0.12887192296482097
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 5,376t ÷ 実効能力 6,840t = 78.6%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 5375.66,
+            "relevantUtilization": 0.7859152046783625,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 44721403.713481136,
+            "cashUsd": 17384273.518012658,
+            "borrowingPressure": 0.474821655247684,
+            "legacyOverallEquipmentUtilization": 0.5196,
+            "shortfallRatio": 1.4295790935672514,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 4,032t ÷ 実効能力 5,130t = 78.6%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 4031.75,
+            "relevantUtilization": 0.785916179337232,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 44721403.713481136,
+            "cashUsd": 17384273.518012658,
+            "borrowingPressure": 0.474821655247684,
+            "legacyOverallEquipmentUtilization": 0.5196,
+            "shortfallRatio": 1.5081876218323589,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 3,828t ÷ 実効能力 5,130t = 74.6%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 3828.16,
+            "relevantUtilization": 0.7462300194931774,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 44721403.713481136,
+            "cashUsd": 17384273.518012658,
+            "borrowingPressure": 0.474821655247684,
+            "legacyOverallEquipmentUtilization": 0.5196,
+            "shortfallRatio": 1.5361395711500974,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 13205.08,
+      "fulfilledVolume": 16266.71,
+      "outstandingVolume": 4496.56,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 695,
+      "revenue": 83723062.41531426,
+      "operatingIncome": 14766254.053794853,
+      "salesPayroll": 3120671,
+      "netIncome": 11291730.580097508,
+      "cash": 27041662.758713298
+    },
+    {
+      "turn": 6,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 75,
+      "hiresThisTurn": 4,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 24,
+          "desiredQuantity": 4271.66
+        },
+        {
+          "market": "EU",
+          "headcount": 13,
+          "desiredQuantity": 2619.47
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 857.8700000000001
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1939.99
+        },
+        {
+          "market": "US",
+          "headcount": 24,
+          "desiredQuantity": 4219.200000000001
+        }
+      ],
+      "japanShare": 0.05333333333333334,
+      "economicallyDesiredHireCount": 4,
+      "organizationalHireLimit": 23,
+      "actualHireCount": 4,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05516388302143932,
+        "EU": 0.17129644012114859,
+        "US": 0.3124830756778836,
+        "CN": 0.3321274240721206,
+        "OTHER": 0.12892917710740787
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 13908.19,
+      "fulfilledVolume": 13908.19,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 2873.68,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1778.97,
+      "revenue": 69868580.07082008,
+      "operatingIncome": 10811564.624442235,
+      "salesPayroll": 2846819,
+      "netIncome": 8299170.405218763,
+      "cash": 12981414.284919696
+    },
+    {
+      "turn": 7,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 84,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 33,
+          "desiredQuantity": 5069.22
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2790.98
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 935.43
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1822.1699999999998
+        },
+        {
+          "market": "US",
+          "headcount": 22,
+          "desiredQuantity": 3767.38
+        }
+      ],
+      "japanShare": 0.05952380952380952,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05696774135703352,
+        "EU": 0.17318683306974186,
+        "US": 0.2574346467250739,
+        "CN": 0.397368487259547,
+        "OTHER": 0.11504229158860377
+      },
+      "primaryConstraint": "none",
+      "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 14346.43,
+      "fulfilledVolume": 14346.43,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 4787.09,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 71842699.32818963,
+      "operatingIncome": 9810537.223940909,
+      "salesPayroll": 2990643,
+      "netIncome": 7431018.844174078,
+      "cash": 43632589.829089634
+    },
+    {
+      "turn": 7,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 23,
+          "desiredQuantity": 4365.13
+        },
+        {
+          "market": "EU",
+          "headcount": 11,
+          "desiredQuantity": 2408.81
+        },
+        {
+          "market": "JP",
+          "headcount": 3,
+          "desiredQuantity": 822.34
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1691.46
+        },
+        {
+          "market": "US",
+          "headcount": 16,
+          "desiredQuantity": 3275.79
+        }
+      ],
+      "japanShare": 0.05,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05695090344428161,
+        "EU": 0.17314942863270344,
+        "US": 0.25742115047791364,
+        "CN": 0.39741349752871685,
+        "OTHER": 0.11506501991638445
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 2,967t ÷ 実効能力 10,260t = 28.9%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 10260,
+            "relevantActualProduction": 2966.85,
+            "relevantUtilization": 0.2891666666666667,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 52383640.82784637,
+            "cashUsd": 19148081.60365826,
+            "borrowingPressure": 0.5769465631764396,
+            "legacyOverallEquipmentUtilization": 0.2138,
+            "shortfallRatio": 1.5263477095516569,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 1,483t ÷ 実効能力 5,130t = 28.9%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 1483.43,
+            "relevantUtilization": 0.2891676413255361,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 52383640.82784637,
+            "cashUsd": 19148081.60365826,
+            "borrowingPressure": 0.5769465631764396,
+            "legacyOverallEquipmentUtilization": 0.2138,
+            "shortfallRatio": 1.928941617933723,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 989t ÷ 実効能力 3,420t = 28.9%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 3420,
+            "relevantActualProduction": 988.94,
+            "relevantUtilization": 0.2891637426900585,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 52383640.82784637,
+            "cashUsd": 19148081.60365826,
+            "borrowingPressure": 0.5769465631764396,
+            "legacyOverallEquipmentUtilization": 0.2138,
+            "shortfallRatio": 1.83201432748538,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "共通原料処理能力は今期不足だが、持続性・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "relevantCapacity": 25650,
+            "relevantActualProduction": 5439.219999999999,
+            "relevantUtilization": 0.21205536062378166,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 52383640.82784637,
+            "cashUsd": 19148081.60365826,
+            "borrowingPressure": 0.5769465631764396,
+            "legacyOverallEquipmentUtilization": 0.2138,
+            "commonShortfallRatio": 1.240595984405458,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12563.53,
+      "fulfilledVolume": 7517.38,
+      "outstandingVolume": 22400.18,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 11226.64,
+      "equipmentShortfall": 0,
+      "laborShortfall": 11226.64,
+      "revenue": 36341230.884709105,
+      "operatingIncome": -4480307.3649318665,
+      "salesPayroll": 2171738,
+      "netIncome": -5699842.461325303,
+      "cash": 0
+    },
+    {
+      "turn": 7,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 91,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 35,
+          "desiredQuantity": 5327.76
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2965.73
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 982
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1913.3999999999999
+        },
+        {
+          "market": "US",
+          "headcount": 24,
+          "desiredQuantity": 4059.7
+        }
+      ],
+      "japanShare": 0.06593406593406594,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05700293526371967,
+        "EU": 0.17326501427225627,
+        "US": 0.25746285602097474,
+        "CN": 0.39727440866225155,
+        "OTHER": 0.11499478578079786
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 6,019t ÷ 実効能力 6,840t = 88.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 6018.65,
+            "relevantUtilization": 0.8799195906432749,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 46367657.15385335,
+            "cashUsd": 23953866.16432687,
+            "borrowingPressure": 0.6561649740688894,
+            "legacyOverallEquipmentUtilization": 0.6139,
+            "shortfallRatio": 1.0695771198830408,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 15199.68,
+      "fulfilledVolume": 15199.68,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 3925.99,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 969.65,
+      "revenue": 76028384.04431222,
+      "operatingIncome": 11440641.48484943,
+      "salesPayroll": 3117968,
+      "netIncome": 8546944.629811088,
+      "cash": 29169506.916163053
+    },
+    {
+      "turn": 7,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 30,
+          "desiredQuantity": 4497.389999999999
+        },
+        {
+          "market": "EU",
+          "headcount": 14,
+          "desiredQuantity": 2499.5699999999997
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 937.6299999999999
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1779.6
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3319.56
+        }
+      ],
+      "japanShare": 0.0641025641025641,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05701022942244451,
+        "EU": 0.17328121781866912,
+        "US": 0.2574687025751425,
+        "CN": 0.39725491028068777,
+        "OTHER": 0.11498493990305601
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 6,507t ÷ 実効能力 6,840t = 95.1%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 6506.88,
+            "relevantUtilization": 0.9512982456140351,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 45643673.479860336,
+            "cashUsd": 27041662.758713298,
+            "borrowingPressure": 0.7242888600369947,
+            "legacyOverallEquipmentUtilization": 0.6396,
+            "shortfallRatio": 1.2975640350877193,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 4,880t ÷ 実効能力 5,130t = 95.1%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 4880.16,
+            "relevantUtilization": 0.9512982456140351,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 45643673.479860336,
+            "cashUsd": 27041662.758713298,
+            "borrowingPressure": 0.7242888600369947,
+            "legacyOverallEquipmentUtilization": 0.6396,
+            "shortfallRatio": 1.3766736842105263,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 4,880t ÷ 実効能力 5,130t = 95.1%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 4879.67,
+            "relevantUtilization": 0.9512027290448343,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 45643673.479860336,
+            "cashUsd": 27041662.758713298,
+            "borrowingPressure": 0.7242888600369947,
+            "legacyOverallEquipmentUtilization": 0.6396,
+            "shortfallRatio": 1.4202698830409355,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12893.62,
+      "fulfilledVolume": 16273.76,
+      "outstandingVolume": 1116.42,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 695,
+      "revenue": 83140301.66831249,
+      "operatingIncome": 13286911.715343826,
+      "salesPayroll": 3121376,
+      "netIncome": 9914550.767112793,
+      "cash": 42853457.86664516
+    },
+    {
+      "turn": 7,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 79,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 31,
+          "desiredQuantity": 5104.52
+        },
+        {
+          "market": "EU",
+          "headcount": 14,
+          "desiredQuantity": 2679.41
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 886.73
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1732.5
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3687.35
+        }
+      ],
+      "japanShare": 0.06329113924050633,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.056974614883197244,
+        "EU": 0.1732021022055552,
+        "US": 0.2574401561257541,
+        "CN": 0.39735011329198144,
+        "OTHER": 0.11503301349351208
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 14090.51,
+      "fulfilledVolume": 14090.51,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 3550.41,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1053.81,
+      "revenue": 69485520.70325918,
+      "operatingIncome": 9424483.629038066,
+      "salesPayroll": 2897051,
+      "netIncome": 7438786.903230453,
+      "cash": 31097924.844844148
+    },
+    {
+      "turn": 8,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 84,
+      "hiresThisTurn": 2,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 31,
+          "desiredQuantity": 4862.23
+        },
+        {
+          "market": "EU",
+          "headcount": 13,
+          "desiredQuantity": 2445.92
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 908.5999999999999
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1750.29
+        },
+        {
+          "market": "US",
+          "headcount": 26,
+          "desiredQuantity": 4250.23
+        }
+      ],
+      "japanShare": 0.05952380952380952,
+      "economicallyDesiredHireCount": 2,
+      "organizationalHireLimit": 26,
+      "actualHireCount": 2,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05533177254866698,
+        "EU": 0.14995200912573167,
+        "US": 0.30504352581228333,
+        "CN": 0.37915410025378016,
+        "OTHER": 0.11051859225953783
+      },
+      "primaryConstraint": "none",
+      "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 14187.75,
+      "fulfilledVolume": 14187.75,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 4937.02,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 73586372.98854947,
+      "operatingIncome": 12255599.444819443,
+      "salesPayroll": 2974775,
+      "netIncome": 9415589.596703712,
+      "cash": 50710936.282684475
+    },
+    {
+      "turn": 8,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 22,
+          "desiredQuantity": 4225.99
+        },
+        {
+          "market": "EU",
+          "headcount": 9,
+          "desiredQuantity": 2043.12
+        },
+        {
+          "market": "JP",
+          "headcount": 3,
+          "desiredQuantity": 822.29
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1691.67
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3738.3
+        }
+      ],
+      "japanShare": 0.05,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05531502689950246,
+        "EU": 0.14991884535238706,
+        "US": 0.30502713663358844,
+        "CN": 0.37919804978934796,
+        "OTHER": 0.11054094132517418
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 4,100t ÷ 実効能力 10,260t = 40.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 10260,
+            "relevantActualProduction": 4100.39,
+            "relevantUtilization": 0.3996481481481482,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51322390.17610436,
+            "cashUsd": 0,
+            "borrowingPressure": 0.5134235817073175,
+            "legacyOverallEquipmentUtilization": 0.2956,
+            "shortfallRatio": 1.8306994639376215,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 2,050t ÷ 実効能力 5,130t = 40.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 2050.2,
+            "relevantUtilization": 0.39964912280701753,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51322390.17610436,
+            "cashUsd": 0,
+            "borrowingPressure": 0.5134235817073175,
+            "legacyOverallEquipmentUtilization": 0.2956,
+            "shortfallRatio": 2.2336003898635477,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 1,367t ÷ 実効能力 3,420t = 40.0%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 3420,
+            "relevantActualProduction": 1366.79,
+            "relevantUtilization": 0.39964619883040936,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51322390.17610436,
+            "cashUsd": 0,
+            "borrowingPressure": 0.5134235817073175,
+            "legacyOverallEquipmentUtilization": 0.2956,
+            "shortfallRatio": 2.1378030701754387,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "共通原料処理能力は今期不足だが、持続性・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "relevantCapacity": 25650,
+            "relevantActualProduction": 7517.38,
+            "relevantUtilization": 0.2930752436647174,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 51322390.17610436,
+            "cashUsd": 0,
+            "borrowingPressure": 0.5134235817073175,
+            "legacyOverallEquipmentUtilization": 0.2956,
+            "commonShortfallRatio": 1.4640402729044832,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 0,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12521.37,
+      "fulfilledVolume": 4464.08,
+      "outstandingVolume": 30457.47,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 14308.56,
+      "equipmentShortfall": 0,
+      "laborShortfall": 10406.23,
+      "revenue": 21570488.165839978,
+      "operatingIncome": -11744004.20998767,
+      "salesPayroll": 1866408,
+      "netIncome": -12800798.432608824,
+      "cash": 2353209.7705585044
+    },
+    {
+      "turn": 8,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 91,
+      "hiresThisTurn": 2,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 34,
+          "desiredQuantity": 5228.379999999999
+        },
+        {
+          "market": "EU",
+          "headcount": 14,
+          "desiredQuantity": 2567.9
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 953.8499999999999
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1837.9099999999999
+        },
+        {
+          "market": "US",
+          "headcount": 28,
+          "desiredQuantity": 4527.92
+        }
+      ],
+      "japanShare": 0.054945054945054944,
+      "economicallyDesiredHireCount": 2,
+      "organizationalHireLimit": 28,
+      "actualHireCount": 2,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05536680682068159,
+        "EU": 0.15002139244106155,
+        "US": 0.3050778142975403,
+        "CN": 0.3790621515948259,
+        "OTHER": 0.11047183484589068
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 15084.75,
+      "fulfilledVolume": 15084.75,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 4904.75,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 770.4,
+      "revenue": 78159655.71458127,
+      "operatingIncome": 13661782.584468894,
+      "salesPayroll": 3106475,
+      "netIncome": 10360697.557819178,
+      "cash": 28565893.762009583
+    },
+    {
+      "turn": 8,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 29,
+          "desiredQuantity": 4394.6900000000005
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2209.3199999999997
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 910.72
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1614.4
+        },
+        {
+          "market": "US",
+          "headcount": 24,
+          "desiredQuantity": 3796.29
+        }
+      ],
+      "japanShare": 0.0641025641025641,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.055374073520836245,
+        "EU": 0.15003578371335707,
+        "US": 0.3050849263089163,
+        "CN": 0.37904307988887004,
+        "OTHER": 0.11046213656802041
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはHOSO専用ラインの稼働率（前期実績 6,510t ÷ 実効能力 6,840t = 95.2%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 6840,
+            "relevantActualProduction": 6509.5,
+            "relevantUtilization": 0.9516812865497076,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 44678900.16009488,
+            "cashUsd": 42853457.86664516,
+            "borrowingPressure": 0.8747306528975287,
+            "legacyOverallEquipmentUtilization": 0.6396,
+            "shortfallRatio": 1.1011630116959064,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはPD専用ラインの稼働率（前期実績 4,882t ÷ 実効能力 5,130t = 95.2%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 4882.13,
+            "relevantUtilization": 0.951682261208577,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 44678900.16009488,
+            "cashUsd": 42853457.86664516,
+            "borrowingPressure": 0.8747306528975287,
+            "legacyOverallEquipmentUtilization": 0.6396,
+            "shortfallRatio": 1.1807262183235867,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。持続性判定に使ったのはVAP専用ラインの稼働率（前期実績 4,882t ÷ 実効能力 5,130t = 95.2%、しきい値 92%）であり、共通前処理能力の稼働率ではない。",
+          "keyValues": {
+            "relevantCapacity": 5130,
+            "relevantActualProduction": 4882.13,
+            "relevantUtilization": 0.951682261208577,
+            "sustainedThreshold": 0.92,
+            "hadPriorQuarter": 1,
+            "financialGateCashSafe": 0,
+            "financialGateBorrowingSafe": 1,
+            "financialGateRequiredCashUsd": 44678900.16009488,
+            "cashUsd": 42853457.86664516,
+            "borrowingPressure": 0.8747306528975287,
+            "legacyOverallEquipmentUtilization": 0.6396,
+            "shortfallRatio": 1.1985527290448343,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "financialGate": 0,
+            "inventoryGate": 1,
+            "ongoingProjectGate": 1,
+            "shortfallGate": 1,
+            "sustainedGate": 1,
+            "finalDecision": 0
+          }
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 12849.24,
+      "fulfilledVolume": 13965.66,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 2306.47,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 695,
+      "revenue": 73993026.59401253,
+      "operatingIncome": 13224778.02058158,
+      "salesPayroll": 2890566,
+      "netIncome": 9770595.82372892,
+      "cash": 42263504.120070346
+    },
+    {
+      "turn": 8,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 79,
+      "hiresThisTurn": 1,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 29,
+          "desiredQuantity": 4878.36
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2320
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 861.33
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1664.1599999999999
+        },
+        {
+          "market": "US",
+          "headcount": 24,
+          "desiredQuantity": 4216.85
+        }
+      ],
+      "japanShare": 0.06329113924050633,
+      "economicallyDesiredHireCount": 1,
+      "organizationalHireLimit": 24,
+      "actualHireCount": 1,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.055338611365559176,
+        "EU": 0.14996555300039008,
+        "US": 0.30505021904889706,
+        "CN": 0.3791361515422498,
+        "OTHER": 0.11050946504290406
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
+      "contractedVolume": 13940.7,
+      "fulfilledVolume": 13940.7,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 4306.39,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 739.14,
+      "revenue": 71195268.06778993,
+      "operatingIncome": 12209553.307324357,
+      "salesPayroll": 2882070,
+      "netIncome": 9545990.887181146,
+      "cash": 37074031.75100621
+    }
+  ]
+}

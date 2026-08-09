@@ -67,7 +67,14 @@ function observation(overrides: Partial<StandardAiObservation> = {}): StandardAi
     procurementHeadcountTotal: 12,
     lastQuarterEquipmentUtilizationRate: 0.9,
     lastQuarterLaborUtilizationRate: 0.85,
-    lastQuarterActualProductionByProduct: {},
+    // 【2026-08-09・Test16】capex判断の稼働率が「会社全体（分母=共通前処理能力）」から
+    // 「投資対象設備ごと（HOSOならHOSOライン）」へ変わった。
+    // 本テストが守りたいのは「前期稼働率が既に高い局面で、成長トレンド・在庫・財務の
+    // 条件が揃えば増設を提案する」という因果であり、その『稼働率が高い』を表す信号が
+    // lastQuarterEquipmentUtilizationRate から商品別の前期実績生産量へ移った。
+    // そこで、上の 0.9 と整合する実績生産量（各ライン能力の90%）を与える。
+    // 期待値を書き換えたのではなく、テストが表明していた前提を新しい信号で表し直している。
+    lastQuarterActualProductionByProduct: { hoso: 9000, pd: 7200, vap: 5400 },
     markets: [],
     marketPremiumByProduct: { pd: 1.0, vap: 3.0 },
     vietnamDomesticPriorPrice: 4.0,

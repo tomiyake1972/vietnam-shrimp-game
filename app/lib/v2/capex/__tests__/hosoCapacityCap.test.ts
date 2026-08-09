@@ -10,6 +10,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CAPEX_PARAMETERS_V1 } from "../parameters";
 import { MAX_HOSO_CAPACITY_TONS } from "../capacityEffect";
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 
 test("【Test16】HOSO加工ライン増設は 8M USD / +4,000t/期 / 工期1Q", () => {
   const t = CAPEX_PARAMETERS_V1.templatesByType.hosoLineExpansion;
@@ -40,7 +42,7 @@ test("【Test16】HOSOの投資単価はPD/VAPより意図的に安い（大量�
 });
 
 test("【Test16】上限はHOSO固有であり、PD/VAPには適用されない", () => {
-  const source = require("fs").readFileSync(require("path").resolve(__dirname, "..", "capacityEffect.ts"), "utf8");
+  const source = readFileSync(resolvePath(__dirname, "..", "capacityEffect.ts"), "utf8");
   assert.ok(/hosoCapacity: hosoEqTons\(Math\.min\(MAX_HOSO_CAPACITY_TONS/.test(source), "HOSOにだけ上限が掛かっていること");
   assert.ok(!/pdCapacity: hosoEqTons\(Math\.min/.test(source), "PDには上限を掛けていないこと");
   assert.ok(!/vapCapacity: hosoEqTons\(Math\.min/.test(source), "VAPには上限を掛けていないこと");

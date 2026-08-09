@@ -165,7 +165,13 @@ export function generateStandardAiDecisionWithDiagnostics(
 
   const procurementResult = buildStandardAiProcurementPlan(fixture, observation, pressures, requiredRawMaterial, period, params);
   const laborResult = buildStandardAiWorkerAssignments(fixture, observation, pressures, productionResult.productionPlans, params);
-  const financingResult = buildStandardAiFinancingRequest(observation, pressures, params);
+  // 【Test16】資金繰り判断へ当期の原料調達計画を渡す。これにより「原料を買うのに
+  // 資金が要る」ことが借入判断の入力になる（従来は最低現金バッファだけで決めていた）。
+  // 調達計画は上で確定済みであり、循環しない。
+  const financingResult = buildStandardAiFinancingRequest(observation, pressures, params, {
+    domesticDesiredQuantityTons: unwrapUnit(procurementResult.domesticPurchasePlan.desiredQuantity),
+    importOrderedQuantityTons: procurementResult.importOrders.reduce((sum, o) => sum + unwrapUnit(o.orderedQuantity), 0),
+  });
   const capexResult = buildStandardAiCapexDecision(
     fixture,
     observation,

@@ -38,6 +38,7 @@ const STANDARD_AI_DESCRIPTIONS: Readonly<Record<string, string>> = {
   HIRING_FOR_SUSTAINED_SHORTAGE: "持続的な不足に対する正社員採用",
   HEADCOUNT_REDUCED_FOR_SUSTAINED_EXCESS: "持続的な過剰人員の縮小",
   CASH_BUFFER_SHORTAGE: "最低現金水準を下回る見込みのため借入",
+  WORKING_CAPITAL_ASSESSED: "短期運転資金の必要額と充足状況を評価",
   DEBT_REPAYMENT_SURPLUS: "現金余剰のため任意期限前返済",
   CAPEX_DEFERRED: "設備投資を見送り（既定の正常な結果）",
   CAPEX_PROPOSED: "持続的なボトルネック解消のため設備投資を提案",

@@ -39,10 +39,89 @@ export interface CapexPlanResult {
   readonly diagnostics: readonly StandardAiDiagnosticEntry[];
 }
 
-function cashAndBorrowingSafe(observation: StandardAiObservation, pressures: PressureScores, params: StandardAiParameters): boolean {
-  const cashSafe = observation.cashUsd > pressures.targetMinimumCashUsd * params.capexCashSafetyMultiple;
+interface FinancialGateDetail {
+  readonly safe: boolean;
+  readonly cashSafe: boolean;
+  readonly borrowingSafe: boolean;
+  readonly requiredCashUsd: number;
+}
+
+/**
+ * 設備投資の財務ゲート。
+ * 【2026-08-09・Test16】判定結果だけでなく内訳（現金・借入圧力のどちらで落ちたか）も
+ * 返す。従来は safe:0 としか残らず、「なぜ投資しないのか」を説明できなかった。
+ */
+function cashAndBorrowingSafe(observation: StandardAiObservation, pressures: PressureScores, params: StandardAiParameters): FinancialGateDetail {
+  const requiredCashUsd = pressures.targetMinimumCashUsd * params.capexCashSafetyMultiple;
+  const cashSafe = observation.cashUsd > requiredCashUsd;
   const borrowingSafe = pressures.borrowingPressure < 1;
-  return cashSafe && borrowingSafe;
+  return { safe: cashSafe && borrowingSafe, cashSafe, borrowingSafe, requiredCashUsd };
+}
+
+// ---------------------------------------------------------------------
+// 【2026-08-09・Test16】投資対象設備ごとの稼働率
+// ---------------------------------------------------------------------
+//
+// 【なぜ必要か】従来は投資対象が何であれ、持続性条件に
+//   averageEquipmentUtilization = 実生産量 / commonProcessing能力
+// という**共通前処理能力を分母にした会社全体の稼働率**を使っていた。
+//
+// Test16の工場設計は「工場全体の箱（common 30,000t）は大きいが、商品別専用能力が
+// 商品構成を制約する」というものであり、この分母では商品別ラインの逼迫が見えない。
+// 実測（docs/standard_ai/TEST16_RAW_PROCUREMENT_AUDIT.md）では、
+//   理論上の最大稼働率 = Σ商品別能力 / common = 0.633〜0.733
+// となり、持続性しきい値0.92へ**算術的に到達不可能**だった。原料を無制限に
+// 与えても設備投資が一度も発動しないことを確認している。
+//
+// 【修正の考え方】「何の設備へ投資するか」に対応する設備の稼働率を見る。
+//   HOSO/PD/VAPライン増設 → その商品の 実生産量 / その商品の実効能力
+//   共通前処理能力増設     → 全商品の実生産量合計 / 共通前処理の実効能力
+//   冷凍・包装能力増設     → 全商品の実生産量合計 / 冷凍・包装の実効能力
+//
+// しきい値 capexSustainedUtilizationThreshold(0.92) 自体は変更しない。
+// まず分母・対象を正しくしたうえで、92%が妥当かをbenchmarkで確かめる。
+
+/** 設備投資の対象設備区分。 */
+export type CapexUtilizationTarget = Product | "commonProcessing" | "freezingPackaging";
+
+export interface RelevantUtilization {
+  readonly target: CapexUtilizationTarget;
+  /** 対象設備の実効能力（capex反映後）。 */
+  readonly capacity: number;
+  /** 前期の実績生産量（対象設備が処理した量）。 */
+  readonly actualProduction: number;
+  /** actualProduction / capacity。capacity が0なら0。 */
+  readonly utilization: number;
+}
+
+function sumLastQuarterProduction(observation: StandardAiObservation): number {
+  return (["hoso", "pd", "vap"] as const).reduce((s, p) => s + (observation.lastQuarterActualProductionByProduct[p] ?? 0), 0);
+}
+
+/**
+ * 投資対象設備に対応する前期稼働率を返す。
+ *
+ * 分母は必ず**その設備の実効能力**（capex反映後・稼働率係数適用後）であり、
+ * production/capacity.ts の calculateFactoryEffectiveCapacity を経由した
+ * observation.totalEffective* をそのまま使う。ここで能力を再計算しない。
+ */
+export function relevantUtilizationFor(observation: StandardAiObservation, target: CapexUtilizationTarget): RelevantUtilization {
+  const capacity =
+    target === "commonProcessing"
+      ? observation.totalEffectiveCommonProcessingCapacity
+      : target === "freezingPackaging"
+        ? observation.totalEffectiveFreezingPackagingCapacity
+        : observation.totalEffectiveCapacityByProduct[target];
+  const actualProduction =
+    target === "commonProcessing" || target === "freezingPackaging"
+      ? sumLastQuarterProduction(observation)
+      : (observation.lastQuarterActualProductionByProduct[target] ?? 0);
+  return {
+    target,
+    capacity,
+    actualProduction,
+    utilization: capacity > EPSILON ? actualProduction / capacity : 0,
+  };
 }
 
 export function buildStandardAiCapexDecision(
@@ -58,8 +137,31 @@ export function buildStandardAiCapexDecision(
   // 【監査指摘H】PD_CAPACITY_MAINTAINED の判定材料（VAP転換へ追随しなかったか）。
   let vapOversupplyRetreated = false;
   let vapGrowthSignalPresent = false;
-  const safe = cashAndBorrowingSafe(observation, pressures, params);
-  const sustained = pressures.hadPriorQuarterUtilization && pressures.equipmentUtilizationLastQuarter >= params.capexSustainedUtilizationThreshold;
+  const financialGate = cashAndBorrowingSafe(observation, pressures, params);
+  const safe = financialGate.safe;
+  // 【2026-08-09・Test16】持続性判定は投資対象設備ごとに行う（下の各分岐で算出）。
+  // hadPriorQuarterUtilization は「前四半期の操業実績が存在するか」の判定にのみ使う
+  // （turn1では前期実績が無いため、いかなる設備区分でも持続性は成立しない）。
+  const hasPriorQuarter = pressures.hadPriorQuarterUtilization;
+  const sustainedFor = (u: RelevantUtilization): boolean =>
+    hasPriorQuarter && u.utilization >= params.capexSustainedUtilizationThreshold;
+
+  /** B3: 「何の設備の何%を見たか」を必ず説明できるようにする共通keyValues。 */
+  const utilizationKeyValues = (u: RelevantUtilization): Record<string, number> => ({
+    relevantCapacity: u.capacity,
+    relevantActualProduction: u.actualProduction,
+    relevantUtilization: u.utilization,
+    sustainedThreshold: params.capexSustainedUtilizationThreshold,
+    hadPriorQuarter: hasPriorQuarter ? 1 : 0,
+    // 財務ゲートの内訳（safe:0 だけでは現金不足か借入過多か分からないため）。
+    financialGateCashSafe: financialGate.cashSafe ? 1 : 0,
+    financialGateBorrowingSafe: financialGate.borrowingSafe ? 1 : 0,
+    financialGateRequiredCashUsd: financialGate.requiredCashUsd,
+    cashUsd: observation.cashUsd,
+    borrowingPressure: pressures.borrowingPressure,
+    // 旧方式（共通前処理能力を分母にした会社全体の稼働率）。新旧の差を追跡できるよう残す。
+    legacyOverallEquipmentUtilization: pressures.equipmentUtilizationLastQuarter,
+  });
 
   // 【SAI-5F】拡張判断用の公開シグナル（前四半期までの公開情報のみ。無効時は未使用）。
   const ext = params.standardAiCapexExtensionsEnabled;
@@ -117,6 +219,10 @@ export function buildStandardAiCapexDecision(
     const productThresholdBias = params.capexShortfallThresholdBiasByProduct[product] ?? 0;
     const effectiveShortfallThreshold = params.capexCurrentShortfallRatioThreshold - productThresholdBias;
     const isBottleneck = shortfallRatio > effectiveShortfallThreshold;
+    // 【2026-08-09・Test16】この商品の専用ラインの稼働率で持続性を判定する。
+    // common(30,000t)の稼働率ではなく、HOSOならHOSOラインの稼働率を見る。
+    const utilization = relevantUtilizationFor(observation, product);
+    const sustained = sustainedFor(utilization);
 
     if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned) {
       proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product] });
@@ -126,12 +232,23 @@ export function buildStandardAiCapexDecision(
         companyId: fixture.companyId,
         severity: "info",
         keyValues: {
+          ...utilizationKeyValues(utilization),
           shortfallRatio,
-          equipmentUtilizationLastQuarter: pressures.equipmentUtilizationLastQuarter,
           effectiveShortfallThreshold,
           productThresholdBias,
+          financialGate: safe ? 1 : 0,
+          inventoryGate: noExcess ? 1 : 0,
+          ongoingProjectGate: alreadyPlanned ? 0 : 1,
+          shortfallGate: isBottleneck ? 1 : 0,
+          sustainedGate: 1,
+          finalDecision: 1,
         },
-        message: `${product.toUpperCase()}加工能力が持続的なボトルネックのため、増設案件を提案する。`,
+        decisionSummary: `${product.toUpperCase()}ライン増設を提案（${product.toUpperCase()}ライン稼働率 ${(utilization.utilization * 100).toFixed(1)}%）`,
+        message:
+          `${product.toUpperCase()}加工能力が持続的なボトルネックのため、増設案件を提案する。` +
+          `判定に使ったのは${product.toUpperCase()}専用ラインの稼働率` +
+          `（前期実績 ${Math.round(utilization.actualProduction).toLocaleString()}t ÷ 実効能力 ${Math.round(utilization.capacity).toLocaleString()}t ` +
+          `= ${(utilization.utilization * 100).toFixed(1)}%）であり、共通前処理能力の稼働率ではない。`,
       });
     } else if (isBottleneck) {
       diagnostics.push({
@@ -140,22 +257,24 @@ export function buildStandardAiCapexDecision(
         companyId: fixture.companyId,
         severity: "info",
         keyValues: {
+          ...utilizationKeyValues(utilization),
           shortfallRatio,
-          sustained: sustained ? 1 : 0,
-          noExcess: noExcess ? 1 : 0,
-          safe: safe ? 1 : 0,
-          alreadyPlanned: alreadyPlanned ? 1 : 0,
           effectiveShortfallThreshold,
           productThresholdBias,
-          // 【2026-08-09・Test16段階D監査】どの条件で見送ったかを後から追跡できるよう、
-          // sustained判定に実際に使った稼働率としきい値も保存する。
-          // （見送り理由が「持続性」なのか「財務」なのかがsustained:0だけでは分からず、
-          //  段階Dで「誰もHOSO増設を提案しない」原因の特定に時間がかかったため）
-          equipmentUtilizationLastQuarter: pressures.equipmentUtilizationLastQuarter,
-          hadPriorQuarterUtilization: pressures.hadPriorQuarterUtilization ? 1 : 0,
-          capexSustainedUtilizationThreshold: params.capexSustainedUtilizationThreshold,
+          financialGate: safe ? 1 : 0,
+          inventoryGate: noExcess ? 1 : 0,
+          ongoingProjectGate: alreadyPlanned ? 0 : 1,
+          shortfallGate: isBottleneck ? 1 : 0,
+          sustainedGate: sustained ? 1 : 0,
+          finalDecision: 0,
         },
-        message: `${product.toUpperCase()}は今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。`,
+        decisionSummary: `${product.toUpperCase()}ライン増設を見送り（${product.toUpperCase()}ライン稼働率 ${(utilization.utilization * 100).toFixed(1)}%）`,
+        message:
+          `${product.toUpperCase()}は今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。` +
+          `持続性判定に使ったのは${product.toUpperCase()}専用ラインの稼働率` +
+          `（前期実績 ${Math.round(utilization.actualProduction).toLocaleString()}t ÷ 実効能力 ${Math.round(utilization.capacity).toLocaleString()}t ` +
+          `= ${(utilization.utilization * 100).toFixed(1)}%、しきい値 ${(params.capexSustainedUtilizationThreshold * 100).toFixed(0)}%）であり、` +
+          `共通前処理能力の稼働率ではない。`,
       });
     } else if (ext && (product === "pd" || product === "vap") && !alreadyPlanned && params.growthTrendResponsiveness > 0) {
       // 【SAI-5F】ライフサイクル成長エントリ: 現時点の能力不足（shortfall）が
@@ -168,8 +287,8 @@ export function buildStandardAiCapexDecision(
       const trend = lifecycleTrendOf(product);
       const trendThreshold = params.capexGrowthEntryTrendPerQuarterThreshold * (2 - params.growthTrendResponsiveness);
       if (product === "vap" && trend !== undefined && trend >= trendThreshold) vapGrowthSignalPresent = true;
-      const utilizationOk =
-        pressures.hadPriorQuarterUtilization && pressures.equipmentUtilizationLastQuarter >= params.capexGrowthEntryUtilizationThreshold;
+      // 【2026-08-09・Test16】成長エントリの稼働率条件も、対象商品の専用ライン稼働率で見る。
+      const utilizationOk = hasPriorQuarter && utilization.utilization >= params.capexGrowthEntryUtilizationThreshold;
       if (trend !== undefined && trend >= trendThreshold && utilizationOk && noExcess && safe) {
         proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product] });
         diagnostics.push({
@@ -178,10 +297,16 @@ export function buildStandardAiCapexDecision(
           companyId: fixture.companyId,
           severity: "info",
           keyValues: {
+            ...utilizationKeyValues(utilization),
             lifecycleTrendPerQuarter: trend,
             trendThreshold,
-            equipmentUtilizationLastQuarter: pressures.equipmentUtilizationLastQuarter,
+            growthEntryUtilizationThreshold: params.capexGrowthEntryUtilizationThreshold,
             growthTrendResponsiveness: params.growthTrendResponsiveness,
+            financialGate: safe ? 1 : 0,
+            inventoryGate: noExcess ? 1 : 0,
+            ongoingProjectGate: alreadyPlanned ? 0 : 1,
+            shortfallGate: 0,
+            finalDecision: 1,
           },
           decisionSummary: `${product.toUpperCase()}ライン増設を成長エントリとして提案`,
           message: `${product.toUpperCase()}の公開ライフサイクルトレンドが成長局面にあり、稼働率・在庫・財務の安全条件を満たすため、能力不足の顕在化前に増設を提案する。`,
@@ -291,14 +416,28 @@ export function buildStandardAiCapexDecision(
     const commonShortfallRatio = requiredRawMaterialUnconstrained / commonCapacity;
     const alreadyPlannedCommon = observation.activeCapexProjectTargets.has("commonProcessing");
     const isBottleneck = commonShortfallRatio > params.capexCurrentShortfallRatioThreshold;
-    if (isBottleneck && sustained && safe && !alreadyPlannedCommon) {
+    // 【2026-08-09・Test16】共通前処理能力への投資は、共通前処理能力の稼働率で判定する
+    // （この設備区分に限っては従来と同じ分母だが、判定経路は商品別と同じ形に揃える）。
+    const commonUtilization = relevantUtilizationFor(observation, "commonProcessing");
+    const commonSustained = sustainedFor(commonUtilization);
+    if (isBottleneck && commonSustained && safe && !alreadyPlannedCommon) {
       proposals.push({ projectType: "commonProcessingExpansion" });
       diagnostics.push({
         code: "CAPEX_PROPOSED",
         domain: "capex",
         companyId: fixture.companyId,
         severity: "info",
-        keyValues: { commonShortfallRatio },
+        keyValues: {
+          ...utilizationKeyValues(commonUtilization),
+          commonShortfallRatio,
+          financialGate: safe ? 1 : 0,
+          inventoryGate: 1,
+          ongoingProjectGate: alreadyPlannedCommon ? 0 : 1,
+          shortfallGate: isBottleneck ? 1 : 0,
+          sustainedGate: 1,
+          finalDecision: 1,
+        },
+        decisionSummary: `共通前処理能力の増設を提案（共通前処理稼働率 ${(commonUtilization.utilization * 100).toFixed(1)}%）`,
         message: "共通原料処理能力が持続的なボトルネックのため、増設案件を提案する。",
       });
     } else if (isBottleneck) {
@@ -307,7 +446,17 @@ export function buildStandardAiCapexDecision(
         domain: "capex",
         companyId: fixture.companyId,
         severity: "info",
-        keyValues: { commonShortfallRatio },
+        keyValues: {
+          ...utilizationKeyValues(commonUtilization),
+          commonShortfallRatio,
+          financialGate: safe ? 1 : 0,
+          inventoryGate: 1,
+          ongoingProjectGate: alreadyPlannedCommon ? 0 : 1,
+          shortfallGate: isBottleneck ? 1 : 0,
+          sustainedGate: commonSustained ? 1 : 0,
+          finalDecision: 0,
+        },
+        decisionSummary: `共通前処理能力の増設を見送り（共通前処理稼働率 ${(commonUtilization.utilization * 100).toFixed(1)}%）`,
         message: "共通原料処理能力は今期不足だが、持続性・財務健全性のいずれかの条件を満たさないため増設を見送る。",
       });
     }

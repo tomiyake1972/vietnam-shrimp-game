@@ -27,6 +27,7 @@ export const STANDARD_AI_REASON_CATEGORY: Readonly<Record<string, AdjustmentCate
   HIRING_FOR_SUSTAINED_SHORTAGE: "labor",
   HEADCOUNT_REDUCED_FOR_SUSTAINED_EXCESS: "labor",
   CASH_BUFFER_SHORTAGE: "cash_constraint",
+  WORKING_CAPITAL_ASSESSED: "cash_constraint",
   DEBT_REPAYMENT_SURPLUS: "cash_constraint",
   CAPEX_DEFERRED: "other",
   CAPEX_PROPOSED: "other",

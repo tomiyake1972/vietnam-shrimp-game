@@ -99,6 +99,14 @@ interface AuditRow {
   readonly loanApprovedUsd: number | null;
   readonly loanDeniedUsd: number | null;
   readonly borrowingAvailableCapacityUsd: number | null;
+  // 【E2】借入余力の内訳（MASSがなぜ借りられないのかを追跡する）
+  readonly borrowingCollateralBasedLimitUsd: number | null;
+  readonly borrowingEarningsBasedLimitUsd: number | null;
+  readonly borrowingCreditTierCapUsd: number | null;
+  readonly borrowingGrossLimitUsd: number | null;
+  readonly borrowingExistingLoanBalanceUsd: number | null;
+  readonly creditTier: string | null;
+  readonly bindingConstraint: string | null;
   readonly underwritingReasons: readonly string[];
 
   // --- 結果 ---
@@ -252,6 +260,13 @@ function run(): void {
         loanApprovedUsd: n(financing?.underwriting?.approvedAmountUsd),
         loanDeniedUsd: n(financing?.underwriting?.deniedAmountUsd),
         borrowingAvailableCapacityUsd: n(financing?.borrowingCapacity?.availableAdditionalCapacityUsd),
+        borrowingCollateralBasedLimitUsd: n(financing?.borrowingCapacity?.collateralBasedLimitUsd),
+        borrowingEarningsBasedLimitUsd: n(financing?.borrowingCapacity?.earningsBasedLimitUsd),
+        borrowingCreditTierCapUsd: n(financing?.borrowingCapacity?.creditTierCapUsd),
+        borrowingGrossLimitUsd: n(financing?.borrowingCapacity?.grossLimitUsd),
+        borrowingExistingLoanBalanceUsd: n(financing?.borrowingCapacity?.existingLoanBalanceUsd),
+        creditTier: financing?.creditScore ? String((financing.creditScore as { tier?: unknown }).tier ?? "") : null,
+        bindingConstraint: financing?.borrowingCapacity ? String((financing.borrowingCapacity as { bindingConstraint?: unknown }).bindingConstraint ?? "") : null,
         underwritingReasons: (financing?.underwriting?.reasons ?? []).map(String),
 
         rawMaterialInventory: n(summary?.rawMaterialInventory),

@@ -44,6 +44,7 @@ export type StandardAiReasonCode =
   | "HEADCOUNT_REDUCED_FOR_SUSTAINED_EXCESS" // 持続的な過剰人員の縮小
   // --- 資金繰り ---
   | "CASH_BUFFER_SHORTAGE" // 最低現金水準を下回る見込みのため借入
+  | "WORKING_CAPITAL_ASSESSED" // 【Test16】短期運転資金（原料調達・人件費・買掛・元利返済 vs 現金・売掛回収）の評価
   | "DEBT_REPAYMENT_SURPLUS" // 現金余剰のため任意期限前返済
   // --- 設備投資 ---
   | "CAPEX_DEFERRED" // 設備投資を見送り（既定の正常な結果）
@@ -123,6 +124,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "HIRING_FOR_SUSTAINED_SHORTAGE",
   "HEADCOUNT_REDUCED_FOR_SUSTAINED_EXCESS",
   "CASH_BUFFER_SHORTAGE",
+  "WORKING_CAPITAL_ASSESSED",
   "DEBT_REPAYMENT_SURPLUS",
   "CAPEX_DEFERRED",
   "CAPEX_PROPOSED",
