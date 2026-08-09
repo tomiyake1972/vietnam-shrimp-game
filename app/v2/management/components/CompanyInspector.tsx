@@ -17,6 +17,7 @@ import { SimulationAnalyticsDataset } from "../../../lib/v2/companyLab/simulatio
 import { companySnapshot } from "../../../lib/v2/companyLab/simulation/analytics/views";
 import { BOTTLENECK_LABELS } from "../../../lib/v2/companyLab/simulation/analytics/types";
 import { CompanyStrategyDocument, resolveStrategyAtTurn } from "../../../lib/v2/companyLab/strategyProfile/types";
+import { Collapsible } from "./Collapsible";
 
 interface Props {
   readonly dataset: SimulationAnalyticsDataset;
@@ -39,12 +40,25 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/** 常に開いたまま見せる小さなブロック（会社の基本情報だけ）。 */
+function AlwaysSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-md border border-slate-700 bg-slate-900/50 p-2.5">
       <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-300">{title}</h3>
       {children}
     </section>
+  );
+}
+
+/**
+ * 詳細セクションは既定で閉じる。
+ * 32Q を回す操作と分析画面への移動を最優先し、Console 起動直後に情報を積み上げない。
+ */
+function Section({ title, children, testId }: { title: string; children: React.ReactNode; testId?: string }) {
+  return (
+    <Collapsible title={title} testId={testId}>
+      {children}
+    </Collapsible>
   );
 }
 
@@ -83,15 +97,15 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
         <p className="text-sm text-slate-400">会社が見つかりません。</p>
       ) : (
         <>
-          <Section title="会社">
+          <AlwaysSection title="会社">
             <p className="text-sm font-semibold text-slate-100">{fixture.displayName}</p>
             <p className="mt-0.5 text-xs text-slate-400">
               archetype: {fixture.archetype} / 表示中: {latestTurn === null ? "実績なし" : `Turn ${latestTurn}`}
             </p>
             <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{fixture.description}</p>
-          </Section>
+          </AlwaysSection>
 
-          <Section title="Mission / Vision">
+          <Section title="Mission / Vision" testId="inspector-mission-toggle">
             <dl>
               <Row label="Mission" value={strategyDocs[selectedCompanyId]?.mission || "（未設定）"} />
               <Row label="Vision" value={strategyDocs[selectedCompanyId]?.vision || "（未設定）"} />
@@ -101,7 +115,7 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
             </p>
           </Section>
 
-          <Section title="Strategy Profile（表示のみ・AI判断へ未接続）">
+          <Section title="Strategy Profile（表示のみ・AI判断へ未接続）" testId="inspector-strategy-toggle">
             {strategy === null ? (
               <p className="text-xs text-slate-400">未設定</p>
             ) : (
@@ -122,7 +136,7 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
             </p>
           </Section>
 
-          <Section title="財務">
+          <Section title="財務" testId="inspector-finance-toggle">
             <dl>
               <Row label="Revenue" value={money(snapshot?.get("revenue"))} />
               <Row label="Operating Profit" value={money(snapshot?.get("operatingProfit"))} />
@@ -132,7 +146,7 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
             </dl>
           </Section>
 
-          <Section title="操業">
+          <Section title="操業" testId="inspector-operations-toggle">
             <dl>
               <Row
                 label="Sales Headcount"
@@ -145,7 +159,7 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
             </dl>
           </Section>
 
-          <Section title="ボトルネック">
+          <Section title="ボトルネック" testId="inspector-bottleneck-toggle">
             {bottleneck === null ? (
               <p className="text-xs text-slate-400">まだ実績がありません。</p>
             ) : (
@@ -160,7 +174,7 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
             )}
           </Section>
 
-          <Section title="Standard AI 状況診断（実行時に記録した値）">
+          <Section title="Standard AI 状況診断（実行時に記録した値）" testId="inspector-diagnosis-toggle">
             {diagnosed === null ? (
               <p className="text-xs text-slate-400">診断の記録がありません。</p>
             ) : (
@@ -179,7 +193,7 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
             )}
           </Section>
 
-          <Section title="Standard AI 主要意思決定（実際に提出した値）">
+          <Section title="Standard AI 主要意思決定（実際に提出した値）" testId="inspector-decision-toggle">
             {decided === null ? (
               <p className="text-xs text-slate-400">意思決定の記録がありません。</p>
             ) : (
@@ -195,7 +209,7 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
             )}
           </Section>
 
-          <Section title="判断根拠（Standard AI が付けた理由コード）">
+          <Section title="判断根拠（Standard AI が付けた理由コード）" testId="inspector-reasons-toggle">
             {constrained === null || constrained.items.filter((i) => i.value === undefined && i.text !== undefined).length === 0 ? (
               <p className="text-[11px] text-slate-500">記録なし</p>
             ) : (

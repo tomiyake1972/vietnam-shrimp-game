@@ -1,11 +1,11 @@
-// ShrimpX V2 — 32Q Analysis（Phase 1 は shell + Overview のみ）
+// ShrimpX V2 — Analysis Home（分析の索引。詳細グラフは各専用URLへ）
 
-import { AnalysisShell } from "./AnalysisShell";
+import { AnalysisHome } from "./AnalysisHome";
 
 export const metadata = {
-  title: "ShrimpX Analysis | 32Q",
+  title: "ShrimpX Analysis Home | 32Q",
 };
 
-export default function AnalysisPage() {
-  return <AnalysisShell />;
+export default function AnalysisHomePage() {
+  return <AnalysisHome />;
 }

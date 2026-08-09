@@ -21,6 +21,11 @@ import {
   SalesTraceFact,
   SIMULATION_ANALYTICS_SCHEMA_VERSION,
   SimulationAnalyticsDataset,
+  ContributionFact,
+  FixedCostFact,
+  FixedCostComponentKey,
+  FixedCostDetailKey,
+  SalesAllocationFact,
 } from "./types";
 import { AiTraceFact } from "./types";
 import { SimulationAiTurnTrace, buildAiTraceFacts } from "./aiTrace";
@@ -347,6 +352,108 @@ export function buildInvestmentTraceFacts(history: readonly CompanyQuarterRecord
 }
 
 // ---------------------------------------------------------------------
+// 5b. 限界利益・固定費・営業配置
+// ---------------------------------------------------------------------
+
+/**
+ * 会社×商品の限界利益。
+ * **独自式を作らない** — finance が既に出した contributionMargin.byProduct を写すだけ。
+ * 記録が無い会社・四半期は行を作らない（推測配賦をしない）。
+ */
+export function buildContributionFacts(history: readonly CompanyQuarterRecord[], companyIds: readonly string[]): readonly ContributionFact[] {
+  const facts: ContributionFact[] = [];
+  for (const record of history) {
+    for (const companyId of companyIds) {
+      const report = record.financialResults?.find((f) => f.companyId === companyId)?.contributionMargin;
+      if (!report) continue;
+      for (const product of PRODUCTS) {
+        const entry = report.byProduct.find((e) => e.key === product);
+        if (!entry) continue;
+        facts.push({
+          turn: record.turn,
+          companyId,
+          product,
+          netRevenue: num(entry.netRevenue),
+          variableCost: num(entry.variableCost),
+          contributionMargin: num(entry.contributionMargin),
+          // engine は純売上高0のとき undefined を返す。0で埋めない。
+          contributionMarginRatio: entry.contributionMarginRatio === undefined ? null : num(entry.contributionMarginRatio),
+          directFixedCost: num(entry.directFixedCost),
+        });
+      }
+    }
+  }
+  return facts;
+}
+
+/**
+ * 固定費。正式な3区分＋合計と、`ManufacturingCostBreakdown` に実在する内訳項目のみ。
+ * 費用分類を新しく作らない。
+ */
+export function buildFixedCostFacts(history: readonly CompanyQuarterRecord[], companyIds: readonly string[]): readonly FixedCostFact[] {
+  const facts: FixedCostFact[] = [];
+  for (const record of history) {
+    for (const companyId of companyIds) {
+      const fin = record.financialResults?.find((f) => f.companyId === companyId);
+      if (!fin) continue;
+      const report = fin.contributionMargin;
+      const push = (component: FixedCostComponentKey | FixedCostDetailKey, value: number | null) => {
+        if (value === null) return;
+        facts.push({ turn: record.turn, companyId, component, value });
+      };
+      if (report) {
+        push("fixedManufacturingCost", num(report.fixedManufacturingCost));
+        push("fixedPersonnelCost", num(report.fixedPersonnelCost));
+        push("fixedSellingAdminCost", num(report.fixedSellingAdminCost));
+        push("totalFixedCost", num(report.totalFixedCost));
+      }
+      const mc = fin.manufacturingCost;
+      if (mc) {
+        push("factoryFixedCost", num(mc.factoryFixedCost));
+        push("utilityFixedCost", num(mc.utilityFixedCost));
+        push("depreciationCost", num(mc.depreciationCost));
+        push("regularLaborCost", num(mc.regularLaborCost));
+      }
+    }
+  }
+  return facts;
+}
+
+/**
+ * 会社×市場の営業人員配置。
+ * 同一市場内の全商品は同じ人数を共有する規約（sales/salesForce.ts が検証済み）なので
+ * 市場ごとに1回だけ数える。合計が総人数に満たない分は "UNALLOCATED" として明示する
+ * （UI で辻褄を合わせる補正はしない）。
+ */
+export function buildSalesAllocationFacts(
+  history: readonly CompanyQuarterRecord[],
+  companyIds: readonly string[],
+  salesHeadcountByTurn?: ReadonlyMap<string, number>
+): readonly SalesAllocationFact[] {
+  const facts: SalesAllocationFact[] = [];
+  for (const record of history) {
+    for (const companyId of companyIds) {
+      const decision = record.decisions.find((d) => d.companyId === companyId);
+      if (!decision) continue;
+      const byMarket = new Map<DemandMarketId, number>();
+      for (const plan of decision.salesPlans) byMarket.set(plan.market, plan.salesForceHeadcount);
+      let allocated = 0;
+      for (const market of DEMAND_MARKET_IDS) {
+        const headcount = byMarket.get(market) ?? 0;
+        allocated += headcount;
+        facts.push({ turn: record.turn, companyId, market, headcount });
+      }
+      // 総人数はこの四半期に配分可能だった人数（前期末までに確定した人数）。
+      const total = salesHeadcountByTurn?.get(`${record.turn}:${companyId}`);
+      if (total !== undefined) {
+        facts.push({ turn: record.turn, companyId, market: "UNALLOCATED", headcount: Math.max(0, total - allocated) });
+      }
+    }
+  }
+  return facts;
+}
+
+// ---------------------------------------------------------------------
 // 6. dataset 全体
 // ---------------------------------------------------------------------
 
@@ -357,7 +464,7 @@ export interface BuildDatasetInput {
   readonly aiTurnTraces: readonly SimulationAiTurnTrace[];
   /** 各ターンで実際に公開されていた観測需要。 */
   readonly observedDemand: readonly ObservedDemandSnapshot[];
-  /** `${turn}:${companyId}` → 期末営業人員。 */
+  /** `${turn}:${companyId}` → 当期に配分可能だった営業人員数。 */
   readonly salesHeadcountByTurn?: ReadonlyMap<string, number>;
   /** `${turn}:${companyId}` → 期末実効能力。 */
   readonly capacityByTurn?: ReadonlyMap<string, { readonly hoso: number; readonly pd: number; readonly vap: number; readonly commonProcessing: number }>;
@@ -383,6 +490,9 @@ export function buildSimulationAnalyticsDataset(input: BuildDatasetInput): Simul
     salesTrace: buildSalesTraceFacts(input.history, companyIds, wishes),
     hiringTrace: buildHiringTraceFacts(input.history, companyIds, input.salesHeadcountByTurn),
     investmentTrace: buildInvestmentTraceFacts(input.history, companyIds),
+    contribution: buildContributionFacts(input.history, companyIds),
+    fixedCosts: buildFixedCostFacts(input.history, companyIds),
+    salesAllocation: buildSalesAllocationFacts(input.history, companyIds, input.salesHeadcountByTurn),
   };
 }
 

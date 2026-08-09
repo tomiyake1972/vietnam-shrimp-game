@@ -41,6 +41,8 @@ import { SeriesChart } from "./SeriesChart";
 import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
 import { RunSelector } from "./RunSelector";
+import { Collapsible } from "./Collapsible";
+import { QUICK_NAVIGATION } from "../analysis/catalog";
 
 const SCENARIO_ID = "baseline";
 const DEFAULT_SEED = "management-console-32q";
@@ -297,7 +299,7 @@ export function ManagementConsole() {
               data-testid="analysis-link"
               className="rounded border border-sky-600 px-3 py-1.5 text-sm font-semibold text-sky-300 hover:bg-slate-800"
             >
-              Analysis
+              Analysis Home
             </Link>
           </div>
         </div>
@@ -335,6 +337,22 @@ export function ManagementConsole() {
           ) : null}
         </div>
 
+        {/* Quick Navigation: 主要分析へ1クリックで移動する。
+            通常の <a href> なので Ctrl+Click・中クリック・「新しいタブで開く」がそのまま使える。 */}
+        <nav className="mt-1.5 flex flex-wrap items-center gap-1.5" aria-label="主要分析へのショートカット">
+          <span className="text-[11px] text-slate-400">分析へ:</span>
+          {QUICK_NAVIGATION.map((q) => (
+            <Link
+              key={q.testId}
+              href={view?.run.simulationRunId ? `${q.path}?run=${encodeURIComponent(view.run.simulationRunId)}` : q.path}
+              data-testid={`console-${q.testId}`}
+              className="rounded border border-slate-600 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-slate-800"
+            >
+              {q.label}
+            </Link>
+          ))}
+        </nav>
+
         {isRestoredOnly ? (
           <p className="mt-1 text-[11px] text-amber-300/90" data-testid="restored-note">
             保存済みの Simulation Run を表示しています。保存物には途中状態を含めていないため、
@@ -364,7 +382,11 @@ export function ManagementConsole() {
             emptyMessage="まだデータがありません。ターンを進めてください。"
           />
 
-          {dataset ? <MarketSummary dataset={dataset} /> : null}
+          {dataset ? (
+            <Collapsible title="Market Summary（最新ターンの市場実績）" testId="console-market-summary-toggle">
+              <MarketSummary dataset={dataset} />
+            </Collapsible>
+          ) : null}
 
           <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
             <h2 className="mb-2 text-sm font-semibold">5社サマリー（最新ターン）</h2>

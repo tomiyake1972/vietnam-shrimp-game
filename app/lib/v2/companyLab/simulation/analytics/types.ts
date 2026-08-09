@@ -320,6 +320,101 @@ export interface InvestmentTraceFact {
   readonly note: string | null;
 }
 
+/**
+ * 会社×商品の限界利益（管理会計）。
+ *
+ * 【独自式を作らない】出所は finance/quarterClose.ts が出した
+ * `CompanyFinancialQuarterResult.contributionMargin.byProduct` そのものである。
+ * 商品別の変動費配賦もそこで既に決まっており、analytics 側で推測配賦はしない。
+ * `directFixedCost` は管理会計専用の並行配賦であり、財務会計のCOGSには影響しない。
+ */
+export interface ContributionFact {
+  readonly turn: number;
+  readonly companyId: string;
+  readonly product: Product;
+  readonly netRevenue: number | null;
+  readonly variableCost: number | null;
+  readonly contributionMargin: number | null;
+  /** 純売上高0の四半期は engine 側が undefined を返すため null になる（0で埋めない）。 */
+  readonly contributionMarginRatio: number | null;
+  readonly directFixedCost: number | null;
+}
+
+/**
+ * 固定費の内訳。
+ *
+ * 【勝手な費用分類をしない】区分は `ContributionMarginReport` が持つ正式な3区分
+ * （固定製造費 / 固定人件費 / 固定販管費）と、その合計だけを使う。
+ * さらに細かい内訳（工場固定費・減価償却等）は `ManufacturingCostBreakdown` に
+ * 存在する項目のみを `detail` として持つ。存在しない分類は作らない。
+ */
+export type FixedCostComponentKey =
+  | "fixedManufacturingCost"
+  | "fixedPersonnelCost"
+  | "fixedSellingAdminCost"
+  | "totalFixedCost";
+
+export const FIXED_COST_COMPONENT_KEYS: readonly FixedCostComponentKey[] = [
+  "fixedManufacturingCost",
+  "fixedPersonnelCost",
+  "fixedSellingAdminCost",
+];
+
+export const FIXED_COST_COMPONENT_LABELS: Readonly<Record<FixedCostComponentKey, string>> = {
+  fixedManufacturingCost: "固定製造費",
+  fixedPersonnelCost: "固定人件費（営業・調達）",
+  fixedSellingAdminCost: "固定販管費",
+  totalFixedCost: "固定費合計",
+};
+
+export const FIXED_COST_COMPONENT_COLORS: Readonly<Record<FixedCostComponentKey, string>> = {
+  fixedManufacturingCost: "#3b82f6",
+  fixedPersonnelCost: "#f59e0b",
+  fixedSellingAdminCost: "#a855f7",
+  totalFixedCost: "#e2e8f0",
+};
+
+/** 固定製造費の内訳として `ManufacturingCostBreakdown` に実在する項目のみ。 */
+export type FixedCostDetailKey = "factoryFixedCost" | "utilityFixedCost" | "depreciationCost" | "regularLaborCost";
+
+export const FIXED_COST_DETAIL_KEYS: readonly FixedCostDetailKey[] = [
+  "factoryFixedCost",
+  "utilityFixedCost",
+  "depreciationCost",
+  "regularLaborCost",
+];
+
+export const FIXED_COST_DETAIL_LABELS: Readonly<Record<FixedCostDetailKey, string>> = {
+  factoryFixedCost: "工場固定費",
+  utilityFixedCost: "固定ユーティリティ費",
+  depreciationCost: "減価償却費",
+  regularLaborCost: "正社員労務費（総額）",
+};
+
+export interface FixedCostFact {
+  readonly turn: number;
+  readonly companyId: string;
+  readonly component: FixedCostComponentKey | FixedCostDetailKey;
+  readonly value: number | null;
+}
+
+/**
+ * 会社×市場の営業人員配置。
+ *
+ * 【engine の意味論をそのまま使う】`salesForceHeadcount` は会社×市場の値であり、
+ * 同一市場内の全商品で同じ値を共有する（sales/salesForce.ts が検証している）。
+ * したがって市場ごとに1回だけ数える。engine は「合計配置人数 ≤ 実在人数」だけを
+ * 要求しており、**下回ること（未配置が出ること）は正常**である。
+ * UI で辻褄合わせの補正はせず、差分を `unallocated` として明示する。
+ */
+export interface SalesAllocationFact {
+  readonly turn: number;
+  readonly companyId: string;
+  /** 市場ID、または未配置を表す "UNALLOCATED"。 */
+  readonly market: DemandMarketId | "UNALLOCATED";
+  readonly headcount: number;
+}
+
 /** Simulation Run 1本ぶんの事実表一式。 */
 export interface SimulationAnalyticsDataset {
   readonly schemaVersion: string;
@@ -333,4 +428,7 @@ export interface SimulationAnalyticsDataset {
   readonly salesTrace: readonly SalesTraceFact[];
   readonly hiringTrace: readonly HiringTraceFact[];
   readonly investmentTrace: readonly InvestmentTraceFact[];
+  readonly contribution: readonly ContributionFact[];
+  readonly fixedCosts: readonly FixedCostFact[];
+  readonly salesAllocation: readonly SalesAllocationFact[];
 }

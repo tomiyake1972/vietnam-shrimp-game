@@ -80,9 +80,11 @@ export interface SimulationSession {
    */
   readonly observedDemand: readonly ObservedDemandSnapshot[];
   /**
-   * 【Phase 2】各ターン終了時点の会社別営業人員数。
+   * 【Phase 2】各ターンで**配分可能だった**会社別営業人員数（当期処理前の値）。
    * salesForceHiringState は「現在値」しか持たず四半期記録にも残らないため、
    * ターンごとの値はここで拾わないと後から復元できない（会社数ぶんのスカラーのみ）。
+   * 採用・減員は次の四半期から反映されるため、当期の市場別配置と突き合わせるには
+   * 当期処理前の値でなければならない。
    */
   readonly salesHeadcountByTurn: readonly { readonly turn: number; readonly companyId: string; readonly headcount: number }[];
   /**

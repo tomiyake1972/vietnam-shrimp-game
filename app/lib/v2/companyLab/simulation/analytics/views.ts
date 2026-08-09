@@ -109,6 +109,129 @@ export function toProducerCountrySeries(dataset: SimulationAnalyticsDataset, met
   return [...countries].sort().map((country) => ({ country, points: dataset.turns.map((turn) => ({ turn, value: index.get(`${turn}:${country}`) ?? null })) }));
 }
 
+/** 会社1社について、商品別の限界利益率（%）の推移。 */
+export function toContributionRatioSeriesByProduct(dataset: SimulationAnalyticsDataset, companyId: string): readonly { readonly product: Product; readonly points: readonly SeriesPoint[] }[] {
+  const index = new Map<string, number | null>();
+  for (const f of dataset.contribution) {
+    if (f.companyId !== companyId) continue;
+    index.set(`${f.turn}:${f.product}`, f.contributionMarginRatio);
+  }
+  return (["hoso", "pd", "vap"] as const).map((product) => ({
+    product,
+    points: dataset.turns.map((turn) => {
+      const v = index.get(`${turn}:${product}`);
+      return { turn, value: v === undefined ? null : v };
+    }),
+  }));
+}
+
+/** 1商品について、5社の限界利益率（%）の推移。 */
+export function toContributionRatioSeriesByCompany(dataset: SimulationAnalyticsDataset, product: Product): readonly CompanyMetricSeries[] {
+  const index = new Map<string, number | null>();
+  for (const f of dataset.contribution) {
+    if (f.product !== product) continue;
+    index.set(`${f.turn}:${f.companyId}`, f.contributionMarginRatio);
+  }
+  return dataset.companies.map((c) => ({
+    companyId: c.companyId,
+    displayName: c.displayName,
+    color: c.color,
+    points: dataset.turns.map((turn) => {
+      const v = index.get(`${turn}:${c.companyId}`);
+      return { turn, value: v === undefined ? null : v };
+    }),
+  }));
+}
+
+/** 固定費の指定区分について、5社の推移。 */
+export function toFixedCostSeriesByCompany(dataset: SimulationAnalyticsDataset, component: string): readonly CompanyMetricSeries[] {
+  const index = new Map<string, number | null>();
+  for (const f of dataset.fixedCosts) {
+    if (f.component !== component) continue;
+    index.set(`${f.turn}:${f.companyId}`, f.value);
+  }
+  return dataset.companies.map((c) => ({
+    companyId: c.companyId,
+    displayName: c.displayName,
+    color: c.color,
+    points: dataset.turns.map((turn) => ({ turn, value: index.get(`${turn}:${c.companyId}`) ?? null })),
+  }));
+}
+
+/** 会社1社について、固定費区分ごとの推移（内訳表示用）。 */
+export function toFixedCostSeriesByComponent(
+  dataset: SimulationAnalyticsDataset,
+  companyId: string,
+  components: readonly string[]
+): readonly { readonly component: string; readonly points: readonly SeriesPoint[] }[] {
+  const index = new Map<string, number | null>();
+  for (const f of dataset.fixedCosts) {
+    if (f.companyId !== companyId) continue;
+    index.set(`${f.turn}:${f.component}`, f.value);
+  }
+  return components.map((component) => ({
+    component,
+    points: dataset.turns.map((turn) => ({ turn, value: index.get(`${turn}:${component}`) ?? null })),
+  }));
+}
+
+/** 会社1社について、市場別の営業人員配置（未配置を含む）の推移。 */
+export function toSalesAllocationSeries(
+  dataset: SimulationAnalyticsDataset,
+  companyId: string
+): readonly { readonly market: string; readonly points: readonly SeriesPoint[] }[] {
+  const markets: string[] = [];
+  const index = new Map<string, number>();
+  for (const f of dataset.salesAllocation) {
+    if (f.companyId !== companyId) continue;
+    if (!markets.includes(f.market)) markets.push(f.market);
+    index.set(`${f.turn}:${f.market}`, f.headcount);
+  }
+  return markets.map((market) => ({
+    market,
+    points: dataset.turns.map((turn) => {
+      const v = index.get(`${turn}:${market}`);
+      return { turn, value: v === undefined ? null : v };
+    }),
+  }));
+}
+
+/**
+ * 営業人員の突き合わせ。
+ * 市場別配置の合計＋未配置が、当期に配分可能だった総人数と一致するかを検証する。
+ * **UI 側で補正はしない** — 一致しないターンがあれば、そのまま差分を返す。
+ */
+export interface SalesAllocationReconciliation {
+  readonly turn: number;
+  readonly companyId: string;
+  readonly allocated: number;
+  readonly unallocated: number | null;
+  readonly total: number | null;
+  readonly matches: boolean;
+}
+
+export function reconcileSalesAllocation(dataset: SimulationAnalyticsDataset, companyId?: string): readonly SalesAllocationReconciliation[] {
+  const totals = new Map<string, number>();
+  for (const f of dataset.companyMetrics) {
+    if (f.metric === "salesHeadcount" && f.value !== null) totals.set(`${f.turn}:${f.companyId}`, f.value);
+  }
+  const rows: SalesAllocationReconciliation[] = [];
+  for (const company of dataset.companies) {
+    if (companyId !== undefined && company.companyId !== companyId) continue;
+    for (const turn of dataset.turns) {
+      const facts = dataset.salesAllocation.filter((f) => f.companyId === company.companyId && f.turn === turn);
+      if (facts.length === 0) continue;
+      const allocated = facts.filter((f) => f.market !== "UNALLOCATED").reduce((s, f) => s + f.headcount, 0);
+      const unallocatedFact = facts.find((f) => f.market === "UNALLOCATED");
+      const unallocated = unallocatedFact ? unallocatedFact.headcount : null;
+      const total = totals.get(`${turn}:${company.companyId}`) ?? null;
+      const matches = total === null || unallocated === null ? false : Math.abs(allocated + unallocated - total) < 1e-9;
+      rows.push({ turn, companyId: company.companyId, allocated, unallocated, total, matches });
+    }
+  }
+  return rows;
+}
+
 /** 律速ヒートマップ（行＝会社、列＝ターン）。 */
 export interface BottleneckHeatmapRow {
   readonly companyId: string;

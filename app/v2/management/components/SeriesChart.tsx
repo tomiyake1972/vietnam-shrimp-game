@@ -81,11 +81,14 @@ export function SeriesChart({ title, series, totalTurns, unitLabel, highlightKey
             <line x1={PAD.left} x2={W - PAD.right} y1={zeroY} y2={zeroY} stroke="#64748b" strokeWidth={1.5} strokeDasharray="4 3" />
           ) : null}
 
-          {[1, Math.ceil(totalTurns / 2), totalTurns].map((t) => (
-            <text key={t} x={x(t)} y={H - 8} textAnchor="middle" className="fill-slate-400" fontSize={11}>
-              Q{t}
-            </text>
-          ))}
+          {/* Q ラベルは間引く（32本すべては描かない）。4Qごと＝年ごとに1本。 */}
+          {Array.from({ length: totalTurns }, (_, i) => i + 1)
+            .filter((t) => t === 1 || t === totalTurns || t % 4 === 0)
+            .map((t) => (
+              <text key={t} x={x(t)} y={H - 8} textAnchor="middle" className="fill-slate-400" fontSize={10}>
+                Q{t}
+              </text>
+            ))}
 
           {series.map((s) => {
             const pts = s.points.filter((p): p is { turn: number; value: number } => p.value !== null);
@@ -93,16 +96,24 @@ export function SeriesChart({ title, series, totalTurns, unitLabel, highlightKey
             const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.turn).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
             const dim = highlightKey !== null && highlightKey !== s.key;
             return (
-              <path
-                key={s.key}
-                d={d}
-                fill="none"
-                stroke={s.color}
-                strokeWidth={dim ? 1.2 : 2.4}
-                strokeDasharray={s.dashed ? "6 4" : undefined}
-                opacity={dim ? 0.35 : 1}
-                strokeLinejoin="round"
-              />
+              <g key={s.key}>
+                <path
+                  d={d}
+                  fill="none"
+                  stroke={s.color}
+                  strokeWidth={dim ? 1.2 : 2.4}
+                  strokeDasharray={s.dashed ? "6 4" : undefined}
+                  opacity={dim ? 0.35 : 1}
+                  strokeLinejoin="round"
+                />
+                {/* tooltip: 各点に当たり判定を置き、ブラウザ標準のツールチップで値を出す
+                    （追加のチャートライブラリ・独自オーバーレイを増やさない） */}
+                {pts.map((p) => (
+                  <circle key={p.turn} cx={x(p.turn)} cy={y(p.value)} r={5} fill="transparent" opacity={0}>
+                    <title>{`${s.label} / Q${p.turn}: ${format(p.value)} ${unitLabel}`}</title>
+                  </circle>
+                ))}
+              </g>
             );
           })}
         </svg>

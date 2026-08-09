@@ -193,9 +193,19 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
         state: nextState,
         aiTurnTraces: [...session.aiTurnTraces, ...turnTraces],
         observedDemand: observedSnapshot ? [...session.observedDemand, observedSnapshot] : session.observedDemand,
+        // 【時点に注意】採用・減員は次の四半期から反映される規約のため、
+        // 当期の市場別配置と突き合わせるべきなのは「当期に配分可能だった人数」＝
+        // 当期処理**前**の値である。処理後の値を使うと、採用した四半期だけ
+        // 配置合計と総人数が食い違って見えてしまう。
         salesHeadcountByTurn: [
           ...session.salesHeadcountByTurn,
-          ...(nextState.salesForceHiringState?.companies ?? []).map((c) => ({ turn, companyId: c.companyId, headcount: c.headcount })),
+          ...session.fixtures.map((f) => ({
+            turn,
+            companyId: f.companyId,
+            headcount:
+              session.state.salesForceHiringState?.companies.find((c) => c.companyId === f.companyId)?.headcount ??
+              f.salesForceHeadcountTotal,
+          })),
         ],
         capacityByTurn: [...session.capacityByTurn, ...captureCapacities(turn, nextState, session.fixtures)],
         run: {
