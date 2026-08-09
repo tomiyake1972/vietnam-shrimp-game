@@ -49,6 +49,13 @@ export const STANDARD_AI_PROPOSABLE_CAPEX_TYPES: readonly CapitalProjectType[] =
   "pdLineExpansion",
   "vapLineExpansion",
   "commonProcessingExpansion",
+  // 【2026-08-09・Vision駆動の戦略成長】新工場建設を Standard AI の候補へ追加した。
+  // ただし提案の判断は**このモジュールでは行わない**。既存増設が「今期このラインが
+  // 足りるか」という戦術判断であるのに対し、新工場は Vision との規模ギャップから
+  // 出発する戦略判断であり、decision/newFactory.ts が専用の評価ゲート群を持つ。
+  // ここは「Standard AI が提案しうる種別の唯一の一覧」としての定数であるため、
+  // 監査・AI Analysis Pack が実態と食い違わないよう追加している。
+  "newFactoryConstruction",
 ];
 
 export interface CapexPlanResult {

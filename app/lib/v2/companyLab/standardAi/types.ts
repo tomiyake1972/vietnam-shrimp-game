@@ -214,6 +214,24 @@ export interface StandardAiObservation {
    */
   readonly availableBorrowingHeadroomUsd?: number;
 
+  // --- 工場・スペース（【2026-08-09・Vision駆動成長】新工場判断に必要な観測） ---
+  /**
+   * 現在実在する工場数（稼働開始済みの新設工場を含む＝computeEffectiveFactories基準）。
+   * **factoryCount を 3 等へ決め打ちしない。** 常にこの観測値を使う。
+   */
+  readonly factoryCount: number;
+  /** 1社あたりの工場数上限（capex/factoryConstruction.ts の唯一の情報源をそのまま観測へ載せる）。 */
+  readonly maxFactoriesPerCompany: number;
+  /** 承認済み〜完成済みの新工場建設案件のうち、まだ稼働開始していないもの（取消を除く）の件数。 */
+  readonly pendingNewFactoryProjectCount: number;
+  /** 「将来的に何工場になりうるか」（現在の工場数＋未稼働の新工場案件）。 */
+  readonly prospectiveFactoryCount: number;
+  /** 既存工場の総スペース（production/factorySpace.ts の導出関数をそのまま使用）。 */
+  readonly factorySpaceTotalUnits: number;
+  readonly factorySpaceUsedUnits: number;
+  /** 既存工場内に残っている増設余地。新工場より既存増設を先に検討すべきかの判断材料。 */
+  readonly factorySpaceRemainingUnits: number;
+
   // --- 設備投資 ---
   readonly activeCapexProjectTargets: ReadonlySet<Product | "commonProcessing" | "freezingPackaging" | "coldStorage">;
   /** 【SAI-5F】資金難で中断中（suspended）の自社設備投資案件ID（projectId昇順。

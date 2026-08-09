@@ -256,9 +256,12 @@ test("PACK-14: Standard AI が提案しうる投資種別が、コード上の�
   const context = buildContext(buildStored(2));
   assert.deepEqual([...context.standardAiProposableCapexTypes], [...STANDARD_AI_PROPOSABLE_CAPEX_TYPES]);
   assert.deepEqual([...context.gameCapexTypes], [...CAPITAL_PROJECT_TYPES]);
-  // 新工場建設はゲームに存在するが、Standard AI の提案対象には含まれない。
+  // 【2026-08-09・Vision駆動の戦略成長で変更】新工場建設は Standard AI の提案対象に
+  // なった（decision/newFactory.ts の戦略評価を経る）。以前はゲームには存在するが
+  // Standard AI からは構造的に一度も提案されない種別であり、この差自体が Pack の
+  // 監査対象だった。定数が実態と一致していることをここで固定する。
   assert.ok(context.gameCapexTypes.includes("newFactoryConstruction"));
-  assert.ok(!context.standardAiProposableCapexTypes.includes("newFactoryConstruction"));
+  assert.ok(context.standardAiProposableCapexTypes.includes("newFactoryConstruction"));
 });
 
 test("PACK-15: 新工場を建てなかった理由を追うための項目が揃っている", () => {

@@ -48,6 +48,10 @@ import { SALES_PARAMETERS_V1 } from "../../sales/parameters";
 import { computeTargetScaleBand } from "./targetScale";
 import { computeTargetCapability } from "./targetCapability";
 import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "./strategicIntent";
+import { defaultVisionDocumentFor } from "../vision/defaults";
+import { resolveVisionAtTurn, CompanyVision } from "../vision/types";
+import { computeStrategicGrowthState, StrategicGrowthState } from "../vision/strategicGrowth";
+import { evaluateNewFactoryDecision, NewFactoryAssessment } from "./decision/newFactory";
 
 // 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
 // 診断情報にこれまで捨てていた圧力スコア(pressures)と、当四半期の意思決定
@@ -88,6 +92,15 @@ export interface StandardAiQuarterDiagnostics {
    */
   readonly situationDiagnosis?: StandardAiSituationDiagnosis;
   readonly currentPeriodDeliveryDemand?: CurrentPeriodDeliveryDemand;
+  /**
+   * 【2026-08-09新設・Vision駆動の戦略成長】その四半期に有効だった Vision と、
+   * 志に対する現在地（strategic scale gap / growth pressure）。
+   * Vision が与えられていない会社では undefined（架空の Vision を作らない）。
+   */
+  readonly vision?: CompanyVision;
+  readonly strategicGrowth?: StrategicGrowthState;
+  /** 新工場を検討した結果（提案しなかった場合も、どのゲートで止まったかを保持する）。 */
+  readonly newFactoryAssessment?: NewFactoryAssessment;
 }
 
 /**
@@ -229,6 +242,34 @@ export function generateStandardAiDecisionWithDiagnostics(
     approxVariableCostUsdPerTon,
   });
 
+  // 【2026-08-09新設・Vision駆動の戦略成長】会社の「志」（Vision）を外から与え、
+  // その志と現在地の差（strategic scale gap）から成長圧力を測る。
+  //
+  // 【役割分担】Vision を決めるのは人間の経営者であり、Standard AI ではない。
+  // Standard AI はここで成長目標を発明せず、与えられた志に対する遅れへ反応するだけ。
+  // 未来の TRUE WORLD は computeStrategicGrowthState の引数に存在しない。
+  const visionDocument = defaultVisionDocumentFor(fixture.companyId);
+  const vision: CompanyVision | null = visionDocument ? resolveVisionAtTurn(visionDocument, turn) : null;
+  const strategicGrowth: StrategicGrowthState | null = vision
+    ? computeStrategicGrowthState({
+        vision,
+        turn,
+        currentSustainableScaleTons: targetScaleResult.currentSustainableScaleTons,
+      })
+    : null;
+
+  // 【新工場は既存増設とは別の判断】既存の capex.ts（今期このラインが足りるか）とは
+  // 独立した戦略評価を行う。提案しなかった場合も理由コードを必ず残す。
+  const newFactoryResult = evaluateNewFactoryDecision({
+    fixture,
+    observation,
+    pressures,
+    vision,
+    strategicGrowth,
+    productionNeededByProductBeforeCap: productionResult.neededByProduct,
+    existingExpansionProposedThisQuarter: capexResult.capexDecision.newProjectProposals.length > 0,
+  });
+
   const salesForceHiringResult = buildStandardAiSalesForceHiringDecision({
     fixture,
     observation,
@@ -255,7 +296,16 @@ export function generateStandardAiDecisionWithDiagnostics(
     productionPlans: productionResult.productionPlans,
     workerAssignments: laborResult.workerAssignments,
     financingRequest: financingResult.financingRequest,
-    capexDecision: capexResult.capexDecision,
+    // 【新工場の提案を既存 capex 提案と同じ意思決定へ合流させる】
+    // 既存増設の提案内容は一切変更せず、新工場ぶんを末尾へ足すだけにする
+    // （既存の設備投資判断の挙動を変えない）。
+    capexDecision:
+      newFactoryResult.proposals.length > 0
+        ? {
+            ...capexResult.capexDecision,
+            newProjectProposals: [...capexResult.capexDecision.newProjectProposals, ...newFactoryResult.proposals],
+          }
+        : capexResult.capexDecision,
   };
 
   const strategicTargetScaleDiagnostic: StandardAiDiagnosticEntry = {
@@ -295,6 +345,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     strategicTargetScaleDiagnostic,
     ...targetCapabilityResult.diagnostics,
     ...salesForceHiringResult.diagnostics,
+    ...newFactoryResult.diagnostics,
   ];
 
   return {
@@ -309,6 +360,9 @@ export function generateStandardAiDecisionWithDiagnostics(
       currentPeriodDeliveryDemand: deliveryDemandResult.deliveryDemand,
       decision,
       salesWishByMarketProduct: salesResult.salesWishByMarketProduct,
+      ...(vision ? { vision } : {}),
+      ...(strategicGrowth ? { strategicGrowth } : {}),
+      newFactoryAssessment: newFactoryResult.assessment,
     },
   };
 }

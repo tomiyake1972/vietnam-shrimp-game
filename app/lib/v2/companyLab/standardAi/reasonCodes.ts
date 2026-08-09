@@ -100,7 +100,24 @@ export type StandardAiReasonCode =
   | "FUTURE_CAPEX_SUPPORTS_TARGET_SCALE" // 現在の実効生産能力はTarget Scaleに届かないが、稼働中の設備投資案件がありその不足を将来解消する見込み
   | "SALES_HIRING_LIMITED_BY_TARGET_SCALE" // Target Scale帯の上限相当の販売量に既に達しているため、限界利益が正でもこれ以上の営業採用を提案しない
   | "SALES_HIRING_DEFERRED_UNTIL_CAPACITY_EXPANSION" // 生産能力側がTarget Scaleに届いておらず、かつ近い将来の設備拡張の見込みも無いため、営業採用をTarget Scale方向へ進めることを見送る
-  | "FINANCEABLE_SCALE_BELOW_STRATEGIC_TARGET"; // Target Scale自体は維持しつつ、現在の資金体力から見た現実的な規模はそれを下回ると診断する
+  | "FINANCEABLE_SCALE_BELOW_STRATEGIC_TARGET" // Target Scale自体は維持しつつ、現在の資金体力から見た現実的な規模はそれを下回ると診断する
+  // --- 【2026-08-09新設】Vision駆動の戦略成長・新工場判断 ---
+  // 【重要】ここは「建てた理由」だけでなく「建てなかった理由」も等しく記録する。
+  // 見送りは異常ではなく、経営判断としての正常な結果である。
+  | "VISION_GROWTH_GAP" // Visionの参照成長軌道に対して現在の持続可能規模が不足している
+  | "VISION_ON_TRACK" // Visionの参照成長軌道に対して遅れていない（成長投資を急ぐ理由が無い）
+  | "GROWTH_PRESSURE_HIGH" // 志に対する遅れが大きく、成長投資を検討する段階にある
+  | "GROWTH_PRESSURE_LOW" // 志に対する遅れが小さく、成長投資を検討する段階にない
+  | "NEW_FACTORY_MONITORING" // 新工場は候補として認識しているが、まだ検討段階に入っていない
+  | "NEW_FACTORY_CONSIDERING" // 新工場を具体的に検討している（一部ゲート未充足）
+  | "NEW_FACTORY_PROPOSED" // 新工場建設を提案した
+  | "NEW_FACTORY_DEFERRED_FINANCE" // 資金・財務健全性の条件を満たさないため新工場を見送り
+  | "NEW_FACTORY_DEFERRED_MARKET" // 需要・受注の裏づけが不足するため新工場を見送り
+  | "NEW_FACTORY_DEFERRED_LABOR" // 労働力の裏づけが不足するため新工場を見送り
+  | "NEW_FACTORY_DEFERRED_RAW" // 原料供給の裏づけが不足するため新工場を見送り
+  | "NEW_FACTORY_DEFERRED_EXISTING_SPACE" // 既存工場にまだ増設余地があるため新工場を見送り
+  | "NEW_FACTORY_DEFERRED_EXISTING_EXPANSION" // 既存増設で当面のgapを埋められるため新工場を見送り
+  | "NEW_FACTORY_NOT_NEEDED"; // Visionに対して規模が足りており、新工場を必要としない
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -173,6 +190,20 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "SALES_HIRING_LIMITED_BY_TARGET_SCALE",
   "SALES_HIRING_DEFERRED_UNTIL_CAPACITY_EXPANSION",
   "FINANCEABLE_SCALE_BELOW_STRATEGIC_TARGET",
+  "VISION_GROWTH_GAP",
+  "VISION_ON_TRACK",
+  "GROWTH_PRESSURE_HIGH",
+  "GROWTH_PRESSURE_LOW",
+  "NEW_FACTORY_MONITORING",
+  "NEW_FACTORY_CONSIDERING",
+  "NEW_FACTORY_PROPOSED",
+  "NEW_FACTORY_DEFERRED_FINANCE",
+  "NEW_FACTORY_DEFERRED_MARKET",
+  "NEW_FACTORY_DEFERRED_LABOR",
+  "NEW_FACTORY_DEFERRED_RAW",
+  "NEW_FACTORY_DEFERRED_EXISTING_SPACE",
+  "NEW_FACTORY_DEFERRED_EXISTING_EXPANSION",
+  "NEW_FACTORY_NOT_NEEDED",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

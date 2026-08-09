@@ -15,8 +15,11 @@ import { PeriodV2 } from "../../core/period";
 import { unwrapUsd } from "../../finance/types";
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../types";
 import { findFactoryRegularHeadcount } from "../workforce";
-import { computeCapacityEffectForCompany, isCapexProjectOperationalAt } from "../../capex/capacityEffect";
+import { isCapexProjectOperationalAt } from "../../capex/capacityEffect";
+import { computeEffectiveFactories, MAX_FACTORIES_PER_COMPANY } from "../../capex/factoryConstruction";
+import { isActiveStatus } from "../../capex/projectLifecycle";
 import { calculateFactoryEffectiveCapacity } from "../../production/capacity";
+import { computeFactoryUsedSpaceUnits, FACTORY_SPACE_PARAMETERS_V1, resolveFactoryTotalSpaceUnits } from "../../production/factorySpace";
 import { computeLoanQuarterlyInterest, computeScheduledPrincipalDue } from "../../financing/loanSchedule";
 import { FactoryObservation, MarketObservationEntry, ProductAmount, StandardAiObservation, zeroProductAmount } from "./types";
 
@@ -126,10 +129,17 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
   // 同じ規則で観測へ反映する。従来は静的fixtureの能力のみを観測していたため、
   // 増設が完成してもAIは旧能力を分母に使い続け、同じボトルネックを恒久的に
   // 再提案し得た（判断根拠と実際のエンジン能力の食い違い）。
-  // エンジン側と同じく「その会社の最初の工場（factoryId昇順）」へ加算する。
-  const capexEffect = computeCapacityEffectForCompany(ownState.capexState.portfolio.projects, period);
-  const firstFactoryId = [...fixture.factories].map((f) => f.factoryId).sort()[0];
-  return fixture.factories.map((f) => {
+  //
+  // 【2026-08-09・Vision駆動成長】この算出を capex/factoryConstruction.ts の
+  // computeEffectiveFactories（runner.ts・simulation engine・AI Analysis Pack が
+  // 使うのと同一の関数）へ置き換える。従来はここでライン増設ぶんだけを手計算で
+  // 主工場へ加算していたため、**稼働開始した新工場（newFactoryConstruction）が
+  // Standard AI からは一切見えなかった**。新工場を Standard AI の候補にする以上、
+  // 建てた工場が観測に現れないままでは「建てても能力が増えていないと認識し続ける」
+  // という致命的な不整合になる。加算規則（主工場へ寄せる・HOSO能力の上限）は
+  // エンジン本体と完全に同一になり、この層で能力を再計算しない。
+  const effectiveFactories = computeEffectiveFactories(fixture.factories, { companies: [ownState.capexState] }, period);
+  return effectiveFactories.map((f) => {
     const baseline = fixture.workerBaseline.find((w) => w.factoryId === f.factoryId);
     const currentRegularHeadcount =
       findFactoryRegularHeadcount({ companies: [ownState.workforceState] }, fixture.companyId, f.factoryId) ?? baseline?.regularHeadcount ?? 0;
@@ -139,12 +149,11 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
         skillByProduct[s.product] = unwrapUnit(s.skillLevel);
       }
     }
-    const isMainFactory = f.factoryId === firstFactoryId;
-    const nominalHoso = unwrapUnit(f.hosoCapacity) + (isMainFactory ? capexEffect.hoso : 0);
-    const nominalPd = unwrapUnit(f.pdCapacity) + (isMainFactory ? capexEffect.pd : 0);
-    const nominalVap = unwrapUnit(f.vapCapacity) + (isMainFactory ? capexEffect.vap : 0);
-    const nominalCommon = unwrapUnit(f.commonProcessingCapacity) + (isMainFactory ? capexEffect.commonProcessing : 0);
-    const nominalFreezing = unwrapUnit(f.freezingPackagingCapacity) + (isMainFactory ? capexEffect.freezingPackaging : 0);
+    const nominalHoso = unwrapUnit(f.hosoCapacity);
+    const nominalPd = unwrapUnit(f.pdCapacity);
+    const nominalVap = unwrapUnit(f.vapCapacity);
+    const nominalCommon = unwrapUnit(f.commonProcessingCapacity);
+    const nominalFreezing = unwrapUnit(f.freezingPackagingCapacity);
 
     // 【2026-08-02・能力認識監査対応】上のcapacityByProduct/commonProcessingCapacity/
     // freezingPackagingCapacityは「名目能力」（capex加算後、稼働率・設備利用可能率は
@@ -237,6 +246,19 @@ function activeCapexTargets(ownState: CompanyOwnState, period: PeriodV2): Readon
   return targets;
 }
 
+/**
+ * まだ稼働開始していない新工場建設案件の件数（取消を除く）。
+ * 「もう1つ建て始めてよいか」を判断するための観測であり、ここで上限判定はしない。
+ */
+function pendingNewFactoryProjectCount(ownState: CompanyOwnState, period: PeriodV2): number {
+  return ownState.capexState.portfolio.projects.filter(
+    (p) =>
+      p.projectType === "newFactoryConstruction" &&
+      (isActiveStatus(p.status) || p.status === "completed") &&
+      !isCapexProjectOperationalAt(p, period)
+  ).length;
+}
+
 export function buildStandardAiObservation(
   fixture: CompanyFixture,
   ownState: CompanyOwnState,
@@ -246,6 +268,17 @@ export function buildStandardAiObservation(
 ): StandardAiObservation {
   const factories = buildFactoryObservations(fixture, ownState, period);
   const lastMarketResult = publicInfo.lastMarketResult;
+
+  // 【2026-08-09・Vision駆動成長】工場スペースは production/factorySpace.ts の
+  // 既存の導出関数だけで算出する（この層で新しいスペース計算式を作らない）。
+  const effectiveFactories = computeEffectiveFactories(fixture.factories, { companies: [ownState.capexState] }, period);
+  let factorySpaceTotalUnits = 0;
+  let factorySpaceUsedUnits = 0;
+  for (const f of effectiveFactories) {
+    factorySpaceTotalUnits += resolveFactoryTotalSpaceUnits(f, FACTORY_SPACE_PARAMETERS_V1);
+    factorySpaceUsedUnits += computeFactoryUsedSpaceUnits(f, FACTORY_SPACE_PARAMETERS_V1);
+  }
+  const pendingNewFactories = pendingNewFactoryProjectCount(ownState, period);
 
   return {
     companyId: fixture.companyId,
@@ -342,6 +375,14 @@ export function buildStandardAiObservation(
     ),
     // availableBorrowingHeadroomUsd: 意図的に未設定（undefined）。ファイル冒頭の
     // types.tsコメント参照（捏造しない）。
+
+    factoryCount: effectiveFactories.length,
+    maxFactoriesPerCompany: MAX_FACTORIES_PER_COMPANY,
+    pendingNewFactoryProjectCount: pendingNewFactories,
+    prospectiveFactoryCount: effectiveFactories.length + pendingNewFactories,
+    factorySpaceTotalUnits,
+    factorySpaceUsedUnits,
+    factorySpaceRemainingUnits: factorySpaceTotalUnits - factorySpaceUsedUnits,
 
     activeCapexProjectTargets: activeCapexTargets(ownState, period),
     // 【SAI-5F】中断中案件（projectId昇順の決定論的順序。resume提案の対象）。
