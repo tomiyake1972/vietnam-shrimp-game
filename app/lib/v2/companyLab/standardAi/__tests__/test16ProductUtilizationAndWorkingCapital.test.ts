@@ -337,3 +337,66 @@ test("Test16-FIN-追加: 運転資金が不足しているときは任意期限�
   assert.ok((r.workingCapital?.projectedWorkingCapitalGapUsd ?? 0) > 0, "この設定では運転資金が不足しているはず");
   assert.equal(r.financingRequest.desiredPrepaymentUsd, 0, "運転資金不足なのに期限前返済しようとしている");
 });
+
+// ---------------------------------------------------------------------
+// capex現金ゲート（投資額連動方式）
+// ---------------------------------------------------------------------
+
+/** 必要現金 = 最低現金バッファ + 投資額 × (1 + capexCostSafetyRatio) */
+function requiredCashFor(costUsd: number, ratio: number, targetMinimumCashUsd = 30_000_000): number {
+  return targetMinimumCashUsd + costUsd * (1 + ratio);
+}
+
+test("Test16-GATE-1: 現金ゲートは投資額に連動し、旧方式より緩いが投資後もバッファを割らない", () => {
+  const cost = CAPEX_PARAMETERS_V1.templatesByType.hosoLineExpansion.standardBudgetUsd;
+  const ratio = STANDARD_AI_PARAMETERS_V1.capexCostSafetyRatio;
+  const required = requiredCashFor(cost, ratio);
+
+  // 旧方式（30M × 1.75 = 52.5M）より緩い。
+  assert.ok(required < 30_000_000 * STANDARD_AI_PARAMETERS_V1.capexCashSafetyMultiple, `required=${required}`);
+  // それでも「投資後に最低現金バッファを割らない」を必ず満たす。
+  assert.ok(required - cost >= 30_000_000, "投資後に最低現金バッファを割る水準になっている");
+});
+
+test("Test16-GATE-2: 必要現金ちょうど超なら投資し、下回れば見送る", () => {
+  const cost = CAPEX_PARAMETERS_V1.templatesByType.hosoLineExpansion.standardBudgetUsd;
+  const required = requiredCashFor(cost, STANDARD_AI_PARAMETERS_V1.capexCostSafetyRatio);
+
+  const above = capex(observation({ cashUsd: required + 1_000_000 }), pressures());
+  assert.ok(
+    above.capexDecision.newProjectProposals.some((p) => p.projectType === "hosoLineExpansion"),
+    "必要現金を上回っているのに投資しない"
+  );
+
+  const below = capex(observation({ cashUsd: required - 1_000_000 }), pressures());
+  assert.ok(
+    !below.capexDecision.newProjectProposals.some((p) => p.projectType === "hosoLineExpansion"),
+    "必要現金を下回っているのに投資している"
+  );
+  const d = hosoDiagnostic(below);
+  assert.equal(d!.keyValues!.financialGateCashSafe, 0);
+  // 借入余力・財務健全性のゲートは維持されており、落ちたのは現金条件だと分かる。
+  assert.equal(d!.keyValues!.financialGateBorrowingSafe, 1);
+});
+
+test("Test16-GATE-3: 旧方式は投資額と無関係に会社規模だけで必要現金を決める", () => {
+  const legacy = { ...STANDARD_AI_PARAMETERS_V1, capexCashGateMode: "legacyMultiple" as const };
+  const cash = requiredCashFor(8_000_000, 0.5) + 1_000_000; // 新方式なら投資できる水準
+  const r = buildStandardAiCapexDecision(fixture, observation({ cashUsd: cash }), pressures(), HOSO_SHORTFALL, 10000, legacy);
+  assert.ok(
+    !r.capexDecision.newProjectProposals.some((p) => p.projectType === "hosoLineExpansion"),
+    "旧方式でも投資できてしまっており、方式の差が出ていない"
+  );
+  const d = r.diagnostics.find((x) => x.decisionSummary?.startsWith("HOSO"));
+  assert.equal(d!.keyValues!.financialGateRequiredCashUsd, 30_000_000 * STANDARD_AI_PARAMETERS_V1.capexCashSafetyMultiple);
+});
+
+test("Test16-GATE-4: 借入圧力が高い場合は現金が足りていても投資しない（既存ゲート維持）", () => {
+  const cost = CAPEX_PARAMETERS_V1.templatesByType.hosoLineExpansion.standardBudgetUsd;
+  const cash = requiredCashFor(cost, STANDARD_AI_PARAMETERS_V1.capexCostSafetyRatio) + 10_000_000;
+  const r = capex(observation({ cashUsd: cash }), pressures({ borrowingPressure: 1.2 }));
+  assert.ok(!r.capexDecision.newProjectProposals.some((p) => p.projectType === "hosoLineExpansion"));
+  const d = hosoDiagnostic(r);
+  assert.equal(d!.keyValues!.financialGateCashSafe, 1);
+  assert.equal(d!.keyValues!.financialGateBorrowingSafe, 0);
+});

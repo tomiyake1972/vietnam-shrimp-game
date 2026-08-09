@@ -137,6 +137,22 @@ export interface StandardAiParameters {
   readonly capexCurrentShortfallRatioThreshold: number;
   /** 設備投資後も安全に維持できる現金の、最低バッファに対する倍率（これ未満なら見送り）。 */
   readonly capexCashSafetyMultiple: number;
+  /**
+   * 【Test16】設備投資の現金ゲートの方式。
+   *   "costBased"      … 最低現金バッファ ＋ 投資額 ＋ 投資額×capexCostSafetyRatio
+   *   "legacyMultiple" … 最低現金バッファ × capexCashSafetyMultiple（旧方式）
+   * 旧方式は投資額と無関係に会社規模だけで必要現金を決めるため、
+   * 8M USDの投資に45〜60M USDの現金保有を要求していた。
+   */
+  readonly capexCashGateMode: "costBased" | "legacyMultiple";
+  /**
+   * 【Test16】投資額に対する追加安全余裕の比率（costBasedのときのみ使用）。
+   * 「投資後に最低現金バッファを割らない」ぶん（投資額そのもの）は
+   * この比率とは別に必ず確保するため、必要現金は
+   *   targetMinimumCash + cost × (1 + capexCostSafetyRatio)
+   * となる。
+   */
+  readonly capexCostSafetyRatio: number;
   /** 借入残高が会社規模推定に対してこの比率を超えたら、財務健全性を理由にcapexを見送る。 */
   readonly capexMaxLoanToSizeRatio: number;
 
@@ -248,6 +264,8 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   capexSustainedUtilizationThreshold: 0.92,
   capexCurrentShortfallRatioThreshold: 1.05,
   capexCashSafetyMultiple: 1.75,
+  capexCashGateMode: "costBased",
+  capexCostSafetyRatio: 0.5,
   capexMaxLoanToSizeRatio: 1.5,
 
   expectedAquacultureHarvestRatio: 0.9,

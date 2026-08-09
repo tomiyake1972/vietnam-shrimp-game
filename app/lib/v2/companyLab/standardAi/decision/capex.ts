@@ -18,6 +18,7 @@
 // 「無理に対応しない。SAI-2引き継ぎ事項として明記する」という判断基準に従う）。
 
 import { CapexDecisionInput, CapexProjectProposalInput, CapitalProjectType } from "../../../capex/types";
+import { CAPEX_PARAMETERS_V1, CapexParameters } from "../../../capex/parameters";
 import { Product } from "../../../market/types";
 import { CompanyFixture } from "../../types";
 import { minimumAcceptablePremium } from "../../premiumPolicy";
@@ -44,18 +45,70 @@ interface FinancialGateDetail {
   readonly cashSafe: boolean;
   readonly borrowingSafe: boolean;
   readonly requiredCashUsd: number;
+  /** 判定対象案件の投資額（legacyMultiple では 0）。 */
+  readonly projectCostUsd: number;
+  /** 投資後に残る現金の見込み（＝現金 − 投資額）。 */
+  readonly cashAfterInvestmentUsd: number;
+}
+
+// ---------------------------------------------------------------------
+// 【2026-08-09・Test16】設備投資の現金ゲートを「投資額に応じた方式」へ
+// ---------------------------------------------------------------------
+//
+// 【旧方式の問題】
+//   requiredCash = targetMinimumCash × capexCashSafetyMultiple(1.75)
+// は投資額と無関係に会社規模だけで必要現金を決めていた。実測では
+// 8M USD の HOSO 増設に対して 45〜60M USD の現金保有を要求しており、
+// 短期運転資金を借りて原料を買う会社とは両立しなかった
+// （持続性条件が成立した11件すべてがこの現金条件で落ちていた）。
+//
+// 【新方式】
+//   requiredCash = targetMinimumCash + 投資額 + 投資額 × capexCostSafetyRatio
+//
+// 第2項（投資額そのもの）は「投資後に最低現金バッファを割らない」という
+// 明示のご指示を満たすために必ず要る。ご指示の式
+//   targetMinimumCash + 投資額 × capexSafetyRatio
+// を字義どおりに取ると、ratio<1 のとき投資直後に現金が
+// 最低バッファを下回ってしまい、同じご指示の後半と矛盾する
+// （HOSO増設は paymentRatios=[1.0] で全額が単一四半期に出るため）。
+// そこで「バッファを割らないぶん」と「追加安全余裕」を分けて足す形にした。
+// capexCostSafetyRatio が純粋に『追加の余裕』を表すため、
+// 0.25 と 0.50 の比較も意味を持つ。
+
+/** 投資案件1件の標準予算（＝この四半期に出ていく現金）。 */
+function projectCostUsdFor(projectType: CapitalProjectType, capexParams: CapexParameters): number {
+  return capexParams.templatesByType[projectType]?.standardBudgetUsd ?? 0;
 }
 
 /**
  * 設備投資の財務ゲート。
- * 【2026-08-09・Test16】判定結果だけでなく内訳（現金・借入圧力のどちらで落ちたか）も
- * 返す。従来は safe:0 としか残らず、「なぜ投資しないのか」を説明できなかった。
+ * 【2026-08-09・Test16】判定結果だけでなく内訳（現金・借入圧力のどちらで落ちたか、
+ * 必要現金がいくらか）も返す。従来は safe:0 としか残らず説明できなかった。
+ *
+ * 借入余力・財務健全性のゲート（borrowingPressure < 1）は変更していない。
  */
-function cashAndBorrowingSafe(observation: StandardAiObservation, pressures: PressureScores, params: StandardAiParameters): FinancialGateDetail {
-  const requiredCashUsd = pressures.targetMinimumCashUsd * params.capexCashSafetyMultiple;
+function cashAndBorrowingSafe(
+  observation: StandardAiObservation,
+  pressures: PressureScores,
+  params: StandardAiParameters,
+  projectType: CapitalProjectType | undefined,
+  capexParams: CapexParameters
+): FinancialGateDetail {
+  const projectCostUsd = projectType !== undefined ? projectCostUsdFor(projectType, capexParams) : 0;
+  const requiredCashUsd =
+    params.capexCashGateMode === "legacyMultiple"
+      ? pressures.targetMinimumCashUsd * params.capexCashSafetyMultiple
+      : pressures.targetMinimumCashUsd + projectCostUsd * (1 + params.capexCostSafetyRatio);
   const cashSafe = observation.cashUsd > requiredCashUsd;
   const borrowingSafe = pressures.borrowingPressure < 1;
-  return { safe: cashSafe && borrowingSafe, cashSafe, borrowingSafe, requiredCashUsd };
+  return {
+    safe: cashSafe && borrowingSafe,
+    cashSafe,
+    borrowingSafe,
+    requiredCashUsd,
+    projectCostUsd,
+    cashAfterInvestmentUsd: observation.cashUsd - projectCostUsd,
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -130,15 +183,17 @@ export function buildStandardAiCapexDecision(
   pressures: PressureScores,
   productionNeededByProductBeforeCap: ProductAmount,
   requiredRawMaterialUnconstrained: number,
-  params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1
+  params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
+  capexParams: CapexParameters = CAPEX_PARAMETERS_V1
 ): CapexPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const proposals: CapexProjectProposalInput[] = [];
   // 【監査指摘H】PD_CAPACITY_MAINTAINED の判定材料（VAP転換へ追随しなかったか）。
   let vapOversupplyRetreated = false;
   let vapGrowthSignalPresent = false;
-  const financialGate = cashAndBorrowingSafe(observation, pressures, params);
-  const safe = financialGate.safe;
+  /** 投資対象ごとの財務ゲート（必要現金が投資額に依存するため案件別に判定する）。 */
+  const financialGateFor = (projectType: CapitalProjectType) =>
+    cashAndBorrowingSafe(observation, pressures, params, projectType, capexParams);
   // 【2026-08-09・Test16】持続性判定は投資対象設備ごとに行う（下の各分岐で算出）。
   // hadPriorQuarterUtilization は「前四半期の操業実績が存在するか」の判定にのみ使う
   // （turn1では前期実績が無いため、いかなる設備区分でも持続性は成立しない）。
@@ -147,16 +202,18 @@ export function buildStandardAiCapexDecision(
     hasPriorQuarter && u.utilization >= params.capexSustainedUtilizationThreshold;
 
   /** B3: 「何の設備の何%を見たか」を必ず説明できるようにする共通keyValues。 */
-  const utilizationKeyValues = (u: RelevantUtilization): Record<string, number> => ({
+  const utilizationKeyValues = (u: RelevantUtilization, gate: FinancialGateDetail): Record<string, number> => ({
     relevantCapacity: u.capacity,
     relevantActualProduction: u.actualProduction,
     relevantUtilization: u.utilization,
     sustainedThreshold: params.capexSustainedUtilizationThreshold,
     hadPriorQuarter: hasPriorQuarter ? 1 : 0,
     // 財務ゲートの内訳（safe:0 だけでは現金不足か借入過多か分からないため）。
-    financialGateCashSafe: financialGate.cashSafe ? 1 : 0,
-    financialGateBorrowingSafe: financialGate.borrowingSafe ? 1 : 0,
-    financialGateRequiredCashUsd: financialGate.requiredCashUsd,
+    financialGateCashSafe: gate.cashSafe ? 1 : 0,
+    financialGateBorrowingSafe: gate.borrowingSafe ? 1 : 0,
+    financialGateRequiredCashUsd: gate.requiredCashUsd,
+    projectCostUsd: gate.projectCostUsd,
+    cashAfterInvestmentUsd: gate.cashAfterInvestmentUsd,
     cashUsd: observation.cashUsd,
     borrowingPressure: pressures.borrowingPressure,
     // 旧方式（共通前処理能力を分母にした会社全体の稼働率）。新旧の差を追跡できるよう残す。
@@ -223,6 +280,9 @@ export function buildStandardAiCapexDecision(
     // common(30,000t)の稼働率ではなく、HOSOならHOSOラインの稼働率を見る。
     const utilization = relevantUtilizationFor(observation, product);
     const sustained = sustainedFor(utilization);
+    // 財務ゲートはこの商品のライン増設案件の投資額で判定する。
+    const gate = financialGateFor(LINE_EXPANSION_BY_PRODUCT[product]);
+    const safe = gate.safe;
 
     if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned) {
       proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product] });
@@ -232,7 +292,7 @@ export function buildStandardAiCapexDecision(
         companyId: fixture.companyId,
         severity: "info",
         keyValues: {
-          ...utilizationKeyValues(utilization),
+          ...utilizationKeyValues(utilization, gate),
           shortfallRatio,
           effectiveShortfallThreshold,
           productThresholdBias,
@@ -257,7 +317,7 @@ export function buildStandardAiCapexDecision(
         companyId: fixture.companyId,
         severity: "info",
         keyValues: {
-          ...utilizationKeyValues(utilization),
+          ...utilizationKeyValues(utilization, gate),
           shortfallRatio,
           effectiveShortfallThreshold,
           productThresholdBias,
@@ -297,7 +357,7 @@ export function buildStandardAiCapexDecision(
           companyId: fixture.companyId,
           severity: "info",
           keyValues: {
-            ...utilizationKeyValues(utilization),
+            ...utilizationKeyValues(utilization, gate),
             lifecycleTrendPerQuarter: trend,
             trendThreshold,
             growthEntryUtilizationThreshold: params.capexGrowthEntryUtilizationThreshold,
@@ -319,10 +379,17 @@ export function buildStandardAiCapexDecision(
   // 通常capexと同じ安全水準（目標バッファ×capexCashSafetyMultiple）を回復した
   // 場合に再開を提案する（従来は再開経路が無く、中断案件がCIPに現金を固定した
   // ままデッドロックし得た。Fable事前監査で特定）。
+  //
+  // 【2026-08-09・Test16】再開判断は「その案件の残額」を観測できないため、
+  // 新規提案の投資額ベースゲートを適用できない。上のコメントどおり
+  // 従来の「目標バッファ×capexCashSafetyMultiple」を維持する
+  // （再開は資金難で中断した案件が対象であり、保守的側に倒すのが妥当）。
+  const resumeCashSafe =
+    observation.cashUsd > pressures.targetMinimumCashUsd * params.capexCashSafetyMultiple && pressures.borrowingPressure < 1;
   const resumeRequests: { readonly projectId: string }[] = [];
   if (ext) {
     for (const projectId of observation.suspendedCapexProjectIds ?? []) {
-      if (safe) {
+      if (resumeCashSafe) {
         resumeRequests.push({ projectId });
         diagnostics.push({
           code: "CAPEX_RESUME_PROPOSED",
@@ -420,6 +487,8 @@ export function buildStandardAiCapexDecision(
     // （この設備区分に限っては従来と同じ分母だが、判定経路は商品別と同じ形に揃える）。
     const commonUtilization = relevantUtilizationFor(observation, "commonProcessing");
     const commonSustained = sustainedFor(commonUtilization);
+    const commonGate = financialGateFor("commonProcessingExpansion");
+    const safe = commonGate.safe;
     if (isBottleneck && commonSustained && safe && !alreadyPlannedCommon) {
       proposals.push({ projectType: "commonProcessingExpansion" });
       diagnostics.push({
@@ -428,7 +497,7 @@ export function buildStandardAiCapexDecision(
         companyId: fixture.companyId,
         severity: "info",
         keyValues: {
-          ...utilizationKeyValues(commonUtilization),
+          ...utilizationKeyValues(commonUtilization, commonGate),
           commonShortfallRatio,
           financialGate: safe ? 1 : 0,
           inventoryGate: 1,
@@ -447,7 +516,7 @@ export function buildStandardAiCapexDecision(
         companyId: fixture.companyId,
         severity: "info",
         keyValues: {
-          ...utilizationKeyValues(commonUtilization),
+          ...utilizationKeyValues(commonUtilization, commonGate),
           commonShortfallRatio,
           financialGate: safe ? 1 : 0,
           inventoryGate: 1,
