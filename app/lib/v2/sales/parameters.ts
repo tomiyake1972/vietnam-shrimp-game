@@ -9,6 +9,7 @@
 
 import { Score0to100, score0to100 } from "../core/units";
 import { Product } from "../market/types";
+import type { SalesCapacityModel } from "./salesCapacityModel";
 
 export interface SalesParameters {
   readonly parametersVersion: string;
@@ -73,6 +74,13 @@ export interface SalesParameters {
    * （PDはHOSOに近く、VAPだけが大幅に営業負荷が高い、という設計意図）。
    */
   readonly salesEffortCoefficients: Readonly<Record<Product, number>>;
+
+  /**
+   * 【Phase 6B・比較用】営業能力モデル。
+   * 未指定なら現行の "perMarket"（市場ごとに飽和曲線を独立適用）と完全に同一。
+   * 正式モデルはまだ決めていない（#04 §16）。
+   */
+  readonly salesCapacityModel?: SalesCapacityModel;
 
   // --- 成約競争力の合成ウェイト（合計1.0を推奨） ---
   readonly competitivenessWeights: {

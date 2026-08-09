@@ -32,6 +32,7 @@ import { DemandMarketId, Product } from "../market/types";
 import { HosoEqTons, hosoEqTons, roundHosoEqTons, unwrapUnit } from "../core/units";
 import { SalesParameters } from "./parameters";
 import { processingCapacity } from "./salesForce";
+import { computeMarketSalesCapacities } from "./salesCapacityModel";
 import { CompanyId, CompanySalesPlanEntry, SalesValidationError } from "./types";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
@@ -64,9 +65,16 @@ export interface MarketSalesEffortResult {
 export function computeMarketSalesEffort(
   headcount: number,
   desiredQuantityByProduct: Readonly<Record<Product, number>>,
-  params: SalesParameters
+  params: SalesParameters,
+  /**
+   * 【Phase 6B】この市場が使える営業工数能力を外から与える。
+   * 会社全体モデル（sales/salesCapacityModel.ts）では、能力は市場単位ではなく
+   * 会社単位で決まるため、呼び出し側が配分済みの値を渡す。
+   * 未指定なら従来どおり processingCapacity(headcount) を使う（挙動不変）。
+   */
+  capacityOverrideHosoEqTons?: number
 ): MarketSalesEffortResult {
-  const capacityHosoEqTons = unwrapUnit(processingCapacity(headcount, params));
+  const capacityHosoEqTons = capacityOverrideHosoEqTons ?? unwrapUnit(processingCapacity(headcount, params));
   const desiredEffortWeightedQuantity = salesEffortWeightedQuantity(desiredQuantityByProduct, params);
 
   if (desiredEffortWeightedQuantity <= capacityHosoEqTons + EPSILON || desiredEffortWeightedQuantity <= EPSILON) {
@@ -165,6 +173,31 @@ export function applyMarketSalesEffortCapacity(
   const adjustments: MarketSalesEffortAdjustment[] = [];
   const adjustedGroups = new Map<string, CompanySalesPlanEntry[]>();
 
+  // 【Phase 6B】会社全体モデルでは、市場ごとの能力を会社単位で1回だけ求めて配分する。
+  // perMarket（既定）では undefined のままとなり、従来の経路をそのまま通る。
+  const capacityByGroup = new Map<string, number>();
+  const model = params.salesCapacityModel;
+  if (model && model.kind !== "perMarket") {
+    const byCompany = new Map<CompanyId, CompanySalesPlanEntry[]>();
+    for (const p of plans) {
+      const arr = byCompany.get(p.companyId);
+      if (arr) arr.push(p);
+      else byCompany.set(p.companyId, [p]);
+    }
+    for (const [companyId, entries] of byCompany) {
+      const effortDemandByMarket = new Map<DemandMarketId, number>();
+      const headcountByMarket = new Map<DemandMarketId, number>();
+      for (const e of entries) {
+        const byProduct = effortDemandByMarket.get(e.market) ?? 0;
+        effortDemandByMarket.set(e.market, byProduct + params.salesEffortCoefficients[e.product] * Math.max(0, unwrapUnit(e.desiredQuantity)));
+        headcountByMarket.set(e.market, e.salesForceHeadcount);
+      }
+      const totalHeadcount = [...headcountByMarket.values()].reduce((s2, v) => s2 + v, 0);
+      const capacities = computeMarketSalesCapacities(totalHeadcount, effortDemandByMarket, headcountByMarket, params, model);
+      for (const [market, capacity] of capacities) capacityByGroup.set(`${companyId}::${market}`, capacity);
+    }
+  }
+
   for (const [key, entries] of groups) {
     const headcounts = new Set(entries.map((e) => e.salesForceHeadcount));
     if (headcounts.size > 1) {
@@ -177,7 +210,7 @@ export function applyMarketSalesEffortCapacity(
     const desiredByProduct: Record<Product, number> = { hoso: 0, pd: 0, vap: 0 };
     for (const e of entries) desiredByProduct[e.product] = unwrapUnit(e.desiredQuantity);
 
-    const result = computeMarketSalesEffort(headcount, desiredByProduct, params);
+    const result = computeMarketSalesEffort(headcount, desiredByProduct, params, capacityByGroup.get(key));
     if (result.isConstrained) {
       adjustments.push({
         companyId: entries[0].companyId,

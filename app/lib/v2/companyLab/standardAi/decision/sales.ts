@@ -18,6 +18,7 @@ import { DemandMarketId, Product } from "../../../market/types";
 import { CompanySalesPlanEntry, PlanCostExpectation } from "../../../sales/types";
 import { SalesParameters, SALES_PARAMETERS_V1 } from "../../../sales/parameters";
 import { allocateHeadcountAcrossMarkets, computeMarketSalesEffort, salesEffortWeightedQuantity } from "../../../sales/marketEffort";
+import { computeMarketSalesCapacities } from "../../../sales/salesCapacityModel";
 import { minimumAcceptablePremium, orderQuantityFactor } from "../../premiumPolicy";
 import { CompanyFixture } from "../../types";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
@@ -622,9 +623,23 @@ export function buildStandardAiSalesPlans(
   // 実際の結果」が食い違わない。
   const constrainedMarkets: { market: DemandMarketId; headcount: number; result: ReturnType<typeof computeMarketSalesEffort> }[] = [];
   const adjustedByMarketProduct = new Map<DemandMarketId, Record<Product, number>>();
+  // 【Phase 6B・SSoT】市場ごとの営業能力は sales/salesCapacityModel.ts で1箇所だけ求める。
+  // エンジン側（marketEffort.ts の applyMarketSalesEffortCapacity）と同じ関数を通すため、
+  // AI の説明とエンジン適用後の結果が食い違わない。
+  const capacityByMarket = computeMarketSalesCapacities(
+    observation.salesForceHeadcountTotal,
+    effortDemandByMarket,
+    headcountByMarket,
+    salesParams
+  );
   for (const market of marketsWithDemand) {
     const headcount = headcountByMarket.get(market) ?? 0;
-    const result = computeMarketSalesEffort(headcount, desiredByMarketProduct.get(market)!, salesParams);
+    const result = computeMarketSalesEffort(
+      headcount,
+      desiredByMarketProduct.get(market)!,
+      salesParams,
+      salesParams.salesCapacityModel && salesParams.salesCapacityModel.kind !== "perMarket" ? capacityByMarket.get(market) : undefined
+    );
     adjustedByMarketProduct.set(market, result.adjustedQuantityByProduct as Record<Product, number>);
     if (result.isConstrained) {
       constrainedMarkets.push({ market, headcount, result });
