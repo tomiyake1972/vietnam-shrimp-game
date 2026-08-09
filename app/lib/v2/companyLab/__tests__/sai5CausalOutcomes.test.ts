@@ -19,6 +19,7 @@ import { hosoEqTons, unwrapUnit } from "../../core/units";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState, CompanyQuarterRecord, Sai5FeatureFlags } from "../types";
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../runner";
 import { asSalesShortageCase } from "./_support/salesShortageCase";
+import { asSupplyUnconstrainedFixtures, asSupplyUnconstrainedState, withSufficientRawMaterial } from "./_support/supplyUnconstrainedCase";
 import { generateAutoPolicyDecision } from "../autoPolicy";
 import { STANDARD_AI_PARAMETERS_V1 } from "../standardAi/parameters";
 import { createCompanyLabRuntimeSnapshot, restoreCompanyLabStateFromRuntimeSnapshot } from "../persistence/snapshot";
@@ -55,15 +56,23 @@ function runControlled(
   // ゲームの初期営業人数（60人）では営業がボトルネックにならず、
   // 「営業基盤の差が成約シェアの差を生む」という因果が観測できなくなるため。
   // 保存→復元の一致テストのように営業制約に依存しないものは false のままにする。
-  salesShortageCase = false
+  salesShortageCase = false,
+  // 【Test16 Stage E】供給側（原料・設備・Worker）を誰にとっても制約でない状態にし、
+  // 営業基盤だけを主要な差分にする。商品集中生産効率は有効なままだが、
+  // 全社が同一の供給条件なので会社間の差にはならない。
+  supplyUnconstrainedCase = false
 ): ControlledRun {
-  const { state: initialState, fixtures } = salesShortageCase
-    ? asSalesShortageCase(initializeCompanyLab(cfg))
-    : initializeCompanyLab(cfg);
+  const base = initializeCompanyLab(cfg);
+  const withSales = salesShortageCase ? asSalesShortageCase(base) : base;
+  const fixtures = supplyUnconstrainedCase ? asSupplyUnconstrainedFixtures(withSales.fixtures) : withSales.fixtures;
+  const initialState = supplyUnconstrainedCase ? asSupplyUnconstrainedState(withSales.state, fixtures) : withSales.state;
   let state = initialState;
   const decisions: { turn: number; decision: CompanyDecisionInput }[] = [];
   const salesBaseStateByTurn: (SalesBaseState | undefined)[] = [];
   for (let i = 0; i < quarters && !state.isComplete; i++) {
+    if (supplyUnconstrainedCase) {
+      state = withSufficientRawMaterial(state, fixtures.map((f) => f.companyId), i + 1);
+    }
     salesBaseStateByTurn.push(state.salesBaseState);
     const publicInfo = buildPublicMarketInfo(state);
     const turn = state.scenarioState.currentTurn;
@@ -198,8 +207,18 @@ test("SAI-5因果(1a): 暫定自動方針（Standard AI以外）の経路でも�
   assert.ok(checked > 50, `検証できたセルが少なすぎる（${checked}）`);
 });
 
-test("SAI-5因果(1b): 営業基盤の高い会社ほど、同じ市場×商品での成約シェアが高い（分位点比較）", () => {
-  // 営業基盤の差が成約シェアへ効くことを見るため、営業不足ケースで実行する。
+test("SAI-5因果(1b): 供給制約がbindingしない条件では、営業基盤の高い会社ほど成約獲得力が高い", () => {
+  // 【この命題の前提】営業基盤の差が成約シェアへ効くことを見るため営業不足ケースで実行する。
+  //
+  // 【2026-08-09・Test16 Stage E・実測に基づく重要な注記】
+  // 「供給制約がbindingしない条件へ分離すれば因果が観測できる」という想定で
+  // 供給十分fixture（_support/supplyUnconstrainedCase.ts）を作って試したが、
+  // **因果はかえって弱まった**（集中効果ONで57%、OFFで51%）。
+  // 全社が何でも供給できる世界では、成約配分は価格・品質・顧客信頼が支配し、
+  // 営業基盤の寄与が相対的に小さくなるためである。
+  // すなわち**営業基盤が効くのは供給が制約されている局面**であり、
+  // 供給を潤沢にすることはこの因果の分離手段にならない。
+  // したがって本テストは営業不足ケース（供給制約あり）のまま維持する。
   const run = runControlled(config("causal-1b", QUARTERS, ALL_ON), QUARTERS, concentrateOn("vap", 3), true);
 
   // 市場×商品ごとに「その中で基盤が最上位の会社」と「最下位の会社」の成約シェアを比べる。

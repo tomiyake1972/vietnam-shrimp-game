@@ -159,6 +159,21 @@ export function computeCapacityEffectForCompany(
  *
  * 24,000t = 初期8,000t + 4,000t × 4回（投資総額 32M USD）。
  */
+/**
+ * HOSO加工能力の明示的な上限（トン/四半期）。
+ *
+ * 【重要・変更時の必須確認事項（2026-08-09・Test16 Stage E）】
+ * この値は商品集中生産効率カーブ（production/concentration.ts）と
+ * **数学的に結び付いている**。集中係数に下限を設けていないため、必要Worker総数
+ *   required ∝ quantity × concentrationFactor(quantity)
+ * は上に凸の二次関数になり、HOSOでは 24,000t が頂点になる
+ * （peakLaborQuantityTons("hoso") === 24,000）。
+ * それを超えると「たくさん作るほど必要人数が減る」という逆転領域へ入る。
+ *
+ * 現在は上限と頂点が一致しているため逆転領域へは入らない。
+ * **この上限を24,000tより上へ変更する場合は、集中カーブ（下限の要否・傾き）も
+ * 同時に再設計しなければならない。** 片方だけ変えてはならない。
+ */
 export const MAX_HOSO_CAPACITY_TONS = 24_000;
 
 /**

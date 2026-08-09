@@ -84,7 +84,19 @@ export interface FinancingParameters {
   };
 
   readonly liquidity: {
-    /** 調達（国内買付）に充当してよい、利用可能流動性に対する割合（残りは賃金等の最優先支払に確保）。 */
+    /**
+     * 調達（国内買付）に充当してよい、利用可能流動性に対する割合。
+     *
+     * 【2026-08-09・Test16で 0.6 → 1.0】
+     * 元は「残りは賃金等の最優先支払に確保する」ための留保だったが、
+     * Standard AIの短期運転資金判断（standardAi/decision/workingCapital.ts）が
+     * 給与・買掛・元利返済・最低現金バッファ・売掛回収見込みを既に織り込むように
+     * なったため、同じリスクを二重に手当てする状態になっていた。
+     * 0.6という水準の根拠は導入時の記録が無く、実測でも 1.0 で
+     * 延滞0件・全社の期末現金プラス・debt同水準・信用悪化なしを確認したため
+     * 1.0（実質的に無効化）とした。
+     * 比較実測: artifacts/domesticPurchaseCashRatioComparison.json
+     */
     readonly domesticPurchaseCashAllocationRatio: number;
     /** 支払延滞が重大とみなされる、期日到来債務に対する未払割合の閾値。 */
     readonly severeArrearsRatioThreshold: number;
@@ -154,7 +166,7 @@ export const FINANCING_PARAMETERS_V1: FinancingParameters = {
   },
 
   liquidity: {
-    domesticPurchaseCashAllocationRatio: 0.6,
+    domesticPurchaseCashAllocationRatio: 1.0,
     severeArrearsRatioThreshold: 0.5,
     paymentDefaultConsecutiveQuartersThreshold: 3,
     targetCashBufferMultipleOfFixedCost: 1.0,
