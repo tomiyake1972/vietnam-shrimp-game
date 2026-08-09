@@ -15,7 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CompanyId, CompanySalesPlanEntry } from "../../sales/types";
-import { hosoEqTons, unwrapUnit } from "../../core/units";
+import { hosoEqTons, unwrapUnit, usdPerHosoEqKg, score0to100 } from "../../core/units";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState, CompanyQuarterRecord, Sai5FeatureFlags } from "../types";
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../runner";
 import { asSalesShortageCase } from "./_support/salesShortageCase";
@@ -24,8 +24,11 @@ import { generateAutoPolicyDecision } from "../autoPolicy";
 import { STANDARD_AI_PARAMETERS_V1 } from "../standardAi/parameters";
 import { createCompanyLabRuntimeSnapshot, restoreCompanyLabStateFromRuntimeSnapshot } from "../persistence/snapshot";
 import { lookupSalesBaseScore, SalesBaseState } from "../salesBase";
-import { SALES_PARAMETERS_SAI5_SALES_BASE_V1 } from "../../sales/parameters";
+import { SALES_PARAMETERS_SAI5_SALES_BASE_V1, SALES_PARAMETERS_V1 } from "../../sales/parameters";
+import { allocateMarketProduct, computeCompetitivenessBreakdown, sumCompetitivenessContributions } from "../../sales/allocation";
+import { DEMAND_MARKET_IDS } from "../../market/types";
 import { CompetitivenessWeightBreakdown } from "../../sales/types";
+import { parsePeriod } from "../../core/period";
 
 const ALL_ON: Sai5FeatureFlags = { productLifecycle: true, salesBaseAccumulation: true, supplyPremiumFeedback: true };
 
@@ -207,52 +210,112 @@ test("SAI-5因果(1a): 暫定自動方針（Standard AI以外）の経路でも�
   assert.ok(checked > 50, `検証できたセルが少なすぎる（${checked}）`);
 });
 
-test("SAI-5因果(1b): 供給制約がbindingしない条件では、営業基盤の高い会社ほど成約獲得力が高い", () => {
-  // 【この命題の前提】営業基盤の差が成約シェアへ効くことを見るため営業不足ケースで実行する。
+test("SAI-5因果(1b・pairwise A/B): 他条件を完全に同一にすると、営業基盤が高いほど成約獲得力が高い", () => {
+  // 【この命題が守る因果（2026-08-09・Test16で再設計）】
   //
-  // 【2026-08-09・Test16 Stage E・実測に基づく重要な注記】
-  // 「供給制約がbindingしない条件へ分離すれば因果が観測できる」という想定で
-  // 供給十分fixture（_support/supplyUnconstrainedCase.ts）を作って試したが、
-  // **因果はかえって弱まった**（集中効果ONで57%、OFFで51%）。
-  // 全社が何でも供給できる世界では、成約配分は価格・品質・顧客信頼が支配し、
-  // 営業基盤の寄与が相対的に小さくなるためである。
-  // すなわち**営業基盤が効くのは供給が制約されている局面**であり、
-  // 供給を潤沢にすることはこの因果の分離手段にならない。
-  // したがって本テストは営業不足ケース（供給制約あり）のまま維持する。
-  const run = runControlled(config("causal-1b", QUARTERS, ALL_ON), QUARTERS, concentrateOn("vap", 3), true);
+  //   「同一市場・同一商品・同一価格・同一品質・同一顧客関係・同一納期信頼性・
+  //     同一営業人員のもとで、営業基盤（salesBaseScore）だけを変えると、
+  //     正式ロジック上の成約獲得力（競争力ウェイトと配分量）が期待方向へ動く」
+  //
+  // 【なぜマクロ勝率をやめたか】
+  // 旧命題は「ゲーム全体の市場×商品セルの60%以上で、営業基盤が最上位の会社が
+  // 最下位以上の成約シェアを取る」というマクロ勝率だった。実測（Test16 Stage E）で
+  //   ・元fixture・集中効果OFF → 合格
+  //   ・元fixture・集中効果ON  → 56%
+  //   ・供給十分fixture・ON    → 57%
+  //   ・供給十分fixture・OFF   → 51%
+  // となり、供給を潤沢にするとかえって悪化した。成約配分は価格・品質・顧客信頼・
+  // 供給余力との相互作用で決まるため、単独因果をマクロ勝率で検証するのは不適切である。
+  // 「営業基盤がゲーム全体の成約結果を常に支配する」ことは要求しない。
+  //
+  // 【観測点】sales/allocation.ts の正式ロジックそのもの。
+  //   salesBaseContribution = competitivenessWeights.salesBase × (salesBaseScore / 100)
+  // が合成競争力ウェイトへ入り、それが配分量を決める。これが営業基盤の最も直接的な効果である。
+  const params = SALES_PARAMETERS_SAI5_SALES_BASE_V1;
+  const market = DEMAND_MARKET_IDS[0];
+  const product = "hoso" as const;
+  const basePrice = usdPerHosoEqKg(5.0);
 
-  // 市場×商品ごとに「その中で基盤が最上位の会社」と「最下位の会社」の成約シェアを比べる。
-  // 会社間で基盤が分かれている市場×商品だけを対象にする（前提はguardではなくassertで明示）。
-  //
-  // 【2026-08-09・Test16 Stage E】最終四半期の1断面だけでなく**全四半期**を集計する。
-  // 商品集中生産効率の導入により供給側の条件が四半期ごとに動くようになり、
-  // 1断面（8セル程度）では1セルの入れ替わりで12%動く不安定な指標になっていた。
-  // 判定のしきい値（60%）は変えず、標本数を増やして信号対雑音比を上げている。
-  let comparable = 0;
-  let topWins = 0;
-  for (let t = 0; t < run.history.length; t++) {
-    const stateBefore = run.salesBaseStateByTurn[t];
-    if (!stateBefore) continue;
-    for (const a of run.history[t].salesRecord.allocations) {
-      const total = a.companies.reduce((s2, c) => s2 + unwrapUnit(c.allocatedQuantity), 0);
-      if (total <= 0 || a.companies.length < 2) continue;
-      const withScore = a.companies.map((c) => ({
-        share: unwrapUnit(c.allocatedQuantity) / total,
-        score: lookupSalesBaseScore(stateBefore, c.companyId, a.market, a.product),
-      }));
-      const scores = withScore.map((x) => x.score);
-      if (Math.max(...scores) - Math.min(...scores) < 1e-9) continue; // 基盤が同一なら比較材料にならない
-      comparable += 1;
-      const top = withScore.reduce((x, y) => (y.score > x.score ? y : x));
-      const bottom = withScore.reduce((x, y) => (y.score < x.score ? y : x));
-      if (top.share >= bottom.share) topWins += 1;
-    }
-  }
-  assert.ok(comparable >= 3, `会社間で営業基盤が分かれている市場×商品が${comparable}件しかない（前提不成立）`);
+  /** 営業基盤スコア以外はすべて同一の販売計画。 */
+  const entryWith = (companyId: CompanyId, salesBaseScore: number): CompanySalesPlanEntry => ({
+    companyId,
+    market,
+    product,
+    desiredQuantity: hosoEqTons(10_000),
+    priceAdjustmentUsdPerHosoEqKg: 0,
+    salesForceHeadcount: 30,
+    customerRelationship: score0to100(50),
+    qualityReputation: score0to100(50),
+    deliveryReliability: score0to100(50),
+    salesBaseScore: score0to100(salesBaseScore),
+  });
+
+  const low = entryWith("A_LOW" as CompanyId, 20);
+  const high = entryWith("B_HIGH" as CompanyId, 80);
+
+  // (1) 直接効果: 営業基盤の寄与が高い方で大きい。
+  const breakdownLow = computeCompetitivenessBreakdown(low, basePrice, basePrice, 1, params);
+  const breakdownHigh = computeCompetitivenessBreakdown(high, basePrice, basePrice, 1, params);
   assert.ok(
-    topWins / comparable >= 0.6,
-    `基盤最上位が最下位以上の成約シェアを取った割合が${((topWins / comparable) * 100).toFixed(0)}%（${topWins}/${comparable}、過半に届かない）`
+    breakdownHigh.salesBaseContribution > breakdownLow.salesBaseContribution,
+    `営業基盤の寄与が期待方向でない low=${breakdownLow.salesBaseContribution} high=${breakdownHigh.salesBaseContribution}`
   );
+  // 他の寄与項目は完全に同一（営業基盤だけが差分であることの保証）。
+  assert.equal(breakdownHigh.priceContribution, breakdownLow.priceContribution);
+  assert.equal(breakdownHigh.coverageContribution, breakdownLow.coverageContribution);
+  assert.equal(breakdownHigh.relationshipContribution, breakdownLow.relationshipContribution);
+  assert.equal(breakdownHigh.qualityContribution, breakdownLow.qualityContribution);
+  assert.equal(breakdownHigh.deliveryReliabilityContribution, breakdownLow.deliveryReliabilityContribution);
+
+  // (2) 合成競争力ウェイトも高い方が大きい（寄与が合計へ正しく伝播している）。
+  assert.ok(
+    sumCompetitivenessContributions(breakdownHigh) > sumCompetitivenessContributions(breakdownLow),
+    "営業基盤の差が合成競争力ウェイトへ伝播していない"
+  );
+
+  // (3) 実際の配分でも、高い方の成約量が低い方を上回る。
+  //
+  // 【参加社数について】1社あたりの成約上限は
+  //   shareCap = 対象需要 × maximumSupplierShare
+  // であり、2社だけだと双方が上限に張り付いて競争力の差が配分へ現れない
+  // （＝独占防止の上限が先に効く）。競争力による配分（水位法）が実際に働く
+  // 状況を作るため、中位の会社を1社加えて3社で競わせる。
+  const mid = entryWith("C_MID" as CompanyId, 50);
+  const allocation = allocateMarketProduct(market, product, parsePeriod("2015Q3"), [low, mid, high], basePrice, hosoEqTons(8_000), params);
+  const allocLow = allocation.companies.find((c) => c.companyId === "A_LOW")!;
+  const allocHigh = allocation.companies.find((c) => c.companyId === "B_HIGH")!;
+  assert.ok(
+    unwrapUnit(allocHigh.allocatedQuantity) > unwrapUnit(allocLow.allocatedQuantity),
+    `営業基盤が高い方の成約量が多くない low=${unwrapUnit(allocLow.allocatedQuantity)} high=${unwrapUnit(allocHigh.allocatedQuantity)}`
+  );
+});
+
+test("SAI-5因果(1b補): 営業基盤ウェイトが0なら、営業基盤の差は成約へ一切影響しない", () => {
+  // 「効く」ことの対偶。ウェイト既定0の版では寄与が厳密に0であり、
+  // 営業基盤だけを変えても配分がビット単位で変わらないことを確認する。
+  const market = DEMAND_MARKET_IDS[0];
+  const product = "hoso" as const;
+  const basePrice = usdPerHosoEqKg(5.0);
+  const entryWith = (companyId: CompanyId, salesBaseScore: number): CompanySalesPlanEntry => ({
+    companyId,
+    market,
+    product,
+    desiredQuantity: hosoEqTons(10_000),
+    priceAdjustmentUsdPerHosoEqKg: 0,
+    salesForceHeadcount: 30,
+    customerRelationship: score0to100(50),
+    qualityReputation: score0to100(50),
+    deliveryReliability: score0to100(50),
+    salesBaseScore: score0to100(salesBaseScore),
+  });
+  const a = allocateMarketProduct(
+    market, product, parsePeriod("2015Q3"),
+    [entryWith("A" as CompanyId, 20), entryWith("C" as CompanyId, 50), entryWith("B" as CompanyId, 80)],
+    basePrice, hosoEqTons(8_000), SALES_PARAMETERS_V1
+  );
+  const qa = unwrapUnit(a.companies.find((c) => c.companyId === "A")!.allocatedQuantity);
+  const qb = unwrapUnit(a.companies.find((c) => c.companyId === "B")!.allocatedQuantity);
+  assert.equal(qa, qb, "ウェイト0なのに営業基盤の差が配分を変えている");
 });
 
 // =====================================================================

@@ -74,14 +74,37 @@ test("NFPC-3（on-staffedケース）: 稼働開始後に手動配置したワ�
   assert.ok(producedAny, "on-staffedケースで、稼働開始後に一度も新設Factoryで生産が発生しなかった");
 });
 
-test("NFPC-4（環境ごとの需要・輸入倍率スケーリング）: 倍率が大きい環境ほど、offケースの会社全体設備稼働率（初期数四半期平均）が高くなる（意図どおりの環境構築）", () => {
+test("NFPC-4（環境ごとの需要・輸入倍率スケーリング）: 倍率が大きい環境ほど需要圧力と供給不足圧力が強くなる（意図どおりの環境構築）", () => {
+  // 【観測点を変更した理由（2026-08-09・Test16）】
+  // 旧命題は「倍率が大きい環境ほど会社全体の設備稼働率が高い」だった。しかし
+  // 設備稼働率（＝実生産量 ÷ 共通前処理能力）は原料制約・商品構成・営業・資金・
+  // capacity mix の合成結果であり、需要倍率だけで単調になる保証がない。
+  // 実測でも 環境1=0.255 / 環境2=0.319 / 環境3=0.296 と非単調だった。
+  //
+  // このテストが本来守りたいのは「環境の強弱が意図どおり構築されていること」、
+  // すなわち倍率の上昇が**需要圧力**と**供給不足圧力**を強めることである。
+  // そこで倍率が直接効く指標へ観測点を移す。環境倍率をテスト通過のために
+  // 再校正することはしない。
+  //
+  //   販売希望量        … applyDemandAndImportMultiplier が直接スケールする値（需要圧力）
+  //   設備不足トン数    … その需要に対して設備が応えられなかった量（供給不足圧力）
   const horizonQuarters = 6;
-  const avgEquipUtilByEnv = ENVIRONMENTS.map((env) => {
+  const byEnv = ENVIRONMENTS.map((env) => {
     const rows = runCase({ environment: env, caseType: "off", seed: "test15-newfactory-seed-1", horizonQuarters, diagnosticCashGrantUsd: 0 });
-    return rows.reduce((s, r) => s + r.companyEquipmentUtilizationRate, 0) / rows.length;
+    const avg = (pick: (r: (typeof rows)[number]) => number) => rows.reduce((s, r) => s + pick(r), 0) / rows.length;
+    return {
+      demandPressure: avg((r) => r.salesDesiredQuantityTons),
+      equipmentShortfall: avg((r) => r.companyEquipmentShortfallTons),
+    };
   });
-  assert.ok(avgEquipUtilByEnv[0] <= avgEquipUtilByEnv[1] + 1e-9, "環境1(需要不足)の設備稼働率が環境2(均衡)を上回っている");
-  assert.ok(avgEquipUtilByEnv[1] <= avgEquipUtilByEnv[2] + 1e-9, "環境2(均衡)の設備稼働率が環境3(能力制約)を上回っている");
+
+  // (1) 需要圧力: 倍率どおりに強くなる。
+  assert.ok(byEnv[0].demandPressure < byEnv[1].demandPressure, "環境1(需要不足)の需要圧力が環境2(均衡)以上になっている");
+  assert.ok(byEnv[1].demandPressure < byEnv[2].demandPressure, "環境2(均衡)の需要圧力が環境3(能力制約)以上になっている");
+
+  // (2) 供給不足圧力: 需要が強い環境ほど設備が応えられない量が増える。
+  assert.ok(byEnv[0].equipmentShortfall < byEnv[1].equipmentShortfall, "環境1(需要不足)の設備不足が環境2(均衡)以上になっている");
+  assert.ok(byEnv[1].equipmentShortfall < byEnv[2].equipmentShortfall, "環境2(均衡)の設備不足が環境3(能力制約)以上になっている");
 });
 
 test("NFPC-5（共有デフォルトパラメータの不変性）: 診断用シナリオ構築（需要・輸入倍率スケーリング、現金付与、新設Factoryへの手動ワーカー・生産計画注入）を経ても、PRODUCTION_PARAMETERS_V1・CAPEX_PARAMETERS_V1・FINANCE_PARAMETERS_V1は一切変更されない", () => {

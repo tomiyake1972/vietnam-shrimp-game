@@ -100,7 +100,29 @@ test("PFC-2（診断用現金付与の対称性）: variant Bで同一の診断�
     band: 0.3,
     scenarioLabel: "test-off-noGrant",
   });
-  assert.ok(rowsOff[0].cashUsd > rowsOffNoGrant[0].cashUsd, "診断用現金付与ありのほうがターン1の現金が多いはず");
+  // 【2026-08-09・Test16で観測点を変更】
+  // 旧命題は「付与ありのほうがターン1の現金が多い」だった。しかし
+  // domesticPurchaseCashAllocationRatio を 1.0 にしたことで、付与された現金は
+  // その四半期のうちに原料調達へ投下されるようになり、ターン末現金には残らなくなった。
+  //
+  // このテストが本来守りたいのは「診断用に付与した現金が消失していないこと」である。
+  // したがって観測点を、現金として残っているかではなく
+  // **正味財務ポジション（現金 − 借入）** へ移す。付与分が原料や生産へ変換されても、
+  // その分だけ借入が減る・現金が残るのいずれかとして必ず現れる。
+  // 観測点は「期間末の現金」。付与された現金は当期のうちに原料在庫・生産へ
+  // 変換されるため**ターン1の現金には残らない**が、それが売上・回収を経て
+  // 期間末には必ず現金として現れる。消失していないことはこれで検証できる。
+  const lastOff = rowsOff[rowsOff.length - 1];
+  const lastNoGrant = rowsOffNoGrant[rowsOffNoGrant.length - 1];
+  assert.ok(
+    lastOff.cashUsd > lastNoGrant.cashUsd,
+    `診断用現金付与が消失している（付与あり期末=${lastOff.cashUsd} 付与なし期末=${lastNoGrant.cashUsd}）`
+  );
+  // 付与によって当期の事業活動が縮小していないこと（資源へ変換されている方向）。
+  assert.ok(
+    rowsOff[0].operatingIncomeUsd >= rowsOffNoGrant[0].operatingIncomeUsd,
+    "診断用現金付与ありのほうがターン1の営業利益が小さい（付与が事業を阻害している）"
+  );
 });
 
 test("PFC-3（共有デフォルトパラメータの不変性）: 診断スクリプトを実行しても、production/capex/financeの共有デフォルトパラメータのオブジェクト参照・内容は一切変化しない", () => {

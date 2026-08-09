@@ -14,11 +14,17 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { unwrapUnit } from "../../../lib/v2/core/units";
+import { unwrapUnit, hosoEqTons } from "../../../lib/v2/core/units";
 import { DEMAND_MARKET_IDS } from "../../../lib/v2/market/types";
 import { generateAutoPolicyDecision } from "../../../lib/v2/companyLab/autoPolicy";
-import { runCompanyLabWithAutoPolicyForAllCompanies } from "../../../lib/v2/companyLab/runner";
-import { CompanyLabConfig } from "../../../lib/v2/companyLab/types";
+import {
+  runCompanyLabWithAutoPolicyForAllCompanies,
+  initializeCompanyLab,
+  buildCompanyOwnState,
+  buildPublicMarketInfo,
+  advanceCompanyLabQuarter,
+} from "../../../lib/v2/companyLab/runner";
+import { CompanyLabConfig, CompanyDecisionInput } from "../../../lib/v2/companyLab/types";
 import {
   buildCompanyComparisonRows,
   buildCompetitivenessExplanationRows,
@@ -158,9 +164,39 @@ test("受入確認V-6: 重大品質事故が発生した会社×商品では、h
  * 全ての会社×商品**について不変条件を検証する形へ変更した。
  * Standard AIやcapacityを歪めて無理に0を作ることはしない（指示2）。
  */
+
+/**
+ * VAP加工能力を全社・全工場で0にした専用fixtureで1四半期だけ回す。
+ * VAPは構造的に生産できないため、生産量0の行が必ず存在する。
+ */
+function runWithZeroVapCapacity() {
+  const cfg = baseConfig({ turns: 1 });
+  const { state: initialState, fixtures: baseFixtures } = initializeCompanyLab(cfg);
+  const fixtures = baseFixtures.map((f) => ({
+    ...f,
+    factories: f.factories.map((factory) => ({ ...factory, vapCapacity: hosoEqTons(0) })),
+  }));
+  const publicInfo = buildPublicMarketInfo(initialState);
+  const decisions: Record<string, CompanyDecisionInput> = {};
+  for (const fixture of fixtures) {
+    const ownState = buildCompanyOwnState(initialState, fixture);
+    decisions[fixture.companyId] = generateAutoPolicyDecision(fixture, ownState, publicInfo, initialState.currentPeriod, 1);
+  }
+  const next = advanceCompanyLabQuarter(initialState, fixtures, decisions);
+  return next.history[0];
+}
+
 test("受入確認V-7: 生産量が0の商品では誤った品質事故検出をしない（hasProduction=false・事故0・回収率undefined）", () => {
-  const result = runAllAuto(baseConfig({ turns: 1 }));
-  const record = result.history[0];
+  // 【専用fixtureへ分離した理由（2026-08-09・Test16）】
+  // 以前は「turn1では偶然VAP等の生産が0になる」というゲーム初期条件に依存していた。
+  // 段階Cの能力再設計、および domesticPurchaseCashAllocationRatio を1.0にして
+  // 原料が回るようになった結果、turn1でも全商品が生産されるようになり、
+  // 検証対象そのものが消えた。
+  //
+  // このテストが守るのは「生産量0の行で誤検出しない」ことであって、
+  // 「初期条件で何かが0になる」ことではない。そこで**VAP能力を0にした専用fixture**を
+  // 与え、生産量0を構造的に保証する。ゲームの初期値がこの先どう変わっても壊れない。
+  const record = runWithZeroVapCapacity();
 
   let zeroProductionRowCount = 0;
   for (const companyId of ["BAL", "MASS", "JPQ", "VAP", "CONSV"] as const) {
@@ -188,7 +224,7 @@ test("受入確認V-7: 生産量が0の商品では誤った品質事故検出�
   // turn1で生産0の商品が存在しなくなった場合は、能力設計が変わった合図なので気づけるようにする。
   assert.ok(
     zeroProductionRowCount > 0,
-    "turn1に生産量0の会社×商品が1件も無い。このテストが検証対象を失っている（能力設計の変更を確認すること）"
+    "VAP能力を0にしたのに生産量0の会社×商品が1件も無い（専用fixtureが効いていない）"
   );
 });
 

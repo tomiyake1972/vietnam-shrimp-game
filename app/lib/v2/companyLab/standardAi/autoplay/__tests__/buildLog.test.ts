@@ -227,7 +227,18 @@ test("buildAutoplayCaseLogs: paymentDefaultが発生した後の四半期でも�
       quarters: 8,
       companyIds: ["BAL"],
       candidate,
-      salesForceHeadcountOverride: 600,
+      // 【2026-08-09・Test16】600 → 2,000。
+      // domesticPurchaseCashAllocationRatio を 1.0 にして原料が回るようになり、
+      // 会社が生産・売上を確保できるため 600 では8四半期以内に paymentDefault へ
+      // 至らなくなった（default判定ロジックは一切変更していない。経営状態が
+      // 改善しただけである）。
+      //
+      // この資金圧迫レバーは営業人員の給与（SG&A）を膨らませるものであり、
+      // 調達側の資金配分比率とは独立している。したがって比率をどう変えても
+      // 圧迫の強さは変わらない＝比率非依存である。
+      // 実測: 2,000 で上記5seed全てが8四半期以内に paymentDefault へ至る
+      //      （600 では 0/5、2,000/5,000/12,000 では 5/5）。
+      salesForceHeadcountOverride: 2_000,
     });
     const log = buildAutoplayCaseLogs(caseResult);
     const defaultedTurn = log.quarterResults.find((r) => r.paymentDefault)?.turn;
