@@ -14,6 +14,7 @@ import { advanceSimulationTurns, createSimulationSession } from "../engine";
 import { buildDatasetFromSession } from "../analytics/dataset";
 import { buildAiAnalysisPackContext } from "../aiPack/context";
 import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, StoredSimulationRun } from "../persistence/types";
+import { listScenarioAliases } from "../../../industryLab/cli/scenarioAliases";
 
 const AT = "2026-01-01T00:00:00.000Z";
 const MANAGEMENT_DIR = path.join(process.cwd(), "app/v2/management");
@@ -147,4 +148,50 @@ test("UI-10: Vision の記録が無い実行では、架空の Vision を作ら�
   const strategyView = read("app/v2/management/analysis/strategy/StrategyView.tsx");
   assert.ok(strategyView.includes("記録がありません"));
   assert.ok(strategyView.includes("推測で補完することはしません"));
+});
+
+// ---------------------------------------------------------------------
+// 3. シナリオの切替（別シナリオで同じテストができること）
+// ---------------------------------------------------------------------
+
+test("UI-11: 登録済みの全シナリオが 32Q を完走し、Vision・新工場判断も記録される", () => {
+  for (const { alias } of listScenarioAliases()) {
+    const session = advanceSimulationTurns({
+      session: createSimulationSession({
+        simulationRunId: `scenario-${alias}`,
+        scenarioId: alias,
+        seed: "phase5-test",
+        requestedTurns: 32,
+        startedAt: AT,
+      }),
+      turns: 32,
+      timestamp: AT,
+    });
+    assert.equal(session.run.completedTurns, 32, `${alias} が 32Q を完走しない`);
+    assert.equal(session.run.stopReason, "completed");
+    assert.equal(session.run.scenarioId, alias, "実行に選んだシナリオIDが残らない");
+    const last = session.packCompanyTurns.filter((c) => c.turn === 32);
+    assert.equal(last.length, 5);
+    for (const row of last) {
+      assert.ok(row.strategy.vision, `${alias} / ${row.companyId}: Vision が無い`);
+      assert.ok(row.strategy.newFactory, `${alias} / ${row.companyId}: 新工場の判断が無い`);
+    }
+  }
+});
+
+test("UI-12: Console のシナリオ選択肢は登録簿から生成し、一覧を画面側へ書き写さない", () => {
+  const console_ = read("app/v2/management/components/ManagementConsole.tsx");
+  assert.ok(console_.includes("listScenarioAliases()"), "シナリオ一覧を登録簿から読んでいない");
+  assert.match(console_, /data-testid="scenario-selector"/);
+  assert.match(console_, /data-testid="seed-input"/);
+  // シナリオIDを画面へハードコードした一覧が無いこと（baseline の既定値1つを除く）。
+  for (const id of ["ecuador-early-expansion", "global-disease-crisis", "global-demand-boom"]) {
+    assert.ok(!console_.includes(id), `${id} が画面側へ書き写されている`);
+  }
+});
+
+test("UI-13: シナリオ・seed を変えたら、途中の実行を引き継がず新しい実行として始める", () => {
+  const console_ = read("app/v2/management/components/ManagementConsole.tsx");
+  assert.ok(console_.includes("liveMatchesSettings"), "設定変更時に実行を作り直す分岐が無い");
+  assert.match(console_, /live\.run\.scenarioId === scenarioId && live\.run\.seed === seed/);
 });

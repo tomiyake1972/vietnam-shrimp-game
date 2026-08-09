@@ -249,3 +249,50 @@ Standard AI が建てないのは正しい挙動である。
 `CompanyVisionDocument` は `effectiveFromTurn` を持つ履歴であり、
 「Q1〜10 は高成長、Q11以降は保守的」といった将来のプレイヤー編集に対応できる。
 `defaultVisionDocumentFor()` を差し替えるだけでよい。
+
+---
+
+## 10. 別シナリオでのテスト（2026-08-09 追記）
+
+Management Console の上部に**シナリオ選択**と **Seed 入力**を追加した。
+選択肢は `scenario/definitions` の登録簿（`ALL_SCENARIO_DEFINITIONS`）から生成しており、
+画面側に一覧を書き写していない（シナリオを追加すれば自動で現れる）。
+
+| alias | タイトル | durationTurns |
+|---|---|---:|
+| `baseline` | ベースライン：緩やかな世界需要拡大 | 32 |
+| `ecuador-early-expansion` | エクアドル早期拡張 | 32 |
+| `ecuador-delayed-expansion` | エクアドル遅延拡張 | 32 |
+| `global-disease-crisis` | 世界的疾病危機 | 32 |
+| `global-demand-boom` | 世界的需要ブーム | 32 |
+
+- シナリオ／Seed を変えると、**途中の実行を引き継がず新しい Simulation Run として始まる**
+  （別シナリオのターンが1本の run に混ざらない）。切り替えた時点で画面に注意書きが出る。
+- `simulationRunId` にシナリオ名と seed が入るため、保存物からどの条件の実行か分かる。
+- Analysis 画面のヘッダにも `シナリオ ・ seed ・ n/32 Turns` を表示する。
+
+### 5シナリオ×32Q の実測（`scripts/scenarioSmoke.ts`）
+
+いずれも 32/32Q を完走し、Vision・成長圧力・新工場判断が記録される。
+Q32 時点の成長圧力は次のとおりで、**シナリオによって会社の焦り方が変わる**ことが確認できる。
+
+| シナリオ | 実行時間 | Q32 の成長圧力 | 新工場提案 |
+|---|---:|---|---:|
+| baseline | 1,059ms | BAL/MASS/JPQ/CONSV=URGENT, VAP=LOW | 0 |
+| ecuador-early-expansion | 587ms | BAL/MASS/JPQ/CONSV=URGENT, VAP=LOW | 0 |
+| ecuador-delayed-expansion | 610ms | BAL/MASS/JPQ/CONSV=URGENT, VAP=LOW | 0 |
+| global-disease-crisis | 491ms | BAL/MASS/CONSV=URGENT, JPQ/VAP=LOW | 0 |
+| global-demand-boom | 499ms | BAL/CONSV=URGENT, MASS/JPQ/VAP=LOW | 0 |
+
+需要ブーム下では MASS・JPQ の成長圧力が LOW へ下がる（規模が志の軌道に追いつく）。
+一方どのシナリオでも新工場は提案されておらず、§8 の ENVIRONMENT_CANDIDATE
+（律速が需要側にある）はシナリオを変えても解消していない。
+
+### 複数シナリオを並べて比較するには
+
+- **ブラウザ保存は最新1本だけ**（`BROWSER_RUN_RETENTION_LIMIT = 1`。保存物が約3.6MBで
+  localStorage の上限に対して2本入らないため）。
+- 複数本を Run selector に並べて A/B 比較するには**サーバー保存（Redis、上限20本）**が要る。
+  staging では `/v2/company-lab/play/login` でログインし、Company Lab UI のセッション Cookie を
+  得てから Console を開くと、`/api/v2/simulation-runs` への保存が通る。
+  ログインしていない場合はブラウザ保存のみになり、その旨が画面の保存先表示に出る。

@@ -54,7 +54,7 @@ export function AnalysisPageShell({ title, description, stored, runs, loading, n
           {loading
             ? "読み込み中…"
             : stored
-              ? `${stored.dataset.turns.length} / ${stored.run.requestedTurns} Turns（${STOP_REASON_LABELS[stored.run.stopReason] ?? stored.run.stopReason}） ・ ${stored.run.simulationRunId}`
+              ? `${stored.run.scenarioId} ・ seed ${stored.run.seed} ・ ${stored.dataset.turns.length} / ${stored.run.requestedTurns} Turns（${STOP_REASON_LABELS[stored.run.stopReason] ?? stored.run.stopReason}） ・ ${stored.run.simulationRunId}`
               : "保存済みの Simulation Run がありません"}
         </span>
       </header>

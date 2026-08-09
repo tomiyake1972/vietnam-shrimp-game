@@ -45,9 +45,21 @@ import { Collapsible } from "./Collapsible";
 import { StrategySummary } from "./StrategySummary";
 import { ExportPackButton } from "./ExportPackButton";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
+import { listScenarioAliases } from "../../../lib/v2/industryLab/cli/scenarioAliases";
 
-const SCENARIO_ID = "baseline";
+const DEFAULT_SCENARIO_ID = "baseline";
 const DEFAULT_SEED = "management-console-32q";
+
+/**
+ * 選べるシナリオ一覧。
+ * **ここに一覧を書き写さない** — scenario/definitions の登録簿（ALL_SCENARIO_DEFINITIONS）
+ * をそのまま読む。シナリオを追加すれば、この画面の選択肢にも自動で現れる。
+ */
+const SCENARIO_OPTIONS = listScenarioAliases().map((e) => ({
+  value: e.alias,
+  label: `${e.definition.title}（${e.alias}）`,
+  durationTurns: e.definition.durationTurns,
+}));
 
 /** metadata 用のタイムスタンプ。ゲーム判断には一切渡さない。 */
 function nowIso(): string {
@@ -79,7 +91,10 @@ function viewFromSession(session: SimulationSession): ConsoleView {
 }
 
 export function ManagementConsole() {
-  const [seed] = useState(DEFAULT_SEED);
+  // シナリオと seed は「次に新しく始める実行」の設定である。
+  // 実行中の run のシナリオは view.run.scenarioId であり、こちらを書き換えても遡及しない。
+  const [scenarioId, setScenarioId] = useState(DEFAULT_SCENARIO_ID);
+  const [seed, setSeed] = useState(DEFAULT_SEED);
   const [view, setView] = useState<ConsoleView | null>(null);
   const [fixtures, setFixtures] = useState<readonly CompanyFixture[]>([]);
   const [phase, setPhase] = useState<RunPhase>("idle");
@@ -93,7 +108,7 @@ export function ManagementConsole() {
   const stopRequested = useRef(false);
 
   const [strategyDocs] = useState<Readonly<Record<string, CompanyStrategyDocument>>>(() => {
-    const s = createSimulationSession({ simulationRunId: "schema", scenarioId: SCENARIO_ID, seed: DEFAULT_SEED, requestedTurns: 1, startedAt: "init" });
+    const s = createSimulationSession({ simulationRunId: "schema", scenarioId: DEFAULT_SCENARIO_ID, seed: DEFAULT_SEED, requestedTurns: 1, startedAt: "init" });
     return Object.fromEntries(s.fixtures.map((f) => [f.companyId, createEmptyStrategyDocument(f.companyId)]));
   });
 
@@ -101,13 +116,13 @@ export function ManagementConsole() {
   const createFresh = useCallback(
     (startedAt: string): SimulationSession =>
       createSimulationSession({
-        simulationRunId: newRunId(seed, startedAt),
-        scenarioId: SCENARIO_ID,
+        simulationRunId: newRunId(`${scenarioId}-${seed}`, startedAt),
+        scenarioId,
         seed,
         requestedTurns: MANAGEMENT_CONSOLE_STANDARD_TURNS,
         startedAt,
       }),
-    [seed]
+    [scenarioId, seed]
   );
 
   // --- 起動時：保存済み Simulation Run を復元する（Aの解消） ---
@@ -176,8 +191,11 @@ export function ManagementConsole() {
       // （保存物には途中状態を含めていないため、続きから進めるふりをしない）。
       // まだ1ターンも進んでいないセッションでも、ここで実時刻の run id を採り直す
       // （起動時に作る空セッションの id を使い回すと、実行どうしを区別できなくなる）。
+      // シナリオ・seed を変えたら、途中の実行を引き継がず新しい実行として始める
+      // （別シナリオのターンが1本の Simulation Run に混ざることを防ぐ）。
       const live = view?.session ?? null;
-      let current = live !== null && live.state.history.length > 0 ? live : createFresh(nowIso());
+      const liveMatchesSettings = live !== null && live.run.scenarioId === scenarioId && live.run.seed === seed;
+      let current = liveMatchesSettings && live.state.history.length > 0 ? live : createFresh(nowIso());
       setView(viewFromSession(current));
 
       for (let i = 0; i < turns; i++) {
@@ -211,7 +229,7 @@ export function ManagementConsole() {
       // 完走・シナリオ終端・失敗のいずれでも保存する（失敗の記録も残す）。
       await persist(current);
     },
-    [phase, restoring, view, createFresh, persist]
+    [phase, restoring, view, createFresh, persist, scenarioId, seed]
   );
 
   const reset = useCallback(() => {
@@ -338,7 +356,44 @@ export function ManagementConsole() {
             )}
           </div>
 
+          {/* 次に新しく始める実行の設定。実行中は変更できない（走っている run のシナリオは変わらない）。 */}
+          <label className="flex items-center gap-1.5 text-xs">
+            <span className="text-slate-400">シナリオ</span>
+            <select
+              value={scenarioId}
+              onChange={(e) => setScenarioId(e.target.value)}
+              disabled={busy || restoring}
+              data-testid="scenario-selector"
+              className="max-w-[320px] rounded border border-slate-600 bg-slate-900 px-2 py-1 text-[11px] disabled:opacity-40"
+            >
+              {SCENARIO_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex items-center gap-1.5 text-xs">
+            <span className="text-slate-400">Seed</span>
+            <input
+              type="text"
+              value={seed}
+              onChange={(e) => setSeed(e.target.value)}
+              disabled={busy || restoring}
+              data-testid="seed-input"
+              spellCheck={false}
+              className="w-[220px] rounded border border-slate-600 bg-slate-900 px-2 py-1 font-mono text-[11px] disabled:opacity-40"
+            />
+          </label>
+
           <RunSelector runs={savedRuns} selectedRunId={view?.run.simulationRunId ?? null} onSelect={selectRun} disabled={busy} />
+
+          {view && completedTurns > 0 && (view.run.scenarioId !== scenarioId || view.run.seed !== seed) ? (
+            <span className="text-[11px] text-amber-300" data-testid="scenario-changed-note">
+              表示中の実行は「{view.run.scenarioId} / {view.run.seed}」です。次に Turn を進めると、選択中の設定で新しい実行が始まります。
+            </span>
+          ) : null}
 
           {storageNote ? (
             <span className="text-[11px] text-slate-400" data-testid="storage-note">{storageNote}</span>
