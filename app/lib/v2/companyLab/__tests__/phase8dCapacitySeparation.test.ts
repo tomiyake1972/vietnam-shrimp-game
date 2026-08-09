@@ -243,7 +243,43 @@ test("CS-6（必須5）: 設備完成・稼働開始後にのみ能力が増え�
 // ---------------------------------------------------------------------
 
 test("CS-7（必須7）: 工場スペースが足りない新規案件は、正常な案件として確定せず理由つきで却下される", () => {
-  const { state: initialState, fixtures } = initializeCompanyLab(baseConfig("phase8d-space-001", 4));
+  const { state: initialState, fixtures: gameFixtures } = initializeCompanyLab(baseConfig("phase8d-space-001", 4));
+
+  // 【2026-08-08・Test16】このテストが守りたいのは
+  // 「工場スペースが足りないとき、新規案件が理由つきで却下される」ことであり、
+  // ゲームの初期工場サイズがいくつかは本質ではない。
+  //
+  // Test16で共通処理能力が30,000へ拡大した結果、既定のfixtureでは2件とも
+  // 入ってしまい「スペース不足」という前提そのものが作れなくなった。
+  // 指示どおり**工場スペース係数（factorySpace.tsのparams）は一切変更せず**、
+  // Factory.totalFactorySpaceUnits を明示して
+  // 「1件は入るが2件は入らない」状況を意図的に作る。
+  //
+  // totalFactorySpaceUnits は Factory の正式なフィールドであり、未設定のときだけ
+  // 基礎能力から導出される（factorySpace.ts resolveFactoryTotalSpaceUnits）。
+  // つまりこれは係数の書き換えではなく、正規の入力による状況設定である。
+  const perProjectSpaceForSetup = computeCandidateProjectSpaceUnits("coldStorageExpansion");
+  // 稼働中の能力が既に占有しているスペースを実測してから、その上に
+  // 「1件ぶん + 半分」だけの空きを与える（2件目は必ず入らない）。
+  const basePlayerFixture = gameFixtures.find((f) => f.companyId === PLAYER)!;
+  const usedByOperations = buildCompanyFactorySpaceState({
+    companyId: PLAYER,
+    baseFactories: basePlayerFixture.factories,
+    currentFactories: basePlayerFixture.factories,
+    capexState: initialState.capexState,
+    period: initialState.currentPeriod,
+  }).usedAfterPendingSpaceUnits;
+  const fixtures = gameFixtures.map((f) =>
+    f.companyId !== PLAYER
+      ? f
+      : {
+          ...f,
+          factories: f.factories.map((factory) => ({
+            ...factory,
+            totalFactorySpaceUnits: usedByOperations + perProjectSpaceForSetup * 1.5,
+          })),
+        }
+  );
   const playerFixture = fixtures.find((f) => f.companyId === PLAYER)!;
 
   // 冷凍保管庫増設は1件あたり最も広いスペースを必要とする（1,250t × 2.0 = 2,500）。

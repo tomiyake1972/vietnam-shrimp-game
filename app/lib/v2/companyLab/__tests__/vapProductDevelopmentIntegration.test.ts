@@ -1,6 +1,7 @@
 // ShrimpX V2 — Test15新設: VAP商品開発費（vapProductDevelopmentSpendUsd）の
 // companyLab統合テスト（会計計上・スコア更新・タイミング・機能フラグの回帰確認）
 
+import { FINANCE_PARAMETERS_V1 } from "../../finance/parameters";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../runner";
@@ -22,14 +23,30 @@ function buildAutoDecisions(state: ReturnType<typeof initializeCompanyLab>["stat
   return decisions;
 }
 
-test("VAPDEV-INT-1: vapProductDevelopmentSpendUsdを設定すると、当期末の現金がその金額だけ、設定しない場合より少なくなる（会計計上の唯一の情報源の確認）", () => {
+/**
+ * VAP商品開発投資は SG&A として費用計上される。したがって課税所得がある会社では
+ * 法人税が減り、**現金の減少は投資額そのものではなく税効果を差し引いた額**になる。
+ *
+ *   課税所得がある場合: 現金差分 = 投資額 × (1 − incomeTaxRate)
+ *   課税所得が無い場合: 現金差分 = 投資額（節税できる利益が無いため）
+ *
+ * これは会計として正しい挙動である。2026-08-08のTest16能力再設計までは
+ * 対象会社のQ1が課税所得ゼロだったため「現金差分 = 投資額」が偶然成立していた。
+ *
+ * このテストが守りたいのは「投資額が唯一の情報源として、二重計上も欠落もなく
+ * 1回だけ会計へ流れること」であり、税金が無い世界を人工的に作ることではない。
+ * したがって税効果を織り込んだ期待式にする（incomeTaxRateは正式なfinance
+ * parameterから読み、テスト内へ数値を直書きしない）。
+ */
+test("VAPDEV-INT-1: vapProductDevelopmentSpendUsdが唯一の情報源として1回だけ会計へ流れ、税効果を含めた現金差分が正しくなる", () => {
+  const SPEND_USD = 250_000;
   const { state, fixtures } = initializeCompanyLab(baseConfig());
   const targetCompanyId = fixtures[0].companyId;
 
   const decisionsBase = buildAutoDecisions(state, fixtures);
   const decisionsWithSpend: Record<string, CompanyDecisionInput> = {
     ...decisionsBase,
-    [targetCompanyId]: { ...decisionsBase[targetCompanyId], vapProductDevelopmentSpendUsd: 250_000 },
+    [targetCompanyId]: { ...decisionsBase[targetCompanyId], vapProductDevelopmentSpendUsd: SPEND_USD },
   };
 
   const afterBase = advanceCompanyLabQuarter(state, fixtures, decisionsBase);
@@ -41,7 +58,40 @@ test("VAPDEV-INT-1: vapProductDevelopmentSpendUsdを設定すると、当期末�
   const cashBase = Number(afterBase.financeState.companies.find((c) => c.companyId === targetCompanyId)!.cash);
   const cashSpend = Number(afterSpend.financeState.companies.find((c) => c.companyId === targetCompanyId)!.cash);
 
-  assert.ok(Math.abs(cashBase - cashSpend - 250_000) < 1, `現金差分が投資額と一致するはず（base=${cashBase}, spend=${cashSpend}）`);
+  // 実際のquarter closeロジックと整合させるため、税引前利益の符号で分岐する。
+  // 投資後も課税所得が残っているなら税効果が丸ごと効き、
+  // 投資によって課税所得が消えるなら効き方が変わるため、両方を許容する。
+  const plBase = afterBase.history[afterBase.history.length - 1].financialResults.find((f) => f.companyId === targetCompanyId)!.profitAndLoss;
+  const plSpend = afterSpend.history[afterSpend.history.length - 1].financialResults.find((f) => f.companyId === targetCompanyId)!.profitAndLoss;
+  const taxRate = FINANCE_PARAMETERS_V1.finance.incomeTaxRate;
+
+  const actualCashDifference = cashBase - cashSpend;
+  // 実際に減った法人税額（会計結果そのものから取る。推定しない）。
+  const actualTaxSaving = Number(plBase.incomeTax) - Number(plSpend.incomeTax);
+  const expectedCashDifference = SPEND_USD - actualTaxSaving;
+
+  assert.ok(
+    Math.abs(actualCashDifference - expectedCashDifference) < 1,
+    `現金差分は「投資額 − 実際の節税額」と一致するはず` +
+      `（現金差分=${actualCashDifference}, 投資額=${SPEND_USD}, 節税額=${actualTaxSaving}）`
+  );
+
+  // 節税額そのものも、税率と税引前利益の減少から説明できること。
+  // 投資後も課税所得が残っている場合は 投資額 × 税率 がまるごと効く。
+  if (Number(plSpend.profitBeforeTax) > 0) {
+    assert.ok(
+      Math.abs(actualTaxSaving - SPEND_USD * taxRate) < 1,
+      `課税所得が残っている場合、節税額は 投資額 × ${taxRate} と一致するはず（実際=${actualTaxSaving}）`
+    );
+  } else if (Number(plBase.profitBeforeTax) <= 0) {
+    // 投資前から赤字なら法人税は発生せず、現金は投資額そのものだけ減る。
+    assert.equal(actualTaxSaving, 0, "赤字の会社では節税効果が発生しないこと");
+    assert.ok(Math.abs(actualCashDifference - SPEND_USD) < 1, "赤字の会社では現金差分が投資額と一致すること");
+  }
+
+  // 【二重計上・欠落の検出】投資額を超えて現金が減っていない／減らなさすぎていないこと。
+  assert.ok(actualCashDifference > 0, "投資したのに現金が減っていない（欠落）");
+  assert.ok(actualCashDifference <= SPEND_USD + 1, "投資額を超えて現金が減っている（二重計上の疑い）");
 });
 
 test("VAPDEV-INT-2: vapProductDevelopmentSpendUsdを設定した会社だけ、次期のVAP商品開発スコアが中立値50から上昇する（他社は変化しない）", () => {

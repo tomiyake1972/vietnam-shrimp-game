@@ -144,24 +144,52 @@ test("受入確認V-6: 重大品質事故が発生した会社×商品では、h
 
 // --- 6: 生産ゼロ時に誤った事故警告を出さない ---
 
-test("受入確認V-7: turn1でMASSのvap/pd生産が0の場合、hasProduction=falseになり、hasMajorIncident=false・saleableRecoveryRatio=undefinedになる（誤った事故検出をしない）", () => {
+/**
+ * 【2026-08-08・Test16】旧版は「turn1でMASSのvap/pd生産が0であること」を前提にしていた。
+ * これはMASSの旧初期capacity（VAP 2,000 / PD 6,000）にたまたま依存した条件であり、
+ * Test16の能力再設計で成立しなくなった。
+ *
+ * このテストが本当に守りたいのは
+ *   「生産量が0の商品では、誤って品質事故を検出しない
+ *     （hasProduction=false / hasMajorIncident=false / saleableRecoveryRatio=undefined）」
+ * であって、どの会社のどの商品が0になるかではない。
+ *
+ * そこで特定の会社・商品を固定するのをやめ、**その四半期に実際に生産量が0だった
+ * 全ての会社×商品**について不変条件を検証する形へ変更した。
+ * Standard AIやcapacityを歪めて無理に0を作ることはしない（指示2）。
+ */
+test("受入確認V-7: 生産量が0の商品では誤った品質事故検出をしない（hasProduction=false・事故0・回収率undefined）", () => {
   const result = runAllAuto(baseConfig({ turns: 1 }));
   const record = result.history[0];
-  const massSummary = findCompanySummary(record, "MASS")!;
-  assert.equal(unwrapUnit(massSummary.vapProduced), 0);
-  assert.equal(unwrapUnit(massSummary.pdProduced), 0);
 
-  const rows = buildProductQualityRows(record, "MASS");
-  const vapRow = rows.find((r) => r.product === "vap")!;
-  const pdRow = rows.find((r) => r.product === "pd")!;
-  for (const row of [vapRow, pdRow]) {
-    assert.equal(row.hasProduction, false);
-    assert.equal(row.hasMajorIncident, false);
-    assert.equal(row.majorIncidentCount, 0);
-    assert.equal(row.saleableRecoveryRatio, undefined);
-    assert.equal(row.originalProductionQuantity, 0);
-    assert.equal(row.discardQuantity, 0);
+  let zeroProductionRowCount = 0;
+  for (const companyId of ["BAL", "MASS", "JPQ", "VAP", "CONSV"] as const) {
+    const summary = findCompanySummary(record, companyId);
+    if (!summary) continue;
+    const producedByProduct = {
+      hoso: unwrapUnit(summary.hosoProduced),
+      pd: unwrapUnit(summary.pdProduced),
+      vap: unwrapUnit(summary.vapProduced),
+    } as const;
+    const rows = buildProductQualityRows(record, companyId);
+    for (const row of rows) {
+      if (producedByProduct[row.product] !== 0) continue;
+      zeroProductionRowCount += 1;
+      assert.equal(row.hasProduction, false, `${companyId}/${row.product}: 生産0ならhasProduction=false`);
+      assert.equal(row.hasMajorIncident, false, `${companyId}/${row.product}: 生産0なら事故なし`);
+      assert.equal(row.majorIncidentCount, 0, `${companyId}/${row.product}: 生産0なら事故件数0`);
+      assert.equal(row.saleableRecoveryRatio, undefined, `${companyId}/${row.product}: 生産0なら回収率はundefined`);
+      assert.equal(row.originalProductionQuantity, 0, `${companyId}/${row.product}: 生産0なら元数量0`);
+      assert.equal(row.discardQuantity, 0, `${companyId}/${row.product}: 生産0なら廃棄0`);
+    }
   }
+
+  // 検証対象が1件も無いと、このテストは何も確かめないまま通ってしまう。
+  // turn1で生産0の商品が存在しなくなった場合は、能力設計が変わった合図なので気づけるようにする。
+  assert.ok(
+    zeroProductionRowCount > 0,
+    "turn1に生産量0の会社×商品が1件も無い。このテストが検証対象を失っている（能力設計の変更を確認すること）"
+  );
 });
 
 // --- 11: 5社比較で会社と数値の対応がずれない ---

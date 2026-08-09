@@ -17,8 +17,45 @@ function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig
 }
 
 /** turn1を1期分進め、turn2（lastMarketResultが存在する最初のターン）の状態を作る。 */
+/**
+ * 【2026-08-08・Test16】このファイルは「Test14 Turn2の工場条件で、Standard AIが
+ * 名目能力を真のcapacityとして過大認識しないこと」を検証する。
+ * 共通前処理・凍結包装が商品別能力の合計より小さく、共有ボトルネックとして効く、
+ * というのがTest14の工場条件そのものである。
+ *
+ * Test16では共通処理30,000・凍結包装30,000に対し商品別合計が20,000となり、
+ * 初期状態では共有ボトルネックが効かない設計へ変わった（HOSO投資で積み上げると
+ * やがて共通能力に当たる、という意図）。そのためゲームの初期fixtureをそのまま使うと
+ * このテストの検証対象そのものが消える。
+ *
+ * 指示どおり、能力パラメータや稼働率係数は一切変更せず、
+ * **Test14 Turn2の工場条件を明示した専用fixture**へ分離する。
+ */
+const TEST14_TURN2_FACTORY = {
+  commonProcessingCapacity: 22_000,
+  hosoCapacity: 10_000,
+  pdCapacity: 8_000,
+  vapCapacity: 6_000,
+  freezingPackagingCapacity: 20_000,
+} as const;
+
 function setupTurn2(seed = "capacity-audit-001") {
-  const { state, fixtures } = initializeCompanyLab(baseConfig({ seed }));
+  const { state, fixtures: gameFixtures } = initializeCompanyLab(baseConfig({ seed }));
+  const fixtures = gameFixtures.map((f) =>
+    f.companyId !== "BAL"
+      ? f
+      : {
+          ...f,
+          factories: f.factories.map((factory) => ({
+            ...factory,
+            commonProcessingCapacity: hosoEqTons(TEST14_TURN2_FACTORY.commonProcessingCapacity),
+            hosoCapacity: hosoEqTons(TEST14_TURN2_FACTORY.hosoCapacity),
+            pdCapacity: hosoEqTons(TEST14_TURN2_FACTORY.pdCapacity),
+            vapCapacity: hosoEqTons(TEST14_TURN2_FACTORY.vapCapacity),
+            freezingPackagingCapacity: hosoEqTons(TEST14_TURN2_FACTORY.freezingPackagingCapacity),
+          })),
+        }
+  );
   const fixture = fixtures.find((f) => f.companyId === "BAL")!;
   const publicInfo1 = buildPublicMarketInfo(state);
 
