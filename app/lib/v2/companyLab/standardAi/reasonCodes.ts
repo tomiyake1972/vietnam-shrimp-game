@@ -117,7 +117,22 @@ export type StandardAiReasonCode =
   | "NEW_FACTORY_DEFERRED_RAW" // 原料供給の裏づけが不足するため新工場を見送り
   | "NEW_FACTORY_DEFERRED_EXISTING_SPACE" // 既存工場にまだ増設余地があるため新工場を見送り
   | "NEW_FACTORY_DEFERRED_EXISTING_EXPANSION" // 既存増設で当面のgapを埋められるため新工場を見送り
-  | "NEW_FACTORY_NOT_NEEDED"; // Visionに対して規模が足りており、新工場を必要としない
+  | "NEW_FACTORY_NOT_NEEDED" // Visionに対して規模が足りており、新工場を必要としない
+  // --- 【2026-08-09・Phase 6新設】Vision駆動の商業成長 ---
+  | "VISION_COMMERCIAL_GROWTH_PRESSURE" // 志に対して販売規模が遅れており、商業的な成長圧力がある
+  | "COMMERCIAL_SCALE_BELOW_VISION_PATH" // 現在の販売規模が Vision の参考成長軌道を下回る
+  | "COMMERCIAL_AMBITION_EXPANDED" // 志と観測できる採算つき機会を理由に、目指す販売規模を引き上げた
+  | "COMMERCIAL_AMBITION_HELD_MARKET_WEAK" // 観測できる採算つき市場機会が乏しいため、販売規模拡大を見送った
+  | "COMMERCIAL_AMBITION_HELD_MARGIN_WEAK" // 採算が薄いため、量的拡大を見送った
+  | "COMMERCIAL_AMBITION_HELD_INVENTORY" // 完成品在庫が過剰なため、まず売り切ることを優先した
+  | "COMMERCIAL_GROWTH_ON_TRACK" // 志の軌道に乗っており、規模拡大を急がない
+  | "PROFITABLE_MARKET_OPPORTUNITY_AVAILABLE" // 観測上、採算の取れる未獲得の市場機会が存在する
+  | "UNSERVED_PROFITABLE_OPPORTUNITY" // 取りたかったが取れなかった採算つき機会がある
+  | "UNSERVED_BY_SALES_CAPACITY" // 未充足機会の主因が営業能力
+  | "UNSERVED_BY_PRODUCTION_CAPACITY" // 未充足機会の主因が生産能力（新工場の根拠になりうる）
+  | "UNSERVED_BY_LABOR" // 未充足機会の主因が労働力
+  | "UNSERVED_BY_RAW_MATERIAL" // 未充足機会の主因が原料
+  | "UNSERVED_BY_MARKET_COMPETITION"; // 提出したが市場競争で取れなかった
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -204,6 +219,20 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "NEW_FACTORY_DEFERRED_EXISTING_SPACE",
   "NEW_FACTORY_DEFERRED_EXISTING_EXPANSION",
   "NEW_FACTORY_NOT_NEEDED",
+  "VISION_COMMERCIAL_GROWTH_PRESSURE",
+  "COMMERCIAL_SCALE_BELOW_VISION_PATH",
+  "COMMERCIAL_AMBITION_EXPANDED",
+  "COMMERCIAL_AMBITION_HELD_MARKET_WEAK",
+  "COMMERCIAL_AMBITION_HELD_MARGIN_WEAK",
+  "COMMERCIAL_AMBITION_HELD_INVENTORY",
+  "COMMERCIAL_GROWTH_ON_TRACK",
+  "PROFITABLE_MARKET_OPPORTUNITY_AVAILABLE",
+  "UNSERVED_PROFITABLE_OPPORTUNITY",
+  "UNSERVED_BY_SALES_CAPACITY",
+  "UNSERVED_BY_PRODUCTION_CAPACITY",
+  "UNSERVED_BY_LABOR",
+  "UNSERVED_BY_RAW_MATERIAL",
+  "UNSERVED_BY_MARKET_COMPETITION",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

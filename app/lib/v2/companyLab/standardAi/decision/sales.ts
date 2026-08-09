@@ -84,6 +84,97 @@ export interface MarketOpportunityComponent {
   readonly normalizedWeight: number;
 }
 
+/**
+ * 【Phase 6】1つの市場×商品の観測上の機会（唯一の計算箇所）。
+ *
+ * 按分重み（buildMarketOpportunityWeights）と Commercial Ambition の両方が
+ * **この関数だけ**を使う。同じ「獲得可能需要」「期待貢献」を2箇所で別々に
+ * 計算しないための共有点である。
+ */
+export function observableOpportunityCell(
+  observation: StandardAiObservation,
+  market: DemandMarketId,
+  product: Product,
+  salesParams: SalesParameters
+): {
+  readonly observedDemand: number;
+  readonly attainableDemand: number;
+  readonly referencePrice: number | undefined;
+  readonly contributionPerKg: number;
+  readonly score: number;
+  /** 参照売価が観測でき、かつ期待貢献が正であること（＝採算の取れる機会）。 */
+  readonly isProfitable: boolean;
+} {
+  const entry = observation.markets.find((m) => m.market === market);
+  const observedDemand = entry?.observedDemandByProduct?.[product] ?? 0;
+  // 1社が1つの市場×商品で取れる上限（sales/allocation.ts の個社成約上限と同じ規則）。
+  const attainableDemand = observedDemand * salesParams.maximumSupplierShare;
+  const referencePrice = entry?.referencePriceByProduct?.[product];
+  const processingCost = observation.productEconomics.expectedProcessingCostUsdPerHosoEqKg[product];
+  // 参照売価が未観測（turn1等）のときは採算差が付けられないため、
+  // 規模のみで按分する（価格を推測して捏造しない）。
+  const contributionPerKg = referencePrice === undefined ? 1 : referencePrice - processingCost;
+  const score = observedDemand <= EPSILON || contributionPerKg <= 0 ? 0 : attainableDemand * contributionPerKg;
+  return {
+    observedDemand,
+    attainableDemand,
+    referencePrice,
+    contributionPerKg,
+    score,
+    isProfitable: referencePrice !== undefined && contributionPerKg > 0 && observedDemand > EPSILON,
+  };
+}
+
+/**
+ * 【Phase 6】会社が観測できる商業機会の合計。
+ *
+ * **未来の TRUE WORLD を使わない** — 参照するのは observation.markets
+ * （原則2四半期遅行の公開実績）だけである。
+ */
+export interface ObservableCommercialOpportunity {
+  readonly observableDemandTons: number;
+  readonly attainableDemandTons: number;
+  /** うち期待貢献が正の分だけ。採算が取れない需要を「機会」と数えない。 */
+  readonly attainableProfitableTons: number;
+  /** 採算つき機会の加重平均期待貢献（USD/HOSO換算kg）。機会が無ければ0。 */
+  readonly weightedContributionUsdPerKg: number;
+  /** 参照売価が1つも観測できていない（turn1等）。採算を断定しない。 */
+  readonly priceObservationMissing: boolean;
+}
+
+export function computeObservableCommercialOpportunity(
+  observation: StandardAiObservation,
+  salesParams: SalesParameters = SALES_PARAMETERS_V1
+): ObservableCommercialOpportunity {
+  let observableDemandTons = 0;
+  let attainableDemandTons = 0;
+  let attainableProfitableTons = 0;
+  let contributionWeighted = 0;
+  let anyPriceObserved = false;
+
+  for (const entry of observation.markets) {
+    for (const product of ["hoso", "pd", "vap"] as const) {
+      const cell = observableOpportunityCell(observation, entry.market, product, salesParams);
+      if (cell.observedDemand <= EPSILON) continue;
+      observableDemandTons += cell.observedDemand;
+      attainableDemandTons += cell.attainableDemand;
+      if (cell.referencePrice !== undefined) anyPriceObserved = true;
+      if (cell.isProfitable) {
+        attainableProfitableTons += cell.attainableDemand;
+        contributionWeighted += cell.attainableDemand * cell.contributionPerKg;
+      }
+    }
+  }
+
+  return {
+    observableDemandTons,
+    attainableDemandTons,
+    attainableProfitableTons,
+    weightedContributionUsdPerKg: attainableProfitableTons > EPSILON ? contributionWeighted / attainableProfitableTons : 0,
+    priceObservationMissing: !anyPriceObserved,
+  };
+}
+
 function buildMarketOpportunityWeights(
   observation: StandardAiObservation,
   markets: readonly DemandMarketId[],
@@ -93,21 +184,21 @@ function buildMarketOpportunityWeights(
   const hasObservedDemand = observation.markets.some((m) => m.observedDemandByProduct !== undefined);
   if (!hasObservedDemand) return undefined;
 
-  const share = salesParams.maximumSupplierShare;
   const result = { hoso: [] as number[], pd: [] as number[], vap: [] as number[] };
 
   for (const product of ["hoso", "pd", "vap"] as const) {
-    const processingCost = observation.productEconomics.expectedProcessingCostUsdPerHosoEqKg[product];
     const detail = markets.map((market) => {
-      const entry = observation.markets.find((m) => m.market === market);
-      const observedDemand = entry?.observedDemandByProduct?.[product] ?? 0;
-      const obtainable = observedDemand * share;
-      const referencePrice = entry?.referencePriceByProduct?.[product];
-      // 参照売価が未観測（turn1等）のときは採算差が付けられないため、
-      // 規模のみで按分する（価格を推測して捏造しない）。
-      const contributionPerKg = referencePrice === undefined ? 1 : referencePrice - processingCost;
-      const score = observedDemand <= EPSILON || contributionPerKg <= 0 ? 0 : obtainable * contributionPerKg;
-      return { market, observedDemand, obtainable, referencePrice, contributionPerKg, score };
+      // 【Phase 6】獲得可能需要・期待貢献・機会スコアの計算は
+      // observableOpportunityCell へ一本化した（Commercial Ambition と同一の式）。
+      const cell = observableOpportunityCell(observation, market, product, salesParams);
+      return {
+        market,
+        observedDemand: cell.observedDemand,
+        obtainable: cell.attainableDemand,
+        referencePrice: cell.referencePrice,
+        contributionPerKg: cell.contributionPerKg,
+        score: cell.score,
+      };
     });
     const scores = detail.map((d) => d.score);
     const total = scores.reduce((sum, v) => sum + v, 0);
@@ -232,7 +323,14 @@ export function buildStandardAiSalesPlans(
    * エンジン側と揃えている（標準AIの意思決定根拠と、エンジン適用後の実際の結果が
    * 食い違わないようにするため）。
    */
-  salesParams: SalesParameters = SALES_PARAMETERS_V1
+  salesParams: SalesParameters = SALES_PARAMETERS_V1,
+  /**
+   * 【Phase 6】Commercial Ambition による希望販売量の倍率（1以上）。
+   * 未指定なら1＝従来どおり「自社能力 × salesUtilizationTarget」だけで決まる。
+   * **これは「売りたい量」の倍率であり、生産量・契約量を直接増やすものではない**
+   * （営業工数・生産能力・納品規律の制約は下流でそのまま効く）。
+   */
+  commercialAmbitionMultiplier?: number
 ): SalesPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const capacityTotals = observation.totalCapacityByProduct;
@@ -256,10 +354,20 @@ export function buildStandardAiSalesPlans(
   const clampProductMult = (v: number) => Math.max(0.85, Math.min(1.2, v));
   const clampCombinedMult = (v: number) => Math.max(0.7, Math.min(1.35, v));
 
+  // 【Phase 6】従来はここが「自社の名目能力 × 0.8」だけであり、市場需要も Vision も
+  // 一切参照していなかった。実測ではこの式が5社・全32Qで誤差ゼロで成立し、
+  // 能力→販売希望→営業人数→成約→生産→稼働率→増設可否→能力 という閉じた循環を
+  // 作っていた（docs/standard_ai/SHRIMPX_VISION_DRIVEN_COMMERCIAL_GROWTH.md §監査）。
+  //
+  // Commercial Ambition（vision/commercialAmbition.ts）は、この供給側アンカーを
+  // **床**として保ったまま、志と観測可能な採算つき市場機会を理由に倍率を掛ける。
+  // 倍率は常に 1 以上であり、未指定なら 1（＝従来と完全に同一の挙動）。
+  // 商品構成は変えない（どの商品を伸ばすかはここで発明しない）。
+  const ambitionMultiplier = Math.max(1, commercialAmbitionMultiplier ?? 1);
   const potentialByProduct: ProductAmount = {
-    hoso: capacityTotals.hoso * params.salesUtilizationTarget,
-    pd: capacityTotals.pd * params.salesUtilizationTarget,
-    vap: capacityTotals.vap * params.salesUtilizationTarget,
+    hoso: capacityTotals.hoso * params.salesUtilizationTarget * ambitionMultiplier,
+    pd: capacityTotals.pd * params.salesUtilizationTarget * ambitionMultiplier,
+    vap: capacityTotals.vap * params.salesUtilizationTarget * ambitionMultiplier,
   };
   if (productOrientationActive) {
     // 商品志向: 商品別の目標販売数量へ倍率（0.85〜1.20にclamp）を乗じる。

@@ -239,6 +239,11 @@ export interface SalesForceHiringDecisionInput {
    * 販売量上限のキャップとして使い、production_capacity_gapとして診断する。
    */
   readonly hasNearTermCapexUnderConstruction: boolean;
+  /**
+   * 【Phase 6】今期目指す販売規模（Commercial Ambition）。
+   * 未指定なら従来どおり TargetScaleBand だけで目標を決める。
+   */
+  readonly commercialAmbitionTons?: number;
 }
 
 /**
@@ -258,6 +263,7 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
     rawMaterialSupplyConstraintState,
     targetScaleBand,
     hasNearTermCapexUnderConstruction,
+    commercialAmbitionTons,
     params,
   } = input;
 
@@ -301,7 +307,19 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
   // market opportunity項は既存のwish飽和メカニズムがそのまま担う）。
   const effectiveCapacityTons = PRODUCTS.reduce((s, p) => s + totalEffectiveCapacityByProduct[p], 0);
   const productionSupportedScaleTons = hasNearTermCapexUnderConstruction ? targetScaleBand.quarterlySalesTons.max : effectiveCapacityTons;
-  const targetSalesVolumeTons = Math.min(targetScaleBand.quarterlySalesTons.max, productionSupportedScaleTons);
+  // 【Phase 6・§26】Vision 由来の Commercial Ambition を営業採用の目標へ届ける。
+  //
+  // 【なぜ必要か】監査では、営業採用の目標が
+  //   min(TargetScaleBand.max, 実効生産能力)
+  // であり、TargetScaleBand 自体も実効能力から導かれていたため、
+  // 「能力 → 販売希望 → 営業人数 → 生産 → 能力」の循環が閉じていた。
+  //
+  // 【Vision だけで大量採用しない】ambition は observable な採算つき機会と
+  // 段階的成長で既に抑制されており（vision/commercialAmbition.ts）、さらにここでも
+  // **生産能力（productionSupportedScaleTons）を超えない**。作れない量を売るための
+  // 営業は採らない。1人ずつの限界採算評価・資金ゲート・採用ガバナーも従来どおり効く。
+  const strategicTargetTons = Math.max(targetScaleBand.quarterlySalesTons.max, commercialAmbitionTons ?? 0);
+  const targetSalesVolumeTons = Math.min(strategicTargetTons, productionSupportedScaleTons);
   const cappedByProductionNotStrategicTarget = productionSupportedScaleTons < targetScaleBand.quarterlySalesTons.max;
 
   // --- 採用方向（+1ずつ、自然停止条件まで評価し、Target Sales Forceを求める） ---

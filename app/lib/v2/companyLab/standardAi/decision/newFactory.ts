@@ -22,6 +22,8 @@ import { CAPEX_PARAMETERS_V1, CapexParameters } from "../../../capex/parameters"
 import { CompanyFixture } from "../../types";
 import { CompanyVision } from "../../vision/types";
 import { GrowthPressure, StrategicGrowthState, growthPressureAtLeast } from "../../vision/strategicGrowth";
+import { CommercialAmbition } from "../../vision/commercialAmbition";
+import { UnservedOpportunity } from "../../vision/unservedOpportunity";
 import { PressureScores } from "../pressures";
 import { ProductAmount, StandardAiObservation, sumProductAmount } from "../types";
 import { StandardAiDiagnosticEntry, StandardAiReasonCode } from "../reasonCodes";
@@ -63,6 +65,16 @@ export interface NewFactoryAssessment {
   readonly growthPressure: GrowthPressure;
   readonly strategicScaleGapTons: number;
   readonly strategicScaleGapRatio: number;
+  /**
+   * 【Phase 6】商業側の需要根拠。ChatGPT が
+   * 「需要が無いから建てなかった」と「需要はあるがWorker不足だから建てなかった」を
+   * 区別できるようにするための記録。
+   */
+  readonly commercialAmbitionTons: number | null;
+  readonly profitableOpportunityTons: number | null;
+  readonly unservedProfitableTons: number | null;
+  readonly capacityCausedUnservedTons: number | null;
+  readonly persistentCapacityCausedUnserved: boolean;
 }
 
 export interface NewFactoryDecisionResult {
@@ -118,6 +130,17 @@ export interface NewFactoryDecisionInput {
   readonly productionNeededByProductBeforeCap: ProductAmount;
   /** 当期、既存設備の増設案件を提案したか（既存増設を先に使う原則の判定材料）。 */
   readonly existingExpansionProposedThisQuarter: boolean;
+  /**
+   * 【Phase 6】商業側の需要根拠。
+   * 「稼働率がまだ低いから不要」だけで判断しないための一次情報である。
+   */
+  readonly commercialAmbition?: CommercialAmbition;
+  readonly unservedOpportunity?: UnservedOpportunity;
+  /**
+   * 直近数四半期にわたり、生産能力起因の未充足機会が続いているか
+   * （一時的な好況で工場を建てないための持続性条件）。
+   */
+  readonly persistentCapacityCausedUnserved?: boolean;
   readonly capexParams?: CapexParameters;
   readonly strategyParams?: NewFactoryStrategyParameters;
 }
@@ -153,6 +176,11 @@ export function evaluateNewFactoryDecision(input: NewFactoryDecisionInput): NewF
       growthPressure: strategicGrowth?.growthPressure ?? "LOW",
       strategicScaleGapTons: strategicGrowth?.strategicScaleGapTons ?? 0,
       strategicScaleGapRatio: strategicGrowth?.strategicScaleGapRatio ?? 0,
+      commercialAmbitionTons: input.commercialAmbition?.ambitionTons ?? null,
+      profitableOpportunityTons: input.commercialAmbition?.realisticOpportunityTons ?? null,
+      unservedProfitableTons: input.unservedOpportunity?.unservedProfitableTons ?? null,
+      capacityCausedUnservedTons: input.unservedOpportunity?.blockedByProductionCapacityTons ?? null,
+      persistentCapacityCausedUnserved: input.persistentCapacityCausedUnserved ?? false,
     },
     proposals,
     diagnostics,
@@ -401,14 +429,38 @@ export function evaluateNewFactoryDecision(input: NewFactoryDecisionInput): NewF
   // --- Gate I: 需要の裏づけ（当期の生産必要量） ------------------------
   const neededTotal = sumProductAmount(input.productionNeededByProductBeforeCap);
   const demandPullRatio = bindingCapacityTons > EPSILON ? neededTotal / bindingCapacityTons : 0;
-  const demandKeyValues = {
+  const demandKeyValues: Record<string, number> = {
     productionNeededTons: neededTotal,
     bindingEffectiveCapacityTons: bindingCapacityTons,
     demandPullRatio,
     minimumDemandPullRatio: sp.minimumDemandPullRatio,
   };
-  const demandOk = demandPullRatio >= sp.minimumDemandPullRatio;
-  gates.push(gate("DEMAND_PULL", demandOk, demandKeyValues, `当期の生産必要量 ÷ 実効能力 = ${(demandPullRatio * 100).toFixed(1)}%。`));
+  // 【Phase 6・§21/§22】需要根拠を「今期の生産必要量 ÷ 能力」だけで見ない。
+  //
+  // その指標は「今期作る必要がある量」であり、**商業的な成長機会を構造的に見落とす**。
+  // 監査では、販売希望量そのものが自社能力×0.8で決まっていたため、この比率は
+  // 定義上0.8前後から動きようがなかった（閾値を下げても意味が無い＝§22）。
+  //
+  // そこで第2の根拠として「取りたかったのに生産能力が理由で取れなかった量が、
+  // 複数四半期にわたって続いている」ことを認める。閾値そのものは変更していない。
+  const capacityCausedUnserved = input.unservedOpportunity?.blockedByProductionCapacityTons ?? 0;
+  const persistentCapacityEvidence = (input.persistentCapacityCausedUnserved ?? false) && capacityCausedUnserved > EPSILON;
+  const demandOk = demandPullRatio >= sp.minimumDemandPullRatio || persistentCapacityEvidence;
+  Object.assign(demandKeyValues, {
+    commercialAmbitionTons: input.commercialAmbition?.ambitionTons ?? 0,
+    capacityCausedUnservedTons: capacityCausedUnserved,
+    persistentCapacityCausedUnserved: persistentCapacityEvidence ? 1 : 0,
+  });
+  gates.push(
+    gate(
+      "DEMAND_PULL",
+      demandOk,
+      demandKeyValues,
+      persistentCapacityEvidence
+        ? `生産能力が理由で取り切れなかった採算つき機会が持続している（当期 ${Math.round(capacityCausedUnserved).toLocaleString()}t）。`
+        : `当期の生産必要量 ÷ 実効能力 = ${(demandPullRatio * 100).toFixed(1)}%。`
+    )
+  );
   if (!demandOk) {
     return deferred(
       "NEW_FACTORY_DEFERRED_MARKET",

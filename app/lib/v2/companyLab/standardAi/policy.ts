@@ -51,6 +51,10 @@ import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "./strategicIntent";
 import { defaultVisionDocumentFor } from "../vision/defaults";
 import { resolveVisionAtTurn, CompanyVision } from "../vision/types";
 import { computeStrategicGrowthState, StrategicGrowthState } from "../vision/strategicGrowth";
+import { CommercialAmbition, computeCommercialAmbition } from "../vision/commercialAmbition";
+import { computeUnservedOpportunity, UnservedOpportunity } from "../vision/unservedOpportunity";
+import { buildCommercialGrowthDiagnostics } from "./diagnosis/commercialGrowth";
+import { computeObservableCommercialOpportunity, ObservableCommercialOpportunity } from "./decision/sales";
 import { evaluateNewFactoryDecision, NewFactoryAssessment } from "./decision/newFactory";
 
 // 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
@@ -99,6 +103,13 @@ export interface StandardAiQuarterDiagnostics {
    */
   readonly vision?: CompanyVision;
   readonly strategicGrowth?: StrategicGrowthState;
+  /**
+   * 【Phase 6】観測できる商業機会・今期目指した販売規模・取れなかった採算つき機会。
+   * Vision がどこまで商業判断へ伝わったかを、画面と Pack の双方から追えるようにする。
+   */
+  readonly commercialAmbition?: CommercialAmbition;
+  readonly observableOpportunity?: ObservableCommercialOpportunity;
+  readonly unservedOpportunity?: UnservedOpportunity;
   /** 新工場を検討した結果（提案しなかった場合も、どのゲートで止まったかを保持する）。 */
   readonly newFactoryAssessment?: NewFactoryAssessment;
 }
@@ -146,7 +157,46 @@ export function generateStandardAiDecisionWithDiagnostics(
   const observation = buildStandardAiObservation(fixture, ownState, publicInfo, period, turn);
   const pressures = computePressureScores(observation, fixture, params);
 
-  const salesResult = buildStandardAiSalesPlans(fixture, observation, pressures, params);
+  // 【2026-08-09・Phase 6】Vision → Commercial Ambition を**販売計画より前**に求める。
+  // Phase 5 では Vision が新工場判断にしか届いておらず、販売希望量は
+  // 「自社能力 × salesUtilizationTarget」だけで決まっていた（監査で実測）。
+  const targetScaleResult = computeTargetScaleBand(fixture, observation, STANDARD_AI_STRATEGIC_INTENT_V1, params);
+  const visionDocument = defaultVisionDocumentFor(fixture.companyId);
+  const vision: CompanyVision | null = visionDocument ? resolveVisionAtTurn(visionDocument, turn) : null;
+  const strategicGrowth: StrategicGrowthState | null = vision
+    ? computeStrategicGrowthState({ vision, turn, currentSustainableScaleTons: targetScaleResult.currentSustainableScaleTons })
+    : null;
+
+  // 観測できる商業機会（採算つき）。未来の TRUE WORLD は含まれない。
+  const observableOpportunity = computeObservableCommercialOpportunity(observation, SALES_PARAMETERS_V1);
+  const capacityAnchorTons = sumProductAmount({ ...observation.totalCapacityByProduct }) * params.salesUtilizationTarget;
+  const recentActualScaleTons =
+    (observation.lastQuarterActualProductionByProduct.hoso ?? 0) +
+    (observation.lastQuarterActualProductionByProduct.pd ?? 0) +
+    (observation.lastQuarterActualProductionByProduct.vap ?? 0);
+  const commercialAmbition = computeCommercialAmbition({
+    vision,
+    strategicGrowth,
+    capacityAnchorTons,
+    recentActualScaleTons,
+    attainableProfitableTons: observableOpportunity.attainableProfitableTons,
+    weightedContributionUsdPerKg: observableOpportunity.weightedContributionUsdPerKg,
+    priceObservationMissing: observableOpportunity.priceObservationMissing,
+    maxFinishedGoodsExcessRatio: Math.max(
+      pressures.finishedGoodsExcessRatioByProduct.hoso,
+      pressures.finishedGoodsExcessRatioByProduct.pd,
+      pressures.finishedGoodsExcessRatioByProduct.vap
+    ),
+  });
+
+  const salesResult = buildStandardAiSalesPlans(
+    fixture,
+    observation,
+    pressures,
+    params,
+    SALES_PARAMETERS_V1,
+    commercialAmbition.ambitionMultiplier
+  );
 
   // 【SAI-6.4】生産計画の営業側inputを、工場能力起点の理論希望量（desiredByProduct）から
   // Standard AI内部の当期納品需要（currentPeriodDeliveryDemand、SAI-6.3）起点の
@@ -226,7 +276,6 @@ export function generateStandardAiDecisionWithDiagnostics(
   // 共通のBALANCED_GROWTHを使う（会社別性格への拡張は将来、この定数を差し替える
   // だけで済む設計）。8期先市場の精密予測は行わず、現在の会社規模・実効生産能力・
   // 成長姿勢から算定する（targetScale.ts参照）。
-  const targetScaleResult = computeTargetScaleBand(fixture, observation, STANDARD_AI_STRATEGIC_INTENT_V1, params);
   const liquidityFloorUsdForCapability = observation.cashUsd - pressures.targetMinimumCashUsd;
   const approxVariableCostUsdPerTon =
     (observation.productEconomics.expectedProcessingCostUsdPerHosoEqKg.hoso +
@@ -248,15 +297,37 @@ export function generateStandardAiDecisionWithDiagnostics(
   // 【役割分担】Vision を決めるのは人間の経営者であり、Standard AI ではない。
   // Standard AI はここで成長目標を発明せず、与えられた志に対する遅れへ反応するだけ。
   // 未来の TRUE WORLD は computeStrategicGrowthState の引数に存在しない。
-  const visionDocument = defaultVisionDocumentFor(fixture.companyId);
-  const vision: CompanyVision | null = visionDocument ? resolveVisionAtTurn(visionDocument, turn) : null;
-  const strategicGrowth: StrategicGrowthState | null = vision
-    ? computeStrategicGrowthState({
-        vision,
-        turn,
-        currentSustainableScaleTons: targetScaleResult.currentSustainableScaleTons,
-      })
-    : null;
+  // 【Phase 6】取りたかったが取れなかった採算つき機会と、その原因分解。
+  // 「稼働率がまだ75%だから新工場は不要」だけで判断しないための一次情報である。
+  const submittedSalesTons = salesResult.salesPlans.reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
+  const desiredBeforeEffortTons = salesResult.salesWishByMarketProduct.reduce(
+    (sum, w) => sum + w.desiredQuantityBeforeEffortConstraint,
+    0
+  );
+  const bindingProductionCapacityTons = Math.min(
+    sumProductAmount({ ...observation.totalEffectiveCapacityByProduct }),
+    observation.totalEffectiveCommonProcessingCapacity
+  );
+  const unservedOpportunity = computeUnservedOpportunity({
+    commercialAmbitionTons: commercialAmbition.ambitionTons,
+    desiredBeforeEffortTons,
+    submittedSalesTons,
+    bindingProductionCapacityTons,
+    heldByInventory: commercialAmbition.limiter === "INVENTORY_EXCESS",
+    // 【推測しない】労働・原料が制約かどうかは、既存の状況診断が名指しした場合だけ。
+    laborIsBindingConstraint: situationDiagnosisResult.diagnosis.workerLoadState === "shortage",
+    rawMaterialIsBindingConstraint: situationDiagnosisResult.diagnosis.rawMaterialSupplyConstraintState === "shortage",
+  });
+
+  const commercialGrowthDiagnostics = buildCommercialGrowthDiagnostics({
+    companyId: fixture.companyId,
+    vision,
+    strategicGrowth,
+    opportunity: observableOpportunity,
+    ambition: commercialAmbition,
+    unserved: unservedOpportunity,
+    submittedSalesTons,
+  });
 
   // 【新工場は既存増設とは別の判断】既存の capex.ts（今期このラインが足りるか）とは
   // 独立した戦略評価を行う。提案しなかった場合も理由コードを必ず残す。
@@ -268,6 +339,16 @@ export function generateStandardAiDecisionWithDiagnostics(
     strategicGrowth,
     productionNeededByProductBeforeCap: productionResult.neededByProduct,
     existingExpansionProposedThisQuarter: capexResult.capexDecision.newProjectProposals.length > 0,
+    commercialAmbition,
+    unservedOpportunity,
+    // 【§23 持続性】一時的な好況で工場を建てない。
+    // 「前四半期に工場を実際に満杯まで回していた（既存の sustained しきい値を再利用）」
+    // かつ「今期の志がその能力を超えている」ときだけ、持続的な能力不足の根拠とみなす。
+    // 新しい閾値は発明していない（capexSustainedUtilizationThreshold をそのまま使う）。
+    persistentCapacityCausedUnserved:
+      pressures.hadPriorQuarterUtilization &&
+      bindingProductionCapacityTons > 0 &&
+      recentActualScaleTons >= bindingProductionCapacityTons * params.capexSustainedUtilizationThreshold,
   });
 
   const salesForceHiringResult = buildStandardAiSalesForceHiringDecision({
@@ -283,6 +364,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     rawMaterialSupplyConstraintState: situationDiagnosisResult.diagnosis.rawMaterialSupplyConstraintState,
     targetScaleBand: targetScaleResult.targetScaleBand,
     hasNearTermCapexUnderConstruction: targetCapabilityResult.hasNearTermCapexUnderConstruction,
+    commercialAmbitionTons: commercialAmbition.ambitionTons,
   });
 
   const decision: CompanyDecisionInput = {
@@ -345,6 +427,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     strategicTargetScaleDiagnostic,
     ...targetCapabilityResult.diagnostics,
     ...salesForceHiringResult.diagnostics,
+    ...commercialGrowthDiagnostics,
     ...newFactoryResult.diagnostics,
   ];
 
@@ -362,6 +445,9 @@ export function generateStandardAiDecisionWithDiagnostics(
       salesWishByMarketProduct: salesResult.salesWishByMarketProduct,
       ...(vision ? { vision } : {}),
       ...(strategicGrowth ? { strategicGrowth } : {}),
+      commercialAmbition,
+      observableOpportunity,
+      unservedOpportunity,
       newFactoryAssessment: newFactoryResult.assessment,
     },
   };
