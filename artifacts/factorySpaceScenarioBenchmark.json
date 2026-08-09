@@ -1,0 +1,735 @@
+{
+  "label": "factory-space-scenario-benchmark",
+  "turns": 12,
+  "results": [
+    {
+      "label": "A-MASS-HOSO集中",
+      "focus": "MASS",
+      "rows": [
+        {
+          "turn": 1,
+          "usedSpaceUnits": 108000,
+          "remainingSpaceUnits": 16199.999999999985,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 12000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "hosoLineExpansion:approved→completed"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 2,
+          "usedSpaceUnits": 112000,
+          "remainingSpaceUnits": 12199.999999999985,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 12000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "hosoLineExpansion:approved→completed"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 3,
+          "usedSpaceUnits": 116000,
+          "remainingSpaceUnits": 8199.999999999985,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 16000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "hosoLineExpansion:approved→completed"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 4,
+          "usedSpaceUnits": 120000,
+          "remainingSpaceUnits": 4199.999999999985,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 20000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "hosoLineExpansion:approved→completed"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 5,
+          "usedSpaceUnits": 124000,
+          "remainingSpaceUnits": 199.99999999998545,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 24000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [],
+          "capexRejections": [
+            "hosoLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 200（総量 124200、不足 3800 スペース単位）。"
+          ]
+        },
+        {
+          "turn": 6,
+          "usedSpaceUnits": 120000,
+          "remainingSpaceUnits": 4199.999999999985,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 24000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "hosoLineExpansion:approved→completed"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 7,
+          "usedSpaceUnits": 124000,
+          "remainingSpaceUnits": 199.99999999998545,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 24000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [],
+          "capexRejections": [
+            "hosoLineExpansion: 重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。/工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 200（総量 124200、不足 3800 スペース単位）。"
+          ]
+        },
+        {
+          "turn": 8,
+          "usedSpaceUnits": 120000,
+          "remainingSpaceUnits": 4199.999999999985,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 24000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [],
+          "capexRejections": [
+            "hosoLineExpansion: 重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。"
+          ]
+        },
+        {
+          "turn": 9,
+          "usedSpaceUnits": 120000,
+          "remainingSpaceUnits": 4199.999999999985,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 24000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [],
+          "capexRejections": [
+            "hosoLineExpansion: 重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。"
+          ]
+        },
+        {
+          "turn": 10,
+          "usedSpaceUnits": 120000,
+          "remainingSpaceUnits": 4199.999999999985,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 24000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [],
+          "capexRejections": [
+            "hosoLineExpansion: 重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。"
+          ]
+        },
+        {
+          "turn": 11,
+          "usedSpaceUnits": 120000,
+          "remainingSpaceUnits": 4199.999999999985,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 24000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [],
+          "capexRejections": [
+            "hosoLineExpansion: 重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。"
+          ]
+        },
+        {
+          "turn": 12,
+          "usedSpaceUnits": 120000,
+          "remainingSpaceUnits": 4199.999999999985,
+          "totalSpaceUnits": 124199.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000
+          },
+          "hosoCapacity": 24000,
+          "pdCapacity": 6000,
+          "vapCapacity": 4000,
+          "commonCapacity": 30000,
+          "capexApproved": [],
+          "capexRejections": [
+            "hosoLineExpansion: 重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "B-BAL-混合型",
+      "focus": "BAL",
+      "rows": [
+        {
+          "turn": 1,
+          "usedSpaceUnits": 109000,
+          "remainingSpaceUnits": 16349.999999999985,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 7000,
+          "vapCapacity": 5000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "hosoLineExpansion:approved→completed",
+            "pdLineExpansion:approved→underConstruction",
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 2,
+          "usedSpaceUnits": 114450,
+          "remainingSpaceUnits": 10899.999999999985,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 7000,
+          "vapCapacity": 5000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "pdLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "hosoLineExpansion:approved→completed"
+          ],
+          "capexRejections": [
+            "pdLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。",
+            "vapLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。"
+          ]
+        },
+        {
+          "turn": 3,
+          "usedSpaceUnits": 118450,
+          "remainingSpaceUnits": 6899.999999999985,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 12000,
+          "pdCapacity": 7000,
+          "vapCapacity": 5000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "pdLineExpansion:underConstruction→completed",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "hosoLineExpansion:approved→completed"
+          ],
+          "capexRejections": [
+            "pdLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。",
+            "vapLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。"
+          ]
+        },
+        {
+          "turn": 4,
+          "usedSpaceUnits": 122450,
+          "remainingSpaceUnits": 2899.9999999999854,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 16000,
+          "pdCapacity": 7000,
+          "vapCapacity": 5000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→completed",
+            "pdLineExpansion:approved→underConstruction",
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": [
+            "hosoLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 2900（総量 125350、不足 1100 スペース単位）。"
+          ]
+        },
+        {
+          "turn": 5,
+          "usedSpaceUnits": 123900,
+          "remainingSpaceUnits": 1449.9999999999854,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 20000,
+          "pdCapacity": 7350,
+          "vapCapacity": 5000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "pdLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "pdLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": [
+            "hosoLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1450（総量 125350、不足 2550 スペース単位）。",
+            "vapLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。"
+          ]
+        },
+        {
+          "turn": 6,
+          "usedSpaceUnits": 124600,
+          "remainingSpaceUnits": 749.9999999999854,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 20000,
+          "pdCapacity": 7350,
+          "vapCapacity": 5000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "pdLineExpansion:underConstruction→completed",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "pdLineExpansion:underConstruction→underConstruction"
+          ],
+          "capexRejections": [
+            "hosoLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。/工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 750（総量 125350、不足 3250 スペース単位）。",
+            "pdLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。",
+            "vapLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。"
+          ]
+        },
+        {
+          "turn": 7,
+          "usedSpaceUnits": 124600,
+          "remainingSpaceUnits": 749.9999999999854,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 20000,
+          "pdCapacity": 7350,
+          "vapCapacity": 5250,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→completed",
+            "pdLineExpansion:underConstruction→completed",
+            "pdLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": [
+            "hosoLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 750（総量 125350、不足 3250 スペース単位）。",
+            "vapLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。/工場スペースが不足しているため新規承認を見送り。必要スペース 750 / 空き 50（総量 125350、不足 700 スペース単位）。"
+          ]
+        },
+        {
+          "turn": 8,
+          "usedSpaceUnits": 125300,
+          "remainingSpaceUnits": 49.99999999998545,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 20000,
+          "pdCapacity": 7700,
+          "vapCapacity": 5250,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "pdLineExpansion:underConstruction→underConstruction"
+          ],
+          "capexRejections": [
+            "hosoLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 50（総量 125350、不足 3950 スペース単位）。",
+            "pdLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 700 / 空き 50（総量 125350、不足 650 スペース単位）。",
+            "vapLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 750 / 空き 50（総量 125350、不足 700 スペース単位）。"
+          ]
+        },
+        {
+          "turn": 9,
+          "usedSpaceUnits": 125300,
+          "remainingSpaceUnits": 49.99999999998545,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 20000,
+          "pdCapacity": 8050,
+          "vapCapacity": 5250,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "pdLineExpansion:underConstruction→completed"
+          ],
+          "capexRejections": [
+            "commonProcessingExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 560 / 空き 50（総量 125350、不足 510 スペース単位）。",
+            "hosoLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 50（総量 125350、不足 3950 スペース単位）。",
+            "pdLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 700 / 空き 50（総量 125350、不足 650 スペース単位）。",
+            "vapLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 750 / 空き 50（総量 125350、不足 700 スペース単位）。"
+          ]
+        },
+        {
+          "turn": 10,
+          "usedSpaceUnits": 125300,
+          "remainingSpaceUnits": 49.99999999998545,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 20000,
+          "pdCapacity": 8050,
+          "vapCapacity": 5500,
+          "commonCapacity": 30000,
+          "capexApproved": [],
+          "capexRejections": [
+            "commonProcessingExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 560 / 空き 50（総量 125350、不足 510 スペース単位）。",
+            "hosoLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 50（総量 125350、不足 3950 スペース単位）。",
+            "pdLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 700 / 空き 50（総量 125350、不足 650 スペース単位）。",
+            "vapLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 750 / 空き 50（総量 125350、不足 700 スペース単位）。"
+          ]
+        },
+        {
+          "turn": 11,
+          "usedSpaceUnits": 125300,
+          "remainingSpaceUnits": 49.99999999998545,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 20000,
+          "pdCapacity": 8400,
+          "vapCapacity": 5500,
+          "commonCapacity": 30000,
+          "capexApproved": [],
+          "capexRejections": [
+            "hosoLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 50（総量 125350、不足 3950 スペース単位）。",
+            "pdLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 700 / 空き 50（総量 125350、不足 650 スペース単位）。",
+            "vapLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 750 / 空き 50（総量 125350、不足 700 スペース単位）。"
+          ]
+        },
+        {
+          "turn": 12,
+          "usedSpaceUnits": 125300,
+          "remainingSpaceUnits": 49.99999999998545,
+          "totalSpaceUnits": 125349.99999999999,
+          "investmentSpaceRequirement": {
+            "hosoLineExpansion": 4000,
+            "pdLineExpansion": 700,
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 20000,
+          "pdCapacity": 8400,
+          "vapCapacity": 5500,
+          "commonCapacity": 30000,
+          "capexApproved": [],
+          "capexRejections": [
+            "hosoLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 50（総量 125350、不足 3950 スペース単位）。",
+            "pdLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 700 / 空き 50（総量 125350、不足 650 スペース単位）。",
+            "vapLineExpansion: 工場スペースが不足しているため新規承認を見送り。必要スペース 750 / 空き 50（総量 125350、不足 700 スペース単位）。"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "C-VAP-高付加価値集中",
+      "focus": "VAP",
+      "rows": [
+        {
+          "turn": 1,
+          "usedSpaceUnits": 110000,
+          "remainingSpaceUnits": 16499.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 6000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 2,
+          "usedSpaceUnits": 110750,
+          "remainingSpaceUnits": 15749.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 6000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 3,
+          "usedSpaceUnits": 111500,
+          "remainingSpaceUnits": 14999.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 6000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 4,
+          "usedSpaceUnits": 112250,
+          "remainingSpaceUnits": 14249.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 6000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→completed",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:underConstruction→underConstruction"
+          ],
+          "capexRejections": [
+            "vapLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。"
+          ]
+        },
+        {
+          "turn": 5,
+          "usedSpaceUnits": 112250,
+          "remainingSpaceUnits": 14249.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 6000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→completed",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 6,
+          "usedSpaceUnits": 113000,
+          "remainingSpaceUnits": 13499.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 6000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→completed",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 7,
+          "usedSpaceUnits": 113750,
+          "remainingSpaceUnits": 12749.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 6250,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 8,
+          "usedSpaceUnits": 114500,
+          "remainingSpaceUnits": 11999.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 6500,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→completed",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:underConstruction→underConstruction"
+          ],
+          "capexRejections": [
+            "vapLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。"
+          ]
+        },
+        {
+          "turn": 9,
+          "usedSpaceUnits": 114500,
+          "remainingSpaceUnits": 11999.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 6750,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→completed",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 10,
+          "usedSpaceUnits": 115250,
+          "remainingSpaceUnits": 11249.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 6750,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→completed",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 11,
+          "usedSpaceUnits": 116000,
+          "remainingSpaceUnits": 10499.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 7000,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:approved→underConstruction"
+          ],
+          "capexRejections": []
+        },
+        {
+          "turn": 12,
+          "usedSpaceUnits": 116750,
+          "remainingSpaceUnits": 9749.999999999985,
+          "totalSpaceUnits": 126499.99999999999,
+          "investmentSpaceRequirement": {
+            "vapLineExpansion": 750
+          },
+          "hosoCapacity": 8000,
+          "pdCapacity": 6000,
+          "vapCapacity": 7250,
+          "commonCapacity": 30000,
+          "capexApproved": [
+            "vapLineExpansion:underConstruction→completed",
+            "vapLineExpansion:underConstruction→underConstruction",
+            "vapLineExpansion:underConstruction→underConstruction"
+          ],
+          "capexRejections": [
+            "vapLineExpansion: 同時進行中案件数が上限(3)に達しているため新規承認を見送り。"
+          ]
+        }
+      ]
+    }
+  ]
+}

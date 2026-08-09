@@ -46,15 +46,14 @@
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
-      "capexRejections": [
-        "hosoLineExpansion:工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
-      ],
+      "capexRejections": [],
       "domesticProcured": 2390.32,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 251209799.4661761,
+      "cash": 243209799.4661761,
       "debt": 75500000,
       "operatingProfit": -13306945.268039107,
       "regularHeadcount": 8050
@@ -72,251 +71,281 @@
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
-      "capexRejections": [
-        "hosoLineExpansion:工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
-      ],
+      "capexRejections": [],
       "domesticProcured": 3059.1,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 255419764.42780066,
+      "cash": 239419764.42780066,
       "debt": 73250000,
       "operatingProfit": -21153472.69732733,
       "regularHeadcount": 8050
     },
     {
       "turn": 4,
-      "hosoCapacity": 13680,
-      "hosoProduced": 13555.51,
-      "hosoUtilization": 0.9908998538011696,
+      "hosoCapacity": 17100,
+      "hosoProduced": 16932.42,
+      "hosoUtilization": 0.9901999999999999,
       "concentrationFactor": 0.000001,
-      "baseRequiredWorkers": 13680,
-      "adjustedRequiredWorkers": 8208,
+      "baseRequiredWorkers": 17100,
+      "adjustedRequiredWorkers": 10260,
       "workerReductionRatio": 0.4,
       "capexProposals": [
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
-      "capexRejections": [
-        "hosoLineExpansion:工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
-      ],
-      "domesticProcured": 2990.89,
+      "capexRejections": [],
+      "domesticProcured": 3467.1,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 263529030.42167512,
+      "cash": 237133890.75522548,
       "debt": 71000000,
-      "operatingProfit": -18422960.95072733,
+      "operatingProfit": -20676033.033269227,
       "regularHeadcount": 8050
     },
     {
       "turn": 5,
-      "hosoCapacity": 13680,
-      "hosoProduced": 13545.94,
-      "hosoUtilization": 0.9902002923976608,
+      "hosoCapacity": 20520,
+      "hosoProduced": 20308.64,
+      "hosoUtilization": 0.9896998050682261,
       "concentrationFactor": 0.000001,
-      "baseRequiredWorkers": 13680,
-      "adjustedRequiredWorkers": 8208,
+      "baseRequiredWorkers": 18614.08,
+      "adjustedRequiredWorkers": 11168.448,
       "workerReductionRatio": 0.4,
       "capexProposals": [
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
       "capexRejections": [
-        "hosoLineExpansion:工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
+        "hosoLineExpansion:工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 200（総量 124200、不足 3800 スペース単位）。"
       ],
-      "domesticProcured": 3042.35,
+      "domesticProcured": 3640.5,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 238963298.45722032,
+      "cash": 217826390.59704876,
       "debt": 33750000,
-      "operatingProfit": -19005926.28805937,
+      "operatingProfit": -23781980.918247417,
       "regularHeadcount": 8050
     },
     {
       "turn": 6,
-      "hosoCapacity": 13680,
-      "hosoProduced": 13545.94,
-      "hosoUtilization": 0.9902002923976608,
+      "hosoCapacity": 20520,
+      "hosoProduced": 20318.9,
+      "hosoUtilization": 0.9901998050682262,
       "concentrationFactor": 0.000001,
-      "baseRequiredWorkers": 13680,
-      "adjustedRequiredWorkers": 8208,
+      "baseRequiredWorkers": 19520.61,
+      "adjustedRequiredWorkers": 11712.366,
       "workerReductionRatio": 0.4,
       "capexProposals": [
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
-      "capexRejections": [
-        "hosoLineExpansion:工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
-      ],
-      "domesticProcured": 3001.16,
+      "capexRejections": [],
+      "domesticProcured": 3640.5,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 250253937.93315828,
+      "cash": 238134310.05973387,
       "debt": 31500000,
-      "operatingProfit": -19989038.300688833,
+      "operatingProfit": -25854219.821587116,
       "regularHeadcount": 8050
     },
     {
       "turn": 7,
-      "hosoCapacity": 13680,
-      "hosoProduced": 13545.94,
-      "hosoUtilization": 0.9902002923976608,
+      "hosoCapacity": 20520,
+      "hosoProduced": 20318.9,
+      "hosoUtilization": 0.9901998050682262,
       "concentrationFactor": 0.000001,
-      "baseRequiredWorkers": 13680,
-      "adjustedRequiredWorkers": 8208,
+      "baseRequiredWorkers": 19003.28,
+      "adjustedRequiredWorkers": 11401.967999999999,
       "workerReductionRatio": 0.4,
       "capexProposals": [
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
       "capexRejections": [
-        "hosoLineExpansion:工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
+        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。/工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 200（総量 124200、不足 3800 スペース単位）。"
       ],
-      "domesticProcured": 2979.39,
+      "domesticProcured": 3640.5,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 260346206.57902423,
+      "cash": 263031021.33204725,
       "debt": 29250000,
-      "operatingProfit": -20728354.224738464,
+      "operatingProfit": -25561011.365813315,
       "regularHeadcount": 8050
     },
     {
       "turn": 8,
-      "hosoCapacity": 13680,
-      "hosoProduced": 13545.94,
-      "hosoUtilization": 0.9902002923976608,
+      "hosoCapacity": 20520,
+      "hosoProduced": 20318.9,
+      "hosoUtilization": 0.9901998050682262,
       "concentrationFactor": 0.000001,
-      "baseRequiredWorkers": 13680,
-      "adjustedRequiredWorkers": 8208,
+      "baseRequiredWorkers": 19638.89,
+      "adjustedRequiredWorkers": 11783.333999999999,
       "workerReductionRatio": 0.4,
       "capexProposals": [
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
       "capexRejections": [
-        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。/工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
+        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。"
       ],
-      "domesticProcured": 2994.98,
+      "domesticProcured": 3640.5,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 269702982.05645245,
+      "cash": 303974195.98833746,
       "debt": 27000000,
-      "operatingProfit": -20534517.869775176,
+      "operatingProfit": -17731539.29139997,
       "regularHeadcount": 8050
     },
     {
       "turn": 9,
-      "hosoCapacity": 13680,
-      "hosoProduced": 13545.94,
-      "hosoUtilization": 0.9902002923976608,
+      "hosoCapacity": 20520,
+      "hosoProduced": 20318.9,
+      "hosoUtilization": 0.9901998050682262,
       "concentrationFactor": 0.000001,
-      "baseRequiredWorkers": 13680,
-      "adjustedRequiredWorkers": 8208,
-      "workerReductionRatio": 0.4,
+      "baseRequiredWorkers": 19563.09,
+      "adjustedRequiredWorkers": 11737.854000000001,
+      "workerReductionRatio": 0.3999999999999999,
       "capexProposals": [
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
       "capexRejections": [
-        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。/工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
+        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。"
       ],
-      "domesticProcured": 2993.63,
+      "domesticProcured": 3640.5,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 292431059.5950023,
+      "cash": 343978939.5349906,
       "debt": 24750000,
-      "operatingProfit": -10642022.465835005,
+      "operatingProfit": -26144751.57684298,
       "regularHeadcount": 8050
     },
     {
       "turn": 10,
-      "hosoCapacity": 13680,
-      "hosoProduced": 13545.94,
-      "hosoUtilization": 0.9902002923976608,
+      "hosoCapacity": 20520,
+      "hosoProduced": 20318.9,
+      "hosoUtilization": 0.9901998050682262,
       "concentrationFactor": 0.000001,
-      "baseRequiredWorkers": 13680,
-      "adjustedRequiredWorkers": 8208,
+      "baseRequiredWorkers": 19542.86,
+      "adjustedRequiredWorkers": 11725.716,
       "workerReductionRatio": 0.4,
       "capexProposals": [
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
       "capexRejections": [
-        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。/工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
+        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。"
       ],
-      "domesticProcured": 2976.2,
+      "domesticProcured": 3640.5,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 315588891.67180914,
+      "cash": 384682457.7705304,
       "debt": 22500000,
-      "operatingProfit": -20634314.527179316,
+      "operatingProfit": -24370679.17119789,
       "regularHeadcount": 8050
     },
     {
       "turn": 11,
-      "hosoCapacity": 13680,
-      "hosoProduced": 13545.94,
-      "hosoUtilization": 0.9902002923976608,
+      "hosoCapacity": 20520,
+      "hosoProduced": 20318.9,
+      "hosoUtilization": 0.9901998050682262,
       "concentrationFactor": 0.000001,
-      "baseRequiredWorkers": 13680,
-      "adjustedRequiredWorkers": 8208,
+      "baseRequiredWorkers": 19542.86,
+      "adjustedRequiredWorkers": 11725.716,
       "workerReductionRatio": 0.4,
       "capexProposals": [
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
       "capexRejections": [
-        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。/工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
+        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。"
       ],
-      "domesticProcured": 2938.07,
+      "domesticProcured": 3640.5,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 338467556.57816786,
+      "cash": 427203312.5454771,
       "debt": 20250000,
-      "operatingProfit": -18921504.010537386,
+      "operatingProfit": -22318516.119663224,
       "regularHeadcount": 8050
     },
     {
       "turn": 12,
-      "hosoCapacity": 13680,
-      "hosoProduced": 13545.94,
-      "hosoUtilization": 0.9902002923976608,
+      "hosoCapacity": 20520,
+      "hosoProduced": 20318.9,
+      "hosoUtilization": 0.9901998050682262,
       "concentrationFactor": 0.000001,
-      "baseRequiredWorkers": 13680,
-      "adjustedRequiredWorkers": 8208,
+      "baseRequiredWorkers": 19542.86,
+      "adjustedRequiredWorkers": 11725.716,
       "workerReductionRatio": 0.4,
       "capexProposals": [
         "hosoLineExpansion"
       ],
       "capexProjectStatuses": [
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
+        "hosoLineExpansion:completed",
         "hosoLineExpansion:completed"
       ],
       "capexRejections": [
-        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。/工場スペースが不足しているため新規承認を見送り。必要スペース 4000 / 空き 1180（総量 108780、不足 2820 スペース単位）。"
+        "hosoLineExpansion:重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。/銀行の通常融資引受が停止しているため新規承認を見送り。"
       ],
-      "domesticProcured": 2937.71,
+      "domesticProcured": 3640.5,
       "rawMaterialShortfall": 0,
       "finishedGoodsInventory": 0,
-      "cash": 362775123.44800514,
+      "cash": 471788945.0713217,
       "debt": 18000000,
-      "operatingProfit": -18645839.154504627,
+      "operatingProfit": -22448171.79004699,
       "regularHeadcount": 8050
     }
   ]

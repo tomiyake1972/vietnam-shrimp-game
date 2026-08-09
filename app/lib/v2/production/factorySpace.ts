@@ -102,9 +102,16 @@ export const FACTORY_SPACE_PARAMETERS_V1: FactorySpaceParameters = {
   parametersVersion: "factorySpace-v0.1",
   spaceUnitsPerCapacityTon: {
     commonProcessing: 0.8,
+    // 【2026-08-09・Test16】商品別の床面積負荷を HOSO : PD : VAP = 1 : 2 : 3 にする。
+    //   HOSO … 低加工度・単純ライン。単位能力あたりの必要スペースが最も小さい
+    //   PD   … 中加工度。HOSOよりスペースを使う
+    //   VAP  … 高加工度・多工程。最もスペースを使う
+    // 係数は「能力1トンあたりのスペース単位」なので、この値そのものが
+    // 1,000tあたりへ正規化した比率になっている（1,000 : 2,000 : 3,000）。
+    // 旧値は 1.0 / 1.6 / 2.5 で、意図した比率より PD・VAP が軽かった。
     hoso: 1.0,
-    pd: 1.6,
-    vap: 2.5,
+    pd: 2.0,
+    vap: 3.0,
     freezingPackaging: 0.6,
     coldStorage: 2.0,
   },
@@ -112,7 +119,25 @@ export const FACTORY_SPACE_PARAMETERS_V1: FactorySpaceParameters = {
     qualityControlEquipment: 600,
     environmentalEquipment: 900,
   },
-  defaultSpaceHeadroomRatio: 0.05,
+  // 【2026-08-09・Test16】0.05 → 0.15。
+  //
+  // 総スペースは「初期能力が占める面積 × (1 + この比率)」で決まる。5%では
+  // MASS の空きが 5,180 単位しかなく、HOSOライン増設1件（+4,000t × 係数1.0 =
+  // 4,000単位）を1回入れた時点で満杯になっていた。その結果、HOSO能力の明示上限
+  // 24,000t に対して**既存工場では16,000tまでしか到達できない**という、
+  // 上限設計とスペース制約の不整合が生じていた（実測: docs/standard_ai/
+  // TEST16_STAGE_E_FINAL_REPORT.md §5）。
+  //
+  // MASS が初期12,000tから24,000tへ到達するには HOSO増設3回 = 12,000スペース単位が
+  // 要る。新係数での MASS の初期使用量は 108,000 単位なので、必要な比率は
+  //   12,000 / 108,000 = 11.1%
+  // が下限になる。品質管理設備（600）・排水環境設備（900）等の固定スペース案件や
+  // 進行中案件の予約と併存できる余裕を見て 15% とした。
+  //
+  // 【新工場の価値を消していないこと】この比率は工場1棟あたりの余裕であり、
+  // 棟を増やさなければ増えない。VAP は係数3.0のため、同じ能力を積むのに
+  // HOSO の3倍の面積を要し、既存工場だけでは早期に頭打ちになる。
+  defaultSpaceHeadroomRatio: 0.15,
   tightUtilizationThreshold: 0.9,
   epsilonSpaceUnits: 1e-6,
 };
