@@ -146,17 +146,28 @@ export const CAPEX_PARAMETERS_V1: CapexParameters = {
   parametersVersion: "capex-v0.3",
 
   templatesByType: {
+    // 【Test16】HOSOを「低加工度・大量処理型」商品にするための再設定。
+    // 8,000,000 USD で +4,000t/期（単価 2,000 USD/t）。
+    // PDライン増設（4,000,000 / +350t = 11,429 USD/t）より意図的に大幅へ安くしてある。
+    // HOSO大量モデルの弱点は、設備単価ではなく大量原料調達・運転資本・
+    // 大量販売営業力・薄いmargin/kg・価格下落リスクの側で担保する。
+    // 上限は capacityEffect.ts の MAX_HOSO_CAPACITY_TONS（24,000t）。
     hosoLineExpansion: template(
       "hosoLineExpansion",
       "HOSO加工ライン増設",
-      3_000_000,
-      [0.3, 0.4, 0.3],
+      8_000_000,
+      // 【Test16・工期1Q】standardConstructionQuarters は paymentRatios.length と
+      // 必ず一致する設計のため、工期1Qにするには支払も1四半期一括になる。
+      // 8M USD を1四半期で全額支払うことになり、旧 [0.3, 0.4, 0.3]（3四半期分割）より
+      // 単一四半期のキャッシュ負担は大きい。これはHOSO大量モデルに
+      // 運転資本の負担を負わせるという設計意図（指示L）と整合する。
+      [1.0],
       "productionEquipment",
       1,
       0.2, // 建物20%（生産ラインは大部分が機械設備という一般的な想定）
       0.8, // 機械80%
       0.0075, // 3%/年（生産ラインの標準的な保守費水準の暫定値）
-      { targetProduct: "hoso", capacityIncreaseTonsPerQuarter: 500, readinessQuartersAfterCompletion: 1 }
+      { targetProduct: "hoso", capacityIncreaseTonsPerQuarter: 4_000, readinessQuartersAfterCompletion: 1 }
     ),
     pdLineExpansion: template(
       "pdLineExpansion",

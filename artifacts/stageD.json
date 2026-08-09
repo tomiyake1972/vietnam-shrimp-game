@@ -1,0 +1,2446 @@
+{
+  "label": "stageD",
+  "turns": 8,
+  "rows": [
+    {
+      "turn": 1,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2838.8300000000004
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2719.4500000000003
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1385.58
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1430.7500000000002
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3255.4799999999996
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "CN": 0.3789111747851003,
+        "US": 0.23472779369627503,
+        "EU": 0.19965616045845266,
+        "JP": 0.05776504297994268,
+        "OTHER": 0.12893982808022922
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 11231.21,
+      "fulfilledVolume": 10126.56,
+      "outstandingVolume": 4204.65,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 6900,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 56786738.77612406,
+      "operatingIncome": 6101171.776124053,
+      "salesPayroll": 2376656,
+      "netIncome": 4880937.420899242,
+      "cash": 61416073.64477519
+    },
+    {
+      "turn": 1,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 13,
+          "desiredQuantity": 3476.1800000000003
+        },
+        {
+          "market": "EU",
+          "headcount": 14,
+          "desiredQuantity": 2835.24
+        },
+        {
+          "market": "JP",
+          "headcount": 7,
+          "desiredQuantity": 1351.41
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1788.76
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3443.09
+        }
+      ],
+      "japanShare": 0.11666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "CN": 0.3789111747851003,
+        "US": 0.23472779369627503,
+        "EU": 0.19965616045845266,
+        "JP": 0.05776504297994268,
+        "OTHER": 0.12893982808022922
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "none",
+      "contractedVolume": 12702.69,
+      "fulfilledVolume": 12112.16,
+      "outstandingVolume": 4190.53,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 6507.34,
+      "equipmentShortfall": 0,
+      "laborShortfall": 2600.84,
+      "revenue": 59335304.524567515,
+      "operatingIncome": -2078982.6754324809,
+      "salesPayroll": 2631216,
+      "netIncome": -2078982.6754324809,
+      "cash": 34051337.800000004
+    },
+    {
+      "turn": 1,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2840.3399999999997
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2757.58
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1411.4700000000003
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1443.44
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3306.5
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "CN": 0.3789111747851003,
+        "US": 0.23472779369627503,
+        "EU": 0.19965616045845266,
+        "JP": 0.05776504297994268,
+        "OTHER": 0.12893982808022922
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 11416.85,
+      "fulfilledVolume": 8904.17,
+      "outstandingVolume": 4412.68,
+      "finishedGoodsInventory": 437.64,
+      "rawMaterialShortfall": 8146.24,
+      "equipmentShortfall": 0,
+      "laborShortfall": 5047.34,
+      "revenue": 50954932.72439276,
+      "operatingIncome": 6005539.641269885,
+      "salesPayroll": 2240417,
+      "netIncome": 4804431.713015908,
+      "cash": 30642218.21774434
+    },
+    {
+      "turn": 1,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 10,
+          "desiredQuantity": 2560.4500000000003
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2562.9700000000003
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1301.2400000000002
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1361.31
+        },
+        {
+          "market": "US",
+          "headcount": 21,
+          "desiredQuantity": 3174.75
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "CN": 0.3789111747851003,
+        "US": 0.23472779369627503,
+        "EU": 0.19965616045845266,
+        "JP": 0.05776504297994268,
+        "OTHER": 0.12893982808022922
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 10273.04,
+      "fulfilledVolume": 7491.34,
+      "outstandingVolume": 4431.7,
+      "finishedGoodsInventory": 241.2,
+      "rawMaterialShortfall": 9011.7,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 49529866.06558493,
+      "operatingIncome": 7487148.091793396,
+      "salesPayroll": 2099134,
+      "netIncome": 5989718.473434716,
+      "cash": 33663429.71497466
+    },
+    {
+      "turn": 1,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2911.6600000000003
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2860.17
+        },
+        {
+          "market": "JP",
+          "headcount": 7,
+          "desiredQuantity": 1308.13
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1699.65
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3429.5499999999997
+        }
+      ],
+      "japanShare": 0.11666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "CN": 0.3789111747851003,
+        "US": 0.23472779369627503,
+        "EU": 0.19965616045845266,
+        "JP": 0.05776504297994268,
+        "OTHER": 0.12893982808022922
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12004.09,
+      "fulfilledVolume": 11066.17,
+      "outstandingVolume": 2337.92,
+      "finishedGoodsInventory": 303.05,
+      "rawMaterialShortfall": 3869.83,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 54859772.02187669,
+      "operatingIncome": 4813000.939769551,
+      "salesPayroll": 2442617,
+      "netIncome": 3850400.751815641,
+      "cash": 23715802.460039612
+    },
+    {
+      "turn": 2,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 18,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2856.07
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2708.77
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1377.32
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1445.8
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3270.08
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": 21,
+      "organizationalHireLimit": 18,
+      "actualHireCount": 18,
+      "deferredByOrganizationalRamp": 3,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05882184525694222,
+        "EU": 0.20236461070459263,
+        "US": 0.2351930845884804,
+        "CN": 0.3765145269159946,
+        "OTHER": 0.12710593253399025
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 11394.38,
+      "fulfilledVolume": 14263.7,
+      "outstandingVolume": 1335.33,
+      "finishedGoodsInventory": 1197.72,
+      "rawMaterialShortfall": 1216.26,
+      "equipmentShortfall": 0,
+      "laborShortfall": 927.79,
+      "revenue": 72880999.94216251,
+      "operatingIncome": 15812643.67431692,
+      "salesPayroll": 2790370,
+      "netIncome": 11777114.939453537,
+      "cash": 40732677.56609742
+    },
+    {
+      "turn": 2,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 13,
+          "desiredQuantity": 3493.46
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2981.17
+        },
+        {
+          "market": "JP",
+          "headcount": 7,
+          "desiredQuantity": 1341.37
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1589.22
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3459.18
+        }
+      ],
+      "japanShare": 0.11666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.058807359941991016,
+        "EU": 0.20232846337531885,
+        "US": 0.2351837499752458,
+        "CN": 0.3765525595985238,
+        "OTHER": 0.12712786710892068
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "none",
+      "contractedVolume": 12712.1,
+      "fulfilledVolume": 9856.25,
+      "outstandingVolume": 7046.38,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 8868.43,
+      "equipmentShortfall": 0,
+      "laborShortfall": 4837.33,
+      "revenue": 49919256.81336865,
+      "operatingIncome": 3376494.7152877897,
+      "salesPayroll": 2405625,
+      "netIncome": 1301695.7722302317,
+      "cash": 31827160.483429093
+    },
+    {
+      "turn": 2,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 5,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2857.16
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2746.9500000000003
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1402.95
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1458.22
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3321.08
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": 5,
+      "organizationalHireLimit": 18,
+      "actualHireCount": 5,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05885193736645475,
+        "EU": 0.20243970395556832,
+        "US": 0.23521247651780047,
+        "CN": 0.37643551699100636,
+        "OTHER": 0.12706036516917005
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 11540.56,
+      "fulfilledVolume": 9490.22,
+      "outstandingVolume": 6463.02,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 7892.57,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 49582681.59009872,
+      "operatingIncome": 6631455.387656659,
+      "salesPayroll": 2299022,
+      "netIncome": 4748664.310125327,
+      "cash": 26886921.11304252
+    },
+    {
+      "turn": 2,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 18,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 10,
+          "desiredQuantity": 2577.3700000000003
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2553.2
+        },
+        {
+          "market": "JP",
+          "headcount": 9,
+          "desiredQuantity": 1426.94
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1376.17
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3075.13
+        }
+      ],
+      "japanShare": 0.15,
+      "economicallyDesiredHireCount": 31,
+      "organizationalHireLimit": 18,
+      "actualHireCount": 18,
+      "deferredByOrganizationalRamp": 13,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.058858143138253424,
+        "EU": 0.2024551901274162,
+        "US": 0.23521647563551096,
+        "CN": 0.3764192230996093,
+        "OTHER": 0.12705096799921017
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 10630.15,
+      "fulfilledVolume": 9416.18,
+      "outstandingVolume": 5645.67,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 6605.3,
+      "equipmentShortfall": 0,
+      "laborShortfall": 3288.67,
+      "revenue": 45038568.10759708,
+      "operatingIncome": 2739647.303367622,
+      "salesPayroll": 2291618,
+      "netIncome": 1408717.8426940977,
+      "cash": 29272107.928531736
+    },
+    {
+      "turn": 2,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 11,
+          "desiredQuantity": 2927.39
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2849.25
+        },
+        {
+          "market": "JP",
+          "headcount": 8,
+          "desiredQuantity": 1452.6799999999998
+        },
+        {
+          "market": "OTHER",
+          "headcount": 6,
+          "desiredQuantity": 1509.44
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3444.52
+        }
+      ],
+      "japanShare": 0.13333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05882774193703898,
+        "EU": 0.20237932555461818,
+        "US": 0.23519688452160276,
+        "CN": 0.3764990445766148,
+        "OTHER": 0.12709700341012523
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 11967.15,
+      "fulfilledVolume": 10150.54,
+      "outstandingVolume": 4154.53,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 6312.09,
+      "equipmentShortfall": 0,
+      "laborShortfall": 3366.45,
+      "revenue": 54305398.91859317,
+      "operatingIncome": 9871604.238505028,
+      "salesPayroll": 2351054,
+      "netIncome": 7760483.390804023,
+      "cash": 26032146.263986856
+    },
+    {
+      "turn": 3,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 2,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 29,
+          "desiredQuantity": 4647.92
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2793.07
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 1250.48
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1788.72
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3379.1000000000004
+        }
+      ],
+      "japanShare": 0.07692307692307693,
+      "economicallyDesiredHireCount": 2,
+      "organizationalHireLimit": 24,
+      "actualHireCount": 2,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.07625135307367326,
+        "EU": 0.1899651233982744,
+        "US": 0.23777819791787316,
+        "CN": 0.38298949991801867,
+        "OTHER": 0.11301582569216052
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 13859.29,
+      "fulfilledVolume": 15107.07,
+      "outstandingVolume": 87.55,
+      "finishedGoodsInventory": 2709.98,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 76894070.04110332,
+      "operatingIncome": 9914917.709169745,
+      "salesPayroll": 3018707,
+      "netIncome": 7085934.167335796,
+      "cash": 38584728.106276914
+    },
+    {
+      "turn": 3,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 22,
+          "desiredQuantity": 4227.25
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2587.1
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1248.8999999999999
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1692.23
+        },
+        {
+          "market": "US",
+          "headcount": 14,
+          "desiredQuantity": 2951.1900000000005
+        }
+      ],
+      "japanShare": 0.08333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.07623064693934418,
+        "EU": 0.18992793350548237,
+        "US": 0.237768669987456,
+        "CN": 0.383034559885788,
+        "OTHER": 0.11303818968192947
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 12706.67,
+      "fulfilledVolume": 12863.69,
+      "outstandingVolume": 6889.36,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 5837.33,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 61983517.74852341,
+      "operatingIncome": 175380.65578320622,
+      "salesPayroll": 2706369,
+      "netIncome": -1523369.3442167938,
+      "cash": 20250740.568541855
+    },
+    {
+      "turn": 3,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 65,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 24,
+          "desiredQuantity": 4113.08
+        },
+        {
+          "market": "EU",
+          "headcount": 13,
+          "desiredQuantity": 2522.0099999999998
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1141.79
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1545.36
+        },
+        {
+          "market": "US",
+          "headcount": 16,
+          "desiredQuantity": 2994.93
+        }
+      ],
+      "japanShare": 0.07692307692307693,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.07629454749663767,
+        "EU": 0.19004270407720417,
+        "US": 0.23779807383724444,
+        "CN": 0.3828955017203996,
+        "OTHER": 0.11296917286851421
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12317.17,
+      "fulfilledVolume": 11701.56,
+      "outstandingVolume": 7078.63,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 5511.27,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 58028093.38698871,
+      "operatingIncome": 3116858.4172806367,
+      "salesPayroll": 2560156,
+      "netIncome": 1954986.7338245094,
+      "cash": 23115588.961012054
+    },
+    {
+      "turn": 3,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 29,
+          "desiredQuantity": 4396.4
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2641.5
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 1242.15
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1780.5100000000002
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3195.75
+        }
+      ],
+      "japanShare": 0.07692307692307693,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.07630348551336345,
+        "EU": 0.1900587574785065,
+        "US": 0.23780218666680872,
+        "CN": 0.3828760511199551,
+        "OTHER": 0.11295951922136628
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 13246.62,
+      "fulfilledVolume": 12548.18,
+      "outstandingVolume": 6344.11,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 4244.56,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 64310958.55432974,
+      "operatingIncome": 5108726.334732361,
+      "salesPayroll": 2748818,
+      "netIncome": 3330981.067785889,
+      "cash": 15969286.642946176
+    },
+    {
+      "turn": 3,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 22,
+          "desiredQuantity": 4008.4800000000005
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2456.57
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1185.48
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1604.69
+        },
+        {
+          "market": "US",
+          "headcount": 14,
+          "desiredQuantity": 2800.5600000000004
+        }
+      ],
+      "japanShare": 0.08333333333333333,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.07625979812980402,
+        "EU": 0.1899802914024578,
+        "US": 0.23778208391155525,
+        "CN": 0.38297112208123785,
+        "OTHER": 0.11300670447494512
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12055.78,
+      "fulfilledVolume": 11354.44,
+      "outstandingVolume": 4855.87,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 4142.09,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 55709180.04799413,
+      "operatingIncome": 3990747.564261809,
+      "salesPayroll": 2471444,
+      "netIncome": 3019227.1209299224,
+      "cash": 29756900.879388653
+    },
+    {
+      "turn": 4,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 80,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 28,
+          "desiredQuantity": 4537.84
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2938.29
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 1140.2
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1876.65
+        },
+        {
+          "market": "US",
+          "headcount": 21,
+          "desiredQuantity": 3643.17
+        }
+      ],
+      "japanShare": 0.075,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.0695428317102663,
+        "EU": 0.19489377908705866,
+        "US": 0.26016367395139445,
+        "CN": 0.3567808685820321,
+        "OTHER": 0.11861884666924848
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "none",
+      "contractedVolume": 14124.76,
+      "fulfilledVolume": 14212.31,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 4432.46,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 71145360.80958952,
+      "operatingIncome": 10465105.02325248,
+      "salesPayroll": 2945231,
+      "netIncome": 7553084.018601984,
+      "cash": 45508085.24382566
+    },
+    {
+      "turn": 4,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 21,
+          "desiredQuantity": 4085.67
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2587.44
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 1038.98
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1692.73
+        },
+        {
+          "market": "US",
+          "headcount": 16,
+          "desiredQuantity": 3278.6699999999996
+        }
+      ],
+      "japanShare": 0.06666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06952352455451355,
+        "EU": 0.19485488206892132,
+        "US": 0.26015347412397166,
+        "CN": 0.35682484721338575,
+        "OTHER": 0.11864327203920766
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 12683.48,
+      "fulfilledVolume": 10507.1,
+      "outstandingVolume": 9065.74,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 8221.36,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 51639077.4731854,
+      "operatingIncome": -962714.0763525814,
+      "salesPayroll": 2470710,
+      "netIncome": -2610839.0763525814,
+      "cash": 28781827.46103395
+    },
+    {
+      "turn": 4,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 65,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 23,
+          "desiredQuantity": 3989.2400000000002
+        },
+        {
+          "market": "EU",
+          "headcount": 13,
+          "desiredQuantity": 2522.42
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1141.94
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1545.77
+        },
+        {
+          "market": "US",
+          "headcount": 17,
+          "desiredQuantity": 3139.71
+        }
+      ],
+      "japanShare": 0.07692307692307693,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06958315379497033,
+        "EU": 0.1949750136759413,
+        "US": 0.2601849758101755,
+        "CN": 0.3566890212834803,
+        "OTHER": 0.11856783543543264
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12337.62,
+      "fulfilledVolume": 12337.54,
+      "outstandingVolume": 7078.71,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 4868.48,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 61880947.939125456,
+      "operatingIncome": 7232330.75220295,
+      "salesPayroll": 2623754,
+      "netIncome": 5260125.780320227,
+      "cash": 29044559.42857963
+    },
+    {
+      "turn": 4,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 27,
+          "desiredQuantity": 4184.75
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2778.89
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 1142.75
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1780.96
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3322.38
+        }
+      ],
+      "japanShare": 0.07692307692307693,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06959150523273809,
+        "EU": 0.194991838838098,
+        "US": 0.2601893878129093,
+        "CN": 0.3566699980359566,
+        "OTHER": 0.11855727008029794
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 13139.78,
+      "fulfilledVolume": 12251.59,
+      "outstandingVolume": 7232.3,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 4562.03,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 63100593.69010079,
+      "operatingIncome": 7480617.714923896,
+      "salesPayroll": 2719159,
+      "netIncome": 5255494.171939117,
+      "cash": 30135289.02886365
+    },
+    {
+      "turn": 4,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 21,
+          "desiredQuantity": 3874.08
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2456.93
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 986.86
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1605.1
+        },
+        {
+          "market": "US",
+          "headcount": 16,
+          "desiredQuantity": 3111.3199999999997
+        }
+      ],
+      "japanShare": 0.06666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06955071029171803,
+        "EU": 0.19490965161274545,
+        "US": 0.2601678361476379,
+        "CN": 0.3567629224260218,
+        "OTHER": 0.118608879521877
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12034.29,
+      "fulfilledVolume": 12459.27,
+      "outstandingVolume": 4430.89,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 3036.39,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 61353346.80600013,
+      "operatingIncome": 8359266.210983589,
+      "salesPayroll": 2581927,
+      "netIncome": 6521242.038307347,
+      "cash": 31631520.622263946
+    },
+    {
+      "turn": 5,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 80,
+      "hiresThisTurn": 4,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 25,
+          "desiredQuantity": 4191.389999999999
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2938.81
+        },
+        {
+          "market": "JP",
+          "headcount": 6,
+          "desiredQuantity": 1098.85
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1997.77
+        },
+        {
+          "market": "US",
+          "headcount": 23,
+          "desiredQuantity": 3896.24
+        }
+      ],
+      "japanShare": 0.075,
+      "economicallyDesiredHireCount": 4,
+      "organizationalHireLimit": 24,
+      "actualHireCount": 4,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.0670351359676232,
+        "EU": 0.19753855546510066,
+        "US": 0.2828257065682783,
+        "CN": 0.3262550782755077,
+        "OTHER": 0.12634552372349003
+      },
+      "primaryConstraint": "none",
+      "secondaryConstraint": "none",
+      "contractedVolume": 14123.06,
+      "fulfilledVolume": 14123.06,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 5328.01,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 70662072.53501008,
+      "operatingIncome": 10667221.922790684,
+      "salesPayroll": 2936306,
+      "netIncome": 7741777.538232547,
+      "cash": 27586446.608458094
+    },
+    {
+      "turn": 5,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 19,
+          "desiredQuantity": 3791.95
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2587.79
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 1039.0500000000002
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1892.33
+        },
+        {
+          "market": "US",
+          "headcount": 17,
+          "desiredQuantity": 3437.3500000000004
+        }
+      ],
+      "japanShare": 0.06666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06701589895505179,
+        "EU": 0.19749797048357068,
+        "US": 0.2828149758481011,
+        "CN": 0.3262980719376971,
+        "OTHER": 0.12637308277557932
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 12748.47,
+      "fulfilledVolume": 11936.95,
+      "outstandingVolume": 9877.26,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 6776.79,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1848.22,
+      "revenue": 57205191.274873786,
+      "operatingIncome": 1429322.5667141303,
+      "salesPayroll": 2613695,
+      "netIncome": -168177.43328586966,
+      "cash": 0
+    },
+    {
+      "turn": 5,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 65,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 21,
+          "desiredQuantity": 3732.55
+        },
+        {
+          "market": "EU",
+          "headcount": 13,
+          "desiredQuantity": 2522.84
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1142.1
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1727.9499999999998
+        },
+        {
+          "market": "US",
+          "headcount": 18,
+          "desiredQuantity": 3281.44
+        }
+      ],
+      "japanShare": 0.07692307692307693,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06707538128789062,
+        "EU": 0.19762346238989795,
+        "US": 0.28284815606601765,
+        "CN": 0.32616513220421123,
+        "OTHER": 0.12628786805198267
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12406.88,
+      "fulfilledVolume": 12886.41,
+      "outstandingVolume": 6599.18,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 4316.53,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 63564615.392749034,
+      "operatingIncome": 7150260.198800817,
+      "salesPayroll": 2678641,
+      "netIncome": 5167298.521485339,
+      "cash": 21017081.803200364
+    },
+    {
+      "turn": 5,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 25,
+          "desiredQuantity": 3964.48
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2779.4700000000003
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 1067.75
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1943.0099999999998
+        },
+        {
+          "market": "US",
+          "headcount": 22,
+          "desiredQuantity": 3567
+        }
+      ],
+      "japanShare": 0.0641025641025641,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06708372863789895,
+        "EU": 0.19764107307890982,
+        "US": 0.28285281235434867,
+        "CN": 0.32614647633729305,
+        "OTHER": 0.12627590959154947
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 13321.71,
+      "fulfilledVolume": 13138.57,
+      "outstandingVolume": 7415.44,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 3666.5,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 66561495.582017176,
+      "operatingIncome": 8114300.708794318,
+      "salesPayroll": 2807857,
+      "netIncome": 5675603.616743218,
+      "cash": 18006300.926794257
+    },
+    {
+      "turn": 5,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 19,
+          "desiredQuantity": 3595.38
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2457.33
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 986.98
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1794.27
+        },
+        {
+          "market": "US",
+          "headcount": 17,
+          "desiredQuantity": 3261.8799999999997
+        }
+      ],
+      "japanShare": 0.06666666666666667,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.06704299213152627,
+        "EU": 0.19755512988203366,
+        "US": 0.282830088864968,
+        "CN": 0.32623752018244634,
+        "OTHER": 0.12633426893902583
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12095.84,
+      "fulfilledVolume": 13713.31,
+      "outstandingVolume": 2813.42,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 2257.74,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 67242838.90161107,
+      "operatingIncome": 10000523.525887512,
+      "salesPayroll": 2707331,
+      "netIncome": 7841447.890230484,
+      "cash": 34349392.95733209
+    },
+    {
+      "turn": 6,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 84,
+      "hiresThisTurn": 4,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 27,
+          "desiredQuantity": 4423.92
+        },
+        {
+          "market": "EU",
+          "headcount": 15,
+          "desiredQuantity": 2791.2299999999996
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 905.01
+        },
+        {
+          "market": "OTHER",
+          "headcount": 11,
+          "desiredQuantity": 2040.56
+        },
+        {
+          "market": "US",
+          "headcount": 26,
+          "desiredQuantity": 4252.68
+        }
+      ],
+      "japanShare": 0.05952380952380952,
+      "economicallyDesiredHireCount": 4,
+      "organizationalHireLimit": 26,
+      "actualHireCount": 4,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05516524351732144,
+        "EU": 0.17128156409553763,
+        "US": 0.3124627092056488,
+        "CN": 0.332131364179161,
+        "OTHER": 0.1289591190023312
+      },
+      "primaryConstraint": "none",
+      "secondaryConstraint": "none",
+      "contractedVolume": 14413.4,
+      "fulfilledVolume": 14413.4,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 5144.28,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 73589937.36413758,
+      "operatingIncome": 10969405.838435218,
+      "salesPayroll": 2997340,
+      "netIncome": 8370524.670748174,
+      "cash": 33783676.13147649
+    },
+    {
+      "turn": 6,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 19,
+          "desiredQuantity": 3790.1899999999996
+        },
+        {
+          "market": "EU",
+          "headcount": 11,
+          "desiredQuantity": 2410.21
+        },
+        {
+          "market": "JP",
+          "headcount": 3,
+          "desiredQuantity": 822.8000000000001
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1891.4499999999998
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3740.53
+        }
+      ],
+      "japanShare": 0.05,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05514887253090791,
+        "EU": 0.17124473260490217,
+        "US": 0.3124479968195095,
+        "CN": 0.3321722426556027,
+        "OTHER": 0.12898615538907784
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 12655.18,
+      "fulfilledVolume": 5462.39,
+      "outstandingVolume": 17070.05,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 13302.45,
+      "equipmentShortfall": 0,
+      "laborShortfall": 13302.45,
+      "revenue": 26004537.6810529,
+      "operatingIncome": -11147900.67054195,
+      "salesPayroll": 1966239,
+      "netIncome": -12364202.823882995,
+      "cash": 19480627.79340602
+    },
+    {
+      "turn": 6,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 65,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 21,
+          "desiredQuantity": 3730.89
+        },
+        {
+          "market": "EU",
+          "headcount": 11,
+          "desiredQuantity": 2203.29
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 949.56
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1727.16
+        },
+        {
+          "market": "US",
+          "headcount": 21,
+          "desiredQuantity": 3683.94
+        }
+      ],
+      "japanShare": 0.06153846153846154,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.0551994975026186,
+        "EU": 0.17135862880665723,
+        "US": 0.31249349280327526,
+        "CN": 0.33204583171974567,
+        "OTHER": 0.12890254916770333
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12294.84,
+      "fulfilledVolume": 13007.75,
+      "outstandingVolume": 5886.27,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 4194.83,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 64788884.38012552,
+      "operatingIncome": 7610821.892893434,
+      "salesPayroll": 2690774.9999999995,
+      "netIncome": 5768247.876759432,
+      "cash": 31387362.226212457
+    },
+    {
+      "turn": 6,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 25,
+          "desiredQuantity": 3962.6499999999996
+        },
+        {
+          "market": "EU",
+          "headcount": 14,
+          "desiredQuantity": 2501.13
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 887.74
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1942.1100000000001
+        },
+        {
+          "market": "US",
+          "headcount": 25,
+          "desiredQuantity": 3911.4500000000003
+        }
+      ],
+      "japanShare": 0.05128205128205128,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.055206602961569415,
+        "EU": 0.1713746146879106,
+        "US": 0.31249987838403015,
+        "CN": 0.33202808933520067,
+        "OTHER": 0.12889081463128904
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 13205.08,
+      "fulfilledVolume": 13523.87,
+      "outstandingVolume": 7096.65,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 3278.54,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 69069188.81920743,
+      "operatingIncome": 8867781.722834937,
+      "salesPayroll": 2846387,
+      "netIncome": 6575388.427975713,
+      "cash": 30385807.297289774
+    },
+    {
+      "turn": 6,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 19,
+          "desiredQuantity": 3593.8100000000004
+        },
+        {
+          "market": "EU",
+          "headcount": 11,
+          "desiredQuantity": 2288.81
+        },
+        {
+          "market": "JP",
+          "headcount": 3,
+          "desiredQuantity": 781.59
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1793.49
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3549.7099999999996
+        }
+      ],
+      "japanShare": 0.05,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05517192964090342,
+        "EU": 0.1712966065549153,
+        "US": 0.3124687179353263,
+        "CN": 0.3321146688781921,
+        "OTHER": 0.128948076990663
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12007.41,
+      "fulfilledVolume": 12993.99,
+      "outstandingVolume": 1826.84,
+      "finishedGoodsInventory": 869.88,
+      "rawMaterialShortfall": 2257.74,
+      "equipmentShortfall": 0,
+      "laborShortfall": 2257.74,
+      "revenue": 65300232.34773369,
+      "operatingIncome": 10465282.295385629,
+      "salesPayroll": 2635399,
+      "netIncome": 8220454.905828978,
+      "cash": 36056768.75563528
+    },
+    {
+      "turn": 7,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 88,
+      "hiresThisTurn": 2,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 34,
+          "desiredQuantity": 5169.93
+        },
+        {
+          "market": "EU",
+          "headcount": 16,
+          "desiredQuantity": 2824.86
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 935.27
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1822.63
+        },
+        {
+          "market": "US",
+          "headcount": 23,
+          "desiredQuantity": 3891.95
+        }
+      ],
+      "japanShare": 0.056818181818181816,
+      "economicallyDesiredHireCount": 2,
+      "organizationalHireLimit": 27,
+      "actualHireCount": 2,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.056960154541588044,
+        "EU": 0.17318812203995548,
+        "US": 0.25742169751078653,
+        "CN": 0.3973600944678635,
+        "OTHER": 0.11506993143980647
+      },
+      "primaryConstraint": "none",
+      "secondaryConstraint": "none",
+      "contractedVolume": 14638.58,
+      "fulfilledVolume": 14638.58,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 4872.61,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 73360714.38577357,
+      "operatingIncome": 9695106.787663676,
+      "salesPayroll": 3051858,
+      "netIncome": 7378085.430130941,
+      "cash": 43120046.34645798
+    },
+    {
+      "turn": 7,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 23,
+          "desiredQuantity": 4365.09
+        },
+        {
+          "market": "EU",
+          "headcount": 11,
+          "desiredQuantity": 2408.84
+        },
+        {
+          "market": "JP",
+          "headcount": 3,
+          "desiredQuantity": 822.35
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1691.46
+        },
+        {
+          "market": "US",
+          "headcount": 16,
+          "desiredQuantity": 3275.7999999999997
+        }
+      ],
+      "japanShare": 0.05,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.056943318463954326,
+        "EU": 0.1731507160859949,
+        "US": 0.25740820010127957,
+        "CN": 0.39740510094376646,
+        "OTHER": 0.11509266440500475
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 12563.53,
+      "fulfilledVolume": 7619.84,
+      "outstandingVolume": 22013.74,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 11123.27,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 36826717.60689194,
+      "operatingIncome": -4290242.762299903,
+      "salesPayroll": 2181984,
+      "netIncome": -5455919.915640948,
+      "cash": 0
+    },
+    {
+      "turn": 7,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 65,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 25,
+          "desiredQuantity": 4233.43
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2363.04
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 949.03
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1544.62
+        },
+        {
+          "market": "US",
+          "headcount": 17,
+          "desiredQuantity": 3137.11
+        }
+      ],
+      "japanShare": 0.06153846153846154,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05699534461336413,
+        "EU": 0.1732663064148059,
+        "US": 0.2574499092367997,
+        "CN": 0.3972660237970179,
+        "OTHER": 0.11502241593801243
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12226.23,
+      "fulfilledVolume": 13082.5,
+      "outstandingVolume": 5030,
+      "finishedGoodsInventory": 320.04,
+      "rawMaterialShortfall": 3796.67,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 65512696.85718973,
+      "operatingIncome": 9171063.844348527,
+      "salesPayroll": 2698250,
+      "netIncome": 6975308.918334229,
+      "cash": 36326465.79066329
+    },
+    {
+      "turn": 7,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 30,
+          "desiredQuantity": 4497.34
+        },
+        {
+          "market": "EU",
+          "headcount": 14,
+          "desiredQuantity": 2499.6
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 937.48
+        },
+        {
+          "market": "OTHER",
+          "headcount": 9,
+          "desiredQuantity": 1779.5899999999997
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3319.57
+        }
+      ],
+      "japanShare": 0.0641025641025641,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05700263797741136,
+        "EU": 0.17328251061899785,
+        "US": 0.25745575629472917,
+        "CN": 0.39724652705790886,
+        "OTHER": 0.1150125680509528
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 12979.79,
+      "fulfilledVolume": 13370.57,
+      "outstandingVolume": 6705.87,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 3434.26,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 68394039.51710856,
+      "operatingIncome": 9193437.518250607,
+      "salesPayroll": 2831057,
+      "netIncome": 6772300.769498654,
+      "cash": 38282657.61117949
+    },
+    {
+      "turn": 7,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 13,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 23,
+          "desiredQuantity": 4139.179999999999
+        },
+        {
+          "market": "EU",
+          "headcount": 11,
+          "desiredQuantity": 2287.52
+        },
+        {
+          "market": "JP",
+          "headcount": 3,
+          "desiredQuantity": 781.1800000000001
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1603.9500000000003
+        },
+        {
+          "market": "US",
+          "headcount": 16,
+          "desiredQuantity": 3108.8
+        }
+      ],
+      "japanShare": 0.05,
+      "economicallyDesiredHireCount": 13,
+      "organizationalHireLimit": 18,
+      "actualHireCount": 13,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.056967027318694116,
+        "EU": 0.17320339179515643,
+        "US": 0.2574272073860121,
+        "CN": 0.3973417220485898,
+        "OTHER": 0.11506065145154751
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 11920.63,
+      "fulfilledVolume": 12796.64,
+      "outstandingVolume": 950.83,
+      "finishedGoodsInventory": 1843.44,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1902.69,
+      "revenue": 64905456.19938385,
+      "operatingIncome": 9816920.875822186,
+      "salesPayroll": 2615664,
+      "netIncome": 7752736.70065775,
+      "cash": 38052735.49945557
+    },
+    {
+      "turn": 8,
+      "companyId": "BAL",
+      "totalSalesHeadcount": 90,
+      "hiresThisTurn": 3,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 33,
+          "desiredQuantity": 5069.74
+        },
+        {
+          "market": "EU",
+          "headcount": 14,
+          "desiredQuantity": 2440.87
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 911.59
+        },
+        {
+          "market": "OTHER",
+          "headcount": 10,
+          "desiredQuantity": 1747.5900000000001
+        },
+        {
+          "market": "US",
+          "headcount": 28,
+          "desiredQuantity": 4476.79
+        }
+      ],
+      "japanShare": 0.05555555555555555,
+      "economicallyDesiredHireCount": 3,
+      "organizationalHireLimit": 27,
+      "actualHireCount": 3,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.055514622600591895,
+        "EU": 0.14964404348758772,
+        "US": 0.3051681021519339,
+        "CN": 0.37932593884851984,
+        "OTHER": 0.1103472929113668
+      },
+      "primaryConstraint": "none",
+      "secondaryConstraint": "none",
+      "contractedVolume": 14618.8,
+      "fulfilledVolume": 14618.8,
+      "outstandingVolume": 0,
+      "finishedGoodsInventory": 4940.17,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 75797481.90599637,
+      "operatingIncome": 12651996.019693606,
+      "salesPayroll": 3065880,
+      "netIncome": 9770596.815754885,
+      "cash": 48826932.571165115
+    },
+    {
+      "turn": 8,
+      "companyId": "MASS",
+      "totalSalesHeadcount": 60,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 22,
+          "desiredQuantity": 4225.96
+        },
+        {
+          "market": "EU",
+          "headcount": 9,
+          "desiredQuantity": 2043.1399999999999
+        },
+        {
+          "market": "JP",
+          "headcount": 3,
+          "desiredQuantity": 822.3
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1691.67
+        },
+        {
+          "market": "US",
+          "headcount": 19,
+          "desiredQuantity": 3738.32
+        }
+      ],
+      "japanShare": 0.05,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05549782209316736,
+        "EU": 0.149610949117669,
+        "US": 0.30515170891723004,
+        "CN": 0.3793699115812546,
+        "OTHER": 0.11036960829067882
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 12521.38,
+      "fulfilledVolume": 4500.67,
+      "outstandingVolume": 30034.45,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 14272.11,
+      "equipmentShortfall": 0,
+      "laborShortfall": 10379.72,
+      "revenue": 21791887.985766273,
+      "operatingIncome": -11661167.325839054,
+      "salesPayroll": 1870067,
+      "netIncome": -12695441.731930293,
+      "cash": 2722629.8592712516
+    },
+    {
+      "turn": 8,
+      "companyId": "JPQ",
+      "totalSalesHeadcount": 65,
+      "hiresThisTurn": 20,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 24,
+          "desiredQuantity": 4111.67
+        },
+        {
+          "market": "EU",
+          "headcount": 10,
+          "desiredQuantity": 2037.0100000000002
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 949.0200000000001
+        },
+        {
+          "market": "OTHER",
+          "headcount": 7,
+          "desiredQuantity": 1544.78
+        },
+        {
+          "market": "US",
+          "headcount": 20,
+          "desiredQuantity": 3550.25
+        }
+      ],
+      "japanShare": 0.06153846153846154,
+      "economicallyDesiredHireCount": 21,
+      "organizationalHireLimit": 20,
+      "actualHireCount": 20,
+      "deferredByOrganizationalRamp": 1,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.055549771642924184,
+        "EU": 0.14971328159926123,
+        "US": 0.30520239912201974,
+        "CN": 0.37923394166026164,
+        "OTHER": 0.11030060597553316
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 12164.29,
+      "fulfilledVolume": 14195.68,
+      "outstandingVolume": 2998.61,
+      "finishedGoodsInventory": 97.86,
+      "rawMaterialShortfall": 3208.47,
+      "equipmentShortfall": 0,
+      "laborShortfall": 3208.47,
+      "revenue": 75461011.99804027,
+      "operatingIncome": 12677187.34287785,
+      "salesPayroll": 2809568,
+      "netIncome": 9803446.53859982,
+      "cash": 31707941.79859469
+    },
+    {
+      "turn": 8,
+      "companyId": "VAP",
+      "totalSalesHeadcount": 78,
+      "hiresThisTurn": 0,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 29,
+          "desiredQuantity": 4394.66
+        },
+        {
+          "market": "EU",
+          "headcount": 12,
+          "desiredQuantity": 2209.35
+        },
+        {
+          "market": "JP",
+          "headcount": 5,
+          "desiredQuantity": 913.71
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1614.3899999999999
+        },
+        {
+          "market": "US",
+          "headcount": 24,
+          "desiredQuantity": 3796.3100000000004
+        }
+      ],
+      "japanShare": 0.0641025641025641,
+      "economicallyDesiredHireCount": null,
+      "organizationalHireLimit": null,
+      "actualHireCount": null,
+      "deferredByOrganizationalRamp": null,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.05555706214822339,
+        "EU": 0.14972764275355072,
+        "US": 0.30520951289313747,
+        "CN": 0.3792148598889245,
+        "OTHER": 0.110290922316164
+      },
+      "primaryConstraint": "production_capacity_shortage",
+      "secondaryConstraint": "worker_shortage",
+      "contractedVolume": 12854.2,
+      "fulfilledVolume": 15452.05,
+      "outstandingVolume": 4108.02,
+      "finishedGoodsInventory": 0,
+      "rawMaterialShortfall": 1330.9,
+      "equipmentShortfall": 0,
+      "laborShortfall": 0,
+      "revenue": 79984765.1758131,
+      "operatingIncome": 13203237.861265875,
+      "salesPayroll": 3039205,
+      "netIncome": 10007141.043910868,
+      "cash": 29633486.813336063
+    },
+    {
+      "turn": 8,
+      "companyId": "CONSV",
+      "totalSalesHeadcount": 73,
+      "hiresThisTurn": 4,
+      "layoffsThisTurn": 0,
+      "marketAllocation": [
+        {
+          "market": "CN",
+          "headcount": 27,
+          "desiredQuantity": 4642.24
+        },
+        {
+          "market": "EU",
+          "headcount": 11,
+          "desiredQuantity": 2287.53
+        },
+        {
+          "market": "JP",
+          "headcount": 4,
+          "desiredQuantity": 864.1600000000001
+        },
+        {
+          "market": "OTHER",
+          "headcount": 8,
+          "desiredQuantity": 1661.5900000000001
+        },
+        {
+          "market": "US",
+          "headcount": 23,
+          "desiredQuantity": 4088.8
+        }
+      ],
+      "japanShare": 0.0547945205479452,
+      "economicallyDesiredHireCount": 4,
+      "organizationalHireLimit": 22,
+      "actualHireCount": 4,
+      "deferredByOrganizationalRamp": 0,
+      "allocationMode": "observed_opportunity",
+      "marketWeights": {
+        "JP": 0.055521483821165944,
+        "EU": 0.14965755901816266,
+        "US": 0.30517479704491435,
+        "CN": 0.37930798066363197,
+        "OTHER": 0.11033817945212501
+      },
+      "primaryConstraint": "worker_shortage",
+      "secondaryConstraint": "production_capacity_shortage",
+      "contractedVolume": 13544.32,
+      "fulfilledVolume": 14079.69,
+      "outstandingVolume": 415.46,
+      "finishedGoodsInventory": 1554.81,
+      "rawMaterialShortfall": 0,
+      "equipmentShortfall": 0,
+      "laborShortfall": 1991.02,
+      "revenue": 72481158.68943171,
+      "operatingIncome": 12446400.435592875,
+      "salesPayroll": 2847969,
+      "netIncome": 9863520.3484743,
+      "cash": 35088870.10326285
+    }
+  ]
+}

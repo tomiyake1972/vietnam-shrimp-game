@@ -148,6 +148,20 @@ export function computeCapacityEffectForCompany(
 }
 
 /**
+ * 【Test16】HOSO加工能力の明示的な上限（HOSO換算t/四半期）。
+ *
+ * HOSOは「低加工度・大量処理・薄利高回転型」の商品として、投資で能力を積み上げられる
+ * 設計になっている（初期8,000t、1回の投資で+4,000t）。ただし無制限には増やせない。
+ *
+ * 共通処理能力（30,000t）も実質的な総量上限として効くが、それだけに頼ると
+ * 「HOSO専用能力がいくらでも大きくなり、PD/VAPを削れば際限なくHOSOを作れる」
+ * ように読めてしまう。HOSO専用能力そのものの上限をここで明示する。
+ *
+ * 24,000t = 初期8,000t + 4,000t × 4回（投資総額 32M USD）。
+ */
+export const MAX_HOSO_CAPACITY_TONS = 24_000;
+
+/**
  * 基礎Factory fixture（元のcompanyLab/fixtures.tsの静的値、mutationしない）＋
  * 当該会社の稼働開始済み累計能力増加、から当期の実効Factory[]を再構成する
  * （実装指示§3.3）。
@@ -194,7 +208,12 @@ export function applyCapexCapacityToFactories(
     return {
       ...f,
       commonProcessingCapacity: hosoEqTons(unwrapUnit(f.commonProcessingCapacity) + effect.commonProcessing),
-      hosoCapacity: hosoEqTons(unwrapUnit(f.hosoCapacity) + effect.hoso),
+      // 【Test16】HOSO能力には明示的な上限がある（MAX_HOSO_CAPACITY_TONS）。
+      // 共通処理能力が実質的な総量上限として効くが、それとは別に
+      // 「HOSO専用能力そのものが24,000tを超えない」ことをここで保証する。
+      // 上限に達した後の投資は能力を増やさない（投資判断側で上限を見るのは
+      // 別の責務であり、ここは最終的な安全弁として機能する）。
+      hosoCapacity: hosoEqTons(Math.min(MAX_HOSO_CAPACITY_TONS, unwrapUnit(f.hosoCapacity) + effect.hoso)),
       pdCapacity: hosoEqTons(unwrapUnit(f.pdCapacity) + effect.pd),
       vapCapacity: hosoEqTons(unwrapUnit(f.vapCapacity) + effect.vap),
       freezingPackagingCapacity: hosoEqTons(unwrapUnit(f.freezingPackagingCapacity) + effect.freezingPackaging),
