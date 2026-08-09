@@ -29,12 +29,18 @@ import {
   initializeCompanyLab,
 } from "../runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../standardAi/policy";
-import { CompanyDecisionInput, CompanyLabConfig } from "../types";
+import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState } from "../types";
+import { computeEffectiveFactories } from "../../capex/factoryConstruction";
+import { calculateFactoryEffectiveCapacity } from "../../production/capacity";
+import { unwrapUnit } from "../../core/units";
 import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
 import { FINANCE_PARAMETERS_V1 } from "../../finance/parameters";
 import { STANDARD_AI_PARAMETERS_V1 } from "../standardAi/parameters";
 import { STRATEGY_PROFILE_SCHEMA_VERSION } from "../strategyProfile/types";
-import { MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession, SimulationTurnOutcome } from "./types";
+import { CapacitySnapshot, MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession, SimulationTurnOutcome } from "./types";
+import { extractAiTurnTrace } from "./analytics/aiTrace";
+import type { ObservedDemandSnapshot } from "./analytics/dataset";
+import type { PublicMarketInfo } from "../types";
 
 /** ゲームパラメータの版（再現性の記録用。複数モジュールの版を連結する）。 */
 export function resolveGameParameterVersion(): string {
@@ -98,7 +104,49 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     errorMessage: null,
     failedAtTurn: null,
   };
-  return { run, state, fixtures, config };
+  return { run, state, fixtures, config, aiTurnTraces: [], observedDemand: [], salesHeadcountByTurn: [], capacityByTurn: [] };
+}
+
+/**
+ * そのターン終了時点の会社別実効能力を拾う。
+ * **能力の計算式をここへ書き直さない** — 既存の
+ * computeEffectiveFactories / calculateFactoryEffectiveCapacity をそのまま通す。
+ */
+function captureCapacities(turn: number, state: CompanyLabState, fixtures: readonly CompanyFixture[]): readonly CapacitySnapshot[] {
+  return fixtures.map((fixture) => {
+    const capexForCompany = state.capexState.companies.find((c) => c.companyId === fixture.companyId);
+    const effective = capexForCompany
+      ? computeEffectiveFactories(fixture.factories, { companies: [capexForCompany] }, state.currentPeriod)
+      : fixture.factories;
+    const totals = effective.reduce(
+      (acc, f) => {
+        const c = calculateFactoryEffectiveCapacity(f);
+        return {
+          hoso: acc.hoso + unwrapUnit(c.hoso),
+          pd: acc.pd + unwrapUnit(c.pd),
+          vap: acc.vap + unwrapUnit(c.vap),
+          commonProcessing: acc.commonProcessing + unwrapUnit(c.commonProcessing),
+        };
+      },
+      { hoso: 0, pd: 0, vap: 0, commonProcessing: 0 }
+    );
+    return { turn, companyId: fixture.companyId, ...totals };
+  });
+}
+
+/**
+ * そのターンに実際に公開されていた観測需要を記録用に切り出す。
+ * **再計算はしない** — buildPublicMarketInfo が既に構築した値をそのまま写すだけ。
+ * 観測需要が未設定（旧スナップショット由来等）のターンは記録を作らない（0で埋めない）。
+ */
+function captureObservedDemand(turn: number, publicInfo: PublicMarketInfo): ObservedDemandSnapshot | null {
+  const observed = publicInfo.observedMarketDemand;
+  if (!observed) return null;
+  return {
+    turn,
+    sourceTurn: observed.sourceQuarter,
+    entries: observed.entries.map((e) => ({ market: e.market, observedDemandByProduct: e.observedDemandByProduct })),
+  };
 }
 
 /**
@@ -120,9 +168,10 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
   try {
     const publicInfo = buildPublicMarketInfo(session.state);
     const decisions: Record<string, CompanyDecisionInput> = {};
+    const turnTraces = [];
     for (const fixture of session.fixtures) {
       const ownState = buildCompanyOwnState(session.state, fixture);
-      const { decision } = generateStandardAiDecisionWithDiagnostics(
+      const { decision, diagnostics } = generateStandardAiDecisionWithDiagnostics(
         fixture,
         ownState,
         publicInfo,
@@ -130,14 +179,25 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
         turn
       );
       decisions[fixture.companyId] = decision;
+      // 【追加の計算をしない】diagnostics は上の1回の呼び出しで既に作られている値であり、
+      // トレース記録のために Standard AI をもう一度回すことはない。
+      turnTraces.push(extractAiTurnTrace(diagnostics));
     }
     const nextState = advanceCompanyLabQuarter(session.state, session.fixtures, decisions);
+    const observedSnapshot = captureObservedDemand(turn, publicInfo);
     const completedTurns = session.run.completedTurns + 1;
     const reachedRequested = completedTurns >= session.run.requestedTurns;
     return {
       session: {
         ...session,
         state: nextState,
+        aiTurnTraces: [...session.aiTurnTraces, ...turnTraces],
+        observedDemand: observedSnapshot ? [...session.observedDemand, observedSnapshot] : session.observedDemand,
+        salesHeadcountByTurn: [
+          ...session.salesHeadcountByTurn,
+          ...(nextState.salesForceHiringState?.companies ?? []).map((c) => ({ turn, companyId: c.companyId, headcount: c.headcount })),
+        ],
+        capacityByTurn: [...session.capacityByTurn, ...captureCapacities(turn, nextState, session.fixtures)],
         run: {
           ...session.run,
           completedTurns,

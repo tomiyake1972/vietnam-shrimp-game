@@ -1,94 +1,116 @@
 "use client";
 
-// ShrimpX V2 — 32Q Analysis 画面（Phase 1）
+// ShrimpX V2 — 32Q Analysis 画面（Phase 2）
 //
-// Phase 1 は Overview のみ実装する。将来のタブを置ける構造だけ用意し、
-// **未実装のタブに中身があるように見せない**（空の器を正直に空と表示する）。
+// 【Phase 2 での最重要の変更】
+// **この画面は Simulation を実行しない。**
+// Phase 1 では Analysis 側でもう一度32Qを回していたため、Console と Analysis が
+// 別々の結果を見ていた（Phase 1 の残課題B）。Phase 2 では
+// `?run=<simulationRunId>` または active run から保存済みの Simulation Run を
+// 読み込むだけで、engine を一切呼ばない。
+//
+// 【未実装のタブに中身があるように見せない】
+// Phase 2 で中身があるのは Overview / Market / Bottleneck / AI Trace の4つ。
+// 残りは空の器であることを正直に表示する。
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { advanceSimulationTurn, createSimulationSession } from "../../../lib/v2/companyLab/simulation/engine";
-import { MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
-import { buildCompanySeries } from "../../../lib/v2/companyLab/simulation/series";
+import { MANAGEMENT_CONSOLE_STANDARD_TURNS } from "../../../lib/v2/companyLab/simulation/types";
+import { StoredSimulationRun, SimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
+import { listSimulationRuns, loadSimulationRun, resolveRequestedRunId, setActiveSimulationRunId } from "../lib/simulationRunStore";
+import { RunSelector } from "../components/RunSelector";
+import { OverviewTab } from "./tabs/OverviewTab";
+import { MarketTab } from "./tabs/MarketTab";
+import { BottleneckTab } from "./tabs/BottleneckTab";
+import { AiTraceTab } from "./tabs/AiTraceTab";
 
-/** 将来のタブ。Phase 1 で中身があるのは Overview だけ。 */
-const TABS = [
-  "Overview",
-  "Market",
-  "Product",
-  "Operations",
-  "Sales",
-  "Profitability",
-  "Investment",
-  "Finance",
-  "Bottleneck",
-  "Strategy",
-  "Scenario",
-  "AI Trace",
-] as const;
+/** Phase 2 で中身があるタブ。 */
+const IMPLEMENTED_TABS = ["Overview", "Market", "Bottleneck", "AI Trace"] as const;
+
+/** 器だけ用意してあるタブ（中身は今後のPhase）。 */
+const SHELL_TABS = ["Product", "Operations", "Sales", "Profitability", "Investment", "Finance", "Strategy", "Scenario"] as const;
+
+const TABS = [...IMPLEMENTED_TABS, ...SHELL_TABS] as const;
 type Tab = (typeof TABS)[number];
-
-const METRICS = [
-  { key: "revenue", label: "Revenue" },
-  { key: "operatingProfit", label: "Operating Profit" },
-  { key: "netIncome", label: "Net Income" },
-  { key: "cash", label: "Cash" },
-  { key: "debt", label: "Debt" },
-] as const;
 
 export function AnalysisShell() {
   const [tab, setTab] = useState<Tab>("Overview");
-  const [session, setSession] = useState<SimulationSession | null>(null);
-  const [running, setRunning] = useState(false);
-  const [metric, setMetric] = useState<(typeof METRICS)[number]["key"]>("revenue");
+  const [stored, setStored] = useState<StoredSimulationRun | null>(null);
+  const [runs, setRuns] = useState<readonly SimulationRunSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFoundId, setNotFoundId] = useState<string | null>(null);
 
-  const series = useMemo(
-    () => (session ? buildCompanySeries(session.state.history, session.fixtures) : []),
-    [session]
+  const loadById = useCallback(async (simulationRunId: string) => {
+    const found = await loadSimulationRun(simulationRunId);
+    if (found) {
+      setStored(found);
+      setNotFoundId(null);
+    } else {
+      setStored(null);
+      setNotFoundId(simulationRunId);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const list = await listSimulationRuns();
+      if (cancelled) return;
+      setRuns(list);
+      const requested = resolveRequestedRunId(typeof window === "undefined" ? null : window.location.search) ?? list[0]?.simulationRunId ?? null;
+      if (requested) await loadById(requested);
+      if (!cancelled) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadById]);
+
+  const selectRun = useCallback(
+    async (simulationRunId: string) => {
+      setActiveSimulationRunId(simulationRunId);
+      // URL にも反映して、2つのタブで別々の実行を並べても互いを壊さないようにする。
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.set("run", simulationRunId);
+        window.history.replaceState(null, "", url.toString());
+      }
+      await loadById(simulationRunId);
+    },
+    [loadById]
   );
 
-  /** Analysis 画面単体でも 32Q を回せるようにする（同じ engine を使う）。 */
-  const run32 = async () => {
-    if (running) return;
-    setRunning(true);
-    let s = createSimulationSession({
-      simulationRunId: `analysis-${Date.now()}`,
-      scenarioId: "baseline",
-      seed: "management-console-32q",
-      requestedTurns: MANAGEMENT_CONSOLE_STANDARD_TURNS,
-      startedAt: new Date().toISOString(),
-    });
-    for (let i = 0; i < MANAGEMENT_CONSOLE_STANDARD_TURNS; i++) {
-      if (s.state.isComplete) break;
-      await new Promise((r) => requestAnimationFrame(() => r(null)));
-      const o = advanceSimulationTurn(s, new Date().toISOString());
-      s = o.session;
-      setSession(s);
-      if (!o.advanced) break;
-    }
-    setRunning(false);
-  };
+  const dataset = stored?.dataset ?? null;
+  const totalTurns = useMemo(() => Math.max(MANAGEMENT_CONSOLE_STANDARD_TURNS, dataset?.turns.length ?? 0), [dataset]);
 
   return (
     <div className="min-h-screen bg-slate-950 p-4 text-slate-100">
       <header className="mb-3 flex flex-wrap items-center gap-3">
         <h1 className="text-base font-bold">32Q Analysis</h1>
-        <Link href="/v2/management" className="rounded border border-slate-600 px-3 py-1.5 text-sm hover:bg-slate-800">
+        <Link
+          href={stored ? `/v2/management?run=${encodeURIComponent(stored.run.simulationRunId)}` : "/v2/management"}
+          className="rounded border border-slate-600 px-3 py-1.5 text-sm hover:bg-slate-800"
+        >
           ← 経営管制室へ戻る
         </Link>
-        <button
-          type="button"
-          onClick={run32}
-          disabled={running}
-          data-testid="analysis-run-32"
-          className="rounded bg-emerald-700 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40"
-        >
-          {running ? "実行中…" : "32 Turns 実行"}
-        </button>
-        <span className="text-xs text-slate-400">
-          {session ? `${session.state.history.length} / ${MANAGEMENT_CONSOLE_STANDARD_TURNS} Turns` : "未実行"}
+        <RunSelector runs={runs} selectedRunId={stored?.run.simulationRunId ?? null} onSelect={selectRun} />
+        <span className="text-xs text-slate-400" data-testid="analysis-run-status">
+          {loading
+            ? "読み込み中…"
+            : stored
+              ? `${stored.dataset.turns.length} / ${stored.run.requestedTurns} Turns ・ ${stored.run.simulationRunId}`
+              : "保存済みの Simulation Run がありません"}
         </span>
       </header>
+
+      {!loading && !stored ? (
+        <p className="mb-3 rounded border border-amber-700 bg-amber-950/40 p-3 text-sm text-amber-200" data-testid="analysis-empty">
+          {notFoundId
+            ? `Simulation Run「${notFoundId}」が見つかりませんでした。`
+            : "まだ保存された Simulation Run がありません。"}{" "}
+          経営管制室で 32 Turns を実行すると、その結果がここで参照できます（この画面では Simulation を実行しません）。
+        </p>
+      ) : null}
 
       <nav className="mb-3 flex flex-wrap gap-1.5" aria-label="Analysis tabs">
         {TABS.map((t) => (
@@ -97,6 +119,7 @@ export function AnalysisShell() {
             type="button"
             onClick={() => setTab(t)}
             aria-pressed={t === tab}
+            data-testid={`analysis-tab-${t.replace(/\s+/g, "-").toLowerCase()}`}
             className={`rounded px-2.5 py-1 text-xs font-semibold ${
               t === tab ? "bg-sky-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
             }`}
@@ -106,67 +129,19 @@ export function AnalysisShell() {
         ))}
       </nav>
 
-      {tab !== "Overview" ? (
-        <p className="rounded border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-400">
-          <strong className="text-slate-200">{tab}</strong> は Phase 2 以降で実装します。Phase 1 では Overview のみが実装済みです。
-        </p>
+      {dataset === null ? null : tab === "Overview" ? (
+        <OverviewTab dataset={dataset} totalTurns={totalTurns} />
+      ) : tab === "Market" ? (
+        <MarketTab dataset={dataset} totalTurns={totalTurns} />
+      ) : tab === "Bottleneck" ? (
+        <BottleneckTab dataset={dataset} />
+      ) : tab === "AI Trace" ? (
+        <AiTraceTab dataset={dataset} />
       ) : (
-        <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-semibold">Overview — 5社 × 32Q</h2>
-            <div className="ml-auto flex gap-1">
-              {METRICS.map((m) => (
-                <button
-                  key={m.key}
-                  type="button"
-                  onClick={() => setMetric(m.key)}
-                  aria-pressed={metric === m.key}
-                  className={`rounded px-2 py-1 text-xs ${
-                    metric === m.key ? "bg-sky-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {series.length === 0 ? (
-            <p className="text-sm text-slate-400">「32 Turns 実行」を押すとデータが表示されます。</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-xs" data-testid="analysis-overview-table">
-                <thead>
-                  <tr className="border-b border-slate-700 text-slate-400">
-                    <th className="py-1 pr-2 text-left">会社</th>
-                    {series[0].points.map((p) => (
-                      <th key={p.turn} className="px-1 py-1 text-right">Q{p.turn}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {series.map((s) => (
-                    <tr key={s.companyId} className="border-b border-slate-800">
-                      <td className="py-1 pr-2">
-                        <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ backgroundColor: s.color }} aria-hidden />
-                        {s.companyId}
-                      </td>
-                      {s.points.map((p) => {
-                        const v = p[metric];
-                        return (
-                          <td key={p.turn} className={`px-1 py-1 text-right tabular-nums ${v !== null && v < 0 ? "text-rose-400" : ""}`}>
-                            {v === null ? "－" : (v / 1_000_000).toFixed(1)}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="mt-1.5 text-[11px] text-slate-500">単位: USD 百万</p>
-            </div>
-          )}
-        </section>
+        <p className="rounded border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-400" data-testid="analysis-shell-tab">
+          <strong className="text-slate-200">{tab}</strong> は今後のPhaseで実装します。Phase 2 で実装済みなのは Overview / Market /
+          Bottleneck / AI Trace の4つです（中身のない器に、それらしい数字を置いていません）。
+        </p>
       )}
     </div>
   );

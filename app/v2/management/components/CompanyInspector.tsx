@@ -1,19 +1,25 @@
 "use client";
 
-// ShrimpX V2 — 32Q Management Console: Company Inspector（Phase 1）
+// ShrimpX V2 — 32Q Management Console: Company Inspector（Phase 2で dataset 駆動へ変更）
 //
-// 【生成AIを呼ばない】表示はすべて既存の state / history / Standard AI diagnostics の再利用。
-// 【捏造しない】取得できない項目は「－」と表示し、推測値で埋めない。
+// 【Phase 2 での変更点】
+// Phase 1 は表示のたびに Standard AI をその場で呼び直していた（画面専用の実行経路）。
+// Phase 2 では、実行中に記録した AI Trace（＝実際にゲームへ提出された判断そのもの）
+// だけを見る。これにより
+//   - 画面の表示と実際の意思決定が食い違わない
+//   - 保存済み Simulation Run をリロード後に開いても同じ内容が出る
+// の2点が同時に満たされる。
+//
+// 【生成AIを呼ばない】【捏造しない】取得できない項目は「－」と表示する。
 
-import { CompanyFixture, CompanyLabState } from "../../../lib/v2/companyLab/types";
-import { buildCompanyInspectorSnapshot } from "../../../lib/v2/companyLab/simulation/series";
-import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
-import { generateStandardAiDecisionWithDiagnostics } from "../../../lib/v2/companyLab/standardAi/policy";
+import { CompanyFixture } from "../../../lib/v2/companyLab/types";
+import { SimulationAnalyticsDataset } from "../../../lib/v2/companyLab/simulation/analytics/types";
+import { companySnapshot } from "../../../lib/v2/companyLab/simulation/analytics/views";
+import { BOTTLENECK_LABELS } from "../../../lib/v2/companyLab/simulation/analytics/types";
 import { CompanyStrategyDocument, resolveStrategyAtTurn } from "../../../lib/v2/companyLab/strategyProfile/types";
-import { unwrapUnit } from "../../../lib/v2/core/units";
 
 interface Props {
-  readonly state: CompanyLabState;
+  readonly dataset: SimulationAnalyticsDataset;
   readonly fixtures: readonly CompanyFixture[];
   readonly selectedCompanyId: string;
   readonly onSelect: (companyId: string) => void;
@@ -21,8 +27,8 @@ interface Props {
 }
 
 const DASH = "－";
-const money = (v: number | null) => (v === null ? DASH : `${(v / 1_000_000).toFixed(1)}M`);
-const tons = (v: number | null) => (v === null ? DASH : `${Math.round(v).toLocaleString()}t`);
+const money = (v: number | null | undefined) => (v === null || v === undefined ? DASH : `${(v / 1_000_000).toFixed(1)}M`);
+const tons = (v: number | null | undefined) => (v === null || v === undefined ? DASH : `${Math.round(v).toLocaleString()}t`);
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -42,32 +48,18 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function CompanyInspector({ state, fixtures, selectedCompanyId, onSelect, strategyDocs }: Props) {
+export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelect, strategyDocs }: Props) {
   const fixture = fixtures.find((f) => f.companyId === selectedCompanyId);
-  const snapshot = buildCompanyInspectorSnapshot(state, selectedCompanyId, fixtures);
-  const turn = state.scenarioState.currentTurn;
+  const latestTurn = dataset.turns[dataset.turns.length - 1] ?? null;
+  const snapshot = latestTurn === null ? null : companySnapshot(dataset, selectedCompanyId, latestTurn);
+  const bottleneck = dataset.bottlenecks.find((b) => b.companyId === selectedCompanyId && b.turn === latestTurn) ?? null;
+  const strategy = strategyDocs[selectedCompanyId] && latestTurn !== null ? resolveStrategyAtTurn(strategyDocs[selectedCompanyId], latestTurn) : null;
 
-  // 当期の Standard AI 判断（次のターンで実際に使われるものと同じ関数・同じ入力）。
-  // 純粋関数なので、会社を切り替えてもゲームの進行には一切影響しない。
-  let diagnostics: ReturnType<typeof generateStandardAiDecisionWithDiagnostics> | null = null;
-  if (fixture) {
-    try {
-      const ownState = buildCompanyOwnState(state, fixture);
-      const publicInfo = buildPublicMarketInfo(state);
-      diagnostics = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, state.currentPeriod, turn);
-    } catch {
-      diagnostics = null;
-    }
-  }
-
-  const sd = diagnostics?.diagnostics.situationDiagnosis;
-  const decision = diagnostics?.decision;
-  const strategy = strategyDocs[selectedCompanyId]
-    ? resolveStrategyAtTurn(strategyDocs[selectedCompanyId], turn)
-    : null;
-
-  const entriesByDomain = (domain: string) =>
-    (diagnostics?.diagnostics.entries ?? []).filter((e) => e.domain === domain);
+  const traceAt = (stage: string) =>
+    dataset.aiTrace.find((t) => t.companyId === selectedCompanyId && t.turn === latestTurn && t.stage === stage) ?? null;
+  const diagnosed = traceAt("DIAGNOSED");
+  const decided = traceAt("DECIDED");
+  const constrained = traceAt("CONSTRAINED");
 
   return (
     <div className="flex h-full flex-col gap-2.5 overflow-y-auto">
@@ -79,9 +71,7 @@ export function CompanyInspector({ state, fixtures, selectedCompanyId, onSelect,
             onClick={() => onSelect(f.companyId)}
             aria-pressed={f.companyId === selectedCompanyId}
             className={`rounded px-2.5 py-1 text-xs font-semibold transition ${
-              f.companyId === selectedCompanyId
-                ? "bg-sky-600 text-white"
-                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+              f.companyId === selectedCompanyId ? "bg-sky-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"
             }`}
           >
             {f.companyId}
@@ -96,7 +86,7 @@ export function CompanyInspector({ state, fixtures, selectedCompanyId, onSelect,
           <Section title="会社">
             <p className="text-sm font-semibold text-slate-100">{fixture.displayName}</p>
             <p className="mt-0.5 text-xs text-slate-400">
-              archetype: {fixture.archetype} / Turn {turn}
+              archetype: {fixture.archetype} / 表示中: {latestTurn === null ? "実績なし" : `Turn ${latestTurn}`}
             </p>
             <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{fixture.description}</p>
           </Section>
@@ -107,7 +97,7 @@ export function CompanyInspector({ state, fixtures, selectedCompanyId, onSelect,
               <Row label="Vision" value={strategyDocs[selectedCompanyId]?.vision || "（未設定）"} />
             </dl>
             <p className="mt-1 text-[11px] leading-snug text-slate-500">
-              Mission / Vision は今回新設した項目です。既定は空で、それらしい文言を自動生成していません。
+              Mission / Vision は既定が空で、それらしい文言を自動生成していません。
             </p>
           </Section>
 
@@ -128,119 +118,98 @@ export function CompanyInspector({ state, fixtures, selectedCompanyId, onSelect,
               </dl>
             )}
             <p className="mt-1 text-[11px] leading-snug text-slate-500">
-              Phase 1 では保存・表示のみで、Standard AI の数値判断へは接続していません。
+              Phase 2 でも保存・表示のみで、Standard AI の数値判断へは接続していません。
             </p>
           </Section>
 
           <Section title="財務">
             <dl>
-              <Row label="Revenue" value={money(snapshot?.revenue ?? null)} />
-              <Row label="Operating Profit" value={money(snapshot?.operatingProfit ?? null)} />
-              <Row label="Net Income" value={money(snapshot?.netIncome ?? null)} />
-              <Row label="Cash" value={money(snapshot?.cash ?? null)} />
-              <Row label="Debt" value={money(snapshot?.debt ?? null)} />
+              <Row label="Revenue" value={money(snapshot?.get("revenue"))} />
+              <Row label="Operating Profit" value={money(snapshot?.get("operatingProfit"))} />
+              <Row label="Net Income" value={money(snapshot?.get("netIncome"))} />
+              <Row label="Cash" value={money(snapshot?.get("cash"))} />
+              <Row label="Debt" value={money(snapshot?.get("debt"))} />
             </dl>
           </Section>
 
           <Section title="操業">
             <dl>
-              <Row label="Sales Headcount" value={snapshot?.salesHeadcount === null || snapshot === null ? DASH : String(snapshot.salesHeadcount)} />
-              <Row label="HOSO 生産 / 能力" value={`${tons(snapshot?.hosoProduced ?? null)} / ${tons(snapshot?.hosoCapacity ?? null)}`} />
-              <Row label="PD 生産 / 能力" value={`${tons(snapshot?.pdProduced ?? null)} / ${tons(snapshot?.pdCapacity ?? null)}`} />
-              <Row label="VAP 生産 / 能力" value={`${tons(snapshot?.vapProduced ?? null)} / ${tons(snapshot?.vapCapacity ?? null)}`} />
-              <Row label="共通前処理能力" value={tons(snapshot?.commonCapacity ?? null)} />
+              <Row
+                label="Sales Headcount"
+                value={snapshot?.get("salesHeadcount") === null || snapshot?.get("salesHeadcount") === undefined ? DASH : String(snapshot.get("salesHeadcount"))}
+              />
+              <Row label="HOSO 生産 / 能力" value={`${tons(snapshot?.get("hosoProduced"))} / ${tons(snapshot?.get("hosoCapacity"))}`} />
+              <Row label="PD 生産 / 能力" value={`${tons(snapshot?.get("pdProduced"))} / ${tons(snapshot?.get("pdCapacity"))}`} />
+              <Row label="VAP 生産 / 能力" value={`${tons(snapshot?.get("vapProduced"))} / ${tons(snapshot?.get("vapCapacity"))}`} />
+              <Row label="共通前処理能力" value={tons(snapshot?.get("commonCapacity"))} />
             </dl>
           </Section>
 
           <Section title="ボトルネック">
-            {snapshot === null ? (
+            {bottleneck === null ? (
               <p className="text-xs text-slate-400">まだ実績がありません。</p>
             ) : (
               <>
-                <p className="mb-1 text-sm font-semibold text-amber-300">
-                  {snapshot.primaryBottleneck ?? "不足なし"}
-                </p>
+                <p className="mb-1 text-sm font-semibold text-amber-300">{BOTTLENECK_LABELS[bottleneck.primary]}</p>
                 <dl>
-                  <Row label="原料不足" value={tons(snapshot.rawMaterialShortfall)} />
-                  <Row label="設備不足" value={tons(snapshot.equipmentShortfall)} />
-                  <Row label="労働力不足" value={tons(snapshot.laborShortfall)} />
+                  <Row label="原料不足" value={tons(bottleneck.rawMaterialShortfall)} />
+                  <Row label="設備不足" value={tons(bottleneck.equipmentShortfall)} />
+                  <Row label="労働力不足" value={tons(bottleneck.laborShortfall)} />
                 </dl>
               </>
             )}
           </Section>
 
-          <Section title="Standard AI 状況診断">
-            {sd === undefined ? (
-              <p className="text-xs text-slate-400">診断が取得できません。</p>
+          <Section title="Standard AI 状況診断（実行時に記録した値）">
+            {diagnosed === null ? (
+              <p className="text-xs text-slate-400">診断の記録がありません。</p>
             ) : (
               <dl>
-                <Row label="主要制約" value={String(sd.primaryConstraint)} />
-                <Row label="副次制約" value={String(sd.secondaryConstraint)} />
+                {diagnosed.items
+                  .filter((i) => i.label === "主要制約" || i.label === "第2の制約" || i.value !== undefined)
+                  .slice(0, 8)
+                  .map((i, index) => (
+                    <Row
+                      key={`${i.label}-${index}`}
+                      label={i.label}
+                      value={i.value !== undefined ? `${i.value.toFixed(2)}${i.text ? `（${i.text}）` : ""}` : (i.text ?? DASH)}
+                    />
+                  ))}
               </dl>
             )}
           </Section>
 
-          <Section title="Standard AI 主要意思決定">
-            {decision === undefined ? (
-              <p className="text-xs text-slate-400">意思決定が取得できません。</p>
+          <Section title="Standard AI 主要意思決定（実際に提出した値）">
+            {decided === null ? (
+              <p className="text-xs text-slate-400">意思決定の記録がありません。</p>
             ) : (
               <dl>
-                <Row label="営業採用" value={String(decision.salesForceHireCount ?? 0)} />
-                <Row
-                  label="販売計画（市場×商品）"
-                  value={`${decision.salesPlans.length} 件 / ${Math.round(
-                    decision.salesPlans.reduce((s, p) => s + unwrapUnit(p.desiredQuantity), 0)
-                  ).toLocaleString()}t`}
-                />
-                <Row
-                  label="生産計画"
-                  value={`${Math.round(
-                    decision.productionPlans.reduce((s, p) => s + unwrapUnit(p.desiredQuantity), 0)
-                  ).toLocaleString()}t`}
-                />
-                <Row label="国内買付希望" value={tons(unwrapUnit(decision.domesticPurchasePlan.desiredQuantity))} />
-                <Row
-                  label="輸入発注"
-                  value={tons(decision.importOrders.reduce((s, o) => s + unwrapUnit(o.orderedQuantity), 0))}
-                />
-                <Row
-                  label="Worker配置"
-                  value={`${decision.workerAssignments.reduce((s, w) => s + w.regularHeadcount, 0)} 人`}
-                />
-                <Row
-                  label="設備投資提案"
-                  value={
-                    decision.capexDecision.newProjectProposals.length === 0
-                      ? "なし"
-                      : decision.capexDecision.newProjectProposals.map((p) => String(p.projectType)).join(", ")
-                  }
-                />
-                <Row label="借入申請" value={money(decision.financingRequest.desiredAmountUsd)} />
+                {decided.items.map((i, index) => (
+                  <Row
+                    key={`${i.label}-${index}`}
+                    label={i.label}
+                    value={i.value === undefined ? (i.text ?? DASH) : i.unit === "USD" ? money(i.value) : `${Math.round(i.value).toLocaleString()}${i.unit ?? ""}`}
+                  />
+                ))}
               </dl>
             )}
           </Section>
 
-          <Section title="判断根拠（diagnostics）">
-            {(["procurement", "capex", "finance"] as const).map((domain) => {
-              const list = entriesByDomain(domain);
-              return (
-                <div key={domain} className="mb-1.5 last:mb-0">
-                  <p className="text-[11px] font-semibold uppercase text-slate-400">{domain}</p>
-                  {list.length === 0 ? (
-                    <p className="text-[11px] text-slate-500">記録なし</p>
-                  ) : (
-                    <ul className="list-inside list-disc">
-                      {list.slice(0, 4).map((e, i) => (
-                        <li key={`${e.code}-${i}`} className="text-[11px] leading-snug text-slate-300">
-                          <span className="font-mono text-slate-400">{e.code}</span>
-                          {e.decisionSummary ? ` — ${e.decisionSummary}` : ""}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              );
-            })}
+          <Section title="判断根拠（Standard AI が付けた理由コード）">
+            {constrained === null || constrained.items.filter((i) => i.value === undefined && i.text !== undefined).length === 0 ? (
+              <p className="text-[11px] text-slate-500">記録なし</p>
+            ) : (
+              <ul className="list-inside list-disc">
+                {constrained.items
+                  .filter((i) => i.value === undefined && i.text !== undefined)
+                  .slice(0, 6)
+                  .map((i, index) => (
+                    <li key={`${i.label}-${index}`} className="text-[11px] leading-snug text-slate-300">
+                      <span className="font-mono text-slate-400">{i.label}</span> — {i.text}
+                    </li>
+                  ))}
+              </ul>
+            )}
           </Section>
         </>
       )}

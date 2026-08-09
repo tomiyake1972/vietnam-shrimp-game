@@ -7,6 +7,8 @@
 // advanceCompanyLabQuarter を呼ぶだけで、fast-run 専用の簡易ロジックは作らない。
 
 import { CompanyLabConfig, CompanyLabState, CompanyFixture } from "../types";
+import type { SimulationAiTurnTrace } from "./analytics/aiTrace";
+import type { ObservedDemandSnapshot } from "./analytics/dataset";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -64,6 +66,43 @@ export interface SimulationSession {
   readonly state: CompanyLabState;
   readonly fixtures: readonly CompanyFixture[];
   readonly config: CompanyLabConfig;
+  /**
+   * 【Phase 2】各ターンで Standard AI が実際に持っていた値（6段階トレース用）。
+   * Standard AI が意思決定の過程で**既に計算している**値を抜き出して保持するだけであり、
+   * 新しい logging system・追加の推論は存在しない。診断オブジェクト全体ではなく
+   * 表示に使う項目だけを持つ（32Q×5社で保存量が膨らまないようにするため）。
+   */
+  readonly aiTurnTraces: readonly SimulationAiTurnTrace[];
+  /**
+   * 【Phase 2】各ターンで実際に公開されていた観測需要（2四半期遅行）。
+   * TRUE WORLD（salesRecord.allocations の targetDemand）と混同しないよう、
+   * 別系列として記録する。
+   */
+  readonly observedDemand: readonly ObservedDemandSnapshot[];
+  /**
+   * 【Phase 2】各ターン終了時点の会社別営業人員数。
+   * salesForceHiringState は「現在値」しか持たず四半期記録にも残らないため、
+   * ターンごとの値はここで拾わないと後から復元できない（会社数ぶんのスカラーのみ）。
+   */
+  readonly salesHeadcountByTurn: readonly { readonly turn: number; readonly companyId: string; readonly headcount: number }[];
+  /**
+   * 【Phase 2】各ターン終了時点の会社別実効能力。
+   * 能力は fixtures と capexState から導出される値であり四半期記録に残らないため、
+   * 保存済み Simulation Run から画面を復元するにはターンごとに拾っておく必要がある。
+   * 計算は既存の唯一の情報源（computeEffectiveFactories / calculateFactoryEffectiveCapacity）
+   * をそのまま通す（analytics 用の独自計算を作らない）。
+   */
+  readonly capacityByTurn: readonly CapacitySnapshot[];
+}
+
+/** 1ターン・1社ぶんの実効能力（HOSO換算トン/四半期）。 */
+export interface CapacitySnapshot {
+  readonly turn: number;
+  readonly companyId: string;
+  readonly hoso: number;
+  readonly pd: number;
+  readonly vap: number;
+  readonly commonProcessing: number;
 }
 
 /** 1ターン進めた結果。 */
