@@ -9,6 +9,7 @@
 import { CompanyLabConfig, CompanyLabState, CompanyFixture } from "../types";
 import type { SimulationAiTurnTrace } from "./analytics/aiTrace";
 import type { ObservedDemandSnapshot } from "./analytics/dataset";
+import type { PackCapitalProject, PackCompanyStateSnapshot, PackWorldTurn } from "./aiPack/types";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -95,6 +96,24 @@ export interface SimulationSession {
    * をそのまま通す（analytics 用の独自計算を作らない）。
    */
   readonly capacityByTurn: readonly CapacitySnapshot[];
+  /**
+   * 【AI Analysis Pack】各ターンの期首・期末の会社状態と、期末の設備投資案件。
+   * 導出値（実効能力・工場スペース・借入残高等）は確定履歴に残らないため、
+   * 実行中に拾わないと後から復元できない。会社数×ターン数ぶんの小さな
+   * スカラー集合であり、CompanyLabState を丸ごと複製するものではない。
+   */
+  readonly packCompanyTurns: readonly PackCompanyTurnCapture[];
+  /** 【AI Analysis Pack】TRUE WORLD と OBSERVABLE を分けた世界のターン記録。 */
+  readonly packWorldTurns: readonly PackWorldTurn[];
+}
+
+/** 1ターン・1社ぶんの期首／期末スナップショットと期末の投資案件。 */
+export interface PackCompanyTurnCapture {
+  readonly turn: number;
+  readonly companyId: string;
+  readonly beginningState: PackCompanyStateSnapshot;
+  readonly endingState: PackCompanyStateSnapshot;
+  readonly capitalProjects: readonly PackCapitalProject[];
 }
 
 /** 1ターン・1社ぶんの実効能力（HOSO換算トン/四半期）。 */

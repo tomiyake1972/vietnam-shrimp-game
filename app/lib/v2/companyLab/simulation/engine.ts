@@ -39,6 +39,7 @@ import { STANDARD_AI_PARAMETERS_V1 } from "../standardAi/parameters";
 import { STRATEGY_PROFILE_SCHEMA_VERSION } from "../strategyProfile/types";
 import { CapacitySnapshot, MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession, SimulationTurnOutcome } from "./types";
 import { extractAiTurnTrace } from "./analytics/aiTrace";
+import { captureCapitalProjects, captureCompanyStateSnapshot, captureScenarioEvents, captureWorldTurn } from "./aiPack/capture";
 import type { ObservedDemandSnapshot } from "./analytics/dataset";
 import type { PublicMarketInfo } from "../types";
 
@@ -104,7 +105,7 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     errorMessage: null,
     failedAtTurn: null,
   };
-  return { run, state, fixtures, config, aiTurnTraces: [], observedDemand: [], salesHeadcountByTurn: [], capacityByTurn: [] };
+  return { run, state, fixtures, config, aiTurnTraces: [], observedDemand: [], salesHeadcountByTurn: [], capacityByTurn: [], packCompanyTurns: [], packWorldTurns: [] };
 }
 
 /**
@@ -183,8 +184,35 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
       // トレース記録のために Standard AI をもう一度回すことはない。
       turnTraces.push(extractAiTurnTrace(diagnostics));
     }
+    // 【AI Analysis Pack】期首状態は「当期処理前」に撮る（処理後では期首にならない）。
+    const beginningStates = new Map(session.fixtures.map((f) => [f.companyId, captureCompanyStateSnapshot(session.state, f)]));
+
     const nextState = advanceCompanyLabQuarter(session.state, session.fixtures, decisions);
     const observedSnapshot = captureObservedDemand(turn, publicInfo);
+
+    const packCompanyTurns = session.fixtures.map((f) => ({
+      turn,
+      companyId: f.companyId,
+      beginningState: beginningStates.get(f.companyId) as ReturnType<typeof captureCompanyStateSnapshot>,
+      endingState: captureCompanyStateSnapshot(nextState, f),
+      capitalProjects: captureCapitalProjects(nextState, f.companyId),
+    }));
+    const finalizedRecord = nextState.history[nextState.history.length - 1];
+    const packWorldTurn = finalizedRecord
+      ? captureWorldTurn(
+          turn,
+          finalizedRecord,
+          observedSnapshot
+            ? {
+                entries: observedSnapshot.entries,
+                sourceTurn: observedSnapshot.sourceTurn,
+                lagQuarters: publicInfo.observedMarketDemand?.observationLagQuarters ?? null,
+                vietnamDomesticPriorPrice: publicInfo.vietnamDomesticPriorPrice ?? null,
+              }
+            : null,
+          captureScenarioEvents(session.state, turn)
+        )
+      : null;
     const completedTurns = session.run.completedTurns + 1;
     const reachedRequested = completedTurns >= session.run.requestedTurns;
     return {
@@ -208,6 +236,8 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
           })),
         ],
         capacityByTurn: [...session.capacityByTurn, ...captureCapacities(turn, nextState, session.fixtures)],
+        packCompanyTurns: [...session.packCompanyTurns, ...packCompanyTurns],
+        packWorldTurns: packWorldTurn ? [...session.packWorldTurns, packWorldTurn] : session.packWorldTurns,
         run: {
           ...session.run,
           completedTurns,

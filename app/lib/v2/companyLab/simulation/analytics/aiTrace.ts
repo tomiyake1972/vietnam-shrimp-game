@@ -62,10 +62,16 @@ function ratioItem(label: string, ratio: number, state: string): AiTraceItem {
 }
 
 /**
- * 1段階に載せる理由コードの上限。
- * **黙って切り捨てない** — 上限を超えた場合は「他N件を省略した」ことを項目として残す。
+ * 理由コードのうち、人間向けメッセージまで保存する件数の上限。
+ *
+ * 【コードそのものは絶対に落とさない】上限を超えた分も
+ * 「[severity] code」という項目として必ず残し、長いメッセージだけを省略する。
+ * 投資を見送った理由（CAPEX_DEFERRED 等）が末尾に並ぶことがあり、
+ * 件数で切り捨てると「なぜ投資しなかったか」が追えなくなるため。
  */
-const MAX_REASON_ITEMS_PER_STAGE = 12;
+const MAX_REASON_MESSAGES_PER_STAGE = 12;
+
+const OMITTED_MESSAGE_TEXT = "（メッセージは保存量の上限により省略。コードと severity は保持している）";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
@@ -142,19 +148,10 @@ export function extractAiTurnTrace(diagnostics: StandardAiQuarterDiagnostics): S
     );
   }
   // 理由コードは Standard AI が既に付けているものをそのまま並べる（要約しない）。
-  for (const entry of diagnostics.entries.slice(0, MAX_REASON_ITEMS_PER_STAGE)) {
-    constrained.push(textItem(`[${entry.severity}] ${entry.code}`, entry.message));
-  }
-  if (diagnostics.entries.length > MAX_REASON_ITEMS_PER_STAGE) {
-    constrained.push(
-      textItem(
-        "（表示上限）",
-        `この四半期の理由コードは ${diagnostics.entries.length} 件あり、先頭 ${MAX_REASON_ITEMS_PER_STAGE} 件のみ保存しています（省略 ${
-          diagnostics.entries.length - MAX_REASON_ITEMS_PER_STAGE
-        } 件）。`
-      )
-    );
-  }
+  // コードは全件残し、上限を超えた分はメッセージだけを省略する。
+  diagnostics.entries.forEach((entry, index) => {
+    constrained.push(textItem(`[${entry.severity}] ${entry.code}`, index < MAX_REASON_MESSAGES_PER_STAGE ? entry.message : OMITTED_MESSAGE_TEXT));
+  });
 
   // --- ⑤ DECIDED: 実際にゲームへ提出した値 ---
   const productionTotal = decision.productionPlans.reduce((s, plan) => s + (Number(unwrapUnit(plan.desiredQuantity as never)) || 0), 0);
@@ -210,18 +207,10 @@ function buildResultItems(record: CompanyQuarterRecord | undefined, companyId: s
     item("売上高", Number(fin?.profitAndLoss?.netRevenue) || null, "USD"),
     item("営業利益", Number(fin?.profitAndLoss?.operatingProfit) || null, "USD"),
   ];
-  // 理由コードも CONSTRAINED と同じ上限を適用する（黙って切り捨てず、省略件数を残す）。
-  for (const reason of summary.reasonCodes.slice(0, MAX_REASON_ITEMS_PER_STAGE)) items.push(textItem(reason.code, reason.message));
-  if (summary.reasonCodes.length > MAX_REASON_ITEMS_PER_STAGE) {
-    items.push(
-      textItem(
-        "（表示上限）",
-        `この四半期の理由コードは ${summary.reasonCodes.length} 件あり、先頭 ${MAX_REASON_ITEMS_PER_STAGE} 件のみ保存しています（省略 ${
-          summary.reasonCodes.length - MAX_REASON_ITEMS_PER_STAGE
-        } 件）。`
-      )
-    );
-  }
+  // 実績側の理由コードも同じ方針（コードは全件、メッセージだけ上限で省略）。
+  summary.reasonCodes.forEach((reason, index) => {
+    items.push(textItem(reason.code, index < MAX_REASON_MESSAGES_PER_STAGE ? reason.message : OMITTED_MESSAGE_TEXT));
+  });
   return items;
 }
 

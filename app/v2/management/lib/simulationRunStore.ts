@@ -23,11 +23,14 @@ const ACTIVE_RUN_KEY = "shrimpx:v2:simulationRun:active";
 
 /**
  * ブラウザ内に残す実行数の上限。
- * 32Q 1本の保存物は実測で約2MBあり（scripts/simulationRunPayloadSize.ts）、
- * localStorage の一般的な上限（オリジンあたり約5MB）に対して余裕を持たせる必要がある。
- * 上限を超えた場合は古い実行から本体ごと消す。
+ *
+ * 32Q 1本の保存物は実測で約3.1MB（analytics dataset ＋ AI Analysis Pack 用の
+ * per-turn capture。scripts/aiAnalysisPackProbe.ts）。localStorage の一般的な上限は
+ * オリジンあたり約5MBのため、ブラウザ側では**最新の1本だけ**を確実に残す方針にする
+ * （2本入れると保存に失敗し、結局古い方を捨てて入れ直すことになる）。
+ * 複数 run を保持したい場合はサーバー保存（Redis、上限20本）を使う。
  */
-export const BROWSER_RUN_RETENTION_LIMIT = 2;
+export const BROWSER_RUN_RETENTION_LIMIT = 1;
 
 export type SimulationRunStorageLocation = "server" | "browser";
 

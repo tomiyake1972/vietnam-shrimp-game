@@ -35,6 +35,22 @@ const LINE_EXPANSION_BY_PRODUCT: Readonly<Record<Product, CapitalProjectType>> =
   vap: "vapLineExpansion",
 };
 
+/**
+ * このモジュールが提案しうる設備投資の種類（＝Standard AI が提案できる全て）。
+ *
+ * 【この一覧が意味すること】ゲームエンジン側には他にも案件種別が存在する
+ * （capex/types.ts の CAPITAL_PROJECT_TYPES）が、ここに無い種別は
+ * **Standard AI からは構造的に一度も提案されない**。
+ * 監査・AI Analysis Pack はこの定数を唯一の情報源として参照する
+ * （別の場所へ同じ一覧を書き写さない）。
+ */
+export const STANDARD_AI_PROPOSABLE_CAPEX_TYPES: readonly CapitalProjectType[] = [
+  "hosoLineExpansion",
+  "pdLineExpansion",
+  "vapLineExpansion",
+  "commonProcessingExpansion",
+];
+
 export interface CapexPlanResult {
   readonly capexDecision: CapexDecisionInput;
   readonly diagnostics: readonly StandardAiDiagnosticEntry[];

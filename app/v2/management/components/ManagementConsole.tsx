@@ -42,6 +42,7 @@ import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
 import { RunSelector } from "./RunSelector";
 import { Collapsible } from "./Collapsible";
+import { ExportPackButton } from "./ExportPackButton";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
 
 const SCENARIO_ID = "baseline";
@@ -140,6 +141,7 @@ export function ManagementConsole() {
       schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
       run: session.run,
       dataset,
+      packCapture: { companyTurns: session.packCompanyTurns, worldTurns: session.packWorldTurns },
       savedAt: nowIso(),
     });
     setActiveSimulationRunId(session.run.simulationRunId);
@@ -387,6 +389,13 @@ export function ManagementConsole() {
               <MarketSummary dataset={dataset} />
             </Collapsible>
           ) : null}
+
+          <ExportPackButton
+            simulationRunId={view?.run.simulationRunId ?? null}
+            scenarioId={view?.run.scenarioId ?? null}
+            seed={view?.run.seed ?? null}
+            completedTurns={completedTurns}
+          />
 
           <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
             <h2 className="mb-2 text-sm font-semibold">5社サマリー（最新ターン）</h2>

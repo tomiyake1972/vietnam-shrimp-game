@@ -20,7 +20,8 @@
 // （どちらも記録に残らず消えてしまう値）に限る。
 
 import { SimulationAnalyticsDataset } from "../analytics/types";
-import { SimulationRun } from "../types";
+import { PackCompanyTurnCapture, SimulationRun } from "../types";
+import { PackWorldTurn } from "../aiPack/types";
 
 /**
  * 保存スキーマ版。
@@ -31,16 +32,33 @@ import { SimulationRun } from "../types";
  *
  * バージョン履歴:
  *   v1 … Phase 2A 初版。
+ *   v2 … AI Analysis Pack 用の per-turn capture（packCapture）を追加。
+ *        **追加的変更のみでマイグレーション不要**（会社ラボ本体と同じ方針）。
+ *        v1 のデータには packCapture が無いため undefined として復元し、
+ *        Pack 生成側は該当セクションを NOT_RECORDED として扱う（推測で埋めない）。
  */
-export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 1;
+export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 2;
 
 /** 保存される Simulation Run 1本ぶん。 */
 export interface StoredSimulationRun {
   readonly schemaVersion: number;
   readonly run: SimulationRun;
   readonly dataset: SimulationAnalyticsDataset;
+  /**
+   * 【schemaVersion 2】AI Analysis Pack 用の per-turn capture。
+   * 確定履歴に残らない導出値（期首・期末状態、工場スペース、投資案件、
+   * TRUE/OBSERVABLE を分けた世界記録）だけを持つ。
+   * v1 の保存データには存在しないため optional。
+   */
+  readonly packCapture?: SimulationPackCapture;
   /** metadata（ゲーム判断には使わない）。 */
   readonly savedAt: string;
+}
+
+/** 実行中に拾った、Pack 用の追加記録。 */
+export interface SimulationPackCapture {
+  readonly companyTurns: readonly PackCompanyTurnCapture[];
+  readonly worldTurns: readonly PackWorldTurn[];
 }
 
 /**

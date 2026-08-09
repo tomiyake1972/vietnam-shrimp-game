@@ -24,6 +24,7 @@ export async function handleSaveSimulationRun(repository: SimulationRunRepositor
     schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
     run: candidate.run,
     dataset: candidate.dataset,
+    packCapture: candidate.packCapture,
     savedAt: candidate.savedAt,
   };
   try {

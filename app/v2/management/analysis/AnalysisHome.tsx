@@ -16,6 +16,7 @@
 import Link from "next/link";
 import { ANALYSIS_CATEGORIES, QUICK_NAVIGATION } from "./catalog";
 import { Collapsible } from "../components/Collapsible";
+import { ExportPackButton } from "../components/ExportPackButton";
 import { analysisHref, useAnalysisRun } from "./lib/useAnalysisRun";
 
 const STOP_REASON_LABELS: Readonly<Record<string, string>> = {
@@ -73,6 +74,17 @@ export function AnalysisHome() {
         「新しいタブで開く」）すると、別のブラウザタブで開いて並べて比較できます。別タブで Run
         を切り替えても、このタブが見ている Run は変わりません。
       </p>
+
+      {/* --- AI Analysis Pack：選択中の Simulation Run について出力する --- */}
+      <div className="mb-3">
+        <ExportPackButton
+          simulationRunId={stored?.run.simulationRunId ?? null}
+          scenarioId={stored?.run.scenarioId ?? null}
+          seed={stored?.run.seed ?? null}
+          completedTurns={stored?.dataset.turns.length ?? null}
+          stored={stored}
+        />
+      </div>
 
       {/* --- カテゴリ：初期状態はすべて閉じている --- */}
       <div className="flex flex-col gap-2" data-testid="analysis-categories">
