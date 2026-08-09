@@ -138,8 +138,11 @@ test("computeFactoryCapacitySummaries: 有効能力は名目能力に基準稼�
   const summaries = computeFactoryCapacitySummaries(fixture.factories);
   assert.equal(summaries.length, 1);
   const [s] = summaries;
-  assert.equal(s.nominal.commonProcessing, 22000);
-  assert.ok(Math.abs(s.effective.commonProcessing - 22000 * 0.9 * 0.95) < 1);
+  // 【Test16】能力値はfixture側で変わりうる。検証したいのは「名目 × 0.9 × 0.95 = 有効」
+  // という関係であって特定の数値ではないため、名目値はfixtureから読む。
+  const nominalCommon = fixture.factories[0].commonProcessingCapacity;
+  assert.equal(s.nominal.commonProcessing, nominalCommon);
+  assert.ok(Math.abs(s.effective.commonProcessing - nominalCommon * 0.9 * 0.95) < 1);
   assert.ok(s.effective.commonProcessing < s.nominal.commonProcessing);
 });
 
