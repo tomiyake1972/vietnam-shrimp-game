@@ -1,0 +1,1252 @@
+{
+  "label": "raw-sufficient-capex-probe",
+  "turns": 8,
+  "testOnlyCondition": {
+    "topupTonsPerCompanyPerTurn": 40000,
+    "topupUnitCostUsdPerHosoEqKg": 4.2
+  },
+  "rows": [
+    {
+      "turn": 1,
+      "companyId": "BAL",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.7,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.3184152046783624,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.082125313283208,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 11231.21,
+      "operatingProfit": -130242.90061706305,
+      "cash": 72888463.913145
+    },
+    {
+      "turn": 1,
+      "companyId": "MASS",
+      "hosoCapacity": 10260,
+      "equipmentUtilizationLastQuarter": 0.7,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.3472066276803119,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 12702.69,
+      "operatingProfit": -6748925.947687611,
+      "cash": 43895670.98400319
+    },
+    {
+      "turn": 1,
+      "companyId": "JPQ",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.7,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.2347353801169592,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 11416.85,
+      "operatingProfit": 387399.0048470199,
+      "cash": 41247924.01628436
+    },
+    {
+      "turn": 1,
+      "companyId": "VAP",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.7,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1759259259259258,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 10273.04,
+      "operatingProfit": 4027837.3741609976,
+      "cash": 44049376.71180712
+    },
+    {
+      "turn": 1,
+      "companyId": "CONSV",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.7,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.2257748538011695,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1059933166248956,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.0505818713450292,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 12004.09,
+      "operatingProfit": -2572527.057890892,
+      "cash": 40179606.601352304
+    },
+    {
+      "turn": 2,
+      "companyId": "BAL",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.6667,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.0616875000000001,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6667,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 11394.88,
+      "operatingProfit": -8317496.197047628,
+      "cash": 97558398.79643805
+    },
+    {
+      "turn": 2,
+      "companyId": "MASS",
+      "hosoCapacity": 10260,
+      "equipmentUtilizationLastQuarter": 0.7293,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.0833173001949317,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7293,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 12712.59,
+      "operatingProfit": -11960888.106892087,
+      "cash": 67100881.98022798
+    },
+    {
+      "turn": 2,
+      "companyId": "JPQ",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 11541.1,
+      "operatingProfit": -7161978.654388696,
+      "cash": 62839168.0370047
+    },
+    {
+      "turn": 2,
+      "companyId": "VAP",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 10630.38,
+      "operatingProfit": -7298569.313553967,
+      "cash": 61255565.81376207
+    },
+    {
+      "turn": 2,
+      "companyId": "CONSV",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 11965.12,
+      "operatingProfit": -7533444.861929648,
+      "cash": 60034205.50769868
+    },
+    {
+      "turn": 3,
+      "companyId": "BAL",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 12636.19,
+      "operatingProfit": -5521738.718452677,
+      "cash": 107197624.64883819
+    },
+    {
+      "turn": 3,
+      "companyId": "MASS",
+      "hosoCapacity": 10260,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 14447.35,
+      "operatingProfit": -5622024.944757894,
+      "cash": 77012247.36207677
+    },
+    {
+      "turn": 3,
+      "companyId": "JPQ",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 13259.94,
+      "operatingProfit": -6375113.006436154,
+      "cash": 71936174.17006728
+    },
+    {
+      "turn": 3,
+      "companyId": "VAP",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 12259.94,
+      "operatingProfit": -6232329.242877126,
+      "cash": 69139924.48686
+    },
+    {
+      "turn": 3,
+      "companyId": "CONSV",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.4692,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.104902485380117,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4692,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 14251.18,
+      "operatingProfit": -6123036.837463245,
+      "cash": 72199459.99166335
+    },
+    {
+      "turn": 4,
+      "companyId": "BAL",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 17826.96,
+      "operatingProfit": -5920153.6098786,
+      "cash": 123840205.92632157
+    },
+    {
+      "turn": 4,
+      "companyId": "MASS",
+      "hosoCapacity": 10260,
+      "equipmentUtilizationLastQuarter": 0.5624,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.0677112085769982,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5624,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 19240.08,
+      "operatingProfit": -12263247.999040738,
+      "cash": 95008692.05186093
+    },
+    {
+      "turn": 4,
+      "companyId": "JPQ",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15478.87,
+      "operatingProfit": -4012687.1199537814,
+      "cash": 93393480.80061722
+    },
+    {
+      "turn": 4,
+      "companyId": "VAP",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.4264,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.0813258040935674,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4264,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 16506.14,
+      "operatingProfit": -5642965.463983908,
+      "cash": 85984249.7596348
+    },
+    {
+      "turn": 4,
+      "companyId": "CONSV",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.5453,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1894369152046784,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5453,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1313371762740183,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5453,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 14349.49,
+      "operatingProfit": -862349.613876,
+      "cash": 95279278.61979455
+    },
+    {
+      "turn": 5,
+      "companyId": "BAL",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.5873,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.139391812865497,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5873,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1844355054302422,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5873,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15830.36,
+      "operatingProfit": -7795167.891190648,
+      "cash": 138199944.54309094
+    },
+    {
+      "turn": 5,
+      "companyId": "MASS",
+      "hosoCapacity": 10260,
+      "equipmentUtilizationLastQuarter": 0.6394,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.195803313840156,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6394,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 17432.81,
+      "operatingProfit": -13334206.940337747,
+      "cash": 91692067.3288118
+    },
+    {
+      "turn": 5,
+      "companyId": "JPQ",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15634.88,
+      "operatingProfit": -7472906.297258452,
+      "cash": 106930250.9529264
+    },
+    {
+      "turn": 5,
+      "companyId": "VAP",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.5559,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1984304824561403,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5559,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15422.95,
+      "operatingProfit": -7808577.740578935,
+      "cash": 95344084.71298319
+    },
+    {
+      "turn": 5,
+      "companyId": "CONSV",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.5883,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1309209795321638,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5883,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1513447786131996,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5883,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 14355.72,
+      "operatingProfit": -7852266.005211294,
+      "cash": 116778321.85909212
+    },
+    {
+      "turn": 6,
+      "companyId": "BAL",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.6106,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1603510233918128,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6106,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.205700417710944,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6106,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15818.42,
+      "operatingProfit": -8023901.837804839,
+      "cash": 164521312.47300443
+    },
+    {
+      "turn": 6,
+      "companyId": "MASS",
+      "hosoCapacity": 10260,
+      "equipmentUtilizationLastQuarter": 0.6792,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.2284418128654968,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6792,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 17460.62,
+      "operatingProfit": -8884408.680566147,
+      "cash": 117626487.60735887
+    },
+    {
+      "turn": 6,
+      "companyId": "JPQ",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15367.2,
+      "operatingProfit": -7745734.254463166,
+      "cash": 132214134.8044318
+    },
+    {
+      "turn": 6,
+      "companyId": "VAP",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.5716,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.2223626461988306,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5716,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.0794900584795322,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5716,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.0635061403508772,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5716,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15371.8,
+      "operatingProfit": -7886974.032982066,
+      "cash": 119020699.16684735
+    },
+    {
+      "turn": 6,
+      "companyId": "CONSV",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.5888,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.07433932748538,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5888,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1371358395989972,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5888,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 14437.83,
+      "operatingProfit": -7193399.40376243,
+      "cash": 137870373.37793997
+    },
+    {
+      "turn": 7,
+      "companyId": "BAL",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.6077,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1583980994152046,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6077,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.2040010860484542,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6077,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15398.38,
+      "operatingProfit": -2925923.2355757505,
+      "cash": 192274786.00218952
+    },
+    {
+      "turn": 7,
+      "companyId": "MASS",
+      "hosoCapacity": 10260,
+      "equipmentUtilizationLastQuarter": 0.6793,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.2141762183235867,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6793,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 17076.59,
+      "operatingProfit": -10729356.357185394,
+      "cash": 145321510.98201603
+    },
+    {
+      "turn": 7,
+      "companyId": "JPQ",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15230.65,
+      "operatingProfit": -5873248.348704159,
+      "cash": 157622876.60548526
+    },
+    {
+      "turn": 7,
+      "companyId": "VAP",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.6099,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1684905701754384,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6099,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1170781676413255,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6099,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1084602339181286,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6099,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 14896.64,
+      "operatingProfit": -4596030.684276447,
+      "cash": 145200786.689139
+    },
+    {
+      "turn": 7,
+      "companyId": "CONSV",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.5888,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.099164828738513,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5888,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 14336.67,
+      "operatingProfit": -2815252.3726833463,
+      "cash": 160882699.09940183
+    },
+    {
+      "turn": 8,
+      "companyId": "BAL",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.6077,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1708673976608188,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6077,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.216634335839599,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6077,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15602.82,
+      "operatingProfit": -6466328.907732993,
+      "cash": 215922646.91393107
+    },
+    {
+      "turn": 8,
+      "companyId": "MASS",
+      "hosoCapacity": 10260,
+      "equipmentUtilizationLastQuarter": 0.679,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.2134225633528266,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.679,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 17259.05,
+      "operatingProfit": -11183242.215272874,
+      "cash": 169255771.6294251
+    },
+    {
+      "turn": 8,
+      "companyId": "JPQ",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": null,
+      "capexSustainedThreshold": null,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {}
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 15166.18,
+      "operatingProfit": -5053703.244239464,
+      "cash": 180577799.25920582
+    },
+    {
+      "turn": 8,
+      "companyId": "VAP",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.6191,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.1060157894736844,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6191,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.103969493177388,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.6191,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 14989.08,
+      "operatingProfit": -4981997.256594852,
+      "cash": 165978446.18829995
+    },
+    {
+      "turn": 8,
+      "companyId": "CONSV",
+      "hosoCapacity": 6840,
+      "equipmentUtilizationLastQuarter": 0.5904,
+      "capexSustainedThreshold": 0.92,
+      "capexProposals": [],
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "keyValues": {
+            "shortfallRatio": 1.0601208020050124,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5904,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "rawMaterialShortfall": 0,
+      "contractedVolume": 14402.95,
+      "operatingProfit": -4418664.346550494,
+      "cash": 181885964.54889643
+    }
+  ]
+}

@@ -1,0 +1,2412 @@
+{
+  "label": "raw-material-procurement-audit",
+  "turns": 8,
+  "parameters": {
+    "maximumBuyerShare": 0.35,
+    "importAvailableSupplyRatio": 0.1,
+    "standardLeadTimeTurns": 2,
+    "importMixRatio": 0.15,
+    "maxAquacultureShareOfRequirement": 0.35,
+    "minDomesticPurchaseRatioOfBase": 0.2,
+    "rawMaterialTargetQuarters": 0.4,
+    "severeCashPressureThreshold": 0.7
+  },
+  "rows": [
+    {
+      "turn": 1,
+      "companyId": "BAL",
+      "plannedRawRequirement": 17100,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2912.48,
+      "aquacultureHarvested": 0,
+      "domesticDesiredBeforeConstraint": 12855,
+      "domesticDesiredAfterConstraint": 12855,
+      "domesticAllocated": 7200,
+      "domesticBidPrice": 2.8467111111111105,
+      "domesticMarketPrice": 2.8467111111111105,
+      "domesticAvailableSupply": 35000,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 157500,
+      "domesticCompetitivenessWeight": 0.6041666666666666,
+      "domesticCoverageScore": 0.7166666666666667,
+      "externalProcessorIntent": 315000,
+      "aggregatedPurchaseIntent": 35000,
+      "importOrderedDesired": 2565,
+      "importAllocatedInTransit": 2565,
+      "importArrivedThisTurn": 0,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5600933488914819,
+      "procurementPlannedCashNeedUsd": 32137500,
+      "procurementAvailableLiquidityUsd": 18000000,
+      "procurementUnmetDemandUsd": 14137500.000000002,
+      "cash": 61416073.64477519,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 4040000,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 6900,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 3000,
+            "requiredRawMaterial": 17100
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.15014947380116905,
+            "currentlyAvailable": 3000,
+            "requiredRawMaterial": 19980.09
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
+          "keyValues": {}
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 1,
+      "companyId": "MASS",
+      "plannedRawRequirement": 18707.34,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2764.59,
+      "aquacultureHarvested": 0,
+      "domesticDesiredBeforeConstraint": 13542.71,
+      "domesticDesiredAfterConstraint": 13542.71,
+      "domesticAllocated": 7200,
+      "domesticBidPrice": 2.8467111111111105,
+      "domesticMarketPrice": 2.8467111111111105,
+      "domesticAvailableSupply": 35000,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 157500,
+      "domesticCompetitivenessWeight": 0.6259615384615385,
+      "domesticCoverageScore": 0.8038461538461539,
+      "externalProcessorIntent": 315000,
+      "aggregatedPurchaseIntent": 35000,
+      "importOrderedDesired": 2806.1,
+      "importAllocatedInTransit": 2806.1,
+      "importArrivedThisTurn": 0,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5316513460009112,
+      "procurementPlannedCashNeedUsd": 33856775,
+      "procurementAvailableLiquidityUsd": 18000000,
+      "procurementUnmetDemandUsd": 15856774.999999998,
+      "cash": 34051337.800000004,
+      "loanRequestedUsd": 798000,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 798000,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "借入余力枠(残り0USD、binding: collateralBased)を超える申請のため一部のみ承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 6507.34,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 5000,
+            "requiredRawMaterial": 18707.34
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.22452051399032227,
+            "currentlyAvailable": 5000,
+            "requiredRawMaterial": 22269.68
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
+          "keyValues": {}
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 1,
+      "companyId": "JPQ",
+      "plannedRawRequirement": 17566.24,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2646.94,
+      "aquacultureHarvested": 0,
+      "domesticDesiredBeforeConstraint": 13594.55,
+      "domesticDesiredAfterConstraint": 13594.55,
+      "domesticAllocated": 6920,
+      "domesticBidPrice": 2.8467111111111105,
+      "domesticMarketPrice": 2.8467111111111105,
+      "domesticAvailableSupply": 35000,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 157500,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 315000,
+      "aggregatedPurchaseIntent": 35000,
+      "importOrderedDesired": 2634.94,
+      "importAllocatedInTransit": 2634.94,
+      "importArrivedThisTurn": 0,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.509027514702583,
+      "procurementPlannedCashNeedUsd": 33986375,
+      "procurementAvailableLiquidityUsd": 17300000,
+      "procurementUnmetDemandUsd": 16686375,
+      "cash": 30642218.21774434,
+      "loanRequestedUsd": 2321000,
+      "loanApprovedUsd": 2300000,
+      "loanDeniedUsd": 21000,
+      "borrowingAvailableCapacityUsd": 2300000,
+      "underwritingReasons": [
+        "借入余力枠(残り2300000USD、binding: collateralBased)を超える申請のため一部のみ承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 8146.24,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 2500,
+            "requiredRawMaterial": 17566.24
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.13039965407579765,
+            "currentlyAvailable": 2500,
+            "requiredRawMaterial": 19171.83
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
+          "keyValues": {}
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 1,
+      "companyId": "VAP",
+      "plannedRawRequirement": 16791.7,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2148.15,
+      "aquacultureHarvested": 0,
+      "domesticDesiredBeforeConstraint": 12781.29,
+      "domesticDesiredAfterConstraint": 12781.29,
+      "domesticAllocated": 5280,
+      "domesticBidPrice": 2.8467111111111105,
+      "domesticMarketPrice": 2.8467111111111105,
+      "domesticAvailableSupply": 35000,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 157500,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 315000,
+      "aggregatedPurchaseIntent": 35000,
+      "importOrderedDesired": 2518.76,
+      "importAllocatedInTransit": 2518.76,
+      "importArrivedThisTurn": 0,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.41310384163100905,
+      "procurementPlannedCashNeedUsd": 31953225,
+      "procurementAvailableLiquidityUsd": 13200000,
+      "procurementUnmetDemandUsd": 18753225,
+      "cash": 33663429.71497466,
+      "loanRequestedUsd": 4868000,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 4868000,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "借入余力枠(残り0USD、binding: collateralBased)を超える申請のため一部のみ承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 9011.7,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 2500,
+            "requiredRawMaterial": 16791.7
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.13997196081680915,
+            "currentlyAvailable": 2500,
+            "requiredRawMaterial": 17860.72
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
+          "keyValues": {}
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 1,
+      "companyId": "CONSV",
+      "plannedRawRequirement": 16245,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 3653.01,
+      "aquacultureHarvested": 0,
+      "domesticDesiredBeforeConstraint": 11957.25,
+      "domesticDesiredAfterConstraint": 11957.25,
+      "domesticAllocated": 8400,
+      "domesticBidPrice": 2.8467111111111105,
+      "domesticMarketPrice": 2.8467111111111105,
+      "domesticAvailableSupply": 35000,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 157500,
+      "domesticCompetitivenessWeight": 0.5839285714285714,
+      "domesticCoverageScore": 0.6357142857142857,
+      "externalProcessorIntent": 315000,
+      "aggregatedPurchaseIntent": 35000,
+      "importOrderedDesired": 2436.75,
+      "importAllocatedInTransit": 2436.75,
+      "importArrivedThisTurn": 0,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.7025026657467227,
+      "procurementPlannedCashNeedUsd": 29893125,
+      "procurementAvailableLiquidityUsd": 21000000,
+      "procurementUnmetDemandUsd": 8893125,
+      "cash": 23715802.460039612,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 16520000,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 3869.83,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 3000,
+            "requiredRawMaterial": 16245
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.16131929066832434,
+            "currentlyAvailable": 3000,
+            "requiredRawMaterial": 18596.659999999996
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_SUPPLY_CONSTRAINT_UNKNOWN",
+          "keyValues": {}
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 2,
+      "companyId": "BAL",
+      "plannedRawRequirement": 16812.62,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 5200,
+      "aquacultureHarvested": 2912.48,
+      "domesticDesiredBeforeConstraint": 12683.88,
+      "domesticDesiredAfterConstraint": 12683.88,
+      "domesticAllocated": 12683.88,
+      "domesticBidPrice": 2.5002634461961524,
+      "domesticMarketPrice": 2.5002634461961524,
+      "domesticAvailableSupply": 39694.44,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 157957.25806451615,
+      "domesticCompetitivenessWeight": 0.6041666666666666,
+      "domesticCoverageScore": 0.7166666666666667,
+      "externalProcessorIntent": 303890.04,
+      "aggregatedPurchaseIntent": 39694.44,
+      "importOrderedDesired": 2521.89,
+      "importAllocatedInTransit": 2521.89,
+      "importArrivedThisTurn": 0,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 1,
+      "procurementPlannedCashNeedUsd": 36107342.12799999,
+      "procurementAvailableLiquidityUsd": 36849644.18686511,
+      "procurementUnmetDemandUsd": 0,
+      "cash": 40732677.56609742,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 1216.26,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 2738.74,
+            "requiredRawMaterial": 16812.62
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0,
+            "currentlyAvailable": 0,
+            "requiredRawMaterial": 19406.986
+          }
+        }
+      ],
+      "verdict": "did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 2,
+      "companyId": "MASS",
+      "plannedRawRequirement": 18810,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2528.85,
+      "aquacultureHarvested": 2764.59,
+      "domesticDesiredBeforeConstraint": 14757.83,
+      "domesticDesiredAfterConstraint": 14757.83,
+      "domesticAllocated": 7176.98,
+      "domesticBidPrice": 2.5002634461961524,
+      "domesticMarketPrice": 2.5002634461961524,
+      "domesticAvailableSupply": 39694.44,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 157957.25806451615,
+      "domesticCompetitivenessWeight": 0.6259615384615385,
+      "domesticCoverageScore": 0.8038461538461539,
+      "externalProcessorIntent": 303890.04,
+      "aggregatedPurchaseIntent": 39694.44,
+      "importOrderedDesired": 2821.5,
+      "importAllocatedInTransit": 2821.5,
+      "importArrivedThisTurn": 0,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.48631708776557714,
+      "procurementPlannedCashNeedUsd": 42011278.63688888,
+      "procurementAvailableLiquidityUsd": 20430802.680000003,
+      "procurementUnmetDemandUsd": 21580475.956888873,
+      "cash": 31827160.483429093,
+      "loanRequestedUsd": 179102.19999998808,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 179102.19999998808,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "借入余力枠(残り0USD、binding: collateralBased)を超える申請のため一部のみ承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 8868.43,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 2785.3450000000003,
+            "requiredRawMaterial": 18810
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0,
+            "currentlyAvailable": 0,
+            "requiredRawMaterial": 21294.185999999998
+          }
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 2,
+      "companyId": "JPQ",
+      "plannedRawRequirement": 17499.22,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2496.26,
+      "aquacultureHarvested": 2646.94,
+      "domesticDesiredBeforeConstraint": 13453.71,
+      "domesticDesiredAfterConstraint": 13453.71,
+      "domesticAllocated": 6458.45,
+      "domesticBidPrice": 2.5002634461961524,
+      "domesticMarketPrice": 2.5002634461961524,
+      "domesticAvailableSupply": 39694.44,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 157957.25806451615,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 303890.04,
+      "aggregatedPurchaseIntent": 39694.44,
+      "importOrderedDesired": 2624.88,
+      "importAllocatedInTransit": 2624.88,
+      "importArrivedThisTurn": 0,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.4800494682050916,
+      "procurementPlannedCashNeedUsd": 38298825.74266666,
+      "procurementAvailableLiquidityUsd": 18385330.930646602,
+      "procurementUnmetDemandUsd": 19913494.81202006,
+      "cash": 26886921.11304252,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 6852536.136338577,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 7892.57,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 2640.94,
+            "requiredRawMaterial": 17499.22
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0,
+            "currentlyAvailable": 0,
+            "requiredRawMaterial": 19031.0335
+          }
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 2,
+      "companyId": "VAP",
+      "plannedRawRequirement": 15848.68,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 3107.12,
+      "aquacultureHarvested": 2148.15,
+      "domesticDesiredBeforeConstraint": 11874.39,
+      "domesticDesiredAfterConstraint": 11874.39,
+      "domesticAllocated": 7095.23,
+      "domesticBidPrice": 2.5002634461961524,
+      "domesticMarketPrice": 2.5002634461961524,
+      "domesticAvailableSupply": 39694.44,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 157957.25806451615,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 303890.04,
+      "aggregatedPurchaseIntent": 39694.44,
+      "importOrderedDesired": 2377.3,
+      "importAllocatedInTransit": 2377.3,
+      "importArrivedThisTurn": 0,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5975233841506598,
+      "procurementPlannedCashNeedUsd": 33802957.95066666,
+      "procurementAvailableLiquidityUsd": 20198057.828984793,
+      "procurementUnmetDemandUsd": 13604900.121681867,
+      "cash": 29272107.928531736,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 6605.3,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 2333.455,
+            "requiredRawMaterial": 15848.68
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0,
+            "currentlyAvailable": 0,
+            "requiredRawMaterial": 17905.699
+          }
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 2,
+      "companyId": "CONSV",
+      "plannedRawRequirement": 16245,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2736.15,
+      "aquacultureHarvested": 3653.01,
+      "domesticDesiredBeforeConstraint": 11934.81,
+      "domesticDesiredAfterConstraint": 11934.81,
+      "domesticAllocated": 6279.9,
+      "domesticBidPrice": 2.5002634461961524,
+      "domesticMarketPrice": 2.5002634461961524,
+      "domesticAvailableSupply": 39694.44,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 157957.25806451615,
+      "domesticCompetitivenessWeight": 0.5839285714285714,
+      "domesticCoverageScore": 0.6357142857142857,
+      "externalProcessorIntent": 303890.04,
+      "aggregatedPurchaseIntent": 39694.44,
+      "importOrderedDesired": 2436.75,
+      "importAllocatedInTransit": 2436.75,
+      "importArrivedThisTurn": 0,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5261834302833199,
+      "procurementPlannedCashNeedUsd": 33974956.235999994,
+      "procurementAvailableLiquidityUsd": 17877059.015984148,
+      "procurementUnmetDemandUsd": 16097897.220015846,
+      "cash": 26032146.263986856,
+      "loanRequestedUsd": 3647577.5399603806,
+      "loanApprovedUsd": 3647577.5399603806,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 32933988.271283478,
+      "underwritingReasons": [
+        "借入余力の範囲内のため全額承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 6312.09,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 3044.88,
+            "requiredRawMaterial": 16245
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0,
+            "currentlyAvailable": 0,
+            "requiredRawMaterial": 18197.376999999997
+          }
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 3,
+      "companyId": "BAL",
+      "plannedRawRequirement": 16749.97,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 4452.54,
+      "aquacultureHarvested": 5200,
+      "domesticDesiredBeforeConstraint": 11415.75,
+      "domesticDesiredAfterConstraint": 11415.75,
+      "domesticAllocated": 9774.81,
+      "domesticBidPrice": 2.4533146705936986,
+      "domesticMarketPrice": 2.4533146705936986,
+      "domesticAvailableSupply": 37310.94,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 158414.51612903227,
+      "domesticCompetitivenessWeight": 0.6041666666666666,
+      "domesticCoverageScore": 0.7166666666666667,
+      "externalProcessorIntent": 321621.02,
+      "aggregatedPurchaseIntent": 37310.94,
+      "importOrderedDesired": 2512.5,
+      "importAllocatedInTransit": 2512.5,
+      "importArrivedThisTurn": 2565,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.8562567120853612,
+      "procurementPlannedCashNeedUsd": 28542382.435913727,
+      "procurementAvailableLiquidityUsd": 24439606.539658453,
+      "procurementUnmetDemandUsd": 4102775.896255275,
+      "cash": 38584728.106276914,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 8895155.950374074,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 789.84,
+      "rawMaterialShortfall": 0,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 5143.445,
+            "requiredRawMaterial": 16749.97
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.13215929167153787,
+            "currentlyAvailable": 2565,
+            "requiredRawMaterial": 19408.396999999997
+          }
+        }
+      ],
+      "verdict": "sufficient"
+    },
+    {
+      "turn": 3,
+      "companyId": "MASS",
+      "plannedRawRequirement": 18810,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2814.47,
+      "aquacultureHarvested": 2528.85,
+      "domesticDesiredBeforeConstraint": 14111.39,
+      "domesticDesiredAfterConstraint": 14111.39,
+      "domesticAllocated": 7637.71,
+      "domesticBidPrice": 2.4533146705936986,
+      "domesticMarketPrice": 2.4533146705936986,
+      "domesticAvailableSupply": 37310.94,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 158414.51612903227,
+      "domesticCompetitivenessWeight": 0.6259615384615385,
+      "domesticCoverageScore": 0.8038461538461539,
+      "externalProcessorIntent": 321621.02,
+      "aggregatedPurchaseIntent": 37310.94,
+      "importOrderedDesired": 2821.5,
+      "importAllocatedInTransit": 2821.5,
+      "importArrivedThisTurn": 2806.1,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5412446020822897,
+      "procurementPlannedCashNeedUsd": 35282192.59201793,
+      "procurementAvailableLiquidityUsd": 19096296.290057454,
+      "procurementUnmetDemandUsd": 16185896.301960472,
+      "cash": 20250740.568541855,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 5837.33,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4078.2250000000004,
+            "requiredRawMaterial": 18810
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.12093831600689359,
+            "currentlyAvailable": 2806.1,
+            "requiredRawMaterial": 23202.7375
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 3,
+      "companyId": "JPQ",
+      "plannedRawRequirement": 17955,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2588.25,
+      "aquacultureHarvested": 2496.26,
+      "domesticDesiredBeforeConstraint": 13313.73,
+      "domesticDesiredAfterConstraint": 13313.73,
+      "domesticAllocated": 6626.79,
+      "domesticBidPrice": 2.4533146705936986,
+      "domesticMarketPrice": 2.4533146705936986,
+      "domesticAvailableSupply": 37310.94,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 158414.51612903227,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 321621.02,
+      "aggregatedPurchaseIntent": 37310.94,
+      "importOrderedDesired": 2693.25,
+      "importAllocatedInTransit": 2693.25,
+      "importArrivedThisTurn": 2634.94,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.497741063358949,
+      "procurementPlannedCashNeedUsd": 33287832.4515251,
+      "procurementAvailableLiquidityUsd": 16568721.121336633,
+      "procurementUnmetDemandUsd": 16719111.330188468,
+      "cash": 23115588.961012054,
+      "loanRequestedUsd": 436568.4535111226,
+      "loanApprovedUsd": 436568.4535111226,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 7951640.190440521,
+      "underwritingReasons": [
+        "借入余力の範囲内のため全額承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 5511.27,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 3878.04,
+            "requiredRawMaterial": 17955
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.12005051986703658,
+            "currentlyAvailable": 2634.94,
+            "requiredRawMaterial": 21948.593
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 3,
+      "companyId": "VAP",
+      "plannedRawRequirement": 17100,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2956.71,
+      "aquacultureHarvested": 3107.12,
+      "domesticDesiredBeforeConstraint": 12354.21,
+      "domesticDesiredAfterConstraint": 12354.21,
+      "domesticAllocated": 7024.57,
+      "domesticBidPrice": 2.4533146705936986,
+      "domesticMarketPrice": 2.4533146705936986,
+      "domesticAvailableSupply": 37310.94,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 158414.51612903227,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 321621.02,
+      "aggregatedPurchaseIntent": 37310.94,
+      "importOrderedDesired": 2565,
+      "importAllocatedInTransit": 2565,
+      "importArrivedThisTurn": 2518.76,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5685969126966444,
+      "procurementPlannedCashNeedUsd": 30888779.669630967,
+      "procurementAvailableLiquidityUsd": 17563264.75711904,
+      "procurementUnmetDemandUsd": 13325514.912511924,
+      "cash": 15969286.642946176,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 4244.56,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4001.59,
+            "requiredRawMaterial": 17100
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.11390288968731514,
+            "currentlyAvailable": 2518.76,
+            "requiredRawMaterial": 22113.223
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 3,
+      "companyId": "CONSV",
+      "plannedRawRequirement": 16245,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2811.35,
+      "aquacultureHarvested": 2736.15,
+      "domesticDesiredBeforeConstraint": 11554.84,
+      "domesticDesiredAfterConstraint": 11554.84,
+      "domesticAllocated": 6247.06,
+      "domesticBidPrice": 2.4533146705936986,
+      "domesticMarketPrice": 2.4533146705936986,
+      "domesticAvailableSupply": 37310.94,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 158414.51612903227,
+      "domesticCompetitivenessWeight": 0.5839285714285714,
+      "domesticCoverageScore": 0.6357142857142857,
+      "externalProcessorIntent": 321621.02,
+      "aggregatedPurchaseIntent": 37310.94,
+      "importOrderedDesired": 2436.75,
+      "importAllocatedInTransit": 2436.75,
+      "importArrivedThisTurn": 2436.75,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5406441627938259,
+      "procurementPlannedCashNeedUsd": 28890144.07864515,
+      "procurementAvailableLiquidityUsd": 15619287.758392112,
+      "procurementUnmetDemandUsd": 13270856.320253037,
+      "cash": 29756900.879388653,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 30449283.48447391,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 4142.09,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 3804.825,
+            "requiredRawMaterial": 16245
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.12396390555667348,
+            "currentlyAvailable": 2436.75,
+            "requiredRawMaterial": 19656.9315
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 4,
+      "companyId": "BAL",
+      "plannedRawRequirement": 16056.82,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 4676.45,
+      "aquacultureHarvested": 4452.54,
+      "domesticDesiredBeforeConstraint": 10493.01,
+      "domesticDesiredAfterConstraint": 10493.01,
+      "domesticAllocated": 9436.55,
+      "domesticBidPrice": 2.3409731667472227,
+      "domesticMarketPrice": 2.3409731667472227,
+      "domesticAvailableSupply": 35853.41,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 158871.7741935484,
+      "domesticCompetitivenessWeight": 0.6041666666666666,
+      "domesticCoverageScore": 0.7166666666666667,
+      "externalProcessorIntent": 324811.86,
+      "aggregatedPurchaseIntent": 35853.41,
+      "importOrderedDesired": 2408.52,
+      "importAllocatedInTransit": 2408.52,
+      "importArrivedThisTurn": 2521.89,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.8993181367462619,
+      "procurementPlannedCashNeedUsd": 25742655.371686384,
+      "procurementAvailableLiquidityUsd": 23150836.86376615,
+      "procurementUnmetDemandUsd": 2591818.5079202345,
+      "cash": 45508085.24382566,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 15378616.642909862,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 1144,
+      "rawMaterialShortfall": 0,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 5533.305,
+            "requiredRawMaterial": 16056.82
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.19109274232392395,
+            "currentlyAvailable": 3311.73,
+            "requiredRawMaterial": 17330.4855
+          }
+        }
+      ],
+      "verdict": "sufficient"
+    },
+    {
+      "turn": 4,
+      "companyId": "MASS",
+      "plannedRawRequirement": 18810,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 1834.82,
+      "aquacultureHarvested": 2814.47,
+      "domesticDesiredBeforeConstraint": 14036.13,
+      "domesticDesiredAfterConstraint": 14036.13,
+      "domesticAllocated": 4952.66,
+      "domesticBidPrice": 2.3409731667472227,
+      "domesticMarketPrice": 2.3409731667472227,
+      "domesticAvailableSupply": 35853.41,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 158871.7741935484,
+      "domesticCompetitivenessWeight": 0.6259615384615385,
+      "domesticCoverageScore": 0.8038461538461539,
+      "externalProcessorIntent": 324811.86,
+      "aggregatedPurchaseIntent": 35853.41,
+      "importOrderedDesired": 2821.5,
+      "importAllocatedInTransit": 2821.5,
+      "importArrivedThisTurn": 2821.5,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.35285113808927965,
+      "procurementPlannedCashNeedUsd": 34435043.64736033,
+      "procurementAvailableLiquidityUsd": 12150444.341125112,
+      "procurementUnmetDemandUsd": 22284599.30623522,
+      "cash": 28781827.46103395,
+      "loanRequestedUsd": 10085074.670335762,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 10085074.670335762,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "借入余力枠(残り0USD、binding: collateralBased)を超える申請のため一部のみ承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 8221.36,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4228.735,
+            "requiredRawMaterial": 18810
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.11719557286921867,
+            "currentlyAvailable": 2821.5,
+            "requiredRawMaterial": 24075.141499999998
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 4,
+      "companyId": "JPQ",
+      "plannedRawRequirement": 17955,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2815.25,
+      "aquacultureHarvested": 2588.25,
+      "domesticDesiredBeforeConstraint": 13276.16,
+      "domesticDesiredAfterConstraint": 13276.16,
+      "domesticAllocated": 7187.66,
+      "domesticBidPrice": 2.3409731667472227,
+      "domesticMarketPrice": 2.3409731667472227,
+      "domesticAvailableSupply": 35853.41,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 158871.7741935484,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 324811.86,
+      "aggregatedPurchaseIntent": 35853.41,
+      "importOrderedDesired": 2693.25,
+      "importAllocatedInTransit": 2693.25,
+      "importArrivedThisTurn": 2624.88,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5413958933179376,
+      "procurementPlannedCashNeedUsd": 32570598.097149238,
+      "procurementAvailableLiquidityUsd": 17633588.05270563,
+      "procurementUnmetDemandUsd": 14937010.04444361,
+      "cash": 29044559.42857963,
+      "loanRequestedUsd": 3764234.676098399,
+      "loanApprovedUsd": 3764234.676098399,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 14189299.141630944,
+      "underwritingReasons": [
+        "借入余力の範囲内のため全額承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 4868.48,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 3953.19,
+            "requiredRawMaterial": 17955
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.11163405017152879,
+            "currentlyAvailable": 2624.88,
+            "requiredRawMaterial": 23513.255999999998
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 4,
+      "companyId": "VAP",
+      "plannedRawRequirement": 17100,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2939.74,
+      "aquacultureHarvested": 2956.71,
+      "domesticDesiredBeforeConstraint": 12380.25,
+      "domesticDesiredAfterConstraint": 12380.25,
+      "domesticAllocated": 6998.98,
+      "domesticBidPrice": 2.3409731667472227,
+      "domesticMarketPrice": 2.3409731667472227,
+      "domesticAvailableSupply": 35853.41,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 158871.7741935484,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 324811.86,
+      "aggregatedPurchaseIntent": 35853.41,
+      "importOrderedDesired": 2565,
+      "importAllocatedInTransit": 2565,
+      "importArrivedThisTurn": 2377.3,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5653343583290238,
+      "procurementPlannedCashNeedUsd": 30372648.950617637,
+      "procurementAvailableLiquidityUsd": 17170702.00525012,
+      "procurementUnmetDemandUsd": 13201946.945367517,
+      "cash": 30135289.02886365,
+      "loanRequestedUsd": 10478545.39239711,
+      "loanApprovedUsd": 7589130.019482411,
+      "loanDeniedUsd": 2889415.372914698,
+      "borrowingAvailableCapacityUsd": 7589130.019482411,
+      "underwritingReasons": [
+        "借入余力枠(残り7589130USD、binding: collateralBased)を超える申請のため一部のみ承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 4562.03,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 3949.505,
+            "requiredRawMaterial": 17100
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.0992787724795551,
+            "currentlyAvailable": 2377.3,
+            "requiredRawMaterial": 23945.703
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 4,
+      "companyId": "CONSV",
+      "plannedRawRequirement": 16245,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 3280.45,
+      "aquacultureHarvested": 2811.35,
+      "domesticDesiredBeforeConstraint": 11536.04,
+      "domesticDesiredAfterConstraint": 11536.04,
+      "domesticAllocated": 7277.56,
+      "domesticBidPrice": 2.3409731667472227,
+      "domesticMarketPrice": 2.3409731667472227,
+      "domesticAvailableSupply": 35853.41,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 158871.7741935484,
+      "domesticCompetitivenessWeight": 0.5839285714285714,
+      "domesticCoverageScore": 0.6357142857142857,
+      "externalProcessorIntent": 324811.86,
+      "aggregatedPurchaseIntent": 35853.41,
+      "importOrderedDesired": 2436.75,
+      "importAllocatedInTransit": 2436.75,
+      "importArrivedThisTurn": 2436.75,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.6308541140231999,
+      "procurementPlannedCashNeedUsd": 28301536.17255573,
+      "procurementAvailableLiquidityUsd": 17854140.52763319,
+      "procurementUnmetDemandUsd": 10447395.644922541,
+      "cash": 31631520.622263946,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 31579183.56208757,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 3036.39,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 3842.425,
+            "requiredRawMaterial": 16245
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.11679088414258021,
+            "currentlyAvailable": 2436.75,
+            "requiredRawMaterial": 20864.214
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 5,
+      "companyId": "BAL",
+      "plannedRawRequirement": 15135.149999999998,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 5200,
+      "aquacultureHarvested": 4676.45,
+      "domesticDesiredBeforeConstraint": 9320.54,
+      "domesticDesiredAfterConstraint": 9320.54,
+      "domesticAllocated": 9320.54,
+      "domesticBidPrice": 2.354369499362286,
+      "domesticMarketPrice": 2.354369499362286,
+      "domesticAvailableSupply": 39972.71,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 159329.03225806452,
+      "domesticCompetitivenessWeight": 0.6041666666666666,
+      "domesticCoverageScore": 0.7166666666666667,
+      "externalProcessorIntent": 331221.82,
+      "aggregatedPurchaseIntent": 39972.71,
+      "importOrderedDesired": 2270.27,
+      "importAllocatedInTransit": 2270.27,
+      "importArrivedThisTurn": 2512.5,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 1,
+      "procurementPlannedCashNeedUsd": 21819134.03959416,
+      "procurementAvailableLiquidityUsd": 27304851.146295395,
+      "procurementUnmetDemandUsd": 0,
+      "cash": 27586446.608458094,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 15037008.568037719,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 2518.34,
+      "rawMaterialShortfall": 0,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 5942.735000000001,
+            "requiredRawMaterial": 15135.149999999998
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.23949132344189086,
+            "currentlyAvailable": 3656.5,
+            "requiredRawMaterial": 15267.776499999998
+          }
+        }
+      ],
+      "verdict": "sufficient"
+    },
+    {
+      "turn": 5,
+      "companyId": "MASS",
+      "plannedRawRequirement": 18810,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2686.06,
+      "aquacultureHarvested": 1834.82,
+      "domesticDesiredBeforeConstraint": 14281.05,
+      "domesticDesiredAfterConstraint": 14281.05,
+      "domesticAllocated": 7376.89,
+      "domesticBidPrice": 2.354369499362286,
+      "domesticMarketPrice": 2.354369499362286,
+      "domesticAvailableSupply": 39972.71,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 159329.03225806452,
+      "domesticCompetitivenessWeight": 0.6259615384615385,
+      "domesticCoverageScore": 0.8038461538461539,
+      "externalProcessorIntent": 331221.82,
+      "aggregatedPurchaseIntent": 39972.71,
+      "importOrderedDesired": 2821.5,
+      "importAllocatedInTransit": 2821.5,
+      "importArrivedThisTurn": 2821.5,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5165508023103185,
+      "procurementPlannedCashNeedUsd": 33431554.842975423,
+      "procurementAvailableLiquidityUsd": 17269096.47662037,
+      "procurementUnmetDemandUsd": 16162458.366355056,
+      "cash": 0,
+      "loanRequestedUsd": 441806.8897635527,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 441806.8897635527,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "借入余力枠(残り0USD、binding: collateralBased)を超える申請のため一部のみ承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 6776.79,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 3738.91,
+            "requiredRawMaterial": 18810
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.11068310679223174,
+            "currentlyAvailable": 2821.5,
+            "requiredRawMaterial": 25491.695
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 5,
+      "companyId": "JPQ",
+      "plannedRawRequirement": 17955,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2932.06,
+      "aquacultureHarvested": 2815.25,
+      "domesticDesiredBeforeConstraint": 13202.31,
+      "domesticDesiredAfterConstraint": 13202.31,
+      "domesticAllocated": 7444.23,
+      "domesticBidPrice": 2.354369499362286,
+      "domesticMarketPrice": 2.354369499362286,
+      "domesticAvailableSupply": 39972.71,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 159329.03225806452,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 331221.82,
+      "aggregatedPurchaseIntent": 39972.71,
+      "importOrderedDesired": 2693.25,
+      "importAllocatedInTransit": 2693.25,
+      "importArrivedThisTurn": 2693.25,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5638579158700117,
+      "procurementPlannedCashNeedUsd": 30906253.449078526,
+      "procurementAvailableLiquidityUsd": 17426735.657147776,
+      "procurementUnmetDemandUsd": 13479517.791930748,
+      "cash": 21017081.803200364,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 14108546.771521587,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 4316.53,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4100.875,
+            "requiredRawMaterial": 17955
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.11314403722206719,
+            "currentlyAvailable": 2693.25,
+            "requiredRawMaterial": 23803.729
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 5,
+      "companyId": "VAP",
+      "plannedRawRequirement": 17100,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 3255.4,
+      "aquacultureHarvested": 2939.74,
+      "domesticDesiredBeforeConstraint": 12337.57,
+      "domesticDesiredAfterConstraint": 12337.57,
+      "domesticAllocated": 7723.78,
+      "domesticBidPrice": 2.354369499362286,
+      "domesticMarketPrice": 2.354369499362286,
+      "domesticAvailableSupply": 39972.71,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 159329.03225806452,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 331221.82,
+      "aggregatedPurchaseIntent": 39972.71,
+      "importOrderedDesired": 2565,
+      "importAllocatedInTransit": 2565,
+      "importArrivedThisTurn": 2565,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.6260377849343999,
+      "procurementPlannedCashNeedUsd": 28881920.312865533,
+      "procurementAvailableLiquidityUsd": 18081173.417318188,
+      "procurementUnmetDemandUsd": 10800746.895547345,
+      "cash": 18006300.926794257,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 717177.3195341155,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 3666.5,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4034.87,
+            "requiredRawMaterial": 17100
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.10325227975700009,
+            "currentlyAvailable": 2565,
+            "requiredRawMaterial": 24842.0665
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 5,
+      "companyId": "CONSV",
+      "plannedRawRequirement": 16245,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 3691.97,
+      "aquacultureHarvested": 3280.45,
+      "domesticDesiredBeforeConstraint": 11418.76,
+      "domesticDesiredAfterConstraint": 11418.76,
+      "domesticAllocated": 8107.27,
+      "domesticBidPrice": 2.354369499362286,
+      "domesticMarketPrice": 2.354369499362286,
+      "domesticAvailableSupply": 39972.71,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 159329.03225806452,
+      "domesticCompetitivenessWeight": 0.5839285714285714,
+      "domesticCoverageScore": 0.6357142857142857,
+      "externalProcessorIntent": 331221.82,
+      "aggregatedPurchaseIntent": 39972.71,
+      "importOrderedDesired": 2436.75,
+      "importAllocatedInTransit": 2436.75,
+      "importArrivedThisTurn": 2436.75,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.7099960620836071,
+      "procurementPlannedCashNeedUsd": 26731010.757526517,
+      "procurementAvailableLiquidityUsd": 18978912.373358365,
+      "procurementUnmetDemandUsd": 7752098.384168151,
+      "cash": 34349392.95733209,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 35878862.3923884,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 2257.74,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4076.975,
+            "requiredRawMaterial": 16245
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.11666082464876258,
+            "currentlyAvailable": 2436.75,
+            "requiredRawMaterial": 20887.4745
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 6,
+      "companyId": "BAL",
+      "plannedRawRequirement": 14341.9,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 4729.22,
+      "aquacultureHarvested": 5200,
+      "domesticDesiredBeforeConstraint": 7730.13,
+      "domesticDesiredAfterConstraint": 7730.13,
+      "domesticAllocated": 7030.28,
+      "domesticBidPrice": 2.402440574956458,
+      "domesticMarketPrice": 2.402440574956458,
+      "domesticAvailableSupply": 31029.23,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 159786.29032258067,
+      "domesticCompetitivenessWeight": 0.6041666666666666,
+      "domesticCoverageScore": 0.7166666666666667,
+      "externalProcessorIntent": 331485.39,
+      "aggregatedPurchaseIntent": 31029.23,
+      "importOrderedDesired": 2151.29,
+      "importAllocatedInTransit": 2151.29,
+      "importArrivedThisTurn": 2408.52,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.9094641675813591,
+      "procurementPlannedCashNeedUsd": 18199582.29810539,
+      "procurementAvailableLiquidityUsd": 16551867.965074856,
+      "procurementUnmetDemandUsd": 1647714.3330305335,
+      "cash": 33783676.13147649,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 38550441.87565397,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 2815.24,
+      "rawMaterialShortfall": 0,
+      "procurementDiagnostics": [
+        {
+          "code": "PROCUREMENT_INCREASED_FOR_SHORTAGE",
+          "keyValues": {
+            "desiredDomestic": 7730.1275,
+            "requiredRawMaterial": 14341.9
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.34352901621461895,
+            "currentlyAvailable": 4926.860000000001,
+            "requiredRawMaterial": 14341.9035
+          }
+        }
+      ],
+      "verdict": "sufficient"
+    },
+    {
+      "turn": 6,
+      "companyId": "MASS",
+      "plannedRawRequirement": 18810,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 0,
+      "aquacultureHarvested": 2686.06,
+      "domesticDesiredBeforeConstraint": 8272.97,
+      "domesticDesiredAfterConstraint": 8272.97,
+      "domesticAllocated": 0,
+      "domesticBidPrice": 2.402440574956458,
+      "domesticMarketPrice": 2.402440574956458,
+      "domesticAvailableSupply": 31029.23,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 159786.29032258067,
+      "domesticCompetitivenessWeight": 0.6259615384615385,
+      "domesticCoverageScore": 0.8038461538461539,
+      "externalProcessorIntent": 331485.39,
+      "aggregatedPurchaseIntent": 31029.23,
+      "importOrderedDesired": 2821.5,
+      "importAllocatedInTransit": 2821.5,
+      "importArrivedThisTurn": 2821.5,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0,
+      "procurementPlannedCashNeedUsd": 19477628.237139206,
+      "procurementAvailableLiquidityUsd": 0,
+      "procurementUnmetDemandUsd": 19477628.237139206,
+      "cash": 19480627.79340602,
+      "loanRequestedUsd": 29356258.04368663,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 29356258.04368663,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "借入余力枠(残り0USD、binding: collateralBased)を超える申請のため一部のみ承認。"
+      ],
+      "rawMaterialInventory": 0.01,
+      "rawMaterialShortfall": 13302.45,
+      "procurementDiagnostics": [
+        {
+          "code": "PROCUREMENT_CASH_CONSTRAINED",
+          "keyValues": {
+            "cashPressure": 1,
+            "desiredDomestic": 8272.9675
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4164.53,
+            "requiredRawMaterial": 18810
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.10563312061634483,
+            "currentlyAvailable": 2821.5,
+            "requiredRawMaterial": 26710.372499999998
+          }
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 6,
+      "companyId": "JPQ",
+      "plannedRawRequirement": 17955,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 2940.48,
+      "aquacultureHarvested": 2932.06,
+      "domesticDesiredBeforeConstraint": 13173.11,
+      "domesticDesiredAfterConstraint": 13173.11,
+      "domesticAllocated": 7449.11,
+      "domesticBidPrice": 2.402440574956458,
+      "domesticMarketPrice": 2.402440574956458,
+      "domesticAvailableSupply": 31029.23,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 159786.29032258067,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 331485.39,
+      "aggregatedPurchaseIntent": 31029.23,
+      "importOrderedDesired": 2693.25,
+      "importAllocatedInTransit": 2693.25,
+      "importArrivedThisTurn": 2693.25,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5654785170508243,
+      "procurementPlannedCashNeedUsd": 31014368.395744324,
+      "procurementAvailableLiquidityUsd": 17537959.047693454,
+      "procurementUnmetDemandUsd": 13476409.34805087,
+      "cash": 31387362.226212457,
+      "loanRequestedUsd": 4927709.965773236,
+      "loanApprovedUsd": 4927709.965773236,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 28552429.05786584,
+      "underwritingReasons": [
+        "借入余力の範囲内のため全額承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 4194.83,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4159.28,
+            "requiredRawMaterial": 17955
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.1150751870487187,
+            "currentlyAvailable": 2693.25,
+            "requiredRawMaterial": 23404.2635
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 6,
+      "companyId": "VAP",
+      "plannedRawRequirement": 17100,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 3307.02,
+      "aquacultureHarvested": 3255.4,
+      "domesticDesiredBeforeConstraint": 12258.65,
+      "domesticDesiredAfterConstraint": 12258.65,
+      "domesticAllocated": 7796.06,
+      "domesticBidPrice": 2.402440574956458,
+      "domesticMarketPrice": 2.402440574956458,
+      "domesticAvailableSupply": 31029.23,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 159786.29032258067,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 331485.39,
+      "aggregatedPurchaseIntent": 31029.23,
+      "importOrderedDesired": 2565,
+      "importAllocatedInTransit": 2565,
+      "importArrivedThisTurn": 2565,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.6359639665902247,
+      "procurementPlannedCashNeedUsd": 28861391.663357485,
+      "procurementAvailableLiquidityUsd": 18354805.123542868,
+      "procurementUnmetDemandUsd": 10506586.539814616,
+      "cash": 30385807.297289774,
+      "loanRequestedUsd": 7551024.567466315,
+      "loanApprovedUsd": 7551024.567466315,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 19606775.376073457,
+      "underwritingReasons": [
+        "借入余力の範囲内のため全額承認。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 3278.54,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4192.7,
+            "requiredRawMaterial": 17100
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.10170895026271738,
+            "currentlyAvailable": 2565,
+            "requiredRawMaterial": 25219.019500000002
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 6,
+      "companyId": "CONSV",
+      "plannedRawRequirement": 16245,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 4022.64,
+      "aquacultureHarvested": 3691.97,
+      "domesticDesiredBeforeConstraint": 11315.88,
+      "domesticDesiredAfterConstraint": 11315.88,
+      "domesticAllocated": 8753.78,
+      "domesticBidPrice": 2.402440574956458,
+      "domesticMarketPrice": 2.402440574956458,
+      "domesticAvailableSupply": 31029.23,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 159786.29032258067,
+      "domesticCompetitivenessWeight": 0.5839285714285714,
+      "domesticCoverageScore": 0.6357142857142857,
+      "externalProcessorIntent": 331485.39,
+      "aggregatedPurchaseIntent": 31029.23,
+      "importOrderedDesired": 2436.75,
+      "importAllocatedInTransit": 2436.75,
+      "importArrivedThisTurn": 2436.75,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.7735837895909379,
+      "procurementPlannedCashNeedUsd": 26641762.730443705,
+      "procurementAvailableLiquidityUsd": 20609635.774399254,
+      "procurementUnmetDemandUsd": 6032126.956044451,
+      "cash": 36056768.75563528,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 40370125.25490405,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 895.24,
+      "rawMaterialShortfall": 2257.74,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4282.735,
+            "requiredRawMaterial": 16245
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.1241941555124889,
+            "currentlyAvailable": 2436.75,
+            "requiredRawMaterial": 19620.4885
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 7,
+      "companyId": "BAL",
+      "plannedRawRequirement": 14480.74,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 5200,
+      "aquacultureHarvested": 4729.22,
+      "domesticDesiredBeforeConstraint": 7909.46,
+      "domesticDesiredAfterConstraint": 7909.46,
+      "domesticAllocated": 7909.46,
+      "domesticBidPrice": 2.3494302591388867,
+      "domesticMarketPrice": 2.3494302591388867,
+      "domesticAvailableSupply": 37207.3,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 160243.5483870968,
+      "domesticCompetitivenessWeight": 0.6041666666666666,
+      "domesticCoverageScore": 0.7166666666666667,
+      "externalProcessorIntent": 330038.48,
+      "aggregatedPurchaseIntent": 37207.3,
+      "importOrderedDesired": 2172.11,
+      "importAllocatedInTransit": 2172.11,
+      "importArrivedThisTurn": 2270.27,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 1,
+      "procurementPlannedCashNeedUsd": 19002007.629995104,
+      "procurementAvailableLiquidityUsd": 20270205.678885896,
+      "procurementUnmetDemandUsd": 0,
+      "cash": 43120046.34645798,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 42226753.72049375,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 3243.45,
+      "rawMaterialShortfall": 0,
+      "procurementDiagnostics": [
+        {
+          "code": "PROCUREMENT_INCREASED_FOR_SHORTAGE",
+          "keyValues": {
+            "desiredDomestic": 7909.462000000001,
+            "requiredRawMaterial": 14480.74
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.3511911973862946,
+            "currentlyAvailable": 5085.51,
+            "requiredRawMaterial": 14480.7445
+          }
+        }
+      ],
+      "verdict": "sufficient"
+    },
+    {
+      "turn": 7,
+      "companyId": "MASS",
+      "plannedRawRequirement": 18810,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 1716.39,
+      "aquacultureHarvested": 0,
+      "domesticDesiredBeforeConstraint": 14739.75,
+      "domesticDesiredAfterConstraint": 14739.75,
+      "domesticAllocated": 4865.21,
+      "domesticBidPrice": 2.3494302591388867,
+      "domesticMarketPrice": 2.3494302591388867,
+      "domesticAvailableSupply": 37207.3,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 160243.5483870968,
+      "domesticCompetitivenessWeight": 0.6259615384615385,
+      "domesticCoverageScore": 0.8038461538461539,
+      "externalProcessorIntent": 330038.48,
+      "aggregatedPurchaseIntent": 37207.3,
+      "importOrderedDesired": 2821.5,
+      "importAllocatedInTransit": 2821.5,
+      "importArrivedThisTurn": 2821.5,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.3300740844658414,
+      "procurementPlannedCashNeedUsd": 35411373.46471445,
+      "procurementAvailableLiquidityUsd": 11688376.676043613,
+      "procurementUnmetDemandUsd": 23722996.788670838,
+      "cash": 0,
+      "loanRequestedUsd": 10351533.898662914,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 10351533.898662914,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "借入余力枠(残り0USD、binding: collateralBased)を超える申請のため一部のみ承認。",
+        "財務制限条項違反により金利加算を適用。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 11123.27,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 2821.51,
+            "requiredRawMaterial": 18810
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.08944275963426904,
+            "currentlyAvailable": 2821.51,
+            "requiredRawMaterial": 31545.426499999994
+          }
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 7,
+      "companyId": "JPQ",
+      "plannedRawRequirement": 17955,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 3094.83,
+      "aquacultureHarvested": 2940.48,
+      "domesticDesiredBeforeConstraint": 13171.01,
+      "domesticDesiredAfterConstraint": 13171.01,
+      "domesticAllocated": 7838.87,
+      "domesticBidPrice": 2.3494302591388867,
+      "domesticMarketPrice": 2.3494302591388867,
+      "domesticAvailableSupply": 37207.3,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 160243.5483870968,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 330038.48,
+      "aggregatedPurchaseIntent": 37207.3,
+      "importOrderedDesired": 2693.25,
+      "importAllocatedInTransit": 2693.25,
+      "importArrivedThisTurn": 2693.25,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.5951608237828317,
+      "procurementPlannedCashNeedUsd": 31642568.837157257,
+      "procurementAvailableLiquidityUsd": 18832417.33572747,
+      "procurementUnmetDemandUsd": 12810151.501429783,
+      "cash": 36326465.79066329,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 25479610.76616673,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 3796.67,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4163.49,
+            "requiredRawMaterial": 17955
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.11882223375431603,
+            "currentlyAvailable": 2693.25,
+            "requiredRawMaterial": 22666.2125
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 7,
+      "companyId": "VAP",
+      "plannedRawRequirement": 17100,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 3222.45,
+      "aquacultureHarvested": 3307.02,
+      "domesticDesiredBeforeConstraint": 12245.75,
+      "domesticDesiredAfterConstraint": 12245.75,
+      "domesticAllocated": 7588.73,
+      "domesticBidPrice": 2.3494302591388867,
+      "domesticMarketPrice": 2.3494302591388867,
+      "domesticAvailableSupply": 37207.3,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 160243.5483870968,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 330038.48,
+      "aggregatedPurchaseIntent": 37207.3,
+      "importOrderedDesired": 2565,
+      "importAllocatedInTransit": 2565,
+      "importArrivedThisTurn": 2565,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.6197035536916821,
+      "procurementPlannedCashNeedUsd": 29419686.670773044,
+      "procurementAvailableLiquidityUsd": 18231484.378373865,
+      "procurementUnmetDemandUsd": 11188202.292399177,
+      "cash": 38282657.61117949,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 15309139.296459936,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 3434.26,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4218.51,
+            "requiredRawMaterial": 17100
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.10316292085720785,
+            "currentlyAvailable": 2565,
+            "requiredRawMaterial": 24863.5845
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 7,
+      "companyId": "CONSV",
+      "plannedRawRequirement": 15787.06,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 4544.14,
+      "aquacultureHarvested": 4022.64,
+      "domesticDesiredBeforeConstraint": 10304.76,
+      "domesticDesiredAfterConstraint": 10304.76,
+      "domesticAllocated": 9005.03,
+      "domesticBidPrice": 2.3494302591388867,
+      "domesticMarketPrice": 2.3494302591388867,
+      "domesticAvailableSupply": 37207.3,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 160243.5483870968,
+      "domesticCompetitivenessWeight": 0.5839285714285714,
+      "domesticCoverageScore": 0.6357142857142857,
+      "externalProcessorIntent": 330038.48,
+      "aggregatedPurchaseIntent": 37207.3,
+      "importOrderedDesired": 2368.06,
+      "importAllocatedInTransit": 2368.06,
+      "importArrivedThisTurn": 2436.75,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.8738713868918744,
+      "procurementPlannedCashNeedUsd": 24756573.53918831,
+      "procurementAvailableLiquidityUsd": 21634061.253381167,
+      "procurementUnmetDemandUsd": 3122512.2858071425,
+      "cash": 38052735.49945557,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 44973040.54163358,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 2475.29,
+      "rawMaterialShortfall": 0,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 5343.3099999999995,
+            "requiredRawMaterial": 15787.06
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.18793008630117258,
+            "currentlyAvailable": 3331.99,
+            "requiredRawMaterial": 17729.944499999998
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 8,
+      "companyId": "BAL",
+      "plannedRawRequirement": 14802.390000000001,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 5200,
+      "aquacultureHarvested": 5200,
+      "domesticDesiredBeforeConstraint": 7939.93,
+      "domesticDesiredAfterConstraint": 7939.93,
+      "domesticAllocated": 7939.93,
+      "domesticBidPrice": 2.4688304443430633,
+      "domesticMarketPrice": 2.4688304443430633,
+      "domesticAvailableSupply": 36511.19,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 160700.8064516129,
+      "domesticCompetitivenessWeight": 0.6041666666666666,
+      "domesticCoverageScore": 0.7166666666666667,
+      "externalProcessorIntent": 333575.12,
+      "aggregatedPurchaseIntent": 36511.19,
+      "importOrderedDesired": 2220.36,
+      "importAllocatedInTransit": 2220.36,
+      "importArrivedThisTurn": 2151.29,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 1,
+      "procurementPlannedCashNeedUsd": 18654311.79744462,
+      "procurementAvailableLiquidityUsd": 25872027.807874788,
+      "procurementUnmetDemandUsd": 0,
+      "cash": 48826932.571165115,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 43424661.56784313,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 3732.28,
+      "rawMaterialShortfall": 0,
+      "procurementDiagnostics": [
+        {
+          "code": "PROCUREMENT_REDUCED_FOR_EXCESS",
+          "keyValues": {
+            "inventoryPosition": 8005.15,
+            "targetInventory": 5920.956000000001
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.3644506425432625,
+            "currentlyAvailable": 5394.74,
+            "requiredRawMaterial": 14802.388500000001
+          }
+        }
+      ],
+      "verdict": "sufficient"
+    },
+    {
+      "turn": 8,
+      "companyId": "MASS",
+      "plannedRawRequirement": 18810,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 0,
+      "aquacultureHarvested": 1716.39,
+      "domesticDesiredBeforeConstraint": 8394.18,
+      "domesticDesiredAfterConstraint": 8394.18,
+      "domesticAllocated": 0,
+      "domesticBidPrice": 2.4688304443430633,
+      "domesticMarketPrice": 2.4688304443430633,
+      "domesticAvailableSupply": 36511.19,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 160700.8064516129,
+      "domesticCompetitivenessWeight": 0.6259615384615385,
+      "domesticCoverageScore": 0.8038461538461539,
+      "externalProcessorIntent": 333575.12,
+      "aggregatedPurchaseIntent": 36511.19,
+      "importOrderedDesired": 2821.5,
+      "importAllocatedInTransit": 2821.5,
+      "importArrivedThisTurn": 2821.5,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0,
+      "procurementPlannedCashNeedUsd": 19721540.49265846,
+      "procurementAvailableLiquidityUsd": 0,
+      "procurementUnmetDemandUsd": 19721540.49265846,
+      "cash": 2722629.8592712516,
+      "loanRequestedUsd": 29307359.565474976,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 29307359.565474976,
+      "borrowingAvailableCapacityUsd": 0,
+      "underwritingReasons": [
+        "借入余力枠(残り0USD、binding: collateralBased)を超える申請のため一部のみ承認。",
+        "財務制限条項違反により金利加算を適用。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 14272.11,
+      "procurementDiagnostics": [
+        {
+          "code": "PROCUREMENT_CASH_CONSTRAINED",
+          "keyValues": {
+            "cashPressure": 1,
+            "desiredDomestic": 8394.17625
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 3679.695,
+            "requiredRawMaterial": 18810
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.07584254576774403,
+            "currentlyAvailable": 2821.5,
+            "requiredRawMaterial": 37202.07399999999
+          }
+        }
+      ],
+      "verdict": "cash_constrained+did_not_intend_to_buy_enough"
+    },
+    {
+      "turn": 8,
+      "companyId": "JPQ",
+      "plannedRawRequirement": 17313.06,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 3872.17,
+      "aquacultureHarvested": 3094.83,
+      "domesticDesiredBeforeConstraint": 12458.38,
+      "domesticDesiredAfterConstraint": 12458.38,
+      "domesticAllocated": 9277.09,
+      "domesticBidPrice": 2.4688304443430633,
+      "domesticMarketPrice": 2.4688304443430633,
+      "domesticAvailableSupply": 36511.19,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 160700.8064516129,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 333575.12,
+      "aggregatedPurchaseIntent": 36511.19,
+      "importOrderedDesired": 2596.96,
+      "importAllocatedInTransit": 2596.96,
+      "importArrivedThisTurn": 2693.25,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.7446466952106637,
+      "procurementPlannedCashNeedUsd": 29270094.951850723,
+      "procurementAvailableLiquidityUsd": 21795879.474397972,
+      "procurementUnmetDemandUsd": 7474215.47745275,
+      "cash": 31707941.79859469,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 27892355.16453812,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 960.58,
+      "rawMaterialShortfall": 3208.47,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4240.665,
+            "requiredRawMaterial": 17313.06
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.12472457669013554,
+            "currentlyAvailable": 2693.25,
+            "requiredRawMaterial": 21593.578999999998
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 8,
+      "companyId": "VAP",
+      "plannedRawRequirement": 17100,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 4144.39,
+      "aquacultureHarvested": 3222.45,
+      "domesticDesiredBeforeConstraint": 12266.89,
+      "domesticDesiredAfterConstraint": 12266.89,
+      "domesticAllocated": 9776.67,
+      "domesticBidPrice": 2.4688304443430633,
+      "domesticMarketPrice": 2.4688304443430633,
+      "domesticAvailableSupply": 36511.19,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 160700.8064516129,
+      "domesticCompetitivenessWeight": 0.5953124999999999,
+      "domesticCoverageScore": 0.68125,
+      "externalProcessorIntent": 333575.12,
+      "aggregatedPurchaseIntent": 36511.19,
+      "importOrderedDesired": 2565,
+      "importAllocatedInTransit": 2565,
+      "importArrivedThisTurn": 2565,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 0.7969962919462449,
+      "procurementPlannedCashNeedUsd": 28820202.55152822,
+      "procurementAvailableLiquidityUsd": 22969594.566707697,
+      "procurementUnmetDemandUsd": 5850607.984820523,
+      "cash": 29633486.813336063,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 16370124.423182018,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 0,
+      "rawMaterialShortfall": 1330.9,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 4176.225,
+            "requiredRawMaterial": 17100
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.10549482222981138,
+            "currentlyAvailable": 2565,
+            "requiredRawMaterial": 24313.989499999996
+          }
+        }
+      ],
+      "verdict": "cash_constrained"
+    },
+    {
+      "turn": 8,
+      "companyId": "CONSV",
+      "plannedRawRequirement": 15897.51,
+      "aquacultureCapacity": 4000,
+      "aquacultureStockingPlanned": 4000,
+      "aquacultureGrowing": 5200,
+      "aquacultureHarvested": 4544.14,
+      "domesticDesiredBeforeConstraint": 9517.5,
+      "domesticDesiredAfterConstraint": 9517.5,
+      "domesticAllocated": 9517.5,
+      "domesticBidPrice": 2.4688304443430633,
+      "domesticMarketPrice": 2.4688304443430633,
+      "domesticAvailableSupply": 36511.19,
+      "domesticUnallocatedSupply": 0,
+      "domesticShareCapTons": 160700.8064516129,
+      "domesticCompetitivenessWeight": 0.5839285714285714,
+      "domesticCoverageScore": 0.6357142857142857,
+      "externalProcessorIntent": 333575.12,
+      "aggregatedPurchaseIntent": 36511.19,
+      "importOrderedDesired": 2384.63,
+      "importAllocatedInTransit": 2384.63,
+      "importArrivedThisTurn": 2436.75,
+      "importOrdersBlocked": false,
+      "importLeadTimeTurns": 2,
+      "importAvailableSupplyRatio": 0.1,
+      "procurementScaleRatio": 1,
+      "procurementPlannedCashNeedUsd": 22360702.491354354,
+      "procurementAvailableLiquidityUsd": 22831641.29967334,
+      "procurementUnmetDemandUsd": 0,
+      "cash": 35088870.10326285,
+      "loanRequestedUsd": 0,
+      "loanApprovedUsd": 0,
+      "loanDeniedUsd": 0,
+      "borrowingAvailableCapacityUsd": 47469232.59152261,
+      "underwritingReasons": [
+        "申請なし。"
+      ],
+      "rawMaterialInventory": 5067.19,
+      "rawMaterialShortfall": 0,
+      "procurementDiagnostics": [
+        {
+          "code": "RAW_MATERIAL_SHORTAGE",
+          "keyValues": {
+            "inventoryPosition": 7149.765,
+            "requiredRawMaterial": 15897.51
+          }
+        },
+        {
+          "code": "RAW_MATERIAL_PROCUREMENT_NEEDED",
+          "keyValues": {
+            "rawMaterialCoverageRatio": 0.28114940634000485,
+            "currentlyAvailable": 4912.04,
+            "requiredRawMaterial": 17471.28
+          }
+        }
+      ],
+      "verdict": "sufficient"
+    }
+  ]
+}
