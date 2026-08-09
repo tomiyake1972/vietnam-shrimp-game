@@ -69,10 +69,11 @@ test("P3-2: カタログの「実装済み」項目は、すべて実在する r
 
 test("P3-3: Quick Navigation は指示された5項目を含む", async () => {
   const { QUICK_NAVIGATION } = await import("../../../../../v2/management/analysis/catalog");
-  assert.deepEqual(
-    QUICK_NAVIGATION.map((q) => q.label),
-    ["商品別価格", "商品別限界利益", "固定費", "営業人数", "営業配置"]
-  );
+  const labels = QUICK_NAVIGATION.map((q) => q.label);
+  // Phase 3 で指示された5項目は、順序も含めてそのまま維持する。
+  assert.deepEqual(labels.slice(0, 5), ["商品別価格", "商品別限界利益", "固定費", "営業人数", "営業配置"]);
+  // Phase 5 で「Vision と戦略成長」を末尾へ追加した（既存5項目を押しのけていない）。
+  assert.ok(labels.includes("Vision と戦略成長"));
 });
 
 // ---------------------------------------------------------------------

@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { advanceSimulationTurn, createSimulationSession } from "../../../lib/v2/companyLab/simulation/engine";
-import { MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
+import { MANAGEMENT_CONSOLE_STANDARD_TURNS, PackCompanyTurnCapture, SimulationRun, SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
 import { SimulationAnalyticsDataset } from "../../../lib/v2/companyLab/simulation/analytics/types";
 import { toCompanySeries } from "../../../lib/v2/companyLab/simulation/analytics/views";
@@ -42,6 +42,7 @@ import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
 import { RunSelector } from "./RunSelector";
 import { Collapsible } from "./Collapsible";
+import { StrategySummary } from "./StrategySummary";
 import { ExportPackButton } from "./ExportPackButton";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
 
@@ -66,10 +67,15 @@ interface ConsoleView {
   readonly dataset: SimulationAnalyticsDataset;
   /** 続きを進められるのは、このブラウザで実際に走らせているセッションだけ。 */
   readonly session: SimulationSession | null;
+  /**
+   * 【Vision駆動の戦略成長】会社×ターンごとの志・戦略ギャップ・新工場判断。
+   * Vision 導入より前に保存された Run では空になる（架空の Vision を作らない）。
+   */
+  readonly strategyTurns: readonly PackCompanyTurnCapture[];
 }
 
 function viewFromSession(session: SimulationSession): ConsoleView {
-  return { run: session.run, dataset: buildDatasetFromSession(session), session };
+  return { run: session.run, dataset: buildDatasetFromSession(session), session, strategyTurns: session.packCompanyTurns };
 }
 
 export function ManagementConsole() {
@@ -119,7 +125,7 @@ export function ManagementConsole() {
       if (activeId) {
         const stored = await loadSimulationRun(activeId);
         if (!cancelled && stored) {
-          setView({ run: stored.run, dataset: stored.dataset, session: null });
+          setView({ run: stored.run, dataset: stored.dataset, session: null, strategyTurns: stored.packCapture?.companyTurns ?? [] });
           setRestoring(false);
           return;
         }
@@ -220,7 +226,7 @@ export function ManagementConsole() {
     const stored = await loadSimulationRun(simulationRunId);
     if (!stored) return;
     setActiveSimulationRunId(simulationRunId);
-    setView({ run: stored.run, dataset: stored.dataset, session: null });
+    setView({ run: stored.run, dataset: stored.dataset, session: null, strategyTurns: stored.packCapture?.companyTurns ?? [] });
     setErrorMessage(null);
   }, []);
 
@@ -390,6 +396,11 @@ export function ManagementConsole() {
             </Collapsible>
           ) : null}
 
+          {/* 【既定画面を重くしない】5社の志と成長圧力は折りたたみで持つ。 */}
+          <Collapsible title="Vision と成長圧力（5社サマリー）" testId="console-strategy-summary-toggle">
+            <StrategySummary strategyTurns={view?.strategyTurns ?? []} runId={view?.run.simulationRunId ?? null} />
+          </Collapsible>
+
           <ExportPackButton
             simulationRunId={view?.run.simulationRunId ?? null}
             scenarioId={view?.run.scenarioId ?? null}
@@ -450,6 +461,7 @@ export function ManagementConsole() {
                 selectedCompanyId={selectedCompanyId}
                 onSelect={setSelectedCompanyId}
                 strategyDocs={strategyDocs}
+                strategyTurns={view?.strategyTurns ?? []}
               />
             ) : (
               <p className="text-sm text-slate-400">読み込み中…</p>

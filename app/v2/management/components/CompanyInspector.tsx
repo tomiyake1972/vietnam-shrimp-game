@@ -17,6 +17,7 @@ import { SimulationAnalyticsDataset } from "../../../lib/v2/companyLab/simulatio
 import { companySnapshot } from "../../../lib/v2/companyLab/simulation/analytics/views";
 import { BOTTLENECK_LABELS } from "../../../lib/v2/companyLab/simulation/analytics/types";
 import { CompanyStrategyDocument, resolveStrategyAtTurn } from "../../../lib/v2/companyLab/strategyProfile/types";
+import { PackCompanyTurnCapture } from "../../../lib/v2/companyLab/simulation/types";
 import { Collapsible } from "./Collapsible";
 
 interface Props {
@@ -25,7 +26,25 @@ interface Props {
   readonly selectedCompanyId: string;
   readonly onSelect: (companyId: string) => void;
   readonly strategyDocs: Readonly<Record<string, CompanyStrategyDocument>>;
+  /** 【Vision駆動の戦略成長】会社×ターンの志・戦略ギャップ・新工場判断の記録。 */
+  readonly strategyTurns: readonly PackCompanyTurnCapture[];
 }
+
+const GROWTH_PRESSURE_LABELS: Readonly<Record<string, string>> = {
+  LOW: "低（志の軌道に乗っている）",
+  MODERATE: "中（やや遅れている）",
+  HIGH: "高（志に対して明確に遅れている）",
+  URGENT: "切迫（志との差が大きい）",
+};
+
+const NEW_FACTORY_STATUS_LABELS: Readonly<Record<string, string>> = {
+  NOT_CONSIDERED: "検討対象外",
+  MONITORING: "候補として監視中",
+  CONSIDERING: "具体的に検討中",
+  READY_TO_BUILD: "提案（着工可能と判断）",
+  DEFERRED: "見送り",
+  APPROVED: "承認済み・建設中",
+};
 
 const DASH = "－";
 const money = (v: number | null | undefined) => (v === null || v === undefined ? DASH : `${(v / 1_000_000).toFixed(1)}M`);
@@ -62,7 +81,7 @@ function Section({ title, children, testId }: { title: string; children: React.R
   );
 }
 
-export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelect, strategyDocs }: Props) {
+export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelect, strategyDocs, strategyTurns }: Props) {
   const fixture = fixtures.find((f) => f.companyId === selectedCompanyId);
   const latestTurn = dataset.turns[dataset.turns.length - 1] ?? null;
   const snapshot = latestTurn === null ? null : companySnapshot(dataset, selectedCompanyId, latestTurn);
@@ -71,6 +90,12 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
 
   const traceAt = (stage: string) =>
     dataset.aiTrace.find((t) => t.companyId === selectedCompanyId && t.turn === latestTurn && t.stage === stage) ?? null;
+  // 【Vision駆動の戦略成長】最新ターンの志・戦略ギャップ・新工場判断。
+  const latestStrategy = strategyTurns.find((s) => s.companyId === selectedCompanyId && s.turn === latestTurn)?.strategy ?? null;
+  const vision = latestStrategy?.vision ?? null;
+  const newFactory = latestStrategy?.newFactory ?? null;
+  const blockingGate = newFactory?.gates.find((g) => !g.passed) ?? null;
+
   const diagnosed = traceAt("DIAGNOSED");
   const decided = traceAt("DECIDED");
   const constrained = traceAt("CONSTRAINED");
@@ -105,7 +130,84 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
             <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{fixture.description}</p>
           </AlwaysSection>
 
-          <Section title="Mission / Vision" testId="inspector-mission-toggle">
+          {/* 【常に見える】経営の「志」は折りたたまない。ここが今回の中心だからである。 */}
+          <AlwaysSection title="Vision（経営者の志）">
+            {vision === null ? (
+              <p className="text-xs text-slate-400" data-testid="vision-card-empty">
+                この実行には Vision の記録がありません（Vision 導入より前に保存された実行です）。
+              </p>
+            ) : (
+              <div data-testid="vision-card">
+                <p className="text-sm leading-relaxed text-slate-100">{vision.longTermNarrative}</p>
+                <dl className="mt-1.5">
+                  <Row label="Q32で目指す規模" value={`${vision.targetScaleTonsPerQuarterAtQ32.toLocaleString()} t/期`} />
+                  <Row label="目指す会社像" value={vision.preferredEndState} />
+                  <Row label="成長への意欲" value={vision.growthAmbition} />
+                  <Row label="工場建設への前向きさ" value={vision.willingnessToBuildFactories} />
+                  <Row label="財務リスク許容度" value={vision.financialRiskTolerance} />
+                  <Row label="商品構成の方向" value={vision.desiredProductEvolution} />
+                </dl>
+                <p className="mt-1.5 text-[11px] leading-snug text-amber-300/80">
+                  Vision を決めるのは<strong>人間の経営者</strong>です。Standard AI はこの志を自分で作らず、志と現在地の差に反応して今期の判断を行います。
+                  Q32の規模は「目指す姿」であって達成義務ではありません。
+                </p>
+              </div>
+            )}
+          </AlwaysSection>
+
+          <AlwaysSection title="Strategic Outlook（志に対する現在地）">
+            {latestStrategy === null || latestStrategy.growthPressure === null ? (
+              <p className="text-xs text-slate-400">記録がありません。</p>
+            ) : (
+              <dl data-testid="strategic-outlook">
+                <Row
+                  label="参考成長軌道（当期）"
+                  value={latestStrategy.visionTargetScaleAtCurrentTurn === null ? DASH : tons(latestStrategy.visionTargetScaleAtCurrentTurn)}
+                />
+                <Row label="現在の持続可能規模" value={tons(latestStrategy.currentSustainableScaleTons)} />
+                <Row
+                  label="戦略ギャップ"
+                  value={
+                    latestStrategy.strategicScaleGapTons === null
+                      ? DASH
+                      : `${tons(latestStrategy.strategicScaleGapTons)}（${((latestStrategy.strategicScaleGapRatio ?? 0) * 100).toFixed(1)}%）`
+                  }
+                />
+                <Row label="成長圧力" value={GROWTH_PRESSURE_LABELS[latestStrategy.growthPressure] ?? latestStrategy.growthPressure} />
+              </dl>
+            )}
+            <p className="mt-1 text-[11px] leading-snug text-slate-500">
+              参考成長軌道は「志に対して今どこにいるか」を測る物差しであり、目標値ではありません。未来の需要・価格の予測は使っていません。
+            </p>
+          </AlwaysSection>
+
+          <Section title="Investment Thinking（新工場を建てる／建てない理由）" testId="inspector-investment-thinking-toggle">
+            {newFactory === null ? (
+              <p className="text-xs text-slate-400">新工場の検討記録がありません。</p>
+            ) : (
+              <div data-testid="investment-thinking">
+                <p className="text-sm font-semibold text-sky-300">{NEW_FACTORY_STATUS_LABELS[newFactory.status] ?? newFactory.status}</p>
+                <dl className="mt-1">
+                  <Row label="投資額（標準工場）" value={money(newFactory.projectCostUsd)} />
+                  <Row label="着工四半期の支払" value={money(newFactory.firstPaymentUsd)} />
+                  <Row label="判断を止めたゲート" value={blockingGate ? blockingGate.gate : "（全ゲート通過）"} />
+                </dl>
+                {blockingGate ? <p className="mt-1 text-[11px] leading-snug text-slate-300">{blockingGate.note}</p> : null}
+                <ul className="mt-1.5 list-inside list-disc">
+                  {newFactory.reasonCodes.map((code, index) => (
+                    <li key={`${code}-${index}`} className="font-mono text-[11px] leading-snug text-slate-400">
+                      {code}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+                  「建てなかった」ことも記録された経営判断です。単一の不透明なスコアではなく、ゲートごとの値と閾値が残っています。
+                </p>
+              </div>
+            )}
+          </Section>
+
+          <Section title="Mission / Vision（自由文。数値判断には未使用）" testId="inspector-mission-toggle">
             <dl>
               <Row label="Mission" value={strategyDocs[selectedCompanyId]?.mission || "（未設定）"} />
               <Row label="Vision" value={strategyDocs[selectedCompanyId]?.vision || "（未設定）"} />

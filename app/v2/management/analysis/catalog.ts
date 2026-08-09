@@ -62,6 +62,7 @@ export const ANALYSIS_CATEGORIES: readonly AnalysisCategory[] = [
     key: "investment",
     label: "投資",
     items: [
+      { path: `${BASE}/strategy`, label: "Vision と戦略成長（新工場を建てる／建てない判断）", implemented: true },
       { path: `${BASE}/ai-trace`, label: "投資トレース（案件・状態遷移・却下理由）", implemented: true },
       { path: "", label: "設備能力の増設経路・投資回収", implemented: false, note: "今後のPhase" },
     ],
@@ -77,7 +78,10 @@ export const ANALYSIS_CATEGORIES: readonly AnalysisCategory[] = [
   {
     key: "standardAi",
     label: "Standard AI",
-    items: [{ path: `${BASE}/ai-trace`, label: "AI Trace（6段階）", implemented: true }],
+    items: [
+      { path: `${BASE}/ai-trace`, label: "AI Trace（6段階）", implemented: true },
+      { path: `${BASE}/strategy`, label: "経営の志と成長圧力（Vision → 戦略ギャップ → 投資判断）", implemented: true },
+    ],
   },
   {
     key: "scenario",
@@ -93,4 +97,5 @@ export const QUICK_NAVIGATION: readonly { readonly path: string; readonly label:
   { path: `${BASE}/fixed-cost`, label: "固定費", testId: "quicknav-fixed-cost" },
   { path: `${BASE}/sales-headcount`, label: "営業人数", testId: "quicknav-sales-headcount" },
   { path: `${BASE}/sales-allocation`, label: "営業配置", testId: "quicknav-sales-allocation" },
+  { path: `${BASE}/strategy`, label: "Vision と戦略成長", testId: "quicknav-strategy" },
 ];
