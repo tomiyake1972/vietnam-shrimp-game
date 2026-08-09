@@ -19,6 +19,7 @@ import {
   AI_ANALYSIS_PACK_SCHEMA_VERSION,
   AiAnalysisPackContext,
   PackCompanyStateSnapshot,
+  PackStrategy,
   PackCompanySummary,
   PackCompanyTurn,
   PackDataAvailabilityNote,
@@ -45,6 +46,18 @@ const EMPTY_STATE: PackCompanyStateSnapshot = {
   factorySpaceRemainingUnits: null,
 };
 
+/** Vision 導入より前に保存された Simulation Run 用（架空の Vision を作らない）。 */
+const EMPTY_STRATEGY: PackStrategy = {
+  vision: null,
+  visionTargetScaleAtCurrentTurn: null,
+  currentSustainableScaleTons: null,
+  strategicScaleGapTons: null,
+  strategicScaleGapRatio: null,
+  growthPressure: null,
+  newFactory: null,
+  availability: "NOT_RECORDED",
+};
+
 /** ChatGPT / Claude へ「このPackの読み方」を伝える定型文（生成文ではない）。 */
 export const PACK_READING_GUIDE: readonly string[] = [
   "This package contains one complete recorded simulation run of ShrimpX, a quarterly shrimp-processing management simulation (5 AI-operated companies, up to 32 quarters = 8 years).",
@@ -54,6 +67,9 @@ export const PACK_READING_GUIDE: readonly string[] = [
   "Fields with a null value mean the value was not recorded; see dataAvailability for concepts that do not exist in the engine at all.",
   "Only completed turns are included. If the run stopped early, later quarters are absent — they are NOT zero.",
   "standardAiProposableCapexTypes lists the ONLY capital project types this Standard AI can ever propose. Types present in gameCapexTypes but absent there are structurally never proposed by the AI.",
+  "companies[].turns[].strategy holds the company Vision (given from OUTSIDE by the human owner — the AI never invents growth targets), the reference growth path, the gap between that path and the company's current sustainable scale, the resulting growth pressure, and the full gate-by-gate record of the new-factory decision. Quarters where no factory was proposed still carry the reasons; 'did not build' is a recorded decision, not missing data.",
+  "A Vision is an aspiration, not a quota. Failing to reach targetScaleTonsPerQuarterAtQ32 is not a bug and must not be reported as one.",
+  "If run.isPartialRun is true, later quarters were never simulated. Treat the run as truncated, never as an 8-year outcome.",
 ];
 
 function metricValue(dataset: SimulationAnalyticsDataset, turn: number, companyId: string, metric: string): number | null {
@@ -244,6 +260,9 @@ function buildCompanyTurn(stored: StoredSimulationRun, companyId: string, turn: 
     },
     endingState: capture?.endingState ?? EMPTY_STATE,
     capitalProjects: capture?.capitalProjects ?? [],
+    // 【捏造しない】Vision 導入より前に保存された Simulation Run には strategy が無い。
+    // その場合は空の Vision を作らず、availability で「記録されていない」ことを示す。
+    strategy: capture?.strategy ?? EMPTY_STRATEGY,
   };
 }
 
@@ -322,6 +341,8 @@ const SOURCE_MAP: Readonly<Record<string, PackSourceType>> = {
   "companies[].turns[].execution": "COMPANY_QUARTER_RECORD",
   "companies[].turns[].financialResult": "FINANCE_QUARTER_CLOSE",
   "companies[].turns[].capitalProjects": "CAPEX_QUARTER_CLOSE",
+  "companies[].turns[].strategy.vision": "COMPANY_FIXTURE",
+  "companies[].turns[].strategy.newFactory": "STANDARD_AI_DIAGNOSTICS",
   "majorChanges": "DERIVED_FROM_RECORDED_VALUES",
 };
 
@@ -403,6 +424,11 @@ export function buildAiAnalysisPackContext(input: BuildPackContextInput): AiAnal
       startedAt: stored.run.startedAt,
       completedAt: stored.run.completedAt,
       stopReason: stored.run.stopReason,
+      isPartialRun: stored.run.completedTurns < stored.run.requestedTurns,
+      runCompletenessLabel:
+        stored.run.completedTurns < stored.run.requestedTurns
+          ? `PARTIAL RUN — ${stored.run.completedTurns} / ${stored.run.requestedTurns} quarters`
+          : `COMPLETE RUN — ${stored.run.completedTurns} / ${stored.run.requestedTurns} quarters`,
       exportedAt: input.exportedAt,
       sourceBranch: input.sourceBranch ?? "UNKNOWN",
       sourceCommit: input.sourceCommit ?? "UNKNOWN",

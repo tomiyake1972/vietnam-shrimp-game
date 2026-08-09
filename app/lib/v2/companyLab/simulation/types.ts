@@ -9,7 +9,7 @@
 import { CompanyLabConfig, CompanyLabState, CompanyFixture } from "../types";
 import type { SimulationAiTurnTrace } from "./analytics/aiTrace";
 import type { ObservedDemandSnapshot } from "./analytics/dataset";
-import type { PackCapitalProject, PackCompanyStateSnapshot, PackWorldTurn } from "./aiPack/types";
+import type { PackCapitalProject, PackCompanyStateSnapshot, PackStrategy, PackWorldTurn } from "./aiPack/types";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -114,6 +114,8 @@ export interface PackCompanyTurnCapture {
   readonly beginningState: PackCompanyStateSnapshot;
   readonly endingState: PackCompanyStateSnapshot;
   readonly capitalProjects: readonly PackCapitalProject[];
+  /** 【2026-08-09新設】その四半期の Vision・戦略ギャップ・新工場判断。 */
+  readonly strategy: PackStrategy;
 }
 
 /** 1ターン・1社ぶんの実効能力（HOSO換算トン/四半期）。 */

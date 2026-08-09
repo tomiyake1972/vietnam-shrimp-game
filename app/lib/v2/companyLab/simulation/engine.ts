@@ -39,7 +39,7 @@ import { STANDARD_AI_PARAMETERS_V1 } from "../standardAi/parameters";
 import { STRATEGY_PROFILE_SCHEMA_VERSION } from "../strategyProfile/types";
 import { CapacitySnapshot, MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession, SimulationTurnOutcome } from "./types";
 import { extractAiTurnTrace } from "./analytics/aiTrace";
-import { captureCapitalProjects, captureCompanyStateSnapshot, captureScenarioEvents, captureWorldTurn } from "./aiPack/capture";
+import { captureCapitalProjects, captureCompanyStateSnapshot, captureScenarioEvents, captureStrategy, captureWorldTurn } from "./aiPack/capture";
 import type { ObservedDemandSnapshot } from "./analytics/dataset";
 import type { PublicMarketInfo } from "../types";
 
@@ -170,6 +170,8 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
     const publicInfo = buildPublicMarketInfo(session.state);
     const decisions: Record<string, CompanyDecisionInput> = {};
     const turnTraces = [];
+    /** 【Vision駆動の戦略成長】その四半期の志・戦略ギャップ・新工場判断（会社別）。 */
+    const strategyByCompany = new Map<string, ReturnType<typeof captureStrategy>>();
     for (const fixture of session.fixtures) {
       const ownState = buildCompanyOwnState(session.state, fixture);
       const { decision, diagnostics } = generateStandardAiDecisionWithDiagnostics(
@@ -183,6 +185,7 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
       // 【追加の計算をしない】diagnostics は上の1回の呼び出しで既に作られている値であり、
       // トレース記録のために Standard AI をもう一度回すことはない。
       turnTraces.push(extractAiTurnTrace(diagnostics));
+      strategyByCompany.set(fixture.companyId, captureStrategy(diagnostics));
     }
     // 【AI Analysis Pack】期首状態は「当期処理前」に撮る（処理後では期首にならない）。
     const beginningStates = new Map(session.fixtures.map((f) => [f.companyId, captureCompanyStateSnapshot(session.state, f)]));
@@ -196,6 +199,7 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
       beginningState: beginningStates.get(f.companyId) as ReturnType<typeof captureCompanyStateSnapshot>,
       endingState: captureCompanyStateSnapshot(nextState, f),
       capitalProjects: captureCapitalProjects(nextState, f.companyId),
+      strategy: strategyByCompany.get(f.companyId) as ReturnType<typeof captureStrategy>,
     }));
     const finalizedRecord = nextState.history[nextState.history.length - 1];
     const packWorldTurn = finalizedRecord

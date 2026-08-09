@@ -27,6 +27,19 @@ export function buildRunSummaryMarkdown(context: AiAnalysisPackContext): string 
   // --- AI への読み方説明（テンプレート） ---
   lines.push("# ShrimpX Simulation Run — AI Analysis Pack");
   lines.push("");
+  // 【§45/§46】途中実行を8年ぶんの結論として読まれないよう、最初に強く出す。
+  if (run.isPartialRun) {
+    lines.push(`> ## ⚠️ ${run.runCompletenessLabel}`);
+    lines.push(">");
+    lines.push(`> This run stopped after **${run.completedTurns} of ${run.requestedTurns}** quarters (stopReason: \`${run.stopReason}\`).`);
+    lines.push("> The remaining quarters are **absent, not zero**. Do not read this as an 8-year outcome,");
+    lines.push("> and do not extrapolate the missing quarters.");
+    lines.push("");
+  } else {
+    lines.push(`**${run.runCompletenessLabel}**`);
+    lines.push("");
+  }
+
   lines.push("## How to read this package (for ChatGPT / Claude)");
   lines.push("");
   for (const guide of context.readingGuide) lines.push(`- ${guide}`);

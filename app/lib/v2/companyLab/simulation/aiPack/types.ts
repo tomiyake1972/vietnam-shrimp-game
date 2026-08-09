@@ -275,6 +275,49 @@ export interface PackProductEconomics {
   readonly directFixedCostUsd: number | null;
 }
 
+/**
+ * 【2026-08-09新設】その四半期の経営の「志」と、志に対する現在地。
+ *
+ * ここは AI が「なぜ建てたのか／なぜ建てなかったのか」を再構成するための中心である。
+ * Vision は**外から与えられたもの**であり、Standard AI が発明した目標ではない。
+ */
+export interface PackStrategy {
+  readonly vision: {
+    readonly visionId: string;
+    readonly effectiveFromTurn: number;
+    readonly growthAmbition: string;
+    readonly targetScaleTonsPerQuarterAtQ32: number;
+    readonly preferredEndState: string;
+    readonly willingnessToBuildFactories: string;
+    readonly financialRiskTolerance: string;
+    readonly desiredProductEvolution: string;
+    /** 人間向けの説明。数値判断には一切使われていない。 */
+    readonly longTermNarrative: string;
+    /** 参考成長軌道（REFERENCE PATH。達成義務ではない）。 */
+    readonly referenceGrowthPath: readonly { readonly turn: number; readonly scaleTonsPerQuarter: number }[];
+  } | null;
+  readonly visionTargetScaleAtCurrentTurn: number | null;
+  readonly currentSustainableScaleTons: number | null;
+  readonly strategicScaleGapTons: number | null;
+  readonly strategicScaleGapRatio: number | null;
+  /** LOW / MODERATE / HIGH / URGENT。 */
+  readonly growthPressure: string | null;
+  /** 新工場の検討結果。**提案しなかった四半期も必ず記録される。** */
+  readonly newFactory: {
+    readonly status: string;
+    readonly reasonCodes: readonly string[];
+    readonly gates: readonly {
+      readonly gate: string;
+      readonly passed: boolean;
+      readonly note: string;
+      readonly keyValues: Readonly<Record<string, number>>;
+    }[];
+    readonly projectCostUsd: number;
+    readonly firstPaymentUsd: number;
+  } | null;
+  readonly availability: PackAvailability;
+}
+
 export interface PackCompanyTurn {
   readonly turn: number;
   readonly beginningState: PackCompanyStateSnapshot;
@@ -288,6 +331,8 @@ export interface PackCompanyTurn {
   readonly endingState: PackCompanyStateSnapshot;
   /** 期末時点の進行中・完成済み設備投資案件。 */
   readonly capitalProjects: readonly PackCapitalProject[];
+  /** その四半期の Vision・戦略ギャップ・新工場判断。 */
+  readonly strategy: PackStrategy;
 }
 
 export interface PackCapitalProject {
@@ -320,6 +365,14 @@ export interface PackRunMetadata {
   readonly startedAt: string;
   readonly completedAt: string | null;
   readonly stopReason: string;
+  /**
+   * 【途中実行の明示】completedTurns < requestedTurns なら true。
+   * 途中実行の Pack も出力できるが、**8年ぶんの結論として読まれてはならない**ため、
+   * JSON・Markdown・Excel のいずれからも一目で分かるようにする。
+   */
+  readonly isPartialRun: boolean;
+  /** 例: "PARTIAL RUN — 17 / 32 quarters"。完走時は "COMPLETE RUN — 32 / 32 quarters"。 */
+  readonly runCompletenessLabel: string;
   readonly exportedAt: string;
   /** 判明しない場合は "UNKNOWN"（捏造しない）。 */
   readonly sourceBranch: string;

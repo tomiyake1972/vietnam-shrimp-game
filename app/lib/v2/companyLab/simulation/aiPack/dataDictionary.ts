@@ -18,6 +18,66 @@ interface DictionaryEntry {
 
 const ENTRIES: readonly DictionaryEntry[] = [
   {
+    field: "companies[].turns[].strategy.vision",
+    japanese: "会社のVision（志）",
+    definition:
+      "その会社が「どんな会社になりたいか」。**人間の経営者が外から与えるもの**であり、Standard AI が発明した目標ではない。targetScaleTonsPerQuarterAtQ32 は aspiration であって quota ではなく、達成できないことは異常ではない。longTermNarrative は人間向けの文章で、数値判断には一切使われていない。",
+    unit: "—（targetScaleTonsPerQuarterAtQ32 のみ HOSO換算トン/四半期）",
+    source: "companyLab/vision/defaults.ts（会社プロファイル）",
+    layer: "METADATA",
+    nullableReason: "その会社に Vision が与えられていない場合。架空の Vision は作らない。",
+  },
+  {
+    field: "companies[].turns[].strategy.visionTargetScaleAtCurrentTurn",
+    japanese: "参考成長軌道上の当期規模",
+    definition:
+      "Vision の referenceGrowthPath を当期ターンで補間した値。**REFERENCE PATH であって TARGET ではない**。ゲーム結果をこの値へ強制する仕組みは存在しない。",
+    unit: "HOSO換算トン/四半期",
+    source: "companyLab/vision/strategicGrowth.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "Vision が与えられていない会社。",
+  },
+  {
+    field: "companies[].turns[].strategy.strategicScaleGapTons / strategicScaleGapRatio",
+    japanese: "戦略規模ギャップ",
+    definition:
+      "参考成長軌道上の当期規模 − 現在の持続可能規模（targetScale.ts の currentSustainableScaleTons）。負の値は志より先行していることを意味する。",
+    unit: "HOSO換算トン/四半期 ／ 比率",
+    source: "companyLab/vision/strategicGrowth.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "Vision が与えられていない会社。",
+  },
+  {
+    field: "companies[].turns[].strategy.growthPressure",
+    japanese: "成長圧力",
+    definition:
+      "LOW / MODERATE / HIGH / URGENT の4段階。ギャップ比率に成長意欲（growthAmbition）の感度を掛けて判定する。**未来の需要・価格を予測して求めた値ではない**（そもそも将来値は計算の引数に存在しない）。",
+    unit: "段階",
+    source: "companyLab/vision/strategicGrowth.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "Vision が与えられていない会社。",
+  },
+  {
+    field: "companies[].turns[].strategy.newFactory",
+    japanese: "新工場の検討結果",
+    definition:
+      "status（NOT_CONSIDERED / MONITORING / CONSIDERING / READY_TO_BUILD / DEFERRED / APPROVED）と、評価した全ゲートの合否・値・閾値・理由コード。**建てなかった四半期にも必ず記録される**（「建てなかった」も決定である）。単一の不透明なスコアは存在しない。",
+    unit: "—",
+    source: "companyLab/standardAi/decision/newFactory.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "Vision 導入より前に保存された Simulation Run（availability=NOT_RECORDED）。",
+  },
+  {
+    field: "run.isPartialRun / run.runCompletenessLabel",
+    japanese: "途中実行かどうか",
+    definition:
+      "completedTurns < requestedTurns なら途中実行。途中実行の Pack も出力できるが、**残りの四半期は「ゼロ」ではなく「存在しない」**。8年ぶんの結論として読んではならない。",
+    unit: "—",
+    source: "SimulationRun メタデータ",
+    layer: "METADATA",
+    nullableReason: "常に設定される。",
+  },
+  {
     field: "world.turns[].trueWorld.marketProducts[].trueDemandTons",
     japanese: "対象需要（真値）",
     definition: "その四半期に、その市場×商品でベトナム産5社が獲得対象にできた需要。配分計算が実際に使った値。",

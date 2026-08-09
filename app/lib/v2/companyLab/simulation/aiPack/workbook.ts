@@ -57,6 +57,8 @@ export async function buildAnalysisWorkbook(context: AiAnalysisPackContext, data
       ["scenarioId", context.run.scenarioId],
       ["scenarioVersion", context.run.scenarioVersion],
       ["seed", context.run.seed],
+      // 【§45/§46】途中実行かどうかを最上部に置く（Excel だけを見ても分かるように）。
+      ["runCompleteness", context.run.runCompletenessLabel],
       ["completedTurns", context.run.completedTurns],
       ["requestedTurns", context.run.requestedTurns],
       ["stopReason", context.run.stopReason],
@@ -238,6 +240,62 @@ export async function buildAnalysisWorkbook(context: AiAnalysisPackContext, data
           p.requiredConstructionQuarters,
           p.elapsedConstructionQuartersWithPayment,
         ])
+      )
+    )
+  );
+
+  // ---------------- 14c_Vision_Strategy ----------------
+  // 「なぜ建てたのか／なぜ建てなかったのか」を Excel だけでも追えるようにする。
+  const strategy = workbook.addWorksheet("14c_Vision_Strategy");
+  addRows(
+    strategy,
+    [
+      "turn",
+      "company",
+      "visionId",
+      "targetScaleAtQ32",
+      "referenceScaleThisTurn",
+      "currentSustainableScale",
+      "strategicScaleGapTons",
+      "strategicScaleGapRatio",
+      "growthPressure",
+      "newFactoryStatus",
+      "reasonCodes",
+      "firstFailedGate",
+      "projectCostUsd",
+    ],
+    Object.values(context.companies).flatMap((c) =>
+      c.turns.map((t) => {
+        const s = t.strategy;
+        const failed = s.newFactory?.gates.find((g) => !g.passed);
+        return [
+          t.turn,
+          c.companyId,
+          s.vision?.visionId ?? null,
+          s.vision?.targetScaleTonsPerQuarterAtQ32 ?? null,
+          s.visionTargetScaleAtCurrentTurn,
+          s.currentSustainableScaleTons,
+          s.strategicScaleGapTons,
+          s.strategicScaleGapRatio,
+          s.growthPressure,
+          s.newFactory?.status ?? null,
+          s.newFactory ? s.newFactory.reasonCodes.join(", ") : null,
+          failed?.gate ?? (s.newFactory ? "(全ゲート通過)" : null),
+          s.newFactory?.projectCostUsd ?? null,
+        ];
+      })
+    )
+  );
+
+  // ---------------- 14d_New_Factory_Gates ----------------
+  // ゲートごとの値と閾値。単一の不透明なスコアではないことがここで確認できる。
+  const gates = workbook.addWorksheet("14d_New_Factory_Gates");
+  addRows(
+    gates,
+    ["turn", "company", "gate", "passed", "note", "keyValues"],
+    Object.values(context.companies).flatMap((c) =>
+      c.turns.flatMap((t) =>
+        (t.strategy.newFactory?.gates ?? []).map((g) => [t.turn, c.companyId, g.gate, g.passed ? 1 : 0, g.note, JSON.stringify(g.keyValues)])
       )
     )
   );

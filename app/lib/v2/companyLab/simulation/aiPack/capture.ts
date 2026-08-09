@@ -25,7 +25,8 @@ import {
   computeFactoryUsedSpaceUnits,
   resolveFactoryTotalSpaceUnits,
 } from "../../../production/factorySpace";
-import { PackCapitalProject, PackCompanyStateSnapshot, PackWorldTurn } from "./types";
+import { PackCapitalProject, PackCompanyStateSnapshot, PackStrategy, PackWorldTurn } from "./types";
+import { StandardAiQuarterDiagnostics } from "../../standardAi/policy";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
@@ -222,4 +223,61 @@ export function captureScenarioEvents(
       durationTurns: e.resolvedDurationTurns,
       magnitudeScale: e.resolvedMagnitudeScale,
     }));
+}
+
+// ---------------------------------------------------------------------
+// 【2026-08-09新設】経営の「志」と、志に対する現在地
+// ---------------------------------------------------------------------
+
+/**
+ * その四半期の Vision・戦略ギャップ・新工場判断を Pack 用に正規化する。
+ *
+ * **ここで新しい判断や再計算は行わない** — Standard AI が実際にその四半期に使った
+ * 診断（StandardAiQuarterDiagnostics）の値をそのまま写すだけである。
+ * Vision が与えられていない会社では、架空の Vision を作らず availability で示す。
+ */
+export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics): PackStrategy {
+  const v = diagnostics.vision;
+  const g = diagnostics.strategicGrowth;
+  const a = diagnostics.newFactoryAssessment;
+  return {
+    vision: v
+      ? {
+          visionId: v.visionId,
+          effectiveFromTurn: v.effectiveFromTurn,
+          growthAmbition: v.growthAmbition,
+          targetScaleTonsPerQuarterAtQ32: v.targetScaleTonsPerQuarterAtQ32,
+          preferredEndState: v.preferredEndState,
+          willingnessToBuildFactories: v.willingnessToBuildFactories,
+          financialRiskTolerance: v.financialRiskTolerance,
+          desiredProductEvolution: v.desiredProductEvolution,
+          longTermNarrative: v.longTermNarrative,
+          referenceGrowthPath: v.referenceGrowthPath.map((w) => ({ turn: w.turn, scaleTonsPerQuarter: w.scaleTonsPerQuarter })),
+        }
+      : null,
+    visionTargetScaleAtCurrentTurn: g?.visionTargetScaleAtCurrentTurn ?? null,
+    currentSustainableScaleTons: g?.currentSustainableScaleTons ?? null,
+    strategicScaleGapTons: g?.strategicScaleGapTons ?? null,
+    strategicScaleGapRatio: g?.strategicScaleGapRatio ?? null,
+    growthPressure: g?.growthPressure ?? null,
+    newFactory: a
+      ? {
+          status: a.status,
+          reasonCodes: [...a.reasonCodes],
+          // 【保存量】note は人間向けの文章であり、通ったゲートでは keyValues から
+          // 同じ内容を再構成できる。32Q×5社×全ゲートぶんの文章を保存すると
+          // 保存物が肥大するため、**判断を止めたゲートの説明文だけ**を残す
+          // （合否・値・閾値はすべてのゲートについて保持するので、説明可能性は落ちない）。
+          gates: a.gates.map((gate) => ({
+            gate: gate.gate,
+            passed: gate.passed,
+            note: gate.passed ? "" : gate.note,
+            keyValues: gate.keyValues,
+          })),
+          projectCostUsd: a.projectCostUsd,
+          firstPaymentUsd: a.firstPaymentUsd,
+        }
+      : null,
+    availability: v ? "AVAILABLE" : "NOT_RECORDED",
+  };
 }
