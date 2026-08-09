@@ -31,6 +31,13 @@ import {
   summarizeRawProcurement,
   usdPerKg,
 } from "./managementAccountingModel";
+import { concentrationFactor } from "../../production/concentration";
+import {
+  requiredHeadcountForQuantity,
+  requiredHeadcountForQuantityWithConcentration,
+  effectiveEfficiencyPerHeadTons,
+  laborIntensityCoefficientFor,
+} from "../../production/labor";
 
 const FONT_NAME = "Yu Gothic";
 const LABEL_FONT: Partial<ExcelJS.Font> = { name: FONT_NAME };
@@ -189,6 +196,89 @@ export function appendManufacturingCostManagementSections(ws: ExcelJS.Worksheet,
     for (const c of [3, 4, 5]) invTotal.getCell(c).numFmt = USD_FMT;
     noteRow(ws, "在庫評価額合計 ＝ 原料費部分 ＋ 加工費その他。合計はBSの完成品在庫と一致します。");
   }
+  ws.addRow([]);
+
+  // --- 【Test16 Stage E】商品集中生産効率 ---
+  sectionTitle(ws, "IX. 商品集中生産効率（同じ商品を大量に作るほど1トンあたりの人手が減る効果）");
+  noteRow(
+    ws,
+    "集中係数はゲームエンジンの唯一の情報源（production/concentration.ts の concentrationFactor(商品, 数量)）から取得しています。Excel側で係数を再計算していません。基準はその四半期の計画生産量（生産配分の生産希望量）です。"
+  );
+  noteRow(
+    ws,
+    "カーブ: HOSO 8,000t以下=1.00 / 16,000t=0.80 / 24,000t=0.60、PD・VAP 4,000t以下=1.00 / 12,000t=0.80。いずれも線形補間で、下限は設けていません。"
+  );
+  noteRow(
+    ws,
+    "必要Worker相当は「出勤率100%・技能100%・残業なし」に換算した比較用の値です（工場ごとの実際の出勤率・技能を織り込んだ人数ではありません）。削減率は集中効果だけによる削減分を表します。"
+  );
+  header(ws, [
+    "商品", "計画生産量 (t)", "実生産量 (t)", "労働集約度係数", "集中係数",
+    "基準必要Worker相当", "調整後必要Worker相当", "Worker削減率", "PD省人化係数",
+  ]);
+
+  const concentrationAllocation = payload.operations.productionAllocation.entries;
+  const pdMechByFactory = payload.processingCapacity?.pdMechanizationByFactory ?? [];
+  // 稼働中のPD省人化案件があれば、その実効PD係数（複数工場ある場合は最小＝最も進んだもの）。
+  const activePdCoefficient = pdMechByFactory
+    .map((f) => f.effectivePdCoefficient)
+    .filter((v): v is number => v !== null && Number.isFinite(v))
+    .reduce<number | null>((min, v) => (min === null || v < min ? v : min), null);
+
+  for (const product of PRODUCTS) {
+    const rows = concentrationAllocation.filter((e) => e.product === product);
+    const planned = rows.reduce((sum, e) => sum + e.desiredQuantity, 0);
+    const actual = rows.reduce((sum, e) => sum + e.allocatedQuantity, 0);
+    const intensity = laborIntensityCoefficientFor(product, PRODUCTION_PARAMETERS_V1);
+    const factor = concentrationFactor(product, planned);
+    const override = product === "pd" ? (activePdCoefficient ?? undefined) : undefined;
+
+    // 基準＝集中効果なし、調整後＝集中効果あり。いずれもエンジンの正式関数を通す。
+    const baseWorkers = requiredHeadcountForQuantity(
+      planned,
+      effectiveEfficiencyPerHeadTons(PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons, product, PRODUCTION_PARAMETERS_V1, override),
+      1,
+      1,
+      0,
+      PRODUCTION_PARAMETERS_V1
+    );
+    const adjustedWorkers = requiredHeadcountForQuantityWithConcentration(
+      planned,
+      PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons,
+      product,
+      1,
+      1,
+      0,
+      PRODUCTION_PARAMETERS_V1,
+      override
+    );
+    const reductionRatio = baseWorkers > 0 ? 1 - adjustedWorkers / baseWorkers : 0;
+
+    const row = ws.addRow([
+      product.toUpperCase(),
+      planned,
+      actual,
+      intensity,
+      factor,
+      baseWorkers,
+      adjustedWorkers,
+      reductionRatio,
+      product === "pd" ? (activePdCoefficient ?? "－") : "－",
+    ]);
+    row.getCell(1).font = LABEL_FONT;
+    row.getCell(2).numFmt = TON_FMT;
+    row.getCell(3).numFmt = TON_FMT;
+    row.getCell(4).numFmt = "0.000";
+    row.getCell(5).numFmt = "0.000";
+    row.getCell(6).numFmt = "#,##0.0";
+    row.getCell(7).numFmt = "#,##0.0";
+    row.getCell(8).numFmt = "0.0%";
+    if (typeof row.getCell(9).value === "number") row.getCell(9).numFmt = "0.000";
+  }
+  noteRow(
+    ws,
+    "PD省人化係数は、稼働中のPD省人化投資案件がある場合の実効PD係数です（複数工場では最も進んだ値）。集中効果とは打ち消し合わず、実効係数＝(省人化係数 × 集中係数) として掛け合わされます。"
+  );
 }
 
 /** 当期の実納入数量を商品別に集計する（contractFulfillmentUsageをそのまま合計）。 */
@@ -213,6 +303,7 @@ export function deliveredByMarketProduct(payload: CompanyExportPayload): Map<str
     out.set(key, (out.get(key) ?? 0) + u.quantity);
   }
   return out;
+
 }
 
 // =====================================================================

@@ -117,14 +117,24 @@ test("Stage E-12: 出勤率・技能が0なら、人数がいくらでも生産�
   assert.equal(maxQuantityForAvailableWorkers(10_000, 10_000, 1, 0, 0, 100_000, PRODUCTION_PARAMETERS_V1, "hoso"), 0);
 });
 
-test("Stage E-13: 「下限なし」の帰結として、頂点を超えると必要Workerが減少に転じる", () => {
+test("Stage E-13: カーブ自体に下限は無いが、労働計算は頂点で頭打ちにして逆転域へ入らない", () => {
   const base = PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons;
   const peak = peakLaborQuantityTons("hoso");
   assert.equal(peak, 24_000);
+
+  // 係数カーブそのものは下限なし（外挿し続ける）。これは指示どおりの設計。
+  assert.ok(concentrationFactor("hoso", 32_000) < concentrationFactor("hoso", 24_000));
+
+  // 【抜け道の封じ込め】計画生産量は意思決定の入力であり、設備能力を超える
+  // 非現実的な値も入り得る。基準数量をそのまま使うと係数が0へ近づき
+  // 「巨大な計画を書けば労務がタダになる」抜け道になるため、労働計算側は
+  // 基準数量を頂点で頭打ちにする。したがって必要Workerは頂点以降**減少しない**。
   const atPeak = requiredHeadcountForQuantityWithConcentration(peak, base, "hoso", 1, 1, 0, PRODUCTION_PARAMETERS_V1);
   const beyond = requiredHeadcountForQuantityWithConcentration(peak + 8_000, base, "hoso", 1, 1, 0, PRODUCTION_PARAMETERS_V1);
-  // 32,000tの方が24,000tより必要人数が少ない＝経済的には逆転している。
-  assert.ok(beyond < atPeak, `beyond=${beyond} atPeak=${atPeak}`);
-  // 逆算側はこの領域へ入らないよう探索上限を頂点で打ち切る。
+  const farBeyond = requiredHeadcountForQuantityWithConcentration(peak * 10, base, "hoso", 1, 1, 0, PRODUCTION_PARAMETERS_V1);
+  assert.ok(beyond > atPeak, `頂点超えで必要Workerが増えていない beyond=${beyond} atPeak=${atPeak}`);
+  assert.ok(farBeyond > beyond, "数量を10倍にしても必要Workerが増えていない（係数が0へ張り付いている）");
+
+  // 逆算側も同じ位置で探索を打ち切る（順算と逆算で同じ上限を使う）。
   assert.equal(maxQuantityForAvailableWorkers(1_000_000, 0, 1, 1, 0, 100_000, PRODUCTION_PARAMETERS_V1, "hoso"), peak);
 });

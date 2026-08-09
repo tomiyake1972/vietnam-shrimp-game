@@ -1,0 +1,2882 @@
+{
+  "label": "vap-profit-diagnosis",
+  "focusCompany": "VAP",
+  "turns": 8,
+  "repositoryDefault": 1,
+  "results": [
+    {
+      "ratio": 0.6,
+      "rows": [
+        {
+          "turn": 1,
+          "hosoProduced": 0,
+          "pdProduced": 3866.27,
+          "vapProduced": 3866.27,
+          "fulfilledQuantity": 7491.34,
+          "outstandingQuantity": 4431.7,
+          "finishedGoodsInventory": 241.2,
+          "rawMaterialInventory": 0,
+          "domesticProcured": 5280,
+          "rawMaterialShortfall": 9011.7,
+          "netRevenue": 49529866.06558493,
+          "operatingProfit": 7417777.91699367,
+          "rawMaterialCost": 24915588.215241637,
+          "contributionMarginTotal": 18604596.307443302,
+          "totalFixedCost": 11398437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 0,
+              "variableCost": 0,
+              "contributionMargin": 0,
+              "contributionMarginRatio": null,
+              "directFixedCost": 0
+            },
+            {
+              "key": "pd",
+              "netRevenue": 20469253.70048345,
+              "variableCost": 13129829.062283192,
+              "contributionMargin": 7339424.638200257,
+              "contributionMarginRatio": 0.3585584870652569,
+              "directFixedCost": 2624702.681846154
+            },
+            {
+              "key": "vap",
+              "netRevenue": 29060612.36510148,
+              "variableCost": 17795440.695858434,
+              "contributionMargin": 11265171.669243045,
+              "contributionMarginRatio": 0.38764398794194876,
+              "directFixedCost": 4338778.500153847
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 4695447.38687506,
+              "variableCost": 3209289.005996355,
+              "contributionMargin": 1486158.3808787055,
+              "contributionMarginRatio": 0.3165104958971294,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 16066113.264308881,
+              "variableCost": 9671388.45291417,
+              "contributionMargin": 6394724.81139471,
+              "contributionMarginRatio": 0.3980256273681756,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 9246557.793262769,
+              "variableCost": 5270519.596491973,
+              "contributionMargin": 3976038.1967707956,
+              "contributionMarginRatio": 0.4300019840537652,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 4375971.4692074265,
+              "variableCost": 3006069.7925941143,
+              "contributionMargin": 1369901.6766133122,
+              "contributionMarginRatio": 0.31305087024743056,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 15145776.151930792,
+              "variableCost": 9570388.867245026,
+              "contributionMargin": 5575387.284685766,
+              "contributionMarginRatio": 0.3681149931675844,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.442816,
+              "allocatedQuantity": 1733.99
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 5.223751123768349,
+              "allocatedQuantity": 562.98
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.699887958512249,
+              "allocatedQuantity": 263.48
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.487616,
+              "allocatedQuantity": 949.75
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 5.327484918632827,
+              "allocatedQuantity": 1047.93
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 7.098780677676393,
+              "allocatedQuantity": 920.93
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.532864,
+              "allocatedQuantity": 862.88
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.423105104370306,
+              "allocatedQuantity": 848.82
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 7.3911734796136495,
+              "allocatedQuantity": 777.55
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.555263999999999,
+              "allocatedQuantity": 271.67
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.46653507630361,
+              "allocatedQuantity": 388.25
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 7.5494159954339555,
+              "allocatedQuantity": 283.5
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.4204159999999995,
+              "allocatedQuantity": 613.41
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 5.209912732895346,
+              "allocatedQuantity": 423.54
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.71890203921347,
+              "allocatedQuantity": 324.36
+            }
+          ],
+          "regularHeadcount": 6500,
+          "laborShortfall": 0
+        },
+        {
+          "turn": 2,
+          "hosoProduced": 6789.38,
+          "pdProduced": 1165.06,
+          "vapProduced": 1174.98,
+          "fulfilledQuantity": 9370.62,
+          "outstandingQuantity": 5691.69,
+          "finishedGoodsInventory": 0,
+          "rawMaterialInventory": 0,
+          "domesticProcured": 7049.34,
+          "rawMaterialShortfall": 6651.19,
+          "netRevenue": 44774439.01123294,
+          "operatingProfit": 2528742.063338861,
+          "rawMaterialCost": 25191107.04018056,
+          "contributionMarginTotal": 14138798.672889225,
+          "totalFixedCost": 11398437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 29909531.550505586,
+              "variableCost": 21920320.411281317,
+              "contributionMargin": 7989211.1392242685,
+              "contributionMarginRatio": 0.2671125465717707,
+              "directFixedCost": 4521322.185161613
+            },
+            {
+              "key": "pd",
+              "netRevenue": 6478559.298401607,
+              "variableCost": 4215488.15717033,
+              "contributionMargin": 2263071.141231277,
+              "contributionMarginRatio": 0.34931703747615966,
+              "directFixedCost": 926192.8695208434
+            },
+            {
+              "key": "vap",
+              "netRevenue": 8386348.162325748,
+              "variableCost": 4499831.769892071,
+              "contributionMargin": 3886516.392433677,
+              "contributionMarginRatio": 0.4634337040636108,
+              "directFixedCost": 1536894.9753175434
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 20054023.870778058,
+              "variableCost": 13889851.145375017,
+              "contributionMargin": 6164172.725403041,
+              "contributionMarginRatio": 0.30737834786290613,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 15417503.342803175,
+              "variableCost": 10081540.183811806,
+              "contributionMargin": 5335963.1589913685,
+              "contributionMarginRatio": 0.34609774620105227,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 2348622.9759636214,
+              "variableCost": 1431411.511412086,
+              "contributionMargin": 917211.4645515354,
+              "contributionMarginRatio": 0.3905315897606813,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 2704002.890084496,
+              "variableCost": 1965509.5233222328,
+              "contributionMargin": 738493.366762263,
+              "contributionMarginRatio": 0.2731111602987918,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 4250285.9316036,
+              "variableCost": 3043221.77625942,
+              "contributionMargin": 1207064.1553441803,
+              "contributionMarginRatio": 0.2839959886860516,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.42013072373612,
+              "allocatedQuantity": 1760.51
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 5.199122938780603,
+              "allocatedQuantity": 561.7
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.675674193241404,
+              "allocatedQuantity": 255.15
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.090662888392685,
+              "allocatedQuantity": 928.42
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 4.858255679192856,
+              "allocatedQuantity": 1019.57
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.481613317355332,
+              "allocatedQuantity": 1127.14
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 3.993488744448501,
+              "allocatedQuantity": 853.21
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 4.779862105707586,
+              "allocatedQuantity": 843.28
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 6.523133811470574,
+              "allocatedQuantity": 856.71
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.218528409444665,
+              "allocatedQuantity": 293.2
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.064657033865929,
+              "allocatedQuantity": 422.36
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 7.00401059118042,
+              "allocatedQuantity": 333.19
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.027382967556801,
+              "allocatedQuantity": 629.96
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.748575960924821,
+              "allocatedQuantity": 429.92
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.130840198370812,
+              "allocatedQuantity": 316.29
+            }
+          ],
+          "regularHeadcount": 6500,
+          "laborShortfall": 3311.52
+        },
+        {
+          "turn": 3,
+          "hosoProduced": 5089.12,
+          "pdProduced": 3807.24,
+          "vapProduced": 3604.11,
+          "fulfilledQuantity": 12500.47,
+          "outstandingQuantity": 6437.83,
+          "finishedGoodsInventory": 0,
+          "rawMaterialInventory": 0,
+          "domesticProcured": 6996.55,
+          "rawMaterialShortfall": 4292.67,
+          "netRevenue": 64063408.36942543,
+          "operatingProfit": 4954244.803154752,
+          "rawMaterialCost": 38844410.03764616,
+          "contributionMarginTotal": 16496682.303154752,
+          "totalFixedCost": 11542437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 21419489.709730785,
+              "variableCost": 22875568.1292614,
+              "contributionMargin": -1456078.4195306152,
+              "contributionMarginRatio": -0.06797913672374394,
+              "directFixedCost": 2686311.934729418
+            },
+            {
+              "key": "pd",
+              "netRevenue": 18920358.96500298,
+              "variableCost": 12351525.099758258,
+              "contributionMargin": 6568833.865244722,
+              "contributionMarginRatio": 0.3471833635606547,
+              "directFixedCost": 2258865.265801809
+            },
+            {
+              "key": "vap",
+              "netRevenue": 23723559.694691658,
+              "variableCost": 12339632.837251015,
+              "contributionMargin": 11383926.857440643,
+              "contributionMarginRatio": 0.4798574498913791,
+              "directFixedCost": 3659750.148468773
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 22754838.26382634,
+              "variableCost": 16592024.045032552,
+              "contributionMargin": 6162814.218793789,
+              "contributionMarginRatio": 0.27083533388988723,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 13541937.563098093,
+              "variableCost": 10110573.661930174,
+              "contributionMargin": 3431363.90116792,
+              "contributionMarginRatio": 0.25338795760795846,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 5263498.68358585,
+              "variableCost": 3968791.0999906003,
+              "contributionMargin": 1294707.5835952493,
+              "contributionMarginRatio": 0.24597851380352342,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 6497745.010329618,
+              "variableCost": 5267355.083957091,
+              "contributionMargin": 1230389.9263725271,
+              "contributionMarginRatio": 0.18935644972471946,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 16005388.84858553,
+              "variableCost": 11245535.68005237,
+              "contributionMargin": 4759853.168533159,
+              "contributionMarginRatio": 0.2973906609556574,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.317941973060755,
+              "allocatedQuantity": 1785.26
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 5.07906474407487,
+              "allocatedQuantity": 1326.94
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.523409305188696,
+              "allocatedQuantity": 1284.24
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.321469178001407,
+              "allocatedQuantity": 1271.38
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 5.13252085360406,
+              "allocatedQuantity": 956.06
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.84976693172474,
+              "allocatedQuantity": 968.32
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.32462488797096,
+              "allocatedQuantity": 1036.49
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.176360255601649,
+              "allocatedQuantity": 786.76
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 7.066707790688995,
+              "allocatedQuantity": 818.23
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.305379051726269,
+              "allocatedQuantity": 483.98
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.16908659428457,
+              "allocatedQuantity": 368.72
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 7.151015180235113,
+              "allocatedQuantity": 379.71
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.217342732714911,
+              "allocatedQuantity": 720.42
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.972691240815405,
+              "allocatedQuantity": 536.97
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.422089163953582,
+              "allocatedQuantity": 523.13
+            }
+          ],
+          "regularHeadcount": 6500,
+          "laborShortfall": 0
+        },
+        {
+          "turn": 4,
+          "hosoProduced": 4927.68,
+          "pdProduced": 3695.77,
+          "vapProduced": 3492.12,
+          "fulfilledQuantity": 12115.57,
+          "outstandingQuantity": 7472,
+          "finishedGoodsInventory": 0,
+          "rawMaterialInventory": 0,
+          "domesticProcured": 6875.04,
+          "rawMaterialShortfall": 4698.94,
+          "netRevenue": 62433029.0039044,
+          "operatingProfit": 7215279.2703715265,
+          "rawMaterialCost": 35294475.01422206,
+          "contributionMarginTotal": 18757716.770371526,
+          "totalFixedCost": 11542437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 20780567.844619993,
+              "variableCost": 20689706.21649741,
+              "contributionMargin": 90861.62812258303,
+              "contributionMarginRatio": 0.004372432399440266,
+              "directFixedCost": 2628677.3333571833
+            },
+            {
+              "key": "pd",
+              "netRevenue": 18541649.957580235,
+              "variableCost": 11479145.001507793,
+              "contributionMargin": 7062504.956072442,
+              "contributionMarginRatio": 0.38089948695127507,
+              "directFixedCost": 2221177.1492292355
+            },
+            {
+              "key": "vap",
+              "netRevenue": 23110811.20170418,
+              "variableCost": 11506461.015527675,
+              "contributionMargin": 11604350.186176507,
+              "contributionMarginRatio": 0.502117822039964,
+              "directFixedCost": 3592059.433413582
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 20947578.98654714,
+              "variableCost": 14985190.664043995,
+              "contributionMargin": 5962388.322503144,
+              "contributionMarginRatio": 0.28463376728796597,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 9445729.186039744,
+              "variableCost": 6869920.956739492,
+              "contributionMargin": 2575808.229300252,
+              "contributionMarginRatio": 0.27269554087016934,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 6002298.086256035,
+              "variableCost": 3732452.5279616714,
+              "contributionMargin": 2269845.5582943633,
+              "contributionMarginRatio": 0.37816275127885085,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 9045588.193282891,
+              "variableCost": 6373220.062978953,
+              "contributionMargin": 2672368.130303938,
+              "contributionMarginRatio": 0.29543331767948444,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 16991834.5517786,
+              "variableCost": 11420952.57389102,
+              "contributionMargin": 5570881.97788758,
+              "contributionMarginRatio": 0.32785641602804183,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.17277186551399,
+              "allocatedQuantity": 1700.08
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 4.909144514834538,
+              "allocatedQuantity": 1263.3
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.307029801394606,
+              "allocatedQuantity": 1221.46
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.176180485090649,
+              "allocatedQuantity": 1322.2
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 4.960858455378729,
+              "allocatedQuantity": 994.08
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.622867016657689,
+              "allocatedQuantity": 1006.08
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.179230099434434,
+              "allocatedQuantity": 1090.69
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.003268813118629,
+              "allocatedQuantity": 827.77
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 6.832810791485551,
+              "allocatedQuantity": 860.37
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.160631312208673,
+              "allocatedQuantity": 445.39
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 4.996252890714831,
+              "allocatedQuantity": 339.27
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 6.914430092958422,
+              "allocatedQuantity": 298.05
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.075554792559751,
+              "allocatedQuantity": 720.92
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.806340945927863,
+              "allocatedQuantity": 537.21
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.209117046364125,
+              "allocatedQuantity": 522.87
+            }
+          ],
+          "regularHeadcount": 6500,
+          "laborShortfall": 0
+        },
+        {
+          "turn": 5,
+          "hosoProduced": 5377.06,
+          "pdProduced": 4039.58,
+          "vapProduced": 3822.4,
+          "fulfilledQuantity": 13239.04,
+          "outstandingQuantity": 7554.65,
+          "finishedGoodsInventory": 0,
+          "rawMaterialInventory": 0,
+          "domesticProcured": 7877.76,
+          "rawMaterialShortfall": 3551.65,
+          "netRevenue": 67096637.43459318,
+          "operatingProfit": 8377420.6369558275,
+          "rawMaterialCost": 38020196.94760302,
+          "contributionMarginTotal": 19919858.136955827,
+          "totalFixedCost": 11542437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 22294275.025471874,
+              "variableCost": 22246149.246183023,
+              "contributionMargin": 48125.779288850725,
+              "contributionMarginRatio": 0.0021586608774613924,
+              "directFixedCost": 2785068.0781080853
+            },
+            {
+              "key": "pd",
+              "netRevenue": 19883198.451498568,
+              "variableCost": 12291076.384120794,
+              "contributionMargin": 7592122.067377774,
+              "contributionMarginRatio": 0.3818360554966732,
+              "directFixedCost": 2330447.0447075292
+            },
+            {
+              "key": "vap",
+              "netRevenue": 24919163.95762273,
+              "variableCost": 12639553.667333534,
+              "contributionMargin": 12279610.290289195,
+              "contributionMarginRatio": 0.49277777983128856,
+              "directFixedCost": 3781245.9111843854
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 19805584.26011967,
+              "variableCost": 14033969.527958514,
+              "contributionMargin": 5771614.732161155,
+              "contributionMarginRatio": 0.291413505219476,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 15851942.66156079,
+              "variableCost": 10913127.592582107,
+              "contributionMargin": 4938815.068978684,
+              "contributionMarginRatio": 0.31155897888495176,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 5622017.934334675,
+              "variableCost": 3860860.2312673964,
+              "contributionMargin": 1761157.7030672785,
+              "contributionMarginRatio": 0.31326077640406863,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 8744369.263399344,
+              "variableCost": 6302173.4605967365,
+              "contributionMargin": 2442195.8028026074,
+              "contributionMarginRatio": 0.27928781702126015,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 17072723.3151787,
+              "variableCost": 11739806.087299263,
+              "contributionMargin": 5332917.227879437,
+              "contributionMarginRatio": 0.31236476626655957,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.164246722993168,
+              "allocatedQuantity": 1611.53
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 4.900562812638221,
+              "allocatedQuantity": 1197.07
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.297174022136289,
+              "allocatedQuantity": 1155.93
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.167648378621491,
+              "allocatedQuantity": 1420.18
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 4.952266078975036,
+              "allocatedQuantity": 1067.47
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.612759832848029,
+              "allocatedQuantity": 1079.33
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.170691762479222,
+              "allocatedQuantity": 1091.31
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 4.9946671829893905,
+              "allocatedQuantity": 828.09
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 6.822541658671355,
+              "allocatedQuantity": 860.03
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.1521309733316984,
+              "allocatedQuantity": 416.26
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 4.987688369001407,
+              "allocatedQuantity": 317.03
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 6.904117283600993,
+              "allocatedQuantity": 334.43
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.0672282684702985,
+              "allocatedQuantity": 786.95
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.797958291253266,
+              "allocatedQuantity": 586.22
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.199455856984378,
+              "allocatedQuantity": 569.86
+            }
+          ],
+          "regularHeadcount": 6500,
+          "laborShortfall": 0
+        },
+        {
+          "turn": 6,
+          "hosoProduced": 6629.05,
+          "pdProduced": 4954.81,
+          "vapProduced": 4953.81,
+          "fulfilledQuantity": 16537.67,
+          "outstandingQuantity": 4222.09,
+          "finishedGoodsInventory": 0,
+          "rawMaterialInventory": 1446.29,
+          "domesticProcured": 12243.32,
+          "rawMaterialShortfall": 0,
+          "netRevenue": 85085425.74655528,
+          "operatingProfit": 15228988.067504667,
+          "rawMaterialCost": 46751900.41811677,
+          "contributionMarginTotal": 26771425.56850467,
+          "totalFixedCost": 11542437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 27717321.230000615,
+              "variableCost": 26242824.542808875,
+              "contributionMargin": 1474496.6871917397,
+              "contributionMarginRatio": 0.053197662030765695,
+              "directFixedCost": 3208552.7731906543
+            },
+            {
+              "key": "pd",
+              "netRevenue": 24584767.405047275,
+              "variableCost": 15366200.254364762,
+              "contributionMargin": 9218567.150682513,
+              "contributionMarginRatio": 0.374970688101362,
+              "directFixedCost": 2565014.0292515596
+            },
+            {
+              "key": "vap",
+              "netRevenue": 32783337.111507397,
+              "variableCost": 16704975.380876964,
+              "contributionMargin": 16078361.730630433,
+              "contributionMarginRatio": 0.49044310760501286,
+              "directFixedCost": 4274870.6975577865
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 20206004.603938714,
+              "variableCost": 13862470.020424016,
+              "contributionMargin": 6343534.583514698,
+              "contributionMarginRatio": 0.3139430435583572,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 19319788.02509336,
+              "variableCost": 11915852.301670749,
+              "contributionMargin": 7403935.723422613,
+              "contributionMarginRatio": 0.3832306914447543,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 10329834.21375288,
+              "variableCost": 6798629.60362755,
+              "contributionMargin": 3531204.6101253303,
+              "contributionMarginRatio": 0.3418452355628296,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 15716746.010484291,
+              "variableCost": 11633528.09229057,
+              "contributionMargin": 4083217.918193722,
+              "contributionMarginRatio": 0.25980046476986385,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 19513052.893286046,
+              "variableCost": 13600987.545076873,
+              "contributionMargin": 5912065.3482091725,
+              "contributionMarginRatio": 0.3029800298570075,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.251743884157606,
+              "allocatedQuantity": 1609.57
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 5.003797733605578,
+              "allocatedQuantity": 1196.19
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.432059245812146,
+              "allocatedQuantity": 1156.93
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.255217013747616,
+              "allocatedQuantity": 1556.07
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 5.056604855456127,
+              "allocatedQuantity": 1170.21
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.754729074843243,
+              "allocatedQuantity": 1185.16
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.258324343731885,
+              "allocatedQuantity": 981.21
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.099911123594189,
+              "allocatedQuantity": 744.94
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 6.969209282599779,
+              "allocatedQuantity": 774.96
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.239373564156943,
+              "allocatedQuantity": 345.79
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.0927898682214705,
+              "allocatedQuantity": 263.51
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 7.0526493058283855,
+              "allocatedQuantity": 278.43
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.152686924254053,
+              "allocatedQuantity": 785.99
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.899035312221575,
+              "allocatedQuantity": 585.79
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.332293916313934,
+              "allocatedQuantity": 570.36
+            }
+          ],
+          "regularHeadcount": 6500,
+          "laborShortfall": 421.23
+        },
+        {
+          "turn": 7,
+          "hosoProduced": 6631.73,
+          "pdProduced": 4956.81,
+          "vapProduced": 4956.81,
+          "fulfilledQuantity": 16387.97,
+          "outstandingQuantity": 726.88,
+          "finishedGoodsInventory": 157.38,
+          "rawMaterialInventory": 3581.88,
+          "domesticProcured": 11049.36,
+          "rawMaterialShortfall": 0,
+          "netRevenue": 83889551.05385199,
+          "operatingProfit": 13871490.90867994,
+          "rawMaterialCost": 47093742.450751424,
+          "contributionMarginTotal": 25325543.517060347,
+          "totalFixedCost": 11542437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 26983866.856567908,
+              "variableCost": 24975812.162982415,
+              "contributionMargin": 2008054.6935854927,
+              "contributionMarginRatio": 0.07441686190712617,
+              "directFixedCost": 3208469.375663197
+            },
+            {
+              "key": "pd",
+              "netRevenue": 24519472.519921843,
+              "variableCost": 17189022.971184775,
+              "contributionMargin": 7330449.548737068,
+              "contributionMarginRatio": 0.29896440646433753,
+              "directFixedCost": 2564919.8844473604
+            },
+            {
+              "key": "vap",
+              "netRevenue": 32386211.677362226,
+              "variableCost": 16399172.402624445,
+              "contributionMargin": 15987039.27473778,
+              "contributionMarginRatio": 0.49363721308326497,
+              "directFixedCost": 4275048.239889443
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 22526950.131241944,
+              "variableCost": 15965257.83779634,
+              "contributionMargin": 6561692.293445604,
+              "contributionMarginRatio": 0.2912818759404715,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 12562477.49010681,
+              "variableCost": 8597870.655105572,
+              "contributionMargin": 3964606.8350012377,
+              "contributionMarginRatio": 0.3155911593173752,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 4497991.926556414,
+              "variableCost": 3111475.6592188217,
+              "contributionMargin": 1386516.2673375923,
+              "contributionMarginRatio": 0.30825228012338507,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 12258491.185537098,
+              "variableCost": 8316345.6962909885,
+              "contributionMargin": 3942145.4892461095,
+              "contributionMarginRatio": 0.32158488590318196,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 32043640.32040971,
+              "variableCost": 22091046.38334686,
+              "contributionMargin": 9952593.937062852,
+              "contributionMarginRatio": 0.3105949835145197,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.174223729851025,
+              "allocatedQuantity": 1824.8
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 4.9129807370250145,
+              "allocatedQuantity": 1357.01
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.316570635608189,
+              "allocatedQuantity": 1315.6
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.177633535414688,
+              "allocatedQuantity": 1319.24
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 4.964852275084418,
+              "allocatedQuantity": 992.69
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.633643305649186,
+              "allocatedQuantity": 1007.62
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.180684210834047,
+              "allocatedQuantity": 979.62
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.00739114308981,
+              "allocatedQuantity": 744.14
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 6.844399275701945,
+              "allocatedQuantity": 698.13
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.162078952390412,
+              "allocatedQuantity": 364.87
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.000406254520409,
+              "allocatedQuantity": 278.19
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 6.926411321350296,
+              "allocatedQuantity": 231.25
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.076972831419209,
+              "allocatedQuantity": 719.44
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.810125253694208,
+              "allocatedQuantity": 536.53
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.218625925012797,
+              "allocatedQuantity": 523.63
+            }
+          ],
+          "regularHeadcount": 6500,
+          "laborShortfall": 421.23
+        },
+        {
+          "turn": 8,
+          "hosoProduced": 6117.73,
+          "pdProduced": 5088.45,
+          "vapProduced": 5088.45,
+          "fulfilledQuantity": 13577.65,
+          "outstandingQuantity": 0,
+          "finishedGoodsInventory": 2874.36,
+          "rawMaterialInventory": 4901.37,
+          "domesticProcured": 9981.56,
+          "rawMaterialShortfall": 0,
+          "netRevenue": 71909492.88572969,
+          "operatingProfit": 12625770.628854379,
+          "rawMaterialCost": 39764229.65636851,
+          "contributionMarginTotal": 22489487.200548485,
+          "totalFixedCost": 11542437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 22195241.006980035,
+              "variableCost": 16151645.554486994,
+              "contributionMargin": 6043595.452493042,
+              "contributionMarginRatio": 0.27229240045613523,
+              "directFixedCost": 2986688.604484952
+            },
+            {
+              "key": "pd",
+              "netRevenue": 21315981.97104012,
+              "variableCost": 14945245.726229873,
+              "contributionMargin": 6370736.244810246,
+              "contributionMarginRatio": 0.298871347023352,
+              "directFixedCost": 2647843.3516701283
+            },
+            {
+              "key": "vap",
+              "netRevenue": 28398269.90770952,
+              "variableCost": 18323114.404464338,
+              "contributionMargin": 10075155.503245182,
+              "contributionMarginRatio": 0.35478060938177064,
+              "directFixedCost": 4413905.54384492
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 22790131.294644803,
+              "variableCost": 15728449.981122823,
+              "contributionMargin": 7061681.313521979,
+              "contributionMarginRatio": 0.3098569824905451,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 11981953.812426636,
+              "variableCost": 7950691.48677695,
+              "contributionMargin": 4031262.325649686,
+              "contributionMarginRatio": 0.3364444888336002,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 4425958.116923465,
+              "variableCost": 2958742.1407782272,
+              "contributionMargin": 1467215.9761452381,
+              "contributionMarginRatio": 0.3315024537930144,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 8212620.38123336,
+              "variableCost": 5781019.826095235,
+              "contributionMargin": 2431600.555138125,
+              "contributionMarginRatio": 0.29608096347598994,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 24498829.280501418,
+              "variableCost": 16515258.452209426,
+              "contributionMargin": 7983570.828291992,
+              "contributionMarginRatio": 0.3258756056007176,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.320902688781668,
+              "allocatedQuantity": 1783.42
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 5.086509895198635,
+              "allocatedQuantity": 1326.17
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.5424269380866615,
+              "allocatedQuantity": 1285.16
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.3244323122474375,
+              "allocatedQuantity": 1508.81
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 5.1402625978012395,
+              "allocatedQuantity": 1135.33
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.871267718934167,
+              "allocatedQuantity": 1152.15
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.3275901860163595,
+              "allocatedQuantity": 865.88
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.184343866568332,
+              "allocatedQuantity": 657.76
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 7.089837380659356,
+              "allocatedQuantity": 685.67
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.308331153334503,
+              "allocatedQuantity": 355.1
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.177127547296365,
+              "allocatedQuantity": 270.76
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 7.174935884558462,
+              "allocatedQuantity": 210.15
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.220234469798718,
+              "allocatedQuantity": 652.75
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.980033392103352,
+              "allocatedQuantity": 486.77
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.441044285927795,
+              "allocatedQuantity": 474.89
+            }
+          ],
+          "regularHeadcount": 6500,
+          "laborShortfall": 672.93
+        }
+      ]
+    },
+    {
+      "ratio": 1,
+      "rows": [
+        {
+          "turn": 1,
+          "hosoProduced": 1032.51,
+          "pdProduced": 5093.06,
+          "vapProduced": 5093.06,
+          "fulfilledQuantity": 8523.85,
+          "outstandingQuantity": 3399.19,
+          "finishedGoodsInventory": 2694.78,
+          "rawMaterialInventory": 0,
+          "domesticProcured": 8800,
+          "rawMaterialShortfall": 5491.7,
+          "netRevenue": 54082278.49063666,
+          "operatingProfit": 10370318.040216483,
+          "rawMaterialCost": 27688018.15457642,
+          "contributionMarginTotal": 19764041.254171714,
+          "totalFixedCost": 11398437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 4574751.6866012635,
+              "variableCost": 4966507,
+              "contributionMargin": -391755.3133987365,
+              "contributionMarginRatio": -0.08563422459543038,
+              "directFixedCost": 540251.8049232533
+            },
+            {
+              "key": "pd",
+              "netRevenue": 20460021.53313752,
+              "variableCost": 13338707.526436234,
+              "contributionMargin": 7121314.006701285,
+              "contributionMarginRatio": 0.34805994681713515,
+              "directFixedCost": 2911945.375414133
+            },
+            {
+              "key": "vap",
+              "netRevenue": 29047505.27089787,
+              "variableCost": 16013022.710028721,
+              "contributionMargin": 13034482.560869148,
+              "contributionMarginRatio": 0.44872984579257974,
+              "directFixedCost": 4837568.389662613
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 9268081.304227188,
+              "variableCost": 8036014.505496082,
+              "contributionMargin": 1232066.7987311063,
+              "contributionMarginRatio": 0.13293655485835654,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 16058867.028152687,
+              "variableCost": 9015891.542704672,
+              "contributionMargin": 7042975.485448016,
+              "contributionMarginRatio": 0.4385723770612849,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 9242387.354507633,
+              "variableCost": 4883179.65326296,
+              "contributionMargin": 4359207.701244673,
+              "contributionMarginRatio": 0.47165386323249375,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 4373997.791930478,
+              "variableCost": 2867051.860125295,
+              "contributionMargin": 1506945.9318051832,
+              "contributionMarginRatio": 0.3445237065700684,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 15138945.01181867,
+              "variableCost": 9188390.34298741,
+              "contributionMargin": 5950554.668831259,
+              "contributionMarginRatio": 0.39306270444775254,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.442816,
+              "allocatedQuantity": 1733.99
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 5.223751123768349,
+              "allocatedQuantity": 562.98
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.699887958512249,
+              "allocatedQuantity": 263.48
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.487616,
+              "allocatedQuantity": 949.75
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 5.327484918632827,
+              "allocatedQuantity": 1047.93
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 7.098780677676393,
+              "allocatedQuantity": 920.93
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.532864,
+              "allocatedQuantity": 862.88
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.423105104370306,
+              "allocatedQuantity": 848.82
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 7.3911734796136495,
+              "allocatedQuantity": 777.55
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.555263999999999,
+              "allocatedQuantity": 271.67
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.46653507630361,
+              "allocatedQuantity": 388.25
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 7.5494159954339555,
+              "allocatedQuantity": 283.5
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.4204159999999995,
+              "allocatedQuantity": 613.41
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 5.209912732895346,
+              "allocatedQuantity": 423.54
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.71890203921347,
+              "allocatedQuantity": 324.36
+            }
+          ],
+          "regularHeadcount": 6500,
+          "laborShortfall": 0
+        },
+        {
+          "turn": 2,
+          "hosoProduced": 6771.6,
+          "pdProduced": 1858.79,
+          "vapProduced": 1878.01,
+          "fulfilledQuantity": 12890.18,
+          "outstandingQuantity": 1139.39,
+          "finishedGoodsInventory": 313,
+          "rawMaterialInventory": 0,
+          "domesticProcured": 7024.8,
+          "rawMaterialShortfall": 3648.82,
+          "netRevenue": 64142278.323099576,
+          "operatingProfit": 6834446.562876232,
+          "rawMaterialCost": 36364253.15976418,
+          "contributionMarginTotal": 19536187.813593917,
+          "totalFixedCost": 10977437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 29428807.970499948,
+              "variableCost": 22881736.159764133,
+              "contributionMargin": 6547071.810735814,
+              "contributionMarginRatio": 0.22247152576817708,
+              "directFixedCost": 4108152.69791894
+            },
+            {
+              "key": "pd",
+              "netRevenue": 15821857.4837482,
+              "variableCost": 10770294.428984554,
+              "contributionMargin": 5051563.054763645,
+              "contributionMarginRatio": 0.3192774969659839,
+              "directFixedCost": 1309912.9063909147
+            },
+            {
+              "key": "vap",
+              "netRevenue": 18891612.86885142,
+              "variableCost": 10954059.920756962,
+              "contributionMargin": 7937552.948094457,
+              "contributionMarginRatio": 0.4201627993966535,
+              "directFixedCost": 2185271.027690146
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 15475537.863386294,
+              "variableCost": 11062647.916313916,
+              "contributionMargin": 4412889.947072377,
+              "contributionMarginRatio": 0.28515260574644524,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 16909276.50802213,
+              "variableCost": 11773997.346533816,
+              "contributionMargin": 5135279.161488313,
+              "contributionMarginRatio": 0.3036959717970207,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 6934910.699880552,
+              "variableCost": 4548664.043648041,
+              "contributionMargin": 2386246.6562325107,
+              "contributionMarginRatio": 0.3440919082452802,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 8546267.516104944,
+              "variableCost": 6230057.5078596985,
+              "contributionMargin": 2316210.0082452456,
+              "contributionMarginRatio": 0.2710200685715118,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 16276285.735705659,
+              "variableCost": 10662825.445408706,
+              "contributionMargin": 5613460.290296953,
+              "contributionMarginRatio": 0.34488582846530996,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.42013072373612,
+              "allocatedQuantity": 1760.51
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 5.2011744401370335,
+              "allocatedQuantity": 561.7
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.699175200602531,
+              "allocatedQuantity": 255.15
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.090662888392685,
+              "allocatedQuantity": 928.42
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 4.86027715979446,
+              "allocatedQuantity": 1019.57
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.507216925094304,
+              "allocatedQuantity": 1127.14
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 3.993488744448501,
+              "allocatedQuantity": 853.21
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 4.781933045552847,
+              "allocatedQuantity": 843.28
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 6.550528841358503,
+              "allocatedQuantity": 856.71
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.218528409444665,
+              "allocatedQuantity": 293.2
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.066885341141908,
+              "allocatedQuantity": 422.36
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 7.034411422537208,
+              "allocatedQuantity": 332.96
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.027382967556801,
+              "allocatedQuantity": 629.96
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.750475246149461,
+              "allocatedQuantity": 429.92
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.15281930471348,
+              "allocatedQuantity": 316.29
+            }
+          ],
+          "regularHeadcount": 6079,
+          "laborShortfall": 1833.8
+        },
+        {
+          "turn": 3,
+          "hosoProduced": 6788.02,
+          "pdProduced": 3912.21,
+          "vapProduced": 3571.58,
+          "fulfilledQuantity": 11995.48,
+          "outstandingQuantity": 0,
+          "finishedGoodsInventory": 2589.33,
+          "rawMaterialInventory": 160.88,
+          "domesticProcured": 8330.32,
+          "rawMaterialShortfall": 0,
+          "netRevenue": 61938617.602672786,
+          "operatingProfit": 7848668.187755302,
+          "rawMaterialCost": 36368993.362667896,
+          "contributionMarginTotal": 17435261.689137653,
+          "totalFixedCost": 10977437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 23069294.77158819,
+              "variableCost": 22978088.182325106,
+              "contributionMargin": 91206.58926308528,
+              "contributionMarginRatio": 0.003953592433844748,
+              "directFixedCost": 3534667.449405687
+            },
+            {
+              "key": "pd",
+              "netRevenue": 16796757.89789687,
+              "variableCost": 10395047.656459473,
+              "contributionMargin": 6401710.241437398,
+              "contributionMarginRatio": 0.38112773193206284,
+              "directFixedCost": 2261103.6568649374
+            },
+            {
+              "key": "vap",
+              "netRevenue": 22072564.93318773,
+              "variableCost": 11130220.074750561,
+              "contributionMargin": 10942344.85843717,
+              "contributionMarginRatio": 0.49574414625391117,
+              "directFixedCost": 3431336.668729375
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 18714647.00652488,
+              "variableCost": 13094099.005765567,
+              "contributionMargin": 5620548.000759313,
+              "contributionMarginRatio": 0.3003288279388707,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 11978926.924405526,
+              "variableCost": 7992242.847473832,
+              "contributionMargin": 3986684.0769316945,
+              "contributionMarginRatio": 0.33280811395629584,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 5811539.387630791,
+              "variableCost": 3856297.9928540126,
+              "contributionMargin": 1955241.3947767788,
+              "contributionMarginRatio": 0.336441218816875,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 8007157.93529505,
+              "variableCost": 5928057.544894816,
+              "contributionMargin": 2079100.3904002337,
+              "contributionMarginRatio": 0.2596552243881302,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 17426346.348816533,
+              "variableCost": 13160566.171679674,
+              "contributionMargin": 4265780.177136859,
+              "contributionMarginRatio": 0.24478913087978185,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.317941973060755,
+              "allocatedQuantity": 1466.72
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 5.083182121563326,
+              "allocatedQuantity": 1090.15
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.544806151006554,
+              "allocatedQuantity": 1054.74
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.321469178001407,
+              "allocatedQuantity": 1002.97
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 5.136908327002933,
+              "allocatedQuantity": 754.23
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.874698740609458,
+              "allocatedQuantity": 763.99
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.32462488797096,
+              "allocatedQuantity": 867.32
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.180967811914978,
+              "allocatedQuantity": 658.36
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 7.093930588021348,
+              "allocatedQuantity": 684.95
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.305379051726269,
+              "allocatedQuantity": 415.76
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.173758915397235,
+              "allocatedQuantity": 316.76
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 7.1793983755768895,
+              "allocatedQuantity": 334.71
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.217342732714911,
+              "allocatedQuantity": 584.88
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.976777381792435,
+              "allocatedQuantity": 435.95
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.4435152293391305,
+              "allocatedQuantity": 424.6
+            }
+          ],
+          "regularHeadcount": 6079,
+          "laborShortfall": 0
+        },
+        {
+          "turn": 4,
+          "hosoProduced": 5308.96,
+          "pdProduced": 3978.25,
+          "vapProduced": 3852.48,
+          "fulfilledQuantity": 10820,
+          "outstandingQuantity": 0,
+          "finishedGoodsInventory": 4909.02,
+          "rawMaterialInventory": 1652.15,
+          "domesticProcured": 8000.52,
+          "rawMaterialShortfall": 0,
+          "netRevenue": 55121925.650068425,
+          "operatingProfit": 6429407.30869218,
+          "rawMaterialCost": 31863481.514798343,
+          "contributionMarginTotal": 15799967.932816714,
+          "totalFixedCost": 10977437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 17972364.554597113,
+              "variableCost": 17916778.813714497,
+              "contributionMargin": 55585.74088261649,
+              "contributionMarginRatio": 0.0030928451686897443,
+              "directFixedCost": 2795202.991884107
+            },
+            {
+              "key": "pd",
+              "netRevenue": 15993728.223009387,
+              "variableCost": 10742199.686643898,
+              "contributionMargin": 5251528.536365489,
+              "contributionMarginRatio": 0.3283492418490877,
+              "directFixedCost": 2330002.470988935
+            },
+            {
+              "key": "vap",
+              "netRevenue": 21155832.872461922,
+              "variableCost": 10662979.216893312,
+              "contributionMargin": 10492853.65556861,
+              "contributionMarginRatio": 0.4959792279899755,
+              "directFixedCost": 3749804.621126959
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 17474277.84569054,
+              "variableCost": 12581775.545507263,
+              "contributionMargin": 4892502.300183278,
+              "contributionMarginRatio": 0.2799830896239213,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 11580081.524150992,
+              "variableCost": 7944296.570530271,
+              "contributionMargin": 3635784.9536207207,
+              "contributionMarginRatio": 0.31396885644009165,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 4560893.378706552,
+              "variableCost": 3135213.3983848593,
+              "contributionMargin": 1425679.9803216928,
+              "contributionMarginRatio": 0.31258787740528343,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 7102623.252249585,
+              "variableCost": 5209730.622206753,
+              "contributionMargin": 1892892.6300428323,
+              "contributionMarginRatio": 0.2665061291887197,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 14404049.649270758,
+              "variableCost": 10076849.878169196,
+              "contributionMargin": 4327199.771101562,
+              "contributionMarginRatio": 0.30041549956200253,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.17277186551399,
+              "allocatedQuantity": 1418.14
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 4.910310614014873,
+              "allocatedQuantity": 1053.75
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.321517822757822,
+              "allocatedQuantity": 1018.6
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.176180485090649,
+              "allocatedQuantity": 1114.67
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 4.962101049517477,
+              "allocatedQuantity": 838.06
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.639948642034204,
+              "allocatedQuantity": 848.26
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.179230099434434,
+              "allocatedQuantity": 867.74
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.004573737832328,
+              "allocatedQuantity": 658.6
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 6.851551349938623,
+              "allocatedQuantity": 684.71
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.160631312208673,
+              "allocatedQuantity": 346
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 4.997576157730064,
+              "allocatedQuantity": 263.58
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 6.934033692177558,
+              "allocatedQuantity": 262.09
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.075554792559751,
+              "allocatedQuantity": 585.28
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.807498198489088,
+              "allocatedQuantity": 436.12
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.2236428308282825,
+              "allocatedQuantity": 424.4
+            }
+          ],
+          "regularHeadcount": 6079,
+          "laborShortfall": 0
+        },
+        {
+          "turn": 5,
+          "hosoProduced": 3847.98,
+          "pdProduced": 3294.86,
+          "vapProduced": 3355.2,
+          "fulfilledQuantity": 10891.76,
+          "outstandingQuantity": 0,
+          "finishedGoodsInventory": 4515.3,
+          "rawMaterialInventory": 2778.56,
+          "domesticProcured": 4348.08,
+          "rawMaterialShortfall": 0,
+          "netRevenue": 55406176.87375624,
+          "operatingProfit": 4385064.677247092,
+          "rawMaterialCost": 33549151.038416438,
+          "contributionMarginTotal": 14400036.412055917,
+          "totalFixedCost": 10093437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 18024940.558885172,
+              "variableCost": 16304965.018107599,
+              "contributionMargin": 1719975.5407775734,
+              "contributionMarginRatio": 0.0954219812907917,
+              "directFixedCost": 2171613.3076629112
+            },
+            {
+              "key": "pd",
+              "netRevenue": 16046945.628926685,
+              "variableCost": 11976308.722304225,
+              "contributionMargin": 4070636.90662246,
+              "contributionMarginRatio": 0.25367051155732795,
+              "directFixedCost": 2116903.609720043
+            },
+            {
+              "key": "vap",
+              "netRevenue": 21334290.685944382,
+              "variableCost": 12724866.721288491,
+              "contributionMargin": 8609423.964655891,
+              "contributionMarginRatio": 0.40354863873341784,
+              "directFixedCost": 3570139.688617046
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 16189032.452916747,
+              "variableCost": 12095455.419789702,
+              "contributionMargin": 4093577.0331270453,
+              "contributionMarginRatio": 0.2528611295970015,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 11559383.137109393,
+              "variableCost": 8264089.921855681,
+              "contributionMargin": 3295293.2152537126,
+              "contributionMarginRatio": 0.2850751788540295,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 4664591.9525894355,
+              "variableCost": 3319113.5899763787,
+              "contributionMargin": 1345478.3626130568,
+              "contributionMarginRatio": 0.2884450293376995,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 7922895.688984321,
+              "variableCost": 6035036.905640585,
+              "contributionMargin": 1887858.783343736,
+              "contributionMarginRatio": 0.2382788891148144,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 15070273.64215634,
+              "variableCost": 10970360.701154087,
+              "contributionMargin": 4099912.9410022534,
+              "contributionMarginRatio": 0.27205298578875803,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.164246722993168,
+              "allocatedQuantity": 1316.84
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 4.901398631336572,
+              "allocatedQuantity": 978.15
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.309455960994791,
+              "allocatedQuantity": 944.33
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.167648378621491,
+              "allocatedQuantity": 1169.18
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 4.953156726557285,
+              "allocatedQuantity": 878.81
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.627259286447839,
+              "allocatedQuantity": 888.64
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.170691762479222,
+              "allocatedQuantity": 868.28
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 4.995602506925849,
+              "allocatedQuantity": 658.86
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 6.838457580460703,
+              "allocatedQuantity": 684.43
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.1521309733316984,
+              "allocatedQuantity": 346.19
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 4.988636840051637,
+              "allocatedQuantity": 263.67
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 6.920772112645283,
+              "allocatedQuantity": 278.23
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.0672282684702985,
+              "allocatedQuantity": 654.6
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.798787769007559,
+              "allocatedQuantity": 487.62
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.211771501706557,
+              "allocatedQuantity": 473.93
+            }
+          ],
+          "regularHeadcount": 5195,
+          "laborShortfall": 0
+        },
+        {
+          "turn": 6,
+          "hosoProduced": 4877.69,
+          "pdProduced": 2751.42,
+          "vapProduced": 2820.23,
+          "fulfilledQuantity": 11377.01,
+          "outstandingQuantity": 0,
+          "finishedGoodsInventory": 3587.63,
+          "rawMaterialInventory": 3309,
+          "domesticProcured": 3880.15,
+          "rawMaterialShortfall": 0,
+          "netRevenue": 57598306.257775776,
+          "operatingProfit": 4564368.553238735,
+          "rawMaterialCost": 35248236.56524585,
+          "contributionMarginTotal": 14823856.656090617,
+          "totalFixedCost": 9595437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 22708988.605928868,
+              "variableCost": 18921877.496430453,
+              "contributionMargin": 3787111.109498415,
+              "contributionMarginRatio": 0.1667670531355005,
+              "directFixedCost": 2823619.403558447
+            },
+            {
+              "key": "pd",
+              "netRevenue": 14975322.47471639,
+              "variableCost": 11586419.853931578,
+              "contributionMargin": 3388902.6207848117,
+              "contributionMarginRatio": 0.2262991415715068,
+              "directFixedCost": 1826699.328534422
+            },
+            {
+              "key": "vap",
+              "netRevenue": 19913995.17713052,
+              "variableCost": 12266152.251323119,
+              "contributionMargin": 7647842.925807402,
+              "contributionMarginRatio": 0.3840436264939081,
+              "directFixedCost": 3097576.5979071315
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 16986485.364673026,
+              "variableCost": 12695743.129909866,
+              "contributionMargin": 4290742.23476316,
+              "contributionMarginRatio": 0.25259741156853216,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 11262254.39325876,
+              "variableCost": 8097495.365168012,
+              "contributionMargin": 3164759.028090748,
+              "contributionMarginRatio": 0.28100581975710615,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 3861259.803271503,
+              "variableCost": 2766116.6910776217,
+              "contributionMargin": 1095143.1121938815,
+              "contributionMarginRatio": 0.2836232649421847,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 8309181.761808562,
+              "variableCost": 6335734.718659734,
+              "contributionMargin": 1973447.0431488277,
+              "contributionMarginRatio": 0.23750197067771095,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 17179124.93476393,
+              "variableCost": 12550602.610430619,
+              "contributionMargin": 4628522.324333312,
+              "contributionMarginRatio": 0.2694271298398305,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.23166833827498,
+              "allocatedQuantity": 1640.02
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 5.0056850541231235,
+              "allocatedQuantity": 898.21
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.4479572154087235,
+              "allocatedQuantity": 868.58
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.234939032190062,
+              "allocatedQuantity": 1589.59
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 5.058615982341892,
+              "allocatedQuantity": 880.97
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.773398091287119,
+              "allocatedQuantity": 892.28
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.2378419021426526,
+              "allocatedQuantity": 1012.09
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.102023131927229,
+              "allocatedQuantity": 566.27
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 6.989658325366693,
+              "allocatedQuantity": 589.21
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.218789904730247,
+              "allocatedQuantity": 343.39
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.094931563396425,
+              "allocatedQuantity": 192.85
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 7.0740164037673745,
+              "allocatedQuantity": 203.83
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.132712596208891,
+              "allocatedQuantity": 815.62
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.900908314569588,
+              "allocatedQuantity": 447.98
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.348226587125895,
+              "allocatedQuantity": 436.12
+            }
+          ],
+          "regularHeadcount": 4697,
+          "laborShortfall": 0
+        },
+        {
+          "turn": 7,
+          "hosoProduced": 4655.22,
+          "pdProduced": 3025.69,
+          "vapProduced": 3035.62,
+          "fulfilledQuantity": 10724.37,
+          "outstandingQuantity": 0,
+          "finishedGoodsInventory": 3579.79,
+          "rawMaterialInventory": 3290.01,
+          "domesticProcured": 3997.17,
+          "rawMaterialShortfall": 0,
+          "netRevenue": 54646667.97645138,
+          "operatingProfit": 4943514.122241348,
+          "rawMaterialCost": 32691864.30534157,
+          "contributionMarginTotal": 14606451.33376208,
+          "totalFixedCost": 9595437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 17800070.57026505,
+              "variableCost": 14745549.034048703,
+              "contributionMargin": 3054521.5362163484,
+              "contributionMarginRatio": 0.17160165315967427,
+              "directFixedCost": 2648815.361590893
+            },
+            {
+              "key": "pd",
+              "netRevenue": 15847498.820354426,
+              "variableCost": 12587995.70514387,
+              "contributionMargin": 3259503.1152105555,
+              "contributionMarginRatio": 0.20567934108466823,
+              "directFixedCost": 1965356.51586634
+            },
+            {
+              "key": "vap",
+              "netRevenue": 20999098.5858319,
+              "variableCost": 12706671.903496724,
+              "contributionMargin": 8292426.682335176,
+              "contributionMarginRatio": 0.3948944117025137,
+              "directFixedCost": 3264285.383542767
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 18695429.01569016,
+              "variableCost": 13798658.461736288,
+              "contributionMargin": 4896770.553953871,
+              "contributionMarginRatio": 0.2619234118588159,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 10796349.93247697,
+              "variableCost": 7632376.010869663,
+              "contributionMargin": 3163973.921607306,
+              "contributionMarginRatio": 0.29305959341773635,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 3639346.401858036,
+              "variableCost": 2570063.274046494,
+              "contributionMargin": 1069283.1278115418,
+              "contributionMarginRatio": 0.2938118578835004,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 7105220.69580774,
+              "variableCost": 5346756.670887623,
+              "contributionMargin": 1758464.024920117,
+              "contributionMarginRatio": 0.24748900846354505,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 14410321.93061847,
+              "variableCost": 10368105.337801509,
+              "contributionMargin": 4042216.592816962,
+              "contributionMarginRatio": 0.2805084169721582,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.174223729851025,
+              "allocatedQuantity": 1513.15
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 4.914755082645462,
+              "allocatedQuantity": 1125.23
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.33194221796776,
+              "allocatedQuantity": 1090.68
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.177633535414688,
+              "allocatedQuantity": 1112.18
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 4.96674301603104,
+              "allocatedQuantity": 836.89
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.651700411666988,
+              "allocatedQuantity": 849.56
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.180684210834047,
+              "allocatedQuantity": 806.72
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.009376726726105,
+              "allocatedQuantity": 612.81
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 6.864180822743247,
+              "allocatedQuantity": 639.05
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.162078952390412,
+              "allocatedQuantity": 273.47
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.002419747945976,
+              "allocatedQuantity": 208.51
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 6.94708293341926,
+              "allocatedQuantity": 211.47
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.076972831419209,
+              "allocatedQuantity": 584.06
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.811886138229924,
+              "allocatedQuantity": 435.56
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.234031619257152,
+              "allocatedQuantity": 425.03
+            }
+          ],
+          "regularHeadcount": 4697,
+          "laborShortfall": 0
+        },
+        {
+          "turn": 8,
+          "hosoProduced": 3569.41,
+          "pdProduced": 3968.21,
+          "vapProduced": 3945.88,
+          "fulfilledQuantity": 12836.38,
+          "outstandingQuantity": 0,
+          "finishedGoodsInventory": 2226.91,
+          "rawMaterialInventory": 4911.04,
+          "domesticProcured": 6403.72,
+          "rawMaterialShortfall": 0,
+          "netRevenue": 67593372.0361057,
+          "operatingProfit": 9714343.27486252,
+          "rawMaterialCost": 38229049.75402591,
+          "contributionMarginTotal": 20414803.287061416,
+          "totalFixedCost": 9739437.5,
+          "byProduct": [
+            {
+              "key": "hoso",
+              "netRevenue": 22198002.76286179,
+              "variableCost": 17485910.294010904,
+              "contributionMargin": 4712092.468850885,
+              "contributionMarginRatio": 0.2122755150177032,
+              "directFixedCost": 1911593.9131363179
+            },
+            {
+              "key": "pd",
+              "netRevenue": 19759622.827548243,
+              "variableCost": 13508600.670354506,
+              "contributionMargin": 6251022.157193737,
+              "contributionMarginRatio": 0.3163533136107618,
+              "directFixedCost": 2390340.225958419
+            },
+            {
+              "key": "vap",
+              "netRevenue": 25635746.445695672,
+              "variableCost": 16184057.784678876,
+              "contributionMargin": 9451688.661016796,
+              "contributionMarginRatio": 0.36869176721802716,
+              "directFixedCost": 3943503.3609052636
+            }
+          ],
+          "byMarket": [
+            {
+              "key": "CN",
+              "netRevenue": 22805094.96886454,
+              "variableCost": 16037694.19715859,
+              "contributionMargin": 6767400.771705952,
+              "contributionMarginRatio": 0.29674951062231414,
+              "directFixedCost": 0
+            },
+            {
+              "key": "EU",
+              "netRevenue": 11995161.62165255,
+              "variableCost": 8094899.2829295695,
+              "contributionMargin": 3900262.3387229796,
+              "contributionMarginRatio": 0.3251529626480888,
+              "directFixedCost": 0
+            },
+            {
+              "key": "JP",
+              "netRevenue": 4334714.958180026,
+              "variableCost": 2964363.818052639,
+              "contributionMargin": 1370351.1401273874,
+              "contributionMarginRatio": 0.31613408340527727,
+              "directFixedCost": 0
+            },
+            {
+              "key": "OTHER",
+              "netRevenue": 8221078.980400647,
+              "variableCost": 5893725.2812083475,
+              "contributionMargin": 2327353.6991922995,
+              "contributionMarginRatio": 0.2830958934637164,
+              "directFixedCost": 0
+            },
+            {
+              "key": "US",
+              "netRevenue": 20237321.507007945,
+              "variableCost": 13888118.703217952,
+              "contributionMargin": 6349202.803789994,
+              "contributionMarginRatio": 0.31373730963316165,
+              "directFixedCost": 0
+            }
+          ],
+          "allocations": [
+            {
+              "market": "CN",
+              "product": "hoso",
+              "askPrice": 4.320902688781668,
+              "allocatedQuantity": 1783.61
+            },
+            {
+              "market": "CN",
+              "product": "pd",
+              "askPrice": 5.087225497472743,
+              "allocatedQuantity": 1326.3
+            },
+            {
+              "market": "CN",
+              "product": "vap",
+              "askPrice": 6.5509497231724385,
+              "allocatedQuantity": 1285.04
+            },
+            {
+              "market": "US",
+              "product": "hoso",
+              "askPrice": 4.3244323122474375,
+              "allocatedQuantity": 1508.72
+            },
+            {
+              "market": "US",
+              "product": "pd",
+              "askPrice": 5.141025142880146,
+              "allocatedQuantity": 1135.27
+            },
+            {
+              "market": "US",
+              "product": "vap",
+              "askPrice": 6.881312574083304,
+              "allocatedQuantity": 1152.2
+            },
+            {
+              "market": "EU",
+              "product": "hoso",
+              "askPrice": 4.3275901860163595,
+              "allocatedQuantity": 865.74
+            },
+            {
+              "market": "EU",
+              "product": "pd",
+              "askPrice": 5.185144662168237,
+              "allocatedQuantity": 657.67
+            },
+            {
+              "market": "EU",
+              "product": "vap",
+              "askPrice": 7.100856159683266,
+              "allocatedQuantity": 685.75
+            },
+            {
+              "market": "JP",
+              "product": "hoso",
+              "askPrice": 4.308331153334503,
+              "allocatedQuantity": 353.47
+            },
+            {
+              "market": "JP",
+              "product": "pd",
+              "askPrice": 5.177939599050902,
+              "allocatedQuantity": 269.53
+            },
+            {
+              "market": "JP",
+              "product": "vap",
+              "askPrice": 7.186460947049339,
+              "allocatedQuantity": 198.62
+            },
+            {
+              "market": "OTHER",
+              "product": "hoso",
+              "askPrice": 4.220234469798718,
+              "allocatedQuantity": 652.8
+            },
+            {
+              "market": "OTHER",
+              "product": "pd",
+              "askPrice": 4.9807435654560965,
+              "allocatedQuantity": 486.81
+            },
+            {
+              "market": "OTHER",
+              "product": "vap",
+              "askPrice": 6.4495889572649165,
+              "allocatedQuantity": 474.85
+            }
+          ],
+          "regularHeadcount": 4697,
+          "laborShortfall": 1531.15
+        }
+      ]
+    }
+  ]
+}

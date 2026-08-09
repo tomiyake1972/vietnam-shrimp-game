@@ -75,9 +75,20 @@ export function effectiveEfficiencyPerHeadTons(
     coefficientOverride !== undefined && Number.isFinite(coefficientOverride) && coefficientOverride > 0
       ? coefficientOverride
       : laborIntensityCoefficientFor(product, params);
+  // 【重要・2026-08-09】集中係数の基準数量は peakLaborQuantityTons で頭打ちにする。
+  //
+  // 集中係数に下限が無いため、基準数量を無制限に大きくすると係数が0へ近づき
+  // 「必要Workerがほぼ0」になってしまう。計画生産量は意思決定の入力であり、
+  // 設備能力を超える非現実的な値も入り得るため（HOSO集中シナリオの実測で発覚）、
+  // そのまま使うと「巨大な計画を書けば労務がタダになる」抜け道になる。
+  //
+  // 頂点を超えた領域は必要Worker総数が減少へ転じる非単調域であり、
+  // 設計上意味を持たない（concentration.ts の解説参照）。逆算側
+  // （maxQuantityForAvailableWorkers）も同じ位置で探索を打ち切っている。
+  // 両者で同じ上限を使うことで、順算と逆算の整合も保たれる。
   const concentration =
     concentrationQuantityTons !== undefined && Number.isFinite(concentrationQuantityTons)
-      ? concentrationFactor(product, concentrationQuantityTons)
+      ? concentrationFactor(product, Math.min(concentrationQuantityTons, peakLaborQuantityTons(product)))
       : 1;
   const coefficient = baseCoefficient * concentration;
   return coefficient > 0 ? baseEfficiencyPerHeadTons / coefficient : baseEfficiencyPerHeadTons;
