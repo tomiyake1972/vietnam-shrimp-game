@@ -1,5 +1,5 @@
 {
-  "label": "stageD",
+  "label": "stageD-diag",
   "turns": 8,
   "rows": [
     {
@@ -50,6 +50,41 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.3184152046783624,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.082125313283208,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 11231.21,
       "fulfilledVolume": 10126.56,
       "outstandingVolume": 4204.65,
@@ -111,6 +146,25 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.3472066276803119,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12702.69,
       "fulfilledVolume": 12112.16,
       "outstandingVolume": 4190.53,
@@ -172,6 +226,25 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2347353801169592,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 11416.85,
       "fulfilledVolume": 8904.17,
       "outstandingVolume": 4412.68,
@@ -233,6 +306,25 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1759259259259258,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 10273.04,
       "fulfilledVolume": 7491.34,
       "outstandingVolume": 4431.7,
@@ -294,6 +386,57 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2257748538011695,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1059933166248956,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.0505818713450292,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.7,
+            "hadPriorQuarterUtilization": 0,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12004.09,
       "fulfilledVolume": 11066.17,
       "outstandingVolume": 2337.92,
@@ -355,6 +498,41 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.322079970760234,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3977,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.0653859649122808,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 1,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3977,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 11394.38,
       "fulfilledVolume": 14263.7,
       "outstandingVolume": 1335.33,
@@ -416,6 +594,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.0833173001949317,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4756,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2142035087719298,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4756,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1551130116959065,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4756,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12712.1,
       "fulfilledVolume": 9856.25,
       "outstandingVolume": 7046.38,
@@ -477,6 +706,41 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1842053362573102,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3673,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.0635902923976608,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3673,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 11540.56,
       "fulfilledVolume": 9490.22,
       "outstandingVolume": 6463.02,
@@ -538,6 +802,25 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.3007324561403506,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3033,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 10630.15,
       "fulfilledVolume": 9416.18,
       "outstandingVolume": 5645.67,
@@ -599,6 +882,25 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4303508771929825,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4444,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 11967.15,
       "fulfilledVolume": 10150.54,
       "outstandingVolume": 4154.53,
@@ -660,6 +962,41 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.3268557017543858,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.608,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.0706324979114452,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.608,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 13859.29,
       "fulfilledVolume": 15107.07,
       "outstandingVolume": 87.55,
@@ -721,6 +1058,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.0697737816764132,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3876,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4706667641325535,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3876,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.369104678362573,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3876,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12706.67,
       "fulfilledVolume": 12863.69,
       "outstandingVolume": 6889.36,
@@ -782,6 +1170,57 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2298554824561403,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.355,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2720204678362572,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.355,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1311722807017546,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.355,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12317.17,
       "fulfilledVolume": 11701.56,
       "outstandingVolume": 7078.63,
@@ -843,6 +1282,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4300340643274856,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3604,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2349887914230018,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3604,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1688689083820665,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3604,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 13246.62,
       "fulfilledVolume": 12548.18,
       "outstandingVolume": 6344.11,
@@ -904,6 +1394,57 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1255172514619882,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3872,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1599894736842105,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3872,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.466624707602339,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.3872,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12055.78,
       "fulfilledVolume": 11354.44,
       "outstandingVolume": 4855.87,
@@ -965,6 +1506,25 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1862086988304092,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.653,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 14124.76,
       "fulfilledVolume": 14212.31,
       "outstandingVolume": 0,
@@ -1026,6 +1586,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1155922027290448,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5058,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.5172666666666668,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5058,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4168384502923976,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5058,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12683.48,
       "fulfilledVolume": 10507.1,
       "outstandingVolume": 9065.74,
@@ -1087,6 +1698,57 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1673979532163743,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4584,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.5107020467836256,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4584,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2152168421052632,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4584,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12337.62,
       "fulfilledVolume": 12337.54,
       "outstandingVolume": 7078.71,
@@ -1148,6 +1810,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.3690122807017544,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4932,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4419874269005848,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4932,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4004412280701752,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4932,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 13139.78,
       "fulfilledVolume": 12251.59,
       "outstandingVolume": 7232.3,
@@ -1209,6 +1922,57 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2082823830409357,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4452,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2430661654135338,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4452,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.508716812865497,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4452,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12034.29,
       "fulfilledVolume": 12459.27,
       "outstandingVolume": 4430.89,
@@ -1270,6 +2034,14 @@
       },
       "primaryConstraint": "none",
       "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 14123.06,
       "fulfilledVolume": 14123.06,
       "outstandingVolume": 0,
@@ -1331,6 +2103,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1906815302144251,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4128,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.5925574074074074,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4128,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4928312865497078,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4128,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12748.47,
       "fulfilledVolume": 11936.95,
       "outstandingVolume": 9877.26,
@@ -1392,6 +2215,57 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1452146929824563,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4835,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4888097222222223,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4835,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.353684678362573,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4835,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12406.88,
       "fulfilledVolume": 12886.41,
       "outstandingVolume": 6599.18,
@@ -1453,6 +2327,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4128715643274854,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4808,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4867419103313841,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4808,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.471937426900585,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4808,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 13321.71,
       "fulfilledVolume": 13138.57,
       "outstandingVolume": 7415.44,
@@ -1514,6 +2439,57 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1676818713450292,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4883,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2026731829573936,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4883,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.6674068713450296,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4883,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12095.84,
       "fulfilledVolume": 13713.31,
       "outstandingVolume": 2813.42,
@@ -1575,6 +2551,14 @@
       },
       "primaryConstraint": "none",
       "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 14413.4,
       "fulfilledVolume": 14413.4,
       "outstandingVolume": 0,
@@ -1636,6 +2620,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2551423976608185,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4691,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.6573188109161794,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4691,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.5586450292397662,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.4691,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12655.18,
       "fulfilledVolume": 5462.39,
       "outstandingVolume": 17070.05,
@@ -1697,6 +2732,57 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.084474926900585,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.505,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.428385745614035,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.505,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4541044444444446,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.505,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12294.84,
       "fulfilledVolume": 13007.75,
       "outstandingVolume": 5886.27,
@@ -1758,6 +2844,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4225118421052632,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5157,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4967032163742688,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5157,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.5226025341130607,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5157,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 13205.08,
       "fulfilledVolume": 13523.87,
       "outstandingVolume": 7096.65,
@@ -1819,6 +2956,57 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.068116081871345,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.539,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.1034187969924811,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.539,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.6697698830409355,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.539,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12007.41,
       "fulfilledVolume": 12993.99,
       "outstandingVolume": 1826.84,
@@ -1880,6 +3068,14 @@
       },
       "primaryConstraint": "none",
       "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 14638.58,
       "fulfilledVolume": 14638.58,
       "outstandingVolume": 0,
@@ -1941,6 +3137,64 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.511698976608187,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.2147,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.9143077972709548,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.2147,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.8172502923976606,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.2147,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "共通原料処理能力は今期不足だが、持続性・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "commonShortfallRatio": 1.2298411890838203
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12563.53,
       "fulfilledVolume": 7619.84,
       "outstandingVolume": 22013.74,
@@ -2002,6 +3256,41 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.3489684210526316,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5097,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.5364618713450293,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5097,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12226.23,
       "fulfilledVolume": 13082.5,
       "outstandingVolume": 5030,
@@ -2063,6 +3352,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.3890126461988304,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5309,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4637044834307993,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5309,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.5309812865497077,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5309,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12979.79,
       "fulfilledVolume": 13370.57,
       "outstandingVolume": 6705.87,
@@ -2124,6 +3464,25 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.5680959064327484,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5453,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 11920.63,
       "fulfilledVolume": 12796.64,
       "outstandingVolume": 950.83,
@@ -2185,6 +3544,14 @@
       },
       "primaryConstraint": "none",
       "secondaryConstraint": "none",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "当期はいずれの能力区分にもボトルネックが観測されないため、設備投資を見送る（既定の正常な結果）。",
+          "keyValues": {}
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 14618.8,
       "fulfilledVolume": 14618.8,
       "outstandingVolume": 0,
@@ -2246,6 +3613,64 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.8120768031189083,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.2997,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 2.214999805068226,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.2997,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 2.119069298245614,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.2997,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "共通原料処理能力は今期不足だが、持続性・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "commonShortfallRatio": 1.4503732553606234
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12521.38,
       "fulfilledVolume": 4500.67,
       "outstandingVolume": 30034.45,
@@ -2307,6 +3732,41 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.2510482456140348,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5252,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.5996138011695906,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5252,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12164.29,
       "fulfilledVolume": 14195.68,
       "outstandingVolume": 2998.61,
@@ -2368,6 +3828,57 @@
       },
       "primaryConstraint": "production_capacity_shortage",
       "secondaryConstraint": "worker_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "HOSOは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.3473798245614033,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5248,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "PDは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.4225297270955164,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5248,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        },
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.5205329434697856,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5248,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 12854.2,
       "fulfilledVolume": 15452.05,
       "outstandingVolume": 4108.02,
@@ -2429,6 +3940,25 @@
       },
       "primaryConstraint": "worker_shortage",
       "secondaryConstraint": "production_capacity_shortage",
+      "capexDiagnostics": [
+        {
+          "code": "CAPEX_DEFERRED",
+          "message": "VAPは今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。",
+          "keyValues": {
+            "shortfallRatio": 1.460168567251462,
+            "sustained": 0,
+            "noExcess": 1,
+            "safe": 0,
+            "alreadyPlanned": 0,
+            "effectiveShortfallThreshold": 1.05,
+            "productThresholdBias": 0,
+            "equipmentUtilizationLastQuarter": 0.5413,
+            "hadPriorQuarterUtilization": 1,
+            "capexSustainedUtilizationThreshold": 0.92
+          }
+        }
+      ],
+      "capexProposals": [],
       "contractedVolume": 13544.32,
       "fulfilledVolume": 14079.69,
       "outstandingVolume": 415.46,

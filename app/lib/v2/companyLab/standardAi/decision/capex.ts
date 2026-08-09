@@ -147,6 +147,13 @@ export function buildStandardAiCapexDecision(
           alreadyPlanned: alreadyPlanned ? 1 : 0,
           effectiveShortfallThreshold,
           productThresholdBias,
+          // 【2026-08-09・Test16段階D監査】どの条件で見送ったかを後から追跡できるよう、
+          // sustained判定に実際に使った稼働率としきい値も保存する。
+          // （見送り理由が「持続性」なのか「財務」なのかがsustained:0だけでは分からず、
+          //  段階Dで「誰もHOSO増設を提案しない」原因の特定に時間がかかったため）
+          equipmentUtilizationLastQuarter: pressures.equipmentUtilizationLastQuarter,
+          hadPriorQuarterUtilization: pressures.hadPriorQuarterUtilization ? 1 : 0,
+          capexSustainedUtilizationThreshold: params.capexSustainedUtilizationThreshold,
         },
         message: `${product.toUpperCase()}は今期は能力不足だが、持続性・在庫・財務健全性のいずれかの条件を満たさないため増設を見送る。`,
       });

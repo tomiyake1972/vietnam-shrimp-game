@@ -39,6 +39,16 @@ interface MarketRow {
   readonly desiredQuantity: number;
 }
 
+/**
+ * capexドメインのdiagnosticsをそのまま写すための行。
+ * keyValues は Standard AI が実際に計算した値なので、加工せずに保存する。
+ */
+interface CapexDiagnosticRow {
+  readonly code: string;
+  readonly message: string;
+  readonly keyValues: Readonly<Record<string, number>>;
+}
+
 interface TurnRow {
   readonly turn: number;
   readonly companyId: string;
@@ -58,6 +68,9 @@ interface TurnRow {
   // 制約
   readonly primaryConstraint: string | null;
   readonly secondaryConstraint: string | null;
+  // 設備投資diagnostics（Standard AIが実際に計算した判断根拠をそのまま保存する）
+  readonly capexDiagnostics: readonly CapexDiagnosticRow[];
+  readonly capexProposals: readonly string[];
   // 実績（前Turnの確定記録から）
   readonly contractedVolume: number | null;
   readonly fulfilledVolume: number | null;
@@ -146,6 +159,16 @@ function run(): void {
         marketWeights: Object.keys(weights).length > 0 ? weights : null,
         primaryConstraint: sd ? String(sd.primaryConstraint) : null,
         secondaryConstraint: sd ? String(sd.secondaryConstraint) : null,
+        capexDiagnostics: entries
+          .filter((e) => e.domain === "capex")
+          .map((e) => ({
+            code: String(e.code),
+            message: String(e.message ?? ""),
+            keyValues: Object.fromEntries(
+              Object.entries(e.keyValues ?? {}).map(([k, v]) => [k, Number(v)])
+            ) as Readonly<Record<string, number>>,
+          })),
+        capexProposals: (decision.capexDecision?.newProjectProposals ?? []).map((p) => String(p.projectType)),
       };
     }
 
