@@ -108,17 +108,37 @@ test("SNAP-6[invariant]: 7点ロールフォワードは内部的に整合する
   }
 });
 
-test("SNAP-7[invariant]: 緊急融資のみが発動したturnでは通常融資実行=0（二重計上の否定）", () => {
-  // 【スタック非依存性の注記】develop/v2・pd_laborのどちらでも緊急融資は
-  // 少なくとも1件発生することが既知（develop/v2で15件、pd_laborで45件）。
-  // 「緊急融資が発生した場合は必ず通常融資実行=0」という条件文自体は
-  // 両スタックで成立すべき不変条件であり、発生件数（15 vs 45）はスタック
-  // 固有の値としてunderwritingSnapshotDevelopV2.test.ts / Pdlabor.test.tsで扱う。
+test("SNAP-7[invariant]: 緊急融資は通常融資では埋まらなかった残余だけを賄う（二重計上の否定）", () => {
+  // 【2026-08-09・Test16で命題を修正】
+  // 旧命題は「緊急融資が発動したturnでは通常融資実行=0」だった。しかし
+  // financing/liquidityClose.ts の緊急融資判定は、通常融資を実行した**後**の
+  // 現金で利息・約定元本を払いきれない残余（shortfallBeforeEmergency）に対して
+  // 発動する設計であり、「通常融資と緊急融資は同一四半期に併存しない」ことは
+  // エンジンが保証していない（コード上も明示的に併存を許している）。
+  // 旧命題は、当時のデータでたまたま併存例が無かったことに依存していた。
+  //
+  // 短期運転資金の借入判断（Test16）を入れた結果、運転資金として通常融資を
+  // 受けたうえでなお元利返済に足りず緊急融資も受ける、という**設計どおりの**
+  // 組み合わせが実際に現れるようになった。
+  //
+  // このテストが本来守るべきは題名どおり「二重計上の否定」である。すなわち
+  //   ・通常＋緊急＝合計実行額（同じ金額を二度数えていない）
+  //   ・緊急融資は残余に対する額であって、通常融資と同額を重ねて実行していない
+  // を検証する。
   const { rfSnapshots } = runOnce(true);
-  const emergencyOnly = rfSnapshots.filter((rf) => rf.emergencyDrawUsd > 0);
-  assert.ok(emergencyOnly.length > 0, "少なくとも1件は緊急融資が発動する行があること（develop/v2・pd_labor共通の既知挙動）");
-  for (const rf of emergencyOnly) {
-    assert.equal(rf.normalDrawUsd, 0, `${rf.companyId} ${periodToString(rf.period)}: 緊急融資発動時は通常融資実行が0であるべき`);
+  const withEmergency = rfSnapshots.filter((rf) => rf.emergencyDrawUsd > 0);
+  assert.ok(withEmergency.length > 0, "少なくとも1件は緊急融資が発動する行があること（develop/v2・pd_labor共通の既知挙動）");
+  for (const rf of withEmergency) {
+    assert.equal(
+      rf.totalLoanDrawUsd,
+      rf.normalDrawUsd + rf.emergencyDrawUsd,
+      `${rf.companyId} ${periodToString(rf.period)}: 通常+緊急=合計実行額（二重計上していない）`
+    );
+    // 緊急融資は「最後の手段」であり、その四半期の元利返済必要額を超えて実行されない。
+    assert.ok(
+      rf.emergencyDrawUsd <= rf.scheduledPrincipalDueUsd + rf.scheduledInterestDueUsd + 1,
+      `${rf.companyId} ${periodToString(rf.period)}: 緊急融資が当期の元利返済必要額を超えている（emergency=${rf.emergencyDrawUsd}）`
+    );
   }
 });
 

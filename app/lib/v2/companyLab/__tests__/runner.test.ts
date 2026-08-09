@@ -13,6 +13,7 @@ import { minimumAcceptablePremium, orderQuantityFactor } from "../premiumPolicy"
 import { CompanyDecisionInput, CompanyLabConfig, CompanyLabState } from "../types";
 import { CompanyProductionPlanEntry } from "../../production/types";
 import { usd } from "../../finance/types";
+import { FINANCING_PARAMETERS_V1 } from "../../financing/parameters";
 
 const EPSILON = 1e-6;
 
@@ -646,7 +647,17 @@ test("自社養殖の池入れ量は既存の調達制約スケール比率ど�
   // 変更していない）任せとし、ここでは「池入れの縮小比率がscaleRatioに一致する」
   // という新たに追加した関係式（constrainedAquacultureStocking = planned×scaleRatio）
   // だけを検証する。
-  const partialResult = advanceCompanyLabQuarter(withCompanyCash(state0, targetCompanyId, 22_000_000), fixtures, decisions);
+  // 【2026-08-09・Test16】現金水準はハードコードせず、資金ゲートの式から逆算する。
+  //   利用可能流動性 = 現金 × domesticPurchaseCashAllocationRatio + 承認融資
+  // なので、必要額のちょうど半分だけ賄える現金を与えれば scaleRatio は 0.5 付近になる。
+  // 以前は 22,000,000 を直接書いていたが、これは比率0.6のときだけ中間値になる値であり、
+  // 比率を 0.6 → 1.0 にした時点で「制約なし(1.0)」へ張り付いてしまった。
+  // このテストが守るのは「池入れ量の縮小比率が scaleRatio に一致する」ことであって、
+  // 特定の現金額ではない。
+  const plannedCashNeedUsd = healthyFinancing?.procurementConstraint?.plannedCashNeedUsd ?? 0;
+  assert.ok(plannedCashNeedUsd > 0, "基準ケースの調達必要額が取れていない");
+  const partialCashUsd = (plannedCashNeedUsd * 0.5) / FINANCING_PARAMETERS_V1.liquidity.domesticPurchaseCashAllocationRatio;
+  const partialResult = advanceCompanyLabQuarter(withCompanyCash(state0, targetCompanyId, partialCashUsd), fixtures, decisions);
   const partialSummary = partialResult.history[0].companySummaries.find((x) => x.companyId === targetCompanyId)!;
   const partialFinancing = partialResult.history[0].financingResults.find((x) => x.companyId === targetCompanyId);
   const partialScaleRatio = partialFinancing?.procurementConstraint?.scaleRatio ?? 1;
