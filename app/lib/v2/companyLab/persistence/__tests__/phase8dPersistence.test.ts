@@ -448,7 +448,7 @@ test("PS-9（追補4・5）: 旧案件と新案件が同じ会社に併存して
 // 営業人員の追加採用（forward-port）: 永続化round-trip・旧schema後方互換
 // ---------------------------------------------------------------------
 
-test("PS-SFH-1: 永続化round-trip後も、採用予定人数を反映した営業人員総数（会社別）が保持される（BAL 18人→採用6人→24人）", () => {
+test("PS-SFH-1: 永続化round-trip後も、採用予定人数を反映した営業人員総数（会社別）が保持される（初期人数＋採用6人）", () => {
   const { state, fixtures } = initializeCompanyLab(baseTestConfig({ turns: 1 }));
   const balFixture = fixtures.find((f) => f.companyId === "BAL")!;
   const publicInfo = buildPublicMarketInfo(state);
@@ -461,7 +461,13 @@ test("PS-SFH-1: 永続化round-trip後も、採用予定人数を反映した営
   const record = stateAfter.history[stateAfter.history.length - 1];
 
   const balHeadcountAfter = buildCompanyOwnState(stateAfter, balFixture).salesForceHiringState.headcount;
-  assert.equal(balHeadcountAfter, 24, "テスト前提: 採用6人ぶんが次期に反映されていること");
+  // 初期営業人数はfixture側で変わりうる（Test16で60人へ）。検証したいのは
+  // 「採用6人ぶんが次期へ繰り越されて永続化される」ことであり、特定の人数ではない。
+  assert.equal(
+    balHeadcountAfter,
+    balFixture.salesForceHeadcountTotal + 6,
+    "テスト前提: 採用6人ぶんが次期に反映されていること"
+  );
 
   const runtime = createCompanyLabRuntimeSnapshot(stateAfter);
   assert.ok(runtime.salesForceHiringState.companies.length > 0, "スナップショットに営業人員総数が含まれていません");
@@ -478,8 +484,8 @@ test("PS-SFH-1: 永続化round-trip後も、採用予定人数を反映した営
   const restored = restoreCompanyLabStateFromRuntimeSnapshot(stored.config, decoded.currentState.runtime, [record]);
   assert.equal(
     buildCompanyOwnState(restored, balFixture).salesForceHiringState.headcount,
-    24,
-    "round-trip後もBALの営業人員総数24人が保持されていること"
+    balFixture.salesForceHeadcountTotal + 6,
+    "round-trip後もBALの営業人員総数が保持されていること"
   );
 });
 

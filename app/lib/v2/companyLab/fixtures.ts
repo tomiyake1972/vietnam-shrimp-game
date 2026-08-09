@@ -163,7 +163,7 @@ export function buildCompanyFixtures(startPeriod: PeriodV2): readonly CompanyFix
       ],
       workerBaseline: [workerBaseline(`${BAL}-F1`, BAL, 6000, { hoso: 0.85, pd: 0.8, vap: 0.75 })],
       aquacultureCapacity: hosoEqTons(15000),
-      salesForceHeadcountTotal: 18,
+      salesForceHeadcountTotal: 60,
       procurementHeadcountTotal: 12,
       initialRawMaterialLots: [initialLot(`${BAL}-RM-INIT`, BAL, "VN", 3000, 4.2, p0)],
       // Phase 6.3: バランス型の標準的なコスト水準（暫定値・要校正）。
@@ -194,7 +194,7 @@ export function buildCompanyFixtures(startPeriod: PeriodV2): readonly CompanyFix
       ],
       workerBaseline: [workerBaseline(`${MASS}-F1`, MASS, 9000, { hoso: 0.9, pd: 0.6, vap: 0.5 })],
       aquacultureCapacity: hosoEqTons(18000),
-      salesForceHeadcountTotal: 22,
+      salesForceHeadcountTotal: 60,
       procurementHeadcountTotal: 20,
       initialRawMaterialLots: [initialLot(`${MASS}-RM-INIT`, MASS, "VN", 5000, 4.0, p0)],
       // Phase 6.3: HOSO大量生産は効率的だが、PD・VAPは技能が低くコスト高
@@ -226,7 +226,7 @@ export function buildCompanyFixtures(startPeriod: PeriodV2): readonly CompanyFix
       ],
       workerBaseline: [workerBaseline(`${JPQ}-F1`, JPQ, 5500, { hoso: 0.6, pd: 0.95, vap: 0.7 })],
       aquacultureCapacity: hosoEqTons(9000),
-      salesForceHeadcountTotal: 14,
+      salesForceHeadcountTotal: 60,
       procurementHeadcountTotal: 10,
       initialRawMaterialLots: [initialLot(`${JPQ}-RM-INIT`, JPQ, "VN", 2500, 4.3, p0)],
       // Phase 6.3: PD加工が効率的（PD最低受注水準が5社中最低）。
@@ -257,7 +257,7 @@ export function buildCompanyFixtures(startPeriod: PeriodV2): readonly CompanyFix
       ],
       workerBaseline: [workerBaseline(`${VAP}-F1`, VAP, 6500, { hoso: 0.5, pd: 0.65, vap: 0.95 })],
       aquacultureCapacity: hosoEqTons(10000),
-      salesForceHeadcountTotal: 14,
+      salesForceHeadcountTotal: 60,
       procurementHeadcountTotal: 10,
       initialRawMaterialLots: [initialLot(`${VAP}-RM-INIT`, VAP, "VN", 2500, 4.3, p0)],
       // Phase 6.3: VAP加工が効率的（VAP最低受注水準が5社中最低）。
@@ -288,7 +288,7 @@ export function buildCompanyFixtures(startPeriod: PeriodV2): readonly CompanyFix
       ],
       workerBaseline: [workerBaseline(`${CONSV}-F1`, CONSV, 4500, { hoso: 0.8, pd: 0.75, vap: 0.7 }, 0.97)],
       aquacultureCapacity: hosoEqTons(10000),
-      salesForceHeadcountTotal: 10,
+      salesForceHeadcountTotal: 60,
       procurementHeadcountTotal: 8,
       initialRawMaterialLots: [initialLot(`${CONSV}-RM-INIT`, CONSV, "VN", 3000, 4.1, p0)],
       // Phase 6.3: 保守的会社は最低貢献利益の要求が高め（薄利受注を避ける）。

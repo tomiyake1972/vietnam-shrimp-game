@@ -18,6 +18,7 @@ import { CompanyId, CompanySalesPlanEntry } from "../../sales/types";
 import { hosoEqTons, unwrapUnit } from "../../core/units";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState, CompanyQuarterRecord, Sai5FeatureFlags } from "../types";
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../runner";
+import { asSalesShortageCase } from "./_support/salesShortageCase";
 import { generateAutoPolicyDecision } from "../autoPolicy";
 import { STANDARD_AI_PARAMETERS_V1 } from "../standardAi/parameters";
 import { createCompanyLabRuntimeSnapshot, restoreCompanyLabStateFromRuntimeSnapshot } from "../persistence/snapshot";
@@ -46,8 +47,19 @@ interface ControlledRun {
  * 実エンジンを暫定自動方針で回しつつ、販売計画だけを任意に書き換えられる制御実行。
  * 「他をすべて同じにして供給量だけ変える」という因果テストの前提を満たすために使う。
  */
-function runControlled(cfg: CompanyLabConfig, quarters: number, mutate?: PlanMutator): ControlledRun {
-  const { state: initialState, fixtures } = initializeCompanyLab(cfg);
+function runControlled(
+  cfg: CompanyLabConfig,
+  quarters: number,
+  mutate?: PlanMutator,
+  // 【Test16】営業が制約であることを前提に因果を見るテストだけ true にする。
+  // ゲームの初期営業人数（60人）では営業がボトルネックにならず、
+  // 「営業基盤の差が成約シェアの差を生む」という因果が観測できなくなるため。
+  // 保存→復元の一致テストのように営業制約に依存しないものは false のままにする。
+  salesShortageCase = false
+): ControlledRun {
+  const { state: initialState, fixtures } = salesShortageCase
+    ? asSalesShortageCase(initializeCompanyLab(cfg))
+    : initializeCompanyLab(cfg);
   let state = initialState;
   const decisions: { turn: number; decision: CompanyDecisionInput }[] = [];
   const salesBaseStateByTurn: (SalesBaseState | undefined)[] = [];
@@ -187,7 +199,8 @@ test("SAI-5因果(1a): 暫定自動方針（Standard AI以外）の経路でも�
 });
 
 test("SAI-5因果(1b): 営業基盤の高い会社ほど、同じ市場×商品での成約シェアが高い（分位点比較）", () => {
-  const run = runControlled(config("causal-1b", QUARTERS, ALL_ON), QUARTERS, concentrateOn("vap", 3));
+  // 営業基盤の差が成約シェアへ効くことを見るため、営業不足ケースで実行する。
+  const run = runControlled(config("causal-1b", QUARTERS, ALL_ON), QUARTERS, concentrateOn("vap", 3), true);
   const last = run.history[run.history.length - 1];
   const stateBefore = run.salesBaseStateByTurn[run.history.length - 1];
   assert.ok(stateBefore, "前期末の営業基盤stateが取れていない");

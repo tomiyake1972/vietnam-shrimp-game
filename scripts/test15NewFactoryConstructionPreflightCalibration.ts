@@ -67,6 +67,7 @@
 // 併用し、両方を明示的にラベル分けして報告する。
 
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../app/lib/v2/companyLab/runner";
+import { asSalesShortageCase } from "../app/lib/v2/companyLab/__tests__/_support/salesShortageCase";
 import { generateAutoPolicyDecision } from "../app/lib/v2/companyLab/autoPolicy";
 import { CompanyDecisionInput, CompanyLabState, CompanyQuarterRecord } from "../app/lib/v2/companyLab/types";
 import { CompanyId } from "../app/lib/v2/sales/types";
@@ -268,7 +269,12 @@ export interface CaseRunOptions {
 
 export function runCase(options: CaseRunOptions): readonly QuarterMetricsRow[] {
   const config = { scenarioId: "baseline" as const, mode: "canonical" as const, seed: options.seed, turns: options.horizonQuarters };
-  const { state: initialState, fixtures } = initializeCompanyLab(config);
+  // 【Test16】この診断スクリプトは「需要が多い環境ほど設備稼働率が高い」という
+  // 環境構築の妥当性を測るためのもので、営業が制約であることを前提にしている。
+  // ゲームの初期営業人数（60人）ではその前提が成立せず、どの環境でも売り切れて
+  // 稼働率の差が出なくなる。そこで営業不足ケースを明示的に作る
+  // （ゲームパラメータ・エンジンには一切触れない。入力データの差し替えのみ）。
+  const { state: initialState, fixtures } = asSalesShortageCase(initializeCompanyLab(config));
   const focusFixture = fixtures.find((f) => f.companyId === FOCUS_COMPANY_ID)!;
   const constructOn = options.caseType !== "off";
 

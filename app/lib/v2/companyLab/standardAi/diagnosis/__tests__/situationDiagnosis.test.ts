@@ -21,11 +21,33 @@ function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig
   return { scenarioId: "baseline", mode: "canonical", seed: "sai6-situation-diagnosis-001", turns: 8, ...overrides };
 }
 
-/** BAL会社のturn1状態（＝Test14 Turn1の初期条件そのもの。fixtures.ts参照）。 */
+/**
+ * BAL会社のturn1状態。
+ *
+ * 【2026-08-08・Test16の初期営業人数変更に伴う分離】
+ * このファイルのゴールデンケースは「営業が強い制約である状況で、Standard AIが
+ * 何をどう診断するか」を固定するものであり、**営業不足が前提条件**である。
+ *
+ * Test16でゲームの初期営業人数が60人になったため、fixtureの既定値をそのまま使うと
+ * 営業はもうボトルネックではなくなり、このテストが何を検証していたのかが失われる。
+ *
+ * そこで指示Oに従い、**このテスト専用に営業人数を低く固定**する。
+ * 「初期ゲーム状態の検証」ではなく「営業不足診断そのものの検証」であるため、
+ * 期待値を書き換えるのではなく前提条件を明示的に作る、という扱いにしてある。
+ *
+ * この値は、Test16以前のBALの初期営業人数（18人）である。
+ */
+const SALES_SHORTAGE_CASE_HEADCOUNT = 18;
+
 function setupBal(seed = "sai6-situation-diagnosis-001") {
   const { state, fixtures } = initializeCompanyLab(baseConfig({ seed }));
-  const fixture = fixtures.find((f) => f.companyId === "BAL")!;
-  const ownState = buildCompanyOwnState(state, fixture);
+  const baseFixture = fixtures.find((f) => f.companyId === "BAL")!;
+  // 営業不足ケースを意図的に作る（ゲームの初期値には依存させない）。
+  const fixture = { ...baseFixture, salesForceHeadcountTotal: SALES_SHORTAGE_CASE_HEADCOUNT };
+  const ownState = {
+    ...buildCompanyOwnState(state, baseFixture),
+    salesForceHiringState: { companyId: baseFixture.companyId, headcount: SALES_SHORTAGE_CASE_HEADCOUNT },
+  };
   const publicInfo = buildPublicMarketInfo(state);
   return { fixture, ownState, publicInfo, period: state.currentPeriod, turn: 1 };
 }
