@@ -21,6 +21,7 @@
 
 import { hosoEqTons, ratio, roundHosoEqTons, roundRatio, unwrapUnit } from "../core/units";
 import { Product } from "../market/types";
+import { concentrationFactor, CONCENTRATION_CURVE_BY_PRODUCT, peakLaborQuantityTons } from "./concentration";
 import { allocateByPriorityTiers, PriorityAllocationItem } from "./priorityAllocation";
 import { PRODUCTION_PARAMETERS_V1, ProductionParameters } from "./parameters";
 import { FactoryEffectiveCapacity, FactoryWorkerAllocationSummary, WorkerAllocationEntry, WorkerAssignment } from "./types";
@@ -63,13 +64,133 @@ export function effectiveEfficiencyPerHeadTons(
   // （companyLab/pdMechanizationState.tsが、稼働中のPD省人化投資案件から算出した
   // その工場だけの実効PD係数をここへ渡す）。省略時はparams.labor.laborIntensityCoefficient
   // をそのまま使う（既存挙動）。0以下・非有限値は無視する（防御的）。
-  coefficientOverride?: number
+  coefficientOverride?: number,
+  // 【Test16 Stage E】商品集中生産効率の基準となる計画生産量（トン）。
+  // 指定すると (override ?? intensity) × concentrationFactor(product, 数量) が
+  // 実効係数になる。**置換ではなく乗算合成**なので、PD省人化投資の効果と両立する。
+  // 省略時は集中効果なし（係数1.00）＝既存挙動。
+  concentrationQuantityTons?: number
 ): number {
-  const coefficient =
+  const baseCoefficient =
     coefficientOverride !== undefined && Number.isFinite(coefficientOverride) && coefficientOverride > 0
       ? coefficientOverride
       : laborIntensityCoefficientFor(product, params);
-  return baseEfficiencyPerHeadTons / coefficient;
+  const concentration =
+    concentrationQuantityTons !== undefined && Number.isFinite(concentrationQuantityTons)
+      ? concentrationFactor(product, concentrationQuantityTons)
+      : 1;
+  const coefficient = baseCoefficient * concentration;
+  return coefficient > 0 ? baseEfficiencyPerHeadTons / coefficient : baseEfficiencyPerHeadTons;
+}
+
+/**
+ * 【Test16 Stage E】ある数量を作るのに必要な常用ワーカー数（集中効果込み）。
+ *
+ *   requiredWorker(quantity)
+ *     = quantity ÷ (基準生産性 ÷ (labor intensity × concentrationFactor(product, quantity))
+ *                   × 出勤率 × 技能 × 残業係数)
+ *
+ * 数量が係数を決めるため、数量→人数は**直接計算**できる（循環しない）。
+ */
+export function requiredHeadcountForQuantityWithConcentration(
+  quantity: number,
+  baseEfficiencyPerHeadTons: number,
+  product: Product,
+  attendanceRate: number,
+  skillLevel: number,
+  appliedOvertimeRate: number,
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
+  coefficientOverride?: number
+): number {
+  const efficiency = effectiveEfficiencyPerHeadTons(baseEfficiencyPerHeadTons, product, params, coefficientOverride, quantity);
+  return requiredHeadcountForQuantity(quantity, efficiency, attendanceRate, skillLevel, appliedOvertimeRate, params);
+}
+
+/**
+ * 【Test16 Stage E】「この人数で作れる最大数量」を二分探索で逆算する。
+ *
+ * 集中効果は数量に依存するため、`人数 → 最大数量` を閉じた式では解けない
+ * （代表生産量を仮定すると、画面・診断・エンジンで別々の値を置くことになり
+ *  判断3で禁じられている）。そこで
+ *      requiredWorker(quantity) <= availableWorker
+ * を満たす最大の quantity を数値的に求める。
+ *
+ * requiredWorker は quantity に対して単調増加である
+ * （集中効果で1トンあたり人手は減るが、総人手は増え続ける。係数は線形に
+ *  下がるので required ∝ quantity × (1 − k×quantity) ではなく
+ *  quantity × factor(quantity) の形になり、factor が正である限り単調増加）。
+ * したがって二分探索が使える。
+ *
+ * @param upperBoundTons 探索上限。通常は設備能力を渡す（設備を超えては作れない）。
+ */
+export function maxQuantityForAvailableWorkers(
+  availableRegularHeadcount: number,
+  availableTemporaryHeadcount: number,
+  attendanceRate: number,
+  skillLevel: number,
+  appliedOvertimeRate: number,
+  upperBoundTons: number,
+  params: ProductionParameters = PRODUCTION_PARAMETERS_V1,
+  product: Product = "hoso",
+  coefficientOverride?: number
+): number {
+  // 【単調性の保護】集中係数に下限が無いため、必要Worker総数は peakLaborQuantityTons
+  // を超えると減少へ転じる（concentration.ts の解説参照）。二分探索の単調性前提が
+  // 破れる領域なので、探索上限をそこで打ち切る。
+  // HOSOの頂点は24,000t＝MAX_HOSO_CAPACITY_TONS と一致するため、ゲーム内の
+  // 到達可能範囲ではこのクランプは効かない（保険である）。
+  const upper = Math.min(Math.max(0, upperBoundTons), peakLaborQuantityTons(product));
+  if (upper <= 0) return 0;
+
+  // 臨時ワーカーは常用ワーカー換算で数える（効率比。既存の換算と同じ考え方）。
+  const regularBase = params.labor.regularEfficiencyPerHeadTons;
+  const temporaryBase = params.labor.temporaryEfficiencyPerHeadTons;
+  const temporaryInRegularEquivalent =
+    regularBase > 0 ? availableTemporaryHeadcount * (temporaryBase / regularBase) : 0;
+  const availableRegularEquivalent = Math.max(0, availableRegularHeadcount) + Math.max(0, temporaryInRegularEquivalent);
+  if (availableRegularEquivalent <= 0) return 0;
+
+  // 【重要】出勤率・技能・効率のいずれかが0なら、どれだけ人を増やしても生産できない。
+  // requiredHeadcountForQuantity はこの場合0を返す仕様（無限大を返さない）ため、
+  // ここで先に弾かないと「必要人数0 ≤ 保有人数」となり上限いっぱいを返してしまう。
+  const overtimeMultiplier = 1 + appliedOvertimeRate * params.labor.overtimeEfficiencyFactor;
+  const productivityDenominator =
+    effectiveEfficiencyPerHeadTons(regularBase, product, params, coefficientOverride) * attendanceRate * skillLevel * overtimeMultiplier;
+  if (!(productivityDenominator > 0)) return 0;
+
+  // 【厳密性】集中効果が働かない数量域（HOSO 8,000t以下 / PD・VAP 4,000t以下）では、
+  // 従来の閉じた式が厳密解である。二分探索の丸め誤差を持ち込まないよう、
+  // まず閉じた式で解き、その解が集中効果の基準数量以下ならそのまま返す。
+  // これにより既存の回帰テスト（係数導入前と同値であること）が厳密に保たれる。
+  const closedFormQuantity = Math.min(upper, availableRegularEquivalent * productivityDenominator);
+  const baseline = CONCENTRATION_CURVE_BY_PRODUCT[product]?.baselineQuantityTons ?? Infinity;
+  if (closedFormQuantity <= baseline) return Math.max(0, closedFormQuantity);
+
+  const requiredFor = (quantity: number): number =>
+    requiredHeadcountForQuantityWithConcentration(
+      quantity,
+      regularBase,
+      product,
+      attendanceRate,
+      skillLevel,
+      appliedOvertimeRate,
+      params,
+      coefficientOverride
+    );
+
+  // 上限でも人数が足りるなら、設備能力いっぱいまで作れる。
+  if (requiredFor(upper) <= availableRegularEquivalent) return upper;
+
+  // 集中効果は必要人手を減らすため、解は必ず閉じた式の解以上になる。
+  let lo = Math.max(0, closedFormQuantity);
+  let hi = upper;
+  // 50回で相対誤差は 2^-50。数量スケール（〜10^5 t）に対して十分。
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    if (requiredFor(mid) <= availableRegularEquivalent) lo = mid;
+    else hi = mid;
+  }
+  return lo;
 }
 
 /**
@@ -93,12 +214,26 @@ export function calculateLaborCapacityFromAssignedHeadcount(
   // 実効PD係数の上書き（省略時は通常のlaborIntensityCoefficientをそのまま使う）。
   coefficientOverride?: number
 ): number {
-  const overtimeMultiplier = 1 + appliedOvertimeRate * params.labor.overtimeEfficiencyFactor;
-  const regularEfficiency = effectiveEfficiencyPerHeadTons(params.labor.regularEfficiencyPerHeadTons, product, params, coefficientOverride);
-  const temporaryEfficiency = effectiveEfficiencyPerHeadTons(params.labor.temporaryEfficiencyPerHeadTons, product, params, coefficientOverride);
-  const raw =
-    (assignedRegularHeadcount * regularEfficiency + assignedTemporaryHeadcount * temporaryEfficiency) * attendanceRate * skillLevel * overtimeMultiplier;
-  return Math.min(Math.max(0, raw), Math.max(0, factoryCapacityForProduct));
+  // 【Test16 Stage E】集中生産効率は数量に依存するため、「この人数で作れる最大数量」は
+  // 閉じた式では解けない。代表生産量を仮定すると画面・診断・エンジンで別々の値を
+  // 置くことになるため（判断3で禁止）、二分探索で
+  //     requiredWorker(quantity) <= availableWorker
+  // を満たす最大の quantity を求める。設備能力を探索上限にすることで
+  // 「人を増やしても設備能力は超えない」という既存の性質もそのまま保たれる。
+  //
+  // 集中効果が働かない数量域（HOSO 8,000t以下 / PD・VAP 4,000t以下）では、
+  // この逆算は従来の閉じた式と厳密に一致する。
+  return maxQuantityForAvailableWorkers(
+    assignedRegularHeadcount,
+    assignedTemporaryHeadcount,
+    attendanceRate,
+    skillLevel,
+    appliedOvertimeRate,
+    factoryCapacityForProduct,
+    params,
+    product,
+    coefficientOverride
+  );
 }
 
 /**
@@ -197,11 +332,14 @@ export function allocateWorkersToPlans(
     function headcountDemandFor(d: (typeof factoryDemands)[number], baseEfficiencyPerHead: number): number {
       // 【Test15】商品別の労働集約度係数を織り込んだ実効効率で逆算する。
       // PD省人化投資の効果はd.product==="pd"のときだけ適用される（HOSO/VAPは無関係）。
+      // 【Test16 Stage E】集中生産効率の基準はこの計画の生産予定量（candidateQuantity）。
+      // ワーカー配分の前に確定している値なので循環しない。
       const efficiencyPerHead = effectiveEfficiencyPerHeadTons(
         baseEfficiencyPerHead,
         d.product,
         params,
-        d.product === "pd" ? pdCoefficientOverride : undefined
+        d.product === "pd" ? pdCoefficientOverride : undefined,
+        d.candidateQuantity
       );
       return requiredHeadcountForQuantity(
         d.candidateQuantity,
@@ -237,6 +375,9 @@ export function allocateWorkersToPlans(
       totalAssignedTemporary += temporary;
 
       const capacityPool = factoryCapacity ? capacityPoolFor(factoryCapacity, d.product) : 0;
+      // 【Test16 Stage E】この計画の生産予定量を集中効果の基準にする。
+      // 「配分された人数で何t作れるか」は集中係数が数量に依存するため
+      // maxQuantityForAvailableWorkers（二分探索）で逆算する。
       const laborCapacity = calculateLaborCapacityFromAssignedHeadcount(
         regular,
         temporary,

@@ -201,30 +201,39 @@ test("SAI-5因果(1a): 暫定自動方針（Standard AI以外）の経路でも�
 test("SAI-5因果(1b): 営業基盤の高い会社ほど、同じ市場×商品での成約シェアが高い（分位点比較）", () => {
   // 営業基盤の差が成約シェアへ効くことを見るため、営業不足ケースで実行する。
   const run = runControlled(config("causal-1b", QUARTERS, ALL_ON), QUARTERS, concentrateOn("vap", 3), true);
-  const last = run.history[run.history.length - 1];
-  const stateBefore = run.salesBaseStateByTurn[run.history.length - 1];
-  assert.ok(stateBefore, "前期末の営業基盤stateが取れていない");
 
   // 市場×商品ごとに「その中で基盤が最上位の会社」と「最下位の会社」の成約シェアを比べる。
   // 会社間で基盤が分かれている市場×商品だけを対象にする（前提はguardではなくassertで明示）。
+  //
+  // 【2026-08-09・Test16 Stage E】最終四半期の1断面だけでなく**全四半期**を集計する。
+  // 商品集中生産効率の導入により供給側の条件が四半期ごとに動くようになり、
+  // 1断面（8セル程度）では1セルの入れ替わりで12%動く不安定な指標になっていた。
+  // 判定のしきい値（60%）は変えず、標本数を増やして信号対雑音比を上げている。
   let comparable = 0;
   let topWins = 0;
-  for (const a of last.salesRecord.allocations) {
-    const total = a.companies.reduce((s2, c) => s2 + unwrapUnit(c.allocatedQuantity), 0);
-    if (total <= 0 || a.companies.length < 2) continue;
-    const withScore = a.companies.map((c) => ({
-      share: unwrapUnit(c.allocatedQuantity) / total,
-      score: lookupSalesBaseScore(stateBefore, c.companyId, a.market, a.product),
-    }));
-    const scores = withScore.map((x) => x.score);
-    if (Math.max(...scores) - Math.min(...scores) < 1e-9) continue; // 基盤が同一なら比較材料にならない
-    comparable += 1;
-    const top = withScore.reduce((x, y) => (y.score > x.score ? y : x));
-    const bottom = withScore.reduce((x, y) => (y.score < x.score ? y : x));
-    if (top.share >= bottom.share) topWins += 1;
+  for (let t = 0; t < run.history.length; t++) {
+    const stateBefore = run.salesBaseStateByTurn[t];
+    if (!stateBefore) continue;
+    for (const a of run.history[t].salesRecord.allocations) {
+      const total = a.companies.reduce((s2, c) => s2 + unwrapUnit(c.allocatedQuantity), 0);
+      if (total <= 0 || a.companies.length < 2) continue;
+      const withScore = a.companies.map((c) => ({
+        share: unwrapUnit(c.allocatedQuantity) / total,
+        score: lookupSalesBaseScore(stateBefore, c.companyId, a.market, a.product),
+      }));
+      const scores = withScore.map((x) => x.score);
+      if (Math.max(...scores) - Math.min(...scores) < 1e-9) continue; // 基盤が同一なら比較材料にならない
+      comparable += 1;
+      const top = withScore.reduce((x, y) => (y.score > x.score ? y : x));
+      const bottom = withScore.reduce((x, y) => (y.score < x.score ? y : x));
+      if (top.share >= bottom.share) topWins += 1;
+    }
   }
   assert.ok(comparable >= 3, `会社間で営業基盤が分かれている市場×商品が${comparable}件しかない（前提不成立）`);
-  assert.ok(topWins / comparable >= 0.6, `基盤最上位が最下位以上の成約シェアを取った割合が${((topWins / comparable) * 100).toFixed(0)}%（過半に届かない）`);
+  assert.ok(
+    topWins / comparable >= 0.6,
+    `基盤最上位が最下位以上の成約シェアを取った割合が${((topWins / comparable) * 100).toFixed(0)}%（${topWins}/${comparable}、過半に届かない）`
+  );
 });
 
 // =====================================================================
