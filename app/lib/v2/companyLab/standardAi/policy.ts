@@ -44,7 +44,7 @@ import {
 } from "./diagnosis/productionRequirement";
 import { buildStandardAiUnitEconomics } from "./diagnosis/forwardUnitEconomics";
 import { buildStandardAiSalesForceHiringDecision } from "./decision/salesForceHiring";
-import { SALES_PARAMETERS_V1 } from "../../sales/parameters";
+import { SALES_PARAMETERS_V1, SalesParameters } from "../../sales/parameters";
 import { computeTargetScaleBand } from "./targetScale";
 import { computeTargetCapability } from "./targetCapability";
 import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "./strategicIntent";
@@ -152,7 +152,9 @@ export function generateStandardAiDecisionWithDiagnostics(
   publicInfo: PublicMarketInfo,
   period: PeriodV2,
   turn: number,
-  params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1
+  params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
+  /** 【Phase 6B】営業パラメータの上書き（比較用。未指定なら既定）。 */
+  salesParams: SalesParameters = SALES_PARAMETERS_V1
 ): StandardAiDecisionWithDiagnostics {
   const observation = buildStandardAiObservation(fixture, ownState, publicInfo, period, turn);
   const pressures = computePressureScores(observation, fixture, params);
@@ -168,7 +170,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     : null;
 
   // 観測できる商業機会（採算つき）。未来の TRUE WORLD は含まれない。
-  const observableOpportunity = computeObservableCommercialOpportunity(observation, SALES_PARAMETERS_V1);
+  const observableOpportunity = computeObservableCommercialOpportunity(observation, salesParams);
   const capacityAnchorTons = sumProductAmount({ ...observation.totalCapacityByProduct }) * params.salesUtilizationTarget;
   const recentActualScaleTons =
     (observation.lastQuarterActualProductionByProduct.hoso ?? 0) +
@@ -194,7 +196,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     observation,
     pressures,
     params,
-    SALES_PARAMETERS_V1,
+    salesParams,
     commercialAmbition.ambitionMultiplier
   );
 
@@ -356,7 +358,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     observation,
     pressures,
     params,
-    salesParams: SALES_PARAMETERS_V1,
+    salesParams,
     salesWishByMarketProduct: salesResult.salesWishByMarketProduct,
     finalProductionRequirementByProduct: finalProductionRequirementByProduct,
     totalEffectiveCapacityByProduct: observation.totalEffectiveCapacityByProduct,
@@ -489,6 +491,8 @@ export interface StandardAiParamsResolution {
 }
 
 export interface StandardAiProviderOptions {
+  /** 【Phase 6B】営業パラメータの上書き（候補モデル比較用）。 */
+  readonly salesParams?: SalesParameters;
   /**
    * 【SAI-4追加】会社IDごとにStandardAiParametersを解決する関数（省略時=undefinedなら
    * 従来どおり全社STANDARD_AI_PARAMETERS_V1固定。既存の呼び出し元は一切変更不要で、
@@ -509,16 +513,17 @@ export function createStandardAiProvider(
   readonly diagnostics: StandardAiQuarterDiagnostics[];
 } {
   const { resolveParams } = options;
+  const salesParams = options.salesParams ?? SALES_PARAMETERS_V1;
   const diagnostics: StandardAiQuarterDiagnostics[] = [];
   const provider: CompanyDecisionProvider = (fixture, ownState, publicInfo, period, turn) => {
     if (!resolveParams) {
-      const result = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn);
+      const result = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, STANDARD_AI_PARAMETERS_V1, salesParams);
       diagnostics.push(result.diagnostics);
       return result.decision;
     }
 
     const resolution = resolveParams(fixture.companyId);
-    const result = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, resolution.params);
+    const result = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, resolution.params, salesParams);
 
     // 【実装指示§4】バイアスが1件でも適用されている場合のみ、基準パラメータでの
     // 判断も計算し診断へ残す（バイアスなしの会社・四半期では省略し、Standard AI

@@ -17,6 +17,7 @@ import { CountryId, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Pro
 import { ConsumerMarketCarryStateTable, ConsumerMarketQuarterRecord } from "../market/consumerInventory";
 import { ScenarioMode, ScenarioState } from "../scenario/types";
 import { CompanyId, CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
+import type { SalesParameters } from "../sales/parameters";
 import type { ObservedMarketDemand } from "./marketDemandObservation";
 import {
   AquacultureStockingPlanEntry,
@@ -505,6 +506,12 @@ export interface CompanyLabConfig {
   readonly turns: number;
   /** 【SAI-5】市場進化モデルの機能フラグ（optional。未指定=全OFF=従来挙動）。 */
   readonly sai5?: Sai5FeatureFlags;
+  /**
+   * 【Phase 6B・営業能力モデル校正】営業パラメータの上書き（optional）。
+   * 未指定なら従来どおり sai5 フラグから解決した既定値を使う（挙動不変）。
+   * 候補モデルの 32Q 比較のためだけに使う注入口であり、正式モデルの決定ではない。
+   */
+  readonly salesParamsOverride?: SalesParameters;
 }
 
 export interface CompanyLabState {

@@ -510,6 +510,8 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
  * （両ウェイトを保持したまま合計1.0を維持する組み合わせ版）を使う。
  */
 function salesParametersFor(config: CompanyLabConfig): SalesParameters {
+  // 【Phase 6B】比較用の上書きが指定されていればそれを使う（既定は undefined）。
+  if (config.salesParamsOverride) return config.salesParamsOverride;
   const vapCapabilityOn = config.sai5?.vapProductDevelopmentCompetitiveness !== false;
   const salesBaseOn = !!config.sai5?.salesBaseAccumulation;
   if (vapCapabilityOn && salesBaseOn) return SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1;
