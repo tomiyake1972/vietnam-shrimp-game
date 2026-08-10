@@ -300,6 +300,119 @@ export async function buildAnalysisWorkbook(context: AiAnalysisPackContext, data
     )
   );
 
+  // ---------------- 14e_Commercial_Growth ----------------
+  // 【Phase 6C】「売りたい」「取りに行く」「売れた」「作る」を別々の列として並べる。
+  // 1つの "sales" 列にまとめないことが、この表の目的である。
+  const commercialGrowth = workbook.addWorksheet("14e_Commercial_Growth");
+  addRows(
+    commercialGrowth,
+    [
+      "turn",
+      "company",
+      "visionReferenceScaleTons",
+      "commercialAmbitionTons",
+      "commercialCommitmentTons",
+      "submittedSalesTons",
+      "contractedSalesTons",
+      "deliveredSalesTons",
+      "productionRequirementTons",
+      "actualProductionTons",
+      "profitableOpportunityTons",
+      "unservedProfitableOpportunityTons",
+      "primaryGrowthConstraint",
+      "commitmentLimiter",
+      "observedConversion",
+      "submissionTargetConversion",
+      "productionExpectedConversion",
+      "submissionToContractRatio",
+      "contractToDeliveryRatio",
+    ],
+    Object.values(context.companies).flatMap((c) =>
+      c.turns.map((t) => {
+        const g = t.commercialGrowth;
+        return [
+          t.turn,
+          c.companyId,
+          g.visionReferenceScaleTons,
+          g.commercialAmbitionTons,
+          g.commercialCommitmentTons,
+          g.submittedSalesTons,
+          g.contractedSalesTons,
+          g.deliveredSalesTons,
+          g.productionRequirementTons,
+          g.actualProductionTons,
+          g.profitableOpportunityTons,
+          g.unservedProfitableOpportunityTons,
+          g.primaryGrowthConstraint,
+          g.commitmentLimiter,
+          g.observedConversionRatio,
+          g.submissionTargetConversionRatio,
+          g.productionExpectedConversionRatio,
+          g.submissionToContractRatio,
+          g.contractToDeliveryRatio,
+        ];
+      })
+    )
+  );
+
+  // ---------------- 14f_Constraint_Breakdown ----------------
+  const constraintBreakdown = workbook.addWorksheet("14f_Constraint_Breakdown");
+  addRows(
+    constraintBreakdown,
+    ["turn", "company", "constraint", "unservedTons"],
+    Object.values(context.companies).flatMap((c) =>
+      c.turns.flatMap((t) =>
+        Object.entries(t.commercialGrowth.constraintBreakdownTons).map(([constraint, value]) => [t.turn, c.companyId, constraint, value])
+      )
+    )
+  );
+
+  // ---------------- 14g_Sales_Organization ----------------
+  // 「人が足りない」と「増やしたくない」を区別できる形で残す。
+  const salesOrganization = workbook.addWorksheet("14g_Sales_Organization");
+  addRows(
+    salesOrganization,
+    [
+      "turn",
+      "company",
+      "currentHeadcount",
+      "requiredHeadcount",
+      "unconstrainedEconomicDesiredHeadcount",
+      "organizationallyAllowedHeadcount",
+      "financiallyAllowedHeadcount",
+      "actualTargetHeadcount",
+      "actualHireCount",
+      "actualLayoffCount",
+      "salesCapacityTons",
+      "usedSalesCapacityTons",
+      "unusedSalesCapacityTons",
+      "utilization",
+      "constraintReason",
+    ],
+    Object.values(context.companies).flatMap((c) =>
+      c.turns.map((t) => {
+        const o = t.salesOrganization;
+        return [
+          t.turn,
+          c.companyId,
+          o.currentHeadcount,
+          o.requiredHeadcount,
+          o.unconstrainedEconomicDesiredHeadcount,
+          o.organizationallyAllowedHeadcount,
+          o.financiallyAllowedHeadcount,
+          o.actualTargetHeadcount,
+          o.actualHireCount,
+          o.actualLayoffCount,
+          o.salesCapacityTons,
+          o.usedSalesCapacityTons,
+          o.unusedSalesCapacityTons,
+          o.utilization,
+          o.constraintReason,
+        ];
+      })
+    )
+  );
+
   // ---------------- 15_PL ----------------
   const pl = workbook.addWorksheet("15_PL");
   addRows(

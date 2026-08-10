@@ -17,6 +17,119 @@ interface DictionaryEntry {
 }
 
 const ENTRIES: readonly DictionaryEntry[] = [
+  // -------------------------------------------------------------------
+  // 【Phase 6C・#05 §18】「売りたい」「市場へ取りに行く」「実際に売れた」「作る」
+  // を AI も人間も混同しないための定義。この4つは**別々の量**であり、
+  // 1つの "sales" として扱ってはならない。
+  // -------------------------------------------------------------------
+  {
+    field: "companies[].turns[].commercialGrowth.commercialAmbitionTons",
+    japanese: "Commercial Ambition（売りたい量）",
+    definition:
+      "その四半期に**どこまで売りたいか**という志の水準。Vision の参考成長軌道と、観測できる採算つき市場機会から決まる。**市場へ提示した量ではなく、成約した量でもなく、作る量でもない。** これは意思であって実績ではない。",
+    unit: "HOSO換算トン/四半期",
+    source: "companyLab/vision/commercialAmbition.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "Vision が与えられていない会社。",
+  },
+  {
+    field: "companies[].turns[].commercialGrowth.commercialCommitmentTons",
+    japanese: "Commercial Commitment（今期、市場へ取りに行く量）",
+    definition:
+      "志のうち、**今期実際に市場へ取りに行くと決めた量**（＝提出量の上限）。志を目標成約率で割り戻して逆算し、志への上乗せ上限・観測できる市場機会・営業組織が捌ける案件量で上から抑える。完成品在庫を理由にこの値を下げることはしない（在庫は生産を抑える理由であって、売るのをやめる理由ではない）。",
+    unit: "HOSO換算トン/四半期",
+    source: "companyLab/vision/commercialCommitment.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "Phase 6C より前に保存された実行。",
+  },
+  {
+    field: "companies[].turns[].commercialGrowth.submittedSalesTons",
+    japanese: "Submitted Sales（市場へ提示した量）",
+    definition:
+      "実際にゲームエンジンへ提出した販売計画の合計（会社×市場×商品の desiredQuantity の合計）。営業工数制約を適用した**後**の値である。**この量が成約するとは限らない。**",
+    unit: "HOSO換算トン/四半期",
+    source: "CompanyDecisionInput.salesPlans（実際にゲームへ提出された意思決定）",
+    layer: "DECISION",
+    nullableReason: "—（常に記録される）",
+  },
+  {
+    field: "companies[].turns[].commercialGrowth.contractedSalesTons",
+    japanese: "Contracts（実際に売れた量）",
+    definition:
+      "市場配分の結果、その四半期に**実際に成約した**新規契約数量。提出量に対して何割が成約したかは市場競争・競合の提示・需要の大きさで決まり、会社が決められる値ではない。",
+    unit: "HOSO換算トン/四半期",
+    source: "CompanyQuarterSummary.newContractedQuantity（エンジンの確定実績）",
+    layer: "RESULT",
+    nullableReason: "—（常に記録される）",
+  },
+  {
+    field: "companies[].turns[].commercialGrowth.deliveredSalesTons",
+    japanese: "Delivered Sales（実際に納品した量）",
+    definition: "その四半期に契約履行として実際に納品した数量。成約とは別の四半期になりうる（標準リードタイムは翌四半期）。",
+    unit: "HOSO換算トン/四半期",
+    source: "CompanyQuarterSummary.fulfilledQuantity",
+    layer: "RESULT",
+    nullableReason: "—（常に記録される）",
+  },
+  {
+    field: "companies[].turns[].commercialGrowth.productionRequirementTons",
+    japanese: "Production Requirement（作ると決めた量）",
+    definition:
+      "生産計画の合計。需要側は「**確定した受注残 × 1.0** ＋ **未成約の販売計画 × 期待成約率**」であり、そこへ通常在庫目標を足し、期首完成品在庫を引く。**提出量をそのまま作らない**（この前提が暗黙に1.0だったことが、Phase 6B で在庫3倍・利益−61%を招いた根本原因である）。",
+    unit: "HOSO換算トン/四半期",
+    source: "companyLab/standardAi/diagnosis/productionRequirement.ts / decision/production.ts",
+    layer: "DECISION",
+    nullableReason: "Phase 6C より前に保存された実行。",
+  },
+  {
+    field: "companies[].turns[].commercialGrowth.actualProductionTons",
+    japanese: "Production（実際に作った量）",
+    definition: "エンジンが実際に生産した数量（設備能力・労働力・原料・共有ボトルネックの制約適用後）。",
+    unit: "HOSO換算トン/四半期",
+    source: "CompanyQuarterSummary の商品別生産量の合計",
+    layer: "RESULT",
+    nullableReason: "—（常に記録される）",
+  },
+  {
+    field: "companies[].turns[].commercialGrowth.observedConversionRatio",
+    japanese: "観測成約率（提出 → 成約）",
+    definition:
+      "直近4四半期に**自社が提出した量**に対する**自社が実際に成約した量**の比。自社の意思決定履歴と自社の契約台帳だけから求める。**TRUE WORLD（市場の真の需要）ではない。** 他社の計画も見ていない。",
+    unit: "比率",
+    source: "companyLab/standardAi/commercialHistory.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "履歴が無い（ゲーム開始直後）。null を 1.0 と読み替えてはならない。",
+  },
+  {
+    field: "companies[].turns[].commercialGrowth.submissionTargetConversionRatio / productionExpectedConversionRatio",
+    japanese: "提出量の逆算に使った率／生産量の見積りに使った率",
+    definition:
+      "**この2つは意図的に別の値である。** 提出側は「目標成約率75〜90%を狙って取りに行く」ための混合値（観測値と目標帯を混ぜる）。生産側は「実際に何トン成約しそうか」という予測なので、観測値そのものを下限で打ち切って使う。目標と予測を同じ数字にすると、実際にほぼ全量成約している会社の生産を過小に見積もってしまう。",
+    unit: "比率",
+    source: "companyLab/vision/commercialCommitment.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "Phase 6C より前に保存された実行。",
+  },
+  {
+    field: "companies[].turns[].commercialGrowth.primaryGrowthConstraint / constraintBreakdownTons",
+    japanese: "主な成長制約とその内訳",
+    definition:
+      "取りたかったのに取れなかった採算つき機会を、在庫 → 生産能力 → 営業能力 → その他の順に割り当てた分解（**同じトン数を二度数えない**）。労働力・原料は、診断がそれらを名指しした場合にのみ生産能力ぶんから移す。**新工場の根拠になりうるのは PRODUCTION_CAPACITY の分だけである。**",
+    unit: "HOSO換算トン/四半期",
+    source: "companyLab/vision/unservedOpportunity.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "Phase 6C より前に保存された実行。",
+  },
+  {
+    field: "companies[].turns[].salesOrganization",
+    japanese: "営業組織の状態",
+    definition:
+      "「人が足りない」と「増やしたくない」を区別するための記録。requiredHeadcount（必要）・unconstrainedEconomicDesiredHeadcount（経済的に欲しい）・organizationallyAllowedHeadcount（1四半期の増員上限まで）・financiallyAllowedHeadcount（資金余力まで）・actualHireCount（実際に採った数）を別々に持つ。**採用が0の四半期には必ず constraintReason が入る**（理由の無い0を作らない）。",
+    unit: "人／HOSO換算トン",
+    source: "companyLab/standardAi/decision/salesForceHiring.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "Phase 6C より前に保存された実行。",
+  },
   {
     field: "companies[].turns[].strategy.vision",
     japanese: "会社のVision（志）",

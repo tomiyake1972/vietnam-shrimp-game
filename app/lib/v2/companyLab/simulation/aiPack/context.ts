@@ -19,7 +19,7 @@ import {
   AI_ANALYSIS_PACK_SCHEMA_VERSION,
   AiAnalysisPackContext,
   PackCompanyStateSnapshot,
-  PackStrategy,
+  PackCommercialGrowth, PackSalesOrganization, PackStrategy,
   PackCompanySummary,
   PackCompanyTurn,
   PackDataAvailabilityNote,
@@ -47,6 +47,45 @@ const EMPTY_STATE: PackCompanyStateSnapshot = {
 };
 
 /** Vision 導入より前に保存された Simulation Run 用（架空の Vision を作らない）。 */
+const EMPTY_COMMERCIAL_GROWTH: PackCommercialGrowth = {
+  visionReferenceScaleTons: null,
+  commercialAmbitionTons: null,
+  commercialCommitmentTons: null,
+  submittedSalesTons: 0,
+  contractedSalesTons: 0,
+  deliveredSalesTons: 0,
+  productionRequirementTons: null,
+  actualProductionTons: 0,
+  profitableOpportunityTons: null,
+  unservedProfitableOpportunityTons: null,
+  primaryGrowthConstraint: null,
+  constraintBreakdownTons: {},
+  observedConversionRatio: null,
+  submissionTargetConversionRatio: null,
+  productionExpectedConversionRatio: null,
+  submissionToContractRatio: null,
+  contractToDeliveryRatio: null,
+  commitmentLimiter: null,
+  availability: "NOT_RECORDED",
+};
+
+const EMPTY_SALES_ORGANIZATION: PackSalesOrganization = {
+  currentHeadcount: 0,
+  requiredHeadcount: null,
+  unconstrainedEconomicDesiredHeadcount: null,
+  organizationallyAllowedHeadcount: null,
+  financiallyAllowedHeadcount: null,
+  actualTargetHeadcount: null,
+  actualHireCount: 0,
+  actualLayoffCount: 0,
+  salesCapacityTons: null,
+  usedSalesCapacityTons: null,
+  unusedSalesCapacityTons: null,
+  utilization: null,
+  constraintReason: null,
+  availability: "NOT_RECORDED",
+};
+
 const EMPTY_STRATEGY: PackStrategy = {
   vision: null,
   visionTargetScaleAtCurrentTurn: null,
@@ -263,6 +302,10 @@ function buildCompanyTurn(stored: StoredSimulationRun, companyId: string, turn: 
     // 【捏造しない】Vision 導入より前に保存された Simulation Run には strategy が無い。
     // その場合は空の Vision を作らず、availability で「記録されていない」ことを示す。
     strategy: capture?.strategy ?? EMPTY_STRATEGY,
+    // 【Phase 6C 後方互換】Phase 6C より前に保存された Simulation Run には
+    // これらの記録が無い。値を推測で補完せず NOT_RECORDED として明示する。
+    commercialGrowth: capture?.commercialGrowth ?? EMPTY_COMMERCIAL_GROWTH,
+    salesOrganization: capture?.salesOrganization ?? EMPTY_SALES_ORGANIZATION,
   };
 }
 

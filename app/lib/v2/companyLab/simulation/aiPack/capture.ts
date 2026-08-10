@@ -14,7 +14,7 @@
 // 能力は computeEffectiveFactories / calculateFactoryEffectiveCapacity、
 // スペースは factorySpace.ts の関数をそのまま通す（唯一の情報源）。
 
-import { CompanyFixture, CompanyLabState } from "../../types";
+import { CompanyFixture, CompanyLabState, CompanyQuarterSummary } from "../../types";
 import { Product } from "../../../market/types";
 import { unwrapUnit } from "../../../core/units";
 import { toYearQuarter } from "../../../core/period";
@@ -25,7 +25,7 @@ import {
   computeFactoryUsedSpaceUnits,
   resolveFactoryTotalSpaceUnits,
 } from "../../../production/factorySpace";
-import { PackCapitalProject, PackCompanyStateSnapshot, PackStrategy, PackWorldTurn } from "./types";
+import { PackCapitalProject, PackCommercialGrowth, PackCompanyStateSnapshot, PackSalesOrganization, PackStrategy, PackWorldTurn } from "./types";
 import { StandardAiQuarterDiagnostics } from "../../standardAi/policy";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
@@ -279,5 +279,109 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics): Pack
         }
       : null,
     availability: v ? "AVAILABLE" : "NOT_RECORDED",
+  };
+}
+
+
+// ---------------------------------------------------------------------
+// 【Phase 6C・#05 §14〜§16】商業成長の因果と営業組織
+// ---------------------------------------------------------------------
+
+/**
+ * 「売りたい」「取りに行く」「売れた」「作る」を別々のフィールドとして写す。
+ *
+ * **新しい計算はここで行わない。** Standard AI の診断とエンジンの確定実績を
+ * そのまま並べるだけである。納品量・生産量は当期の会社サマリーから取る。
+ */
+export function captureCommercialGrowth(
+  diagnostics: StandardAiQuarterDiagnostics,
+  summary: CompanyQuarterSummary | undefined,
+  productionRequirementTons: number | null
+): PackCommercialGrowth {
+  const commitment = diagnostics.commercialCommitment;
+  const conversion = diagnostics.conversionObservation;
+  const unserved = diagnostics.unservedOpportunity;
+
+  const submittedSalesTons = diagnostics.decision.salesPlans.reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
+  const contractedSalesTons = summary ? unwrapUnit(summary.newContractedQuantity) : 0;
+  const deliveredSalesTons = summary ? unwrapUnit(summary.fulfilledQuantity) : 0;
+  const actualProductionTons = summary
+    ? unwrapUnit(summary.hosoProduced) + unwrapUnit(summary.pdProduced) + unwrapUnit(summary.vapProduced)
+    : 0;
+
+  const constraintBreakdownTons: Record<string, number> = unserved
+    ? {
+        SALES_CAPACITY: unserved.blockedBySalesCapacityTons,
+        PRODUCTION_CAPACITY: unserved.blockedByProductionCapacityTons,
+        LABOR: unserved.blockedByLaborTons,
+        RAW_MATERIAL: unserved.blockedByRawMaterialTons,
+        INVENTORY_POLICY: unserved.blockedByInventoryPolicyTons,
+        OTHER: unserved.otherTons,
+      }
+    : {};
+
+  return {
+    visionReferenceScaleTons: diagnostics.strategicGrowth?.visionTargetScaleAtCurrentTurn ?? null,
+    commercialAmbitionTons: diagnostics.commercialAmbition?.ambitionTons ?? null,
+    commercialCommitmentTons: commitment?.submissionTargetTons ?? null,
+    submittedSalesTons,
+    contractedSalesTons,
+    deliveredSalesTons,
+    productionRequirementTons,
+    actualProductionTons,
+    profitableOpportunityTons: diagnostics.observableOpportunity?.attainableProfitableTons ?? null,
+    unservedProfitableOpportunityTons: unserved?.unservedProfitableTons ?? null,
+    primaryGrowthConstraint: unserved?.primaryConstraint ?? null,
+    constraintBreakdownTons,
+    observedConversionRatio: conversion?.conversionRatio ?? null,
+    submissionTargetConversionRatio: commitment?.expectedConversionRatio ?? null,
+    productionExpectedConversionRatio: commitment?.productionExpectedConversionRatio ?? null,
+    submissionToContractRatio: submittedSalesTons > 0 ? contractedSalesTons / submittedSalesTons : null,
+    contractToDeliveryRatio: contractedSalesTons > 0 ? deliveredSalesTons / contractedSalesTons : null,
+    commitmentLimiter: commitment?.limiter ?? null,
+    availability: commitment ? "AVAILABLE" : "NOT_RECORDED",
+  };
+}
+
+/** 営業組織の状態（「人が足りない」と「増やしたくない」を区別できる形で写す）。 */
+export function captureSalesOrganization(diagnostics: StandardAiQuarterDiagnostics): PackSalesOrganization {
+  const h = diagnostics.salesHiring;
+  const currentHeadcount = h
+    ? h.currentHeadcount
+    : [...new Map(diagnostics.decision.salesPlans.map((p) => [p.market, p.salesForceHeadcount])).values()].reduce((a, b) => a + b, 0);
+  if (!h) {
+    return {
+      currentHeadcount,
+      requiredHeadcount: null,
+      unconstrainedEconomicDesiredHeadcount: null,
+      organizationallyAllowedHeadcount: null,
+      financiallyAllowedHeadcount: null,
+      actualTargetHeadcount: null,
+      actualHireCount: diagnostics.decision.salesForceHireCount ?? 0,
+      actualLayoffCount: diagnostics.decision.salesForceLayoffCount ?? 0,
+      salesCapacityTons: null,
+      usedSalesCapacityTons: null,
+      unusedSalesCapacityTons: null,
+      utilization: null,
+      constraintReason: null,
+      availability: "NOT_RECORDED",
+    };
+  }
+  const unused = Math.max(0, h.salesCapacityTons - h.usedSalesCapacityTons);
+  return {
+    currentHeadcount: h.currentHeadcount,
+    requiredHeadcount: h.requiredHeadcount,
+    unconstrainedEconomicDesiredHeadcount: h.unconstrainedEconomicDesiredHeadcount,
+    organizationallyAllowedHeadcount: h.organizationallyAllowedHeadcount,
+    financiallyAllowedHeadcount: h.financiallyAllowedHeadcount,
+    actualTargetHeadcount: h.actualTargetHeadcount,
+    actualHireCount: h.actualHireCount,
+    actualLayoffCount: h.actualLayoffCount,
+    salesCapacityTons: h.salesCapacityTons,
+    usedSalesCapacityTons: h.usedSalesCapacityTons,
+    unusedSalesCapacityTons: unused,
+    utilization: h.salesCapacityTons > 0 ? h.usedSalesCapacityTons / h.salesCapacityTons : null,
+    constraintReason: h.zeroHireReason,
+    availability: "AVAILABLE",
   };
 }

@@ -318,6 +318,75 @@ export interface PackStrategy {
   readonly availability: PackAvailability;
 }
 
+/**
+ * 【Phase 6C・#05 §14〜§16】商業成長の因果1本ぶん（1社・1四半期）。
+ *
+ * 「売りたい量」「市場へ取りに行った量」「実際に売れた量」「作る量」を
+ * **別々のフィールド**として保存する。AIも人間もこれらを混同しないことが目的であり、
+ * 1つの "sales" にまとめてはならない（Data Dictionary 参照）。
+ *
+ * ここに新しい計算は無い。Standard AI とエンジンが既に確定させた値の写しである。
+ */
+export interface PackCommercialGrowth {
+  /** Vision の参考成長軌道におけるその四半期の規模（達成義務ではない）。 */
+  readonly visionReferenceScaleTons: number | null;
+  /** 志として、どこまで売りたいか。 */
+  readonly commercialAmbitionTons: number | null;
+  /** 今期、実際に市場へ取りに行くと決めた量（提出量の上限）。 */
+  readonly commercialCommitmentTons: number | null;
+  /** 実際に市場へ提出した販売計画の合計。 */
+  readonly submittedSalesTons: number;
+  /** 市場が実際に応じた量（新規成約）。 */
+  readonly contractedSalesTons: number;
+  /** 当期に実際に納品した量。 */
+  readonly deliveredSalesTons: number;
+  /** 生産必要量（確定受注残＋未成約計画×期待成約率＋在庫目標−期首在庫）。 */
+  readonly productionRequirementTons: number | null;
+  /** 実際の生産量。 */
+  readonly actualProductionTons: number;
+  /** 観測できる採算つき獲得可能需要。 */
+  readonly profitableOpportunityTons: number | null;
+  /** そのうち取れなかった量。 */
+  readonly unservedProfitableOpportunityTons: number | null;
+  /** 成長を止めている主因（SALES_CAPACITY / PRODUCTION_CAPACITY / LABOR / RAW_MATERIAL / INVENTORY_POLICY / OTHER / NONE）。 */
+  readonly primaryGrowthConstraint: string | null;
+  /** 制約別の未充足量の内訳（同じトン数を二重に数えない分解）。 */
+  readonly constraintBreakdownTons: Readonly<Record<string, number>>;
+  /** 【§16】転換率。TRUE WORLD ではなく、自社の観測にもとづく値である。 */
+  readonly observedConversionRatio: number | null;
+  readonly submissionTargetConversionRatio: number | null;
+  readonly productionExpectedConversionRatio: number | null;
+  readonly submissionToContractRatio: number | null;
+  readonly contractToDeliveryRatio: number | null;
+  /** 提出量を実際に縛った要因。 */
+  readonly commitmentLimiter: string | null;
+  readonly availability: PackAvailability;
+}
+
+/**
+ * 【Phase 6C・#05 §15】営業組織の状態（1社・1四半期）。
+ *
+ * 「人が足りない」と「増やしたくない」を区別できるように、必要人数・経済的に
+ * 欲しい人数・組織上許される人数・資金上許される人数を別々に保存する。
+ */
+export interface PackSalesOrganization {
+  readonly currentHeadcount: number;
+  readonly requiredHeadcount: number | null;
+  readonly unconstrainedEconomicDesiredHeadcount: number | null;
+  readonly organizationallyAllowedHeadcount: number | null;
+  readonly financiallyAllowedHeadcount: number | null;
+  readonly actualTargetHeadcount: number | null;
+  readonly actualHireCount: number;
+  readonly actualLayoffCount: number;
+  readonly salesCapacityTons: number | null;
+  readonly usedSalesCapacityTons: number | null;
+  readonly unusedSalesCapacityTons: number | null;
+  readonly utilization: number | null;
+  /** 採用0だった場合の理由コード（0でなければ null）。 */
+  readonly constraintReason: string | null;
+  readonly availability: PackAvailability;
+}
+
 export interface PackCompanyTurn {
   readonly turn: number;
   readonly beginningState: PackCompanyStateSnapshot;
@@ -333,6 +402,10 @@ export interface PackCompanyTurn {
   readonly capitalProjects: readonly PackCapitalProject[];
   /** その四半期の Vision・戦略ギャップ・新工場判断。 */
   readonly strategy: PackStrategy;
+  /** 【Phase 6C】Vision → Ambition → Commitment → Contracts → Production の因果。 */
+  readonly commercialGrowth: PackCommercialGrowth;
+  /** 【Phase 6C】営業組織（人が足りないのか、増やしたくないのか）。 */
+  readonly salesOrganization: PackSalesOrganization;
 }
 
 export interface PackCapitalProject {

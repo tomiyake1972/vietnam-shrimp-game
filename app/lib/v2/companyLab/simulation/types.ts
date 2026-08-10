@@ -7,6 +7,7 @@
 // advanceCompanyLabQuarter を呼ぶだけで、fast-run 専用の簡易ロジックは作らない。
 
 import { CompanyLabConfig, CompanyLabState, CompanyFixture } from "../types";
+import type { PackCommercialGrowth, PackSalesOrganization } from "./aiPack/types";
 import type { SimulationAiTurnTrace } from "./analytics/aiTrace";
 import type { ObservedDemandSnapshot } from "./analytics/dataset";
 import type { PackCapitalProject, PackCompanyStateSnapshot, PackStrategy, PackWorldTurn } from "./aiPack/types";
@@ -116,6 +117,10 @@ export interface PackCompanyTurnCapture {
   readonly capitalProjects: readonly PackCapitalProject[];
   /** 【2026-08-09新設】その四半期の Vision・戦略ギャップ・新工場判断。 */
   readonly strategy: PackStrategy;
+  /** 【Phase 6C】Vision → Ambition → Commitment → Contracts → Production の因果。 */
+  readonly commercialGrowth: PackCommercialGrowth;
+  /** 【Phase 6C】営業組織の状態（人が足りないのか、増やしたくないのか）。 */
+  readonly salesOrganization: PackSalesOrganization;
 }
 
 /** 1ターン・1社ぶんの実効能力（HOSO換算トン/四半期）。 */

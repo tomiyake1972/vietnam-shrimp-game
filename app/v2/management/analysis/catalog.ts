@@ -46,7 +46,8 @@ export const ANALYSIS_CATEGORIES: readonly AnalysisCategory[] = [
       { path: `${BASE}/sales-headcount`, label: "各社 総営業人員数推移", implemented: true },
       { path: `${BASE}/sales-allocation`, label: "各社 市場別 営業人員配置", implemented: true },
       { path: `${BASE}/ai-trace`, label: "販売トレース（希望 → 計画 → 成約）", implemented: true },
-      { path: "", label: "Sales Capacity / Hiring Diagnostics", implemented: false, note: "営業工数換算能力の専用画面は今後のPhase" },
+      { path: `${BASE}/commercial-growth`, label: "Commercial Growth（売りたい→取りに行く→売れた→作った）", implemented: true },
+      { path: `${BASE}/commercial-growth`, label: "Sales Organization / Hiring Diagnostics", implemented: true },
     ],
   },
   {
@@ -98,4 +99,5 @@ export const QUICK_NAVIGATION: readonly { readonly path: string; readonly label:
   { path: `${BASE}/sales-headcount`, label: "営業人数", testId: "quicknav-sales-headcount" },
   { path: `${BASE}/sales-allocation`, label: "営業配置", testId: "quicknav-sales-allocation" },
   { path: `${BASE}/strategy`, label: "Vision と戦略成長", testId: "quicknav-strategy" },
+  { path: `${BASE}/commercial-growth`, label: "Commercial Growth", testId: "quicknav-commercial-growth" },
 ];

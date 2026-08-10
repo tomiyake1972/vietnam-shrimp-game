@@ -121,10 +121,49 @@ export function extractAiTurnTrace(diagnostics: StandardAiQuarterDiagnostics): S
   }
 
   // --- ③ WANTED: 制約適用前の希望 ---
+  // 【Phase 6C・#05 §17】既存の6段階を壊さずに、この段階へ
+  //   VISION → COMMERCIAL AMBITION → COMMERCIAL COMMITMENT → SALES ORGANIZATION
+  // の各値を追加する。段階そのものを増やすと既存の Trace 画面・保存済み Run の
+  // 互換が崩れるため、意味的に最も近い「何をしたかったか」の中へ並べる。
   const wishTotal = diagnostics.salesWishByMarketProduct.reduce((s, w) => s + w.desiredQuantityBeforeEffortConstraint, 0);
-  const wanted: AiTraceItem[] = [
-    item("販売希望量（営業工数制約前）", wishTotal, "t"),
-  ];
+  const wanted: AiTraceItem[] = [];
+  if (diagnostics.strategicGrowth) {
+    wanted.push(
+      item("① Vision 参考成長軌道（当期）", diagnostics.strategicGrowth.visionTargetScaleAtCurrentTurn, "t"),
+      item("① 現在の持続可能規模", diagnostics.strategicGrowth.currentSustainableScaleTons, "t"),
+      textItem("① 成長圧力", diagnostics.strategicGrowth.growthPressure)
+    );
+  }
+  if (diagnostics.commercialAmbition) {
+    wanted.push(item("② 売りたい量（Commercial Ambition）", diagnostics.commercialAmbition.ambitionTons, "t"));
+  }
+  if (diagnostics.commercialCommitment) {
+    const c = diagnostics.commercialCommitment;
+    wanted.push(
+      item("③ 取りに行く量（Commercial Commitment）", c.submissionTargetTons, "t"),
+      textItem("③ 提出量を縛った要因", c.limiter),
+      item("③ 提出量の逆算に使った期待成約率", c.expectedConversionRatio, "ratio"),
+      item("③ 生産の見積りに使った期待成約率", c.productionExpectedConversionRatio, "ratio")
+    );
+  }
+  if (diagnostics.conversionObservation) {
+    const o = diagnostics.conversionObservation;
+    wanted.push(
+      item("③ 直近の観測成約率（自社実績）", o.conversionRatio, "ratio", o.observedQuarters === 0 ? "履歴なし（1.0とは読み替えない）" : null)
+    );
+  }
+  if (diagnostics.salesHiring) {
+    const h = diagnostics.salesHiring;
+    wanted.push(
+      item("④ 営業 現在人数", h.currentHeadcount, "人"),
+      item("④ 営業 必要人数", h.requiredHeadcount, "人"),
+      item("④ 営業 経済的に欲しい人数", h.unconstrainedEconomicDesiredHeadcount, "人"),
+      item("④ 営業 組織上の上限", h.organizationallyAllowedHeadcount, "人"),
+      item("④ 営業 資金上の上限", h.financiallyAllowedHeadcount, "人"),
+      textItem("④ 営業を増やさなかった理由", h.zeroHireReason ?? "（採用した）")
+    );
+  }
+  wanted.push(item("販売希望量（営業工数制約前）", wishTotal, "t"));
   if (d) {
     wanted.push(
       item("当期の基本生産必要量", sumProducts(d.basicCurrentPeriodProductionRequirementByProduct as unknown as Record<string, number>), "t"),

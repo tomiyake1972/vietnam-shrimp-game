@@ -39,7 +39,15 @@ import { STANDARD_AI_PARAMETERS_V1 } from "../standardAi/parameters";
 import { STRATEGY_PROFILE_SCHEMA_VERSION } from "../strategyProfile/types";
 import { CapacitySnapshot, MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession, SimulationTurnOutcome } from "./types";
 import { extractAiTurnTrace } from "./analytics/aiTrace";
-import { captureCapitalProjects, captureCompanyStateSnapshot, captureScenarioEvents, captureStrategy, captureWorldTurn } from "./aiPack/capture";
+import {
+  captureCapitalProjects,
+  captureCommercialGrowth,
+  captureCompanyStateSnapshot,
+  captureSalesOrganization,
+  captureScenarioEvents,
+  captureStrategy,
+  captureWorldTurn,
+} from "./aiPack/capture";
 import type { ObservedDemandSnapshot } from "./analytics/dataset";
 import type { PublicMarketInfo } from "../types";
 
@@ -172,6 +180,8 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
     const turnTraces = [];
     /** 【Vision駆動の戦略成長】その四半期の志・戦略ギャップ・新工場判断（会社別）。 */
     const strategyByCompany = new Map<string, ReturnType<typeof captureStrategy>>();
+    /** 【Phase 6C】その四半期の商業成長の因果と営業組織（会社別）。 */
+    const diagnosticsByCompany = new Map<string, ReturnType<typeof generateStandardAiDecisionWithDiagnostics>["diagnostics"]>();
     for (const fixture of session.fixtures) {
       const ownState = buildCompanyOwnState(session.state, fixture);
       const { decision, diagnostics } = generateStandardAiDecisionWithDiagnostics(
@@ -186,6 +196,7 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
       // トレース記録のために Standard AI をもう一度回すことはない。
       turnTraces.push(extractAiTurnTrace(diagnostics));
       strategyByCompany.set(fixture.companyId, captureStrategy(diagnostics));
+      diagnosticsByCompany.set(fixture.companyId, diagnostics);
     }
     // 【AI Analysis Pack】期首状態は「当期処理前」に撮る（処理後では期首にならない）。
     const beginningStates = new Map(session.fixtures.map((f) => [f.companyId, captureCompanyStateSnapshot(session.state, f)]));
@@ -200,6 +211,16 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
       endingState: captureCompanyStateSnapshot(nextState, f),
       capitalProjects: captureCapitalProjects(nextState, f.companyId),
       strategy: strategyByCompany.get(f.companyId) as ReturnType<typeof captureStrategy>,
+      // 【Phase 6C】商業成長の因果は、当期の確定サマリー（成約・納品・生産）と
+      // 突き合わせて初めて完成するため、advanceCompanyLabQuarter の後に組み立てる。
+      commercialGrowth: captureCommercialGrowth(
+        diagnosticsByCompany.get(f.companyId)!,
+        nextState.history[nextState.history.length - 1]?.companySummaries.find((c) => c.companyId === f.companyId),
+        diagnosticsByCompany
+          .get(f.companyId)!
+          .decision.productionPlans.reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0)
+      ),
+      salesOrganization: captureSalesOrganization(diagnosticsByCompany.get(f.companyId)!),
     }));
     const finalizedRecord = nextState.history[nextState.history.length - 1];
     const packWorldTurn = finalizedRecord

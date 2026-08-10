@@ -46,9 +46,81 @@ const NEW_FACTORY_STATUS_LABELS: Readonly<Record<string, string>> = {
   APPROVED: "承認済み・建設中",
 };
 
+const CONSTRAINT_LABELS: Readonly<Record<string, string>> = {
+  SALES_CAPACITY: "営業能力",
+  PRODUCTION_CAPACITY: "生産能力",
+  LABOR: "労働力",
+  RAW_MATERIAL: "原料",
+  INVENTORY_POLICY: "在庫方針",
+  MARKET: "市場競争",
+  FINANCE: "資金",
+  OTHER: "その他",
+  NONE: "なし（志の範囲で取り切れている）",
+};
+
+const COMMITMENT_LIMITER_LABELS: Readonly<Record<string, string>> = {
+  NONE: "志のまま取りに行けた",
+  RECENT_CONVERSION: "直近の成約率を踏まえて抑えた",
+  MARKET_OPPORTUNITY: "観測できる採算機会が足りない",
+  SALES_CAPACITY: "営業組織が捌ける案件量が足りない",
+  STRETCH_LIMIT: "志への上乗せ上限に当たった",
+};
+
+const ZERO_HIRE_REASON_LABELS: Readonly<Record<string, string>> = {
+  SALES_HIRING_BLOCKED_BY_PRODUCTION: "生産能力に余力が無いため増やさない",
+  SALES_HIRING_BLOCKED_BY_LIQUIDITY: "資金余力が足りないため増やさない",
+  SALES_HIRING_BLOCKED_BY_RAW_SUPPLY_UNCERTAINTY: "原料供給が不確実なため増やさない",
+  SALES_HIRING_NOT_ECONOMIC: "追加1人が担う販売機会が無いため増やさない",
+  SALES_HIRING_LIMITED_BY_TARGET_SCALE: "目指す規模に既に達しているため増やさない",
+  SALES_HIRING_DEFERRED_UNTIL_CAPACITY_EXPANSION: "生産能力の拡張が先のため増やさない",
+  SALES_FORCE_EXCESS_CAPACITY: "営業容量が過剰なため減員した",
+};
+
 const DASH = "－";
 const money = (v: number | null | undefined) => (v === null || v === undefined ? DASH : `${(v / 1_000_000).toFixed(1)}M`);
 const tons = (v: number | null | undefined) => (v === null || v === undefined ? DASH : `${Math.round(v).toLocaleString()}t`);
+const percent = (v: number | null | undefined) => (v === null || v === undefined ? DASH : `${(v * 100).toFixed(0)}%`);
+
+/**
+ * 【Phase 6C・#05 §9】経営の思考を決定論的なテンプレートで1本の文にする。
+ *
+ * **生成AIは使わない。** 与えられた数値と理由コードだけから組み立てる。
+ * 値が無いところは書かない（推測で埋めない）。
+ */
+function commercialNarrative(companyId: string, g: PackCompanyTurnCapture["commercialGrowth"], s: PackCompanyTurnCapture["salesOrganization"]): string {
+  const parts: string[] = [];
+
+  if (g.visionReferenceScaleTons !== null && g.commercialAmbitionTons !== null) {
+    const behind = g.commercialAmbitionTons < g.visionReferenceScaleTons;
+    parts.push(
+      behind
+        ? `${companyId}はVisionの参考軌道（${Math.round(g.visionReferenceScaleTons).toLocaleString()}t）に対して販売規模が遅れている。`
+        : `${companyId}はVisionの参考軌道（${Math.round(g.visionReferenceScaleTons).toLocaleString()}t）に対して遅れていない。`
+    );
+  }
+  if (g.profitableOpportunityTons !== null && g.profitableOpportunityTons > 0) {
+    parts.push("観測可能な採算機会があるため販売拡大を狙う。");
+  }
+  if (g.commercialAmbitionTons !== null) {
+    parts.push(`今期は${Math.round(g.commercialAmbitionTons).toLocaleString()}tを目指し、`);
+  }
+  parts.push(`${Math.round(g.submittedSalesTons).toLocaleString()}tを市場へ提示した。`);
+  parts.push(`実際の成約は${Math.round(g.contractedSalesTons).toLocaleString()}t。`);
+  if (g.actualProductionTons > 0) {
+    parts.push(`生産は${Math.round(g.actualProductionTons).toLocaleString()}t。`);
+  }
+  if (g.primaryGrowthConstraint && g.primaryGrowthConstraint !== "NONE") {
+    parts.push(`現在の主な成長制約は${CONSTRAINT_LABELS[g.primaryGrowthConstraint] ?? g.primaryGrowthConstraint}。`);
+  } else if (g.primaryGrowthConstraint === "NONE") {
+    parts.push("現在、志の範囲では取り切れており、明確な成長制約は出ていない。");
+  }
+  if (s.actualHireCount > 0) {
+    parts.push(`営業は${s.actualHireCount}人を採用した。`);
+  } else if (s.constraintReason) {
+    parts.push(`営業は増やさなかった（${ZERO_HIRE_REASON_LABELS[s.constraintReason] ?? s.constraintReason}）。`);
+  }
+  return parts.join("");
+}
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -93,6 +165,10 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
   // 【Vision駆動の戦略成長】最新ターンの志・戦略ギャップ・新工場判断。
   const latestStrategy = strategyTurns.find((s) => s.companyId === selectedCompanyId && s.turn === latestTurn)?.strategy ?? null;
   const vision = latestStrategy?.vision ?? null;
+  // 【Phase 6C】Vision → Ambition → Commitment → Contracts → Production の因果。
+  const latestCapture = strategyTurns.find((s) => s.companyId === selectedCompanyId && s.turn === latestTurn) ?? null;
+  const growth = latestCapture?.commercialGrowth ?? null;
+  const salesOrg = latestCapture?.salesOrganization ?? null;
   const newFactory = latestStrategy?.newFactory ?? null;
   const blockingGate = newFactory?.gates.find((g) => !g.passed) ?? null;
 
@@ -180,6 +256,96 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
               参考成長軌道は「志に対して今どこにいるか」を測る物差しであり、目標値ではありません。未来の需要・価格の予測は使っていません。
             </p>
           </AlwaysSection>
+
+          {/* 【常に見える】§8: 主要値だけを簡潔に。詳細は下の折りたたみへ。 */}
+          <AlwaysSection title="Commercial Growth（売りたい → 取りに行く → 売れた → 作った）">
+            {growth === null || growth.availability !== "AVAILABLE" ? (
+              <p className="text-xs text-slate-400" data-testid="commercial-growth-empty">
+                この実行には商業成長の記録がありません（Phase 6C より前に保存された実行です）。値を推測で補完することはしません。
+              </p>
+            ) : (
+              <div data-testid="commercial-growth">
+                <p className="text-sm leading-relaxed text-slate-100" data-testid="commercial-narrative">
+                  {commercialNarrative(selectedCompanyId, growth, salesOrg!)}
+                </p>
+                <dl className="mt-1.5">
+                  <Row label="① 参考成長軌道（Vision）" value={tons(growth.visionReferenceScaleTons)} />
+                  <Row label="② 売りたい量（Ambition）" value={tons(growth.commercialAmbitionTons)} />
+                  <Row label="③ 取りに行く量（Commitment）" value={tons(growth.commercialCommitmentTons)} />
+                  <Row label="④ 市場へ提示した量（Submitted）" value={tons(growth.submittedSalesTons)} />
+                  <Row label="⑤ 実際に売れた量（Contracts）" value={tons(growth.contractedSalesTons)} />
+                  <Row label="⑥ 作った量（Production）" value={tons(growth.actualProductionTons)} />
+                  <Row label="取れなかった採算機会" value={tons(growth.unservedProfitableOpportunityTons)} />
+                  <Row
+                    label="主な成長制約"
+                    value={
+                      growth.primaryGrowthConstraint === null
+                        ? DASH
+                        : (CONSTRAINT_LABELS[growth.primaryGrowthConstraint] ?? growth.primaryGrowthConstraint)
+                    }
+                  />
+                </dl>
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                  ②〜⑥は<strong>それぞれ別の量</strong>です。「売りたい」「市場へ取りに行く」「実際に売れた」「作る」を同じ数字として扱わないでください。
+                </p>
+              </div>
+            )}
+          </AlwaysSection>
+
+          <Section title="Commercial Thinking（なぜその量を取りに行ったのか）" testId="inspector-commercial-thinking-toggle">
+            {growth === null || growth.availability !== "AVAILABLE" ? (
+              <p className="text-xs text-slate-400">記録がありません。</p>
+            ) : (
+              <dl data-testid="commercial-thinking">
+                <Row
+                  label="提出量を縛った要因"
+                  value={growth.commitmentLimiter === null ? DASH : (COMMITMENT_LIMITER_LABELS[growth.commitmentLimiter] ?? growth.commitmentLimiter)}
+                />
+                <Row label="直近の成約率（観測）" value={percent(growth.observedConversionRatio)} />
+                <Row label="提出量の逆算に使った期待成約率" value={percent(growth.submissionTargetConversionRatio)} />
+                <Row label="生産量の見積りに使った期待成約率" value={percent(growth.productionExpectedConversionRatio)} />
+                <Row label="今期の 提出→成約" value={percent(growth.submissionToContractRatio)} />
+                <Row label="今期の 成約→納品" value={percent(growth.contractToDeliveryRatio)} />
+                <Row label="観測できる採算機会" value={tons(growth.profitableOpportunityTons)} />
+                <Row label="生産必要量" value={tons(growth.productionRequirementTons)} />
+              </dl>
+            )}
+            <p className="mt-1 text-[11px] leading-snug text-slate-500">
+              成約率は<strong>自社の過去の実績</strong>から観測した値であり、市場の真の需要（TRUE WORLD）ではありません。
+            </p>
+          </Section>
+
+          <Section title="Sales Organization（人が足りないのか、増やしたくないのか）" testId="inspector-sales-organization-toggle">
+            {salesOrg === null || salesOrg.availability !== "AVAILABLE" ? (
+              <p className="text-xs text-slate-400">記録がありません。</p>
+            ) : (
+              <dl data-testid="sales-organization">
+                <Row label="現在の営業人員" value={`${salesOrg.currentHeadcount}人`} />
+                <Row label="必要人数" value={salesOrg.requiredHeadcount === null ? DASH : `${salesOrg.requiredHeadcount}人`} />
+                <Row
+                  label="経済的に欲しい人数"
+                  value={salesOrg.unconstrainedEconomicDesiredHeadcount === null ? DASH : `${salesOrg.unconstrainedEconomicDesiredHeadcount}人`}
+                />
+                <Row
+                  label="組織上ここまで増やせる"
+                  value={salesOrg.organizationallyAllowedHeadcount === null ? DASH : `${salesOrg.organizationallyAllowedHeadcount}人`}
+                />
+                <Row
+                  label="資金上ここまで増やせる"
+                  value={salesOrg.financiallyAllowedHeadcount === null ? DASH : `${salesOrg.financiallyAllowedHeadcount}人`}
+                />
+                <Row label="今期の採用" value={`${salesOrg.actualHireCount}人`} />
+                <Row label="今期の減員" value={`${salesOrg.actualLayoffCount}人`} />
+                <Row label="営業能力" value={tons(salesOrg.salesCapacityTons)} />
+                <Row label="うち使った量" value={tons(salesOrg.usedSalesCapacityTons)} />
+                <Row label="営業能力の稼働率" value={percent(salesOrg.utilization)} />
+                <Row
+                  label="増やさなかった理由"
+                  value={salesOrg.constraintReason === null ? "（採用した）" : (ZERO_HIRE_REASON_LABELS[salesOrg.constraintReason] ?? salesOrg.constraintReason)}
+                />
+              </dl>
+            )}
+          </Section>
 
           <Section title="Investment Thinking（新工場を建てる／建てない理由）" testId="inspector-investment-thinking-toggle">
             {newFactory === null ? (
