@@ -22,12 +22,20 @@ interface Props {
 }
 
 export function CompanyControlPanel({ fixtures, controlModes, onChangeMode, decidedCompanyIds, waitingCompanyIds, onOperate, disabled, currentTurn }: Props) {
+  const hasAnyPlayerCompany = fixtures.some((f) => (controlModes[f.companyId] ?? "STANDARD_AI") === "PLAYER");
   return (
     <section className="rounded-md border border-slate-700 bg-slate-900/50 p-2.5" data-testid="company-control-panel">
       <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-300">経営モード（Manual Override）</h3>
       <p className="mb-2 text-[11px] leading-snug text-slate-500">
         会社ごとに Standard AI / 自分で操作 を切り替えられます。切り替えは次のTurnから適用されます。今すでに確定済みのTurnの意思決定は上書きしません。
       </p>
+      {/* 【受入指示§6-8】PLAYER会社が存在する場合だけ、小さな補足として表示する
+          （全社AI利用時には邪魔しない）。既に実行済みのTurn結果は失われないことを明記する。 */}
+      {hasAnyPlayerCompany ? (
+        <p className="mb-2 text-[11px] leading-snug text-slate-400" data-testid="player-reload-warning">
+          ⓘ プレイヤー操作待ちの途中状態・まだ確定していない入力内容は、ページを再読み込みすると失われます（既に実行済みのTurnの結果は失われません）。
+        </p>
+      ) : null}
       <ul className="flex flex-col gap-1.5">
         {fixtures.map((f) => {
           const mode: CompanyControlMode = controlModes[f.companyId] ?? "STANDARD_AI";

@@ -181,6 +181,16 @@ const ENTRIES: readonly DictionaryEntry[] = [
     nullableReason: "Vision 導入より前に保存された Simulation Run（availability=NOT_RECORDED）。",
   },
   {
+    field: "companies[].turns[].decisionOwner",
+    japanese: "その四半期の意思決定者",
+    definition:
+      "STANDARD_AI または PLAYER。**実際にゲームエンジンへ渡された意思決定が誰由来だったか**の唯一の情報源（Management Console の Manual Override機能で会社ごとにPLAYER操作へ切り替えられる）。PLAYER の四半期でも、diagnosis / wanted / constraints 等の Standard AI 参考診断は比較用としてそのまま記録される場合があるが、これは実行された意思決定そのものではない。実際に実行されたのは decision / execution / financialResult であり、その由来を判定する唯一の情報源が decisionOwner である。Phase 7（Manual Override）より前に保存された Simulation Run にはこの記録が無い。当時の Management Console は全社 Standard AI のみで、PLAYER操作は存在しなかったため、その場合は当時の仕様どおり STANDARD_AI として解釈する（NOT_RECORDEDにはしない）。",
+    unit: "—",
+    source: "companyLab/simulation/engine.ts（advanceSimulationTurn の playerDecisions 引数）",
+    layer: "DECISION",
+    nullableReason: "存在しない（常にSTANDARD_AIかPLAYERのいずれかが入る。Phase 7より前のRunはSTANDARD_AIとして解釈）。",
+  },
+  {
     field: "run.isPartialRun / run.runCompletenessLabel",
     japanese: "途中実行かどうか",
     definition:
@@ -331,6 +341,10 @@ export function buildDataDictionaryMarkdown(context: AiAnalysisPackContext): str
   lines.push("# ShrimpX AI Analysis Pack — Data Dictionary");
   lines.push("");
   lines.push(`Pack schema version: \`${context.schemaVersion}\``);
+  lines.push("");
+  lines.push(
+    "**Phase 7 (Manual Override) note:** `companies[].turns[].decisionOwner` and the top-level `decisionOwnership` summary were added as backward-compatible additive fields — existing readers of this schema version are unaffected, so the schema version was not bumped. Simulation Runs recorded before Phase 7 simply have no PLAYER turns; see the `decisionOwner` entry in Fields below for how those are interpreted."
+  );
   lines.push("");
   lines.push("## Layers");
   lines.push("");

@@ -78,6 +78,25 @@ export function buildRunSummaryMarkdown(context: AiAnalysisPackContext): string 
   lines.push(`| sourceCommit | ${run.sourceCommit} |`);
   lines.push("");
 
+  // --- Decision ownership（Phase 7・Manual Override） ---
+  lines.push("## Decision Ownership");
+  lines.push("");
+  const ownership = context.decisionOwnership;
+  if (ownership.playerTurnCount === 0) {
+    lines.push("Decision ownership: STANDARD_AI only (no PLAYER turns were recorded in this run).");
+  } else {
+    lines.push(`Decision ownership:`);
+    lines.push(`- STANDARD_AI turns: ${ownership.standardAiTurnCount}`);
+    lines.push(`- PLAYER turns: ${ownership.playerTurnCount}`);
+    lines.push("");
+    lines.push(`PLAYER companies: ${ownership.playerCompanyIds.join(", ")}`);
+    lines.push("");
+    lines.push(
+      "This run includes human (Management Console Manual Override) intervention. See `companies[].turns[].decisionOwner` in `02_AI_Context.json` for the exact company × turn breakdown, and the reading guide above for how to interpret Standard AI reference diagnosis recorded alongside PLAYER decisions."
+    );
+  }
+  lines.push("");
+
   // --- Companies ---
   lines.push("## Companies");
   lines.push("");

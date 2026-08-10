@@ -23,6 +23,7 @@ import {
   PackCompanySummary,
   PackCompanyTurn,
   PackDataAvailabilityNote,
+  PackDecisionOwnership,
   PackProductEconomics,
   PackSourceType,
   PackTraceItem,
@@ -109,6 +110,8 @@ export const PACK_READING_GUIDE: readonly string[] = [
   "companies[].turns[].strategy holds the company Vision (given from OUTSIDE by the human owner — the AI never invents growth targets), the reference growth path, the gap between that path and the company's current sustainable scale, the resulting growth pressure, and the full gate-by-gate record of the new-factory decision. Quarters where no factory was proposed still carry the reasons; 'did not build' is a recorded decision, not missing data.",
   "A Vision is an aspiration, not a quota. Failing to reach targetScaleTonsPerQuarterAtQ32 is not a bug and must not be reported as one.",
   "If run.isPartialRun is true, later quarters were never simulated. Treat the run as truncated, never as an 8-year outcome.",
+  "companies[].turns[].decisionOwner records who actually decided that company's quarter: STANDARD_AI or PLAYER (Management Console Manual Override). This is the single source of truth for what was actually submitted to the engine.",
+  "For a PLAYER turn, the standardAiObservable/diagnosis/wanted/constraints layers still hold the Standard AI's own reference computation for that same turn — this is kept as comparison-only context, not the decision that was actually executed. Only the decision/execution/financialResult layers reflect the human's actual choice on a PLAYER turn. Runs recorded before decisionOwner existed have no PLAYER turns (Management Console was Standard-AI-only at the time), so decisionOwner defaults to STANDARD_AI for them.",
 ];
 
 function metricValue(dataset: SimulationAnalyticsDataset, turn: number, companyId: string, metric: string): number | null {
@@ -452,6 +455,14 @@ export function buildAiAnalysisPackContext(input: BuildPackContextInput): AiAnal
 
   const worldTurns = (stored.packCapture?.worldTurns ?? []).filter((w) => turns.includes(w.turn));
 
+  // 【Phase 7・Manual Override受入】companies[].turns[].decisionOwner を1回だけ数える。
+  const allCompanyTurns = Object.values(companies).flatMap((c) => c.turns.map((t) => ({ companyId: c.companyId, turn: t })));
+  const decisionOwnership: PackDecisionOwnership = {
+    standardAiTurnCount: allCompanyTurns.filter((t) => t.turn.decisionOwner === "STANDARD_AI").length,
+    playerTurnCount: allCompanyTurns.filter((t) => t.turn.decisionOwner === "PLAYER").length,
+    playerCompanyIds: [...new Set(allCompanyTurns.filter((t) => t.turn.decisionOwner === "PLAYER").map((t) => t.companyId))],
+  };
+
   return {
     schemaVersion: AI_ANALYSIS_PACK_SCHEMA_VERSION,
     readingGuide: PACK_READING_GUIDE,
@@ -481,6 +492,7 @@ export function buildAiAnalysisPackContext(input: BuildPackContextInput): AiAnal
     companySummaries: summaries,
     world: { turns: worldTurns },
     companies,
+    decisionOwnership,
     majorChanges: buildMajorChanges(dataset, worldTurns, companies),
     standardAiProposableCapexTypes: STANDARD_AI_PROPOSABLE_CAPEX_TYPES,
     gameCapexTypes: CAPITAL_PROJECT_TYPES,

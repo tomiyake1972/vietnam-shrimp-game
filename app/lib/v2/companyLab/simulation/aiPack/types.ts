@@ -501,6 +501,18 @@ export interface PackDataAvailabilityNote {
   readonly reason: string;
 }
 
+/**
+ * 【Phase 7・Manual Override受入】このRun全体で、誰がどれだけの四半期を決めたか。
+ * companies[].turns[].decisionOwner を1回だけ集計した値であり、
+ * ここに新しい計算・推測は無い（会社×ターンの実測を数えるだけ）。
+ */
+export interface PackDecisionOwnership {
+  readonly standardAiTurnCount: number;
+  readonly playerTurnCount: number;
+  /** 1回でもPLAYERとして意思決定した会社のcompanyId一覧（登場順）。 */
+  readonly playerCompanyIds: readonly string[];
+}
+
 export interface AiAnalysisPackContext {
   readonly schemaVersion: string;
   readonly readingGuide: readonly string[];
@@ -508,6 +520,8 @@ export interface AiAnalysisPackContext {
   readonly companySummaries: readonly PackCompanySummary[];
   readonly world: { readonly turns: readonly PackWorldTurn[] };
   readonly companies: Readonly<Record<string, { readonly companyId: string; readonly displayName: string; readonly turns: readonly PackCompanyTurn[] }>>;
+  /** 【Phase 7・Manual Override受入】このRun全体の意思決定者集計。 */
+  readonly decisionOwnership: PackDecisionOwnership;
   readonly majorChanges: readonly PackMajorChange[];
   /**
    * Standard AI が提案しうる設備投資の種類（コード上の事実）。
