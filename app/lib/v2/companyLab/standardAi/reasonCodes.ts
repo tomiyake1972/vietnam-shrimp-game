@@ -20,6 +20,7 @@ export type StandardAiReasonCode =
   | "FINISHED_GOODS_EXCESS" // 完成品在庫過剰
   | "CAPACITY_CONSTRAINT" // 設備・原料・労働能力による制約
   | "SHARED_CAPACITY_CONSTRAINT" // 【2026-08-02新設】共通前処理・凍結包装等の共有ボトルネックの実効能力により生産計画全体を縮小
+  | "CAPEX_DEFERRED_INSUFFICIENT_SPACE" // 【Phase 6D-1新設】既存増設候補が工場スペース不足のため提案しない（承認ゲートで却下され続ける空提案を出さない）
   // --- 原料調達 ---
   | "RAW_MATERIAL_SHORTAGE" // 原料不足
   | "PROCUREMENT_INCREASED_FOR_SHORTAGE" // 原料不足のため調達量を増加
@@ -149,6 +150,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "FINISHED_GOODS_EXCESS",
   "CAPACITY_CONSTRAINT",
   "SHARED_CAPACITY_CONSTRAINT",
+  "CAPEX_DEFERRED_INSUFFICIENT_SPACE",
   "RAW_MATERIAL_SHORTAGE",
   "PROCUREMENT_INCREASED_FOR_SHORTAGE",
   "PROCUREMENT_REDUCED_FOR_EXCESS",

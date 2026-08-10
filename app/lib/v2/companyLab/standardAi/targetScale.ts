@@ -67,11 +67,24 @@ export function computeTargetScaleBand(
   // 「現在の持続可能規模」= 直近実績と現在の実効生産能力の加重平均。
   // 実績だけだとturn1（実績ゼロ）や一時的な落ち込みに引きずられ、能力だけだと
   // 実際に売れている量を無視するため、両者を混合する（targetScaleCapacityWeightInBaseline）。
+  //
+  // 【Phase 6D-1・修正B】能力側は「商品別ラインの合計」だけでなく
+  // min(商品別ラインの合計, 共通前処理能力) を使う（binding production capacity と
+  // 同一の SSoT）。decision/newFactory.ts の Gate H は元々この min を使っており
+  // （「分母を間違えない」というコメントつきで明記）、targetScale.ts だけが
+  // 商品別ラインの合計のみを見ていた。この不一致により、共通前処理が商品別ライン
+  // 合計より小さい会社（例: JPQ Q32 ライン29,455 vs 共通26,249）で、実際には
+  // 生産できない3,000t超が「達成可能な持続可能規模」として数えられ、
+  // Vision gap が過小評価される（＝新工場の検討に入るべき局面で LOW/onTrack に
+  // なる）ことが Phase 6D 監査で確認された。
   const lastQuarterActualTons =
     (observation.lastQuarterActualProductionByProduct.hoso ?? 0) +
     (observation.lastQuarterActualProductionByProduct.pd ?? 0) +
     (observation.lastQuarterActualProductionByProduct.vap ?? 0);
-  const effectiveCapacityTons = sumProductAmount(observation.totalEffectiveCapacityByProduct);
+  const effectiveCapacityTons = Math.min(
+    sumProductAmount(observation.totalEffectiveCapacityByProduct),
+    observation.totalEffectiveCommonProcessingCapacity
+  );
 
   const capacityWeight = params.targetScaleCapacityWeightInBaseline;
   // turn1等、直近実績が存在しない場合は能力側へ全面的に寄せる（実績ゼロに

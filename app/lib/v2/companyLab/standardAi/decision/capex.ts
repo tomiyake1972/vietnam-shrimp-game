@@ -19,6 +19,7 @@
 
 import { CapexDecisionInput, CapexProjectProposalInput, CapitalProjectType } from "../../../capex/types";
 import { CAPEX_PARAMETERS_V1, CapexParameters } from "../../../capex/parameters";
+import { computeCandidateProjectSpaceUnits } from "../../../capex/factorySpace";
 import { Product } from "../../../market/types";
 import { CompanyFixture } from "../../types";
 import { minimumAcceptablePremium } from "../../premiumPolicy";
@@ -211,6 +212,60 @@ export function buildStandardAiCapexDecision(
 ): CapexPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const proposals: CapexProjectProposalInput[] = [];
+
+  // ---------------------------------------------------------------------
+  // 【Phase 6D-1・修正A】既存増設候補のスペース実現可能性チェック
+  // ---------------------------------------------------------------------
+  //
+  // 【なぜ必要か（Phase 6D 監査で確認）】従来はここでスペースを一切確認せず、
+  // 「稼働率・在庫・財務が条件を満たせば増設を提案する」だけだった。実際には
+  // capex/factorySpace.ts の承認ゲートがスペース不足を理由に毎四半期その提案を
+  // REJECTする（例: BAL は commonProcessingExpansion 必要560units に対し残520units
+  // で、Q24〜Q32まで8四半期連続でREJECTされ続けていた）。この「実行不能な提案が
+  // 存在する」という事実だけが decision/newFactory.ts の Gate G
+  // （EXISTING_EXPANSION_FIRST）を通じて新工場判断を無期限に block していた。
+  //
+  // 【修正方針】増設そのものを禁止しない。承認可能性が無い候補だけを
+  // 「実行可能な既存増設候補」として扱わない（提案しない）。スペースが
+  // 実際に十分ならこれまでどおり提案する。既存の観測値
+  // （observation.factorySpaceRemainingUnits）と既存の関数
+  // （computeCandidateProjectSpaceUnits、承認ゲート自身が使うのと同じ関数）だけを
+  // 使い、新しい判定式・新しい閾値は作らない。
+  //
+  // 同一四半期内で複数案件（HOSO/PD/VAP/共通）を評価するため、実際に提案した
+  // ぶんのスペースを都度差し引きながら判定する（1四半期内の二重予約を防ぐ）。
+  // 【捏造しない】observation.factorySpaceRemainingUnits を持たない呼び出し元
+  // （テスト用の合成observation等）では、スペースという概念自体を検証していないと
+  // みなし、無限大（＝常に十分）として扱う。存在しない制約を作らない。
+  let spaceRemainingUnits = Number.isFinite(observation.factorySpaceRemainingUnits)
+    ? observation.factorySpaceRemainingUnits
+    : Number.POSITIVE_INFINITY;
+  const checkSpaceFeasible = (projectType: CapitalProjectType): { readonly feasible: boolean; readonly requiredSpaceUnits: number } => {
+    const requiredSpaceUnits = computeCandidateProjectSpaceUnits(projectType, capexParams);
+    return { feasible: requiredSpaceUnits <= spaceRemainingUnits + EPSILON, requiredSpaceUnits };
+  };
+  const reserveSpace = (requiredSpaceUnits: number): void => {
+    spaceRemainingUnits -= requiredSpaceUnits;
+  };
+  const recordSpaceInfeasible = (projectType: CapitalProjectType, requiredSpaceUnits: number): void => {
+    diagnostics.push({
+      code: "CAPEX_DEFERRED_INSUFFICIENT_SPACE",
+      domain: "capex",
+      companyId: fixture.companyId,
+      severity: "info",
+      keyValues: {
+        requiredSpaceUnits,
+        factorySpaceRemainingUnits: spaceRemainingUnits,
+        factorySpaceTotalUnits: observation.factorySpaceTotalUnits,
+        factorySpaceUsedUnits: observation.factorySpaceUsedUnits,
+      },
+      decisionSummary: `${projectType} は工場スペース不足のため提案しない`,
+      message: `${projectType} の必要スペース ${Math.round(requiredSpaceUnits).toLocaleString()} units が、現在の残スペース ${Math.round(
+        spaceRemainingUnits
+      ).toLocaleString()} units を上回るため、実行不能な候補として提案しない（承認ゲートでREJECTされ続ける空提案を繰り返さない）。`,
+    });
+  };
+
   // 【監査指摘H】PD_CAPACITY_MAINTAINED の判定材料（VAP転換へ追随しなかったか）。
   let vapOversupplyRetreated = false;
   let vapGrowthSignalPresent = false;
@@ -307,8 +362,10 @@ export function buildStandardAiCapexDecision(
     const gate = financialGateFor(LINE_EXPANSION_BY_PRODUCT[product]);
     const safe = gate.safe;
 
-    if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned) {
+    const lineSpace = checkSpaceFeasible(LINE_EXPANSION_BY_PRODUCT[product]);
+    if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned && lineSpace.feasible) {
       proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product] });
+      reserveSpace(lineSpace.requiredSpaceUnits);
       diagnostics.push({
         code: "CAPEX_PROPOSED",
         domain: "capex",
@@ -324,6 +381,7 @@ export function buildStandardAiCapexDecision(
           ongoingProjectGate: alreadyPlanned ? 0 : 1,
           shortfallGate: isBottleneck ? 1 : 0,
           sustainedGate: 1,
+          spaceGate: 1,
           finalDecision: 1,
         },
         decisionSummary: `${product.toUpperCase()}ライン増設を提案（${product.toUpperCase()}ライン稼働率 ${(utilization.utilization * 100).toFixed(1)}%）`,
@@ -333,6 +391,8 @@ export function buildStandardAiCapexDecision(
           `（前期実績 ${Math.round(utilization.actualProduction).toLocaleString()}t ÷ 実効能力 ${Math.round(utilization.capacity).toLocaleString()}t ` +
           `= ${(utilization.utilization * 100).toFixed(1)}%）であり、共通前処理能力の稼働率ではない。`,
       });
+    } else if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned && !lineSpace.feasible) {
+      recordSpaceInfeasible(LINE_EXPANSION_BY_PRODUCT[product], lineSpace.requiredSpaceUnits);
     } else if (isBottleneck) {
       diagnostics.push({
         code: "CAPEX_DEFERRED",
@@ -372,8 +432,10 @@ export function buildStandardAiCapexDecision(
       if (product === "vap" && trend !== undefined && trend >= trendThreshold) vapGrowthSignalPresent = true;
       // 【2026-08-09・Test16】成長エントリの稼働率条件も、対象商品の専用ライン稼働率で見る。
       const utilizationOk = hasPriorQuarter && utilization.utilization >= params.capexGrowthEntryUtilizationThreshold;
-      if (trend !== undefined && trend >= trendThreshold && utilizationOk && noExcess && safe) {
+      const growthEntrySpace = checkSpaceFeasible(LINE_EXPANSION_BY_PRODUCT[product]);
+      if (trend !== undefined && trend >= trendThreshold && utilizationOk && noExcess && safe && growthEntrySpace.feasible) {
         proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product] });
+        reserveSpace(growthEntrySpace.requiredSpaceUnits);
         diagnostics.push({
           code: product === "vap" ? "VAP_GROWTH_ENTRY" : "LIFECYCLE_GROWTH_PURSUED",
           domain: "capex",
@@ -389,11 +451,14 @@ export function buildStandardAiCapexDecision(
             inventoryGate: noExcess ? 1 : 0,
             ongoingProjectGate: alreadyPlanned ? 0 : 1,
             shortfallGate: 0,
+            spaceGate: 1,
             finalDecision: 1,
           },
           decisionSummary: `${product.toUpperCase()}ライン増設を成長エントリとして提案`,
           message: `${product.toUpperCase()}の公開ライフサイクルトレンドが成長局面にあり、稼働率・在庫・財務の安全条件を満たすため、能力不足の顕在化前に増設を提案する。`,
         });
+      } else if (trend !== undefined && trend >= trendThreshold && utilizationOk && noExcess && safe && !growthEntrySpace.feasible) {
+        recordSpaceInfeasible(LINE_EXPANSION_BY_PRODUCT[product], growthEntrySpace.requiredSpaceUnits);
       }
     }
   }
@@ -512,8 +577,10 @@ export function buildStandardAiCapexDecision(
     const commonSustained = sustainedFor(commonUtilization);
     const commonGate = financialGateFor("commonProcessingExpansion");
     const safe = commonGate.safe;
-    if (isBottleneck && commonSustained && safe && !alreadyPlannedCommon) {
+    const commonSpace = checkSpaceFeasible("commonProcessingExpansion");
+    if (isBottleneck && commonSustained && safe && !alreadyPlannedCommon && commonSpace.feasible) {
       proposals.push({ projectType: "commonProcessingExpansion" });
+      reserveSpace(commonSpace.requiredSpaceUnits);
       diagnostics.push({
         code: "CAPEX_PROPOSED",
         domain: "capex",
@@ -527,11 +594,14 @@ export function buildStandardAiCapexDecision(
           ongoingProjectGate: alreadyPlannedCommon ? 0 : 1,
           shortfallGate: isBottleneck ? 1 : 0,
           sustainedGate: 1,
+          spaceGate: 1,
           finalDecision: 1,
         },
         decisionSummary: `共通前処理能力の増設を提案（共通前処理稼働率 ${(commonUtilization.utilization * 100).toFixed(1)}%）`,
         message: "共通原料処理能力が持続的なボトルネックのため、増設案件を提案する。",
       });
+    } else if (isBottleneck && commonSustained && safe && !alreadyPlannedCommon && !commonSpace.feasible) {
+      recordSpaceInfeasible("commonProcessingExpansion", commonSpace.requiredSpaceUnits);
     } else if (isBottleneck) {
       diagnostics.push({
         code: "CAPEX_DEFERRED",
