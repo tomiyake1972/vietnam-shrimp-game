@@ -10,6 +10,7 @@
 import { Score0to100, score0to100 } from "../core/units";
 import { Product } from "../market/types";
 import type { SalesCapacityModel } from "./salesCapacityModel";
+import { SALES_CAPACITY_MODEL_COMPANY_ORGANIZATION_V1, SALES_CAPACITY_MODEL_PER_MARKET } from "./salesCapacityModel";
 
 export interface SalesParameters {
   readonly parametersVersion: string;
@@ -148,7 +149,7 @@ export interface SalesParameters {
 }
 
 export const SALES_PARAMETERS_V1: SalesParameters = {
-  parametersVersion: "sales-v0.1",
+  parametersVersion: "sales-v0.2",
 
   salesForce: {
     baselineCoverageAtZeroHeadcount: 0.15,
@@ -188,6 +189,28 @@ export const SALES_PARAMETERS_V1: SalesParameters = {
 
   minAskPriceRatioOfBase: 0.5,
   maxAskPriceRatioOfBase: 2.0,
+
+  /**
+   * 【Test16 正式営業能力モデル（2026-08-10 切替・#05 Phase 6C §2）】
+   * 会社営業組織モデル v1。ベンチマーク呼称 "Case B + V1"。
+   * 定義・採用理由・能力関数の実測値は sales/salesCapacityModel.ts に記載する。
+   *
+   * 切替前は undefined（＝市場別モデル）だった。旧挙動が必要な場合は
+   * SALES_PARAMETERS_LEGACY_PER_MARKET を使う（下記）。
+   */
+  salesCapacityModel: SALES_CAPACITY_MODEL_COMPANY_ORGANIZATION_V1,
+};
+
+/**
+ * 【後方互換・比較対照】Phase 6C 以前の Test16 既定（市場別営業能力モデル）。
+ *
+ * 正式モデルの切替による差分を測るため、および旧挙動での再現が必要な調査のために
+ * 残す。**新しい既定ではない**（production default は SALES_PARAMETERS_V1）。
+ */
+export const SALES_PARAMETERS_LEGACY_PER_MARKET: SalesParameters = {
+  ...SALES_PARAMETERS_V1,
+  parametersVersion: "sales-v0.1-legacy-per-market",
+  salesCapacityModel: SALES_CAPACITY_MODEL_PER_MARKET,
 };
 
 /**

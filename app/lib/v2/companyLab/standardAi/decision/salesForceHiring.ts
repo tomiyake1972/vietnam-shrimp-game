@@ -35,7 +35,7 @@ import { CompanyFixture } from "../../types";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
 import { ProductAmount, StandardAiObservation } from "../types";
-import { StandardAiDiagnosticEntry } from "../reasonCodes";
+import { StandardAiDiagnosticEntry, StandardAiReasonCode } from "../reasonCodes";
 import { applySalesHireRampLimit } from "../../salesForceHiring";
 import { SalesWishEntry } from "./sales";
 import { StandardAiUnitEconomicsResult } from "../diagnosis/forwardUnitEconomics";
@@ -90,6 +90,40 @@ export interface MarginalSalespersonEvaluation {
     | "SALES_HIRING_DEFERRED_UNTIL_CAPACITY_EXPANSION";
 }
 
+/**
+ * 【Phase 6C・#05 §6】営業採用判断の構造化記録。
+ *
+ * Phase 6B の監査で「required > current なのに採用0、しかも理由コードが1件も無い」
+ * 会社×四半期が29件見つかった。人数だけを見て理由を推測させないため、
+ * 「何人必要で、経済的には何人欲しくて、組織上・資金上は何人まで許され、
+ * 結局何人採ったのか」を毎四半期かならず残す。
+ *
+ * **採用0のときは必ず zeroHireReason が入る**（不明のまま黙って0にしない）。
+ */
+export interface SalesHiringDiagnosticsRecord {
+  /** 現在の稼働営業人員（前期末までに確定した人数）。 */
+  readonly currentHeadcount: number;
+  /** 今期の販売希望を営業工数制約なしで捌くのに必要な人数（目標販売量からの逆算）。 */
+  readonly requiredHeadcount: number;
+  /** 経済合理性だけで決めた場合に欲しい総人数（組織・資金の上限を掛ける前）。 */
+  readonly unconstrainedEconomicDesiredHeadcount: number;
+  /** 組織の吸収能力（1四半期の増員上限）を適用した後に到達できる総人数。 */
+  readonly organizationallyAllowedHeadcount: number;
+  /** 資金余力（最低現金バッファ）で許される総人数。 */
+  readonly financiallyAllowedHeadcount: number;
+  /** 実際に目標とした総人数。 */
+  readonly actualTargetHeadcount: number;
+  /** 今期実際に採用した人数。 */
+  readonly actualHireCount: number;
+  /** 今期実際に減員した人数。 */
+  readonly actualLayoffCount: number;
+  /** 営業組織が捌ける案件量（工数トン）と、そのうち実際に使った量。 */
+  readonly salesCapacityTons: number;
+  readonly usedSalesCapacityTons: number;
+  /** 採用0だった場合の理由（0でなければ null）。 */
+  readonly zeroHireReason: StandardAiReasonCode | null;
+}
+
 export interface SalesForceHiringDecisionResult {
   /** 今四半期に実際へ反映する採用数（組織吸収能力の上限を適用した後）。 */
   readonly salesForceHireCount: number;
@@ -101,6 +135,8 @@ export interface SalesForceHiringDecisionResult {
    * 目標そのものではない（目標 > 反映分の場合、残りは次四半期以降に繰り越される）。
    */
   readonly targetSalesForceHeadcount: number;
+  /** 【Phase 6C・#05 §6】採用判断の構造化記録（採用0でも必ず理由が入る）。 */
+  readonly hiringDiagnostics: SalesHiringDiagnosticsRecord;
   readonly evaluations: readonly MarginalSalespersonEvaluation[];
   readonly diagnostics: readonly StandardAiDiagnosticEntry[];
 }
@@ -789,10 +825,67 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
     }
   }
 
+  // ---------------------------------------------------------------------
+  // 【Phase 6C・#05 §6】採用0に理由コードが無い状態を構造的に無くす。
+  // ---------------------------------------------------------------------
+  const HIRING_REASON_CODES: readonly StandardAiReasonCode[] = [
+    "SALES_HIRING_PROFITABLE_UNSERVED_OPPORTUNITY",
+    "SALES_HIRING_BLOCKED_BY_PRODUCTION",
+    "SALES_HIRING_BLOCKED_BY_LIQUIDITY",
+    "SALES_HIRING_BLOCKED_BY_RAW_SUPPLY_UNCERTAINTY",
+    "SALES_HIRING_NOT_ECONOMIC",
+    "SALES_HIRING_LIMITED_BY_TARGET_SCALE",
+    "SALES_HIRING_DEFERRED_UNTIL_CAPACITY_EXPANSION",
+    "SALES_FORCE_EXCESS_CAPACITY",
+  ];
+  let zeroHireReason: StandardAiReasonCode | null = null;
+  if (hireCount === 0) {
+    zeroHireReason = diagnostics.find((d) => HIRING_REASON_CODES.includes(d.code))?.code ?? null;
+    if (zeroHireReason === null) {
+      // ここへ来るのは「経済評価ループが1人目の評価すら行わずに終わった」場合。
+      // 目標販売量が現在の営業能力で既に満たされている（＝追加の販売機会が観測
+      // できない）ことを意味する。黙って0にせず、明示的に記録する。
+      zeroHireReason = "SALES_HIRING_NOT_ECONOMIC";
+      diagnostics.push({
+        code: "SALES_HIRING_NOT_ECONOMIC",
+        domain: "sales",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: {
+          currentHeadcount,
+          targetSalesVolumeTons,
+          currentSalesCapacityTons,
+          unusedSalesCapacityTons,
+        },
+        decisionSummary: "営業採用は提案しない",
+        message:
+          `現在の営業人員${currentHeadcount}人で目標販売量（約${Math.round(targetSalesVolumeTons)}t/期）を既に捌けており、` +
+          `追加1人が担う販売機会が観測できないため、営業採用を提案しない。`,
+      });
+    }
+  }
+
+  const hiringDiagnostics: SalesHiringDiagnosticsRecord = {
+    currentHeadcount,
+    requiredHeadcount: targetSalesForceHeadcount,
+    unconstrainedEconomicDesiredHeadcount: currentHeadcount + targetGap,
+    organizationallyAllowedHeadcount: currentHeadcount + organizationalHireLimit,
+    // 資金余力で許される追加人数 = 最低現金バッファ余力 ÷ 1人あたり四半期給与。
+    financiallyAllowedHeadcount:
+      currentHeadcount + (salaryUsdPerQuarter > 0 ? Math.max(0, Math.floor(liquidityFloorUsd / salaryUsdPerQuarter)) : 0),
+    actualTargetHeadcount: targetSalesForceHeadcount,
+    actualHireCount: hireCount,
+    actualLayoffCount: layoffCount,
+    salesCapacityTons: currentSalesCapacityTons,
+    usedSalesCapacityTons: Math.max(0, currentSalesCapacityTons - unusedSalesCapacityTons),
+    zeroHireReason,
+  };
+
   return {
     salesForceHireCount: hireCount,
     salesForceLayoffCount: layoffCount,
     targetSalesForceHeadcount,
+    hiringDiagnostics,
     evaluations,
     diagnostics,
   };

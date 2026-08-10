@@ -43,7 +43,7 @@ import {
   computeNormalInventoryTargetByProduct,
 } from "./diagnosis/productionRequirement";
 import { buildStandardAiUnitEconomics } from "./diagnosis/forwardUnitEconomics";
-import { buildStandardAiSalesForceHiringDecision } from "./decision/salesForceHiring";
+import { buildStandardAiSalesForceHiringDecision, SalesHiringDiagnosticsRecord } from "./decision/salesForceHiring";
 import { SALES_PARAMETERS_V1, SalesParameters } from "../../sales/parameters";
 import { computeTargetScaleBand } from "./targetScale";
 import { computeTargetCapability } from "./targetCapability";
@@ -123,6 +123,8 @@ export interface StandardAiQuarterDiagnostics {
    */
   readonly commercialCommitment?: CommercialCommitmentState;
   readonly conversionObservation?: ConversionObservation;
+  /** 【Phase 6C・#05 §6】営業採用判断の構造化記録（採用0でも必ず理由が入る）。 */
+  readonly salesHiring?: SalesHiringDiagnosticsRecord;
 }
 
 /**
@@ -599,6 +601,7 @@ export function generateStandardAiDecisionWithDiagnostics(
       newFactoryAssessment: newFactoryResult.assessment,
       commercialCommitment,
       conversionObservation,
+      salesHiring: salesForceHiringResult.hiringDiagnostics,
     },
   };
 }

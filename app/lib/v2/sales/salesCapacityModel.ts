@@ -53,7 +53,13 @@ export interface SalesCapacityModel {
   readonly fragmentationFloor: number;
 }
 
-/** Case Control（現行）。市場ごとに salesForce の曲線を独立適用する。 */
+/**
+ * 【legacy】市場ごとに salesForce の曲線を独立適用する旧モデル。
+ *
+ * Phase 6C までの Test16 既定であり、後方互換・比較対照のために残す。
+ * 構造的な問題（展開市場を増やすほど会社の総営業能力が増える／1工場分を売るのに
+ * 500〜700人を要する）が Phase 6B の監査で確認されたため、**新規の既定ではない**。
+ */
 export const SALES_CAPACITY_MODEL_PER_MARKET: SalesCapacityModel = {
   kind: "perMarket",
   companyBaselineCapacityTons: 0,
@@ -61,6 +67,56 @@ export const SALES_CAPACITY_MODEL_PER_MARKET: SalesCapacityModel = {
   companyCapacitySaturationHeadcount: 1,
   fragmentationPenaltyPerExtraMarket: 0,
   fragmentationFloor: 1,
+};
+
+/**
+ * 【Test16 正式営業能力モデル（2026-08-10 採用・#05 Phase 6C §2〜§3）】
+ * 会社営業組織モデル v1（Company Sales Organization Model v1）。
+ *
+ * ベンチマーク上の呼称は "Case B + V1" だったが、Case名は研究用の一時的な符牒で
+ * あるため、正式名称でここに固定する。
+ *
+ * 【モデルの意味】
+ *   営業能力は**会社の営業組織**が持つものであり、市場ごとに独立して湧くものではない。
+ *   会社全体で1回だけ処理能力を求め、それを各市場の営業工数需要の比率で配分する。
+ *   したがって市場を増やしても会社の総能力は増えない（旧モデルはここが逆だった）。
+ *
+ * 【能力関数】
+ *   capacity(h) = 1,000 + 95,000 × h / (h + 190)   （工数トン／四半期）
+ *     h=0   →   1,000
+ *     h=60  →  23,800
+ *     h=100 →  33,759
+ *     h=130 →  39,594
+ *     h=190 →  48,500（半飽和点＝増分上限の半分）
+ *     h→∞   →  96,000（漸近上限）
+ *
+ * 【市場分散の非効率】適用しない（fragmentationPenaltyPerExtraMarket = 0）。
+ *   研究候補 Case C はこれを 0.03（5市場で0.88倍）としていたが、5seed検証で
+ *   1seed において MASS が資金枯渇 → 生産0×16Q → 現金 −159M に陥ったため
+ *   正式採用しない（研究候補としては残す。#05 §4）。
+ *
+ * 【営業工数係数】salesEffortCoefficients は変更しない（HOSO 1.0 / PD 1.2 / VAP 3.0）。
+ *   ベンチマークの "V1" とはこの既存値そのものであり、新しい値を導入していない。
+ */
+export const SALES_CAPACITY_MODEL_COMPANY_ORGANIZATION_V1: SalesCapacityModel = {
+  kind: "companyWide",
+  companyBaselineCapacityTons: 1_000,
+  companyCapacityMaxIncrementTons: 95_000,
+  companyCapacitySaturationHeadcount: 190,
+  fragmentationPenaltyPerExtraMarket: 0,
+  fragmentationFloor: 1,
+};
+
+/**
+ * 【研究候補・production default にはしない（#05 §4）】
+ * 会社営業組織モデルに市場展開の非効率を加えたもの（ベンチマーク呼称 "Case C"）。
+ * 将来の AGGRESSIVE / growth-oriented archetype の研究材料として残す。
+ */
+export const SALES_CAPACITY_MODEL_COMPANY_ORGANIZATION_WITH_FRAGMENTATION_RESEARCH: SalesCapacityModel = {
+  ...SALES_CAPACITY_MODEL_COMPANY_ORGANIZATION_V1,
+  kind: "companyWideWithFragmentation",
+  fragmentationPenaltyPerExtraMarket: 0.03,
+  fragmentationFloor: 0.85,
 };
 
 /**

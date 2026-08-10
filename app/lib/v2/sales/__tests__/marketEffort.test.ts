@@ -18,7 +18,8 @@ import {
   applyMarketSalesEffortCapacity,
 } from "../marketEffort";
 import { processingCapacity, validateSalesForceHeadcountBudget } from "../salesForce";
-import { SALES_PARAMETERS_V1 } from "../parameters";
+import { companySalesOrganizationCapacity } from "../salesCapacityModel";
+import { SALES_PARAMETERS_LEGACY_PER_MARKET, SALES_PARAMETERS_V1 } from "../parameters";
 import { allocateMarketProduct } from "../allocation";
 import { CompanySalesPlanEntry, SalesValidationError } from "../types";
 import { advanceSalesQuarter, initializeSalesState } from "../runner";
@@ -124,7 +125,11 @@ test("4. allocateHeadcountAcrossMarkets: 市場別配分の合計は必ず実在
 // ---------------------------------------------------------------------
 // 5. ある市場の余剰能力は、暗黙には別の市場へ流用されない
 // ---------------------------------------------------------------------
-test("5. 会社×市場ごとに独立して制約が適用される（CN市場の余剰能力がUS市場の不足を補わない）", () => {
+test("5【legacy 市場別モデル】会社×市場ごとに独立して制約が適用される（CN市場の余剰能力がUS市場の不足を補わない）", () => {
+  // 【Phase 6C】Test16 の正式モデルは会社営業組織モデルへ切り替わったため、
+  // 「市場ごとに独立」という性質は legacy パラメータの性質として検証する。
+  // 正式モデル側の性質（会社全体で1回だけ能力を決める）は下の 5b で検証する。
+  const PARAMS = SALES_PARAMETERS_LEGACY_PER_MARKET;
   const plans: CompanySalesPlanEntry[] = [
     // CN市場: 余裕あり（能力に対して希望量が小さい）
     entry({ market: "CN", product: "hoso", desiredQuantity: hosoEqTons(100), salesForceHeadcount: 20 }),
@@ -151,10 +156,25 @@ test("5. 会社×市場ごとに独立して制約が適用される（CN市場�
   assert.equal(adjustments[0].market, "US");
 });
 
+test("5b【正式モデル】営業能力は会社全体で決まり、市場へ需要比で配分される", () => {
+  const plans: CompanySalesPlanEntry[] = [
+    entry({ market: "CN", product: "hoso", desiredQuantity: hosoEqTons(100), salesForceHeadcount: 20 }),
+    entry({ market: "US", product: "vap", desiredQuantity: hosoEqTons(5000), salesForceHeadcount: 1 }),
+  ];
+  const { capacityByCompanyMarket } = applyMarketSalesEffortCapacity(plans, SALES_PARAMETERS_V1);
+  const model = SALES_PARAMETERS_V1.salesCapacityModel!;
+  const companyCapacity = companySalesOrganizationCapacity(21, model);
+  const total = [...capacityByCompanyMarket.values()].reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(total - companyCapacity) < 1e-6, "市場別能力の合計＝会社全体の能力");
+  // 需要（工数換算）の大きい US 側へ多く配分される（人数配分ではなく需要配分）。
+  assert.ok((capacityByCompanyMarket.get("C1::US") ?? 0) > (capacityByCompanyMarket.get("C1::CN") ?? 0));
+});
+
 // ---------------------------------------------------------------------
 // 6. 営業能力不足時、販売計画は適切に制限される（allocateMarketProduct経由の実際の成約まで）
 // ---------------------------------------------------------------------
-test("6. 営業工数換算能力が不足する場合、成約配分に渡る前にdesiredQuantityが縮小される", () => {
+test("6【legacy 市場別モデル】営業工数換算能力が不足する場合、成約配分に渡る前にdesiredQuantityが縮小される", () => {
+  const PARAMS = SALES_PARAMETERS_LEGACY_PER_MARKET;
   const plans: CompanySalesPlanEntry[] = [
     entry({ market: "CN", product: "hoso", desiredQuantity: hosoEqTons(2000), salesForceHeadcount: 2 }),
     entry({ market: "CN", product: "vap", desiredQuantity: hosoEqTons(2000), salesForceHeadcount: 2 }),

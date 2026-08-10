@@ -136,15 +136,19 @@ test("Test15 4ケースシミュレーション（develop/v2統合・Required fi
   // 比較窓平均PD稼働率もOff/Onでほぼ一致するはず。
   assert.ok(Math.abs(offAvg - onAvg) < 0.02, `Off(${offAvg})とOn(${onAvg})の比較窓平均PD稼働率はほぼ一致するはず（同一PD需要下限のため）`);
 
-  // 【誠実な実測結果】このseed・シナリオ・地平線では、Off/Onとも比較窓平均PD稼働率が
-  // 70%を下回る。コーディネーター指示どおり、この場合は「高PD稼働率」という呼称を
-  // 使わず、実際の稼働率のままレポートする（テストはこの実測をそのまま固定する。
-  // 無理に70%以上になるよう入力を作り込まない）。
+  // 【誠実な実測結果・2026-08-10 更新】
+  // 当初（Test15時点）はOff/Onとも比較窓平均PD稼働率が70%を下回っており、
+  // 「高PD稼働率」という呼称を使わず実際の稼働率のままレポートしていた。
+  // Phase 6C で Test16 の正式営業能力モデルが会社営業組織モデル v1 へ切り替わり、
+  // 営業能力が成長を不当に止めなくなった結果、同一seed・同一シナリオでも
+  // 比較窓平均PD稼働率が70%を上回るようになった。
+  // ラベルを実測に合わせて更新し、実測値そのものを引き続き固定する
+  // （閾値を動かして帳尻を合わせることはしない）。
   const bothHigh = offAvg >= HIGH_PD_UTILIZATION_THRESHOLD && onAvg >= HIGH_PD_UTILIZATION_THRESHOLD;
   assert.equal(
     bothHigh,
-    false,
-    `本シナリオの実測ではOff(${offAvg})・On(${onAvg})とも${HIGH_PD_UTILIZATION_THRESHOLD}未満のはず（「実際の稼働率における比較」として扱うべきケース）`,
+    true,
+    `Phase 6C以降の実測ではOff(${offAvg})・On(${onAvg})とも${HIGH_PD_UTILIZATION_THRESHOLD}以上のはず（「高PD稼働率における比較」として扱えるケース）`,
   );
 });
 
@@ -160,16 +164,23 @@ test("Test15 4ケースシミュレーション（develop/v2統合・Required fi
     `On側の必要Worker人数(${on.targetFactoryPdRequiredWorkers})はOff側(${off.targetFactoryPdRequiredWorkers})より少ないはず（PD省人化投資の労働集約度低減効果）`,
   );
 
-  // 配置Worker人数（実際にエンジンが配分した人数）は、必要人数とほぼ一致する
-  // はず（このシナリオでは労働不足が生じていないため）。
-  assert.ok(
-    Math.abs(off.targetFactoryPdAllocatedRegularWorkers - off.targetFactoryPdRequiredWorkers) < 1,
-    `Off側は必要人数(${off.targetFactoryPdRequiredWorkers})と配置常用Worker人数(${off.targetFactoryPdAllocatedRegularWorkers})がほぼ一致するはず`,
-  );
-  assert.ok(
-    Math.abs(on.targetFactoryPdAllocatedRegularWorkers - on.targetFactoryPdRequiredWorkers) < 1,
-    `On側は必要人数(${on.targetFactoryPdRequiredWorkers})と配置常用Worker人数(${on.targetFactoryPdAllocatedRegularWorkers})がほぼ一致するはず`,
-  );
+  // 配置Worker人数（実際にエンジンが配分した人数）は、必要人数を上回らず、かつ
+  // 大きくは下回らない。
+  // 【2026-08-10 更新】Phase 6C の営業能力モデル切替で PD稼働率が70%超まで上がり、
+  // 労働がわずかに逼迫するようになったため、「1人未満の一致」から
+  // 「必要人数の5%以内の不足まで許容」へ緩めた（不足が生じること自体は
+  // 労働制約が効いている正常な状態であり、隠さずここに記録する）。
+  for (const [label, row] of [["Off", off], ["On", on]] as const) {
+    const shortfall = row.targetFactoryPdRequiredWorkers - row.targetFactoryPdAllocatedRegularWorkers;
+    assert.ok(
+      shortfall >= -1,
+      `${label}側の配置常用Worker人数(${row.targetFactoryPdAllocatedRegularWorkers})が必要人数(${row.targetFactoryPdRequiredWorkers})を超えないこと`,
+    );
+    assert.ok(
+      shortfall <= row.targetFactoryPdRequiredWorkers * 0.05,
+      `${label}側の必要人数(${row.targetFactoryPdRequiredWorkers})に対する配置不足(${shortfall})が5%以内であること`,
+    );
+  }
 
   // 対象工場単位の常用Worker人数は、会社全体のregularHeadcountとは別のフィールドとして
   // 取得できる（Required fix A-3の「工場単位で区別する」要求）。

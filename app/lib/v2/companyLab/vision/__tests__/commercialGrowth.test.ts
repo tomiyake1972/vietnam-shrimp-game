@@ -10,6 +10,7 @@
 //  (g) 監査で特定した固定販売規模（能力×0.8）へ回帰していない
 
 import { test } from "node:test";
+import { COMMERCIAL_COMMITMENT_PARAMETERS_V1 } from "../commercialCommitment";
 import assert from "node:assert/strict";
 import { computeCommercialAmbition, COMMERCIAL_AMBITION_PARAMETERS_V1 } from "../commercialAmbition";
 import { computeUnservedOpportunity } from "../unservedOpportunity";
@@ -232,10 +233,21 @@ test("CG-14: 成長意欲の低い VAP は、志の軌道に乗っている間�
 });
 
 test("CG-15: 目指す販売規模と、実際に提出した販売計画は別物である（過剰契約を作らない）", () => {
+  // 【Phase 6C で意味が変わった点】
+  // 以前は「提出 ≤ 志」を固定していた。これは営業能力が提出量を削っていたから
+  // 成立していただけであり、経営としては「志どおり成約するために、目標成約率を
+  // 見込んで志より少し多く取りに行く」のが自然である。
+  // Phase 6C 以降は Commercial Commitment が上限を持ち、志の
+  // maximumStretchOverAmbition 倍を超えて提出しないことを固定する。
   for (const d of diagnostics.filter((x) => x.turn === 24)) {
     const submitted = d.decision.salesPlans.reduce((s, p) => s + unwrapUnit(p.desiredQuantity), 0);
     const ambition = d.commercialAmbition?.ambitionTons ?? 0;
-    assert.ok(submitted <= ambition + 1e-6, `${d.companyId}: 提出計画が志を超えている`);
+    const ceiling = ambition * COMMERCIAL_COMMITMENT_PARAMETERS_V1.maximumStretchOverAmbition;
+    assert.ok(submitted <= ceiling + 1e-6, `${d.companyId}: 提出計画 ${Math.round(submitted)}t が志の上乗せ上限 ${Math.round(ceiling)}t を超えている`);
+    // 志と提出が同一値へ潰れていないこと（別の量として扱われていること）。
+    if (d.commercialCommitment && d.commercialCommitment.limiter !== "NONE") {
+      assert.ok(d.commercialCommitment.submissionTargetTons > 0);
+    }
   }
 });
 

@@ -10,13 +10,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  SALES_CAPACITY_MODEL_COMPANY_ORGANIZATION_V1,
   SALES_CAPACITY_MODEL_PER_MARKET,
   SalesCapacityModel,
   companySalesOrganizationCapacity,
   computeMarketSalesCapacities,
   marketFragmentationFactor,
 } from "../salesCapacityModel";
-import { SALES_PARAMETERS_V1, SalesParameters } from "../parameters";
+import { SALES_PARAMETERS_LEGACY_PER_MARKET, SALES_PARAMETERS_V1, SalesParameters } from "../parameters";
 import { processingCapacity } from "../salesForce";
 import { salesEffortWeightedQuantity, computeMarketSalesEffort, applyMarketSalesEffortCapacity } from "../marketEffort";
 import { DemandMarketId, Product } from "../../market/types";
@@ -127,7 +128,7 @@ test("SCM-3: 会社全体モデルでは、展開市場を増やしても総能�
   for (const t of totals) assert.ok(Math.abs(t - totals[0]) < 1e-6, "市場数によらず会社能力は一定");
 
   // 対照: 現行 perMarket は市場を増やすほど総能力が増える（この非対称が Phase 6B の発端）。
-  const control = SALES_PARAMETERS_V1;
+  const control = SALES_PARAMETERS_LEGACY_PER_MARKET;
   const one = computeMarketSalesCapacities(150, evenDemand(MARKETS.slice(0, 1)), new Map([["JP" as DemandMarketId, 150]]), control, SALES_CAPACITY_MODEL_PER_MARKET);
   const five = computeMarketSalesCapacities(150, evenDemand(MARKETS), evenHeadcount(MARKETS, 150), control, SALES_CAPACITY_MODEL_PER_MARKET);
   assert.ok(sum(five.values()) > sum(one.values()), "perMarket は市場数で総能力が増える（現行構造の記録）");
@@ -277,22 +278,28 @@ test("SCM-10: エンジン側（applyMarketSalesEffortCapacity）も computeMark
 // SCM-11 / SCM-12 既存挙動（財務・生産）への非影響 ＝ 既定が perMarket であること
 // ---------------------------------------------------------------------
 
-test("SCM-11: 既定パラメータは salesCapacityModel を持たず、従来の市場別能力と完全一致する", () => {
-  assert.equal(SALES_PARAMETERS_V1.salesCapacityModel, undefined, "既定では新モデルを有効化しない");
+test("SCM-11【Phase 6C 正式切替】既定パラメータは会社営業組織モデル v1 である", () => {
+  assert.equal(SALES_PARAMETERS_V1.salesCapacityModel, SALES_CAPACITY_MODEL_COMPANY_ORGANIZATION_V1, "既定が正式モデルであること");
+  assert.equal(SALES_PARAMETERS_V1.salesCapacityModel?.kind, "companyWide");
+  assert.equal(SALES_PARAMETERS_V1.salesCapacityModel?.fragmentationPenaltyPerExtraMarket, 0, "市場分散の非効率は正式モデルでは適用しない");
+  // 営業工数係数は切替で変更していない（ベンチマークの "V1" ＝ 既存値そのもの）。
+  assert.deepEqual(SALES_PARAMETERS_V1.salesEffortCoefficients, { hoso: 1.0, pd: 1.2, vap: 3.0 });
+  // 旧挙動は明示的な legacy パラメータとして残っている。
+  assert.equal(SALES_PARAMETERS_LEGACY_PER_MARKET.salesCapacityModel, SALES_CAPACITY_MODEL_PER_MARKET);
   const headcountByMarket = evenHeadcount(MARKETS, 150);
-  const capacities = computeMarketSalesCapacities(150, evenDemand(MARKETS), headcountByMarket, SALES_PARAMETERS_V1);
+  const capacities = computeMarketSalesCapacities(150, evenDemand(MARKETS), headcountByMarket, SALES_PARAMETERS_LEGACY_PER_MARKET);
   for (const m of MARKETS) {
-    const legacy = unwrapUnit(processingCapacity(headcountByMarket.get(m) ?? 0, SALES_PARAMETERS_V1));
-    assert.equal(capacities.get(m), legacy, `${m}: 既定経路は従来式と同値`);
+    const legacy = unwrapUnit(processingCapacity(headcountByMarket.get(m) ?? 0, SALES_PARAMETERS_LEGACY_PER_MARKET));
+    assert.equal(capacities.get(m), legacy, `${m}: legacy パラメータは従来式と同値`);
   }
 });
 
-test("SCM-12: 既定パラメータでは applyMarketSalesEffortCapacity の結果が従来経路とビット単位で一致する", () => {
+test("SCM-12: legacy パラメータでは applyMarketSalesEffortCapacity の結果が従来経路と一致する", () => {
   const plans = MARKETS.flatMap((m) => [plan("BAL", m, "hoso", 4_000, 24), plan("BAL", m, "pd", 2_000, 24), plan("BAL", m, "vap", 1_000, 24)]);
-  const { adjustedPlans } = applyMarketSalesEffortCapacity(plans, SALES_PARAMETERS_V1);
+  const { adjustedPlans } = applyMarketSalesEffortCapacity(plans, SALES_PARAMETERS_LEGACY_PER_MARKET);
   for (const m of MARKETS) {
     const byProduct: Record<Product, number> = { hoso: 4_000, pd: 2_000, vap: 1_000 };
-    const expected = computeMarketSalesEffort(24, byProduct, SALES_PARAMETERS_V1);
+    const expected = computeMarketSalesEffort(24, byProduct, SALES_PARAMETERS_LEGACY_PER_MARKET);
     for (const p of adjustedPlans.filter((x) => x.market === m)) {
       assert.ok(
         Math.abs(unwrapUnit(p.desiredQuantity) - expected.adjustedQuantityByProduct[p.product]) < 0.01,
@@ -321,7 +328,7 @@ test("SCM-13: 同一入力に対して常に同一の能力を返し、市場の
 // SCM-14 永続化・移行（salesCapacityModel を持たない古い設定でも壊れない）
 // ---------------------------------------------------------------------
 
-test("SCM-14: salesCapacityModel を持たない旧パラメータでも既定 perMarket として動作する（移行互換）", () => {
+test("SCM-14: salesCapacityModel を持たない旧パラメータでも perMarket として動作する（移行互換）", () => {
   const legacy: SalesParameters = { ...SALES_PARAMETERS_V1 };
   delete (legacy as { salesCapacityModel?: SalesCapacityModel }).salesCapacityModel;
   const c = computeMarketSalesCapacities(100, evenDemand(MARKETS), evenHeadcount(MARKETS, 100), legacy);
@@ -375,10 +382,10 @@ test("SCM-16: applyMarketSalesEffortCapacity は、実際に適用した会社×
   }
 });
 
-test("SCM-17: 既定（perMarket）では、公開される能力が従来の processingCapacity と同値", () => {
+test("SCM-17: legacy（perMarket）では、公開される能力が従来の processingCapacity と同値", () => {
   const plans = MARKETS.map((m) => plan("BAL", m, "hoso", 1_000, 24));
-  const { capacityByCompanyMarket } = applyMarketSalesEffortCapacity(plans, SALES_PARAMETERS_V1);
-  const legacy = unwrapUnit(processingCapacity(24, SALES_PARAMETERS_V1));
+  const { capacityByCompanyMarket } = applyMarketSalesEffortCapacity(plans, SALES_PARAMETERS_LEGACY_PER_MARKET);
+  const legacy = unwrapUnit(processingCapacity(24, SALES_PARAMETERS_LEGACY_PER_MARKET));
   for (const m of MARKETS) {
     assert.equal(capacityByCompanyMarket.get(`BAL::${m}`), legacy);
   }
