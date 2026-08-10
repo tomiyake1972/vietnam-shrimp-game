@@ -80,6 +80,8 @@ export interface SimulationRun {
    * 未設定（旧run・schema）は全社 STANDARD_AI 相当として扱う（捏造しない＝存在しないなら省略）。
    */
   readonly companyControlModes?: Readonly<Record<string, CompanyControlMode>>;
+  /** 【Phase 8・Game Setup】Setup画面で任意入力できるRun名・メモ。未入力ならundefined。 */
+  readonly runName?: string;
 }
 
 /** 実行中のセッション（状態 + fixtures + run メタデータ）。 */

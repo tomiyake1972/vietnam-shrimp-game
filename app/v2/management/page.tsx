@@ -3,6 +3,7 @@
 // Game Owner / test environment 専用画面。既存の Player 画面
 // （/v2/company-lab/play）とは独立しており、そちらの動作を変更しない。
 
+import { Suspense } from "react";
 import { ManagementConsole } from "./components/ManagementConsole";
 
 export const metadata = {
@@ -10,5 +11,10 @@ export const metadata = {
 };
 
 export default function ManagementConsolePage() {
-  return <ManagementConsole />;
+  // ManagementConsole は ?run= を読むために useSearchParams を使うため、Suspense境界が必要。
+  return (
+    <Suspense fallback={null}>
+      <ManagementConsole />
+    </Suspense>
+  );
 }

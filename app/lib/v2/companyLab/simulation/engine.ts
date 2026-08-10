@@ -37,7 +37,7 @@ import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
 import { FINANCE_PARAMETERS_V1 } from "../../finance/parameters";
 import { STANDARD_AI_PARAMETERS_V1 } from "../standardAi/parameters";
 import { STRATEGY_PROFILE_SCHEMA_VERSION } from "../strategyProfile/types";
-import { CapacitySnapshot, DecisionOwner, MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession, SimulationTurnOutcome } from "./types";
+import { CapacitySnapshot, CompanyControlMode, DecisionOwner, MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession, SimulationTurnOutcome } from "./types";
 import { extractAiTurnTrace } from "./analytics/aiTrace";
 import {
   captureCapitalProjects,
@@ -80,6 +80,13 @@ export interface CreateSimulationSessionInput {
   readonly requestedTurns?: number;
   /** metadata 用のタイムスタンプ。ゲーム判断には使わない。 */
   readonly startedAt: string;
+  /** 【Phase 8・Game Setup】Setup画面で任意入力できるRun名・メモ。 */
+  readonly runName?: string;
+  /**
+   * 【Phase 8・Game Setup】開始時点の会社別経営モード。省略時は全社 STANDARD_AI
+   * （Setup画面を経由しない既存の呼び出し元・既存テストとの後方互換）。
+   */
+  readonly companyControlModes?: Readonly<Record<string, CompanyControlMode>>;
 }
 
 /**
@@ -112,6 +119,8 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     stopReason: "running",
     errorMessage: null,
     failedAtTurn: null,
+    companyControlModes: input.companyControlModes,
+    runName: input.runName,
   };
   return { run, state, fixtures, config, aiTurnTraces: [], observedDemand: [], salesHeadcountByTurn: [], capacityByTurn: [], packCompanyTurns: [], packWorldTurns: [] };
 }

@@ -78,6 +78,15 @@ export interface SimulationRunSummary {
   readonly savedAt: string;
   readonly gameParameterVersion: string;
   readonly standardAiVersion: string;
+  /** 【Phase 8・Game Setup】Setup画面で任意入力されたRun名。未入力ならundefined。 */
+  readonly runName?: string;
+  /**
+   * 【Phase 8・Run History】保存時点でPLAYERとして操作されていた会社。
+   * この項目を持たない旧形式のsummary（localStorageキャッシュ等）との後方互換のためoptional。
+   * 未設定は「記録なし」であり、必ずしも「PLAYER無し」を意味しない
+   * （読み手は `?? []` で扱い、空配列と未設定を区別する必要が無い表示にする）。
+   */
+  readonly playerCompanyIds?: readonly string[];
 }
 
 export function toSimulationRunSummary(stored: StoredSimulationRun): SimulationRunSummary {
@@ -93,6 +102,10 @@ export function toSimulationRunSummary(stored: StoredSimulationRun): SimulationR
     savedAt: stored.savedAt,
     gameParameterVersion: stored.run.gameParameterVersion,
     standardAiVersion: stored.run.standardAiVersion,
+    runName: stored.run.runName,
+    playerCompanyIds: Object.entries(stored.run.companyControlModes ?? {})
+      .filter(([, mode]) => mode === "PLAYER")
+      .map(([companyId]) => companyId),
   };
 }
 

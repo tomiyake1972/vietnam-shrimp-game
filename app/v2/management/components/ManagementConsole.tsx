@@ -22,6 +22,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { advanceSimulationTurn, createSimulationSession } from "../../../lib/v2/companyLab/simulation/engine";
 import {
   CompanyControlMode,
@@ -33,7 +34,7 @@ import {
 import { CompanyDecisionInput } from "../../../lib/v2/companyLab/types";
 import { CompanyDecisionDraft } from "../../company-lab/decisionDraft";
 import { CompanyControlPanel } from "./CompanyControlPanel";
-import { PlayerTurnPanel } from "./PlayerTurnPanel";
+import { getLiveSession, upsertLiveSession } from "../lib/liveSessionRegistry";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
 import { SimulationAnalyticsDataset } from "../../../lib/v2/companyLab/simulation/analytics/types";
 import { toCompanySeries } from "../../../lib/v2/companyLab/simulation/analytics/views";
@@ -56,6 +57,7 @@ import { StrategySummary } from "./StrategySummary";
 import { ExportPackButton } from "./ExportPackButton";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
 import { listScenarioAliases } from "../../../lib/v2/industryLab/cli/scenarioAliases";
+import { newRunId } from "../lib/runId";
 
 const DEFAULT_SCENARIO_ID = "baseline";
 const DEFAULT_SEED = "management-console-32q";
@@ -74,11 +76,6 @@ const SCENARIO_OPTIONS = listScenarioAliases().map((e) => ({
 /** metadata 用のタイムスタンプ。ゲーム判断には一切渡さない。 */
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function newRunId(seed: string, startedAt: string): string {
-  // Redisキーへ使うため、コロン以外の記号が入らないよう ISO 文字列を整形する。
-  return `run-${seed}-${startedAt.replace(/[^0-9A-Za-z]/g, "")}`;
 }
 
 type RunPhase = "idle" | "running" | "stopping";
@@ -101,6 +98,13 @@ function viewFromSession(session: SimulationSession): ConsoleView {
 }
 
 export function ManagementConsole() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // 【Phase 8・Run Context Preservation】URLの ?run= を最優先で見る。
+  // これがあれば「今表示すべき Simulation Run」はURLが示しており、
+  // localStorageの「直近アクティブなrun」に頼る必要が無い。
+  const runQueryParam = searchParams.get("run");
+
   // シナリオと seed は「次に新しく始める実行」の設定である。
   // 実行中の run のシナリオは view.run.scenarioId であり、こちらを書き換えても遡及しない。
   const [scenarioId, setScenarioId] = useState(DEFAULT_SCENARIO_ID);
@@ -124,7 +128,6 @@ export function ManagementConsole() {
   const [confirmedPlayerDecisions, setConfirmedPlayerDecisions] = useState<Readonly<Record<string, CompanyDecisionInput>>>({});
   const [confirmedPlayerDrafts, setConfirmedPlayerDrafts] = useState<Readonly<Record<string, CompanyDecisionDraft>>>({});
   const [waitingForPlayerCompanyIds, setWaitingForPlayerCompanyIds] = useState<readonly string[]>([]);
-  const [activePlayerCompanyId, setActivePlayerCompanyId] = useState<string | null>(null);
 
   /** 新しい実行を始めるときは、経営モード・確定済み意思決定をすべてdefaultへ戻す（指示§3/§29/§30）。 */
   const resetControlState = useCallback(() => {
@@ -132,7 +135,6 @@ export function ManagementConsole() {
     setConfirmedPlayerDecisions({});
     setConfirmedPlayerDrafts({});
     setWaitingForPlayerCompanyIds([]);
-    setActivePlayerCompanyId(null);
   }, []);
 
   const [strategyDocs] = useState<Readonly<Record<string, CompanyStrategyDocument>>>(() => {
@@ -153,12 +155,50 @@ export function ManagementConsole() {
     [scenarioId, seed]
   );
 
-  // --- 起動時：保存済み Simulation Run を復元する（Aの解消） ---
+  // --- 起動時：Run Contextを復元する ---
+  // 優先順位（指示§4/§5/§27 NAV-1〜NAV-7）：
+  //   1. URLの ?run= が、このタブでまだ生きている liveSessionRegistry と一致する
+  //      → 進行中のセッションをそのまま復元する（Turnが1に戻らない・続きから進められる）。
+  //   2. URLの ?run= はあるが liveSessionRegistry に無い（別タブ・ハードリロード等）
+  //      → 保存済み実行を読み取り専用で復元する（従来のisRestoredOnly挙動）。
+  //   3. URLに ?run= が無い → 従来どおりlocalStorageの直近アクティブなrunを見る。
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const blank = createFresh("init");
       if (!cancelled) setFixtures(blank.fixtures);
+
+      if (runQueryParam) {
+        const live = getLiveSession(runQueryParam);
+        if (live) {
+          if (!cancelled) {
+            setView(viewFromSession(live.session));
+            setFixtures(live.session.fixtures);
+            setScenarioId(live.session.run.scenarioId);
+            setSeed(live.session.run.seed);
+            setCompanyControlModes(live.companyControlModes);
+            setConfirmedPlayerDecisions(live.confirmedPlayerDecisions);
+            setConfirmedPlayerDrafts(live.confirmedPlayerDrafts);
+            setSelectedCompanyId(live.selectedCompanyId);
+            setActiveSimulationRunId(runQueryParam);
+            setRestoring(false);
+          }
+          return;
+        }
+        const stored = await loadSimulationRun(runQueryParam);
+        if (cancelled) return;
+        if (stored) {
+          setView({ run: stored.run, dataset: stored.dataset, session: null, strategyTurns: stored.packCapture?.companyTurns ?? [] });
+          setScenarioId(stored.run.scenarioId);
+          setSeed(stored.run.seed);
+          setActiveSimulationRunId(runQueryParam);
+          setSavedRuns(await listSimulationRuns());
+          setRestoring(false);
+          return;
+        }
+        // 指定されたrunが見つからない場合だけ、従来のフォールバックへ進む
+        // （存在しないrunIdを捏造した空Runとして扱わない・明示的なエラーは出さず静かにフォールバック）。
+      }
 
       const runs = await listSimulationRuns();
       if (cancelled) return;
@@ -166,6 +206,21 @@ export function ManagementConsole() {
 
       const activeId = getActiveSimulationRunId() ?? runs[0]?.simulationRunId ?? null;
       if (activeId) {
+        const live = getLiveSession(activeId);
+        if (live) {
+          if (!cancelled) {
+            setView(viewFromSession(live.session));
+            setFixtures(live.session.fixtures);
+            setScenarioId(live.session.run.scenarioId);
+            setSeed(live.session.run.seed);
+            setCompanyControlModes(live.companyControlModes);
+            setConfirmedPlayerDecisions(live.confirmedPlayerDecisions);
+            setConfirmedPlayerDrafts(live.confirmedPlayerDrafts);
+            setSelectedCompanyId(live.selectedCompanyId);
+            setRestoring(false);
+          }
+          return;
+        }
         const stored = await loadSimulationRun(activeId);
         if (!cancelled && stored) {
           setView({ run: stored.run, dataset: stored.dataset, session: null, strategyTurns: stored.packCapture?.companyTurns ?? [] });
@@ -181,7 +236,21 @@ export function ManagementConsole() {
     return () => {
       cancelled = true;
     };
-  }, [createFresh]);
+  }, [createFresh, runQueryParam]);
+
+  // --- ライブセッションレジストリへの書き込み（Analysis/PLAYER Workspace等、別routeが読む） ---
+  // Consoleが持つ状態が変わるたびに書き込む。pendingDrafts（Workspace内の未確定下書き）は
+  // Consoleが関知しないフィールドのため、upsertLiveSessionのマージにより保持される。
+  useEffect(() => {
+    if (!view?.session) return;
+    upsertLiveSession(view.session.run.simulationRunId, {
+      session: view.session,
+      companyControlModes,
+      confirmedPlayerDecisions,
+      confirmedPlayerDrafts,
+      selectedCompanyId,
+    });
+  }, [view, companyControlModes, confirmedPlayerDecisions, confirmedPlayerDrafts, selectedCompanyId]);
 
   /** 実行の区切りで保存する。保存先（サーバー／ブラウザ）は必ず画面へ出す。 */
   const persist = useCallback(async (session: SimulationSession) => {
@@ -215,22 +284,27 @@ export function ManagementConsole() {
       setPhase("running");
       stopRequested.current = false;
 
-      // 保存済み実行を表示しているだけの状態からは、新しい実行として開始する
-      // （保存物には途中状態を含めていないため、続きから進めるふりをしない）。
-      // まだ1ターンも進んでいないセッションでも、ここで実時刻の run id を採り直す
-      // （起動時に作る空セッションの id を使い回すと、実行どうしを区別できなくなる）。
+      // 保存済み実行を表示しているだけの状態（view.session===null）からは、新しい実行として
+      // 開始する（保存物には途中状態を含めていないため、続きから進めるふりをしない）。
+      // 【Phase 8】Setup画面で作った直後（まだ0ターン）のライブセッションは、それ自体が
+      // 「これから進めるべき本物のRun」であり、0ターンだからといって作り直してはいけない
+      // （以前はhistory.length>0を要求しており、Setup直後にBALをPLAYERにしていても
+      // 最初のTurnボタンでその設定ごと別Runへ作り直されてしまうバグがあった）。
       // シナリオ・seed を変えたら、途中の実行を引き継がず新しい実行として始める
       // （別シナリオのターンが1本の Simulation Run に混ざることを防ぐ）。
       const live = view?.session ?? null;
       const liveMatchesSettings = live !== null && live.run.scenarioId === scenarioId && live.run.seed === seed;
-      const continuesLiveRun = liveMatchesSettings && live.state.history.length > 0;
+      const continuesLiveRun = liveMatchesSettings;
       let current = continuesLiveRun ? live : createFresh(nowIso());
       // 【指示§30】シナリオ切替・新規Runでは経営モード・確定済み意思決定をdefaultへ戻す。
       // 既存Runの続きなら、これまでの経営モード切替（PLAYER化など）を引き継ぐ（指示§18）。
       // 【重要】setState は非同期のため、このrun()呼び出し内のループ判定にはstateではなく
       // ローカル変数を使う（reset直後に古いstateを読んでしまう不整合を避ける）。
       const controlModesForThisRun = continuesLiveRun ? companyControlModes : {};
-      if (!continuesLiveRun) resetControlState();
+      if (!continuesLiveRun) {
+        resetControlState();
+        router.replace(`/v2/management?run=${encodeURIComponent(current.run.simulationRunId)}`);
+      }
       setView(viewFromSession(current));
       setWaitingForPlayerCompanyIds([]);
 
@@ -284,37 +358,59 @@ export function ManagementConsole() {
       // 完走・シナリオ終端・失敗・PLAYER待ちのいずれでも保存する（失敗の記録も残す）。
       await persist(current);
     },
-    [phase, restoring, view, createFresh, persist, scenarioId, seed, companyControlModes, confirmedPlayerDecisions, resetControlState]
+    [phase, restoring, view, createFresh, persist, scenarioId, seed, companyControlModes, confirmedPlayerDecisions, resetControlState, router]
   );
 
   const reset = useCallback(() => {
     if (phase !== "idle") return;
-    setView(viewFromSession(createFresh(nowIso())));
+    const fresh = createFresh(nowIso());
+    setView(viewFromSession(fresh));
     setErrorMessage(null);
     setRunningTurn(null);
     setStorageNote(null);
     resetControlState();
-  }, [phase, createFresh, resetControlState]);
-
-  /** PLAYER会社の意思決定確定：DecisionEditorから戻ってきたら、その場でrun()の続きに使う値を保存する。 */
-  const handleConfirmPlayerDecision = useCallback((companyId: string, decision: CompanyDecisionInput, draft: CompanyDecisionDraft) => {
-    setConfirmedPlayerDecisions((prev) => ({ ...prev, [companyId]: decision }));
-    setConfirmedPlayerDrafts((prev) => ({ ...prev, [companyId]: draft }));
-    setWaitingForPlayerCompanyIds((prev) => prev.filter((id) => id !== companyId));
-    setActivePlayerCompanyId(null);
-  }, []);
+    router.replace(`/v2/management?run=${encodeURIComponent(fresh.run.simulationRunId)}`);
+  }, [phase, createFresh, resetControlState, router]);
 
   const handleChangeControlMode = useCallback((companyId: string, mode: CompanyControlMode) => {
     setCompanyControlModes((prev) => ({ ...prev, [companyId]: mode }));
   }, []);
 
-  const selectRun = useCallback(async (simulationRunId: string) => {
-    const stored = await loadSimulationRun(simulationRunId);
-    if (!stored) return;
-    setActiveSimulationRunId(simulationRunId);
-    setView({ run: stored.run, dataset: stored.dataset, session: null, strategyTurns: stored.packCapture?.companyTurns ?? [] });
-    setErrorMessage(null);
-  }, []);
+  /** 【PLAYER Company Workspace】「この会社を操作」は、モーダルではなく専用routeへ遷移する。 */
+  const openPlayerWorkspace = useCallback(
+    (companyId: string) => {
+      if (!view?.run.simulationRunId) return;
+      router.push(`/v2/management/player?run=${encodeURIComponent(view.run.simulationRunId)}&company=${encodeURIComponent(companyId)}`);
+    },
+    [view, router]
+  );
+
+  const selectRun = useCallback(
+    async (simulationRunId: string) => {
+      const live = getLiveSession(simulationRunId);
+      if (live) {
+        setView(viewFromSession(live.session));
+        setFixtures(live.session.fixtures);
+        setScenarioId(live.session.run.scenarioId);
+        setSeed(live.session.run.seed);
+        setCompanyControlModes(live.companyControlModes);
+        setConfirmedPlayerDecisions(live.confirmedPlayerDecisions);
+        setConfirmedPlayerDrafts(live.confirmedPlayerDrafts);
+        setSelectedCompanyId(live.selectedCompanyId);
+        setActiveSimulationRunId(simulationRunId);
+        setErrorMessage(null);
+        router.replace(`/v2/management?run=${encodeURIComponent(simulationRunId)}`);
+        return;
+      }
+      const stored = await loadSimulationRun(simulationRunId);
+      if (!stored) return;
+      setActiveSimulationRunId(simulationRunId);
+      setView({ run: stored.run, dataset: stored.dataset, session: null, strategyTurns: stored.packCapture?.companyTurns ?? [] });
+      setErrorMessage(null);
+      router.replace(`/v2/management?run=${encodeURIComponent(simulationRunId)}`);
+    },
+    [router]
+  );
 
   const dataset = view?.dataset ?? null;
   const revenueSeries = useMemo(
@@ -394,6 +490,17 @@ export function ManagementConsole() {
               className="rounded border border-sky-600 px-3 py-1.5 text-sm font-semibold text-sky-300 hover:bg-slate-800"
             >
               Analysis Home
+            </Link>
+            {/* 【指示J/K】ゲーム条件（Scenario/Seed/初期PLAYER設定）を選び直すための入口。
+                現在のRunは保存されたままで、押すと新しい条件で「別のRun」を開始できる
+                Setup画面へ移動するだけ（現在のRunを破棄する表現にはしない）。 */}
+            <Link
+              href="/v2/management/setup"
+              data-testid="back-to-setup-link"
+              className="rounded border border-slate-600 px-3 py-1.5 text-sm hover:bg-slate-800"
+              title="現在のRunは保存されたままです。ゲーム条件設定画面から、別の条件で新しいRunを開始できます。"
+            >
+              ゲーム条件へ戻る
             </Link>
           </div>
         </div>
@@ -494,6 +601,17 @@ export function ManagementConsole() {
             この実行の「続き」からは進められません（実行ボタンを押すと新しい実行を開始します）。
           </p>
         ) : null}
+
+        {/* 【指示A】active Runが無ければSetupへ誘導してよい（強制リダイレクトはしない）。 */}
+        {!restoring && !runQueryParam && completedTurns === 0 ? (
+          <p className="mt-1 text-[11px] text-sky-300" data-testid="setup-guide-note">
+            まだこのRunにターンが進んでいません。
+            <Link href="/v2/management/setup" className="ml-1 underline underline-offset-2">
+              ゲーム条件を設定して開始する
+            </Link>
+            こともできます。
+          </p>
+        ) : null}
       </header>
 
       {/* ---------------- BODY ---------------- */}
@@ -586,7 +704,7 @@ export function ManagementConsole() {
               onChangeMode={handleChangeControlMode}
               decidedCompanyIds={new Set(Object.keys(confirmedPlayerDecisions))}
               waitingCompanyIds={waitingForPlayerCompanyIds}
-              onOperate={setActivePlayerCompanyId}
+              onOperate={openPlayerWorkspace}
               disabled={busy || view?.session === null}
               currentTurn={view?.session?.state.scenarioState.currentTurn ?? view?.run.startingTurn ?? 1}
             />
@@ -614,16 +732,6 @@ export function ManagementConsole() {
           </div>
         </aside>
       </div>
-
-      {activePlayerCompanyId && view?.session ? (
-        <PlayerTurnPanel
-          session={view.session}
-          companyId={activePlayerCompanyId}
-          initialDraft={confirmedPlayerDrafts[activePlayerCompanyId]}
-          onConfirm={handleConfirmPlayerDecision}
-          onClose={() => setActivePlayerCompanyId(null)}
-        />
-      ) : null}
     </div>
   );
 }
