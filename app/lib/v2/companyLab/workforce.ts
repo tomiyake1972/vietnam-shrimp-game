@@ -114,17 +114,31 @@ export function deriveNextWorkforceState(
     companies: fixtures.map((f) => {
       const prevCompany = previous.companies.find((c) => c.companyId === f.companyId);
       const submitted = workerAssignmentsByCompanyId.get(f.companyId) ?? [];
+      // 【発見された不具合の修正】従来はf.workerBaseline（fixture作成時点の静的な
+      // 工場一覧）だけをiterateしていたため、稼働開始後に新設されたFactory
+      // （fixture.workerBaselineには存在しない）ぶんのworkerAssignmentが当期の
+      // 意思決定に含まれていても黙って捨てられ、そのFactoryのworkforceStateが
+      // 永久に作られなかった（＝新設Factoryへは何人配置してもエンジン側の状態へ
+      // 反映されない）。workerBaseline・前期末の繰越・当期提出のいずれかに
+      // 現れたfactoryIdをすべて対象にする（新設Factory増加後は、その後の四半期で
+      // 再提出が無くても前期末の人数がそのまま繰り越される＝既存Factoryと同じ扱い）。
+      const factoryIds = new Set<string>([
+        ...f.workerBaseline.map((b) => b.factoryId),
+        ...(prevCompany?.factories.map((x) => x.factoryId) ?? []),
+        ...submitted.map((w) => w.factoryId),
+      ]);
       return {
         companyId: f.companyId,
-        factories: f.workerBaseline.map((b) => {
-          const assignment = submitted.find((w) => w.factoryId === b.factoryId);
+        factories: [...factoryIds].map((factoryId) => {
+          const assignment = submitted.find((w) => w.factoryId === factoryId);
           if (assignment !== undefined) {
-            return { factoryId: b.factoryId, regularHeadcount: Math.max(0, Math.round(assignment.regularHeadcount)) };
+            return { factoryId, regularHeadcount: Math.max(0, Math.round(assignment.regularHeadcount)) };
           }
           // 当期の意思決定にその工場のワーカー配置が含まれていなければ、前期末の
           // 人数を据え置く（0へ落とさない。「指定しなかった＝全員解雇」ではない）。
-          const prevFactory = prevCompany?.factories.find((x) => x.factoryId === b.factoryId);
-          return { factoryId: b.factoryId, regularHeadcount: prevFactory?.regularHeadcount ?? Math.max(0, Math.round(b.regularHeadcount)) };
+          const prevFactory = prevCompany?.factories.find((x) => x.factoryId === factoryId);
+          const baseline = f.workerBaseline.find((b) => b.factoryId === factoryId);
+          return { factoryId, regularHeadcount: prevFactory?.regularHeadcount ?? Math.max(0, Math.round(baseline?.regularHeadcount ?? 0)) };
         }),
       };
     }),

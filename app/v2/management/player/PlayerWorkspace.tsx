@@ -31,6 +31,7 @@ import { unwrapUnit } from "../../../lib/v2/core/units";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
 import { createEmptyStrategyDocument, CompanyStrategyDocument } from "../../../lib/v2/companyLab/strategyProfile/types";
 import { getLiveSession, LiveSessionEntry, upsertLiveSession } from "../lib/liveSessionRegistry";
+import { persistResumableRun } from "../lib/persistRun";
 import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
@@ -110,7 +111,6 @@ interface PlayerWorkspaceReadyProps {
 
 function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, consoleHref }: PlayerWorkspaceReadyProps) {
   const [tab, setTab] = useState<WorkspaceTab>("overview");
-  const [revision, setRevision] = useState(0);
 
   const [strategyDocs] = useState<Readonly<Record<string, CompanyStrategyDocument>>>(() => ({
     [companyId]: createEmptyStrategyDocument(companyId),
@@ -137,6 +137,12 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   });
   const [confirmed, setConfirmed] = useState<boolean>(() => Boolean(entry.pendingDrafts[companyId] === undefined && entry.confirmedPlayerDecisions[companyId]));
 
+  // 【Phase 9・§21根本原因】以前はここで setRevision を毎回bumpし、DecisionEditorを
+  // key={revision} で毎回remountしていた。draftはcontrolled propとして渡しているため
+  // remountは本来不要で、むしろ入力のたびに<input>のDOMノードごと壊して作り直す結果、
+  // spinnerクリック・直接入力が「反応しない/戻る」ように見える不具合を引き起こしていた
+  // （新工場のように大量の増員を続けて入力する操作で特に顕著だった）。
+  // draft state自体の更新だけで再描画は十分行われるため、remountを廃止した。
   const setDraft = useCallback(
     (next: CompanyDecisionDraft) => {
       setDraftState(next);
@@ -145,7 +151,6 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
         session,
         pendingDrafts: { ...(getLiveSession(session.run.simulationRunId)?.pendingDrafts ?? {}), [companyId]: next },
       });
-      setRevision((r) => r + 1);
     },
     [session, companyId]
   );
@@ -155,15 +160,18 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
     const current = getLiveSession(session.run.simulationRunId);
     const nextPendingDrafts = { ...(current?.pendingDrafts ?? {}) };
     delete nextPendingDrafts[companyId];
+    const nextConfirmedPlayerDecisions = { ...(current?.confirmedPlayerDecisions ?? {}), [companyId]: decision };
     upsertLiveSession(session.run.simulationRunId, {
       session,
-      confirmedPlayerDecisions: { ...(current?.confirmedPlayerDecisions ?? {}), [companyId]: decision },
+      confirmedPlayerDecisions: nextConfirmedPlayerDecisions,
       confirmedPlayerDrafts: { ...(current?.confirmedPlayerDrafts ?? {}), [companyId]: draft },
       pendingDrafts: nextPendingDrafts,
     });
     setConfirmed(true);
-    setRevision((r) => r + 1);
-  }, [session, fixture, draft, companyId]);
+    // 【指示§15】PLAYER意思決定の確定は保存タイミングの1つ（WAITING_FOR_PLAYER状態を
+    // ハードリロード後も再現できるように、確定した瞬間に resumePayload ごと保存する）。
+    void persistResumableRun(session, current?.companyControlModes ?? entry.companyControlModes, nextConfirmedPlayerDecisions);
+  }, [session, fixture, draft, companyId, entry.companyControlModes]);
 
   const dataset = buildDatasetFromSession(session);
   const turn = session.state.scenarioState.currentTurn;
@@ -300,7 +308,6 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               </button>
             </div>
             <DecisionEditor
-              key={revision}
               fixture={fixture}
               ownState={ownState}
               draft={draft}

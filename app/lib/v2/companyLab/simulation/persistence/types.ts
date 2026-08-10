@@ -1,17 +1,21 @@
-// ShrimpX V2 — 32Q Management Console Phase 2: Simulation Run の永続化モデル
+// ShrimpX V2 — 32Q Management Console Phase 2/9: Simulation Run の永続化モデル
 //
-// 【何を保存し、何を保存しないか】
-// 保存するのは次の2つだけである。
+// 【何を保存するか】
 //   (1) SimulationRun メタデータ（再現に必要な条件一式）
 //   (2) 確定済み実績から導いた analytics dataset（long-format の事実表）
+//   (3) 【Phase 9・Save/Resume】resumePayload（optional） — 続きからプレイできる
+//       ようにするための、その時点の完全な CompanyLabState 等。
 //
-// **CompanyLabState をそのまま保存しない。**
+// 【quadratic 増大を避ける、という元の設計意図は維持している】
 // 会社ラボ本体（persistence/types.ts の CompanyLabRuntimeSnapshot）が
 // 「history を絶対にスナップショットへ含めない」という設計で保存量の二次関数的
-// 増大を防いでいるのと同じ理由で、Simulation Run 側も 32Q ぶんの
-// scenarioState / contracts / rawMaterialLots / capexState 等を複製しない。
-// Management Console と Analysis が必要とするのは確定済みの**実績値**であり、
-// 途中状態の完全な復元ではない（続きから再開する機能は本Phaseの対象外）。
+// 増大を防いでいるのは、**ターンごとに**スナップショットを重ねて保存する場合の
+// 話である。Simulation Run の保存は「1本のRunにつき、常に最新1個の状態で
+// 上書き保存する」（ターンごとに別レコードを積み増さない）ため、resumePayload
+// を含めても保存量は turns に対して線形（O(turns)）のままであり、
+// 二次関数的増大（O(turns²)）には該当しない。CompanyLabState は branded
+// unit型を含めすべて JSON.stringify/JSON.parse を素通しできるプレーンな
+// データであり（core/units.ts参照）、特別なシリアライズは不要。
 //
 // 【既存 turn history を利用する】
 // dataset は CompanyQuarterRecord（＝会社ラボが既に持っている確定履歴）から
@@ -20,8 +24,11 @@
 // （どちらも記録に残らず消えてしまう値）に限る。
 
 import { SimulationAnalyticsDataset } from "../analytics/types";
-import { PackCompanyTurnCapture, SimulationRun } from "../types";
+import { CapacitySnapshot, CompanyControlMode, PackCompanyTurnCapture, SimulationRun } from "../types";
 import { PackWorldTurn } from "../aiPack/types";
+import { CompanyDecisionInput, CompanyFixture, CompanyLabState } from "../../types";
+import { SimulationAiTurnTrace } from "../analytics/aiTrace";
+import { ObservedDemandSnapshot } from "../analytics/dataset";
 
 /**
  * 保存スキーマ版。
@@ -36,8 +43,12 @@ import { PackWorldTurn } from "../aiPack/types";
  *        **追加的変更のみでマイグレーション不要**（会社ラボ本体と同じ方針）。
  *        v1 のデータには packCapture が無いため undefined として復元し、
  *        Pack 生成側は該当セクションを NOT_RECORDED として扱う（推測で埋めない）。
+ *   v3 … 【Phase 9・Save/Resume】resumePayload を追加。同じく追加的変更のみで
+ *        マイグレーション不要。v1/v2 のデータには resumePayload が無いため
+ *        undefined のまま扱う（＝続きからプレイできない「閲覧専用」の Run として
+ *        明示する。architectureはPart Aの§4参照）。
  */
-export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 2;
+export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 3;
 
 /** 保存される Simulation Run 1本ぶん。 */
 export interface StoredSimulationRun {
@@ -51,6 +62,12 @@ export interface StoredSimulationRun {
    * v1 の保存データには存在しないため optional。
    */
   readonly packCapture?: SimulationPackCapture;
+  /**
+   * 【schemaVersion 3・Phase 9】続きからプレイするために必要な完全な状態。
+   * 存在しない場合（v1/v2の保存データ、またはSetup画面を経由しない古い呼び出し元）は
+   * 「閲覧専用（VIEW_ONLY）」として扱う。Q1からの再構築や、別Runの暗黙生成はしない。
+   */
+  readonly resumePayload?: SimulationResumePayload;
   /** metadata（ゲーム判断には使わない）。 */
   readonly savedAt: string;
 }
@@ -59,6 +76,34 @@ export interface StoredSimulationRun {
 export interface SimulationPackCapture {
   readonly companyTurns: readonly PackCompanyTurnCapture[];
   readonly worldTurns: readonly PackWorldTurn[];
+}
+
+/**
+ * 【Phase 9・Save/Resume】保存済みRunから「続きからプレイする」ために
+ * 必要な完全な状態。SimulationSessionのうち、run（メタデータ、別途保存済み）と
+ * config（run.scenarioId/seed/requestedTurnsから再構築できる）、
+ * packCompanyTurns/packWorldTurns（packCaptureとして既に別途保存済み、
+ * 同じ型でそのまま流用する）を除いた残り全部。
+ *
+ * CompanyLabStateは会社ラボが確定させた実際の状態そのもの（history込み）であり、
+ * 別の計算ロジック・別の状態表現を新設していない。branded unit型はただの
+ * numberなのでJSON往復で失われる情報は無い（core/units.ts参照）。
+ */
+export interface SimulationResumePayload {
+  readonly state: CompanyLabState;
+  readonly fixtures: readonly CompanyFixture[];
+  /** 【Phase 7・Manual Override】保存時点で有効だった会社別経営モード。 */
+  readonly companyControlModes: Readonly<Record<string, CompanyControlMode>>;
+  /**
+   * 【Phase 7・Manual Override】保存時点で確定済みだった、まだエンジンへ渡していない
+   * PLAYER意思決定（＝WAITING_FOR_PLAYERの状態そのものを再現するために必要）。
+   * 未確定の下書き（draft）はここに含めない（指示§8: 今回は必須ではない）。
+   */
+  readonly confirmedPlayerDecisions: Readonly<Record<string, CompanyDecisionInput>>;
+  readonly aiTurnTraces: readonly SimulationAiTurnTrace[];
+  readonly observedDemand: readonly ObservedDemandSnapshot[];
+  readonly salesHeadcountByTurn: readonly { readonly turn: number; readonly companyId: string; readonly headcount: number }[];
+  readonly capacityByTurn: readonly CapacitySnapshot[];
 }
 
 /**
@@ -87,6 +132,12 @@ export interface SimulationRunSummary {
    * （読み手は `?? []` で扱い、空配列と未設定を区別する必要が無い表示にする）。
    */
   readonly playerCompanyIds?: readonly string[];
+  /**
+   * 【Phase 9・Save/Resume】このRunに resumePayload があるか（＝続きからプレイできるか）。
+   * この項目を持たない旧形式のsummaryはfalse相当（VIEW_ONLY）として扱ってよい
+   * （旧schemaのRunにresumePayloadが存在しないのは事実であり、捏造ではない）。
+   */
+  readonly hasResumePayload?: boolean;
 }
 
 export function toSimulationRunSummary(stored: StoredSimulationRun): SimulationRunSummary {
@@ -106,6 +157,7 @@ export function toSimulationRunSummary(stored: StoredSimulationRun): SimulationR
     playerCompanyIds: Object.entries(stored.run.companyControlModes ?? {})
       .filter(([, mode]) => mode === "PLAYER")
       .map(([companyId]) => companyId),
+    hasResumePayload: stored.resumePayload !== undefined,
   };
 }
 

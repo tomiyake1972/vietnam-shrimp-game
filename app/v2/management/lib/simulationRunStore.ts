@@ -14,7 +14,7 @@
 //             リロードで消えないようにするための確実な足場。
 // サーバー保存が失敗したことを黙って握りつぶさない（画面に保存先を出す）。
 
-import { StoredSimulationRun, SimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
+import { StoredSimulationRun, SimulationRunSummary, toSimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
 
 /** localStorage のキー空間（他機能と衝突させない）。 */
 const RUN_KEY_PREFIX = "shrimpx:v2:simulationRun:";
@@ -68,22 +68,6 @@ function writeBrowserIndex(summaries: readonly SimulationRunSummary[]): void {
   window.localStorage.setItem(INDEX_KEY, JSON.stringify(summaries));
 }
 
-function summaryOf(stored: StoredSimulationRun): SimulationRunSummary {
-  return {
-    simulationRunId: stored.run.simulationRunId,
-    scenarioId: stored.run.scenarioId,
-    seed: stored.run.seed,
-    requestedTurns: stored.run.requestedTurns,
-    completedTurns: stored.run.completedTurns,
-    stopReason: stored.run.stopReason,
-    startedAt: stored.run.startedAt,
-    completedAt: stored.run.completedAt,
-    savedAt: stored.savedAt,
-    gameParameterVersion: stored.run.gameParameterVersion,
-    standardAiVersion: stored.run.standardAiVersion,
-  };
-}
-
 /**
  * ブラウザへ保存する。容量超過（QuotaExceededError）で失敗した場合は、
  * **黙って諦めない** — 古い実行を消して再試行し、それでも入らなければ理由を返す。
@@ -94,7 +78,7 @@ function saveToBrowser(stored: StoredSimulationRun): string | null {
   const payload = JSON.stringify(stored);
 
   const index = readBrowserIndex().filter((s) => s.simulationRunId !== id);
-  index.unshift(summaryOf(stored));
+  index.unshift(toSimulationRunSummary(stored));
   // 上限を超えた古い実行は本体ごと消す（index だけ消して本体を残すと孤児になる）。
   for (const evicted of index.slice(BROWSER_RUN_RETENTION_LIMIT)) {
     window.localStorage.removeItem(RUN_KEY_PREFIX + evicted.simulationRunId);

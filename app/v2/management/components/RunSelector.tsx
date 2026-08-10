@@ -17,6 +17,23 @@ const STOP_REASON_LABELS: Readonly<Record<string, string>> = {
   running: "実行中",
 };
 
+/**
+ * 【Phase 9・§17 Run History状態表示】
+ *   COMPLETED  … シナリオを最後まで終えた（もう続きが無い）。
+ *   RESUMABLE  … resumePayloadがあり、続きから進められる。
+ *   VIEW_ONLY  … resumePayloadが無い旧形式のRun。閲覧はできるが続きから進められない。
+ */
+export function runResumeStatus(r: SimulationRunSummary): "COMPLETED" | "RESUMABLE" | "VIEW_ONLY" {
+  if (r.stopReason === "completed" || r.stopReason === "scenario_end") return "COMPLETED";
+  return r.hasResumePayload ? "RESUMABLE" : "VIEW_ONLY";
+}
+
+const STATUS_LABELS: Readonly<Record<ReturnType<typeof runResumeStatus>, string>> = {
+  COMPLETED: "完了",
+  RESUMABLE: "再開可",
+  VIEW_ONLY: "閲覧専用",
+};
+
 export interface RunSelectorProps {
   readonly runs: readonly SimulationRunSummary[];
   readonly selectedRunId: string | null;
@@ -26,6 +43,7 @@ export interface RunSelectorProps {
 }
 
 export function RunSelector({ runs, selectedRunId, onSelect, label = "Simulation Run", disabled = false }: RunSelectorProps) {
+  const selectedRun = selectedRunId ? (runs.find((r) => r.simulationRunId === selectedRunId) ?? null) : null;
   return (
     <label className="flex items-center gap-1.5 text-xs">
       <span className="text-slate-400">{label}</span>
@@ -40,10 +58,18 @@ export function RunSelector({ runs, selectedRunId, onSelect, label = "Simulation
         {runs.map((r, index) => (
           <option key={r.simulationRunId} value={r.simulationRunId}>
             {index === 0 ? "Current" : `Previous ${index}`}: {r.completedTurns}/{r.requestedTurns}Q ・{" "}
-            {STOP_REASON_LABELS[r.stopReason] ?? r.stopReason} ・ {r.savedAt.slice(0, 19).replace("T", " ")}
+            {STOP_REASON_LABELS[r.stopReason] ?? r.stopReason} ・[{STATUS_LABELS[runResumeStatus(r)]}]・{" "}
+            {r.savedAt.slice(0, 19).replace("T", " ")}
           </option>
         ))}
       </select>
+      {/* <option>内はスタイル・data-testidを個別に持てないため、選択中の実行の状態を
+          Playwrightからも読める形でここに複製する（指示§17）。 */}
+      {selectedRun ? (
+        <span data-testid="run-selector-selected-status" data-status={runResumeStatus(selectedRun)} className="text-[11px] text-slate-400">
+          {STATUS_LABELS[runResumeStatus(selectedRun)]}
+        </span>
+      ) : null}
     </label>
   );
 }

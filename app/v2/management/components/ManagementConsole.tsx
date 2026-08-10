@@ -38,16 +38,17 @@ import { getLiveSession, upsertLiveSession } from "../lib/liveSessionRegistry";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
 import { SimulationAnalyticsDataset } from "../../../lib/v2/companyLab/simulation/analytics/types";
 import { toCompanySeries } from "../../../lib/v2/companyLab/simulation/analytics/views";
-import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, SimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
+import { SimulationRunSummary, StoredSimulationRun } from "../../../lib/v2/companyLab/simulation/persistence/types";
+import { restoreSessionFromResumePayload } from "../../../lib/v2/companyLab/simulation/persistence/resume";
 import { createEmptyStrategyDocument, CompanyStrategyDocument } from "../../../lib/v2/companyLab/strategyProfile/types";
 import { CompanyFixture } from "../../../lib/v2/companyLab/types";
 import {
   getActiveSimulationRunId,
   listSimulationRuns,
   loadSimulationRun,
-  saveSimulationRun,
   setActiveSimulationRunId,
 } from "../lib/simulationRunStore";
+import { persistResumableRun } from "../lib/persistRun";
 import { SeriesChart } from "./SeriesChart";
 import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
@@ -155,12 +156,69 @@ export function ManagementConsole() {
     [scenarioId, seed]
   );
 
+  /**
+   * 【Phase 9・Save/Resume】保存済みRunを開くとき、resumePayloadがあれば
+   * 「続きから進められる」本物のSimulation Sessionへ復元する（liveSessionRegistryにも
+   * 登録し、以降はこのタブ内の通常のライブセッションと同じに扱われる）。
+   * resumePayloadが無い（古いRun）場合だけ、従来どおり閲覧専用のdataset表示に留める
+   * （Q1からの再構築や、別Runの暗黙生成はしない）。
+   * 起動時の復元（useEffect）と Run History からの選択（selectRun）の両方から呼ぶ。
+   */
+  const applyStoredRun = useCallback((stored: StoredSimulationRun) => {
+    const resumePayload = stored.resumePayload;
+    if (resumePayload) {
+      // 【指示§16】resumePayloadが壊れている・非互換な形をしていた場合、Q1へ黙って
+      // 作り直したり、既存の実績（dataset）まで捨てたりしない。閲覧専用（VIEW_ONLY）へ
+      // 落ちたうえで、理由をstorageNoteとして画面に出す。
+      try {
+        const session = restoreSessionFromResumePayload(stored.run, resumePayload, stored.packCapture);
+        // 復元直後に最低限アクセスして、壊れた形（欠けたフィールド等）を早期検出する。
+        void session.state.scenarioState.currentTurn;
+        void session.fixtures.length;
+        upsertLiveSession(session.run.simulationRunId, {
+          session,
+          companyControlModes: resumePayload.companyControlModes,
+          confirmedPlayerDecisions: resumePayload.confirmedPlayerDecisions,
+          confirmedPlayerDrafts: {},
+          selectedCompanyId: "BAL",
+        });
+        setView(viewFromSession(session));
+        setFixtures(session.fixtures);
+        setScenarioId(session.run.scenarioId);
+        setSeed(session.run.seed);
+        setCompanyControlModes(resumePayload.companyControlModes);
+        setConfirmedPlayerDecisions(resumePayload.confirmedPlayerDecisions);
+        setConfirmedPlayerDrafts({});
+        setWaitingForPlayerCompanyIds(
+          session.run.stopReason === "waiting_for_player"
+            ? session.fixtures
+                .filter(
+                  (f) =>
+                    (resumePayload.companyControlModes[f.companyId] ?? "STANDARD_AI") === "PLAYER" &&
+                    resumePayload.confirmedPlayerDecisions[f.companyId] === undefined
+                )
+                .map((f) => f.companyId)
+            : []
+        );
+        return;
+      } catch (e) {
+        setStorageNote(
+          `この Simulation Run の保存済み状態（resumePayload）が壊れているため、続きからは進められません（${
+            e instanceof Error ? e.message : String(e)
+          }）。閲覧専用として表示します。`
+        );
+        // フォールスルーして下の閲覧専用表示へ。
+      }
+    }
+    setView({ run: stored.run, dataset: stored.dataset, session: null, strategyTurns: stored.packCapture?.companyTurns ?? [] });
+  }, []);
+
   // --- 起動時：Run Contextを復元する ---
   // 優先順位（指示§4/§5/§27 NAV-1〜NAV-7）：
   //   1. URLの ?run= が、このタブでまだ生きている liveSessionRegistry と一致する
   //      → 進行中のセッションをそのまま復元する（Turnが1に戻らない・続きから進められる）。
   //   2. URLの ?run= はあるが liveSessionRegistry に無い（別タブ・ハードリロード等）
-  //      → 保存済み実行を読み取り専用で復元する（従来のisRestoredOnly挙動）。
+  //      → resumePayloadがあれば続きから、無ければ読み取り専用で復元する。
   //   3. URLに ?run= が無い → 従来どおりlocalStorageの直近アクティブなrunを見る。
   useEffect(() => {
     let cancelled = false;
@@ -188,7 +246,7 @@ export function ManagementConsole() {
         const stored = await loadSimulationRun(runQueryParam);
         if (cancelled) return;
         if (stored) {
-          setView({ run: stored.run, dataset: stored.dataset, session: null, strategyTurns: stored.packCapture?.companyTurns ?? [] });
+          applyStoredRun(stored);
           setScenarioId(stored.run.scenarioId);
           setSeed(stored.run.seed);
           setActiveSimulationRunId(runQueryParam);
@@ -223,7 +281,7 @@ export function ManagementConsole() {
         }
         const stored = await loadSimulationRun(activeId);
         if (!cancelled && stored) {
-          setView({ run: stored.run, dataset: stored.dataset, session: null, strategyTurns: stored.packCapture?.companyTurns ?? [] });
+          applyStoredRun(stored);
           setRestoring(false);
           return;
         }
@@ -236,7 +294,7 @@ export function ManagementConsole() {
     return () => {
       cancelled = true;
     };
-  }, [createFresh, runQueryParam]);
+  }, [createFresh, runQueryParam, applyStoredRun]);
 
   // --- ライブセッションレジストリへの書き込み（Analysis/PLAYER Workspace等、別routeが読む） ---
   // Consoleが持つ状態が変わるたびに書き込む。pendingDrafts（Workspace内の未確定下書き）は
@@ -252,28 +310,32 @@ export function ManagementConsole() {
     });
   }, [view, companyControlModes, confirmedPlayerDecisions, confirmedPlayerDrafts, selectedCompanyId]);
 
-  /** 実行の区切りで保存する。保存先（サーバー／ブラウザ）は必ず画面へ出す。 */
-  const persist = useCallback(async (session: SimulationSession) => {
-    const dataset = buildDatasetFromSession(session);
-    const result = await saveSimulationRun({
-      schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
-      run: session.run,
-      dataset,
-      packCapture: { companyTurns: session.packCompanyTurns, worldTurns: session.packWorldTurns },
-      savedAt: nowIso(),
-    });
-    setActiveSimulationRunId(session.run.simulationRunId);
-    setSavedRuns(await listSimulationRuns());
-    setStorageNote(
-      result.savedTo.length === 0
-        ? `保存できませんでした（${[result.browserError, result.serverError].filter(Boolean).join(" / ")}）`
-        : result.savedTo.length === 2
-          ? "保存先: サーバー（Redis）＋このブラウザ"
-          : result.savedTo[0] === "browser"
-            ? `保存先: このブラウザのみ（${result.serverError}）`
-            : `保存先: サーバーのみ（${result.browserError}）`
-    );
-  }, []);
+  /**
+   * 実行の区切りで保存する。保存先（サーバー／ブラウザ）は必ず画面へ出す。
+   * 【Phase 9・Save/Resume】経営モード・確定済みPLAYER意思決定は、呼び出し側の
+   * ローカル変数から明示的に受け取る（state setterは非同期のため、直前に更新した
+   * 値がまだstateへ反映されていない可能性があり、stateを読むと古い値を保存しかねない）。
+   */
+  const persist = useCallback(
+    async (
+      session: SimulationSession,
+      controlModes: Readonly<Record<string, CompanyControlMode>>,
+      playerDecisions: Readonly<Record<string, CompanyDecisionInput>>
+    ) => {
+      const result = await persistResumableRun(session, controlModes, playerDecisions);
+      setSavedRuns(await listSimulationRuns());
+      setStorageNote(
+        result.savedTo.length === 0
+          ? `保存できませんでした（${[result.browserError, result.serverError].filter(Boolean).join(" / ")}）`
+          : result.savedTo.length === 2
+            ? "保存先: サーバー（Redis）＋このブラウザ"
+            : result.savedTo[0] === "browser"
+              ? `保存先: このブラウザのみ（${result.serverError}）`
+              : `保存先: サーバーのみ（${result.browserError}）`
+      );
+    },
+    []
+  );
 
   /** 指定ターン数だけ進める。1回のターン処理ごとに描画を更新する。 */
   const run = useCallback(
@@ -319,7 +381,7 @@ export function ManagementConsole() {
           setView(viewFromSession(current));
           setPhase("idle");
           setRunningTurn(null);
-          await persist(current);
+          await persist(current, controlModesForThisRun, pendingPlayerDecisions);
           return;
         }
         if (current.state.isComplete) break;
@@ -356,7 +418,7 @@ export function ManagementConsole() {
       setPhase("idle");
       setRunningTurn(null);
       // 完走・シナリオ終端・失敗・PLAYER待ちのいずれでも保存する（失敗の記録も残す）。
-      await persist(current);
+      await persist(current, controlModesForThisRun, pendingPlayerDecisions);
     },
     [phase, restoring, view, createFresh, persist, scenarioId, seed, companyControlModes, confirmedPlayerDecisions, resetControlState, router]
   );
@@ -372,9 +434,24 @@ export function ManagementConsole() {
     router.replace(`/v2/management?run=${encodeURIComponent(fresh.run.simulationRunId)}`);
   }, [phase, createFresh, resetControlState, router]);
 
-  const handleChangeControlMode = useCallback((companyId: string, mode: CompanyControlMode) => {
-    setCompanyControlModes((prev) => ({ ...prev, [companyId]: mode }));
-  }, []);
+  /**
+   * 【指示§15】経営モード変更も保存タイミングの1つ。
+   * 変更直後のSimulation Sessionが無ければ（保存済みRunの閲覧のみ・実行前）保存しない
+   * （resumePayloadはSimulation Sessionが無いと組み立てられない）。
+   */
+  const handleChangeControlMode = useCallback(
+    (companyId: string, mode: CompanyControlMode) => {
+      setCompanyControlModes((prev) => {
+        const next = { ...prev, [companyId]: mode };
+        const session = view?.session;
+        if (session) {
+          void persist(session, next, confirmedPlayerDecisions);
+        }
+        return next;
+      });
+    },
+    [view, persist, confirmedPlayerDecisions]
+  );
 
   /** 【PLAYER Company Workspace】「この会社を操作」は、モーダルではなく専用routeへ遷移する。 */
   const openPlayerWorkspace = useCallback(
@@ -405,11 +482,11 @@ export function ManagementConsole() {
       const stored = await loadSimulationRun(simulationRunId);
       if (!stored) return;
       setActiveSimulationRunId(simulationRunId);
-      setView({ run: stored.run, dataset: stored.dataset, session: null, strategyTurns: stored.packCapture?.companyTurns ?? [] });
+      applyStoredRun(stored);
       setErrorMessage(null);
       router.replace(`/v2/management?run=${encodeURIComponent(simulationRunId)}`);
     },
-    [router]
+    [router, applyStoredRun]
   );
 
   const dataset = view?.dataset ?? null;
