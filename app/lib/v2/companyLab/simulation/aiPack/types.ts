@@ -406,6 +406,12 @@ export interface PackCompanyTurn {
   readonly commercialGrowth: PackCommercialGrowth;
   /** 【Phase 6C】営業組織（人が足りないのか、増やしたくないのか）。 */
   readonly salesOrganization: PackSalesOrganization;
+  /**
+   * 【Phase 7・Manual Override】この四半期の意思決定が実際に誰由来だったか
+   * （STANDARD_AI or PLAYER）。Phase 7 より前に保存された Simulation Run には
+   * この記録が無いため、その場合は STANDARD_AI として扱う（当時は全社AIだったため）。
+   */
+  readonly decisionOwner: "STANDARD_AI" | "PLAYER";
 }
 
 export interface PackCapitalProject {

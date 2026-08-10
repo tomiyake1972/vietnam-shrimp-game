@@ -306,6 +306,8 @@ function buildCompanyTurn(stored: StoredSimulationRun, companyId: string, turn: 
     // これらの記録が無い。値を推測で補完せず NOT_RECORDED として明示する。
     commercialGrowth: capture?.commercialGrowth ?? EMPTY_COMMERCIAL_GROWTH,
     salesOrganization: capture?.salesOrganization ?? EMPTY_SALES_ORGANIZATION,
+    // 【Phase 7 後方互換】Phase 7 より前の Simulation Run は全社 STANDARD_AI だった。
+    decisionOwner: capture?.decisionOwner ?? "STANDARD_AI",
   };
 }
 

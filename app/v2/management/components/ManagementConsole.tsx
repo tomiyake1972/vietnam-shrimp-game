@@ -23,7 +23,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { advanceSimulationTurn, createSimulationSession } from "../../../lib/v2/companyLab/simulation/engine";
-import { MANAGEMENT_CONSOLE_STANDARD_TURNS, PackCompanyTurnCapture, SimulationRun, SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
+import {
+  CompanyControlMode,
+  MANAGEMENT_CONSOLE_STANDARD_TURNS,
+  PackCompanyTurnCapture,
+  SimulationRun,
+  SimulationSession,
+} from "../../../lib/v2/companyLab/simulation/types";
+import { CompanyDecisionInput } from "../../../lib/v2/companyLab/types";
+import { CompanyDecisionDraft } from "../../company-lab/decisionDraft";
+import { CompanyControlPanel } from "./CompanyControlPanel";
+import { PlayerTurnPanel } from "./PlayerTurnPanel";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
 import { SimulationAnalyticsDataset } from "../../../lib/v2/companyLab/simulation/analytics/types";
 import { toCompanySeries } from "../../../lib/v2/companyLab/simulation/analytics/views";
@@ -106,6 +116,24 @@ export function ManagementConsole() {
   const [storageNote, setStorageNote] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(true);
   const stopRequested = useRef(false);
+
+  // --- 【Phase 7・Manual Override】会社ごとの経営モードと、PLAYER会社の当ターン意思決定 ---
+  // 未確定は STANDARD_AI 相当（指示§3「新しいSimulation Run作成時は5社すべてSTANDARD_AI」）。
+  const [companyControlModes, setCompanyControlModes] = useState<Readonly<Record<string, CompanyControlMode>>>({});
+  // そのターンぶんだけ持つ（確定後、advanceSimulationTurn へ渡したら毎回クリアする）。
+  const [confirmedPlayerDecisions, setConfirmedPlayerDecisions] = useState<Readonly<Record<string, CompanyDecisionInput>>>({});
+  const [confirmedPlayerDrafts, setConfirmedPlayerDrafts] = useState<Readonly<Record<string, CompanyDecisionDraft>>>({});
+  const [waitingForPlayerCompanyIds, setWaitingForPlayerCompanyIds] = useState<readonly string[]>([]);
+  const [activePlayerCompanyId, setActivePlayerCompanyId] = useState<string | null>(null);
+
+  /** 新しい実行を始めるときは、経営モード・確定済み意思決定をすべてdefaultへ戻す（指示§3/§29/§30）。 */
+  const resetControlState = useCallback(() => {
+    setCompanyControlModes({});
+    setConfirmedPlayerDecisions({});
+    setConfirmedPlayerDrafts({});
+    setWaitingForPlayerCompanyIds([]);
+    setActivePlayerCompanyId(null);
+  }, []);
 
   const [strategyDocs] = useState<Readonly<Record<string, CompanyStrategyDocument>>>(() => {
     const s = createSimulationSession({ simulationRunId: "schema", scenarioId: DEFAULT_SCENARIO_ID, seed: DEFAULT_SEED, requestedTurns: 1, startedAt: "init" });
@@ -195,8 +223,20 @@ export function ManagementConsole() {
       // （別シナリオのターンが1本の Simulation Run に混ざることを防ぐ）。
       const live = view?.session ?? null;
       const liveMatchesSettings = live !== null && live.run.scenarioId === scenarioId && live.run.seed === seed;
-      let current = liveMatchesSettings && live.state.history.length > 0 ? live : createFresh(nowIso());
+      const continuesLiveRun = liveMatchesSettings && live.state.history.length > 0;
+      let current = continuesLiveRun ? live : createFresh(nowIso());
+      // 【指示§30】シナリオ切替・新規Runでは経営モード・確定済み意思決定をdefaultへ戻す。
+      // 既存Runの続きなら、これまでの経営モード切替（PLAYER化など）を引き継ぐ（指示§18）。
+      // 【重要】setState は非同期のため、このrun()呼び出し内のループ判定にはstateではなく
+      // ローカル変数を使う（reset直後に古いstateを読んでしまう不整合を避ける）。
+      const controlModesForThisRun = continuesLiveRun ? companyControlModes : {};
+      if (!continuesLiveRun) resetControlState();
       setView(viewFromSession(current));
+      setWaitingForPlayerCompanyIds([]);
+
+      // このrun()呼び出しの間だけ有効な、直近のPLAYER確定意思決定。
+      // ターン処理後は消費してクリアする（次のPLAYERターンでは再び未入力に戻るのが正しい）。
+      let pendingPlayerDecisions: Readonly<Record<string, CompanyDecisionInput>> = continuesLiveRun ? confirmedPlayerDecisions : {};
 
       for (let i = 0; i < turns; i++) {
         // 【本物のSTOP】次のターンへ入る前に確認する。処理中の中断はしない。
@@ -210,14 +250,29 @@ export function ManagementConsole() {
         }
         if (current.state.isComplete) break;
 
+        // 【指示§11/§12/§27/§28】PLAYER会社の当ターン意思決定が未確定なら、勝手に先へ進めず停止する。
+        const missingPlayerCompanies = current.fixtures.filter(
+          (f) => (controlModesForThisRun[f.companyId] ?? "STANDARD_AI") === "PLAYER" && pendingPlayerDecisions[f.companyId] === undefined
+        );
+        if (missingPlayerCompanies.length > 0) {
+          current = { ...current, run: { ...current.run, companyControlModes: controlModesForThisRun, stopReason: "waiting_for_player" } };
+          setView(viewFromSession(current));
+          setWaitingForPlayerCompanyIds(missingPlayerCompanies.map((f) => f.companyId));
+          break;
+        }
+
         const turnNumber = current.state.scenarioState.currentTurn;
         setRunningTurn(turnNumber);
         // ブラウザへ制御を戻し、進捗表示を実際に描画させる。
         await new Promise((r) => requestAnimationFrame(() => r(null)));
 
-        const outcome = advanceSimulationTurn(current, nowIso());
-        current = outcome.session;
+        const outcome = advanceSimulationTurn(current, nowIso(), pendingPlayerDecisions);
+        current = { ...outcome.session, run: { ...outcome.session.run, companyControlModes: controlModesForThisRun } };
         setView(viewFromSession(current));
+        // このターンで使った確定済みPLAYER意思決定は消費済み。次のターンはまた未入力から。
+        pendingPlayerDecisions = {};
+        setConfirmedPlayerDecisions({});
+        setConfirmedPlayerDrafts({});
 
         if (!outcome.advanced) {
           if (outcome.error) setErrorMessage(`Simulation stopped at Turn ${turnNumber}: ${outcome.error.message}`);
@@ -226,10 +281,10 @@ export function ManagementConsole() {
       }
       setPhase("idle");
       setRunningTurn(null);
-      // 完走・シナリオ終端・失敗のいずれでも保存する（失敗の記録も残す）。
+      // 完走・シナリオ終端・失敗・PLAYER待ちのいずれでも保存する（失敗の記録も残す）。
       await persist(current);
     },
-    [phase, restoring, view, createFresh, persist, scenarioId, seed]
+    [phase, restoring, view, createFresh, persist, scenarioId, seed, companyControlModes, confirmedPlayerDecisions, resetControlState]
   );
 
   const reset = useCallback(() => {
@@ -238,7 +293,20 @@ export function ManagementConsole() {
     setErrorMessage(null);
     setRunningTurn(null);
     setStorageNote(null);
-  }, [phase, createFresh]);
+    resetControlState();
+  }, [phase, createFresh, resetControlState]);
+
+  /** PLAYER会社の意思決定確定：DecisionEditorから戻ってきたら、その場でrun()の続きに使う値を保存する。 */
+  const handleConfirmPlayerDecision = useCallback((companyId: string, decision: CompanyDecisionInput, draft: CompanyDecisionDraft) => {
+    setConfirmedPlayerDecisions((prev) => ({ ...prev, [companyId]: decision }));
+    setConfirmedPlayerDrafts((prev) => ({ ...prev, [companyId]: draft }));
+    setWaitingForPlayerCompanyIds((prev) => prev.filter((id) => id !== companyId));
+    setActivePlayerCompanyId(null);
+  }, []);
+
+  const handleChangeControlMode = useCallback((companyId: string, mode: CompanyControlMode) => {
+    setCompanyControlModes((prev) => ({ ...prev, [companyId]: mode }));
+  }, []);
 
   const selectRun = useCallback(async (simulationRunId: string) => {
     const stored = await loadSimulationRun(simulationRunId);
@@ -343,6 +411,10 @@ export function ManagementConsole() {
               <span className="text-amber-300">停止要求を受け付けました。処理中のターンの完了を待っています…</span>
             ) : errorMessage ? (
               <span className="text-rose-400" data-testid="error-message">{errorMessage}</span>
+            ) : waitingForPlayerCompanyIds.length > 0 ? (
+              <span className="font-semibold text-amber-300" data-testid="waiting-for-player-message">
+                {waitingForPlayerCompanyIds.join(", ")} の意思決定待ち — Completed {completedTurns} / {MANAGEMENT_CONSOLE_STANDARD_TURNS} Turns
+              </span>
             ) : view?.run.stopReason === "stopped_by_user" ? (
               <span className="text-amber-300">Stopped by user — Completed {completedTurns} / {MANAGEMENT_CONSOLE_STANDARD_TURNS} Turns</span>
             ) : isComplete && completedTurns > 0 ? (
@@ -506,7 +578,25 @@ export function ManagementConsole() {
         </main>
 
         {/* RIGHT: Company Inspector 約35% */}
-        <aside className="lg:w-[35%]">
+        <aside className="flex flex-col gap-3 lg:w-[35%]">
+          {fixtures.length > 0 ? (
+            <CompanyControlPanel
+              fixtures={fixtures}
+              controlModes={companyControlModes}
+              onChangeMode={handleChangeControlMode}
+              decidedCompanyIds={new Set(Object.keys(confirmedPlayerDecisions))}
+              waitingCompanyIds={waitingForPlayerCompanyIds}
+              onOperate={setActivePlayerCompanyId}
+              disabled={busy || view?.session === null}
+              currentTurn={view?.session?.state.scenarioState.currentTurn ?? view?.run.startingTurn ?? 1}
+            />
+          ) : null}
+          {view?.session === null && fixtures.length > 0 ? (
+            <p className="text-[11px] text-amber-300/90">
+              保存済みの実行を表示しているため、経営モードの切替・PLAYER操作はできません（実行ボタンで新しい実行を開始してください）。
+            </p>
+          ) : null}
+
           <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-2.5">
             <h2 className="mb-2 text-sm font-semibold">Company Inspector</h2>
             {dataset ? (
@@ -524,6 +614,16 @@ export function ManagementConsole() {
           </div>
         </aside>
       </div>
+
+      {activePlayerCompanyId && view?.session ? (
+        <PlayerTurnPanel
+          session={view.session}
+          companyId={activePlayerCompanyId}
+          initialDraft={confirmedPlayerDrafts[activePlayerCompanyId]}
+          onConfirm={handleConfirmPlayerDecision}
+          onClose={() => setActivePlayerCompanyId(null)}
+        />
+      ) : null}
     </div>
   );
 }

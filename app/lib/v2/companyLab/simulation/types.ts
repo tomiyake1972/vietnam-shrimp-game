@@ -28,8 +28,23 @@ export type SimulationStopReason =
   | "error"
   /** シナリオ側の上限（durationTurns）に到達した。 */
   | "scenario_end"
+  /**
+   * 【Phase 7・Manual Override】PLAYER会社の当該ターン意思決定が未確定のため停止した。
+   * ERROR扱いにはしない（Player decision確定後にresume可能）。
+   */
+  | "waiting_for_player"
   /** まだ実行中。 */
   | "running";
+
+/**
+ * 【Phase 7・Manual Override】会社ごとの経営モード。
+ * STANDARD_AI = 従来どおり Standard AI が意思決定する。
+ * PLAYER = ユーザーが既存の通常プレイ意思決定画面（DecisionEditor）で操作する。
+ */
+export type CompanyControlMode = "STANDARD_AI" | "PLAYER";
+
+/** 由来（誰の意思決定が実際にエンジンへ渡されたか）。AI Analysis Pack の識別用。 */
+export type DecisionOwner = "STANDARD_AI" | "PLAYER";
 
 /**
  * 32Qテストを再現するためのメタデータ。
@@ -60,6 +75,11 @@ export interface SimulationRun {
   readonly errorMessage: string | null;
   /** 失敗したターン番号（成功扱いにしない）。 */
   readonly failedAtTurn: number | null;
+  /**
+   * 【Phase 7・Manual Override】この run で現在有効な会社別経営モード（記録用）。
+   * 未設定（旧run・schema）は全社 STANDARD_AI 相当として扱う（捏造しない＝存在しないなら省略）。
+   */
+  readonly companyControlModes?: Readonly<Record<string, CompanyControlMode>>;
 }
 
 /** 実行中のセッション（状態 + fixtures + run メタデータ）。 */
@@ -121,6 +141,8 @@ export interface PackCompanyTurnCapture {
   readonly commercialGrowth: PackCommercialGrowth;
   /** 【Phase 6C】営業組織の状態（人が足りないのか、増やしたくないのか）。 */
   readonly salesOrganization: PackSalesOrganization;
+  /** 【Phase 7・Manual Override】この四半期・この会社の意思決定が実際に誰由来だったか。 */
+  readonly decisionOwner: DecisionOwner;
 }
 
 /** 1ターン・1社ぶんの実効能力（HOSO換算トン/四半期）。 */

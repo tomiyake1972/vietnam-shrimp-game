@@ -465,11 +465,23 @@ export async function buildAnalysisWorkbook(context: AiAnalysisPackContext, data
   const aiDecision = workbook.addWorksheet("19_AI_Decision");
   addRows(
     aiDecision,
-    ["turn", "company", "salesHireCount", "salesLayoffCount", "domesticPurchaseDesiredTons", "importOrderCount", "financingRequestUsd", "capexProposals", "vapDevelopmentSpendUsd"],
+    [
+      "turn",
+      "company",
+      "decisionOwner",
+      "salesHireCount",
+      "salesLayoffCount",
+      "domesticPurchaseDesiredTons",
+      "importOrderCount",
+      "financingRequestUsd",
+      "capexProposals",
+      "vapDevelopmentSpendUsd",
+    ],
     Object.values(context.companies).flatMap((c) =>
       c.turns.map((t) => [
         t.turn,
         c.companyId,
+        t.decisionOwner,
         t.decision.salesHireCount,
         t.decision.salesLayoffCount,
         t.decision.domesticPurchaseDesiredTons,

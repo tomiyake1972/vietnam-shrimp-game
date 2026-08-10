@@ -37,7 +37,7 @@ import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
 import { FINANCE_PARAMETERS_V1 } from "../../finance/parameters";
 import { STANDARD_AI_PARAMETERS_V1 } from "../standardAi/parameters";
 import { STRATEGY_PROFILE_SCHEMA_VERSION } from "../strategyProfile/types";
-import { CapacitySnapshot, MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession, SimulationTurnOutcome } from "./types";
+import { CapacitySnapshot, DecisionOwner, MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession, SimulationTurnOutcome } from "./types";
 import { extractAiTurnTrace } from "./analytics/aiTrace";
 import {
   captureCapitalProjects,
@@ -163,8 +163,19 @@ function captureObservedDemand(turn: number, publicInfo: PublicMarketInfo): Obse
  *
  * 失敗した場合は state を一切変更せず（前のターンまでの状態を保つ）、
  * completedTurns も増やさない。**失敗したターンを成功扱いにしない。**
+ *
+ * 【Phase 7・Manual Override】playerDecisions は companyId をキーに、その会社の
+ * 当ターン意思決定を Standard AI ではなくプレイヤー入力で置き換える。渡された
+ * すべての会社について Standard AI の意思決定（＝参考用の診断・トレース記録）は
+ * 従来どおり計算する（将来の AI Recommendation 表示のための構造を残すため）が、
+ * 実際にエンジンへ渡す意思決定だけを差し替える。playerDecisions に無い会社は
+ * 従来どおり Standard AI の意思決定をそのまま使う。
  */
-export function advanceSimulationTurn(session: SimulationSession, completedAt: string): SimulationTurnOutcome {
+export function advanceSimulationTurn(
+  session: SimulationSession,
+  completedAt: string,
+  playerDecisions?: Readonly<Record<string, CompanyDecisionInput>>
+): SimulationTurnOutcome {
   if (session.state.isComplete) {
     return {
       session: { ...session, run: { ...session.run, stopReason: "scenario_end", completedAt } },
@@ -182,18 +193,22 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
     const strategyByCompany = new Map<string, ReturnType<typeof captureStrategy>>();
     /** 【Phase 6C】その四半期の商業成長の因果と営業組織（会社別）。 */
     const diagnosticsByCompany = new Map<string, ReturnType<typeof generateStandardAiDecisionWithDiagnostics>["diagnostics"]>();
+    const decisionOwnerByCompany = new Map<string, DecisionOwner>();
     for (const fixture of session.fixtures) {
       const ownState = buildCompanyOwnState(session.state, fixture);
-      const { decision, diagnostics } = generateStandardAiDecisionWithDiagnostics(
+      const { decision: aiDecision, diagnostics } = generateStandardAiDecisionWithDiagnostics(
         fixture,
         ownState,
         publicInfo,
         session.state.currentPeriod,
         turn
       );
-      decisions[fixture.companyId] = decision;
+      const playerDecision = playerDecisions?.[fixture.companyId];
+      decisions[fixture.companyId] = playerDecision ?? aiDecision;
+      decisionOwnerByCompany.set(fixture.companyId, playerDecision ? "PLAYER" : "STANDARD_AI");
       // 【追加の計算をしない】diagnostics は上の1回の呼び出しで既に作られている値であり、
-      // トレース記録のために Standard AI をもう一度回すことはない。
+      // トレース記録のために Standard AI をもう一度回すことはない（PLAYER会社でも、
+      // 参考用の Standard AI 診断はそのまま記録する＝実際の意思決定には使わない）。
       turnTraces.push(extractAiTurnTrace(diagnostics));
       strategyByCompany.set(fixture.companyId, captureStrategy(diagnostics));
       diagnosticsByCompany.set(fixture.companyId, diagnostics);
@@ -221,6 +236,7 @@ export function advanceSimulationTurn(session: SimulationSession, completedAt: s
           .decision.productionPlans.reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0)
       ),
       salesOrganization: captureSalesOrganization(diagnosticsByCompany.get(f.companyId)!),
+      decisionOwner: decisionOwnerByCompany.get(f.companyId) ?? "STANDARD_AI",
     }));
     const finalizedRecord = nextState.history[nextState.history.length - 1];
     const packWorldTurn = finalizedRecord
