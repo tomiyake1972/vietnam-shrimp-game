@@ -19,6 +19,7 @@ import { BOTTLENECK_LABELS } from "../../../lib/v2/companyLab/simulation/analyti
 import { CompanyStrategyDocument, resolveStrategyAtTurn } from "../../../lib/v2/companyLab/strategyProfile/types";
 import { PackCompanyTurnCapture } from "../../../lib/v2/companyLab/simulation/types";
 import { Collapsible } from "./Collapsible";
+import { describeNewFactoryBlocker } from "../../../lib/v2/companyLab/standardAi/decision/newFactory";
 
 interface Props {
   readonly dataset: SimulationAnalyticsDataset;
@@ -170,6 +171,8 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
   const growth = latestCapture?.commercialGrowth ?? null;
   const salesOrg = latestCapture?.salesOrganization ?? null;
   const newFactory = latestStrategy?.newFactory ?? null;
+  // 【Phase 6D】MONITORING では失敗 gate が記録上存在しない（提案圧力未達が止めている）。
+  const blocker = newFactory ? describeNewFactoryBlocker(newFactory) : null;
   const blockingGate = newFactory?.gates.find((g) => !g.passed) ?? null;
 
   const diagnosed = traceAt("DIAGNOSED");
@@ -356,7 +359,7 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
                 <dl className="mt-1">
                   <Row label="投資額（標準工場）" value={money(newFactory.projectCostUsd)} />
                   <Row label="着工四半期の支払" value={money(newFactory.firstPaymentUsd)} />
-                  <Row label="判断を止めたゲート" value={blockingGate ? blockingGate.gate : "（全ゲート通過）"} />
+                  <Row label="判断を止めたゲート" value={blocker ?? "（全ゲート通過・提案）"} />
                 </dl>
                 {blockingGate ? <p className="mt-1 text-[11px] leading-snug text-slate-300">{blockingGate.note}</p> : null}
                 <ul className="mt-1.5 list-inside list-disc">

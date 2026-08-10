@@ -12,6 +12,7 @@ import { createStandardAiProvider, StandardAiQuarterDiagnostics } from "../app/l
 import { unwrapUnit } from "../app/lib/v2/core/units";
 import { unwrapUsd } from "../app/lib/v2/finance/types";
 import { SALES_PARAMETERS_V1 } from "../app/lib/v2/sales/parameters";
+import { describeNewFactoryBlocker } from "../app/lib/v2/companyLab/standardAi/decision/newFactory";
 
 const TURNS = Number(process.env.P6C_TURNS ?? 32);
 const SHOW = [1, 8, 16, 24, 32].filter((t) => t <= TURNS);
@@ -95,10 +96,10 @@ for (const companyId of COMPANIES) {
   const productionBound = rows.filter((d) => d.unservedOpportunity?.primaryConstraint === "PRODUCTION_CAPACITY").length;
   const capacityCaused = rows.reduce((sum, d) => sum + (d.unservedOpportunity?.blockedByProductionCapacityTons ?? 0), 0);
   const last = rows[rows.length - 1];
-  const failed = last?.newFactoryAssessment?.gates.find((g) => !g.passed);
+  const blocker = last?.newFactoryAssessment ? describeNewFactoryBlocker(last.newFactoryAssessment) : null;
   console.log(
     `  ${companyId.padEnd(6)}${String(productionBound).padStart(26)} ${n(capacityCaused, 20)}  ${(last?.newFactoryAssessment?.status ?? "-").padEnd(17)}${
-      failed?.gate ?? (last?.newFactoryAssessment ? "(全通過)" : "-")
+      blocker ?? (last?.newFactoryAssessment ? "(全ゲート通過・提案)" : "-")
     }`
   );
 }

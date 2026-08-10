@@ -150,6 +150,32 @@ function gate(gateName: string, passed: boolean, keyValues: Record<string, numbe
 }
 
 /**
+ * 【Phase 6D・表示専用の SSoT】この assessment を実際に止めている条件のラベル。
+ *
+ * 【なぜ必要か（監査で確認した logging semantic bug）】
+ * MONITORING は Gate C（GROWTH_PRESSURE）で評価が終わるが、その gate の passed は
+ * 「検討開始（monitoring）圧力に達したか」を記録する。したがって MONITORING の
+ * assessment には failed な gate が1つも存在せず、従来の表示各所
+ * （firstFailedGate ?? "全ゲート通過"）は**提案圧力に達していないのに
+ * 「全ゲート通過」と表示していた**。実際に止めている条件
+ * （growthPressure < 提案に必要な圧力）はどの gate の fail としても現れない。
+ *
+ * この関数は判断そのものを一切変えない。表示・ログが参照する「止めている条件」を
+ * 1箇所に集約するだけである。
+ */
+export function describeNewFactoryBlocker(assessment: {
+  readonly status: string;
+  readonly gates: readonly { readonly gate: string; readonly passed: boolean }[];
+}): string | null {
+  const failed = assessment.gates.find((g) => !g.passed);
+  if (failed) return failed.gate;
+  // 全 gate が passed のまま止まるのは MONITORING だけ（Gate C の passed が
+  // monitoring 閾値を記録するため）。READY_TO_BUILD は本当に全ゲート通過。
+  if (assessment.status === "MONITORING") return "GROWTH_PRESSURE_BELOW_PROPOSAL";
+  return null;
+}
+
+/**
  * 新工場建設を検討する（純粋関数）。
  * 提案するかどうかに関わらず、必ず assessment と診断エントリを返す。
  */

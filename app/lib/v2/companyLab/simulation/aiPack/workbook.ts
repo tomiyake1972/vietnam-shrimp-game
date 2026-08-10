@@ -13,6 +13,7 @@
 import ExcelJS from "exceljs";
 import { COMPANY_METRIC_LABELS, COMPANY_METRIC_UNITS, SimulationAnalyticsDataset } from "../analytics/types";
 import { AiAnalysisPackContext } from "./types";
+import { describeNewFactoryBlocker } from "../../standardAi/decision/newFactory";
 
 function addRows(sheet: ExcelJS.Worksheet, header: readonly string[], rows: readonly (readonly (string | number | null)[])[]): void {
   sheet.addRow([...header]);
@@ -267,7 +268,7 @@ export async function buildAnalysisWorkbook(context: AiAnalysisPackContext, data
     Object.values(context.companies).flatMap((c) =>
       c.turns.map((t) => {
         const s = t.strategy;
-        const failed = s.newFactory?.gates.find((g) => !g.passed);
+        const blocker = s.newFactory ? describeNewFactoryBlocker(s.newFactory) : null;
         return [
           t.turn,
           c.companyId,
@@ -280,7 +281,7 @@ export async function buildAnalysisWorkbook(context: AiAnalysisPackContext, data
           s.growthPressure,
           s.newFactory?.status ?? null,
           s.newFactory ? s.newFactory.reasonCodes.join(", ") : null,
-          failed?.gate ?? (s.newFactory ? "(全ゲート通過)" : null),
+          blocker ?? (s.newFactory ? "(全ゲート通過・提案)" : null),
           s.newFactory?.projectCostUsd ?? null,
         ];
       })

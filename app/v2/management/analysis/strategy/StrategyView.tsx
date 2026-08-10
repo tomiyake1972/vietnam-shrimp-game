@@ -14,6 +14,7 @@ import { MANAGEMENT_CONSOLE_STANDARD_TURNS } from "../../../../lib/v2/companyLab
 import { SeriesChart } from "../../components/SeriesChart";
 import { AnalysisPageShell } from "../components/AnalysisPageShell";
 import { replaceQueryParam, useAnalysisRun, useQueryParam } from "../lib/useAnalysisRun";
+import { describeNewFactoryBlocker } from "../../../../lib/v2/companyLab/standardAi/decision/newFactory";
 
 const PATH = "/v2/management/analysis/strategy";
 
@@ -141,7 +142,9 @@ export function StrategyView() {
               <tbody>
                 {rows.map((r) => {
                   const s = r.strategy;
-                  const failed = s.newFactory?.gates.find((g) => !g.passed) ?? null;
+                  // 【Phase 6D】MONITORING は「提案圧力未達」で止まっており、失敗した gate は
+                  // 記録上存在しない。従来の「（全通過）」表示は誤解を招くため SSoT を使う。
+                  const blocker = s.newFactory ? describeNewFactoryBlocker(s.newFactory) : null;
                   return (
                     <tr key={r.turn} className="border-t border-slate-800 text-slate-300">
                       <td className="px-2 py-1 tabular-nums">{r.turn}</td>
@@ -152,7 +155,7 @@ export function StrategyView() {
                       </td>
                       <td className="px-2 py-1">{s.growthPressure === null ? DASH : (GROWTH_PRESSURE_LABELS[s.growthPressure] ?? s.growthPressure)}</td>
                       <td className="px-2 py-1">{s.newFactory === null ? DASH : (STATUS_LABELS[s.newFactory.status] ?? s.newFactory.status)}</td>
-                      <td className="px-2 py-1 font-mono text-slate-400">{failed ? failed.gate : s.newFactory ? "（全通過）" : DASH}</td>
+                      <td className="px-2 py-1 font-mono text-slate-400">{blocker ?? (s.newFactory ? "（全ゲート通過・提案）" : DASH)}</td>
                       <td className="px-2 py-1 font-mono text-slate-500">{s.newFactory ? s.newFactory.reasonCodes.join(", ") : DASH}</td>
                     </tr>
                   );

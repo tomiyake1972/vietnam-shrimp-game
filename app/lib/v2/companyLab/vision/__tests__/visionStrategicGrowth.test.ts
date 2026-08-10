@@ -356,3 +356,35 @@ test("NEWFAC-16: 稼働率の分母は「商品別ライン合計と共通前処
   const gate = r.assessment.gates.find((g) => g.gate === "EXISTING_CAPACITY_IN_USE");
   assert.equal(gate?.keyValues.bindingEffectiveCapacityTons, 6840 + 5985 + 4275);
 });
+
+// ---------------------------------------------------------------------
+// 【Phase 6D】describeNewFactoryBlocker（表示専用 SSoT・logging semantic bug の修正）
+// ---------------------------------------------------------------------
+
+test("P6D-1: MONITORING は失敗ゲートが無くても「全ゲート通過」ではなく提案圧力未達と表示される", async () => {
+  const { describeNewFactoryBlocker } = await import("../../standardAi/decision/newFactory");
+  // MONITORING の実記録どおり: A/B/C の3ゲートすべて passed=true。
+  const monitoring = {
+    status: "MONITORING",
+    gates: [
+      { gate: "VISION_PRESENT", passed: true },
+      { gate: "VISION_GROWTH_GAP", passed: true },
+      { gate: "GROWTH_PRESSURE", passed: true },
+    ],
+  };
+  assert.equal(describeNewFactoryBlocker(monitoring), "GROWTH_PRESSURE_BELOW_PROPOSAL");
+
+  // 失敗ゲートがあるならそのゲート名（従来どおり）。
+  const deferred = {
+    status: "DEFERRED",
+    gates: [
+      { gate: "VISION_PRESENT", passed: true },
+      { gate: "EXISTING_EXPANSION_FIRST", passed: false },
+    ],
+  };
+  assert.equal(describeNewFactoryBlocker(deferred), "EXISTING_EXPANSION_FIRST");
+
+  // READY_TO_BUILD は本当に全ゲート通過 → null（表示側が「全ゲート通過・提案」を出す）。
+  const ready = { status: "READY_TO_BUILD", gates: [{ gate: "VISION_PRESENT", passed: true }] };
+  assert.equal(describeNewFactoryBlocker(ready), null);
+});
