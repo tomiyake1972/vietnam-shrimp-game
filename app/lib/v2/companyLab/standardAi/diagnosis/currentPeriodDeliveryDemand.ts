@@ -57,11 +57,34 @@ export interface CurrentPeriodDeliveryDemandResult {
 export function buildCurrentPeriodDeliveryDemand(
   companyId: string,
   observation: StandardAiObservation,
-  realisticSalesByProduct: ProductAmount
+  realisticSalesByProduct: ProductAmount,
+  /**
+   * 【Phase 6C・#05 §10-§11】新規販売計画（未成約）のうち、実際に成約すると
+   * 見込む比率。vision/commercialCommitment.ts が観測した転換率から決める。
+   *
+   * 【なぜ必要か】従来はここが暗黙に 1.0 だった。つまり
+   *   「市場へ提出した量は全部成約する」
+   * という前提で生産必要量を作っていた。Phase 6B で営業能力の壁を外した結果、
+   * 提出24,420t・成約14,425t（転換率59%）に対して生産が提出量へ追随し、
+   * 完成品在庫が3倍に膨らんで利益が−61%まで崩れた。
+   *
+   * **未履行契約（outstandingContract）には掛けない**。これは既に確定した需要であり、
+   * 確率で割り引く対象ではない（#05 §10「confirmed backlog を基準にする」）。
+   *
+   * 未指定なら 1.0 ＝ 従来と完全に同一の挙動。
+   */
+  expectedConversionRatio: number = 1
 ): CurrentPeriodDeliveryDemandResult {
+  const conversion = Math.max(0, Math.min(1, expectedConversionRatio));
   const byProduct: ProductAmount = zeroProductAmount();
+  let speculativeTons = 0;
+  let confirmedTons = 0;
   for (const product of ["hoso", "pd", "vap"] as const) {
-    byProduct[product] = realisticSalesByProduct[product] + observation.outstandingContractByProduct[product];
+    const speculative = realisticSalesByProduct[product] * conversion;
+    const confirmed = observation.outstandingContractByProduct[product];
+    byProduct[product] = speculative + confirmed;
+    speculativeTons += speculative;
+    confirmedTons += confirmed;
   }
 
   const diagnostics: StandardAiDiagnosticEntry[] = [
@@ -74,10 +97,26 @@ export function buildCurrentPeriodDeliveryDemand(
         currentPeriodDeliveryDemandHoso: byProduct.hoso,
         currentPeriodDeliveryDemandPd: byProduct.pd,
         currentPeriodDeliveryDemandVap: byProduct.vap,
+        expectedConversionRatio: conversion,
       },
       message:
-        "当期納品需要（currentPeriodDeliveryDemand）は現行仕様上の暫定推定値（現実的販売可能量＋未履行契約残高の全額）であり、" +
+        "当期納品需要（currentPeriodDeliveryDemand）は現行仕様上の暫定推定値（未履行契約残高の全額＋新規販売計画×期待成約率）であり、" +
         "当期即納分と次期納品分を区別するゲーム機能が実装された場合はこの推定方法を差し替える。",
+    },
+    {
+      code: confirmedTons >= speculativeTons ? "PRODUCTION_LIMITED_TO_CONFIRMED_DEMAND" : "PRODUCTION_INCLUDES_EXPECTED_CONVERSION",
+      domain: "production",
+      companyId,
+      severity: "info",
+      keyValues: {
+        confirmedBacklogTons: confirmedTons,
+        speculativeTons,
+        expectedConversionRatio: conversion,
+      },
+      message:
+        `生産必要量の需要側は、確定した受注残${Math.round(confirmedTons)}トンに、` +
+        `未成約の販売計画へ期待成約率${(conversion * 100).toFixed(0)}%を掛けた${Math.round(speculativeTons)}トンを加えて算出した` +
+        `（提出量をそのまま作らない）。`,
     },
   ];
 

@@ -160,7 +160,18 @@ export interface MarketSalesEffortAdjustment {
 export function applyMarketSalesEffortCapacity(
   plans: readonly CompanySalesPlanEntry[],
   params: SalesParameters
-): { readonly adjustedPlans: readonly CompanySalesPlanEntry[]; readonly adjustments: readonly MarketSalesEffortAdjustment[] } {
+): {
+  readonly adjustedPlans: readonly CompanySalesPlanEntry[];
+  readonly adjustments: readonly MarketSalesEffortAdjustment[];
+  /**
+   * 【Phase 6C・営業能力 SSoT】会社×市場ごとに実際に適用された営業工数能力
+   * （キーは `${companyId}::${market}`、値は工数トン）。
+   * sales/allocation.ts の個社成約上限が、ここと**同じ能力**を使えるようにするための公開値。
+   * 従来 allocation.ts は processingCapacity(headcount) を自分で呼び直しており、
+   * 会社全体営業能力モデルを通らない二重制約になっていた（Phase 6B の監査で発見）。
+   */
+  readonly capacityByCompanyMarket: ReadonlyMap<string, number>;
+} {
   const groupKey = (p: CompanySalesPlanEntry) => `${p.companyId}::${p.market}`;
   const groups = new Map<string, CompanySalesPlanEntry[]>();
   for (const p of plans) {
@@ -172,6 +183,7 @@ export function applyMarketSalesEffortCapacity(
 
   const adjustments: MarketSalesEffortAdjustment[] = [];
   const adjustedGroups = new Map<string, CompanySalesPlanEntry[]>();
+  const appliedCapacityByGroup = new Map<string, number>();
 
   // 【Phase 6B】会社全体モデルでは、市場ごとの能力を会社単位で1回だけ求めて配分する。
   // perMarket（既定）では undefined のままとなり、従来の経路をそのまま通る。
@@ -211,6 +223,7 @@ export function applyMarketSalesEffortCapacity(
     for (const e of entries) desiredByProduct[e.product] = unwrapUnit(e.desiredQuantity);
 
     const result = computeMarketSalesEffort(headcount, desiredByProduct, params, capacityByGroup.get(key));
+    appliedCapacityByGroup.set(key, result.capacityHosoEqTons);
     if (result.isConstrained) {
       adjustments.push({
         companyId: entries[0].companyId,
@@ -243,5 +256,5 @@ export function applyMarketSalesEffortCapacity(
   // adjustmentsは会社ID→市場IDの順で決定論的に並べ替える（Mapの反復順に依存しない）。
   const sortedAdjustments = [...adjustments].sort((a, b) => a.companyId.localeCompare(b.companyId) || a.market.localeCompare(b.market));
 
-  return { adjustedPlans, adjustments: sortedAdjustments };
+  return { adjustedPlans, adjustments: sortedAdjustments, capacityByCompanyMarket: appliedCapacityByGroup };
 }

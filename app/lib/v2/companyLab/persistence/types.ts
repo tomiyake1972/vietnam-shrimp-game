@@ -33,6 +33,7 @@ import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyQuarterR
 import type { WorkforceState } from "../workforce";
 import type { SalesForceHiringState } from "../salesForceHiring";
 import type { SalesBaseState } from "../salesBase";
+import type { CommercialHistoryState } from "../commercialHistoryState";
 import type { MarketEvolutionState } from "../marketEvolution";
 import type { ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 import type { PdMechanizationState } from "../pdMechanizationState";
@@ -216,6 +217,11 @@ export interface CompanyLabRuntimeSnapshot {
    * schemaVersion:1〜3のデータにはキーが無い → undefined（機能無効）として復元。
    */
   readonly salesBaseState?: SalesBaseState;
+  /**
+   * 【Phase 6C】会社ごとの「自分が過去に市場へ提出した販売計画」の履歴
+   * （提出→成約の転換率を観測するための持ち越し状態）。キー欠落＝履歴なし。
+   */
+  readonly commercialHistoryState?: CommercialHistoryState;
   /**
    * 【SAI-5E・schemaVersion 4で追加】市場進化carry state（供給圧力EWMA・
    * プレミアム倍率・割安シグナル）。SAI-5機能フラグ有効時のみ設定される

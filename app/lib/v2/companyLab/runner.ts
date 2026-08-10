@@ -150,6 +150,11 @@ import {
   deriveNextSalesForceHiringState,
 } from "./salesForceHiring";
 import {
+  buildInitialCommercialHistoryState,
+  commercialHistoryForCompany,
+  deriveNextCommercialHistoryState,
+} from "./commercialHistoryState";
+import {
   buildInitialPdMechanizationState,
   buildPdCoefficientOverridesByFactory,
   computeCurrentQuarterPdUtilizationByFactory,
@@ -476,6 +481,9 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // 【SAI-5D】前四半期末までの自社の営業基盤（quality/trustと同じ「当期処理の
     // 最後に更新される＝呼び出し時点では常に前期末値」の規約）。無効時はundefined。
     ...(state.salesBaseState ? { salesBaseByMarketProduct: salesBaseSliceForCompany(state.salesBaseState, fixture.companyId) } : {}),
+    // 【Phase 6C】自社が過去に提出した販売計画（提出→成約の転換率の観測に使う）。
+    // 旧スナップショットから復元したラボでは空配列＝学習しないだけで壊れない。
+    recentSalesSubmissions: commercialHistoryForCompany(state.commercialHistoryState, fixture.companyId),
     // 【監査指摘G】営業基盤が当期の成約へ実際にどれだけ効くか（ウェイト）。
     // 機能OFFなら0＝「基盤の高低は成約に一切影響しない」ことが判断側から分かる。
     salesBaseCompetitivenessWeight: salesParametersFor(state.config).competitivenessWeights.salesBase,
@@ -1637,6 +1645,13 @@ export function advanceCompanyLabQuarter(
     lastQuarterActualProduction,
     qualityState: qualityStateAfter,
     ...(salesBaseStateAfter ? { salesBaseState: salesBaseStateAfter } : {}),
+    // 【Phase 6C】当期に確定した販売計画を次期へ持ち越す（提出→成約の転換率の観測用）。
+    commercialHistoryState: deriveNextCommercialHistoryState(
+      state.commercialHistoryState ?? buildInitialCommercialHistoryState(fixtures.map((f) => f.companyId)),
+      decisions,
+      state.currentPeriod,
+      turn
+    ),
     ...(marketEvolutionStateAfter ? { marketEvolutionState: marketEvolutionStateAfter } : {}),
     financeState: financeStateAfter,
     financingState: financingStateAfter,

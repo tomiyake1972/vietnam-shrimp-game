@@ -352,3 +352,48 @@ test("SCM-15: 会社能力式は 0人で baseline、単調増加、上限へ漸�
   // 負の人数は0扱い（防御）。
   assert.equal(companySalesOrganizationCapacity(-10, COMPANY_WIDE), COMPANY_WIDE.companyBaselineCapacityTons);
 });
+
+// ---------------------------------------------------------------------
+// SCM-16〜SCM-18 【Phase 6C §15】営業能力 SSoT
+// 成約配分（sales/allocation.ts）が、販売計画の縮小に使ったのと**同じ能力**を
+// 使うこと。従来は allocation.ts が processingCapacity() を自分で呼び直しており、
+// 会社全体営業能力モデルを通らない二重制約になっていた。
+// ---------------------------------------------------------------------
+
+test("SCM-16: applyMarketSalesEffortCapacity は、実際に適用した会社×市場の能力を公開する", () => {
+  const params = paramsWith(CASE_C);
+  const plans = MARKETS.map((m) => plan("BAL", m, "hoso", 20_000, 24));
+  const { capacityByCompanyMarket } = applyMarketSalesEffortCapacity(plans, params);
+
+  const effortDemand = new Map<DemandMarketId, number>(MARKETS.map((m) => [m, params.salesEffortCoefficients.hoso * 20_000]));
+  const expected = computeMarketSalesCapacities(120, effortDemand, evenHeadcount(MARKETS, 120), params);
+  for (const m of MARKETS) {
+    assert.ok(
+      Math.abs((capacityByCompanyMarket.get(`BAL::${m}`) ?? 0) - (expected.get(m) ?? 0)) < 1e-9,
+      `${m}: 公開された能力がモデルの値と一致すること`
+    );
+  }
+});
+
+test("SCM-17: 既定（perMarket）では、公開される能力が従来の processingCapacity と同値", () => {
+  const plans = MARKETS.map((m) => plan("BAL", m, "hoso", 1_000, 24));
+  const { capacityByCompanyMarket } = applyMarketSalesEffortCapacity(plans, SALES_PARAMETERS_V1);
+  const legacy = unwrapUnit(processingCapacity(24, SALES_PARAMETERS_V1));
+  for (const m of MARKETS) {
+    assert.equal(capacityByCompanyMarket.get(`BAL::${m}`), legacy);
+  }
+});
+
+test("SCM-18: 会社全体モデルでは、成約配分側の個社上限も会社全体能力を反映する（二重制約の解消）", () => {
+  const params = paramsWith(CASE_C);
+  // 会社の営業組織が小さいのに、市場ごとの人数配置だけは大きく見える状況を作る。
+  const plans = MARKETS.map((m) => plan("BAL", m, "hoso", 50_000, 40));
+  const { capacityByCompanyMarket } = applyMarketSalesEffortCapacity(plans, params);
+  const total = [...capacityByCompanyMarket.values()].reduce((a, b) => a + b, 0);
+  const companyCeiling = companySalesOrganizationCapacity(200, CASE_C) * marketFragmentationFactor(5, CASE_C);
+  assert.ok(total <= companyCeiling + 1e-6, "成約配分へ渡る能力の合計も会社全体能力を超えない");
+
+  // 旧実装（市場ごとに processingCapacity(40) を独立適用）はこの上限を超えていた。
+  const legacyTotal = MARKETS.length * unwrapUnit(processingCapacity(40, params));
+  assert.ok(legacyTotal > companyCeiling, "旧実装は会社全体能力を超えていた（この差が二重制約の正体）");
+});

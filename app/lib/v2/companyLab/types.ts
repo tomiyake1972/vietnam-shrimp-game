@@ -50,6 +50,7 @@ import type { CompanyWorkforceState, WorkforceState } from "./workforce";
 // CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
 import type { CompanySalesForceHiringState, SalesForceHiringState } from "./salesForceHiring";
 import type { SalesBaseState } from "./salesBase";
+import type { CommercialHistoryState, CommercialSubmissionRecord } from "./commercialHistoryState";
 import type { PdMechanizationState } from "./pdMechanizationState";
 import type { ProductDevelopmentState } from "./productDevelopmentState";
 import type { MarketEvolutionState, Sai5MarketEvolutionRecord, SupplyPressureDefinition } from "./marketEvolution";
@@ -240,6 +241,12 @@ export interface CompanyOwnState {
    * 成約に使う」規約に従う）。
    */
   readonly salesBaseByMarketProduct?: Readonly<Partial<Record<DemandMarketId, Readonly<Partial<Record<Product, Score0to100>>>>>>;
+  /**
+   * 【Phase 6C】自社が過去に市場へ提出した販売計画の履歴（直近6四半期まで）。
+   * 自社の意思決定履歴であり、他社の計画も市場の真の需要も含まない。
+   * 旧スナップショットから復元したラボでは空配列になる（学習しないだけで壊れない）。
+   */
+  readonly recentSalesSubmissions?: readonly CommercialSubmissionRecord[];
   /**
    * 【監査指摘G】当期の成約配分で実際に使われる営業基盤の競争力ウェイト。
    * 機能OFF・旧state（＝営業基盤が成約へ一切影響しない）のとき 0。
@@ -528,6 +535,13 @@ export interface CompanyLabState {
   /** 【SAI-5D】会社×市場×商品の営業基盤ストック（config.sai5.salesBaseAccumulation
    *  有効時のみ更新・保持。無効時はundefinedのまま＝既存スナップショットと同一）。 */
   readonly salesBaseState?: SalesBaseState;
+  /**
+   * 【Phase 6C】会社ごとの「自分が過去に市場へ提出した販売計画」の履歴。
+   * Standard AI が「提出 → 成約」の転換率を観測し、成約しない量まで提出し続けない
+   * ようにするために持ち越す（commercialHistoryState.ts）。旧スナップショットには
+   * 存在しないためオプショナル（salesBaseStateと同じ後方互換方式）。
+   */
+  readonly commercialHistoryState?: CommercialHistoryState;
   /** 【SAI-5E】市場進化carry state（供給圧力EWMA・プレミアム倍率・割安シグナル。
    *  config.sai5.productLifecycle/supplyPremiumFeedback有効時のみ保持）。 */
   readonly marketEvolutionState?: MarketEvolutionState;

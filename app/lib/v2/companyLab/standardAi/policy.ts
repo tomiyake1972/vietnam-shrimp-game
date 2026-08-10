@@ -56,6 +56,11 @@ import { computeUnservedOpportunity, UnservedOpportunity } from "../vision/unser
 import { buildCommercialGrowthDiagnostics } from "./diagnosis/commercialGrowth";
 import { computeObservableCommercialOpportunity, ObservableCommercialOpportunity } from "./decision/sales";
 import { evaluateNewFactoryDecision, NewFactoryAssessment } from "./decision/newFactory";
+import { computeCommercialCommitment, CommercialCommitmentState } from "../vision/commercialCommitment";
+import { ConversionObservation, observeContractConversion } from "./commercialHistory";
+import { companySalesOrganizationCapacity, marketFragmentationFactor } from "../../sales/salesCapacityModel";
+import { processingCapacity } from "../../sales/salesForce";
+import { StandardAiObservation } from "./types";
 
 // 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
 // 診断情報にこれまで捨てていた圧力スコア(pressures)と、当四半期の意思決定
@@ -112,6 +117,12 @@ export interface StandardAiQuarterDiagnostics {
   readonly unservedOpportunity?: UnservedOpportunity;
   /** 新工場を検討した結果（提案しなかった場合も、どのゲートで止まったかを保持する）。 */
   readonly newFactoryAssessment?: NewFactoryAssessment;
+  /**
+   * 【Phase 6C】今期どこまで市場へ取りに行くか（Commercial Commitment）と、
+   * その根拠になった「提出 → 成約」転換率の観測。
+   */
+  readonly commercialCommitment?: CommercialCommitmentState;
+  readonly conversionObservation?: ConversionObservation;
 }
 
 /**
@@ -140,6 +151,112 @@ export interface StandardAiManagementProfileDiagnostics {
 export interface StandardAiDecisionWithDiagnostics {
   readonly decision: CompanyDecisionInput;
   readonly diagnostics: StandardAiQuarterDiagnostics;
+}
+
+
+/**
+ * 【Phase 6C】営業組織が今期に捌ける案件量の上限（HOSO換算トン）。
+ *
+ * 【重要】これは「必ず成約する量」ではなく「提出できる量の上限要因の一つ」である
+ * （#05 §9）。市場配分（誰がどれだけ取れるか）とは無関係。
+ *
+ * 【SSoT】能力そのものは sales/salesCapacityModel.ts の1箇所からしか取らない。
+ * perMarket（既定）では市場ごとの曲線の合計、会社全体モデルでは会社1回ぶんの能力に
+ * 市場分散係数を掛けた値になる。工数（effort）→ トン換算には、最も軽い HOSO の
+ * 係数を使う。商品構成はこの時点でまだ確定していないため、**上限として最も緩い**
+ * 換算を採る（この上限が実際の商品構成より厳しくなって成長を止めることを避ける）。
+ */
+function salesCapacityCeilingTons(observation: StandardAiObservation, salesParams: SalesParameters): number | null {
+  const model = salesParams.salesCapacityModel;
+  const totalHeadcount = observation.salesForceHeadcountTotal;
+  const marketCount = observation.markets.length;
+  if (!Number.isFinite(totalHeadcount) || marketCount <= 0) return null;
+
+  const lightestCoefficient = Math.min(
+    salesParams.salesEffortCoefficients.hoso,
+    salesParams.salesEffortCoefficients.pd,
+    salesParams.salesEffortCoefficients.vap
+  );
+  if (lightestCoefficient <= 0) return null;
+
+  let effortCapacity: number;
+  if (!model || model.kind === "perMarket") {
+    // 市場別モデルでは、能力曲線が凹関数であるため**均等配置のときに合計が最大**になる。
+    // ここは上限（最も緩い見積り）を求める場所なので、均等配置で評価する。
+    // processingCapacity は整数人数しか受け付けないため、均等配置を整数で近似する
+    // （端数は切り上げ側の市場へ寄せる。上限見積りとしての意味は変わらない）。
+    const base = Math.floor(totalHeadcount / marketCount);
+    const remainder = Math.max(0, Math.round(totalHeadcount) - base * marketCount);
+    effortCapacity =
+      (marketCount - remainder) * unwrapUnit(processingCapacity(base, salesParams)) +
+      remainder * unwrapUnit(processingCapacity(base + 1, salesParams));
+  } else {
+    effortCapacity = companySalesOrganizationCapacity(totalHeadcount, model) * marketFragmentationFactor(marketCount, model);
+  }
+  return effortCapacity / lightestCoefficient;
+}
+
+
+/** 【Phase 6C】Commercial Commitment の判断根拠を理由コードとして残す（#05 §14）。 */
+function buildCommitmentDiagnostics(
+  companyId: string,
+  commitment: CommercialCommitmentState,
+  conversion: ConversionObservation
+): StandardAiDiagnosticEntry[] {
+  const entries: StandardAiDiagnosticEntry[] = [];
+
+  const limiterCode: Partial<Record<CommercialCommitmentState["limiter"], StandardAiDiagnosticEntry["code"]>> = {
+    RECENT_CONVERSION: "SALES_SUBMISSION_LIMITED_BY_RECENT_CONVERSION",
+    SALES_CAPACITY: "SALES_SUBMISSION_LIMITED_BY_SALES_CAPACITY",
+    MARKET_OPPORTUNITY: "SALES_SUBMISSION_LIMITED_BY_MARKET_OPPORTUNITY",
+    STRETCH_LIMIT: "SALES_SUBMISSION_EXPANDED_FOR_GROWTH",
+    NONE: "SALES_SUBMISSION_EXPANDED_FOR_GROWTH",
+  };
+  const code = limiterCode[commitment.limiter];
+  if (code) {
+    entries.push({
+      code,
+      domain: "sales",
+      companyId,
+      severity: "info",
+      keyValues: {
+        submissionTargetTons: commitment.submissionTargetTons,
+        ambitionTons: commitment.caps.ambitionTons,
+        stretchOverAmbition: commitment.stretchOverAmbition,
+        expectedConversionRatio: commitment.expectedConversionRatio,
+        observedConversionRatio: conversion.conversionRatio ?? -1,
+        observedQuarters: conversion.observedQuarters,
+        salesCapacityCeilingTons: commitment.caps.salesCapacityTons ?? -1,
+        marketOpportunityTons: commitment.caps.opportunityTons ?? -1,
+      },
+      message:
+        `今期の提出目標は${Math.round(commitment.submissionTargetTons)}トン` +
+        `（志${Math.round(commitment.caps.ambitionTons)}トンの${(commitment.stretchOverAmbition * 100).toFixed(0)}%）。` +
+        (conversion.conversionRatio === null
+          ? "直近の成約実績が無いため、提出どおり成約する前提は置かず目標成約率で見積もった。"
+          : `直近${conversion.observedQuarters}四半期の成約率${(conversion.conversionRatio * 100).toFixed(0)}%を踏まえ、` +
+            `期待成約率${(commitment.expectedConversionRatio * 100).toFixed(0)}%で逆算した。`),
+    });
+  }
+
+  if (commitment.overSubmissionRisk) {
+    entries.push({
+      code: "OVER_SUBMISSION_RISK_HIGH",
+      domain: "sales",
+      companyId,
+      severity: "warning",
+      keyValues: {
+        observedConversionRatio: conversion.conversionRatio ?? -1,
+        submittedTons: conversion.submittedTons,
+        contractedTons: conversion.contractedTons,
+      },
+      message:
+        `直近${conversion.observedQuarters}四半期で${Math.round(conversion.submittedTons)}トン提出して` +
+        `${Math.round(conversion.contractedTons)}トンしか成約していない。提出量に対する成約率が低い状態が続いている。`,
+    });
+  }
+
+  return entries;
 }
 
 /**
@@ -191,13 +308,34 @@ export function generateStandardAiDecisionWithDiagnostics(
     ),
   });
 
+  // 【Phase 6C】Commercial Ambition（売りたい量）から Commercial Commitment
+  // （今期どこまで取りに行くか）を分離する。過去の「提出 → 成約」転換率を
+  // bounded rational に学習し、成約しない量まで市場へ提出しない。
+  const conversionObservation = observeContractConversion(
+    { records: ownState.recentSalesSubmissions ?? [] },
+    ownState.contracts,
+    turn
+  );
+  const salesCapacityTonsForCommitment = salesCapacityCeilingTons(observation, salesParams);
+  const commercialCommitment = computeCommercialCommitment({
+    ambition: commercialAmbition,
+    capacityAnchorTons,
+    attainableProfitableTons: observableOpportunity.attainableProfitableTons,
+    observedConversionRatio: conversionObservation.conversionRatio,
+    observedQuarters: conversionObservation.observedQuarters,
+    salesCapacityTons: salesCapacityTonsForCommitment,
+    backlogTons: sumProductAmount({ ...observation.outstandingContractByProduct } as never),
+    finishedGoodsTons: sumProductAmount({ ...observation.finishedGoodsByProduct }),
+  });
+
   const salesResult = buildStandardAiSalesPlans(
     fixture,
     observation,
     pressures,
     params,
     salesParams,
-    commercialAmbition.ambitionMultiplier
+    commercialAmbition.ambitionMultiplier,
+    commercialCommitment.submissionTargetTons
   );
 
   // 【SAI-6.4】生産計画の営業側inputを、工場能力起点の理論希望量（desiredByProduct）から
@@ -214,7 +352,14 @@ export function generateStandardAiDecisionWithDiagnostics(
   //
   // 【戦略先行生産（実装指示C-3）】今回は常に0（strategicProductionAdjustmentByProduct省略時
   // のデフォルト）。Test14 Turn1を含む今回のスコープでは戦略在庫理由が観測されていない。
-  const deliveryDemandResult = buildCurrentPeriodDeliveryDemand(fixture.companyId, observation, salesResult.realisticSalesByProduct);
+  // 【Phase 6C・#05 §10】生産必要量の需要側は、提出量をそのまま使わない。
+  // 確定した受注残は100%、未成約の販売計画は期待成約率を掛けて織り込む。
+  const deliveryDemandResult = buildCurrentPeriodDeliveryDemand(
+    fixture.companyId,
+    observation,
+    salesResult.realisticSalesByProduct,
+    commercialCommitment.productionExpectedConversionRatio
+  );
   const eligibleCurrentPeriodDemand = computeEligibleCurrentPeriodDemand(deliveryDemandResult.deliveryDemand);
   const normalInventoryTargetByProduct = computeNormalInventoryTargetByProduct(observation, params);
   const basicProductionRequirementByProduct = computeBasicCurrentPeriodProductionRequirement(
@@ -431,6 +576,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...salesForceHiringResult.diagnostics,
     ...commercialGrowthDiagnostics,
     ...newFactoryResult.diagnostics,
+    ...buildCommitmentDiagnostics(fixture.companyId, commercialCommitment, conversionObservation),
   ];
 
   return {
@@ -451,6 +597,8 @@ export function generateStandardAiDecisionWithDiagnostics(
       observableOpportunity,
       unservedOpportunity,
       newFactoryAssessment: newFactoryResult.assessment,
+      commercialCommitment,
+      conversionObservation,
     },
   };
 }
@@ -517,13 +665,29 @@ export function createStandardAiProvider(
   const diagnostics: StandardAiQuarterDiagnostics[] = [];
   const provider: CompanyDecisionProvider = (fixture, ownState, publicInfo, period, turn) => {
     if (!resolveParams) {
-      const result = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, STANDARD_AI_PARAMETERS_V1, salesParams);
+      const result = generateStandardAiDecisionWithDiagnostics(
+        fixture,
+        ownState,
+        publicInfo,
+        period,
+        turn,
+        STANDARD_AI_PARAMETERS_V1,
+        salesParams
+      );
       diagnostics.push(result.diagnostics);
       return result.decision;
     }
 
     const resolution = resolveParams(fixture.companyId);
-    const result = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, resolution.params, salesParams);
+    const result = generateStandardAiDecisionWithDiagnostics(
+      fixture,
+      ownState,
+      publicInfo,
+      period,
+      turn,
+      resolution.params,
+      salesParams
+    );
 
     // 【実装指示§4】バイアスが1件でも適用されている場合のみ、基準パラメータでの
     // 判断も計算し診断へ残す（バイアスなしの会社・四半期では省略し、Standard AI

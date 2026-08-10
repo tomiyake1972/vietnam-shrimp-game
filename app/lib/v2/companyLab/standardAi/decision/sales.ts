@@ -331,7 +331,19 @@ export function buildStandardAiSalesPlans(
    * **これは「売りたい量」の倍率であり、生産量・契約量を直接増やすものではない**
    * （営業工数・生産能力・納品規律の制約は下流でそのまま効く）。
    */
-  commercialAmbitionMultiplier?: number
+  commercialAmbitionMultiplier?: number,
+  /**
+   * 【Phase 6C】Commercial Commitment（今期どこまで市場へ取りに行くか）。
+   * vision/commercialCommitment.ts が決めた提出目標量（HOSO換算トン）。
+   *
+   * **これは「売りたい量」ではなく「今期の提出量の上限」である**。
+   * Commercial Ambition をそのまま市場へ提出すると、成約率を無視した過剰提出
+   * （Phase 6B で実測: 提出24,420t に対し成約14,425t、在庫3倍、利益−61%）に
+   * なるため、志と提出を分離する。
+   *
+   * 未指定（undefined）なら上限を掛けない＝従来どおりの挙動。
+   */
+  submissionTargetTons?: number | null
 ): SalesPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const capacityTotals = observation.totalCapacityByProduct;
@@ -475,6 +487,39 @@ export function buildStandardAiSalesPlans(
         message: `${product.toUpperCase()}の完成品在庫が目標水準を超えたため、値引きと販売数量の上乗せで在庫を圧縮する。`,
       });
     }
+  }
+
+  // 【Phase 6C】Commercial Commitment による提出量の上限。
+  // 商品構成は変えず（どの商品を削るかをここで発明しない）、全商品を同一比率で縮小する。
+  // 完成品在庫の売り切り上乗せ（excessBoost）も含めた「実際に市場へ出す量」に対して掛ける
+  // （在庫があるからといって提出を減らすのではなく、提出の総量だけを規律する。#05 §12）。
+  const submittedBeforeCommitment =
+    plannedSalesQuantityByProduct.hoso + plannedSalesQuantityByProduct.pd + plannedSalesQuantityByProduct.vap;
+  if (
+    submissionTargetTons !== undefined &&
+    submissionTargetTons !== null &&
+    submissionTargetTons >= 0 &&
+    submittedBeforeCommitment > submissionTargetTons + EPSILON
+  ) {
+    const commitmentScale = submissionTargetTons / submittedBeforeCommitment;
+    for (const product of ["hoso", "pd", "vap"] as const) {
+      plannedSalesQuantityByProduct[product] = plannedSalesQuantityByProduct[product] * commitmentScale;
+    }
+    diagnostics.push({
+      code: "COMMERCIAL_COMMITMENT_SET",
+      domain: "sales",
+      companyId: fixture.companyId,
+      severity: "info",
+      keyValues: {
+        submittedBeforeCommitment,
+        submissionTargetTons,
+        commitmentScale,
+      },
+      message:
+        `今期市場へ取りに行く量（Commercial Commitment）を${Math.round(submissionTargetTons)}トンとし、` +
+        `供給側アンカーから出た提出案${Math.round(submittedBeforeCommitment)}トンを比率${commitmentScale.toFixed(3)}で縮小した` +
+        `（志＝売りたい量とは別に、今期の提出量を規律する）。`,
+    });
   }
 
   const markets = pressures.marketPriceRanking as readonly DemandMarketId[];

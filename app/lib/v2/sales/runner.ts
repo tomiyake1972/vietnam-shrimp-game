@@ -58,7 +58,11 @@ export function advanceSalesQuarter(
   // 営業工数換算能力の制約を一括で適用する（唯一の適用箇所。allocation.ts側の
   // 既存の行単位capacity上限は、適用後の入力に対して数学的に非拘束となるため、
   // 二重適用にはならない。詳細はsales/marketEffort.tsのコメント参照）。
-  const { adjustedPlans, adjustments: salesEffortAdjustments } = applyMarketSalesEffortCapacity(input.plans, params);
+  const {
+    adjustedPlans,
+    adjustments: salesEffortAdjustments,
+    capacityByCompanyMarket,
+  } = applyMarketSalesEffortCapacity(input.plans, params);
 
   const combos: Array<{ market: DemandMarketId; product: Product }> = [];
   for (const market of DEMAND_MARKET_IDS) {
@@ -77,7 +81,8 @@ export function advanceSalesQuarter(
         adjustedPlans,
         marketReferencePrices[market][product],
         targetDemandByMarketProduct[market][product],
-        params
+        params,
+        capacityByCompanyMarket
       )
     );
 

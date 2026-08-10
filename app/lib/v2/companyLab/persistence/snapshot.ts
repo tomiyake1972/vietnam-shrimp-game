@@ -47,6 +47,9 @@ export function createCompanyLabRuntimeSnapshot(state: CompanyLabState): Company
     // のみ存在するoptional。undefinedのときはキー自体を含めない＝既存スナップ
     // ショットと同一形状）。
     ...(state.salesBaseState ? { salesBaseState: state.salesBaseState } : {}),
+    // 【Phase 6C】商業実績履歴（提出→成約の転換率観測用）。salesBaseStateと同じ
+    // 「値があるときだけキーを含める」方式で、既存スナップショットと同一形状を保つ。
+    ...(state.commercialHistoryState ? { commercialHistoryState: state.commercialHistoryState } : {}),
     ...(state.marketEvolutionState ? { marketEvolutionState: state.marketEvolutionState } : {}),
     // 【営業人員の追加採用・forward-port】会社別・営業人員総数。
     salesForceHiringState: state.salesForceHiringState,
@@ -113,6 +116,8 @@ export function restoreCompanyLabStateFromRuntimeSnapshot(
     // キーが存在しない → undefined（機能無効）として復元する。履歴からの再構築は
     // しない（機能フラグ無効のラボでは状態が存在しないことが正しい状態のため）。
     ...(snapshot.salesBaseState ? { salesBaseState: snapshot.salesBaseState } : {}),
+    // 【Phase 6C 後方互換】キー欠落＝履歴なし（学習しないだけで壊れない）。
+    ...(snapshot.commercialHistoryState ? { commercialHistoryState: snapshot.commercialHistoryState } : {}),
     // 【SAI-5E 後方互換】salesBaseStateと同じ方式（キー欠落=機能無効）。
     ...(snapshot.marketEvolutionState ? { marketEvolutionState: snapshot.marketEvolutionState } : {}),
     // 【営業人員の追加採用・forward-port 後方互換】この機能導入前に保存された

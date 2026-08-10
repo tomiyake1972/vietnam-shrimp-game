@@ -69,6 +69,7 @@ import type { WorkforceState } from "../workforce";
 import type { SalesForceHiringState } from "../salesForceHiring";
 import type { ConsumerMarketCarryState, ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 import type { SalesBaseState } from "../salesBase";
+import type { CommercialHistoryState } from "../commercialHistoryState";
 import type { MarketEvolutionState, SupplyPressureDefinition } from "../marketEvolution";
 import type { PdMechanizationState } from "../pdMechanizationState";
 import type { ProductDevelopmentState } from "../productDevelopmentState";
@@ -731,6 +732,9 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
   // として復元する。
   const pdMechanizationState = validatePdMechanizationState(obj.pdMechanizationState, `${path}.pdMechanizationState`);
   const productDevelopmentState = validateProductDevelopmentState(obj.productDevelopmentState, `${path}.productDevelopmentState`);
+  // 【Phase 6C】optionalな商業実績履歴（提出→成約の転換率観測用）。
+  // キー欠落（それ以前の既存データ）はundefined（履歴なし＝学習しない）として復元する。
+  const commercialHistoryState = validateCommercialHistoryState(obj.commercialHistoryState, `${path}.commercialHistoryState`);
   const isComplete = requireBoolean(obj.isComplete, `${path}.isComplete`);
 
   return {
@@ -751,7 +755,48 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
     salesForceHiringState,
     ...(pdMechanizationState ? { pdMechanizationState } : {}),
     ...(productDevelopmentState ? { productDevelopmentState } : {}),
+    ...(commercialHistoryState ? { commercialHistoryState } : {}),
     isComplete,
+  };
+}
+
+/**
+ * 【Phase 6C】商業実績履歴（自社が過去に提出した販売計画）の検証。
+ * キー欠落・nullはundefined（履歴なし）を返す（salesBaseStateと同じ後方互換方式であり、
+ * マイグレーション処理は不要）。
+ */
+function validateCommercialHistoryState(raw: unknown, path: string): CommercialHistoryState | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = requireObject(raw, path);
+  const companiesRaw = requireArray(obj.companies, `${path}.companies`);
+  return {
+    companies: companiesRaw.map((c, i) => {
+      const companyPath = `${path}.companies[${i}]`;
+      const companyObj = requireObject(c, companyPath);
+      const submissionsRaw = requireArray(companyObj.submissions, `${companyPath}.submissions`);
+      return {
+        companyId: requireNonEmptyString(companyObj.companyId, `${companyPath}.companyId`),
+        submissions: submissionsRaw.map((r, j) => {
+          const recordPath = `${companyPath}.submissions[${j}]`;
+          const recordObj = requireObject(r, recordPath);
+          const cellsRaw = requireArray(recordObj.submittedByMarketProduct, `${recordPath}.submittedByMarketProduct`);
+          return {
+            turn: requireFiniteNumber(recordObj.turn, `${recordPath}.turn`),
+            period: requirePeriod(recordObj.period, `${recordPath}.period`),
+            submittedTotalTons: requireFiniteNumber(recordObj.submittedTotalTons, `${recordPath}.submittedTotalTons`),
+            submittedByMarketProduct: cellsRaw.map((cell, k) => {
+              const cellPath = `${recordPath}.submittedByMarketProduct[${k}]`;
+              const cellObj = requireObject(cell, cellPath);
+              return {
+                market: requireEnum(cellObj.market, DEMAND_MARKET_IDS, `${cellPath}.market`),
+                product: requireEnum(cellObj.product, PRODUCTS_FOR_SALES_BASE, `${cellPath}.product`),
+                tons: requireFiniteNumber(cellObj.tons, `${cellPath}.tons`),
+              };
+            }),
+          };
+        }),
+      };
+    }),
   };
 }
 

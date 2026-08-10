@@ -227,7 +227,20 @@ export function allocateMarketProduct(
   entries: readonly CompanySalesPlanEntry[],
   basePrice: UsdPerHosoEqKg,
   targetDemand: HosoEqTons,
-  params: SalesParameters
+  params: SalesParameters,
+  /**
+   * 【Phase 6C・営業能力 SSoT】会社×市場ごとに実際に適用された営業工数能力
+   * （キーは `${companyId}::${market}`、値は工数トン）。
+   * sales/marketEffort.ts の applyMarketSalesEffortCapacity が返す値をそのまま渡す。
+   *
+   * 【なぜ必要か】従来この関数は processingCapacity(headcount) を自分で呼び直しており、
+   * 会社全体営業能力モデル（sales/salesCapacityModel.ts）を通らなかった。その結果、
+   * 販売計画は会社全体モデルで縮小されるのに、成約配分では**旧・市場別曲線が二重に効く**
+   * という SSoT の穴になっていた（Phase 6B の市場配分監査で発見）。
+   *
+   * 未指定なら従来どおり processingCapacity(headcount) を使う（既定モデルでは同値）。
+   */
+  salesCapacityByCompanyMarket?: ReadonlyMap<string, number>
 ): MarketProductAllocationResult {
   const relevant = entries.filter((e) => e.market === market && e.product === product);
   const sorted = [...relevant].sort((a, b) => a.companyId.localeCompare(b.companyId));
@@ -250,7 +263,13 @@ export function allocateMarketProduct(
     const askPrice = usdPerHosoEqKg(rawAskPrice);
 
     const coverage = salesCoverageScore(entry.salesForceHeadcount, params);
-    const capacity = processingCapacity(entry.salesForceHeadcount, params);
+    // 【Phase 6C】営業能力の唯一の情報源（SSoT）から取る。工数トン → 商品トンへは
+    // 当該商品の営業工数係数で割り戻す（工数の単位を混ぜない）。
+    const appliedEffortCapacity = salesCapacityByCompanyMarket?.get(`${entry.companyId}::${entry.market}`);
+    const capacity =
+      appliedEffortCapacity !== undefined
+        ? hosoEqTons(appliedEffortCapacity / params.salesEffortCoefficients[entry.product])
+        : processingCapacity(entry.salesForceHeadcount, params);
     const breakdown = computeCompetitivenessBreakdown(entry, askPrice, basePrice, coverage, params);
     // 【SAI-5 監査指摘A・修正】以前はここで内訳を手書きで5項目だけ合計しており、
     // 公開ヘルパーcomputeCompetitivenessWeight（6項目）と実エンジンの計算が
