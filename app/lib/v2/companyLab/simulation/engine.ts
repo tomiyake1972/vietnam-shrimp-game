@@ -30,6 +30,7 @@ import {
 } from "../runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../standardAi/policy";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState } from "../types";
+import { createCompanyLabRuntimeSnapshot } from "../persistence/snapshot";
 import { computeEffectiveFactories } from "../../capex/factoryConstruction";
 import { calculateFactoryEffectiveCapacity } from "../../production/capacity";
 import { unwrapUnit } from "../../core/units";
@@ -122,7 +123,19 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     companyControlModes: input.companyControlModes,
     runName: input.runName,
   };
-  return { run, state, fixtures, config, aiTurnTraces: [], observedDemand: [], salesHeadcountByTurn: [], capacityByTurn: [], packCompanyTurns: [], packWorldTurns: [] };
+  return {
+    run,
+    state,
+    fixtures,
+    config,
+    aiTurnTraces: [],
+    observedDemand: [],
+    salesHeadcountByTurn: [],
+    capacityByTurn: [],
+    packCompanyTurns: [],
+    packWorldTurns: [],
+    latestQuarterPreProcessingSnapshot: null,
+  };
 }
 
 /**
@@ -288,6 +301,10 @@ export function advanceSimulationTurn(
         capacityByTurn: [...session.capacityByTurn, ...captureCapacities(turn, nextState, session.fixtures)],
         packCompanyTurns: [...session.packCompanyTurns, ...packCompanyTurns],
         packWorldTurns: packWorldTurn ? [...session.packWorldTurns, packWorldTurn] : session.packWorldTurns,
+        // 【Phase 9・PLAYER Databook】このターンの「処理直前」の状態（＝session.stateが
+        // まだ書き換わっていない、advanceCompanyLabQuarter呼び出し前の値）を、直近1ターン
+        // ぶんだけ保持する（履歴として積み増さない）。
+        latestQuarterPreProcessingSnapshot: createCompanyLabRuntimeSnapshot(session.state),
         run: {
           ...session.run,
           completedTurns,

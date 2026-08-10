@@ -29,6 +29,7 @@ import { PackWorldTurn } from "../aiPack/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabState } from "../../types";
 import { SimulationAiTurnTrace } from "../analytics/aiTrace";
 import { ObservedDemandSnapshot } from "../analytics/dataset";
+import { CompanyLabRuntimeSnapshot } from "../../persistence/types";
 
 /**
  * 保存スキーマ版。
@@ -104,6 +105,13 @@ export interface SimulationResumePayload {
   readonly observedDemand: readonly ObservedDemandSnapshot[];
   readonly salesHeadcountByTurn: readonly { readonly turn: number; readonly companyId: string; readonly headcount: number }[];
   readonly capacityByTurn: readonly CapacitySnapshot[];
+  /**
+   * 【Phase 9・PLAYER Databook】SimulationSession.latestQuarterPreProcessingSnapshot
+   * をそのまま保存する（PLAYER Company Databookの期首欄用）。v3で新設したフィールドの
+   * ため、v3より前の保存物を読んだ場合はこのフィールド自体が存在しない
+   * （そのRunのDatabookは期首欄なしで組み立てるか、後方互換の扱いをする）。
+   */
+  readonly latestQuarterPreProcessingSnapshot: CompanyLabRuntimeSnapshot | null;
 }
 
 /**

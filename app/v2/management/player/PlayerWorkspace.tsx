@@ -36,6 +36,7 @@ import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
 import { ExportPackButton } from "../components/ExportPackButton";
+import { CompanyDatabookButton } from "./CompanyDatabookButton";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
 
 type WorkspaceTab = "overview" | "market" | "inventory" | "decision";
@@ -321,10 +322,19 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
           </div>
         ) : null}
 
-        {/* 【指示§18/§19/§20】Databook / Analysis Pack export。Run全体のPackであることを明記する。 */}
-        <div className="mx-auto mt-4 max-w-5xl">
+        {/* 【指示B】この会社1社だけのDatabook（意思決定用・通常プレイと同じ内容）。 */}
+        <div className="mx-auto mt-4 max-w-5xl rounded-lg border border-emerald-800/60 bg-emerald-950/20 p-3">
+          <h2 className="mb-1 text-sm font-semibold text-emerald-300">会社Databook（{companyId}だけの意思決定用データ）</h2>
+          <p className="mb-2 text-[11px] text-slate-400">
+            PL・BS・CF・契約・在庫・工場・借入等、通常プレイと同じ内容をこの会社ぶんだけ出力します。他社の非公開情報は含みません。
+          </p>
+          <CompanyDatabookButton session={session} companyId={companyId} />
+        </div>
+
+        {/* 【指示§18/§19/§20】AI Analysis Pack export。Run全体のPackであることを明記し、上の会社Databookとは別物と分かるようにする。 */}
+        <div className="mx-auto mt-3 max-w-5xl">
           <p className="mb-1 text-[11px] text-slate-500">
-            ⓘ 以下はこのRun全体（5社ぶん）のAI Analysis Packです。この会社（{companyId}）だけの出力ではありません。
+            ⓘ 以下はこのRun全体（5社ぶん）の、研究用AI Analysis Packです（上の会社Databookとは別物）。この会社（{companyId}）だけの出力ではありません。
           </p>
           <ExportPackButton
             simulationRunId={session.run.simulationRunId}

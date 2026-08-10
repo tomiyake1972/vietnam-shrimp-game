@@ -11,6 +11,7 @@ import type { PackCommercialGrowth, PackSalesOrganization } from "./aiPack/types
 import type { SimulationAiTurnTrace } from "./analytics/aiTrace";
 import type { ObservedDemandSnapshot } from "./analytics/dataset";
 import type { PackCapitalProject, PackCompanyStateSnapshot, PackStrategy, PackWorldTurn } from "./aiPack/types";
+import type { CompanyLabRuntimeSnapshot } from "../persistence/types";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -128,6 +129,16 @@ export interface SimulationSession {
   readonly packCompanyTurns: readonly PackCompanyTurnCapture[];
   /** 【AI Analysis Pack】TRUE WORLD と OBSERVABLE を分けた世界のターン記録。 */
   readonly packWorldTurns: readonly PackWorldTurn[];
+  /**
+   * 【Phase 9・PLAYER Databook】直近に確定したターンの「処理直前」のランタイム状態。
+   * 通常ゲームの CompanyLabQuarterHistoryEntry.preProcessingStateSnapshot と同じ形。
+   * Databook出力の期首欄（契約・原料ロット・完成品在庫の期首残高）はここから作る
+   * （期末側は現在の session.state から createCompanyLabRuntimeSnapshot で作れるが、
+   * 期首側は「1つ前のターンの終わり」の状態であり、session.state だけからは
+   * 復元できないため、直近1ターンぶんだけ別途保持する。履歴を積み増すものではない
+   * ＝quadratic増大にはならない）。まだ1ターンも処理していないRunはnull。
+   */
+  readonly latestQuarterPreProcessingSnapshot: CompanyLabRuntimeSnapshot | null;
 }
 
 /** 1ターン・1社ぶんの期首／期末スナップショットと期末の投資案件。 */

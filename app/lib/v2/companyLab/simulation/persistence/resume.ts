@@ -27,6 +27,7 @@ export function buildResumePayload(
     observedDemand: session.observedDemand,
     salesHeadcountByTurn: session.salesHeadcountByTurn,
     capacityByTurn: session.capacityByTurn,
+    latestQuarterPreProcessingSnapshot: session.latestQuarterPreProcessingSnapshot,
   };
 }
 
@@ -60,5 +61,6 @@ export function restoreSessionFromResumePayload(
     capacityByTurn: resumePayload.capacityByTurn,
     packCompanyTurns: packCapture?.companyTurns ?? [],
     packWorldTurns: packCapture?.worldTurns ?? [],
+    latestQuarterPreProcessingSnapshot: resumePayload.latestQuarterPreProcessingSnapshot,
   };
 }
