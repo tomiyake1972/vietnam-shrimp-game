@@ -27,7 +27,6 @@ import { extractCompanyCapexResult, extractCompanyFinancialResult } from "../../
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecision } from "../../../lib/v2/companyLab/standardAi/policy";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab/types";
-import { unwrapUnit } from "../../../lib/v2/core/units";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
 import { createEmptyStrategyDocument, CompanyStrategyDocument } from "../../../lib/v2/companyLab/strategyProfile/types";
 import { getLiveSession, LiveSessionEntry, upsertLiveSession } from "../lib/liveSessionRegistry";
@@ -37,6 +36,7 @@ import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
 import { ExportPackButton } from "../components/ExportPackButton";
 import { CompanyDatabookButton } from "./CompanyDatabookButton";
+import { buildBacklogDisplay } from "./backlogView";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
 
 type WorkspaceTab = "overview" | "market" | "inventory" | "decision";
@@ -177,7 +177,12 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const dataset = buildDatasetFromSession(session);
   const turn = session.state.scenarioState.currentTurn;
   const lastRecord = session.state.history[session.state.history.length - 1] ?? null;
+  const previousRecord = session.state.history[session.state.history.length - 2] ?? null;
   const summary = lastRecord?.companySummaries.find((c) => c.companyId === companyId) ?? null;
+  const previousSummary = previousRecord?.companySummaries.find((c) => c.companyId === companyId) ?? null;
+  // 【指示A/B/C/D】受注残（Backlog）はSales（Overview）・Inventoryの両方で使う。
+  // 同じsummary/previousSummaryから同じ関数で作ることで、表示のズレを構造的に防ぐ。
+  const backlog = buildBacklogDisplay(summary, previousSummary);
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
   const controlMode = entry.companyControlModes[companyId] ?? "STANDARD_AI";
@@ -206,30 +211,53 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
             >
               {confirmed ? `Turn ${turn} 意思決定済み` : `Turn ${turn} 意思決定はまだ確定していません`}
             </span>
+            {/* 【指示K/L】主要導線として見つけやすくする（左向きicon・強めのborder/font-weight）。
+                ただしDecisionより主役にはしない（accentは中立色のまま）。 */}
             <Link
               href={consoleHref}
               data-testid="workspace-back-to-console"
-              className="rounded border border-slate-600 px-3 py-1.5 text-sm hover:bg-slate-800"
+              className="flex items-center gap-1.5 rounded border-2 border-slate-500 bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-100 hover:border-slate-400 hover:bg-slate-700"
             >
-              経営管制室へ戻る
+              <span aria-hidden="true">←</span> 経営管制室へ戻る
             </Link>
           </div>
         </div>
 
-        {/* 【指示§14】タブで情報閲覧⇄意思決定入力を切り替える。draftはタブ間で消えない。 */}
-        <nav className="mt-2 flex flex-wrap gap-1" aria-label="Workspace タブ">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              data-testid={`workspace-tab-${t.id}`}
-              aria-pressed={tab === t.id}
-              className={`rounded px-2.5 py-1.5 text-xs font-semibold ${tab === t.id ? "bg-sky-700 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
-            >
-              {t.label}
-            </button>
-          ))}
+        {/* 【指示§14/H/I/J】タブで情報閲覧⇄意思決定入力を切り替える。draftはタブ間で消えない。
+            Decision（意思決定）はテストプレイで最も重要な操作導線のため、他の閲覧タブより
+            視覚的に目立たせる（常時アクセント色＋未確定バッジ、activeはさらに強調）。 */}
+        <nav className="mt-2 flex flex-wrap gap-1.5" aria-label="Workspace タブ">
+          {TABS.map((t) => {
+            const active = tab === t.id;
+            const isDecision = t.id === "decision";
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                data-testid={`workspace-tab-${t.id}`}
+                aria-pressed={active}
+                className={
+                  isDecision
+                    ? `flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-bold ring-2 ${
+                        active ? "bg-emerald-600 text-white ring-emerald-300" : "bg-emerald-900/50 text-emerald-200 ring-emerald-600 hover:bg-emerald-900/80"
+                      }`
+                    : `rounded px-2.5 py-1.5 text-xs font-semibold ${active ? "bg-sky-700 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`
+                }
+              >
+                {isDecision ? <span aria-hidden="true">→</span> : null}
+                {t.label}
+                {isDecision && !confirmed ? (
+                  <span
+                    className="rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-amber-950"
+                    data-testid="workspace-decision-unconfirmed-badge"
+                  >
+                    未確定
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </nav>
 
         {/* 【指示§21】Analysisはrun/companyの両方をquery付きで。新しいタブで開いてもdraftは消えない。 */}
@@ -253,6 +281,49 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
       <div className="p-3">
         {tab === "overview" ? (
           <div className="mx-auto max-w-3xl">
+            {/* 【指示A/B/E/F/G】成約→納品→受注残の関係を一目で分かるように、
+                Overviewの先頭にSalesカードを置く。他社の受注残は表示しない
+                （このsummaryは対象会社1社ぶんのCompanyQuarterSummaryのみ）。 */}
+            <section className="mb-3 rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="workspace-sales-backlog">
+              <h2 className="mb-2 text-sm font-semibold">Sales（成約・納品・受注残）</h2>
+              {backlog === null ? (
+                <p className="text-xs text-slate-400">まだ確定した実績がありません。</p>
+              ) : (
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+                  <div>
+                    <dt className="text-[11px] text-slate-400">新規成約（Contracts）</dt>
+                    <dd className="tabular-nums font-semibold" data-testid="sales-new-contracted">
+                      {tons(backlog.newContractedTons)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] text-slate-400">納品数量（Delivered）</dt>
+                    <dd className="tabular-nums font-semibold" data-testid="sales-fulfilled">
+                      {tons(backlog.fulfilledTons)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] text-slate-400">受注残（Backlog）</dt>
+                    <dd className="tabular-nums font-semibold" data-testid="sales-backlog">
+                      {tons(backlog.backlogTons)}
+                      {backlog.previousBacklogTons !== null ? (
+                        <span className="ml-1.5 text-[10px] font-normal text-slate-500">（前期 {tons(backlog.previousBacklogTons)}）</span>
+                      ) : null}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] text-slate-400">納期超過（Overdue）</dt>
+                    <dd
+                      className={`tabular-nums font-semibold ${backlog.overdueIsSignificant ? "text-amber-300" : ""}`}
+                      data-testid="sales-overdue"
+                    >
+                      {tons(backlog.overdueTons)}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+            </section>
+
             {/* 【指示§10】新しい表示ロジックを作らず、既存のCompanyInspectorをそのまま埋め込む
                 （財務・販売・生産・在庫の一部・市場ボトルネック・投資状況を一括カバーする）。 */}
             <CompanyInspector
@@ -275,23 +346,49 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
         {tab === "inventory" ? (
           <div className="mx-auto max-w-2xl rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="workspace-inventory">
             <h2 className="mb-2 text-sm font-semibold">在庫（直近確定Turn）</h2>
-            {summary === null ? (
+            {backlog === null ? (
               <p className="text-xs text-slate-400">まだ確定した実績がありません。</p>
             ) : (
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                <dt className="text-slate-400">完成品在庫</dt>
-                <dd className="text-right tabular-nums">{tons(unwrapUnit(summary.finishedGoodsInventory))}</dd>
-                <dt className="text-slate-400">原料在庫</dt>
-                <dd className="text-right tabular-nums">{tons(unwrapUnit(summary.rawMaterialInventory))}</dd>
-                <dt className="text-slate-400">未履行残高（backlog）</dt>
-                <dd className="text-right tabular-nums">{tons(unwrapUnit(summary.outstandingQuantity))}</dd>
-                <dt className="text-slate-400">納期超過</dt>
-                <dd className="text-right tabular-nums">{tons(unwrapUnit(summary.overdueQuantity))}</dd>
-                <dt className="text-slate-400">設備稼働率</dt>
-                <dd className="text-right tabular-nums">{percent(summary.equipmentUtilizationRate)}</dd>
-                <dt className="text-slate-400">労働稼働率</dt>
-                <dd className="text-right tabular-nums">{percent(summary.laborUtilizationRate)}</dd>
-              </dl>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {/* 【指示D】「在庫」と「受注残」を近接表示し、在庫過多／不足を一目で
+                    判断できるようにする（在庫はあるが受注残が無い／受注残に対し
+                    在庫が足りない／両方大きい、等）。 */}
+                <div className="rounded border border-slate-700 bg-slate-900/40 p-2.5" data-testid="inventory-stock-group">
+                  <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">在庫</h3>
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                    <dt className="text-slate-400">完成品在庫</dt>
+                    <dd className="text-right tabular-nums" data-testid="inventory-finished-goods">
+                      {tons(backlog.finishedGoodsInventoryTons)}
+                    </dd>
+                    <dt className="text-slate-400">原料在庫</dt>
+                    <dd className="text-right tabular-nums" data-testid="inventory-raw-material">
+                      {tons(backlog.rawMaterialInventoryTons)}
+                    </dd>
+                  </dl>
+                </div>
+                <div className="rounded border border-slate-700 bg-slate-900/40 p-2.5" data-testid="inventory-backlog-group">
+                  <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">受注残</h3>
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                    <dt className="text-slate-400">未履行残高（backlog）</dt>
+                    <dd className="text-right tabular-nums" data-testid="inventory-backlog">
+                      {tons(backlog.backlogTons)}
+                    </dd>
+                    <dt className="text-slate-400">納期超過</dt>
+                    <dd className={`text-right tabular-nums ${backlog.overdueIsSignificant ? "font-semibold text-amber-300" : ""}`} data-testid="inventory-overdue">
+                      {tons(backlog.overdueTons)}
+                    </dd>
+                  </dl>
+                </div>
+                <div className="rounded border border-slate-700 bg-slate-900/40 p-2.5 sm:col-span-2">
+                  <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">稼働率</h3>
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                    <dt className="text-slate-400">設備稼働率</dt>
+                    <dd className="text-right tabular-nums">{percent(summary!.equipmentUtilizationRate)}</dd>
+                    <dt className="text-slate-400">労働稼働率</dt>
+                    <dd className="text-right tabular-nums">{percent(summary!.laborUtilizationRate)}</dd>
+                  </dl>
+                </div>
+              </div>
             )}
           </div>
         ) : null}
