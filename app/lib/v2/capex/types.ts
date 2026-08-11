@@ -194,9 +194,14 @@ export interface CapitalProject {
   /** 【Test15新設】newFactoryConstruction案件のみ設定される、新設Factory合成用の承認時スナップショット。 */
   readonly newFactoryEffect?: NewFactoryEffectPlaceholder;
   /**
-   * 【Test15新設】この案件が対象とする特定のFactoryId。pdMechanization案件は必須
-   * （会社単位ではなく工場単位の投資のため）。他の案件種別は未設定（会社全体・
-   * または既存の「主工場」規則に従う既存挙動を変えない）。
+   * 【Test15新設・複数工場CAPEX Targeting修正で全案件種別へ拡張】この案件が
+   * 対象とする特定のFactoryId。pdMechanization案件は必須（会社単位ではなく
+   * 工場単位の投資のため）。common processing / freezing・packaging /
+   * HOSO・PD・VAP line expansion 等の他のFactory-specific CAPEXでも、
+   * 会社が複数Factoryを持つ場合はこの値で対象Factoryを明示できる（省略時は
+   * 従来どおり「その会社の最初のFactory（主工場）」へ適用される。単一Factory
+   * 企業・従来案件の挙動は変えない）。newFactoryConstructionは対象Factory
+   * 自体を新設するため使わない。
    */
   readonly targetFactoryId?: string;
   /** 直近の意思決定・処理結果の診断メモ（承認拒否理由・支払見送り理由等、直近1件分）。 */
@@ -233,7 +238,11 @@ export interface CapexProjectProposalInput {
   readonly requestedBudgetUsd?: number;
   /** 省略時は提案順に自動付与される連番を使う。 */
   readonly priority?: number;
-  /** 【Test15新設】この提案が対象とする特定のFactoryId。pdMechanization提案は必須。 */
+  /**
+   * 【Test15新設・複数工場CAPEX Targeting修正で全案件種別へ拡張】この提案が
+   * 対象とする特定のFactoryId。pdMechanization提案は必須。他のFactory-specific
+   * CAPEXでは省略可（省略時は主工場へ適用。CapitalProject.targetFactoryId参照）。
+   */
   readonly targetFactoryId?: string;
 }
 

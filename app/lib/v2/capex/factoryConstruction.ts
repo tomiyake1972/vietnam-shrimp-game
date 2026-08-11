@@ -220,8 +220,15 @@ export function applyNewFactoryConstructionToFactories(factories: readonly Facto
  * 構造的に防ぐ（実装指示「ONE canonical place」）。
  */
 export function computeEffectiveFactories(baseFactories: readonly Factory[], capexState: CapexState, period: PeriodV2): readonly Factory[] {
-  const withCapexCapacity = applyCapexCapacityToFactories(baseFactories, capexState, period);
-  return applyNewFactoryConstructionToFactories(withCapexCapacity, capexState, period);
+  // 【複数工場CAPEX Targeting修正】先に稼働開始済み新設Factoryを合成してから
+  // 能力増強効果を適用する（順序を入れ替えた）。理由: targetFactoryIdが
+  // 新設Factory（例: BAL-NEWF-...）を指す案件が完成した場合、applyCapexCapacityToFactories
+  // がその増強を適用できるためには、対象Factoryが渡すfactories配列に既に
+  // 存在していなければならない。applyNewFactoryConstructionToFactoriesは
+  // 新設Factoryを純粋に追加するだけで、baseFactories側の能力増強有無には
+  // 依存しないため、順序を入れ替えても既存工場側の結果は変わらない。
+  const withNewFactories = applyNewFactoryConstructionToFactories(baseFactories, capexState, period);
+  return applyCapexCapacityToFactories(withNewFactories, capexState, period);
 }
 
 // ---------------------------------------------------------------------

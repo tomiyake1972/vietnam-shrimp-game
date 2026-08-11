@@ -37,6 +37,28 @@ const LINE_EXPANSION_BY_PRODUCT: Readonly<Record<Product, CapitalProjectType>> =
 };
 
 /**
+ * 【複数工場CAPEX Targeting修正・§18/§19】Factory-specific CAPEXの投資先Factoryを選ぶ。
+ * 「何に投資するか」（今どの区分がボトルネックか）の判断は上のゲート群が既に行って
+ * おり、ここでは一切変更しない。ここは「投資すると決めた後、どのFactoryへ置くか」
+ * だけを、既存のobservation.factories（能力認識監査Phase 3で追加済みの、
+ * production/capacity.tsの実効能力計算をそのまま使った、Factoryごとの実効能力の
+ * 一覧。新しい独立スコアではない）から選ぶ。
+ *
+ * 選択規則: その区分の実効能力が最も小さいFactory（＝最もbindingしている
+ * Factory）を優先する。同点の場合はfactoryId昇順（決定論的にするため）。
+ * 会社が1工場しかない場合はその工場がそのまま選ばれる（従来挙動と一致）。
+ * observation.factoriesが空（テスト用の合成observation等）ならundefined
+ * （呼び出し側はtargetFactoryIdを省略し、承認側の「主工場」規則にフォールバックする）。
+ */
+function selectTargetFactoryId(observation: StandardAiObservation, dimension: "hoso" | "pd" | "vap" | "commonProcessing"): string | undefined {
+  const factories = observation.factories;
+  if (!factories || factories.length === 0) return undefined;
+  const capacityOf = (f: (typeof factories)[number]): number =>
+    dimension === "commonProcessing" ? f.effectiveCommonProcessingCapacity : f.effectiveCapacityByProduct[dimension];
+  return [...factories].sort((a, b) => capacityOf(a) - capacityOf(b) || a.factoryId.localeCompare(b.factoryId))[0]?.factoryId;
+}
+
+/**
  * このモジュールが提案しうる設備投資の種類（＝Standard AI が提案できる全て）。
  *
  * 【この一覧が意味すること】ゲームエンジン側には他にも案件種別が存在する
@@ -364,7 +386,7 @@ export function buildStandardAiCapexDecision(
 
     const lineSpace = checkSpaceFeasible(LINE_EXPANSION_BY_PRODUCT[product]);
     if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned && lineSpace.feasible) {
-      proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product] });
+      proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product], targetFactoryId: selectTargetFactoryId(observation, product) });
       reserveSpace(lineSpace.requiredSpaceUnits);
       diagnostics.push({
         code: "CAPEX_PROPOSED",
@@ -434,7 +456,7 @@ export function buildStandardAiCapexDecision(
       const utilizationOk = hasPriorQuarter && utilization.utilization >= params.capexGrowthEntryUtilizationThreshold;
       const growthEntrySpace = checkSpaceFeasible(LINE_EXPANSION_BY_PRODUCT[product]);
       if (trend !== undefined && trend >= trendThreshold && utilizationOk && noExcess && safe && growthEntrySpace.feasible) {
-        proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product] });
+        proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product], targetFactoryId: selectTargetFactoryId(observation, product) });
         reserveSpace(growthEntrySpace.requiredSpaceUnits);
         diagnostics.push({
           code: product === "vap" ? "VAP_GROWTH_ENTRY" : "LIFECYCLE_GROWTH_PURSUED",
@@ -579,7 +601,7 @@ export function buildStandardAiCapexDecision(
     const safe = commonGate.safe;
     const commonSpace = checkSpaceFeasible("commonProcessingExpansion");
     if (isBottleneck && commonSustained && safe && !alreadyPlannedCommon && commonSpace.feasible) {
-      proposals.push({ projectType: "commonProcessingExpansion" });
+      proposals.push({ projectType: "commonProcessingExpansion", targetFactoryId: selectTargetFactoryId(observation, "commonProcessing") });
       reserveSpace(commonSpace.requiredSpaceUnits);
       diagnostics.push({
         code: "CAPEX_PROPOSED",

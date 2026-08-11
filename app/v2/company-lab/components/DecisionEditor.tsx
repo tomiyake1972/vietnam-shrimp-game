@@ -334,6 +334,13 @@ export default function DecisionEditor(props: DecisionEditorProps) {
       (p) => p.projectType === "pdMechanization" && p.targetFactoryId === factoryId && p.status !== "cancelled"
     );
 
+  // 【複数工場CAPEX Targeting修正】common processing/freezing・packaging/HOSO・PD・VAP line等
+  // （newFactoryConstruction・pdMechanization以外）の投資カードが対象とするFactory。
+  // pdMechanizationと同じくeffectiveFactories（稼働開始済み新設Factoryを含む）を基準にする。
+  // 単一Factory企業ではselectorを出さず、この値がそのままその唯一のFactoryになる（§8）。
+  const [factorySpecificTargetFactoryId, setFactorySpecificTargetFactoryId] = useState<string>(ownState.effectiveFactories[0]?.factoryId ?? "");
+  const hasMultipleFactories = ownState.effectiveFactories.length > 1;
+
   // 【develop/v2統合・Required fix 5】投資金額・支払スケジュール・想定稼働開始時期・
   // 減価償却費・保守費（すべてcapex/parameters.tsのpdMechanizationテンプレート・
   // componentUsefulLifeQuartersを唯一の情報源とし、この画面で別の数値を作らない）。
@@ -505,12 +512,33 @@ export default function DecisionEditor(props: DecisionEditorProps) {
               （現在・進行中・今期提案 合計 {prospectiveFactoryCount} / 上限 {MAX_FACTORIES_PER_COMPANY}工場）
             </div>
           )}
+          {/* 【複数工場CAPEX Targeting修正・§7/§8】2工場以上ある場合だけ対象工場selectorを表示する。
+              1工場のみの会社では表示せず、その唯一のFactoryへ自動的に適用される（従来操作を変えない）。
+              新工場建設（newFactoryConstruction）はこのselectorの対象外（対象Factoryを新設する案件のため）。 */}
+          {hasMultipleFactories && (
+            <label className="flex flex-wrap items-center gap-2 text-xs text-gray-300" data-testid="capex-target-factory-selector">
+              対象工場（新工場建設を除く）
+              <select
+                value={factorySpecificTargetFactoryId}
+                disabled={disabled}
+                onChange={(e) => setFactorySpecificTargetFactoryId(e.target.value)}
+                className={INPUT_CONTROL_CLASS}
+              >
+                {ownState.effectiveFactories.map((f) => (
+                  <option key={f.factoryId} value={f.factoryId}>
+                    {f.factoryId}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <InvestmentCardList
             cards={planning.investmentCards.filter((c) => c.projectType !== "pdMechanization")}
             currentCashUsd={currentCashUsd}
             draftPaymentThisQuarterUsd={capexDraftThisQuarterPaymentUsd}
             isDuplicate={(projectType) => isDuplicateProjectTypeInDraft(draft, projectType)}
-            onAdd={(projectType) => onChange(addCapexProposalToDraft(draft, projectType))}
+            onAdd={(projectType, targetFactoryId) => onChange(addCapexProposalToDraft(draft, projectType, targetFactoryId))}
+            targetFactoryId={hasMultipleFactories ? factorySpecificTargetFactoryId : undefined}
             extraBlockedReasonByType={investmentCardExtraBlockedReason}
             disabled={disabled}
           />

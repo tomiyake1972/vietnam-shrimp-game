@@ -17,7 +17,15 @@ interface InvestmentCardListProps {
   readonly currentCashUsd: number;
   readonly draftPaymentThisQuarterUsd: number;
   readonly isDuplicate: (projectType: CapitalProjectType) => boolean;
-  readonly onAdd: (projectType: CapitalProjectType) => void;
+  /**
+   * 【複数工場CAPEX Targeting修正】targetFactoryIdは、この会社が複数Factoryを
+   * 持つ場合に呼び出し側（DecisionEditor.tsx）が選択中の対象Factoryを渡す
+   * （newFactoryConstructionは対象Factoryを新設する案件のため渡さない）。
+   * 単一Factory企業ではundefinedのままでよい（主工場へ自動的に適用される）。
+   */
+  readonly onAdd: (projectType: CapitalProjectType, targetFactoryId?: string) => void;
+  /** 【複数工場CAPEX Targeting修正】onAdd呼び出し時にnewFactoryConstruction以外の案件へ渡す対象Factory。 */
+  readonly targetFactoryId?: string;
   readonly disabled: boolean;
   /**
    * 【Test15新設】案件種別ごとの追加ブロック理由（例: 新工場建設の4工場上限）。
@@ -72,7 +80,7 @@ export default function InvestmentCardList(props: InvestmentCardListProps) {
               <button
                 type="button"
                 disabled={disabled || extraBlockedReason !== undefined}
-                onClick={() => props.onAdd(card.projectType)}
+                onClick={() => props.onAdd(card.projectType, card.projectType === "newFactoryConstruction" ? undefined : props.targetFactoryId)}
                 className="shrink-0 text-[11px] px-2 py-1 rounded bg-sky-900/70 border border-sky-500/70 text-sky-50 hover:bg-sky-800/70 disabled:opacity-50 disabled:bg-gray-800 disabled:border-gray-600 disabled:text-gray-400"
               >
                 ドラフトへ追加

@@ -451,6 +451,12 @@ export interface PackCapitalProject {
   readonly elapsedConstructionQuartersWithPayment: number | null;
   readonly completedYear: number | null;
   readonly completedQuarter: number | null;
+  /**
+   * 【複数工場CAPEX Targeting修正・§30】この案件が対象とする特定のFactoryId。
+   * 未設定（従来案件・会社に1工場しかない等）の場合はnull。「どの工場へ何を
+   * 投資したか」を後から機械的に再構成できるようにする。
+   */
+  readonly targetFactoryId: string | null;
 }
 
 // ---------------------------------------------------------------------

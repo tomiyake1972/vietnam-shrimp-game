@@ -130,6 +130,7 @@ export function captureCapitalProjects(state: CompanyLabState, companyId: string
     elapsedConstructionQuartersWithPayment: num(p.elapsedConstructionQuartersWithPayment),
     completedYear: p.completedPeriod ? toYearQuarter(p.completedPeriod).year : null,
     completedQuarter: p.completedPeriod ? toYearQuarter(p.completedPeriod).quarter : null,
+    targetFactoryId: p.targetFactoryId ?? null,
   }));
 }
 

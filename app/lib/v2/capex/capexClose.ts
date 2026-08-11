@@ -67,10 +67,29 @@ export interface CloseQuarterWithCapexInput {
   readonly decision: CapexDecisionInput;
   readonly approvalGate: ProposalApprovalGate;
   /**
-   * 【Phase 8D-3】当四半期の新規承認に使える工場スペース枠。
+   * 【Phase 8D-3】当四半期の新規承認に使える工場スペース枠（全工場合計）。
    * 省略時はスペース判定を行わない（Phase 8D以前の呼び出し元・既存テストとの後方互換）。
+   * 【複数工場CAPEX Targeting修正】factorySpaceBudgetByFactoryが渡された場合は
+   * そちらが優先される（Factory単位の判定）。この会社合算値は、
+   * factorySpaceBudgetByFactoryを渡さない・単一工場企業の呼び出し元向けの
+   * 後方互換パスとしてのみ使う。
    */
   readonly factorySpaceBudget?: FactorySpaceApprovalBudget;
+  /**
+   * 【複数工場CAPEX Targeting修正・§10】Factoryごとの新規承認スペース枠
+   * （factoryId → 枠）。渡された場合、各提案は
+   * targetFactoryId（未設定ならprimaryFactoryId）に対応する枠だけを消費する
+   * （会社全体の合算では判定しない）。省略時はfactorySpaceBudget（会社合算）に
+   * フォールバックする。
+   */
+  readonly factorySpaceBudgetByFactory?: ReadonlyMap<string, FactorySpaceApprovalBudget>;
+  /**
+   * 【複数工場CAPEX Targeting修正】targetFactoryId未指定の提案が既定で対象とする
+   * Factory（＝主工場、factories先頭）。factorySpaceBudgetByFactoryを渡す場合は
+   * 必ず一緒に渡すこと（省略時はtargetFactoryId未指定の提案のスペース判定を
+   * 行わない＝無条件で通ってしまう）。
+   */
+  readonly primaryFactoryId?: string;
   /** スペース係数（省略時は FACTORY_SPACE_PARAMETERS_V1）。 */
   readonly factorySpaceParams?: FactorySpaceParameters;
   /**
@@ -144,6 +163,12 @@ export function closeQuarterWithCapex(
   // 再利用できず、翌四半期から解放される」。過剰承認を避ける安全側の挙動であり、
   // 意図した仕様である。
   const spaceParams = input.factorySpaceParams ?? FACTORY_SPACE_PARAMETERS_V1;
+  // 【複数工場CAPEX Targeting修正】factorySpaceBudgetByFactoryが渡されていれば
+  // Factoryごとに残枠を追跡する（承認するたびにその対象Factoryの枠だけを減らす）。
+  // 渡されていなければ、従来どおり会社合算の単一枠にフォールバックする。
+  const remainingSpaceUnitsByFactory = new Map<string, number>(
+    input.factorySpaceBudgetByFactory ? [...input.factorySpaceBudgetByFactory].map(([factoryId, budget]) => [factoryId, budget.remainingSpaceUnits]) : []
+  );
   let remainingSpaceUnits = input.factorySpaceBudget?.remainingSpaceUnits ?? 0;
   const existingFactoryCount = input.existingFactoryCount ?? 0;
   const rejectedProposals: CapexRejectedProposal[] = [];
@@ -152,15 +177,24 @@ export function closeQuarterWithCapex(
     const activeCount = totalActiveProjects(projects);
     const projectId = `${companyId}-CAPEX-${nextProjectSequence}`;
     const requiredSpaceUnits = computeCandidateProjectSpaceUnits(proposal.projectType, params, spaceParams);
+    const resolvedFactoryId = proposal.targetFactoryId ?? input.primaryFactoryId;
+    const perFactoryBudget = resolvedFactoryId !== undefined ? input.factorySpaceBudgetByFactory?.get(resolvedFactoryId) : undefined;
     const spaceGate: ProposalSpaceGate | undefined =
-      input.factorySpaceBudget !== undefined
+      perFactoryBudget !== undefined
         ? {
             requiredSpaceUnits,
-            remainingSpaceUnits,
-            totalSpaceUnits: input.factorySpaceBudget.totalSpaceUnits,
+            remainingSpaceUnits: remainingSpaceUnitsByFactory.get(resolvedFactoryId!) ?? 0,
+            totalSpaceUnits: perFactoryBudget.totalSpaceUnits,
             epsilonSpaceUnits: spaceParams.epsilonSpaceUnits,
           }
-        : undefined;
+        : input.factorySpaceBudget !== undefined
+          ? {
+              requiredSpaceUnits,
+              remainingSpaceUnits,
+              totalSpaceUnits: input.factorySpaceBudget.totalSpaceUnits,
+              epsilonSpaceUnits: spaceParams.epsilonSpaceUnits,
+            }
+          : undefined;
     // 【Test15新設】newFactoryConstruction提案のみ、1社あたり工場数上限を判定する。
     // projectsは同一四半期内の直前までの承認をすでに反映済みのため（`projects = [...projects, outcome.approved]`で
     // 逐次更新）、同じ四半期に複数のnewFactoryConstructionを提案しても正しく積み上がる。
@@ -168,13 +202,17 @@ export function closeQuarterWithCapex(
       proposal.projectType === "newFactoryConstruction"
         ? { wouldExceedMax: wouldExceedMaxFactories(existingFactoryCount, projects), maxFactoriesPerCompany: MAX_FACTORIES_PER_COMPANY }
         : undefined;
-    // 【Test15新設】pdMechanization提案のみ、同一Factoryへの重複進行を判定する。
+    // 【Test15新設、複数工場CAPEX Targeting修正で全案件種別のtargetFactoryExists判定へ拡張】
+    // hasActiveProjectForSameFactory（同一Factoryへの重複進行）はpdMechanization固有の
+    // ルールのままだが、targetFactoryExists（存在しないFactoryへの投資を拒否する）は
+    // targetFactoryIdを持つ提案であれば種別を問わず判定する。
     // projectsは同一四半期内の直前までの承認をすでに反映済みのため、同じ四半期に
     // 同じFactoryへ2件提案しても2件目は正しく拒否される。
     const mechanizationGate: ProposalFactoryMechanizationGate | undefined =
-      proposal.projectType === "pdMechanization" && proposal.targetFactoryId !== undefined
+      proposal.targetFactoryId !== undefined
         ? {
-            hasActiveProjectForSameFactory: hasActivePdMechanizationProjectForFactory(projects, proposal.targetFactoryId),
+            hasActiveProjectForSameFactory:
+              proposal.projectType === "pdMechanization" ? hasActivePdMechanizationProjectForFactory(projects, proposal.targetFactoryId) : false,
             // 【develop/v2統合・Phase2監査2-3】validFactoryIdsが渡されている場合だけ判定する
             // （省略時はundefinedのまま＝評価しない。既存呼び出し元との後方互換）。
             ...(input.validFactoryIds !== undefined
@@ -198,7 +236,11 @@ export function closeQuarterWithCapex(
     if ("approved" in outcome) {
       projects = [...projects, outcome.approved];
       nextProjectSequence += 1;
-      remainingSpaceUnits -= requiredSpaceUnits;
+      if (perFactoryBudget !== undefined && resolvedFactoryId !== undefined) {
+        remainingSpaceUnitsByFactory.set(resolvedFactoryId, (remainingSpaceUnitsByFactory.get(resolvedFactoryId) ?? 0) - requiredSpaceUnits);
+      } else {
+        remainingSpaceUnits -= requiredSpaceUnits;
+      }
     } else {
       rejectedProposals.push(outcome.rejected);
     }

@@ -26,6 +26,7 @@ import {
   SpaceConsumingPoolKey,
 } from "../production/factorySpace";
 import { isCapexProjectOperationalAt } from "./capacityEffect";
+import { applyNewFactoryConstructionToFactories } from "./factoryConstruction";
 import { CapexParameters, CAPEX_PARAMETERS_V1 } from "./parameters";
 import { CapexState, CapitalProject, CapitalProjectType } from "./types";
 
@@ -90,6 +91,31 @@ export function buildPendingSpaceReservations(
 }
 
 /**
+ * 【複数工場CAPEX Targeting修正】buildPendingSpaceReservationsと同じ判定条件で、
+ * project.targetFactoryIdごとに予約を分ける版。targetFactoryId未設定の案件は
+ * primaryFactoryIdへ寄せる（capacityEffect.tsのcomputeCapacityEffectByFactoryForCompanyと
+ * 同じ後方互換ルール。能力の加算先とスペースの予約先を必ず一致させる）。
+ */
+export function buildPendingSpaceReservationsByFactory(
+  projects: readonly CapitalProject[],
+  period: PeriodV2,
+  primaryFactoryId: string,
+  spaceParams: FactorySpaceParameters = FACTORY_SPACE_PARAMETERS_V1
+): ReadonlyMap<string, readonly PendingSpaceReservation[]> {
+  const byFactory = new Map<string, PendingSpaceReservation[]>();
+  for (const p of projects) {
+    if (p.status === "cancelled" || isCapexProjectOperationalAt(p, period)) continue;
+    const requiredSpaceUnits = computeApprovedProjectSpaceUnits(p, spaceParams);
+    if (requiredSpaceUnits <= 0) continue;
+    const factoryId = p.targetFactoryId ?? primaryFactoryId;
+    const list = byFactory.get(factoryId) ?? [];
+    list.push({ projectId: p.projectId, projectType: p.projectType, requiredSpaceUnits });
+    byFactory.set(factoryId, list);
+  }
+  return byFactory;
+}
+
+/**
  * 案件が「能力増加を伴わない固定スペース案件」（品質管理設備・排水環境設備等）か。
  * 承認時スナップショット（futureCapacityEffect）に増強対象・増加量がどちらも
  * 揃っていなければ、能力プールを一切増やさない案件とみなす
@@ -124,6 +150,27 @@ export function computeOperationalFixedSpaceUnits(
     .reduce((sum, p) => sum + Math.max(0, computeApprovedProjectSpaceUnits(p, spaceParams)), 0);
 }
 
+/**
+ * 【複数工場CAPEX Targeting修正】computeOperationalFixedSpaceUnitsと同じ判定条件で、
+ * project.targetFactoryIdごとに合算を分ける版（未設定はprimaryFactoryIdへ寄せる）。
+ */
+export function computeOperationalFixedSpaceUnitsByFactory(
+  projects: readonly CapitalProject[],
+  period: PeriodV2,
+  primaryFactoryId: string,
+  spaceParams: FactorySpaceParameters = FACTORY_SPACE_PARAMETERS_V1
+): ReadonlyMap<string, number> {
+  const byFactory = new Map<string, number>();
+  for (const p of projects) {
+    if (p.status === "cancelled" || !isCapexProjectOperationalAt(p, period) || !isFixedSpaceOnlyProject(p)) continue;
+    const amount = Math.max(0, computeApprovedProjectSpaceUnits(p, spaceParams));
+    if (amount <= 0) continue;
+    const factoryId = p.targetFactoryId ?? primaryFactoryId;
+    byFactory.set(factoryId, (byFactory.get(factoryId) ?? 0) + amount);
+  }
+  return byFactory;
+}
+
 export interface BuildCompanyFactorySpaceStateInput {
   readonly companyId: CompanyId;
   /** 基礎Factory（CompanyFixture.factories。capex加算前）。 */
@@ -138,33 +185,46 @@ export interface BuildCompanyFactorySpaceStateInput {
 /**
  * 1社ぶんの工場スペース状態を組み立てる。
  *
- * 【複数工場の扱い】CapitalProject は factoryId を持たない（capex/capacityEffect.ts の
- * applyCapexCapacityToFactories が「その会社の最初の工場（主工場）へまとめて加算する」
- * という規則を持つ）。したがってスペースの予約も同じ主工場へ寄せる。
- * 能力の加算先とスペースの予約先を必ず一致させるため、主工場の決め方
- * （factories の先頭）を capacityEffect.ts と同じ規則にしている。
+ * 【複数工場CAPEX Targeting修正】CapitalProject.targetFactoryIdが設定されて
+ * いれば、スペースの予約・稼働中固定スペースもその対象Factoryへ計上する
+ * （能力の加算先と必ず一致させる。capacityEffect.tsのcomputeCapacityEffectByFactoryForCompanyと
+ * 同じ後方互換ルール：targetFactoryId未設定の案件は主工場（factories先頭）へ寄せる）。
+ *
+ * 【新設Factoryのスペース追跡】以前はbaseFactories（fixture.factories、静的）に
+ * 存在しないFactoryは工場スペース状態の対象外だった（稼働開始済みnewFactoryConstruction
+ * による新設Factory自身のスペースが一切追跡されない、既知の制約として文書化
+ * されていた）。この関数では稼働開始済み新設FactoryをapplyNewFactoryConstructionToFactoriesで
+ * 合成してbaseへ含めることで、新設Factory自身のスペースも他のFactoryと同じ規則で
+ * 追跡できるようにする（新設Factoryの「基礎値」はテンプレートの初期スペース。
+ * その後のFactory-specific CAPEXによる増設は、他のFactoryと同じ予約・固定スペースの
+ * 仕組みで積み上がる）。
  */
 export function buildCompanyFactorySpaceState(input: BuildCompanyFactorySpaceStateInput): CompanyFactorySpaceState {
   const spaceParams = input.spaceParams ?? FACTORY_SPACE_PARAMETERS_V1;
-  const base = input.baseFactories.filter((f) => f.companyId === input.companyId);
+  const baseWithNewFactories = applyNewFactoryConstructionToFactories(input.baseFactories, input.capexState, input.period);
+  const base = baseWithNewFactories.filter((f) => f.companyId === input.companyId);
   const currentById = new Map(input.currentFactories.filter((f) => f.companyId === input.companyId).map((f) => [f.factoryId, f]));
 
   const companyCapex = input.capexState.companies.find((c) => c.companyId === input.companyId);
-  const reservations = companyCapex ? buildPendingSpaceReservations(companyCapex.portfolio.projects, input.period, spaceParams) : [];
-  // 【Phase 8D監査M-1】稼働開始済みの固定スペース案件（品質管理設備・排水環境設備等）は
-  // 予約(reservations)からは外れるが能力プールにも現れないため、別途合算して主工場の
-  // usedByOperationalSpaceUnitsへ計上する（予約と同じ主工場へ寄せる規則で一致させる）。
-  const operationalFixedSpaceUnits = companyCapex
-    ? computeOperationalFixedSpaceUnits(companyCapex.portfolio.projects, input.period, spaceParams)
-    : 0;
   const primaryFactoryId = base.length > 0 ? base[0].factoryId : undefined;
+  const reservationsByFactory =
+    companyCapex && primaryFactoryId !== undefined
+      ? buildPendingSpaceReservationsByFactory(companyCapex.portfolio.projects, input.period, primaryFactoryId, spaceParams)
+      : new Map<string, readonly PendingSpaceReservation[]>();
+  // 【Phase 8D監査M-1】稼働開始済みの固定スペース案件（品質管理設備・排水環境設備等）は
+  // 予約(reservations)からは外れるが能力プールにも現れないため、別途合算してその対象
+  // Factoryのusedbyoperationalspaceunitsへ計上する（予約と同じFactoryへ寄せる規則で一致させる）。
+  const operationalFixedSpaceUnitsByFactory =
+    companyCapex && primaryFactoryId !== undefined
+      ? computeOperationalFixedSpaceUnitsByFactory(companyCapex.portfolio.projects, input.period, primaryFactoryId, spaceParams)
+      : new Map<string, number>();
 
   const factoryStates = base.map((baseFactory) =>
     buildFactorySpaceState({
       baseFactory,
       currentFactory: currentById.get(baseFactory.factoryId) ?? baseFactory,
-      pendingReservations: baseFactory.factoryId === primaryFactoryId ? reservations : [],
-      operationalFixedSpaceUnits: baseFactory.factoryId === primaryFactoryId ? operationalFixedSpaceUnits : 0,
+      pendingReservations: reservationsByFactory.get(baseFactory.factoryId) ?? [],
+      operationalFixedSpaceUnits: operationalFixedSpaceUnitsByFactory.get(baseFactory.factoryId) ?? 0,
       params: spaceParams,
     })
   );
@@ -182,10 +242,27 @@ export interface FactorySpaceApprovalBudget {
   readonly remainingSpaceUnits: number;
 }
 
-/** 会社のスペース状態から、当四半期の新規承認に使える枠を作る。 */
+/** 会社のスペース状態から、当四半期の新規承認に使える枠を作る（全工場合計）。 */
 export function buildFactorySpaceApprovalBudget(state: CompanyFactorySpaceState): FactorySpaceApprovalBudget {
   return {
     totalSpaceUnits: state.totalSpaceUnits,
     remainingSpaceUnits: Math.max(0, state.totalSpaceUnits - state.usedAfterPendingSpaceUnits),
   };
+}
+
+/**
+ * 【複数工場CAPEX Targeting修正・§10】Factory-specific CAPEXの新規承認は、
+ * 会社全体のスペース合算ではなく、その提案が対象とするFactory自身の残りスペースで
+ * 判定しなければならない（F1が不足していてもF2に余裕があれば、F2向け投資は
+ * 承認できるべき）。会社ごとの1個の枠ではなく、Factoryごとの枠のMapを返す。
+ */
+export function buildFactorySpaceApprovalBudgetByFactory(state: CompanyFactorySpaceState): ReadonlyMap<string, FactorySpaceApprovalBudget> {
+  const byFactory = new Map<string, FactorySpaceApprovalBudget>();
+  for (const f of state.factories) {
+    byFactory.set(f.factoryId, {
+      totalSpaceUnits: f.totalSpaceUnits,
+      remainingSpaceUnits: Math.max(0, f.totalSpaceUnits - f.usedAfterPendingSpaceUnits),
+    });
+  }
+  return byFactory;
 }

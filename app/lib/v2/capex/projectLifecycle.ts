@@ -160,12 +160,16 @@ export function evaluateProposal(
   if (proposal.projectType === "pdMechanization" && mechanizationGate?.hasActiveProjectForSameFactory) {
     reasons.push(`工場"${proposal.targetFactoryId}"には既に進行中のPD省人化投資があるため、新規承認を見送り。`);
   }
-  // 【develop/v2統合・Phase2監査2-3】targetFactoryIdが実在しないFactoryを指す提案は
-  // 拒否する（存在しないFactoryへの投資が承認され、支払だけ発生して効果が
-  // 永久に発現しない、という静かな不整合を防ぐ）。mechanizationGate.targetFactoryExistsが
-  // 省略された呼び出し元（後方互換）では、この判定自体を行わない。
-  if (proposal.projectType === "pdMechanization" && mechanizationGate?.targetFactoryExists === false) {
-    reasons.push(`対象Factory"${proposal.targetFactoryId}"はこの会社に存在しないため、PD省人化投資の新規承認を見送り。`);
+  // 【develop/v2統合・Phase2監査2-3、複数工場CAPEX Targeting修正で全案件種別へ拡張】
+  // targetFactoryIdが実在しないFactoryを指す提案は拒否する（存在しないFactoryへの
+  // 投資が承認され、支払だけ発生して効果が永久に発現しない、という静かな不整合を
+  // 防ぐ）。当初はpdMechanizationのみの判定だったが、targetFactoryIdは他の
+  // Factory-specific CAPEX（common processing/freezing/HOSO・PD・VAP line等）でも
+  // 使えるようになったため、projectTypeを問わずtargetFactoryIdが指定された提案
+  // すべてに適用する。mechanizationGate.targetFactoryExistsが省略された呼び出し元
+  // （後方互換）では、この判定自体を行わない。
+  if (proposal.targetFactoryId !== undefined && mechanizationGate?.targetFactoryExists === false) {
+    reasons.push(`対象Factory"${proposal.targetFactoryId}"はこの会社に存在しないため、新規承認を見送り。`);
   }
 
   if (reasons.length > 0) {

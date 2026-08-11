@@ -225,6 +225,91 @@ test("FAC-4: 複数プールへの効果が同時に正しく反映される（�
 });
 
 // ---------------------------------------------------------------------
+// 4. 複数工場CAPEX Targeting（targetFactoryId）
+// ---------------------------------------------------------------------
+
+test("CAPEX-FAC-1: targetFactoryId未指定の従来案件は、単一Factory企業では従来どおりその唯一のFactoryへ適用される", () => {
+  const f1 = factory({ factoryId: "BAL-F1", companyId: "BAL", hosoCapacity: hosoEqTons(10_000) });
+  const p = makeProject({ companyId: "BAL", projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), futureCapacityEffect: effect({ targetProduct: "hoso", capacityIncreaseTonsPerQuarter: 500 }) });
+  const capexState: CapexState = { companies: [capexStateWith("BAL", [p])] };
+  const result = applyCapexCapacityToFactories([f1], capexState, period(2015, 3));
+  assert.equal(unwrapUnit(result[0].hosoCapacity), 10_500);
+});
+
+test("CAPEX-FAC-3: targetFactoryIdを指定すれば、共通前処理能力の増強は第2工場だけに適用される（第1工場は不変）", () => {
+  const f1 = factory({ factoryId: "BAL-F1", companyId: "BAL", commonProcessingCapacity: hosoEqTons(30_000) });
+  const f2 = factory({ factoryId: "BAL-F2", companyId: "BAL", commonProcessingCapacity: hosoEqTons(22_000) });
+  const p = makeProject({
+    companyId: "BAL",
+    projectType: "commonProcessingExpansion",
+    completedPeriod: period(2015, 1),
+    futureCapacityEffect: effect({ targetProduct: "commonProcessing", capacityIncreaseTonsPerQuarter: 4_000 }),
+    targetFactoryId: "BAL-F2",
+  });
+  const capexState: CapexState = { companies: [capexStateWith("BAL", [p])] };
+  const result = applyCapexCapacityToFactories([f1, f2], capexState, period(2015, 3));
+  const r1 = result.find((f) => f.factoryId === "BAL-F1")!;
+  const r2 = result.find((f) => f.factoryId === "BAL-F2")!;
+  assert.equal(unwrapUnit(r1.commonProcessingCapacity), 30_000, "F1は不変でなければならない");
+  assert.equal(unwrapUnit(r2.commonProcessingCapacity), 26_000, "F2だけに増強が反映される");
+});
+
+test("CAPEX-FAC-4: targetFactoryIdを指定すれば、冷凍・包装能力の増強も指定Factoryだけに適用される", () => {
+  const f1 = factory({ factoryId: "BAL-F1", companyId: "BAL", freezingPackagingCapacity: hosoEqTons(20_000) });
+  const f2 = factory({ factoryId: "BAL-F2", companyId: "BAL", freezingPackagingCapacity: hosoEqTons(15_000) });
+  const p = makeProject({
+    companyId: "BAL",
+    projectType: "coldStorageExpansion",
+    completedPeriod: period(2015, 1),
+    futureCapacityEffect: effect({ targetProduct: "freezingPackaging", capacityIncreaseTonsPerQuarter: 500 }),
+    targetFactoryId: "BAL-F2",
+  });
+  const capexState: CapexState = { companies: [capexStateWith("BAL", [p])] };
+  const result = applyCapexCapacityToFactories([f1, f2], capexState, period(2015, 3));
+  assert.equal(unwrapUnit(result.find((f) => f.factoryId === "BAL-F1")!.freezingPackagingCapacity), 20_000);
+  assert.equal(unwrapUnit(result.find((f) => f.factoryId === "BAL-F2")!.freezingPackagingCapacity), 15_500);
+});
+
+test("CAPEX-FAC-5/6/7: HOSO・PD・VAPライン増強もそれぞれ指定Factoryだけに適用される", () => {
+  const f1 = factory({ factoryId: "BAL-F1", companyId: "BAL", hosoCapacity: hosoEqTons(8_000), pdCapacity: hosoEqTons(7_000), vapCapacity: hosoEqTons(5_000) });
+  const f2 = factory({ factoryId: "BAL-F2", companyId: "BAL", hosoCapacity: hosoEqTons(4_000), pdCapacity: hosoEqTons(3_000), vapCapacity: hosoEqTons(2_000) });
+  const hoso = makeProject({ projectId: "P-H", companyId: "BAL", projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), futureCapacityEffect: effect({ targetProduct: "hoso", capacityIncreaseTonsPerQuarter: 400 }), targetFactoryId: "BAL-F2" });
+  const pd = makeProject({ projectId: "P-P", companyId: "BAL", projectType: "pdLineExpansion", completedPeriod: period(2015, 1), futureCapacityEffect: effect({ targetProduct: "pd", capacityIncreaseTonsPerQuarter: 300 }), targetFactoryId: "BAL-F2" });
+  const vap = makeProject({ projectId: "P-V", companyId: "BAL", projectType: "vapLineExpansion", completedPeriod: period(2015, 1), futureCapacityEffect: effect({ targetProduct: "vap", capacityIncreaseTonsPerQuarter: 200 }), targetFactoryId: "BAL-F2" });
+  const capexState: CapexState = { companies: [capexStateWith("BAL", [hoso, pd, vap])] };
+  const result = applyCapexCapacityToFactories([f1, f2], capexState, period(2015, 3));
+  const r1 = result.find((f) => f.factoryId === "BAL-F1")!;
+  const r2 = result.find((f) => f.factoryId === "BAL-F2")!;
+  assert.equal(unwrapUnit(r1.hosoCapacity), 8_000);
+  assert.equal(unwrapUnit(r1.pdCapacity), 7_000);
+  assert.equal(unwrapUnit(r1.vapCapacity), 5_000);
+  assert.equal(unwrapUnit(r2.hosoCapacity), 4_400);
+  assert.equal(unwrapUnit(r2.pdCapacity), 3_300);
+  assert.equal(unwrapUnit(r2.vapCapacity), 2_200);
+});
+
+test("CAPEX-FAC-11: 別々のFactoryへ同時に提案された案件は、それぞれ独立して自分のFactoryだけに反映される", () => {
+  const f1 = factory({ factoryId: "BAL-F1", companyId: "BAL", commonProcessingCapacity: hosoEqTons(30_000) });
+  const f2 = factory({ factoryId: "BAL-F2", companyId: "BAL", commonProcessingCapacity: hosoEqTons(22_000) });
+  const p1 = makeProject({ projectId: "P-1", companyId: "BAL", projectType: "commonProcessingExpansion", completedPeriod: period(2015, 1), futureCapacityEffect: effect({ targetProduct: "commonProcessing", capacityIncreaseTonsPerQuarter: 700 }), targetFactoryId: "BAL-F1" });
+  const p2 = makeProject({ projectId: "P-2", companyId: "BAL", projectType: "commonProcessingExpansion", completedPeriod: period(2015, 1), futureCapacityEffect: effect({ targetProduct: "commonProcessing", capacityIncreaseTonsPerQuarter: 4_000 }), targetFactoryId: "BAL-F2" });
+  const capexState: CapexState = { companies: [capexStateWith("BAL", [p1, p2])] };
+  const result = applyCapexCapacityToFactories([f1, f2], capexState, period(2015, 3));
+  assert.equal(unwrapUnit(result.find((f) => f.factoryId === "BAL-F1")!.commonProcessingCapacity), 30_700);
+  assert.equal(unwrapUnit(result.find((f) => f.factoryId === "BAL-F2")!.commonProcessingCapacity), 26_000);
+});
+
+test("CAPEX-FAC-15: targetFactoryId未指定のlegacy案件は主工場（factoryId先頭）へ寄せられる（既存挙動を壊さない）", () => {
+  const f1 = factory({ factoryId: "BAL-F1", companyId: "BAL", hosoCapacity: hosoEqTons(8_000) });
+  const f2 = factory({ factoryId: "BAL-F2", companyId: "BAL", hosoCapacity: hosoEqTons(4_000) });
+  const legacy = makeProject({ companyId: "BAL", projectType: "hosoLineExpansion", completedPeriod: period(2015, 1), futureCapacityEffect: effect({ targetProduct: "hoso", capacityIncreaseTonsPerQuarter: 500 }) });
+  const capexState: CapexState = { companies: [capexStateWith("BAL", [legacy])] };
+  const result = applyCapexCapacityToFactories([f1, f2], capexState, period(2015, 3));
+  assert.equal(unwrapUnit(result.find((f) => f.factoryId === "BAL-F1")!.hosoCapacity), 8_500, "targetFactoryId未指定分は主工場（先頭factoryId）へ");
+  assert.equal(unwrapUnit(result.find((f) => f.factoryId === "BAL-F2")!.hosoCapacity), 4_000, "F2は影響を受けない");
+});
+
+// ---------------------------------------------------------------------
 // 4. 固定保守費（computeCapexMaintenanceCostUsd）
 // ---------------------------------------------------------------------
 // 新規capex資産の減価償却（建物・機械コンポーネント別定額法）の単体テストは

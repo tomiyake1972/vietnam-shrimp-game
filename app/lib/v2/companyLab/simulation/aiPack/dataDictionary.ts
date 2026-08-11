@@ -385,6 +385,16 @@ const ENTRIES: readonly DictionaryEntry[] = [
     nullableReason: "案件が1件も無い場合は空配列。",
   },
   {
+    field: "companies[].turns[].capitalProjects[].targetFactoryId",
+    japanese: "投資対象Factory",
+    definition:
+      "この案件が対象とする特定のFactoryId。会社が複数Factoryを持つ場合、Factory-specificな設備投資（common processing / freezing・packaging / HOSO・PD・VAP line / PD省人化）がどのFactoryへ適用されたかを事後に再構成できる。未指定（会社に1Factoryしかない・従来案件）の場合はnull（その場合は主工場＝factories先頭へ適用された、と解釈する）。newFactoryConstruction案件は対象Factoryを新設するため常にnull。",
+    unit: "factoryId",
+    source: "CapitalProject.targetFactoryId（capex/types.ts）",
+    layer: "DECISION",
+    nullableReason: "対象Factoryが1つに定まらない・従来案件・newFactoryConstruction案件の場合。",
+  },
+  {
     field: "standardAiProposableCapexTypes",
     japanese: "Standard AI が提案しうる投資種別",
     definition:

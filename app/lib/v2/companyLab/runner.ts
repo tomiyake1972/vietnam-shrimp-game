@@ -178,7 +178,7 @@ import {
   CAPEX_PARAMETERS_V1,
   computeEffectiveFactories,
   buildCompanyFactorySpaceState,
-  buildFactorySpaceApprovalBudget,
+  buildFactorySpaceApprovalBudgetByFactory,
   buildInitialCompanyCapexState,
   closeQuarterWithCapex,
 } from "../capex";
@@ -1503,17 +1503,17 @@ export function advanceCompanyLabQuarter(
         prevCapexState,
         decision: companyDecision!.capexDecision,
         approvalGate: capexApprovalGate,
-        // 【Phase 8D-3】工場スペースによる承認ゲート。当期の生産で実際に使った
-        // factoriesWithCapex（＝稼働開始済み投資を反映済みのFactory。Test15で
-        // 新設Factoryぶんも合成済み）を「稼働中設備の使用量」の基準にし、まだ
-        // 稼働開始していない案件を予約量として数える。稼働中と予約が二重に
-        // 数えられることはない（判定は isCapexProjectOperationalAt へ一元化されて
-        // いるため）。【Test15の既知の制約】buildCompanyFactorySpaceStateは
-        // baseFactories（fixture.factories、静的）とfactoryId一致でのみ工場
-        // スペース状態を組み立てるため、fixtureに存在しない新設Factory自体の
-        // スペース使用率はここには現れない（新設Factoryは既存工場のスペース
-        // プールを消費しない設計。capex/factoryConstruction.ts参照。新設Factory
-        // 自身のスペース状態表示は本タスクの範囲外・将来課題）。
+        // 【Phase 8D-3・複数工場CAPEX Targeting修正】工場スペースによる承認ゲート。
+        // 当期の生産で実際に使った factoriesWithCapex（＝稼働開始済み投資を反映済みの
+        // Factory。Test15で新設Factoryぶんも合成済み）を「稼働中設備の使用量」の
+        // 基準にし、まだ稼働開始していない案件を予約量として数える。稼働中と予約が
+        // 二重に数えられることはない（判定は isCapexProjectOperationalAt へ一元化
+        // されているため）。buildCompanyFactorySpaceStateは稼働開始済み新設Factory
+        // 自身もbaseへ合成するため（複数工場CAPEX Targeting修正）、新設Factory自身の
+        // スペースもここで追跡される。factorySpaceBudgetByFactoryをFactoryごとに
+        // 渡すことで、targetFactoryIdを持つ提案はその対象Factory自身の残枠だけで
+        // 判定される（会社全体の合算では判定しない＝§10）。primaryFactoryIdは
+        // targetFactoryId未指定の提案（従来案件）が既定で使う工場。
         //
         // 【Phase 8D監査L-1・安全側の仕様（意図的、修正不要）】このスペース枠は
         // state.capexState（＝当四半期のcloseQuarterWithCapex呼び出しより前、
@@ -1522,7 +1522,7 @@ export function advanceCompanyLabQuarter(
         // 承認には反映されず（再利用できず）、翌四半期のこの算出からはじめて
         // 反映される。取消と新規承認を同時に行っても案件を過剰承認しない
         // 安全側の挙動であり、意図した仕様である（Phase 8D監査L-1）。
-        factorySpaceBudget: buildFactorySpaceApprovalBudget(
+        factorySpaceBudgetByFactory: buildFactorySpaceApprovalBudgetByFactory(
           buildCompanyFactorySpaceState({
             companyId: f.companyId,
             baseFactories,
@@ -1531,6 +1531,7 @@ export function advanceCompanyLabQuarter(
             period: state.currentPeriod,
           })
         ),
+        primaryFactoryId: f.factories[0]?.factoryId,
         // 【Test15新設】newFactoryConstruction提案の1社あたり工場数上限（4工場）判定に使う、
         // この会社の既存（静的fixture）工場数。capex/factoryConstruction.ts参照。
         existingFactoryCount: f.factories.length,

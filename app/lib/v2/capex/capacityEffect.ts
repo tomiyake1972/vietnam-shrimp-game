@@ -148,6 +148,55 @@ export function computeCapacityEffectForCompany(
 }
 
 /**
+ * 【複数工場CAPEX Targeting修正】computeCapacityEffectForCompanyと同じ判定条件
+ * （稼働開始済み・target/増加量が揃っている）で、project.targetFactoryIdごとに
+ * 累計効果を分ける版。targetFactoryIdが無い案件（pdMechanization/newFactoryConstruction
+ * 以外の従来案件で、まだプレイヤー/AIがfactoryを指定していないもの）は
+ * primaryFactoryIdへ寄せる（既存の「主工場（最初の工場）」規則を後方互換として維持）。
+ */
+export function computeCapacityEffectByFactoryForCompany(
+  projects: readonly CapitalProject[],
+  period: PeriodV2,
+  primaryFactoryId: string
+): ReadonlyMap<string, CapexCapacityEffect> {
+  const byFactory = new Map<string, CapexCapacityEffect>();
+  const zero = (): CapexCapacityEffect => ({ commonProcessing: 0, hoso: 0, pd: 0, vap: 0, freezingPackaging: 0, coldStorage: 0 });
+
+  for (const project of projects) {
+    if (!isCapexProjectOperationalAt(project, period)) continue;
+    const effect = project.futureCapacityEffect;
+    if (!effect || effect.targetProduct === undefined || effect.capacityIncreaseTonsPerQuarter === undefined) continue;
+    const amount = effect.capacityIncreaseTonsPerQuarter;
+    if (amount === 0) continue;
+    const factoryId = project.targetFactoryId ?? primaryFactoryId;
+    const current = byFactory.get(factoryId) ?? zero();
+    const next = { ...current };
+    switch (effect.targetProduct) {
+      case "hoso":
+        byFactory.set(factoryId, { ...next, hoso: next.hoso + amount });
+        break;
+      case "pd":
+        byFactory.set(factoryId, { ...next, pd: next.pd + amount });
+        break;
+      case "vap":
+        byFactory.set(factoryId, { ...next, vap: next.vap + amount });
+        break;
+      case "commonProcessing":
+        byFactory.set(factoryId, { ...next, commonProcessing: next.commonProcessing + amount });
+        break;
+      case "freezingPackaging":
+        byFactory.set(factoryId, { ...next, freezingPackaging: next.freezingPackaging + amount });
+        break;
+      case "coldStorage":
+        byFactory.set(factoryId, { ...next, coldStorage: next.coldStorage + amount });
+        break;
+    }
+  }
+
+  return byFactory;
+}
+
+/**
  * 【Test16】HOSO加工能力の明示的な上限（HOSO換算t/四半期）。
  *
  * HOSOは「低加工度・大量処理・薄利高回転型」の商品として、投資で能力を積み上げられる
@@ -184,32 +233,32 @@ export const MAX_HOSO_CAPACITY_TONS = 24_000;
  *   - 会社IDを厳密に区別する（companyIdでグルーピング）。
  *   - 他社設備へ効果を加えない（他社のfactoryはcapexState.companiesの
  *     該当エントリを参照しないため影響しない）。
- *   - 1社が複数工場を持つ場合、投資案件はfactoryId非依存（CapitalProjectに
- *     factoryId概念が無い）ため、その会社の最初の工場（factoryId昇順）へ
- *     累計効果をまとめて加算する（現状は全社1工場のみのため実質的な差は無い。
- *     複数工場への按分はfactoryId単位の投資対象化とあわせてPhase 8B-2B以降の
- *     課題として送る）。
+ *   - 【複数工場CAPEX Targeting修正】投資案件はCapitalProject.targetFactoryIdを
+ *     持ちうる（capex/types.ts参照）。targetFactoryIdが設定されていればその
+ *     Factoryへ、未設定（factoryを未指定のまま提出した従来案件）なら
+ *     その会社の最初の工場（factoryId昇順、＝主工場）へ累計効果を加算する
+ *     （単一工場企業・従来案件の挙動は変えない後方互換ルール）。
  */
 export function applyCapexCapacityToFactories(
   factories: readonly Factory[],
   capexState: CapexState,
   period: PeriodV2
 ): readonly Factory[] {
-  const effectByCompany = new Map<CompanyId, CapexCapacityEffect>();
-  for (const company of capexState.companies) {
-    effectByCompany.set(company.companyId, computeCapacityEffectForCompany(company.portfolio.projects, period));
-  }
-
   const primaryFactoryIdByCompany = new Map<CompanyId, string>();
   for (const f of factories) {
     if (!primaryFactoryIdByCompany.has(f.companyId)) primaryFactoryIdByCompany.set(f.companyId, f.factoryId);
   }
 
+  const effectByCompanyAndFactory = new Map<CompanyId, ReadonlyMap<string, CapexCapacityEffect>>();
+  for (const company of capexState.companies) {
+    const primaryFactoryId = primaryFactoryIdByCompany.get(company.companyId);
+    if (primaryFactoryId === undefined) continue; // この会社のFactoryが1件も無い（fixture未整備等）。
+    effectByCompanyAndFactory.set(company.companyId, computeCapacityEffectByFactoryForCompany(company.portfolio.projects, period, primaryFactoryId));
+  }
+
   return factories.map((f) => {
-    const effect = effectByCompany.get(f.companyId);
+    const effect = effectByCompanyAndFactory.get(f.companyId)?.get(f.factoryId);
     if (!effect) return f;
-    const isPrimary = primaryFactoryIdByCompany.get(f.companyId) === f.factoryId;
-    if (!isPrimary) return f;
     if (
       effect.commonProcessing === 0 &&
       effect.hoso === 0 &&
