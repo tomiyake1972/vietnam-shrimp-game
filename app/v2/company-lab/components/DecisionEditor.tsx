@@ -13,6 +13,7 @@ import { PeriodV2 } from "../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab";
 import { CAPEX_PARAMETERS_V1, CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../lib/v2/capex";
 import { formatHosoEqTons } from "../../../lib/v2/industryLab/ui/formatters";
+import { computeSalesPlanTotals } from "../salesPlanTotals";
 import {
   buildDecisionInputFromDraft,
   CompanyDecisionDraft,
@@ -118,7 +119,14 @@ function toSafeRatioNumber(raw: string): number {
   return Math.min(1, Math.max(0, n));
 }
 
-function NumberCell(props: { readonly value: number; readonly onChange: (n: number) => void; readonly disabled: boolean; readonly step?: number; readonly warn?: boolean }) {
+function NumberCell(props: {
+  readonly value: number;
+  readonly onChange: (n: number) => void;
+  readonly disabled: boolean;
+  readonly step?: number;
+  readonly warn?: boolean;
+  readonly testId?: string;
+}) {
   return (
     <input
       type="number"
@@ -127,6 +135,7 @@ function NumberCell(props: { readonly value: number; readonly onChange: (n: numb
       value={props.value}
       disabled={props.disabled}
       onChange={(e) => props.onChange(toSafeNumber(e.target.value))}
+      data-testid={props.testId}
       className={`w-24 ${INPUT_CONTROL_CLASS} ${props.warn ? INPUT_CONTROL_WARN_CLASS : ""}`}
     />
   );
@@ -753,6 +762,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
                       value={row.desiredQuantity}
                       disabled={disabled}
                       warn={row.desiredQuantity > currentSalesForceHeadcount * 500}
+                      testId={`sales-plan-desired-quantity-${row.market}-${row.product}`}
                       onChange={(n) => {
                         const next = [...draft.salesPlans];
                         next[idx] = { ...row, desiredQuantity: n };
@@ -789,6 +799,71 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             </tbody>
           </table>
         </div>
+
+        {/* 【指示1〜9・11】販売希望数量の商品別・市場別・全体合計。
+            新しいゲーム計算ロジックは持たず、上の draft.salesPlans を
+            computeSalesPlanTotals() で単純に足し上げるだけの pure derived
+            value（別stateに二重保持しない・draftが変わるたびに再計算される）。 */}
+        {(() => {
+          const totals = computeSalesPlanTotals(draft.salesPlans);
+          return (
+            <div className="mt-3" data-testid="sales-plan-totals">
+              {/* 【指示4・10】全体合計は横スクロールの外（mobileでもスクロール無しで見える位置）に、
+                  商品別・市場別合計より少し目立たせて置く。 */}
+              <div className="mb-2 flex items-center justify-between rounded-lg border border-sky-700/60 bg-sky-950/30 px-3 py-2">
+                <span className="text-xs font-semibold text-sky-200">販売希望数量 合計</span>
+                <span className="text-base font-bold tabular-nums text-sky-100" data-testid="sales-plan-grand-total">
+                  {formatHosoEqTons(totals.grandTotalTons)}
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs text-gray-300" data-testid="sales-plan-totals-table">
+                  <thead>
+                    <tr className={INFO_TABLE_HEAD_CLASS}>
+                      <th className="pr-3 py-1">市場＼商品</th>
+                      {totals.products.map((product) => (
+                        <th key={product} className="pr-3 py-1 text-right uppercase">
+                          {product}
+                        </th>
+                      ))}
+                      <th className="pr-3 py-1 text-right font-semibold">市場合計</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {totals.markets.map((market) => (
+                      <tr key={market} className="border-t border-gray-700/60">
+                        <td className="pr-3 py-1">{market}</td>
+                        {totals.products.map((product) => (
+                          <td
+                            key={product}
+                            className="pr-3 py-1 text-right tabular-nums"
+                            data-testid={`sales-plan-cell-${market}-${product}`}
+                          >
+                            {formatHosoEqTons(totals.cellTons(market, product))}
+                          </td>
+                        ))}
+                        <td className="pr-3 py-1 text-right font-semibold tabular-nums" data-testid={`sales-plan-market-total-${market}`}>
+                          {formatHosoEqTons(totals.marketTotalTons(market))}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="border-t border-gray-600 font-semibold">
+                      <td className="pr-3 py-1">商品合計</td>
+                      {totals.products.map((product) => (
+                        <td key={product} className="pr-3 py-1 text-right tabular-nums" data-testid={`sales-plan-product-total-${product}`}>
+                          {formatHosoEqTons(totals.productTotalTons(product))}
+                        </td>
+                      ))}
+                      <td className="pr-3 py-1 text-right tabular-nums text-sky-200" data-testid="sales-plan-grand-total-cell">
+                        {formatHosoEqTons(totals.grandTotalTons)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
       </CollapsibleSection>
 
       {/* 【営業人員の追加採用・減員・forward-port（続き）】当期に決定した採用・
