@@ -119,6 +119,13 @@ export type StandardAiReasonCode =
   | "NEW_FACTORY_DEFERRED_EXISTING_SPACE" // 既存工場にまだ増設余地があるため新工場を見送り
   | "NEW_FACTORY_DEFERRED_EXISTING_EXPANSION" // 既存増設で当面のgapを埋められるため新工場を見送り
   | "NEW_FACTORY_NOT_NEEDED" // Visionに対して規模が足りており、新工場を必要としない
+  // --- 【Strategic Posture・先行能力投資型戦略】Forward Capacity Gapに基づく新工場判断 ---
+  | "NEW_FACTORY_STRATEGIC_FORWARD_GAP" // 工場完成時点で能力不足が見込まれる（Forward Capacity Gapが存在する）
+  | "NEW_FACTORY_STRATEGIC_PROPOSED" // Forward Capacity Gapを根拠に新工場建設を先行提案した
+  | "NEW_FACTORY_STRATEGIC_GAP_INSUFFICIENT" // 完成時点でも既存増設で賄える見込みのため、先行提案しない
+  | "NEW_FACTORY_STRATEGIC_DEFERRED_GROWTH_EVIDENCE" // 観測できる自社・市場の成長根拠が乏しいため先行提案しない
+  | "NEW_FACTORY_STRATEGIC_DEFERRED_FINANCE" // 財務ゲート（既存の新工場finance gateと同一）を満たさないため先行提案しない
+  | "NEW_FACTORY_STRATEGIC_DEFERRED_ACTIVATION" // 完成後にWorker・設備を実際に入れられる見込みが立たないため先行提案しない
   // --- 【2026-08-09・Phase 6新設】Vision駆動の商業成長 ---
   | "VISION_COMMERCIAL_GROWTH_PRESSURE" // 志に対して販売規模が遅れており、商業的な成長圧力がある
   | "COMMERCIAL_SCALE_BELOW_VISION_PATH" // 現在の販売規模が Vision の参考成長軌道を下回る
@@ -231,6 +238,12 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "NEW_FACTORY_DEFERRED_EXISTING_SPACE",
   "NEW_FACTORY_DEFERRED_EXISTING_EXPANSION",
   "NEW_FACTORY_NOT_NEEDED",
+  "NEW_FACTORY_STRATEGIC_FORWARD_GAP",
+  "NEW_FACTORY_STRATEGIC_PROPOSED",
+  "NEW_FACTORY_STRATEGIC_GAP_INSUFFICIENT",
+  "NEW_FACTORY_STRATEGIC_DEFERRED_GROWTH_EVIDENCE",
+  "NEW_FACTORY_STRATEGIC_DEFERRED_FINANCE",
+  "NEW_FACTORY_STRATEGIC_DEFERRED_ACTIVATION",
   "VISION_COMMERCIAL_GROWTH_PRESSURE",
   "COMMERCIAL_SCALE_BELOW_VISION_PATH",
   "COMMERCIAL_AMBITION_EXPANDED",

@@ -27,6 +27,9 @@ import { UnservedOpportunity } from "../../vision/unservedOpportunity";
 import { PressureScores } from "../pressures";
 import { ProductAmount, StandardAiObservation, sumProductAmount } from "../types";
 import { StandardAiDiagnosticEntry, StandardAiReasonCode } from "../reasonCodes";
+import { computeBindingProductionCapacityTons } from "../bindingCapacity";
+import { StrategicPosture } from "../../vision/types";
+import { computeForwardCapacityGap, ForwardCapacityGapResult, MarketGrowthEvidence } from "../forwardCapacityGap";
 
 const EPSILON = 1e-6;
 
@@ -75,6 +78,18 @@ export interface NewFactoryAssessment {
   readonly unservedProfitableTons: number | null;
   readonly capacityCausedUnservedTons: number | null;
   readonly persistentCapacityCausedUnserved: boolean;
+  /**
+   * 【Strategic Posture・§29/§30】この判断がどちらの経路を通ったか。
+   * NONE ＝ 提案しなかった（reactiveも strategic も READY_TO_BUILD に届かなかった）。
+   */
+  readonly decisionRoute: "REACTIVE" | "STRATEGIC_FORWARD_CAPACITY" | "NONE";
+  readonly strategicPosture: StrategicPosture | null;
+  /** Forward Capacity Gap の計算結果。AGGRESSIVE_EARLY_CAPACITY以外・Vision無しではnull。 */
+  readonly forwardCapacityGap: ForwardCapacityGapResult | null;
+  readonly marketGrowthEvidence: MarketGrowthEvidence | null;
+  /** 既存増設だけでforward gapを解消できると判断した場合の、その根拠比率（gapJustifiesOverlapの判定に使った値）。 */
+  readonly existingExpansionAlternativeSufficientTons: number | null;
+  readonly postConstructionActivationFeasible: boolean | null;
 }
 
 export interface NewFactoryDecisionResult {
@@ -126,6 +141,8 @@ export interface NewFactoryDecisionInput {
   readonly pressures: PressureScores;
   readonly vision: CompanyVision | null;
   readonly strategicGrowth: StrategicGrowthState | null;
+  /** 【Strategic Posture】Forward Capacity Gapの完成予定ターン算出に使う現在ターン。 */
+  readonly turn: number;
   /** 制約適用前の当期生産必要量（需要の裏づけ判定に使う。capex.ts と同じ値）。 */
   readonly productionNeededByProductBeforeCap: ProductAmount;
   /** 当期、既存設備の増設案件を提案したか（既存増設を先に使う原則の判定材料）。 */
@@ -176,10 +193,12 @@ export function describeNewFactoryBlocker(assessment: {
 }
 
 /**
- * 新工場建設を検討する（純粋関数）。
+ * 【Reactive Route】現行の新工場検討（今の稼働率・受注残・需要に反応する経路）。
  * 提案するかどうかに関わらず、必ず assessment と診断エントリを返す。
+ * この関数のゲート順・判断ロジックはStrategic Posture導入前と一切変更していない
+ * （DEMAND_CONFIRMED/VALUE_FIRSTの会社は常にこの関数の結果だけで決まる＝STRAT-1）。
  */
-export function evaluateNewFactoryDecision(input: NewFactoryDecisionInput): NewFactoryDecisionResult {
+function evaluateReactiveNewFactoryRoute(input: NewFactoryDecisionInput): NewFactoryDecisionResult {
   const { fixture, observation, pressures, vision, strategicGrowth } = input;
   const capexParams = input.capexParams ?? CAPEX_PARAMETERS_V1;
   const sp = input.strategyParams ?? NEW_FACTORY_STRATEGY_PARAMETERS_V1;
@@ -207,6 +226,12 @@ export function evaluateNewFactoryDecision(input: NewFactoryDecisionInput): NewF
       unservedProfitableTons: input.unservedOpportunity?.unservedProfitableTons ?? null,
       capacityCausedUnservedTons: input.unservedOpportunity?.blockedByProductionCapacityTons ?? null,
       persistentCapacityCausedUnserved: input.persistentCapacityCausedUnserved ?? false,
+      decisionRoute: status === "READY_TO_BUILD" ? "REACTIVE" : "NONE",
+      strategicPosture: vision?.strategicPosture ?? null,
+      forwardCapacityGap: null,
+      marketGrowthEvidence: null,
+      existingExpansionAlternativeSufficientTons: null,
+      postConstructionActivationFeasible: null,
     },
     proposals,
     diagnostics,
@@ -417,8 +442,8 @@ export function evaluateNewFactoryDecision(input: NewFactoryDecisionInput): NewF
   // （decision/capex.ts の Test16 修正と同じ落とし穴）。
   // 実際に生産を縛るのは「商品別ライン合計」と「共通前処理」の**小さい方**なので、
   // それを分母にする。ここで新しい能力計算式は作らず、観測値だけを使う。
-  const bindingCapacityTons = Math.min(
-    sumProductAmount({ ...observation.totalEffectiveCapacityByProduct }),
+  const bindingCapacityTons = computeBindingProductionCapacityTons(
+    observation.totalEffectiveCapacityByProduct,
     observation.totalEffectiveCommonProcessingCapacity
   );
   const lastQuarterProduction = sumProductAmount({
@@ -606,4 +631,338 @@ export function evaluateNewFactoryDecision(input: NewFactoryDecisionInput): NewF
     ).toLocaleString()}t/期 不足しており、既存工場の増設余地・稼働率・需要・原料・労働・財務のすべての条件を満たすため、新工場の建設を提案する。`
   );
   return finish("READY_TO_BUILD", [{ projectType: "newFactoryConstruction" }]);
+}
+
+// =========================================================================
+// Strategic Posture: AGGRESSIVE_EARLY_CAPACITY — Strategic Forward Capacity Route
+//
+// 設計文書: docs/standard_ai/STRATEGIC_POSTURE_AGGRESSIVE_EARLY_CAPACITY.md
+//
+// 【limited rationality】ここで使うのは Vision（会社自身の志）・
+// currentSustainableScaleTons（bindingCapacity.tsの唯一の計算）・
+// commercialAmbition/unservedOpportunity（既存モジュールが観測情報だけから
+// 既に計算した値）だけである。シナリオの将来イベント・TRUE需要は一切読まない。
+//
+// 【reactiveゲートを緩めない】財務ゲートはreactive route（Gate L）とまったく
+// 同じ cashSafe && borrowingSafe を再計算する。ここでは閾値を下げない。
+// =========================================================================
+
+/**
+ * Forward Capacity Gap の算出に使う、観測可能な成長根拠を組み立てる。
+ * 新しいtrend検出ロジックは作らず、既存モジュールの出力をそのまま使う
+ * （設計文書§5.2）。
+ */
+function buildMarketGrowthEvidence(input: NewFactoryDecisionInput, bindingCapacityTons: number): MarketGrowthEvidence {
+  const recentOwnContractGrowthRatio = input.commercialAmbition ? input.commercialAmbition.ambitionMultiplier - 1 : null;
+
+  const capacityCausedUnserved = input.unservedOpportunity?.blockedByProductionCapacityTons ?? 0;
+  const persistentEvidence = (input.persistentCapacityCausedUnserved ?? false) && capacityCausedUnserved > EPSILON && bindingCapacityTons > EPSILON;
+  const observedMarketGrowthRatio = persistentEvidence ? capacityCausedUnserved / bindingCapacityTons : null;
+
+  return { recentOwnContractGrowthRatio, observedMarketGrowthRatio };
+}
+
+/**
+ * 【Strategic Route】Forward Capacity Gapに基づく、先行能力投資型の新工場検討。
+ * AGGRESSIVE_EARLY_CAPACITYの会社に対してのみ、reactive routeがREADY_TO_BUILDへ
+ * 届かなかったときに呼ばれる（evaluateNewFactoryDecision参照）。
+ */
+function evaluateStrategicForwardCapacityRoute(input: NewFactoryDecisionInput): NewFactoryDecisionResult {
+  const { fixture, observation, pressures, vision, strategicGrowth } = input;
+  if (!vision || !strategicGrowth) {
+    throw new Error("evaluateStrategicForwardCapacityRoute: vision/strategicGrowth must be present（呼び出し側の契約違反）。");
+  }
+  const capexParams = input.capexParams ?? CAPEX_PARAMETERS_V1;
+  const sp = input.strategyParams ?? NEW_FACTORY_STRATEGY_PARAMETERS_V1;
+  const template = capexParams.templatesByType.newFactoryConstruction;
+  const projectCostUsd = template.standardBudgetUsd;
+  const firstPaymentUsd = projectCostUsd * (template.paymentRatios[0] ?? 1);
+
+  const gates: NewFactoryGateResult[] = [];
+  const reasonCodes: StandardAiReasonCode[] = [];
+  const diagnostics: StandardAiDiagnosticEntry[] = [];
+
+  const record = (
+    code: StandardAiReasonCode,
+    severity: StandardAiDiagnosticEntry["severity"],
+    keyValues: Record<string, number>,
+    decisionSummary: string,
+    message: string
+  ) => {
+    reasonCodes.push(code);
+    diagnostics.push({ code, domain: "capex", companyId: fixture.companyId, severity, keyValues, decisionSummary, message });
+  };
+
+  const bindingCapacityTons = computeBindingProductionCapacityTons(
+    observation.totalEffectiveCapacityByProduct,
+    observation.totalEffectiveCommonProcessingCapacity
+  );
+  const marketGrowthEvidence = buildMarketGrowthEvidence(input, bindingCapacityTons);
+  const forwardCapacityGap = computeForwardCapacityGap({
+    turn: input.turn,
+    vision,
+    currentSustainableScaleTons: strategicGrowth.currentSustainableScaleTons,
+    marketGrowthEvidence,
+    capexParams,
+  });
+
+  let existingExpansionAlternativeSufficientTons: number | null = null;
+  let postConstructionActivationFeasible: boolean | null = null;
+
+  const finish = (status: NewFactoryConsiderationStatus, proposals: readonly CapexProjectProposalInput[] = []): NewFactoryDecisionResult => ({
+    assessment: {
+      status,
+      reasonCodes,
+      gates,
+      projectCostUsd,
+      firstPaymentUsd,
+      growthPressure: strategicGrowth.growthPressure,
+      strategicScaleGapTons: strategicGrowth.strategicScaleGapTons,
+      strategicScaleGapRatio: strategicGrowth.strategicScaleGapRatio,
+      commercialAmbitionTons: input.commercialAmbition?.ambitionTons ?? null,
+      profitableOpportunityTons: input.commercialAmbition?.realisticOpportunityTons ?? null,
+      unservedProfitableTons: input.unservedOpportunity?.unservedProfitableTons ?? null,
+      capacityCausedUnservedTons: input.unservedOpportunity?.blockedByProductionCapacityTons ?? null,
+      persistentCapacityCausedUnserved: input.persistentCapacityCausedUnserved ?? false,
+      decisionRoute: status === "READY_TO_BUILD" ? "STRATEGIC_FORWARD_CAPACITY" : "NONE",
+      strategicPosture: vision.strategicPosture ?? null,
+      forwardCapacityGap,
+      marketGrowthEvidence,
+      existingExpansionAlternativeSufficientTons,
+      postConstructionActivationFeasible,
+    },
+    proposals,
+    diagnostics,
+  });
+
+  const gapKeyValues = {
+    forwardCapacityGapTons: forwardCapacityGap.forwardCapacityGapTons,
+    forwardCapacityGapRatio: forwardCapacityGap.forwardCapacityGapRatio,
+    forecastCompletionTurn: forwardCapacityGap.forecastCompletionTurn,
+    projectedCommercialScaleAtCompletion: forwardCapacityGap.projectedCommercialScaleAtCompletion,
+    existingCapacityAtCompletion: forwardCapacityGap.existingCapacityAtCompletion,
+    constructionLeadTimeQuarters: forwardCapacityGap.constructionLeadTimeQuarters,
+  };
+
+  // --- Gate: forward gap が意味のある大きさか -----------------------------
+  const gapMeaningful = forwardCapacityGap.forwardCapacityGapTons > EPSILON;
+  gates.push(
+    gate(
+      "STRATEGIC_FORWARD_GAP",
+      gapMeaningful,
+      gapKeyValues,
+      `完成予定Q${forwardCapacityGap.forecastCompletionTurn}時点の想定規模 ${Math.round(
+        forwardCapacityGap.projectedCommercialScaleAtCompletion
+      ).toLocaleString()}t/期 に対し、現在能力 ${Math.round(forwardCapacityGap.existingCapacityAtCompletion).toLocaleString()}t/期。`
+    )
+  );
+  if (!gapMeaningful) {
+    record(
+      "NEW_FACTORY_STRATEGIC_GAP_INSUFFICIENT",
+      "info",
+      gapKeyValues,
+      "先行投資の根拠なし",
+      `完成予定Q${forwardCapacityGap.forecastCompletionTurn}時点でも、Vision参考軌道と観測できる成長根拠のどちらか小さい方で見た想定規模が現在能力を上回らないため、先行着工の根拠が無い。`
+    );
+    return finish("NOT_CONSIDERED");
+  }
+  record(
+    "NEW_FACTORY_STRATEGIC_FORWARD_GAP",
+    "info",
+    gapKeyValues,
+    `完成時点で ${Math.round(forwardCapacityGap.forwardCapacityGapTons).toLocaleString()}t/期 不足見込み`,
+    `Vision参考軌道（完成時点 ${Math.round(
+      forwardCapacityGap.visionReferenceScaleAtCompletion
+    ).toLocaleString()}t/期）と観測成長率で延伸した見込み（${Math.round(
+      forwardCapacityGap.trendAdjustedScaleAtCompletion
+    ).toLocaleString()}t/期）の小さい方に対し、現在能力が ${Math.round(forwardCapacityGap.forwardCapacityGapTons).toLocaleString()}t/期 不足する。`
+  );
+
+  // --- Gate: 観測できる成長根拠があるか（Vision単独の楽観だけで進めない） ---
+  const growthEvidencePresent = forwardCapacityGap.observedGrowthRatioPerQuarter > EPSILON;
+  const evidenceKeyValues = {
+    recentOwnContractGrowthRatio: marketGrowthEvidence.recentOwnContractGrowthRatio ?? 0,
+    observedMarketGrowthRatio: marketGrowthEvidence.observedMarketGrowthRatio ?? 0,
+    observedGrowthRatioPerQuarter: forwardCapacityGap.observedGrowthRatioPerQuarter,
+  };
+  gates.push(
+    gate(
+      "STRATEGIC_GROWTH_EVIDENCE",
+      growthEvidencePresent,
+      evidenceKeyValues,
+      growthEvidencePresent
+        ? `自社成長根拠・観測市場成長根拠のいずれも正（四半期あたり ${(forwardCapacityGap.observedGrowthRatioPerQuarter * 100).toFixed(1)}%）。`
+        : "自社成長・観測市場成長のいずれかが観測できないか0以下であり、Vision単独の楽観にとどまる。"
+    )
+  );
+  if (!growthEvidencePresent) {
+    record(
+      "NEW_FACTORY_STRATEGIC_DEFERRED_GROWTH_EVIDENCE",
+      "info",
+      evidenceKeyValues,
+      "観測できる成長根拠が乏しいため見送り",
+      "Vision の参考軌道だけでは先行着工の根拠として不十分。自社の直近成長・観測できる市場成長のいずれかが確認できないため、今期は先行提案しない。"
+    );
+    return finish("NOT_CONSIDERED");
+  }
+
+  // --- Gate: 既存増設だけでは gap を解消できないか ------------------------
+  const gapJustifiesOverlap = strategicGrowth.strategicScaleGapRatio > sp.overlapGapRatio;
+  const hasExistingSpace = observation.factorySpaceRemainingUnits > sp.existingSpaceSufficientUnits;
+  const existingExpansionSufficient = hasExistingSpace && !gapJustifiesOverlap;
+  const expansionKeyValues = {
+    factorySpaceRemainingUnits: observation.factorySpaceRemainingUnits,
+    existingSpaceSufficientUnits: sp.existingSpaceSufficientUnits,
+    overlapGapRatio: sp.overlapGapRatio,
+    strategicScaleGapRatio: strategicGrowth.strategicScaleGapRatio,
+  };
+  gates.push(
+    gate(
+      "STRATEGIC_EXISTING_EXPANSION_INSUFFICIENT",
+      !existingExpansionSufficient,
+      expansionKeyValues,
+      existingExpansionSufficient
+        ? "既存工場の増設余地・志との差の大きさから見て、既存増設だけで足りる可能性が高い。"
+        : "既存増設だけではforward gapを解消できない、または志との差がすでに併走を正当化する規模。"
+    )
+  );
+  if (existingExpansionSufficient) {
+    existingExpansionAlternativeSufficientTons = forwardCapacityGap.forwardCapacityGapTons;
+    record(
+      "NEW_FACTORY_STRATEGIC_GAP_INSUFFICIENT",
+      "info",
+      expansionKeyValues,
+      "既存増設で対応可能",
+      `既存工場にまだ ${Math.round(observation.factorySpaceRemainingUnits).toLocaleString()} スペース単位の増設余地があり、志との差もまだ既存増設だけで対応できる範囲のため、先行して新工場は建てない。`
+    );
+    return finish("DEFERRED");
+  }
+
+  // --- Gate: 工場数上限・進行中案件（reactive routeと同じ条件の再確認） -----
+  const factoryKeyValues = {
+    factoryCount: observation.factoryCount,
+    pendingNewFactoryProjectCount: observation.pendingNewFactoryProjectCount,
+    prospectiveFactoryCount: observation.prospectiveFactoryCount,
+    maxFactoriesPerCompany: observation.maxFactoriesPerCompany,
+  };
+  const factoryRoomOk = observation.pendingNewFactoryProjectCount === 0 && observation.prospectiveFactoryCount < observation.maxFactoriesPerCompany;
+  gates.push(
+    gate(
+      "STRATEGIC_FACTORY_ROOM",
+      factoryRoomOk,
+      factoryKeyValues,
+      factoryRoomOk ? "進行中の新工場案件は無く、工場数にも余地がある。" : "進行中の新工場案件があるか、工場数が上限に達している。"
+    )
+  );
+  if (!factoryRoomOk) {
+    return finish("DEFERRED");
+  }
+
+  // --- Gate: 財務（reactive routeのGate Lと同一の判定式。基準を緩めない） ---
+  const coverageRatio = sp.upfrontCoverageRatioByRiskTolerance[vision.financialRiskTolerance];
+  const requiredCashUsd = pressures.targetMinimumCashUsd + projectCostUsd * coverageRatio;
+  const cashSafe = observation.cashUsd > requiredCashUsd;
+  const borrowingSafe = pressures.borrowingPressure < 1;
+  const financeKeyValues = {
+    cashUsd: observation.cashUsd,
+    projectCostUsd,
+    firstPaymentUsd,
+    upfrontCoverageRatio: coverageRatio,
+    requiredCashUsd,
+    borrowingPressure: pressures.borrowingPressure,
+  };
+  gates.push(
+    gate(
+      "STRATEGIC_FINANCIAL_FEASIBILITY",
+      cashSafe && borrowingSafe,
+      financeKeyValues,
+      `必要現金 ${Math.round(requiredCashUsd).toLocaleString()} USD（reactive routeと同一の財務ゲート）に対し手元現金 ${Math.round(
+        observation.cashUsd
+      ).toLocaleString()} USD。`
+    )
+  );
+  if (!cashSafe || !borrowingSafe) {
+    postConstructionActivationFeasible = false;
+    record(
+      "NEW_FACTORY_STRATEGIC_DEFERRED_FINANCE",
+      "info",
+      financeKeyValues,
+      "財務条件を満たさないため先行着工を見送り",
+      "積極戦略でも財務の安全性は緩めない。reactive routeと同じ財務ゲートを満たさないため、今期は先行着工しない。"
+    );
+    return finish("DEFERRED");
+  }
+
+  // --- Gate: 完成後の実際の稼働化可能性（空箱化リスク） -------------------
+  // 【このフェーズでの簡略化】独立したキャッシュフロー予測は持たず、上のGateが
+  // 使った cashSafe && borrowingSafe をそのまま再利用する（既に投資額＋最低
+  // バッファの両方を満たした状態であることを、そのまま「その後の稼働化にも
+  // 耐えうる」ことの根拠とする）。設計文書§8/§17参照。
+  postConstructionActivationFeasible = cashSafe && borrowingSafe;
+  gates.push(
+    gate(
+      "STRATEGIC_ACTIVATION_FEASIBILITY",
+      postConstructionActivationFeasible,
+      financeKeyValues,
+      "完成後もWorker・設備を追加投入できる財務余力があると判断（reactive routeの財務ゲートと同一の根拠）。"
+    )
+  );
+  if (!postConstructionActivationFeasible) {
+    record(
+      "NEW_FACTORY_STRATEGIC_DEFERRED_ACTIVATION",
+      "info",
+      financeKeyValues,
+      "完成後の稼働化に見込みが立たないため見送り",
+      "工場を先行着工しても、完成後にWorker・設備を実際に入れられる財務余力の見込みが立たないため、空箱化を避けて今期は見送る。"
+    );
+    return finish("DEFERRED");
+  }
+
+  // --- 全ゲート通過 --------------------------------------------------------
+  record(
+    "NEW_FACTORY_STRATEGIC_PROPOSED",
+    "info",
+    { ...gapKeyValues, ...evidenceKeyValues, ...financeKeyValues },
+    `Forward Capacity Gapに基づき新工場建設を先行提案（${Math.round(projectCostUsd / 1e6)}百万USD、完成予定Q${forwardCapacityGap.forecastCompletionTurn}）`,
+    `完成予定Q${forwardCapacityGap.forecastCompletionTurn}時点で ${Math.round(
+      forwardCapacityGap.forwardCapacityGapTons
+    ).toLocaleString()}t/期 の能力不足が見込まれ、観測できる自社・市場の成長根拠もあり、既存増設だけでは解消できず、財務・完成後の稼働化見込みも問題ない。現在の稼働率がまだ逼迫していなくても、建設リードタイム（${
+      forwardCapacityGap.constructionLeadTimeQuarters
+    }四半期）を踏まえて今着工する。`
+  );
+  return finish("READY_TO_BUILD", [{ projectType: "newFactoryConstruction" }]);
+}
+
+/**
+ * 新工場建設を検討する（純粋関数）。提案するかどうかに関わらず、必ず
+ * assessment と診断エントリを返す。
+ *
+ * 【2つの経路】
+ *   Reactive Route      … 今の稼働率・受注残・需要に反応する経路（常に評価）。
+ *   Strategic Route      … Forward Capacity Gapに基づく先行投資の経路。
+ *     vision.strategicPosture === "AGGRESSIVE_EARLY_CAPACITY" のときだけ、
+ *     reactive routeがREADY_TO_BUILDへ届かなかった場合に限り評価する
+ *     （同一四半期に二重提案しない。DEMAND_CONFIRMED/VALUE_FIRSTは常にreactiveのみ＝STRAT-1）。
+ */
+export function evaluateNewFactoryDecision(input: NewFactoryDecisionInput): NewFactoryDecisionResult {
+  const reactive = evaluateReactiveNewFactoryRoute(input);
+  if (reactive.assessment.status === "READY_TO_BUILD") {
+    return reactive;
+  }
+
+  const isAggressive = input.vision?.strategicPosture === "AGGRESSIVE_EARLY_CAPACITY";
+  const factoryRoomForStrategic =
+    input.observation.pendingNewFactoryProjectCount === 0 && input.observation.prospectiveFactoryCount < input.observation.maxFactoriesPerCompany;
+  if (!isAggressive || !input.vision || !input.strategicGrowth || !factoryRoomForStrategic) {
+    return reactive;
+  }
+
+  const strategic = evaluateStrategicForwardCapacityRoute(input);
+  return {
+    assessment: strategic.assessment,
+    proposals: strategic.proposals,
+    // 【両方の経路の判断根拠を残す】strategicが見送りに終わっても、reactiveが
+    // 何を見ていたかの記録を捨てない（説明可能性。設計文書§9）。
+    diagnostics: [...reactive.diagnostics, ...strategic.diagnostics],
+  };
 }

@@ -14,7 +14,8 @@
 
 import { CompanyFixture } from "../types";
 import { StandardAiParameters } from "./parameters";
-import { StandardAiObservation, sumProductAmount } from "./types";
+import { StandardAiObservation } from "./types";
+import { computeBindingProductionCapacityTons } from "./bindingCapacity";
 import { StrategicIntent } from "./strategicIntent";
 
 export interface TargetScaleBand {
@@ -81,8 +82,8 @@ export function computeTargetScaleBand(
     (observation.lastQuarterActualProductionByProduct.hoso ?? 0) +
     (observation.lastQuarterActualProductionByProduct.pd ?? 0) +
     (observation.lastQuarterActualProductionByProduct.vap ?? 0);
-  const effectiveCapacityTons = Math.min(
-    sumProductAmount(observation.totalEffectiveCapacityByProduct),
+  const effectiveCapacityTons = computeBindingProductionCapacityTons(
+    observation.totalEffectiveCapacityByProduct,
     observation.totalEffectiveCommonProcessingCapacity
   );
 

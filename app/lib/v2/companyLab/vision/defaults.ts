@@ -31,6 +31,12 @@
 
 import { CompanyVision, CompanyVisionDocument, COMPANY_VISION_SCHEMA_VERSION, VisionGrowthWaypoint } from "./types";
 
+// 【Strategic Posture・§27候補案】
+// MASS・BALは高成長ambition・HIGH willingnessToBuildFactoriesと整合するため
+// AGGRESSIVE_EARLY_CAPACITY（先行能力投資型）。JPQ・CONSVは既存Vision通り
+// 実績確認後に投資するDEMAND_CONFIRMED。VAPは規模を追わない志（emphasisProducts=vap、
+// "量を追うための工場は建てない"というlongTermNarrative）と整合するVALUE_FIRST。
+
 /**
  * 参考成長軌道の形。
  * 新工場は着工から稼働まで 3四半期の建設 ＋ 1四半期の立ち上げ ＋ 3四半期の ramp を
@@ -60,6 +66,7 @@ const MASS_VISION: CompanyVision = {
   longTermNarrative:
     "量で勝つ。HOSOを軸に生産量を積み上げ、ベトナム最大級の輸出量を持つ会社になる。工場を建てることを恐れず、借入も成長のための手段として使う。",
   emphasisProducts: ["hoso", "pd"],
+  strategicPosture: "AGGRESSIVE_EARLY_CAPACITY",
 };
 
 const BAL_VISION: CompanyVision = {
@@ -75,6 +82,7 @@ const BAL_VISION: CompanyVision = {
   longTermNarrative:
     "HOSO・PD・VAPのすべてを自社で扱える総合水産会社になる。規模も追うが、特定商品・特定市場に依存しない構成を保つ。財務は無理をしない範囲で攻める。",
   emphasisProducts: ["hoso", "pd", "vap"],
+  strategicPosture: "AGGRESSIVE_EARLY_CAPACITY",
 };
 
 const JPQ_VISION: CompanyVision = {
@@ -90,6 +98,7 @@ const JPQ_VISION: CompanyVision = {
   longTermNarrative:
     "品質を落とさずに大きくなる。日本市場で選ばれ続けるPDの品質を維持したまま規模を伸ばす。品質を守れないと判断すれば、規模の方を諦める。",
   emphasisProducts: ["pd"],
+  strategicPosture: "DEMAND_CONFIRMED",
 };
 
 const CONSV_VISION: CompanyVision = {
@@ -105,6 +114,7 @@ const CONSV_VISION: CompanyVision = {
   longTermNarrative:
     "潰れない会社であり続けたうえで、着実に大きくなる。手元資金と負債水準に余裕があるときにだけ投資する。無理な成長で財務を痛めるくらいなら成長を遅らせる。",
   emphasisProducts: ["hoso", "pd"],
+  strategicPosture: "DEMAND_CONFIRMED",
 };
 
 const VAP_VISION: CompanyVision = {
@@ -120,6 +130,7 @@ const VAP_VISION: CompanyVision = {
   longTermNarrative:
     "大きさでは勝たない。付加価値加工品で単価と利益率を取り、小さくても強い会社であり続ける。量を追うための工場は建てない。",
   emphasisProducts: ["vap"],
+  strategicPosture: "VALUE_FIRST",
 };
 
 const VISION_DOCUMENTS: readonly CompanyVisionDocument[] = [

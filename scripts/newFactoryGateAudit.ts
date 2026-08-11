@@ -293,6 +293,7 @@ function baseInput(companyId: string, turn: number) {
   const fixture = result.companies.find((f) => f.companyId === companyId)!;
   const existingExpansion = d.decision.capexDecision.newProjectProposals.some((p) => p.projectType !== "newFactoryConstruction");
   return {
+    turn,
     fixture,
     observation: c.observation,
     pressures: c.pressures,

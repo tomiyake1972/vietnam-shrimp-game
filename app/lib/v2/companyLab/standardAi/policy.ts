@@ -30,6 +30,7 @@ import { buildStandardAiWorkerAssignments } from "./decision/labor";
 import { buildStandardAiFinancingRequest } from "./decision/finance";
 import { buildStandardAiCapexDecision } from "./decision/capex";
 import { sumProductAmount } from "./types";
+import { computeBindingProductionCapacityTons } from "./bindingCapacity";
 import { StandardAiDiagnosticEntry } from "./reasonCodes";
 import { SalesWishEntry } from "./decision/sales";
 import { PressureScores } from "./pressures";
@@ -453,8 +454,8 @@ export function generateStandardAiDecisionWithDiagnostics(
     (sum, w) => sum + w.desiredQuantityBeforeEffortConstraint,
     0
   );
-  const bindingProductionCapacityTons = Math.min(
-    sumProductAmount({ ...observation.totalEffectiveCapacityByProduct }),
+  const bindingProductionCapacityTons = computeBindingProductionCapacityTons(
+    observation.totalEffectiveCapacityByProduct,
     observation.totalEffectiveCommonProcessingCapacity
   );
   const unservedOpportunity = computeUnservedOpportunity({
@@ -481,6 +482,7 @@ export function generateStandardAiDecisionWithDiagnostics(
   // 【新工場は既存増設とは別の判断】既存の capex.ts（今期このラインが足りるか）とは
   // 独立した戦略評価を行う。提案しなかった場合も理由コードを必ず残す。
   const newFactoryResult = evaluateNewFactoryDecision({
+    turn,
     fixture,
     observation,
     pressures,

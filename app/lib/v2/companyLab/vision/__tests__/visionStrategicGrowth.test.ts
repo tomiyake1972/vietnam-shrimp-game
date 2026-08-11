@@ -103,6 +103,7 @@ function passingInput(overrides: Record<string, unknown> = {}) {
   const v = vision();
   const growth = computeStrategicGrowthState({ vision: v, turn: 20, currentSustainableScaleTons: 10_000 });
   return {
+    turn: 20,
     fixture,
     observation: observation(),
     pressures: pressures(),

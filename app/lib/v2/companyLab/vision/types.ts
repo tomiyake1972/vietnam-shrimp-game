@@ -48,6 +48,23 @@ export type FinancialRiskTolerance = "HIGH" | "MEDIUM" | "LOW";
 export type DesiredProductEvolution = "HOSO_SCALE" | "PD_SCALE" | "VAP_VALUE" | "INTEGRATED" | "SPECIALIST";
 
 /**
+ * 【Strategic Posture・先行能力投資型戦略】新工場投資をどちらの経路で考えるか。
+ *
+ *   AGGRESSIVE_EARLY_CAPACITY … 市場成長を先取りする。工場完成時点の能力不足
+ *     （Forward Capacity Gap）を根拠に、現在の稼働率がまだ逼迫していなくても
+ *     財務が許す範囲で先行着工を検討する（forwardCapacityGap.ts参照）。
+ *   DEMAND_CONFIRMED … 現行のStandard AI挙動そのもの（実績需要・稼働率・
+ *     受注残を確認してから投資する、reactiveな経路のみ）。
+ *   VALUE_FIRST … 数量拡大より高付加価値・商品力を優先する会社像を示す値。
+ *     このフェーズではnew factory判断への効果はDEMAND_CONFIRMEDと同じ
+ *     （reactive経路のみ）。R&D/VAP投資への接続は将来のフェーズの対象。
+ *
+ * 未設定（undefined）は DEMAND_CONFIRMED 相当として扱う（既存Visionを
+ * 黙って積極化しない。既存の32Q再現性を壊さない）。
+ */
+export type StrategicPosture = "AGGRESSIVE_EARLY_CAPACITY" | "DEMAND_CONFIRMED" | "VALUE_FIRST";
+
+/**
  * 参考成長軌道の1点。
  *
  * 【TARGET ではなく REFERENCE PATH】ゲーム結果をこの数字へ強制しない。
@@ -76,6 +93,12 @@ export interface CompanyVision {
   readonly longTermNarrative: string;
   /** 重視する商品（人間向け・将来のR&D投資判断の受け皿。今回は数値判断に使わない）。 */
   readonly emphasisProducts: readonly Product[];
+  /**
+   * 【Strategic Posture】未設定はDEMAND_CONFIRMED相当として扱う
+   * （既存Visionを黙って積極化しない）。COMPANY_VISION_SCHEMA_VERSIONは
+   * 追加的変更のみのため据え置き。
+   */
+  readonly strategicPosture?: StrategicPosture;
 }
 
 /** 1社ぶんの Vision 履歴（将来のプレイヤー編集に備える）。 */
