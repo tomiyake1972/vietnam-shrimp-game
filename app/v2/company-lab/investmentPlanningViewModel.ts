@@ -537,8 +537,19 @@ export function buildCompanyInvestmentPlanningViewModel(
   const workforceRows: WorkforcePlanRow[] = input.workerAssignments
     .filter((w) => w.companyId === input.companyId)
     .map((assignment) => {
-      const headcountBefore =
-        input.workforceState?.factories.find((f) => f.factoryId === assignment.factoryId)?.regularHeadcount ?? assignment.regularHeadcount;
+      // 【staging再現バグの根本原因】headcountBeforeを「workforceStateに無ければ
+      // assignment.regularHeadcount（＝今まさに編集中の現在値）」にfallbackしていたため、
+      // workforceStateにまだ記録が無い工場（稼働開始したばかりで、一度もWorker決定が
+      // 確定していない新設Factory）では headcountBefore が常に headcountAfter と同じ値になり、
+      // headcountChange（＝この「増員／減員」inputの表示値）が入力のたびに必ず0へ計算し直され、
+      // 何人入力しても増減欄が0のまま動かないように見えていた（他のUI層・draft側は正しく
+      // 動いていた＝入力binding自体は壊れていない。表示計算だけが誤っていた）。
+      // workforceStateが渡されているのに対象Factoryの記録が無い場合は「まだ誰もアサインした
+      // ことが無い＝0人からのスタート」が正しい前提であり、assignment.regularHeadcountへ
+      // fallbackしてはいけない。workforceState自体が渡されていない呼び出し（無い場合の
+      // 既存動作を変えない）だけ、従来どおりassignment.regularHeadcountへfallbackする。
+      const persistedHeadcount = input.workforceState?.factories.find((f) => f.factoryId === assignment.factoryId)?.regularHeadcount;
+      const headcountBefore = persistedHeadcount !== undefined ? persistedHeadcount : input.workforceState ? 0 : assignment.regularHeadcount;
       const headcountAfter = assignment.regularHeadcount;
       const attendanceRate = unwrapUnit(assignment.attendanceRate);
       const overtimeRate = unwrapUnit(assignment.overtimeRate);
