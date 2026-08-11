@@ -300,6 +300,8 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics): Pack
             : null,
           existingExpansionAlternativeSufficientTons: a.existingExpansionAlternativeSufficientTons,
           postConstructionActivationFeasible: a.postConstructionActivationFeasible,
+          reactiveStatusAtStrategicDecision: a.reactiveStatusAtStrategicDecision,
+          reactiveBlockerAtStrategicDecision: a.reactiveBlockerAtStrategicDecision,
         }
       : null,
     availability: v ? "AVAILABLE" : "NOT_RECORDED",

@@ -339,6 +339,8 @@ export interface PackStrategy {
     } | null;
     readonly existingExpansionAlternativeSufficientTons: number | null;
     readonly postConstructionActivationFeasible: boolean | null;
+    readonly reactiveStatusAtStrategicDecision: string | null;
+    readonly reactiveBlockerAtStrategicDecision: string | null;
   } | null;
   readonly availability: PackAvailability;
 }

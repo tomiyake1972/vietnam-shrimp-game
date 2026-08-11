@@ -384,6 +384,14 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
                         value={`${tons(newFactory.forwardCapacityGap.forwardCapacityGapTons)}（${percent(newFactory.forwardCapacityGap.forwardCapacityGapRatio)}）`}
                       />
                       <Row label="財務" value={newFactory.postConstructionActivationFeasible ? "Feasible" : "見送り"} />
+                      {newFactory.reactiveStatusAtStrategicDecision ? (
+                        <Row
+                          label="Reactive route"
+                          value={`NOT READY（${NEW_FACTORY_STATUS_LABELS[newFactory.reactiveStatusAtStrategicDecision] ?? newFactory.reactiveStatusAtStrategicDecision}${
+                            newFactory.reactiveBlockerAtStrategicDecision ? ` / ${newFactory.reactiveBlockerAtStrategicDecision}` : ""
+                          }）`}
+                        />
+                      ) : null}
                     </dl>
                   </div>
                 ) : null}

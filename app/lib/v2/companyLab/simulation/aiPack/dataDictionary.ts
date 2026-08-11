@@ -231,6 +231,16 @@ const ENTRIES: readonly DictionaryEntry[] = [
     nullableReason: "strategic route未評価の場合はどちらもnull。",
   },
   {
+    field: "companies[].turns[].strategy.newFactory.reactiveStatusAtStrategicDecision / reactiveBlockerAtStrategicDecision",
+    japanese: "strategic route評価時点のreactive routeの状態",
+    definition:
+      "strategic routeが評価された同じ四半期に、reactive route（今日までの既存経路）がどの段階（NOT_CONSIDERED/MONITORING/CONSIDERING/DEFERRED等）で止まっていたか、およびその止めたゲート名。「reactiveがまだREADY_TO_BUILDに届いていないタイミングでstrategicが提案した」ことを事後に機械的に確認するための記録（reactiveが自力でREADY_TO_BUILDに届いた四半期はstrategic route自体が評価されないため、この2値は常にnull）。",
+    unit: "状態名 ／ ゲート名",
+    source: "companyLab/standardAi/decision/newFactory.ts（evaluateNewFactoryDecision）",
+    layer: "AI_INTERNAL",
+    nullableReason: "strategic route未評価の場合はどちらもnull。",
+  },
+  {
     field: "companies[].turns[].decisionOwner",
     japanese: "その四半期の意思決定者",
     definition:
