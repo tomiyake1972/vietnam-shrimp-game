@@ -276,6 +276,30 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics): Pack
           })),
           projectCostUsd: a.projectCostUsd,
           firstPaymentUsd: a.firstPaymentUsd,
+          decisionRoute: a.decisionRoute,
+          strategicPosture: a.strategicPosture,
+          forwardCapacityGap: a.forwardCapacityGap
+            ? {
+                constructionLeadTimeQuarters: a.forwardCapacityGap.constructionLeadTimeQuarters,
+                forecastCompletionTurn: a.forwardCapacityGap.forecastCompletionTurn,
+                visionReferenceScaleAtCompletion: a.forwardCapacityGap.visionReferenceScaleAtCompletion,
+                observedGrowthRatioPerQuarter: a.forwardCapacityGap.observedGrowthRatioPerQuarter,
+                trendAdjustedScaleAtCompletion: a.forwardCapacityGap.trendAdjustedScaleAtCompletion,
+                projectedCommercialScaleAtCompletion: a.forwardCapacityGap.projectedCommercialScaleAtCompletion,
+                projectedRequiredProductionAtCompletion: a.forwardCapacityGap.projectedRequiredProductionAtCompletion,
+                existingCapacityAtCompletion: a.forwardCapacityGap.existingCapacityAtCompletion,
+                forwardCapacityGapTons: a.forwardCapacityGap.forwardCapacityGapTons,
+                forwardCapacityGapRatio: a.forwardCapacityGap.forwardCapacityGapRatio,
+              }
+            : null,
+          marketGrowthEvidence: a.marketGrowthEvidence
+            ? {
+                recentOwnContractGrowthRatio: a.marketGrowthEvidence.recentOwnContractGrowthRatio,
+                observedMarketGrowthRatio: a.marketGrowthEvidence.observedMarketGrowthRatio,
+              }
+            : null,
+          existingExpansionAlternativeSufficientTons: a.existingExpansionAlternativeSufficientTons,
+          postConstructionActivationFeasible: a.postConstructionActivationFeasible,
         }
       : null,
     availability: v ? "AVAILABLE" : "NOT_RECORDED",

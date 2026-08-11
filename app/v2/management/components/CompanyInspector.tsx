@@ -360,7 +360,33 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
                   <Row label="投資額（標準工場）" value={money(newFactory.projectCostUsd)} />
                   <Row label="着工四半期の支払" value={money(newFactory.firstPaymentUsd)} />
                   <Row label="判断を止めたゲート" value={blocker ?? "（全ゲート通過・提案）"} />
+                  {newFactory.decisionRoute && newFactory.decisionRoute !== "NONE" ? (
+                    <Row
+                      label="判断経路"
+                      value={
+                        newFactory.decisionRoute === "STRATEGIC_FORWARD_CAPACITY"
+                          ? "Strategic route: Lead-the-Market（先行能力投資）"
+                          : "Reactive route（今の稼働率・需要に反応）"
+                      }
+                    />
+                  ) : null}
+                  {newFactory.strategicPosture ? <Row label="戦略姿勢" value={newFactory.strategicPosture} /> : null}
                 </dl>
+                {newFactory.forwardCapacityGap ? (
+                  <div className="mt-1.5 rounded border border-amber-800/60 bg-amber-950/30 p-1.5" data-testid="investment-thinking-forward-gap">
+                    <p className="text-[11px] font-semibold text-amber-300">Forward Capacity Gap（完成予定時点の能力不足見込み）</p>
+                    <dl className="mt-0.5">
+                      <Row label="新工場完成予定" value={`Q${newFactory.forwardCapacityGap.forecastCompletionTurn}`} />
+                      <Row label="完成時点の想定規模" value={tons(newFactory.forwardCapacityGap.projectedCommercialScaleAtCompletion)} />
+                      <Row label="現在の実効能力" value={tons(newFactory.forwardCapacityGap.existingCapacityAtCompletion)} />
+                      <Row
+                        label="Forward Gap"
+                        value={`${tons(newFactory.forwardCapacityGap.forwardCapacityGapTons)}（${percent(newFactory.forwardCapacityGap.forwardCapacityGapRatio)}）`}
+                      />
+                      <Row label="財務" value={newFactory.postConstructionActivationFeasible ? "Feasible" : "見送り"} />
+                    </dl>
+                  </div>
+                ) : null}
                 {blockingGate ? <p className="mt-1 text-[11px] leading-snug text-slate-300">{blockingGate.note}</p> : null}
                 <ul className="mt-1.5 list-inside list-disc">
                   {newFactory.reasonCodes.map((code, index) => (

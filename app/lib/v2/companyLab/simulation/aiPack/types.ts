@@ -314,6 +314,31 @@ export interface PackStrategy {
     }[];
     readonly projectCostUsd: number;
     readonly firstPaymentUsd: number;
+    /**
+     * 【Strategic Posture・Phase E】この判断がどちらの経路を通ったか。
+     * NONE ＝ 提案しなかった（reactiveも strategic も READY_TO_BUILD に届かなかった）。
+     */
+    readonly decisionRoute: "REACTIVE" | "STRATEGIC_FORWARD_CAPACITY" | "NONE" | null;
+    readonly strategicPosture: string | null;
+    /** Forward Capacity Gap（新工場完成予定ターン時点の能力不足見込み）。AGGRESSIVE_EARLY_CAPACITY以外では null。 */
+    readonly forwardCapacityGap: {
+      readonly constructionLeadTimeQuarters: number;
+      readonly forecastCompletionTurn: number;
+      readonly visionReferenceScaleAtCompletion: number;
+      readonly observedGrowthRatioPerQuarter: number;
+      readonly trendAdjustedScaleAtCompletion: number;
+      readonly projectedCommercialScaleAtCompletion: number;
+      readonly projectedRequiredProductionAtCompletion: number;
+      readonly existingCapacityAtCompletion: number;
+      readonly forwardCapacityGapTons: number;
+      readonly forwardCapacityGapRatio: number;
+    } | null;
+    readonly marketGrowthEvidence: {
+      readonly recentOwnContractGrowthRatio: number | null;
+      readonly observedMarketGrowthRatio: number | null;
+    } | null;
+    readonly existingExpansionAlternativeSufficientTons: number | null;
+    readonly postConstructionActivationFeasible: boolean | null;
   } | null;
   readonly availability: PackAvailability;
 }

@@ -181,6 +181,56 @@ const ENTRIES: readonly DictionaryEntry[] = [
     nullableReason: "Vision 導入より前に保存された Simulation Run（availability=NOT_RECORDED）。",
   },
   {
+    field: "companies[].turns[].strategy.newFactory.decisionRoute",
+    japanese: "新工場判断の経路",
+    definition:
+      "REACTIVE（今の稼働率・受注残・需要に反応する既存経路）／ STRATEGIC_FORWARD_CAPACITY（Forward Capacity Gapに基づく先行投資経路）／ NONE（どちらの経路も提案に届かなかった）。STRATEGIC_FORWARD_CAPACITYは vision.strategicPosture が AGGRESSIVE_EARLY_CAPACITY の会社に限り、REACTIVEがREADY_TO_BUILDへ届かなかった場合だけ評価される。",
+    unit: "経路名",
+    source: "companyLab/standardAi/decision/newFactory.ts（evaluateNewFactoryDecision）",
+    layer: "AI_INTERNAL",
+    nullableReason: "newFactory自体がnull（Vision未導入）の場合。",
+  },
+  {
+    field: "companies[].turns[].strategy.newFactory.strategicPosture",
+    japanese: "会社の戦略姿勢",
+    definition:
+      "AGGRESSIVE_EARLY_CAPACITY（先行能力投資型）／ DEMAND_CONFIRMED（今日までの反応型。既定）／ VALUE_FIRST（価値重視・新工場ロジックはDEMAND_CONFIRMEDと同一挙動）。Vision に付随する任意フィールドで、未設定の会社は DEMAND_CONFIRMED として扱われる。",
+    unit: "姿勢名",
+    source: "companyLab/vision/types.ts（CompanyVision.strategicPosture）",
+    layer: "AI_INTERNAL",
+    nullableReason: "newFactory自体がnull（Vision未導入）の場合。",
+  },
+  {
+    field: "companies[].turns[].strategy.newFactory.forwardCapacityGap",
+    japanese: "Forward Capacity Gap（完成予定ターン時点の能力不足見込み）",
+    definition:
+      "新工場の完成予定ターン（forecastCompletionTurn = 現在ターン + 建設リードタイム）時点で必要になっていそうな規模と、現在の持続可能な生産能力の差。想定規模は「Vision参考軌道」と「観測できる自社成約成長・観測市場成長のminで現在規模を延伸した値」の**小さい方**（片方だけの楽観に依らない）。**TRUE未来の需要・価格は一切参照していない**（この計算の引数に存在しない）。",
+    unit: "HOSO換算トン/四半期 ／ 比率 ／ ターン数",
+    source: "companyLab/standardAi/forwardCapacityGap.ts",
+    layer: "AI_INTERNAL",
+    nullableReason: "strategicPostureがAGGRESSIVE_EARLY_CAPACITYでない、またはVision未導入の場合はnull。",
+  },
+  {
+    field: "companies[].turns[].strategy.newFactory.marketGrowthEvidence",
+    japanese: "観測できる成長根拠",
+    definition:
+      "recentOwnContractGrowthRatio（直近の自社成約成長率。Commercial Ambitionのambitionmultiplierから）と observedMarketGrowthRatio（生産能力起因で持続的に取り切れていない機会の比率）。どちらも観測できなければnull。Forward Capacity Gapの延伸計算はこの2値のminを使うため、片方でも欠けていれば延伸は0になる（Vision単独の楽観だけで先行投資しない設計）。",
+    unit: "比率/四半期",
+    source: "companyLab/standardAi/forwardCapacityGap.ts（buildMarketGrowthEvidence）",
+    layer: "AI_INTERNAL",
+    nullableReason: "forwardCapacityGapと同じ（strategic route未評価の場合）。",
+  },
+  {
+    field: "companies[].turns[].strategy.newFactory.existingExpansionAlternativeSufficientTons / postConstructionActivationFeasible",
+    japanese: "既存増設で足りるか／完成後に稼働化できる見込みか",
+    definition:
+      "既存工場の増設余地と志との差の大きさから見て、新工場を先行着工しなくても既存増設だけで対応できると判断した場合に前者へforwardCapacityGapTonsが入る（それ以外はnull）。後者は、完成後にWorker・設備を実際に投入できる財務余力の見込み（このフェーズではreactive routeと同一の財務ゲート判定を再利用）。空箱化（先行着工したが稼働化できない）を避けるための判定。",
+    unit: "HOSO換算トン/四半期 ／ 真偽値",
+    source: "companyLab/standardAi/decision/newFactory.ts（evaluateStrategicForwardCapacityRoute）",
+    layer: "AI_INTERNAL",
+    nullableReason: "strategic route未評価の場合はどちらもnull。",
+  },
+  {
     field: "companies[].turns[].decisionOwner",
     japanese: "その四半期の意思決定者",
     definition:
@@ -344,6 +394,10 @@ export function buildDataDictionaryMarkdown(context: AiAnalysisPackContext): str
   lines.push("");
   lines.push(
     "**Phase 7 (Manual Override) note:** `companies[].turns[].decisionOwner` and the top-level `decisionOwnership` summary were added as backward-compatible additive fields — existing readers of this schema version are unaffected, so the schema version was not bumped. Simulation Runs recorded before Phase 7 simply have no PLAYER turns; see the `decisionOwner` entry in Fields below for how those are interpreted."
+  );
+  lines.push("");
+  lines.push(
+    "**Strategic Posture (Aggressive Early Capacity) note:** `companies[].turns[].strategy.newFactory.decisionRoute` / `.strategicPosture` / `.forwardCapacityGap` / `.marketGrowthEvidence` / `.existingExpansionAlternativeSufficientTons` / `.postConstructionActivationFeasible` were added as backward-compatible additive fields on the existing `newFactory` object — existing readers are unaffected, so the schema version was not bumped. `forwardCapacityGap`/`marketGrowthEvidence` are non-null only for companies whose Vision has `strategicPosture: \"AGGRESSIVE_EARLY_CAPACITY\"` **and** whose reactive route did not already reach READY_TO_BUILD that quarter; for every other company/quarter they are `null`, and `decisionRoute` reads `\"REACTIVE\"` or `\"NONE\"` exactly as before this change."
   );
   lines.push("");
   lines.push("## Layers");
