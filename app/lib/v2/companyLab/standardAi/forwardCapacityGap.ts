@@ -87,12 +87,26 @@ export function computeForwardCapacityGap(input: ForwardCapacityGapInput): Forwa
     horizonTurn
   );
 
-  // 【両方の根拠が揃って初めて成長を仮定する】どちらかがnull・0以下なら
-  // 成長率0（＝現状維持）にfall backする。楽観的なVisionだけで先行投資を
-  // 正当化しない（設計文書§5.2「支持されなければならない」）。
-  const ownGrowth = input.marketGrowthEvidence.recentOwnContractGrowthRatio ?? 0;
-  const marketGrowth = input.marketGrowthEvidence.observedMarketGrowthRatio ?? 0;
-  const observedGrowthRatioPerQuarter = Math.max(0, Math.min(ownGrowth, marketGrowth));
+  // 【Phase G・§3/§27修正】どちらか一方しか観測できない場合に「観測できていない
+  // 方」を0とみなしてmin()を取ると、observedMarketGrowthRatioがたまたま
+  // 観測できていないだけで、実際に強い自社成長根拠（recentOwnContractGrowthRatio）
+  // まで一律ゼロに潰れてしまう。これは「楽観的なVisionだけで先行投資を正当化
+  // しない」（設計文書§5.2）という趣旨とは別の、観測欠落による過小評価であり、
+  // Phase Fでstrategic routeが一度も発火しなかった直接原因の1つだった
+  // （observedMarketGrowthRatioの計算がreactive Gate Hと同じ「持続的稼働率」
+  // 条件に紐づいていたため、reactiveが動くタイミングとしか一致しなかった）。
+  //
+  // 修正: 両方が観測できているときだけ「小さい方」で慎重に見る（支持の要件は
+  // そのまま維持）。片方しか観測できていないときは、観測できている方をそのまま
+  // 使う（無いものを0と決めつけない）。両方とも観測できなければ0。
+  const ownGrowth = input.marketGrowthEvidence.recentOwnContractGrowthRatio;
+  const marketGrowth = input.marketGrowthEvidence.observedMarketGrowthRatio;
+  const observedGrowthRatioPerQuarter = Math.max(
+    0,
+    ownGrowth !== null && marketGrowth !== null
+      ? Math.min(ownGrowth, marketGrowth)
+      : (ownGrowth ?? marketGrowth ?? 0)
+  );
   const trendAdjustedScaleAtCompletion =
     input.currentSustainableScaleTons * Math.pow(1 + observedGrowthRatioPerQuarter, constructionLeadTimeQuarters);
 

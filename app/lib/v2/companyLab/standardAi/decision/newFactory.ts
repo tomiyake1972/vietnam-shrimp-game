@@ -90,6 +90,16 @@ export interface NewFactoryAssessment {
   /** 既存増設だけでforward gapを解消できると判断した場合の、その根拠比率（gapJustifiesOverlapの判定に使った値）。 */
   readonly existingExpansionAlternativeSufficientTons: number | null;
   readonly postConstructionActivationFeasible: boolean | null;
+  /**
+   * 【Phase G・§31/§34】strategic routeが評価された場合、その同じ四半期に
+   * reactive routeがどの段階で止まっていたか（READY_TO_BUILDでなかったことの
+   * 直接証拠。「reactiveがまだ準備できていない時にstrategicが提案した」を
+   * 事後に再構成できるようにする）。strategic route自体が評価されなかった
+   * 四半期（DEMAND_CONFIRMED/VALUE_FIRST、またはreactiveが自力でREADY_TO_BUILD
+   * に届いた四半期）はnull。
+   */
+  readonly reactiveStatusAtStrategicDecision: NewFactoryConsiderationStatus | null;
+  readonly reactiveBlockerAtStrategicDecision: string | null;
 }
 
 export interface NewFactoryDecisionResult {
@@ -232,6 +242,8 @@ function evaluateReactiveNewFactoryRoute(input: NewFactoryDecisionInput): NewFac
       marketGrowthEvidence: null,
       existingExpansionAlternativeSufficientTons: null,
       postConstructionActivationFeasible: null,
+      reactiveStatusAtStrategicDecision: null,
+      reactiveBlockerAtStrategicDecision: null,
     },
     proposals,
     diagnostics,
@@ -655,9 +667,23 @@ function evaluateReactiveNewFactoryRoute(input: NewFactoryDecisionInput): NewFac
 function buildMarketGrowthEvidence(input: NewFactoryDecisionInput, bindingCapacityTons: number): MarketGrowthEvidence {
   const recentOwnContractGrowthRatio = input.commercialAmbition ? input.commercialAmbition.ambitionMultiplier - 1 : null;
 
+  // 【Phase G・§3/§6修正】ここで observedMarketGrowthRatio を
+  // 「持続的に稼働率が高い（persistentCapacityCausedUnserved）」に紐づけない。
+  // その条件は reactive Gate H（EXISTING_CAPACITY_IN_USE、稼働率が既に
+  // minimumUtilizationForNewFactory を超えている）と実質同一の「今すでに
+  // 能力が逼迫している」条件であり、strategic routeの存在意義（＝まだ逼迫
+  // していない段階で先を見る）と矛盾する。Phase Fの実測監査で、この結合が
+  // strategic routeが一度もreactiveより先に発火しなかった直接原因だった。
+  //
+  // 代わりに、当期・生産能力が理由で取り切れなかった採算つき機会
+  // （unservedOpportunity.blockedByProductionCapacityTons）をそのまま使う。
+  // これは既存モジュール（unservedOpportunity.ts）が当期の観測だけから
+  // 正式に切り分けた値であり、新しい計算式ではない。「持続しているか」は
+  // ここでは要求しない（1四半期の値の急増だけで過剰反応しないための
+  // 抑制は、Gate STRATEGIC_GROWTH_EVIDENCE 側でrecentOwnContractGrowthRatio
+  // との**両立**を要求することで別途かける。設計文書§5.2）。
   const capacityCausedUnserved = input.unservedOpportunity?.blockedByProductionCapacityTons ?? 0;
-  const persistentEvidence = (input.persistentCapacityCausedUnserved ?? false) && capacityCausedUnserved > EPSILON && bindingCapacityTons > EPSILON;
-  const observedMarketGrowthRatio = persistentEvidence ? capacityCausedUnserved / bindingCapacityTons : null;
+  const observedMarketGrowthRatio = bindingCapacityTons > EPSILON && capacityCausedUnserved > EPSILON ? capacityCausedUnserved / bindingCapacityTons : null;
 
   return { recentOwnContractGrowthRatio, observedMarketGrowthRatio };
 }
@@ -667,7 +693,11 @@ function buildMarketGrowthEvidence(input: NewFactoryDecisionInput, bindingCapaci
  * AGGRESSIVE_EARLY_CAPACITYの会社に対してのみ、reactive routeがREADY_TO_BUILDへ
  * 届かなかったときに呼ばれる（evaluateNewFactoryDecision参照）。
  */
-function evaluateStrategicForwardCapacityRoute(input: NewFactoryDecisionInput): NewFactoryDecisionResult {
+function evaluateStrategicForwardCapacityRoute(
+  input: NewFactoryDecisionInput,
+  reactiveStatusAtDecision: NewFactoryConsiderationStatus,
+  reactiveBlockerAtDecision: string | null
+): NewFactoryDecisionResult {
   const { fixture, observation, pressures, vision, strategicGrowth } = input;
   if (!vision || !strategicGrowth) {
     throw new Error("evaluateStrategicForwardCapacityRoute: vision/strategicGrowth must be present（呼び出し側の契約違反）。");
@@ -730,6 +760,8 @@ function evaluateStrategicForwardCapacityRoute(input: NewFactoryDecisionInput): 
       marketGrowthEvidence,
       existingExpansionAlternativeSufficientTons,
       postConstructionActivationFeasible,
+      reactiveStatusAtStrategicDecision: reactiveStatusAtDecision,
+      reactiveBlockerAtStrategicDecision: reactiveBlockerAtDecision,
     },
     proposals,
     diagnostics,
@@ -807,14 +839,20 @@ function evaluateStrategicForwardCapacityRoute(input: NewFactoryDecisionInput): 
   }
 
   // --- Gate: 既存増設だけでは gap を解消できないか ------------------------
-  const gapJustifiesOverlap = strategicGrowth.strategicScaleGapRatio > sp.overlapGapRatio;
+  // 【Phase G・§13/§14修正】ここでの「併走を正当化するほど差が大きいか」は
+  // reactive routeと同じ currentの strategicScaleGapRatio ではなく、
+  // strategic routeが実際に見ている forwardCapacityGapRatio（完成時点の
+  // 不足）で判定する。current gapは「今」の話であり、strategic routeの
+  // 判断基準（完成時点）と食い違うと、ここでも実質的にreactiveと同じ
+  // タイミングでしか併走を許さなくなってしまう（§3と同型の問題）。
+  const gapJustifiesOverlap = forwardCapacityGap.forwardCapacityGapRatio > sp.overlapGapRatio;
   const hasExistingSpace = observation.factorySpaceRemainingUnits > sp.existingSpaceSufficientUnits;
   const existingExpansionSufficient = hasExistingSpace && !gapJustifiesOverlap;
   const expansionKeyValues = {
     factorySpaceRemainingUnits: observation.factorySpaceRemainingUnits,
     existingSpaceSufficientUnits: sp.existingSpaceSufficientUnits,
     overlapGapRatio: sp.overlapGapRatio,
-    strategicScaleGapRatio: strategicGrowth.strategicScaleGapRatio,
+    forwardCapacityGapRatio: forwardCapacityGap.forwardCapacityGapRatio,
   };
   gates.push(
     gate(
@@ -957,7 +995,11 @@ export function evaluateNewFactoryDecision(input: NewFactoryDecisionInput): NewF
     return reactive;
   }
 
-  const strategic = evaluateStrategicForwardCapacityRoute(input);
+  const strategic = evaluateStrategicForwardCapacityRoute(
+    input,
+    reactive.assessment.status,
+    describeNewFactoryBlocker(reactive.assessment)
+  );
   return {
     assessment: strategic.assessment,
     proposals: strategic.proposals,
