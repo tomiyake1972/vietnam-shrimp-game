@@ -9,7 +9,10 @@
 // （32Q を回し終えた結果を丸ごと1回保存する）。四半期ごとの原子コミット・
 // 楽観ロック・処理ロックは必要ないため、意図的に持たない。
 
-import { StoredSimulationRun, SimulationRunSummary, isReadableSimulationRunSchema, toSimulationRunSummary } from "./types";
+import { StoredSimulationRun, StoredSimulationRunManifest, SimulationRunSummary, isReadableSimulationRunSchema, toSimulationRunSummary } from "./types";
+
+/** saveRunPart が受け付けるパート種別。 */
+export type SimulationRunPart = "dataset" | "resume" | "pack";
 
 export class SimulationRunNotFoundError extends Error {
   constructor(readonly simulationRunId: string) {
@@ -36,8 +39,31 @@ export class SimulationRunSchemaError extends Error {
 export const SIMULATION_RUN_RETENTION_LIMIT = 20;
 
 export interface SimulationRunRepository {
-  /** 保存（同じ simulationRunId は上書きする＝同じ実行を保存し直せる）。 */
+  /**
+   * 保存（同じ simulationRunId は上書きする＝同じ実行を保存し直せる）。
+   * 【Turn14以降Save/Resume停止BLOCKER修正】呼び出し側が完全な StoredSimulationRun を
+   * 一度に持っている場合の便宜メソッド（テスト・小さいpayload向け）。内部的には
+   * saveRunPart×最大3回 → commitRunManifest の順で呼ぶのと同じ意味を持つ。
+   * HTTP経由でクライアントから保存する場合は、1回のrequest bodyが巨大になるのを
+   * 避けるため、API層はこのsaveRunではなく saveRunPart / commitRunManifest を
+   * 個別のHTTP requestとして順に呼ぶ（simulation-runs/_lib/handlers.ts参照）。
+   */
   saveRun(stored: StoredSimulationRun): Promise<void>;
+  /**
+   * 【Turn14以降Save/Resume停止BLOCKER修正】dataset/resumePayload/packCaptureの
+   * いずれか1パートだけを、指定revisionのキーへ保存する。まだmanifestは更新しない
+   * （＝この時点ではまだ「読み込み可能な完全な状態」として公開されない。
+   * commitRunManifestが呼ばれて初めて公開される。指示§21/§22）。
+   */
+  saveRunPart(simulationRunId: string, revision: number, part: SimulationRunPart, value: unknown): Promise<void>;
+  /**
+   * 【Turn14以降Save/Resume停止BLOCKER修正】manifestを更新し、指定revisionを
+   * 「読み込み可能な完全な状態」として公開する。呼び出し側は、この呼び出しより前に
+   * 該当revisionのdataset（必須）・resume（hasResumePayloadがtrueなら必須）・
+   * pack（hasPackCaptureがtrueなら必須）をすべてsaveRunPartで保存し終えている
+   * こと（そうでない場合、後続のloadRunがパート欠落エラーを出す）。
+   */
+  commitRunManifest(manifest: StoredSimulationRunManifest, summary: SimulationRunSummary): Promise<void>;
   /** 読み込み。存在しなければ null。 */
   loadRun(simulationRunId: string): Promise<StoredSimulationRun | null>;
   /** 一覧（保存が新しい順）。dataset 本体は読まない。 */
@@ -90,14 +116,54 @@ export function sortAndLimitSummaries(summaries: readonly SimulationRunSummary[]
 
 export function createInMemorySimulationRunRepository(): SimulationRunRepository {
   const runs = new Map<string, StoredSimulationRun>();
+  // simulationRunId → revision → part → value（commitRunManifestで公開されるまで見えない）。
+  const pendingParts = new Map<string, Map<number, Partial<Record<SimulationRunPart, unknown>>>>();
 
   async function saveRun(stored: StoredSimulationRun): Promise<void> {
     assertStorableSimulationRun(stored);
+    const revision = stored.persistenceRevision ?? 1;
+    await saveRunPart(stored.run.simulationRunId, revision, "dataset", stored.dataset);
+    if (stored.resumePayload !== undefined) await saveRunPart(stored.run.simulationRunId, revision, "resume", stored.resumePayload);
+    if (stored.packCapture !== undefined) await saveRunPart(stored.run.simulationRunId, revision, "pack", stored.packCapture);
+    await commitRunManifest(
+      {
+        schemaVersion: stored.schemaVersion,
+        run: stored.run,
+        persistenceRevision: revision,
+        savedAt: stored.savedAt,
+        hasResumePayload: stored.resumePayload !== undefined,
+        hasPackCapture: stored.packCapture !== undefined,
+      },
+      toSimulationRunSummary(stored)
+    );
+  }
+
+  async function saveRunPart(simulationRunId: string, revision: number, part: SimulationRunPart, value: unknown): Promise<void> {
+    const byRevision = pendingParts.get(simulationRunId) ?? new Map<number, Partial<Record<SimulationRunPart, unknown>>>();
+    const parts = byRevision.get(revision) ?? {};
+    parts[part] = value;
+    byRevision.set(revision, parts);
+    pendingParts.set(simulationRunId, byRevision);
+  }
+
+  async function commitRunManifest(manifest: StoredSimulationRunManifest, summary: SimulationRunSummary): Promise<void> {
+    const parts = pendingParts.get(manifest.run.simulationRunId)?.get(manifest.persistenceRevision) ?? {};
+    const stored: StoredSimulationRun = {
+      schemaVersion: manifest.schemaVersion,
+      run: manifest.run,
+      dataset: parts.dataset as StoredSimulationRun["dataset"],
+      resumePayload: manifest.hasResumePayload ? (parts.resume as StoredSimulationRun["resumePayload"]) : undefined,
+      packCapture: manifest.hasPackCapture ? (parts.pack as StoredSimulationRun["packCapture"]) : undefined,
+      savedAt: manifest.savedAt,
+      persistenceRevision: manifest.persistenceRevision,
+    };
+    assertStorableSimulationRun(stored);
     runs.set(stored.run.simulationRunId, stored);
+    void summary; // インメモリ実装は toSimulationRunSummary(stored) を都度計算するため要約を別保持しない
     // 保存上限を超えたら、保存が古いものから消す（Redis 実装と同じ意味論）。
     const ordered = sortAndLimitSummaries([...runs.values()].map(toSimulationRunSummary), Number.MAX_SAFE_INTEGER);
-    for (const summary of ordered.slice(SIMULATION_RUN_RETENTION_LIMIT)) {
-      runs.delete(summary.simulationRunId);
+    for (const evicted of ordered.slice(SIMULATION_RUN_RETENTION_LIMIT)) {
+      runs.delete(evicted.simulationRunId);
     }
   }
 
@@ -113,5 +179,5 @@ export function createInMemorySimulationRunRepository(): SimulationRunRepository
     runs.delete(simulationRunId);
   }
 
-  return { saveRun, loadRun, listRuns, deleteRun };
+  return { saveRun, saveRunPart, commitRunManifest, loadRun, listRuns, deleteRun };
 }

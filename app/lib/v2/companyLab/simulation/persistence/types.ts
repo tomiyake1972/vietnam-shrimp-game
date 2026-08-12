@@ -58,8 +58,36 @@ import { CompanyLabRuntimeSnapshot } from "../../persistence/types";
  *            readonly CompanyQuarterRecord[]）ため、古いv1-v3データや
  *            間引き前のv4データも同じ型としてそのまま読める。
  *        追加的変更のみでマイグレーション不要。
+ *   v5 … 【Turn14以降Save/Resume停止BLOCKER修正】serverの保存物を
+ *        1つの巨大なJSON value（manifestキーへ直接dataset等を埋め込む形）から、
+ *        manifest（小さい）＋revisionでバージョニングしたresume/dataset/pack
+ *        パートキーへ分割した（redisRepository.ts参照）。実測でこの束ねた形が
+ *        Vercel Functionsのrequest body上限（既定約4.5MB）にTurn10〜15あたりで
+ *        到達し、それ以降のserver保存がプラットフォーム側で拒否されていたことを
+ *        確認した。あわせて、POST /api/v2/simulation-runs のハンドラーが
+ *        resumePayloadとpersistenceRevisionをクライアントから受け取っても
+ *        保存対象へ含めていなかった実バグ（server保存物が常にVIEW_ONLY・
+ *        常にrevision=0扱いになっていた）も修正した。
+ *        StoredSimulationRun自体の型（TypeScript側の形）は変わらない
+ *        （読み込み時にredisRepository.tsがmanifest＋各パートから組み立てて
+ *        従来と同じ形へ復元する）ため、旧v1-v4データ（manifestキーに直接
+ *        dataset等が埋め込まれた形）もそのまま読める。
  */
-export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 4;
+export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 5;
+
+/**
+ * 【schemaVersion 5・Turn14以降Save/Resume停止BLOCKER修正】
+ * Redis上でmanifestキーに保存する小さい本体。dataset/resumePayload/packCaptureは
+ * 持たない（それぞれ別キー・別revisionへ保存される。redisRepository.ts参照）。
+ */
+export interface StoredSimulationRunManifest {
+  readonly schemaVersion: number;
+  readonly run: SimulationRun;
+  readonly persistenceRevision: number;
+  readonly savedAt: string;
+  readonly hasResumePayload: boolean;
+  readonly hasPackCapture: boolean;
+}
 
 /** 保存される Simulation Run 1本ぶん。 */
 export interface StoredSimulationRun {
@@ -188,6 +216,30 @@ export function toSimulationRunSummary(stored: StoredSimulationRun): SimulationR
       .map(([companyId]) => companyId),
     hasResumePayload: stored.resumePayload !== undefined,
     persistenceRevision: stored.persistenceRevision,
+  };
+}
+
+/** toSimulationRunSummary と同じ変換を、巨大なdataset/resumePayload/packCaptureを
+ * 持たない StoredSimulationRunManifest から行う（Turn14以降Save/Resume停止BLOCKER修正）。 */
+export function manifestToSimulationRunSummary(manifest: StoredSimulationRunManifest): SimulationRunSummary {
+  return {
+    simulationRunId: manifest.run.simulationRunId,
+    scenarioId: manifest.run.scenarioId,
+    seed: manifest.run.seed,
+    requestedTurns: manifest.run.requestedTurns,
+    completedTurns: manifest.run.completedTurns,
+    stopReason: manifest.run.stopReason,
+    startedAt: manifest.run.startedAt,
+    completedAt: manifest.run.completedAt,
+    savedAt: manifest.savedAt,
+    gameParameterVersion: manifest.run.gameParameterVersion,
+    standardAiVersion: manifest.run.standardAiVersion,
+    runName: manifest.run.runName,
+    playerCompanyIds: Object.entries(manifest.run.companyControlModes ?? {})
+      .filter(([, mode]) => mode === "PLAYER")
+      .map(([companyId]) => companyId),
+    hasResumePayload: manifest.hasResumePayload,
+    persistenceRevision: manifest.persistenceRevision,
   };
 }
 

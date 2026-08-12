@@ -3,19 +3,86 @@
 // Repository を注入して受け取る純粋なハンドラー（テストではインメモリ実装を渡す）。
 // 例外を投げず、必ず {status, body} を返す。
 
-import { SimulationRunRepository, SimulationRunSchemaError } from "../../../../lib/v2/companyLab/simulation/persistence/repository";
-import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, StoredSimulationRun } from "../../../../lib/v2/companyLab/simulation/persistence/types";
+import { SimulationRunPart, SimulationRunRepository, SimulationRunSchemaError } from "../../../../lib/v2/companyLab/simulation/persistence/repository";
+import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, StoredSimulationRun, StoredSimulationRunManifest, manifestToSimulationRunSummary } from "../../../../lib/v2/companyLab/simulation/persistence/types";
 import { SimulationRunApiResult } from "./context";
 
 function badRequest(message: string): SimulationRunApiResult {
   return { status: 400, body: { error: { code: "BAD_REQUEST", message } } };
 }
 
+const VALID_PARTS: readonly SimulationRunPart[] = ["dataset", "resume", "pack"];
+
+/**
+ * 【Turn14以降Save/Resume停止BLOCKER修正】dataset/resumePayload/packCaptureの
+ * いずれか1パートを保存する。1回のHTTP requestが小さく収まるよう、クライアントは
+ * これを複数回（part単位）に分けて呼ぶ（simulationRunStore.ts の saveToServer 参照）。
+ * まだmanifestは更新しない＝この時点ではまだ「読み込み可能な完全な状態」として
+ * 公開されない。
+ */
+export async function handleSaveSimulationRunPart(repository: SimulationRunRepository, body: unknown): Promise<SimulationRunApiResult> {
+  if (typeof body !== "object" || body === null) {
+    return badRequest("リクエストボディが JSON オブジェクトではありません。");
+  }
+  const candidate = body as { simulationRunId?: unknown; revision?: unknown; part?: unknown; value?: unknown };
+  if (typeof candidate.simulationRunId !== "string" || candidate.simulationRunId.length === 0) {
+    return badRequest("simulationRunId が空です。");
+  }
+  if (typeof candidate.revision !== "number" || !Number.isFinite(candidate.revision)) {
+    return badRequest("revision が数値ではありません。");
+  }
+  if (typeof candidate.part !== "string" || !VALID_PARTS.includes(candidate.part as SimulationRunPart)) {
+    return badRequest(`part は ${VALID_PARTS.join(" / ")} のいずれかである必要があります。`);
+  }
+  if (candidate.value === undefined) {
+    return badRequest("value がありません。");
+  }
+  try {
+    await repository.saveRunPart(candidate.simulationRunId, candidate.revision, candidate.part as SimulationRunPart, candidate.value);
+  } catch (e) {
+    if (e instanceof SimulationRunSchemaError) return badRequest(e.message);
+    throw e;
+  }
+  return { status: 200, body: { simulationRunId: candidate.simulationRunId, revision: candidate.revision, part: candidate.part } };
+}
+
+/**
+ * 【Turn14以降Save/Resume停止BLOCKER修正】manifestをcommitする（＝該当revisionを
+ * 「読み込み可能な完全な状態」として公開する）。呼び出し側は、この呼び出しより前に
+ * 該当revisionの全パートをhandleSaveSimulationRunPart経由で保存し終えていること。
+ *
+ * 【後方互換】旧クライアント（dataset/resumePayload/packCaptureを直接bodyへ埋め込む
+ * 形）からの呼び出しも引き続き受け付ける（小さいpayloadであれば単発で成立するため）。
+ * その場合はrepository.saveRunへフォールバックする。
+ */
 export async function handleSaveSimulationRun(repository: SimulationRunRepository, body: unknown): Promise<SimulationRunApiResult> {
   if (typeof body !== "object" || body === null) {
     return badRequest("リクエストボディが JSON オブジェクトではありません。");
   }
-  const candidate = body as Partial<StoredSimulationRun>;
+  const candidate = body as Partial<StoredSimulationRun> & Partial<StoredSimulationRunManifest> & { readonly manifestOnly?: boolean };
+
+  if (candidate.manifestOnly) {
+    if (!candidate.run || typeof candidate.savedAt !== "string" || typeof candidate.persistenceRevision !== "number") {
+      return badRequest("run / savedAt / persistenceRevision のいずれかがありません。");
+    }
+    const manifest: StoredSimulationRunManifest = {
+      schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
+      run: candidate.run,
+      persistenceRevision: candidate.persistenceRevision,
+      savedAt: candidate.savedAt,
+      hasResumePayload: candidate.hasResumePayload === true,
+      hasPackCapture: candidate.hasPackCapture === true,
+    };
+    try {
+      await repository.commitRunManifest(manifest, manifestToSimulationRunSummary(manifest));
+    } catch (e) {
+      if (e instanceof SimulationRunSchemaError) return badRequest(e.message);
+      throw e;
+    }
+    return { status: 200, body: { simulationRunId: manifest.run.simulationRunId, savedAt: manifest.savedAt, persistenceRevision: manifest.persistenceRevision } };
+  }
+
+  // 旧形式（dataset等を直接bodyへ埋め込む単発保存）。
   if (!candidate.run || !candidate.dataset || typeof candidate.savedAt !== "string") {
     return badRequest("run / dataset / savedAt のいずれかがありません。");
   }
@@ -24,8 +91,16 @@ export async function handleSaveSimulationRun(repository: SimulationRunRepositor
     schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
     run: candidate.run,
     dataset: candidate.dataset,
+    // 【Turn14以降Save/Resume停止BLOCKER修正で判明した実バグの修正】
+    // 旧実装はここで resumePayload と persistenceRevision をクライアントから
+    // 受け取っていながら保存対象へ含めておらず、server保存物が常に
+    // resumePayload無し（＝VIEW_ONLY）・常にpersistenceRevision無し
+    // （＝freshness比較で常にrevision=0扱い、browser側に常に敗ける）という
+    // 実バグになっていた。
+    resumePayload: candidate.resumePayload,
     packCapture: candidate.packCapture,
     savedAt: candidate.savedAt,
+    persistenceRevision: candidate.persistenceRevision,
   };
   try {
     await repository.saveRun(stored);
@@ -33,7 +108,7 @@ export async function handleSaveSimulationRun(repository: SimulationRunRepositor
     if (e instanceof SimulationRunSchemaError) return badRequest(e.message);
     throw e;
   }
-  return { status: 200, body: { simulationRunId: stored.run.simulationRunId, savedAt: stored.savedAt } };
+  return { status: 200, body: { simulationRunId: stored.run.simulationRunId, savedAt: stored.savedAt, persistenceRevision: stored.persistenceRevision } };
 }
 
 export async function handleLoadSimulationRun(repository: SimulationRunRepository, simulationRunId: string): Promise<SimulationRunApiResult> {

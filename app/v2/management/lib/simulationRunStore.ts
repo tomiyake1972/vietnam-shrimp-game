@@ -182,18 +182,65 @@ function removeFromBrowser(simulationRunId: string): void {
 // 2. サーバー保存（使えない環境では静かに諦めず、理由を返す）
 // ---------------------------------------------------------------------
 
-async function saveToServer(stored: StoredSimulationRun): Promise<string | null> {
+async function postJson(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const response = await fetch("/api/v2/simulation-runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(stored),
+      body: JSON.stringify(body),
     });
-    if (!response.ok) return `サーバー保存に失敗しました（HTTP ${response.status}）`;
-    return null;
+    if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
+    return { ok: true };
   } catch (e) {
-    return `サーバー保存に到達できませんでした（${e instanceof Error ? e.message : String(e)}）`;
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/**
+ * 【Turn14以降Save/Resume停止BLOCKER修正】dataset/resumePayload/packCaptureを
+ * 1回のrequest bodyへ束ねない。実測でこの束ねた形がVercel Functionsのrequest body
+ * 上限（既定約4.5MB）にTurn10〜15あたりで到達し、それ以降のserver保存が
+ * プラットフォーム側で拒否されていた（アプリケーションコードにすら到達しない失敗
+ * のため、以前はHTTPエラーとして観測しづらかった）。
+ *
+ * ここでは各パートを個別のPOST requestとして送り（dataset/pack単体はO(turns)で
+ * 成長し続けても32Qまで4.5MBに到達しない。resumePayloadはrolling windowで既に
+ * 小さい）、すべて成功した場合にだけ最後にmanifestをcommitする（＝このrevisionを
+ * 「読み込み可能な完全な状態」として公開する。指示§21/§22 atomic save / manifest方式）。
+ * 途中のパートが失敗したら、manifestは古いrevisionを指したままになる
+ * （部分的に書けた新しいパートは「未公開」のまま＝次にこのrevisionで再送すれば
+ * 上書きされる。孤立した未公開パートがユーザーに見えることはない）。
+ */
+async function saveToServer(stored: StoredSimulationRun): Promise<string | null> {
+  const simulationRunId = stored.run.simulationRunId;
+  const revision = stored.persistenceRevision;
+  if (typeof revision !== "number") {
+    return "サーバー保存に失敗しました（persistenceRevisionが未設定です。呼び出し側の実装ミスの可能性があります）。";
+  }
+
+  const datasetResult = await postJson({ simulationRunId, revision, part: "dataset", value: stored.dataset });
+  if (!datasetResult.ok) return `サーバー保存に失敗しました（dataset: ${datasetResult.error}）`;
+
+  if (stored.resumePayload !== undefined) {
+    const resumeResult = await postJson({ simulationRunId, revision, part: "resume", value: stored.resumePayload });
+    if (!resumeResult.ok) return `サーバー保存に失敗しました（resume: ${resumeResult.error}）`;
+  }
+
+  if (stored.packCapture !== undefined) {
+    const packResult = await postJson({ simulationRunId, revision, part: "pack", value: stored.packCapture });
+    if (!packResult.ok) return `サーバー保存に失敗しました（pack: ${packResult.error}）`;
+  }
+
+  const manifestResult = await postJson({
+    manifestOnly: true,
+    run: stored.run,
+    savedAt: stored.savedAt,
+    persistenceRevision: revision,
+    hasResumePayload: stored.resumePayload !== undefined,
+    hasPackCapture: stored.packCapture !== undefined,
+  });
+  if (!manifestResult.ok) return `サーバー保存に失敗しました（manifest: ${manifestResult.error}）`;
+  return null;
 }
 
 async function loadFromServer(simulationRunId: string): Promise<StoredSimulationRun | null> {

@@ -119,6 +119,14 @@ export function ManagementConsole() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("BAL");
   const [savedRuns, setSavedRuns] = useState<readonly SimulationRunSummary[]>([]);
   const [storageNote, setStorageNote] = useState<string | null>(null);
+  /**
+   * 【Turn14以降Save/Resume停止BLOCKER修正・指示§17/§31】browser・server両方の保存が
+   * 失敗した場合、ゲームの見た目上のTurnだけが進み続けて保存正本が追いつかない
+   * （「Turn18まで進めたように見えてTurn14へ消える」）状態を防ぐ。両方失敗した直後は
+   * さらにTurnを進めるボタンを無効化し、次に保存が成功する（browser・serverの
+   * どちらか一方でも成功する）までブロックする。
+   */
+  const [persistenceBlocked, setPersistenceBlocked] = useState(false);
   const [restoring, setRestoring] = useState(true);
   const stopRequested = useRef(false);
 
@@ -136,6 +144,7 @@ export function ManagementConsole() {
     setConfirmedPlayerDecisions({});
     setConfirmedPlayerDrafts({});
     setWaitingForPlayerCompanyIds([]);
+    setPersistenceBlocked(false);
   }, []);
 
   const [strategyDocs] = useState<Readonly<Record<string, CompanyStrategyDocument>>>(() => {
@@ -333,6 +342,9 @@ export function ManagementConsole() {
               ? `保存先: このブラウザのみ（${result.serverError}）`
               : `保存先: サーバーのみ（${result.browserError}）`
       );
+      // 【指示§17/§31】両方失敗＝どこにも保存されていない状態でだけブロックする
+      // （片方だけの成功はdegradedとして継続可、と既存のstorageNote表示で伝える）。
+      setPersistenceBlocked(result.savedTo.length === 0);
     },
     []
   );
@@ -341,6 +353,15 @@ export function ManagementConsole() {
   const run = useCallback(
     async (turns: number) => {
       if (phase !== "idle" || restoring) return;
+      // 【指示§17/§31】直前の保存でbrowser・server両方が失敗している場合、
+      // 見た目のTurnだけ進んで保存正本が追いつかない状態を許さない。
+      if (persistenceBlocked) {
+        setErrorMessage(
+          "直前の保存がブラウザ・サーバーの両方で失敗しており、このまま進めると進行状況が保存されずに失われます。" +
+            "ネットワーク状態を確認するか、保存できる状態になってから再度お試しください（画面下部の保存先表示を参照）。"
+        );
+        return;
+      }
       setErrorMessage(null);
       setTargetTurns(turns);
       setPhase("running");
@@ -428,7 +449,7 @@ export function ManagementConsole() {
       setPhase("idle");
       setRunningTurn(null);
     },
-    [phase, restoring, view, createFresh, persist, scenarioId, seed, companyControlModes, confirmedPlayerDecisions, resetControlState, router]
+    [phase, restoring, persistenceBlocked, view, createFresh, persist, scenarioId, seed, companyControlModes, confirmedPlayerDecisions, resetControlState, router]
   );
 
   const reset = useCallback(() => {
@@ -549,15 +570,15 @@ export function ManagementConsole() {
           </dl>
 
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
-            <button type="button" onClick={() => run(1)} disabled={busy || restoring} data-testid="run-1"
+            <button type="button" onClick={() => run(1)} disabled={busy || restoring || persistenceBlocked} data-testid="run-1"
               className="rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40">
               1 Turn
             </button>
-            <button type="button" onClick={() => run(4)} disabled={busy || restoring} data-testid="run-4"
+            <button type="button" onClick={() => run(4)} disabled={busy || restoring || persistenceBlocked} data-testid="run-4"
               className="rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40">
               4 Turns
             </button>
-            <button type="button" onClick={() => run(MANAGEMENT_CONSOLE_STANDARD_TURNS)} disabled={busy || restoring} data-testid="run-32"
+            <button type="button" onClick={() => run(MANAGEMENT_CONSOLE_STANDARD_TURNS)} disabled={busy || restoring || persistenceBlocked} data-testid="run-32"
               className="rounded bg-emerald-700 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40">
               32 Turns
             </button>
@@ -660,9 +681,18 @@ export function ManagementConsole() {
           ) : null}
 
           {storageNote ? (
-            <span className="text-[11px] text-slate-400" data-testid="storage-note">{storageNote}</span>
+            <span className={`text-[11px] ${persistenceBlocked ? "font-semibold text-rose-400" : "text-slate-400"}`} data-testid="storage-note">
+              {storageNote}
+            </span>
           ) : null}
         </div>
+
+        {persistenceBlocked ? (
+          <div className="mt-1.5 rounded-md border border-rose-700 bg-rose-950/60 px-3 py-2 text-xs text-rose-200" data-testid="persistence-blocked-banner">
+            ⚠️ 直前の保存がブラウザ・サーバーの両方で失敗しました。この状態のままTurnを進めると、進行状況が保存されずに失われます。
+            保存できる状態になるまで、Turnを進めるボタンを無効化しています。
+          </div>
+        ) : null}
 
         {/* Quick Navigation: 主要分析へ1クリックで移動する。
             通常の <a href> なので Ctrl+Click・中クリック・「新しいタブで開く」がそのまま使える。 */}
