@@ -136,7 +136,7 @@ export interface CapexProjectProposalDraftRow {
   readonly projectType: CapitalProjectType;
   readonly requestedBudgetUsd?: number;
   readonly priority?: number;
-  /** 【Test15新設】pdMechanization提案の対象Factory（他の案件種別では未設定）。 */
+  /** 【Test15新設・複数工場CAPEX Targeting修正で全案件種別へ拡張】この提案の対象Factory。pdMechanizationは必須、他は省略可（省略時は主工場）。 */
   readonly targetFactoryId?: string;
 }
 

@@ -379,9 +379,14 @@ export function ManagementConsole() {
         if (stopRequested.current) {
           current = { ...current, run: { ...current.run, stopReason: "stopped_by_user", completedAt: nowIso() } };
           setView(viewFromSession(current));
+          // 【複数工場CAPEX Targeting E2E受入で発見・修正】setPhase("idle")を先に呼ぶと、
+          // まだpersist()（ブラウザ・サーバーへの保存）が完了していないうちにRun/1Turn
+          // ボタンが再度押せる状態になり、その直後にhard reloadすると直近のターンぶんが
+          // 保存前に失われる（実測: reload直前10/32だったcompletedTurnsがreload後8/32に
+          // 後退する再現バグを確認した）。persist完了まではボタンをdisabledのままにする。
+          await persist(current, controlModesForThisRun, pendingPlayerDecisions);
           setPhase("idle");
           setRunningTurn(null);
-          await persist(current, controlModesForThisRun, pendingPlayerDecisions);
           return;
         }
         if (current.state.isComplete) break;
@@ -415,10 +420,13 @@ export function ManagementConsole() {
           break;
         }
       }
+      // 完走・シナリオ終端・失敗・PLAYER待ちのいずれでも保存する（失敗の記録も残す）。
+      // 【複数工場CAPEX Targeting E2E受入で発見・修正】persist完了前にボタンを再度押せる
+      // 状態へ戻すと、hard reloadで直近ターンが保存前に失われる競合が起きる（上のSTOP分岐と
+      // 同じ理由）。
+      await persist(current, controlModesForThisRun, pendingPlayerDecisions);
       setPhase("idle");
       setRunningTurn(null);
-      // 完走・シナリオ終端・失敗・PLAYER待ちのいずれでも保存する（失敗の記録も残す）。
-      await persist(current, controlModesForThisRun, pendingPlayerDecisions);
     },
     [phase, restoring, view, createFresh, persist, scenarioId, seed, companyControlModes, confirmedPlayerDecisions, resetControlState, router]
   );

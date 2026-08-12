@@ -35,8 +35,17 @@ export default function CapexDraftList(props: CapexDraftListProps) {
           <ul className="space-y-1">
             {newProjectProposals.map((p, idx) => (
               <li key={`${p.projectType}-${idx}`} className="flex items-center justify-between bg-gray-900/60 rounded-lg px-3 py-1.5 text-xs text-gray-200">
-                <span>
+                <span data-testid={`capex-draft-row-${idx}`}>
                   {displayNameByType(p.projectType)}（{formatUsd(budgetByType(p.projectType, p.requestedBudgetUsd))}）
+                  {/* 【複数工場CAPEX Targeting修正・§7】Confirm前にどのFactoryが対象かを
+                      その場で確認できるようにする（以前はtargetFactoryIdが提出確認画面に
+                      一切表示されず、複数Factory企業では「今どこへ投資しようとしているか」
+                      が見えなかった）。 */}
+                  {p.targetFactoryId !== undefined && (
+                    <span className="ml-1.5 text-sky-300" data-testid={`capex-draft-target-factory-${idx}`}>
+                      ／ 対象工場: {p.targetFactoryId}
+                    </span>
+                  )}
                 </span>
                 <button
                   onClick={() => onRemoveProposal(idx)}
