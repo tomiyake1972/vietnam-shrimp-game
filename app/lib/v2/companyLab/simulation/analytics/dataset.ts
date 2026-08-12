@@ -500,6 +500,13 @@ export function buildSimulationAnalyticsDataset(input: BuildDatasetInput): Simul
  * 実行中／実行済みセッションから dataset を作る。
  * Console・Analysis・将来の xlsx exporter はいずれもこの1つの関数を通る
  * （画面ごとに別の集計器を作らない）。
+ *
+ * 【Save/Resume 長期永続化・鮮度整合】session.priorAnalyticsDataset が設定されている
+ * 場合（＝resumePayload.state.history を rolling window へ間引いた状態から復元した
+ * セッション）、window内の履歴だけから作った dataset を単独で返さない。resume時点で
+ * 既に保存されていた完全な dataset と mergeAnalyticsDatasets でマージすることで、
+ * reload以前のturnぶんのAnalysis事実（Console・Analysis・AI Pack・Databookが読む
+ * 唯一の情報源）を欠落させない。
  */
 export function buildDatasetFromSession(session: {
   readonly state: { readonly history: readonly CompanyQuarterRecord[] };
@@ -508,6 +515,7 @@ export function buildDatasetFromSession(session: {
   readonly observedDemand: readonly ObservedDemandSnapshot[];
   readonly salesHeadcountByTurn: readonly { readonly turn: number; readonly companyId: string; readonly headcount: number }[];
   readonly capacityByTurn: readonly { readonly turn: number; readonly companyId: string; readonly hoso: number; readonly pd: number; readonly vap: number; readonly commonProcessing: number }[];
+  readonly priorAnalyticsDataset?: SimulationAnalyticsDataset;
 }): SimulationAnalyticsDataset {
   const headcount = new Map<string, number>();
   for (const h of session.salesHeadcountByTurn) headcount.set(`${h.turn}:${h.companyId}`, h.headcount);
@@ -515,7 +523,7 @@ export function buildDatasetFromSession(session: {
   for (const c of session.capacityByTurn) {
     capacity.set(`${c.turn}:${c.companyId}`, { hoso: c.hoso, pd: c.pd, vap: c.vap, commonProcessing: c.commonProcessing });
   }
-  return buildSimulationAnalyticsDataset({
+  const fresh = buildSimulationAnalyticsDataset({
     history: session.state.history,
     fixtures: session.fixtures,
     aiTurnTraces: session.aiTurnTraces,
@@ -523,6 +531,40 @@ export function buildDatasetFromSession(session: {
     salesHeadcountByTurn: headcount,
     capacityByTurn: capacity,
   });
+  return session.priorAnalyticsDataset ? mergeAnalyticsDatasets(session.priorAnalyticsDataset, fresh) : fresh;
+}
+
+/**
+ * 【Save/Resume 長期永続化・鮮度整合】prior（resume以前に保存済みだった完全な dataset）と
+ * next（現在のライブ session.state.history――rolling windowで間引かれている場合がある――
+ * から作った dataset）を、ターン単位でマージする。
+ *
+ * 各 fact 配列は必ず `turn` を持つ long-format の行集合であるため（analytics/types.ts参照）、
+ * next が持つターンは next を優先し（最新の再計算を信頼する）、next に無い古いターンだけ
+ * prior から引き継ぐ。ゲーム計算はしない（既存の事実を選んで並べるだけ）。
+ */
+export function mergeAnalyticsDatasets(prior: SimulationAnalyticsDataset, next: SimulationAnalyticsDataset): SimulationAnalyticsDataset {
+  const nextTurns = new Set(next.turns);
+  const turns = [...new Set([...prior.turns, ...next.turns])].sort((a, b) => a - b);
+  function merge<T extends { readonly turn: number }>(priorFacts: readonly T[], nextFacts: readonly T[]): readonly T[] {
+    return [...priorFacts.filter((f) => !nextTurns.has(f.turn)), ...nextFacts];
+  }
+  return {
+    schemaVersion: next.schemaVersion,
+    turns,
+    companies: next.companies,
+    companyMetrics: merge(prior.companyMetrics, next.companyMetrics),
+    marketMetrics: merge(prior.marketMetrics, next.marketMetrics),
+    producerCountryMetrics: merge(prior.producerCountryMetrics, next.producerCountryMetrics),
+    bottlenecks: merge(prior.bottlenecks, next.bottlenecks),
+    aiTrace: merge(prior.aiTrace, next.aiTrace),
+    salesTrace: merge(prior.salesTrace, next.salesTrace),
+    hiringTrace: merge(prior.hiringTrace, next.hiringTrace),
+    investmentTrace: merge(prior.investmentTrace, next.investmentTrace),
+    contribution: merge(prior.contribution, next.contribution),
+    fixedCosts: merge(prior.fixedCosts, next.fixedCosts),
+    salesAllocation: merge(prior.salesAllocation, next.salesAllocation),
+  };
 }
 
 // ---------------------------------------------------------------------

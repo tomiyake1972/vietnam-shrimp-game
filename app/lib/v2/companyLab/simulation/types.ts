@@ -12,6 +12,7 @@ import type { SimulationAiTurnTrace } from "./analytics/aiTrace";
 import type { ObservedDemandSnapshot } from "./analytics/dataset";
 import type { PackCapitalProject, PackCompanyStateSnapshot, PackStrategy, PackWorldTurn } from "./aiPack/types";
 import type { CompanyLabRuntimeSnapshot } from "../persistence/types";
+import type { SimulationAnalyticsDataset } from "./analytics/types";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -139,6 +140,18 @@ export interface SimulationSession {
    * ＝quadratic増大にはならない）。まだ1ターンも処理していないRunはnull。
    */
   readonly latestQuarterPreProcessingSnapshot: CompanyLabRuntimeSnapshot | null;
+  /**
+   * 【Save/Resume 長期永続化・鮮度整合】resumePayload保存量を抑えるため、
+   * resumePayload.state.history は直近の rolling window だけへ間引いて保存する
+   * （resume.ts の buildResumePayload / ROLLING_RESUME_HISTORY_WINDOW参照）。
+   * そのままではreload後、buildDatasetFromSessionがwindow分の履歴からしか
+   * datasetを再計算できず、reload以前のturnぶんのAnalysis事実が失われてしまう
+   * （resume snapshotの軽量化とAnalysis履歴の欠落防止は別問題であり混同しない）。
+   * このフィールドは「resume時点で既に保存されていた完全なdataset」を保持し、
+   * buildDatasetFromSessionが以後の新しいターンぶんとマージする土台として使う
+   * （dataset.ts の mergeAnalyticsDatasets参照）。新規Runでは未設定。
+   */
+  readonly priorAnalyticsDataset?: SimulationAnalyticsDataset;
 }
 
 /** 1ターン・1社ぶんの期首／期末スナップショットと期末の投資案件。 */

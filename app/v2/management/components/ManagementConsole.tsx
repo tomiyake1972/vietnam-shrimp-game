@@ -171,7 +171,7 @@ export function ManagementConsole() {
       // 作り直したり、既存の実績（dataset）まで捨てたりしない。閲覧専用（VIEW_ONLY）へ
       // 落ちたうえで、理由をstorageNoteとして画面に出す。
       try {
-        const session = restoreSessionFromResumePayload(stored.run, resumePayload, stored.packCapture);
+        const session = restoreSessionFromResumePayload(stored.run, resumePayload, stored.packCapture, stored.dataset);
         // 復元直後に最低限アクセスして、壊れた形（欠けたフィールド等）を早期検出する。
         void session.state.scenarioState.currentTurn;
         void session.fixtures.length;

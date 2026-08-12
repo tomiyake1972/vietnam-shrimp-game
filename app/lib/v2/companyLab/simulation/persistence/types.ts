@@ -48,8 +48,18 @@ import { CompanyLabRuntimeSnapshot } from "../../persistence/types";
  *        マイグレーション不要。v1/v2 のデータには resumePayload が無いため
  *        undefined のまま扱う（＝続きからプレイできない「閲覧専用」の Run として
  *        明示する。architectureはPart Aの§4参照）。
+ *   v4 … 【Save/Resume 長期永続化・鮮度整合 BLOCKER修正】
+ *        (a) persistenceRevision を追加（browser/server 保存物の鮮度比較用。
+ *            simulationRunStore.ts の pickFresher が使う。v1-v3 のデータには無いため
+ *            0 として扱う＝completedTurns/savedAt による比較へ自動的にフォールバックする）。
+ *        (b) resumePayload.state.history / resumePayload.aiTurnTraces を
+ *            直近 ROLLING_RESUME_HISTORY_WINDOW 件へ間引く（resume.ts参照）。
+ *            スキーマの形自体は変わらない（historyは引き続き
+ *            readonly CompanyQuarterRecord[]）ため、古いv1-v3データや
+ *            間引き前のv4データも同じ型としてそのまま読める。
+ *        追加的変更のみでマイグレーション不要。
  */
-export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 3;
+export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 4;
 
 /** 保存される Simulation Run 1本ぶん。 */
 export interface StoredSimulationRun {
@@ -71,6 +81,15 @@ export interface StoredSimulationRun {
   readonly resumePayload?: SimulationResumePayload;
   /** metadata（ゲーム判断には使わない）。 */
   readonly savedAt: string;
+  /**
+   * 【schemaVersion 4・Save/Resume 長期永続化・鮮度整合 BLOCKER修正】
+   * browser保存物とserver保存物、どちらが新しいかを比較するための単調増加カウンタ。
+   * simulationRunStore.ts の中でのみ採番する（呼び出し側が組み立てて渡すものではない
+   * ＝比較ルールを1箇所にSSoT化する。指示§12参照）。
+   * v1-v3のデータには存在しないため、比較時は0として扱う
+   * （その場合はcompletedTurns→savedAtの順にフォールバックする）。
+   */
+  readonly persistenceRevision?: number;
 }
 
 /** 実行中に拾った、Pack 用の追加記録。 */
@@ -146,6 +165,8 @@ export interface SimulationRunSummary {
    * （旧schemaのRunにresumePayloadが存在しないのは事実であり、捏造ではない）。
    */
   readonly hasResumePayload?: boolean;
+  /** 【schemaVersion 4】このRunの保存物が持つpersistenceRevision（無ければ0扱い）。 */
+  readonly persistenceRevision?: number;
 }
 
 export function toSimulationRunSummary(stored: StoredSimulationRun): SimulationRunSummary {
@@ -166,6 +187,7 @@ export function toSimulationRunSummary(stored: StoredSimulationRun): SimulationR
       .filter(([, mode]) => mode === "PLAYER")
       .map(([companyId]) => companyId),
     hasResumePayload: stored.resumePayload !== undefined,
+    persistenceRevision: stored.persistenceRevision,
   };
 }
 

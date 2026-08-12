@@ -41,10 +41,56 @@ export interface SaveSimulationRunResult {
   readonly serverError: string | null;
   /** ブラウザ保存に失敗した場合の理由（容量超過など。成功時は null）。 */
   readonly browserError: string | null;
+  /**
+   * 【Save/Resume 長期永続化・鮮度整合 BLOCKER修正】browser・serverのどちらか一方でも
+   * 保存に失敗していれば true（silent successを禁止する。指示§18/§19）。
+   */
+  readonly degraded: boolean;
+  /** この保存に採番されたpersistenceRevision。 */
+  readonly persistenceRevision: number;
 }
 
 function hasWindow(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+// ---------------------------------------------------------------------
+// 0. persistenceRevision（browser/server保存物の鮮度比較。指示§11/§12のSSoT）
+// ---------------------------------------------------------------------
+
+/**
+ * タブ内でのみ有効な単調増加カウンタ（simulationRunId ごと）。
+ * サーバー側の原子的カウンタは持たない（指示§48「大規模なlockingは今回必須ではない」）。
+ * resumeで既存の保存物を読んだ時点でその値へ底上げしておくことで、reload後の採番が
+ * 既存の保存物より古くならないようにする（seedRevisionCounter）。
+ */
+const revisionCounters = new Map<string, number>();
+
+function nextRevisionFor(id: string): number {
+  const next = (revisionCounters.get(id) ?? 0) + 1;
+  revisionCounters.set(id, next);
+  return next;
+}
+
+/** 保存物を読んだ側（loadSimulationRun）が、以後の採番をその保存物より古くしないために呼ぶ。 */
+function seedRevisionCounter(id: string, knownRevision: number): void {
+  const current = revisionCounters.get(id) ?? 0;
+  if (knownRevision > current) revisionCounters.set(id, knownRevision);
+}
+
+/**
+ * browser保存物・server保存物のどちらが新しいかを決める、唯一の比較ルール（指示§12 SSoT）。
+ * 優先順位: (1) persistenceRevision（無ければ0） (2) completedTurns (3) savedAt（ISO文字列は
+ * 辞書式比較＝時系列比較と一致する）。
+ */
+function pickFresher(a: StoredSimulationRun | null, b: StoredSimulationRun | null): StoredSimulationRun | null {
+  if (!a) return b;
+  if (!b) return a;
+  const revA = a.persistenceRevision ?? 0;
+  const revB = b.persistenceRevision ?? 0;
+  if (revA !== revB) return revA > revB ? a : b;
+  if (a.run.completedTurns !== b.run.completedTurns) return a.run.completedTurns > b.run.completedTurns ? a : b;
+  return a.savedAt >= b.savedAt ? a : b;
 }
 
 // ---------------------------------------------------------------------
@@ -96,7 +142,13 @@ function saveToBrowser(stored: StoredSimulationRun): string | null {
         for (const other of kept.filter((s) => s.simulationRunId !== id)) {
           window.localStorage.removeItem(RUN_KEY_PREFIX + other.simulationRunId);
         }
-        writeBrowserIndex(kept.filter((s) => s.simulationRunId === id));
+        // 【実ブラウザE2Eで発見】ここで index を新しい（まだ本体保存に成功していない）
+        // summaryへ書き換えてはならない。書き換えてしまうと、2回目の試行も失敗した場合に
+        // 「index（Run Historyの一覧・現在状態表示）は新しいcompletedTurnsを指しているのに、
+        // 本体（loadFromBrowserが返す実データ）は古いturnのまま」という不整合が生まれる
+        // （実測: confirm直後にQuota超過で本体保存が失敗した際、画面上部の概要が
+        // 「Current: 28/32Q」を指す一方、実際に復元されるstateはQ12のままという食い違いを
+        // 確認した）。indexの更新は、本体保存が実際に成功した場合（下のtryブロック内）だけに限る。
         continue;
       }
       return `ブラウザ保存に失敗しました（${e instanceof Error ? e.name : String(e)}。保存物は約${Math.round(payload.length / 1024)}KBです）`;
@@ -114,6 +166,16 @@ function loadFromBrowser(simulationRunId: string): StoredSimulationRun | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 【指示§20 stale browser cleanup】serverの方が新しく、かつそのbrowserキャッシュ更新にも
+ * 失敗した場合に、古いbrowserエントリを残さず消す（indexからも消す＝孤児を作らない）。
+ */
+function removeFromBrowser(simulationRunId: string): void {
+  if (!hasWindow()) return;
+  window.localStorage.removeItem(RUN_KEY_PREFIX + simulationRunId);
+  writeBrowserIndex(readBrowserIndex().filter((s) => s.simulationRunId !== simulationRunId));
 }
 
 // ---------------------------------------------------------------------
@@ -163,37 +225,82 @@ async function listFromServer(): Promise<readonly SimulationRunSummary[]> {
  * Simulation Run を保存する。
  * ブラウザ保存を**必ず**行い、そのうえでサーバー保存を試みる
  * （サーバーが使えない環境でもリロードで結果が消えないことを保証するため）。
+ *
+ * 【Save/Resume 長期永続化・鮮度整合 BLOCKER修正】persistenceRevision はここで
+ * 唯一採番する（呼び出し側は組み立てない＝SSoT。指示§12）。browser・serverの
+ * どちらか一方でも失敗すれば degraded=true を返し、silent successにしない（指示§18/§19）。
  */
 export async function saveSimulationRun(stored: StoredSimulationRun): Promise<SaveSimulationRunResult> {
-  const browserError = saveToBrowser(stored);
-  const serverError = await saveToServer(stored);
+  const persistenceRevision = nextRevisionFor(stored.run.simulationRunId);
+  const stamped: StoredSimulationRun = { ...stored, persistenceRevision };
+  const browserError = saveToBrowser(stamped);
+  const serverError = await saveToServer(stamped);
   const savedTo: SimulationRunStorageLocation[] = [];
   if (browserError === null) savedTo.push("browser");
   if (serverError === null) savedTo.push("server");
-  return { savedTo, serverError, browserError };
+  return { savedTo, serverError, browserError, degraded: browserError !== null || serverError !== null, persistenceRevision };
 }
 
 /**
  * Simulation Run を読み込む。
- * ブラウザ保存を先に見る（同じ端末で回した直後は必ずここにある＝最速で確実）。
- * 無ければサーバーから取りに行く（別端末で保存された実行を開ける）。
+ *
+ * 【Save/Resume 長期永続化・鮮度整合 BLOCKER修正】旧実装は
+ * `loadFromBrowser(id) ?? loadFromServer(id)` で「browserにnon-nullな値さえあれば
+ * 無条件にそれを使う」設計だった。ブラウザ保存が容量超過で古いまま失敗し続けても
+ * その古い値が消えないため、より新しいserver保存物へ絶対にフォールスルーしない
+ * という実バグがあった（reload後にcompletedTurnsが後退する。指示§1参照）。
+ *
+ * ここではbrowser・serverの両方を取得し、pickFresher（persistenceRevision→
+ * completedTurns→savedAtの順）で選ぶ。選んだ側の revision を以後の採番の
+ * 底上げに使う（seedRevisionCounter）ことで、reload後に続けて保存しても
+ * revisionが逆行しない。
+ *
+ * serverの方が新しかった場合、browserのキャッシュも最新へ更新を試みる
+ * （失敗時は黙って古いままにしない＝古いbrowserキャッシュだけが残る状態を解消する。
+ * 指示§20「stale browser cleanup」）。
  */
 export async function loadSimulationRun(simulationRunId: string): Promise<StoredSimulationRun | null> {
-  return loadFromBrowser(simulationRunId) ?? (await loadFromServer(simulationRunId));
+  const browser = loadFromBrowser(simulationRunId);
+  const server = await loadFromServer(simulationRunId);
+  const chosen = pickFresher(browser, server);
+  if (!chosen) return null;
+  seedRevisionCounter(simulationRunId, chosen.persistenceRevision ?? 0);
+
+  const browserRevision = browser?.persistenceRevision ?? 0;
+  const serverRevision = server?.persistenceRevision ?? 0;
+  if (server && serverRevision > browserRevision) {
+    const refreshError = saveToBrowser(server);
+    if (refreshError) removeFromBrowser(simulationRunId);
+  }
+  return chosen;
 }
 
 /**
  * 保存済み実行の一覧（Run selector 用）。
  * ブラウザ保存とサーバー保存を simulationRunId で統合し、保存が新しい順に並べる。
- * 同じ実行が両方にある場合はブラウザ側の要約を採る（同じ内容であり、往復を減らす）。
+ * 同じ実行が両方にある場合は、より新しい方の要約を採る
+ * （persistenceRevision→completedTurns→savedAtの順。loadSimulationRunと同じ
+ * pickFresherの考え方を要約レベルへ適用し、一覧表示がQ8のような古い方の
+ * completedTurnsを出さないようにする。指示§27）。
  */
 export async function listSimulationRuns(): Promise<readonly SimulationRunSummary[]> {
   const browser = readBrowserIndex();
   const server = await listFromServer();
   const merged = new Map<string, SimulationRunSummary>();
   for (const s of server) merged.set(s.simulationRunId, s);
-  for (const b of browser) merged.set(b.simulationRunId, b);
+  for (const b of browser) {
+    const existing = merged.get(b.simulationRunId);
+    merged.set(b.simulationRunId, existing && !isSummaryFresher(b, existing) ? existing : b);
+  }
   return [...merged.values()].sort((a, b) => (a.savedAt === b.savedAt ? a.simulationRunId.localeCompare(b.simulationRunId) : a.savedAt < b.savedAt ? 1 : -1));
+}
+
+function isSummaryFresher(a: SimulationRunSummary, b: SimulationRunSummary): boolean {
+  const revA = a.persistenceRevision ?? 0;
+  const revB = b.persistenceRevision ?? 0;
+  if (revA !== revB) return revA > revB;
+  if (a.completedTurns !== b.completedTurns) return a.completedTurns > b.completedTurns;
+  return a.savedAt >= b.savedAt;
 }
 
 /** 現在選択中の Simulation Run。Console と Analysis はこれで同じ実行を見る。 */
