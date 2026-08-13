@@ -182,6 +182,23 @@ function removeFromBrowser(simulationRunId: string): void {
 // 2. サーバー保存（使えない環境では静かに諦めず、理由を返す）
 // ---------------------------------------------------------------------
 
+/**
+ * 【指示§31-35】Vercel Functionsのrequest body上限（既定約4.5MB）に対して、
+ * 413を受けてから気づくのではなく、送信前にサイズを検査して安全側で止める。
+ * 4.5MBの実測値ちょうどではなく、将来のfield追加等の余裕を見て4MBを閾値にする
+ * （§32 safety margin）。
+ */
+const PERSISTENCE_PAYLOAD_TOO_LARGE_THRESHOLD_BYTES = 4 * 1024 * 1024;
+
+function checkPartSize(part: string, value: unknown): string | null {
+  const bytes = typeof TextEncoder !== "undefined" ? new TextEncoder().encode(JSON.stringify(value)).length : JSON.stringify(value).length;
+  if (bytes <= PERSISTENCE_PAYLOAD_TOO_LARGE_THRESHOLD_BYTES) return null;
+  return (
+    `PERSISTENCE_PAYLOAD_TOO_LARGE: ${part}が${(bytes / 1024 / 1024).toFixed(2)}MBあり、安全threshold` +
+    `（${(PERSISTENCE_PAYLOAD_TOO_LARGE_THRESHOLD_BYTES / 1024 / 1024).toFixed(1)}MB）を超えています。送信を中止しました。`
+  );
+}
+
 async function postJson(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const response = await fetch("/api/v2/simulation-runs", {
@@ -218,15 +235,21 @@ async function saveToServer(stored: StoredSimulationRun): Promise<string | null>
     return "サーバー保存に失敗しました（persistenceRevisionが未設定です。呼び出し側の実装ミスの可能性があります）。";
   }
 
+  const datasetSizeError = checkPartSize("dataset", stored.dataset);
+  if (datasetSizeError) return `サーバー保存に失敗しました（${datasetSizeError}）`;
   const datasetResult = await postJson({ simulationRunId, revision, part: "dataset", value: stored.dataset });
   if (!datasetResult.ok) return `サーバー保存に失敗しました（dataset: ${datasetResult.error}）`;
 
   if (stored.resumePayload !== undefined) {
+    const resumeSizeError = checkPartSize("resume", stored.resumePayload);
+    if (resumeSizeError) return `サーバー保存に失敗しました（${resumeSizeError}）`;
     const resumeResult = await postJson({ simulationRunId, revision, part: "resume", value: stored.resumePayload });
     if (!resumeResult.ok) return `サーバー保存に失敗しました（resume: ${resumeResult.error}）`;
   }
 
   if (stored.packCapture !== undefined) {
+    const packSizeError = checkPartSize("pack", stored.packCapture);
+    if (packSizeError) return `サーバー保存に失敗しました（${packSizeError}）`;
     const packResult = await postJson({ simulationRunId, revision, part: "pack", value: stored.packCapture });
     if (!packResult.ok) return `サーバー保存に失敗しました（pack: ${packResult.error}）`;
   }

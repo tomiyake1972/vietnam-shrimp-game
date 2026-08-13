@@ -33,7 +33,16 @@ function runTurns(simulationRunId: string, turnsToRun: number, seed = "phase9-re
 // 【Save/Resume 長期永続化・鮮度整合 BLOCKER修正】resumePayload.state.history は
 // ROLLING_RESUME_HISTORY_WINDOW（4）件へ間引かれる。4ターンぶんの実行はwindow以内
 // のため間引きが発生せず、状態全体の往復一致を確認できる（間引き自体はPERSIST-1で確認）。
-test("SAVE-1: resumePayloadはJSON往復してもCompanyLabState・fixturesが変わらない（window以内）", () => {
+// 【Management Console Resume Snapshot Phase 2・state compaction】履行済み／
+// キャンセル済みの古い契約・完全消費済み/期限切れの原料ロット・完全充当済み/期限切れの
+// 完成品ロット・productionState.historyも、resumePayload保存用に間引かれるようになった
+// （resume.ts参照、consumer audit根拠つき。gameplay-relevant結果が変わらないことは
+// simulationResumeStateCompaction.test.tsのPERSIST-B-COMPACT-1/2で確認済み）。
+// そのため「window以内なら state 全体が完全一致する」というこのテストの前提は
+// もう成り立たない。ここでは「compactionが対象としていないフィールドは変わらない」
+// ことだけを確認し、compaction対象フィールド自体の正しさは
+// simulationResumeStateCompaction.test.tsが別途保証する。
+test("SAVE-1: resumePayloadはJSON往復してもcompaction対象外のCompanyLabState・fixturesが変わらない（window以内）", () => {
   const session = runTurns("save-1", 4);
   const controlModes: Readonly<Record<string, CompanyControlMode>> = { BAL: "PLAYER" };
   const decisions: Readonly<Record<string, CompanyDecisionInput>> = {};
@@ -46,7 +55,12 @@ test("SAVE-1: resumePayloadはJSON往復してもCompanyLabState・fixturesが�
   // optionalフィールドは影響を受ける）。実行時の意味（キー無し・値がundefined、
   // どちらもアクセス結果はundefined）は変わらないため、比較対象も同じJSON往復を
   // 経たものにする（捏造した差分をテストが検知したことにしない）。
-  assert.deepEqual(restored.state, JSON.parse(JSON.stringify(session.state)));
+  const expectedState = JSON.parse(JSON.stringify(session.state));
+  // compaction対象フィールド（contracts/rawMaterialLots/productionState）は
+  // このテストの比較から除外する（別テストが保証する）。
+  const { contracts: _c1, rawMaterialLots: _r1, productionState: _p1, ...restoredRest } = restored.state;
+  const { contracts: _c2, rawMaterialLots: _r2, productionState: _p2, ...expectedRest } = expectedState;
+  assert.deepEqual(restoredRest, expectedRest);
   assert.deepEqual(restored.fixtures, JSON.parse(JSON.stringify(session.fixtures)));
   assert.equal(restored.state.scenarioState.currentTurn, session.state.scenarioState.currentTurn);
 });
