@@ -131,5 +131,25 @@ export function useAnalysisRun(): AnalysisRunState & { readonly reload: () => vo
     };
   }, [nonce]);
 
+  // 【Q25→Q26 authoritative persistence停止BLOCKER修正・指示§25/§26】
+  // マウント時の1回だけの取得だと、このAnalysis画面を開いたまま（別タブ・
+  // ブラウザの戻る操作等で再マウントされずに）別のタブ・別のページでConsoleの
+  // プレイが進んだ場合、storedがそのTurnのまま古くなり続ける
+  // （ExportPackButtonのstale export問題の根本原因の一つだった）。
+  // タブがフォーカスを取り戻した時・可視状態に戻った時に再取得することで、
+  // ユーザーが手動でreload()を呼ばなくても最新のRunへ追従させる。
+  useEffect(() => {
+    function onFocusOrVisible(): void {
+      if (document.visibilityState === "hidden") return;
+      setNonce((n) => n + 1);
+    }
+    window.addEventListener("focus", onFocusOrVisible);
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+    return () => {
+      window.removeEventListener("focus", onFocusOrVisible);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+    };
+  }, []);
+
   return { ...state, reload };
 }

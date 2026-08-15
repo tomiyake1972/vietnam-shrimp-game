@@ -18,7 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findStaleness } from "../ExportPackButton";
+import { findStaleness, findLiveMismatch } from "../ExportPackButton";
 import { StoredSimulationRun } from "../../../../lib/v2/companyLab/simulation/persistence/types";
 
 function fakeStored(overrides: {
@@ -104,4 +104,41 @@ test("dataset/packの最大turnがcompletedTurnsとちょうど一致する場�
 test("completedTurns=0の新規Runでは、空datasetでもstaleとみなさない", () => {
   const stored = fakeStored({ completedTurns: 0, datasetTurns: [], packTurns: [] });
   assert.equal(findStaleness(stored), null);
+});
+
+// ---------------------------------------------------------------------
+// 【Q25→Q26 authoritative persistence停止BLOCKER修正】findLiveMismatch
+//
+// findStalenessは「取得したStoredSimulationRun自身が内部矛盾していないか」しか
+// 見ない。今回のQ25停止は、authoritative persistence自体がQ25で止まっていながら
+// dataset/packCapture/run.completedTurnsが全て内部的にはQ25で自己矛盾なく揃って
+// いた可能性がある（＝findStalenessでは検知できない）ケースを想定し、
+// 呼び出し元のlive completedTurnsとの比較で検知する2段目のガード。
+// ---------------------------------------------------------------------
+
+// ANALYSIS-C1/EXPORT-C1相当: live31 / persisted(authoritative)25 は検知される。
+test("EXPORT-C1: live31 / 保存済みauthoritative run25 の不一致はfindLiveMismatchで検知される", () => {
+  const stored = fakeStored({ completedTurns: 25, datasetTurns: Array.from({ length: 25 }, (_, i) => i + 1) });
+  const error = findLiveMismatch(stored, 31);
+  assert.ok(error, "live31/persisted25の不整合が検知されなかった");
+  assert.match(error!, /Turn25/);
+  assert.match(error!, /Turn31/);
+});
+
+// EXPORT-C3相当: live31 / persisted31（一致）なら検知されない。
+test("EXPORT-C3: live31 / 保存済みauthoritative run31（一致）ならfindLiveMismatchはnullを返す", () => {
+  const stored = fakeStored({ completedTurns: 31, datasetTurns: Array.from({ length: 31 }, (_, i) => i + 1) });
+  assert.equal(findLiveMismatch(stored, 31), null);
+});
+
+// 保存済みの方がliveより進んでいる場合（他タブでさらに進んだ等）は問題ではない。
+test("保存済みauthoritative runがliveより進んでいる場合は不一致として扱わない", () => {
+  const stored = fakeStored({ completedTurns: 32, datasetTurns: Array.from({ length: 32 }, (_, i) => i + 1) });
+  assert.equal(findLiveMismatch(stored, 25), null);
+});
+
+// liveCompletedTurnsがnull（未知）の場合は判定をスキップする（誤検知しない）。
+test("liveCompletedTurnsが不明（null）の場合はfindLiveMismatchを行わない", () => {
+  const stored = fakeStored({ completedTurns: 25, datasetTurns: Array.from({ length: 25 }, (_, i) => i + 1) });
+  assert.equal(findLiveMismatch(stored, null), null);
 });

@@ -60,6 +60,28 @@ export function findStaleness(stored: StoredSimulationRun): string | null {
   return null;
 }
 
+/**
+ * 【Q25→Q26 authoritative persistence停止BLOCKER修正・指示§21/§24】
+ * findStalenessは「取得したStoredSimulationRunの中で自己矛盾していないか」
+ * （dataset/packCaptureがそのRun自身のcompletedTurnsに追いついているか）しか見ない。
+ * しかし今回の実stagingでは、authoritative persistence自体がQ25で止まっていながら
+ * dataset/packCapture/run.completedTurnsが**全て内部的にはQ25で自己矛盾なく揃っていた**
+ * 可能性がある（＝findStalenessだけでは検知できない）。このため、export呼び出し元
+ * （Console/Analysis/PlayerWorkspaceのその時点のlive completedTurns）と、
+ * 取得した authoritative run.completedTurns を比較する2段目のガードを設ける。
+ */
+export function findLiveMismatch(stored: StoredSimulationRun, liveCompletedTurns: number | null): string | null {
+  if (liveCompletedTurns === null) return null;
+  if (stored.run.completedTurns < liveCompletedTurns) {
+    return (
+      `保存されているRunはTurn${stored.run.completedTurns}までですが、この画面はTurn${liveCompletedTurns}まで進んでいます。` +
+      `保存が追いついていない可能性が高く、Turn${stored.run.completedTurns}のデータで出力するとこの画面の内容と一致しません。` +
+      `ページを再読み込みして保存状況を確認してから再度お試しください。`
+    );
+  }
+  return null;
+}
+
 const STAGE_LABELS: Readonly<Record<PackBuildStage, string>> = {
   preparing: "Preparing data…",
   buildingJson: "Building JSON…",
@@ -111,6 +133,8 @@ export function ExportPackButton({ simulationRunId, scenarioId, seed, completedT
       }
       const stalenessError = findStaleness(target);
       if (stalenessError) throw new Error(stalenessError);
+      const liveMismatchError = findLiveMismatch(target, completedTurns);
+      if (liveMismatchError) throw new Error(liveMismatchError);
 
       const pack = await buildAiAnalysisPack({
         stored: target,
@@ -140,7 +164,7 @@ export function ExportPackButton({ simulationRunId, scenarioId, seed, completedT
     } finally {
       setStage(null);
     }
-  }, [simulationRunId, stage]);
+  }, [simulationRunId, stage, completedTurns]);
 
   const disabled = !simulationRunId || stage !== null || (completedTurns ?? 0) === 0;
 

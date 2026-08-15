@@ -127,8 +127,29 @@ export function ManagementConsole() {
    * どちらか一方でも成功する）までブロックする。
    */
   const [persistenceBlocked, setPersistenceBlocked] = useState(false);
+  /**
+   * 【Q25→Q26 authoritative persistence停止BLOCKER修正・指示§16/§41】
+   * 直近のpersist()が成功した時点のcompletedTurns/revision（＝「保存正本が
+   * 実際に到達しているTurn」）。live（画面のCompleted Turns）と比較して表示することで、
+   * 三宅がstagingで「Live == Saved」だけを見れば保存停止に気づける診断表示を出す
+   * （本格的なPERSISTENCE_OUT_OF_SYNC状態機械までは今回導入しないが、
+   * 「見た目のTurnだけ進んで保存が追いついていない」状態を隠さないための最小限の
+   * 可視化）。per-turn persistへの変更（runInternal参照）により、通常はこの2つは
+   * 常に一致するはずで、一致しない場合だけ強調表示する。
+   */
+  const [lastPersisted, setLastPersisted] = useState<{ readonly completedTurns: number; readonly revision: number } | null>(null);
   const [restoring, setRestoring] = useState(true);
   const stopRequested = useRef(false);
+  /**
+   * 【Q25→Q26 authoritative persistence停止BLOCKER修正・指示§10】run()の再入防止。
+   * phase（React state）の更新は非同期・バッチされ得るため、同じイベントティック内で
+   * 連打・二重クリックされた場合、2つのrun()呼び出しが両方とも「phase !== "idle"」の
+   * チェックを古い値のまま通過し、同じliveセッションから独立に2本のturn進行ループが
+   * 並行して走り得る（それぞれが自分のcurrentをsetView/persistする競合状態）。
+   * ref は同期的に読み書きできるため、この競合を確実に防ぐ（stateのbatchingの影響を
+   * 受けない）。
+   */
+  const runInProgress = useRef(false);
 
   // --- 【Phase 7・Manual Override】会社ごとの経営モードと、PLAYER会社の当ターン意思決定 ---
   // 未確定は STANDARD_AI 相当（指示§3「新しいSimulation Run作成時は5社すべてSTANDARD_AI」）。
@@ -325,12 +346,17 @@ export function ManagementConsole() {
    * ローカル変数から明示的に受け取る（state setterは非同期のため、直前に更新した
    * 値がまだstateへ反映されていない可能性があり、stateを読むと古い値を保存しかねない）。
    */
+  /**
+   * 【Q25→Q26 authoritative persistence停止BLOCKER修正】呼び出し側（run()）が、
+   * このTurnの保存が成立したかどうかを見て次のTurnへ進めるかどうかを決められるよう、
+   * 真偽値を返す（旧実装はvoidで、呼び出し側は結果を見ずに次のTurnへ進んでいた）。
+   */
   const persist = useCallback(
     async (
       session: SimulationSession,
       controlModes: Readonly<Record<string, CompanyControlMode>>,
       playerDecisions: Readonly<Record<string, CompanyDecisionInput>>
-    ) => {
+    ): Promise<boolean> => {
       const result = await persistResumableRun(session, controlModes, playerDecisions);
       setSavedRuns(await listSimulationRuns());
       setStorageNote(
@@ -344,15 +370,16 @@ export function ManagementConsole() {
       );
       // 【指示§17/§31】両方失敗＝どこにも保存されていない状態でだけブロックする
       // （片方だけの成功はdegradedとして継続可、と既存のstorageNote表示で伝える）。
-      setPersistenceBlocked(result.savedTo.length === 0);
+      const ok = result.savedTo.length > 0;
+      setPersistenceBlocked(!ok);
+      if (ok) setLastPersisted({ completedTurns: session.run.completedTurns, revision: result.persistenceRevision });
+      return ok;
     },
     []
   );
 
-  /** 指定ターン数だけ進める。1回のターン処理ごとに描画を更新する。 */
-  const run = useCallback(
+  const runInternal = useCallback(
     async (turns: number) => {
-      if (phase !== "idle" || restoring) return;
       // 【指示§17/§31】直前の保存でbrowser・server両方が失敗している場合、
       // 見た目のTurnだけ進んで保存正本が追いつかない状態を許さない。
       if (persistenceBlocked) {
@@ -440,6 +467,21 @@ export function ManagementConsole() {
           if (outcome.error) setErrorMessage(`Simulation stopped at Turn ${turnNumber}: ${outcome.error.message}`);
           break;
         }
+
+        // 【指示§9/§10/§12】このTurnの保存が成立して初めて、次のTurnへ進む。
+        // 4Turns/32Turnsのようなバッチでも、Turn境界ごとにここを通る
+        // （バッチの最後にまとめて1回だけ保存する旧実装は、途中の保存失敗を検知できず、
+        // liveだけが先へ進んでしまう窓を作っていた）。
+        const persisted = await persist(current, controlModesForThisRun, pendingPlayerDecisions);
+        if (!persisted) {
+          setErrorMessage(
+            `Turn ${turnNumber} の保存に失敗したため、これ以上Turnを進めません` +
+              `（画面下部の保存先表示を参照。保存できる状態になってから再度お試しください）。`
+          );
+          setPhase("idle");
+          setRunningTurn(null);
+          return;
+        }
       }
       // 完走・シナリオ終端・失敗・PLAYER待ちのいずれでも保存する（失敗の記録も残す）。
       // 【複数工場CAPEX Targeting E2E受入で発見・修正】persist完了前にボタンを再度押せる
@@ -449,7 +491,37 @@ export function ManagementConsole() {
       setPhase("idle");
       setRunningTurn(null);
     },
-    [phase, restoring, persistenceBlocked, view, createFresh, persist, scenarioId, seed, companyControlModes, confirmedPlayerDecisions, resetControlState, router]
+    [persistenceBlocked, view, createFresh, persist, scenarioId, seed, companyControlModes, confirmedPlayerDecisions, resetControlState, router]
+  );
+
+
+  /**
+   * 指定ターン数だけ進める。1回のターン処理ごとに描画を更新する。
+   *
+   * 【Q25→Q26 authoritative persistence停止BLOCKER修正・指示§9/§10/§12】
+   * 以前は複数ターンをまとめて計算してからループの最後に1回だけpersist()していた
+   * （4Turns/32Turnsのループが「途中の失敗を検知できない・途中まで進んだ分が
+   * 保存されないまま次のバッチへ進んでしまう」窓を広く持っていた）。
+   * ここでは1ターン進めるたびにpersist()し、その保存が成立した場合にだけ
+   * 次のターンへ進む（"Turn N simulation complete → authoritative persist success
+   * → only then allow Turn N+1"）。保存が失敗したら、そのバッチの残りターンへは
+   * 進まずその場で止める（liveをこれ以上先へ進めない）。
+   */
+  const run = useCallback(
+    async (turns: number) => {
+      if (phase !== "idle" || restoring) return;
+      // 【指示§10】run()の再入防止（stateのphaseチェックだけでは、同じイベント
+      // ティック内での連打・二重クリックによる並行実行を防ぎきれない。refは
+      // 同期的に確定するため、ここで即座に確保する）。
+      if (runInProgress.current) return;
+      runInProgress.current = true;
+      try {
+        await runInternal(turns);
+      } finally {
+        runInProgress.current = false;
+      }
+    },
+    [phase, restoring, runInternal]
   );
 
   const reset = useCallback(() => {
@@ -683,6 +755,20 @@ export function ManagementConsole() {
           {storageNote ? (
             <span className={`text-[11px] ${persistenceBlocked ? "font-semibold text-rose-400" : "text-slate-400"}`} data-testid="storage-note">
               {storageNote}
+            </span>
+          ) : null}
+
+          {/* 【Q25→Q26 authoritative persistence停止BLOCKER修正・指示§16/§41】
+              Live（画面のCompleted Turns）と直近の保存成功時点のTurnを並べて出す。
+              通常は常に一致するはずで、一致しない場合だけ強調表示する
+              （見た目のTurnだけ進んで保存が追いついていない状態を隠さない）。 */}
+          {lastPersisted ? (
+            <span
+              className={`text-[11px] font-mono ${lastPersisted.completedTurns < completedTurns ? "font-semibold text-rose-400" : "text-slate-500"}`}
+              data-testid="live-vs-saved"
+            >
+              Live: {completedTurns} / Saved: {lastPersisted.completedTurns} (rev {lastPersisted.revision})
+              {lastPersisted.completedTurns < completedTurns ? " — 保存が追いついていません" : ""}
             </span>
           ) : null}
         </div>

@@ -16,6 +16,24 @@
 
 import { StoredSimulationRun, SimulationRunSummary, toSimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
 
+/**
+ * 【Q25→Q26 authoritative persistence停止BLOCKER修正・指示§22/§23】
+ * fetch()自体がタイムアウトせずハングし続けると、呼び出し元（Export/保存/読み込みの
+ * どの経路でも）が「生成中」「保存中」のまま無限に固まって見える。AbortController で
+ * 明示的にタイムアウトさせ、必ずエラーとして返す（無限待ちを許さない）。
+ */
+const FETCH_TIMEOUT_MS = 20_000;
+
+async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 /** localStorage のキー空間（他機能と衝突させない）。 */
 const RUN_KEY_PREFIX = "shrimpx:v2:simulationRun:";
 const INDEX_KEY = "shrimpx:v2:simulationRun:index";
@@ -201,7 +219,7 @@ function checkPartSize(part: string, value: unknown): string | null {
 
 async function postJson(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const response = await fetch("/api/v2/simulation-runs", {
+    const response = await fetchWithTimeout("/api/v2/simulation-runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -268,7 +286,7 @@ async function saveToServer(stored: StoredSimulationRun): Promise<string | null>
 
 async function loadFromServer(simulationRunId: string): Promise<StoredSimulationRun | null> {
   try {
-    const response = await fetch(`/api/v2/simulation-runs/${encodeURIComponent(simulationRunId)}`);
+    const response = await fetchWithTimeout(`/api/v2/simulation-runs/${encodeURIComponent(simulationRunId)}`);
     if (!response.ok) return null;
     return (await response.json()) as StoredSimulationRun;
   } catch {
@@ -278,7 +296,7 @@ async function loadFromServer(simulationRunId: string): Promise<StoredSimulation
 
 async function listFromServer(): Promise<readonly SimulationRunSummary[]> {
   try {
-    const response = await fetch("/api/v2/simulation-runs");
+    const response = await fetchWithTimeout("/api/v2/simulation-runs");
     if (!response.ok) return [];
     const body = (await response.json()) as { runs?: SimulationRunSummary[] };
     return body.runs ?? [];
