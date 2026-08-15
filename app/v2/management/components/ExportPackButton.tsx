@@ -18,6 +18,48 @@ import { buildAiAnalysisPack, PackBuildStage } from "../../../lib/v2/companyLab/
 import { StoredSimulationRun } from "../../../lib/v2/companyLab/simulation/persistence/types";
 import { loadSimulationRun } from "../lib/simulationRunStore";
 
+/**
+ * 【Turn25 Pack停止BLOCKER修正】Analysis Dataset / Pack Captureの実データが、
+ * export時点でRunの申告するcompletedTurnsに追いついているか確認する。
+ *
+ * 【背景】実stagingで、Console/Company Databookは31/32を正しく表示している
+ * （どちらも生きたSimulationSessionから直接組み立てるため、常に最新）一方、
+ * AI Analysis Pack ZIPの中身がTurn25までしか無いという不整合を確認した。
+ * 原因調査の結果、Analysis画面（AnalysisHome等）がuseAnalysisRun経由で
+ * 保存済みRunを**マウント時に1回だけ**読み込み、その後は誰もreload()を呼ばない
+ * ため、Analysis画面を開いたまま（別タブ・ブラウザの戻る操作等で再マウントされずに）
+ * Consoleでプレイを続けると、Analysis画面が握っているstored（＝古いturnの
+ * Simulation Run）がstaleになり得ることを特定した。ExportPackButtonは、この
+ * staleなstoredをそのまま信頼してexportしていた（`stored &&
+ * stored.run.simulationRunId === simulationRunId` の一致判定だけで再取得をスキップ
+ * していた）。
+ *
+ * 【対策】(1) exportのたびに必ずサーバー/ブラウザから最新を再取得する（stale prop を
+ * 無条件で信頼しない）。(2) それでも dataset/packCapture が Run 自体の
+ * completedTurns に追いついていない場合（他の未知の経路での遅延を含め、原因を問わず
+ * 検知できる最後の防衛線）は、黙ってその古いデータでZIPを出力せず、明示的にブロックする
+ * （指示§11 stale capture禁止）。
+ */
+export function findStaleness(stored: StoredSimulationRun): string | null {
+  const runCompletedTurns = stored.run.completedTurns;
+  const datasetMaxTurn = stored.dataset.turns.length > 0 ? Math.max(...stored.dataset.turns) : 0;
+  if (datasetMaxTurn < runCompletedTurns) {
+    return (
+      `Analysis Dataset が Turn${datasetMaxTurn} までしかありません（Runは Turn${runCompletedTurns} まで完了しています）。` +
+      `保存が追いついていない可能性があります。ページを再読み込みしてから再度お試しください。`
+    );
+  }
+  const packTurns = stored.packCapture?.companyTurns ?? [];
+  const packMaxTurn = packTurns.length > 0 ? Math.max(...packTurns.map((t) => t.turn)) : 0;
+  if (stored.packCapture && packMaxTurn < runCompletedTurns) {
+    return (
+      `AI Analysis Pack Capture が Turn${packMaxTurn} までしかありません（Runは Turn${runCompletedTurns} まで完了しています）。` +
+      `保存が追いついていない可能性があります。ページを再読み込みしてから再度お試しください。`
+    );
+  }
+  return null;
+}
+
 const STAGE_LABELS: Readonly<Record<PackBuildStage, string>> = {
   preparing: "Preparing data…",
   buildingJson: "Building JSON…",
@@ -32,8 +74,6 @@ interface Props {
   readonly scenarioId: string | null;
   readonly seed: string | null;
   readonly completedTurns: number | null;
-  /** 既に読み込み済みの run があれば渡す（無ければ ID から読み直す）。 */
-  readonly stored?: StoredSimulationRun | null;
   readonly compact?: boolean;
 }
 
@@ -48,7 +88,7 @@ function toDownload(name: string, data: BlobPart, type: string): DownloadTarget 
   return { name, url: URL.createObjectURL(blob), bytes: blob.size };
 }
 
-export function ExportPackButton({ simulationRunId, scenarioId, seed, completedTurns, stored, compact = false }: Props) {
+export function ExportPackButton({ simulationRunId, scenarioId, seed, completedTurns, compact = false }: Props) {
   const [stage, setStage] = useState<PackBuildStage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloads, setDownloads] = useState<readonly DownloadTarget[]>([]);
@@ -60,11 +100,17 @@ export function ExportPackButton({ simulationRunId, scenarioId, seed, completedT
     setStage("preparing");
     try {
       // 【run の取り違え防止】表示中の ID で読み直し、その1本だけを出力する。
-      const target = stored && stored.run.simulationRunId === simulationRunId ? stored : await loadSimulationRun(simulationRunId);
+      // 【Turn25 Pack停止BLOCKER修正】呼び出し元が渡した stored（props経由。
+      // Analysis画面のuseAnalysisRunはマウント時に1回しか取得しないため、Console側で
+      // プレイが進んだ後もstaleな古いturnのままになり得る）を無条件で信頼しない。
+      // export操作のたびに必ず最新を取り直す。
+      const target = await loadSimulationRun(simulationRunId);
       if (!target) throw new Error(`Simulation Run「${simulationRunId}」を読み込めませんでした。`);
       if (target.run.simulationRunId !== simulationRunId) {
         throw new Error("読み込んだ Simulation Run の ID が一致しません（出力を中止しました）。");
       }
+      const stalenessError = findStaleness(target);
+      if (stalenessError) throw new Error(stalenessError);
 
       const pack = await buildAiAnalysisPack({
         stored: target,
@@ -94,7 +140,7 @@ export function ExportPackButton({ simulationRunId, scenarioId, seed, completedT
     } finally {
       setStage(null);
     }
-  }, [simulationRunId, stage, stored]);
+  }, [simulationRunId, stage]);
 
   const disabled = !simulationRunId || stage !== null || (completedTurns ?? 0) === 0;
 

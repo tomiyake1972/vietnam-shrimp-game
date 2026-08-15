@@ -81,8 +81,7 @@ export function AnalysisHome() {
           simulationRunId={stored?.run.simulationRunId ?? null}
           scenarioId={stored?.run.scenarioId ?? null}
           seed={stored?.run.seed ?? null}
-          completedTurns={stored?.dataset.turns.length ?? null}
-          stored={stored}
+          completedTurns={stored?.run.completedTurns ?? null}
         />
       </div>
 
