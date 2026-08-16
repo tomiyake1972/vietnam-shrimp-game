@@ -158,6 +158,7 @@ export type StandardAiReasonCode =
   | "CRISIS_NEW_SALES_SUPPRESSED" // 危機のため新規Commercial Commitmentを縮小・停止した（既存Backlogは維持）
   | "CRISIS_CAPEX_PAUSED" // 危機のため新規設備投資提案（新工場含む）を停止した（着工済み案件は維持）
   | "CRISIS_SALES_HIRING_STOPPED" // 危機のため営業採用を停止した
+  | "CRISIS_VAP_DEV_PAUSED" // 【Phase CE-2】危機のため新規VAP商品開発支出を停止した（既存スコアの蓄積は取り消さない）
   // --- Strategy Profile Quantification（Phase SP-Q1） ---
   | "PROFILE_BIAS_APPLIED" // 会社別ManagementProfile/OrientationProfileのバイアスをStandardAiParametersへ適用した（mode=ONの時のみ）
   // --- 【Standard AI Capability Expansion・Phase CE-1】PD機械化 ---
@@ -167,7 +168,16 @@ export type StandardAiReasonCode =
   | "PD_MECH_ALREADY_ACTIVE" // 当該工場は既に機械化案件が進行中／完了しているため重複提案しない
   | "PD_MECH_FINANCE_BLOCKED" // 財務ゲート（現金・借入余力）を満たさないため見送り
   | "PD_MECH_PROPOSED" // PD機械化案件を提案（経済性・戦略適合を踏まえて工場を選定）
-  | "PD_MECH_DEFERRED"; // 当期はPD機械化案件を見送り（既定の正常な結果）
+  | "PD_MECH_DEFERRED" // 当期はPD機械化案件を見送り（既定の正常な結果）
+  // --- 【Standard AI Capability Expansion・Phase CE-2】VAP商品開発 ---
+  | "VAP_DEV_CONSIDERED" // VAP商品開発費（tier選択）を検討対象に含めた
+  | "VAP_DEV_LOW_OPPORTUNITY" // VAP稼働率が低く、商品開発を検討する段階にないため見送り
+  | "VAP_DEV_LOW_MARGIN" // VAP市場プレミアムが最低受注水準未満で採算が立たないため見送り
+  | "VAP_DEV_PAYBACK_UNATTRACTIVE" // どのtierも現在のVAP事業規模に対して支出が過大（affordability基準未達）のため見送り
+  | "VAP_DEV_ALREADY_ACTIVE" // VAP商品開発スコアが既に高く、ヘッドルームが乏しいため新規支出を見送り
+  | "VAP_DEV_FINANCE_BLOCKED" // 財務ゲート（現金・借入余力）を満たさないtierを見送り
+  | "VAP_DEV_PROPOSED" // VAP商品開発費のtierを選択して提案
+  | "VAP_DEV_DEFERRED"; // 当期はVAP商品開発費tier=0（既定の正常な結果）
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -290,6 +300,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CRISIS_NEW_SALES_SUPPRESSED",
   "CRISIS_CAPEX_PAUSED",
   "CRISIS_SALES_HIRING_STOPPED",
+  "CRISIS_VAP_DEV_PAUSED",
   "PROFILE_BIAS_APPLIED",
   "PD_MECH_CONSIDERED",
   "PD_MECH_LOW_UTILIZATION",
@@ -298,6 +309,14 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "PD_MECH_FINANCE_BLOCKED",
   "PD_MECH_PROPOSED",
   "PD_MECH_DEFERRED",
+  "VAP_DEV_CONSIDERED",
+  "VAP_DEV_LOW_OPPORTUNITY",
+  "VAP_DEV_LOW_MARGIN",
+  "VAP_DEV_PAYBACK_UNATTRACTIVE",
+  "VAP_DEV_ALREADY_ACTIVE",
+  "VAP_DEV_FINANCE_BLOCKED",
+  "VAP_DEV_PROPOSED",
+  "VAP_DEV_DEFERRED",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

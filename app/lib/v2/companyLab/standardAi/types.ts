@@ -178,6 +178,13 @@ export interface StandardAiObservation {
   readonly marketDemandObservationSource?: "INITIAL_MARKET_INFORMATION" | "LAGGED_MARKET_RESULT";
   /** 商品別の市場プレミアム（前期実績、VN。turn1等は未定義）。 */
   readonly marketPremiumByProduct: Readonly<{ pd?: number; vap?: number }>;
+  /**
+   * 【Standard AI Capability Expansion・Phase CE-2】前四半期末までの自社VAP商品開発
+   * スコア（0〜100、中立50）。companyLab/types.ts CompanyOwnState.
+   * vapProductDevelopmentScoreをそのまま転記する（companyLab/productDevelopmentState.ts
+   * が唯一の情報源。ここで新しいスコア計算は行わない）。
+   */
+  readonly vapProductDevelopmentScore: number;
   readonly vietnamDomesticPriorPrice?: number;
   /**
    * 【2026-08-02・能力認識監査Phase 2新設】ベトナム国内未凍結原料市場の、前四半期の

@@ -341,6 +341,7 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics, profi
         }
       : null,
     pdMechanization: buildPackPdMechanization(diagnostics.entries),
+    vapProductDevelopment: buildPackVapProductDevelopment(diagnostics.entries),
   };
 }
 
@@ -380,6 +381,40 @@ function buildPackPdMechanization(
   };
 }
 
+/**
+ * 【Standard AI Capability Expansion・Phase CE-2】decision/vapProductDevelopment.tsが
+ * 積んだVAP_DEV_*のStandardAiDiagnosticEntryから、Pack用の要約を再構成する。
+ * ここで新しい判断・数値計算は行わない（既存entriesのkeyValuesを読み取るだけ）。
+ * CE-1.1で確立したfirst-classなmetadata（文字列parseに依存しない）方針をそのまま
+ * 踏襲する（VAP商品開発はfactory-specificではないため、そもそもtargetFactoryId
+ * のようなstring metadataを必要としない）。
+ */
+function buildPackVapProductDevelopment(
+  entries: readonly { readonly code: string; readonly keyValues?: Readonly<Record<string, number>> }[]
+): PackStrategy["vapProductDevelopment"] {
+  const vapDevEntries = entries.filter((e) => e.code.startsWith("VAP_DEV_"));
+  if (vapDevEntries.length === 0) return null;
+
+  const reasonCodes = vapDevEntries.map((e) => e.code);
+  const consideredEntry = vapDevEntries.find((e) => e.code === "VAP_DEV_CONSIDERED");
+  const proposedEntry = vapDevEntries.find((e) => e.code === "VAP_DEV_PROPOSED");
+  const financeBlockedEntry = vapDevEntries.find((e) => e.code === "VAP_DEV_FINANCE_BLOCKED");
+  const kv = proposedEntry?.keyValues;
+
+  return {
+    considered: consideredEntry !== undefined,
+    proposedSpendUsd: num(kv?.investmentCostUsd),
+    investmentCostUsd: num(kv?.investmentCostUsd ?? financeBlockedEntry?.keyValues?.investmentCostUsd),
+    paybackQuarters: num(kv?.paybackQuarters),
+    expectedIncrementalBenefitUsd: num(kv?.expectedIncrementalBenefitUsd),
+    effectiveMaxPaybackQuarters: num(kv?.effectiveMaxPaybackQuarters),
+    strategyFitMultiplier: num(kv?.strategyFitMultiplier),
+    financialConservatismRatio: num(kv?.financialConservatismRatio),
+    currentDevelopmentScore: num(kv?.currentDevelopmentScore ?? consideredEntry?.keyValues?.currentDevelopmentScore),
+    financeBlocked: financeBlockedEntry !== undefined,
+    reasonCodes,
+  };
+}
 
 // ---------------------------------------------------------------------
 // 【Phase 6C・#05 §14〜§16】商業成長の因果と営業組織

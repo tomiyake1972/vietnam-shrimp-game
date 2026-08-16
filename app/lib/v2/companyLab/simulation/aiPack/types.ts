@@ -410,6 +410,25 @@ export interface PackStrategy {
     readonly financeBlocked: boolean;
     readonly reasonCodes: readonly string[];
   } | null;
+  /**
+   * 【Standard AI Capability Expansion・Phase CE-2・指示§24】今期のVAP商品開発費
+   * （vapProductDevelopmentSpendUsd、tier選択）評価の結果。considered自体が
+   * 一度も行われなかった四半期（この機能導入前に保存されたPack等）はnull。
+   */
+  readonly vapProductDevelopment: {
+    readonly considered: boolean;
+    /** 提案されたtier金額（$0/$100k/$250k/$500kのいずれか）。提案が無かった場合はnull。 */
+    readonly proposedSpendUsd: number | null;
+    readonly investmentCostUsd: number | null;
+    readonly paybackQuarters: number | null;
+    readonly expectedIncrementalBenefitUsd: number | null;
+    readonly effectiveMaxPaybackQuarters: number | null;
+    readonly strategyFitMultiplier: number | null;
+    readonly financialConservatismRatio: number | null;
+    readonly currentDevelopmentScore: number | null;
+    readonly financeBlocked: boolean;
+    readonly reasonCodes: readonly string[];
+  } | null;
 }
 
 /**

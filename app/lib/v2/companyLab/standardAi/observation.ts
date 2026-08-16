@@ -330,6 +330,7 @@ export function buildStandardAiObservation(
       pd: lastMarketResult ? unwrapUnit(lastMarketResult.pdPremium.byCountry.VN.premium) : undefined,
       vap: lastMarketResult ? unwrapUnit(lastMarketResult.vapPremium.byCountry.VN.premium) : undefined,
     },
+    vapProductDevelopmentScore: ownState.vapProductDevelopmentScore,
     vietnamDomesticPriorPrice: publicInfo.vietnamDomesticPriorPrice > EPSILON ? publicInfo.vietnamDomesticPriorPrice : undefined,
     // 【2026-08-02・能力認識監査Phase 2】publicInfo.lastMarketResult（既存の
     // MarketQuarterResult）は元からvietnamDomestic（VietnamDomesticResult。

@@ -98,6 +98,7 @@ const EMPTY_STRATEGY: PackStrategy = {
   availability: "NOT_RECORDED",
   crisis: null,
   pdMechanization: null,
+  vapProductDevelopment: null,
   profile: null,
 };
 

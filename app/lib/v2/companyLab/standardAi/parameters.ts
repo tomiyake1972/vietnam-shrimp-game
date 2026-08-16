@@ -165,6 +165,27 @@ export interface StandardAiParameters {
    * （初期値は校正前の暫定値、CE-1ベンチマーク実施前は変更しない）。
    */
   readonly pdMechanizationMaxPaybackQuarters: number;
+  /**
+   * 【CE-2新設】VAP商品開発費（vapProductDevelopmentSpendUsd）の投資判断に使う、
+   * 許容「affordability」期間（四半期）。VAP商品開発の効果は
+   * companyLab/productDevelopmentState.tsのスコア（→sales/allocation.tsの
+   * 非価格競争力ウェイトへの間接効果）であり、CAPEXのような直接的な$回収額の
+   * 式が既存コードに存在しない（想像で新しい弾力性係数を作らない・指示§2/§39）。
+   * そのため「投資額 ÷ 直近四半期の実際のVAP貢献利益（既存のtargetMarginUsdPerHosoEqKg
+   * ×実績VAP生産量から算出、新しい効果値ではない）」を、投資額が現在のVAP事業
+   * 規模に対して"身の丈に合っているか"を測るaffordability指標として使う
+   * （文字通りのROI paybackではないことを明示するため、コード内コメントでは
+   * 一貫して"affordability"と呼ぶ）。この値以下のtierだけを経済的に妥当とみなす。
+   */
+  readonly vapProductDevelopmentMaxAffordabilityQuarters: number;
+  /**
+   * 【CE-2新設】VAP商品開発スコア（0〜100、companyLab/productDevelopmentState.ts）の
+   * ヘッドルーム（= 1 − score/100、既存の飽和型スコア更新式にそのまま存在する量）が
+   * この比率を下回ったら「これ以上投資しても得られる伸びがほぼ無い」とみなし、
+   * 新規支出を見送る（指示§18 saturation guard）。新しい効果値ではなく、既存の
+   * ヘッドルーム式へ判断しきい値を1つ足すだけ。
+   */
+  readonly vapProductDevelopmentMinHeadroomRatio: number;
 
   // --- 養殖 ---
   /** 養殖の期待収穫比率（池入れ量→収穫量の目安）。 */
@@ -278,6 +299,8 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   capexCostSafetyRatio: 0.5,
   capexMaxLoanToSizeRatio: 1.5,
   pdMechanizationMaxPaybackQuarters: 12,
+  vapProductDevelopmentMaxAffordabilityQuarters: 3,
+  vapProductDevelopmentMinHeadroomRatio: 0.1,
 
   expectedAquacultureHarvestRatio: 0.9,
   aquacultureIntensity: 0.6,

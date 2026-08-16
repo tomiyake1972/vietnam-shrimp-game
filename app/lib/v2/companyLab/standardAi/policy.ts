@@ -29,6 +29,7 @@ import { buildStandardAiProcurementPlan } from "./decision/procurement";
 import { buildStandardAiWorkerAssignments } from "./decision/labor";
 import { buildStandardAiFinancingRequest } from "./decision/finance";
 import { buildStandardAiCapexDecision } from "./decision/capex";
+import { buildStandardAiVapProductDevelopmentDecision } from "./decision/vapProductDevelopment";
 import { sumProductAmount } from "./types";
 import { computeBindingProductionCapacityTons } from "./bindingCapacity";
 import { StandardAiDiagnosticEntry } from "./reasonCodes";
@@ -511,6 +512,11 @@ export function generateStandardAiDecisionWithDiagnostics(
     requiredRawMaterialUnconstrained,
     params
   );
+  // 【Standard AI Capability Expansion・Phase CE-2】VAP商品開発費（tier選択）。
+  // capex.tsのnewProjectProposalsとは独立した意思決定軸（CapitalProjectTypeでは
+  // ない・factory非依存）だが、経済性・戦略適合・財務ゲート・Crisis Gateという
+  // 判断の骨格はPD Mechanization（CE-1）と同じ思想を踏襲する。
+  const vapProductDevelopmentResult = buildStandardAiVapProductDevelopmentDecision(fixture, observation, pressures, params);
 
   // 【SAI-6.4改訂】Current Period Delivery Demand（当期納品需要）は、今回から
   // decision.productionPlansの実際の入力として使われている（上で計算済みの
@@ -656,6 +662,12 @@ export function generateStandardAiDecisionWithDiagnostics(
   // 生産計画から逆算する既存ロジックそのまま）。
   const salesForceHireCountAfterCrisisGate = isSevereDistress ? 0 : salesForceHiringResult.salesForceHireCount;
   const salesHiringSuppressedByCrisis = isSevereDistress && salesForceHiringResult.salesForceHireCount > 0;
+  // 【Standard AI Capability Expansion・Phase CE-2・Crisis Gate】SEVERE_DISTRESSでは
+  // 新規のVAP商品開発支出（新たな裁量的コミットメント）も停止する（CM-1の
+  // 「新規提案・新規採用を止める」思想をそのまま踏襲。既に投じたスコアの蓄積
+  // 自体はここでは変更しない＝過去の開発成果を取り消さない）。
+  const vapProductDevelopmentSpendUsdAfterCrisisGate = isSevereDistress ? 0 : vapProductDevelopmentResult.spendUsd;
+  const vapProductDevelopmentSuppressedByCrisis = isSevereDistress && vapProductDevelopmentResult.spendUsd > 0;
 
   const decision: CompanyDecisionInput = {
     companyId: fixture.companyId,
@@ -668,6 +680,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     productionPlans: productionResult.productionPlans,
     workerAssignments: laborResult.workerAssignments,
     financingRequest: financingResult.financingRequest,
+    vapProductDevelopmentSpendUsd: vapProductDevelopmentSpendUsdAfterCrisisGate > 0 ? vapProductDevelopmentSpendUsdAfterCrisisGate : undefined,
     // 【新工場の提案を既存 capex 提案と同じ意思決定へ合流させる】
     // 既存増設の提案内容は一切変更せず、新工場ぶんを末尾へ足すだけにする
     // （既存の設備投資判断の挙動を変えない）。
@@ -711,6 +724,16 @@ export function generateStandardAiDecisionWithDiagnostics(
     capexPaused: capexSuppressedByCrisis,
     salesHiringStopped: salesHiringSuppressedByCrisis,
   });
+  const vapDevCrisisDiagnostic: StandardAiDiagnosticEntry | null = vapProductDevelopmentSuppressedByCrisis
+    ? {
+        code: "CRISIS_VAP_DEV_PAUSED",
+        domain: "crisis",
+        companyId: fixture.companyId,
+        severity: "warning",
+        keyValues: { attemptedSpendUsd: vapProductDevelopmentResult.spendUsd },
+        message: "危機（SEVERE_DISTRESS）のため、新規のVAP商品開発支出を停止した（既存スコアの蓄積は取り消していない）。",
+      }
+    : null;
 
   const entries: StandardAiDiagnosticEntry[] = [
     ...salesResult.diagnostics,
@@ -719,6 +742,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...laborResult.diagnostics,
     ...financingResult.diagnostics,
     ...capexResult.diagnostics,
+    ...vapProductDevelopmentResult.diagnostics,
     ...deliveryDemandResult.diagnostics,
     ...situationDiagnosisResult.diagnostics,
     strategicTargetScaleDiagnostic,
@@ -728,6 +752,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...newFactoryResult.diagnostics,
     ...buildCommitmentDiagnostics(fixture.companyId, commercialCommitment, conversionObservation),
     ...crisisDiagnostics,
+    ...(vapDevCrisisDiagnostic ? [vapDevCrisisDiagnostic] : []),
   ];
 
   return {
