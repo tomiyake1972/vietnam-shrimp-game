@@ -69,6 +69,8 @@ function factoryObservation(
     skillByProduct: { hoso: 1, pd: 1, vap: 1 },
     attendanceRate: 1,
     pdMechanization: { previousQuarterPdUtilization: 0, hasActiveOrCompletedProject: false },
+    qualityEquipment: { hasQualityEquipment: false, qualityEquipmentStatus: "NONE", equipmentRampProgress: 0, qualityEquipmentRiskMultiplier: 1 },
+    qualityMetrics: { operationalRisk: 0, downgradeTons: 0, reworkTons: 0, disposalTons: 0, majorIncidentOccurred: false, productionTons: 0, qualitySensitiveProductionTons: 0 },
     ...overrides,
   };
 }

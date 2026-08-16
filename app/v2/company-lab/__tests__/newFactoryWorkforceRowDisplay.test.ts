@@ -24,7 +24,7 @@ import { CAPEX_PARAMETERS_V1 } from "../../../lib/v2/capex";
 const AT = "2026-01-01T00:00:00.000Z";
 
 /**
- * MASSの2つ目の工場（MASS-NEWF-MASS-CAPEX-4）がこのseedでTurn25に稼働開始する。
+ * MASSの2つ目の工場（MASS-NEWF-MASS-CAPEX-5）がこのseedでTurn25に稼働開始する。
  *
  * 【Standard AI Crisis Management・Phase CM-1】この定数は元々Turn20だったが、
  * Crisis Management導入（既存Finance診断シグナルからのCrisis State判定・
@@ -32,8 +32,16 @@ const AT = "2026-01-01T00:00:00.000Z";
  * MASSの投資判断（Standard AIの既存reactiveな新工場評価ロジック自体は
  * 無変更）の実際のタイミングが後ろへずれ、対象の新設Factory IDも
  * MASS-NEWF-MASS-CAPEX-3からMASS-NEWF-MASS-CAPEX-4へ変わった（実測で確認）。
+ *
+ * 【Standard AI Capability Expansion・Phase CE-3】品質管理設備
+ * （qualityControlEquipment）をStandard AIの投資候補へ追加したことで、同じ会社の
+ * capex案件連番（nextProjectSequence）が1つ余分に消費されるようになり、稼働開始
+ * ターン自体は25のまま変わらないが、新設Factory IDがMASS-NEWF-MASS-CAPEX-4から
+ * MASS-NEWF-MASS-CAPEX-5へ変わった（実測で確認。指示§24の「Quality Equipmentも
+ * 既存CAPEX ranking/finance capacityの中で他案件と競争する」という設計どおりの
+ * 挙動であり、Standard AIの新工場評価ロジック自体は無変更）。
  * このテストの目的はWorker入力欄の表示バグ固定であり、新工場が実際に建つ
- * ターン自体を固定する意図はないため、実測値へ更新した。
+ * ターン・案件連番自体を固定する意図はないため、実測値へ更新した。
  */
 function sessionAtNewFactoryFirstTurn() {
   const session = createSimulationSession({
@@ -84,7 +92,7 @@ function buildPlanningForCompany(session: ReturnType<typeof sessionAtNewFactoryF
 test("NEWF-VM-1: 稼働開始した直後の新設Factoryは、workforceStateにまだ記録が無い", () => {
   const session = sessionAtNewFactoryFirstTurn();
   const { ownState } = buildPlanningForCompany(session, "MASS");
-  const newFactoryId = "MASS-NEWF-MASS-CAPEX-4";
+  const newFactoryId = "MASS-NEWF-MASS-CAPEX-5";
   assert.ok(
     ownState.effectiveFactories.some((f) => f.factoryId === newFactoryId),
     "このseed/turn前提が崩れている（新設Factoryがまだ稼働していない）"
@@ -97,7 +105,7 @@ test("NEWF-VM-1: 稼働開始した直後の新設Factoryは、workforceStateに
 // 正しく変化する（0に固定されない）。
 test("NEWF-VM-2: 新設Factoryのregularheadcountを編集すると、headcountChangeが入力どおりに変化する（常に0に戻らない）", () => {
   const session = sessionAtNewFactoryFirstTurn();
-  const newFactoryId = "MASS-NEWF-MASS-CAPEX-4";
+  const newFactoryId = "MASS-NEWF-MASS-CAPEX-5";
 
   const { planning: beforeEdit } = buildPlanningForCompany(session, "MASS");
   const rowBefore = beforeEdit.workforceRows.find((r) => r.factoryId === newFactoryId)!;
@@ -132,7 +140,7 @@ test("NEWF-VM-3: 既存Factory（workforceStateに記録あり）のheadcountCha
 test("NEWF-VM-4: 既存Factoryと新設Factoryを同時に編集しても、互いのheadcountChangeが独立して正しい", () => {
   const session = sessionAtNewFactoryFirstTurn();
   const oldFactoryId = "MASS-F1";
-  const newFactoryId = "MASS-NEWF-MASS-CAPEX-4";
+  const newFactoryId = "MASS-NEWF-MASS-CAPEX-5";
 
   const baseline = buildPlanningForCompany(session, "MASS");
   const oldFactoryPersistedHeadcount = baseline.ownState.workforceState.factories.find((f) => f.factoryId === oldFactoryId)!.regularHeadcount;

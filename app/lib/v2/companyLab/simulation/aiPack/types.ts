@@ -429,6 +429,27 @@ export interface PackStrategy {
     readonly financeBlocked: boolean;
     readonly reasonCodes: readonly string[];
   } | null;
+  /**
+   * 【Standard AI Capability Expansion・Phase CE-3・指示§30】今期の品質管理設備
+   * （qualityControlEquipment）候補評価の結果。候補が1件も無かった四半期（全工場が
+   * 既に稼働中/導入進行中で対象外だった等）はnull（架空の値を作らない）。
+   * decision.reasonCodesにはQUALITY_EQUIP_*の全発火コードを保存し、詳細な数値根拠は
+   * StandardAiDiagnosticEntry.keyValues（entries経由）から再構成できる。
+   */
+  readonly qualityEquipment: {
+    /** 提案された場合はその工場、財務ゲートで止まった場合・候補はNeedを満たさず見送りだった場合はnull。 */
+    readonly proposedTargetFactoryId: string | null;
+    readonly investmentCostUsd: number | null;
+    readonly qualityNeedScore: number | null;
+    readonly effectiveNeedThreshold: number | null;
+    readonly lossExposureCoverage: number | null;
+    readonly qualitySensitiveExposureRatio: number | null;
+    readonly qualityRiskProtectionRatio: number | null;
+    readonly strategyFitMultiplier: number | null;
+    readonly financialConservatismRatio: number | null;
+    readonly financeBlocked: boolean;
+    readonly reasonCodes: readonly string[];
+  } | null;
 }
 
 /**

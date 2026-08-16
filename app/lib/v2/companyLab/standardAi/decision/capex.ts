@@ -88,6 +88,11 @@ export const STANDARD_AI_PROPOSABLE_CAPEX_TYPES: readonly CapitalProjectType[] =
   // （労務生産性の向上）であり、buildPdMechanizationCapexCandidate()が専用の
   // 評価ゲート群を持つ（既存のPDライン増設ロジックは一切変更しない）。
   "pdMechanization",
+  // 【Standard AI Capability Expansion・Phase CE-3】品質管理設備
+  // （qualityControlEquipment）を候補種別として追加した。QI-I1で完成した
+  // ゲーム効果（factory-specific operationalRisk -30%・2Qランプ）自体は一切
+  // 変更せず、その効果へ「投資するかどうか」の判断だけを追加する。
+  "qualityControlEquipment",
 ];
 
 export interface CapexPlanResult {
@@ -716,6 +721,226 @@ export function buildStandardAiCapexDecision(
         companyId: fixture.companyId,
         severity: "info",
         message: "当期はいずれの工場もPD省人化投資の経済性・稼働率条件を満たさないため見送る（既定の正常な結果）。",
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // 【Standard AI Capability Expansion・Phase CE-3】品質管理設備（qualityControlEquipment）
+  // ---------------------------------------------------------------------
+  //
+  // 【責務の境界（指示§1・§2）】ここで判断するのはあくまで「投資するかどうか・
+  // どのFactoryへ」だけであり、qualityControlEquipmentが実際に生む効果
+  // （factory-specific operationalRisk -30%・2Qランプ・downgrade/rework/disposal/
+  // major incidentの減少・既存Quality Score/Trust/VAP capabilityへの波及）は
+  // QI-I1で確定済みのゲームルールをそのまま使う。ここでその効果値・ランプ・
+  // 集約ロジックを一切再計算・変更しない。
+  //
+  // 【観測（指示§3〜§6）】factory.qualityEquipment（companyLab/
+  // qualityControlEquipmentState.tsのresolveQualityEquipmentStatusByFactoryが
+  // 既存capexState＋既存効果関数から導出）とfactory.qualityMetrics（前四半期の
+  // BatchQualityAdjustmentをFactory単位へ集計しただけ）だけを判断材料にする。
+  //
+  // 【Quality Need（指示§9〜§11）】反応的シグナル（前四半期の実績downgrade/rework/
+  // disposalの生産量比・major incident発生）と予防的シグナル（品質敏感商品
+  // （PD+VAP）の生産シェア×稼働率）を合成した1つのスコアで表す。事故が起きて
+  // からしか動かない・逆に事故が起きなければ絶対動かない、のどちらの極端も
+  // 避けるため、operationalRisk自体（現在の操業ストレスの总合指標）も重みに含める。
+  //
+  // 【経済性（指示§14〜§16）】QI-I1のゲームエンジンには品質損失の$換算式が存在
+  // しない（CE-3監査・QI-I1ベンチマークで確認済み。ベンチマークscriptだけが
+  // illustrativeな$/kg換算を使っており、ゲームエンジン本体・AI判断コードには
+  // 一切存在しない）。ここで新しい$便益式を作らない。代わりに、既存の観測
+  // （tons・生産量比）だけで構成した無次元の"qualityRiskProtectionRatio"で
+  // Factory間の優先順位を決める。ROI・paybackとは呼ばない（指示§16）。
+  {
+    const qualityEquipType: CapitalProjectType = "qualityControlEquipment";
+    const qualityEquipGate = financialGateFor(qualityEquipType);
+    const qualityEquipSpace = checkSpaceFeasible(qualityEquipType);
+    const investmentCostUsd = projectCostUsdFor(qualityEquipType, capexParams);
+    const financialConservatismRatio =
+      params.capexCurrentShortfallRatioThreshold / STANDARD_AI_PARAMETERS_V1.capexCurrentShortfallRatioThreshold;
+    // 【戦略適合（指示§12・§13）】新しいStrategyProfile型は作らない。既存の
+    // productOrientationMultipliers（PD Mechanization・§9-14で使うのと同じ既存値）の
+    // うち、PD・VAP（品質敏感度が相対的に高いとみなす商品群）の平均をHOSOとの比で
+    // 表す。JPQ（quality-sensitive/processed志向）・VAP（high-value/processed志向）は
+    // ともにPD/VAPの重みが高いため、この比が1より大きくなり自然にsoft preferenceが
+    // 生まれる。BAL（全て1.0）は比が1になり特別扱いされない（指示§39）。
+    const productOrientationHoso = params.productOrientationMultipliers.hoso ?? 1;
+    const productOrientationPd = params.productOrientationMultipliers.pd ?? 1;
+    const productOrientationVap = params.productOrientationMultipliers.vap ?? 1;
+    const qualitySensitiveOrientation = (productOrientationPd + productOrientationVap) / 2;
+    const strategyFitMultiplier = productOrientationHoso > EPSILON ? qualitySensitiveOrientation / productOrientationHoso : 1;
+    // Need側のしきい値なので、方向はPD Mechanizationのpaybackしきい値とは逆
+    // （しきい値が低いほど早く動く）。strategyFitMultiplierが高い（品質敏感志向が
+    // 強い）ほど割り、financialConservatismRatioが高い（保守的）ほど掛けることで、
+    // 「品質敏感な会社は動きやすく、財務保守的な会社は動きにくい」を両立する。
+    const effectiveNeedThreshold =
+      strategyFitMultiplier > EPSILON
+        ? (params.qualityEquipmentNeedThreshold / strategyFitMultiplier) * financialConservatismRatio
+        : params.qualityEquipmentNeedThreshold * financialConservatismRatio;
+
+    interface QualityEquipCandidate {
+      readonly factory: FactoryObservation;
+      readonly qualityNeedScore: number;
+      readonly lossExposureCoverage: number;
+      readonly qualitySensitiveExposureRatio: number;
+      readonly utilization: number;
+      readonly qualityRiskProtectionRatio: number;
+    }
+
+    const eligibleCandidates: QualityEquipCandidate[] = [];
+    for (const factory of [...observation.factories].sort((a, b) => a.factoryId.localeCompare(b.factoryId))) {
+      if (factory.qualityEquipment.hasQualityEquipment) {
+        // 【指示§19・§20】稼働中(FULL_EFFECT)・ランプ中(RAMPING)・導入進行中
+        // (IN_PROGRESS)のいずれであっても再提案しない（ランプ中を「設備なし」と
+        // 誤判定しない）。承認段階のガード（QI-I1最終化の
+        // hasActiveQualityControlEquipmentProjectForFactory）と二重の安全策になる。
+        diagnostics.push({
+          code: "QUALITY_EQUIP_ALREADY_ACTIVE",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: {
+            equipmentRampProgress: factory.qualityEquipment.equipmentRampProgress,
+            qualityEquipmentRiskMultiplier: factory.qualityEquipment.qualityEquipmentRiskMultiplier,
+          },
+          targetFactoryId: factory.factoryId,
+          decisionSummary: `${factory.factoryId}: 品質管理設備を検討対象から除外（状態=${factory.qualityEquipment.qualityEquipmentStatus}）`,
+          message: `${factory.factoryId}には既に品質管理設備が${factory.qualityEquipment.qualityEquipmentStatus}のため、重複提案しない。`,
+        });
+        continue;
+      }
+
+      const qm = factory.qualityMetrics;
+      const factoryEffectiveCapacityTons = factory.effectiveCapacityByProduct.hoso + factory.effectiveCapacityByProduct.pd + factory.effectiveCapacityByProduct.vap;
+      const utilization = factoryEffectiveCapacityTons > EPSILON ? Math.min(1, qm.productionTons / factoryEffectiveCapacityTons) : 0;
+
+      if (qm.productionTons <= EPSILON) {
+        // 【指示§9】前四半期の生産実績が無い（turn1・稼働直後等）と品質露出を
+        // 観測しようがないため、実績に乏しいことを理由に見送る（架空の値で
+        // 判断しない）。
+        diagnostics.push({
+          code: "QUALITY_EQUIP_LOW_EXPOSURE",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: { productionTons: qm.productionTons },
+          targetFactoryId: factory.factoryId,
+          decisionSummary: `${factory.factoryId}: 前四半期の生産実績が無いため品質管理設備の検討を見送り`,
+          message: `${factory.factoryId}は前四半期の生産実績が無く、品質リスク露出を観測できないため見送る。`,
+        });
+        continue;
+      }
+
+      const lossExposureCoverage = (qm.downgradeTons + qm.reworkTons + qm.disposalTons) / qm.productionTons;
+      const qualitySensitiveExposureRatio = qm.qualitySensitiveProductionTons / qm.productionTons;
+      // 【指示§10・§11】反応的（実績のdowngrade/rework/disposal・major incident）＋
+      // 予防的（品質敏感商品シェア×稼働率）の合成。operationalRisk自体も含めることで、
+      // 「まだ大きな事故は無いが操業ストレスが高まっている」局面も拾う（指示§11）。
+      const qualityNeedScore =
+        0.4 * qm.operationalRisk +
+        0.3 * Math.min(1, lossExposureCoverage) +
+        0.15 * (qm.majorIncidentOccurred ? 1 : 0) +
+        0.15 * qualitySensitiveExposureRatio * utilization;
+
+      diagnostics.push({
+        code: "QUALITY_EQUIP_CONSIDERED",
+        domain: "capex",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: {
+          operationalRisk: qm.operationalRisk,
+          lossExposureCoverage,
+          qualitySensitiveExposureRatio,
+          utilization,
+          majorIncidentOccurred: qm.majorIncidentOccurred ? 1 : 0,
+          qualityNeedScore,
+          effectiveNeedThreshold,
+        },
+        targetFactoryId: factory.factoryId,
+        decisionSummary: `${factory.factoryId}: 品質管理設備候補として評価（Quality Need ${qualityNeedScore.toFixed(3)}）`,
+        message: `${factory.factoryId}の前四半期品質実績（operationalRisk ${qm.operationalRisk.toFixed(2)}、損失比率 ${(lossExposureCoverage * 100).toFixed(1)}%）を基に、品質管理設備の候補として評価する。`,
+      });
+
+      if (!(qualityNeedScore > effectiveNeedThreshold)) {
+        diagnostics.push({
+          code: "QUALITY_EQUIP_LOW_NEED",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: { qualityNeedScore, effectiveNeedThreshold, strategyFitMultiplier, financialConservatismRatio },
+          targetFactoryId: factory.factoryId,
+          decisionSummary: `${factory.factoryId}: Quality Needがしきい値未満のため品質管理設備を見送り`,
+          message: `${factory.factoryId}のQuality Needスコア（${qualityNeedScore.toFixed(3)}）が、しきい値（${effectiveNeedThreshold.toFixed(3)}）未満のため見送る。`,
+        });
+        continue;
+      }
+
+      // 【経済性proxy・指示§15・§16】$換算を一切使わない無次元スコア。
+      // 生産規模（productionTons）が大きいほど、また品質敏感商品への露出・
+      // Quality Needが高いほど、同じ投資額に対する保護価値が大きいとみなす。
+      const qualityRiskProtectionRatio =
+        investmentCostUsd > EPSILON ? (qualityNeedScore * qm.productionTons) / (investmentCostUsd / 1_000_000) : qualityNeedScore;
+
+      eligibleCandidates.push({ factory, qualityNeedScore, lossExposureCoverage, qualitySensitiveExposureRatio, utilization, qualityRiskProtectionRatio });
+    }
+
+    if (eligibleCandidates.length > 0) {
+      if (!qualityEquipGate.safe) {
+        diagnostics.push({
+          code: "QUALITY_EQUIP_FINANCE_BLOCKED",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: {
+            financialGateCashSafe: qualityEquipGate.cashSafe ? 1 : 0,
+            financialGateBorrowingSafe: qualityEquipGate.borrowingSafe ? 1 : 0,
+            financialGateRequiredCashUsd: qualityEquipGate.requiredCashUsd,
+            cashUsd: observation.cashUsd,
+            investmentCostUsd,
+          },
+          decisionSummary: "品質管理設備を財務ゲート未達のため見送り",
+          message: "Quality Needを満たす品質管理設備候補があったが、現金・借入余力の財務ゲートを満たさないため今期は見送る。",
+        });
+      } else if (!qualityEquipSpace.feasible) {
+        recordSpaceInfeasible(qualityEquipType, qualityEquipSpace.requiredSpaceUnits);
+      } else {
+        const best = [...eligibleCandidates].sort(
+          (a, b) => b.qualityRiskProtectionRatio - a.qualityRiskProtectionRatio || a.factory.factoryId.localeCompare(b.factory.factoryId)
+        )[0];
+        proposals.push({ projectType: qualityEquipType, targetFactoryId: best.factory.factoryId });
+        reserveSpace(qualityEquipSpace.requiredSpaceUnits);
+        diagnostics.push({
+          code: "QUALITY_EQUIP_PROPOSED",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: {
+            qualityNeedScore: best.qualityNeedScore,
+            effectiveNeedThreshold,
+            lossExposureCoverage: best.lossExposureCoverage,
+            qualitySensitiveExposureRatio: best.qualitySensitiveExposureRatio,
+            qualityRiskProtectionRatio: best.qualityRiskProtectionRatio,
+            investmentCostUsd,
+            strategyFitMultiplier,
+            financialConservatismRatio,
+            eligibleCandidateCount: eligibleCandidates.length,
+          },
+          targetFactoryId: best.factory.factoryId,
+          decisionSummary: `${best.factory.factoryId}: 品質管理設備を提案（Quality Need ${best.qualityNeedScore.toFixed(3)}）`,
+          message: `${best.factory.factoryId}の品質管理設備投資が最も合理的（qualityRiskProtectionRatio ${best.qualityRiskProtectionRatio.toFixed(
+            2
+          )}）と判断し、提案する。`,
+        });
+      }
+    } else {
+      diagnostics.push({
+        code: "QUALITY_EQUIP_DEFERRED",
+        domain: "capex",
+        companyId: fixture.companyId,
+        severity: "info",
+        message: "当期はいずれの工場もQuality Need条件を満たさないため、品質管理設備投資を見送る（既定の正常な結果）。",
       });
     }
   }

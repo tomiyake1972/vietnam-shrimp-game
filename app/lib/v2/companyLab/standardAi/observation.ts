@@ -21,6 +21,8 @@ import { isActiveStatus } from "../../capex/projectLifecycle";
 import { calculateFactoryEffectiveCapacity } from "../../production/capacity";
 import { computeFactoryUsedSpaceUnits, FACTORY_SPACE_PARAMETERS_V1, resolveFactoryTotalSpaceUnits } from "../../production/factorySpace";
 import { computeLoanQuarterlyInterest, computeScheduledPrincipalDue } from "../../financing/loanSchedule";
+import { resolveQualityEquipmentStatusByFactory, qualityEquipmentStatusFor } from "../qualityControlEquipmentState";
+import { BatchQualityAdjustment } from "../../quality/types";
 import { FactoryObservation, MarketObservationEntry, ProductAmount, StandardAiObservation, zeroProductAmount } from "./types";
 
 const EPSILON = 1e-6;
@@ -123,6 +125,65 @@ function buildMarkets(publicInfo: PublicMarketInfo): readonly MarketObservationE
   });
 }
 
+/**
+ * 【Standard AI Capability Expansion・Phase CE-3新設】前四半期のBatchQualityAdjustment
+ * （会社×工場×商品）を、Factory単位（商品横断）へ集計する。生産量加重平均の
+ * operationalRisk、tons単位のdowngrade/rework/disposal、major incident発生有無、
+ * 品質敏感商品（PD+VAP）の生産量シェアだけを求める（新しい品質計算はしない。
+ * 既存のBatchQualityAdjustment.risk.operationalRiskとdowngrade/rework/discard
+ * Quantityをそのまま合算・加重するだけ）。
+ */
+function aggregateQualityMetricsByFactory(
+  adjustments: readonly BatchQualityAdjustment[]
+): ReadonlyMap<string, FactoryObservation["qualityMetrics"]> {
+  const byFactory = new Map<string, BatchQualityAdjustment[]>();
+  for (const a of adjustments) {
+    const list = byFactory.get(a.factoryId) ?? [];
+    list.push(a);
+    byFactory.set(a.factoryId, list);
+  }
+  const result = new Map<string, FactoryObservation["qualityMetrics"]>();
+  for (const [factoryId, list] of byFactory) {
+    let productionTons = 0;
+    let qualitySensitiveProductionTons = 0;
+    let downgradeTons = 0;
+    let reworkTons = 0;
+    let disposalTons = 0;
+    let riskWeightedSum = 0;
+    let majorIncidentOccurred = false;
+    for (const a of list) {
+      const tons = unwrapUnit(a.originalFinishedGoodsQuantity);
+      productionTons += tons;
+      if (a.product !== "hoso") qualitySensitiveProductionTons += tons;
+      downgradeTons += unwrapUnit(a.downgradeQuantity);
+      reworkTons += unwrapUnit(a.reworkQuantity);
+      disposalTons += unwrapUnit(a.discardQuantity);
+      riskWeightedSum += a.risk.operationalRisk * tons;
+      if (a.outcome.majorIncident.occurred) majorIncidentOccurred = true;
+    }
+    result.set(factoryId, {
+      operationalRisk: productionTons > EPSILON ? riskWeightedSum / productionTons : 0,
+      downgradeTons,
+      reworkTons,
+      disposalTons,
+      majorIncidentOccurred,
+      productionTons,
+      qualitySensitiveProductionTons,
+    });
+  }
+  return result;
+}
+
+const ZERO_QUALITY_METRICS: FactoryObservation["qualityMetrics"] = {
+  operationalRisk: 0,
+  downgradeTons: 0,
+  reworkTons: 0,
+  disposalTons: 0,
+  majorIncidentOccurred: false,
+  productionTons: 0,
+  qualitySensitiveProductionTons: 0,
+};
+
 function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnState, period: PeriodV2): readonly FactoryObservation[] {
   // 【SAI-5F修正（Fable事前監査で特定した既存の観測ギャップ）】完成・稼働開始済み
   // のcapex能力増加を、エンジン側（runner.tsのapplyCapexCapacityToFactories）と
@@ -139,6 +200,15 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
   // という致命的な不整合になる。加算規則（主工場へ寄せる・HOSO能力の上限）は
   // エンジン本体と完全に同一になり、この層で能力を再計算しない。
   const effectiveFactories = computeEffectiveFactories(fixture.factories, { companies: [ownState.capexState] }, period);
+  // 【Standard AI Capability Expansion・Phase CE-3新設】品質管理設備の状態・前四半期
+  // 品質実績は、いずれもFactory一覧全体を1回だけ渡して事前計算する（PD省人化投資と
+  // 同じパターン。Factoryごとに毎回portfolio全体を再走査しない）。
+  const qualityEquipmentStatusByFactory = resolveQualityEquipmentStatusByFactory(
+    { companies: [ownState.capexState] },
+    effectiveFactories,
+    period
+  );
+  const qualityMetricsByFactory = aggregateQualityMetricsByFactory(ownState.lastQuarterQualityAdjustments);
   return effectiveFactories.map((f) => {
     const baseline = fixture.workerBaseline.find((w) => w.factoryId === f.factoryId);
     const currentRegularHeadcount =
@@ -195,6 +265,8 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
           (p) => p.projectType === "pdMechanization" && p.targetFactoryId === f.factoryId && (isActiveStatus(p.status) || p.status === "completed")
         ),
       },
+      qualityEquipment: qualityEquipmentStatusFor(qualityEquipmentStatusByFactory, f.factoryId),
+      qualityMetrics: qualityMetricsByFactory.get(f.factoryId) ?? ZERO_QUALITY_METRICS,
     };
   });
 }

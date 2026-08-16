@@ -70,6 +70,38 @@ export interface FactoryObservation {
     /** pdMechanization案件がこのFactoryに存在し、稼働中(active)または完成済みか。 */
     readonly hasActiveOrCompletedProject: boolean;
   };
+  /**
+   * 【Standard AI Capability Expansion・Phase CE-3新設・指示§3〜§6】このFactoryの
+   * 品質管理設備（qualityControlEquipment）候補評価に必要な最小限の観測。
+   * companyLab/qualityControlEquipmentState.tsのresolveQualityEquipmentStatusByFactory
+   * （既存のcapexState＋既存の品質管理設備効果関数だけから導出、新しい独立状態は
+   * 持たない）をそのまま転記する。
+   */
+  readonly qualityEquipment: {
+    readonly hasQualityEquipment: boolean;
+    readonly qualityEquipmentStatus: "NONE" | "IN_PROGRESS" | "RAMPING" | "FULL_EFFECT";
+    readonly equipmentRampProgress: number;
+    readonly qualityEquipmentRiskMultiplier: number;
+  };
+  /**
+   * 【Standard AI Capability Expansion・Phase CE-3新設・指示§9・§28】前四半期の
+   * このFactoryの品質実績（companyLab/types.ts CompanyOwnState.
+   * lastQuarterQualityAdjustments、＝quality/batchAdjustment.tsが実際に算出した
+   * BatchQualityAdjustmentを商品横断で集計しただけ。新しい品質計算は一切しない）。
+   * 前四半期の確定実績が無い場合（turn1等）はproductionTons=0の中立値。
+   */
+  readonly qualityMetrics: {
+    /** 生産量加重平均のoperationalRisk（0〜1）。 */
+    readonly operationalRisk: number;
+    readonly downgradeTons: number;
+    readonly reworkTons: number;
+    readonly disposalTons: number;
+    readonly majorIncidentOccurred: boolean;
+    /** 品質調整前の完成品量（HOSO換算トン、会社×工場合計）。 */
+    readonly productionTons: number;
+    /** うちPD+VAP（品質敏感度が相対的に高いとみなす商品群）の量。 */
+    readonly qualitySensitiveProductionTons: number;
+  };
 }
 
 /**

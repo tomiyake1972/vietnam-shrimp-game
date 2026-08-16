@@ -177,7 +177,15 @@ export type StandardAiReasonCode =
   | "VAP_DEV_ALREADY_ACTIVE" // VAP商品開発スコアが既に高く、ヘッドルームが乏しいため新規支出を見送り
   | "VAP_DEV_FINANCE_BLOCKED" // 財務ゲート（現金・借入余力）を満たさないtierを見送り
   | "VAP_DEV_PROPOSED" // VAP商品開発費のtierを選択して提案
-  | "VAP_DEV_DEFERRED"; // 当期はVAP商品開発費tier=0（既定の正常な結果）
+  | "VAP_DEV_DEFERRED" // 当期はVAP商品開発費tier=0（既定の正常な結果）
+  // --- 【Standard AI Capability Expansion・Phase CE-3】品質管理設備（qualityControlEquipment） ---
+  | "QUALITY_EQUIP_CONSIDERED" // 品質管理設備の投資候補として工場を評価対象に含めた
+  | "QUALITY_EQUIP_LOW_NEED" // Quality Needスコアがしきい値未満のため候補から外した
+  | "QUALITY_EQUIP_LOW_EXPOSURE" // 品質リスク・品質敏感生産の露出が小さく、優先度が低いため候補から外した
+  | "QUALITY_EQUIP_ALREADY_ACTIVE" // 当該工場には既に品質管理設備が稼働中／導入進行中のため重複提案しない
+  | "QUALITY_EQUIP_FINANCE_BLOCKED" // 財務ゲート（現金・借入余力）を満たさないため見送り
+  | "QUALITY_EQUIP_PROPOSED" // 品質管理設備を提案（Quality Need・経済性・戦略適合を踏まえて工場を選定）
+  | "QUALITY_EQUIP_DEFERRED"; // 当期はいずれの工場もQuality Need条件を満たさないため見送り（既定の正常な結果）
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -317,6 +325,13 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "VAP_DEV_FINANCE_BLOCKED",
   "VAP_DEV_PROPOSED",
   "VAP_DEV_DEFERRED",
+  "QUALITY_EQUIP_CONSIDERED",
+  "QUALITY_EQUIP_LOW_NEED",
+  "QUALITY_EQUIP_LOW_EXPOSURE",
+  "QUALITY_EQUIP_ALREADY_ACTIVE",
+  "QUALITY_EQUIP_FINANCE_BLOCKED",
+  "QUALITY_EQUIP_PROPOSED",
+  "QUALITY_EQUIP_DEFERRED",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

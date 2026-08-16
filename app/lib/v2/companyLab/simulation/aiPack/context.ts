@@ -99,6 +99,7 @@ const EMPTY_STRATEGY: PackStrategy = {
   crisis: null,
   pdMechanization: null,
   vapProductDevelopment: null,
+  qualityEquipment: null,
   profile: null,
 };
 

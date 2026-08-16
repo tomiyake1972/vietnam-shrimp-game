@@ -503,6 +503,10 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
         factoryId: f.factoryId,
         previousQuarterPdUtilization: findPreviousQuarterPdUtilization(state.pdMechanizationState, f.factoryId),
       })),
+    // 【Standard AI Capability Expansion・Phase CE-3新設】前四半期末までのbuildQuarter
+    // 結果（state.history、既存のqualityStateと同じ「呼び出し時点では常に前ターンの
+    // 結果」の規約）から、この会社ぶんの品質調整結果だけを抽出する。新しい計算はしない。
+    lastQuarterQualityAdjustments: lastRecord ? lastRecord.qualityAdjustments.filter((a) => a.companyId === fixture.companyId) : [],
     vapProductDevelopmentScore: lookupProductDevelopmentScore(state.productDevelopmentState, fixture.companyId),
     // 【Test15・develop/v2統合（Required fix 2）】唯一の計算箇所
     // computeEffectiveFactories（companyLab/runner.ts先頭のimport参照）を通した、

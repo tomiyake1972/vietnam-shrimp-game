@@ -186,6 +186,19 @@ export interface StandardAiParameters {
    * ヘッドルーム式へ判断しきい値を1つ足すだけ。
    */
   readonly vapProductDevelopmentMinHeadroomRatio: number;
+  /**
+   * 【Standard AI Capability Expansion・Phase CE-3新設】品質管理設備
+   * （qualityControlEquipment）投資の合成Quality Needスコア（0〜1程度、
+   * decision/capex.tsのcomputeQualityNeedScore参照）に対するしきい値。
+   * このスコアがしきい値を超えたFactoryだけが候補になる。PD機械化の
+   * pdMechanizationMaxPaybackQuarters・VAP開発のvapProductDevelopment
+   * MaxAffordabilityQuartersと同じく、productOrientationMultipliers（既存の
+   * 商品志向、PD/VAP対HOSOの比）とcapexCurrentShortfallRatioThreshold由来の
+   * financialConservatismRatioで会社ごとに実効的に加減される（新しいStrategy
+   * Profile型は作らない・指示§13）。この値自体は全社一律の基準値（初期値は
+   * 校正前の暫定値、CE-3ベンチマーク実施前は変更しない）。
+   */
+  readonly qualityEquipmentNeedThreshold: number;
 
   // --- 養殖 ---
   /** 養殖の期待収穫比率（池入れ量→収穫量の目安）。 */
@@ -301,6 +314,7 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   pdMechanizationMaxPaybackQuarters: 12,
   vapProductDevelopmentMaxAffordabilityQuarters: 3,
   vapProductDevelopmentMinHeadroomRatio: 0.1,
+  qualityEquipmentNeedThreshold: 0.3,
 
   expectedAquacultureHarvestRatio: 0.9,
   aquacultureIntensity: 0.6,

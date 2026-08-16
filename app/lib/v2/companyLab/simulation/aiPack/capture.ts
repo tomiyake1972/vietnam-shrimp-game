@@ -342,6 +342,40 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics, profi
       : null,
     pdMechanization: buildPackPdMechanization(diagnostics.entries),
     vapProductDevelopment: buildPackVapProductDevelopment(diagnostics.entries),
+    qualityEquipment: buildPackQualityEquipment(diagnostics.entries),
+  };
+}
+
+/**
+ * 【Standard AI Capability Expansion・Phase CE-3・指示§30】decision/capex.tsが積んだ
+ * QUALITY_EQUIP_*のStandardAiDiagnosticEntryから、Pack用の要約を再構成する。
+ * ここで新しい判断・数値計算は行わない（既存entriesのkeyValues/targetFactoryIdを
+ * 読み取るだけ）。CE-1.1で確立したfirst-classなtargetFactoryId方針をそのまま踏襲する
+ * （decisionSummary文字列をparseしない）。
+ */
+function buildPackQualityEquipment(
+  entries: readonly { readonly code: string; readonly keyValues?: Readonly<Record<string, number>>; readonly targetFactoryId?: string }[]
+): PackStrategy["qualityEquipment"] {
+  const qualityEquipEntries = entries.filter((e) => e.code.startsWith("QUALITY_EQUIP_"));
+  if (qualityEquipEntries.length === 0) return null;
+
+  const reasonCodes = qualityEquipEntries.map((e) => e.code);
+  const proposedEntry = qualityEquipEntries.find((e) => e.code === "QUALITY_EQUIP_PROPOSED");
+  const financeBlockedEntry = qualityEquipEntries.find((e) => e.code === "QUALITY_EQUIP_FINANCE_BLOCKED");
+  const kv = proposedEntry?.keyValues;
+
+  return {
+    proposedTargetFactoryId: proposedEntry?.targetFactoryId ?? null,
+    investmentCostUsd: num(kv?.investmentCostUsd ?? financeBlockedEntry?.keyValues?.investmentCostUsd),
+    qualityNeedScore: num(kv?.qualityNeedScore),
+    effectiveNeedThreshold: num(kv?.effectiveNeedThreshold),
+    lossExposureCoverage: num(kv?.lossExposureCoverage),
+    qualitySensitiveExposureRatio: num(kv?.qualitySensitiveExposureRatio),
+    qualityRiskProtectionRatio: num(kv?.qualityRiskProtectionRatio),
+    strategyFitMultiplier: num(kv?.strategyFitMultiplier),
+    financialConservatismRatio: num(kv?.financialConservatismRatio),
+    financeBlocked: financeBlockedEntry !== undefined,
+    reasonCodes,
   };
 }
 

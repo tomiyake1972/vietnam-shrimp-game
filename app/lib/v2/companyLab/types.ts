@@ -277,6 +277,17 @@ export interface CompanyOwnState {
    */
   readonly pdUtilizationByFactory: readonly { readonly factoryId: string; readonly previousQuarterPdUtilization: number }[];
   /**
+   * 【Standard AI Capability Expansion・Phase CE-3新設】前四半期の自社バッチ品質調整
+   * 結果（会社×工場×商品、quality/batchAdjustment.tsのapplyQualityToBatchesが実際に
+   * 算出した値をそのまま転記。新しい計算はしない）。quality/types.tsの
+   * BatchQualityAdjustmentがoperationalRisk・qualityEquipmentRiskMultiplier・
+   * effectiveOperationalRisk・downgrade/rework/discard量・major incidentを
+   * 工場単位で保持しているため、Standard AIの品質管理設備（qualityControlEquipment）
+   * 候補評価はこれだけを唯一の情報源として使う（新しい独立した品質観測状態は作らない）。
+   * 直近確定Turnがまだ無い場合（Turn1の意思決定時点）は空配列。
+   */
+  readonly lastQuarterQualityAdjustments: readonly BatchQualityAdjustment[];
+  /**
    * 【Test15新設】前四半期末までの自社VAP商品開発スコア（0〜100、中立50）。
    * productDevelopmentState.ts lookupProductDevelopmentScoreと同じ値。
    * 常に存在する（機能フラグに依存しない常時ゲームルール）。
