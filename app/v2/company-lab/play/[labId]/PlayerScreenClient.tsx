@@ -23,7 +23,7 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import DecisionEditor from "../../components/DecisionEditor";
+import DecisionStudio from "../../components/decisionStudio/DecisionStudio";
 import OpeningCompanyStatePanel from "../../components/OpeningCompanyStatePanel";
 import AiMarketInfoPanel from "../../components/AiMarketInfoPanel";
 import CollapsibleSection from "../../components/CollapsibleSection";
@@ -504,7 +504,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
           <div className="bg-gray-800 rounded-2xl p-4 sm:p-5">
             <h2 className="text-base font-semibold mb-3">意思決定編集（turn {viewModel.currentTurn}）</h2>
             <DomesticReferencePriceBanner reference={viewModel.openingInfo.domesticReferencePrice} turn={viewModel.currentTurn} />
-            <DecisionEditor
+            <DecisionStudio
               fixture={viewModel.fixture}
               ownState={viewModel.ownState}
               draft={draft}
@@ -516,6 +516,9 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               lastQuarterFinancialResult={viewModel.lastQuarterResult?.financialResult ?? null}
               publicInfo={viewModel.publicInfo}
               turn={viewModel.currentTurn}
+              openingInfo={viewModel.openingInfo}
+              labId={viewModel.labId}
+              companyName={viewModel.playerDisplayName}
             />
 
             {isEditing && (

@@ -39,7 +39,7 @@ import {
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "./decisionDraft";
 import LabBanner from "./components/LabBanner";
 import ScenarioControls, { CompanyOption, ScenarioOption } from "./components/ScenarioControls";
-import DecisionEditor from "./components/DecisionEditor";
+import DecisionStudio from "./components/decisionStudio/DecisionStudio";
 import ResultsPanel from "./components/ResultsPanel";
 import MarketPanel from "./components/MarketPanel";
 import ComparisonPanel from "./components/ComparisonPanel";
@@ -337,7 +337,7 @@ export default function CompanyLabPage() {
                   意思決定編集（{draftPlayerCompanyId} — {nameById.get(draftPlayerCompanyId) ?? draftPlayerCompanyId}）
                 </h2>
                 {playerFixture && ownStateForEditor && playerDraft ? (
-                  <DecisionEditor
+                  <DecisionStudio
                     fixture={playerFixture}
                     ownState={ownStateForEditor}
                     draft={playerDraft}

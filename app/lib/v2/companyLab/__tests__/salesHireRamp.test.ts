@@ -117,9 +117,14 @@ test("【E】採用診断に economicallyDesired / organizationalLimit / actual 
 });
 
 // --- B4: Player UIが同じ制約を、意味とともに表示する ---
+// 【Decision Studio化・Step 6】旧DecisionEditor.tsxの「営業人員の追加採用・減員」
+// セクションはcomponents/decisionStudio/SalesPlanningScreen.tsxへ移設された
+// （DecisionEditor.tsx自体は削除済み）。このテストが確認したい内容
+// （UIが共通関数から上限を出し、理由つきで表示すること）は変わらないため、
+// 読み取り対象のファイルパスだけを新しい配置場所へ更新する。
 test("【H8b】UIが共通関数から上限を出し、理由つきで表示する", () => {
   const editor = fs.readFileSync(
-    path.resolve(__dirname, "..", "..", "..", "..", "v2", "company-lab", "components", "DecisionEditor.tsx"),
+    path.resolve(__dirname, "..", "..", "..", "..", "v2", "company-lab", "components", "decisionStudio", "SalesPlanningScreen.tsx"),
     "utf8"
   );
   assert.ok(editor.includes("computeMaxSalesHiresPerQuarter"), "UIも共通関数を使うこと（式を再実装しない）");

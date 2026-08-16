@@ -21,7 +21,7 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import DecisionEditor from "../../company-lab/components/DecisionEditor";
+import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "../../company-lab/decisionDraft";
 import { extractCompanyCapexResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
@@ -408,7 +408,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
                 この内容で意思決定を確定
               </button>
             </div>
-            <DecisionEditor
+            <DecisionStudio
               fixture={fixture}
               ownState={ownState}
               draft={draft}
