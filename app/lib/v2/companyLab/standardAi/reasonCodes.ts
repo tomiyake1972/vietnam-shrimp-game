@@ -6,7 +6,7 @@
 // 圧力値フレームワーク・AI取締役会機能・プレイヤー向け説明・テスト結果分析で
 // 再利用できるよう、意図的に汎用的な構造にしてある。
 
-export type StandardAiDomain = "procurement" | "sales" | "production" | "labor" | "finance" | "capex" | "diagnosis" | "crisis";
+export type StandardAiDomain = "procurement" | "sales" | "production" | "labor" | "finance" | "capex" | "diagnosis" | "crisis" | "profile";
 
 export type StandardAiSeverity = "info" | "warning" | "critical";
 
@@ -157,7 +157,9 @@ export type StandardAiReasonCode =
   | "CRISIS_PROCUREMENT_BLOCKED" // 前Turnの原料調達がほぼ完全に止まっていた（scaleRatio≈0または輸入停止）
   | "CRISIS_NEW_SALES_SUPPRESSED" // 危機のため新規Commercial Commitmentを縮小・停止した（既存Backlogは維持）
   | "CRISIS_CAPEX_PAUSED" // 危機のため新規設備投資提案（新工場含む）を停止した（着工済み案件は維持）
-  | "CRISIS_SALES_HIRING_STOPPED"; // 危機のため営業採用を停止した
+  | "CRISIS_SALES_HIRING_STOPPED" // 危機のため営業採用を停止した
+  // --- Strategy Profile Quantification（Phase SP-Q1） ---
+  | "PROFILE_BIAS_APPLIED"; // 会社別ManagementProfile/OrientationProfileのバイアスをStandardAiParametersへ適用した（mode=ONの時のみ）
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -280,6 +282,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CRISIS_NEW_SALES_SUPPRESSED",
   "CRISIS_CAPEX_PAUSED",
   "CRISIS_SALES_HIRING_STOPPED",
+  "PROFILE_BIAS_APPLIED",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

@@ -28,7 +28,9 @@ import {
   buildPublicMarketInfo,
   initializeCompanyLab,
 } from "../runner";
-import { generateStandardAiDecisionWithDiagnostics } from "../standardAi/policy";
+import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../standardAi/policy";
+import { resolveStandardAiProfileForMode } from "../standardAi/orientationProfile";
+import { StandardAiDiagnosticEntry } from "../standardAi/reasonCodes";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState } from "../types";
 import {
   CompanyLabVisionOverrides,
@@ -99,6 +101,12 @@ export interface CreateSimulationSessionInput {
    * Vision上書き（省略時=undefinedなら全社vision/defaults.tsの既定Visionのみを使う）。
    */
   readonly visionOverrides?: CompanyLabVisionOverrides;
+  /**
+   * 【Strategy Profile Quantification・Phase SP-Q1】未指定・"OFF"なら従来どおり
+   * STANDARD_AI_PARAMETERS_V1（全社バイアスゼロ）のまま＝挙動不変。"ON"は
+   * 会社別ManagementProfile/OrientationProfileを適用する（A/Bベンチマーク用）。
+   */
+  readonly standardAiProfileMode?: "OFF" | "ON";
 }
 
 /**
@@ -114,6 +122,7 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     seed: input.seed,
     turns: requestedTurns,
     visionOverrides: input.visionOverrides,
+    standardAiProfileMode: input.standardAiProfileMode,
   };
   const { state, fixtures } = initializeCompanyLab(config);
   const run: SimulationRun = {
@@ -228,6 +237,29 @@ function captureObservedDemand(turn: number, publicInfo: PublicMarketInfo): Obse
 }
 
 /**
+ * 【Strategy Profile Quantification・Phase SP-Q1・指示§25】mode="ON"でバイアスが
+ * 実際に適用された場合のみ、診断ストリーム（StandardAiQuarterDiagnostics.entries）へ
+ * 1件PROFILE_BIAS_APPLIEDを追記する（policy.ts側の意思決定ロジックには一切触れず、
+ * engine.ts側で診断を合成するだけ）。「base値→bias後値」の対応表そのものは
+ * diagnostics.managementProfile.appliedBiasItems（createStandardAiProviderが既に
+ * 生成する。baselineDecisionとの突き合わせも含む）で監査できるため、ここでは
+ * AI Trace上で目に留まる要約エントリを1件加えるだけにとどめる。
+ */
+function appendProfileDiagnosticEntry(diagnostics: StandardAiQuarterDiagnostics): StandardAiQuarterDiagnostics {
+  const mp = diagnostics.managementProfile;
+  if (!mp || mp.appliedBiasItems.length === 0) return diagnostics;
+  const entry: StandardAiDiagnosticEntry = {
+    code: "PROFILE_BIAS_APPLIED",
+    domain: "profile",
+    companyId: diagnostics.companyId,
+    severity: "info",
+    keyValues: { appliedBiasItemCount: mp.appliedBiasItems.length },
+    message: `Profile「${mp.profileId}」を適用し、${mp.appliedBiasItems.length}件のパラメータへバイアスを反映した。`,
+  };
+  return { ...diagnostics, entries: [...diagnostics.entries, entry] };
+}
+
+/**
  * ちょうど1ターンだけ進める。通常ゲームと同じ経路だけを通る。
  *
  * 失敗した場合は state を一切変更せず（前のターンまでの状態を保つ）、
@@ -265,15 +297,42 @@ export function advanceSimulationTurn(
     const decisionOwnerByCompany = new Map<string, DecisionOwner>();
     for (const fixture of session.fixtures) {
       const ownState = buildCompanyOwnState(session.state, fixture);
-      const { decision: aiDecision, diagnostics } = generateStandardAiDecisionWithDiagnostics(
+      /**
+       * 【Strategy Profile Quantification・Phase SP-Q1・指示§4/§5】既存の
+       * ManagementProfile（SAI-4）・CompanyOrientationProfile（SAI-5A）を、唯一の
+       * SSoT resolveStandardAiProfileForMode 経由で会社ID単位に解決する。
+       * mode未指定（=config.standardAiProfileMode省略）は"OFF"扱いとなり、
+       * STANDARD_AI_PARAMETERS_V1をそのまま返す＝従来のparams=undefined
+       * フォールバックとビット単位で同値（回帰の基準、指示§27）。
+       */
+      const profileResolution = resolveStandardAiProfileForMode(fixture.companyId, session.state.config.standardAiProfileMode);
+      const { decision: aiDecision, diagnostics: rawDiagnostics } = generateStandardAiDecisionWithDiagnostics(
         fixture,
         ownState,
         publicInfo,
         session.state.currentPeriod,
         turn,
-        undefined,
+        profileResolution.params,
         undefined,
         session.state.config.visionOverrides
+      );
+      /**
+       * 【指示§25】バイアスが1件でも適用されている場合のみ、基準パラメータ
+       * （STANDARD_AI_PARAMETERS_V1）でも同一入力を評価し、「base決定→bias後決定」を
+       * 突き合わせられるようにする（createStandardAiProviderの既存ロジックと同じ、
+       * 純粋関数の再呼び出しのみ。ゲーム状態・他四半期への影響はゼロ）。
+       */
+      const baselineDecision =
+        profileResolution.appliedBiasItems.length > 0
+          ? generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, session.state.currentPeriod, turn, STANDARD_AI_PARAMETERS_V1).decision
+          : undefined;
+      const diagnostics = appendProfileDiagnosticEntry(
+        profileResolution.mode === "OFF"
+          ? rawDiagnostics
+          : {
+              ...rawDiagnostics,
+              managementProfile: { profileId: profileResolution.profileId, appliedBiasItems: profileResolution.appliedBiasItems, baselineDecision },
+            }
       );
       const playerDecision = playerDecisions?.[fixture.companyId];
       decisions[fixture.companyId] = playerDecision ?? aiDecision;
@@ -282,7 +341,7 @@ export function advanceSimulationTurn(
       // トレース記録のために Standard AI をもう一度回すことはない（PLAYER会社でも、
       // 参考用の Standard AI 診断はそのまま記録する＝実際の意思決定には使わない）。
       turnTraces.push(extractAiTurnTrace(diagnostics));
-      strategyByCompany.set(fixture.companyId, captureStrategy(diagnostics));
+      strategyByCompany.set(fixture.companyId, captureStrategy(diagnostics, profileResolution));
       diagnosticsByCompany.set(fixture.companyId, diagnostics);
     }
     // 【AI Analysis Pack】期首状態は「当期処理前」に撮る（処理後では期首にならない）。

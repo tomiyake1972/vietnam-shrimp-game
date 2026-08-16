@@ -23,7 +23,7 @@
 import { DemandMarketId, Product } from "../../market/types";
 import { CompanyId } from "../../sales/types";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "./parameters";
-import { AppliedManagementBiasItem, resolveManagementProfileParameters } from "./managementProfile";
+import { AppliedManagementBiasItem, ManagementProfileId, resolveManagementProfileParameters } from "./managementProfile";
 import { StandardAiParamsResolution } from "./policy";
 
 /** 市場志向倍率の許容範囲（実装指示§3）。 */
@@ -205,6 +205,68 @@ export function applyOrientationProfile(
 export function resolveOrientationProfile(companyId: CompanyId): CompanyOrientationProfile {
   const id = COMPANY_ORIENTATION_BY_COMPANY_ID[companyId] ?? "balancedGeneralist";
   return COMPANY_ORIENTATION_PROFILES[id];
+}
+
+/**
+ * 【Phase SP-Q1】Management Console 本番経路（simulation/engine.ts）向けの
+ * Profile解決結果。会社別のManagementProfile・OrientationProfileのIDを
+ * 個別に保持する（createSai5ParamsResolverの結合済み文字列profileIdだと
+ * Analysis Pack上でMS/志向を分離して記録できないため、ここで組み立て直す）。
+ */
+export interface StandardAiProfileResolution {
+  readonly mode: "OFF" | "ON";
+  readonly params: StandardAiParameters;
+  /** 【StandardAiParamsResolution互換】createStandardAiProviderへそのまま渡せるよう、
+   *  managementProfileId+orientationProfileIdを結合した文字列も保持する。 */
+  readonly profileId: string;
+  readonly managementProfileId: ManagementProfileId | "OFF";
+  readonly orientationProfileId: string | "OFF";
+  readonly appliedBiasItems: readonly AppliedManagementBiasItem[];
+}
+
+/**
+ * 【Phase SP-Q1・指示§4/§5】CompanyLabConfig.standardAiProfileModeから、会社ID単位で
+ * 実際にpolicy.tsへ渡す`params`を解決する唯一の入口（SSoT）。既存の
+ * vision/defaults.ts・managementProfile.ts・orientationProfile.tsの値をそのまま使い、
+ * 新しい倍率・しきい値は一切考案しない。
+ *
+ * mode="OFF"（未指定を含む）は STANDARD_AI_PARAMETERS_V1 をそのまま返す
+ * （既存のparams=undefinedフォールバックと完全に同値＝ビット単位で従来挙動と一致）。
+ * mode="ON"はSAI-4経営性格プロファイル→SAI-5A志向プロファイルの順に適用する
+ * （createSai5ParamsResolverと同じ適用順・同じ非干渉性）。
+ *
+ * 【意図的に含めないもの】aiCapexEnabled（SAI-5F拡張：成長エントリ先行投資・
+ * 供給過剰リトリート）はこの関数では有効化しない。既存module（growthTrendResponsiveness・
+ * oversupplyRetreatSensitivity）の値はparamsへ設定されるが、
+ * standardAiCapexExtensionsEnabledがfalseのままなのでdecision/capex.tsのext分岐は
+ * 発火しない。SP-Q1は既存consumerの接続のみが目的であり、新しい判断経路の有効化は
+ * 別Phase（指示§8）。
+ */
+export function resolveStandardAiProfileForMode(
+  companyId: CompanyId,
+  mode: "OFF" | "ON" | undefined
+): StandardAiProfileResolution {
+  if (mode !== "ON") {
+    return {
+      mode: "OFF",
+      params: STANDARD_AI_PARAMETERS_V1,
+      profileId: "OFF",
+      managementProfileId: "OFF",
+      orientationProfileId: "OFF",
+      appliedBiasItems: [],
+    };
+  }
+  const m = resolveManagementProfileParameters(companyId, STANDARD_AI_PARAMETERS_V1);
+  const orientation = resolveOrientationProfile(companyId);
+  const o = applyOrientationProfile(m.params, orientation);
+  return {
+    mode: "ON",
+    params: o.params,
+    profileId: `${m.profileId}+${orientation.id}`,
+    managementProfileId: m.profileId,
+    orientationProfileId: orientation.id,
+    appliedBiasItems: [...m.appliedBiasItems, ...o.appliedBiasItems],
+  };
 }
 
 /**

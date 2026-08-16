@@ -370,6 +370,26 @@ export interface PackStrategy {
     readonly capexPaused: boolean;
     readonly salesHiringStopped: boolean;
   } | null;
+  /**
+   * 【Strategy Profile Quantification・Phase SP-Q1・指示§24】この四半期に適用された
+   * 会社別ManagementProfile（SAI-4）・CompanyOrientationProfile（SAI-5A）。
+   * mode="OFF"（未指定含む）ではmanagementProfileId/orientationProfileIdとも"OFF"、
+   * appliedBiasItemsは空配列（バイアスなし＝従来挙動）。SP-Q1導入前に保存された
+   * Packにはこのフィールドが無いためnull（架空の値を作らない）。
+   */
+  readonly profile: {
+    readonly mode: "OFF" | "ON";
+    readonly managementProfileId: string;
+    readonly orientationProfileId: string;
+    readonly appliedBiasItems: readonly {
+      readonly field: string;
+      readonly meaning: string;
+      readonly baseValue: number;
+      readonly biasedValue: number;
+      readonly ratio: number | null;
+      readonly absoluteDelta: number | null;
+    }[];
+  } | null;
 }
 
 /**

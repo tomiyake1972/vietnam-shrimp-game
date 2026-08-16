@@ -537,6 +537,17 @@ export interface CompanyLabConfig {
    * 別Runへは引き継がれない（Run単位の設定であり、defaults.ts自体は変更しない）。
    */
   readonly visionOverrides?: CompanyLabVisionOverrides;
+  /**
+   * 【Strategy Profile Quantification・Phase SP-Q1】既存の会社別ManagementProfile
+   * （SAI-4）・CompanyOrientationProfile（SAI-5A）を Standard AI の意思決定へ
+   * 適用するかどうか。未指定・"OFF"なら従来どおり STANDARD_AI_PARAMETERS_V1
+   * （全社バイアスゼロ）のまま＝挙動不変（回帰の基準）。"ON"なら会社IDに応じた
+   * 既存プロファイル値（本フェーズでは値そのものを変更しない）を適用する。
+   * PD Mechanization・VAP Product Development・Quality・Environmental投資は
+   * 本フェーズの対象外（Standard AI側に候補生成関数自体が無いため、Profile接続
+   * では発生しない。SP-A1監査参照）。
+   */
+  readonly standardAiProfileMode?: "OFF" | "ON";
 }
 
 export interface CompanyLabState {

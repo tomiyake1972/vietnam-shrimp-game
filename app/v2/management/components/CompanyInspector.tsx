@@ -242,6 +242,20 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
             </AlwaysSection>
           ) : null}
 
+          {/* 【Strategy Profile Quantification・Phase SP-Q1・指示§23】名前のみの表示。
+              全parameter editorやON/OFF toggleは今回追加しない（benchmark configで十分）。
+              mode="OFF"（既定）ではStrategy Profileセクション自体を出さない。 */}
+          {latestStrategy?.profile && latestStrategy.profile.mode === "ON" ? (
+            <AlwaysSection title="Strategy Profile">
+              <div data-testid="strategy-profile-card">
+                <dl>
+                  <Row label="Management Profile" value={latestStrategy.profile.managementProfileId} />
+                  <Row label="Orientation Profile" value={latestStrategy.profile.orientationProfileId} />
+                </dl>
+              </div>
+            </AlwaysSection>
+          ) : null}
+
           {/* 【常に見える】経営の「志」は折りたたまない。ここが今回の中心だからである。 */}
           <AlwaysSection title="Vision（経営者の志）">
             {vision === null ? (

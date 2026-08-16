@@ -27,6 +27,7 @@ import {
 } from "../../../production/factorySpace";
 import { PackCapitalProject, PackCommercialGrowth, PackCompanyStateSnapshot, PackSalesOrganization, PackStrategy, PackWorldTurn } from "./types";
 import { StandardAiQuarterDiagnostics } from "../../standardAi/policy";
+import { StandardAiProfileResolution } from "../../standardAi/orientationProfile";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
@@ -237,7 +238,7 @@ export function captureScenarioEvents(
  * 診断（StandardAiQuarterDiagnostics）の値をそのまま写すだけである。
  * Vision が与えられていない会社では、架空の Vision を作らず availability で示す。
  */
-export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics): PackStrategy {
+export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics, profileResolution?: StandardAiProfileResolution): PackStrategy {
   const v = diagnostics.vision;
   const g = diagnostics.strategicGrowth;
   const a = diagnostics.newFactoryAssessment;
@@ -322,6 +323,21 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics): Pack
           newSalesSuppressed: crisis.newSalesSuppressed,
           capexPaused: crisis.capexPaused,
           salesHiringStopped: crisis.salesHiringStopped,
+        }
+      : null,
+    profile: profileResolution
+      ? {
+          mode: profileResolution.mode,
+          managementProfileId: profileResolution.managementProfileId,
+          orientationProfileId: profileResolution.orientationProfileId,
+          appliedBiasItems: profileResolution.appliedBiasItems.map((item) => ({
+            field: item.field,
+            meaning: item.meaning,
+            baseValue: item.baseValue,
+            biasedValue: item.biasedValue,
+            ratio: item.ratio ?? null,
+            absoluteDelta: item.absoluteDelta ?? null,
+          })),
         }
       : null,
   };
