@@ -559,6 +559,14 @@ export interface CompanyLabConfig {
    * では発生しない。SP-A1監査参照）。
    */
   readonly standardAiProfileMode?: "OFF" | "ON";
+  /**
+   * 【Standard AI CE-3A新設・監査専用】true のときだけ、全社のStandard AI
+   * StandardAiParametersへqualityEquipmentCapabilityEnabled=falseを上書きし、
+   * 品質管理設備の候補生成そのものを無効化する（Customer Trust Attribution
+   * controlled ablation benchmark専用の注入口）。省略時（undefined）・falseは
+   * 既存挙動と完全に同一（既存の全呼び出し元・全既存テストへの影響はゼロ）。
+   */
+  readonly qualityEquipmentCapabilityDisabled?: boolean;
 }
 
 export interface CompanyLabState {

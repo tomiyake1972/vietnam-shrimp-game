@@ -753,7 +753,15 @@ export function buildStandardAiCapexDecision(
   // 一切存在しない）。ここで新しい$便益式を作らない。代わりに、既存の観測
   // （tons・生産量比）だけで構成した無次元の"qualityRiskProtectionRatio"で
   // Factory間の優先順位を決める。ROI・paybackとは呼ばない（指示§16）。
-  {
+  //
+  // 【CE-3A新設・指示§11-14】params.qualityEquipmentCapabilityEnabled===false の
+  // ときだけ、このブロック全体をスキップする（候補評価・診断・提案のいずれも
+  // 一切発生しない＝「Quality Equipment候補生成そのものが無い」状態を再現する）。
+  // 省略時（undefined）は必ずtrue相当で実行される＝CE-3までの挙動と完全に同一
+  // （既存の全呼び出し元・全既存テストへの影響はゼロ）。他のCAPEX判断
+  // （PD Mechanization・HOSO/PD/VAPライン増設・共通前処理増設）はこのifの外に
+  // あり、一切変更されない。
+  if (params.qualityEquipmentCapabilityEnabled !== false) {
     const qualityEquipType: CapitalProjectType = "qualityControlEquipment";
     const qualityEquipGate = financialGateFor(qualityEquipType);
     const qualityEquipSpace = checkSpaceFeasible(qualityEquipType);

@@ -453,3 +453,40 @@ test("CE3-16: 品質管理設備そのもののゲーム効果（QI-I1）はCE-3
   assert.equal(QUALITY_PARAMETERS_V1.qualityControlEquipment.fullEffectRiskReductionRatio, 0.3);
   assert.equal(QUALITY_PARAMETERS_V1.qualityControlEquipment.rampQuarters, 2);
 });
+
+// ---------------------------------------------------------------------
+// CE-3A: controlled ablation switch（qualityEquipmentCapabilityEnabled）
+// ---------------------------------------------------------------------
+
+test("CE3A-ABLATION-1: qualityEquipmentCapabilityEnabled省略時（undefined）はCE-3までの挙動と完全に同一（高Needなら提案される）", () => {
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  assert.ok(result.capexDecision.newProjectProposals.some((p) => p.projectType === "qualityControlEquipment"));
+});
+
+test("CE3A-ABLATION-2: qualityEquipmentCapabilityEnabled=falseなら、高Needでも品質管理設備の候補生成そのものが発生しない（診断も提案もゼロ）", () => {
+  const disabledParams: StandardAiParameters = { ...STANDARD_AI_PARAMETERS_V1, qualityEquipmentCapabilityEnabled: false };
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, disabledParams);
+  assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "qualityControlEquipment"));
+  assert.ok(
+    !result.diagnostics.some((d) => d.code.startsWith("QUALITY_EQUIP_")),
+    "品質管理設備関連のdiagnosticsが一切発生しないべき（候補評価ロジック自体をスキップ）"
+  );
+});
+
+test("CE3A-ABLATION-3: qualityEquipmentCapabilityEnabled=falseでも、他のCAPEX判断（PD Mechanization等）は無変更", () => {
+  const obs = observation({
+    factories: [
+      factoryObservation({
+        factoryId: "BAL-F1",
+        qualityMetrics: HIGH_NEED_METRICS,
+        pdMechanization: { previousQuarterPdUtilization: 0.9, hasActiveOrCompletedProject: false },
+      }),
+    ],
+  });
+  const enabledResult = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const disabledParams: StandardAiParameters = { ...STANDARD_AI_PARAMETERS_V1, qualityEquipmentCapabilityEnabled: false };
+  const disabledResult = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, disabledParams);
+  const pdMechProposalsEnabled = enabledResult.capexDecision.newProjectProposals.filter((p) => p.projectType === "pdMechanization");
+  const pdMechProposalsDisabled = disabledResult.capexDecision.newProjectProposals.filter((p) => p.projectType === "pdMechanization");
+  assert.deepEqual(pdMechProposalsDisabled, pdMechProposalsEnabled, "PD Mechanization判断はablation switchの影響を受けないべき");
+});

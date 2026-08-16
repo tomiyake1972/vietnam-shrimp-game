@@ -199,6 +199,17 @@ export interface StandardAiParameters {
    * 校正前の暫定値、CE-3ベンチマーク実施前は変更しない）。
    */
   readonly qualityEquipmentNeedThreshold: number;
+  /**
+   * 【Standard AI CE-3A新設・監査専用】品質管理設備の候補生成そのものを無効化する
+   * ためのablation switch。省略時（undefined）は有効（＝CE-3までの挙動と完全に
+   * 同一）。falseを明示的に渡した場合のみ、decision/capex.tsのQuality Equipment
+   * 候補ブロックを丸ごとスキップする（PD Mechanization・VAP Product Development・
+   * Line CAPEX・New Factory等、他の判断ロジックは一切変更しない）。
+   * Customer Trust Attribution監査（CE-3A）のcontrolled ablation benchmark
+   * （品質管理設備ONとの比較用）だけに使う注入口であり、既定挙動・既存の
+   * 全呼び出し元・全既存テストには一切影響しない。
+   */
+  readonly qualityEquipmentCapabilityEnabled?: boolean;
 
   // --- 養殖 ---
   /** 養殖の期待収穫比率（池入れ量→収穫量の目安）。 */

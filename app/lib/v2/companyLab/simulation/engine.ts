@@ -107,6 +107,11 @@ export interface CreateSimulationSessionInput {
    * 会社別ManagementProfile/OrientationProfileを適用する（A/Bベンチマーク用）。
    */
   readonly standardAiProfileMode?: "OFF" | "ON";
+  /**
+   * 【Standard AI CE-3A新設・監査専用】Customer Trust Attribution controlled
+   * ablation benchmark専用。省略時（undefined）は既存挙動と完全に同一。
+   */
+  readonly qualityEquipmentCapabilityDisabled?: boolean;
 }
 
 /**
@@ -123,6 +128,7 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     turns: requestedTurns,
     visionOverrides: input.visionOverrides,
     standardAiProfileMode: input.standardAiProfileMode,
+    qualityEquipmentCapabilityDisabled: input.qualityEquipmentCapabilityDisabled,
   };
   const { state, fixtures } = initializeCompanyLab(config);
   const run: SimulationRun = {
@@ -306,13 +312,19 @@ export function advanceSimulationTurn(
        * フォールバックとビット単位で同値（回帰の基準、指示§27）。
        */
       const profileResolution = resolveStandardAiProfileForMode(fixture.companyId, session.state.config.standardAiProfileMode);
+      // 【Standard AI CE-3A新設・監査専用】config.qualityEquipmentCapabilityDisabled
+      // がtrueのときだけ、Quality Equipment候補生成を無効化するablation paramsを
+      // 使う。省略時は必ずprofileResolution.paramsそのまま（既存挙動と完全に同一）。
+      const effectiveParams = session.state.config.qualityEquipmentCapabilityDisabled
+        ? { ...profileResolution.params, qualityEquipmentCapabilityEnabled: false }
+        : profileResolution.params;
       const { decision: aiDecision, diagnostics: rawDiagnostics } = generateStandardAiDecisionWithDiagnostics(
         fixture,
         ownState,
         publicInfo,
         session.state.currentPeriod,
         turn,
-        profileResolution.params,
+        effectiveParams,
         undefined,
         session.state.config.visionOverrides
       );
