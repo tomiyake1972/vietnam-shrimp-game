@@ -138,6 +138,12 @@ export function ManagementConsole() {
    * 常に一致するはずで、一致しない場合だけ強調表示する。
    */
   const [lastPersisted, setLastPersisted] = useState<{ readonly completedTurns: number; readonly revision: number } | null>(null);
+  /**
+   * 【Management Console認証Cookie整合性調査・指示§13】staging限定の認証診断
+   * （/api/v2/company-lab/session-status）。persistenceBlockedになった時だけ
+   * 確認し、「Auth: VALID/INVALID」を表示する。秘密情報は含まない。
+   */
+  const [authDiagnostic, setAuthDiagnostic] = useState<"unknown" | "valid" | "invalid">("unknown");
   const [restoring, setRestoring] = useState(true);
   const stopRequested = useRef(false);
   /**
@@ -339,6 +345,30 @@ export function ManagementConsole() {
       selectedCompanyId,
     });
   }, [view, companyControlModes, confirmedPlayerDecisions, confirmedPlayerDrafts, selectedCompanyId]);
+
+  // 【Management Console認証Cookie整合性調査・指示§13】保存がブロックされたら、
+  // staging限定の診断endpointで実際に認証Cookieが有効かを確認する
+  // （秘密情報は返さない。開発者・三宅がHTTP 403の原因をこの画面だけで切り分けられる）。
+  useEffect(() => {
+    if (!persistenceBlocked) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/v2/company-lab/session-status");
+        if (cancelled || !response.ok) return;
+        const body = (await response.json()) as { authenticated?: boolean };
+        setAuthDiagnostic(body.authenticated ? "valid" : "invalid");
+      } catch {
+        // 診断自体が失敗しても本体機能には影響させない（unknownのまま）。
+      }
+    })();
+    return () => {
+      cancelled = true;
+      // ブロック解除・再ブロック時は次の診断結果が出るまでunknownへ戻す
+      // （cleanup側で行うことで、effect本体からの同期setStateを避ける）。
+      setAuthDiagnostic("unknown");
+    };
+  }, [persistenceBlocked]);
 
   /**
    * 実行の区切りで保存する。保存先（サーバー／ブラウザ）は必ず画面へ出す。
@@ -779,10 +809,36 @@ export function ManagementConsole() {
 
         {persistenceBlocked ? (
           <div className="mt-1.5 rounded-md border border-rose-700 bg-rose-950/60 px-3 py-2 text-xs text-rose-200" data-testid="persistence-blocked-banner">
-            ⚠️ 直前のサーバー保存（正本）が失敗しました。この状態のままTurnを進めると、進行状況が保存されずに失われます。
-            HTTP 403の場合はstagingログインセッションが切れている可能性があります
-            （別タブで /v2/company-lab/play/login からログインし直してください）。
-            保存できる状態になるまで、Turnを進めるボタンを無効化しています。
+            <p>
+              ⚠️ 直前のサーバー保存（正本）が失敗しました。この状態のままTurnを進めると、進行状況が保存されずに失われます。
+              保存できる状態になるまで、Turnを進めるボタンを無効化しています。
+              {authDiagnostic !== "unknown" ? (
+                <span className="ml-2 font-mono" data-testid="auth-diagnostic">
+                  [Auth: {authDiagnostic === "valid" ? "VALID" : "INVALID"}]
+                </span>
+              ) : null}
+            </p>
+            {/* 【Management Console認証Cookie整合性調査・指示§11】HTTP 403（stagingログイン
+                セッションが無効）の場合の再ログイン導線。テキスト案内だけだと、ユーザーが
+                URLを手入力・別検索して別オリジンへ迷い込む恐れがあるため、必ず同一オリジン内の
+                相対リンクにする。returnToで戻り先（このRunのURL）を渡し、ログイン後に
+                Management Consoleへ自動的に戻す（指示§17）。 */}
+            <p className="mt-1">
+              HTTP 403（認証セッション切れ）の場合は、
+              <Link
+                href={`/v2/company-lab/play/login?returnTo=${encodeURIComponent(
+                  typeof window !== "undefined" ? window.location.pathname + window.location.search : "/v2/management"
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-rose-100 underline underline-offset-2 hover:text-white"
+                data-testid="persistence-relogin-link"
+              >
+                こちらから再ログイン
+              </Link>
+              してください（新しいタブで開きます。ログイン後、このRunへ自動的に戻ります）。
+              再ログイン後、この画面で「1 Turn」等を押すと保存を再試行します。
+            </p>
           </div>
         ) : null}
 

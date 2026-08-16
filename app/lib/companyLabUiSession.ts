@@ -161,6 +161,22 @@ export async function requireStagingSession(): Promise<void> {
 }
 
 /**
+ * 【Management Console認証Cookie整合性調査・指示§11/§17】ログイン後に
+ * 「元いた画面」（Management ConsoleのRun等）へ戻すための returnTo を検証する。
+ * open redirect対策として、必ず同一オリジン内の絶対パス（"/"始まり）だけを許可する
+ * （"//evil.com"のようなprotocol-relative URLや"https://..."のような別オリジンURLは
+ * 拒否する）。無効な値はnullを返し、呼び出し側は既定のCOMPANY_LAB_UI_HOME_PATHへ
+ * フォールバックする。
+ */
+export function sanitizeReturnToPath(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith("/")) return null;
+  if (raw.startsWith("//")) return null;
+  if (raw.includes("://")) return null;
+  return raw;
+}
+
+/**
  * 状態変更を伴うServer Action（createLab/saveDraft/submitDraft/processQuarter/
  * login等）の先頭で呼ぶ、CSRF対策の多重防御（指示§7「state-changing操作では
  * same-origin／Origin確認等」）。

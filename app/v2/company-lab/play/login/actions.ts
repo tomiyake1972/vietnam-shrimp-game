@@ -11,19 +11,32 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { attemptStagingLogin, assertSameOriginRequest, COMPANY_LAB_UI_HOME_PATH, COMPANY_LAB_UI_LOGIN_PATH } from "../../../../lib/companyLabUiSession";
+import {
+  attemptStagingLogin,
+  assertSameOriginRequest,
+  sanitizeReturnToPath,
+  COMPANY_LAB_UI_HOME_PATH,
+  COMPANY_LAB_UI_LOGIN_PATH,
+} from "../../../../lib/companyLabUiSession";
 
 export async function loginAction(formData: FormData): Promise<void> {
+  const rawReturnTo = formData.get("returnTo");
+  const returnTo = sanitizeReturnToPath(typeof rawReturnTo === "string" ? rawReturnTo : null);
+  const errorRedirectPath = `${COMPANY_LAB_UI_LOGIN_PATH}?error=1${returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : ""}`;
+
   const origin = await assertSameOriginRequest();
   if (!origin.ok) {
-    redirect(`${COMPANY_LAB_UI_LOGIN_PATH}?error=1`);
+    redirect(errorRedirectPath);
   }
 
   const token = formData.get("token");
   const result = await attemptStagingLogin(typeof token === "string" ? token : "");
   if (!result.ok) {
-    redirect(`${COMPANY_LAB_UI_LOGIN_PATH}?error=1`);
+    redirect(errorRedirectPath);
   }
 
-  redirect(COMPANY_LAB_UI_HOME_PATH);
+  // 【Management Console認証Cookie整合性調査・指示§11/§17】ログイン成功後、
+  // returnToがあれば元の画面（Management ConsoleのRun等）へ戻す。無ければ
+  // 従来どおりCompany Lab一覧へ（Company Lab自体のログインフローと後方互換）。
+  redirect(returnTo ?? COMPANY_LAB_UI_HOME_PATH);
 }

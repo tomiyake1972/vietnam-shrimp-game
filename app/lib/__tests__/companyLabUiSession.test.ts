@@ -14,7 +14,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { createSessionToken, verifySessionToken, deriveSessionSecret, isSameOriginHost, COMPANY_LAB_UI_SESSION_COOKIE_NAME } from "../companyLabUiSession";
+import {
+  createSessionToken,
+  verifySessionToken,
+  deriveSessionSecret,
+  isSameOriginHost,
+  sanitizeReturnToPath,
+  COMPANY_LAB_UI_SESSION_COOKIE_NAME,
+} from "../companyLabUiSession";
 
 const ORIGINAL_TOKEN_ENV = process.env.STAGING_ADMIN_TOKEN;
 
@@ -234,4 +241,34 @@ test("verifySessionToken: 非本番環境（staging）では、同じCookie値�
   });
   const result = JSON.parse(out.trim().split("\n").pop() ?? "{}");
   assert.equal(result.verified, true);
+});
+
+// --- sanitizeReturnToPath（Management Console認証Cookie整合性調査・指示§11/§17。
+//     ログイン後にreturnToへ戻すためのopen redirect対策の純粋関数） ---
+
+test("sanitizeReturnToPath: 同一オリジン内の絶対パスはそのまま返す", () => {
+  assert.equal(sanitizeReturnToPath("/v2/management/runs/abc123"), "/v2/management/runs/abc123");
+  assert.equal(sanitizeReturnToPath("/v2/management/runs/abc123?turn=25"), "/v2/management/runs/abc123?turn=25");
+  assert.equal(sanitizeReturnToPath("/"), "/");
+});
+
+test("sanitizeReturnToPath: null・undefined・空文字はnullを返す（既定のCOMPANY_LAB_UI_HOME_PATHへフォールバックさせる）", () => {
+  assert.equal(sanitizeReturnToPath(null), null);
+  assert.equal(sanitizeReturnToPath(undefined), null);
+  assert.equal(sanitizeReturnToPath(""), null);
+});
+
+test("sanitizeReturnToPath: '/'で始まらない値はnullを返す", () => {
+  assert.equal(sanitizeReturnToPath("evil.com/path"), null);
+  assert.equal(sanitizeReturnToPath("v2/management"), null);
+});
+
+test("sanitizeReturnToPath: protocol-relative URL（'//'始まり）はopen redirectとしてnullを返す", () => {
+  assert.equal(sanitizeReturnToPath("//evil.com"), null);
+  assert.equal(sanitizeReturnToPath("//evil.com/v2/management"), null);
+});
+
+test("sanitizeReturnToPath: '://'を含む別オリジンの絶対URLはopen redirectとしてnullを返す", () => {
+  assert.equal(sanitizeReturnToPath("https://evil.com"), null);
+  assert.equal(sanitizeReturnToPath("/redirect?next=https://evil.com"), null);
 });
