@@ -254,6 +254,11 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics): Pack
           desiredProductEvolution: v.desiredProductEvolution,
           longTermNarrative: v.longTermNarrative,
           referenceGrowthPath: v.referenceGrowthPath.map((w) => ({ turn: w.turn, scaleTonsPerQuarter: w.scaleTonsPerQuarter })),
+          strategicPosture: v.strategicPosture ?? null,
+          // 【指示§17のSSoTであるresolveCompanyVision（vision/overrides.ts）の実装】
+          // override適用時はvisionIdへ"-override-t<Turn>"を付与している。ここでは
+          // その事実だけを読み取り、判定ロジックを重複させない。
+          source: v.visionId.includes("-override-") ? "MANUAL_OVERRIDE" : "DEFAULT",
         }
       : null,
     visionTargetScaleAtCurrentTurn: g?.visionTargetScaleAtCurrentTurn ?? null,

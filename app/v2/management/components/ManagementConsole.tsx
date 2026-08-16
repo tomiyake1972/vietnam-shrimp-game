@@ -23,7 +23,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { advanceSimulationTurn, createSimulationSession } from "../../../lib/v2/companyLab/simulation/engine";
+import {
+  advanceSimulationTurn,
+  applyVisionOverrideToSession,
+  createSimulationSession,
+  resetVisionOverrideForSessionCompany,
+} from "../../../lib/v2/companyLab/simulation/engine";
+import { CompanyVisionOverrideEntry } from "../../../lib/v2/companyLab/vision/overrides";
+import { VisionCalibrationPanel } from "./VisionCalibrationPanel";
 import {
   CompanyControlMode,
   MANAGEMENT_CONSOLE_STANDARD_TURNS,
@@ -407,6 +414,35 @@ export function ManagementConsole() {
       return ok;
     },
     []
+  );
+
+  /**
+   * 【Management Console Vision Calibration・指示§12】実行中のRunへVision
+   * overrideを適用する。session.state.config.visionOverridesを更新した新しい
+   * sessionへ差し替えるだけで、過去Turnのcapture・現在の意思決定計算そのものは
+   * 一切再計算しない（次のTurn実行時にresolveCompanyVisionが自然に拾う）。
+   * ライブセッションレジストリへの書き込みは既存のuseEffect（view依存）に任せ、
+   * ここでは重複して呼ばない。即座にサーバーへも保存し、次のTurnボタンを押す前に
+   * リロードしてもoverrideが消えないようにする。
+   */
+  const handleApplyVisionOverride = useCallback(
+    (companyId: string, entry: CompanyVisionOverrideEntry) => {
+      if (!view?.session) return;
+      const updated = applyVisionOverrideToSession(view.session, companyId, entry);
+      setView(viewFromSession(updated));
+      void persist(updated, companyControlModes, confirmedPlayerDecisions);
+    },
+    [view, companyControlModes, confirmedPlayerDecisions, persist]
+  );
+
+  const handleResetVisionOverride = useCallback(
+    (companyId: string) => {
+      if (!view?.session) return;
+      const updated = resetVisionOverrideForSessionCompany(view.session, companyId);
+      setView(viewFromSession(updated));
+      void persist(updated, companyControlModes, confirmedPlayerDecisions);
+    },
+    [view, companyControlModes, confirmedPlayerDecisions, persist]
   );
 
   const runInternal = useCallback(
@@ -907,6 +943,11 @@ export function ManagementConsole() {
           {/* 【既定画面を重くしない】5社の志と成長圧力は折りたたみで持つ。 */}
           <Collapsible title="Vision と成長圧力（5社サマリー）" testId="console-strategy-summary-toggle">
             <StrategySummary strategyTurns={view?.strategyTurns ?? []} runId={view?.run.simulationRunId ?? null} />
+          </Collapsible>
+
+          {/* 【Management Console Vision Calibration・指示§12】実行中でもVisionを調整できる。 */}
+          <Collapsible title="Vision & Strategy Calibration（実行中の編集）" testId="console-vision-calibration-toggle">
+            <VisionCalibrationPanel session={view?.session ?? null} onApply={handleApplyVisionOverride} onReset={handleResetVisionOverride} />
           </Collapsible>
 
           <ExportPackButton

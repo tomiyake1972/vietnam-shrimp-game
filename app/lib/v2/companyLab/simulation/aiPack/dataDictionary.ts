@@ -134,11 +134,31 @@ const ENTRIES: readonly DictionaryEntry[] = [
     field: "companies[].turns[].strategy.vision",
     japanese: "会社のVision（志）",
     definition:
-      "その会社が「どんな会社になりたいか」。**人間の経営者が外から与えるもの**であり、Standard AI が発明した目標ではない。targetScaleTonsPerQuarterAtQ32 は aspiration であって quota ではなく、達成できないことは異常ではない。longTermNarrative は人間向けの文章で、数値判断には一切使われていない。",
+      "その会社が「どんな会社になりたいか」。**人間の経営者が外から与えるもの**であり、Standard AI が発明した目標ではない。targetScaleTonsPerQuarterAtQ32 は aspiration であって quota ではなく、達成できないことは異常ではない。longTermNarrative は人間向けの文章で、数値判断には一切使われていない。Management Console の Vision Calibration からRunごとに上書きできる（source参照）。",
     unit: "—（targetScaleTonsPerQuarterAtQ32 のみ HOSO換算トン/四半期）",
-    source: "companyLab/vision/defaults.ts（会社プロファイル）",
+    source: "companyLab/vision/overrides.ts:resolveCompanyVision（既定はcompanyLab/vision/defaults.ts）",
     layer: "METADATA",
     nullableReason: "その会社に Vision が与えられていない場合。架空の Vision は作らない。",
+  },
+  {
+    field: "companies[].turns[].strategy.vision.strategicPosture",
+    japanese: "戦略姿勢",
+    definition:
+      "AGGRESSIVE_EARLY_CAPACITY（工場完成時点の将来能力不足を根拠に先行投資を検討）／ DEMAND_CONFIRMED（実績需要を確認してから投資する既存経路）／ VALUE_FIRST（数量拡大より高付加価値を優先）。未設定はnull（DEMAND_CONFIRMED相当として扱われるが、値そのものを捏造しない）。",
+    unit: "—",
+    source: "companyLab/vision/types.ts:CompanyVision.strategicPosture",
+    layer: "METADATA",
+    nullableReason: "その会社に Vision が与えられていない場合。",
+  },
+  {
+    field: "companies[].turns[].strategy.vision.source",
+    japanese: "既定 or Run固有override",
+    definition:
+      "DEFAULT＝vision/defaults.tsの既定Visionのまま。MANUAL_OVERRIDE＝Management Console（Setup画面またはRun実行中のVision & Strategy Calibrationパネル）で、このRunだけに適用されたVision上書き。過去Turnのこの値は、そのTurn実行時点で実際に有効だったVisionを表し、後からoverrideしても遡って書き換わらない。",
+    unit: "—",
+    source: "companyLab/vision/overrides.ts:resolveCompanyVision（visionIdの命名規約から導出）",
+    layer: "METADATA",
+    nullableReason: "その会社に Vision が与えられていない場合。",
   },
   {
     field: "companies[].turns[].strategy.visionTargetScaleAtCurrentTurn",
@@ -467,7 +487,7 @@ export function buildDataDictionaryMarkdown(context: AiAnalysisPackContext): str
   lines.push(`| Money (cash, debt) | relative ≥ ${MAJOR_CHANGE_THRESHOLDS.moneyRelative * 100}% AND absolute ≥ ${MAJOR_CHANGE_THRESHOLDS.moneyAbsoluteUsd.toLocaleString()} USD |`);
   lines.push(`| Market price | relative ≥ ${MAJOR_CHANGE_THRESHOLDS.priceRelative * 100}% |`);
   lines.push(`| Market demand | relative ≥ ${MAJOR_CHANGE_THRESHOLDS.demandRelative * 100}% |`);
-  lines.push("| Bottleneck transition / capex event / scenario event | no threshold — always recorded |");
+  lines.push("| Bottleneck transition / capex event / scenario event / Vision target change (VISION_TARGET_CHANGED) | no threshold — always recorded |");
   lines.push("");
 
   lines.push("## Data availability");

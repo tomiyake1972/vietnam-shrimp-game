@@ -22,6 +22,27 @@ import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, SimulationRunSummary } from "
 import { listSimulationRuns, saveSimulationRun, setActiveSimulationRunId } from "../lib/simulationRunStore";
 import { upsertLiveSession } from "../lib/liveSessionRegistry";
 import { newRunId } from "../lib/runId";
+import { StrategicPosture } from "../../../lib/v2/companyLab/vision/types";
+import {
+  CompanyLabVisionOverrides,
+  CompanyVisionOverrideEntry,
+  VISION_TARGET_SCALE_MAX_TONS_PER_QUARTER,
+  VISION_TARGET_SCALE_MIN_TONS_PER_QUARTER,
+  defaultCompanyVisionAtTurn,
+  isVisionTargetScaleInValidRange,
+} from "../../../lib/v2/companyLab/vision/overrides";
+
+const STRATEGIC_POSTURE_OPTIONS: readonly StrategicPosture[] = ["AGGRESSIVE_EARLY_CAPACITY", "DEMAND_CONFIRMED", "VALUE_FIRST"];
+
+function defaultVisionTargetsByCompany(): Record<string, number> {
+  return Object.fromEntries(
+    COMPANY_LAB_COMPANY_IDS.map((id) => [id, defaultCompanyVisionAtTurn(id, 1)?.targetScaleTonsPerQuarterAtQ32 ?? VISION_TARGET_SCALE_MIN_TONS_PER_QUARTER])
+  );
+}
+
+function defaultVisionPosturesByCompany(): Record<string, StrategicPosture> {
+  return Object.fromEntries(COMPANY_LAB_COMPANY_IDS.map((id) => [id, defaultCompanyVisionAtTurn(id, 1)?.strategicPosture ?? "DEMAND_CONFIRMED"]));
+}
 
 const SCENARIOS = listScenarioAliases();
 const DEFAULT_SEED = "management-console-32q";
@@ -57,6 +78,10 @@ export function SetupScreen() {
   );
   const [starting, setStarting] = useState(false);
   const [savedRuns, setSavedRuns] = useState<readonly SimulationRunSummary[] | null>(null);
+  const [defaultVisionTargets] = useState<Record<string, number>>(() => defaultVisionTargetsByCompany());
+  const [defaultVisionPostures] = useState<Record<string, StrategicPosture>>(() => defaultVisionPosturesByCompany());
+  const [visionTargets, setVisionTargets] = useState<Record<string, number>>(() => defaultVisionTargetsByCompany());
+  const [visionPostures, setVisionPostures] = useState<Record<string, StrategicPosture>>(() => defaultVisionPosturesByCompany());
 
   useEffect(() => {
     let cancelled = false;
@@ -75,11 +100,41 @@ export function SetupScreen() {
     setControlModes((prev) => ({ ...prev, [companyId]: mode }));
   }, []);
 
+  const handleChangeVisionTarget = useCallback((companyId: string, value: number) => {
+    setVisionTargets((prev) => ({ ...prev, [companyId]: value }));
+  }, []);
+
+  const handleChangeVisionPosture = useCallback((companyId: string, posture: StrategicPosture) => {
+    setVisionPostures((prev) => ({ ...prev, [companyId]: posture }));
+  }, []);
+
+  const handleResetVisionDefaults = useCallback(() => {
+    setVisionTargets(defaultVisionTargetsByCompany());
+    setVisionPostures(defaultVisionPosturesByCompany());
+  }, []);
+
+  const hasInvalidVisionTarget = COMPANY_LAB_COMPANY_IDS.some((id) => !isVisionTargetScaleInValidRange(visionTargets[id] ?? 0));
+
   const handleStart = useCallback(async () => {
-    if (!selectedScenario || starting) return;
+    if (!selectedScenario || starting || hasInvalidVisionTarget) return;
     setStarting(true);
     const startedAt = nowIso();
     const simulationRunId = newRunId(`${scenarioAlias}-${seed}`, startedAt);
+    // 【指示§9「Default Vision + Run-specific override」】defaultから変更した会社
+    // だけをoverrideに含める。誰も編集しなければvisionOverridesはundefinedのままで、
+    // 既存の全Run・全テストの挙動を変えない。
+    const visionOverrides: Record<string, readonly CompanyVisionOverrideEntry[]> = {};
+    for (const companyId of COMPANY_LAB_COMPANY_IDS) {
+      const target = visionTargets[companyId];
+      const posture = visionPostures[companyId];
+      const targetChanged = target !== defaultVisionTargets[companyId];
+      const postureChanged = posture !== defaultVisionPostures[companyId];
+      if (targetChanged || postureChanged) {
+        visionOverrides[companyId] = [
+          { effectiveFromTurn: 1, targetScaleTonsPerQuarterAtQ32: target, strategicPosture: posture, source: "MANUAL_OVERRIDE" },
+        ];
+      }
+    }
     const session = createSimulationSession({
       simulationRunId,
       scenarioId: scenarioAlias,
@@ -88,6 +143,7 @@ export function SetupScreen() {
       startedAt,
       runName: runName.trim() || undefined,
       companyControlModes: controlModes,
+      visionOverrides: Object.keys(visionOverrides).length > 0 ? (visionOverrides as CompanyLabVisionOverrides) : undefined,
     });
 
     // 【指示§I】既存Runは削除・上書きしない。新しいRunを1本追加するだけ。
@@ -108,7 +164,20 @@ export function SetupScreen() {
     });
     setActiveSimulationRunId(simulationRunId);
     router.push(`/v2/management?run=${encodeURIComponent(simulationRunId)}`);
-  }, [selectedScenario, scenarioAlias, seed, runName, controlModes, starting, router]);
+  }, [
+    selectedScenario,
+    scenarioAlias,
+    seed,
+    runName,
+    controlModes,
+    starting,
+    router,
+    visionTargets,
+    visionPostures,
+    defaultVisionTargets,
+    defaultVisionPostures,
+    hasInvalidVisionTarget,
+  ]);
 
   return (
     <div className="min-h-screen bg-slate-950 p-3 text-slate-100 sm:p-6">
@@ -200,9 +269,85 @@ export function SetupScreen() {
           <p className="mt-1.5 text-[11px] leading-snug text-slate-500">開始後もManagement Console上の経営モード切替でいつでも変更できます。</p>
         </section>
 
+        {/* --- Vision / AI Strategy Calibration --- */}
+        <section className="mb-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="setup-vision-calibration-section">
+          <h2 className="mb-2 text-sm font-semibold">4. Vision / AI Strategy Calibration（Q32目標規模・戦略姿勢）</h2>
+          <p className="mb-2 text-[11px] leading-snug text-slate-500">
+            各社が8年後（Q32）に目指す規模の「志」です。単位は <span className="font-mono">t / quarter（t/四半期）</span>
+            。ここで変更してもStandard AIが必ずこの数量を作るわけではありません（達成義務ではなく、投資判断の物差しです）。このRunだけに適用され、他のRunや既定値は変わりません。
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-xs">
+              <thead>
+                <tr className="border-b border-slate-700 text-left text-slate-400">
+                  <th className="py-1 pr-2">Company</th>
+                  <th className="py-1 pr-2">Q32 Target Scale（t/quarter）</th>
+                  <th className="py-1 pr-2">Default</th>
+                  <th className="py-1 pr-2">Strategic Posture</th>
+                </tr>
+              </thead>
+              <tbody>
+                {COMPANY_LAB_COMPANY_IDS.map((companyId) => {
+                  const value = visionTargets[companyId] ?? 0;
+                  const valid = isVisionTargetScaleInValidRange(value);
+                  const isDefault = value === defaultVisionTargets[companyId];
+                  return (
+                    <tr key={companyId} className="border-b border-slate-800">
+                      <td className="py-1 pr-2 font-semibold">{companyId}</td>
+                      <td className="py-1 pr-2">
+                        <input
+                          type="number"
+                          value={value}
+                          step={1000}
+                          min={VISION_TARGET_SCALE_MIN_TONS_PER_QUARTER}
+                          max={VISION_TARGET_SCALE_MAX_TONS_PER_QUARTER}
+                          onChange={(e) => handleChangeVisionTarget(companyId, Math.round(Number(e.target.value)))}
+                          data-testid={`setup-vision-target-${companyId}`}
+                          className={`w-28 rounded border bg-slate-900 px-1.5 py-1 text-[11px] ${valid ? "border-slate-600" : "border-red-600"}`}
+                        />
+                        {!valid ? (
+                          <p className="mt-0.5 text-[10px] text-red-400" data-testid={`setup-vision-target-warning-${companyId}`}>
+                            {VISION_TARGET_SCALE_MIN_TONS_PER_QUARTER.toLocaleString()}〜{VISION_TARGET_SCALE_MAX_TONS_PER_QUARTER.toLocaleString()}
+                            t/期の範囲で入力してください。
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className={`py-1 pr-2 tabular-nums ${isDefault ? "text-slate-500" : "text-amber-400"}`}>
+                        {defaultVisionTargets[companyId]?.toLocaleString() ?? "－"}
+                      </td>
+                      <td className="py-1 pr-2">
+                        <select
+                          value={visionPostures[companyId] ?? "DEMAND_CONFIRMED"}
+                          onChange={(e) => handleChangeVisionPosture(companyId, e.target.value as StrategicPosture)}
+                          data-testid={`setup-vision-posture-${companyId}`}
+                          className="rounded border border-slate-600 bg-slate-900 px-1.5 py-1 text-[11px]"
+                        >
+                          {STRATEGIC_POSTURE_OPTIONS.map((p) => (
+                            <option key={p} value={p}>
+                              {p}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <button
+            type="button"
+            onClick={handleResetVisionDefaults}
+            data-testid="setup-vision-reset-defaults"
+            className="mt-2 rounded border border-slate-600 px-2.5 py-1.5 text-[11px] hover:bg-slate-800"
+          >
+            Reset Defaults
+          </button>
+        </section>
+
         {/* --- Run name --- */}
         <section className="mb-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="setup-run-name-section">
-          <h2 className="mb-2 text-sm font-semibold">4. Run名・メモ（任意）</h2>
+          <h2 className="mb-2 text-sm font-semibold">5. Run名・メモ（任意）</h2>
           <input
             type="text"
             value={runName}
@@ -217,7 +362,7 @@ export function SetupScreen() {
         <button
           type="button"
           onClick={handleStart}
-          disabled={starting}
+          disabled={starting || hasInvalidVisionTarget}
           data-testid="setup-start-button"
           className="w-full rounded bg-emerald-700 px-4 py-3 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40"
         >

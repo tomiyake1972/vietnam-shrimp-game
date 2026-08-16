@@ -18,6 +18,7 @@ import { ConsumerMarketCarryStateTable, ConsumerMarketQuarterRecord } from "../m
 import { ScenarioMode, ScenarioState } from "../scenario/types";
 import { CompanyId, CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
 import type { SalesParameters } from "../sales/parameters";
+import type { CompanyLabVisionOverrides } from "./vision/overrides";
 import type { ObservedMarketDemand } from "./marketDemandObservation";
 import {
   AquacultureStockingPlanEntry,
@@ -519,6 +520,15 @@ export interface CompanyLabConfig {
    * 候補モデルの 32Q 比較のためだけに使う注入口であり、正式モデルの決定ではない。
    */
   readonly salesParamsOverride?: SalesParameters;
+  /**
+   * 【Management Console Vision Calibration】Run固有のVision（Q32目標規模・
+   * strategicPosture）上書き（optional）。未指定ならvision/defaults.tsの既定
+   * Visionをそのまま使う（挙動不変）。UI・Standard AI・Analysis Packは必ず
+   * vision/overrides.ts の resolveCompanyVision を通してこれを読む
+   * （defaultVisionDocumentForを直接呼んでこれを無視する経路を作らない）。
+   * 別Runへは引き継がれない（Run単位の設定であり、defaults.ts自体は変更しない）。
+   */
+  readonly visionOverrides?: CompanyLabVisionOverrides;
 }
 
 export interface CompanyLabState {

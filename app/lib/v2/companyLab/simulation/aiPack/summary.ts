@@ -107,6 +107,34 @@ export function buildRunSummaryMarkdown(context: AiAnalysisPackContext): string 
   }
   lines.push("");
 
+  // --- Vision Calibration（Management Console Vision Calibration・指示§19） ---
+  // 【捏造しない】記録済みのturns[].strategy.visionだけを読む。Visionが一度も
+  // captureされていない会社（turns空）は行を出さない。
+  lines.push("## Vision Calibration");
+  lines.push("");
+  lines.push(
+    "Q32 target scale is an aspiration (a yardstick for strategic gap), not a quota. `source` distinguishes the built-in default Vision from a Management Console Run-specific override."
+  );
+  lines.push("");
+  lines.push("| Company | Initial Vision (first recorded turn) | Final Vision (last recorded turn) | Vision changes |");
+  lines.push("|---|---|---|---|");
+  for (const c of context.companySummaries) {
+    const turns = context.companies[c.companyId]?.turns ?? [];
+    const visionTurns = turns.filter((t) => t.strategy.vision !== null);
+    if (visionTurns.length === 0) {
+      lines.push(`| ${c.companyId} | n/a | n/a | 0 |`);
+      continue;
+    }
+    const first = visionTurns[0].strategy.vision!;
+    const last = visionTurns[visionTurns.length - 1].strategy.vision!;
+    const distinctVisionIds = new Set(visionTurns.map((t) => t.strategy.vision!.visionId));
+    lines.push(
+      `| ${c.companyId} | ${first.targetScaleTonsPerQuarterAtQ32.toLocaleString()} t/Q (from Turn ${first.effectiveFromTurn}, ${first.source}) | ` +
+        `${last.targetScaleTonsPerQuarterAtQ32.toLocaleString()} t/Q (from Turn ${last.effectiveFromTurn}, ${last.source}) | ${distinctVisionIds.size - 1} |`
+    );
+  }
+  lines.push("");
+
   // --- Beginning vs Ending ---
   lines.push("## Beginning vs Ending");
   lines.push("");

@@ -30,6 +30,12 @@ import {
 } from "../runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../standardAi/policy";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState } from "../types";
+import {
+  CompanyLabVisionOverrides,
+  CompanyVisionOverrideEntry,
+  withCompanyVisionOverrideApplied,
+  withCompanyVisionOverrideReset,
+} from "../vision/overrides";
 import { createCompanyLabRuntimeSnapshot } from "../persistence/snapshot";
 import { computeEffectiveFactories } from "../../capex/factoryConstruction";
 import { calculateFactoryEffectiveCapacity } from "../../production/capacity";
@@ -88,6 +94,11 @@ export interface CreateSimulationSessionInput {
    * （Setup画面を経由しない既存の呼び出し元・既存テストとの後方互換）。
    */
   readonly companyControlModes?: Readonly<Record<string, CompanyControlMode>>;
+  /**
+   * 【Management Console Vision Calibration・Setup画面】Run開始時点で適用する
+   * Vision上書き（省略時=undefinedなら全社vision/defaults.tsの既定Visionのみを使う）。
+   */
+  readonly visionOverrides?: CompanyLabVisionOverrides;
 }
 
 /**
@@ -102,6 +113,7 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     mode: "canonical",
     seed: input.seed,
     turns: requestedTurns,
+    visionOverrides: input.visionOverrides,
   };
   const { state, fixtures } = initializeCompanyLab(config);
   const run: SimulationRun = {
@@ -135,6 +147,41 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     packCompanyTurns: [],
     packWorldTurns: [],
     latestQuarterPreProcessingSnapshot: null,
+  };
+}
+
+/**
+ * 【Management Console Vision Calibration・指示§12「Run開始後のVision編集」】
+ * 実行中のRunに新しいVision override（Q32目標規模・任意でstrategicPosture）を
+ * 適用した、新しいSimulationSessionを返す（純粋関数。既存sessionは変更しない）。
+ *
+ * 【指示§13「過去Turnをretroactive変更しない」】config.visionOverridesを更新する
+ * だけで、既に確定した過去TurnのAI Pack capture（session.packCompanyTurns等）は
+ * 一切書き換えない。以降のTurnがresolveCompanyVision経由でこのoverrideを読む。
+ * 呼び出し側は必ずentry.effectiveFromTurnへ「次のTurn」を渡すこと
+ * （過去Turnを渡しても、既に確定した過去のcaptureへは影響しない＝画面上「効いた
+ * ように見えない」だけなので、UI側でnextTurn固定にする）。
+ */
+export function applyVisionOverrideToSession(
+  session: SimulationSession,
+  companyId: string,
+  entry: CompanyVisionOverrideEntry
+): SimulationSession {
+  const nextOverrides = withCompanyVisionOverrideApplied(session.state.config.visionOverrides, companyId, entry);
+  return {
+    ...session,
+    config: { ...session.config, visionOverrides: nextOverrides },
+    state: { ...session.state, config: { ...session.state.config, visionOverrides: nextOverrides } },
+  };
+}
+
+/** 【指示§11「Reset to Default」】ある会社のRun内override（全履歴）を取り除く。 */
+export function resetVisionOverrideForSessionCompany(session: SimulationSession, companyId: string): SimulationSession {
+  const nextOverrides = withCompanyVisionOverrideReset(session.state.config.visionOverrides, companyId);
+  return {
+    ...session,
+    config: { ...session.config, visionOverrides: nextOverrides },
+    state: { ...session.state, config: { ...session.state.config, visionOverrides: nextOverrides } },
   };
 }
 
@@ -223,7 +270,10 @@ export function advanceSimulationTurn(
         ownState,
         publicInfo,
         session.state.currentPeriod,
-        turn
+        turn,
+        undefined,
+        undefined,
+        session.state.config.visionOverrides
       );
       const playerDecision = playerDecisions?.[fixture.companyId];
       decisions[fixture.companyId] = playerDecision ?? aiDecision;

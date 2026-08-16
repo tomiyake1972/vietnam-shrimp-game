@@ -295,6 +295,18 @@ export interface PackStrategy {
     readonly longTermNarrative: string;
     /** 参考成長軌道（REFERENCE PATH。達成義務ではない）。 */
     readonly referenceGrowthPath: readonly { readonly turn: number; readonly scaleTonsPerQuarter: number }[];
+    /**
+     * 【Management Console Vision Calibration・指示§19】undefined（未設定）は
+     * DEMAND_CONFIRMED相当として扱われるが、Pack上はnullのまま残す
+     * （元のCompanyVisionの値を捏造・補完しない）。
+     */
+    readonly strategicPosture: string | null;
+    /**
+     * 【指示§19「default or override」】このTurnで実際に使われたVisionが、
+     * vision/defaults.tsの既定のままか、Management ConsoleでのRun固有override
+     * （vision/overrides.ts）が適用された結果かを区別する。
+     */
+    readonly source: "DEFAULT" | "MANUAL_OVERRIDE";
   } | null;
   readonly visionTargetScaleAtCurrentTurn: number | null;
   readonly currentSustainableScaleTons: number | null;

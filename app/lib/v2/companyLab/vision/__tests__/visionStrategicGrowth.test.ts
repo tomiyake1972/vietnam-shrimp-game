@@ -138,11 +138,15 @@ test("VISION-2: 未知の会社には架空の Vision を作らない", () => {
 test("VISION-3: 既定 Vision の合計は、5社が獲得対象にできる需要の総量を超えない", () => {
   // 実測: Q32 の TRUE 需要 266,642t/四半期（scripts/visionBaselineCalibration.ts）。
   // 全社が同時に達成しても算術的に成立しうる水準に収まっていること。
+  //
+  // 【Management Console Vision Calibration・2026-08】MASSを40,000→80,000へ
+  // 引き上げたため合計は148,000→188,000へ増える（他4社は不変）。それでも
+  // Q32 TRUE需要（266,642t）は超えていない。
   const total = [...DEFAULT_COMPANY_VISION_DOCUMENTS.values()].reduce(
     (s, d) => s + d.visions[0].targetScaleTonsPerQuarterAtQ32,
     0
   );
-  assert.equal(total, 148_000);
+  assert.equal(total, 188_000);
   assert.ok(total < 266_642, "既定 Vision の合計が、5社が獲得対象にできる需要を超えている");
 });
 

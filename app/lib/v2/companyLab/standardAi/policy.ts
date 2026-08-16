@@ -49,8 +49,8 @@ import { SALES_PARAMETERS_V1, SalesParameters } from "../../sales/parameters";
 import { computeTargetScaleBand } from "./targetScale";
 import { computeTargetCapability } from "./targetCapability";
 import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "./strategicIntent";
-import { defaultVisionDocumentFor } from "../vision/defaults";
-import { resolveVisionAtTurn, CompanyVision } from "../vision/types";
+import { CompanyVision } from "../vision/types";
+import { resolveCompanyVision, CompanyLabVisionOverrides } from "../vision/overrides";
 import { computeStrategicGrowthState, StrategicGrowthState } from "../vision/strategicGrowth";
 import { CommercialAmbition, computeCommercialAmbition } from "../vision/commercialAmbition";
 import { computeUnservedOpportunity, UnservedOpportunity } from "../vision/unservedOpportunity";
@@ -274,7 +274,14 @@ export function generateStandardAiDecisionWithDiagnostics(
   turn: number,
   params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
   /** 【Phase 6B】営業パラメータの上書き（比較用。未指定なら既定）。 */
-  salesParams: SalesParameters = SALES_PARAMETERS_V1
+  salesParams: SalesParameters = SALES_PARAMETERS_V1,
+  /**
+   * 【Management Console Vision Calibration・指示§17】Run固有のVision上書き
+   * （未指定なら従来どおりvision/defaults.tsの既定Visionのみを使う。挙動不変）。
+   * Vision解決は必ずvision/overrides.tsのresolveCompanyVision（唯一のSSoT）を
+   * 通す。ここでdefaultVisionDocumentFor/resolveVisionAtTurnを直接呼ばない。
+   */
+  visionOverrides?: CompanyLabVisionOverrides
 ): StandardAiDecisionWithDiagnostics {
   const observation = buildStandardAiObservation(fixture, ownState, publicInfo, period, turn);
   const pressures = computePressureScores(observation, fixture, params);
@@ -283,8 +290,7 @@ export function generateStandardAiDecisionWithDiagnostics(
   // Phase 5 では Vision が新工場判断にしか届いておらず、販売希望量は
   // 「自社能力 × salesUtilizationTarget」だけで決まっていた（監査で実測）。
   const targetScaleResult = computeTargetScaleBand(fixture, observation, STANDARD_AI_STRATEGIC_INTENT_V1, params);
-  const visionDocument = defaultVisionDocumentFor(fixture.companyId);
-  const vision: CompanyVision | null = visionDocument ? resolveVisionAtTurn(visionDocument, turn) : null;
+  const vision: CompanyVision | null = resolveCompanyVision(fixture.companyId, turn, visionOverrides);
   const strategicGrowth: StrategicGrowthState | null = vision
     ? computeStrategicGrowthState({ vision, turn, currentSustainableScaleTons: targetScaleResult.currentSustainableScaleTons })
     : null;
@@ -657,6 +663,8 @@ export interface StandardAiProviderOptions {
    * 一切持たない。decision/*.tsの内部にも会社ID分岐は存在しない。
    */
   readonly resolveParams?: (companyId: string) => StandardAiParamsResolution;
+  /** 【Management Console Vision Calibration】Run固有のVision上書き（未指定なら既定Visionのみ）。 */
+  readonly visionOverrides?: CompanyLabVisionOverrides;
 }
 
 export function createStandardAiProvider(
@@ -665,7 +673,7 @@ export function createStandardAiProvider(
   readonly provider: CompanyDecisionProvider;
   readonly diagnostics: StandardAiQuarterDiagnostics[];
 } {
-  const { resolveParams } = options;
+  const { resolveParams, visionOverrides } = options;
   const salesParams = options.salesParams ?? SALES_PARAMETERS_V1;
   const diagnostics: StandardAiQuarterDiagnostics[] = [];
   const provider: CompanyDecisionProvider = (fixture, ownState, publicInfo, period, turn) => {
@@ -677,7 +685,8 @@ export function createStandardAiProvider(
         period,
         turn,
         STANDARD_AI_PARAMETERS_V1,
-        salesParams
+        salesParams,
+        visionOverrides
       );
       diagnostics.push(result.diagnostics);
       return result.decision;
@@ -691,7 +700,8 @@ export function createStandardAiProvider(
       period,
       turn,
       resolution.params,
-      salesParams
+      salesParams,
+      visionOverrides
     );
 
     // 【実装指示§4】バイアスが1件でも適用されている場合のみ、基準パラメータでの

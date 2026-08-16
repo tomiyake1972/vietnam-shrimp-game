@@ -28,6 +28,20 @@
 //
 // 【Vision は quota ではない】ここに書いた数値へゲーム結果を強制しない。
 // 達成できないことはバグではない。Vision は strategic gap を測る物差しである。
+//
+// 【2026-08・MASS Vision Calibration（ChatGPT #05指示）】32Qベンチマークで、
+// 現行の工場能力構成（第2工場までで会社能力が40,000t/期を超え得る）に対し、
+// 5社のQ32数量Visionが17,000〜40,000t/期に集中していたため、「Q32 Visionの
+// 達成には第2工場で足りる」状況になり、Standard AIが第3工場まで検討する
+// 戦略的理由がほとんど発生しなかった。これはNew Factory trigger自体の問題では
+// なく、Vision calibrationが会社の成長戦略を十分に差別化していなかった問題。
+//
+// MASSを「超成長・量産型企業」として Q32 Vision を 80,000t/期へ引き上げる
+// （他4社の既定値は変更しない）。この変更は targetScaleTonsPerQuarterAtQ32 と
+// それに整合する referenceGrowthPath の付け替えのみであり、
+// 「Visionが80,000だから第3工場を建てる」という強制ロジックは一切追加しない
+// （工場建設判断は既存の Strategic Posture / Forward Capacity Gap / Finance /
+// Market / Operational feasibility を通じて Standard AI 自身が行う）。
 
 import { CompanyVision, CompanyVisionDocument, COMPANY_VISION_SCHEMA_VERSION, VisionGrowthWaypoint } from "./types";
 
@@ -54,17 +68,21 @@ function waypoints(q1: number, q8: number, q16: number, q24: number, q32: number
 }
 
 const MASS_VISION: CompanyVision = {
-  visionId: "MASS-vision-v1",
+  visionId: "MASS-vision-v2",
   effectiveFromTurn: 1,
   growthAmbition: "HIGH",
-  targetScaleTonsPerQuarterAtQ32: 40000,
+  targetScaleTonsPerQuarterAtQ32: 80000,
   preferredEndState: "LARGE_VOLUME",
   willingnessToBuildFactories: "HIGH",
   financialRiskTolerance: "HIGH",
   desiredProductEvolution: "HOSO_SCALE",
-  referenceGrowthPath: waypoints(18000, 21000, 27000, 33500, 40000),
+  // 【2026-08 recalibration】q1は変更しない（現在の実設備能力に近い水準を保つ。
+  // ここをQ32目標と同じ比率で引き上げると、初期からgapが過大になりQ1〜Q5での
+  // 暴走投資を誘発しかねない）。中盤以降に立ち上がる凸型の傾きだけを、
+  // Q32=80,000へ届くよう強める。
+  referenceGrowthPath: waypoints(18000, 22000, 32000, 52000, 80000),
   longTermNarrative:
-    "量で勝つ。HOSOを軸に生産量を積み上げ、ベトナム最大級の輸出量を持つ会社になる。工場を建てることを恐れず、借入も成長のための手段として使う。",
+    "量で勝つ。8年後、世界需要の拡大を先取りして80,000t/期級の会社になる。HOSO・PDを軸に大規模化し、成長市場では工場完成前に将来の能力不足を読んで先行投資する。工場を建てることを恐れず、借入も成長のための手段として使う。2工場で終わらず、3工場目も当然の選択肢として持つ。ただし市況が崩れれば、その強気が裏目に出ることも受け入れる。",
   emphasisProducts: ["hoso", "pd"],
   strategicPosture: "AGGRESSIVE_EARLY_CAPACITY",
 };

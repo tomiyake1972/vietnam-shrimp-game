@@ -132,6 +132,23 @@ export function buildMajorChanges(
         changes.push({ turn, scope: companyId, metric: "DEBT", from: money(debtBefore), to: money(debtAfter), changeType: direction(debtBefore, debtAfter) });
       }
 
+      // 【Management Console Vision Calibration・指示§21】Q32 Vision目標の変更
+      // （閾値なし。defaultからoverrideへ、またはoverride同士の変更は必ず記録する）。
+      // 律速の切り替わりと同じ「離散的な状態遷移」であり、金額・能力系のような
+      // ノイズ除去の閾値を必要としない。
+      const prevVision = prev.strategy?.vision ?? null;
+      const currVision = curr.strategy?.vision ?? null;
+      if (prevVision !== null && currVision !== null && prevVision.visionId !== currVision.visionId) {
+        changes.push({
+          turn,
+          scope: companyId,
+          metric: "VISION_TARGET_CHANGED",
+          from: `${prevVision.targetScaleTonsPerQuarterAtQ32.toLocaleString()} t/Q (${prevVision.source})`,
+          to: `${currVision.targetScaleTonsPerQuarterAtQ32.toLocaleString()} t/Q (${currVision.source})`,
+          changeType: "TRANSITION",
+        });
+      }
+
       // 律速の切り替わり（閾値なし。切り替わったら必ず記録する）
       if (prev.diagnosis.commercialBottleneck !== curr.diagnosis.commercialBottleneck) {
         changes.push({
