@@ -59,6 +59,8 @@ import { persistResumableRun } from "../lib/persistRun";
 import { SeriesChart } from "./SeriesChart";
 import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
+import { ScenarioNewsPanel } from "./ScenarioNewsPanel";
+import { resolveNewsTurn, selectScenarioNewsForTurn } from "../lib/scenarioNews";
 import { RunSelector } from "./RunSelector";
 import { Collapsible } from "./Collapsible";
 import { StrategySummary } from "./StrategySummary";
@@ -675,6 +677,19 @@ export function ManagementConsole() {
   const isComplete = completedTurns >= MANAGEMENT_CONSOLE_STANDARD_TURNS;
   const isRestoredOnly = view !== null && view.session === null && completedTurns > 0;
 
+  // 【Dynamic Scenario 1 Testplay】そのターンに公開してよいシナリオNews。
+  // 実行中のセッションがあればシナリオが今いるターン、保存済み実行を眺めている
+  // だけなら最後に完了したターンを対象にする（それより先の情報は持っていない）。
+  // 記事の選定・未来記事の除外は lib/scenarioNews.ts 経由で情報公開エンジンが行う。
+  const scenarioNews = useMemo(() => {
+    if (view === null) return { scenarioNotFound: false, releases: [], turn: 1 } as const;
+    const turn = resolveNewsTurn({
+      scenarioCurrentTurn: view.session?.state.scenarioState.currentTurn ?? null,
+      completedTurns,
+    });
+    return selectScenarioNewsForTurn(view.run.scenarioId, turn);
+  }, [view, completedTurns]);
+
   const money = (v: number | null | undefined) => (v === null || v === undefined ? "－" : `${(v / 1_000_000).toFixed(1)}M`);
   const latestValue = (companyId: string, metric: string): number | null => {
     if (!dataset) return null;
@@ -937,6 +952,19 @@ export function ManagementConsole() {
           {dataset ? (
             <Collapsible title="Market Summary（最新ターンの市場実績）" testId="console-market-summary-toggle">
               <MarketSummary dataset={dataset} />
+            </Collapsible>
+          ) : null}
+
+          {/* 【Dynamic Scenario 1 Testplay】そのターンのシナリオNewsを読めるようにする。
+              表示する記事の選定は lib/scenarioNews.ts が既存の情報公開エンジンへ委ねており、
+              ここではシナリオIDとターンを渡すだけ。未来の記事は情報公開エンジンが構造的に落とす。 */}
+          {view ? (
+            <Collapsible
+              title={`シナリオNews（Turn ${scenarioNews.turn}）`}
+              testId="console-scenario-news-toggle"
+              hint="プレイヤーが読むのと同じ記事です。"
+            >
+              <ScenarioNewsPanel turn={scenarioNews.turn} releases={scenarioNews.releases} scenarioNotFound={scenarioNews.scenarioNotFound} />
             </Collapsible>
           ) : null}
 
