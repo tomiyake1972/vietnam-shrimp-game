@@ -97,6 +97,25 @@ export function hasActivePdMechanizationProjectForFactory(portfolio: readonly Ca
 }
 
 /**
+ * 【QI-I1最終化】特定Factoryに、qualityControlEquipment案件が既に「稼働中（completed）」
+ * または「導入進行中（approved/underConstruction/suspended）」のいずれかの状態で
+ * 存在するか判定する（＝取消以外はすべて重複投資とみなす。PD省人化と異なり、
+ * 稼働完了後の同一Factoryへの再投資も禁止するのが#04の最終判断のため、
+ * isActiveStatusではなくstatus !== "cancelled"で判定する）。
+ * 案件のtargetFactoryIdが未指定（省略時は主工場を対象とする既存規約）の場合は
+ * primaryFactoryIdで補って比較する。
+ */
+export function hasActiveQualityControlEquipmentProjectForFactory(
+  portfolio: readonly CapitalProject[],
+  targetFactoryId: string,
+  primaryFactoryId?: string
+): boolean {
+  return portfolio.some(
+    (p) => p.projectType === "qualityControlEquipment" && (p.targetFactoryId ?? primaryFactoryId) === targetFactoryId && p.status !== "cancelled"
+  );
+}
+
+/**
  * 1件の新規提案を評価する。承認条件（実装指示§12。会社IDでの特殊扱いは
  * 一切行わない。財務・信用診断だけで判定する）:
  *   - 銀行引受停止・重大資金繰り不安（前期末までの情報のみ）の会社は新規承認しない。
@@ -159,6 +178,15 @@ export function evaluateProposal(
   // （1工場につき同時に1件まで）。
   if (proposal.projectType === "pdMechanization" && mechanizationGate?.hasActiveProjectForSameFactory) {
     reasons.push(`工場"${proposal.targetFactoryId}"には既に進行中のPD省人化投資があるため、新規承認を見送り。`);
+  }
+  // 【QI-I1最終化】同一FactoryにqualityControlEquipmentが既に「稼働中」または
+  // 「導入進行中」の場合は、新規の同種案件を拒否する（1工場につき同時に1件まで。
+  // targetFactoryId省略時は主工場が対象となる既存規約のため、拒否理由の文言も
+  // それに合わせる）。
+  if (proposal.projectType === "qualityControlEquipment" && mechanizationGate?.hasActiveProjectForSameFactory) {
+    reasons.push(
+      `工場"${proposal.targetFactoryId ?? "(主工場)"}"には既に稼働中または導入進行中の品質管理設備投資があるため、新規承認を見送り。`
+    );
   }
   // 【develop/v2統合・Phase2監査2-3、複数工場CAPEX Targeting修正で全案件種別へ拡張】
   // targetFactoryIdが実在しないFactoryを指す提案は拒否する（存在しないFactoryへの

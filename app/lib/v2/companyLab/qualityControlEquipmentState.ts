@@ -33,9 +33,13 @@ function quartersBetweenLocal(from: PeriodV2, to: PeriodV2): number {
  *
  * 稼働開始済み（isCapexProjectOperationalAt）のqualityControlEquipment案件だけを
  * 対象に、targetFactoryId（省略時は主工場）ごとのoperationalRisk乗数を算出する。
- * 同じFactoryを対象とする案件が複数存在する場合は、承認時の重複ガードが
- * qualityControlEquipmentには存在しない（設計doc§6で明記済みのギャップ）ため、
- * 最も効果の大きい（乗数が最小の）ものを採用する（決定論的・保守的な既定）。
+ *
+ * 【QI-I1最終化】通常の新規プレイでは、projectLifecycle.tsの承認ゲート
+ * （hasActiveQualityControlEquipmentProjectForFactory）により、同一Factoryへの
+ * 重複投資は承認段階で拒否される。ここでの「複数案件が同じFactoryを対象とする
+ * 場合は最も効果の大きい（乗数が最小の）ものを採用する」処理は、旧保存データ・
+ * 異常stateに対する防御的フォールバックとして意図的に残している
+ * （#04指示：QI-I1最終化§3）。
  */
 export function buildQualityEquipmentRiskMultiplierByFactory(
   capexState: CapexState,

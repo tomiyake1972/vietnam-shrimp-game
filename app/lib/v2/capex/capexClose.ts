@@ -41,6 +41,7 @@ import {
   buildPaymentQueue,
   evaluateProposal,
   hasActivePdMechanizationProjectForFactory,
+  hasActiveQualityControlEquipmentProjectForFactory,
   isActiveStatus,
   ProposalApprovalGate,
   ProposalFactoryCountGate,
@@ -208,14 +209,22 @@ export function closeQuarterWithCapex(
     // targetFactoryIdを持つ提案であれば種別を問わず判定する。
     // projectsは同一四半期内の直前までの承認をすでに反映済みのため、同じ四半期に
     // 同じFactoryへ2件提案しても2件目は正しく拒否される。
+    // 【QI-I1最終化】qualityControlEquipmentはtargetFactoryId省略時に主工場
+    // （input.primaryFactoryId）を暗黙の対象とする既存規約があるため、重複投資判定は
+    // resolvedFactoryId（targetFactoryId ?? primaryFactoryId）基準で行う。pdMechanization
+    // はtargetFactoryIdが必須のため、この一般化による挙動変化はない。
     const mechanizationGate: ProposalFactoryMechanizationGate | undefined =
-      proposal.targetFactoryId !== undefined
+      resolvedFactoryId !== undefined
         ? {
             hasActiveProjectForSameFactory:
-              proposal.projectType === "pdMechanization" ? hasActivePdMechanizationProjectForFactory(projects, proposal.targetFactoryId) : false,
+              proposal.projectType === "pdMechanization"
+                ? hasActivePdMechanizationProjectForFactory(projects, resolvedFactoryId)
+                : proposal.projectType === "qualityControlEquipment"
+                  ? hasActiveQualityControlEquipmentProjectForFactory(projects, resolvedFactoryId, input.primaryFactoryId)
+                  : false,
             // 【develop/v2統合・Phase2監査2-3】validFactoryIdsが渡されている場合だけ判定する
             // （省略時はundefinedのまま＝評価しない。既存呼び出し元との後方互換）。
-            ...(input.validFactoryIds !== undefined
+            ...(input.validFactoryIds !== undefined && proposal.targetFactoryId !== undefined
               ? { targetFactoryExists: input.validFactoryIds.includes(proposal.targetFactoryId) }
               : {}),
           }

@@ -20,6 +20,7 @@ import {
   attemptPayment,
   buildPaymentQueue,
   evaluateProposal,
+  hasActiveQualityControlEquipmentProjectForFactory,
   isActiveStatus,
   ProposalApprovalGate,
   validateResumeRequest,
@@ -372,4 +373,99 @@ test("受入確認CX-28（Phase2監査2-3・後方互換）: mechanizationGate.t
     { hasActiveProjectForSameFactory: false }
   );
   assert.ok("approved" in outcome, "targetFactoryExistsを省略した既存呼び出し元の挙動は変わらないはず（後方互換）");
+});
+
+// ---------------------------------------------------------------------
+// QI-I1最終化: qualityControlEquipmentの同一Factory重複投資ガード
+// ---------------------------------------------------------------------
+
+test("QI-I1最終化-A: 同一Factoryを対象とする進行中のqualityControlEquipment案件があるときは、新規提案がmechanizationGate経由で拒否される", () => {
+  const outcome = evaluateProposal(
+    "TEST",
+    proposal({ projectType: "qualityControlEquipment", targetFactoryId: "F1" }),
+    0,
+    HEALTHY_GATE,
+    CAPEX_PARAMETERS_V1,
+    P1,
+    "Q-1",
+    1,
+    undefined,
+    undefined,
+    { hasActiveProjectForSameFactory: true }
+  );
+  assert.ok("rejected" in outcome);
+  if ("rejected" in outcome) {
+    assert.ok(outcome.rejected.reasons.some((r) => r.includes("F1") && r.includes("品質管理設備")));
+  }
+});
+
+function qualityEquipmentProject(overrides: Partial<CapitalProject> = {}): CapitalProject {
+  return {
+    projectId: "Q-EXISTING",
+    companyId: "TEST",
+    projectType: "qualityControlEquipment",
+    approvedBudgetUsd: 1_200_000,
+    paymentSchedule: [{ stageIndex: 0, plannedRatio: 1 }],
+    completedPaymentStagesCount: 1,
+    cumulativePaidUsd: 1_200_000,
+    elapsedConstructionQuartersWithPayment: 1,
+    requiredConstructionQuarters: 1,
+    status: "underConstruction",
+    proposedPeriod: P1,
+    approvedPeriod: P1,
+    priority: 1,
+    targetFactoryId: "F1",
+    lastDiagnosticReasons: [],
+    ...overrides,
+  } as CapitalProject;
+}
+
+test("QI-I1最終化-B: 稼働中（status=completed）のqualityControlEquipment案件がある場合もhasActiveQualityControlEquipmentProjectForFactoryはtrueを返す（既存稼働中への重複投資も禁止）", () => {
+  const result = hasActiveQualityControlEquipmentProjectForFactory([qualityEquipmentProject({ status: "completed", completedPeriod: P1 })], "F1");
+  assert.equal(result, true, "稼働完了後（completed）の同一Factoryへの重複投資も禁止されるはず");
+});
+
+test("QI-I1最終化-B': 導入進行中（underConstruction/approved/suspended）のqualityControlEquipment案件がある場合もtrueを返す", () => {
+  for (const status of ["approved", "underConstruction", "suspended"] as const) {
+    const result = hasActiveQualityControlEquipmentProjectForFactory([qualityEquipmentProject({ status })], "F1");
+    assert.equal(result, true, `status=${status}のときもtrueのはず`);
+  }
+});
+
+test("QI-I1最終化: 取消済み（cancelled）のqualityControlEquipment案件は重複投資判定の対象にならない", () => {
+  const result = hasActiveQualityControlEquipmentProjectForFactory([qualityEquipmentProject({ status: "cancelled", cancelledPeriod: P1 })], "F1");
+  assert.equal(result, false, "取消済み案件は重複とみなさないはず（再投資を妨げない）");
+});
+
+test("QI-I1最終化: targetFactoryId省略済みの既存案件は、primaryFactoryId引数で補って比較される", () => {
+  const withOmittedTarget = hasActiveQualityControlEquipmentProjectForFactory(
+    [qualityEquipmentProject({ targetFactoryId: undefined, status: "completed", completedPeriod: P1 })],
+    "F1",
+    "F1"
+  );
+  assert.equal(withOmittedTarget, true, "targetFactoryId省略時はprimaryFactoryId基準で同一Factoryと判定されるはず");
+
+  const differentPrimary = hasActiveQualityControlEquipmentProjectForFactory(
+    [qualityEquipmentProject({ targetFactoryId: undefined, status: "completed", completedPeriod: P1 })],
+    "F2",
+    "F1"
+  );
+  assert.equal(differentPrimary, false, "primaryFactoryIdがF1・比較対象がF2なら重複ではないはず");
+});
+
+test("QI-I1最終化-C: 別のFactoryを対象とするqualityControlEquipment提案は、他Factoryの案件の有無に影響されず承認される", () => {
+  const outcome = evaluateProposal(
+    "TEST",
+    proposal({ projectType: "qualityControlEquipment", targetFactoryId: "F2" }),
+    0,
+    HEALTHY_GATE,
+    CAPEX_PARAMETERS_V1,
+    P1,
+    "Q-2",
+    2,
+    undefined,
+    undefined,
+    { hasActiveProjectForSameFactory: false }
+  );
+  assert.ok("approved" in outcome);
 });

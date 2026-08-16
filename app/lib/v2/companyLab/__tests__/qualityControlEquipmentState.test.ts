@@ -15,6 +15,7 @@ import { buildQualityEquipmentRiskMultiplierByFactory } from "../qualityControlE
 const P1 = period(2020, 1);
 const P2 = nextPeriod(P1);
 const P3 = nextPeriod(P2);
+const P4 = nextPeriod(P3);
 
 function makeFactory(factoryId: string, companyId = "BAL"): Factory {
   return {
@@ -116,4 +117,26 @@ test("QI1-STATE: 未完成（承認済みだが未完成）案件は効果を持
   ]);
   const result = buildQualityEquipmentRiskMultiplierByFactory(capexState, factories, P1, QUALITY_PARAMETERS_V1);
   assert.ok(!result.has("BAL-F1"), "未完成案件はまだ効果を持たないはず");
+});
+
+test("QI-I1最終化-D: 承認ガードでは通常発生しないはずの、同一Factoryを対象とする複数案件（旧保存データ・異常stateを模す）をロードしても、effect計算は壊れず最も効果の大きいものが採用される", () => {
+  const factories = [makeFactory("BAL-F1")];
+  const capexState = capexStateWith([
+    makeQualityEquipmentProject({ projectId: "PROJ-Q1", targetFactoryId: "BAL-F1" }),
+    makeQualityEquipmentProject({ projectId: "PROJ-Q2", targetFactoryId: "BAL-F1", completedPeriod: P1, approvedPeriod: P1, proposedPeriod: P1 }),
+  ]);
+  assert.doesNotThrow(() => {
+    const result = buildQualityEquipmentRiskMultiplierByFactory(capexState, factories, P4, QUALITY_PARAMETERS_V1);
+    assert.ok(result.has("BAL-F1"));
+    assert.ok(result.get("BAL-F1")! >= 0 && result.get("BAL-F1")! <= 1, "異常stateでもmultiplierは[0,1]に収まるはず");
+    assert.ok(
+      Math.abs(result.get("BAL-F1")! - (1 - QUALITY_PARAMETERS_V1.qualityControlEquipment.fullEffectRiskReductionRatio)) < 1e-9,
+      "両案件ともランプ完了済みなので、結果はfull effectのmultiplierと一致するはず"
+    );
+  });
+});
+
+test("QI-I1最終化-E: fullEffectRiskReductionRatio=0.30・rampQuarters=2がQUALITY_PARAMETERS_V1のSSoT既定値である", () => {
+  assert.equal(QUALITY_PARAMETERS_V1.qualityControlEquipment.fullEffectRiskReductionRatio, 0.3);
+  assert.equal(QUALITY_PARAMETERS_V1.qualityControlEquipment.rampQuarters, 2);
 });
