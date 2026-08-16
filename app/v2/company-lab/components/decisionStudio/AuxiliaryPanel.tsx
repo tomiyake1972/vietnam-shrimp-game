@@ -19,54 +19,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AREA_TONES } from "../panelStyles";
+import { fetchAiMeetingConversationAction, sendAiMeetingMessageAction } from "../../play/[labId]/actions";
+import { AiMeetingCallDiagnostics, AiMeetingMessage, ExecutiveRole, ValidatedAiMeetingProposal } from "../../../../lib/v2/companyLab/aiManagementMeeting/types";
 
-type ExecutiveRole = "CEO" | "CFO" | "COO" | "COMMERCIAL";
 type MessageSpeaker = "PLAYER" | ExecutiveRole;
-
-interface AiMeetingMessage {
-  readonly id: string;
-  readonly speaker: MessageSpeaker;
-  readonly text: string;
-  readonly turn: number;
-  readonly stance?: string;
-  readonly proposalIds: readonly string[];
-  readonly factsUsed: readonly string[];
-}
-
-interface ValidatedAiMeetingProposal {
-  readonly proposal: { readonly id: string; readonly domain: string; readonly rationale: string; readonly [key: string]: unknown };
-  readonly valid: boolean;
-  readonly issues: readonly string[];
-  readonly financiallyRisky: boolean;
-}
-
-interface AiMeetingCallDiagnostics {
-  readonly model: string;
-  readonly inputTokens: number | null;
-  readonly outputTokens: number | null;
-  readonly stopReason: string | null;
-  readonly latencyMs: number;
-  readonly retryCount: number;
-  readonly schemaValidationResult: string;
-}
-
-interface PostAiMeetingResponseBody {
-  readonly meetingId: string;
-  readonly messages: readonly AiMeetingMessage[];
-  readonly validatedProposals: readonly ValidatedAiMeetingProposal[];
-  readonly meetingIntent: string | null;
-  readonly potentialStrategicChange: boolean;
-  readonly potentialStrategicChangeNote?: string | null;
-  readonly available: boolean;
-  readonly unavailableReason?: string;
-  readonly diagnostics: AiMeetingCallDiagnostics;
-}
-
-interface GetAiMeetingResponseBody {
-  readonly meetingId: string;
-  readonly messages: readonly AiMeetingMessage[];
-  readonly lastValidatedProposals: readonly ValidatedAiMeetingProposal[];
-}
 
 const ROLE_LABEL: Readonly<Record<MessageSpeaker, string>> = {
   PLAYER: "あなた（プレイヤー）",
@@ -109,10 +65,6 @@ function buildMeetingId(labId: string, companyId: string, turn: number): string 
   return `${labId}:${companyId}:turn${turn}`;
 }
 
-function apiUrl(labId: string, companyId: string, turn: number): string {
-  return `/api/v2/company-labs/${encodeURIComponent(labId)}/companies/${encodeURIComponent(companyId)}/turns/${turn}/ai-meeting/messages`;
-}
-
 export default function AuxiliaryPanel({ labId, companyId, turn, onClose }: AuxiliaryPanelProps) {
   const tone = AREA_TONES.info;
   const [messages, setMessages] = useState<readonly AiMeetingMessage[]>([]);
@@ -133,28 +85,20 @@ export default function AuxiliaryPanel({ labId, companyId, turn, onClose }: Auxi
     let cancelled = false;
     const restoreMeetingId = buildMeetingId(labId, companyId, turn);
     (async () => {
-      try {
-        const res = await fetch(`${apiUrl(labId, companyId, turn)}?meetingId=${encodeURIComponent(restoreMeetingId)}`, { method: "GET" });
-        if (cancelled) return;
-        if (res.status === 404) {
-          setMeetingId(restoreMeetingId);
-          return;
-        }
-        if (!res.ok) {
-          setLoadError(`会話の復元に失敗しました（HTTP ${res.status}）。新しい会話として続行できます。`);
-          setMeetingId(restoreMeetingId);
-          return;
-        }
-        const body = (await res.json()) as GetAiMeetingResponseBody;
-        setMessages(body.messages);
-        setValidatedProposals(body.lastValidatedProposals);
-        setMeetingId(body.meetingId);
-      } catch {
-        if (!cancelled) {
-          setLoadError("会話の復元中にネットワークエラーが発生しました。新しい会話として続行できます。");
-          setMeetingId(restoreMeetingId);
-        }
+      const result = await fetchAiMeetingConversationAction(labId, companyId, restoreMeetingId);
+      if (cancelled) return;
+      if (!result.ok) {
+        setLoadError(result.errorMessage ?? "会話の復元に失敗しました。新しい会話として続行できます。");
+        setMeetingId(restoreMeetingId);
+        return;
       }
+      if (!result.found) {
+        setMeetingId(restoreMeetingId);
+        return;
+      }
+      setMessages(result.messages ?? []);
+      setValidatedProposals(result.lastValidatedProposals ?? []);
+      setMeetingId(result.meetingId ?? restoreMeetingId);
     })();
     return () => {
       cancelled = true;
@@ -175,23 +119,18 @@ export default function AuxiliaryPanel({ labId, companyId, turn, onClose }: Auxi
     setLoadError(null);
     setUnavailableReason(null);
     try {
-      const res = await fetch(apiUrl(labId, companyId, turn), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meetingId: meetingId ?? undefined, playerMessage: text }),
-      });
-      if (!res.ok) {
-        setLoadError(`送信に失敗しました（HTTP ${res.status}）。ゲームの状態には影響ありません。`);
+      const result = await sendAiMeetingMessageAction(labId, companyId, turn, text, meetingId ?? undefined);
+      if (!result.ok) {
+        setLoadError(result.errorMessage ?? "送信に失敗しました。ゲームの状態には影響ありません。");
         return;
       }
-      const body = (await res.json()) as PostAiMeetingResponseBody;
-      setMeetingId(body.meetingId);
-      setMessages((prev) => [...prev, ...body.messages]);
-      setLastDiagnostics(body.diagnostics);
-      if (!body.available) {
-        setUnavailableReason(body.unavailableReason ?? "AI Management Meetingは現在利用できません。");
+      if (result.meetingId) setMeetingId(result.meetingId);
+      setMessages((prev) => [...prev, ...(result.messages ?? [])]);
+      if (result.diagnostics) setLastDiagnostics(result.diagnostics);
+      if (!result.available) {
+        setUnavailableReason(result.unavailableReason ?? "AI Management Meetingは現在利用できません。");
       } else {
-        setValidatedProposals(body.validatedProposals);
+        setValidatedProposals(result.validatedProposals ?? []);
       }
     } catch {
       setLoadError("送信中にネットワークエラーが発生しました。ゲームの状態には影響ありません。もう一度お試しください。");

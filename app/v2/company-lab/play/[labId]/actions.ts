@@ -23,9 +23,20 @@ import { unstable_rethrow } from "next/navigation";
 import { requireStagingSession, assertSameOriginRequest } from "../../../../lib/companyLabUiSession";
 import { resolveCompanyLabUiDependencies } from "../_lib/uiDependencies";
 import { resolveAiExplanationUiDependencies } from "../_lib/aiExplanationUiDependencies";
+import { resolveAiMeetingUiDependencies } from "../_lib/aiMeetingUiDependencies";
 import { ApiResult, handleProcessQuarter, handleSaveDraft, handleSubmitDraft, handleWithdrawDraft } from "../../../../api/v2/company-labs/_lib/handlers";
 import { handlePostAiExplanation } from "../../../../api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/ai-explanation/_lib/handlers";
+import {
+  handleGetAiMeetingConversation,
+  handlePostAiMeetingMessage,
+} from "../../../../api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/ai-meeting/messages/_lib/handlers";
 import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
+import {
+  AiMeetingCallDiagnostics,
+  AiMeetingIntent,
+  AiMeetingMessage,
+  ValidatedAiMeetingProposal,
+} from "../../../../lib/v2/companyLab/aiManagementMeeting/types";
 
 export interface PlayerActionResult {
   readonly ok: boolean;
@@ -202,5 +213,128 @@ export async function fetchAiExplanationAction(labId: string, companyId: string,
     unstable_rethrow(e);
     console.error(`${logPrefix} 予期しない例外を捕捉しました:`, e instanceof Error ? e.message : String(e));
     return { ok: false, errorCategory: "internal_error" };
+  }
+}
+
+// ---------------------------------------------------------------------
+// AI Management Meeting（AMM-M0/M1/M1.1）— Decision Studio AuxiliaryPanel向けServer Actions
+//
+// 【重要】route.ts（app/api/v2/company-labs/.../ai-meeting/messages/route.ts）は
+// STAGING_ADMIN_TOKEN（Bearerヘッダー・サーバー専用シークレット）による認証を要求する
+// 管理者/テスト用エンドポイントであり、ブラウザから直接fetchすることを想定していない
+// （assertStagingAdmin参照）。実プレイヤー画面はfetchAiExplanationActionと同じ設計方針
+// （このファイル冒頭のコメント参照：「同一Next.jsアプリ内での自己HTTP fetchは行わない」）
+// に従い、route.tsが呼ぶのと同じhandlePostAiMeetingMessage/handleGetAiMeetingConversation
+// （AI prompt・role定義・validationロジック本体）をServer Actionから直接呼び出す。
+// guard()（実セッション認証・Origin検証）を通過した実プレイヤーのみが呼び出せる。
+// ---------------------------------------------------------------------
+
+export interface AiMeetingSendActionResult {
+  readonly ok: boolean;
+  readonly meetingId?: string;
+  readonly messages?: readonly AiMeetingMessage[];
+  readonly validatedProposals?: readonly ValidatedAiMeetingProposal[];
+  readonly meetingIntent?: AiMeetingIntent | null;
+  readonly potentialStrategicChange?: boolean;
+  readonly potentialStrategicChangeNote?: string | null;
+  readonly available?: boolean;
+  readonly unavailableReason?: string;
+  readonly diagnostics?: AiMeetingCallDiagnostics;
+  readonly errorMessage?: string;
+}
+
+export async function sendAiMeetingMessageAction(
+  labId: string,
+  companyId: string,
+  turn: number,
+  playerMessage: string,
+  meetingId?: string
+): Promise<AiMeetingSendActionResult> {
+  const logPrefix = `[sendAiMeetingMessageAction] lab=${labId} company=${companyId} turn=${turn}`;
+  try {
+    const g = await guard();
+    if (!g.ok) {
+      console.log(`${logPrefix} guard()で拒否されました（未認証またはOrigin不一致）`);
+      return { ok: false, errorMessage: "認証に失敗しました。ページを再読み込みしてやり直してください。" };
+    }
+
+    const deps = await resolveAiMeetingUiDependencies();
+    const result = await handlePostAiMeetingMessage(deps, labId, companyId, String(turn), { meetingId, playerMessage });
+
+    if (result.status !== 200) {
+      const body = result.body as { error?: { message?: string } } | undefined;
+      console.log(`${logPrefix} 失敗 status=${result.status}`);
+      return { ok: false, errorMessage: body?.error?.message ?? describeStatusFallback(result.status) };
+    }
+
+    const body = result.body as {
+      meetingId: string;
+      messages: readonly AiMeetingMessage[];
+      validatedProposals: readonly ValidatedAiMeetingProposal[];
+      meetingIntent: AiMeetingIntent | null;
+      potentialStrategicChange: boolean;
+      potentialStrategicChangeNote?: string | null;
+      available: boolean;
+      unavailableReason?: string;
+      diagnostics: AiMeetingCallDiagnostics;
+    };
+    return {
+      ok: true,
+      meetingId: body.meetingId,
+      messages: body.messages,
+      validatedProposals: body.validatedProposals,
+      meetingIntent: body.meetingIntent,
+      potentialStrategicChange: body.potentialStrategicChange,
+      potentialStrategicChangeNote: body.potentialStrategicChangeNote,
+      available: body.available,
+      unavailableReason: body.unavailableReason,
+      diagnostics: body.diagnostics,
+    };
+  } catch (e) {
+    unstable_rethrow(e);
+    console.error(`${logPrefix} 予期しない例外を捕捉しました:`, e instanceof Error ? e.message : String(e));
+    return { ok: false, errorMessage: "サーバー内部で予期しないエラーが発生しました。ゲームの状態には影響ありません。" };
+  }
+}
+
+export interface AiMeetingFetchActionResult {
+  readonly ok: boolean;
+  readonly found: boolean;
+  readonly meetingId?: string;
+  readonly messages?: readonly AiMeetingMessage[];
+  readonly lastValidatedProposals?: readonly ValidatedAiMeetingProposal[];
+  readonly errorMessage?: string;
+}
+
+export async function fetchAiMeetingConversationAction(labId: string, companyId: string, meetingId: string): Promise<AiMeetingFetchActionResult> {
+  const logPrefix = `[fetchAiMeetingConversationAction] lab=${labId} company=${companyId} meetingId=${meetingId}`;
+  try {
+    const g = await guard();
+    if (!g.ok) {
+      console.log(`${logPrefix} guard()で拒否されました（未認証またはOrigin不一致）`);
+      return { ok: false, found: false, errorMessage: "認証に失敗しました。ページを再読み込みしてやり直してください。" };
+    }
+
+    const deps = await resolveAiMeetingUiDependencies();
+    const result = await handleGetAiMeetingConversation(deps, labId, companyId, meetingId);
+
+    if (result.status === 404) {
+      return { ok: true, found: false };
+    }
+    if (result.status !== 200) {
+      const body = result.body as { error?: { message?: string } } | undefined;
+      return { ok: false, found: false, errorMessage: body?.error?.message ?? describeStatusFallback(result.status) };
+    }
+
+    const body = result.body as {
+      meetingId: string;
+      messages: readonly AiMeetingMessage[];
+      lastValidatedProposals: readonly ValidatedAiMeetingProposal[];
+    };
+    return { ok: true, found: true, meetingId: body.meetingId, messages: body.messages, lastValidatedProposals: body.lastValidatedProposals };
+  } catch (e) {
+    unstable_rethrow(e);
+    console.error(`${logPrefix} 予期しない例外を捕捉しました:`, e instanceof Error ? e.message : String(e));
+    return { ok: false, found: false, errorMessage: "サーバー内部で予期しないエラーが発生しました。" };
   }
 }
