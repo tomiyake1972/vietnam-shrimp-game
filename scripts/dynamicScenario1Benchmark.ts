@@ -260,3 +260,105 @@ for (const fixture of result.fixtures) {
     ].join("\t")
   );
 }
+
+// ---------------------------------------------------------------------
+// H. 会社×ターン 詳細指標（#04 指示 §14）
+// ---------------------------------------------------------------------
+
+console.log("\n## H. 会社×ターン 詳細（全32ターン）");
+console.log(
+  [
+    "turn","company","成約量","成約単価","履行量","受注残","国内買付","国内買付単価","輸入到着","原料在庫",
+    "HOSO生産","PD生産","VAP生産","完成品在庫","原料不足","設備稼働率","労働稼働率","残業率",
+    "営業利益","現金","有利子負債","品質(PD)","顧客信頼(平均)",
+  ].join("\t")
+);
+for (const h of result.state.history) {
+  for (const sum of h.companySummaries) {
+    const fin = h.financialResults.find((f) => f.companyId === sum.companyId);
+    const trustValues = Object.values(sum.customerTrustByMarket).filter((v): v is NonNullable<typeof v> => v !== undefined).map(Number);
+    const avgTrust = trustValues.length > 0 ? trustValues.reduce((a, b) => a + b, 0) / trustValues.length : 0;
+    const debt = fin ? Number(fin.balanceSheet.shortTermLoans) + Number(fin.balanceSheet.longTermLoans) : 0;
+    console.log(
+      [
+        h.turn,
+        sum.companyId,
+        Math.round(unwrapUnit(sum.newContractedQuantity)),
+        sum.newContractedAveragePrice.toFixed(3),
+        Math.round(unwrapUnit(sum.fulfilledQuantity)),
+        Math.round(unwrapUnit(sum.outstandingQuantity)),
+        Math.round(unwrapUnit(sum.domesticPurchaseQuantity)),
+        sum.domesticPurchasePrice.toFixed(3),
+        Math.round(unwrapUnit(sum.importArrivedQuantity)),
+        Math.round(unwrapUnit(sum.rawMaterialInventory)),
+        Math.round(unwrapUnit(sum.hosoProduced)),
+        Math.round(unwrapUnit(sum.pdProduced)),
+        Math.round(unwrapUnit(sum.vapProduced)),
+        Math.round(unwrapUnit(sum.finishedGoodsInventory)),
+        Math.round(unwrapUnit(sum.rawMaterialShortfall)),
+        unwrapUnit(sum.equipmentUtilizationRate).toFixed(3),
+        unwrapUnit(sum.laborUtilizationRate).toFixed(3),
+        unwrapUnit(sum.overtimeRate).toFixed(3),
+        fin ? Math.round(Number(fin.profitAndLoss.operatingProfit)) : "-",
+        fin ? Math.round(Number(fin.balanceSheet.cash)) : "-",
+        Math.round(debt),
+        sum.qualityScoreByProduct.pd !== undefined ? Number(sum.qualityScoreByProduct.pd).toFixed(1) : "-",
+        avgTrust.toFixed(1),
+      ].join("\t")
+    );
+  }
+}
+
+// ---------------------------------------------------------------------
+// I. 局面別の会社別サマリー（#04 指示 §14）
+// ---------------------------------------------------------------------
+
+const PHASES: readonly { readonly label: string; readonly turns: readonly number[] }[] = [
+  { label: "T1-4 序盤成長", turns: [1, 2, 3, 4] },
+  { label: "T7-9 原料ショック", turns: [7, 8, 9] },
+  { label: "T8-12 再建・消費ブーム", turns: [8, 9, 10, 11, 12] },
+  { label: "T13-16 global調達転換", turns: [13, 14, 15, 16] },
+  { label: "T17-20 世界需要ショック", turns: [17, 18, 19, 20] },
+  { label: "T22-24 再開ブーム", turns: [22, 23, 24] },
+  { label: "T25-32 拡大・中国高付加価値化", turns: [25, 26, 27, 28, 29, 30, 31, 32] },
+];
+
+console.log("\n## I. 局面別 会社別サマリー");
+console.log(["局面", "company", "営業利益計", "成約量計", "生産量計", "国内買付計", "輸入到着計", "国内比率", "平均設備稼働率", "期末現金", "期末受注残"].join("\t"));
+for (const phase of PHASES) {
+  for (const fixture of result.fixtures) {
+    const id = fixture.companyId;
+    const rows = phase.turns.map((t) => historyByTurn.get(t)).filter((h): h is CompanyQuarterRecord => h !== undefined);
+    let op = 0, contracted = 0, produced = 0, domestic = 0, imported = 0, util = 0, n = 0, cash = 0, backlog = 0;
+    for (const h of rows) {
+      const sum = h.companySummaries.find((c) => c.companyId === id);
+      const fin = h.financialResults.find((f) => f.companyId === id);
+      if (!sum) continue;
+      n += 1;
+      op += fin ? Number(fin.profitAndLoss.operatingProfit) : 0;
+      contracted += unwrapUnit(sum.newContractedQuantity);
+      produced += unwrapUnit(sum.hosoProduced) + unwrapUnit(sum.pdProduced) + unwrapUnit(sum.vapProduced);
+      domestic += unwrapUnit(sum.domesticPurchaseQuantity);
+      imported += unwrapUnit(sum.importArrivedQuantity);
+      util += unwrapUnit(sum.equipmentUtilizationRate);
+      cash = fin ? Number(fin.balanceSheet.cash) : cash;
+      backlog = unwrapUnit(sum.outstandingQuantity);
+    }
+    const rawTotal = domestic + imported;
+    console.log(
+      [
+        phase.label,
+        id,
+        Math.round(op).toLocaleString(),
+        Math.round(contracted).toLocaleString(),
+        Math.round(produced).toLocaleString(),
+        Math.round(domestic).toLocaleString(),
+        Math.round(imported).toLocaleString(),
+        rawTotal > 0 ? ((domestic / rawTotal) * 100).toFixed(1) + "%" : "-",
+        n > 0 ? (util / n).toFixed(3) : "-",
+        Math.round(cash).toLocaleString(),
+        Math.round(backlog).toLocaleString(),
+      ].join("\t")
+    );
+  }
+}

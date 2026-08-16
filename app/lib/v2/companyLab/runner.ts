@@ -211,6 +211,7 @@ import {
   CompanyQuarterSummary,
   CompanyReasonEntry,
   PublicMarketInfo,
+  Sai5FeatureFlags,
 } from "./types";
 
 const EPSILON = 1e-6;
@@ -336,6 +337,29 @@ export interface CompanyLabInitResult {
 }
 
 /** 会社経営統合テスト環境を初期化する（5社フィクスチャの初期原料在庫込み）。 */
+/**
+ * シナリオが宣言した必要機能を CompanyLabConfig.sai5 へマージする。
+ *
+ * 【方針】シナリオ定義を SSoT にする。呼び出し側（Management Console の32Q実行・
+ * 通常プレイ・benchmark）がフラグを設定していなくても、そのシナリオが成立するのに
+ * 必要な機能は必ず有効になる。
+ *
+ * 【できないこと】無効化はできない。呼び出し側が明示的に true にした機能を
+ * シナリオが false へ落とすことはなく、宣言は「足りなければ足す」だけに限定する。
+ * 宣言を持たないシナリオでは config をそのまま返す（同一参照＝既存挙動と完全一致）。
+ */
+export function applyScenarioRequiredCapabilities(config: CompanyLabConfig, definition: ScenarioDefinition): CompanyLabConfig {
+  const required = definition.requiredCapabilities;
+  if (required === undefined) return config;
+  const merged: Sai5FeatureFlags = {
+    ...config.sai5,
+    ...(required.productLifecycle ? { productLifecycle: true } : {}),
+    ...(required.supplyPremiumFeedback ? { supplyPremiumFeedback: true } : {}),
+    ...(required.salesBaseAccumulation ? { salesBaseAccumulation: true } : {}),
+  };
+  return { ...config, sai5: merged };
+}
+
 export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitResult {
   const definition = findScenarioDefinitionForCompanyLab(config.scenarioId);
   if (!Number.isInteger(config.turns) || config.turns < 1 || config.turns > definition.durationTurns) {
@@ -343,6 +367,12 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
       `turns は1〜${definition.durationTurns}（シナリオ"${definition.scenarioId}"のdurationTurns）の整数である必要があります。受け取った値: ${config.turns}`
     );
   }
+
+  // 【Dynamic Scenario 1】シナリオが必要とする機能を、呼び出し側の設定へ
+  // 足りない分だけマージする。呼び出し側ごとにフラグを設定して回ると設定漏れが
+  // 起きるため、「この世界にはこの機能が要る」という事実をシナリオ定義（正典）から
+  // 取る。宣言を持たないシナリオでは effectiveConfig === config（恒等変換）。
+  const effectiveConfig = applyScenarioRequiredCapabilities(config, definition);
 
   const scenarioState = initializeScenario(definition, config.mode, config.seed);
   const startPeriod = getScenarioTurnInput(scenarioState, 1).period;
@@ -366,7 +396,7 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
   const initialMarketInput = toMarketQuarterInput(initialScenarioTurnInput, initialPreviousMarketContext);
 
   const state: CompanyLabState = {
-    config,
+    config: effectiveConfig,
     currentPeriod: startPeriod,
     scenarioState,
     contracts: initialContracts,

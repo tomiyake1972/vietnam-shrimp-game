@@ -28,6 +28,8 @@ import { toMarketQuarterInput } from "../marketAdapter";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS } from "../../market/types";
 import { unwrapUnit, usdPerHosoEqKg, hosoEqTons } from "../../core/units";
 import { calculateExternalProcessorIntent } from "../../companyLab/externalDemand";
+import { applyScenarioRequiredCapabilities } from "../../companyLab/runner";
+import { BASELINE_SCENARIO } from "../definitions/baseline";
 import { EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1, REFERENCE_WORLD_CONSUMPTION_TONS } from "../../companyLab/parameters";
 
 const TURNS = DYNAMIC_SCENARIO_1.durationTurns;
@@ -340,6 +342,48 @@ test("DS1: 構造需要トレンドの keyframe は全市場で単調な turn �
     const kfs = DS1_REGIONAL_DEMAND_KEYFRAMES[market];
     for (let i = 1; i < kfs.length; i++) {
       assert.ok(kfs[i][0] > kfs[i - 1][0], `${market} keyframe ${i}`);
+    }
+  }
+});
+
+
+// ---------------------------------------------------------------------
+// 5. 必要機能の宣言（Console 等でフラグ設定漏れが起きても世界が変わらないこと）
+// ---------------------------------------------------------------------
+
+const BASE_CONFIG = { scenarioId: "x", mode: "canonical", seed: "s", turns: 32 } as const;
+
+test("DS1: 必要機能を宣言しており、呼び出し側が未設定でも有効になる", () => {
+  const merged = applyScenarioRequiredCapabilities(BASE_CONFIG, DYNAMIC_SCENARIO_1);
+  assert.equal(merged.sai5?.productLifecycle, true);
+  assert.equal(merged.sai5?.supplyPremiumFeedback, true);
+  assert.equal(merged.sai5?.salesBaseAccumulation, true);
+});
+
+test("宣言を持たないシナリオでは config がそのまま返る（同一参照＝既存挙動と一致）", () => {
+  assert.equal(applyScenarioRequiredCapabilities(BASE_CONFIG, BASELINE_SCENARIO), BASE_CONFIG);
+});
+
+test("シナリオ宣言は、呼び出し側が明示的に有効化した機能を無効化できない", () => {
+  const withExtra = { ...BASE_CONFIG, sai5: { vapProductDevelopmentCompetitiveness: false, productLifecycle: true } } as const;
+  const merged = applyScenarioRequiredCapabilities(withExtra, DYNAMIC_SCENARIO_1);
+  // 呼び出し側の設定は保持される
+  assert.equal(merged.sai5?.vapProductDevelopmentCompetitiveness, false);
+  // シナリオが必要とする機能は有効
+  assert.equal(merged.sai5?.productLifecycle, true);
+  assert.equal(merged.sai5?.supplyPremiumFeedback, true);
+});
+
+test("DS1: productLifecycleOverrides を持つなら productLifecycle の宣言が必須（設定漏れ防止）", () => {
+  // 上書きを持ちながら機能宣言が無いと、世界一律の固定構成比で走ってしまう。
+  // この不整合を定義追加時に必ず検出する。
+  for (const definition of [DYNAMIC_SCENARIO_1, ...DEVELOPMENT_SCENARIO_DEFINITIONS, ...ALL_SCENARIO_DEFINITIONS]) {
+    if (definition.productLifecycleOverrides !== undefined) {
+      assert.equal(
+        definition.requiredCapabilities?.productLifecycle,
+        true,
+        `${definition.scenarioId}: productLifecycleOverrides があるのに productLifecycle を宣言していない`
+      );
     }
   }
 });

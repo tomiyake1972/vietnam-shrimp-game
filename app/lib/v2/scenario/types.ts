@@ -344,6 +344,38 @@ export interface ScenarioDefinition {
    * 詳細は market/consumerInventory.ts の StructuralDemandAnchor を参照。
    */
   readonly structuralDemandAnchor?: StructuralDemandAnchorSettings;
+
+  /**
+   * このシナリオが成立するために必要なゲーム機能。
+   *
+   * 【なぜシナリオ側が宣言するのか】市場×商品の商品構成の時間変化は
+   * 機能フラグ（CompanyLabConfig.sai5.productLifecycle）で切り替わるが、
+   * Management Console の32Q実行のように呼び出し側がフラグを設定しない経路がある。
+   * その場合 productLifecycleOverrides を持つシナリオでも構成比が世界一律の
+   * 固定値へフォールバックし、**シナリオが定義した世界と違う世界が動いてしまう**。
+   *
+   * 呼び出し側ごとにフラグを設定して回ると設定漏れが必ず起きるため、
+   * 「このシナリオにはこの機能が要る」という事実をシナリオ定義（＝世界の正典）に
+   * 持たせ、初期化時に呼び出し側の設定へ**足りない分だけ**マージする。
+   *
+   * 【安全性】ここで宣言できるのは有効化（true）だけで、呼び出し側が明示的に
+   * 有効化した機能を無効化することはできない。宣言を持たないシナリオは
+   * マージが恒等変換になり、既存挙動と完全に一致する。
+   */
+  readonly requiredCapabilities?: ScenarioRequiredCapabilities;
+}
+
+/**
+ * シナリオが成立するために有効でなければならない機能。
+ * すべて optional で、true のものだけが有効化される（無効化はできない）。
+ */
+export interface ScenarioRequiredCapabilities {
+  /** 市場×商品の商品ライフサイクル（productLifecycleOverrides を使うシナリオに必須）。 */
+  readonly productLifecycle?: boolean;
+  /** 供給圧力→翌期プレミアム倍率のフィードバック（商品への殺到がプレミアムを下げる経路）。 */
+  readonly supplyPremiumFeedback?: boolean;
+  /** 会社×市場×商品の営業基盤ストック。 */
+  readonly salesBaseAccumulation?: boolean;
 }
 
 /**

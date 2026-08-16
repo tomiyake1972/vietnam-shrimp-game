@@ -114,6 +114,7 @@ const NEWS_SPECS: readonly NewsSpec[] = [
   { id: "ds1-t18-destocking", turn: 18, headline: "輸入業者が在庫調整に動き、新規成約は低調", facts: [f("direction", "在庫", "調整局面")], isRumor: false, confidence: 0.85, eventId: DS1_EVENT_IDS.demandShock },
   { id: "ds1-t19-restructuring", turn: 19, headline: "稼働率低下で加工各社は減産・人員調整へ", facts: [f("direction", "稼働率", "低下")], isRumor: false, confidence: 0.85, eventId: DS1_EVENT_IDS.demandShock },
   { id: "ds1-t20-others-retail", turn: 20, headline: "小売向け・アジア都市部の販売は堅調との報告、中東・オセアニアでも取扱いが増加", facts: [f("region", "地域", "中東・オセアニア・アジア都市部"), f("channel", "販路", "小売")], isRumor: false, confidence: 0.7, eventId: DS1_EVENT_IDS.othersRetailGrowth },
+  { id: "ds1-t20-reopening-early", turn: 20, headline: "一部地域で外食の客足が下げ止まったとの声、業界団体は回復時期を慎重に見る", facts: [f("channel", "販路", "外食"), f("status", "確度", "一部地域の観測")], isRumor: true, confidence: 0.3, eventId: DS1_EVENT_IDS.reopeningBoom },
 
   // T21: 回復シグナル3件（effect は T22 から。この turn の強度は 0）
   { id: "ds1-t21-reopening", turn: 21, headline: "レストランの営業再開の動きが広がる", facts: [f("channel", "販路", "外食"), f("direction", "動向", "再開")], isRumor: true, confidence: 0.4, eventId: DS1_EVENT_IDS.reopeningBoom },
@@ -129,6 +130,7 @@ const NEWS_SPECS: readonly NewsSpec[] = [
   // ---- Phase D: T25–32 拡大・China premiumization・業界再編 ----
   { id: "ds1-t25-cn-premium", turn: 25, headline: "中国都市部で調理済み・むき身製品の消費が拡大", facts: [f("market", "市場", "中国"), f("product", "商品", "PD/VAP")], isRumor: false, confidence: 0.8 },
   { id: "ds1-t26-cn-retail", turn: 26, headline: "中国の量販店でエビ加工品の売場が拡大", facts: [f("market", "市場", "中国"), f("channel", "販路", "量販店")], isRumor: false, confidence: 0.75 },
+  { id: "ds1-t26-vn-warning", turn: 26, headline: "ベトナム一部地域の池で成長のばらつきが出ているとの現地報告", facts: [f("region", "地域", "ベトナム"), f("status", "確度", "未確認の現地報告")], isRumor: true, confidence: 0.3, eventId: DS1_EVENT_IDS.vietnamDiseaseY7 },
   { id: "ds1-t27-vn-disease", turn: 27, headline: "ベトナムの一部地域で疾病、集荷価格が上昇", facts: [f("region", "地域", "ベトナム"), f("direction", "集荷価格", "上昇")], isRumor: false, confidence: 0.85, eventId: DS1_EVENT_IDS.vietnamDiseaseY7 },
   { id: "ds1-t28-cost-pressure", turn: 28, headline: "原料高で加工各社の採算は圧迫、調達先の見直しが進む", facts: [f("direction", "採算", "悪化")], isRumor: false, confidence: 0.8, eventId: DS1_EVENT_IDS.vietnamDiseaseY7 },
   { id: "ds1-t29-ec-warning", turn: 29, headline: "エクアドルで生育不良の報告、次期の出荷減を懸念する声", facts: [f("country", "産地", "エクアドル"), f("status", "確度", "未確認の報告")], isRumor: true, confidence: 0.35, eventId: DS1_EVENT_IDS.ecuadorDiseaseY8 },
@@ -192,9 +194,15 @@ export const DS1_NEWS_EFFECT_SYNC: readonly NewsEffectSync[] = [
   { informationId: "ds1-t21-reopening", eventId: DS1_EVENT_IDS.reopeningBoom, newsTurn: 21, effectStartTurn: 22, leadQuarters: 1 },
   { informationId: "ds1-t21-restocking", eventId: DS1_EVENT_IDS.reopeningBoom, newsTurn: 21, effectStartTurn: 22, leadQuarters: 1 },
   { informationId: "ds1-t21-easing", eventId: DS1_EVENT_IDS.reopeningBoom, newsTurn: 21, effectStartTurn: 22, leadQuarters: 1 },
+  { informationId: "ds1-t20-reopening-early", eventId: DS1_EVENT_IDS.reopeningBoom, newsTurn: 20, effectStartTurn: 22, leadQuarters: 2 },
+  { informationId: "ds1-t12-ecuador-rumor", eventId: DS1_EVENT_IDS.ecuadorExpansion, newsTurn: 12, effectStartTurn: 13, leadQuarters: 1 },
+  { informationId: "ds1-t26-vn-warning", eventId: DS1_EVENT_IDS.vietnamDiseaseY7, newsTurn: 26, effectStartTurn: 27, leadQuarters: 1 },
+  { informationId: "ds1-t29-ec-warning", eventId: DS1_EVENT_IDS.ecuadorDiseaseY8, newsTurn: 29, effectStartTurn: 30, leadQuarters: 1 },
   // 事象と同時に出る確報
   { informationId: "ds1-t7-shock", eventId: DS1_EVENT_IDS.vnRawShock, newsTurn: 7, effectStartTurn: 7, leadQuarters: 0 },
   { informationId: "ds1-t17-shock", eventId: DS1_EVENT_IDS.demandShock, newsTurn: 17, effectStartTurn: 17, leadQuarters: 0 },
   { informationId: "ds1-t22-boom", eventId: DS1_EVENT_IDS.reopeningBoom, newsTurn: 22, effectStartTurn: 22, leadQuarters: 0 },
   { informationId: "ds1-t30-ec-disease", eventId: DS1_EVENT_IDS.ecuadorDiseaseY8, newsTurn: 30, effectStartTurn: 30, leadQuarters: 0 },
+  { informationId: "ds1-t27-vn-disease", eventId: DS1_EVENT_IDS.vietnamDiseaseY7, newsTurn: 27, effectStartTurn: 27, leadQuarters: 0 },
+  { informationId: "ds1-t23-india", eventId: DS1_EVENT_IDS.indiaDisruption, newsTurn: 23, effectStartTurn: 23, leadQuarters: 0 },
 ];

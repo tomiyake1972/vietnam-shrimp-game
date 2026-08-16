@@ -400,4 +400,18 @@ export const DYNAMIC_SCENARIO_1: ScenarioDefinition = {
 
   productLifecycleOverrides: DS1_PRODUCT_LIFECYCLE_OVERRIDES,
   structuralDemandAnchor: DS1_STRUCTURAL_DEMAND_ANCHOR,
+
+  // 【必要機能の宣言】市場×商品の商品構成の時間変化が無効だと、
+  // productLifecycleOverrides が反映されず「世界一律の固定商品構成比」で走ってしまう。
+  // 呼び出し側（Management Console の32Q実行・通常プレイ・benchmark）が
+  // フラグを設定していなくても、このシナリオを選んだ時点で必ず有効になる。
+  //
+  // supplyPremiumFeedback は「同じ商品へ全社が殺到すると翌期のプレミアムが下がる」
+  // という内生競争の経路そのもので、本シナリオの学習目標（殺到すれば不利になる）に
+  // 必須。salesBaseAccumulation は市場別の営業基盤の蓄積で、市場特化の意味を作る。
+  requiredCapabilities: {
+    productLifecycle: true,
+    supplyPremiumFeedback: true,
+    salesBaseAccumulation: true,
+  },
 };
