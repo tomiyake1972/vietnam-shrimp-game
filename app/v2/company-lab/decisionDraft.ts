@@ -313,6 +313,45 @@ export function syncMarketSalesForceHeadcount(draft: CompanyDecisionDraft, marke
 }
 
 // ---------------------------------------------------------------------
+// 【Procurement Planning・Step 5】国内買付・輸入・養殖の各draft field を書き換える
+// 単一責務のヘルパー。DecisionEditor.tsxの旧入力欄と、Procurement Planning
+// component群（新）の両方から同じ関数を呼ぶことで、「どちらのUIから入力しても
+// 同じdraft・同じdecisionInputが生成される」ことを構造的に保証する
+// （app/v2/company-lab/__tests__/procurementDraftParity.test.ts 参照）。
+// 計算ロジックは持たない（他のドラフト変換ヘルパーと同じ方針）。
+// ---------------------------------------------------------------------
+
+/** 国内原料買付ドラフトの部分更新（他のドラフト項目には一切触れない）。 */
+export function updateDomesticPurchaseDraft(draft: CompanyDecisionDraft, patch: Partial<DomesticPurchaseDraft>): CompanyDecisionDraft {
+  return { ...draft, domesticPurchase: { ...draft.domesticPurchase, ...patch } };
+}
+
+/** 指定した原産国の輸入発注ドラフト行の部分更新（他の原産国・他のドラフト項目には触れない）。 */
+export function updateImportOrderDraft(
+  draft: CompanyDecisionDraft,
+  originCountry: CountryId,
+  patch: Partial<ImportOrderDraftRow>
+): CompanyDecisionDraft {
+  return {
+    ...draft,
+    importOrders: draft.importOrders.map((row) => (row.originCountry === originCountry ? { ...row, ...patch } : row)),
+  };
+}
+
+/**
+ * 養殖池入れドラフトの部分更新。現行仕様（fixture.aquacultureCapacity>0の会社のみ
+ * 1件だけ持つ）に合わせ、常に先頭（唯一）の行を更新する。行が存在しない会社
+ * （養殖能力0）に対しては何もしない（draftをそのまま返す）。
+ */
+export function updateAquacultureStockingDraft(draft: CompanyDecisionDraft, patch: Partial<AquacultureStockingDraft>): CompanyDecisionDraft {
+  if (draft.aquacultureStockingPlans.length === 0) return draft;
+  return {
+    ...draft,
+    aquacultureStockingPlans: [{ ...draft.aquacultureStockingPlans[0], ...patch }],
+  };
+}
+
+// ---------------------------------------------------------------------
 // generateAutoPolicyDecision の結果 → 網羅グリッドドラフトへの変換
 // ---------------------------------------------------------------------
 

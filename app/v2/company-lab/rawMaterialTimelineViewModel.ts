@@ -58,16 +58,23 @@ export type TimelineRowKey = "carriedInventory" | "domesticProcurement" | "impor
  * この行の数量が確定値か、まだ変動しうる見込み値かを示す。
  *   confirmed … ロットとして存在する数量が今後変わらないことが保証されている。
  *   expected  … エンジンが将来（収穫等）の時点で数量を再計算する。現在値は見込み。
+ *   planned   … 当期のdraft入力そのもの（未提出・未確定）。国内買付は競争配分前、
+ *     輸入発注は原産国供給上限適用前、養殖池入れは疾病圧力適用前の希望値であり、
+ *     いずれも「このまま成立する」ことを保証しない（plannedProcurementViewModel.ts参照）。
  *   unknown   … 想定外分類（otherCommittedLots）で、確実性を機械的に断定できない。
  */
-export type TimelineRowCertainty = "confirmed" | "expected" | "unknown";
+export type TimelineRowCertainty = "confirmed" | "expected" | "planned" | "unknown";
 
 function safeTons(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-/** currentPeriodからの四半期差分を、表示用の4バケットへ丸める（超過・当期はいずれも"current"）。 */
-function toBucketKey(currentPeriod: PeriodV2, availableFromPeriod: PeriodV2): TimelineBucketKey {
+/**
+ * currentPeriodからの四半期差分を、表示用の4バケットへ丸める（超過・当期はいずれも"current"）。
+ * plannedProcurementViewModel.ts（輸入のリードタイム・養殖の収穫期バケット分け）でも
+ * 同じ「当期以降を4バケットに丸める」規約を使うため、ここから再利用する。
+ */
+export function toTimelineBucketKey(currentPeriod: PeriodV2, availableFromPeriod: PeriodV2): TimelineBucketKey {
   const offset = periodDifferenceInQuarters(currentPeriod, availableFromPeriod);
   if (offset <= 0) return "current";
   if (offset === 1) return "q1";
@@ -82,7 +89,8 @@ export interface TimelineRowBucketValue {
 }
 
 export interface TimelineRow {
-  readonly rowKey: TimelineRowKey;
+  /** buildRawMaterialTimelineが返す行は TimelineRowKey、Planned層（別ファイル）はそれ以外の文字列。 */
+  readonly rowKey: string;
   readonly label: string;
   readonly certainty: TimelineRowCertainty;
   readonly byBucket: Readonly<Record<TimelineBucketKey, TimelineRowBucketValue>>;
@@ -120,7 +128,19 @@ const ROW_CERTAINTY: Readonly<Record<TimelineRowKey, TimelineRowCertainty>> = {
 
 const ROW_ORDER: readonly TimelineRowKey[] = ["carriedInventory", "domesticProcurement", "importArrivals", "ownFarm", "otherCommittedLots"];
 
-function emptyBucketMap(): Record<TimelineBucketKey, TimelineRowBucketValue> {
+/**
+ * バケットの表示ラベル（Current Quarter/Q+1/Q+2/Q+3以降）。buildRawMaterialTimelineの
+ * 戻り値（bucketLabels）と、輸入発注のPlanned行（Import Procurement Sectionの
+ * Expected Arrival Quarter表示）が同じラベルを使うための単一の情報源。
+ */
+export const TIMELINE_BUCKET_LABELS: Readonly<Record<TimelineBucketKey, string>> = {
+  current: "Current Quarter",
+  q1: "Q+1",
+  q2: "Q+2",
+  beyond: "Q+3以降",
+};
+
+export function emptyTimelineBucketMap(): Record<TimelineBucketKey, TimelineRowBucketValue> {
   return {
     current: { bucket: "current", tons: 0, lotCount: 0 },
     q1: { bucket: "q1", tons: 0, lotCount: 0 },
@@ -150,7 +170,7 @@ export function buildRawMaterialTimeline(
   currentPeriod: PeriodV2
 ): RawMaterialTimeline {
   const rowMaps = new Map<TimelineRowKey, Record<TimelineBucketKey, TimelineRowBucketValue>>();
-  for (const key of ROW_ORDER) rowMaps.set(key, emptyBucketMap());
+  for (const key of ROW_ORDER) rowMaps.set(key, emptyTimelineBucketMap());
 
   for (const lot of lots) {
     if (lot.companyId !== companyId) continue;
@@ -158,7 +178,7 @@ export function buildRawMaterialTimeline(
     if (quantity <= 0) continue;
     const rowKey = classifyRow(lot);
     if (rowKey === null) continue;
-    const bucketKey = toBucketKey(currentPeriod, lot.availableFromPeriod);
+    const bucketKey = toTimelineBucketKey(currentPeriod, lot.availableFromPeriod);
     const map = rowMaps.get(rowKey)!;
     map[bucketKey] = { bucket: bucketKey, tons: map[bucketKey].tons + quantity, lotCount: map[bucketKey].lotCount + 1 };
   }
@@ -176,12 +196,7 @@ export function buildRawMaterialTimeline(
 
   return {
     currentPeriod,
-    bucketLabels: {
-      current: "Current Quarter",
-      q1: "Q+1",
-      q2: "Q+2",
-      beyond: "Q+3以降",
-    },
+    bucketLabels: TIMELINE_BUCKET_LABELS,
     rows,
     totalByBucket,
     grandTotalTons: TIMELINE_BUCKET_KEYS.reduce((sum, b) => sum + totalByBucket[b], 0),
