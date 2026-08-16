@@ -210,6 +210,14 @@ export interface StandardAiParameters {
    * 全呼び出し元・全既存テストには一切影響しない。
    */
   readonly qualityEquipmentCapabilityEnabled?: boolean;
+  /**
+   * 【Standard AI Factory Activation・Phase FA-1新設・監査専用ablation】
+   * falseを明示的に渡した場合だけ、decision/labor.tsの新設Factoryぶん労働
+   * baseline合成（FA-1で修正した既存バグの修正部分）を無効化し、修正前の
+   * 挙動（新設Factoryへ一切WorkerAssignmentが生成されない）を再現する。
+   * 省略時（undefined）は必ず有効＝FA-1後の正しい挙動。
+   */
+  readonly factoryActivationLaborFixEnabled?: boolean;
 
   // --- 養殖 ---
   /** 養殖の期待収穫比率（池入れ量→収穫量の目安）。 */

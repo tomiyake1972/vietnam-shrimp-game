@@ -31,6 +31,7 @@ import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
 import { FactoryObservation, ProductAmount, StandardAiObservation } from "../types";
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
+import { diagnoseFactoryActivation } from "../factoryActivation";
 
 const EPSILON = 1e-6;
 
@@ -248,6 +249,60 @@ export function buildStandardAiCapexDecision(
 ): CapexPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const proposals: CapexProjectProposalInput[] = [];
+
+  // ---------------------------------------------------------------------
+  // 【Standard AI Factory Activation・Phase FA-1】Factory別ボトルネック診断
+  // ---------------------------------------------------------------------
+  //
+  // 【指示§4・§26】新しい独立SSoTは作らず、既存FactoryObservationから
+  // factoryActivation.tsの純粋関数でボトルネック（COMMON/PRODUCT_LINE/LABOR/NONE）を
+  // 診断し、reason codeとして記録するだけ（診断のみ。CAPEX候補生成ロジック自体は
+  // 変更しない。既存のselectTargetFactoryId・PD Mechanization・Quality Equipmentの
+  // 各候補生成は「実効能力が最も小さいFactory」を選ぶ設計のため、新設Factoryが
+  // 最もボトルネックであれば既存ロジックのままそこが選ばれる）。
+  for (const factory of [...observation.factories].sort((a, b) => a.factoryId.localeCompare(b.factoryId))) {
+    const activation = diagnoseFactoryActivation(factory);
+    const activationKeyValues = {
+      effectiveCapacityTons: activation.effectiveCapacityTons,
+      effectiveCommonProcessingCapacity: activation.effectiveCommonProcessingCapacity,
+      productionTons: activation.productionTons,
+      utilization: activation.utilization,
+      currentRegularHeadcount: activation.currentRegularHeadcount,
+      requiredRegularHeadcount: activation.requiredRegularHeadcount,
+      activationNeed: activation.activationNeed,
+    };
+    diagnostics.push({
+      code: "FACTORY_ACTIVATION_CONSIDERED",
+      domain: "capex",
+      companyId: fixture.companyId,
+      severity: "info",
+      keyValues: activationKeyValues,
+      targetFactoryId: factory.factoryId,
+      decisionSummary: `${factory.factoryId}: Factory Activation診断（bottleneck=${activation.bottleneck}）`,
+      message: `${factory.factoryId}の稼働率${(activation.utilization * 100).toFixed(1)}%・常用${activation.currentRegularHeadcount}人（必要${activation.requiredRegularHeadcount.toFixed(1)}人）からボトルネックを診断した。`,
+    });
+    const bottleneckCode =
+      activation.bottleneck === "COMMON"
+        ? "FACTORY_ACTIVATION_BOTTLENECK_COMMON"
+        : activation.bottleneck === "PRODUCT_LINE"
+          ? "FACTORY_ACTIVATION_BOTTLENECK_PRODUCT_LINE"
+          : activation.bottleneck === "LABOR"
+            ? "FACTORY_ACTIVATION_BOTTLENECK_LABOR"
+            : "FACTORY_ACTIVATION_NONE_NEEDED";
+    diagnostics.push({
+      code: bottleneckCode,
+      domain: "capex",
+      companyId: fixture.companyId,
+      severity: activation.bottleneck === "NONE" ? "info" : "warning",
+      keyValues: activationKeyValues,
+      targetFactoryId: factory.factoryId,
+      decisionSummary: `${factory.factoryId}: ${activation.bottleneck}`,
+      message:
+        activation.bottleneck === "NONE"
+          ? `${factory.factoryId}は現時点で顕著なボトルネックが無い。`
+          : `${factory.factoryId}は${activation.bottleneck}が最も強い制約と診断した（activationNeed ${activation.activationNeed.toFixed(2)}）。`,
+    });
+  }
 
   // ---------------------------------------------------------------------
   // 【Phase 6D-1・修正A】既存増設候補のスペース実現可能性チェック

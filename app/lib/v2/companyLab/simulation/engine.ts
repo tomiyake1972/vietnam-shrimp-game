@@ -112,6 +112,11 @@ export interface CreateSimulationSessionInput {
    * ablation benchmark専用。省略時（undefined）は既存挙動と完全に同一。
    */
   readonly qualityEquipmentCapabilityDisabled?: boolean;
+  /**
+   * 【Standard AI Factory Activation・Phase FA-1新設・監査専用】Factory Activation
+   * controlled ablation benchmark専用。省略時（undefined）は既存挙動と完全に同一。
+   */
+  readonly factoryActivationLaborFixDisabled?: boolean;
 }
 
 /**
@@ -129,6 +134,7 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     visionOverrides: input.visionOverrides,
     standardAiProfileMode: input.standardAiProfileMode,
     qualityEquipmentCapabilityDisabled: input.qualityEquipmentCapabilityDisabled,
+    factoryActivationLaborFixDisabled: input.factoryActivationLaborFixDisabled,
   };
   const { state, fixtures } = initializeCompanyLab(config);
   const run: SimulationRun = {
@@ -315,9 +321,11 @@ export function advanceSimulationTurn(
       // 【Standard AI CE-3A新設・監査専用】config.qualityEquipmentCapabilityDisabled
       // がtrueのときだけ、Quality Equipment候補生成を無効化するablation paramsを
       // 使う。省略時は必ずprofileResolution.paramsそのまま（既存挙動と完全に同一）。
-      const effectiveParams = session.state.config.qualityEquipmentCapabilityDisabled
-        ? { ...profileResolution.params, qualityEquipmentCapabilityEnabled: false }
-        : profileResolution.params;
+      const effectiveParams = {
+        ...profileResolution.params,
+        ...(session.state.config.qualityEquipmentCapabilityDisabled ? { qualityEquipmentCapabilityEnabled: false } : {}),
+        ...(session.state.config.factoryActivationLaborFixDisabled ? { factoryActivationLaborFixEnabled: false } : {}),
+      };
       const { decision: aiDecision, diagnostics: rawDiagnostics } = generateStandardAiDecisionWithDiagnostics(
         fixture,
         ownState,

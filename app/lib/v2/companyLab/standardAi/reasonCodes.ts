@@ -185,7 +185,14 @@ export type StandardAiReasonCode =
   | "QUALITY_EQUIP_ALREADY_ACTIVE" // 当該工場には既に品質管理設備が稼働中／導入進行中のため重複提案しない
   | "QUALITY_EQUIP_FINANCE_BLOCKED" // 財務ゲート（現金・借入余力）を満たさないため見送り
   | "QUALITY_EQUIP_PROPOSED" // 品質管理設備を提案（Quality Need・経済性・戦略適合を踏まえて工場を選定）
-  | "QUALITY_EQUIP_DEFERRED"; // 当期はいずれの工場もQuality Need条件を満たさないため見送り（既定の正常な結果）
+  | "QUALITY_EQUIP_DEFERRED" // 当期はいずれの工場もQuality Need条件を満たさないため見送り（既定の正常な結果）
+  // --- 【Standard AI Factory Activation・Phase FA-1】新工場の戦力化 ---
+  | "FACTORY_ACTIVATION_LABOR_BASELINE_SYNTHESIZED" // 新設Factoryぶんの労働baselineを合成した（既存Factoryの平均skillを流用）
+  | "FACTORY_ACTIVATION_CONSIDERED" // Factory Activation候補として評価対象に含めた
+  | "FACTORY_ACTIVATION_BOTTLENECK_COMMON" // 共通前処理能力がボトルネックと診断
+  | "FACTORY_ACTIVATION_BOTTLENECK_PRODUCT_LINE" // 商品別ラインがボトルネックと診断
+  | "FACTORY_ACTIVATION_BOTTLENECK_LABOR" // 労働力がボトルネックと診断
+  | "FACTORY_ACTIVATION_NONE_NEEDED"; // 当該Factoryは十分に戦力化済み（追加のActivation不要）
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -332,6 +339,12 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "QUALITY_EQUIP_FINANCE_BLOCKED",
   "QUALITY_EQUIP_PROPOSED",
   "QUALITY_EQUIP_DEFERRED",
+  "FACTORY_ACTIVATION_LABOR_BASELINE_SYNTHESIZED",
+  "FACTORY_ACTIVATION_CONSIDERED",
+  "FACTORY_ACTIVATION_BOTTLENECK_COMMON",
+  "FACTORY_ACTIVATION_BOTTLENECK_PRODUCT_LINE",
+  "FACTORY_ACTIVATION_BOTTLENECK_LABOR",
+  "FACTORY_ACTIVATION_NONE_NEEDED",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */
