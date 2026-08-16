@@ -314,19 +314,46 @@ test("DS1: 需要ショック期の景気指数は水準として読める（複
 // 4. 既存シナリオへの非影響 / 露出制御
 // ---------------------------------------------------------------------
 
-test("DS1: プレイヤー向けシナリオ一覧（ALL_SCENARIO_DEFINITIONS）には含まれない", () => {
+test("DS1: Testplay 用にシナリオ選択肢へ出ている", () => {
+  // Testplay 実施の判断により、ラボ作成画面から選べる状態にしてある。
   assert.ok(
-    !ALL_SCENARIO_DEFINITIONS.some((d) => d.scenarioId === DYNAMIC_SCENARIO_1.scenarioId),
-    "開発中シナリオがプレイヤー向け選択肢へ露出している"
+    ALL_SCENARIO_DEFINITIONS.some((d) => d.scenarioId === DYNAMIC_SCENARIO_1.scenarioId),
+    "DS1 がシナリオ選択肢に出ていない（Testplay できない）"
   );
-  assert.ok(DEVELOPMENT_SCENARIO_DEFINITIONS.some((d) => d.scenarioId === DYNAMIC_SCENARIO_1.scenarioId));
+  // 開発中枠へは二重登録しない（解決経路が二重になるのを防ぐ）。
+  assert.ok(!DEVELOPMENT_SCENARIO_DEFINITIONS.some((d) => d.scenarioId === DYNAMIC_SCENARIO_1.scenarioId));
 });
 
-test("DS1: 既存5シナリオは productLifecycleOverrides も structuralDemandAnchor も持たない", () => {
+test("DS1: まだ正式 production シナリオでないことがタイトルで分かる", () => {
+  assert.ok(
+    DYNAMIC_SCENARIO_1.title.includes("Development"),
+    `タイトルに Development 表記がない: ${DYNAMIC_SCENARIO_1.title}`
+  );
+});
+
+test("DS1: production の既定シナリオは変えていない", () => {
+  // 選択肢の先頭（＝画面の初期選択）は従来どおり baseline のまま。
+  assert.equal(ALL_SCENARIO_DEFINITIONS[0].scenarioId, BASELINE_SCENARIO.scenarioId);
+});
+
+test("DS1 以外のシナリオは従来どおり（上書き機構を使っていない）", () => {
   for (const definition of ALL_SCENARIO_DEFINITIONS) {
+    if (definition.scenarioId === DYNAMIC_SCENARIO_1.scenarioId) continue;
     assert.equal(definition.productLifecycleOverrides, undefined, definition.scenarioId);
     assert.equal(definition.structuralDemandAnchor, undefined, definition.scenarioId);
+    assert.equal(definition.requiredCapabilities, undefined, definition.scenarioId);
   }
+});
+
+test("DS1: 選択肢から解決したときも必要 capability が有効になる", () => {
+  // 画面のシナリオ選択肢から選ばれた定義そのものを使って、
+  // 呼び出し側が何も設定していなくても機能が有効になることを確認する。
+  const fromSelector = ALL_SCENARIO_DEFINITIONS.find((d) => d.scenarioId === DYNAMIC_SCENARIO_1.scenarioId);
+  assert.ok(fromSelector);
+  const merged = applyScenarioRequiredCapabilities({ scenarioId: fromSelector.scenarioId, mode: "canonical", seed: "s", turns: 32 }, fromSelector);
+  assert.equal(merged.sai5?.productLifecycle, true);
+  assert.equal(merged.sai5?.supplyPremiumFeedback, true);
+  assert.equal(merged.sai5?.salesBaseAccumulation, true);
 });
 
 test("DS1: canonical mode は乱数を消費しない（完全再現性）", () => {

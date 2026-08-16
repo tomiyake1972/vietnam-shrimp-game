@@ -341,7 +341,8 @@ function scheduledEvents(): ScenarioEvent[] {
 export const DYNAMIC_SCENARIO_1: ScenarioDefinition = {
   scenarioId: "dynamic-scenario-1-v0.1",
   version: "0.1.0",
-  title: "動的シナリオ1：8年間の構造変化",
+  // まだ正式な production シナリオではないことが選択画面で分かるようにする。
+  title: "Dynamic Scenario 1 — Development（動的シナリオ1：8年間の構造変化）",
   durationTurns: DS1_DURATION_TURNS,
 
   publicBackground:

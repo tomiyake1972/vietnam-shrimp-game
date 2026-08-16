@@ -9,10 +9,12 @@ test("shortScenarioAlias: バージョン接尾辞を取り除く", () => {
   assert.equal(shortScenarioAlias("no-version-here"), "no-version-here");
 });
 
-test("listScenarioAliases: 5シナリオすべてを列挙する", () => {
+test("listScenarioAliases: 選択可能なシナリオをすべて列挙する", () => {
   const entries = listScenarioAliases();
   assert.equal(entries.length, ALL_SCENARIO_DEFINITIONS.length);
-  assert.equal(entries.length, 5);
+  // Testplay 用に Dynamic Scenario 1 を加えて6本。
+  assert.equal(entries.length, 6);
+  assert.ok(entries.some((e) => e.alias === "dynamic-scenario-1"));
 });
 
 test("resolveScenarioDefinition: 完全なscenarioIdで解決できる", () => {
