@@ -60,6 +60,15 @@ export interface QualityAdjustmentInput {
    * §文書化参照）。
    */
   readonly baselineQualityOverride?: ReadonlyMap<string, number>;
+  /**
+   * 【Phase QI-I1新設】品質管理設備（capex/qualityControlEquipmentEffect.ts）による、
+   * Factory単位のoperationalRisk低減乗数（0〜1。companyLab/qualityControlEquipmentState.ts
+   * が唯一の情報源）。未指定のFactoryは乗数1.0（効果なし）とみなす。設計方針
+   * （docs/v2/quality_control_equipment_design_qi_d1.md）どおり、この乗数は
+   * risk.operationalRiskそのものではなく、outcome算出に使うeffectiveOperationalRisk
+   * だけに適用する（Quality Scoreへの直接加点は行わない）。
+   */
+  readonly qualityEquipmentRiskMultiplierByFactory?: ReadonlyMap<string, number>;
 }
 
 export interface QualityAdjustmentResult {
@@ -123,14 +132,21 @@ export function applyQualityToBatches(input: QualityAdjustmentInput, params: Qua
       params
     );
 
+    // 【Phase QI-I1新設】品質管理設備は、outcome算出（nonConformance・major incident
+    // 確率の両方）にだけ使うeffectiveOperationalRiskを、risk.operationalRiskへの
+    // 有界な乗算で低減する。risk（内訳6要因＋operationalRisk）自体は「純粋な操業条件」
+    // のまま変更しない（Quality Scoreへの直接加点をしないという設計方針の核心）。
+    const qualityEquipmentRiskMultiplier = input.qualityEquipmentRiskMultiplierByFactory?.get(batch.factoryId) ?? 1;
+    const effectiveOperationalRisk = Math.max(0, Math.min(1, risk.operationalRisk * qualityEquipmentRiskMultiplier));
+
     const incidentSeed = deriveQualityIncidentSeed(input.gameSeed, input.turn, batch.companyId, batch.factoryId, batch.product);
-    const probability = calculateMajorIncidentProbability(risk.operationalRisk, params);
+    const probability = calculateMajorIncidentProbability(effectiveOperationalRisk, params);
     const majorIncident = drawMajorIncident(incidentSeed, probability);
 
     const baselineQuality =
       input.baselineQualityOverride?.get(`${batch.companyId}::${batch.product}`) ?? unwrapUnit(params.qualityOutcome.baselineOperationalQuality);
 
-    const outcome = calculateQualityOutcome(risk.operationalRisk, majorIncident, baselineQuality, params);
+    const outcome = calculateQualityOutcome(effectiveOperationalRisk, majorIncident, baselineQuality, params);
 
     const adjustedFinishedGoodsQuantity = hosoEqTons(Math.max(0, roundHosoEqTons(currentProduction * unwrapUnit(outcome.saleableRecoveryRatio))));
     const discardQuantity = hosoEqTons(Math.max(0, roundHosoEqTons(currentProduction - unwrapUnit(adjustedFinishedGoodsQuantity))));
@@ -151,6 +167,8 @@ export function applyQualityToBatches(input: QualityAdjustmentInput, params: Qua
       product: batch.product,
       period: batch.period,
       risk,
+      qualityEquipmentRiskMultiplier,
+      effectiveOperationalRisk,
       outcome,
       originalFinishedGoodsQuantity,
       adjustedFinishedGoodsQuantity,

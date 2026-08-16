@@ -72,14 +72,27 @@ export function formatReductionRatioAtFullMaturityLabel(params: PdMechanizationP
 }
 
 /**
+ * 【Standard AI Capability Expansion・Phase QI-I1で抽出】稼働開始からの経過四半期数
+ * （0始まり。稼働開始四半期そのものが0）から、習熟進捗（0〜1）を求める汎用の
+ * 線形ランプ計算。rampQuartersで1.0に到達する。PD省人化投資専用の計算式ではなく、
+ * 「完成後N四半期で効果がフル発現する」という同じ形の投資（品質管理設備等）が
+ * 再利用できるよう、PdMechanizationParametersへの依存を持たない形で独立させた
+ * （新しい類似ロジックを重複実装しないための、唯一のランプ計算の情報源）。
+ */
+export function computeLinearRampProgress(quartersSinceActivation: number, rampQuarters: number): number {
+  if (!Number.isFinite(quartersSinceActivation) || quartersSinceActivation <= 0) return 0;
+  if (!(rampQuarters > 0)) return 1;
+  return Math.max(0, Math.min(1, quartersSinceActivation / rampQuarters));
+}
+
+/**
  * 稼働開始からの経過四半期数（0始まり。稼働開始四半期そのものが0）から、
  * 習熟進捗（0〜1）を求める。adoptionRampQuarters（習熟期間）で1.0に到達する
- * 線形ランプ（Test15暫定値・要校正）。
+ * 線形ランプ（Test15暫定値・要校正）。実体はcomputeLinearRampProgressへ委譲する
+ * （計算式は完全に同一、PD省人化投資固有のparams型を受け取る薄いラッパー）。
  */
 export function computeAdoptionRampProgress(quartersSinceActivation: number, params: PdMechanizationParameters = PD_MECHANIZATION_PARAMETERS_V1): number {
-  if (!Number.isFinite(quartersSinceActivation) || quartersSinceActivation <= 0) return 0;
-  if (!(params.adoptionRampQuarters > 0)) return 1;
-  return Math.max(0, Math.min(1, quartersSinceActivation / params.adoptionRampQuarters));
+  return computeLinearRampProgress(quartersSinceActivation, params.adoptionRampQuarters);
 }
 
 /**

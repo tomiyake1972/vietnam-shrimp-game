@@ -161,6 +161,7 @@ import {
   deriveNextPdMechanizationState,
   findPreviousQuarterPdUtilization,
 } from "./pdMechanizationState";
+import { buildQualityEquipmentRiskMultiplierByFactory } from "./qualityControlEquipmentState";
 import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { unwrapUsd } from "../finance/types";
@@ -1166,6 +1167,14 @@ export function advanceCompanyLabQuarter(
   // （state.capexState、上のfactoriesWithCapex算出と同じ基準）から算出する。
   // 当期の生産実績を当期の効果算出へ遡及させない（先読み禁止）。
   const pdCoefficientOverrideByFactoryId = buildPdCoefficientOverridesByFactory(state.capexState, state.pdMechanizationState, state.currentPeriod);
+  // 【Phase QI-I1新設・品質管理設備】PD省人化投資と同じく「前四半期末までのcapex状態」
+  // （factoriesWithCapexと同じ基準）から、Factory単位のoperationalRisk低減乗数を
+  // 毎期再導出する（先読み禁止・ターンをまたいだ新規状態を持たない）。
+  const qualityEquipmentRiskMultiplierByFactoryId = buildQualityEquipmentRiskMultiplierByFactory(
+    state.capexState,
+    factoriesWithCapex,
+    state.currentPeriod
+  );
   const productionInput: ProductionQuarterInput = {
     factories: factoriesWithCapex,
     workerAssignments: decisions.flatMap((d) => d.workerAssignments),
@@ -1196,6 +1205,7 @@ export function advanceCompanyLabQuarter(
     period: state.currentPeriod,
     turn,
     gameSeed: state.config.seed,
+    qualityEquipmentRiskMultiplierByFactory: qualityEquipmentRiskMultiplierByFactoryId,
   };
   const { adjustedBatches, adjustments, updatedRampHistory } = applyQualityToBatches(qualityAdjustmentInput);
 

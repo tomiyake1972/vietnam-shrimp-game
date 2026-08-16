@@ -32,6 +32,8 @@ function makeAdjustment(overrides: Partial<BatchQualityAdjustment> = {}): BatchQ
       productionRampStress: 0,
       operationalRisk: 0.3,
     },
+    qualityEquipmentRiskMultiplier: 1,
+    effectiveOperationalRisk: 0.3,
     outcome: {
       nonConformanceRatio: 0.02,
       downgradeRatio: 0.01,

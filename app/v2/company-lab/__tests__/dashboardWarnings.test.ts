@@ -99,6 +99,8 @@ function makeAdjustment(overrides: Partial<BatchQualityAdjustment> = {}): BatchQ
     product: "hoso",
     period: P1,
     risk: makeRisk(),
+    qualityEquipmentRiskMultiplier: 1,
+    effectiveOperationalRisk: 0.1,
     outcome: makeOutcome(),
     originalFinishedGoodsQuantity: hosoEqTons(1000),
     adjustedFinishedGoodsQuantity: hosoEqTons(995),

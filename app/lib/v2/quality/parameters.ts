@@ -101,6 +101,26 @@ export interface QualityParameters {
 
   /** 品質・顧客関係・納期信頼性が未接続・初期状態の場合に使う中立値（sales/parameters.tsのneutralScoreと同じ思想）。 */
   readonly neutralScore: Score0to100;
+
+  /**
+   * 【Phase QI-I1新設】品質管理設備（capex/types.ts CapitalProjectType
+   * "qualityControlEquipment"）の効果パラメータ。設計方針（docs/v2/
+   * quality_control_equipment_design_qi_d1.md）どおり、Quality Scoreへ直接
+   * 加点せず、batch単位のoperationalRiskを完成済み設備のあるFactoryのぶんだけ
+   * 有界な乗算で低減する。パラメータは意図的に最小限（2項目）とし、
+   * PD省人化投資（capex/pdMechanization.ts）と同じ線形ランプの考え方を再利用する。
+   */
+  readonly qualityControlEquipment: {
+    /**
+     * 完成・フル習熟時（ramp=1.0）に達成される、operationalRiskの最大削減率
+     * （0〜1）。effectiveOperationalRisk = baseOperationalRisk ×
+     * (1 − fullEffectRiskReductionRatio × rampProgress)。1.0にはしない
+     * （設備だけでリスクをゼロにしない設計方針、指示§4）。
+     */
+    readonly fullEffectRiskReductionRatio: number;
+    /** 稼働開始からフル効果に達するまでの四半期数（線形ランプ、PD省人化投資と同じ形）。 */
+    readonly rampQuarters: number;
+  };
 }
 
 export const QUALITY_PARAMETERS_V1: QualityParameters = {
@@ -162,4 +182,12 @@ export const QUALITY_PARAMETERS_V1: QualityParameters = {
   },
 
   neutralScore: score0to100(50),
+
+  // 【Phase QI-I1・#04指示】第一候補は30%削減・2Qランプ（PD省人化投資と同じ
+  // ランプ長）。20%/30%/40%はscripts/qualityControlEquipmentCapabilityQI1.tsの
+  // ベンチマークで比較し、初回benchmark前には値を確定しない（指示§14/§42）。
+  qualityControlEquipment: {
+    fullEffectRiskReductionRatio: 0.3,
+    rampQuarters: 2,
+  },
 };

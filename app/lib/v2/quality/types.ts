@@ -131,6 +131,15 @@ export interface BatchQualityAdjustment {
   readonly product: Product;
   readonly period: PeriodV2;
   readonly risk: OperationalRiskFactors;
+  /**
+   * 【Phase QI-I1新設】品質管理設備（qualityControlEquipment）による
+   * operationalRisk低減乗数（0〜1、設備なし/未稼働なら1.0）。risk.operationalRisk
+   * は設備の有無に関わらず「純粋な操業条件から計算されたリスク」のまま変更しない
+   * （既存の6要因の意味を保つ）。この乗数を掛けた後の値がeffectiveOperationalRisk。
+   */
+  readonly qualityEquipmentRiskMultiplier: number;
+  /** risk.operationalRisk × qualityEquipmentRiskMultiplier。outcome（downgrade/rework/discard/major incident）の算出に実際に使われる値。 */
+  readonly effectiveOperationalRisk: number;
   readonly outcome: QualityOutcome;
   /** 品質調整前の完成品HOSO換算量（Phase6のsaleableRecoveryRatio=1.00基準の値）。 */
   readonly originalFinishedGoodsQuantity: HosoEqTons;
