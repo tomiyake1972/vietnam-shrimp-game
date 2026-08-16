@@ -1,0 +1,201 @@
+scenario,seed,companyId,anomalyType,detail,evidenceValue
+baseline,seed-1,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":21,""100000"":0,""250000"":0,""500000"":11} midTierRatio=0.000",0
+baseline,seed-1,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+baseline,seed-1,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":1,""250000"":0,""500000"":24} midTierRatio=0.031",0.03125
+baseline,seed-1,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.905 endingCashUsd=312793957,21
+baseline,seed-1,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+baseline,seed-1,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.897 endingCashUsd=334390213,16
+baseline,seed-1,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+baseline,seed-1,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.871 endingCashUsd=313008639,21
+baseline,seed-2,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":17,""100000"":0,""250000"":0,""500000"":15} midTierRatio=0.000",0
+baseline,seed-2,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+baseline,seed-2,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+baseline,seed-2,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.885 endingCashUsd=339251686,21
+baseline,seed-2,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+baseline,seed-2,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.898 endingCashUsd=335380448,16
+baseline,seed-2,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+baseline,seed-2,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.870 endingCashUsd=317489872,21
+baseline,seed-3,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":18,""100000"":0,""250000"":0,""500000"":14} midTierRatio=0.000",0
+baseline,seed-3,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+baseline,seed-3,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+baseline,seed-3,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=20 avgUtilization=0.881 endingCashUsd=284433404,20
+baseline,seed-3,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+baseline,seed-3,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.898 endingCashUsd=327986123,16
+baseline,seed-3,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":1,""500000"":24} midTierRatio=0.031",0.03125
+baseline,seed-3,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.873 endingCashUsd=307934268,21
+baseline,seed-4,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":14,""100000"":0,""250000"":0,""500000"":18} midTierRatio=0.000",0
+baseline,seed-4,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+baseline,seed-4,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+baseline,seed-4,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=20 avgUtilization=0.881 endingCashUsd=282958666,20
+baseline,seed-4,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+baseline,seed-4,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.897 endingCashUsd=327921087,16
+baseline,seed-4,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":1,""500000"":24} midTierRatio=0.031",0.03125
+baseline,seed-4,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.871 endingCashUsd=302018031,21
+baseline,seed-5,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":14,""100000"":0,""250000"":0,""500000"":18} midTierRatio=0.000",0
+baseline,seed-5,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+baseline,seed-5,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+baseline,seed-5,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=20 avgUtilization=0.883 endingCashUsd=327248883,20
+baseline,seed-5,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+baseline,seed-5,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=15 avgUtilization=0.898 endingCashUsd=333513558,15
+baseline,seed-5,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+baseline,seed-5,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.871 endingCashUsd=312571953,21
+ecuador-early-expansion,seed-1,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":20,""100000"":0,""250000"":1,""500000"":11} midTierRatio=0.031",0.03125
+ecuador-early-expansion,seed-1,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+ecuador-early-expansion,seed-1,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+ecuador-early-expansion,seed-1,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.905 endingCashUsd=243915930,21
+ecuador-early-expansion,seed-1,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-early-expansion,seed-1,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.896 endingCashUsd=269708526,16
+ecuador-early-expansion,seed-1,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+ecuador-early-expansion,seed-1,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.872 endingCashUsd=246420018,21
+ecuador-early-expansion,seed-2,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":18,""100000"":0,""250000"":0,""500000"":14} midTierRatio=0.000",0
+ecuador-early-expansion,seed-2,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+ecuador-early-expansion,seed-2,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+ecuador-early-expansion,seed-2,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=20 avgUtilization=0.885 endingCashUsd=271288533,20
+ecuador-early-expansion,seed-2,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-early-expansion,seed-2,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.897 endingCashUsd=272325637,16
+ecuador-early-expansion,seed-2,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+ecuador-early-expansion,seed-2,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.871 endingCashUsd=248967193,21
+ecuador-early-expansion,seed-3,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":17,""100000"":0,""250000"":0,""500000"":15} midTierRatio=0.000",0
+ecuador-early-expansion,seed-3,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+ecuador-early-expansion,seed-3,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+ecuador-early-expansion,seed-3,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=20 avgUtilization=0.880 endingCashUsd=223127388,20
+ecuador-early-expansion,seed-3,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-early-expansion,seed-3,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.898 endingCashUsd=264469269,16
+ecuador-early-expansion,seed-3,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+ecuador-early-expansion,seed-3,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.873 endingCashUsd=239685136,21
+ecuador-early-expansion,seed-4,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":16,""100000"":0,""250000"":1,""500000"":15} midTierRatio=0.031",0.03125
+ecuador-early-expansion,seed-4,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":1,""250000"":0,""500000"":26} midTierRatio=0.031",0.03125
+ecuador-early-expansion,seed-4,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+ecuador-early-expansion,seed-4,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=19 avgUtilization=0.880 endingCashUsd=222396371,19
+ecuador-early-expansion,seed-4,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-early-expansion,seed-4,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.896 endingCashUsd=264849678,16
+ecuador-early-expansion,seed-4,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":1,""500000"":24} midTierRatio=0.031",0.03125
+ecuador-early-expansion,seed-4,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.872 endingCashUsd=234247287,21
+ecuador-early-expansion,seed-5,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":15,""100000"":0,""250000"":0,""500000"":17} midTierRatio=0.000",0
+ecuador-early-expansion,seed-5,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+ecuador-early-expansion,seed-5,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+ecuador-early-expansion,seed-5,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=20 avgUtilization=0.883 endingCashUsd=259787055,20
+ecuador-early-expansion,seed-5,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-early-expansion,seed-5,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=15 avgUtilization=0.898 endingCashUsd=269215841,15
+ecuador-early-expansion,seed-5,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+ecuador-early-expansion,seed-5,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.871 endingCashUsd=245819693,21
+ecuador-delayed-expansion,seed-1,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":19,""100000"":0,""250000"":0,""500000"":13} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-1,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-1,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-1,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.905 endingCashUsd=342571637,21
+ecuador-delayed-expansion,seed-1,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-1,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.897 endingCashUsd=358675794,16
+ecuador-delayed-expansion,seed-1,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-1,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.870 endingCashUsd=341834576,21
+ecuador-delayed-expansion,seed-2,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":17,""100000"":0,""250000"":0,""500000"":15} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-2,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-2,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-2,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.885 endingCashUsd=367128950,21
+ecuador-delayed-expansion,seed-2,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-2,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.898 endingCashUsd=359601844,16
+ecuador-delayed-expansion,seed-2,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-2,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.870 endingCashUsd=344748747,21
+ecuador-delayed-expansion,seed-3,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":16,""100000"":1,""250000"":0,""500000"":15} midTierRatio=0.031",0.03125
+ecuador-delayed-expansion,seed-3,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-3,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-3,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.881 endingCashUsd=314915484,21
+ecuador-delayed-expansion,seed-3,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-3,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.898 endingCashUsd=353153234,16
+ecuador-delayed-expansion,seed-3,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":1,""500000"":24} midTierRatio=0.031",0.03125
+ecuador-delayed-expansion,seed-3,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.872 endingCashUsd=336260572,21
+ecuador-delayed-expansion,seed-4,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":15,""100000"":0,""250000"":0,""500000"":17} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-4,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-4,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-4,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=20 avgUtilization=0.881 endingCashUsd=312961683,20
+ecuador-delayed-expansion,seed-4,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-4,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.897 endingCashUsd=350754311,16
+ecuador-delayed-expansion,seed-4,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":1,""500000"":24} midTierRatio=0.031",0.03125
+ecuador-delayed-expansion,seed-4,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.871 endingCashUsd=326723516,21
+ecuador-delayed-expansion,seed-5,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":16,""100000"":0,""250000"":0,""500000"":16} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-5,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-5,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-5,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.883 endingCashUsd=356010720,21
+ecuador-delayed-expansion,seed-5,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-5,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=15 avgUtilization=0.898 endingCashUsd=357185508,15
+ecuador-delayed-expansion,seed-5,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+ecuador-delayed-expansion,seed-5,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.870 endingCashUsd=341594227,21
+global-demand-boom,seed-1,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":25,""100000"":0,""250000"":0,""500000"":7} midTierRatio=0.000",0
+global-demand-boom,seed-1,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+global-demand-boom,seed-1,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-demand-boom,seed-1,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=22 avgUtilization=0.905 endingCashUsd=530944327,22
+global-demand-boom,seed-1,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-demand-boom,seed-1,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.898 endingCashUsd=535462677,16
+global-demand-boom,seed-1,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":1,""500000"":24} midTierRatio=0.031",0.03125
+global-demand-boom,seed-1,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.868 endingCashUsd=531468380,21
+global-demand-boom,seed-2,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":19,""100000"":0,""250000"":1,""500000"":12} midTierRatio=0.031",0.03125
+global-demand-boom,seed-2,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+global-demand-boom,seed-2,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-demand-boom,seed-2,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.885 endingCashUsd=555396760,21
+global-demand-boom,seed-2,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-demand-boom,seed-2,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.898 endingCashUsd=534772310,16
+global-demand-boom,seed-2,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+global-demand-boom,seed-2,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.868 endingCashUsd=535514639,21
+global-demand-boom,seed-3,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":15,""100000"":0,""250000"":1,""500000"":16} midTierRatio=0.031",0.03125
+global-demand-boom,seed-3,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+global-demand-boom,seed-3,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-demand-boom,seed-3,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.881 endingCashUsd=504450101,21
+global-demand-boom,seed-3,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-demand-boom,seed-3,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=16 avgUtilization=0.899 endingCashUsd=528369889,16
+global-demand-boom,seed-3,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-demand-boom,seed-3,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.870 endingCashUsd=527539386,21
+global-demand-boom,seed-4,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":17,""100000"":0,""250000"":0,""500000"":15} midTierRatio=0.000",0
+global-demand-boom,seed-4,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-demand-boom,seed-4,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-demand-boom,seed-4,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.881 endingCashUsd=492160974,21
+global-demand-boom,seed-4,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-demand-boom,seed-4,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=15 avgUtilization=0.899 endingCashUsd=523332117,15
+global-demand-boom,seed-4,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-demand-boom,seed-4,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=20 avgUtilization=0.867 endingCashUsd=517833682,20
+global-demand-boom,seed-5,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":20,""100000"":0,""250000"":0,""500000"":12} midTierRatio=0.000",0
+global-demand-boom,seed-5,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-demand-boom,seed-5,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-demand-boom,seed-5,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.883 endingCashUsd=544584312,21
+global-demand-boom,seed-5,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-demand-boom,seed-5,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=15 avgUtilization=0.899 endingCashUsd=532816703,15
+global-demand-boom,seed-5,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+global-demand-boom,seed-5,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.868 endingCashUsd=532867531,21
+global-disease-crisis,seed-1,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":20,""100000"":0,""250000"":0,""500000"":12} midTierRatio=0.000",0
+global-disease-crisis,seed-1,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+global-disease-crisis,seed-1,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":1,""250000"":0,""500000"":24} midTierRatio=0.031",0.03125
+global-disease-crisis,seed-1,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.906 endingCashUsd=440221472,21
+global-disease-crisis,seed-1,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-disease-crisis,seed-1,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=15 avgUtilization=0.897 endingCashUsd=440194532,15
+global-disease-crisis,seed-1,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+global-disease-crisis,seed-1,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.870 endingCashUsd=437989485,21
+global-disease-crisis,seed-2,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":18,""100000"":0,""250000"":0,""500000"":14} midTierRatio=0.000",0
+global-disease-crisis,seed-2,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+global-disease-crisis,seed-2,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-disease-crisis,seed-2,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.886 endingCashUsd=459893951,21
+global-disease-crisis,seed-2,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-disease-crisis,seed-2,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=15 avgUtilization=0.898 endingCashUsd=439085776,15
+global-disease-crisis,seed-2,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+global-disease-crisis,seed-2,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.870 endingCashUsd=439921794,21
+global-disease-crisis,seed-3,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":22,""100000"":0,""250000"":0,""500000"":10} midTierRatio=0.000",0
+global-disease-crisis,seed-3,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-disease-crisis,seed-3,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-disease-crisis,seed-3,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.881 endingCashUsd=408701105,21
+global-disease-crisis,seed-3,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-disease-crisis,seed-3,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=15 avgUtilization=0.899 endingCashUsd=431144144,15
+global-disease-crisis,seed-3,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":1,""500000"":23} midTierRatio=0.031",0.03125
+global-disease-crisis,seed-3,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.873 endingCashUsd=432805652,21
+global-disease-crisis,seed-4,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":19,""100000"":0,""250000"":0,""500000"":13} midTierRatio=0.000",0
+global-disease-crisis,seed-4,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":5,""100000"":0,""250000"":0,""500000"":27} midTierRatio=0.000",0
+global-disease-crisis,seed-4,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-disease-crisis,seed-4,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.881 endingCashUsd=410840368,21
+global-disease-crisis,seed-4,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-disease-crisis,seed-4,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=17 avgUtilization=0.898 endingCashUsd=431913053,17
+global-disease-crisis,seed-4,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":1,""500000"":24} midTierRatio=0.031",0.03125
+global-disease-crisis,seed-4,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.871 endingCashUsd=425000251,21
+global-disease-crisis,seed-5,MASS,VAP_DEV_BANG_BANG,"tierCounts={""0"":17,""100000"":0,""250000"":0,""500000"":15} midTierRatio=0.000",0
+global-disease-crisis,seed-5,BAL,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-disease-crisis,seed-5,JPQ,VAP_DEV_BANG_BANG,"tierCounts={""0"":8,""100000"":0,""250000"":0,""500000"":24} midTierRatio=0.000",0
+global-disease-crisis,seed-5,JPQ,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.883 endingCashUsd=446284814,21
+global-disease-crisis,seed-5,CONSV,VAP_DEV_BANG_BANG,"tierCounts={""0"":6,""100000"":0,""250000"":0,""500000"":26} midTierRatio=0.000",0
+global-disease-crisis,seed-5,CONSV,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=15 avgUtilization=0.899 endingCashUsd=437735398,15
+global-disease-crisis,seed-5,VAP,VAP_DEV_BANG_BANG,"tierCounts={""0"":7,""100000"":0,""250000"":0,""500000"":25} midTierRatio=0.000",0
+global-disease-crisis,seed-5,VAP,UNDERINVESTMENT_SUSTAINED_BACKLOG,maxConsecutiveBacklogQuarters=21 avgUtilization=0.871 endingCashUsd=434634413,21

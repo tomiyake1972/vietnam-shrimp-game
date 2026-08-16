@@ -83,19 +83,23 @@ test("CE2-2: VAP opportunityが低い（稼働率が低い）と候補になら�
   assert.ok(result.diagnostics.some((d) => d.code === "VAP_DEV_LOW_OPPORTUNITY"));
 });
 
-test("CE2-3: VAP opportunityが高く経済性も良好なら候補になる（最上位tierが選ばれる）", () => {
+test("CE2-3: VAP opportunityが高く経済性も良好なら候補になる（Intensityに応じたtierが選ばれる）", () => {
+  // 【Phase PC-2A・指示§9】affordabilityが十分でも「必ず最上位tier」にはしない設計へ変更した。
+  // ここではheadroom=0.5・vapBusinessScale≈0.43・affordabilityScore=1（$500kも余裕で賄える）の
+  // 単純平均でIntensity≈0.64となり、MEDIUM帯（$250k）が選ばれる（HIGH閾値2/3には届かない）。
   const result = buildStandardAiVapProductDevelopmentDecision(fixtureFor("BAL"), observation(), pressures(), STANDARD_AI_PARAMETERS_V1);
-  assert.equal(result.spendUsd, MAX_TIER, "affordabilityに十分な余裕があるため最上位tierが選ばれるはず");
+  assert.equal(result.spendUsd, 250_000, "headroom・VAP事業規模・affordabilityのIntensity平均からMEDIUM tierが選ばれるはず");
 });
 
 test("CE2-4: 会社のVAP商品志向（既存のproductOrientationMultipliers）がVAP商品開発への戦略適合をソフトに引き上げる（強制ルールではない）", () => {
-  // 【経済性設計】affordabilityが基準ぎりぎり（3四半期）となる境界ケースを作る。
-  // 基準パラメータでは最上位tierが見送りになるが、VAP志向の高いパラメータでは
-  // 同じ経済性でもより高いtierが選ばれる。稼働率ゲート（52%）は満たす値にする。
-  const borderline = observation({ lastQuarterActualProductionByProduct: { hoso: 3000, pd: 3000, vap: 2600 } });
-  // currentQuarterlyVapContributionUsd = 2600*1000*0.5 = $1,300,000。
-  // 最上位tier$500,000のaffordability = 500,000/1,300,000 ≈ 0.38四半期（基準3以下で通る）。
-  // より制約的な境界を作るため、targetMarginを下げたfixtureを使う。
+  // 【Phase PC-2A】Investment Intensity（headroom・VAP事業規模・affordabilityの単純平均）が
+  // MEDIUM帯からHIGH帯へ越境する境界ケースを作る。VAP志向バイアスはaffordabilityScore
+  // （3要素のうち1つ）だけを引き上げるため、他の2要素（headroom・vapBusinessScale）も
+  // 境界に近い値にしておくことで、バイアスの有無でtierが変わることを確認する。
+  const borderline = observation({
+    lastQuarterActualProductionByProduct: { hoso: 3000, pd: 1000, vap: 3000 },
+    vapProductDevelopmentScore: 40, // headroom = 0.6
+  });
   const lowMarginFixture: CompanyFixture = {
     ...fixtureFor("BAL"),
     productEconomics: {
@@ -103,22 +107,23 @@ test("CE2-4: 会社のVAP商品志向（既存のproductOrientationMultipliers�
       premiumEconomics: {
         vap: {
           ...fixtureFor("BAL").productEconomics.premiumEconomics.vap,
-          targetMarginUsdPerHosoEqKg: 0.06,
+          targetMarginUsdPerHosoEqKg: 0.03,
         },
       },
     },
   } as unknown as CompanyFixture;
-  // currentQuarterlyVapContributionUsd = 2600*1000*0.06 = $156,000。
-  // 最上位tier$500,000 affordability = 500,000/156,000 ≈ 3.21四半期 > 基準3 → 基準では見送り。
+  // baseline: headroom0.6・vapBusinessScale≈0.43・affordabilityScore0.54 → Intensity≈0.52（MEDIUM）。
   const baselineResult = buildStandardAiVapProductDevelopmentDecision(lowMarginFixture, borderline, pressures(), STANDARD_AI_PARAMETERS_V1);
-  assert.notEqual(baselineResult.spendUsd, MAX_TIER, "前提: 基準paramsでは最上位tierのaffordabilityが基準を超えるはず");
+  assert.equal(baselineResult.spendUsd, 250_000, "前提: 基準paramsではMEDIUM tierが選ばれるはず");
 
   const vapOrientedParams: StandardAiParameters = {
     ...STANDARD_AI_PARAMETERS_V1,
-    productOrientationMultipliers: { hoso: 0.9, vap: 1.2 },
+    productOrientationMultipliers: { hoso: 0.7, vap: 1.4 },
   };
+  // バイアスでstrategyFitMultiplier=2.0となりaffordabilityScoreが1.0へ飽和、
+  // Intensity≈0.68でHIGH帯へ越境する。
   const biasedResult = buildStandardAiVapProductDevelopmentDecision(lowMarginFixture, borderline, pressures(), vapOrientedParams);
-  assert.equal(biasedResult.spendUsd, MAX_TIER, "VAP志向が高い場合、同じ経済性でも最上位tierが選ばれるべき");
+  assert.equal(biasedResult.spendUsd, MAX_TIER, "VAP志向が高い場合、同じ経済性でもより高いtierが選ばれるべき（ソフトバイアス、強制ではない）");
 });
 
 test("CE2-5: MASS（HOSO/scale志向）でもハードブロックされない。経済性が非常に良好なら投資可能", () => {

@@ -450,6 +450,22 @@ export interface PackStrategy {
     readonly financeBlocked: boolean;
     readonly reasonCodes: readonly string[];
   } | null;
+  /**
+   * 【Standard AI Factory Activation・Phase FA-1新設・指示§27】Factory単位の
+   * ボトルネック診断（factoryActivation.tsの既存FactoryObservation由来の純粋関数、
+   * 新しいSSoTは持たない）。当期観測対象Factoryが1件も無かった場合はnull
+   * （架空の値を作らない）。
+   */
+  readonly factoryActivation: readonly {
+    readonly factoryId: string;
+    readonly bottleneck: string;
+    readonly utilization: number | null;
+    readonly forwardRequirement: number | null;
+    readonly currentRegularHeadcount: number | null;
+    readonly requiredRegularHeadcount: number | null;
+    readonly activationNeed: number | null;
+    readonly reasonCodes: readonly string[];
+  }[] | null;
 }
 
 /**

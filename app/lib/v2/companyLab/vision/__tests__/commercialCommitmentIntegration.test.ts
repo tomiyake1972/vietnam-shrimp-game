@@ -182,6 +182,17 @@ test("CCI-6: 終盤の生産量は、提出量ではなく成約量の近くに�
     // 方針（ファイル冒頭コメント）に沿って5tへ広げた。ゲームバランスの数値
     // そのものは固定しない。
     if (submitted <= contracted + 5) continue;
+    // 【Standard AI Factory Activation・Phase FA-1】新設Factoryが稼働開始後も
+    // Standard AIから一切WorkerAssignmentを得られず生産0のまま滞留する既存
+    // デッドロックバグを修正した結果、それまで積み上がっていた未履行契約残
+    // （backlog）を、労務Activationが追いついた終盤ターンでまとめて生産・出荷
+    // できるようになった。この場合、当該ターンの生産量が「提出量」「成約量」の
+    // どちらより明らかに大きくなる（＝backlog解消のための一時的なバースト）。
+    // 本テストの目的は「AIが成約実績を無視して提出量へ盲目的に追随していないか」
+    // の検知であり、生産が両方を上回るケースはこの検知対象の失敗モードではない
+    // ため対象外とする（本文冒頭コメントの「明らかに壊れている水準にのみ置く」
+    // 方針どおり、ゲームバランスの数値そのものは固定しない）。
+    if (produced > Math.max(submitted, contracted) + 5) continue;
     assert.ok(
       Math.abs(produced - contracted) < Math.abs(produced - submitted),
       `${d.companyId}: 生産 ${Math.round(produced)}t は提出 ${Math.round(submitted)}t より成約 ${Math.round(contracted)}t に近いこと`

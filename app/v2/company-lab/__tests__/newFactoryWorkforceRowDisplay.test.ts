@@ -107,10 +107,18 @@ test("NEWF-VM-2: 新設Factoryのregularheadcountを編集すると、headcountC
   const session = sessionAtNewFactoryFirstTurn();
   const newFactoryId = "MASS-NEWF-MASS-CAPEX-5";
 
-  const { planning: beforeEdit } = buildPlanningForCompany(session, "MASS");
+  const { draft, planning: beforeEdit } = buildPlanningForCompany(session, "MASS");
   const rowBefore = beforeEdit.workforceRows.find((r) => r.factoryId === newFactoryId)!;
   assert.ok(rowBefore, "新設Factoryのworkforce行が見つからない");
-  assert.equal(rowBefore.headcountChange, 0, "編集前はheadcountChange=0であるべき");
+  // 【Standard AI Factory Activation・Phase FA-1】以前はStandard AIが新設Factoryへ
+  // 一切WorkerAssignmentを生成できなかったバグ（労務Activationデッドロック）があり、
+  // このため編集前のheadcountChangeは常に0だった。FA-1でこのバグを修正した結果、
+  // Standard AI自身が新設Factoryへ実際の必要人数を提案するようになり、編集前でも
+  // その提案値（0ではない）がheadcountChangeとして表示されるのが正しい挙動になった。
+  const aiProposedHeadcount = draft.workerAssignments.find((w) => w.factoryId === newFactoryId)?.regularHeadcount ?? 0;
+  assert.ok(aiProposedHeadcount > 0, "FA-1修正後はStandard AIが新設Factoryへ0より大きい人数を提案するはず");
+  assert.equal(rowBefore.headcountBefore, 0, "新設FactoryのheadcountBeforeは0であるべき（workforceStateに記録が無いため）");
+  assert.equal(rowBefore.headcountChange, aiProposedHeadcount, "編集前のheadcountChangeはStandard AIの提案値と一致するべき");
 
   const { planning: afterEdit } = buildPlanningForCompany(session, "MASS", { [newFactoryId]: 500 });
   const rowAfter = afterEdit.workforceRows.find((r) => r.factoryId === newFactoryId)!;

@@ -173,6 +173,7 @@ export type StandardAiReasonCode =
   | "VAP_DEV_CONSIDERED" // VAP商品開発費（tier選択）を検討対象に含めた
   | "VAP_DEV_LOW_OPPORTUNITY" // VAP稼働率が低く、商品開発を検討する段階にないため見送り
   | "VAP_DEV_LOW_MARGIN" // VAP市場プレミアムが最低受注水準未満で採算が立たないため見送り
+  | "VAP_DEV_INTENSITY_EVALUATED" // 【Phase PC-2A新設】headroom・VAP事業規模・affordabilityからInvestment Intensityを算出し、候補tierを導出した
   | "VAP_DEV_PAYBACK_UNATTRACTIVE" // どのtierも現在のVAP事業規模に対して支出が過大（affordability基準未達）のため見送り
   | "VAP_DEV_ALREADY_ACTIVE" // VAP商品開発スコアが既に高く、ヘッドルームが乏しいため新規支出を見送り
   | "VAP_DEV_FINANCE_BLOCKED" // 財務ゲート（現金・借入余力）を満たさないtierを見送り
@@ -185,7 +186,14 @@ export type StandardAiReasonCode =
   | "QUALITY_EQUIP_ALREADY_ACTIVE" // 当該工場には既に品質管理設備が稼働中／導入進行中のため重複提案しない
   | "QUALITY_EQUIP_FINANCE_BLOCKED" // 財務ゲート（現金・借入余力）を満たさないため見送り
   | "QUALITY_EQUIP_PROPOSED" // 品質管理設備を提案（Quality Need・経済性・戦略適合を踏まえて工場を選定）
-  | "QUALITY_EQUIP_DEFERRED"; // 当期はいずれの工場もQuality Need条件を満たさないため見送り（既定の正常な結果）
+  | "QUALITY_EQUIP_DEFERRED" // 当期はいずれの工場もQuality Need条件を満たさないため見送り（既定の正常な結果）
+  // --- 【Standard AI Factory Activation・Phase FA-1】新工場の戦力化 ---
+  | "FACTORY_ACTIVATION_LABOR_BASELINE_SYNTHESIZED" // 新設Factoryぶんの労働baselineを合成した（既存Factoryの平均skillを流用）
+  | "FACTORY_ACTIVATION_CONSIDERED" // Factory Activation候補として評価対象に含めた
+  | "FACTORY_ACTIVATION_BOTTLENECK_COMMON" // 共通前処理能力がボトルネックと診断
+  | "FACTORY_ACTIVATION_BOTTLENECK_PRODUCT_LINE" // 商品別ラインがボトルネックと診断
+  | "FACTORY_ACTIVATION_BOTTLENECK_LABOR" // 労働力がボトルネックと診断
+  | "FACTORY_ACTIVATION_NONE_NEEDED"; // 当該Factoryは十分に戦力化済み（追加のActivation不要）
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -320,6 +328,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "VAP_DEV_CONSIDERED",
   "VAP_DEV_LOW_OPPORTUNITY",
   "VAP_DEV_LOW_MARGIN",
+  "VAP_DEV_INTENSITY_EVALUATED",
   "VAP_DEV_PAYBACK_UNATTRACTIVE",
   "VAP_DEV_ALREADY_ACTIVE",
   "VAP_DEV_FINANCE_BLOCKED",
@@ -332,6 +341,12 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "QUALITY_EQUIP_FINANCE_BLOCKED",
   "QUALITY_EQUIP_PROPOSED",
   "QUALITY_EQUIP_DEFERRED",
+  "FACTORY_ACTIVATION_LABOR_BASELINE_SYNTHESIZED",
+  "FACTORY_ACTIVATION_CONSIDERED",
+  "FACTORY_ACTIVATION_BOTTLENECK_COMMON",
+  "FACTORY_ACTIVATION_BOTTLENECK_PRODUCT_LINE",
+  "FACTORY_ACTIVATION_BOTTLENECK_LABOR",
+  "FACTORY_ACTIVATION_NONE_NEEDED",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

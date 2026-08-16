@@ -209,11 +209,36 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
     period
   );
   const qualityMetricsByFactory = aggregateQualityMetricsByFactory(ownState.lastQuarterQualityAdjustments);
+  // 【Standard AI Factory Activation・Phase FA-1・監査で発見した既存バグ】新設Factory
+  // （newFactoryConstruction完成後にこの一覧へ現れるFactory）はfixture.workerBaseline
+  // に存在しないため、従来skillByProductが常にゼロのままだった。skill=0は
+  // computeRequiredRegularHeadcount（companyLab/workforce.ts）上「必要人数を
+  // 計算できない（要求量に関わらず0人と算出される）」ことを意味するため、
+  // 新設Factoryはproductionを計画しても常にrequiredRegularHeadcount=0となり、
+  // 労働力配属が恒久的に発生しない構造的デッドロックの根本原因だった
+  // （companyLab/standardAi/decision/labor.tsのbaseline合成だけでは解決しない。
+  // labor.ts側はfactoryObs.skillByProductを優先して読むため、ここ＝唯一の
+  // FactoryObservation生成元を直さないと効果が出ない）。新しいskill-rampモデルは
+  // 作らず、同一会社の既存Factory（workerBaselineに存在するFactory）の平均skillを
+  // 流用する（無ければ1.0=フルスキル）。
+  const companySkillAverage: ProductAmount = zeroProductAmount();
+  if (fixture.workerBaseline.length > 0) {
+    for (const product of ["hoso", "pd", "vap"] as const) {
+      const samples = fixture.workerBaseline
+        .map((w) => unwrapUnit(w.skills.find((s) => s.product === product)?.skillLevel ?? (0 as never)))
+        .filter((v) => Number.isFinite(v) && v > 0);
+      companySkillAverage[product] = samples.length > 0 ? samples.reduce((s, v) => s + v, 0) / samples.length : 1;
+    }
+  } else {
+    companySkillAverage.hoso = 1;
+    companySkillAverage.pd = 1;
+    companySkillAverage.vap = 1;
+  }
   return effectiveFactories.map((f) => {
     const baseline = fixture.workerBaseline.find((w) => w.factoryId === f.factoryId);
     const currentRegularHeadcount =
       findFactoryRegularHeadcount({ companies: [ownState.workforceState] }, fixture.companyId, f.factoryId) ?? baseline?.regularHeadcount ?? 0;
-    const skillByProduct: ProductAmount = zeroProductAmount();
+    const skillByProduct: ProductAmount = baseline ? zeroProductAmount() : { ...companySkillAverage };
     if (baseline) {
       for (const s of baseline.skills) {
         skillByProduct[s.product] = unwrapUnit(s.skillLevel);

@@ -343,7 +343,38 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics, profi
     pdMechanization: buildPackPdMechanization(diagnostics.entries),
     vapProductDevelopment: buildPackVapProductDevelopment(diagnostics.entries),
     qualityEquipment: buildPackQualityEquipment(diagnostics.entries),
+    factoryActivation: buildPackFactoryActivation(diagnostics.entries),
   };
+}
+
+/**
+ * 【Standard AI Factory Activation・Phase FA-1新設・指示§27】decision/capex.tsが
+ * 積んだFACTORY_ACTIVATION_*のStandardAiDiagnosticEntryから、Factory単位の
+ * Pack用要約を再構成する。ここで新しい判断・数値計算は行わない。
+ */
+function buildPackFactoryActivation(
+  entries: readonly { readonly code: string; readonly keyValues?: Readonly<Record<string, number>>; readonly targetFactoryId?: string }[]
+): PackStrategy["factoryActivation"] {
+  const activationEntries = entries.filter((e) => e.code.startsWith("FACTORY_ACTIVATION_") && e.targetFactoryId !== undefined);
+  if (activationEntries.length === 0) return null;
+
+  const factoryIds = [...new Set(activationEntries.map((e) => e.targetFactoryId!))].sort();
+  return factoryIds.map((factoryId) => {
+    const forThisFactory = activationEntries.filter((e) => e.targetFactoryId === factoryId);
+    const considered = forThisFactory.find((e) => e.code === "FACTORY_ACTIVATION_CONSIDERED");
+    const bottleneckEntry = forThisFactory.find((e) => e.code.startsWith("FACTORY_ACTIVATION_BOTTLENECK_") || e.code === "FACTORY_ACTIVATION_NONE_NEEDED");
+    const kv = considered?.keyValues;
+    return {
+      factoryId,
+      bottleneck: bottleneckEntry?.code.replace("FACTORY_ACTIVATION_", "").replace("BOTTLENECK_", "") ?? "UNKNOWN",
+      utilization: num(kv?.utilization),
+      forwardRequirement: num(kv?.requiredRegularHeadcount),
+      currentRegularHeadcount: num(kv?.currentRegularHeadcount),
+      requiredRegularHeadcount: num(kv?.requiredRegularHeadcount),
+      activationNeed: num(kv?.activationNeed),
+      reasonCodes: forThisFactory.map((e) => e.code),
+    };
+  });
 }
 
 /**
