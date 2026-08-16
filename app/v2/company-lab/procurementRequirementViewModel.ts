@@ -87,23 +87,45 @@ export function buildProductionRawRequirement(rows: readonly ProductionPlanQuant
 // ---------------------------------------------------------------------
 
 export interface AvailableRawMaterialThisQuarter {
-  /** 既に使用可能な在庫（status="available"）。 */
+  /** 既に使用可能な在庫（status="available"）。確定値。 */
   readonly carriedInventoryTons: number;
-  /** 当期に到着する輸送中輸入原料（status="inTransitImport" かつ到着予定が当期以前）。 */
-  readonly arrivingImportTons: number;
-  /** 当期に収穫される養殖分（status="growingAquaculture" かつ収穫予定が当期以前）。 */
-  readonly harvestingAquacultureTons: number;
-  /** 上記3つの合計＝当期に確実に使える原料。 */
-  readonly totalTons: number;
+  /**
+   * 当期到着予定の輸送中輸入原料（status="inTransitImport" かつ到着予定が当期以前）。
+   * 【確定値である根拠】到着処理（rawMaterials/imports.ts の receiveArrivedImports）は
+   * availableFromPeriod <= currentPeriod のロットの status を "available" へ
+   * 遷移させるだけで、remainingQuantity は一切変更しない。したがって到着予定日が
+   * 来れば、この数量がそのまま利用可能になる（数量そのものの不確実性はない。
+   * 不確実なのは「発注量が競合他社との水位法配分で満額通るか」であり、それは
+   * 発注時点＝ロット生成時点で既に確定済み）。
+   */
+  readonly confirmedImportArrivalTons: number;
+  /** carriedInventoryTons + confirmedImportArrivalTons（養殖の期待収穫を含まない、確定量の小計）。 */
+  readonly confirmedAvailableTons: number;
+  /**
+   * 当期収穫予定の養殖ロットの期待生産量（status="growingAquaculture" かつ
+   * 収穫予定が当期以前。疾病圧力適用前の値）。
+   * 【確定値ではない根拠】実際の収穫量（rawMaterials/aquaculture.ts の
+   * harvestAquacultureLots）は
+   *   actualHarvestQuantity = originalQuantity × survivalRatio(diseasePressure)
+   * として収穫時点で初めて確定する。diseasePressure はシナリオの外生値であり、
+   * 意思決定時点（この画面が表示される時点）ではまだ分からない。したがって
+   * この値を「確実に利用可能」として確定量へ合算してはならない。
+   */
+  readonly expectedAquacultureHarvestTons: number;
+  /** confirmedAvailableTons + expectedAquacultureHarvestTons（参考の合計。疾病影響前の楽観値）。 */
+  readonly totalIncludingExpectedTons: number;
   /**
    * 当期より後にしか使えないパイプライン（輸送中・養殖中の残り）。
-   * totalTonsには含めない（当期の生産には使えないため）。
+   * confirmedAvailableTons・totalIncludingExpectedTonsのいずれにも含めない
+   * （当期の生産には使えないため）。
    */
   readonly pipelineBeyondThisQuarterTons: number;
 }
 
 /**
- * 当期に確実に使える原料量を、既存のロットstatus・availableFromPeriodだけから求める。
+ * 当期に使える原料量を、既存のロットstatus・availableFromPeriodだけから求める。
+ * 「確定して使える量（confirmed）」と「養殖の期待収穫（expected、疾病圧力次第で
+ * 変動しうる）」を明確に分離して返す（前者だけを「確実に利用可能」と呼ぶ）。
  *
  * 【当期の国内買付を含めない理由】国内買付は5社競争配分（rawMaterials/
  * domesticPurchase.ts の allocateDomesticPurchase）の結果で決まるため、
@@ -116,8 +138,8 @@ export function buildAvailableRawMaterialThisQuarter(
   currentPeriod: PeriodV2
 ): AvailableRawMaterialThisQuarter {
   let carriedInventoryTons = 0;
-  let arrivingImportTons = 0;
-  let harvestingAquacultureTons = 0;
+  let confirmedImportArrivalTons = 0;
+  let expectedAquacultureHarvestTons = 0;
   let pipelineBeyondThisQuarterTons = 0;
 
   for (const lot of lots) {
@@ -130,20 +152,22 @@ export function buildAvailableRawMaterialThisQuarter(
     if (lot.status === "available") {
       carriedInventoryTons += quantity;
     } else if (lot.status === "inTransitImport") {
-      if (isDueByNow) arrivingImportTons += quantity;
+      if (isDueByNow) confirmedImportArrivalTons += quantity;
       else pipelineBeyondThisQuarterTons += quantity;
     } else if (lot.status === "growingAquaculture") {
-      if (isDueByNow) harvestingAquacultureTons += quantity;
+      if (isDueByNow) expectedAquacultureHarvestTons += quantity;
       else pipelineBeyondThisQuarterTons += quantity;
     }
     // consumed / expired は当期の供給源ではないため無視する。
   }
 
+  const confirmedAvailableTons = carriedInventoryTons + confirmedImportArrivalTons;
   return {
     carriedInventoryTons,
-    arrivingImportTons,
-    harvestingAquacultureTons,
-    totalTons: carriedInventoryTons + arrivingImportTons + harvestingAquacultureTons,
+    confirmedImportArrivalTons,
+    confirmedAvailableTons,
+    expectedAquacultureHarvestTons,
+    totalIncludingExpectedTons: confirmedAvailableTons + expectedAquacultureHarvestTons,
     pipelineBeyondThisQuarterTons,
   };
 }
@@ -155,18 +179,29 @@ export function buildAvailableRawMaterialThisQuarter(
 export interface ProcurementRequirementViewModel {
   readonly requirement: ProductionRawRequirement;
   readonly available: AvailableRawMaterialThisQuarter;
-  /** available.totalTons − requirement.requiredRawMaterialTons（負なら不足）。 */
+
+  // --- 楽観値（養殖の期待収穫を含む。totalIncludingExpectedTons基準） ---
+  /** available.totalIncludingExpectedTons − requirement.requiredRawMaterialTons（負なら不足）。 */
   readonly balanceTons: number;
   /** 不足量（正の数。不足していなければ0）。 */
   readonly shortageTons: number;
   /** 余剰量（正の数。余剰でなければ0）。 */
   readonly surplusTons: number;
   readonly isShortage: boolean;
-  /**
-   * 必要原料量に対する充足率（available / required）。
-   * 必要量が0のときは undefined（0除算の結果を捏造しない）。
-   */
+  /** 必要原料量に対する充足率（楽観値ベース）。必要量が0のときは undefined。 */
   readonly coverageRatio: number | undefined;
+
+  // --- 保守値（養殖の期待収穫を一切含めない。confirmedAvailableTons基準） ---
+  /**
+   * available.confirmedAvailableTons − requirement.requiredRawMaterialTons。
+   * 「養殖が収穫段階で疾病等により目減りした場合でも、この量だけは確実に足りている／
+   * 不足している」という保守的な基準。
+   */
+  readonly confirmedBalanceTons: number;
+  readonly confirmedShortageTons: number;
+  readonly confirmedSurplusTons: number;
+  readonly isConfirmedShortage: boolean;
+  readonly confirmedCoverageRatio: number | undefined;
 }
 
 export interface BuildProcurementRequirementInput {
@@ -179,7 +214,11 @@ export interface BuildProcurementRequirementInput {
 export function buildProcurementRequirementViewModel(input: BuildProcurementRequirementInput): ProcurementRequirementViewModel {
   const requirement = buildProductionRawRequirement(input.productionPlanRows);
   const available = buildAvailableRawMaterialThisQuarter(input.rawMaterialLots, input.companyId, input.currentPeriod);
-  const balanceTons = available.totalTons - requirement.requiredRawMaterialTons;
+  const required = requirement.requiredRawMaterialTons;
+
+  const balanceTons = available.totalIncludingExpectedTons - required;
+  const confirmedBalanceTons = available.confirmedAvailableTons - required;
+
   return {
     requirement,
     available,
@@ -187,7 +226,12 @@ export function buildProcurementRequirementViewModel(input: BuildProcurementRequ
     shortageTons: balanceTons < 0 ? -balanceTons : 0,
     surplusTons: balanceTons > 0 ? balanceTons : 0,
     isShortage: balanceTons < 0,
-    coverageRatio: requirement.requiredRawMaterialTons > 0 ? available.totalTons / requirement.requiredRawMaterialTons : undefined,
+    coverageRatio: required > 0 ? available.totalIncludingExpectedTons / required : undefined,
+    confirmedBalanceTons,
+    confirmedShortageTons: confirmedBalanceTons < 0 ? -confirmedBalanceTons : 0,
+    confirmedSurplusTons: confirmedBalanceTons > 0 ? confirmedBalanceTons : 0,
+    isConfirmedShortage: confirmedBalanceTons < 0,
+    confirmedCoverageRatio: required > 0 ? available.confirmedAvailableTons / required : undefined,
   };
 }
 

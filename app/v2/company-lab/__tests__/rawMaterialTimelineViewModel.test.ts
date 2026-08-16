@@ -110,3 +110,29 @@ test("PROC-TL-8: totalByBucketは全行のバケット別合計と一致する",
   assert.equal(timeline.totalByBucket.q1, 500);
   assert.equal(timeline.grandTotalTons, 1000);
 });
+
+// PROC-TL-9: 各行のcertaintyが正しく割り当てられる（carriedInventory/domestic/import=confirmed, ownFarm=expected）
+test("PROC-TL-9: carriedInventory・domesticProcurement・importArrivalsはconfirmed、ownFarmはexpected", () => {
+  const timeline = buildRawMaterialTimeline([], COMPANY, CURRENT);
+  const byKey = new Map(timeline.rows.map((r) => [r.rowKey, r]));
+  assert.equal(byKey.get("carriedInventory")!.certainty, "confirmed");
+  assert.equal(byKey.get("domesticProcurement")!.certainty, "confirmed");
+  assert.equal(byKey.get("importArrivals")!.certainty, "confirmed");
+  assert.equal(byKey.get("ownFarm")!.certainty, "expected");
+  assert.equal(byKey.get("otherCommittedLots")!.certainty, "unknown");
+});
+
+// PROC-TL-10: confirmedTotalTons/expectedTotalTonsは、養殖の見込み量を確定量へ混ぜない
+test("PROC-TL-10: confirmedTotalTonsは養殖の見込み量を含まず、expectedTotalTonsは養殖の見込み量のみを表す", () => {
+  const lots = [
+    lot({ status: "available", remainingQuantity: hosoEqTons(1000), availableFromPeriod: CURRENT }),
+    lot({ source: "import", status: "inTransitImport", remainingQuantity: hosoEqTons(500), availableFromPeriod: CURRENT }),
+    lot({ source: "aquaculture", status: "growingAquaculture", remainingQuantity: hosoEqTons(5000), availableFromPeriod: Q1 }),
+  ];
+  const timeline = buildRawMaterialTimeline(lots, COMPANY, CURRENT);
+  // 確定量は在庫＋輸入到着のみ。養殖5000tは含めない。
+  assert.equal(timeline.confirmedTotalTons, 1500);
+  assert.equal(timeline.expectedTotalTons, 5000);
+  // grandTotalTonsは（表示上の合計として）両方を含む。
+  assert.equal(timeline.grandTotalTons, 6500);
+});
