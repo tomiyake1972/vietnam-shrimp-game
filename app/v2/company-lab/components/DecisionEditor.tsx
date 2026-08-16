@@ -8,9 +8,8 @@
 // 警告表示のみ行い、送信はブロックしない（ソフト警告）。計算ロジックは
 // 一切持たない（表示・編集のみ）。
 
-import { score0to100, unwrapUnit, UsdPerHosoEqKg } from "../../../lib/v2/core/units";
+import { score0to100, unwrapUnit } from "../../../lib/v2/core/units";
 import { PeriodV2 } from "../../../lib/v2/core/period";
-import { CountryId, COUNTRY_IDS } from "../../../lib/v2/market/types";
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../../lib/v2/companyLab";
 import { CAPEX_PARAMETERS_V1, CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../lib/v2/capex";
 import { formatHosoEqTons } from "../../../lib/v2/industryLab/ui/formatters";
@@ -66,21 +65,9 @@ import InvestmentCardList from "./InvestmentCardList";
 import PlanningWarningsPanel from "./PlanningWarningsPanel";
 import ProcessingCapacityPanel from "./ProcessingCapacityPanel";
 import WorkforcePanel from "./WorkforcePanel";
-import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INFO_VALUE_CLASS, INPUT_CONTROL_CLASS, INPUT_CONTROL_WARN_CLASS, NO_VALUE_TEXT } from "./panelStyles";
-import { buildProcurementRequirementViewModel, ProductionPlanQuantityRow } from "../procurementRequirementViewModel";
-import { buildRawMaterialTimeline } from "../rawMaterialTimelineViewModel";
-import {
-  buildAquaculturePricingViewModel,
-  buildDomesticPricingViewModel,
-  buildImportPricingRows,
-} from "../procurementPricingViewModel";
-import { buildProcurementCapacityViewModel } from "../procurementCapacityViewModel";
-import { buildProcurementCashViewModel } from "../procurementCashViewModel";
-import ProductionLinkageHeader from "./procurement/ProductionLinkageHeader";
-import RawMaterialTimelineTable from "./procurement/RawMaterialTimeline";
-import ProcurementPricingSummary from "./procurement/ProcurementPricingSummary";
-import ProcurementCapacitySummary from "./procurement/ProcurementCapacitySummary";
-import PreFinancingLiquidityPanel from "./procurement/PreFinancingLiquidityPanel";
+import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INFO_VALUE_CLASS, INPUT_CONTROL_CLASS, NO_VALUE_TEXT } from "./panelStyles";
+import { NumberCell, PriceAdjustmentCell } from "./InputCells";
+import ProcurementPlanningSection from "./procurement/ProcurementPlanningSection";
 
 interface DecisionEditorProps {
   readonly fixture: CompanyFixture;
@@ -134,71 +121,6 @@ const REPAYMENT_METHOD_LABELS: Record<CompanyDecisionDraft["financingRequest"]["
 
 function formatUsd(value: number): string {
   return `$${Math.round(value).toLocaleString("en-US")}`;
-}
-
-function toSafeNumber(raw: string): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return n;
-}
-
-function toSafeRatioNumber(raw: string): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 0;
-  return Math.min(1, Math.max(0, n));
-}
-
-function NumberCell(props: {
-  readonly value: number;
-  readonly onChange: (n: number) => void;
-  readonly disabled: boolean;
-  readonly step?: number;
-  readonly warn?: boolean;
-  readonly testId?: string;
-}) {
-  return (
-    <input
-      type="number"
-      min={0}
-      step={props.step ?? 1}
-      value={props.value}
-      disabled={props.disabled}
-      onChange={(e) => props.onChange(toSafeNumber(e.target.value))}
-      data-testid={props.testId}
-      className={`w-24 ${INPUT_CONTROL_CLASS} ${props.warn ? INPUT_CONTROL_WARN_CLASS : ""}`}
-    />
-  );
-}
-
-function RatioCell(props: { readonly value: number; readonly onChange: (n: number) => void; readonly disabled: boolean }) {
-  return (
-    <input
-      type="number"
-      min={0}
-      max={1}
-      step={0.05}
-      value={props.value}
-      disabled={props.disabled}
-      onChange={(e) => props.onChange(toSafeRatioNumber(e.target.value))}
-      className={`w-20 ${INPUT_CONTROL_CLASS}`}
-    />
-  );
-}
-
-function PriceAdjustmentCell(props: { readonly value: number; readonly onChange: (n: number) => void; readonly disabled: boolean }) {
-  return (
-    <input
-      type="number"
-      step={0.01}
-      value={props.value}
-      disabled={props.disabled}
-      onChange={(e) => {
-        const n = Number(e.target.value);
-        props.onChange(Number.isFinite(n) ? n : 0);
-      }}
-      className={`w-24 ${INPUT_CONTROL_CLASS}`}
-    />
-  );
 }
 
 export default function DecisionEditor(props: DecisionEditorProps) {
@@ -264,69 +186,6 @@ export default function DecisionEditor(props: DecisionEditorProps) {
   // buildCompanyProcessingForecast（内部で allocateProductionPlans を呼ぶ純粋関数）へ渡す。
   // レンダーのたびに再計算されるため、優先度・希望量の入力変更が即座に反映される。
   const decisionInputForForecast = buildDecisionInputFromDraft(draft, fixture, period);
-
-  // --- 【Procurement Planning情報ブロック・Step 4】既存VM（P1〜P5）を呼ぶだけで、
-  // ここでは新しい計算式を一切書かない。draftの生値ではなく decisionInputForForecast
-  // （buildDecisionInputFromDraftの出力＝提出時にエンジンへ渡るのと同じ形）を入力に
-  // 使うことで、上のprocessingForecast等と同じ「実際に提出される値」を見る。
-  const procurementProductionRows: readonly ProductionPlanQuantityRow[] = decisionInputForForecast.productionPlans.map((p) => ({
-    product: p.product,
-    desiredQuantity: unwrapUnit(p.desiredQuantity),
-  }));
-  const procurementRequirement = buildProcurementRequirementViewModel({
-    productionPlanRows: procurementProductionRows,
-    rawMaterialLots: ownState.rawMaterialLots,
-    companyId: fixture.companyId,
-    currentPeriod: period,
-  });
-  const rawMaterialTimeline = buildRawMaterialTimeline(ownState.rawMaterialLots, fixture.companyId, period);
-
-  // 国内Reference Priceはturn2以降のみ公開情報から取得できる（turn1はvietnamDomesticPriorPrice=0。
-  // Opening情報画面のturn1参考価格はここでは再現しない＝Step 4の範囲外）。
-  const domesticReferencePriceUsdPerHosoEqKg =
-    publicInfo !== undefined && publicInfo.vietnamDomesticPriorPrice > 0 ? publicInfo.vietnamDomesticPriorPrice : undefined;
-  const procurementDomesticPricing =
-    domesticReferencePriceUsdPerHosoEqKg !== undefined
-      ? buildDomesticPricingViewModel(domesticReferencePriceUsdPerHosoEqKg, draft.domesticPurchase.priceAdjustmentUsdPerHosoEqKg)
-      : null;
-  // 輸入原産国別価格は前四半期の確定市場結果からのみ取得できる（turn1は未確定）。
-  const lastHosoPricesByCountry = publicInfo?.lastMarketResult?.hosoPrices;
-  const originFobPriceByCountry: Record<CountryId, UsdPerHosoEqKg> | null = lastHosoPricesByCountry
-    ? COUNTRY_IDS.reduce(
-        (acc, c) => {
-          acc[c] = lastHosoPricesByCountry[c].price;
-          return acc;
-        },
-        {} as Record<CountryId, UsdPerHosoEqKg>
-      )
-    : null;
-  const procurementImportPricingRows = originFobPriceByCountry ? buildImportPricingRows(COUNTRY_IDS, originFobPriceByCountry) : [];
-  const procurementAquaculturePricing = buildAquaculturePricingViewModel();
-
-  // 国内基準供給量（shareOfSupplyCapの元）も前四半期の確定結果からのみ取得できる。
-  const domesticReferenceSupplyTons = publicInfo?.lastMarketResult?.vietnamDomestic.supply;
-  const procurementCapacity = buildProcurementCapacityViewModel({
-    companyId: fixture.companyId,
-    desiredQuantityTons: unwrapUnit(decisionInputForForecast.domesticPurchasePlan.desiredQuantity),
-    procurementHeadcount: decisionInputForForecast.domesticPurchasePlan.procurementHeadcount,
-    factoryCommonProcessingCapacityTons: decisionInputForForecast.domesticPurchasePlan.factoryCommonProcessingCapacityTons,
-    referenceSupplyTons: domesticReferenceSupplyTons ?? 0,
-  });
-  const procurementReferenceSupplyKnown = domesticReferenceSupplyTons !== undefined;
-
-  // Pre-Financing Liquidity（P5）はStandardAiObservationの構築にturn・publicInfoを要する。
-  const procurementCash =
-    publicInfo !== undefined && turn !== undefined
-      ? buildProcurementCashViewModel({
-          fixture,
-          ownState,
-          publicInfo,
-          period,
-          turn,
-          domesticDesiredQuantityTons: unwrapUnit(decisionInputForForecast.domesticPurchasePlan.desiredQuantity),
-          importOrderedQuantityTons: decisionInputForForecast.importOrders.reduce((sum, o) => sum + unwrapUnit(o.orderedQuantity), 0),
-        })
-      : null;
 
   const processingForecast = buildCompanyProcessingForecast({
     companyId: fixture.companyId,
@@ -1096,167 +955,20 @@ export default function DecisionEditor(props: DecisionEditorProps) {
         </div>
       </CollapsibleSection>
 
-      {/* 【Procurement Planning情報ブロック・Step 4】既存の国内原料買付・輸入・養殖の
-          入力欄はまだ削除せず、その手前にread-only/auto-calculatedな情報ブロックを
-          並存させる。入力値を変えるとここの表示が即座に反応することを確認する段階。
-          ここに計算式は書かない（procurementRequirementViewModel.ts等の既存VMを
-          呼んだ結果をそのまま各componentへ渡すだけ）。 */}
-      <CollapsibleSection
-        title="Procurement Planning（新: 原料調達の情報・自動計算）"
-        tone="info"
-        testId="procurement-planning-info-section"
-        defaultOpen={false}
-        description="以下は下の入力欄（国内原料買付・輸入・養殖）と同じdraftから自動計算される参考情報です。ここでは何も入力しません。"
-      >
-        <div className="space-y-3">
-          <ProductionLinkageHeader vm={procurementRequirement} />
-          <RawMaterialTimelineTable timeline={rawMaterialTimeline} />
-          <ProcurementPricingSummary
-            domestic={procurementDomesticPricing}
-            importRows={procurementImportPricingRows}
-            aquaculture={procurementAquaculturePricing}
-          />
-          <ProcurementCapacitySummary capacity={procurementCapacity} referenceSupplyKnown={procurementReferenceSupplyKnown} />
-          <PreFinancingLiquidityPanel
-            cash={procurementCash}
-            effectivePurchaseIntentTons={procurementReferenceSupplyKnown ? procurementCapacity.effectivePurchaseIntentTons : null}
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* 国内原料買付 */}
-      <CollapsibleSection title="国内原料買付" tone="input" testId="domestic-purchase-section">
-        <div className="flex flex-wrap gap-4 text-xs text-gray-300">
-          <label className="flex flex-col gap-1">
-            買付希望量(t)
-            <NumberCell
-              value={draft.domesticPurchase.desiredQuantity}
-              disabled={disabled}
-              warn={draft.domesticPurchase.desiredQuantity > 20000}
-              onChange={(n) => onChange({ ...draft, domesticPurchase: { ...draft.domesticPurchase, desiredQuantity: n } })}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            価格調整($/kg)
-            <PriceAdjustmentCell
-              value={draft.domesticPurchase.priceAdjustmentUsdPerHosoEqKg}
-              disabled={disabled}
-              onChange={(n) => onChange({ ...draft, domesticPurchase: { ...draft.domesticPurchase, priceAdjustmentUsdPerHosoEqKg: n } })}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            調達人員
-            <NumberCell
-              value={draft.domesticPurchase.procurementHeadcount}
-              disabled={disabled}
-              onChange={(n) => onChange({ ...draft, domesticPurchase: { ...draft.domesticPurchase, procurementHeadcount: Math.round(n) } })}
-            />
-          </label>
-        </div>
-      </CollapsibleSection>
-
-      {/* 輸入 */}
-      <CollapsibleSection title="輸入（原産国別）" tone="input" testId="import-section">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-xs text-gray-300">
-            <thead>
-              <tr className={INFO_TABLE_HEAD_CLASS}>
-                <th className="pr-3 py-1">原産国</th>
-                <th className="pr-3 py-1">発注量(t)</th>
-                <th className="pr-3 py-1">リードタイム(ターン)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {draft.importOrders.map((row, idx) => (
-                <tr key={row.originCountry} className="border-t border-gray-700/60">
-                  <td className="pr-3 py-1">{row.originCountry}</td>
-                  <td className="pr-3 py-1">
-                    <NumberCell
-                      value={row.orderedQuantity}
-                      disabled={disabled}
-                      onChange={(n) => {
-                        const next = [...draft.importOrders];
-                        next[idx] = { ...row, orderedQuantity: n };
-                        onChange({ ...draft, importOrders: next });
-                      }}
-                    />
-                  </td>
-                  <td className="pr-3 py-1">
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={row.leadTimeTurns ?? ""}
-                      disabled={disabled}
-                      placeholder="標準"
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        const next = [...draft.importOrders];
-                        next[idx] = { ...row, leadTimeTurns: raw === "" ? undefined : Math.max(1, Math.round(Number(raw) || 1)) };
-                        onChange({ ...draft, importOrders: next });
-                      }}
-                      className={`w-20 ${INPUT_CONTROL_CLASS}`}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </CollapsibleSection>
-
-      {/* 養殖 */}
-      {draft.aquacultureStockingPlans.length > 0 && (
-        <CollapsibleSection
-          title="養殖"
-          tone="input"
-          testId="aquaculture-section"
-          summaryRight={`自社養殖能力上限 ${formatHosoEqTons(fixture.aquacultureCapacity)}`}
-        >
-          <div className="flex flex-wrap gap-4 text-xs text-gray-300">
-            <label className="flex flex-col gap-1">
-              池入れ予定量(t)
-              <NumberCell
-                value={draft.aquacultureStockingPlans[0].plannedStockingQuantity}
-                disabled={disabled}
-                warn={draft.aquacultureStockingPlans[0].plannedStockingQuantity > unwrapUnit(fixture.aquacultureCapacity)}
-                onChange={(n) =>
-                  onChange({
-                    ...draft,
-                    aquacultureStockingPlans: [{ ...draft.aquacultureStockingPlans[0], plannedStockingQuantity: n }],
-                  })
-                }
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              養殖強度(0〜1)
-              <RatioCell
-                value={draft.aquacultureStockingPlans[0].aquacultureIntensity}
-                disabled={disabled}
-                onChange={(n) =>
-                  onChange({
-                    ...draft,
-                    aquacultureStockingPlans: [{ ...draft.aquacultureStockingPlans[0], aquacultureIntensity: n }],
-                  })
-                }
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              バイオセキュリティ(0〜1)
-              <RatioCell
-                value={draft.aquacultureStockingPlans[0].bioSecurityLevel}
-                disabled={disabled}
-                onChange={(n) =>
-                  onChange({
-                    ...draft,
-                    aquacultureStockingPlans: [{ ...draft.aquacultureStockingPlans[0], bioSecurityLevel: n }],
-                  })
-                }
-              />
-            </label>
-          </div>
-        </CollapsibleSection>
-      )}
+      {/* 【Step 5】Procurement Planning（国内原料買付・輸入・養殖の入力＋自動計算を
+          統合した意思決定画面）。計算式・入力ロジックはすべてProcurementPlanningSection
+          およびその子componentが呼ぶ既存view-model層が持つ。DecisionEditor.tsxはここでは
+          何も計算しない。 */}
+      <ProcurementPlanningSection
+        fixture={fixture}
+        ownState={ownState}
+        draft={draft}
+        onChange={onChange}
+        disabled={disabled}
+        period={period}
+        publicInfo={publicInfo}
+        turn={turn}
+      />
 
       {/* 生産計画 */}
       <CollapsibleSection

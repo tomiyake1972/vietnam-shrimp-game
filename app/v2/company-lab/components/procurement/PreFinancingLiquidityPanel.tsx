@@ -51,6 +51,12 @@ export default function PreFinancingLiquidityPanel({ cash, effectivePurchaseInte
                 {formatHosoEqTons(cash.preFinancingConstrainedDomesticQuantityTons)}
               </div>
             </div>
+            <div className="rounded border border-amber-800/50 bg-amber-950/20 px-2.5 py-2">
+              <div className="text-[11px] text-amber-300">Potential Reduction（希望量 − 資金制約後数量）</div>
+              <div className="mt-0.5 text-sm font-semibold tabular-nums text-amber-100" data-testid="pre-financing-potential-reduction">
+                {formatHosoEqTons(Math.max(0, cash.domesticDesiredQuantityTons - cash.preFinancingConstrainedDomesticQuantityTons))}
+              </div>
+            </div>
             <div className="rounded border border-gray-700/60 bg-gray-900/40 px-2.5 py-2">
               <div className="text-[11px] text-gray-400">Funding Gap</div>
               <div
