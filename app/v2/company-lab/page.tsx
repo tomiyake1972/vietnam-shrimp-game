@@ -214,6 +214,10 @@ export default function CompanyLabPage() {
 
   const playerFixture = fixtures?.find((f) => f.companyId === draftPlayerCompanyId);
   const ownStateForEditor = labState && playerFixture ? buildCompanyOwnState(labState, playerFixture) : undefined;
+  // 【Procurement Planning情報ブロック・Step 4】既存のbuildPublicMarketInfo（このファイルの
+  // handleStepOnce等が既に使っているpure function）をレンダー時にも呼ぶだけ。新しい計算はしない。
+  const publicInfoForEditor = labState ? buildPublicMarketInfo(labState) : undefined;
+  const turnForEditor = labState?.scenarioState.currentTurn;
   const playerSummary = displayedRecord?.companySummaries.find((s) => s.companyId === draftPlayerCompanyId);
   // 【Phase 8B-3】設備投資ポートフォリオ表示の「直近四半期の実際の支払額」参考情報用。
   // 選択中の表示四半期（displayedRecord）ではなく、常に「実際に最後に確定した四半期」を使う
@@ -343,6 +347,8 @@ export default function CompanyLabPage() {
                     lastQuarterCapexEvents={lastQuarterCapexEventsForPlayer}
                     lastQuarterRejectedCapexProposals={lastQuarterRejectedCapexProposalsForPlayer}
                     lastQuarterFinancialResult={lastQuarterFinancialResultForPlayer}
+                    publicInfo={publicInfoForEditor}
+                    turn={turnForEditor}
                   />
                 ) : (
                   <div className="text-sm text-gray-400">このシナリオはすでに完了しています。</div>

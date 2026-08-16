@@ -176,6 +176,9 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
 
   const dataset = buildDatasetFromSession(session);
   const turn = session.state.scenarioState.currentTurn;
+  // 【Procurement Planning情報ブロック・Step 4】turnと同様、毎レンダーでsession.stateから
+  // 素直に組み立てる（buildPublicMarketInfoは既存のpure function。新しい計算はしない）。
+  const publicInfo = buildPublicMarketInfo(session.state);
   const lastRecord = session.state.history[session.state.history.length - 1] ?? null;
   const previousRecord = session.state.history[session.state.history.length - 2] ?? null;
   const summary = lastRecord?.companySummaries.find((c) => c.companyId === companyId) ?? null;
@@ -415,6 +418,8 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               lastQuarterCapexEvents={lastQuarterCapexResult?.events}
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
+              publicInfo={publicInfo}
+              turn={turn}
             />
           </div>
         ) : null}

@@ -514,6 +514,8 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               lastQuarterCapexEvents={viewModel.lastQuarterCapexEvents}
               lastQuarterRejectedCapexProposals={viewModel.lastQuarterRejectedCapexProposals}
               lastQuarterFinancialResult={viewModel.lastQuarterResult?.financialResult ?? null}
+              publicInfo={viewModel.publicInfo}
+              turn={viewModel.currentTurn}
             />
 
             {isEditing && (
