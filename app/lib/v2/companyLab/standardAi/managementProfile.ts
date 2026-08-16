@@ -77,6 +77,19 @@ export interface ManagementProfile {
   readonly headcountPaceRatio: number;
   /** 養殖自給選好（maxAquacultureShareOfRequirement）。 */
   readonly aquacultureSelfSufficiencyRatio: number;
+  /**
+   * 【Phase SP-Q2追加】設備投資の慎重さ（capexCurrentShortfallRatioThreshold）。
+   * 正の値ほど、投資判断のしきい値（≒どれだけ供給不足が続けば投資するか）が
+   * 引き上げられ、投資が発動しにくくなる（＝より慎重）。PD/VAP限定の
+   * valueAddedCapexTimingAbsoluteとは異なり、HOSO/PD/VAP/Common Processingの
+   * 全投資判断へ一律に効く「財務保守性」の軸として、SP-Q1監査で発見した
+   * 「conservativeプロファイルにCAPEX慎重さの接続先が無い」という構造的
+   * ギャップを埋めるために追加した（既存フィールドで表現不能だったため新設。
+   * capexHurdleBiasRatioという名前は、既存のcapexShortfallThresholdBiasByProduct
+   * （PD/VAP限定・前倒し方向）と意味が重複しないよう、「hurdle＝投資のハードル」
+   * という一般的な財務用語を採用した）。
+   */
+  readonly capexHurdleBiasRatio: number;
 
   // --- 絶対値バイアス（基準値が0のフィールド向け）。0 = バイアスなし。 ---
   /** 高付加価値(PD/VAP)受注選好（valueAddedOrderFactorBoost、0〜1スケールへの直接加算）。 */
@@ -130,6 +143,7 @@ const ZERO_PROFILE_BIASES: Omit<ManagementProfile, "id" | "label" | "description
   inventoryResponsivenessRatio: 0,
   headcountPaceRatio: 0,
   aquacultureSelfSufficiencyRatio: 0,
+  capexHurdleBiasRatio: 0,
   valueAddedPreferenceAbsolute: 0,
   valueAddedCapexTimingAbsolute: 0,
 };
@@ -149,27 +163,52 @@ export const MANAGEMENT_PROFILES: Readonly<Record<ManagementProfileId, Managemen
     ...ZERO_PROFILE_BIASES,
   },
   // B社相当：成長・シェア重視。能力を積極的に売り切りにいき、在庫過剰時も値引きで
-  // 数量を守り、輸入も併用して量を確保し、必要人員の確保も早めに動く。
+  // 数量を守り、必要人員の確保も早めに動く。
+  //
+  // 【Phase SP-Q2・指示§4-8修正】輸入依存度バイアス（importRelianceRatio、旧値+0.05）を
+  // 0へ変更した（削除）。root cause: MASS（growth×chinaVolume）のPROFILE ON実測で
+  // 一部シナリオ/シードにOP-19%/Cash-51%/Crisis quarters増という一方的悪化が
+  // 発生していた。Turn-by-Turn監査（scripts/spq2MassTurnByTurn.ts、baseline/seed-1）で
+  // Turn10-12にMASSの国内買付実績が一時的にゼロへ落ち込むタイミングで
+  // importMixRatio+5%が重なり、procurementConstraint.scaleRatioが0に張り付く
+  // 自己強化型の崩壊（CM-1監査で既知のdomesticPurchaseCashAllocationRatio由来の
+  // boom-bust cycleが、僅かな輸入比率シフトだけで不可逆側へ倒れる）を誘発することを
+  // 確認した。Ablation監査（scripts/spq2MassAblation.ts）でimportRelianceRatio単独が
+  // 崩壊のほぼ全てを再現する一方、他の軸（market/product orientation・sales
+  // aggressiveness・headcount pace）は穏やかで方向性のある効果に留まることを
+  // 確認済み（詳細はdocs/standard_ai/benchmarks/strategy_profile_spq2_report.md参照）。
+  // Financeのしきい値・boom-bust周期自体は変更していない（指示§29の禁止事項）。
   growth: {
     id: "growth",
     label: "成長・シェア重視型（B社）",
     description:
       "販売数量・市場シェアを重視する経営性格。能力に対する目標販売比率をやや高め、" +
-      "値引き許容度と輸入依存度をやや高め、人員増強のペースをやや早める（いずれも+5%）。",
+      "値引き許容度をやや高め、人員増強のペースをやや早める（いずれも+5%）。",
     ...ZERO_PROFILE_BIASES,
     salesAggressivenessRatio: 0.05,
     discountToleranceRatio: 0.05,
-    importRelianceRatio: 0.05,
     headcountPaceRatio: 0.05,
   },
   // C社相当：財務保守・CFO視点。過剰な販売コミットや値引き、輸入依存、性急な
   // 人員固定費増加、単一調達チャネルへの集中を避け、在庫是正も急がず慎重に行う。
+  // 【Phase SP-Q2・指示§14-17修正】capexHurdleBiasRatio: 0.05を新規追加。
+  // root cause: SP-Q1監査で「CONSVのPD志向（productOrientation）は方向として妥当だが、
+  // financial conservatismがCAPEX判断へ未接続」という構造的ギャップが判明した
+  // （既存のconservativeプロファイルはsales/inventory/headcount/importの各ペースだけを
+  // 抑制し、CAPEX投資判断のしきい値そのものには一切触れていなかった）。
+  // capexShortfallThresholdBiasByProduct（既存、valueAddedプロファイル用）はPD/VAP
+  // 限定の「前倒し」方向の差し込み口であり、意味も方向も異なるため転用しなかった。
+  // 既存フィールドで表現不能なため、指示§17に基づき最小の新フィールドを追加した
+  // （capexCurrentShortfallRatioThreshold自体への一般比率バイアス。HOSO/PD/VAP
+  // ライン・Common Processingの投資判断すべてへ一律に効く。Finance側の現金バッファ・
+  // 借入健全性しきい値・承認ゲートは一切変更しない＝指示§18のFinance Gate不可侵）。
   conservative: {
     id: "conservative",
     label: "財務保守型・CFO視点（C社）",
     description:
       "利益率・資金繰りの安定を重視する経営性格。目標販売比率をやや低め、値引き許容度・" +
       "輸入依存度・養殖自給比率をやや低め（-5%）、人員調整と在庫是正のペースをやや緩やかに（-5%）する。" +
+      "設備投資判断のしきい値をやや引き上げ（+5%）、供給不足がより明確になるまで投資を待つ。" +
       "安全ガード（現金バッファ・借入健全性しきい値等）そのものは他社と完全に同一のまま。",
     ...ZERO_PROFILE_BIASES,
     salesAggressivenessRatio: -0.03,
@@ -178,6 +217,7 @@ export const MANAGEMENT_PROFILES: Readonly<Record<ManagementProfileId, Managemen
     inventoryResponsivenessRatio: -0.05,
     headcountPaceRatio: -0.05,
     aquacultureSelfSufficiencyRatio: -0.05,
+    capexHurdleBiasRatio: 0.05,
   },
   // D社相当：高付加価値（PD/VAP）重視。受注量係数を直接押し上げ、PD/VAP能力への
   // 設備投資判断をやや前倒しし、原料の自給（品質管理）をやや重視する。
@@ -312,6 +352,19 @@ export function deriveStandardAiParameters(
     profile.valueAddedPreferenceAbsolute,
     VALUE_ADDED_PREFERENCE_REFERENCE_SCALE
   );
+  /**
+   * 【Phase SP-Q2追加】設備投資の慎重さ。capexCurrentShortfallRatioThreshold
+   * （HOSO/PD/VAPライン・Common Processingの投資判断すべてが読む、単一の基準しきい値）
+   * へ比率バイアスを適用する。正の値ほどしきい値が上がり、投資が発動しにくくなる
+   * （＝より慎重）。capexShortfallThresholdBiasByProduct（PD/VAP限定・前倒し方向の
+   * 既存フィールド）とは意味も適用対象も異なる、独立した軸。
+   */
+  const capexCurrentShortfallRatioThreshold = applyRatio(
+    "capexCurrentShortfallRatioThreshold",
+    "設備投資の慎重さ（投資判断しきい値）",
+    base.capexCurrentShortfallRatioThreshold,
+    profile.capexHurdleBiasRatio
+  );
 
   // 【重要】バイアスが0（=A社balancedを含む大半のプロファイル）の場合は、baseの
   // capexShortfallThresholdBiasByProductをキー単位でも一切書き換えない（{}のままにする）。
@@ -343,6 +396,7 @@ export function deriveStandardAiParameters(
     maxAquacultureShareOfRequirement,
     valueAddedOrderFactorBoost,
     capexShortfallThresholdBiasByProduct,
+    capexCurrentShortfallRatioThreshold,
   };
 
   return { params, appliedBiasItems };

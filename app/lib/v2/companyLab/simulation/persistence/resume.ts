@@ -239,11 +239,31 @@ export function restoreSessionFromResumePayload(
    */
   priorAnalyticsDataset?: SimulationAnalyticsDataset
 ): SimulationSession {
+  /**
+   * 【Strategy Profile Quantification・Phase SP-Q2・指示§2】
+   * SimulationSession.config（トップレベルの複製）は、以前は
+   * run.scenarioId/seed/requestedTurnsだけから再構築しており、
+   * visionOverrides・standardAiProfileModeが黙って失われていた
+   * （engine.tsの意思決定ループはsession.state.config側だけを読むため、
+   * resumePayload.stateがそのまま渡るゲーム挙動そのものへの影響は無かったが、
+   * applyVisionOverrideToSession等の書き込み系関数はsession.config側も
+   * 参照する設計であり、トップレベルのconfigが古いままだと将来の編集操作が
+   * 不整合な状態から出発してしまう）。resumePayload.state.config
+   * （trimStateForResumeが一切変更しないフィールド）を単一の情報源として、
+   * 両方のconfigを同じ値で再構築する。
+   */
+  // 【SAVE-10との整合】ここで resumePayload.state を非nullとして強くdereferenceすると、
+  // 壊れたpayload（state欠落）がこの関数の呼び出し時点で即例外になってしまう。
+  // 既存の「アクセスした瞬間に初めて壊れていることが分かる」設計（呼び出し側が
+  // try/catchでVIEW_ONLYへ落とせるようにする）を崩さないよう、optional chainingで
+  // 読む（state自体が無ければconfig側もundefinedのまま＝従来通りの黙示的OFF扱い）。
   const config: CompanyLabConfig = {
     scenarioId: run.scenarioId,
     mode: "canonical",
     seed: run.seed,
     turns: run.requestedTurns,
+    visionOverrides: resumePayload.state?.config?.visionOverrides,
+    standardAiProfileMode: resumePayload.state?.config?.standardAiProfileMode,
   };
   return {
     run,

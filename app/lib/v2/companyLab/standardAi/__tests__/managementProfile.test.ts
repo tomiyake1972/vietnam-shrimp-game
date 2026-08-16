@@ -88,11 +88,15 @@ for (const profileId of ["growth", "conservative", "valueAdded", "opportunistic"
   });
 }
 
-test("growth(B社): 販売積極性・値引き許容度・輸入依存度・人員調整ペースが基準値よりわずかに高い", () => {
+test("growth(B社): 販売積極性・値引き許容度・人員調整ペースが基準値よりわずかに高い", () => {
   const { params } = deriveStandardAiParameters(STANDARD_AI_PARAMETERS_V1, MANAGEMENT_PROFILES.growth);
   assert.ok(params.salesUtilizationTarget > STANDARD_AI_PARAMETERS_V1.salesUtilizationTarget);
   assert.ok(params.maxDiscountRatioForExcessStock > STANDARD_AI_PARAMETERS_V1.maxDiscountRatioForExcessStock);
-  assert.ok(params.importMixRatio > STANDARD_AI_PARAMETERS_V1.importMixRatio);
+  // 【Phase SP-Q2・指示§8】importRelianceRatioは0へ変更した（root cause: MASSの
+  // PROFILE ON実測が一部シナリオ/シードで一方的なOP/Cash悪化を示し、Turn-by-Turn監査で
+  // 輸入依存度の微増が既存のprocurement/finance boom-bust cycleを不可逆側へ倒す
+  // トリガーになっていたことを確認したため）。よってimportMixRatioは基準値のまま。
+  assert.equal(params.importMixRatio, STANDARD_AI_PARAMETERS_V1.importMixRatio);
   assert.ok(params.regularHeadcountAdjustmentDamping > STANDARD_AI_PARAMETERS_V1.regularHeadcountAdjustmentDamping);
 });
 
