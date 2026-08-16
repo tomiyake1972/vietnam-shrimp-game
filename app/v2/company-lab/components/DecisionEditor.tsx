@@ -8,9 +8,10 @@
 // 警告表示のみ行い、送信はブロックしない（ソフト警告）。計算ロジックは
 // 一切持たない（表示・編集のみ）。
 
-import { score0to100, unwrapUnit } from "../../../lib/v2/core/units";
+import { score0to100, unwrapUnit, UsdPerHosoEqKg } from "../../../lib/v2/core/units";
 import { PeriodV2 } from "../../../lib/v2/core/period";
-import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab";
+import { CountryId, COUNTRY_IDS } from "../../../lib/v2/market/types";
+import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../../lib/v2/companyLab";
 import { CAPEX_PARAMETERS_V1, CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../lib/v2/capex";
 import { formatHosoEqTons } from "../../../lib/v2/industryLab/ui/formatters";
 import { computeSalesPlanTotals } from "../salesPlanTotals";
@@ -66,6 +67,20 @@ import PlanningWarningsPanel from "./PlanningWarningsPanel";
 import ProcessingCapacityPanel from "./ProcessingCapacityPanel";
 import WorkforcePanel from "./WorkforcePanel";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INFO_VALUE_CLASS, INPUT_CONTROL_CLASS, INPUT_CONTROL_WARN_CLASS, NO_VALUE_TEXT } from "./panelStyles";
+import { buildProcurementRequirementViewModel, ProductionPlanQuantityRow } from "../procurementRequirementViewModel";
+import { buildRawMaterialTimeline } from "../rawMaterialTimelineViewModel";
+import {
+  buildAquaculturePricingViewModel,
+  buildDomesticPricingViewModel,
+  buildImportPricingRows,
+} from "../procurementPricingViewModel";
+import { buildProcurementCapacityViewModel } from "../procurementCapacityViewModel";
+import { buildProcurementCashViewModel } from "../procurementCashViewModel";
+import ProductionLinkageHeader from "./procurement/ProductionLinkageHeader";
+import RawMaterialTimelineTable from "./procurement/RawMaterialTimeline";
+import ProcurementPricingSummary from "./procurement/ProcurementPricingSummary";
+import ProcurementCapacitySummary from "./procurement/ProcurementCapacitySummary";
+import PreFinancingLiquidityPanel from "./procurement/PreFinancingLiquidityPanel";
 
 interface DecisionEditorProps {
   readonly fixture: CompanyFixture;
@@ -90,6 +105,20 @@ interface DecisionEditorProps {
    * 無ければ（初回四半期など）回収年数は「算定対象外」と表示される。
    */
   readonly lastQuarterFinancialResult?: CompanyFinancialQuarterResult | null;
+  /**
+   * 【Procurement Planning情報ブロック・Step 4】公開市場情報（国内原料参考価格・
+   * 前四半期の産地国別価格・国内基準供給量）。Procurement Pricing Summary /
+   * Procurement Capacity Summary / Pre-Financing Liquidity Panel が使う。
+   * 省略時はそれぞれ「－」表示となり、値を捏造しない（呼び出し元がpublicInfoを
+   * まだ持たない画面でも既存機能を壊さないための任意化）。
+   */
+  readonly publicInfo?: PublicMarketInfo;
+  /**
+   * 【Procurement Planning情報ブロック・Step 4】当期turn番号。Pre-Financing
+   * Liquidity Panel（buildStandardAiObservation経由）でのみ使う。省略時は
+   * 同panelを「表示できません」扱いにする。
+   */
+  readonly turn?: number;
 }
 
 const LOAN_TYPE_LABELS: Record<CompanyDecisionDraft["financingRequest"]["desiredLoanType"], string> = {
@@ -183,6 +212,8 @@ export default function DecisionEditor(props: DecisionEditorProps) {
     lastQuarterCapexEvents,
     lastQuarterRejectedCapexProposals,
     lastQuarterFinancialResult,
+    publicInfo,
+    turn,
   } = props;
 
   // --- 【Phase 8G §1】営業人員配分の集計。「配分済み/配分可能/未配分（or 超過）」の
@@ -233,6 +264,70 @@ export default function DecisionEditor(props: DecisionEditorProps) {
   // buildCompanyProcessingForecast（内部で allocateProductionPlans を呼ぶ純粋関数）へ渡す。
   // レンダーのたびに再計算されるため、優先度・希望量の入力変更が即座に反映される。
   const decisionInputForForecast = buildDecisionInputFromDraft(draft, fixture, period);
+
+  // --- 【Procurement Planning情報ブロック・Step 4】既存VM（P1〜P5）を呼ぶだけで、
+  // ここでは新しい計算式を一切書かない。draftの生値ではなく decisionInputForForecast
+  // （buildDecisionInputFromDraftの出力＝提出時にエンジンへ渡るのと同じ形）を入力に
+  // 使うことで、上のprocessingForecast等と同じ「実際に提出される値」を見る。
+  const procurementProductionRows: readonly ProductionPlanQuantityRow[] = decisionInputForForecast.productionPlans.map((p) => ({
+    product: p.product,
+    desiredQuantity: unwrapUnit(p.desiredQuantity),
+  }));
+  const procurementRequirement = buildProcurementRequirementViewModel({
+    productionPlanRows: procurementProductionRows,
+    rawMaterialLots: ownState.rawMaterialLots,
+    companyId: fixture.companyId,
+    currentPeriod: period,
+  });
+  const rawMaterialTimeline = buildRawMaterialTimeline(ownState.rawMaterialLots, fixture.companyId, period);
+
+  // 国内Reference Priceはturn2以降のみ公開情報から取得できる（turn1はvietnamDomesticPriorPrice=0。
+  // Opening情報画面のturn1参考価格はここでは再現しない＝Step 4の範囲外）。
+  const domesticReferencePriceUsdPerHosoEqKg =
+    publicInfo !== undefined && publicInfo.vietnamDomesticPriorPrice > 0 ? publicInfo.vietnamDomesticPriorPrice : undefined;
+  const procurementDomesticPricing =
+    domesticReferencePriceUsdPerHosoEqKg !== undefined
+      ? buildDomesticPricingViewModel(domesticReferencePriceUsdPerHosoEqKg, draft.domesticPurchase.priceAdjustmentUsdPerHosoEqKg)
+      : null;
+  // 輸入原産国別価格は前四半期の確定市場結果からのみ取得できる（turn1は未確定）。
+  const lastHosoPricesByCountry = publicInfo?.lastMarketResult?.hosoPrices;
+  const originFobPriceByCountry: Record<CountryId, UsdPerHosoEqKg> | null = lastHosoPricesByCountry
+    ? COUNTRY_IDS.reduce(
+        (acc, c) => {
+          acc[c] = lastHosoPricesByCountry[c].price;
+          return acc;
+        },
+        {} as Record<CountryId, UsdPerHosoEqKg>
+      )
+    : null;
+  const procurementImportPricingRows = originFobPriceByCountry ? buildImportPricingRows(COUNTRY_IDS, originFobPriceByCountry) : [];
+  const procurementAquaculturePricing = buildAquaculturePricingViewModel();
+
+  // 国内基準供給量（shareOfSupplyCapの元）も前四半期の確定結果からのみ取得できる。
+  const domesticReferenceSupplyTons = publicInfo?.lastMarketResult?.vietnamDomestic.supply;
+  const procurementCapacity = buildProcurementCapacityViewModel({
+    companyId: fixture.companyId,
+    desiredQuantityTons: unwrapUnit(decisionInputForForecast.domesticPurchasePlan.desiredQuantity),
+    procurementHeadcount: decisionInputForForecast.domesticPurchasePlan.procurementHeadcount,
+    factoryCommonProcessingCapacityTons: decisionInputForForecast.domesticPurchasePlan.factoryCommonProcessingCapacityTons,
+    referenceSupplyTons: domesticReferenceSupplyTons ?? 0,
+  });
+  const procurementReferenceSupplyKnown = domesticReferenceSupplyTons !== undefined;
+
+  // Pre-Financing Liquidity（P5）はStandardAiObservationの構築にturn・publicInfoを要する。
+  const procurementCash =
+    publicInfo !== undefined && turn !== undefined
+      ? buildProcurementCashViewModel({
+          fixture,
+          ownState,
+          publicInfo,
+          period,
+          turn,
+          domesticDesiredQuantityTons: unwrapUnit(decisionInputForForecast.domesticPurchasePlan.desiredQuantity),
+          importOrderedQuantityTons: decisionInputForForecast.importOrders.reduce((sum, o) => sum + unwrapUnit(o.orderedQuantity), 0),
+        })
+      : null;
+
   const processingForecast = buildCompanyProcessingForecast({
     companyId: fixture.companyId,
     baseFactories: fixture.factories,
@@ -998,6 +1093,34 @@ export default function DecisionEditor(props: DecisionEditorProps) {
               （この内容のままでは提出できません）。
             </p>
           )}
+        </div>
+      </CollapsibleSection>
+
+      {/* 【Procurement Planning情報ブロック・Step 4】既存の国内原料買付・輸入・養殖の
+          入力欄はまだ削除せず、その手前にread-only/auto-calculatedな情報ブロックを
+          並存させる。入力値を変えるとここの表示が即座に反応することを確認する段階。
+          ここに計算式は書かない（procurementRequirementViewModel.ts等の既存VMを
+          呼んだ結果をそのまま各componentへ渡すだけ）。 */}
+      <CollapsibleSection
+        title="Procurement Planning（新: 原料調達の情報・自動計算）"
+        tone="info"
+        testId="procurement-planning-info-section"
+        defaultOpen={false}
+        description="以下は下の入力欄（国内原料買付・輸入・養殖）と同じdraftから自動計算される参考情報です。ここでは何も入力しません。"
+      >
+        <div className="space-y-3">
+          <ProductionLinkageHeader vm={procurementRequirement} />
+          <RawMaterialTimelineTable timeline={rawMaterialTimeline} />
+          <ProcurementPricingSummary
+            domestic={procurementDomesticPricing}
+            importRows={procurementImportPricingRows}
+            aquaculture={procurementAquaculturePricing}
+          />
+          <ProcurementCapacitySummary capacity={procurementCapacity} referenceSupplyKnown={procurementReferenceSupplyKnown} />
+          <PreFinancingLiquidityPanel
+            cash={procurementCash}
+            effectivePurchaseIntentTons={procurementReferenceSupplyKnown ? procurementCapacity.effectivePurchaseIntentTons : null}
+          />
         </div>
       </CollapsibleSection>
 
