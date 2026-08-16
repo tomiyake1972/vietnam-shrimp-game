@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { DYNAMIC_SCENARIO_1 } from "../definitions/dynamicScenario1";
 import { DEVELOPMENT_SCENARIO_DEFINITIONS } from "../definitions";
 import { ALL_SCENARIO_DEFINITIONS } from "../definitions";
-import { DS1_NEWS_EFFECT_SYNC, DS1_INFORMATION_RELEASES } from "../definitions/dynamicScenario1News";
+import { DS1_NEWS_EFFECT_SYNC, DS1_INFORMATION_RELEASES, DS1_NEWS_SPECS, DS1_CN_HOSO_SPIKE_TURNS } from "../definitions/dynamicScenario1News";
 import { DS1_REGIONAL_DEMAND_KEYFRAMES } from "../definitions/dynamicScenario1Parameters";
 import { validateScenarioDefinition } from "../validation";
 import { initializeScenario, getScenarioTurnInput } from "../scenarioEngine";
@@ -91,11 +91,12 @@ test("DS1: 同期表が参照する informationId / eventId が実在する", ()
   }
 });
 
-test("DS1: 全32ターンに最低1件のNewsがある", () => {
+test("DS1: 全32ターンに1〜4件のNewsがある", () => {
   for (let turn = 1; turn <= TURNS; turn++) {
     const available = DS1_INFORMATION_RELEASES.filter((r) => r.availableFromTurn === turn);
     assert.ok(available.length >= 1, `turn ${turn} にNewsが無い`);
-    assert.ok(available.length <= 3, `turn ${turn} のNewsが3件を超える（${available.length}件）`);
+    // 原則1〜3件。重要ターンのみ4件まで許容する（読み切れない量にしない）。
+    assert.ok(available.length <= 4, `turn ${turn} のNewsが4件を超える（${available.length}件）`);
   }
 });
 
@@ -384,6 +385,125 @@ test("DS1: productLifecycleOverrides を持つなら productLifecycle の宣言�
         true,
         `${definition.scenarioId}: productLifecycleOverrides があるのに productLifecycle を宣言していない`
       );
+    }
+  }
+});
+
+
+// ---------------------------------------------------------------------
+// 6. News 本文の品質（プレイヤーが読む記事としての最低条件）
+// ---------------------------------------------------------------------
+
+test("News: 全記事に本文がある", () => {
+  for (const r of DS1_INFORMATION_RELEASES) {
+    assert.ok(r.body !== undefined && r.body.length > 0, `${r.informationId} に本文が無い`);
+  }
+});
+
+test("News: 本文の分量が記事クラスの目安に収まっている", () => {
+  // #04 指示の目安: major 250–450字 / normal 150–300字 / background 100–220字。
+  // 厳密な制限ではないため、上下に少し余裕を持たせて「明らかな逸脱」だけを検出する。
+  const BOUNDS: Record<string, readonly [number, number]> = {
+    major: [230, 520],
+    normal: [140, 340],
+    background: [90, 240],
+  };
+  for (const spec of DS1_NEWS_SPECS) {
+    const [min, max] = BOUNDS[spec.scale];
+    const len = spec.body.length;
+    assert.ok(len >= min, `${spec.id}(${spec.scale}): 本文が短すぎる ${len}字 < ${min}字`);
+    assert.ok(len <= max, `${spec.id}(${spec.scale}): 本文が長すぎる ${len}字 > ${max}字`);
+  }
+});
+
+test("News: 見出しと本文に重複がない（言い換えただけの記事を作らない）", () => {
+  const headlines = new Set<string>();
+  const bodies = new Set<string>();
+  for (const spec of DS1_NEWS_SPECS) {
+    assert.ok(!headlines.has(spec.headline), `見出しが重複: ${spec.headline}`);
+    assert.ok(!bodies.has(spec.body), `本文が重複: ${spec.id}`);
+    headlines.add(spec.headline);
+    bodies.add(spec.body);
+  }
+});
+
+test("News: 記事IDが一意である", () => {
+  const ids = new Set<string>();
+  for (const spec of DS1_NEWS_SPECS) {
+    assert.ok(!ids.has(spec.id), `IDが重複: ${spec.id}`);
+    ids.add(spec.id);
+  }
+});
+
+test("News: 内部パラメータ・将来の答えを本文へ書いていない", () => {
+  // シナリオ内部の用語や、将来の効果を断定する表現が本文へ漏れていないか。
+  const FORBIDDEN = [
+    "倍率", "magnitude", "accelStart", "pullStrength", "productLifecycle",
+    "シナリオ", "ターン", "turn", "来期は必ず", "確実に上昇", "確実に下落",
+    "signalStrength", "hiddenImportance",
+  ];
+  for (const spec of DS1_NEWS_SPECS) {
+    for (const word of FORBIDDEN) {
+      assert.ok(!spec.body.includes(word), `${spec.id}: 本文に "${word}" が含まれる`);
+      assert.ok(!spec.headline.includes(word), `${spec.id}: 見出しに "${word}" が含まれる`);
+    }
+  }
+});
+
+test("News: 予兆記事が将来を断定していない", () => {
+  const ASSERTIVE = ["будет", "必ず", "間違いなく", "決まった", "確定した"];
+  for (const spec of DS1_NEWS_SPECS.filter((s) => s.isRumor)) {
+    for (const word of ASSERTIVE) {
+      assert.ok(!spec.body.includes(word), `${spec.id}（予兆記事）が断定表現 "${word}" を含む`);
+    }
+  }
+});
+
+test("News: signal class が strong だけに偏っていない（noise が混ざっている）", () => {
+  const counts = { strong: 0, weak: 0, background: 0 };
+  for (const spec of DS1_NEWS_SPECS) counts[spec.signalClass] += 1;
+  const total = DS1_NEWS_SPECS.length;
+  assert.ok(counts.background >= total * 0.15, `background が少なすぎる: ${counts.background}/${total}`);
+  assert.ok(counts.strong <= total * 0.7, `strong に偏りすぎ: ${counts.strong}/${total}`);
+  assert.ok(counts.weak >= 5, `weak signal が少なすぎる: ${counts.weak}`);
+});
+
+test("News: 内部メタデータがプレイヤー向け InformationRelease へ漏れていない", () => {
+  for (const r of DS1_INFORMATION_RELEASES) {
+    const keys = Object.keys(r);
+    for (const leaked of ["signalClass", "scale", "market", "product", "origin", "scenarioRelevance", "futureEffectTurn"]) {
+      assert.ok(!keys.includes(leaked), `${r.informationId}: ${leaked} が公開データへ漏れている`);
+    }
+  }
+});
+
+test("News: China HOSO スパイクは全ターンぶん記事がある", () => {
+  for (const turn of DS1_CN_HOSO_SPIKE_TURNS) {
+    const article = DS1_NEWS_SPECS.find((s) => s.turn === turn && s.market === "CN" && s.product === "hoso");
+    assert.ok(article, `turn ${turn} の China HOSO スパイク記事が無い`);
+    // 「行けば儲かる」と読ませないため、他産地の動きを必ず併記する。
+    assert.ok(
+      article.body.includes("中国向け出荷が増えている") || article.body.includes("中国向け出荷増加"),
+      `turn ${turn}: 他産地の動きへの言及が無い`
+    );
+  }
+});
+
+test("News: Others の隠れた機会を数字で明かしていない", () => {
+  const othersArticles = DS1_NEWS_SPECS.filter((s) => s.market === "OTHER");
+  assert.ok(othersArticles.length >= 4, `Others 関連記事が少なすぎる: ${othersArticles.length}`);
+  for (const spec of othersArticles) {
+    for (const word of ["急成長", "倍増", "4倍", "3倍", "%増"]) {
+      assert.ok(!spec.body.includes(word), `${spec.id}: Others の成長を露骨に書いている（"${word}"）`);
+      assert.ok(!spec.headline.includes(word), `${spec.id}: 見出しが露骨（"${word}"）`);
+    }
+  }
+});
+
+test("News: China premiumization を数字で予告していない", () => {
+  for (const spec of DS1_NEWS_SPECS.filter((s) => s.market === "CN")) {
+    for (const word of ["4倍", "急拡大する見込み", "来期から", "倍増"]) {
+      assert.ok(!spec.body.includes(word), `${spec.id}: China の将来を断定的に書いている（"${word}"）`);
     }
   }
 });

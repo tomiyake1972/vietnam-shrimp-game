@@ -217,6 +217,19 @@ export interface InformationRelease {
   readonly availableFromTurn: number;
   readonly informationLevel: InformationLevel;
   readonly headlineTemplate: string;
+  /**
+   * 記事本文（プレイヤーが読む業界ニュース）。
+   *
+   * 見出しだけでは「重要かどうか」を判断できないため、業界紙の記事として
+   * 読める分量の本文を持たせる。本文には確認された事実・業界関係者の見方・
+   * 現時点で不確かな点・波及の可能性を混ぜてよいが、
+   * **将来のイベントの答え（何がいつどれだけ起きるか）は書かない**。
+   *
+   * 内部パラメータ値・シナリオ上の重要度・効果発生ターンは決して書かない
+   * （それらは gm / postGameTruth レベルの管轄）。
+   * 未設定の場合、画面は見出しと構造化事実だけを表示する。
+   */
+  readonly body?: string;
   readonly structuredFacts: readonly StructuredFact[];
   readonly estimateRange?: EstimateRange;
   /** 0〜1。省略可（不明な場合に明示しない）。 */

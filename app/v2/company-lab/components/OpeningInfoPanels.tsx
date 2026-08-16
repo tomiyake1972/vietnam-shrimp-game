@@ -436,8 +436,9 @@ export function ScenarioNewsPanel({ news, turn }: { readonly news: readonly Scen
               {n.availableFromTurn === turn && (
                 <span className="shrink-0 rounded bg-teal-800 px-1.5 py-0.5 text-[10px] text-teal-100">新着</span>
               )}
-              <span className="text-xs text-gray-200">{n.headline}</span>
+              <span className="text-xs font-semibold text-gray-100">{n.headline}</span>
             </div>
+            {n.body && <p className="mt-1 pl-1 text-[11px] leading-relaxed text-gray-300">{n.body}</p>}
             {n.facts.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 pl-1 text-[10px] text-gray-400">
                 {n.facts.map((f) => (

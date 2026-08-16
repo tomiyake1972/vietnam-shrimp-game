@@ -429,6 +429,7 @@ export function toScenarioNewsItems(releases: readonly InformationRelease[]): re
     .map((r) => ({
       informationId: r.informationId,
       headline: r.headlineTemplate,
+      body: r.body ?? null,
       isRumor: r.isRumor,
       confidence: r.confidence ?? null,
       availableFromTurn: r.availableFromTurn,
@@ -470,6 +471,8 @@ export interface OpeningInfoViewModel {
 export interface ScenarioNewsItem {
   readonly informationId: string;
   readonly headline: string;
+  /** 記事本文。未設定の記事では null（画面は見出しと事実だけを出す）。 */
+  readonly body: string | null;
   /** 噂（Leading Indicator）か、確定した事象（Current Event / Structural Trend）か。 */
   readonly isRumor: boolean;
   /** 0〜1。未指定なら null（確信度を捏造しない）。 */
