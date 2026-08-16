@@ -187,6 +187,27 @@ export interface StandardAiParameters {
    */
   readonly vapProductDevelopmentMinHeadroomRatio: number;
   /**
+   * 【Standard AI Investment Portfolio Calibration・Phase PC-2A新設】VAP商品開発の
+   * Investment Intensity（0〜1、headroom・VAP事業規模・affordabilityの単純平均。
+   * decision/vapProductDevelopment.ts参照）がこの値以上ならHIGH intensity（$500k候補）、
+   * 下回ればMEDIUM/LOW判定へ進む。PC-1.5監査で判明した「affordabilityが通れば必ず
+   * 最大tierになる」bang-bang挙動（指示§2-3）を解消するため、tier選定を
+   * affordability単独ではなくIntensity（3要素の合成）で決めるように変更した
+   * （指示§9「最大tierがaffordableなら必ず最大tierにはしない」）。
+   */
+  readonly vapProductDevelopmentIntensityHighThreshold: number;
+  /**
+   * 【Phase PC-2A新設】同上のIntensityがこの値以上ならMEDIUM intensity（$250k候補）、
+   * 下回ればLOW intensity（$100k候補）。
+   */
+  readonly vapProductDevelopmentIntensityMediumThreshold: number;
+  /**
+   * 【Phase PC-2A新設・BEFORE/AFTER比較用ablationスイッチ】省略時（=undefined）は
+   * 新方式（Investment Intensity）。falseのときだけPC-2A以前の挙動（常に最高tierから
+   * affordability・財務ゲートを満たす最初のtierを選ぶ）を再現する。
+   */
+  readonly vapDevelopmentTierIntensityEnabled?: boolean;
+  /**
    * 【Standard AI Capability Expansion・Phase CE-3新設】品質管理設備
    * （qualityControlEquipment）投資の合成Quality Needスコア（0〜1程度、
    * decision/capex.tsのcomputeQualityNeedScore参照）に対するしきい値。
@@ -333,6 +354,11 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   pdMechanizationMaxPaybackQuarters: 12,
   vapProductDevelopmentMaxAffordabilityQuarters: 3,
   vapProductDevelopmentMinHeadroomRatio: 0.1,
+  // 【Phase PC-2A新設】Intensity（0〜1）を単純に三分割（tertile）するしきい値。
+  // 実測データへの事後calibrationではなく、3要素平均という設計の対称性に基づく
+  // 素朴な既定値（指示§43相当「初回calibration禁止」の精神を踏襲）。
+  vapProductDevelopmentIntensityHighThreshold: 2 / 3,
+  vapProductDevelopmentIntensityMediumThreshold: 1 / 3,
   qualityEquipmentNeedThreshold: 0.3,
 
   expectedAquacultureHarvestRatio: 0.9,

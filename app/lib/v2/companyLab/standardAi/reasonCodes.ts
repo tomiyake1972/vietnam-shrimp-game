@@ -173,6 +173,7 @@ export type StandardAiReasonCode =
   | "VAP_DEV_CONSIDERED" // VAP商品開発費（tier選択）を検討対象に含めた
   | "VAP_DEV_LOW_OPPORTUNITY" // VAP稼働率が低く、商品開発を検討する段階にないため見送り
   | "VAP_DEV_LOW_MARGIN" // VAP市場プレミアムが最低受注水準未満で採算が立たないため見送り
+  | "VAP_DEV_INTENSITY_EVALUATED" // 【Phase PC-2A新設】headroom・VAP事業規模・affordabilityからInvestment Intensityを算出し、候補tierを導出した
   | "VAP_DEV_PAYBACK_UNATTRACTIVE" // どのtierも現在のVAP事業規模に対して支出が過大（affordability基準未達）のため見送り
   | "VAP_DEV_ALREADY_ACTIVE" // VAP商品開発スコアが既に高く、ヘッドルームが乏しいため新規支出を見送り
   | "VAP_DEV_FINANCE_BLOCKED" // 財務ゲート（現金・借入余力）を満たさないtierを見送り
@@ -327,6 +328,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "VAP_DEV_CONSIDERED",
   "VAP_DEV_LOW_OPPORTUNITY",
   "VAP_DEV_LOW_MARGIN",
+  "VAP_DEV_INTENSITY_EVALUATED",
   "VAP_DEV_PAYBACK_UNATTRACTIVE",
   "VAP_DEV_ALREADY_ACTIVE",
   "VAP_DEV_FINANCE_BLOCKED",

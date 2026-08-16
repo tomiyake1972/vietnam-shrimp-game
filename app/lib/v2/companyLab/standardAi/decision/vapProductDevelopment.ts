@@ -137,11 +137,67 @@ export function buildStandardAiVapProductDevelopmentDecision(
       ? (params.vapProductDevelopmentMaxAffordabilityQuarters * strategyFitMultiplier) / financialConservatismRatio
       : params.vapProductDevelopmentMaxAffordabilityQuarters;
 
-  // 高いtierから順に、affordability・財務ゲートの両方を満たす最初のtierを選ぶ
-  // （指示§17「他候補と同じCAPEX rankingへ流す」に対応する部分は、この関数の
-  // 呼び出し元policy.tsが他ドメインの結果と対等にdiagnostics/decisionへ合流させる
-  // ことで満たす。ここは単一ドメイン内の「どのtierか」の決定だけを担う）。
-  const candidateTiers = [...VAP_PRODUCT_DEVELOPMENT_SPEND_TIERS_USD].filter((t) => t > 0).sort((a, b) => b - a);
+  // 【Phase PC-2A・指示§2-9】Investment Intensity = headroom・VAP事業規模・affordabilityの
+  // 単純平均（0〜1）。PC-1.5監査で判明した「affordabilityが通れば必ず最大tierになる」
+  // bang-bang挙動（$500k pass率93〜97%・中間tier実測ほぼ0%）を解消するため、
+  // どのtierを「狙うか」をaffordability単独ではなくIntensity（3要素の合成）で決める
+  // （指示§9「最大tierがaffordableなら必ず最大tierにはしない」）。会社IDによる分岐は
+  // 行わない（指示§7・§9「会社名hardcode禁止」「VAP会社だから必ず$500kは禁止」）。
+  // affordability・財務ゲート自体（既存のeffectiveMaxAffordabilityQuarters・
+  // financeSafeForSpend）は一切変更しない（指示§8「既存概念を維持可能」）。
+  const maxTierUsd = Math.max(...VAP_PRODUCT_DEVELOPMENT_SPEND_TIERS_USD);
+  const totalProductionTons =
+    (observation.lastQuarterActualProductionByProduct.hoso ?? 0) +
+    (observation.lastQuarterActualProductionByProduct.pd ?? 0) +
+    (observation.lastQuarterActualProductionByProduct.vap ?? 0);
+  // 【指示§7】VAP business scale＝この会社の生産全体に占めるVAPの比重。既存の実績生産量
+  // （lastQuarterActualProductionByProduct、新しい観測ではない）だけから導出する。
+  const vapBusinessScale = totalProductionTons > EPSILON ? Math.min(1, vapProductionTons / totalProductionTons) : 0;
+  // 【指示§8】affordability指標を0〜1へ正規化（既存のeffectiveMaxAffordabilityQuarters×
+  // currentQuarterlyVapContributionUsdが「その期間内で賄える$」であることを利用し、
+  // 最大tier$500kに対する充足度として表現するだけで、新しい効果値は作らない）。
+  const affordabilityScore = maxTierUsd > EPSILON ? Math.min(1, (effectiveMaxAffordabilityQuarters * currentQuarterlyVapContributionUsd) / maxTierUsd) : 0;
+  const investmentIntensity = (headroom + vapBusinessScale + affordabilityScore) / 3;
+  // 【指示§13 BEFORE/AFTER比較用のablationスイッチ】省略時（=undefined）は新方式（Intensity）。
+  // falseの場合のみ、PC-2A以前の挙動（常に最高tier＝$500kを候補とする、affordability・
+  // 財務ゲートだけで絞り込む旧方式）を再現する。既存呼び出し元・既存テストの挙動には
+  // 一切影響しない（他フェーズのablationスイッチと同じ設計パターン）。
+  const candidateTierUsd =
+    params.vapDevelopmentTierIntensityEnabled === false
+      ? 500_000
+      : investmentIntensity >= params.vapProductDevelopmentIntensityHighThreshold
+        ? 500_000
+        : investmentIntensity >= params.vapProductDevelopmentIntensityMediumThreshold
+          ? 250_000
+          : 100_000;
+
+  diagnostics.push({
+    code: "VAP_DEV_INTENSITY_EVALUATED",
+    domain: "sales",
+    companyId: fixture.companyId,
+    severity: "info",
+    keyValues: {
+      headroom,
+      vapBusinessScale,
+      affordabilityScore,
+      investmentIntensity,
+      candidateTierUsd,
+      intensityHighThreshold: params.vapProductDevelopmentIntensityHighThreshold,
+      intensityMediumThreshold: params.vapProductDevelopmentIntensityMediumThreshold,
+    },
+    message: `Investment Intensity ${(investmentIntensity * 100).toFixed(1)}%（headroom ${(headroom * 100).toFixed(
+      1
+    )}%・VAP事業規模 ${(vapBusinessScale * 100).toFixed(1)}%・affordability ${(affordabilityScore * 100).toFixed(
+      1
+    )}%の単純平均）から、候補tier $${candidateTierUsd.toLocaleString()}を導出する。`,
+  });
+
+  // 候補tier以下を高い順に、affordability・財務ゲートの両方を満たす最初のtierを選ぶ
+  // （Intensityで「狙うtier」を決めた後、その候補が両ゲートを満たさない場合だけ、
+  // より低いtierへ段階的に下げる。指示§17のCAPEX ranking合流は呼び出し元policy.tsが担う）。
+  const candidateTiers = [...VAP_PRODUCT_DEVELOPMENT_SPEND_TIERS_USD]
+    .filter((t) => t > 0 && t <= candidateTierUsd)
+    .sort((a, b) => b - a);
   let bestPaybackUnattractiveTier: number | null = null;
   let bestFinanceBlockedTier: number | null = null;
 

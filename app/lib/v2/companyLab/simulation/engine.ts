@@ -117,6 +117,12 @@ export interface CreateSimulationSessionInput {
    * controlled ablation benchmark専用。省略時（undefined）は既存挙動と完全に同一。
    */
   readonly factoryActivationLaborFixDisabled?: boolean;
+  /**
+   * 【Standard AI Investment Portfolio Calibration・Phase PC-2A新設・BEFORE/AFTER
+   * 比較用】VAP Development tier Intensity化のcontrolled benchmark専用。
+   * 省略時（undefined）は既存挙動と完全に同一。
+   */
+  readonly vapDevelopmentTierIntensityDisabled?: boolean;
 }
 
 /**
@@ -135,6 +141,7 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     standardAiProfileMode: input.standardAiProfileMode,
     qualityEquipmentCapabilityDisabled: input.qualityEquipmentCapabilityDisabled,
     factoryActivationLaborFixDisabled: input.factoryActivationLaborFixDisabled,
+    vapDevelopmentTierIntensityDisabled: input.vapDevelopmentTierIntensityDisabled,
   };
   const { state, fixtures } = initializeCompanyLab(config);
   const run: SimulationRun = {
@@ -325,6 +332,7 @@ export function advanceSimulationTurn(
         ...profileResolution.params,
         ...(session.state.config.qualityEquipmentCapabilityDisabled ? { qualityEquipmentCapabilityEnabled: false } : {}),
         ...(session.state.config.factoryActivationLaborFixDisabled ? { factoryActivationLaborFixEnabled: false } : {}),
+        ...(session.state.config.vapDevelopmentTierIntensityDisabled ? { vapDevelopmentTierIntensityEnabled: false } : {}),
       };
       const { decision: aiDecision, diagnostics: rawDiagnostics } = generateStandardAiDecisionWithDiagnostics(
         fixture,

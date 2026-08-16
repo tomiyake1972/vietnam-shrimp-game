@@ -575,6 +575,14 @@ export interface CompanyLabConfig {
    * 既存挙動（FA-1修正後の正しい挙動）と完全に同一。
    */
   readonly factoryActivationLaborFixDisabled?: boolean;
+  /**
+   * 【Standard AI Investment Portfolio Calibration・Phase PC-2A新設・BEFORE/AFTER
+   * 比較用】trueのときだけ、全社のStandard AI StandardAiParametersへ
+   * vapDevelopmentTierIntensityEnabled=falseを上書きし、VAP商品開発tier選定を
+   * PC-2A以前の挙動（常に最高tierから選ぶ）へ戻す（controlled benchmark専用の注入口）。
+   * 省略時（undefined）・falseは既存挙動（PC-2A後の正しい挙動）と完全に同一。
+   */
+  readonly vapDevelopmentTierIntensityDisabled?: boolean;
 }
 
 export interface CompanyLabState {
