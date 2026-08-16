@@ -62,6 +62,13 @@ import { ConversionObservation, observeContractConversion } from "./commercialHi
 import { companySalesOrganizationCapacity, marketFragmentationFactor } from "../../sales/salesCapacityModel";
 import { processingCapacity } from "../../sales/salesForce";
 import { StandardAiObservation } from "./types";
+import {
+  assessStandardAiCrisisState,
+  applyCrisisGateToCommercialCommitment,
+  StandardAiCrisisAssessment,
+  StandardAiCrisisState,
+  StandardAiCrisisSignalCode,
+} from "./crisisState";
 
 // 【SAI-1.5 追記／マージ前受入修正】原因分解レポート（三宅さん指示）のため、
 // 診断情報にこれまで捨てていた圧力スコア(pressures)と、当四半期の意思決定
@@ -126,6 +133,22 @@ export interface StandardAiQuarterDiagnostics {
   readonly conversionObservation?: ConversionObservation;
   /** 【Phase 6C・#05 §6】営業採用判断の構造化記録（採用0でも必ず理由が入る）。 */
   readonly salesHiring?: SalesHiringDiagnosticsRecord;
+  /**
+   * 【Standard AI Crisis Management・Phase CM-1・指示§15】この四半期のCrisis State
+   * 判断そのもの。Management Console・Analysis Pack・Claude explanationが読む
+   * 唯一のSSoT。旧スナップショット（この機能追加前に保存されたドラフト）には
+   * 存在しないためoptional（架空の値を捏造しない）。
+   */
+  readonly crisis?: {
+    readonly state: StandardAiCrisisState;
+    readonly signals: readonly StandardAiCrisisSignalCode[];
+    readonly summary: string;
+    readonly procurementScaleRatio: number | null;
+    readonly underwritingFrozen: boolean | null;
+    readonly newSalesSuppressed: boolean;
+    readonly capexPaused: boolean;
+    readonly salesHiringStopped: boolean;
+  };
 }
 
 /**
@@ -263,6 +286,72 @@ function buildCommitmentDiagnostics(
 }
 
 /**
+ * 【Standard AI Crisis Management・Phase CM-1・指示§13】Crisis Stateの検知シグナルと、
+ * 実際に抑制が発動したことを、既存のreason-code体系で必ず残す。
+ */
+function buildCrisisDiagnostics(
+  companyId: string,
+  crisis: StandardAiCrisisAssessment,
+  observation: StandardAiObservation,
+  actions: { readonly newSalesSuppressed: boolean; readonly capexPaused: boolean; readonly salesHiringStopped: boolean }
+): StandardAiDiagnosticEntry[] {
+  const entries: StandardAiDiagnosticEntry[] = [];
+  const keyValues = {
+    scaleRatio: observation.lastQuarterProcurementScaleRatio ?? -1,
+    underwritingFrozen: observation.lastQuarterUnderwritingFrozen ? 1 : 0,
+    importOrdersBlocked: observation.lastQuarterImportOrdersBlocked ? 1 : 0,
+  };
+
+  for (const signal of crisis.signals) {
+    entries.push({
+      code: signal,
+      domain: "crisis",
+      companyId,
+      severity: crisis.state === "SEVERE_DISTRESS" ? "critical" : "warning",
+      keyValues,
+      decisionSummary: `Crisis State: ${crisis.state}`,
+      message: crisis.summary,
+    });
+  }
+
+  if (actions.newSalesSuppressed) {
+    entries.push({
+      code: "CRISIS_NEW_SALES_SUPPRESSED",
+      domain: "crisis",
+      companyId,
+      severity: "critical",
+      keyValues,
+      decisionSummary: "新規Commercial Commitmentを縮小・停止",
+      message: "資金制約により原料調達が停止・大幅縮小しているため、新規受注（Commercial Commitment）を縮小・停止し、既存Backlogの履行を優先している。Vision・Commercial Ambition自体は変更していない。",
+    });
+  }
+  if (actions.capexPaused) {
+    entries.push({
+      code: "CRISIS_CAPEX_PAUSED",
+      domain: "crisis",
+      companyId,
+      severity: "critical",
+      keyValues,
+      decisionSummary: "新規設備投資提案を停止（着工済み案件は継続）",
+      message: "資金繰り危機のため、新規の設備投資提案（既存増設・新工場を含む）を停止した。既に着工済みの案件は勝手にキャンセルしていない。",
+    });
+  }
+  if (actions.salesHiringStopped) {
+    entries.push({
+      code: "CRISIS_SALES_HIRING_STOPPED",
+      domain: "crisis",
+      companyId,
+      severity: "critical",
+      keyValues,
+      decisionSummary: "営業採用を停止",
+      message: "資金繰り危機のため、営業人員の新規採用を停止した。既存営業人員の自動解雇はこの判断では行っていない。",
+    });
+  }
+
+  return entries;
+}
+
+/**
  * 標準AIの意思決定一式を、診断情報つきで生成する（純粋関数。副作用・内部状態を
  * 一切持たない。同一入力・同一パラメータなら常に同一出力＝決定論的）。
  */
@@ -285,6 +374,19 @@ export function generateStandardAiDecisionWithDiagnostics(
 ): StandardAiDecisionWithDiagnostics {
   const observation = buildStandardAiObservation(fixture, ownState, publicInfo, period, turn);
   const pressures = computePressureScores(observation, fixture, params);
+
+  // 【Standard AI Crisis Management・Phase CM-1】既存Finance診断シグナル
+  // （前Turnの調達制約・銀行underwriting・財務健全性）だけからCrisis Stateを導出する。
+  // Finance formula自体（computeProcurementConstraint・銀行underwriting・
+  // insolvency判定式）は一切ここで再計算しない（crisisState.ts参照）。
+  // Vision・Strategic Growth・Strategy Profileより下位の安全層として、以降の
+  // Commercial Commitment・CAPEX・Sales Hiringの各判断へこの結果を通す。
+  const crisisAssessment: StandardAiCrisisAssessment = assessStandardAiCrisisState({
+    lastQuarterProcurementScaleRatio: observation.lastQuarterProcurementScaleRatio,
+    lastQuarterUnderwritingFrozen: observation.lastQuarterUnderwritingFrozen,
+    lastQuarterImportOrdersBlocked: observation.lastQuarterImportOrdersBlocked,
+    lastQuarterFinancialHealthTier: observation.lastQuarterFinancialHealthTier,
+  });
 
   // 【2026-08-09・Phase 6】Vision → Commercial Ambition を**販売計画より前**に求める。
   // Phase 5 では Vision が新工場判断にしか届いておらず、販売希望量は
@@ -326,7 +428,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     turn
   );
   const salesCapacityTonsForCommitment = salesCapacityCeilingTons(observation, salesParams);
-  const commercialCommitment = computeCommercialCommitment({
+  const commercialCommitmentBeforeCrisisGate = computeCommercialCommitment({
     ambition: commercialAmbition,
     capacityAnchorTons,
     attainableProfitableTons: observableOpportunity.attainableProfitableTons,
@@ -336,6 +438,16 @@ export function generateStandardAiDecisionWithDiagnostics(
     backlogTons: sumProductAmount({ ...observation.outstandingContractByProduct } as never),
     finishedGoodsTons: sumProductAmount({ ...observation.finishedGoodsByProduct }),
   });
+  // 【指示§5/§6/§7】Crisis Gate。computeCommercialCommitment自体（志の量・
+  // 転換率学習等）は一切変更しない。危機時はこの出力（新規提出量の上限）だけを
+  // 縮小・停止する。Vision Ambition（commercialAmbition）はこの後も一切変更しない
+  // ため、「志は残るが今は守りに入っている」が両立する。既存Backlogは
+  // outstandingContractByProduct経由で別途、生産必要量計算（confirmed）へ
+  // 100%反映され続ける（このgateの影響を受けない）。
+  const commercialCommitment: CommercialCommitmentState = applyCrisisGateToCommercialCommitment(
+    commercialCommitmentBeforeCrisisGate,
+    crisisAssessment
+  );
 
   const salesResult = buildStandardAiSalesPlans(
     fixture,
@@ -524,10 +636,31 @@ export function generateStandardAiDecisionWithDiagnostics(
     commercialAmbitionTons: commercialAmbition.ambitionTons,
   });
 
+  // 【指示§9・Crisis Gate】SEVERE_DISTRESS時、新規設備投資提案（既存増設＋新工場の
+  // 両方）を止める。capex.ts・newFactory.tsの計算そのものは変更せず、ここで
+  // 「新規提案（newProjectProposals）」だけを空にする（指示§9「既に着工済み
+  // projectを勝手にキャンセルしない」ため、cancelRequests/resumeRequestsは
+  // capexResultの計算結果をそのまま使う＝一切触らない）。
+  const isSevereDistress = crisisAssessment.state === "SEVERE_DISTRESS";
+  const newFactoryProposalsAfterCrisisGate = isSevereDistress ? [] : newFactoryResult.proposals;
+  const capexDecisionAfterCrisisGate = isSevereDistress
+    ? { ...capexResult.capexDecision, newProjectProposals: [] }
+    : capexResult.capexDecision;
+  const capexSuppressedByCrisis = isSevereDistress && (capexResult.capexDecision.newProjectProposals.length > 0 || newFactoryResult.proposals.length > 0);
+
+  // 【指示§10・Crisis Gate】SEVERE_DISTRESS時、営業採用を0にする。既存営業人員の
+  // 自動大量解雇は今回追加しない（salesForceLayoffCountはそのまま。指示§10
+  // 「人員リストラは別Phase」）。Worker（正社員）拡大は、危機時に縮小される生産
+  // 必要量（Commercial Commitment Gate経由）にbuildStandardAiWorkerAssignments自体が
+  // 追随するため、別途のgateを追加していない（laborResult.workerAssignmentsは
+  // 生産計画から逆算する既存ロジックそのまま）。
+  const salesForceHireCountAfterCrisisGate = isSevereDistress ? 0 : salesForceHiringResult.salesForceHireCount;
+  const salesHiringSuppressedByCrisis = isSevereDistress && salesForceHiringResult.salesForceHireCount > 0;
+
   const decision: CompanyDecisionInput = {
     companyId: fixture.companyId,
     salesPlans: salesResult.salesPlans,
-    salesForceHireCount: salesForceHiringResult.salesForceHireCount > 0 ? salesForceHiringResult.salesForceHireCount : undefined,
+    salesForceHireCount: salesForceHireCountAfterCrisisGate > 0 ? salesForceHireCountAfterCrisisGate : undefined,
     salesForceLayoffCount: salesForceHiringResult.salesForceLayoffCount > 0 ? salesForceHiringResult.salesForceLayoffCount : undefined,
     domesticPurchasePlan: procurementResult.domesticPurchasePlan,
     importOrders: procurementResult.importOrders,
@@ -539,12 +672,12 @@ export function generateStandardAiDecisionWithDiagnostics(
     // 既存増設の提案内容は一切変更せず、新工場ぶんを末尾へ足すだけにする
     // （既存の設備投資判断の挙動を変えない）。
     capexDecision:
-      newFactoryResult.proposals.length > 0
+      newFactoryProposalsAfterCrisisGate.length > 0
         ? {
-            ...capexResult.capexDecision,
-            newProjectProposals: [...capexResult.capexDecision.newProjectProposals, ...newFactoryResult.proposals],
+            ...capexDecisionAfterCrisisGate,
+            newProjectProposals: [...capexDecisionAfterCrisisGate.newProjectProposals, ...newFactoryProposalsAfterCrisisGate],
           }
-        : capexResult.capexDecision,
+        : capexDecisionAfterCrisisGate,
   };
 
   const strategicTargetScaleDiagnostic: StandardAiDiagnosticEntry = {
@@ -572,6 +705,13 @@ export function generateStandardAiDecisionWithDiagnostics(
     }。`,
   };
 
+  const newSalesSuppressedByCrisis = crisisAssessment.state !== "NORMAL";
+  const crisisDiagnostics = buildCrisisDiagnostics(fixture.companyId, crisisAssessment, observation, {
+    newSalesSuppressed: newSalesSuppressedByCrisis,
+    capexPaused: capexSuppressedByCrisis,
+    salesHiringStopped: salesHiringSuppressedByCrisis,
+  });
+
   const entries: StandardAiDiagnosticEntry[] = [
     ...salesResult.diagnostics,
     ...productionResult.diagnostics,
@@ -587,6 +727,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...commercialGrowthDiagnostics,
     ...newFactoryResult.diagnostics,
     ...buildCommitmentDiagnostics(fixture.companyId, commercialCommitment, conversionObservation),
+    ...crisisDiagnostics,
   ];
 
   return {
@@ -610,6 +751,18 @@ export function generateStandardAiDecisionWithDiagnostics(
       commercialCommitment,
       conversionObservation,
       salesHiring: salesForceHiringResult.hiringDiagnostics,
+      // 【Standard AI Crisis Management・Phase CM-1・指示§15】Analysis Pack・
+      // Company Inspector・Claude explanationが読む、この四半期のCrisis判断そのもの。
+      crisis: {
+        state: crisisAssessment.state,
+        signals: crisisAssessment.signals,
+        summary: crisisAssessment.summary,
+        procurementScaleRatio: observation.lastQuarterProcurementScaleRatio,
+        underwritingFrozen: observation.lastQuarterUnderwritingFrozen,
+        newSalesSuppressed: newSalesSuppressedByCrisis,
+        capexPaused: capexSuppressedByCrisis,
+        salesHiringStopped: salesHiringSuppressedByCrisis,
+      },
     },
   };
 }

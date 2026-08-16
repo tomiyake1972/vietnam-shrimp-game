@@ -175,7 +175,13 @@ test("CCI-6: 終盤の生産量は、提出量ではなく成約量の近くに�
     const summary = last.companySummaries.find((c) => c.companyId === d.companyId)!;
     const contracted = unwrapUnit(summary.newContractedQuantity);
     const produced = unwrapUnit(summary.hosoProduced) + unwrapUnit(summary.pdProduced) + unwrapUnit(summary.vapProduced);
-    if (submitted <= contracted + 1) continue; // 提出=成約なら比較する意味がない
+    // 提出≈成約（僅差）なら比較する意味がない。
+    // 【Standard AI Crisis Management・Phase CM-1】Crisis Gate導入により、
+    // 一時的な資金ストレスで提出量がわずかに（数トン単位）縮小し得るため、
+    // 元の閾値（1t）を「明らかに壊れている水準にのみ置く」という本テストの
+    // 方針（ファイル冒頭コメント）に沿って5tへ広げた。ゲームバランスの数値
+    // そのものは固定しない。
+    if (submitted <= contracted + 5) continue;
     assert.ok(
       Math.abs(produced - contracted) < Math.abs(produced - submitted),
       `${d.companyId}: 生産 ${Math.round(produced)}t は提出 ${Math.round(submitted)}t より成約 ${Math.round(contracted)}t に近いこと`

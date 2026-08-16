@@ -32,7 +32,15 @@ export type CommitmentLimiter =
   | "RECENT_CONVERSION" // 直近の転換率が低く、取りに行く量を抑えた
   | "MARKET_OPPORTUNITY" // 観測できる採算つき市場機会が足りない
   | "SALES_CAPACITY" // 営業組織が捌ける案件量が足りない
-  | "STRETCH_LIMIT"; // 志に対する上乗せ幅の上限に当たった
+  | "STRETCH_LIMIT" // 志に対する上乗せ幅の上限に当たった
+  /**
+   * 【Standard AI Crisis Management・Phase CM-1】資金繰り危機（LIQUIDITY_STRESS /
+   * SEVERE_DISTRESS）により、Strategy Profileより下位のCrisis Gateで新規提出量を
+   * 縮小・停止した。computeCommercialCommitment自体はこの値を一切設定しない
+   * （このモジュールの計算式は無変更）。policy.tsが計算後の結果へ上書きする際に
+   * だけ使う、この型定義の追加のみ。
+   */
+  | "CRISIS";
 
 export interface CommercialCommitmentParameters {
   /**

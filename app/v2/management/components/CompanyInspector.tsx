@@ -209,6 +209,39 @@ export function CompanyInspector({ dataset, fixtures, selectedCompanyId, onSelec
             <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{fixture.description}</p>
           </AlwaysSection>
 
+          {/* 【Standard AI Crisis Management・Phase CM-1・指示§14】Operating Modeは
+              NORMAL時も含め常に見える位置に置き、危機時だけ理由を添えて目立たせる。
+              大規模UI改修はしない（Vision/Strategic Outlookの既存パターンを踏襲）。 */}
+          {latestStrategy?.crisis && latestStrategy.crisis.state !== "NORMAL" ? (
+            <AlwaysSection title="Operating Mode">
+              <div data-testid="operating-mode-card">
+                <p
+                  className={`text-sm font-semibold ${
+                    latestStrategy.crisis.state === "SEVERE_DISTRESS" ? "text-red-400" : "text-amber-300"
+                  }`}
+                  data-testid="operating-mode-label"
+                >
+                  {latestStrategy.crisis.state === "SEVERE_DISTRESS" ? "SEVERE DISTRESS（深刻な資金繰り危機）" : "LIQUIDITY STRESS（資金繰り悪化）"}
+                </p>
+                <dl className="mt-1.5">
+                  <Row
+                    label="Procurement Capacity"
+                    value={
+                      latestStrategy.crisis.procurementScaleRatio === null
+                        ? DASH
+                        : `${Math.round(latestStrategy.crisis.procurementScaleRatio * 100)}%`
+                    }
+                  />
+                  <Row label="Underwriting" value={latestStrategy.crisis.underwritingFrozen ? "Frozen" : latestStrategy.crisis.underwritingFrozen === false ? "通常" : DASH} />
+                  <Row label="新規受注" value={latestStrategy.crisis.newSalesSuppressed ? "抑制中（既存Backlogは履行継続）" : "通常"} />
+                  <Row label="新規設備投資" value={latestStrategy.crisis.capexPaused ? "停止中（着工済みは継続）" : "通常"} />
+                  <Row label="営業採用" value={latestStrategy.crisis.salesHiringStopped ? "停止中" : "通常"} />
+                </dl>
+                <p className="mt-1.5 text-[11px] leading-snug text-slate-400">{latestStrategy.crisis.summary}</p>
+              </div>
+            </AlwaysSection>
+          ) : null}
+
           {/* 【常に見える】経営の「志」は折りたたまない。ここが今回の中心だからである。 */}
           <AlwaysSection title="Vision（経営者の志）">
             {vision === null ? (

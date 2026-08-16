@@ -355,6 +355,21 @@ export interface PackStrategy {
     readonly reactiveBlockerAtStrategicDecision: string | null;
   } | null;
   readonly availability: PackAvailability;
+  /**
+   * 【Standard AI Crisis Management・Phase CM-1・指示§15】この四半期のCrisis State。
+   * Crisis Management導入前に保存されたPackにはこのフィールドが無いためnull
+   * （架空の値を作らない）。
+   */
+  readonly crisis: {
+    readonly state: "NORMAL" | "LIQUIDITY_STRESS" | "SEVERE_DISTRESS";
+    readonly signals: readonly string[];
+    readonly summary: string;
+    readonly procurementScaleRatio: number | null;
+    readonly underwritingFrozen: boolean | null;
+    readonly newSalesSuppressed: boolean;
+    readonly capexPaused: boolean;
+    readonly salesHiringStopped: boolean;
+  } | null;
 }
 
 /**

@@ -13,6 +13,7 @@
 import { DemandMarketId, Product } from "../../market/types";
 import { PeriodV2 } from "../../core/period";
 import { Score0to100 } from "../../core/units";
+import { FinancialHealthTier } from "../../financing/types";
 
 /**
  * 【可変であることの明示】この型はブランド型（core/units.ts）ではない、単なる
@@ -213,6 +214,17 @@ export interface StandardAiObservation {
    * 将来、これらの入力を配線した時点でこのコメントと合わせて実装する。
    */
   readonly availableBorrowingHeadroomUsd?: number;
+  /**
+   * 【Standard AI Crisis Management・Phase CM-1】前Turnの資金繰りクローズで
+   * 確定した危機シグナル。companyLab/types.tsのCompanyOwnState.lastFinancingResult
+   * （既存のFinancingQuarterResult。financing/liquidityClose.ts・bankUnderwriting.ts
+   * が既に計算した値）をそのまま渡すだけで、新しい計算はしない。
+   * まだ1Turnも確定していない場合（Turn1の意思決定時点）はすべてnull。
+   */
+  readonly lastQuarterProcurementScaleRatio: number | null;
+  readonly lastQuarterUnderwritingFrozen: boolean | null;
+  readonly lastQuarterImportOrdersBlocked: boolean | null;
+  readonly lastQuarterFinancialHealthTier: FinancialHealthTier | null;
 
   // --- 工場・スペース（【2026-08-09・Vision駆動成長】新工場判断に必要な観測） ---
   /**

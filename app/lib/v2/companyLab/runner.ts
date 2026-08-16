@@ -475,6 +475,11 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     deliveryReliabilityByMarket,
     financeState: financeStateForCompany,
     financingState: financingStateForCompany,
+    // 【Standard AI Crisis Management・Phase CM-1】前Turnの資金繰りクローズ結果
+    // （procurementConstraint.scaleRatio・borrowingCapacity.underwritingFrozen・
+    // financialHealth等）をそのまま渡す。新しい計算はしない。まだ1Turnも
+    // 確定していない場合（lastRecordが無い）はundefined。
+    lastFinancingResult: lastRecord?.financingResults.find((f) => f.companyId === fixture.companyId),
     capexState: capexStateForCompany,
     workforceState: workforceStateForCompany,
     salesForceHiringState: salesForceHiringStateForCompany,

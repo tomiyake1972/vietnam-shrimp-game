@@ -376,6 +376,14 @@ export function buildStandardAiObservation(
     // availableBorrowingHeadroomUsd: 意図的に未設定（undefined）。ファイル冒頭の
     // types.tsコメント参照（捏造しない）。
 
+    // 【Standard AI Crisis Management・Phase CM-1】前Turnの資金繰りクローズ結果
+    // （ownState.lastFinancingResult。既にfinancing/liquidityClose.ts・
+    // bankUnderwriting.tsが計算済み）をそのまま渡すだけ。新しい計算はしない。
+    lastQuarterProcurementScaleRatio: ownState.lastFinancingResult?.procurementConstraint?.scaleRatio ?? null,
+    lastQuarterUnderwritingFrozen: ownState.lastFinancingResult?.borrowingCapacity.underwritingFrozen ?? null,
+    lastQuarterImportOrdersBlocked: ownState.lastFinancingResult?.procurementConstraint?.importOrdersBlocked ?? null,
+    lastQuarterFinancialHealthTier: ownState.lastFinancingResult?.financialHealth.primary ?? null,
+
     factoryCount: effectiveFactories.length,
     maxFactoriesPerCompany: MAX_FACTORIES_PER_COMPANY,
     pendingNewFactoryProjectCount: pendingNewFactories,

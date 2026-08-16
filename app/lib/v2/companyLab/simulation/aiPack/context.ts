@@ -96,6 +96,7 @@ const EMPTY_STRATEGY: PackStrategy = {
   growthPressure: null,
   newFactory: null,
   availability: "NOT_RECORDED",
+  crisis: null,
 };
 
 /** ChatGPT / Claude へ「このPackの読み方」を伝える定型文（生成文ではない）。 */

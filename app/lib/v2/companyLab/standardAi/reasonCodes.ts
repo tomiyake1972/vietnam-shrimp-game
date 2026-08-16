@@ -6,7 +6,7 @@
 // 圧力値フレームワーク・AI取締役会機能・プレイヤー向け説明・テスト結果分析で
 // 再利用できるよう、意図的に汎用的な構造にしてある。
 
-export type StandardAiDomain = "procurement" | "sales" | "production" | "labor" | "finance" | "capex" | "diagnosis";
+export type StandardAiDomain = "procurement" | "sales" | "production" | "labor" | "finance" | "capex" | "diagnosis" | "crisis";
 
 export type StandardAiSeverity = "info" | "warning" | "critical";
 
@@ -150,7 +150,14 @@ export type StandardAiReasonCode =
   | "PRODUCTION_LIMITED_TO_CONFIRMED_DEMAND" // 生産は確定需要（受注残）中心に絞った
   | "PRODUCTION_INCLUDES_EXPECTED_CONVERSION" // 生産に期待成約分を織り込んだ
   | "PRODUCTION_REDUCED_FOR_FINISHED_GOODS" // 完成品在庫があるため生産を抑えた
-  | "OVER_SUBMISSION_RISK_HIGH"; // 提出量に対する成約率が低い状態が続いている
+  | "OVER_SUBMISSION_RISK_HIGH" // 提出量に対する成約率が低い状態が続いている
+  // --- 【Standard AI Crisis Management・Phase CM-1】資金繰り危機時の受注抑制 ---
+  | "CRISIS_LIQUIDITY_STRESS" // 調達能力が大きく低下しているが完全支払不能ではない
+  | "CRISIS_UNDERWRITING_FROZEN" // 銀行の通常融資審査が凍結している（前Turn時点）
+  | "CRISIS_PROCUREMENT_BLOCKED" // 前Turnの原料調達がほぼ完全に止まっていた（scaleRatio≈0または輸入停止）
+  | "CRISIS_NEW_SALES_SUPPRESSED" // 危機のため新規Commercial Commitmentを縮小・停止した（既存Backlogは維持）
+  | "CRISIS_CAPEX_PAUSED" // 危機のため新規設備投資提案（新工場含む）を停止した（着工済み案件は維持）
+  | "CRISIS_SALES_HIRING_STOPPED"; // 危機のため営業採用を停止した
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -267,6 +274,12 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "PRODUCTION_INCLUDES_EXPECTED_CONVERSION",
   "PRODUCTION_REDUCED_FOR_FINISHED_GOODS",
   "OVER_SUBMISSION_RISK_HIGH",
+  "CRISIS_LIQUIDITY_STRESS",
+  "CRISIS_UNDERWRITING_FROZEN",
+  "CRISIS_PROCUREMENT_BLOCKED",
+  "CRISIS_NEW_SALES_SUPPRESSED",
+  "CRISIS_CAPEX_PAUSED",
+  "CRISIS_SALES_HIRING_STOPPED",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

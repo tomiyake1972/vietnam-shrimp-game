@@ -220,6 +220,14 @@ export interface CompanyOwnState {
    */
   readonly financeState: CompanyFinanceState;
   readonly financingState: CompanyFinancingState;
+  /**
+   * 【Standard AI Crisis Management・Phase CM-1】前四半期の資金繰りクローズ結果
+   * （信用スコア・借入枠・銀行審査・調達制約・財務健全性）。新しい計算はせず、
+   * companyLab/runner.tsのadvanceCompanyLabQuarterが既に生成しstate.historyへ
+   * 保存しているFinancingQuarterResultをそのまま1件だけ渡す（重複実装しない）。
+   * 直近確定Turnがまだ無い場合（Turn1の意思決定時点）はundefined。
+   */
+  readonly lastFinancingResult?: FinancingQuarterResult;
   /** 【Phase 8B-2A】前期末までの自社設備投資状態（案件ポートフォリオ）。 */
   readonly capexState: CompanyCapexState;
   /**

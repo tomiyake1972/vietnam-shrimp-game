@@ -241,6 +241,7 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics): Pack
   const v = diagnostics.vision;
   const g = diagnostics.strategicGrowth;
   const a = diagnostics.newFactoryAssessment;
+  const crisis = diagnostics.crisis;
   return {
     vision: v
       ? {
@@ -311,6 +312,18 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics): Pack
         }
       : null,
     availability: v ? "AVAILABLE" : "NOT_RECORDED",
+    crisis: crisis
+      ? {
+          state: crisis.state,
+          signals: [...crisis.signals],
+          summary: crisis.summary,
+          procurementScaleRatio: crisis.procurementScaleRatio,
+          underwritingFrozen: crisis.underwritingFrozen,
+          newSalesSuppressed: crisis.newSalesSuppressed,
+          capexPaused: crisis.capexPaused,
+          salesHiringStopped: crisis.salesHiringStopped,
+        }
+      : null,
   };
 }
 
