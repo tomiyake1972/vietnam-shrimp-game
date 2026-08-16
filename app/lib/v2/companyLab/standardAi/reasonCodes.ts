@@ -310,6 +310,15 @@ export interface StandardAiDiagnosticEntry {
   readonly keyValues?: Readonly<Record<string, number>>;
   /** 発火した閾値（該当する場合）。 */
   readonly threshold?: number;
+  /**
+   * 【Phase CE-1.1・指示§16-17】この判断がFactory単位の場合、対象FactoryId。
+   * keyValuesはRecord<string, number>限定のため、factoryIdのような文字列識別子を
+   * 保持できなかった（従来はdecisionSummary文字列の先頭"<factoryId>: "を
+   * パースして復元していた）。ここへfirst-classなoptionalフィールドとして追加し、
+   * 文字列parseへの依存を解消する。既存のdiagnostics生成コードは何も変更しなくても
+   * 動く（省略時undefined）ため、後方互換を壊さない。
+   */
+  readonly targetFactoryId?: string;
   /** 結果として生成された意思決定の簡潔な要約（例: "VAP生産を+120トン増"）。 */
   readonly decisionSummary?: string;
   /** 人間向けの簡潔な日本語説明。 */

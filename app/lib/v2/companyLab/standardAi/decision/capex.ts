@@ -581,6 +581,7 @@ export function buildStandardAiCapexDecision(
           companyId: fixture.companyId,
           severity: "info",
           keyValues: { factoryPdUtilization: factory.pdMechanization.previousQuarterPdUtilization },
+          targetFactoryId: factory.factoryId,
           decisionSummary: `${factory.factoryId}: PD機械化を検討対象から除外（既存/進行中案件あり）`,
           message: `${factory.factoryId}には既にPD省人化投資案件が稼働中または完成済みのため、重複提案しない。`,
         });
@@ -593,6 +594,7 @@ export function buildStandardAiCapexDecision(
         companyId: fixture.companyId,
         severity: "info",
         keyValues: { factoryPdUtilization: pdUtilization, capexPdInUseUtilizationThreshold: params.capexPdInUseUtilizationThreshold },
+        targetFactoryId: factory.factoryId,
         decisionSummary: `${factory.factoryId}: PD機械化候補として評価`,
         message: `${factory.factoryId}のPD稼働率（前期実績 ${(pdUtilization * 100).toFixed(1)}%）を基に、PD省人化投資の候補として評価する。`,
       });
@@ -603,6 +605,7 @@ export function buildStandardAiCapexDecision(
           companyId: fixture.companyId,
           severity: "info",
           keyValues: { factoryPdUtilization: pdUtilization, capexPdInUseUtilizationThreshold: params.capexPdInUseUtilizationThreshold },
+          targetFactoryId: factory.factoryId,
           decisionSummary: `${factory.factoryId}: PD稼働率が低いためPD機械化を見送り`,
           message: `${factory.factoryId}のPD稼働率が低く、機械化による削減余地を検討する段階にないため見送る。`,
         });
@@ -636,6 +639,7 @@ export function buildStandardAiCapexDecision(
             strategyFitMultiplier,
             financialConservatismRatio,
           },
+          targetFactoryId: factory.factoryId,
           decisionSummary: `${factory.factoryId}: PD機械化の想定回収期間が長すぎるため見送り`,
           message: `${factory.factoryId}のPD省人化投資は想定回収期間（${
             Number.isFinite(paybackQuarters) ? paybackQuarters.toFixed(1) : "無限大"
@@ -698,6 +702,7 @@ export function buildStandardAiCapexDecision(
             financialConservatismRatio,
             eligibleCandidateCount: eligibleCandidates.length,
           },
+          targetFactoryId: best.factory.factoryId,
           decisionSummary: `${best.factory.factoryId}: PD機械化を提案（想定回収 ${best.paybackQuarters.toFixed(1)}四半期）`,
           message: `${best.factory.factoryId}のPD省人化投資が最も経済的（想定回収期間 ${best.paybackQuarters.toFixed(
             1

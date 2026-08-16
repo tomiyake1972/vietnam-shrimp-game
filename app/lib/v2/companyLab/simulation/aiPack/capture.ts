@@ -345,14 +345,19 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics, profi
 }
 
 /**
- * 【Standard AI Capability Expansion・Phase CE-1】decision/capex.tsが積んだ
+ * 【Standard AI Capability Expansion・Phase CE-1/CE-1.1】decision/capex.tsが積んだ
  * PD_MECH_*のStandardAiDiagnosticEntryから、Pack用の要約を再構成する。
- * ここで新しい判断・数値計算は行わない（既存entriesのkeyValues/decisionSummaryを
- * 読み取るだけ）。PD_MECH_CONSIDERED等の工場別entryはdecisionSummaryが
- * "<factoryId>: ..." の形式で始まる（decision/capex.ts側の既存の書式）ため、
- * それを唯一の情報源として対象工場を復元する。
+ * ここで新しい判断・数値計算は行わない（既存entriesのkeyValues/targetFactoryIdを
+ * 読み取るだけ）。
+ *
+ * 【CE-1.1・指示§16-20】従来はdecisionSummary文字列の先頭"<factoryId>: "を
+ * パースして対象工場を復元していたが、first-classなStandardAiDiagnosticEntry.
+ * targetFactoryId（reasonCodes.ts参照）へ置き換えた。文字列書式の変更に
+ * 依存しない、より頑健な経路になる。
  */
-function buildPackPdMechanization(entries: readonly { readonly code: string; readonly keyValues?: Readonly<Record<string, number>>; readonly decisionSummary?: string }[]): PackStrategy["pdMechanization"] {
+function buildPackPdMechanization(
+  entries: readonly { readonly code: string; readonly keyValues?: Readonly<Record<string, number>>; readonly targetFactoryId?: string }[]
+): PackStrategy["pdMechanization"] {
   const pdMechEntries = entries.filter((e) => e.code.startsWith("PD_MECH_"));
   if (pdMechEntries.length === 0) return null;
 
@@ -360,14 +365,9 @@ function buildPackPdMechanization(entries: readonly { readonly code: string; rea
   const proposedEntry = pdMechEntries.find((e) => e.code === "PD_MECH_PROPOSED");
   const financeBlockedEntry = pdMechEntries.find((e) => e.code === "PD_MECH_FINANCE_BLOCKED");
   const kv = proposedEntry?.keyValues;
-  const factoryIdFromSummary = (summary: string | undefined): string | null => {
-    if (!summary) return null;
-    const idx = summary.indexOf(":");
-    return idx > 0 ? summary.slice(0, idx) : null;
-  };
 
   return {
-    proposedTargetFactoryId: factoryIdFromSummary(proposedEntry?.decisionSummary),
+    proposedTargetFactoryId: proposedEntry?.targetFactoryId ?? null,
     investmentCostUsd: num(kv?.investmentCostUsd ?? financeBlockedEntry?.keyValues?.investmentCostUsd),
     paybackQuarters: num(kv?.paybackQuarters),
     laborSavingsHeadcount: num(kv?.laborSavingsHeadcount),
