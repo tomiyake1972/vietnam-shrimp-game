@@ -122,19 +122,32 @@ export const AI_MEETING_TOOL_INPUT_SCHEMA = {
     proposals: {
       type: "array",
       maxItems: AI_MEETING_PROPOSAL_LIMITS.maxProposals,
-      description: "具体的な差分提案（無ければ空配列）。domainごとに使うフィールドが異なる（下記参照）。",
+      description:
+        "具体的な差分提案（無ければ空配列）。domainごとに使うフィールドが異なる（下記参照）。" +
+        "【重要】domain=SALESは、営業人員(salesForceHeadcount)が市場単位で共有される一方、" +
+        "販売数量(desiredQuantityTons)・価格調整(priceAdjustmentUsdPerHosoEqKg)は" +
+        "market×product単位という非対称な粒度である。そのためscopeで区別すること: " +
+        "scope=MARKET_PRODUCTはmarket・productが必須でsalesForceHeadcountは含めない。" +
+        "scope=MARKETはmarketとsalesForceHeadcountのみでproductは含めない" +
+        "（「日本向けPDに営業を3人追加」のような商品単位の営業人員配置は実在しない。" +
+        "営業人員を増やす提案は必ずscope=MARKETで、市場全体に対して行うこと）。",
       items: {
         type: "object",
         properties: {
           id: { type: "string" },
           domain: { type: "string", enum: PROPOSAL_DOMAIN_ENUM },
           rationale: { type: "string" },
-          // SALES: market, product必須。product/factoryはPRODUCTIONとも共用。
-          market: { type: "string", enum: ["CN", "US", "EU", "JP", "OTHER"], description: "domain=SALESのみ必須。" },
-          product: { type: "string", enum: ["hoso", "pd", "vap"], description: "domain=SALES/PRODUCTIONのみ必須。" },
-          desiredQuantityTons: { type: "number" },
-          priceAdjustmentUsdPerHosoEqKg: { type: "number" },
-          salesForceHeadcount: { type: "number" },
+          scope: {
+            type: "string",
+            enum: ["MARKET_PRODUCT", "MARKET"],
+            description: "domain=SALESのみ必須。MARKET_PRODUCT=販売数量/価格（market×product単位）、MARKET=営業人員（market単位）。",
+          },
+          // SALES: market必須（両scope共通）。product/factoryはPRODUCTIONとも共用。
+          market: { type: "string", enum: ["CN", "US", "EU", "JP", "OTHER"], description: "domain=SALESのみ必須（両scope共通）。" },
+          product: { type: "string", enum: ["hoso", "pd", "vap"], description: "domain=SALES(scope=MARKET_PRODUCTのみ)/PRODUCTIONで必須。scope=MARKETでは指定しないこと。" },
+          desiredQuantityTons: { type: "number", description: "domain=SALES(scope=MARKET_PRODUCT)/PRODUCTIONで使用。" },
+          priceAdjustmentUsdPerHosoEqKg: { type: "number", description: "domain=SALES(scope=MARKET_PRODUCT)で使用。" },
+          salesForceHeadcount: { type: "number", description: "domain=SALES(scope=MARKETのみ)で使用。市場全体の営業人員数（商品別ではない）。" },
           factoryId: { type: "string", description: "domain=PRODUCTION/LABORのみ必須。" },
           priority: { type: "number" },
           channel: { type: "string", enum: ["DOMESTIC", "IMPORT"], description: "domain=PROCUREMENTのみ必須。" },

@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { aiMeetingStructuredResponseSchema } from "../proposalSchema";
+import { aiMeetingProposalSchema, aiMeetingStructuredResponseSchema } from "../proposalSchema";
 import { validateAiMeetingProposals } from "../validation";
 import { AiMeetingProposal, CapexProposal, SalesProposal } from "../types";
 import { CompanyFixture } from "../../types";
@@ -96,27 +96,58 @@ test("AMM-10b: 同一CAPEX案件の重複提案は検出される", () => {
   assert.ok(results[1].issues.some((i) => i.includes("重複")));
 });
 
-test("AMM-12: sales-proposal-respects-market-level-headcount-structure — 販売提案はmarket×product単位で、salesForceHeadcountは0以上の整数", () => {
+test("AMM-12: sales-proposal-respects-market-level-headcount-structure — 営業人員(scope=MARKET)はmarket単位・0以上の整数、販売数量(scope=MARKET_PRODUCT)はmarket×product単位", () => {
   const fixture = minimalFixture();
-  const validSales: SalesProposal = { id: "s1", domain: "SALES", rationale: "test", market: "JP", product: "pd", salesForceHeadcount: 3 };
-  const invalidSales: SalesProposal = { id: "s2", domain: "SALES", rationale: "test", market: "JP", product: "pd", salesForceHeadcount: -1.5 };
-  const results = validateAiMeetingProposals([validSales, invalidSales], { fixture, currentTurn: 3, requestTurn: 3, cashUsd: 1_000_000 });
+  const validForce: SalesProposal = { id: "s1", domain: "SALES", scope: "MARKET", rationale: "test", market: "JP", salesForceHeadcount: 3 };
+  const invalidForce: SalesProposal = { id: "s2", domain: "SALES", scope: "MARKET", rationale: "test", market: "JP", salesForceHeadcount: -1.5 };
+  const validQuantity: SalesProposal = { id: "s3", domain: "SALES", scope: "MARKET_PRODUCT", rationale: "test", market: "JP", product: "pd", desiredQuantityTons: 100 };
+  const results = validateAiMeetingProposals([validForce, invalidForce, validQuantity], { fixture, currentTurn: 3, requestTurn: 3, cashUsd: 1_000_000 });
   assert.equal(results[0].valid, true);
   assert.equal(results[1].valid, false);
   assert.ok(results[1].issues.some((i) => i.includes("salesForceHeadcount")));
+  assert.equal(results[2].valid, true);
 });
 
-test("AMM-12b: proposalSchema.tsはSALES提案にmarket/productを要求する（会社全体や市場単位の粒度は許さない）", () => {
-  const missingMarket = {
+test("AMM-12b: proposalSchema.tsはSALES提案のscope未指定・market欠落を拒否する", () => {
+  const missingScope = {
     primarySpeaker: "COMMERCIAL",
     responses: [{ speaker: "COMMERCIAL", text: "販売を強化します。", proposalIds: ["s1"], factsUsed: [], standardAiReferences: [] }],
     requiresCeoSummary: false,
-    proposals: [{ id: "s1", domain: "SALES", rationale: "test", product: "pd", salesForceHeadcount: 3 }],
+    proposals: [{ id: "s1", domain: "SALES", rationale: "test", market: "JP", product: "pd", salesForceHeadcount: 3 }],
     meetingIntent: "GROW_AGGRESSIVELY",
     potentialStrategicChange: false,
   };
-  const result = aiMeetingStructuredResponseSchema.safeParse(missingMarket);
+  const result = aiMeetingStructuredResponseSchema.safeParse(missingScope);
   assert.equal(result.success, false);
+});
+
+test('AMM-12c: 「日本向けPDに営業を3人追加」のような商品単位の営業人員提案は、scope=MARKET_PRODUCTにsalesForceHeadcountを持たせても構造上生成できない（フィールドが黙って落ちる）', () => {
+  // scope=MARKET_PRODUCTのスキーマはsalesForceHeadcountを定義していないため、
+  // 仮にClaudeがこのフィールドを付けて返しても、Zodの既定挙動（未知キーの除去）で
+  // 結果オブジェクトからは消える＝「商品単位の営業人員」という意味論は最終的に成立しない。
+  const productLevelHeadcount = {
+    id: "s1",
+    domain: "SALES",
+    scope: "MARKET_PRODUCT",
+    rationale: "test",
+    market: "JP",
+    product: "pd",
+    salesForceHeadcount: 3,
+  };
+  const result = aiMeetingProposalSchema.safeParse(productLevelHeadcount);
+  assert.equal(result.success, true);
+  if (result.success) {
+    assert.equal((result.data as Record<string, unknown>).salesForceHeadcount, undefined);
+  }
+});
+
+test("AMM-12d: scope=MARKETの営業人員提案にproductを付けても、productは構造上保持されない", () => {
+  const withStrayProduct = { id: "s1", domain: "SALES", scope: "MARKET", rationale: "test", market: "JP", product: "pd", salesForceHeadcount: 3 };
+  const result = aiMeetingProposalSchema.safeParse(withStrayProduct);
+  assert.equal(result.success, true);
+  if (result.success) {
+    assert.equal((result.data as Record<string, unknown>).product, undefined);
+  }
 });
 
 test("AMM-18: Standard-AI-proposal-references-preserved — standardAiReferencesはZod検証を通過して保持される", () => {

@@ -144,17 +144,39 @@ trend情報は `previousQuarterFinancials`（turn-1の1四半期ぶんのみ）�
 ## 10. 提案（Proposal）スキーマとValidation層
 
 7ドメイン（SALES/PRODUCTION/PROCUREMENT/LABOR/FINANCE/CAPEX/VAP_PRODUCT_DEVELOPMENT）を
-`AiMeetingProposal` の判別共用体として定義（`types.ts`）。各ドメインは既存のDecision
-schemaの実際の粒度に合わせた（例: SALESは`market`×`product`単位＋`salesForceHeadcount`
-──`CompanySalesPlanEntry`が会社全体や市場単位ではなく市場×商品単位で営業人員を持つため。
-CAPEXは実在する`CapitalProjectType`10種のみ、`pdMechanization`は`targetFactoryId`必須）。
+`AiMeetingProposal` の共用体として定義（`types.ts`）。各ドメインは既存のDecision schemaの
+実際の粒度に合わせた（CAPEXは実在する`CapitalProjectType`10種のみ、`pdMechanization`は
+`targetFactoryId`必須）。
+
+**【M1.1で訂正】SALESドメインは単一の粒度ではない**: `app/lib/v2/sales/types.ts`の
+`CompanySalesPlanEntry`・`app/lib/v2/sales/salesForce.ts`の
+`validateSalesForceHeadcountBudget`を監査した結果、営業人員(`salesForceHeadcount`)は
+**市場単位で共有**される（同一market内の全product行が同一の`salesForceHeadcount`を
+持たなければならず、違反すると入力エラーになる）一方、販売数量(`desiredQuantityTons`)・
+価格調整(`priceAdjustmentUsdPerHosoEqKg`)は**market×product単位**という非対称な粒度
+であることが判明した（初版のドキュメントはこれを「SALESはmarket×product単位＋
+salesForceHeadcount」と誤って一体化して記載していた——初版実装のバグでもあった）。
+`SalesProposal`は`scope`で2種類に分離した:
+- `SalesQuantityProposal`（`scope: "MARKET_PRODUCT"`）: `market`＋`product`＋
+  `desiredQuantityTons`/`priceAdjustmentUsdPerHosoEqKg`のみ。`salesForceHeadcount`は含まない。
+- `SalesForceProposal`（`scope: "MARKET"`）: `market`＋`salesForceHeadcount`のみ。
+  `product`は含まない。
+
+「日本向けPDに営業を3人追加」のような商品単位の営業人員配置は、`aiMeetingProposalSchema`
+（discriminatedUnionではなくz.unionで実装。理由は両scopeが同じ`domain="SALES"`を共有する
+ため）を構造上通過できない（`scope=MARKET_PRODUCT`のスキーマは`salesForceHeadcount`
+フィールド自体を定義していないため、Claudeがこのフィールドを付けて返してもZodの既定挙動
+（未知キーの除去）で結果から消える）。プロンプト（`prompt.ts`）・tool定義の
+description（`claudeClient.ts`）双方にもこの区別を明示した。テストAMM-12/12b/12c/12dで
+この構造的制約を証明済み。
 
 Claude出力は以下の二段階で検証してからUIへ返す:
 1. **`proposalSchema.ts`（Zod）**: 型・enum・配列件数上限（responses<=3, proposals<=3等）の検証。
 2. **`validation.ts`**: 実データとの整合性検証——
    - company/factory/market/product/CAPEX種別の実在確認
    - 同一CAPEX案件（projectType×targetFactoryId）の重複検出
-   - sales headcount構造の妥当性（0以上の整数、market×product単位）
+   - sales提案のscope別妥当性（`scope=MARKET`は`salesForceHeadcount`が0以上の整数、
+     `scope=MARKET_PRODUCT`は`product`の実在確認と`desiredQuantityTons`の非負確認）
    - 数値の有限性（Zodの`.finite()`で担保）
    - 現在turnと一致しない場合は編集不可として`issues`へ記録
    - financiallyRisky（現金残高比の簡易heuristicによるsoft flag。M1では
@@ -302,3 +324,58 @@ aiMeetingHandlers.test.ts`（角括弧ディレクトリ内のhandlers.tsを直�
   smoke test経路を使い、実運用開始前に開発者が手動で数回確認することを推奨する。
 - 会話要約（compactSummary）は決定論的な文字列圧縮のみで、意味的な要約ではない。
   会話が長期化するユースケースが増えた場合、LLMベースの要約への切り替えを検討する余地がある。
+
+## 20. M1.1（Real API Smoke Test / Sales Schema Final Check）追記
+
+ChatGPT #05からの追加指示（前提HEAD `d5a8e57`）に基づく対応。
+
+### 20.1 Sales proposal schema最終監査（§4対応）
+
+M0/M1の初版実装には、実際にご指摘のバグが存在した。`SalesProposal`が1つのオブジェクトに
+`market`・`product`・`salesForceHeadcount`を同居させており、「Japan PDに営業を3人追加」
+という、ShrimpXには存在しない粒度（商品単位の営業人員）の提案が構造上作れてしまっていた。
+
+監査の結果（`app/lib/v2/sales/types.ts`の`CompanySalesPlanEntry`、
+`app/lib/v2/sales/salesForce.ts`の`validateSalesForceHeadcountBudget`）、実際のゲーム構造は:
+- 営業人員(`salesForceHeadcount`): **market単位**で共有（同一market内の全product行が
+  同一の値を持たなければならず、違反は入力エラー）
+- 販売数量・価格調整: **market×product単位**
+
+という非対称な粒度であることを確認し、`SalesProposal`を`scope`で2種類（`MARKET_PRODUCT`
+＝販売数量/価格、`MARKET`＝営業人員）へ分離した（詳細は§10参照）。修正後、以下のテストで
+「無効な提案が構造上生成・validation通過できないこと」を証明した:
+- AMM-12: `scope=MARKET`は`salesForceHeadcount`のみ検証、`scope=MARKET_PRODUCT`は
+  `product`実在確認・`desiredQuantityTons`非負確認のみ検証（validation.ts）
+- AMM-12b: `scope`未指定のSALES提案はZodで拒否される
+- AMM-12c: `scope=MARKET_PRODUCT`に`salesForceHeadcount`を付けても、Zodの既定挙動
+  （未知キー除去）で結果から消え、「商品単位の営業人員」という意味論は成立しない
+- AMM-12d: `scope=MARKET`に`product`を付けても、同様に結果から消える
+
+### 20.2 実Claude API Smoke Test（§1・§2・§5対応）
+
+`scripts/aiMeetingRealApiSmokeTest.ts`を新設した。8つの最低ケース（CFO質問・COO質問・
+Commercial質問・CEO/strategy質問・CEO summary要求・primary+secondaryが必要な投資質問・
+structured proposalを返す質問・比較的長いPlayer message）を実行し、各callで
+model/inputTokens/outputTokens/latencyMs/stopReason/retryCount/schemaValidationResult/
+primarySpeaker/secondarySpeaker/proposalCountを記録する設計。CIには組み込まない
+（`npm test`・tscからはこのスクリプト自体を呼ばない）。
+
+**本セッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため、実APIでの
+smoke testは実施していない（`REAL_API_SMOKE_NOT_RUN`）**。実行すると
+`docs/standard_ai/benchmarks/ai_meeting_real_api_smoke_test.md`にその旨と、
+API keyを持つ開発者が手動実行するための手順（コマンド例・評価観点）が出力される。
+手順:
+```
+ANTHROPIC_API_KEY=sk-ant-... npx tsx scripts/aiMeetingRealApiSmokeTest.ts
+```
+
+### 20.3 変更ファイル（M1.1）
+
+`types.ts`（SalesProposal分離）・`proposalSchema.ts`（discriminatedUnion→z.union、
+salesQuantity/salesForceの2スキーマ化）・`validation.ts`（scope別検証）・
+`claudeClient.ts`（tool JSON schemaへscope・粒度の説明追加）・`prompt.ts`
+（システムプロンプトのSALES提案ガイダンス訂正）・`__tests__/proposalValidation.test.ts`
+（AMM-12/12bの内容更新＋AMM-12c/12d新設）・`scripts/aiMeetingCapacityBenchmark.ts`
+（worst-caseペイロードを新schemaへ追従）。**Standard AI・ゲームエンジン・既存の
+Decision schema自体（`app/lib/v2/sales/`等）への変更はなし**（AI Management Meeting
+モジュール内のみの修正）。

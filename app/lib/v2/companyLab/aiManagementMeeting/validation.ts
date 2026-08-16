@@ -49,12 +49,17 @@ function validateOne(proposal: AiMeetingProposal, ctx: ValidationContext, seenCa
 
   switch (proposal.domain) {
     case "SALES": {
+      // 【M1.1・Sales proposal schema最終監査】営業人員(salesForceHeadcount)は市場単位
+      // （scope=MARKET）、販売数量・価格調整はmarket×product単位（scope=MARKET_PRODUCT）
+      // という非対称な粒度を、ここでも型ごとに個別に検証する（zodのunionを通過した後の
+      // 二段目の防御）。
       if (!DEMAND_MARKET_IDS.includes(proposal.market)) issues.push(`市場 "${proposal.market}" は存在しません。`);
-      if (!PRODUCTS.includes(proposal.product)) issues.push(`商品 "${proposal.product}" は存在しません。`);
-      if (!nonNegativeOrUndefined(proposal.desiredQuantityTons)) issues.push("desiredQuantityTonsは0以上である必要があります。");
-      if (proposal.salesForceHeadcount !== undefined) {
+      if (proposal.scope === "MARKET_PRODUCT") {
+        if (!PRODUCTS.includes(proposal.product)) issues.push(`商品 "${proposal.product}" は存在しません。`);
+        if (!nonNegativeOrUndefined(proposal.desiredQuantityTons)) issues.push("desiredQuantityTonsは0以上である必要があります。");
+      } else {
         if (!Number.isInteger(proposal.salesForceHeadcount) || proposal.salesForceHeadcount < 0) {
-          issues.push("salesForceHeadcountは0以上の整数である必要があります（市場×商品ごとの営業人員配置）。");
+          issues.push("salesForceHeadcountは0以上の整数である必要があります（市場全体で共有される人数。商品単位ではない）。");
         }
       }
       break;

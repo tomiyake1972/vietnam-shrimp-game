@@ -89,7 +89,7 @@ function worstCaseResponse(): AiMeetingStructuredResponse {
     requiresCeoSummary: true,
     proposals: [
       { id: "p1", domain: "CAPEX", rationale, projectType: "pdMechanization", targetFactoryId: "F1", requestedBudgetUsd: 500_000 },
-      { id: "p2", domain: "SALES", rationale, market: "JP", product: "pd", desiredQuantityTons: 100, salesForceHeadcount: 3 },
+      { id: "p2", domain: "SALES", scope: "MARKET_PRODUCT", rationale, market: "JP", product: "pd", desiredQuantityTons: 100, priceAdjustmentUsdPerHosoEqKg: -0.05 },
       { id: "p3", domain: "FINANCE", rationale, desiredAmountUsd: 300_000, desiredTermQuarters: 8 },
     ],
     meetingIntent: "DEFER_CAPEX",

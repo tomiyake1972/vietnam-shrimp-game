@@ -73,14 +73,38 @@ interface AiMeetingProposalBase {
   readonly rationale: string;
 }
 
-export interface SalesProposal extends AiMeetingProposalBase {
+/**
+ * 【M1.1・Sales proposal schema最終監査での訂正】ShrimpXの実際のデータ構造
+ * （app/lib/v2/sales/types.ts の CompanySalesPlanEntry、および
+ * app/lib/v2/sales/salesForce.ts の validateSalesForceHeadcountBudget）を
+ * 監査した結果、営業人員(salesForceHeadcount)は「市場単位で共有」される
+ * （同一market内の全product行が同一のsalesForceHeadcountを持たなければならず、
+ * 違反すると入力エラーになる）一方、販売数量(desiredQuantity)・価格調整
+ * (priceAdjustmentUsdPerHosoEqKg)はmarket×product単位で独立に決まる、という
+ * 非対称な粒度であることが判明した。当初のSalesProposal（1つのproposal内に
+ * market・product・salesForceHeadcountを同居させる設計）は、この非対称性を
+ * 表現できず、「Japan PDにsalespersonを3人追加」のような、実際には存在しない
+ * 粒度（商品単位の営業人員）の提案が構造上作れてしまっていた。
+ * scopeで2種類に分離することで、この種の無効な提案がスキーマレベルで
+ * 生成・validation通過できないようにする。
+ */
+export interface SalesQuantityProposal extends AiMeetingProposalBase {
   readonly domain: "SALES";
+  readonly scope: "MARKET_PRODUCT";
   readonly market: DemandMarketId;
   readonly product: Product;
   readonly desiredQuantityTons?: number;
   readonly priceAdjustmentUsdPerHosoEqKg?: number;
-  readonly salesForceHeadcount?: number;
 }
+
+export interface SalesForceProposal extends AiMeetingProposalBase {
+  readonly domain: "SALES";
+  readonly scope: "MARKET";
+  readonly market: DemandMarketId;
+  readonly salesForceHeadcount: number;
+}
+
+export type SalesProposal = SalesQuantityProposal | SalesForceProposal;
 
 export interface ProductionProposal extends AiMeetingProposalBase {
   readonly domain: "PRODUCTION";

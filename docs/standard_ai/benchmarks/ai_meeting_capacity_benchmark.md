@@ -7,9 +7,9 @@
 
 使用モデル: claude-haiku-4-5-20251001 / maxTokens: 4096
 
-- worst-case構造化応答（responses3件＋proposals3件＋factsUsed6件＋standardAiReferences3件）のJSON長: 2502文字
-- 出力トークン概算（2.8文字/トークン経験則）: 894トークン
-- maxTokens(4096)に対する余裕: 3202トークン（78%）
+- worst-case構造化応答（responses3件＋proposals3件＋factsUsed6件＋standardAiReferences3件）のJSON長: 2541文字
+- 出力トークン概算（2.8文字/トークン経験則）: 908トークン
+- maxTokens(4096)に対する余裕: 3188トークン（78%）
 
 | シナリオ | 履歴件数(truncation後) | userMessage概算トークン |
 |---|---|---|

@@ -43,14 +43,32 @@ const proposalBaseFields = {
   rationale: z.string(),
 };
 
-const salesProposalSchema = z.object({
+// 【M1.1・Sales proposal schema最終監査】ShrimpXでは営業人員(salesForceHeadcount)は
+// 市場単位で共有される一方、販売数量・価格調整はmarket×product単位という非対称な粒度
+// （app/lib/v2/sales/salesForce.ts の validateSalesForceHeadcountBudget が、同一market内で
+// productごとに異なるsalesForceHeadcountを指定するとエラーにすることで、この粒度を
+// 実際に強制している）。scopeで2種類に分離し、「Japan PDにsalespersonを3人追加」のような
+// 存在しない粒度（商品単位の営業人員）の提案が構造上作れないようにする。
+const marketEnum = z.enum(DEMAND_MARKET_IDS as unknown as [string, ...string[]]);
+
+/** market×product単位: 販売数量・価格調整のみ（営業人員はここには持たせない）。 */
+const salesQuantityProposalSchema = z.object({
   ...proposalBaseFields,
   domain: z.literal("SALES"),
-  market: z.enum(DEMAND_MARKET_IDS as unknown as [string, ...string[]]),
+  scope: z.literal("MARKET_PRODUCT"),
+  market: marketEnum,
   product: z.enum(PRODUCTS),
   desiredQuantityTons: z.number().finite().optional(),
   priceAdjustmentUsdPerHosoEqKg: z.number().finite().optional(),
-  salesForceHeadcount: z.number().finite().optional(),
+});
+
+/** 市場単位: 営業人員のみ（商品は持たせない。同一市場の全商品へ同じ人数が適用される）。 */
+const salesForceProposalSchema = z.object({
+  ...proposalBaseFields,
+  domain: z.literal("SALES"),
+  scope: z.literal("MARKET"),
+  market: marketEnum,
+  salesForceHeadcount: z.number().finite(),
 });
 
 const productionProposalSchema = z.object({
@@ -103,8 +121,13 @@ const vapProposalSchema = z.object({
   spendTierUsd: z.number().finite(),
 });
 
-export const aiMeetingProposalSchema = z.discriminatedUnion("domain", [
-  salesProposalSchema,
+// 【discriminatedUnionではなくz.unionを使う理由】salesQuantityProposalSchemaと
+// salesForceProposalSchemaは、どちらもdomain="SALES"を共有し、scopeで区別する
+// （2階層discriminated unionはzodのバージョン依存の癖があり、単純さを優先する
+// 三宅さんの追加指示§7の方針にも合致するため、素直なz.unionへ統一した）。
+export const aiMeetingProposalSchema = z.union([
+  salesQuantityProposalSchema,
+  salesForceProposalSchema,
   productionProposalSchema,
   procurementProposalSchema,
   laborProposalSchema,
