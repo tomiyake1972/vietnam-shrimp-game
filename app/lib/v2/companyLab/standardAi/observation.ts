@@ -189,6 +189,12 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
       currentRegularHeadcount,
       skillByProduct,
       attendanceRate: baseline ? unwrapUnit(baseline.attendanceRate) : 1,
+      pdMechanization: {
+        previousQuarterPdUtilization: ownState.pdUtilizationByFactory.find((u) => u.factoryId === f.factoryId)?.previousQuarterPdUtilization ?? 0,
+        hasActiveOrCompletedProject: ownState.capexState.portfolio.projects.some(
+          (p) => p.projectType === "pdMechanization" && p.targetFactoryId === f.factoryId && (isActiveStatus(p.status) || p.status === "completed")
+        ),
+      },
     };
   });
 }

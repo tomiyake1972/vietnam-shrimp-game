@@ -160,6 +160,7 @@ function factoryObservation(overrides: Partial<FactoryObservation> & Pick<Factor
     currentRegularHeadcount: 500,
     skillByProduct: { hoso: 1, pd: 1, vap: 1 },
     attendanceRate: 1,
+    pdMechanization: { previousQuarterPdUtilization: 0, hasActiveOrCompletedProject: false },
     ...overrides,
   };
 }

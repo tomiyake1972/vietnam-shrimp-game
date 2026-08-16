@@ -155,6 +155,16 @@ export interface StandardAiParameters {
   readonly capexCostSafetyRatio: number;
   /** 借入残高が会社規模推定に対してこの比率を超えたら、財務健全性を理由にcapexを見送る。 */
   readonly capexMaxLoanToSizeRatio: number;
+  /**
+   * 【CE-1新設】PD機械化（pdMechanization）案件の投資判断に使う、許容回収期間（四半期）。
+   * 「投資額 ÷ 想定四半期人件費削減額」がこの期間以内であれば経済性ありと判定する
+   * 基準しきい値。既存のcapexCurrentShortfallRatioThreshold等とは独立した、
+   * 労務生産性投資（機械化）専用の1つのしきい値。productOrientationMultipliers.pd
+   * とcapexCurrentShortfallRatioThresholdの比率（既存のFinancial Conservatism
+   * 由来）で会社ごとに実効的に加減されるため、この値自体は全社一律の基準値
+   * （初期値は校正前の暫定値、CE-1ベンチマーク実施前は変更しない）。
+   */
+  readonly pdMechanizationMaxPaybackQuarters: number;
 
   // --- 養殖 ---
   /** 養殖の期待収穫比率（池入れ量→収穫量の目安）。 */
@@ -267,6 +277,7 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   capexCashGateMode: "costBased",
   capexCostSafetyRatio: 0.5,
   capexMaxLoanToSizeRatio: 1.5,
+  pdMechanizationMaxPaybackQuarters: 12,
 
   expectedAquacultureHarvestRatio: 0.9,
   aquacultureIntensity: 0.6,

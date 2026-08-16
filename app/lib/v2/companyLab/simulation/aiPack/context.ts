@@ -97,6 +97,7 @@ const EMPTY_STRATEGY: PackStrategy = {
   newFactory: null,
   availability: "NOT_RECORDED",
   crisis: null,
+  pdMechanization: null,
   profile: null,
 };
 

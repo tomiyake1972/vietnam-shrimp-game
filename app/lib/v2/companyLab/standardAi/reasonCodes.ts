@@ -159,7 +159,15 @@ export type StandardAiReasonCode =
   | "CRISIS_CAPEX_PAUSED" // 危機のため新規設備投資提案（新工場含む）を停止した（着工済み案件は維持）
   | "CRISIS_SALES_HIRING_STOPPED" // 危機のため営業採用を停止した
   // --- Strategy Profile Quantification（Phase SP-Q1） ---
-  | "PROFILE_BIAS_APPLIED"; // 会社別ManagementProfile/OrientationProfileのバイアスをStandardAiParametersへ適用した（mode=ONの時のみ）
+  | "PROFILE_BIAS_APPLIED" // 会社別ManagementProfile/OrientationProfileのバイアスをStandardAiParametersへ適用した（mode=ONの時のみ）
+  // --- 【Standard AI Capability Expansion・Phase CE-1】PD機械化 ---
+  | "PD_MECH_CONSIDERED" // PD機械化候補として工場を評価対象に含めた
+  | "PD_MECH_LOW_UTILIZATION" // PD稼働率が低く機械化を検討する段階にないため候補から外した
+  | "PD_MECH_PAYBACK_UNATTRACTIVE" // 想定回収期間がしきい値を超えるため候補から外した
+  | "PD_MECH_ALREADY_ACTIVE" // 当該工場は既に機械化案件が進行中／完了しているため重複提案しない
+  | "PD_MECH_FINANCE_BLOCKED" // 財務ゲート（現金・借入余力）を満たさないため見送り
+  | "PD_MECH_PROPOSED" // PD機械化案件を提案（経済性・戦略適合を踏まえて工場を選定）
+  | "PD_MECH_DEFERRED"; // 当期はPD機械化案件を見送り（既定の正常な結果）
 
 export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CONTRACT_FULFILLMENT_PRIORITY",
@@ -283,6 +291,13 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CRISIS_CAPEX_PAUSED",
   "CRISIS_SALES_HIRING_STOPPED",
   "PROFILE_BIAS_APPLIED",
+  "PD_MECH_CONSIDERED",
+  "PD_MECH_LOW_UTILIZATION",
+  "PD_MECH_PAYBACK_UNATTRACTIVE",
+  "PD_MECH_ALREADY_ACTIVE",
+  "PD_MECH_FINANCE_BLOCKED",
+  "PD_MECH_PROPOSED",
+  "PD_MECH_DEFERRED",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

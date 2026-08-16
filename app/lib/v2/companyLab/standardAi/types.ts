@@ -55,6 +55,21 @@ export interface FactoryObservation {
   readonly currentRegularHeadcount: number;
   readonly skillByProduct: ProductAmount;
   readonly attendanceRate: number;
+  /**
+   * 【Standard AI Capability Expansion・Phase CE-1】このFactoryのPD省人化投資
+   * （pdMechanization）候補評価に必要な最小限の観測。前四半期のPD稼働率と、
+   * 既にこのFactoryへ稼働中/完成済みのpdMechanization案件が存在するか
+   * （＝これ以上投資しても得られる削減余地がほぼ無い、または重複提案になる）
+   * だけを持つ。機械化レベル・実効PD係数そのものはここでは持たない
+   * （companyLab/pdMechanizationState.tsが唯一の情報源であり、Standard AIの
+   * 候補判断に必要な最小限の値だけをobservation層へ写す）。
+   */
+  readonly pdMechanization: {
+    /** companyLab/types.ts CompanyOwnState.pdUtilizationByFactoryをそのまま転記。 */
+    readonly previousQuarterPdUtilization: number;
+    /** pdMechanization案件がこのFactoryに存在し、稼働中(active)または完成済みか。 */
+    readonly hasActiveOrCompletedProject: boolean;
+  };
 }
 
 /**

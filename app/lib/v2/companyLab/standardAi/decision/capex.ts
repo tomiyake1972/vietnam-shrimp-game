@@ -20,12 +20,16 @@
 import { CapexDecisionInput, CapexProjectProposalInput, CapitalProjectType } from "../../../capex/types";
 import { CAPEX_PARAMETERS_V1, CapexParameters } from "../../../capex/parameters";
 import { computeCandidateProjectSpaceUnits } from "../../../capex/factorySpace";
+import { PD_MECHANIZATION_PARAMETERS_V1 } from "../../../capex/pdMechanization";
+import { PRODUCTION_PARAMETERS_V1 } from "../../../production/parameters";
+import { effectiveEfficiencyPerHeadTons } from "../../../production/labor";
+import { FINANCE_PARAMETERS_V1 } from "../../../finance/parameters";
 import { Product } from "../../../market/types";
 import { CompanyFixture } from "../../types";
 import { minimumAcceptablePremium } from "../../premiumPolicy";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
-import { ProductAmount, StandardAiObservation } from "../types";
+import { FactoryObservation, ProductAmount, StandardAiObservation } from "../types";
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
 
 const EPSILON = 1e-6;
@@ -79,6 +83,11 @@ export const STANDARD_AI_PROPOSABLE_CAPEX_TYPES: readonly CapitalProjectType[] =
   // ここは「Standard AI が提案しうる種別の唯一の一覧」としての定数であるため、
   // 監査・AI Analysis Pack が実態と食い違わないよう追加している。
   "newFactoryConstruction",
+  // 【Standard AI Capability Expansion・Phase CE-1】PD省人化投資（pdMechanization）を
+  // 候補種別として追加した。既存のPDライン増設（能力増強）とは別の投資判断軸
+  // （労務生産性の向上）であり、buildPdMechanizationCapexCandidate()が専用の
+  // 評価ゲート群を持つ（既存のPDライン増設ロジックは一切変更しない）。
+  "pdMechanization",
 ];
 
 export interface CapexPlanResult {
@@ -482,6 +491,227 @@ export function buildStandardAiCapexDecision(
       } else if (trend !== undefined && trend >= trendThreshold && utilizationOk && noExcess && safe && !growthEntrySpace.feasible) {
         recordSpaceInfeasible(LINE_EXPANSION_BY_PRODUCT[product], growthEntrySpace.requiredSpaceUnits);
       }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // 【Standard AI Capability Expansion・Phase CE-1】PD省人化投資（pdMechanization）
+  // ---------------------------------------------------------------------
+  //
+  // 【狙い（指示§1）】既存のPDライン増設（能力増強）とは別の投資選択肢として、
+  // 「PDを省人化して労務生産性を上げる」を追加する。JPQのような品質・PD志向の
+  // 会社が"必ず機械化する"という強制ルールは作らず（指示§5禁止）、既存の
+  // ManagementProfile/CompanyOrientationProfile（指示§9）が生む自然なバイアスと、
+  // 工場ごとの実際の経済性（回収期間）だけで判断する。
+  //
+  // 【対象externalシグナル】新設したobservation.factories[].pdMechanization
+  // （前四半期PD稼働率・既存/進行中案件の有無）だけを使い、新しい生産量観測は
+  // 作らない。PD生産量は「前四半期PD稼働率 × 実効PD能力」から逆算する
+  // （companyLab/pdMechanizationState.tsが実際に使うのと同じ稼働率の意味）。
+  //
+  // 【経済性（指示§8）】既存のeffectiveEfficiencyPerHeadTons()をそのまま使い、
+  // 機械化前後（PD係数: baseCoefficient→floorCoefficient、いずれも
+  // PRODUCTION_PARAMETERS_V1由来で新しい効果値は作らない）の必要Worker数の差から
+  // 想定四半期人件費削減額を求め、投資額（capexParams由来）との比で回収期間を計算する。
+  //
+  // 【戦略適合（指示§9・§13）】新しいStrategyProfile型は作らない。
+  // 既存のproductOrientationMultipliers.pd（商品志向）と、既存の
+  // capexCurrentShortfallRatioThreshold（SP-Q2のcapexHurdleBiasRatioにより
+  // CONSVで既に引き上げ済み＝財務保守性の比率）から、許容回収期間を会社ごとに
+  // 加減する。新規パラメータはpdMechanizationMaxPaybackQuartersの1つのみ
+  // （基準しきい値、校正前の暫定値、CE-1ベンチマーク前は変更しない・指示§39）。
+  //
+  // 【工場選定（指示§15・16）】主工場ハードコードをしない。稼働中/完成済み案件が
+  // 無い全工場を評価し、回収期間が最も短い（＝最も経済的な）工場を1件だけ選ぶ
+  // （指示§20-22・既存の「1区分1提案/turn」慣行に合わせる）。
+  {
+    const pdMechType: CapitalProjectType = "pdMechanization";
+    const pdMechGate = financialGateFor(pdMechType);
+    const pdMechSpace = checkSpaceFeasible(pdMechType);
+    const investmentCostUsd = projectCostUsdFor(pdMechType, capexParams);
+    const financialConservatismRatio =
+      params.capexCurrentShortfallRatioThreshold / STANDARD_AI_PARAMETERS_V1.capexCurrentShortfallRatioThreshold;
+    // 【戦略適合（指示§9・10-14）】productOrientationMultipliers（会社ごとの商品志向、
+    // orientationProfile.ts由来・既存フィールド）は、HOSO（汎用コモディティ品）を含めた
+    // 3商品間の"相対的な"重みづけである（絶対値は会社ごとの基準が異なり、単独では
+    // 「PD機械化を好むか」を表さない。例: japanQualityはvap=1.2が最大でpd=0.95は
+    // 基準1.0未満だが、hoso=0.85よりは高く、"コモディティのHOSOよりPDを選好する"
+    // という関係は保たれている）。ここではPD対HOSOの比（pd/hoso）を「コモディティ
+    // 増強より高付加価値化・省人化を選ぶ度合い」として使う。全員1.0（neutral)の
+    // BALでは比が1になり特別扱いされない（指示§14）。新しいStrategyProfile型は
+    // 作らず、既存のorientationProfile.tsの値をそのまま比として再利用するだけ。
+    const productOrientationHoso = params.productOrientationMultipliers.hoso ?? 1;
+    const productOrientationPd = params.productOrientationMultipliers.pd ?? 1;
+    const strategyFitMultiplier = productOrientationHoso > EPSILON ? productOrientationPd / productOrientationHoso : 1;
+    const effectiveMaxPaybackQuarters =
+      financialConservatismRatio > EPSILON
+        ? (params.pdMechanizationMaxPaybackQuarters * strategyFitMultiplier) / financialConservatismRatio
+        : params.pdMechanizationMaxPaybackQuarters;
+
+    const regularBaseEfficiencyPerHeadTons = PRODUCTION_PARAMETERS_V1.labor.regularEfficiencyPerHeadTons;
+    const efficiencyBeforeMechanization = effectiveEfficiencyPerHeadTons(
+      regularBaseEfficiencyPerHeadTons,
+      "pd",
+      PRODUCTION_PARAMETERS_V1,
+      PD_MECHANIZATION_PARAMETERS_V1.baseCoefficient
+    );
+    const efficiencyAfterMechanization = effectiveEfficiencyPerHeadTons(
+      regularBaseEfficiencyPerHeadTons,
+      "pd",
+      PRODUCTION_PARAMETERS_V1,
+      PD_MECHANIZATION_PARAMETERS_V1.floorCoefficient
+    );
+
+    interface PdMechCandidate {
+      readonly factory: FactoryObservation;
+      readonly pdProductionTonsEstimate: number;
+      readonly workersBeforeMechanization: number;
+      readonly workersAfterMechanization: number;
+      readonly laborSavingsHeadcount: number;
+      readonly expectedQuarterlySavingUsd: number;
+      readonly paybackQuarters: number;
+    }
+
+    const eligibleCandidates: PdMechCandidate[] = [];
+    for (const factory of [...observation.factories].sort((a, b) => a.factoryId.localeCompare(b.factoryId))) {
+      if (factory.pdMechanization.hasActiveOrCompletedProject) {
+        diagnostics.push({
+          code: "PD_MECH_ALREADY_ACTIVE",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: { factoryPdUtilization: factory.pdMechanization.previousQuarterPdUtilization },
+          decisionSummary: `${factory.factoryId}: PD機械化を検討対象から除外（既存/進行中案件あり）`,
+          message: `${factory.factoryId}には既にPD省人化投資案件が稼働中または完成済みのため、重複提案しない。`,
+        });
+        continue;
+      }
+      const pdUtilization = factory.pdMechanization.previousQuarterPdUtilization;
+      diagnostics.push({
+        code: "PD_MECH_CONSIDERED",
+        domain: "capex",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: { factoryPdUtilization: pdUtilization, capexPdInUseUtilizationThreshold: params.capexPdInUseUtilizationThreshold },
+        decisionSummary: `${factory.factoryId}: PD機械化候補として評価`,
+        message: `${factory.factoryId}のPD稼働率（前期実績 ${(pdUtilization * 100).toFixed(1)}%）を基に、PD省人化投資の候補として評価する。`,
+      });
+      if (pdUtilization < params.capexPdInUseUtilizationThreshold) {
+        diagnostics.push({
+          code: "PD_MECH_LOW_UTILIZATION",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: { factoryPdUtilization: pdUtilization, capexPdInUseUtilizationThreshold: params.capexPdInUseUtilizationThreshold },
+          decisionSummary: `${factory.factoryId}: PD稼働率が低いためPD機械化を見送り`,
+          message: `${factory.factoryId}のPD稼働率が低く、機械化による削減余地を検討する段階にないため見送る。`,
+        });
+        continue;
+      }
+
+      const pdProductionTonsEstimate = pdUtilization * factory.effectiveCapacityByProduct.pd;
+      const workersBeforeMechanization =
+        efficiencyBeforeMechanization > EPSILON ? pdProductionTonsEstimate / efficiencyBeforeMechanization : 0;
+      const workersAfterMechanization =
+        efficiencyAfterMechanization > EPSILON ? pdProductionTonsEstimate / efficiencyAfterMechanization : 0;
+      const laborSavingsHeadcount = Math.max(0, workersBeforeMechanization - workersAfterMechanization);
+      const expectedQuarterlySavingUsd = laborSavingsHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter;
+      const paybackQuarters = expectedQuarterlySavingUsd > EPSILON ? investmentCostUsd / expectedQuarterlySavingUsd : Number.POSITIVE_INFINITY;
+
+      if (!(paybackQuarters <= effectiveMaxPaybackQuarters)) {
+        diagnostics.push({
+          code: "PD_MECH_PAYBACK_UNATTRACTIVE",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: {
+            pdProductionTonsEstimate,
+            workersBeforeMechanization,
+            workersAfterMechanization,
+            laborSavingsHeadcount,
+            expectedQuarterlySavingUsd,
+            investmentCostUsd,
+            paybackQuarters: Number.isFinite(paybackQuarters) ? paybackQuarters : -1,
+            effectiveMaxPaybackQuarters,
+            strategyFitMultiplier,
+            financialConservatismRatio,
+          },
+          decisionSummary: `${factory.factoryId}: PD機械化の想定回収期間が長すぎるため見送り`,
+          message: `${factory.factoryId}のPD省人化投資は想定回収期間（${
+            Number.isFinite(paybackQuarters) ? paybackQuarters.toFixed(1) : "無限大"
+          }四半期）が許容基準（${effectiveMaxPaybackQuarters.toFixed(1)}四半期）を超えるため見送る。`,
+        });
+        continue;
+      }
+
+      eligibleCandidates.push({
+        factory,
+        pdProductionTonsEstimate,
+        workersBeforeMechanization,
+        workersAfterMechanization,
+        laborSavingsHeadcount,
+        expectedQuarterlySavingUsd,
+        paybackQuarters,
+      });
+    }
+
+    if (eligibleCandidates.length > 0) {
+      if (!pdMechGate.safe) {
+        diagnostics.push({
+          code: "PD_MECH_FINANCE_BLOCKED",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: {
+            financialGateCashSafe: pdMechGate.cashSafe ? 1 : 0,
+            financialGateBorrowingSafe: pdMechGate.borrowingSafe ? 1 : 0,
+            financialGateRequiredCashUsd: pdMechGate.requiredCashUsd,
+            cashUsd: observation.cashUsd,
+            investmentCostUsd,
+          },
+          decisionSummary: "PD機械化を財務ゲート未達のため見送り",
+          message: "経済性のあるPD省人化投資候補があったが、現金・借入余力の財務ゲートを満たさないため今期は見送る。",
+        });
+      } else if (!pdMechSpace.feasible) {
+        recordSpaceInfeasible(pdMechType, pdMechSpace.requiredSpaceUnits);
+      } else {
+        const best = [...eligibleCandidates].sort(
+          (a, b) => a.paybackQuarters - b.paybackQuarters || a.factory.factoryId.localeCompare(b.factory.factoryId)
+        )[0];
+        proposals.push({ projectType: pdMechType, targetFactoryId: best.factory.factoryId });
+        reserveSpace(pdMechSpace.requiredSpaceUnits);
+        diagnostics.push({
+          code: "PD_MECH_PROPOSED",
+          domain: "capex",
+          companyId: fixture.companyId,
+          severity: "info",
+          keyValues: {
+            pdProductionTonsEstimate: best.pdProductionTonsEstimate,
+            workersBeforeMechanization: best.workersBeforeMechanization,
+            workersAfterMechanization: best.workersAfterMechanization,
+            laborSavingsHeadcount: best.laborSavingsHeadcount,
+            expectedQuarterlySavingUsd: best.expectedQuarterlySavingUsd,
+            investmentCostUsd,
+            paybackQuarters: best.paybackQuarters,
+            effectiveMaxPaybackQuarters,
+            strategyFitMultiplier,
+            financialConservatismRatio,
+            eligibleCandidateCount: eligibleCandidates.length,
+          },
+          decisionSummary: `${best.factory.factoryId}: PD機械化を提案（想定回収 ${best.paybackQuarters.toFixed(1)}四半期）`,
+          message: `${best.factory.factoryId}のPD省人化投資が最も経済的（想定回収期間 ${best.paybackQuarters.toFixed(
+            1
+          )}四半期、想定人員削減 ${best.laborSavingsHeadcount.toFixed(1)}人）と判断し、提案する。`,
+        });
+      }
+    } else {
+      diagnostics.push({
+        code: "PD_MECH_DEFERRED",
+        domain: "capex",
+        companyId: fixture.companyId,
+        severity: "info",
+        message: "当期はいずれの工場もPD省人化投資の経済性・稼働率条件を満たさないため見送る（既定の正常な結果）。",
+      });
     }
   }
 

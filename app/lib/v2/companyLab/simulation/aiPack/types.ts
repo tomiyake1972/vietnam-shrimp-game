@@ -390,6 +390,26 @@ export interface PackStrategy {
       readonly absoluteDelta: number | null;
     }[];
   } | null;
+  /**
+   * 【Standard AI Capability Expansion・Phase CE-1・指示§24】今期のPD省人化投資
+   * （pdMechanization）候補評価の結果。候補が1件も無かった四半期（他工場が既に
+   * 稼働中/完成済みで対象外だった等）はnull（架空の値を作らない）。
+   * decision.reasonCodesにはPD_MECH_*の全発火コードを保存し、詳細な数値根拠は
+   * StandardAiDiagnosticEntry.keyValues（entries経由）から再構成できる。
+   */
+  readonly pdMechanization: {
+    /** 提案された場合はその工場、財務ゲートで止まった場合・候補は経済性を満たさず見送りだった場合はnull。 */
+    readonly proposedTargetFactoryId: string | null;
+    readonly investmentCostUsd: number | null;
+    readonly paybackQuarters: number | null;
+    readonly laborSavingsHeadcount: number | null;
+    readonly expectedQuarterlySavingUsd: number | null;
+    readonly effectiveMaxPaybackQuarters: number | null;
+    readonly strategyFitMultiplier: number | null;
+    readonly financialConservatismRatio: number | null;
+    readonly financeBlocked: boolean;
+    readonly reasonCodes: readonly string[];
+  } | null;
 }
 
 /**

@@ -340,6 +340,43 @@ export function captureStrategy(diagnostics: StandardAiQuarterDiagnostics, profi
           })),
         }
       : null,
+    pdMechanization: buildPackPdMechanization(diagnostics.entries),
+  };
+}
+
+/**
+ * 【Standard AI Capability Expansion・Phase CE-1】decision/capex.tsが積んだ
+ * PD_MECH_*のStandardAiDiagnosticEntryから、Pack用の要約を再構成する。
+ * ここで新しい判断・数値計算は行わない（既存entriesのkeyValues/decisionSummaryを
+ * 読み取るだけ）。PD_MECH_CONSIDERED等の工場別entryはdecisionSummaryが
+ * "<factoryId>: ..." の形式で始まる（decision/capex.ts側の既存の書式）ため、
+ * それを唯一の情報源として対象工場を復元する。
+ */
+function buildPackPdMechanization(entries: readonly { readonly code: string; readonly keyValues?: Readonly<Record<string, number>>; readonly decisionSummary?: string }[]): PackStrategy["pdMechanization"] {
+  const pdMechEntries = entries.filter((e) => e.code.startsWith("PD_MECH_"));
+  if (pdMechEntries.length === 0) return null;
+
+  const reasonCodes = pdMechEntries.map((e) => e.code);
+  const proposedEntry = pdMechEntries.find((e) => e.code === "PD_MECH_PROPOSED");
+  const financeBlockedEntry = pdMechEntries.find((e) => e.code === "PD_MECH_FINANCE_BLOCKED");
+  const kv = proposedEntry?.keyValues;
+  const factoryIdFromSummary = (summary: string | undefined): string | null => {
+    if (!summary) return null;
+    const idx = summary.indexOf(":");
+    return idx > 0 ? summary.slice(0, idx) : null;
+  };
+
+  return {
+    proposedTargetFactoryId: factoryIdFromSummary(proposedEntry?.decisionSummary),
+    investmentCostUsd: num(kv?.investmentCostUsd ?? financeBlockedEntry?.keyValues?.investmentCostUsd),
+    paybackQuarters: num(kv?.paybackQuarters),
+    laborSavingsHeadcount: num(kv?.laborSavingsHeadcount),
+    expectedQuarterlySavingUsd: num(kv?.expectedQuarterlySavingUsd),
+    effectiveMaxPaybackQuarters: num(kv?.effectiveMaxPaybackQuarters),
+    strategyFitMultiplier: num(kv?.strategyFitMultiplier),
+    financialConservatismRatio: num(kv?.financialConservatismRatio),
+    financeBlocked: financeBlockedEntry !== undefined,
+    reasonCodes,
   };
 }
 
