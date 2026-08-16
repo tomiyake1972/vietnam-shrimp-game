@@ -30,7 +30,20 @@ import { checkStagingAdminToken } from "./stagingAdmin";
 import { isProduction } from "./env";
 
 export const COMPANY_LAB_UI_SESSION_COOKIE_NAME = "shrimpx_company_lab_ui_session";
-const SESSION_TTL_MILLISECONDS = 8 * 60 * 60 * 1000; // 8時間（staging用の短命セッション）
+/**
+ * 【Persistence Architecture Phase 3・dataset HTTP 403調査】このセッションCookieは
+ * Company Lab UIログインだけでなく、Management ConsoleのSimulation Run API
+ * （app/api/v2/simulation-runs/_lib/context.ts:withSimulationRunApiContext）の
+ * 唯一の認証経路にもなっている。32Q Runは実プレイで数時間かかり得るため、
+ * 旧8時間のTTLは「一度ログインしたまま長時間の32Qプレイを続ける」という
+ * Management Consoleの実際の使い方に対して余裕が無さすぎた（実stagingで、
+ * Turn18のsave/resumeは成功していたのに、Turn26付近のserver dataset保存が
+ * HTTP 403で失敗する不具合を確認。時間経過に起因するセッション失効が最も説明力の
+ * 高い仮説であり、他の原因―body sizeやVercel deployment protection等―は
+ * 実測で否定的または未確認。断定できない部分は最終報告で明記する）。
+ * 24時間へ延ばし、1日がかりのstaging検証セッションの途中で切れる可能性を下げる。
+ */
+const SESSION_TTL_MILLISECONDS = 24 * 60 * 60 * 1000; // 24時間（staging用の短命セッション）
 const SESSION_SECRET_DOMAIN_PREFIX = "company-lab-ui-session-v1:";
 
 export const COMPANY_LAB_UI_LOGIN_PATH = "/v2/company-lab/play/login";

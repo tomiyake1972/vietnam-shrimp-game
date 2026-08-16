@@ -1,4 +1,4 @@
-// ShrimpX V2 — 32Q Management Console Phase 2: Simulation Run ストア（クライアント側）
+// ShrimpX V2 — 32Q Management Console: Simulation Run ストア（クライアント側）
 //
 // 【この層が解決する2つの課題（Phase 1の最大の残課題）】
 //   A. ブラウザをリロードすると Simulation 結果が消える
@@ -8,11 +8,26 @@
 // だったため、保存・読み出し・現在選択中の実行の管理をこの1モジュールへ集約する。
 // Console と Analysis は**同じ関数**を通してのみ Simulation Run に触れる。
 //
-// 【保存先は2系統。どちらに保存されたかを必ず呼び出し側へ返す】
-//   server  … /api/v2/simulation-runs（Redis）。他のブラウザ・他の端末からも読める。
-//   browser … このブラウザの localStorage。サーバー保存が使えない環境でも
-//             リロードで消えないようにするための確実な足場。
-// サーバー保存が失敗したことを黙って握りつぶさない（画面に保存先を出す）。
+// 【Persistence Architecture Phase 3・指示A/B】localStorageへ full StoredSimulationRun
+// （dataset・packCapture・resumePayload込みで実測約3.6MB@Q32）を保存する設計を廃止した。
+// 実stagingでTurn26付近、localStorage QuotaExceededErrorとserver dataset HTTP 403が
+// 同時に発生した（後者は別途根本修正。後述）。QuotaExceededErrorの方は、そもそも
+// localStorageが「大容量ゲーム状態の保存先」に向いていないという設計上の無理が
+// 原因であり、上限を上げても五十歩百歩（指示§2「5MBが大きいわけではない」）。
+//
+// 新しい責務分担:
+//   server（authoritative） … /api/v2/simulation-runs（Redis）。full StoredSimulationRun
+//                             （dataset・packCapture・resumePayload）はここにしか無い。
+//                             Turnを進められるかどうかは server 保存の成否だけで決まる
+//                             （browser側の成否はゲーム進行をブロックしない。指示§6/§7/§8）。
+//   browser（lightweight cache） … SimulationRunSummary（数百バイト）だけを持つ。
+//                             オフラインでの完全なgameplay resumeを保証する層ではなく、
+//                             「このブラウザで最近どのRunを触っていたか」の識別・
+//                             一覧表示・鮮度参考情報のためだけの軽量キャッシュ。
+//                             サーバーへ到達できない間は、このキャッシュから完全な
+//                             StoredSimulationRun を組み立てることはできない
+//                             （loadSimulationRunはその場合 null を返す。指示§22/§23
+//                             「browserだけで32Q完全復元を無理に維持しない」）。
 
 import { StoredSimulationRun, SimulationRunSummary, toSimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
 
@@ -35,21 +50,26 @@ async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Resp
 }
 
 /** localStorage のキー空間（他機能と衝突させない）。 */
-const RUN_KEY_PREFIX = "shrimpx:v2:simulationRun:";
 const INDEX_KEY = "shrimpx:v2:simulationRun:index";
 const ACTIVE_RUN_KEY = "shrimpx:v2:simulationRun:active";
+/**
+ * 【Persistence Architecture Phase 3・旧構造からの移行】旧実装（〜9b99db2）は
+ * `shrimpx:v2:simulationRun:{id}` へ full StoredSimulationRun のJSONを直接保存して
+ * いた。新実装はこのプレフィックスへ二度と書き込まないが、既にブラウザへ残っている
+ * 旧エントリ（MB単位）が居座ってlocalStorage quotaを圧迫し続けないよう、初回アクセス時に
+ * ベストエフォートで掃除する（指示§20/§21 migration/cleanup）。
+ */
+const LEGACY_FULL_RUN_KEY_PREFIX = "shrimpx:v2:simulationRun:";
 
 /**
- * ブラウザ内に残す実行数の上限。
- *
- * 32Q 1本の保存物は実測で約3.6MB（analytics dataset ＋ AI Analysis Pack 用の
- * per-turn capture。Vision・新工場判断の記録を含む。scripts/aiAnalysisPackProbe.ts）。
- * localStorage の一般的な上限は
- * オリジンあたり約5MBのため、ブラウザ側では**最新の1本だけ**を確実に残す方針にする
- * （2本入れると保存に失敗し、結局古い方を捨てて入れ直すことになる）。
- * 複数 run を保持したい場合はサーバー保存（Redis、上限20本）を使う。
+ * 【Persistence Architecture Phase 3】ブラウザに残すRun数の上限。
+ * 以前はfull run（実測約3.6MB@Q32）を保存していたため1本に絞っていたが、
+ * 新実装はSimulationRunSummary（数百バイト）だけを保持するため、サーバーの
+ * 保存上限（SIMULATION_RUN_RETENTION_LIMIT=20、simulation-runs/persistence/
+ * repository.ts参照）に合わせて増やしてよい（指示§19「Q32でもbrowser cacheは
+ * 数百KB以下を目標」に対し、20件でも数十KB程度で十分収まる）。
  */
-export const BROWSER_RUN_RETENTION_LIMIT = 1;
+export const BROWSER_RUN_RETENTION_LIMIT = 20;
 
 export type SimulationRunStorageLocation = "server" | "browser";
 
@@ -57,19 +77,53 @@ export interface SaveSimulationRunResult {
   readonly savedTo: readonly SimulationRunStorageLocation[];
   /** サーバー保存を試みて失敗した場合の理由（成功時・未試行時は null）。 */
   readonly serverError: string | null;
-  /** ブラウザ保存に失敗した場合の理由（容量超過など。成功時は null）。 */
+  /** ブラウザキャッシュ保存に失敗した場合の理由（成功時は null）。 */
   readonly browserError: string | null;
   /**
    * 【Save/Resume 長期永続化・鮮度整合 BLOCKER修正】browser・serverのどちらか一方でも
    * 保存に失敗していれば true（silent successを禁止する。指示§18/§19）。
    */
   readonly degraded: boolean;
+  /**
+   * 【Persistence Architecture Phase 3・指示§6/§8】サーバーがauthoritativeであるため、
+   * 「このTurnを正本として進めてよいか」はこのフラグだけで判断する。browser cacheの
+   * 成否はゲーム進行をブロックしない（degradedとしては表現するが、continue可能）。
+   */
+  readonly serverSaveSucceeded: boolean;
   /** この保存に採番されたpersistenceRevision。 */
   readonly persistenceRevision: number;
 }
 
 function hasWindow(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+/**
+ * 【指示§20/§21 migration/cleanup】旧形式（`shrimpx:v2:simulationRun:{id}` へ
+ * full StoredSimulationRunを直接保存していた形式）のエントリを、index（現行の
+ * summary一覧）に載っていないキー・または明らかに古い形式のキーとして検出し、
+ * ベストエフォートで削除する。新実装のbrowser cacheは数十件のsummary（数百バイト）
+ * だけしか持たないため、保存のたびに毎回走査しても軽い（1回のセッションで1回だけに
+ * 絞る最適化は行わない）。失敗しても致命的ではない（単に居座り続けるだけ）ため、
+ * 例外は握りつぶす。
+ */
+function cleanupLegacyFullRunEntries(): void {
+  if (!hasWindow()) return;
+  try {
+    const knownKeys = new Set([INDEX_KEY, ACTIVE_RUN_KEY]);
+    const toRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (!key || knownKeys.has(key)) continue;
+      if (!key.startsWith(LEGACY_FULL_RUN_KEY_PREFIX)) continue;
+      // 新実装はこのプレフィックス配下へ何も書かないため、存在すること自体が
+      // 旧形式（full run本体）の残留物だと判定できる。
+      toRemove.push(key);
+    }
+    for (const key of toRemove) window.localStorage.removeItem(key);
+  } catch {
+    // ベストエフォート。失敗しても何もしない（次回起動時にまた試みる）。
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -96,23 +150,8 @@ function seedRevisionCounter(id: string, knownRevision: number): void {
   if (knownRevision > current) revisionCounters.set(id, knownRevision);
 }
 
-/**
- * browser保存物・server保存物のどちらが新しいかを決める、唯一の比較ルール（指示§12 SSoT）。
- * 優先順位: (1) persistenceRevision（無ければ0） (2) completedTurns (3) savedAt（ISO文字列は
- * 辞書式比較＝時系列比較と一致する）。
- */
-function pickFresher(a: StoredSimulationRun | null, b: StoredSimulationRun | null): StoredSimulationRun | null {
-  if (!a) return b;
-  if (!b) return a;
-  const revA = a.persistenceRevision ?? 0;
-  const revB = b.persistenceRevision ?? 0;
-  if (revA !== revB) return revA > revB ? a : b;
-  if (a.run.completedTurns !== b.run.completedTurns) return a.run.completedTurns > b.run.completedTurns ? a : b;
-  return a.savedAt >= b.savedAt ? a : b;
-}
-
 // ---------------------------------------------------------------------
-// 1. ブラウザ保存
+// 1. ブラウザキャッシュ（軽量。SimulationRunSummaryだけを持つ）
 // ---------------------------------------------------------------------
 
 function readBrowserIndex(): SimulationRunSummary[] {
@@ -133,71 +172,33 @@ function writeBrowserIndex(summaries: readonly SimulationRunSummary[]): void {
 }
 
 /**
- * ブラウザへ保存する。容量超過（QuotaExceededError）で失敗した場合は、
- * **黙って諦めない** — 古い実行を消して再試行し、それでも入らなければ理由を返す。
+ * 【Persistence Architecture Phase 3】ブラウザキャッシュへ保存する対象は
+ * SimulationRunSummary（数百バイト）だけであり、dataset/packCapture/resumePayloadは
+ * 一切含まない（指示§3/§4）。数百バイト×20件程度のため、QuotaExceededErrorは
+ * 現実的にはほぼ起こらないはずだが、万一に備えて失敗を検知したら黙って諦めず理由を返す
+ * （指示§18/§19の方針を維持）。
  */
-function saveToBrowser(stored: StoredSimulationRun): string | null {
+function saveBrowserCache(stored: StoredSimulationRun): string | null {
   if (!hasWindow()) return "このブラウザには保存できません（localStorage が使えません）";
-  const id = stored.run.simulationRunId;
-  const payload = JSON.stringify(stored);
-
-  const index = readBrowserIndex().filter((s) => s.simulationRunId !== id);
-  index.unshift(toSimulationRunSummary(stored));
-  // 上限を超えた古い実行は本体ごと消す（index だけ消して本体を残すと孤児になる）。
-  for (const evicted of index.slice(BROWSER_RUN_RETENTION_LIMIT)) {
-    window.localStorage.removeItem(RUN_KEY_PREFIX + evicted.simulationRunId);
-  }
+  cleanupLegacyFullRunEntries();
+  const summary = toSimulationRunSummary(stored);
+  const index = readBrowserIndex().filter((s) => s.simulationRunId !== summary.simulationRunId);
+  index.unshift(summary);
   const kept = index.slice(0, BROWSER_RUN_RETENTION_LIMIT);
-
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      window.localStorage.setItem(RUN_KEY_PREFIX + id, payload);
-      writeBrowserIndex(kept);
-      return null;
-    } catch (e) {
-      // 1回目の失敗では、今回保存する1本を除く既存の実行をすべて捨てて再試行する。
-      if (attempt === 0) {
-        for (const other of kept.filter((s) => s.simulationRunId !== id)) {
-          window.localStorage.removeItem(RUN_KEY_PREFIX + other.simulationRunId);
-        }
-        // 【実ブラウザE2Eで発見】ここで index を新しい（まだ本体保存に成功していない）
-        // summaryへ書き換えてはならない。書き換えてしまうと、2回目の試行も失敗した場合に
-        // 「index（Run Historyの一覧・現在状態表示）は新しいcompletedTurnsを指しているのに、
-        // 本体（loadFromBrowserが返す実データ）は古いturnのまま」という不整合が生まれる
-        // （実測: confirm直後にQuota超過で本体保存が失敗した際、画面上部の概要が
-        // 「Current: 28/32Q」を指す一方、実際に復元されるstateはQ12のままという食い違いを
-        // 確認した）。indexの更新は、本体保存が実際に成功した場合（下のtryブロック内）だけに限る。
-        continue;
-      }
-      return `ブラウザ保存に失敗しました（${e instanceof Error ? e.name : String(e)}。保存物は約${Math.round(payload.length / 1024)}KBです）`;
-    }
-  }
-  return null;
-}
-
-function loadFromBrowser(simulationRunId: string): StoredSimulationRun | null {
-  if (!hasWindow()) return null;
   try {
-    const raw = window.localStorage.getItem(RUN_KEY_PREFIX + simulationRunId);
-    if (!raw) return null;
-    return JSON.parse(raw) as StoredSimulationRun;
-  } catch {
+    writeBrowserIndex(kept);
     return null;
+  } catch (e) {
+    return `ブラウザキャッシュ保存に失敗しました（${e instanceof Error ? e.name : String(e)}）`;
   }
 }
 
-/**
- * 【指示§20 stale browser cleanup】serverの方が新しく、かつそのbrowserキャッシュ更新にも
- * 失敗した場合に、古いbrowserエントリを残さず消す（indexからも消す＝孤児を作らない）。
- */
-function removeFromBrowser(simulationRunId: string): void {
-  if (!hasWindow()) return;
-  window.localStorage.removeItem(RUN_KEY_PREFIX + simulationRunId);
-  writeBrowserIndex(readBrowserIndex().filter((s) => s.simulationRunId !== simulationRunId));
+function loadBrowserCacheSummary(simulationRunId: string): SimulationRunSummary | null {
+  return readBrowserIndex().find((s) => s.simulationRunId === simulationRunId) ?? null;
 }
 
 // ---------------------------------------------------------------------
-// 2. サーバー保存（使えない環境では静かに諦めず、理由を返す）
+// 2. サーバー保存（authoritative。使えない環境では静かに諦めず、理由を返す）
 // ---------------------------------------------------------------------
 
 /**
@@ -217,6 +218,41 @@ function checkPartSize(part: string, value: unknown): string | null {
   );
 }
 
+/**
+ * 【Persistence Architecture Phase 3・指示§9/§10】HTTP 403は「保存先の認証セッションが
+ * 切れている／確立していない」ことを意味する（app/api/v2/simulation-runs/_lib/context.ts
+ * のwithSimulationRunApiContextが、Bearerトークンも有効なstagingセッションCookieも
+ * 無い場合にこのstatusを返す）。413（body too large）等の他のエラーと区別し、
+ * 再試行しても同じ理由で失敗し続けることをユーザーへ明示する
+ * （単なる「HTTP 403」より再ログインという次のアクションが分かる文言にする）。
+ */
+function describeHttpError(status: number): string {
+  if (status === 403) {
+    return (
+      "HTTP 403（認証セッションが無効です。staging管理ログイン " +
+      "/v2/company-lab/play/login のセッションが切れている可能性があります。" +
+      "別タブでログインし直してから、この画面で保存を再試行してください）"
+    );
+  }
+  return `HTTP ${status}`;
+}
+
+/**
+ * 【Persistence Architecture Phase 3・指示§10】HTTP statusだけでは403の原因
+ * （認証セッション切れ／Vercel deployment protection／middleware／その他）を
+ * 区別できない。失敗時はresponse bodyも読み、診断に使えるようにする
+ * （このAPIのエラー応答は`{error:{code,message}}`形式で秘密情報を含まない設計
+ * ―app/api/v2/simulation-runs/_lib/context.ts参照―のため、そのまま表示してよい）。
+ */
+async function readErrorBody(response: Response): Promise<string | null> {
+  try {
+    const text = await response.text();
+    return text.length > 0 ? text.slice(0, 500) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function postJson(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const response = await fetchWithTimeout("/api/v2/simulation-runs", {
@@ -224,7 +260,11 @@ async function postJson(body: unknown): Promise<{ ok: true } | { ok: false; erro
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
+    if (!response.ok) {
+      const bodyText = await readErrorBody(response);
+      const base = describeHttpError(response.status);
+      return { ok: false, error: bodyText ? `${base} — ${bodyText}` : base };
+    }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -311,84 +351,83 @@ async function listFromServer(): Promise<readonly SimulationRunSummary[]> {
 
 /**
  * Simulation Run を保存する。
- * ブラウザ保存を**必ず**行い、そのうえでサーバー保存を試みる
- * （サーバーが使えない環境でもリロードで結果が消えないことを保証するため）。
  *
- * 【Save/Resume 長期永続化・鮮度整合 BLOCKER修正】persistenceRevision はここで
- * 唯一採番する（呼び出し側は組み立てない＝SSoT。指示§12）。browser・serverの
- * どちらか一方でも失敗すれば degraded=true を返し、silent successにしない（指示§18/§19）。
+ * 【Persistence Architecture Phase 3・指示§6/§7/§8】サーバーがauthoritative。
+ * サーバー保存の成否だけが「このrevisionを正本として進めてよいか」を決める
+ * （呼び出し側はresult.serverSaveSucceededを見てTurn進行の可否を判断する）。
+ * ブラウザキャッシュ（軽量summaryのみ）の成否はdegraded表現には含めるが、
+ * ゲーム進行はブロックしない。
  */
 export async function saveSimulationRun(stored: StoredSimulationRun): Promise<SaveSimulationRunResult> {
   const persistenceRevision = nextRevisionFor(stored.run.simulationRunId);
   const stamped: StoredSimulationRun = { ...stored, persistenceRevision };
-  const browserError = saveToBrowser(stamped);
+  const browserError = saveBrowserCache(stamped);
   const serverError = await saveToServer(stamped);
   const savedTo: SimulationRunStorageLocation[] = [];
   if (browserError === null) savedTo.push("browser");
   if (serverError === null) savedTo.push("server");
-  return { savedTo, serverError, browserError, degraded: browserError !== null || serverError !== null, persistenceRevision };
+  return {
+    savedTo,
+    serverError,
+    browserError,
+    degraded: browserError !== null || serverError !== null,
+    serverSaveSucceeded: serverError === null,
+    persistenceRevision,
+  };
 }
 
 /**
  * Simulation Run を読み込む。
  *
- * 【Save/Resume 長期永続化・鮮度整合 BLOCKER修正】旧実装は
- * `loadFromBrowser(id) ?? loadFromServer(id)` で「browserにnon-nullな値さえあれば
- * 無条件にそれを使う」設計だった。ブラウザ保存が容量超過で古いまま失敗し続けても
- * その古い値が消えないため、より新しいserver保存物へ絶対にフォールスルーしない
- * という実バグがあった（reload後にcompletedTurnsが後退する。指示§1参照）。
- *
- * ここではbrowser・serverの両方を取得し、pickFresher（persistenceRevision→
- * completedTurns→savedAtの順）で選ぶ。選んだ側の revision を以後の採番の
- * 底上げに使う（seedRevisionCounter）ことで、reload後に続けて保存しても
- * revisionが逆行しない。
- *
- * serverの方が新しかった場合、browserのキャッシュも最新へ更新を試みる
- * （失敗時は黙って古いままにしない＝古いbrowserキャッシュだけが残る状態を解消する。
- * 指示§20「stale browser cleanup」）。
+ * 【Persistence Architecture Phase 3・指示§22】サーバーがauthoritative。
+ *   1. サーバーから読めれば、それを返す（persistenceRevisionカウンタもここで底上げする）。
+ *   2. サーバーから読めなければ null を返す。ブラウザキャッシュは
+ *      dataset/resumePayload/packCaptureを持たないため、ここから完全な
+ *      StoredSimulationRunを組み立てることはできない
+ *      （「browserだけで32Q完全復元」を無理に維持しない。指示§22/§23）。
+ *      一覧・識別のためのSimulationRunSummaryはloadBrowserCacheSummaryFallback
+ *      で別途取得できる（呼び出し側が「サーバー未接続だがこのRunは以前触ったことがある」
+ *      という表示だけしたい場合に使う）。
  */
 export async function loadSimulationRun(simulationRunId: string): Promise<StoredSimulationRun | null> {
-  const browser = loadFromBrowser(simulationRunId);
   const server = await loadFromServer(simulationRunId);
-  const chosen = pickFresher(browser, server);
-  if (!chosen) return null;
-  seedRevisionCounter(simulationRunId, chosen.persistenceRevision ?? 0);
+  if (!server) return null;
+  seedRevisionCounter(simulationRunId, server.persistenceRevision ?? 0);
+  saveBrowserCache(server);
+  return server;
+}
 
-  const browserRevision = browser?.persistenceRevision ?? 0;
-  const serverRevision = server?.persistenceRevision ?? 0;
-  if (server && serverRevision > browserRevision) {
-    const refreshError = saveToBrowser(server);
-    if (refreshError) removeFromBrowser(simulationRunId);
-  }
-  return chosen;
+/**
+ * 【Persistence Architecture Phase 3】サーバーへ到達できない場合に、せめて
+ * 「このブラウザで最近触っていたRun」の識別情報（軽量summary）だけを返す。
+ * これは完全な StoredSimulationRun ではなく、resume（続きからプレイ）には使えない
+ * （呼び出し側は「サーバーに接続できるまで続きはプレイできません」等の表示にとどめる）。
+ */
+export function loadBrowserCacheSummaryFallback(simulationRunId: string): SimulationRunSummary | null {
+  return loadBrowserCacheSummary(simulationRunId);
 }
 
 /**
  * 保存済み実行の一覧（Run selector 用）。
- * ブラウザ保存とサーバー保存を simulationRunId で統合し、保存が新しい順に並べる。
- * 同じ実行が両方にある場合は、より新しい方の要約を採る
- * （persistenceRevision→completedTurns→savedAtの順。loadSimulationRunと同じ
- * pickFresherの考え方を要約レベルへ適用し、一覧表示がQ8のような古い方の
- * completedTurnsを出さないようにする。指示§27）。
+ *
+ * 【Persistence Architecture Phase 3・指示§24/§27】Run Historyもサーバーの
+ * manifest（＝ここではlistFromServerが返す要約一覧）を正本とする。
+ * ブラウザ側のindexはあくまでキャッシュであり、サーバーから取得できた実行は
+ * 常にサーバー側の要約を優先する（ブラウザ側だけにしか無い実行――サーバーへ
+ * 一度も保存できていない、またはサーバーが一時的に読めない場合――だけ
+ * ブラウザのキャッシュ要約を補助的に載せる）。
  */
 export async function listSimulationRuns(): Promise<readonly SimulationRunSummary[]> {
   const browser = readBrowserIndex();
   const server = await listFromServer();
   const merged = new Map<string, SimulationRunSummary>();
+  // サーバーを常に正本として先に入れる。
   for (const s of server) merged.set(s.simulationRunId, s);
+  // ブラウザにしか無い実行（サーバー未到達・未保存）だけを補助的に加える。
   for (const b of browser) {
-    const existing = merged.get(b.simulationRunId);
-    merged.set(b.simulationRunId, existing && !isSummaryFresher(b, existing) ? existing : b);
+    if (!merged.has(b.simulationRunId)) merged.set(b.simulationRunId, b);
   }
   return [...merged.values()].sort((a, b) => (a.savedAt === b.savedAt ? a.simulationRunId.localeCompare(b.simulationRunId) : a.savedAt < b.savedAt ? 1 : -1));
-}
-
-function isSummaryFresher(a: SimulationRunSummary, b: SimulationRunSummary): boolean {
-  const revA = a.persistenceRevision ?? 0;
-  const revB = b.persistenceRevision ?? 0;
-  if (revA !== revB) return revA > revB;
-  if (a.completedTurns !== b.completedTurns) return a.completedTurns > b.completedTurns;
-  return a.savedAt >= b.savedAt;
 }
 
 /** 現在選択中の Simulation Run。Console と Analysis はこれで同じ実行を見る。 */

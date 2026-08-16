@@ -363,14 +363,15 @@ export function ManagementConsole() {
         result.savedTo.length === 0
           ? `保存できませんでした（${[result.browserError, result.serverError].filter(Boolean).join(" / ")}）`
           : result.savedTo.length === 2
-            ? "保存先: サーバー（Redis）＋このブラウザ"
+            ? "保存先: サーバー（Redis、正本）＋このブラウザ（軽量キャッシュ）"
             : result.savedTo[0] === "browser"
-              ? `保存先: このブラウザのみ（${result.serverError}）`
-              : `保存先: サーバーのみ（${result.browserError}）`
+              ? `⚠️ サーバー保存に失敗しました（${result.serverError}）。ブラウザの軽量キャッシュのみ更新（識別情報だけで、続きからは進められません）。`
+              : "保存先: サーバー（Redis、正本）のみ（ブラウザキャッシュは更新失敗。ゲーム進行には影響しません）"
       );
-      // 【指示§17/§31】両方失敗＝どこにも保存されていない状態でだけブロックする
-      // （片方だけの成功はdegradedとして継続可、と既存のstorageNote表示で伝える）。
-      const ok = result.savedTo.length > 0;
+      // 【Persistence Architecture Phase 3・指示§6/§7/§8】サーバーがauthoritative。
+      // Turnを進めてよいかどうかは server 保存の成否だけで決める
+      // （browser軽量キャッシュの成否はゲーム進行をブロックしない）。
+      const ok = result.serverSaveSucceeded;
       setPersistenceBlocked(!ok);
       if (ok) setLastPersisted({ completedTurns: session.run.completedTurns, revision: result.persistenceRevision });
       return ok;
@@ -380,12 +381,15 @@ export function ManagementConsole() {
 
   const runInternal = useCallback(
     async (turns: number) => {
-      // 【指示§17/§31】直前の保存でbrowser・server両方が失敗している場合、
-      // 見た目のTurnだけ進んで保存正本が追いつかない状態を許さない。
+      // 【Persistence Architecture Phase 3・指示§6/§8】サーバー保存（正本）が
+      // 失敗している場合、見た目のTurnだけ進んで保存正本が追いつかない状態を許さない
+      // （ブラウザの軽量キャッシュはgameplay resumeを保証する層ではないため、
+      // browserだけ成功していてもブロックする）。
       if (persistenceBlocked) {
         setErrorMessage(
-          "直前の保存がブラウザ・サーバーの両方で失敗しており、このまま進めると進行状況が保存されずに失われます。" +
-            "ネットワーク状態を確認するか、保存できる状態になってから再度お試しください（画面下部の保存先表示を参照）。"
+          "直前のサーバー保存（正本）が失敗しており、このまま進めると進行状況が保存されずに失われます。" +
+            "ネットワーク状態・stagingログインセッションを確認するか、保存できる状態になってから再度お試しください" +
+            "（画面下部の保存先表示を参照）。"
         );
         return;
       }
@@ -775,7 +779,9 @@ export function ManagementConsole() {
 
         {persistenceBlocked ? (
           <div className="mt-1.5 rounded-md border border-rose-700 bg-rose-950/60 px-3 py-2 text-xs text-rose-200" data-testid="persistence-blocked-banner">
-            ⚠️ 直前の保存がブラウザ・サーバーの両方で失敗しました。この状態のままTurnを進めると、進行状況が保存されずに失われます。
+            ⚠️ 直前のサーバー保存（正本）が失敗しました。この状態のままTurnを進めると、進行状況が保存されずに失われます。
+            HTTP 403の場合はstagingログインセッションが切れている可能性があります
+            （別タブで /v2/company-lab/play/login からログインし直してください）。
             保存できる状態になるまで、Turnを進めるボタンを無効化しています。
           </div>
         ) : null}
