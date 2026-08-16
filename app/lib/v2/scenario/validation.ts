@@ -5,6 +5,7 @@
 // （initializeScenarioは内部でこれを呼び、不正な場合にのみ例外化する）。
 
 import { COUNTRY_IDS, DEMAND_MARKET_IDS, CountryId, DemandMarketId } from "../market/types";
+import { PRODUCT_LIFECYCLE_PARAMETERS_V1, resolveProductLifecycleParameters } from "../market/productLifecycle";
 import { assertSortedKeyframes } from "./interpolation";
 import { ScenarioDefinition, ScenarioEvent, ScenarioValidationResult, ScenarioValidationError } from "./types";
 
@@ -213,6 +214,27 @@ export function validateScenarioDefinition(definition: ScenarioDefinition): Scen
   }
   if (definition.initialStateOverrides.initialDomesticProcurementIntentHosoEqTons < 0) {
     errors.push(`initialStateOverrides.initialDomesticProcurementIntentHosoEqTons は0以上である必要があります。`);
+  }
+
+  // 市場×商品ライフサイクル上書き（解決後のパラメータが市場モジュールの健全性
+  // 条件を満たすかを、市場モジュール自身の検証関数で確認する。検証規則を
+  // シナリオ側へ二重定義しない）。
+  if (definition.productLifecycleOverrides !== undefined) {
+    try {
+      resolveProductLifecycleParameters(PRODUCT_LIFECYCLE_PARAMETERS_V1, definition.productLifecycleOverrides);
+    } catch (e) {
+      errors.push(`productLifecycleOverrides: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // 構造需要アンカー
+  const anchor = definition.structuralDemandAnchor;
+  if (anchor !== undefined) {
+    if (!Number.isFinite(anchor.pullStrength) || anchor.pullStrength < 0 || anchor.pullStrength > 1) {
+      errors.push(
+        `structuralDemandAnchor.pullStrength は[0,1]の範囲である必要があります。受け取った値: ${anchor.pullStrength}`
+      );
+    }
   }
 
   return { valid: errors.length === 0, errors };

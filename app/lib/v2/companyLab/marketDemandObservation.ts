@@ -25,6 +25,7 @@
 import { DEMAND_MARKET_IDS, DemandMarketId, Product } from "../market/types";
 import { unwrapUnit } from "../core/units";
 import { computeMarketProductMix } from "../market/productLifecycle";
+import { resolveScenarioProductLifecycleParameters } from "../scenario/lifecycle";
 import type { ScenarioDefinition } from "../scenario/types";
 import type { CompanyLabState } from "./types";
 
@@ -106,7 +107,10 @@ export function buildInitialObservedMarketDemand(definition: ScenarioDefinition,
   const prehistory = definition.prehistory;
   const totalCountrySupply = Object.values(prehistory.countrySupplyHosoEqTons).reduce((sum, v) => sum + v, 0);
   const vietnamSupplyShare = totalCountrySupply > 0 ? prehistory.countrySupplyHosoEqTons.VN / totalCountrySupply : 0;
-  const mix = computeMarketProductMix(turn);
+  // 【Dynamic Scenario 1】商品構成比はシナリオ定義の実効パラメータで算出する
+  // （上書きの無いシナリオでは既定表と同一）。公開する観測需要と、ターン処理で
+  // 実際に使われる構成比が食い違わないようにする。
+  const mix = computeMarketProductMix(turn, resolveScenarioProductLifecycleParameters(definition));
 
   const entries = DEMAND_MARKET_IDS.map((market) => {
     const marketConsumption = prehistory.priorMarketConsumptionHosoEqTons[market] ?? 0;

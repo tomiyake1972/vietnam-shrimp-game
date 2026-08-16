@@ -10,6 +10,7 @@
 import { PeriodV2 } from "../core/period";
 import { HosoEqTons, UsdPerHosoEqKg, Ratio, Score0to100 } from "../core/units";
 import { CountryId, DemandMarketId, MarketQuarterResult } from "../market/types";
+import { ProductLifecycleOverrides } from "../market/productLifecycle";
 
 export class ScenarioValidationError extends Error {
   constructor(message: string) {
@@ -318,6 +319,59 @@ export interface ScenarioDefinition {
   readonly scheduledEvents: readonly ScenarioEvent[];
   readonly informationReleases: readonly InformationRelease[];
   readonly variationSettings: ScenarioVariationSettings;
+
+  /**
+   * 市場×商品の需要構成比（HOSO/PD/VAPの普及曲線）の部分上書き。
+   *
+   * 「日本のVAPはいつ立ち上がるか」「中国のPD/VAPはいつ高付加価値化するか」
+   * という**市場の長期構造**はシナリオ（世界の物語）の管轄であるという整理に
+   * 基づく。未指定のシナリオは市場モジュール既定値
+   * （PRODUCT_LIFECYCLE_PARAMETERS_V1）をそのまま使い、既存挙動と完全に一致する。
+   *
+   * 【シナリオが決めるのは構造であって結果ではない】ここで定義するのは
+   * 「その市場にその商品の需要が存在する（していく）」という構造だけであり、
+   * 各社が何トン売れるか・誰が高い価格を取るか・シェアがどうなるかは
+   * 従来どおり市場清算と5社の競争が決める。
+   */
+  readonly productLifecycleOverrides?: ProductLifecycleOverrides;
+
+  /**
+   * 市場別の構造需要アンカー（opt-in）。
+   *
+   * 未指定時は消費国在庫モデルの従来挙動（前期の実現消費を翌期の基準にする）
+   * をそのまま使う。指定した場合、翌期の消費基準を「前期実現消費」から
+   * 「シナリオが定義する構造需要」へ向けて引き戻す。
+   * 詳細は market/consumerInventory.ts の StructuralDemandAnchor を参照。
+   */
+  readonly structuralDemandAnchor?: StructuralDemandAnchorSettings;
+}
+
+/**
+ * 構造需要アンカーの設定（ScenarioDefinition.structuralDemandAnchor）。
+ *
+ * 【解決したい問題】消費国在庫モデルは翌期の消費基準に前期の**実現**消費を使う。
+ * 供給が届かなかった四半期は実現消費が計画消費を下回るため、その差が翌期以降の
+ * 市場規模そのものを恒久的に縮小させ、さらに市場別按分ウェイトを下げて供給を
+ * 遠ざける、という復元力の無い正のフィードバックが生じていた
+ * （baseline 32Q 実測で日本の対象需要が −99.3%）。
+ *
+ * 【方針】長期の市場構造はシナリオが決め、短期の需給はエンジンが揺らす。
+ * 過去の供給不足を理由に、シナリオが定義した市場構造が消滅しないようにする。
+ *
+ * 【販売保証ではない】アンカーが守るのは「その市場に消費需要が存在すること」
+ * だけである。5社がそれを取れるかどうかは、産地間の配分・外部供給者との競争・
+ * 各社の競争力が従来どおり決める。
+ */
+export interface StructuralDemandAnchorSettings {
+  /**
+   * 前期実現消費を構造需要へ引き戻す強さ（0〜1）。
+   *  - 0   : 従来挙動（構造需要を参照しない）
+   *  - 1   : 毎期その turn の構造需要を基準にする（供給不足の記憶を持ち越さない）
+   *  - 中間: 供給不足の影響が数四半期かけて減衰する
+   * 在庫（openingInventoryTons）の持ち越しはこの設定に関係なく従来どおり残るため、
+   * 短期の需給逼迫・在庫調整はどの値でも機能する。
+   */
+  readonly pullStrength: number;
 }
 
 export interface ScenarioValidationResult {

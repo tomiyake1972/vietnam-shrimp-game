@@ -57,7 +57,8 @@ import {
   settleConsumerMarketQuarter,
 } from "../market/consumerInventory";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS, DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
-import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../market/productLifecycle";
+import { applyLifecycleDemandToMarketInput, computeMarketProductMix, MarketProductMix } from "../market/productLifecycle";
+import { resolveScenarioProductLifecycleParameters } from "../scenario/lifecycle";
 import { lookupSalesBaseScore, salesBaseSliceForCompany, updateSalesBaseState } from "./salesBase";
 import {
   buildInitialProductDevelopmentState,
@@ -658,10 +659,14 @@ export function buildPublicMarketInfo(state: CompanyLabState): PublicMarketInfo 
       const recentMixes = state.marketEvolutionState?.recentAppliedMixes ?? [];
       const prevRecord = state.history[state.history.length - 1];
       const prevPrevRecord = state.history[state.history.length - 2];
-      const prevMix = recentMixes[0] ?? prevRecord?.sai5MarketEvolution?.appliedMix ?? computeMarketProductMix(nextTurn - 1);
+      // 【Dynamic Scenario 1】再計算フォールバックもシナリオ定義の実効パラメータを使う。
+      // ここだけ既定表で再計算すると、公開情報とターン処理の構成比が食い違う。
+      const lifecycleParams = resolveScenarioProductLifecycleParameters(state.scenarioState.definition);
+      const prevMix =
+        recentMixes[0] ?? prevRecord?.sai5MarketEvolution?.appliedMix ?? computeMarketProductMix(nextTurn - 1, lifecycleParams);
       const prevPrevMix =
         nextTurn >= 3
-          ? recentMixes[1] ?? prevPrevRecord?.sai5MarketEvolution?.appliedMix ?? computeMarketProductMix(nextTurn - 2)
+          ? recentMixes[1] ?? prevPrevRecord?.sai5MarketEvolution?.appliedMix ?? computeMarketProductMix(nextTurn - 2, lifecycleParams)
           : prevMix;
       const trend = {} as Record<DemandMarketId, Record<Product, number>>;
       for (const market of DEMAND_MARKET_IDS) {
@@ -949,7 +954,10 @@ export function advanceCompanyLabQuarter(
     const shiftByMarket = Object.fromEntries(
       DEMAND_MARKET_IDS.map((m) => [m, { pd: appliedAdoptionTurnShift.pd, vap: appliedAdoptionTurnShift.vap }])
     ) as Readonly<Partial<Record<DemandMarketId, { pd: number; vap: number }>>>;
-    const baseMix = computeMarketProductMix(turn, PRODUCT_LIFECYCLE_PARAMETERS_V1, shiftByMarket);
+    // 【Dynamic Scenario 1】市場×商品の長期構造はシナリオ定義が正典。
+    // 上書きを持たないシナリオでは resolveProductLifecycleParameters が
+    // PRODUCT_LIFECYCLE_PARAMETERS_V1 をそのまま返すため、既存挙動と完全に一致する。
+    const baseMix = computeMarketProductMix(turn, resolveScenarioProductLifecycleParameters(definition), shiftByMarket);
     const substitution = applyProductSubstitution(baseMix, lastRecord?.marketResult, sai5ReferencePremiumRatios);
     lifecycleMix = substitution.mix;
     substitutionShareShift = substitution.substitutionShareShift;
@@ -973,7 +981,16 @@ export function advanceCompanyLabQuarter(
   // (b) 前四半期の購買圧力・在庫逼迫度から導く当四半期の仕向市場価格係数
   // （既存のTurnOrchestratorParameters.destinationMarketPricingスロットへ渡すだけ。
   // 新しいスロットは追加しない）の2つだけである。
-  const consumerMarketPlanning = planConsumerMarketQuarterTable(state.currentPeriod, state.consumerMarketState, marketInput.demandMarkets);
+  // 【Dynamic Scenario 1・構造需要アンカー】シナリオが structuralDemandAnchor を
+  // 指定した場合のみ、消費基準を「前期の実現消費」からシナリオの構造需要へ引き戻す。
+  // 未指定シナリオでは undefined が渡り、従来挙動と完全に一致する。
+  const consumerMarketPlanning = planConsumerMarketQuarterTable(
+    state.currentPeriod,
+    state.consumerMarketState,
+    marketInput.demandMarkets,
+    CONSUMER_MARKET_INVENTORY_PARAMETERS_V1,
+    definition.structuralDemandAnchor?.pullStrength
+  );
   const consumerMarketWeights = deriveMarketWeightsFromDesiredPurchase(consumerMarketPlanning);
   const lastConsumerMarketRecords = lastRecord?.consumerMarketRecords;
   const destinationMarketPricingForThisQuarter: DestinationMarketPriceCoefficientTable =
@@ -1294,6 +1311,7 @@ export function advanceCompanyLabQuarter(
           allocations: turnResult.salesRecord.allocations,
           qualityAdjustments: adjustments,
           lifecycleMix,
+          lifecycleParameters: resolveScenarioProductLifecycleParameters(definition),
         },
         fixtures.map((f) => f.companyId)
       )
