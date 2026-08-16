@@ -23,7 +23,7 @@ import { Score0to100, score0to100, unwrapUnit } from "../core/units";
 import { DEMAND_MARKET_IDS, DemandMarketId, Product } from "../market/types";
 import { CompanyId, CompanySalesPlanEntry, MarketProductAllocationResult } from "../sales/types";
 import { BatchQualityAdjustment } from "../quality/types";
-import { MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../market/productLifecycle";
+import { MarketProductMix, PRODUCT_LIFECYCLE_PARAMETERS_V1, ProductLifecycleParameters } from "../market/productLifecycle";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
@@ -134,11 +134,24 @@ export interface SalesBaseQuarterActivity {
    *  小さい初期市場（例: 中国VAP）では基盤形成速度を
    *  clamp(構成比/成熟構成比, floor, 1) で抑える。 */
   readonly lifecycleMix?: MarketProductMix;
+  /**
+   * 【Dynamic Scenario 1】成熟度係数の分母（matureShare）を読む実効ライフサイクル
+   * パラメータ。シナリオが productLifecycleOverrides を持つ場合、成熟構成比も
+   * 上書きされるため、既定表を読むと成熟度係数が実際の市場と食い違う。
+   * 省略時は市場モジュール既定値（＝従来挙動）。
+   */
+  readonly lifecycleParameters?: ProductLifecycleParameters;
 }
 
-function maturityFactor(market: DemandMarketId, product: Product, mix: MarketProductMix | undefined, params: SalesBaseParameters): number {
+function maturityFactor(
+  market: DemandMarketId,
+  product: Product,
+  mix: MarketProductMix | undefined,
+  params: SalesBaseParameters,
+  lifecycleParameters: ProductLifecycleParameters = PRODUCT_LIFECYCLE_PARAMETERS_V1
+): number {
   if (!mix || product === "hoso") return 1; // HOSOは成熟商品＝常に1
-  const matureShare = PRODUCT_LIFECYCLE_PARAMETERS_V1.byMarket[market][product].matureShare;
+  const matureShare = lifecycleParameters.byMarket[market][product].matureShare;
   if (matureShare <= EPSILON) return 1;
   return Math.max(params.maturityFactorFloor, Math.min(1, mix[market][product] / matureShare));
 }
@@ -217,7 +230,7 @@ export function updateSalesBaseState(
           // したがって「営業を続ける／撤退する／成約できる」の違いで順位は入れ替わる
           // （salesBase.test.ts の順位入れ替えテストで検証）。
           const headroom = 1 - score / 100;
-          const factor = maturityFactor(market, product, activity.lifecycleMix, params);
+          const factor = maturityFactor(market, product, activity.lifecycleMix, params, activity.lifecycleParameters);
           const alloc = allocated.get(key) ?? 0;
           const fillRatio = alloc > EPSILON && active.desired > EPSILON ? Math.min(1, alloc / active.desired) : 0;
           score += (params.activeAcquisitionPerQuarter * factor + params.contractSuccessBoostPerQuarter * fillRatio) * headroom;

@@ -388,6 +388,50 @@ export interface ConsumerMarketPlanningResult {
   readonly laggedPriceUsdPerHosoEqKg: number;
 }
 
+// ---------------------------------------------------------------------
+// 3.5 構造需要アンカー（シナリオ opt-in）
+// ---------------------------------------------------------------------
+
+/**
+ * 【解決する問題】本モデルは翌期の消費基準に前期の**実現**消費を使う
+ * （rollCarryStateForward: priorConsumptionTons ← realizedConsumptionTons）。
+ * 供給が届かなかった四半期は実現消費が計画消費を下回るため、その差だけ翌期の
+ * 市場規模が縮む。縮んだ市場は desiredPurchase も小さくなり、
+ * deriveMarketWeightsFromDesiredPurchase の按分ウェイトが下がって供給がさらに
+ * 遠のく。復元力の無い正のフィードバックであり、baseline 32Q の実測では
+ * 日本の対象需要が −99.3%、EUが −97.6% まで縮小して市場が事実上消滅していた。
+ *
+ * 【方針】長期の市場構造はシナリオが決め、短期の需給はこのモジュールが揺らす。
+ * アンカーは「その市場に消費需要が存在し続ける」ことだけを守り、
+ * 5社がそれを取れるかどうかには一切関与しない（販売保証ではない）。
+ *
+ * 【短期メカニクスは温存する】
+ *  - 在庫の持ち越し（openingInventoryTons）はアンカーの有無に関係なく残る
+ *  - 遅行価格効果・季節性・目標在庫・購買圧力・仕向市場価格係数もすべて従来どおり
+ *  - realizedConsumption が計画を下回る（＝その四半期の需要は失われる）挙動も不変
+ * 変わるのは「失われた需要が**翌期以降の市場規模そのもの**を恒久的に削るか」だけ。
+ */
+export interface StructuralDemandAnchorInput {
+  /** その turn にシナリオが定義する構造需要水準（HOSO換算トン）。 */
+  readonly structuralConsumptionTons: number;
+  /** 前期実現消費を構造需要へ引き戻す強さ（0=従来挙動、1=構造需要をそのまま基準にする）。 */
+  readonly pullStrength: number;
+}
+
+/**
+ * 前期実現消費と構造需要を混ぜて、当期の消費基準を返す。
+ * アンカー未指定・pullStrength=0 のときは前期実現消費をそのまま返す（従来挙動）。
+ */
+export function applyStructuralDemandAnchor(priorConsumptionTons: number, anchor?: StructuralDemandAnchorInput): number {
+  if (anchor === undefined) return priorConsumptionTons;
+  assertFinite(anchor.structuralConsumptionTons, "structuralConsumptionTons");
+  assertFinite(anchor.pullStrength, "anchorPullStrength");
+  const pull = clamp(anchor.pullStrength, 0, 1);
+  if (pull <= 0) return priorConsumptionTons;
+  const structural = Math.max(0, anchor.structuralConsumptionTons);
+  return priorConsumptionTons + pull * (structural - priorConsumptionTons);
+}
+
 /** 価格乖離率 = (価格 - 平常価格) / 平常価格。負で割安、正で割高。 */
 function priceDeviationRatio(priceUsdPerHosoEqKg: number, normalPriceUsdPerHosoEqKg: number): number {
   return safeDivide(priceUsdPerHosoEqKg - normalPriceUsdPerHosoEqKg, normalPriceUsdPerHosoEqKg);
@@ -406,7 +450,8 @@ export function planConsumerMarketQuarter(
   carry: ConsumerMarketCarryState,
   demandInput: DemandMarketInput,
   params: ConsumerMarketInventoryParameters,
-  demandShockFactor = 1
+  demandShockFactor = 1,
+  anchor?: StructuralDemandAnchorInput
 ): ConsumerMarketPlanningResult {
   assertFinite(demandInput.economicIndex, "economicIndex");
   assertFinite(demandInput.populationGrowthRate, "populationGrowthRate");
@@ -424,7 +469,9 @@ export function planConsumerMarketQuarter(
   const laggedPriceFactor = Math.max(0, 1 + params.consumptionPriceElasticity * laggedDeviation);
   const populationFactor = Math.max(0, 1 + demandInput.populationGrowthRate);
   const priorConsumption = unwrapUnit(carry.priorConsumptionTons);
-  const plannedConsumptionRaw = priorConsumption * macroFactor * seasonalFactor * laggedPriceFactor * demandShockFactor * populationFactor;
+  // 【構造需要アンカー】未指定時は priorConsumption そのもの（従来挙動）。
+  const consumptionBasis = applyStructuralDemandAnchor(priorConsumption, anchor);
+  const plannedConsumptionRaw = consumptionBasis * macroFactor * seasonalFactor * laggedPriceFactor * demandShockFactor * populationFactor;
   const plannedConsumptionTons = hosoEqTons(Math.max(0, plannedConsumptionRaw));
 
   const consumptionGrowthRate = safeDivide(unwrapUnit(plannedConsumptionTons) - priorConsumption, priorConsumption);
@@ -487,15 +534,33 @@ export function planConsumerMarketQuarter(
   };
 }
 
+/**
+ * 全市場ぶんの計画を組み立てる。
+ *
+ * `anchorPullStrength` を渡すと、各市場の構造需要（シナリオが当該 turn に定義した
+ * priorPeriodConsumption。トレンド＋イベント効果適用後の値）へ消費基準を引き戻す。
+ * 省略時は完全に従来挙動（既存シナリオ・既存テストへ影響しない）。
+ */
 export function planConsumerMarketQuarterTable(
   period: PeriodV2,
   carryTable: ConsumerMarketCarryStateTable,
   demandMarkets: Readonly<Record<DemandMarketId, DemandMarketInput>>,
-  params: ConsumerMarketInventoryParameterTable = CONSUMER_MARKET_INVENTORY_PARAMETERS_V1
+  params: ConsumerMarketInventoryParameterTable = CONSUMER_MARKET_INVENTORY_PARAMETERS_V1,
+  anchorPullStrength?: number
 ): Readonly<Record<DemandMarketId, ConsumerMarketPlanningResult>> {
   const result = {} as Record<DemandMarketId, ConsumerMarketPlanningResult>;
   for (const market of DEMAND_MARKET_IDS) {
-    result[market] = planConsumerMarketQuarter(period, carryTable[market], demandMarkets[market], params[market]);
+    // 構造需要は「シナリオがその turn に定義した市場消費水準」＝ MarketQuarterInput
+    // の priorPeriodConsumption（scenarioEngine が REGIONAL_DEMAND トレンドと
+    // イベント効果から導いた値）。ここで新しい需要数値を発明しない。
+    const anchor: StructuralDemandAnchorInput | undefined =
+      anchorPullStrength !== undefined && anchorPullStrength > 0
+        ? {
+            structuralConsumptionTons: unwrapUnit(demandMarkets[market].priorPeriodConsumption),
+            pullStrength: anchorPullStrength,
+          }
+        : undefined;
+    result[market] = planConsumerMarketQuarter(period, carryTable[market], demandMarkets[market], params[market], 1, anchor);
   }
   return result;
 }

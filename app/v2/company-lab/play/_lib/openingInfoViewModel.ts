@@ -19,7 +19,8 @@ import { rawMaterialInventoryValueUsd } from "../../../../lib/v2/finance/initial
 import { totalUnitCostPerTon } from "../../../../lib/v2/finance/types";
 import { FINANCE_PARAMETERS_V1 } from "../../../../lib/v2/finance/parameters";
 import { MARKET_PARAMETERS_V1 } from "../../../../lib/v2/market/parameters";
-import { PRODUCT_LIFECYCLE_PARAMETERS_V1 } from "../../../../lib/v2/market/productLifecycle";
+import { PRODUCT_LIFECYCLE_PARAMETERS_V1, ProductLifecycleParameters } from "../../../../lib/v2/market/productLifecycle";
+import { InformationRelease } from "../../../../lib/v2/scenario/types";
 import { DEMAND_MARKET_IDS, DemandMarketId } from "../../../../lib/v2/market/types";
 import { SALES_PARAMETERS_V1 } from "../../../../lib/v2/sales/parameters";
 import type { CapitalProject } from "../../../../lib/v2/capex/types";
@@ -342,7 +343,12 @@ export function buildOpeningMarketInfo(
   vietnamDomesticPriorPrice: number,
   priorConsumptionByMarket?: Readonly<
     Partial<Record<DemandMarketId, { readonly priorPeriodConsumption: number; readonly economicIndex: number; readonly populationGrowthRate: number }>>
-  >
+  >,
+  /**
+   * 【Dynamic Scenario 1】市場別の初期/成熟構成比を表示するための実効
+   * ライフサイクルパラメータ。省略時は市場モジュール既定値（＝従来表示）。
+   */
+  lifecycleParameters: ProductLifecycleParameters = PRODUCT_LIFECYCLE_PARAMETERS_V1
 ): OpeningMarketInfo {
   const farmer = MARKET_PARAMETERS_V1.vietnamDomestic.farmerEconomicsDefaults;
   const premium = MARKET_PARAMETERS_V1.pdVapPremium;
@@ -374,7 +380,7 @@ export function buildOpeningMarketInfo(
       ],
     },
     salesMarkets: DEMAND_MARKET_IDS.map((market) => {
-      const lc = PRODUCT_LIFECYCLE_PARAMETERS_V1.byMarket[market];
+      const lc = lifecycleParameters.byMarket[market];
       const prior = priorConsumptionByMarket?.[market];
       return {
         market,
@@ -409,6 +415,29 @@ export function buildOpeningMarketInfo(
 }
 
 /** 画面へ渡す期初情報のまとめ（viewModelの1フィールドとして持たせる）。 */
+/**
+ * 【Dynamic Scenario 1】公開済みシナリオNewsを画面表示用へ変換する。
+ *
+ * 情報の絞り込み（未来のイベントを返さない・GM情報を混ぜない・postGameTruthを
+ * 落とす）は scenario/informationEngine.ts が既に多重防御で行っている。
+ * ここでは表示に必要なフィールドを取り出すだけで、判定ロジックを再実装しない。
+ */
+export function toScenarioNewsItems(releases: readonly InformationRelease[]): readonly ScenarioNewsItem[] {
+  return [...releases]
+    // 新しいNewsを上に。同じターンなら確定情報（噂でない）を先に見せる。
+    .sort((a, b) => b.availableFromTurn - a.availableFromTurn || Number(a.isRumor) - Number(b.isRumor) || a.informationId.localeCompare(b.informationId))
+    .map((r) => ({
+      informationId: r.informationId,
+      headline: r.headlineTemplate,
+      body: r.body ?? null,
+      isRumor: r.isRumor,
+      confidence: r.confidence ?? null,
+      availableFromTurn: r.availableFromTurn,
+      facts: r.structuredFacts.map((f) => ({ label: f.label, value: String(f.value), ...(f.unit !== undefined ? { unit: f.unit } : {}) })),
+      estimateRange: r.estimateRange ?? null,
+    }));
+}
+
 export interface OpeningInfoViewModel {
   readonly period: PeriodV2;
   readonly turn: number;
@@ -426,4 +455,31 @@ export interface OpeningInfoViewModel {
    * publicInfoからそのまま渡す（画面側で再計算しない）。
    */
   readonly observedMarketDemand: ObservedMarketDemand | undefined;
+  /**
+   * 【Dynamic Scenario 1】当該ターンまでに公開されたシナリオNews（世界情勢）。
+   * scenario/informationEngine.ts の getAvailableInformation をそのまま読み出した
+   * ものであり、画面側で新しい情報を作らない。未来のイベント・GM専用情報・
+   * ゲーム終了後の真実は情報エンジン側で構造的に除外されている。
+   *
+   * これは**外部世界の情報**であり、他社の意思決定・シェア等の競争情報は
+   * 一切含まない（競争情報は既存の market report 側の責務）。
+   */
+  readonly scenarioNews: readonly ScenarioNewsItem[];
+}
+
+/** 画面表示用に絞り込んだシナリオNews 1件。 */
+export interface ScenarioNewsItem {
+  readonly informationId: string;
+  readonly headline: string;
+  /** 記事本文。未設定の記事では null（画面は見出しと事実だけを出す）。 */
+  readonly body: string | null;
+  /** 噂（Leading Indicator）か、確定した事象（Current Event / Structural Trend）か。 */
+  readonly isRumor: boolean;
+  /** 0〜1。未指定なら null（確信度を捏造しない）。 */
+  readonly confidence: number | null;
+  readonly availableFromTurn: number;
+  /** 定性的な構造化事実（内部パラメータ値は情報エンジン側で除外済み）。 */
+  readonly facts: readonly { readonly label: string; readonly value: string; readonly unit?: string }[];
+  /** 見積り範囲（幅で示す量的ヒント）。無ければ null。 */
+  readonly estimateRange: { readonly low: number; readonly high: number; readonly unit?: string } | null;
 }

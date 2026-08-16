@@ -24,12 +24,15 @@ import { CompanyLabPersistedStateV1, CompanyLabDraftEnvelope } from "../../../..
 import { DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterResult } from "../../../../lib/v2/market/types";
 import { unwrapUnit } from "../../../../lib/v2/core/units";
 import { getScenarioTurnInput } from "../../../../lib/v2/scenario/scenarioEngine";
+import { getAvailableInformation } from "../../../../lib/v2/scenario/informationEngine";
+import { resolveScenarioProductLifecycleParameters } from "../../../../lib/v2/scenario/lifecycle";
 import { computeDomesticReferencePrice } from "../../../../lib/v2/companyLab/domesticReferencePrice";
 import {
   OpeningInfoViewModel,
   buildDepreciableAssets,
   buildOpeningBalanceSheet,
   buildOpeningMarketInfo,
+  toScenarioNewsItems,
 } from "./openingInfoViewModel";
 import { ConsumerMarketQuarterRecord } from "../../../../lib/v2/market/consumerInventory";
 import { CapexProjectQuarterEvent, CapexQuarterResult, CapexRejectedProposal } from "../../../../lib/v2/capex";
@@ -348,6 +351,13 @@ function buildOpeningInfo(
     priorByMarket = undefined;
   }
 
+  // 【Dynamic Scenario 1】シナリオNews（世界情勢）。プレイヤーが実際に遊ぶ画面へ
+  // 情報を届けるための唯一の配線であり、絞り込みは informationEngine が行う
+  // （未来のイベント・GM専用情報・終了後の真実は構造的に返らない）。
+  // "standard" は「噂＋公開情報」までを含むレベル。
+  const definition = restoredState.scenarioState.definition;
+  const scenarioNews = toScenarioNewsItems(getAvailableInformation(definition.informationReleases, turn, "standard"));
+
   return {
     period: restoredState.currentPeriod,
     turn,
@@ -355,6 +365,11 @@ function buildOpeningInfo(
     balanceSheet: buildOpeningBalanceSheet(ownState),
     depreciableAssets: buildDepreciableAssets(ownState, turn),
     observedMarketDemand: publicInfo.observedMarketDemand,
-    marketInfo: buildOpeningMarketInfo(publicInfo.vietnamDomesticPriorPrice, priorByMarket),
+    marketInfo: buildOpeningMarketInfo(
+      publicInfo.vietnamDomesticPriorPrice,
+      priorByMarket,
+      resolveScenarioProductLifecycleParameters(definition)
+    ),
+    scenarioNews,
   };
 }

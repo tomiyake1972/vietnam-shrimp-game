@@ -95,6 +95,66 @@ export const PRODUCT_LIFECYCLE_PARAMETERS_V1: ProductLifecycleParameters = {
   maxAdoptionTurnShift: 4,
 };
 
+// ---------------------------------------------------------------------
+// Scenario からの上書き（Dynamic Scenario 1）
+// ---------------------------------------------------------------------
+//
+// 【なぜ必要か】PRODUCT_LIFECYCLE_PARAMETERS_V1 はグローバル定数表であり、
+// 「日本のVAPはいつ立ち上がるか」「中国のPD/VAPはいつ高付加価値化するか」
+// といった**市場の長期構造**を、シナリオごとに変えることができなかった。
+// 長期構造はシナリオ（世界の物語）の管轄であるべきなので、シナリオ定義から
+// 市場×商品単位で部分上書きできるようにする。
+//
+// 【設計上の約束】
+//  - 上書きを指定しないシナリオは、既存の挙動と**ビット単位で一致**する
+//    （resolveProductLifecycleParameters は base をそのまま返す）。
+//  - 上書きは市場×商品×フィールド単位の部分適用。指定しなかったフィールドは
+//    PRODUCT_LIFECYCLE_PARAMETERS_V1 の値がそのまま残る。
+//  - PRODUCT_LIFECYCLE_PARAMETERS_V1 自体は一切書き換えない（他シナリオ・
+//    既存テスト・並行開発中の Standard AI benchmark を巻き込まない）。
+//  - market engine 側に turn 番号の分岐は追加しない。時間変化は従来どおり
+//    adoptionShare の普及曲線が担い、シナリオは曲線の**形**だけを差し替える。
+
+/** 1商品ぶんの普及曲線の部分上書き。指定しなかったフィールドは基準値を保つ。 */
+export type ProductAdoptionCurveOverride = Partial<ProductAdoptionCurve>;
+
+/** 1市場ぶんの上書き（pd / vap のどちらか一方だけでもよい）。 */
+export type MarketLifecycleOverride = Readonly<Partial<Record<"pd" | "vap", ProductAdoptionCurveOverride>>>;
+
+/** シナリオ定義が持つ市場×商品の普及曲線上書き。 */
+export type ProductLifecycleOverrides = Readonly<Partial<Record<DemandMarketId, MarketLifecycleOverride>>>;
+
+/**
+ * 基準パラメータへシナリオ上書きを適用した実効パラメータを返す。
+ *
+ * 上書きが無い（undefined・空オブジェクト）場合は **base をそのまま返す**
+ * （新しいオブジェクトを作らない）。これにより上書きを持たないシナリオでは
+ * 参照そのものが変わらず、既存挙動との完全一致が構造的に保証される。
+ *
+ * 解決後のパラメータは assertLifecycleParametersValid で検証する
+ * （成熟時にもHOSOシェアが残る・matureShare >= initialShare 等）。
+ */
+export function resolveProductLifecycleParameters(
+  base: ProductLifecycleParameters,
+  overrides?: ProductLifecycleOverrides
+): ProductLifecycleParameters {
+  if (overrides === undefined) return base;
+  const marketsWithOverride = DEMAND_MARKET_IDS.filter((m) => overrides[m] !== undefined);
+  if (marketsWithOverride.length === 0) return base;
+
+  const byMarket = {} as Record<DemandMarketId, MarketLifecycleConfig>;
+  for (const market of DEMAND_MARKET_IDS) {
+    const baseConfig = base.byMarket[market];
+    const override = overrides[market];
+    byMarket[market] = override
+      ? { pd: { ...baseConfig.pd, ...override.pd }, vap: { ...baseConfig.vap, ...override.vap } }
+      : baseConfig;
+  }
+  const resolved: ProductLifecycleParameters = { byMarket, maxAdoptionTurnShift: base.maxAdoptionTurnShift };
+  assertLifecycleParametersValid(resolved);
+  return resolved;
+}
+
 /** 市場×商品の需要構成比行列（各市場の行和=1）。 */
 export type MarketProductMix = Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
 

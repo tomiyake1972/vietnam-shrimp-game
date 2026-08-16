@@ -10,6 +10,7 @@
 import { PeriodV2 } from "../core/period";
 import { HosoEqTons, UsdPerHosoEqKg, Ratio, Score0to100 } from "../core/units";
 import { CountryId, DemandMarketId, MarketQuarterResult } from "../market/types";
+import { ProductLifecycleOverrides } from "../market/productLifecycle";
 
 export class ScenarioValidationError extends Error {
   constructor(message: string) {
@@ -216,6 +217,19 @@ export interface InformationRelease {
   readonly availableFromTurn: number;
   readonly informationLevel: InformationLevel;
   readonly headlineTemplate: string;
+  /**
+   * 記事本文（プレイヤーが読む業界ニュース）。
+   *
+   * 見出しだけでは「重要かどうか」を判断できないため、業界紙の記事として
+   * 読める分量の本文を持たせる。本文には確認された事実・業界関係者の見方・
+   * 現時点で不確かな点・波及の可能性を混ぜてよいが、
+   * **将来のイベントの答え（何がいつどれだけ起きるか）は書かない**。
+   *
+   * 内部パラメータ値・シナリオ上の重要度・効果発生ターンは決して書かない
+   * （それらは gm / postGameTruth レベルの管轄）。
+   * 未設定の場合、画面は見出しと構造化事実だけを表示する。
+   */
+  readonly body?: string;
   readonly structuredFacts: readonly StructuredFact[];
   readonly estimateRange?: EstimateRange;
   /** 0〜1。省略可（不明な場合に明示しない）。 */
@@ -318,6 +332,91 @@ export interface ScenarioDefinition {
   readonly scheduledEvents: readonly ScenarioEvent[];
   readonly informationReleases: readonly InformationRelease[];
   readonly variationSettings: ScenarioVariationSettings;
+
+  /**
+   * 市場×商品の需要構成比（HOSO/PD/VAPの普及曲線）の部分上書き。
+   *
+   * 「日本のVAPはいつ立ち上がるか」「中国のPD/VAPはいつ高付加価値化するか」
+   * という**市場の長期構造**はシナリオ（世界の物語）の管轄であるという整理に
+   * 基づく。未指定のシナリオは市場モジュール既定値
+   * （PRODUCT_LIFECYCLE_PARAMETERS_V1）をそのまま使い、既存挙動と完全に一致する。
+   *
+   * 【シナリオが決めるのは構造であって結果ではない】ここで定義するのは
+   * 「その市場にその商品の需要が存在する（していく）」という構造だけであり、
+   * 各社が何トン売れるか・誰が高い価格を取るか・シェアがどうなるかは
+   * 従来どおり市場清算と5社の競争が決める。
+   */
+  readonly productLifecycleOverrides?: ProductLifecycleOverrides;
+
+  /**
+   * 市場別の構造需要アンカー（opt-in）。
+   *
+   * 未指定時は消費国在庫モデルの従来挙動（前期の実現消費を翌期の基準にする）
+   * をそのまま使う。指定した場合、翌期の消費基準を「前期実現消費」から
+   * 「シナリオが定義する構造需要」へ向けて引き戻す。
+   * 詳細は market/consumerInventory.ts の StructuralDemandAnchor を参照。
+   */
+  readonly structuralDemandAnchor?: StructuralDemandAnchorSettings;
+
+  /**
+   * このシナリオが成立するために必要なゲーム機能。
+   *
+   * 【なぜシナリオ側が宣言するのか】市場×商品の商品構成の時間変化は
+   * 機能フラグ（CompanyLabConfig.sai5.productLifecycle）で切り替わるが、
+   * Management Console の32Q実行のように呼び出し側がフラグを設定しない経路がある。
+   * その場合 productLifecycleOverrides を持つシナリオでも構成比が世界一律の
+   * 固定値へフォールバックし、**シナリオが定義した世界と違う世界が動いてしまう**。
+   *
+   * 呼び出し側ごとにフラグを設定して回ると設定漏れが必ず起きるため、
+   * 「このシナリオにはこの機能が要る」という事実をシナリオ定義（＝世界の正典）に
+   * 持たせ、初期化時に呼び出し側の設定へ**足りない分だけ**マージする。
+   *
+   * 【安全性】ここで宣言できるのは有効化（true）だけで、呼び出し側が明示的に
+   * 有効化した機能を無効化することはできない。宣言を持たないシナリオは
+   * マージが恒等変換になり、既存挙動と完全に一致する。
+   */
+  readonly requiredCapabilities?: ScenarioRequiredCapabilities;
+}
+
+/**
+ * シナリオが成立するために有効でなければならない機能。
+ * すべて optional で、true のものだけが有効化される（無効化はできない）。
+ */
+export interface ScenarioRequiredCapabilities {
+  /** 市場×商品の商品ライフサイクル（productLifecycleOverrides を使うシナリオに必須）。 */
+  readonly productLifecycle?: boolean;
+  /** 供給圧力→翌期プレミアム倍率のフィードバック（商品への殺到がプレミアムを下げる経路）。 */
+  readonly supplyPremiumFeedback?: boolean;
+  /** 会社×市場×商品の営業基盤ストック。 */
+  readonly salesBaseAccumulation?: boolean;
+}
+
+/**
+ * 構造需要アンカーの設定（ScenarioDefinition.structuralDemandAnchor）。
+ *
+ * 【解決したい問題】消費国在庫モデルは翌期の消費基準に前期の**実現**消費を使う。
+ * 供給が届かなかった四半期は実現消費が計画消費を下回るため、その差が翌期以降の
+ * 市場規模そのものを恒久的に縮小させ、さらに市場別按分ウェイトを下げて供給を
+ * 遠ざける、という復元力の無い正のフィードバックが生じていた
+ * （baseline 32Q 実測で日本の対象需要が −99.3%）。
+ *
+ * 【方針】長期の市場構造はシナリオが決め、短期の需給はエンジンが揺らす。
+ * 過去の供給不足を理由に、シナリオが定義した市場構造が消滅しないようにする。
+ *
+ * 【販売保証ではない】アンカーが守るのは「その市場に消費需要が存在すること」
+ * だけである。5社がそれを取れるかどうかは、産地間の配分・外部供給者との競争・
+ * 各社の競争力が従来どおり決める。
+ */
+export interface StructuralDemandAnchorSettings {
+  /**
+   * 前期実現消費を構造需要へ引き戻す強さ（0〜1）。
+   *  - 0   : 従来挙動（構造需要を参照しない）
+   *  - 1   : 毎期その turn の構造需要を基準にする（供給不足の記憶を持ち越さない）
+   *  - 中間: 供給不足の影響が数四半期かけて減衰する
+   * 在庫（openingInventoryTons）の持ち越しはこの設定に関係なく従来どおり残るため、
+   * 短期の需給逼迫・在庫調整はどの値でも機能する。
+   */
+  readonly pullStrength: number;
 }
 
 export interface ScenarioValidationResult {

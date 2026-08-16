@@ -14,6 +14,7 @@ import type {
   OpeningBalanceSheet,
   OpeningBalanceSheetRow,
   OpeningMarketInfo,
+  ScenarioNewsItem,
 } from "../play/_lib/openingInfoViewModel";
 import type { DomesticReferencePrice } from "../../../lib/v2/companyLab/domesticReferencePrice";
 import type { ObservedMarketDemand } from "../../../lib/v2/companyLab/marketDemandObservation";
@@ -393,6 +394,72 @@ export function ObservedMarketDemandPanel({ observed }: { readonly observed: Obs
       </table>
       <p className="text-[10px] text-gray-500 mt-2">
         この数値は標準AI（他の4社）が見ている情報とまったく同じです。市場の現在の実需要を直接知る手段は、プレイヤーにも標準AIにもありません。
+      </p>
+    </CollapsibleSection>
+  );
+}
+
+/**
+ * 【Dynamic Scenario 1】シナリオNews（世界情勢）。
+ *
+ * 【この層がやらないこと】
+ *  - 情報の絞り込み判定をしない（scenario/informationEngine.ts が済ませている）。
+ *  - 数値の解釈・助言をしない。「この市場が儲かる」といった答えは書かない。
+ *  - 他社の意思決定・シェアといった競争情報は一切含まない（別系統の情報）。
+ *
+ * 噂（Leading Indicator）と確定情報を見分けられるようにラベルを分ける。
+ * 先読みできるかどうかはプレイヤーの判断に委ねる。
+ */
+export function ScenarioNewsPanel({ news, turn }: { readonly news: readonly ScenarioNewsItem[]; readonly turn: number }) {
+  if (news.length === 0) return null;
+  const newThisTurn = news.filter((n) => n.availableFromTurn === turn).length;
+  return (
+    <CollapsibleSection
+      title="世界のニュース"
+      description="外部の市場環境に関する報道です。将来の需給がどう動くかは書かれていません。噂の段階の情報も含まれます。"
+      tone="info"
+      defaultOpen={newThisTurn > 0}
+      testId="scenario-news"
+      summaryRight={<span className="text-xs text-gray-400">{newThisTurn > 0 ? `新着 ${newThisTurn}件` : `全${news.length}件`}</span>}
+    >
+      <ul className="flex flex-col gap-2" data-testid="scenario-news-list">
+        {news.map((n) => (
+          <li
+            key={n.informationId}
+            className="border-l-2 border-gray-700 pl-2 py-0.5"
+            data-testid={`scenario-news-item-${n.informationId}`}
+          >
+            <div className="flex items-start gap-2">
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${n.isRumor ? "bg-amber-900 text-amber-200" : "bg-gray-700 text-gray-200"}`}>
+                {n.isRumor ? "観測・噂" : "確報"}
+              </span>
+              {n.availableFromTurn === turn && (
+                <span className="shrink-0 rounded bg-teal-800 px-1.5 py-0.5 text-[10px] text-teal-100">新着</span>
+              )}
+              <span className="text-xs font-semibold text-gray-100">{n.headline}</span>
+            </div>
+            {n.body && <p className="mt-1 pl-1 text-[11px] leading-relaxed text-gray-300">{n.body}</p>}
+            {n.facts.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 pl-1 text-[10px] text-gray-400">
+                {n.facts.map((f) => (
+                  <span key={f.label}>
+                    {f.label}: {f.value}
+                    {f.unit ?? ""}
+                  </span>
+                ))}
+              </div>
+            )}
+            {n.estimateRange && (
+              <div className="mt-0.5 pl-1 text-[10px] text-gray-500">
+                推定幅: {n.estimateRange.low} 〜 {n.estimateRange.high}
+                {n.estimateRange.unit ?? ""}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[10px] text-gray-500">
+        ニュースは外部世界の情報です。他社が同じ情報をどう読み、どう動くかは書かれていません。
       </p>
     </CollapsibleSection>
   );
