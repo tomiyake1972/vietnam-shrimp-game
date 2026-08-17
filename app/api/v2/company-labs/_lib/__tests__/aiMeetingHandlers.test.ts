@@ -282,3 +282,56 @@ test("AMM-DUE-6: overdue=0で禁止語彙を含まない応答はrepairされな
   const body = result.body as { diagnostics: { semanticGuardResult?: string } };
   assert.equal(body.diagnostics.semanticGuardResult, "ok");
 });
+
+// AMM-MEM-18: Run Advisory Memoryの読み込み・保存に使うRedisキーだけ失敗させても、
+// AI Meeting応答そのものは失敗せずに継続する（実装指示§38）。
+// AMM-MEM-19: memoryが1件も存在しない既存Runでも、memory機能追加前と同様に正常応答する。
+
+function createMemoryFailingRedisClient(): CompanyLabRedisClient {
+  const base = createInMemoryRedisClient();
+  return {
+    ...base,
+    get: async (key: string) => {
+      if (key.endsWith(":aiMeetingMemory")) {
+        throw new Error("simulated redis failure for memory key");
+      }
+      return base.get(key);
+    },
+    set: async (key: string, value: string, options?: CompanyLabRedisSetOptions) => {
+      if (key.endsWith(":aiMeetingMemory")) {
+        throw new Error("simulated redis failure for memory key");
+      }
+      return base.set(key, value, options);
+    },
+  };
+}
+
+test("AMM-MEM-18: Run Advisory Memory用Redisキーの読み書きが失敗しても、AI Meeting応答自体は200で継続する（memoryなしにフォールバック）", async () => {
+  const repository = createInMemoryCompanyLabStateRepository();
+  const service = createCompanyLabQuarterFlowService({ repository });
+  const redisClient = createMemoryFailingRedisClient();
+  const deps = { repository, service, redisClient } as CompanyLabApiDependencies & { redisClient: CompanyLabRedisClient };
+  await createBaselineLab(deps, "lab-amm-mem18");
+
+  const responseWithCandidate = {
+    ...VALID_MEETING_RESPONSE,
+    memoryCandidates: [
+      { action: "SAVE", type: "PLAYER_PREFERENCE", topic: "CASH_FLOOR", statement: "Cashは最低30M維持を希望。", requestedScope: "RUN", normalizedValue: 30_000_000 },
+    ],
+  };
+  const client: AnthropicMessagesClient = { messages: { create: async () => toolUseResponse(responseWithCandidate) } };
+  const result = await handlePostAiMeetingMessage(deps, "lab-amm-mem18", "BAL", "1", { playerMessage: "Cashは最低30M維持したい" }, client);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  const body = result.body as { meetingIntent: string };
+  assert.equal(body.meetingIntent, "PROTECT_CASH", "memory書き込み失敗時も会話・応答本体は正常に返るはず");
+});
+
+test("AMM-MEM-19: memoryが1件も無い既存Runでも通常どおり応答し、memoryUsedIdsは空配列で返る", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-amm-mem19");
+  const client: AnthropicMessagesClient = { messages: { create: async () => toolUseResponse(VALID_MEETING_RESPONSE) } };
+  const result = await handlePostAiMeetingMessage(deps, "lab-amm-mem19", "BAL", "1", { playerMessage: "現金は足りてる？" }, client);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  const body = result.body as { memoryUsedIds: readonly string[] };
+  assert.deepEqual(body.memoryUsedIds, []);
+});

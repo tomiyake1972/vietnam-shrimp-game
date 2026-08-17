@@ -1097,3 +1097,243 @@ due status・capacity pool・raw material/preview semantics・CAPEX根拠要求�
 response validatorが、コード・テスト・prompt文言の3層で揃った。次のTest26継続
 セッションでは、新規BAL Turn1の「現状を分析してください」を含む、backlogと
 capacityに関する質問系列を優先的に再検証することを推奨する。
+
+## 26. M2.6（Run Advisory Memory / Player Correction Memory）追記
+
+### 26.1 branch / HEAD
+
+`feature/v2-32q-management-console`。M2.5コミット`7d9e621`を前提に開始し、本節は
+その続きとして追記した。M2.1〜M2.5のFact Grounding/Backlog Semantics/Finance
+Semantics/Accounting Semantics/Operational KPI Semantics/Due-Date Groundingは
+すべて維持されている（既存テストの再実行で確認済み）。
+
+### 26.2 architecture
+
+Run Advisory Memoryは、Standard AIの学習でもGame Engineの学習でもない、AI
+Management Meeting専用のRun-scoped advisory memoryである。プレイヤーが会話中に
+明示した訂正・そのRun固有の方針・優先順位・一時的な制約・未確認見解を保持し、
+同一Run（=既存の`labId`）内の後続turnでAI役員が参照できるようにする。永続化は
+Game State SSoTとは完全に分離した独立Redisキー（`companylab:v2:{labId}:
+{companyId}:aiMeetingMemory`）で行い、既存の会話永続化（conversation.ts）と
+並行するパターンを採用した。抽出は既存の単一structured Claude callの応答へ
+`memoryCandidates[]`を追加するのみで、追加のClaude呼び出しは発生しない。
+
+### 26.3 memory scopes
+
+実装指示§1どおり最低3スコープ（MEETING/TURN/RUN）を型として定義し、MVPでは
+RUNスコープのみを実際に永続化・注入する（`RunAdvisoryMemoryScope`型・
+`RUN_ADVISORY_MEMORY_SCOPES`定数）。MEETING/TURNスコープは将来拡張のため型のみ
+用意した。
+
+### 26.4 memory types
+
+実装指示§2どおり最低6種（CONFIRMED_CORRECTION/PLAYER_PREFERENCE/
+STRATEGIC_INTENT/TEMPORARY_CONSTRAINT/UNVERIFIED_CLAIM/OPEN_QUESTION）を
+`RunAdvisoryMemoryType`として定義した。
+
+### 26.5 extraction logic
+
+`claudeClient.ts`のtool schemaへ`memoryCandidates`（optional・最大3件）を追加し、
+`prompt.ts`に「今期の売上は？」のような通常質問には候補を生成しないこと、明示的な
+訂正・「今後は」「このRunでは」「当面」等の継続宣言・明確な優先順位・明確な禁止
+事項のみを対象とすることを明記した（実装指示§12・§13）。候補はPlayerメッセージ
+由来のみとし、executiveの発言・推論からの生成を明示的に禁止した（実装指示§29・
+hallucination防止）。
+
+### 26.6 confirmation logic
+
+`confirmMemoryCandidate()`が機械照合可能な唯一のケース（`type=
+CONFIRMED_CORRECTION`かつ`topic=BACKLOG_SEMANTICS`）をbriefingの
+`backlog.status`（M2.5のdue status）と突合し、`SUPPORTED`/`CONTRADICTED`を判定
+する。それ以外はClaudeの主張だけでは確定せず、`NOT_VERIFIABLE`へ分類し
+`CONFIRMED_CORRECTION`は`UNVERIFIED_CLAIM`へ自動的に降格される（実装指示§4・
+§15「Claudeだけでconfirmedにしない」）。
+
+### 26.7 truth hierarchy integration
+
+既存の6段階のTruth Hierarchy（Engine/Briefing facts > Structured diagnostics >
+確認済みPlayer correction > Standard AI proposal > 他executiveの発言 > 一般的business
+knowledge）は変更していない。CONFIRMED_CORRECTIONのみがlevel-3相当として扱われる
+ことをpromptに明記した（実装指示§5）。
+
+### 26.8 persistence
+
+Game State SSoTとは別の独立Redisキー（`companylab:v2:{labId}:{companyId}:
+aiMeetingMemory`）に、run×company単位で1キー・全記録を1つのJSON配列として保持する
+（record単位のキー分割はしない）。既存のsave/resumeには一切影響しない
+（キー自体が既存の状態保存経路とは独立しているため構造的に無関係、実装指示§6）。
+
+### 26.9 memory record schema
+
+`RunAdvisoryMemoryRecord`（id/runId/companyId/createdTurn/updatedTurn/scope/type/
+topic/statement/normalizedValue?/verificationStatus/sourceMessageId/isActive/
+expiresAfterTurn?/createdAt/updatedAt）。実装指示§8の要求フィールドをすべて
+含む。statementは1〜2文の簡潔な文（実装指示§9）で、最大200文字にzodで制限した。
+
+### 26.10 dedupe / update
+
+同一`(topic, type)`ペア（CUSTOMトピックのみ正規化済み文字列完全一致）を重複と
+判定し、新しいrecordを追加する代わりに既存recordを更新する（同一idを保持、
+statement/normalizedValue/verificationStatus/updatedTurn/updatedAtを上書き）。
+これにより、同一トピックについて履歴が積み増されず「最新の明示的発言が古い
+記憶を上書きする」（実装指示§10・§22）を実現した。
+
+### 26.11 expiry
+
+`TEMPORARY_CONSTRAINT`は`expiresAfterTurn`を持てる。`expireRunMemories()`が
+`currentTurn > expiresAfterTurn`のrecordを`isActive=false`へ変更する純粋関数
+として実装され、handlers.tsがmemory読み込み直後に毎回適用する（実装指示§18）。
+
+### 26.12 forget handling
+
+candidateに`action: "SAVE"|"FORGET"`を追加した（元の実装指示にない拡張フィールド
+だが、§25「さっきのJapan優先は忘れて」を実装するために必要と判断した）。FORGETは
+同一`(topic, type)`の全active recordを`isActive=false`へ変更するのみで、record
+自体は削除しない（実装指示§25「完全削除よりinactive推奨」）。
+
+### 26.13 role relevance filtering
+
+単一structured callアーキテクチャ（1回のClaude呼び出しで複数役員が発言し得る）
+のため、役割ごとに別プロンプトを構築することができない。そのため`ROLE_RELEVANT_
+TOPICS`によるtopic→role逆引きで各summary itemに`relevantRoles`タグを付与し、
+Claude自身が役割に応じた参照規律を適用できるようにした（実装指示§20の精神を
+単一callアーキテクチャへ適応させた実装）。
+
+### 26.14 prompt injection
+
+`buildRunAdvisoryMemorySummary()`が6カテゴリ（confirmedCorrections/
+playerPreferences/strategicIntents/temporaryConstraints/unverifiedClaims/
+openQuestions）へグループ化し、各カテゴリ最大5件（`SUMMARY_ITEMS_PER_CATEGORY`）
+の最近更新順で圧縮する。`ExecutiveBriefingPacket`とは別の`runAdvisoryMemory`
+フィールドとして`buildMeetingUserMessage`のペイロードへ注入する（実装指示§19
+「別枠として注入・mergeしない」）。promptには実装指示§35の6原則（player memoriesは
+advisory contextでありengine factではない・confirmed correctionのみ信頼できる・
+preference/strategic intentはゲームを自動的に変更しない・unverified claimをgame
+factとして提示しない・現在のbriefingが古いmemoryより優先・現在のplayer
+messageが古いpreferenceより優先）を英語原文の形で明記した。
+
+### 26.15 factsUsed vs memoryUsedIds
+
+`AiMeetingStructuredResponse`へ`memoryUsedIds[]`を`factsUsed`とは別フィールドと
+して追加した（実装指示§28）。`factsUsed`はゲーム事実の参照のみ、`memoryUsedIds`は
+player/run advisory context（memory）の参照のみを表す。
+
+### 26.16 API contract
+
+MVPでUI実装は不要（実装指示§23・§42）だが、`app/api/v2/company-labs/[labId]/
+companies/[companyId]/ai-meeting/memory/route.ts`にGET（active memory一覧）・
+DELETE（`?id=`で個別memoryをinactive化）を実装した。既存`turns/[turn]/ai-meeting/
+messages`とは別の、labId×companyId直下のRun-scopedなルートとして配置した
+（memoryはturnスコープではなくrunスコープのため）。
+
+### 26.17 Redis failure behavior
+
+memoryの読み込み・保存いずれかが失敗しても、AI Meeting応答自体は例外を投げず
+継続する（読み込み失敗時はmemoryなしで継続、保存失敗時は応答はそのまま返す）。
+ゲーム状態は一切変更されない（実装指示§38）。AMM-MEM-18で結合テストとして確認
+した。
+
+### 26.18 token impact
+
+保存上限20件のうち、注入時は`SUMMARY_ITEMS_PER_CATEGORY=5`によりカテゴリごと
+最大5件・全体最大30件相当（6カテゴリ×5）に圧縮する。各statementは200文字以下の
+ため、増分は測定可能な範囲に収まる設計とした（実API未実施のため実測値は今回
+報告できない。実装指示§39）。
+
+### 26.19 Test26 correction example（§30）
+
+Test26のbacklog-is-not-overdue訂正ケース（受注残はfuture dueでありoverdueでは
+ない）は、`confirmMemoryCandidate()`でCONFIRMED_CORRECTION/BACKLOG_SEMANTICS/
+SUPPORTEDと正しく判定される一方、`isRedundantWithSystemRule()`がこの組み合わせを
+検知し、`applyCandidate()`が実際の永続化をスキップする（`skippedReason=
+"redundant_with_system_rule"`）。M2.5で既にこの訂正は決定的なdue status
+ルール＋強い語彙ガードとしてシステムルール化されているため、冗長なRUN memoryを
+残さないという実装指示§30の推奨を採用した。AMM-MEM-2で確認済み。
+
+### 26.20 preference example
+
+「Cashは最低30M維持を希望」→`PLAYER_PREFERENCE`/`CASH_FLOOR`/`normalizedValue=
+30,000,000`として保存され、事実確認は不要（実装指示§16）、`buildRunAdvisoryMemory
+Summary()`で`relevantRoles`に`CFO`・`CEO`が付与される。AMM-MEM-4・13で確認済み。
+
+### 26.21 unverified claim example
+
+「来期VAP価格は絶対上がる」→`UNVERIFIED_CLAIM`/`CUSTOM`として保存され、
+promptで「game factとして提示してはならない」ことを明記。AMM-MEM-16で確認済み。
+
+### 26.22 code changes
+
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/runAdvisoryMemory.ts`
+  （persistence/confirmation/dedupe/expiry/role relevance/summary構築）
+- 新規: `app/api/v2/company-labs/[labId]/companies/[companyId]/ai-meeting/
+  memory/route.ts`＋`_lib/{dependencies,handlers,withApiContext}.ts`
+- 変更: `types.ts`（`AiMeetingStructuredResponse.memoryCandidates/
+  memoryUsedIds`、Run Advisory Memory型一式追加）
+- 変更: `proposalSchema.ts`（`memoryCandidateSchema`、structured responseへの
+  組み込み、上限定数追加）
+- 変更: `claudeClient.ts`（tool input schemaへ`memoryCandidates`/
+  `memoryUsedIds`追加、いずれもoptional）
+- 変更: `prompt.ts`（memory summary注入・抽出規律・実装指示§35原則・
+  `AI_MEETING_PROMPT_VERSION`を"v6"→"v7"）
+- 変更: `handlers.ts`（memory読込→expire→注入→応答後の候補処理→永続化の配線、
+  レスポンスへ`memoryUsedIds`追加）
+- `EXECUTIVE_BRIEFING_VERSION`は変更していない（memory注入はExecutiveBriefing
+  Packetとは別枠のため）
+- 既存のStandard AI・Vision/ManagementProfile・Game State・Finance/Sales/
+  Production/Trust/CAPEX/Scenario parametersは一切変更していない（実装指示§43の
+  禁止事項の遵守）。
+
+### 26.23 tests
+
+`app/lib/v2/companyLab/aiManagementMeeting/__tests__/runAdvisoryMemory.test.ts`に
+AMM-MEM-1〜17・20（18件）を新規追加。`app/api/v2/company-labs/_lib/__tests__/
+aiMeetingHandlers.test.ts`にAMM-MEM-18（Redis失敗時のフォールバック）・
+AMM-MEM-19（memoryなしの既存Run）の結合テスト2件を追加。AMM-MEM-1〜20の20件
+すべてを実装した。AMM系テスト（`aiManagementMeeting/__tests__/*`配下）は88件、
+結合テスト（`aiMeetingHandlers.test.ts`）は15件、プロジェクト全体3200件、
+いずれもpass。
+
+### 26.24 tsc / eslint
+
+`npx tsc --noEmit -p .`・`npx eslint .`ともにエラー0件（既存の無関係な
+warning 14件のみ、M2.6由来の新規warningは0件）。
+
+### 26.25 real API結果
+
+このセッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため未実施
+（M2.1〜M2.5と同様）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、実装指示§41の
+4フロー（10A: cash floor preference→CAPEX質問、10B: Japan priority strategic
+intent→販売戦略質問、10C: VAP price unverified claim→VAP投資質問、10D:
+explicit forget後の再質問）を追加した（計16ケース）。各フローは、
+`applyCandidate`/`buildRunAdvisoryMemorySummary`で決定的に構築したmemory
+recordを2回目の質問callへ注入する構成とした（candidate抽出自体はunit testで
+別途検証済みのため、smoke testではmemory注入後の参照品質を確認する）。
+`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで、各役員がmemoryを適切に
+参照するか（cash floor preferenceを踏まえたCAPEX助言・Japan priorityを踏まえた
+販売戦略・VAP price claimをgame factとして扱わない・forget後にJapan priorityへ
+言及しない）を確認できる。
+
+### 26.26 remaining risks
+
+- memory抽出はClaudeの自発的なcandidate生成に依存しており、実装指示§12の
+  「明示的な訂正・継続宣言・明確な優先順位・明確な禁止事項」の境界線は
+  prompt文言による誘導にとどまる。実API未検証のため、過剰生成・過少生成の
+  傾向は今回確認できていない。
+- 20件上限到達後は新規topicの保存を見送るのみで、既存recordの自動追い出し
+  （LRU等）は実装していない。同一topicの更新は上限に関係なく通るため実運用上の
+  影響は限定的と考えるが、多数の異なるtopicを扱うRunでは上限到達時の挙動を
+  プレイヤーへ明示する必要が将来的に生じる可能性がある。
+- role relevance filteringはハード制約ではなくtag付けのみであり、Claudeが
+  無関係な役員へmemoryを参照させてしまう可能性を完全には排除できない。
+- Redis障害時のフォールバックはユニット・結合テストで確認済みだが、実際の
+  Redis接続断（タイムアウト等）はモックでのみ検証しており、実インフラでの
+  挙動は未検証。
+
+### 26.27 readiness for continued Test26
+
+Run Advisory Memoryの型・永続化・confirmation・dedupe・expiry・forget・role
+relevance・prompt注入・API contractが、コード・テスト（AMM-MEM-1〜20）・
+prompt文言の3層で揃った。次のTest26継続セッションでは、「Cash≥30M維持」
+「日本優先」「次の2四半期はCAPEXなし」等のプレイヤー発言を実際に会話へ投入し、
+後続turnでの参照品質（cash floor preferenceを踏まえたCAPEX助言の変化等）を
+実APIで確認することを推奨する。

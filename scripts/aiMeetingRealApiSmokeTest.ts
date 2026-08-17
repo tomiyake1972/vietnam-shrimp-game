@@ -24,7 +24,8 @@ import { generateMeetingResponse, getMeetingModelConfig } from "../app/lib/v2/co
 import { buildMeetingUserMessage } from "../app/lib/v2/companyLab/aiManagementMeeting/prompt";
 import { buildRecentHistoryForPrompt } from "../app/lib/v2/companyLab/aiManagementMeeting/conversation";
 import { routePlayerMessage } from "../app/lib/v2/companyLab/aiManagementMeeting/router";
-import { AiMeetingMessage } from "../app/lib/v2/companyLab/aiManagementMeeting/types";
+import { AiMeetingMessage, RunAdvisoryMemoryRecord } from "../app/lib/v2/companyLab/aiManagementMeeting/types";
+import { applyCandidate, buildRunAdvisoryMemorySummary } from "../app/lib/v2/companyLab/aiManagementMeeting/runAdvisoryMemory";
 
 /**
  * 実際のExecutiveBriefingPacketに近い、代表的な内容のダミーbriefing（実APIの応答品質を
@@ -637,6 +638,7 @@ async function runCase(scenario: SmokeCase): Promise<CaseResult> {
     meetingIntentHint: null,
     confirmedCorrections: [],
     repairNote: null,
+    runAdvisoryMemory: { confirmedCorrections: [], playerPreferences: [], strategicIntents: [], temporaryConstraints: [], unverifiedClaims: [], openQuestions: [] },
   });
 
   const result = await generateMeetingResponse(userMessage, undefined, { labId: "smoke", companyId: "BAL", turn: 6 });
@@ -692,6 +694,156 @@ async function runCase(scenario: SmokeCase): Promise<CaseResult> {
   };
 }
 
+/**
+ * 【M2.6追加・実装指示§41】Run Advisory Memoryの4つの実例フロー（A/B/C/D）。
+ * 実際のcandidate抽出（Claude呼び出し）はunit test（AMM-MEM-1..20）側で十分に検証済みの
+ * ため、ここでは「memoryが既に保存された状態でTurn2の応答がそのmemoryを正しく参照するか」
+ * を確認する目的で、applyCandidate/buildRunAdvisoryMemorySummaryを使って決定的にmemory
+ * recordを組み立て、2回目の質問callへ注入する（1回目のcandidate抽出call自体は行わない）。
+ */
+interface MemoryScenarioCase {
+  readonly label: string;
+  readonly setupNote: string;
+  readonly records: readonly RunAdvisoryMemoryRecord[];
+  readonly followUpPlayerMessage: string;
+}
+
+const MEMORY_NOW = "2026-08-17T00:00:00.000Z";
+
+function buildMemoryScenarios(): readonly MemoryScenarioCase[] {
+  const ctx = { runId: "smoke-run", companyId: "BAL" as const, currentTurn: 6, sourceMessageId: "smoke-msg-1", existingRecords: [] as readonly RunAdvisoryMemoryRecord[] };
+
+  const cashFloorApplied = applyCandidate(
+    { action: "SAVE", type: "PLAYER_PREFERENCE", topic: "CASH_FLOOR", statement: "Cashは最低30M維持を希望。", requestedScope: "RUN", normalizedValue: 30_000_000 },
+    "PLAYER_PREFERENCE",
+    "NOT_VERIFIABLE",
+    ctx,
+    MEMORY_NOW
+  );
+
+  const japanPriorityApplied = applyCandidate(
+    { action: "SAVE", type: "STRATEGIC_INTENT", topic: "MARKET_PRIORITY", statement: "このRunでは日本市場を最優先にする。", requestedScope: "RUN" },
+    "STRATEGIC_INTENT",
+    "NOT_VERIFIABLE",
+    ctx,
+    MEMORY_NOW
+  );
+
+  const vapPriceClaimApplied = applyCandidate(
+    { action: "SAVE", type: "UNVERIFIED_CLAIM", topic: "CUSTOM", statement: "来期VAP価格は絶対上がるとプレイヤーは主張。", requestedScope: "RUN" },
+    "UNVERIFIED_CLAIM",
+    "NOT_VERIFIABLE",
+    ctx,
+    MEMORY_NOW
+  );
+
+  const japanForgotten = applyCandidate(
+    { action: "FORGET", type: "STRATEGIC_INTENT", topic: "MARKET_PRIORITY", statement: "Japan優先の記憶を取り消し。", requestedScope: "RUN" },
+    "STRATEGIC_INTENT",
+    "NOT_VERIFIABLE",
+    { ...ctx, existingRecords: japanPriorityApplied.records },
+    MEMORY_NOW
+  );
+
+  return [
+    {
+      label: "10A. Run Advisory Memory: cash floor preference → CAPEX質問",
+      setupNote: "「Cashは最低30M維持を希望」がPLAYER_PREFERENCE/CASH_FLOORとして保存済みの状態。",
+      records: cashFloorApplied.records,
+      followUpPlayerMessage: "PDラインの増設投資を検討したいが、どう思う？",
+    },
+    {
+      label: "10B. Run Advisory Memory: Japan priority strategic intent → 販売戦略質問",
+      setupNote: "「このRunでは日本市場を最優先」がSTRATEGIC_INTENT/MARKET_PRIORITYとして保存済みの状態。",
+      records: japanPriorityApplied.records,
+      followUpPlayerMessage: "来期の販売戦略についてどう考えるべき？",
+    },
+    {
+      label: "10C. Run Advisory Memory: VAP price unverified claim → VAP投資質問",
+      setupNote: "「来期VAP価格は絶対上がる」がUNVERIFIED_CLAIM/CUSTOMとして保存済みの状態（game factではない）。",
+      records: vapPriceClaimApplied.records,
+      followUpPlayerMessage: "VAPへの追加投資は妥当だと思う？",
+    },
+    {
+      label: "10D. Run Advisory Memory: explicit forget後の再質問（Japan優先を参照しない）",
+      setupNote: "Japan優先のSTRATEGIC_INTENTを一度保存後、明示的forgetでinactive化した状態。",
+      records: japanForgotten.records,
+      followUpPlayerMessage: "来期の販売戦略についてどう考えるべき？",
+    },
+  ];
+}
+
+async function runMemoryScenario(scenario: MemoryScenarioCase): Promise<CaseResult> {
+  const briefing = sampleBriefing();
+  const history = dummyHistory(0);
+  const { recent, compactSummary } = buildRecentHistoryForPrompt(history);
+  const routing = routePlayerMessage(scenario.followUpPlayerMessage);
+  const runAdvisoryMemory = buildRunAdvisoryMemorySummary(scenario.records);
+  const userMessage = buildMeetingUserMessage({
+    briefing,
+    standardAiDecisionSummary: { topReasonCodes: briefing.common.standardAiReasonCodesTopN.map((r) => r.code) },
+    recentHistory: recent.map((m) => ({ speaker: m.speaker, text: m.text })),
+    compactSummary,
+    playerMessage: scenario.followUpPlayerMessage,
+    routingHint: routing,
+    meetingIntentHint: null,
+    confirmedCorrections: [],
+    repairNote: null,
+    runAdvisoryMemory,
+  });
+
+  const result = await generateMeetingResponse(userMessage, undefined, { labId: "smoke", companyId: "BAL", turn: 6 });
+
+  if (!result.ok) {
+    return {
+      label: scenario.label,
+      playerMessagePreview: scenario.followUpPlayerMessage.slice(0, 40),
+      ok: false,
+      model: result.diagnostics.model,
+      inputTokens: result.diagnostics.inputTokens,
+      outputTokens: result.diagnostics.outputTokens,
+      latencyMs: result.diagnostics.latencyMs,
+      stopReason: result.diagnostics.stopReason,
+      retryCount: result.diagnostics.retryCount,
+      schemaValidationResult: result.diagnostics.schemaValidationResult,
+      primarySpeaker: null,
+      secondarySpeaker: null,
+      responseCount: 0,
+      proposalCount: 0,
+      errorCategory: result.errorCategory,
+    };
+  }
+
+  const response = result.response;
+  console.log(`\n=== ${scenario.label} ===`);
+  console.log(`setup: ${scenario.setupNote}`);
+  console.log(`player: ${scenario.followUpPlayerMessage}`);
+  for (const r of response.responses) {
+    console.log(`  [${r.speaker}${r.stance ? `/${r.stance}` : ""}] ${r.text}`);
+    if (r.factsUsed.length > 0) console.log(`    factsUsed: ${r.factsUsed.join(", ")}`);
+    if (r.speaker && response.memoryUsedIds.length > 0) console.log(`    memoryUsedIds: ${response.memoryUsedIds.join(", ")}`);
+  }
+
+  const secondary = response.responses.find((r) => r.speaker !== response.primarySpeaker && r.speaker !== "CEO") ?? null;
+
+  return {
+    label: scenario.label,
+    playerMessagePreview: scenario.followUpPlayerMessage.slice(0, 40),
+    ok: true,
+    model: result.diagnostics.model,
+    inputTokens: result.diagnostics.inputTokens,
+    outputTokens: result.diagnostics.outputTokens,
+    latencyMs: result.diagnostics.latencyMs,
+    stopReason: result.diagnostics.stopReason,
+    retryCount: result.diagnostics.retryCount,
+    schemaValidationResult: result.diagnostics.schemaValidationResult,
+    primarySpeaker: response.primarySpeaker,
+    secondarySpeaker: secondary?.speaker ?? null,
+    responseCount: response.responses.length,
+    proposalCount: response.proposals.length,
+  };
+}
+
 function mean(values: readonly number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((a, b) => a + b, 0) / values.length;
@@ -721,8 +873,10 @@ async function main() {
       "- 8つの最低ケース（CFO質問・COO質問・Commercial質問・CEO/strategy質問・CEO summary要求・",
       "  primary+secondaryが必要な投資質問・structured proposalを返す質問・比較的長いPlayer message）に加え、",
       "  Test26 BAL Turn1の実再現ケース（「前回の営業結果を教えて」、overdue=0のhealthy forward",
-      "  backlogのみを持つturn1状態、M2.2でinvestment affordability/AR認識/player correctionの3ケースを追加）を",
-      "  含む計12ケースを順に実行し、各callのmodel/inputTokens/outputTokens/latencyMs/stopReason/retryCount/",
+      "  backlogのみを持つturn1状態、M2.2でinvestment affordability/AR認識/player correctionの3ケースを追加）、",
+      "  M2.6のRun Advisory Memory実例フロー4種（A: cash floor preference→CAPEX質問、",
+      "  B: Japan priority strategic intent→販売戦略質問、C: VAP price unverified claim→VAP投資質問、",
+      "  D: explicit forget後の再質問）を含む計16ケースを順に実行し、各callのmodel/inputTokens/outputTokens/latencyMs/stopReason/retryCount/",
       "  schemaValidationResult/primarySpeaker/secondarySpeaker/proposalCountを本ファイルへ出力する。",
       "- 実行後は、本文内容（開発用ログにのみ出力。API keyはログへ出さない）を人手で確認し、",
       "  役員らしさ・役割の混在有無・数値の捏造有無・Standard AIへの反論可否・回答の簡潔さ・",
@@ -739,6 +893,10 @@ async function main() {
   const results: CaseResult[] = [];
   for (const scenario of SMOKE_CASES) {
     const result = await runCase(scenario);
+    results.push(result);
+  }
+  for (const scenario of buildMemoryScenarios()) {
+    const result = await runMemoryScenario(scenario);
     results.push(result);
   }
 

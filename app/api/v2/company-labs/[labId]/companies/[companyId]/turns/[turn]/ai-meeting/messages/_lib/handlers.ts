@@ -33,8 +33,16 @@ import {
   saveConversation,
 } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/conversation";
 import { validateAiMeetingProposals } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/validation";
-import { AiMeetingCallDiagnostics, AiMeetingMessage, ExecutiveRole, PlayerCorrectionRecord } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/types";
+import { AiMeetingCallDiagnostics, AiMeetingMessage, ExecutiveRole, PlayerCorrectionRecord, RunAdvisoryMemoryRecord } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/types";
 import { findOverdueWordingViolations } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/dueWordingGuard";
+import {
+  applyCandidate,
+  buildRunAdvisoryMemorySummary,
+  confirmMemoryCandidate,
+  expireRunMemories,
+  loadRunMemories,
+  saveRunMemories,
+} from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/runAdvisoryMemory";
 import { AiMeetingApiDependencies } from "./dependencies";
 
 export type AiMeetingApiResult = { readonly status: number; readonly body: unknown };
@@ -241,6 +249,20 @@ export async function handlePostAiMeetingMessage(
   const routing = routePlayerMessage(body.playerMessage);
   const { recent, compactSummary } = buildRecentHistoryForPrompt(conversation.messages);
 
+  // 【M2.6追加・実装指示§6・§37・§38】Run Advisory Memoryの読み込み。既存save/resumeへ
+  // 影響させない別Redis namespace。読み込み失敗時もAI Meetingそのものは停止せず、
+  // memoryなしで会話継続する（Game stateは絶対に変更しない設計と同じ耐障害方針）。
+  const memoryNow = new Date().toISOString();
+  let runMemories: readonly RunAdvisoryMemoryRecord[] = [];
+  try {
+    const loaded = await loadRunMemories(deps.redisClient, labId, companyId);
+    runMemories = expireRunMemories(loaded, viewModel.currentTurn, memoryNow);
+  } catch (e) {
+    console.error(`${logPrefix} Run Advisory Memoryの読み込みに失敗（memoryなしで継続します）:`, e instanceof Error ? e.message : String(e));
+    runMemories = [];
+  }
+  const runAdvisoryMemorySummary = buildRunAdvisoryMemorySummary(runMemories);
+
   const userMessage = buildMeetingUserMessage({
     briefing,
     standardAiDecisionSummary: { decision: diagnostics.decision, topReasonCodes: diagnostics.entries.slice(0, 8).map((e) => e.code) },
@@ -257,6 +279,8 @@ export async function handlePostAiMeetingMessage(
     confirmedCorrections: conversation.confirmedCorrections.map((c) => c.note),
     // 【M2.5追加・実装指示§11】通常のcallではnull。overdue語彙違反検知時のみ、下でrepair呼び出しに使う。
     repairNote: null,
+    // 【M2.6追加・実装指示§19】Run Advisory Memory Summary（role-relevant top N件、compact）。
+    runAdvisoryMemory: runAdvisoryMemorySummary,
   });
 
   let generated = await generateMeetingResponse(userMessage, anthropicClient, { labId, companyId, turn });
@@ -285,6 +309,7 @@ export async function handlePostAiMeetingMessage(
         repairNote:
           `直前の応答で禁止語彙（${violations.join("、")}）が検出されました。overdueTonsは0です。` +
           "backlogの各statusフィールド（OVERDUE/DUE_THIS_TURN/FUTURE_DUE/MIXED）と一致する語彙のみを使って、同じ質問に発言し直してください。",
+        runAdvisoryMemory: runAdvisoryMemorySummary,
       });
       const repaired = await generateMeetingResponse(repairUserMessage, anthropicClient, { labId, companyId, turn });
       if (repaired.ok) {
@@ -380,6 +405,35 @@ export async function handlePostAiMeetingMessage(
     console.error(`${logPrefix} 会話保存に失敗（応答はそのまま返します）:`, e instanceof Error ? e.message : String(e));
   }
 
+  // 【M2.6追加・実装指示§4・§14・§15・§30・§38】memoryCandidatesのserver-side
+  // validation・confirmation・永続化。AIに保存可否を最終決定させない。Redis書き込み
+  // 失敗時もAI Meeting応答そのものは既に確定しているため、ここでの失敗は握りつぶし、
+  // ログのみ残す（Game stateは絶対に変更しない設計と同じ耐障害方針）。
+  if (response.memoryCandidates.length > 0) {
+    let updatedMemories = runMemories;
+    for (const candidate of response.memoryCandidates) {
+      const confirmation = confirmMemoryCandidate(candidate, { backlogStatus: briefing.common.backlog.status });
+      const applied = applyCandidate(
+        candidate,
+        confirmation.finalType,
+        confirmation.verificationStatus,
+        { runId: labId, companyId, currentTurn: viewModel.currentTurn, sourceMessageId: playerMsg.id, existingRecords: updatedMemories },
+        memoryNow
+      );
+      updatedMemories = applied.records;
+      if (applied.skippedReason) {
+        console.log(`${logPrefix} memory候補を保存しませんでした reason=${applied.skippedReason} topic=${candidate.topic} type=${candidate.type}`);
+      }
+    }
+    if (updatedMemories !== runMemories) {
+      try {
+        await saveRunMemories(deps.redisClient, labId, companyId, updatedMemories);
+      } catch (e) {
+        console.error(`${logPrefix} Run Advisory Memoryの保存に失敗（応答はそのまま返します）:`, e instanceof Error ? e.message : String(e));
+      }
+    }
+  }
+
   console.log(`${logPrefix} 完了 primarySpeaker=${response.primarySpeaker} responses=${response.responses.length} proposals=${response.proposals.length}`);
   return {
     status: 200,
@@ -392,6 +446,8 @@ export async function handlePostAiMeetingMessage(
       potentialStrategicChangeNote: response.potentialStrategicChangeNote ?? null,
       playerCorrectionStatus: response.playerCorrectionStatus,
       playerCorrectionNote: response.playerCorrectionNote ?? null,
+      // 【M2.6追加・実装指示§28】応答の根拠として使ったmemoryのid（factsUsedとは分離）。
+      memoryUsedIds: response.memoryUsedIds,
       available: true,
       diagnostics: { ...generated.diagnostics, semanticGuardResult },
     },

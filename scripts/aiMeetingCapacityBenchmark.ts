@@ -97,6 +97,10 @@ function worstCaseResponse(): AiMeetingStructuredResponse {
     potentialStrategicChangeNote: repeatToLength("積極拡大から慎重路線への転換を示唆", 80),
     playerCorrectionStatus: "CONFIRMED",
     playerCorrectionNote: repeatToLength("受注残はfuture dueでありoverdueではないという指摘を確認", 80),
+    memoryCandidates: [
+      { action: "SAVE", type: "PLAYER_PREFERENCE", topic: "CASH_FLOOR", statement: repeatToLength("Cashは最低30M維持を希望", 60), requestedScope: "RUN", normalizedValue: 30_000_000 },
+    ],
+    memoryUsedIds: ["mem-1"],
   };
 }
 
@@ -156,6 +160,7 @@ async function runMockWorstCase(lines: string[]): Promise<void> {
       meetingIntentHint: null,
       confirmedCorrections: [],
     repairNote: null,
+    runAdvisoryMemory: { confirmedCorrections: [], playerPreferences: [], strategicIntents: [], temporaryConstraints: [], unverifiedClaims: [], openQuestions: [] },
     });
     lines.push(`| ${scenario.label} | ${recent.length} | ${estimateTokens(userMessage)} |`);
 
@@ -200,6 +205,7 @@ async function runRealApiSmokeTestIfAvailable(lines: string[]): Promise<void> {
     meetingIntentHint: null,
     confirmedCorrections: [],
     repairNote: null,
+    runAdvisoryMemory: { confirmedCorrections: [], playerPreferences: [], strategicIntents: [], temporaryConstraints: [], unverifiedClaims: [], openQuestions: [] },
   });
 
   for (let i = 1; i <= 2; i++) {

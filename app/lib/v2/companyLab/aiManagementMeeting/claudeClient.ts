@@ -69,6 +69,23 @@ const INTENT_ENUM = ["GROW_AGGRESSIVELY", "PROTECT_CASH", "REDUCE_BACKLOG", "PRI
 const PROPOSAL_DOMAIN_ENUM = ["SALES", "PRODUCTION", "PROCUREMENT", "LABOR", "FINANCE", "CAPEX", "VAP_PRODUCT_DEVELOPMENT"] as const;
 const STANDARD_AI_REF_STANCE_ENUM = ["SUPPORT", "MODIFY", "OPPOSE"] as const;
 const PLAYER_CORRECTION_STATUS_ENUM = ["NOT_APPLICABLE", "CONFIRMED", "UNSUPPORTED"] as const;
+// 【M2.6追加・実装指示§13】Run Advisory Memory候補用のenum。
+const MEMORY_ACTION_ENUM = ["SAVE", "FORGET"] as const;
+const MEMORY_TYPE_ENUM = ["CONFIRMED_CORRECTION", "PLAYER_PREFERENCE", "STRATEGIC_INTENT", "TEMPORARY_CONSTRAINT", "UNVERIFIED_CLAIM", "OPEN_QUESTION"] as const;
+const MEMORY_TOPIC_ENUM = [
+  "BACKLOG_SEMANTICS",
+  "CASH_FLOOR",
+  "MARKET_PRIORITY",
+  "PRODUCT_PRIORITY",
+  "CAPEX_POSTURE",
+  "DEBT_TOLERANCE",
+  "GROWTH_PRIORITY",
+  "MARGIN_PRIORITY",
+  "QUALITY_PRIORITY",
+  "INVENTORY_POLICY",
+  "CUSTOM",
+] as const;
+const MEMORY_SCOPE_ENUM = ["MEETING", "TURN", "RUN"] as const;
 
 /**
  * 【三宅さんの追加指示§7・§13】スキーマは意図的にフラットな構造にする（proposalの
@@ -194,6 +211,36 @@ export const AI_MEETING_TOOL_INPUT_SCHEMA = {
         "整合すればCONFIRMED、根拠が無ければUNSUPPORTED、事実主張ではない場合はNOT_APPLICABLE。",
     },
     playerCorrectionNote: { type: "string" },
+    // 【M2.6追加・実装指示§13】通常は空配列。明示的な訂正・継続方針・優先順位・制約等、
+    // 実装指示§12に該当する場合のみ候補を返す（毎messageで生成しない）。
+    memoryCandidates: {
+      type: "array",
+      maxItems: AI_MEETING_PROPOSAL_LIMITS.maxMemoryCandidates,
+      description:
+        "Run Advisory Memory候補（無ければ空配列）。通常の質問には生成しないこと。" +
+        "明示的な訂正・「今後は」「このRunでは」等の継続方針・明確な優先順位・明確な禁止/制約の場合のみ。" +
+        "action=FORGETは、プレイヤーが以前の方針の記憶を取り消したい場合（例:「さっきのJapan優先は忘れて」）。",
+      items: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: MEMORY_ACTION_ENUM, description: "既定はSAVE。取り消したい場合のみFORGET。" },
+          type: { type: "string", enum: MEMORY_TYPE_ENUM },
+          topic: { type: "string", enum: MEMORY_TOPIC_ENUM },
+          statement: { type: "string", description: `短い1〜2文のcanonical statement（最大${AI_MEETING_PROPOSAL_LIMITS.maxMemoryStatementChars}文字）。会話全文を書き写さない。` },
+          requestedScope: { type: "string", enum: MEMORY_SCOPE_ENUM, description: "通常はRUN。" },
+          verificationHint: { type: "string", description: "CONFIRMED_CORRECTION候補の場合、なぜ現在のbriefingと整合すると考えるかの短い根拠。" },
+          normalizedValue: { type: "number", description: "数値化できる場合のみ（例: cash floor $30M → 30000000）。" },
+          expiresAfterTurn: { type: "number", description: "TEMPORARY_CONSTRAINT用。指定turn以降は失効。" },
+        },
+        required: ["action", "type", "topic", "statement", "requestedScope"],
+      },
+    },
+    memoryUsedIds: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: AI_MEETING_PROPOSAL_LIMITS.maxMemoryUsedIds,
+      description: "今回の応答で参照したRun Advisory Memoryのid（factsUsedとは分離。ゲーム事実ではない）。",
+    },
   },
   required: ["primarySpeaker", "responses", "requiresCeoSummary", "proposals", "meetingIntent", "potentialStrategicChange", "playerCorrectionStatus"],
 } as const;

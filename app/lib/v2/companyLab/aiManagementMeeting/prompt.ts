@@ -73,12 +73,22 @@
 //   - 現在在庫0と今期調達可能性の分離（§6）、production previewと確定結果の区別
 //     （§7）、CAPEX必要性を現在のoverdue backlogだけで断定しないための根拠要求
 //     （§8）を追加する。
+//
+// 【M2.6・Run Advisory Memory / Player Correction Memory】
+// これはStandard AIの学習でもGame Engineの学習でもない。プレイヤーが会話中に明示した
+// 訂正・そのRun固有の方針・一時的な制約・優先順位・未確認見解を、短い構造化memory
+// （runAdvisoryMemory.ts参照）として保持し、同一Run内の後続turnでもAI役員が参照
+// できるようにするための、AI Management Meeting専用のRun-scoped advisory memory。
+// プレイヤー発言を無条件にgame factへ昇格させない原則（M2.2の既存Truth Hierarchy）を
+// 維持し、CONFIRMED_CORRECTIONだけがTruth Hierarchy第3階層相当として扱われる。
+// PLAYER_PREFERENCE/STRATEGIC_INTENT等はfactではなくdecision contextとして扱う。
 
 import { EXECUTIVE_ROLE_DEFINITIONS } from "./roles";
 import { AI_MEETING_PROPOSAL_LIMITS } from "./proposalSchema";
 import { AiMeetingIntent, ExecutiveRole } from "./types";
+import { RunAdvisoryMemorySummary } from "./runAdvisoryMemory";
 
-export const AI_MEETING_PROMPT_VERSION = "v6";
+export const AI_MEETING_PROMPT_VERSION = "v7";
 
 const rolesDescriptionJa = (Object.values(EXECUTIVE_ROLE_DEFINITIONS) as (typeof EXECUTIVE_ROLE_DEFINITIONS)[ExecutiveRole][])
   .map((r) => `- ${r.role}（${r.titleJa}）: ${r.personalityJa} 担当領域: ${r.responsibilityJa}`)
@@ -366,6 +376,57 @@ export const AI_MANAGEMENT_MEETING_SYSTEM_PROMPT = [
   "  混同）を再び繰り返さないでください。playerCorrectionStatus/confirmedCorrectionsの",
   "  仕組みで記録し、以後の発言で参照してください（§8の一般原則と同じ運用）。",
   "",
+  "【Run Advisory Memory（M2.6で追加・実装指示§0-§39・最重要）】",
+  "  userメッセージのrunAdvisoryMemoryには、このRunでプレイヤーが以前に明示した",
+  "  訂正・方針・制約・優先順位・未確認見解が、短いcanonical statementとして",
+  "  カテゴリ別（confirmedCorrections/playerPreferences/strategicIntents/",
+  "  temporaryConstraints/unverifiedClaims/openQuestions）に入っています。",
+  "  各itemのrelevantRolesは、そのmemoryを主に参照すべき役員を示すヒントです。",
+  "  - Player memories are advisory context, not engine facts.",
+  "  - Confirmed corrections may be treated as reliable only when marked CONFIRMED",
+  "    （confirmedCorrectionsに入っているもののみ。unverifiedClaimsは事実として",
+  "    扱ってはいけません）。",
+  "  - Preferences and strategic intents guide advice but do not change the game",
+  "    automatically（Vision・ManagementProfile・StrategicPostureを自動書換えしない。",
+  "    正式な方針変更にしたい場合は「これは正式なVision変更にしますか？」のように",
+  "    プレイヤーへ確認してよい）。",
+  "  - Unverified claims must not be presented as game facts",
+  "    （unverifiedClaimsの内容は「プレイヤーの見通しとして承知していますが、",
+  "    ゲームデータ上は未確認です」のように述べること）。",
+  "  - Current structured briefing overrides stale memories if they conflict",
+  "    （例: memoryに古い「Cash floor $30M」があっても、今回のBriefingPacketの",
+  "    実際の現金残高と矛盾する助言をしてはいけません）。",
+  "  - Current player message overrides older preferences when explicitly changed",
+  "    （例: memoryに「Japan優先」とあっても、今回の発言で「今期だけUSを優先したい」と",
+  "    明言された場合は今回の発言を優先し、必要ならmemory更新候補として扱う）。",
+  "",
+  "【memory候補の生成（M2.6で追加・実装指示§12・§13）】memoryCandidatesは、",
+  "  以下のいずれかに該当する場合にのみ候補化してください（通常の質問には生成しない）:",
+  "  明示的な訂正／「今後は」「このRunでは」「当面」等の継続方針／明確な優先順位／",
+  "  明確な禁止・制約／役員に覚えてほしいと自然に解釈できる内容。",
+  '  例:「今期の売上は？」のような通常質問には候補を生成しないでください。',
+  "  1つのcandidateのstatementは、会話全文ではなく短い1〜2文の要約にしてください",
+  '  （良い例:「Player prefers to keep cash >= $30M during this run.」）。',
+  "  action=FORGETは、プレイヤーが以前の方針の記憶を取り消したいと明言した場合のみ",
+  '  （例:「さっきのJapan優先は忘れて」）に使ってください。',
+  "",
+  "【CONFIRMED_CORRECTIONの扱い（M2.6で追加・実装指示§4・§15）】",
+  "  CONFIRMED_CORRECTIONは、あなたの判断だけで確定させないでください。",
+  "  verificationHintへ「なぜ現在のBriefingPacketと整合すると考えるか」を",
+  "  簡潔に記入すれば、server-side validationが実際に照合します（機械照合できない",
+  "  場合は自動的にUNVERIFIED_CLAIMへ降格されます）。あなたがCONFIRMED_CORRECTIONと",
+  "  ラベル付けしただけでは、確定した扱いにはなりません。",
+  "",
+  "【memory由来の禁止事項（M2.6で追加・実装指示§29・hallucination防止）】",
+  "  Run Advisory Memoryは、ゲームルール不足を埋めるための自由知識ストアでは",
+  "  ありません。あなた自身（役員）の発言内容や推測をmemoryCandidateとして",
+  "  提案しないでください。memoryはプレイヤーの発言由来のみを対象とします。",
+  "",
+  "【factsUsedとmemoryUsedIdsの区別（M2.6で追加・実装指示§28）】factsUsedは",
+  "  ExecutiveBriefingPacketのgame factのみを指します。応答でRun Advisory Memoryの",
+  "  項目を参照した場合は、そのidをmemoryUsedIdsへ入れてください（factsUsedへは",
+  "  入れない）。",
+  "",
   "【プレイヤーの訂正・主張の扱い（重要・M2.2で追加）】プレイヤーの発言も、常に",
   "  game truthへ自動的に昇格させないでください。プレイヤーが今回の発言でゲーム事実に",
   "  関する主張・訂正（例:「受注残は納期遅延ではない」）を行った場合:",
@@ -424,6 +485,8 @@ export interface BuildUserMessageInput {
    * 違反を検知した場合にのみ、この値を入れて同一入力で1回だけ再呼び出しする。
    */
   readonly repairNote: string | null;
+  /** 【M2.6追加・実装指示§19】RunAdvisoryMemorySummary（role-relevant top N件、compact）。memoryが1件も無い場合も空配列のカテゴリを持つオブジェクトを渡す（既存Runとの互換性維持）。 */
+  readonly runAdvisoryMemory: RunAdvisoryMemorySummary;
 }
 
 /**
@@ -448,6 +511,8 @@ export function buildMeetingUserMessage(input: BuildUserMessageInput): string {
     playerMessage: input.playerMessage,
     // 【M2.5追加・実装指示§11】overdue語彙違反を検知した場合の1回限りのrepair指示。通常はnull。
     repairNote: input.repairNote,
+    // 【M2.6追加・実装指示§19】Run Advisory Memory Summary（role-relevant top N件、compact）。
+    runAdvisoryMemory: input.runAdvisoryMemory,
   };
   return JSON.stringify(payload);
 }

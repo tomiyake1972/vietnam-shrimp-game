@@ -200,7 +200,96 @@ export interface AiMeetingStructuredResponse {
   /** 【M2.2追加】プレイヤーの今回の発言に事実主張・訂正が含まれるかどうかの判定。 */
   readonly playerCorrectionStatus: PlayerCorrectionStatus;
   readonly playerCorrectionNote?: string;
+  /** 【M2.6追加・実装指示§13】今回のプレイヤー発言から抽出されたRun Advisory Memory候補（無ければ空配列）。 */
+  readonly memoryCandidates: readonly RunAdvisoryMemoryCandidate[];
+  /** 【M2.6追加・実装指示§28】応答の根拠として使ったmemoryのid（factsUsedとは分離。ゲーム事実ではなくplayer/run advisory contextの参照）。 */
+  readonly memoryUsedIds: readonly string[];
 }
+
+// ---------------------------------------------------------------------
+// 【M2.6追加】Run Advisory Memory — AI Management Meeting専用のRun-scoped
+// advisory memory。Standard AIの学習でもGame Engineの学習でもない。
+// ---------------------------------------------------------------------
+
+/** 【実装指示§1】最低3scope。MVPでは主にRUNを使う（MEETING/TURNは型としては用意するが、cross-turn永続化はRUN scopeのみ本格実装）。 */
+export const RUN_ADVISORY_MEMORY_SCOPES = ["MEETING", "TURN", "RUN"] as const;
+export type RunAdvisoryMemoryScope = (typeof RUN_ADVISORY_MEMORY_SCOPES)[number];
+
+/** 【実装指示§2】最低6種類。 */
+export const RUN_ADVISORY_MEMORY_TYPES = [
+  "CONFIRMED_CORRECTION",
+  "PLAYER_PREFERENCE",
+  "STRATEGIC_INTENT",
+  "TEMPORARY_CONSTRAINT",
+  "UNVERIFIED_CLAIM",
+  "OPEN_QUESTION",
+] as const;
+export type RunAdvisoryMemoryType = (typeof RUN_ADVISORY_MEMORY_TYPES)[number];
+
+/** 【実装指示§11】最低topic例＋CUSTOM（enum固定しすぎない）。 */
+export const RUN_ADVISORY_MEMORY_TOPICS = [
+  "BACKLOG_SEMANTICS",
+  "CASH_FLOOR",
+  "MARKET_PRIORITY",
+  "PRODUCT_PRIORITY",
+  "CAPEX_POSTURE",
+  "DEBT_TOLERANCE",
+  "GROWTH_PRIORITY",
+  "MARGIN_PRIORITY",
+  "QUALITY_PRIORITY",
+  "INVENTORY_POLICY",
+  "CUSTOM",
+] as const;
+export type RunAdvisoryMemoryTopic = (typeof RUN_ADVISORY_MEMORY_TOPICS)[number];
+
+/** 【実装指示§4】機械的に検証できる場合の照合結果。 */
+export const RUN_ADVISORY_MEMORY_VERIFICATION_STATUSES = ["SUPPORTED", "CONTRADICTED", "NOT_VERIFIABLE"] as const;
+export type RunAdvisoryMemoryVerificationStatus = (typeof RUN_ADVISORY_MEMORY_VERIFICATION_STATUSES)[number];
+
+/** 【実装指示§24・§25】保存(SAVE、既定)か、既存memoryの無効化(FORGET、「さっきの〜は忘れて」)か。 */
+export const RUN_ADVISORY_MEMORY_ACTIONS = ["SAVE", "FORGET"] as const;
+export type RunAdvisoryMemoryAction = (typeof RUN_ADVISORY_MEMORY_ACTIONS)[number];
+
+/**
+ * 【実装指示§13】Claudeのstructured responseが返す、memory化候補（server-side
+ * validationを通過するまでは未確定。AIに保存可否を最終決定させない＝実装指示§14）。
+ */
+export interface RunAdvisoryMemoryCandidate {
+  readonly action: RunAdvisoryMemoryAction;
+  readonly type: RunAdvisoryMemoryType;
+  readonly topic: RunAdvisoryMemoryTopic;
+  /** 短い1〜2文のcanonical statement（実装指示§9。会話全文は保存しない）。 */
+  readonly statement: string;
+  readonly requestedScope: RunAdvisoryMemoryScope;
+  /** Claudeが「なぜこれが確認可能/確認不可能と考えるか」を示す短いヒント（server-side confirmation logicの入力の一部。これ単体でconfirmedにはしない）。 */
+  readonly verificationHint?: string;
+  readonly normalizedValue?: number;
+  /** TEMPORARY_CONSTRAINT用。指定turn以降はactive=falseとする。 */
+  readonly expiresAfterTurn?: number;
+}
+
+/** 【実装指示§8】永続化されるmemory record schema。 */
+export interface RunAdvisoryMemoryRecord {
+  readonly id: string;
+  readonly runId: string;
+  readonly companyId: CompanyId;
+  readonly createdTurn: number;
+  readonly updatedTurn: number;
+  readonly scope: RunAdvisoryMemoryScope;
+  readonly type: RunAdvisoryMemoryType;
+  readonly topic: RunAdvisoryMemoryTopic;
+  readonly statement: string;
+  readonly normalizedValue?: number;
+  readonly verificationStatus: RunAdvisoryMemoryVerificationStatus;
+  readonly sourceMessageId: string;
+  readonly isActive: boolean;
+  readonly expiresAfterTurn?: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** 【実装指示§36】memory schema version。将来migrationを可能にする。 */
+export const RUN_ADVISORY_MEMORY_VERSION = "v1";
 
 /**
  * 【M2.2追加】CONFIRMED（BriefingPacketと整合する）と判定されたプレイヤー訂正の記録。
