@@ -20,7 +20,7 @@
 // AuxiliaryPanel.tsxとして右側に追加される（本ファイルはその表示/非表示の
 // トグル状態だけを持ち、AI prompt・会話state・role定義には一切関与しない）。
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { PeriodV2 } from "../../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../../../lib/v2/companyLab";
 import { CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../../lib/v2/capex";
@@ -91,8 +91,18 @@ export default function DecisionStudio(props: DecisionStudioProps) {
   const [auxiliaryPanelOpen, setAuxiliaryPanelOpen] = useState(false);
 
   // どちらの経路でAI会議へ繋ぐか。両方未指定なら会議の入口自体を出さない。
-  const aiMeetingSource: AiMeetingSource | null =
-    labId !== undefined ? { kind: "companyLab", labId } : simulationRunId !== undefined ? { kind: "simulationRun", simulationRunId } : null;
+  // 【入力欄のたびに画面が勝手にスクロールする不具合の修正】useMemoを外すと、
+  // Sales等どの入力欄を編集してもDecisionStudioが再renderされるたびにこのobjectが
+  // 新しい参照として作られ、AuxiliaryPanel.tsxの「会話復元」useEffect（source自体を
+  // 依存配列に持つ）が毎回再実行されてしまっていた。再実行のたびに会話一覧を
+  // 再取得してmessages stateを（内容が同じでも）新しい配列として置き換え、それが
+  // 「messages変化時に会話欄の末尾へscrollIntoViewする」別のuseEffectを連鎖的に
+  // 誘発し、入力のたびに画面がスクロールする原因になっていた。labId・
+  // simulationRunIdの値が変わらない限り同じobject参照を保つことで、この連鎖を止める。
+  const aiMeetingSource: AiMeetingSource | null = useMemo(
+    () => (labId !== undefined ? { kind: "companyLab", labId } : simulationRunId !== undefined ? { kind: "simulationRun", simulationRunId } : null),
+    [labId, simulationRunId]
+  );
 
   const vm = buildDecisionStudioViewModel({
     fixture,
