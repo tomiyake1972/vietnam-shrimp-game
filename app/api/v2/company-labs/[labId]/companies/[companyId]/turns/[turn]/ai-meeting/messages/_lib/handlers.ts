@@ -33,7 +33,8 @@ import {
   saveConversation,
 } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/conversation";
 import { validateAiMeetingProposals } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/validation";
-import { AiMeetingMessage, ExecutiveRole, PlayerCorrectionRecord } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/types";
+import { AiMeetingCallDiagnostics, AiMeetingMessage, ExecutiveRole, PlayerCorrectionRecord } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/types";
+import { findOverdueWordingViolations } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/dueWordingGuard";
 import { AiMeetingApiDependencies } from "./dependencies";
 
 export type AiMeetingApiResult = { readonly status: number; readonly body: unknown };
@@ -254,9 +255,52 @@ export async function handlePostAiMeetingMessage(
     // 【M2.2追加】同一meeting内で既にCONFIRMED済みのプレイヤー訂正（correction memory）。
     // 以後のresponse生成で同じ誤りを繰り返さないための明示的なメモリ（実装指示§9）。
     confirmedCorrections: conversation.confirmedCorrections.map((c) => c.note),
+    // 【M2.5追加・実装指示§11】通常のcallではnull。overdue語彙違反検知時のみ、下でrepair呼び出しに使う。
+    repairNote: null,
   });
 
-  const generated = await generateMeetingResponse(userMessage, anthropicClient, { labId, companyId, turn });
+  let generated = await generateMeetingResponse(userMessage, anthropicClient, { labId, companyId, turn });
+  let semanticGuardResult: AiMeetingCallDiagnostics["semanticGuardResult"] = briefing.common.backlog.overdueTons > 1e-6 ? "not_applicable" : "ok";
+
+  // 【M2.5追加・実装指示§2・§11】overdueTons=0なのに応答テキストへoverdue関連の
+  // 禁止語彙が出た場合、最大1回だけ同一入力＋repair指示で再呼び出しする
+  // （schema_mismatch由来のretryとは別レイヤー。既存のclaudeClient.ts内リトライ
+  // ポリシーは変更しない）。
+  if (generated.ok && briefing.common.backlog.overdueTons <= 1e-6) {
+    const violations = findOverdueWordingViolations(
+      generated.response.responses.map((r) => r.text),
+      briefing.common.backlog.overdueTons
+    );
+    if (violations.length > 0) {
+      console.log(`${logPrefix} overdue語彙違反を検知 violations=${violations.join(",")} repairを1回試行します`);
+      const repairUserMessage = buildMeetingUserMessage({
+        briefing,
+        standardAiDecisionSummary: { decision: diagnostics.decision, topReasonCodes: diagnostics.entries.slice(0, 8).map((e) => e.code) },
+        recentHistory: recent.map((m) => formatHistoryEntryForPrompt(m, AI_MEETING_PROMPT_VERSION)),
+        compactSummary,
+        playerMessage: body.playerMessage,
+        routingHint: routing,
+        meetingIntentHint: conversation.lastMeetingIntent,
+        confirmedCorrections: conversation.confirmedCorrections.map((c) => c.note),
+        repairNote:
+          `直前の応答で禁止語彙（${violations.join("、")}）が検出されました。overdueTonsは0です。` +
+          "backlogの各statusフィールド（OVERDUE/DUE_THIS_TURN/FUTURE_DUE/MIXED）と一致する語彙のみを使って、同じ質問に発言し直してください。",
+      });
+      const repaired = await generateMeetingResponse(repairUserMessage, anthropicClient, { labId, companyId, turn });
+      if (repaired.ok) {
+        const remainingViolations = findOverdueWordingViolations(
+          repaired.response.responses.map((r) => r.text),
+          briefing.common.backlog.overdueTons
+        );
+        generated = repaired;
+        semanticGuardResult = remainingViolations.length === 0 ? "repaired" : "violation_after_repair";
+      } else {
+        // repair呼び出し自体が失敗した場合は、元のgenerated（違反を含む）をそのまま使う
+        // （新しい応答が得られない以上、無い袖は振れない。診断へ違反が残った旨を記録する）。
+        semanticGuardResult = "violation_after_repair";
+      }
+    }
+  }
 
   const playerMsg: AiMeetingMessage = {
     id: randomUUID(),
@@ -288,7 +332,7 @@ export async function handlePostAiMeetingMessage(
         potentialStrategicChange: false,
         available: false,
         unavailableReason: "AI Management Meetingは現在利用できません。しばらくしてから再度お試しください。",
-        diagnostics: generated.diagnostics,
+        diagnostics: { ...generated.diagnostics, semanticGuardResult },
       },
     };
   }
@@ -349,7 +393,7 @@ export async function handlePostAiMeetingMessage(
       playerCorrectionStatus: response.playerCorrectionStatus,
       playerCorrectionNote: response.playerCorrectionNote ?? null,
       available: true,
-      diagnostics: generated.diagnostics,
+      diagnostics: { ...generated.diagnostics, semanticGuardResult },
     },
   };
 }

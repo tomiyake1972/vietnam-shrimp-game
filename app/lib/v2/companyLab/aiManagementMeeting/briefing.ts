@@ -28,7 +28,7 @@
 // 付与した形へ変更した。
 
 import { ExplanationContext } from "../aiExplanation/buildExplanationContext";
-import { computeBacklogSemantics } from "./backlogSemantics";
+import { BacklogDueStatus, computeBacklogSemantics } from "./backlogSemantics";
 import { computeFinanceSemantics, FinanceSemantics } from "./financeSemantics";
 import {
   buildBalanceSheetPacket,
@@ -58,9 +58,10 @@ import {
 } from "./operationalSemantics";
 import { CompanyQuarterSummary } from "../types";
 import { ProductionAllocationEntry, WorkerAssignment } from "../../production/types";
+import { buildCapacityPools, buildRawMaterialAvailabilityFact, CapacityPools, RawMaterialAvailabilityFact } from "./capacitySemantics";
 
 /** ExecutiveBriefingPacket・promptの整合性を識別するバージョン（実装指示§20）。prompt.tsのAI_MEETING_PROMPT_VERSIONと対にして管理する。 */
-export const EXECUTIVE_BRIEFING_VERSION = "v5";
+export const EXECUTIVE_BRIEFING_VERSION = "v6";
 
 /**
  * 【M2.2追加・実装指示§19】誤解しやすい重要ルールについての、短い固定context
@@ -88,6 +89,10 @@ export const RULE_SEMANTICS: Readonly<Record<string, string>> = {
   workforce: "regularWorkers（常用ワーカー）とtemporaryWorkers（臨時ワーカー）は別項目。briefingに存在しない人数を発言してはいけない。",
   interestBearingDebt: "短期借入＋長期借入（有利子負債）。totalLiabilities（買掛金その他負債を含む負債合計）とは別の、より狭い概念。「有利子負債」と言う場合はinterestBearingDebtの値のみを使うこと。",
   totalLiabilities: "買掛金・その他負債を含む負債合計。interestBearingDebt（有利子負債＝短期借入＋長期借入のみ）より広い概念であり、同一視してはいけない。",
+  // 【M2.5追加・実装指示§1-§8】due status判定・capacity pool・原料在庫・preview区別のための用語定義。
+  dueStatus: "各backlog集計（common.backlog/commercial.backlog/backlogByProduct/backlogByMarket/backlogByMarketProduct）が持つstatusフィールド（OVERDUE/DUE_THIS_TURN/FUTURE_DUE/MIXED）はserver-sideで機械的に確定した唯一の分類結果。overdueTons/dueThisTurnTons/healthyForwardTonsの大小関係からClaude自身が再判定してはいけない。",
+  capacityPools: "coo.capacityPoolsは、common preprocessing（共通前処理）・freezing/packing（凍結・包装）・hoso/pd/vap（商品別専用ライン）という5つの別々のcapacity poolを表す。productLineSumTons（hoso+pd+vap）は商品別ラインの合計であり、会社全体の唯一の天井ではない。どのpoolがbindingか（bindingPoolLabel）を必ず明示すること。",
+  productionPreview: "player draftの現在の入力に基づく生産見込み（forecast/preview/current-input estimate）は確定した生産能力・確定生産量ではない。使う場合は必ずforecast/preview/見込みであることを明示すること。",
 };
 
 /** previousQuarterFinancials/previousQuarterMarketは既存のPlayerScreenViewModel型（app/v2層）
@@ -186,6 +191,8 @@ export interface BacklogSummaryFacts {
   readonly healthyForwardTons: number;
   readonly dueThisTurnTons: number;
   readonly overdueTons: number;
+  /** 【M2.5追加・実装指示§1】server-side deterministicな唯一の分類結果。Claudeはこの値をそのまま使い、3値の大小関係から再判定しないこと。 */
+  readonly status: BacklogDueStatus;
 }
 
 export interface BriefingCommonFacts {
@@ -252,8 +259,8 @@ export interface CooBriefing {
   readonly rawMaterialTotalTons: number;
   readonly totalRegularHeadcount: number;
   readonly qualityScoreByProduct: Readonly<Partial<Record<string, number>>>;
-  /** 【M2.1追加】商品別のbacklog内訳（overdue分離済み）。生産計画の参考情報。 */
-  readonly backlogByProduct: readonly { readonly product: string; readonly totalTons: number; readonly overdueTons: number }[];
+  /** 【M2.1追加・M2.5でstatus追加】商品別のbacklog内訳（overdue分離済み）。生産計画の参考情報。 */
+  readonly backlogByProduct: readonly { readonly product: string; readonly totalTons: number; readonly overdueTons: number; readonly status: BacklogDueStatus }[];
   /** 【M2.4追加・実装指示§3】equipmentUtilization/laborUtilization/overtimeRateを別KPIとして保持。直近確定四半期の実績が無い場合はnull。 */
   readonly utilization: UtilizationPacket | null;
   /** 【M2.4追加・実装指示§4・§5】rawMaterial/equipment/laborのshortfall優先順位＋商品別equipment shortage内訳。 */
@@ -262,6 +269,10 @@ export interface CooBriefing {
   readonly inventory: InventoryPacket | null;
   /** 【M2.4追加・実装指示§7】regular/temporary workerを別項目化。 */
   readonly workforce: WorkforcePacket | null;
+  /** 【M2.5追加・実装指示§4・§5】common/freezing/hoso/pd/vapの5つのcapacity poolを明示的に分離。productLineSumTonsを会社全体の唯一の天井と呼ばないこと。 */
+  readonly capacityPools: CapacityPools;
+  /** 【M2.5追加・実装指示§6】decision時点の現在在庫のみ（今期のdomestic purchase/import arrivalsは含まない別事象）。 */
+  readonly rawMaterialAvailability: RawMaterialAvailabilityFact;
 }
 
 export interface SupplyPressureFact {
@@ -280,8 +291,9 @@ export interface LifecycleTrendSummary {
 
 export interface CommercialBriefing {
   readonly backlog: BacklogSummaryFacts;
-  readonly backlogByMarket: readonly { readonly market: string; readonly totalTons: number; readonly overdueTons: number }[];
-  readonly backlogByProduct: readonly { readonly product: string; readonly totalTons: number; readonly overdueTons: number }[];
+  readonly backlogByMarket: readonly { readonly market: string; readonly totalTons: number; readonly overdueTons: number; readonly status: BacklogDueStatus }[];
+  readonly backlogByProduct: readonly { readonly product: string; readonly totalTons: number; readonly overdueTons: number; readonly status: BacklogDueStatus }[];
+  /** 【M2.5追加・実装指示§1】各market×productの唯一のdue status（statusフィールド）を含む。Claudeはこの値をそのまま使うこと。 */
   readonly backlogByMarketProduct: readonly {
     readonly market: string;
     readonly product: string;
@@ -290,6 +302,7 @@ export interface CommercialBriefing {
     readonly dueThisTurnTons: number;
     readonly healthyForwardTons: number;
     readonly earliestDueLabel: string;
+    readonly status: BacklogDueStatus;
   }[];
   readonly customerTrustByMarket: Readonly<Partial<Record<string, number>>>;
   readonly deliveryReliabilityByMarket: Readonly<Partial<Record<string, number>>>;
@@ -380,6 +393,7 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     healthyForwardTons: backlogSemantics.healthyForwardTons,
     dueThisTurnTons: backlogSemantics.dueThisTurnTons,
     overdueTons: backlogSemantics.overdueTons,
+    status: backlogSemantics.status,
   };
 
   const financeSemantics: FinanceSemantics = computeFinanceSemantics(
@@ -455,6 +469,8 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     bottleneck,
     inventory,
     workforce,
+    capacityPools: buildCapacityPools(ownState.factoryCapacity, ownState.productionCapacitySummary.bindingTotalTons, ownState.productionCapacitySummary.bindingConstraintLabel),
+    rawMaterialAvailability: buildRawMaterialAvailabilityFact(ownState.rawMaterialInventory.totalTons),
   };
 
   const supplyPressureFacts: SupplyPressureFact[] = (context.marketInfo.supplyPressure ?? []).map((row) => ({

@@ -155,6 +155,7 @@ async function runMockWorstCase(lines: string[]): Promise<void> {
       routingHint: routing,
       meetingIntentHint: null,
       confirmedCorrections: [],
+    repairNote: null,
     });
     lines.push(`| ${scenario.label} | ${recent.length} | ${estimateTokens(userMessage)} |`);
 
@@ -198,6 +199,7 @@ async function runRealApiSmokeTestIfAvailable(lines: string[]): Promise<void> {
     routingHint: { primary: "CFO", secondary: null },
     meetingIntentHint: null,
     confirmedCorrections: [],
+    repairNote: null,
   });
 
   for (let i = 1; i <= 2; i++) {

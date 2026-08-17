@@ -254,4 +254,11 @@ export interface AiMeetingCallDiagnostics {
   readonly latencyMs: number;
   readonly retryCount: number;
   readonly schemaValidationResult: "ok" | "schema_mismatch" | "max_tokens_truncation" | "empty_response" | "http_error" | "network_error" | "missing_api_key";
+  /**
+   * 【M2.5追加・実装指示§11】overdue関連の禁止語彙guard（dueWordingGuard.ts）の結果。
+   * "not_applicable"=overdueTons>0のため判定対象外。"ok"=違反なし。"repaired"=違反を
+   * 検知し1回のrepair呼び出しで解消。"violation_after_repair"=repair後も違反が残った
+   * （それ以上は再試行しない。呼び出し側はrepair後の応答をそのまま返す）。
+   */
+  readonly semanticGuardResult?: "not_applicable" | "ok" | "repaired" | "violation_after_repair";
 }

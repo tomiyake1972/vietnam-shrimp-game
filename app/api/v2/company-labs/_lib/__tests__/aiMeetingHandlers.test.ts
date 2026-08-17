@@ -234,3 +234,51 @@ test("AMM-FG-6: playerCorrectionStatus=UNSUPPORTEDの応答は、confirmedCorrec
   const conversation = getResult.body as { confirmedCorrections: readonly unknown[] };
   assert.equal(conversation.confirmedCorrections.length, 0);
 });
+
+test("AMM-DUE-5: overdue=0で禁止語彙を含む応答は1回だけrepairされ、repair後の応答が使われる", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-amm-due5");
+  const violatingResponse = {
+    ...VALID_MEETING_RESPONSE,
+    responses: [{ ...VALID_MEETING_RESPONSE.responses[0], text: "未納期限オーバー分がありますが、財務的には問題ありません。" }],
+  };
+  const repairedResponse = {
+    ...VALID_MEETING_RESPONSE,
+    responses: [{ ...VALID_MEETING_RESPONSE.responses[0], text: "受注残は次四半期の履行義務であり、財務的には問題ありません。" }],
+  };
+  let callCount = 0;
+  const client: AnthropicMessagesClient = {
+    messages: {
+      create: async () => {
+        callCount += 1;
+        return toolUseResponse(callCount === 1 ? violatingResponse : repairedResponse);
+      },
+    },
+  };
+  const result = await handlePostAiMeetingMessage(deps, "lab-amm-due5", "BAL", "1", { playerMessage: "現状を分析してください" }, client);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(callCount, 2, "1回目で違反が検知され、repairのため2回目のAPI呼び出しが発生するはず");
+  const body = result.body as { messages: readonly { speaker: string; text: string }[]; diagnostics: { semanticGuardResult?: string } };
+  const cfoMessage = body.messages.find((m) => m.speaker === "CFO");
+  assert.ok(cfoMessage?.text.includes("次四半期の履行義務"), "repair後の応答テキストが使われるべき");
+  assert.equal(body.diagnostics.semanticGuardResult, "repaired");
+});
+
+test("AMM-DUE-6: overdue=0で禁止語彙を含まない応答はrepairされない（1回のAPI呼び出しのみ）", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-amm-due6");
+  let callCount = 0;
+  const client: AnthropicMessagesClient = {
+    messages: {
+      create: async () => {
+        callCount += 1;
+        return toolUseResponse(VALID_MEETING_RESPONSE);
+      },
+    },
+  };
+  const result = await handlePostAiMeetingMessage(deps, "lab-amm-due6", "BAL", "1", { playerMessage: "現状を分析してください" }, client);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(callCount, 1, "違反が無ければrepair呼び出しは発生しないはず");
+  const body = result.body as { diagnostics: { semanticGuardResult?: string } };
+  assert.equal(body.diagnostics.semanticGuardResult, "ok");
+});

@@ -54,12 +54,31 @@
 // あり（詳細はoperationalSemantics.tsのコメント参照）、briefing側でKPIごとに意味を
 // 明示したpacketへ分離した上、プロンプト側にも以下の明示的なガードレールを追加する
 // （実装指示§1-§9）。
+//
+// 【M2.5・Due-Date Grounding Enforcement / Capacity Pool Semantics】
+// Test26系の新規BAL Turn1で、「現状を分析してください」に対しCOO/CFO/Commercialが
+// 揃って、overdueTons=0のfuture backlog（US HOSO 1,443.43t・OTHER HOSO 814.04t、
+// いずれも次四半期=2015Q2納期）を「期限オーバー」「納期内に納めるにはCAPEX・人員増が
+// 必要」と誤って説明した。M2.1〜M2.4のprompt文言による誘導だけでは、overdueTons/
+// dueThisTurnTons/healthyForwardTonsの3値からClaude自身が「どれが優勢か」を都度
+// 解釈する余地が残っており、防ぎきれなかった。根本原因への対応として:
+//   - due-date判定をprompt任せにせず、backlogSemantics.tsがserver-sideで
+//     deterministicに算出した`status`（OVERDUE/DUE_THIS_TURN/FUTURE_DUE/MIXED）を
+//     唯一の分類結果として渡し、Claudeには再判定させない（§1）。
+//   - overdueTons=0の場合、「期限オーバー」等の単語自体を使用禁止にするstrong
+//     wording guardを追加する（§2）。
+//   - 14,107.5t（商品別ライン合計）を「会社全体の実効生産能力」と呼ばない、
+//     capacity pool（common/freezing/hoso/pd/vap）を明示的に区別するcapacity pool
+//     semanticsを追加する（§4・§5）。
+//   - 現在在庫0と今期調達可能性の分離（§6）、production previewと確定結果の区別
+//     （§7）、CAPEX必要性を現在のoverdue backlogだけで断定しないための根拠要求
+//     （§8）を追加する。
 
 import { EXECUTIVE_ROLE_DEFINITIONS } from "./roles";
 import { AI_MEETING_PROPOSAL_LIMITS } from "./proposalSchema";
 import { AiMeetingIntent, ExecutiveRole } from "./types";
 
-export const AI_MEETING_PROMPT_VERSION = "v5";
+export const AI_MEETING_PROMPT_VERSION = "v6";
 
 const rolesDescriptionJa = (Object.values(EXECUTIVE_ROLE_DEFINITIONS) as (typeof EXECUTIVE_ROLE_DEFINITIONS)[ExecutiveRole][])
   .map((r) => `- ${r.role}（${r.titleJa}）: ${r.personalityJa} 担当領域: ${r.responsibilityJa}`)
@@ -279,6 +298,68 @@ export const AI_MANAGEMENT_MEETING_SYSTEM_PROMPT = [
   "  leverageから、COOはreal bottleneck/次期執行リスクから、Commercialはforward order",
   "  book/pricing/trust/sales opportunityから、それぞれ最重要のものを選択してください。",
   "",
+  "【due status（M2.5で追加・実装指示§1・最重要）】backlogの各集計",
+  "  （common.backlog/commercial.backlog/coo.backlogByProduct/",
+  "  commercial.backlogByMarket/commercial.backlogByProduct/",
+  "  commercial.backlogByMarketProduct）には、server-sideで機械的に確定した唯一の",
+  '  statusフィールド（"OVERDUE"|"DUE_THIS_TURN"|"FUTURE_DUE"|"MIXED"）が付与されて',
+  "  います。overdueTons/dueThisTurnTons/healthyForwardTonsの数値の大小関係から、",
+  "  あなた自身が「これはoverdueだろう」のように再判定してはいけません。必ず",
+  "  statusフィールドの値をそのまま使ってください。",
+  "",
+  "【overdue関連の強い語彙ガード（M2.5で追加・実装指示§2・最重要）】",
+  '  common.backlog.overdueTons（またはstatusを判定する対象のoverdueTons）が0の',
+  "  場合、以下の単語・表現を一切使用してはいけません（プレイヤー発言の引用・",
+  "  プレイヤーの誤った主張を訂正する文脈を除く）:",
+  '  「overdue」「late」「delayed」「past due」「deadline missed」「納期遅延」',
+  '  「期限オーバー」「未達」「契約違反」。',
+  "  future backlog（statusがFUTURE_DUEまたはDUE_THIS_TURN）については、代わりに",
+  '  以下の表現を使ってください: 「next-quarter obligation」「forward order book」',
+  '  「scheduled delivery」「upcoming fulfillment requirement」「将来納期の受注残」',
+  '  「次四半期の履行義務」。',
+  '  「Q2中に消化できれば評価改善」のような表現も禁止です。DUE_THIS_TURN/',
+  '  FUTURE_DUEのbacklogは「Q2納期なのでQ2中に予定どおり履行する必要がある」という',
+  "  表現にしてください。Customer Trustの改善を断定する場合は、engineの事実として",
+  "  改善要因（例: deliveryReliabilityByMarket・customerTrustByMarketの実際の数値",
+  "  変化）が存在する場合にのみ述べてください。future backlogを予定どおり履行する",
+  "  ことが自動的にTrust改善につながる、というルールはShrimpXに存在しません。",
+  "",
+  "【repairNote（M2.5で追加・実装指示§11）】userメッセージのrepairNoteがnullでない",
+  "  場合、直前の応答でoverdue関連の禁止語彙違反が検知されたことを意味します。",
+  "  repairNoteの指示に従い、backlogのstatusフィールド（OVERDUE/DUE_THIS_TURN/",
+  "  FUTURE_DUE/MIXED）と一致する語彙のみを使って発言し直してください。",
+  "",
+  "【capacity pool semantics（M2.5で追加・実装指示§4・§5）】coo.capacityPoolsは、",
+  "  common preprocessing（共通前処理）・freezing/packing（凍結・包装）・",
+  "  hoso/pd/vap（商品別専用ライン）という5つの別々のcapacity poolを表します。",
+  "  productLineSumTons（hoso+pd+vapの合計）を「会社全体の実効生産能力」と",
+  "  単純に呼んではいけません。これはあくまで商品別専用ラインの合計です。",
+  "  COOは、どのcapacity poolがbindingか（coo.capacityPools.bindingPoolLabel・",
+  "  bindingTons）を必ず明示してください。例:「商品別ライン能力を合計すると",
+  "  ◯◯tだが、共通前処理能力は◯◯t。したがって全社共通設備が満杯という意味では",
+  "  ない。」商品別capacity合計とcommon capacityを混同しないでください。",
+  "",
+  "【raw material availability（M2.5で追加・実装指示§6）】",
+  "  coo.rawMaterialAvailability.currentOnHandTonsは、decision時点（当期処理後）の",
+  "  在庫のみです。今期のquarter processing中に発生し得るdomestic purchase・",
+  "  import arrivalsはこの数値には含まれません。COOは「現在在庫は◯◯t」と",
+  "  「今期の調達により生産可能」を分離して説明してください。現在在庫が0だからと",
+  "  いって、今期の生産が不可能であるかのように断定してはいけません。",
+  "",
+  "【production preview semantics（M2.5で追加・実装指示§7）】player draftの現在の",
+  "  入力に基づく生産見込み（もしBriefingPacketに含まれる場合）は、forecast/",
+  "  preview/current-input estimateであり、確定した生産能力・確定生産量ではあり",
+  "  ません。このような値に言及する場合は、必ずforecast/preview/見込みであることを",
+  "  明示してください。",
+  "",
+  "【CAPEX必要性の根拠（M2.5で追加・実装指示§8）】CFO・COOがCAPEXの必要性を述べる",
+  "  場合、現在のoverdue backlogだけを理由にしないでください。future backlogが",
+  "  存在するというだけで「CAPEXが必要」と断定してはいけません。少なくとも以下の",
+  "  うち複数の根拠を示してください: (a) 商品別のcapacity gap（coo.capacityPools",
+  "  の該当商品poolと必要量の比較）、(b) 完了時点でのforward obligation（backlogの",
+  "  該当statusとperiod）、(c) 既存のCAPEX（cfo.activeCapexRemainingCommitmentUsd",
+  "  等）、(d) 財務的な実現可能性（cfo.cashUsd・borrowingHeadroom等）。",
+  "",
   "【会計カテゴリの誤りに対するプレイヤー訂正（M2.3で追加）】プレイヤーが",
   '  「P&LとCash Flowを混同している」のような会計カテゴリの誤りを指摘した場合、',
   "  単に謝るだけでなく、同一meeting内で同じ種類の誤り（P&L/Cash Flow/Balance Sheetの",
@@ -337,6 +418,12 @@ export interface BuildUserMessageInput {
   readonly meetingIntentHint: AiMeetingIntent | null;
   /** 【M2.2追加】同一meeting内で既にCONFIRMED済みのプレイヤー訂正（correction memory）。 */
   readonly confirmedCorrections: readonly string[];
+  /**
+   * 【M2.5追加・実装指示§11】overdue関連の禁止語彙が検出された場合の、1回限りの
+   * repair指示。通常はnull（毎回のcallでは使わない）。handlers.tsが最初の応答で
+   * 違反を検知した場合にのみ、この値を入れて同一入力で1回だけ再呼び出しする。
+   */
+  readonly repairNote: string | null;
 }
 
 /**
@@ -359,6 +446,8 @@ export function buildMeetingUserMessage(input: BuildUserMessageInput): string {
     // 【M2.2追加】同一meeting内で既にCONFIRMED済みのプレイヤー訂正。以後の発言で同じ誤りを繰り返さないための明示的なメモリ。
     confirmedCorrections: input.confirmedCorrections,
     playerMessage: input.playerMessage,
+    // 【M2.5追加・実装指示§11】overdue語彙違反を検知した場合の1回限りのrepair指示。通常はnull。
+    repairNote: input.repairNote,
   };
   return JSON.stringify(payload);
 }

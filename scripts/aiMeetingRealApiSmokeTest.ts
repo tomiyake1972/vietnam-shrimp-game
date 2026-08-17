@@ -366,6 +366,114 @@ function test26Turn4Briefing() {
   };
 }
 
+/**
+ * 【M2.5追加・実装指示§9・§20】Test26系の新規BAL Turn1の実再現ケース用briefing。
+ * COO/CFO/Commercialが揃って、overdueTons=0のfuture backlog（US HOSO 1,443.43t・
+ * OTHER HOSO 814.04t、いずれも2015Q2納期＝次四半期）を「期限オーバー」と誤って
+ * 説明し、14,107.5t（商品別ライン合計）を「会社全体の実効生産能力」と呼んだ実会話を
+ * 再現する。実装指示§9の実データ（ending backlog=3,625.95t/overdue=0、capacity pools
+ * common=25,650t/HOSO=6,840t/PD=5,985t/VAP=1,282.5t/freezing=25,650t、
+ * ending raw inventory=0t）に基づく。
+ */
+function test26M25Turn1Briefing() {
+  return {
+    common: {
+      companyId: "BAL",
+      turn: 1,
+      year: 2015,
+      quarter: 1,
+      cashUsd: 38_200_000,
+      bindingCapacityTons: 14107.5,
+      bindingConstraintLabel: "商品別実効能力",
+      backlog: { totalTons: 3625.95, healthyForwardTons: 3625.95, dueThisTurnTons: 0, overdueTons: 0, status: "FUTURE_DUE" },
+      playerDraft: null,
+      standardAiReasonCodesTopN: [],
+    },
+    cfo: {
+      totalAssetsUsd: 120_000_000,
+      totalLiabilitiesUsd: 50_600_000,
+      totalEquityUsd: 69_400_000,
+      shortTermLoansUsd: 10_600_000,
+      longTermLoansUsd: 40_000_000,
+      activeLoanCount: 2,
+      payablesUsd: 0,
+      receivablesUsd: 0,
+      receivablesScheduleByPeriod: [],
+      payablesScheduleByPeriod: [],
+      loanArrearsPrincipalUsd: 0,
+      loanArrearsInterestUsd: 0,
+      activeCapexRemainingCommitmentUsd: 0,
+      borrowingHeadroom: null,
+      crisis: { state: "NORMAL", summary: "資金繰りは平常。" },
+      previousQuarter: null,
+      interestBearingDebtUsd: 50_600_000,
+    },
+    coo: {
+      factoryCapacityTopN: [{ factoryId: "F1", nominalTotalTons: 16000, effectiveTotalTons: 14107.5 }],
+      nominalTotalTons: 16000,
+      effectiveTotalTons: 14107.5,
+      rawMaterialTotalTons: 0,
+      totalRegularHeadcount: 200,
+      qualityScoreByProduct: { hoso: 75, pd: 70, vap: 80 },
+      backlogByProduct: [{ product: "hoso", totalTons: 3625.95, overdueTons: 0, status: "FUTURE_DUE" }],
+      // 【M2.5追加・実装指示§4・§5】14,107.5tは商品別ライン合計であり、共通前処理(25,650t)・凍結包装(25,650t)は別pool。
+      capacityPools: {
+        commonProcessingTons: 25650,
+        freezingPackagingTons: 25650,
+        hosoTons: 6840,
+        pdTons: 5985,
+        vapTons: 1282.5,
+        productLineSumTons: 14107.5,
+        bindingTons: 14107.5,
+        bindingPoolLabel: "商品別実効能力",
+      },
+      // 【M2.5追加・実装指示§6】decision時点の現在在庫のみ（今期の調達は別事象）。
+      rawMaterialAvailability: { currentOnHandTons: 0 },
+    },
+    commercial: {
+      backlog: { totalTons: 3625.95, healthyForwardTons: 3625.95, dueThisTurnTons: 0, overdueTons: 0, status: "FUTURE_DUE" },
+      backlogByMarket: [
+        { market: "US", totalTons: 1443.43, overdueTons: 0, status: "FUTURE_DUE" },
+        { market: "OTHER", totalTons: 814.04, overdueTons: 0, status: "FUTURE_DUE" },
+        { market: "EU", totalTons: 3625.95 - 1443.43 - 814.04, overdueTons: 0, status: "FUTURE_DUE" },
+      ],
+      backlogByProduct: [{ product: "hoso", totalTons: 3625.95, overdueTons: 0, status: "FUTURE_DUE" }],
+      backlogByMarketProduct: [
+        {
+          market: "US",
+          product: "hoso",
+          totalTons: 1443.43,
+          overdueTons: 0,
+          dueThisTurnTons: 0,
+          healthyForwardTons: 1443.43,
+          earliestDueLabel: "2015年Q2",
+          status: "FUTURE_DUE",
+        },
+        {
+          market: "OTHER",
+          product: "hoso",
+          totalTons: 814.04,
+          overdueTons: 0,
+          dueThisTurnTons: 0,
+          healthyForwardTons: 814.04,
+          earliestDueLabel: "2015年Q2",
+          status: "FUTURE_DUE",
+        },
+      ],
+      customerTrustByMarket: { US: 50, EU: 50, JP: 50, OTHER: 50 },
+      deliveryReliabilityByMarket: { US: 50, EU: 50, JP: 50, OTHER: 50 },
+      salesForceHeadcountTotal: 15,
+      salesForceCoverageScore: 0.5,
+      lastQuarterNetRevenueUsd: null,
+      lastQuarterLabel: null,
+      hasPriorMarketData: false,
+      supplyPressureFacts: [],
+      lifecycleTrendSummary: null,
+    },
+    ceo: { topSeverityReasonCodesTopN: [], domainsInvolved: [] },
+  };
+}
+
 interface SmokeCase {
   readonly label: string;
   readonly playerMessage: string;
@@ -376,6 +484,8 @@ interface SmokeCase {
   readonly useTest26Turn2Briefing?: boolean;
   /** 【M2.4追加】trueの場合、test26Turn4Briefing()（operational KPI grounding再現ケース）を使う。 */
   readonly useTest26Turn4Briefing?: boolean;
+  /** 【M2.5追加】trueの場合、test26M25Turn1Briefing()（due-date/capacity pool grounding再現ケース）を使う。 */
+  readonly useTest26M25Turn1Briefing?: boolean;
 }
 
 const SMOKE_CASES: readonly SmokeCase[] = [
@@ -459,6 +569,20 @@ const SMOKE_CASES: readonly SmokeCase[] = [
     historyCount: 0,
     useTest26Turn4Briefing: true,
   },
+  {
+    // 【M2.5追加・実装指示§9・§20】Test26系の新規BAL Turn1で実際に問題が残った、
+    // 実際のプレイヤー発言そのものでの再現テスト。期待する回答の方向性:
+    // overdueTons=0のため「期限オーバー」「納期遅延」等の禁止語彙を一切使わない、
+    // US HOSO 1,443.43t/OTHER HOSO 814.04tを次四半期の履行義務（FUTURE_DUE）として
+    // 説明する、14,107.5t（商品別ライン合計）を「会社全体の実効生産能力」と呼ばず、
+    // common preprocessing(25,650t)・freezing/packing(25,650t)という別poolの存在を
+    // 明示する、現在在庫0tと今期調達可能性を分離する、future backlogの存在だけで
+    // CAPEXを必要と断定しない。
+    label: "9G. Test26 BAL Turn1再現（due-date grounding・capacity pool semantics）",
+    playerMessage: "現状を分析してください",
+    historyCount: 0,
+    useTest26M25Turn1Briefing: true,
+  },
 ];
 
 function dummyHistory(count: number): AiMeetingMessage[] {
@@ -491,13 +615,15 @@ interface CaseResult {
 }
 
 async function runCase(scenario: SmokeCase): Promise<CaseResult> {
-  const briefing = scenario.useTest26Turn4Briefing
-    ? test26Turn4Briefing()
-    : scenario.useTest26Turn2Briefing
-      ? test26Turn2Briefing()
-      : scenario.useTest26Briefing
-        ? test26Turn1Briefing()
-        : sampleBriefing();
+  const briefing = scenario.useTest26M25Turn1Briefing
+    ? test26M25Turn1Briefing()
+    : scenario.useTest26Turn4Briefing
+      ? test26Turn4Briefing()
+      : scenario.useTest26Turn2Briefing
+        ? test26Turn2Briefing()
+        : scenario.useTest26Briefing
+          ? test26Turn1Briefing()
+          : sampleBriefing();
   const history = dummyHistory(scenario.historyCount);
   const { recent, compactSummary } = buildRecentHistoryForPrompt(history);
   const routing = routePlayerMessage(scenario.playerMessage);
@@ -510,6 +636,7 @@ async function runCase(scenario: SmokeCase): Promise<CaseResult> {
     routingHint: routing,
     meetingIntentHint: null,
     confirmedCorrections: [],
+    repairNote: null,
   });
 
   const result = await generateMeetingResponse(userMessage, undefined, { labId: "smoke", companyId: "BAL", turn: 6 });

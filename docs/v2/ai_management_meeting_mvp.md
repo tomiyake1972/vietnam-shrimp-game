@@ -932,3 +932,168 @@ forward obligation riskのFACT→JUDGMENT順序規律・debt terminology区別�
 1〜2論点規律が、コード・テスト・prompt文言の3層で揃った。次のTest26継続セッション
 では、Turn4の「現在の当社業績を分析して」を含む広範な業績分析質問系列を優先的に
 再検証することを推奨する。
+
+## 25. M2.5（Due-Date Grounding Enforcement / Capacity Pool Semantics）追記
+
+### 25.1 root cause
+
+Test26系の新規BAL Turn1「現状を分析してください」で、COO/CFO/Commercialが揃って、
+overdueTons=0のfuture backlog（US HOSO 1,443.43t・OTHER HOSO 814.04t、いずれも
+2015Q2納期＝次四半期）を「期限オーバー」「納期内に納めるにはCAPEX・人員増が必要」と
+誤って説明した。COOはさらに、14,107.5t（HOSO 6,840+PD 5,985+VAP 1,282.5の商品別
+専用ライン合計）を「実効能力で天井」と述べ、common preprocessing（25,650t）・
+freezing/packing（25,650t）という遥かに大きい別のcapacity poolの存在を無視した。
+
+### 25.2 why M2.4 prompt guard was insufficient
+
+M2.1〜M2.4のprompt文言（backlog=overdueと呼ばない・healthyForward/dueThisTurn/
+overdueTonsの3値分離）は既に存在していたが、3値を見た上で「どれが優勢か」をClaude
+自身が都度解釈する余地が残っていた。overdueTons=0・dueThisTurnTons=0・
+healthyForwardTons>0という組み合わせから、Claudeが独自に「大部分は将来納期だが
+一部は期限が近い」のような曖昧な言い換えを行い、結果として「期限オーバー」という
+単語そのものを使ってしまう余地があった。prompt文言による誘導だけでは、語彙選択の
+最終決定権がClaude側に残っており、構造的な強制力が無かったことが直接の原因。
+
+### 25.3 due status deterministic grounding
+
+`backlogSemantics.ts`へ`classifyBacklogDueStatus(overdueTons, dueThisTurnTons,
+healthyForwardTons)`を追加し、`"OVERDUE"|"DUE_THIS_TURN"|"FUTURE_DUE"|"MIXED"`という
+唯一の分類結果を、common.backlog・commercial.backlog・coo.backlogByProduct・
+commercial.backlogByMarket/backlogByProduct/backlogByMarketProductの全集計へ
+`status`フィールドとして付与した。Claudeはこの値をそのまま使うだけでよく、3値の
+大小関係から再判定する必要が無い（prompt側にも「再判定してはいけない」旨を明記）。
+
+### 25.4 wording guard
+
+overdueTonsが0の場合、prompt.tsに「overdue/late/delayed/past due/deadline
+missed/納期遅延/期限オーバー/未達/契約違反」の使用を明示的に禁止する強い語彙
+ガードを追加した。future backlogについては「next-quarter obligation/forward
+order book/scheduled delivery/upcoming fulfillment requirement/将来納期の受注残/
+次四半期の履行義務」という表現のみを許可し、「Q2中に消化できれば評価改善」という
+誤表現も明示的に禁止した（正しくは「Q2納期なのでQ2中に予定どおり履行する必要が
+ある」）。
+
+### 25.5 response validator採否
+
+**採否: 採用した。** `dueWordingGuard.ts`の`findOverdueWordingViolations`が、
+overdueTons=0のときのみ応答テキストを走査し、禁止語彙（訂正文脈の否定表現近傍を
+除く）を検知する。`handlers.ts`が、通常のClaude呼び出し後にこの検知を行い、
+違反があれば最大1回だけ`repairNote`付きの同一入力で再呼び出しする（schema_mismatch
+由来の既存retryとは別レイヤー。既存claudeClient.tsのretryポリシーは変更していない）。
+採用理由: 平常時（違反が無い場合）のtoken・latencyコストは走査コストのみで
+ほぼゼロであり、違反が実際に発生した稀なケースにのみ追加API呼び出しが発生する
+ため、トレードオフが良好と判断した。限界: 完全な自然言語理解ではなく単純な文字列
+マッチ＋否定表現の近傍一致であるため、「プレイヤーは『納期遅延』と述べましたが」
+のような複雑な引用文脈までは正確に除外できない（remaining risksに明記）。
+
+### 25.6 capacity pool semantics
+
+`capacitySemantics.ts`の`buildCapacityPools`が、既存`ownState.factoryCapacity`
+（commonProcessing/hoso/pd/vap/freezingPackagingの5フィールドを既に保持している）
+を単純合算し、`coo.capacityPools`として明示的に分離する。`productLineSumTons`
+（hoso+pd+vap）は「会社全体の実効生産能力」ではなく商品別専用ラインの合計に
+すぎないことをRuleSemantics・prompt双方で明記し、`bindingPoolLabel`（既存
+`computeProductionCapacitySummary`が既に正しく算出済みの"商品別実効能力"|
+"共通前処理"|"凍結・包装"）を必ず明示するようCOOへ指示した。
+
+### 25.7 raw material semantics
+
+`coo.rawMaterialAvailability.currentOnHandTons`として、decision時点の現在在庫
+（既存`ownState.rawMaterialInventory.totalTons`の転記のみ）を明示的にラベル付け。
+今期のquarter processing中に発生し得るdomestic purchase/import arrivalsはこの
+数値に含まれないことをpromptで明記し、「現在在庫0＝今期生産不可能」という誤った
+断定を禁止した。
+
+### 25.8 preview semantics
+
+RuleSemantics.productionPreviewエントリと、promptの明示的な指示により、player
+draftの現在の入力に基づく生産見込み（forecast/preview/current-input estimate）を
+確定した生産能力・確定生産量と混同しないよう規定した。新しいpreview計算・新しい
+観測フィールドは追加していない（現時点でAI Meeting briefingにpreview数値を渡す
+経路自体が無いため、原則の明文化のみ）。
+
+### 25.9 CAPEX grounding
+
+CFO・COOがCAPEX必要性を述べる場合、現在のoverdue backlogだけを理由にせず、
+(a) 商品別capacity gap、(b) forward obligationのstatus・期間、(c) 既存CAPEX
+（cfo.activeCapexRemainingCommitmentUsd等）、(d) 財務的実現可能性、のうち複数の
+根拠を示すことを要求する原則をprompt.tsへ追加した。future backlogが存在するという
+事実だけで「CAPEXが必要」と断定することを明示的に禁止した。
+
+### 25.10 Test26 BAL Turn1 reproduction
+
+実装指示§9の実データ（ending backlog=3,625.95t/overdue=0、US HOSO 1,443.43t・
+OTHER HOSO 814.04t（いずれも次四半期納期）、capacity pools common=25,650t/
+HOSO=6,840t/PD=5,985t/VAP=1,282.5t/freezing=25,650t、ending raw inventory=0t）を
+`dueCapacitySemantics.test.ts`のAMM-CAP-10で再現し、due status=FUTURE_DUE・
+capacity pools分離・raw material=0の正しい算出を確認した。
+`scripts/aiMeetingRealApiSmokeTest.ts`へ、実際のプレイヤー発言「現状を分析して
+ください」を使う「9G. Test26 BAL Turn1再現（due-date grounding・capacity pool
+semantics）」ケースも追加した。
+
+### 25.11 code changes
+
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/capacitySemantics.ts`
+  （CapacityPools/RawMaterialAvailabilityFact + builder関数）
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/dueWordingGuard.ts`
+  （overdue関連禁止語彙の検知関数、訂正文脈の否定表現近傍除外を含む）
+- 変更: `backlogSemantics.ts`（`classifyBacklogDueStatus`・`BacklogDueStatus`型を
+  追加し、全集計エントリへ`status`フィールドを付与）
+- 変更: `briefing.ts`（`coo.capacityPools`/`coo.rawMaterialAvailability`/
+  `cfo`・`commercial`各backlog集計への`status`追加、RuleSemantics 5エントリ追加、
+  `EXECUTIVE_BRIEFING_VERSION`を"v5"→"v6"）
+- 変更: `prompt.ts`（due status唯一分類・強い語彙ガード・capacity pool説明規律・
+  raw material/preview区別・CAPEX根拠要求・repairNote処理を追加、
+  `AI_MEETING_PROMPT_VERSION`を"v5"→"v6"）
+- 変更: `types.ts`（`AiMeetingCallDiagnostics.semanticGuardResult`をoptional追加）
+- 変更: `handlers.ts`（overdue語彙違反検知時の最大1回repair呼び出しを追加、
+  `diagnostics.semanticGuardResult`を返す）
+- 既存のStandard AI・Production/Sales/Contract fulfillment/Finance/Trust
+  mechanicsは一切変更していない（実装指示の禁止事項の遵守）。
+
+### 25.12 tests
+
+`app/lib/v2/companyLab/aiManagementMeeting/__tests__/dueCapacitySemantics.test.ts`に
+AMM-DUE-1〜4・AMM-CAP-1〜6・AMM-CAP-10（Test26 Turn1 reproduction）の11件を新規追加。
+`app/api/v2/company-labs/_lib/__tests__/aiMeetingHandlers.test.ts`にAMM-DUE-5
+（repair発火）・AMM-DUE-6（repair不発火）の結合テスト2件を追加。既存
+backlogSemantics.test.ts等は`status`フィールド追加が構造的に既存アサーションを
+壊さないことを確認済み。factGrounding.test.ts AMM-FG-9のversion識別テストを
+"v5"→"v6"へ更新。AMM系テスト計72件（59+11+2）、プロジェクト全体3180件、いずれも
+pass。
+
+### 25.13 real API結果
+
+このセッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため未実施
+（M2.1〜M2.4と同様）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、Test26 BAL Turn1の
+実会話再現ケース「9G. Test26 BAL Turn1再現（due-date grounding・capacity pool
+semantics）」（プレイヤー発言「現状を分析してください」、実データベースの
+due status・capacityPools・rawMaterialAvailabilityを組み込み済み）を追加した
+（計15ケース）。`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで、「期限
+オーバー」等の禁止語彙を使わない・US HOSO/OTHER HOSOを次四半期の履行義務として
+説明する・14,107.5tを会社全体の天井と呼ばない・common/freezing poolの存在を
+明示する・現在在庫0と今期調達可能性を分離する・future backlogだけでCAPEXを
+断定しない、という方向で各役員が応答するかを確認できる。
+
+### 25.14 remaining risks
+
+- prompt文言・response validatorともに、Claudeの出力を完全に機械的強制する
+  仕組みではない。実API未検証のため、実際の応答品質（特に9Gケースでの改善）は
+  引き続き確認が必要。
+- `dueWordingGuard.ts`の訂正文脈除外は、否定表現の近傍一致という単純な
+  ヒューリスティックであり、「プレイヤーは『納期遅延』と述べましたが」のような
+  複雑な引用文脈までは正確に除外できない（既知の限界。将来phaseでより精緻な
+  文脈解析が必要になった場合は要検討）。
+- repair呼び出しは、1回のみで打ち切る設計のため、repair後も違反が残った場合
+  （`semanticGuardResult="violation_after_repair"`）はそのまま応答を返す
+  （無限リトライを避けるための意図的な設計）。
+- `coo.capacityPools`は既存`ownState.factoryCapacity`の単純合算であり、
+  factory単位の内訳（どの工場のどのラインが逼迫しているか）はfactoryCapacityTopN
+  （上位N件）からしか読み取れない。全factory詳細が必要な場合は別途監査が必要。
+
+### 25.15 readiness
+
+due status・capacity pool・raw material/preview semantics・CAPEX根拠要求・
+response validatorが、コード・テスト・prompt文言の3層で揃った。次のTest26継続
+セッションでは、新規BAL Turn1の「現状を分析してください」を含む、backlogと
+capacityに関する質問系列を優先的に再検証することを推奨する。
