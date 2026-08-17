@@ -37,7 +37,7 @@ import ProductionPlanningScreen from "./ProductionPlanningScreen";
 import WorkforcePlanningScreen from "./WorkforcePlanningScreen";
 import InvestmentPlanningScreen from "./InvestmentPlanningScreen";
 import FinancePlanningScreen from "./FinancePlanningScreen";
-import AuxiliaryPanel from "./AuxiliaryPanel";
+import AuxiliaryPanel, { AiMeetingSource } from "./AuxiliaryPanel";
 
 export interface DecisionStudioProps {
   readonly fixture: CompanyFixture;
@@ -54,10 +54,17 @@ export interface DecisionStudioProps {
   /** INFO画面のBS・償却資産明細・市場情報向け（PlayerScreenClient.tsxが持つ場合のみ渡す）。 */
   readonly openingInfo?: OpeningInfoViewModel;
   /**
-   * AI Management Meeting panel接続用（labId必須・companyIdはfixture.companyIdを使う）。
-   * 省略時はAuxiliaryPanelのトグル自体を表示しない（backendへ接続できないため）。
+   * AI Management Meeting panel接続用（Company Lab 経路。companyIdはfixture.companyIdを使う）。
+   * labId・simulationRunId のどちらも無い場合は、AuxiliaryPanelのトグル自体を表示しない
+   * （backendへ接続できないため）。
    */
   readonly labId?: string;
+  /**
+   * AI Management Meeting panel接続用（Management Console の Simulation Run 経路）。
+   * PLAYER Company Workspace は Redis 上の Lab を持たないため labId ではなくこちらを渡す。
+   * 会議の中身はどちらの経路でも同じ実装（aiManagementMeeting/session.ts）を通る。
+   */
+  readonly simulationRunId?: string;
   readonly companyName?: string;
 }
 
@@ -76,11 +83,16 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     turn,
     openingInfo,
     labId,
+    simulationRunId,
     companyName,
   } = props;
 
   const [activeScreen, setActiveScreen] = useState<DecisionStudioScreenKey>("info");
   const [auxiliaryPanelOpen, setAuxiliaryPanelOpen] = useState(false);
+
+  // どちらの経路でAI会議へ繋ぐか。両方未指定なら会議の入口自体を出さない。
+  const aiMeetingSource: AiMeetingSource | null =
+    labId !== undefined ? { kind: "companyLab", labId } : simulationRunId !== undefined ? { kind: "simulationRun", simulationRunId } : null;
 
   const vm = buildDecisionStudioViewModel({
     fixture,
@@ -113,7 +125,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
           ) : (
             <span className="text-[11px] rounded px-1.5 py-0.5 bg-sky-900/70 text-sky-200 border border-sky-700/70">DRAFT・未提出</span>
           )}
-          {labId !== undefined && (
+          {aiMeetingSource !== null && (
             <button
               type="button"
               onClick={() => setAuxiliaryPanelOpen((v) => !v)}
@@ -171,9 +183,9 @@ export default function DecisionStudio(props: DecisionStudioProps) {
         </div>
       </div>
 
-      {/* AuxiliaryPanel — AI Management Meeting。デスクトップでは右側に横並び、開いていない/labId未指定なら何もレンダリングしない。 */}
-      {labId !== undefined && auxiliaryPanelOpen && (
-        <AuxiliaryPanel labId={labId} companyId={fixture.companyId} turn={turn} onClose={() => setAuxiliaryPanelOpen(false)} />
+      {/* AuxiliaryPanel — AI Management Meeting。デスクトップでは右側に横並び、開いていない/接続先未指定なら何もレンダリングしない。 */}
+      {aiMeetingSource !== null && auxiliaryPanelOpen && (
+        <AuxiliaryPanel source={aiMeetingSource} companyId={fixture.companyId} turn={turn} onClose={() => setAuxiliaryPanelOpen(false)} />
       )}
     </div>
   );

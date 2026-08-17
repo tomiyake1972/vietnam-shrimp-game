@@ -20,6 +20,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AREA_TONES } from "../panelStyles";
 import { fetchAiMeetingConversationAction, sendAiMeetingMessageAction } from "../../play/[labId]/actions";
+import { fetchRunAiMeetingConversationAction, sendRunAiMeetingMessageAction } from "../../../management/player/aiMeetingActions";
 import { AiMeetingCallDiagnostics, AiMeetingMessage, ExecutiveRole, ValidatedAiMeetingProposal } from "../../../../lib/v2/companyLab/aiManagementMeeting/types";
 
 type MessageSpeaker = "PLAYER" | ExecutiveRole;
@@ -48,25 +49,45 @@ const STANCE_LABEL: Readonly<Record<string, string>> = {
   INFORMATIONAL: "情報提供",
 };
 
+/**
+ * この会議がどの進行状態を相手にしているか。
+ *
+ * 会議の中身（AI役員・prompt・提案検証）はどちらでも完全に同じで、違うのは
+ * 「会社状態をサーバーがどこから読むか」と「会話をどの名前空間へ保存するか」だけ。
+ * UI側はこの union を持ち回るだけで、AI会議のロジックには一切関与しない。
+ */
+export type AiMeetingSource =
+  | { readonly kind: "companyLab"; readonly labId: string }
+  | { readonly kind: "simulationRun"; readonly simulationRunId: string };
+
 interface AuxiliaryPanelProps {
-  readonly labId: string;
+  readonly source: AiMeetingSource;
   readonly companyId: string;
   readonly turn?: number;
   readonly onClose: () => void;
 }
 
 /**
+ * サーバー側 session.ts の contextId と同じ規約。Company Lab は labId をそのまま、
+ * Simulation Run は simulationRunContextId() と同じ "simrun:" 接頭辞を付ける。
+ */
+function contextIdOf(source: AiMeetingSource): string {
+  return source.kind === "companyLab" ? source.labId : `simrun:${source.simulationRunId}`;
+}
+
+/**
  * サーバー側 conversation.ts の defaultMeetingId と同じ命名規約
- * （`${labId}:${companyId}:turn${turn}`）をクライアント側でも使い、ページ再読み込み後に
+ * （`${contextId}:${companyId}:turn${turn}`）をクライアント側でも使い、ページ再読み込み後に
  * GETで同じ会話を復元できるようにする。ID文字列の組み立てのみで、判断ロジックは
  * 一切含まない（backendのdefaultMeetingIdをそのまま複製しているだけの単純な規約）。
  */
-function buildMeetingId(labId: string, companyId: string, turn: number): string {
-  return `${labId}:${companyId}:turn${turn}`;
+function buildMeetingId(contextId: string, companyId: string, turn: number): string {
+  return `${contextId}:${companyId}:turn${turn}`;
 }
 
-export default function AuxiliaryPanel({ labId, companyId, turn, onClose }: AuxiliaryPanelProps) {
+export default function AuxiliaryPanel({ source, companyId, turn, onClose }: AuxiliaryPanelProps) {
   const tone = AREA_TONES.info;
+  const contextId = contextIdOf(source);
   const [messages, setMessages] = useState<readonly AiMeetingMessage[]>([]);
   const [validatedProposals, setValidatedProposals] = useState<readonly ValidatedAiMeetingProposal[]>([]);
   const [meetingId, setMeetingId] = useState<string | null>(null);
@@ -83,9 +104,12 @@ export default function AuxiliaryPanel({ labId, companyId, turn, onClose }: Auxi
   useEffect(() => {
     if (turn === undefined) return;
     let cancelled = false;
-    const restoreMeetingId = buildMeetingId(labId, companyId, turn);
+    const restoreMeetingId = buildMeetingId(contextId, companyId, turn);
     (async () => {
-      const result = await fetchAiMeetingConversationAction(labId, companyId, restoreMeetingId);
+      const result =
+        source.kind === "companyLab"
+          ? await fetchAiMeetingConversationAction(source.labId, companyId, restoreMeetingId)
+          : await fetchRunAiMeetingConversationAction(source.simulationRunId, companyId, restoreMeetingId);
       if (cancelled) return;
       if (!result.ok) {
         setLoadError(result.errorMessage ?? "会話の復元に失敗しました。新しい会話として続行できます。");
@@ -103,7 +127,7 @@ export default function AuxiliaryPanel({ labId, companyId, turn, onClose }: Auxi
     return () => {
       cancelled = true;
     };
-  }, [labId, companyId, turn]);
+  }, [source, contextId, companyId, turn]);
 
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -119,7 +143,10 @@ export default function AuxiliaryPanel({ labId, companyId, turn, onClose }: Auxi
     setLoadError(null);
     setUnavailableReason(null);
     try {
-      const result = await sendAiMeetingMessageAction(labId, companyId, turn, text, meetingId ?? undefined);
+      const result =
+        source.kind === "companyLab"
+          ? await sendAiMeetingMessageAction(source.labId, companyId, turn, text, meetingId ?? undefined)
+          : await sendRunAiMeetingMessageAction(source.simulationRunId, companyId, turn, text, meetingId ?? undefined);
       if (!result.ok) {
         setLoadError(result.errorMessage ?? "送信に失敗しました。ゲームの状態には影響ありません。");
         return;

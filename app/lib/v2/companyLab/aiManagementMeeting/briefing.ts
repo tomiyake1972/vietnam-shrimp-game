@@ -18,6 +18,7 @@
 // 呼び出しのたびにExplanationContextから再構築する。
 
 import { ExplanationContext } from "../aiExplanation/buildExplanationContext";
+import { AiMeetingNewsItem } from "./scenarioNews";
 import { ExecutiveRole } from "./types";
 
 /** previousQuarterFinancials/previousQuarterMarketは既存のPlayerScreenViewModel型（app/v2層）
@@ -42,6 +43,19 @@ export interface BriefingBuildInput {
   readonly context: ExplanationContext;
   readonly previousQuarter: PreviousQuarterDelta | null;
   readonly playerDraft: PlayerDraftSummary | null;
+  /**
+   * そのターン時点で人間プレイヤーが読めるシナリオNews（scenarioNews.tsが射影済み）。
+   *
+   * 【なぜcommonへ入れるか】News は特定役員の専門領域ではなく、4人全員が同じ記事を
+   * 読んでいる前提の共有情報だから（selectBriefingForRolesでも常にcommonは配られる）。
+   *
+   * 【将来Newsが混ざらない理由】この配列を作るのは scenarioNews.ts だけで、そこが
+   * getAvailableInformation（availableFromTurn <= turn で構造的に絞る）に委ねている。
+   * briefing.ts 側ではターン比較を再実装しない。
+   *
+   * 省略時は空配列（News を持たないシナリオ・既存の呼び出し側との互換のため）。
+   */
+  readonly scenarioNews?: readonly AiMeetingNewsItem[];
 }
 
 const TOP_N_BACKLOG = 5;
@@ -59,6 +73,8 @@ export interface BriefingCommonFacts {
   readonly overdueBacklogTopN: readonly { readonly market: string; readonly product: string; readonly outstandingTons: number; readonly nearestDueDateLabel: string }[];
   readonly playerDraft: PlayerDraftSummary | null;
   readonly standardAiReasonCodesTopN: readonly { readonly code: string; readonly domain: string; readonly severity: string; readonly targetFactoryId?: string }[];
+  /** そのターン時点で人間プレイヤーが読めるシナリオNews（BriefingBuildInput.scenarioNews参照）。 */
+  readonly scenarioNews: readonly AiMeetingNewsItem[];
 }
 
 export interface CfoBriefing {
@@ -117,7 +133,7 @@ function severityRank(s: string): number {
 }
 
 export function buildExecutiveBriefingPacket(input: BriefingBuildInput): ExecutiveBriefingPacket {
-  const { context, previousQuarter, playerDraft } = input;
+  const { context, previousQuarter, playerDraft, scenarioNews } = input;
   const ownState = context.ownState;
   const diagEntries = context.standardAi.diagnosticEntries;
 
@@ -142,6 +158,7 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     overdueBacklogTopN,
     playerDraft,
     standardAiReasonCodesTopN: reasonCodesTopN,
+    scenarioNews: scenarioNews ?? [],
   };
 
   const cfo: CfoBriefing = {
