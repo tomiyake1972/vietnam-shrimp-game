@@ -223,6 +223,9 @@ export default function CompanyLabPage() {
   // 【Phase 8D-2】投資回収の「1トンあたり限界利益」を実績から求めるための直近確定四半期の財務結果。
   const lastQuarterFinancialResultForPlayer =
     latestHistoryRecord?.financialResults.find((r) => r.companyId === draftPlayerCompanyId) ?? null;
+  // 【DIV-1新設】直近確定四半期の配当結果（累積配当・加重配当価値・却下理由の表示用）。
+  const lastQuarterDividendResultForPlayer =
+    (latestHistoryRecord?.dividendResults ?? []).find((r) => r.companyId === draftPlayerCompanyId) ?? null;
   // 【Phase 8B-3補足確認】前四半期に却下された新規投資案件（同時進行中案件数の上限超過等）。
   // エンジンは例外を投げず理由つきで却下結果を返すため、これを表示しないと「見送られたのに
   // 画面上は何も起きなかったように見える」という分かりにくさが残る（今回の確認で発見・修正）。
@@ -340,9 +343,11 @@ export default function CompanyLabPage() {
                     onChange={setPlayerDraft}
                     disabled={labState.isComplete}
                     period={labState.currentPeriod}
+                    turn={labState.scenarioState.currentTurn}
                     lastQuarterCapexEvents={lastQuarterCapexEventsForPlayer}
                     lastQuarterRejectedCapexProposals={lastQuarterRejectedCapexProposalsForPlayer}
                     lastQuarterFinancialResult={lastQuarterFinancialResultForPlayer}
+                    lastQuarterDividendResult={lastQuarterDividendResultForPlayer}
                   />
                 ) : (
                   <div className="text-sm text-gray-400">このシナリオはすでに完了しています。</div>

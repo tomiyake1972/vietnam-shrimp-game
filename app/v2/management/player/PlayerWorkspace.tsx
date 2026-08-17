@@ -23,7 +23,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import DecisionEditor from "../../company-lab/components/DecisionEditor";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "../../company-lab/decisionDraft";
-import { extractCompanyCapexResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
+import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecision } from "../../../lib/v2/companyLab/standardAi/policy";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab/types";
@@ -185,6 +185,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const backlog = buildBacklogDisplay(summary, previousSummary);
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
+  const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
   const controlMode = entry.companyControlModes[companyId] ?? "STANDARD_AI";
 
   return (
@@ -412,9 +413,11 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               onChange={setDraft}
               disabled={false}
               period={session.state.currentPeriod}
+              turn={turn}
               lastQuarterCapexEvents={lastQuarterCapexResult?.events}
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
+              lastQuarterDividendResult={lastQuarterDividendResult}
             />
           </div>
         ) : null}

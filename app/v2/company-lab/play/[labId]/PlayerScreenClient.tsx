@@ -511,9 +511,11 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               onChange={setDraft}
               disabled={!isEditing || busy}
               period={viewModel.period}
+              turn={viewModel.currentTurn}
               lastQuarterCapexEvents={viewModel.lastQuarterCapexEvents}
               lastQuarterRejectedCapexProposals={viewModel.lastQuarterRejectedCapexProposals}
               lastQuarterFinancialResult={viewModel.lastQuarterResult?.financialResult ?? null}
+              lastQuarterDividendResult={viewModel.lastQuarterDividendResult}
             />
 
             {isEditing && (

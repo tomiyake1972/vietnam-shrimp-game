@@ -53,7 +53,8 @@ import { buildCompanyProcessingForecast } from "../processingForecastViewModel";
 import { buildCompanyInvestmentPlanningViewModel } from "../investmentPlanningViewModel";
 import { applyHeadcountChange, WORKFORCE_EXPLANATION_TEXT } from "../../../lib/v2/companyLab/workforce";
 import { computeMaxSalesHiresPerQuarter } from "../../../lib/v2/companyLab/salesForceHiring";
-import { CompanyFinancialQuarterResult } from "../../../lib/v2/finance/types";
+import { CompanyFinancialQuarterResult, unwrapUsd } from "../../../lib/v2/finance/types";
+import { computeMaxDividendUsd, computeWeightedDividendValueUsd, CompanyDividendQuarterResult, getDividendTimeWeight } from "../../../lib/v2/finance/dividend";
 import CapacityEffectiveRatePanel from "./CapacityEffectiveRatePanel";
 import ProcessingForecastPanel from "./ProcessingForecastPanel";
 import CapexDraftList from "./CapexDraftList";
@@ -75,6 +76,8 @@ interface DecisionEditorProps {
   readonly disabled: boolean;
   /** 【Phase 8B-3】設備投資セクション用の当四半期（プレビュー・稼働開始判定の基準）。 */
   readonly period: PeriodV2;
+  /** 【DIV-1新設】現在のTurn番号（1始まり）。配当の時間加重スコア計算（getDividendTimeWeight）にのみ使う。 */
+  readonly turn: number;
   /** 【Phase 8B-3】直近確定四半期の設備投資イベント（今期の実際の支払額表示用、参考情報）。未実行なら省略可。 */
   readonly lastQuarterCapexEvents?: readonly CapexProjectQuarterEvent[];
   /**
@@ -90,6 +93,12 @@ interface DecisionEditorProps {
    * 無ければ（初回四半期など）回収年数は「算定対象外」と表示される。
    */
   readonly lastQuarterFinancialResult?: CompanyFinancialQuarterResult | null;
+  /**
+   * 【DIV-1新設】直近確定四半期のプレイヤー会社ぶんの配当結果（累積配当・
+   * 加重配当価値・却下理由の表示用）。無ければ（初回四半期など）「まだ配当実績なし」
+   * として表示する。
+   */
+  readonly lastQuarterDividendResult?: CompanyDividendQuarterResult | null;
 }
 
 const LOAN_TYPE_LABELS: Record<CompanyDecisionDraft["financingRequest"]["desiredLoanType"], string> = {
@@ -180,9 +189,11 @@ export default function DecisionEditor(props: DecisionEditorProps) {
     onChange,
     disabled,
     period,
+    turn,
     lastQuarterCapexEvents,
     lastQuarterRejectedCapexProposals,
     lastQuarterFinancialResult,
+    lastQuarterDividendResult,
   } = props;
 
   // --- 【Phase 8G §1】営業人員配分の集計。「配分済み/配分可能/未配分（or 超過）」の
@@ -289,6 +300,21 @@ export default function DecisionEditor(props: DecisionEditorProps) {
   const existingLoans = ownState.financingState.loanPortfolio.loans.filter((l) => l.status !== "closed");
   const existingLoanBalanceUsd = existingLoans.reduce((sum, l) => sum + l.currentPrincipalUsd, 0);
   const accruedInterestPayableUsd = ownState.financingState.accruedInterestPayableUsd;
+
+  // --- 【DIV-1新設】株主還元（配当）セクション用の派生値 ---
+  // maxDividend = min(Cash, distributableEarnings) はエンジン側の
+  // computeMaxDividendUsd（finance/dividend.ts）と同一の関数を使い、画面用に
+  // 別計算しない。前期までに確定した分配可能利益（当ゲーム開始後に稼いだ利益のみ。
+  // 初期BS上の利益剰余金は含まない）とCashの小さい方が上限になる。
+  const distributableEarningsUsd = unwrapUsd(ownState.financeState.distributableEarnings);
+  const maxDividendUsd = computeMaxDividendUsd(ownState.financeState);
+  const dividendAmountUsd = draft.dividendAmountUsd ?? 0;
+  const cashAfterDividendUsd = currentCashUsd - dividendAmountUsd;
+  const dividendExceedsMax = dividendAmountUsd > maxDividendUsd;
+  const cumulativeDividendUsd = lastQuarterDividendResult?.cumulativeDividendUsd ?? 0;
+  const cumulativeWeightedDividendValueUsd = lastQuarterDividendResult?.cumulativeWeightedDividendValueUsd ?? 0;
+  const currentTimeWeight = getDividendTimeWeight(turn);
+  const projectedWeightedDividendValueUsd = computeWeightedDividendValueUsd(dividendAmountUsd, turn);
 
   // --- 【Test15新設】新工場建設（4工場上限のブロック判定） ---
   const newFactoryConstructionBlocked = isNewFactoryConstructionBlockedByCap(draft, fixture.factories.length, ownState.capexState.portfolio.projects);
@@ -1244,6 +1270,74 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             onChange({ ...draft, workerAssignments: next });
           }}
         />
+      </CollapsibleSection>
+
+      {/* 【DIV-1新設】株主還元（配当）。maxDividend = min(Cash, distributableEarnings)は
+          finance/dividend.ts の computeMaxDividendUsd と同一関数を使い、超過要求は
+          エンジン側で全額拒否される（部分執行しない）ため、画面側では超過を警告表示するのみ
+          （送信自体はブロックしない＝ソフト警告。他の入力と同じ方針）。 */}
+      <CollapsibleSection
+        title="株主還元（配当）"
+        tone="input"
+        testId="dividend-section"
+        summaryRight={`累積配当 ${formatUsd(cumulativeDividendUsd)}`}
+      >
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-gray-300 sm:grid-cols-3">
+          <div>
+            前期確定分配可能利益 <span className={INFO_VALUE_CLASS}>{formatUsd(distributableEarningsUsd)}</span>
+          </div>
+          <div>
+            現在Cash <span className={INFO_VALUE_CLASS}>{formatUsd(currentCashUsd)}</span>
+          </div>
+          <div>
+            配当可能上限（Cash・分配可能利益の小さい方） <span className={INFO_VALUE_CLASS}>{formatUsd(maxDividendUsd)}</span>
+          </div>
+          <div>
+            配当後Cash見込み <span className={INFO_VALUE_CLASS}>{formatUsd(cashAfterDividendUsd)}</span>
+          </div>
+          <div>
+            累積配当（当ゲーム開始後） <span className={INFO_VALUE_CLASS}>{formatUsd(cumulativeDividendUsd)}</span>
+          </div>
+          <div>
+            累積加重配当価値 <span className={INFO_VALUE_CLASS}>{formatUsd(cumulativeWeightedDividendValueUsd)}</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-end gap-4 text-xs text-gray-300">
+          <label className="flex flex-col gap-1">
+            今四半期の配当希望額(USD)
+            <NumberCell
+              value={dividendAmountUsd}
+              disabled={disabled}
+              step={100000}
+              warn={dividendExceedsMax}
+              testId="dividend-amount-input"
+              onChange={(n) => onChange({ ...draft, dividendAmountUsd: n })}
+            />
+          </label>
+          <div>
+            時間加重係数（Turn {turn}） <span className={INFO_VALUE_CLASS}>×{currentTimeWeight.toFixed(2)}</span>
+          </div>
+          <div>
+            加重配当価値見込み <span className={INFO_VALUE_CLASS}>{formatUsd(projectedWeightedDividendValueUsd)}</span>
+          </div>
+        </div>
+        {dividendExceedsMax && (
+          <p className="text-[11px] text-red-400" data-testid="dividend-exceeds-max-warning" role="alert">
+            入力額（{formatUsd(dividendAmountUsd)}）が配当可能上限（{formatUsd(maxDividendUsd)}）を超えています。
+            このまま提出すると配当は全額却下されます（部分執行はされません）。上限以内に減らしてください。
+          </p>
+        )}
+        {!dividendExceedsMax && dividendAmountUsd > 0 && (
+          <p className="text-[11px] text-amber-300" data-testid="dividend-cash-warning">
+            配当を実行すると、その分だけ今四半期の原料調達・設備投資に使えるCashが減ります（借入は自動的に増えません）。
+          </p>
+        )}
+        {lastQuarterDividendResult?.rejected && (
+          <p className="text-[11px] text-amber-300" data-testid="dividend-last-rejected-note">
+            前四半期の配当（希望額 {formatUsd(lastQuarterDividendResult.requestedDividendUsd)}）は却下されました：
+            {lastQuarterDividendResult.rejectionReason}
+          </p>
+        )}
       </CollapsibleSection>
 
       {/* 【営業人員バジェット修正と合わせて発見・対応】資金調達（追加借入・任意期限前返済） */}

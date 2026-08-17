@@ -10,6 +10,7 @@ import { CompanyQuarterRecord } from "../../../../lib/v2/companyLab/types";
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
 import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
 import { CapexQuarterResult } from "../../../../lib/v2/capex";
+import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividend";
 import { CompanyId } from "../../../../lib/v2/sales/types";
 
 /** 指定四半期記録から、指定会社ぶんのPL/BS/CF結果を抽出する（見つからなければnull）。 */
@@ -25,4 +26,12 @@ export function extractCompanyFinancingResult(record: CompanyQuarterRecord, comp
 /** 指定四半期記録から、指定会社ぶんの設備投資結果を抽出する（見つからなければnull）。 */
 export function extractCompanyCapexResult(record: CompanyQuarterRecord, companyId: CompanyId): CapexQuarterResult | null {
   return record.capexResults.find((r) => r.companyId === companyId) ?? null;
+}
+
+/**
+ * 【DIV-1】指定四半期記録から、指定会社ぶんの配当結果を抽出する（見つからなければnull）。
+ * dividendResultsは旧形式の保存には存在しないため、任意（?.）で読む。
+ */
+export function extractCompanyDividendResult(record: CompanyQuarterRecord, companyId: CompanyId): CompanyDividendQuarterResult | null {
+  return (record.dividendResults ?? []).find((r) => r.companyId === companyId) ?? null;
 }
