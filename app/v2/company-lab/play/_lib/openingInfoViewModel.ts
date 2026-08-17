@@ -50,6 +50,10 @@ export interface OpeningBalanceSheet {
   readonly debtEquityRatio: number | undefined;
   /** 資産合計 −（負債合計＋純資産合計）。0近傍であるべき検算値。 */
   readonly balanceDifference: number;
+  /** 現金（assets[0]と同じ値）。スクロールせず見える「一目」表示用に単独で持つ。 */
+  readonly cash: number;
+  /** 有利子負債合計（短期借入金＋長期借入金）。「一目」表示用に単独で持つ。 */
+  readonly totalDebt: number;
 }
 
 /**
@@ -123,6 +127,8 @@ export function buildOpeningBalanceSheet(ownState: CompanyOwnState): OpeningBala
     totalEquity,
     debtEquityRatio: totalEquity > 0 ? (shortTermLoans + longTermLoans) / totalEquity : undefined,
     balanceDifference: totalAssets - (totalLiabilities + totalEquity),
+    cash,
+    totalDebt: shortTermLoans + longTermLoans,
   };
 }
 

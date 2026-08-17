@@ -53,13 +53,22 @@ function BsRows({ rows }: { readonly rows: readonly OpeningBalanceSheetRow[] }) 
   );
 }
 
-export function OpeningBalanceSheetPanel({ bs, turn }: { readonly bs: OpeningBalanceSheet; readonly turn: number }) {
+export function OpeningBalanceSheetPanel({
+  bs,
+  turn,
+  defaultOpen = false,
+}: {
+  readonly bs: OpeningBalanceSheet;
+  readonly turn: number;
+  /** Decision StudioのINFOタブ最上段など、開いた状態を初期表示したい呼び出し元向け。他の呼び出し元は省略すれば従来どおり閉じたまま。 */
+  readonly defaultOpen?: boolean;
+}) {
   return (
     <CollapsibleSection
       title={`財務状況（turn ${turn} 開始時点のBS）`}
       description="四半期処理前の確定値です。PL・CFは当期の実績が確定してから「直近の四半期結果」に表示されます。"
       tone="info"
-      defaultOpen={false}
+      defaultOpen={defaultOpen}
       testId="opening-balance-sheet"
       summaryRight={
         <span className="text-xs text-gray-400">
