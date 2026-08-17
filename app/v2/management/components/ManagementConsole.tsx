@@ -60,6 +60,7 @@ import { SeriesChart } from "./SeriesChart";
 import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
 import { PublicDividendSummary } from "./PublicDividendSummary";
+import { EvaluationSummaryPanel } from "./EvaluationSummaryPanel";
 import { RunSelector } from "./RunSelector";
 import { Collapsible } from "./Collapsible";
 import { StrategySummary } from "./StrategySummary";
@@ -1045,6 +1046,15 @@ export function ManagementConsole() {
               <p className="text-sm text-slate-400">読み込み中…</p>
             )}
           </div>
+
+          {/* 【EVAL-1】任意Turn評価サービスの基盤（プレビュー表示・読み取り専用）。
+              End Gameを実際に実行するボタンはまだ無い（§14/§32・Run/Labライフサイクルへの
+              大きな変更を避けるため今回はサービス層の基盤のみ）。 */}
+          {view?.session && fixtures.length > 0 ? (
+            <Collapsible title="評価サマリー（EVAL-1・プレビュー）" testId="console-evaluation-summary-toggle">
+              <EvaluationSummaryPanel session={view.session} fixture={fixtures.find((f) => f.companyId === selectedCompanyId) ?? fixtures[0]} />
+            </Collapsible>
+          ) : null}
         </aside>
       </div>
     </div>
