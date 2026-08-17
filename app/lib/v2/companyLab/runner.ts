@@ -297,15 +297,32 @@ function buildCompanyCountryMap(fixtures: readonly CompanyFixture[]): Readonly<R
   return result;
 }
 
-/** 会社の生産計画（plannedQuantity）と前期実績（actualQuantity）から、PD/VAP供給シグナル入力を組み立てる。 */
+/**
+ * 会社の生産計画（plannedQuantity）と前期実績（actualQuantity）から、PD/VAP供給シグナル入力を組み立てる。
+ *
+ * 【vapNominalCapacityByCompany を渡した場合】VAPの plannedQuantity を、
+ * 生産計画ではなくその会社の保有VAP設備能力に差し替える
+ * （シナリオが vapCapacitySignal: "nominalEquipment" を宣言した場合のみ）。
+ *
+ * 【なぜ差し替えで済むか】この plannedQuantity は下流で
+ * CountrySupplyInput.vapProcessingCapacity＝「その国の加工能力」として使われる。
+ * つまり呼び名は planned だが、意味としては当期の供給能力シグナルであり、
+ * そこへ設備能力を入れることは新しい式を足すことにはならない。actualQuantity
+ * （次期フィードバック用の実績）は実績のまま変えない。
+ */
 function buildSupplySignalInputs(
   decisions: readonly CompanyDecisionInput[],
-  lastQuarterActualProduction: Readonly<Record<CompanyId, Readonly<Partial<Record<Product, number>>>>>
+  lastQuarterActualProduction: Readonly<Record<CompanyId, Readonly<Partial<Record<Product, number>>>>>,
+  vapNominalCapacityByCompany?: Readonly<Record<CompanyId, number>>
 ): readonly ProductionSupplySignalInput[] {
   const signals: ProductionSupplySignalInput[] = [];
   for (const d of decisions) {
     for (const product of ["pd", "vap"] as const) {
-      const planned = d.productionPlans.filter((p) => p.product === product).reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
+      const plannedFromDecision = d.productionPlans.filter((p) => p.product === product).reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
+      const planned =
+        product === "vap" && vapNominalCapacityByCompany !== undefined
+          ? (vapNominalCapacityByCompany[d.companyId] ?? plannedFromDecision)
+          : plannedFromDecision;
       const actual = lastQuarterActualProduction[d.companyId]?.[product] ?? 0;
       if (planned <= EPSILON && actual <= EPSILON) continue;
       signals.push({
@@ -360,6 +377,39 @@ export function applyScenarioRequiredCapabilities(config: CompanyLabConfig, defi
   return { ...config, sai5: merged };
 }
 
+/**
+ * シナリオが宣言した初期VAP設備能力を、共有フィクスチャへ適用する。
+ *
+ * 宣言を持たないシナリオでは fixtures をそのまま返す（恒等変換）。つまり
+ * baseline 等の既存シナリオは共有フィクスチャの値のまま一切変わらない。
+ *
+ * 【工場の広さを縮めない】ここで差し替えるのは vapCapacity だけで、
+ * buildCompanyFixtures が既に確定させた totalFactorySpaceUnits はそのまま持ち越す。
+ * totalFactorySpaceUnits は「今据えている設備の占有面積 ×(1+余裕率)」で導出される
+ * ため、能力だけ下げて再導出させると建屋まで一緒に縮み、他製品の増設余地も
+ * 減ってしまう。建屋の広さは初期設備量とは別物なので、据え置く。
+ * 結果として、減らしたVAP設備のぶんは空きスペース＝将来のVAPライン増設余地になる。
+ */
+export function applyScenarioInitialCompanyVapCapacity(
+  fixtures: readonly CompanyFixture[],
+  definition: ScenarioDefinition
+): readonly CompanyFixture[] {
+  const overrides = definition.initialCompanyVapCapacityTons;
+  if (overrides === undefined) return fixtures;
+
+  return fixtures.map((fixture) => {
+    const tons = overrides[fixture.companyId];
+    if (tons === undefined) return fixture;
+    // 宣言値は「その会社の初期VAP能力の合計」。初期フィクスチャは1社1工場だが、
+    // 将来2工場目を持つフィクスチャが来ても合計が二重にならないよう、
+    // 先頭の工場へ集約し、残りは0にする。
+    return {
+      ...fixture,
+      factories: fixture.factories.map((f, index) => ({ ...f, vapCapacity: hosoEqTons(index === 0 ? Math.max(0, tons) : 0) })),
+    };
+  });
+}
+
 export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitResult {
   const definition = findScenarioDefinitionForCompanyLab(config.scenarioId);
   if (!Number.isInteger(config.turns) || config.turns < 1 || config.turns > definition.durationTurns) {
@@ -376,7 +426,7 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
 
   const scenarioState = initializeScenario(definition, config.mode, config.seed);
   const startPeriod = getScenarioTurnInput(scenarioState, 1).period;
-  const fixtures = buildCompanyFixtures(startPeriod);
+  const fixtures = applyScenarioInitialCompanyVapCapacity(buildCompanyFixtures(startPeriod), definition);
 
   // 【Phase 8A】5社の初期財務状態。原料在庫の初期金額は各社の初期原料ロット
   // （実データ）から算出し、開始時点の貸借一致を構造的に保証する。
@@ -1001,7 +1051,13 @@ export function advanceCompanyLabQuarter(
 
   // --- 実装指示 §3: PD/VAP供給計画（会社の生産計画）の集計 → 市場入力への適用 ---
   const companyCountry = buildCompanyCountryMap(fixtures);
-  const supplySignals = buildSupplySignalInputs(decisions, state.lastQuarterActualProduction);
+  // シナリオが "nominalEquipment" を宣言している場合のみ、VAPの供給能力シグナルを
+  // 5社の保有VAP設備能力の合計へ切り替える（未宣言なら従来どおり生産計画）。
+  const vapNominalCapacityByCompany =
+    definition.vapCapacitySignal === "nominalEquipment"
+      ? Object.fromEntries(fixtures.map((f) => [f.companyId, f.factories.reduce((sum, fac) => sum + unwrapUnit(fac.vapCapacity), 0)]))
+      : undefined;
+  const supplySignals = buildSupplySignalInputs(decisions, state.lastQuarterActualProduction, vapNominalCapacityByCompany);
   const marketInput = applyProductionSupplySignalsToMarketInput(lifecycleAdjustedMarketInput, supplySignals, companyCountry);
 
   // --- 【Phase 8F-1】消費国在庫・購買循環モデル: 当期の計画(実購買量が確定する前) ---

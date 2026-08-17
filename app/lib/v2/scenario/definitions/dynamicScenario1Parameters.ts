@@ -439,3 +439,62 @@ export const DS1_LATE_SUPPLY_SHOCKS = {
   vietnamDiseaseY7: { startTurn: 26, rampUpTurns: 1, durationTurns: 2, recoveryTurns: 2, survivalRateDelta: -0.12, costMultiplier: 1.15 },
   ecuadorDiseaseY8: { startTurn: 29, rampUpTurns: 1, durationTurns: 2, recoveryTurns: 2, survivalRateDelta: -0.15, costMultiplier: 1.18 },
 } as const;
+
+// ---------------------------------------------------------------------
+// VAP 加工能力（産地別）— External VAP Capacity Recalibration
+// ---------------------------------------------------------------------
+
+/**
+ * 産地別 VAP 加工能力（HOSO換算 t/四半期）のキーフレーム。
+ *
+ * 【なぜ産地別に持つか】既定の導出は「その国のエビ生産量 × 共通比率(0.1)」で、
+ * 「エビをたくさん獲る国ほどVAP設備も自動的に多い」という世界になってしまう。
+ * 実際の加工産業の厚みは生産量とは別の話なので、DS1 では産地ごとに宣言する。
+ * 宣言しないシナリオ（baseline 等）は従来どおり共通比率のままで、影響しない。
+ *
+ * 【各産地の性格】
+ *  - EC（エクアドル）: 養殖と原料供給が強み。加工はコモディティ寄りで、
+ *    生産量が伸びてもVAP設備は大きくは増えない（T13以降の増産期もほぼ横ばい）。
+ *  - IN（インド）: 同様にVAP能力は低水準で推移する。PD等の加工能力とは切り離す。
+ *  - ID（インドネシア）: 一定のVAP加工力を持つ産地として扱い、世界のVAP市場の
+ *    成長に合わせて緩やかに増える。ただし世界需要を常に上回る規模にはしない。
+ *  - VN（ベトナム）: ここでは宣言しない。VNの値は5社の保有設備で置き換わるため
+ *    （runner.ts の vapCapacitySignal="nominalEquipment"）、シナリオが自動で
+ *    増やすのではなく各社のCAPEXで増える。
+ */
+export const DS1_VAP_PROCESSING_CAPACITY_KEYFRAMES: Readonly<Record<"EC" | "IN" | "ID", readonly (readonly [number, number])[]>> = {
+  EC: [
+    [1, 16500],
+    [12, 17000],
+    [20, 17600],
+    [32, 18000],
+  ],
+  IN: [
+    [1, 19500],
+    [12, 19800],
+    [20, 20200],
+    [32, 20500],
+  ],
+  ID: [
+    [1, 28000],
+    [8, 29500],
+    [16, 32000],
+    [24, 34500],
+    [32, 37000],
+  ],
+};
+
+/**
+ * 5社の初期VAP設備能力（HOSO換算 t/四半期）。合計 7,000。
+ *
+ * 全社1,000では生産能力不足が強すぎ（Standard AI の能力診断が shortage へ反転）、
+ * 一律2,000では開始時点の設備を残しすぎる。VAP専業志向の VAP 社だけ少し高くして
+ * 会社の性格を残す。ここから先の能力増加は各社のVAPライン増設投資で起きる。
+ */
+export const DS1_INITIAL_COMPANY_VAP_CAPACITY_TONS: Readonly<Record<string, number>> = {
+  BAL: 1500,
+  MASS: 1500,
+  JPQ: 1500,
+  CONSV: 1500,
+  VAP: 2000,
+};

@@ -376,6 +376,42 @@ export interface ScenarioDefinition {
    * マージが恒等変換になり、既存挙動と完全に一致する。
    */
   readonly requiredCapabilities?: ScenarioRequiredCapabilities;
+
+  /**
+   * 会社の初期VAP加工設備能力（HOSO換算 t/四半期）の部分上書き（opt-in）。
+   *
+   * 【なぜシナリオが持つか】「その世界のベトナム加工業者が、ゲーム開始時点で
+   * どれだけVAP設備を持っているか」は、5社の性格ではなくその世界の産業の
+   * 成熟度の話だから。VAP市場をこれから育てる世界と、既に成熟した世界とでは
+   * 開始時点の設備量が違ってよい。
+   *
+   * 未指定のシナリオは共有フィクスチャ（companyLab/fixtures.ts）の値をそのまま
+   * 使い、既存挙動と完全に一致する（baseline 等は一切変わらない）。
+   *
+   * 【工場の広さは変えない】上書きするのは vapCapacity だけで、
+   * totalFactorySpaceUnits（建屋の広さ）は共有フィクスチャの値を保つ。
+   * その結果、初期VAP設備を減らしたぶんは空きスペースになり、後から
+   * VAPライン増設へ投資できる余地として残る。
+   */
+  readonly initialCompanyVapCapacityTons?: Readonly<Record<string, number>>;
+
+  /**
+   * ベトナムの world VAP capacity シグナルに何を使うか（opt-in）。
+   *
+   *  - 未指定（既定）: "plannedProduction"。5社の当期VAP生産計画の合計を
+   *    CountrySupplyInput.vapProcessingCapacity へ入れる（従来挙動）。
+   *  - "nominalEquipment": 5社が実際に保有するVAP設備能力の合計を入れる。
+   *
+   * 【なぜ選べるようにするか】プレミアム計算（market/productPremium.ts）は
+   * この値を globalCapacity＝「世界の加工能力」として読み、需要/能力で稼働率を
+   * 出す。生産計画は「能力」ではなく「今期どれだけ作るつもりか」なので、
+   * 計画を減らすと能力が減ったことになり、稼働率が上がってプレミアムが上がる、
+   * という逆向きの因果が混ざる。設備能力を入れれば、稼働率は素直に
+   * 「世界の需要 ÷ 世界の設備」になる。
+   *
+   * 既存シナリオの挙動を変えないため、切り替えはシナリオ側の宣言に委ねる。
+   */
+  readonly vapCapacitySignal?: "plannedProduction" | "nominalEquipment";
 }
 
 /**

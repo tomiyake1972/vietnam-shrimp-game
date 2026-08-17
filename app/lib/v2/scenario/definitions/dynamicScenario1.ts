@@ -37,6 +37,8 @@ import {
   DS1_DEMAND_SHOCK,
   DS1_DURATION_TURNS,
   DS1_ECONOMIC_INDEX_KEYFRAMES,
+  DS1_VAP_PROCESSING_CAPACITY_KEYFRAMES,
+  DS1_INITIAL_COMPANY_VAP_CAPACITY_TONS,
   DS1_INITIAL_STATE_OVERRIDES,
   DS1_LATE_SUPPLY_SHOCKS,
   DS1_OTHERS_RETAIL_GROWTH,
@@ -109,6 +111,24 @@ function capacityTrends(): LongTermTrend[] {
       DS1_CAPACITY_MULTIPLIER_KEYFRAMES[c].map(([turn, multiplier]) => kf(turn, base * multiplier))
     );
   });
+}
+
+/**
+ * 産地別のVAP加工能力（External VAP Capacity Recalibration）。
+ *
+ * 既定の「生産量 × 共通比率」を、EC / IN / ID については産地別の宣言で置き換える。
+ * VN は宣言しない（5社の保有設備で置き換わるため。dynamicScenario1Parameters.ts
+ * DS1_VAP_PROCESSING_CAPACITY_KEYFRAMES のコメント参照）。
+ */
+function vapProcessingCapacityTrends(): LongTermTrend[] {
+  return (["EC", "IN", "ID"] as const).map((c) =>
+    countryTrend(
+      `ds1-vap-capacity-${c}`,
+      "VAP_PROCESSING_CAPACITY",
+      c,
+      DS1_VAP_PROCESSING_CAPACITY_KEYFRAMES[c].map(([turn, value]) => kf(turn, value))
+    )
+  );
 }
 
 /**
@@ -390,6 +410,7 @@ export const DYNAMIC_SCENARIO_1: ScenarioDefinition = {
     ...economicIndexTrends(),
     ...aquacultureCostTrends(),
     ...capacityTrends(),
+    ...vapProcessingCapacityTrends(),
     vietnamUtilizationTrend(),
   ],
 
@@ -415,4 +436,12 @@ export const DYNAMIC_SCENARIO_1: ScenarioDefinition = {
     supplyPremiumFeedback: true,
     salesBaseAccumulation: true,
   },
+
+  // 【External VAP Capacity Recalibration】この世界のベトナム加工業者は、開始時点では
+  // まだVAP設備を大きくは持っていない。ここから先の能力は各社のVAPライン増設投資で増える。
+  initialCompanyVapCapacityTons: DS1_INITIAL_COMPANY_VAP_CAPACITY_TONS,
+
+  // world VAP capacity のベトナム分は、当期の生産計画ではなく5社の保有設備能力を使う
+  // （生産計画を減らすと「能力が減った」ことになる、という逆向きの因果を断つ）。
+  vapCapacitySignal: "nominalEquipment",
 };

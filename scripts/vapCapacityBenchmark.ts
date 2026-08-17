@@ -18,8 +18,8 @@ import { computeFactoryUsedSpaceUnits, resolveFactoryTotalSpaceUnits, computePro
 
 const fmt = (n: number) => Math.round(n).toLocaleString();
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
-const SEEDS = ["ds1-bench-a", "ds1-bench-b", "ds1-bench-c"];
-const TURNS = 4;
+const SEEDS = ["ds1-bench-a", "ds1-bench-b"];
+const TURNS = 8;
 
 console.log("### 初期VAP能力（fixtures.ts）");
 let nominalTotal = 0;
@@ -60,10 +60,7 @@ for (const seed of SEEDS) {
     const decisions = fixtures.map((f) =>
       generateStandardAiDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, state.scenarioState.currentTurn)
     );
-    const plannedVap = decisions.reduce(
-      (sum, d) => sum + d.productionPlans.filter((p) => p.product === "vap").reduce((s, p) => s + unwrapUnit(p.desiredQuantity), 0),
-      0
-    );
+    const vnNominalVap = fixtures.reduce((sum, f) => sum + f.factories.reduce((s, fac) => s + unwrapUnit(fac.vapCapacity), 0), 0);
     const vapCapexProposals = decisions.reduce(
       (sum, d) => sum + d.capexDecision.newProjectProposals.filter((p) => p.projectType === "vapLineExpansion").length,
       0
@@ -74,6 +71,9 @@ for (const seed of SEEDS) {
     const record = state.history[state.history.length - 1];
     const vap = record.marketResult.vapPremium;
     const pd = record.marketResult.pdPremium;
+    const cash = record.financialResults.reduce((sum, r) => sum + Number(r.balanceSheet.cash), 0);
+    const op = record.financialResults.reduce((sum, r) => sum + Number(r.profitAndLoss.operatingProfit), 0);
+    const negCash = record.financialResults.filter((r) => Number(r.balanceSheet.cash) < 0).length;
 
     const actualVap = record.companySummaries.reduce((sum, c) => sum + unwrapUnit(c.vapProduced), 0);
     const contractedAll = record.companySummaries.reduce((sum, c) => sum + unwrapUnit(c.newContractedQuantity), 0);
@@ -83,7 +83,7 @@ for (const seed of SEEDS) {
       `  T${turn}` +
         ` demand=${String(fmt(unwrapUnit(vap.globalDemand))).padStart(7)}` +
         ` capacity=${String(fmt(unwrapUnit(vap.globalCapacity))).padStart(8)}` +
-        ` (VN=${String(fmt(plannedVap)).padStart(6)})` +
+        ` (VN設備=${String(fmt(vnNominalVap)).padStart(6)})` +
         ` util=${pct(vap.globalUtilization).padStart(6)}` +
         ` basePrem=${unwrapUnit(vap.basePremium).toFixed(4)}` +
         ` vnVapPrice=${unwrapUnit(vap.byCountry.VN.finalPrice).toFixed(3)}` +
@@ -92,7 +92,8 @@ for (const seed of SEEDS) {
         ` 製品在庫(全商品)=${String(fmt(fgAll)).padStart(7)}` +
         ` vapCapex=${vapCapexProposals}/${allCapexProposals}` +
         ` oversupply=${vap.drivers.includes("PROCESSING_CAPACITY_OVERSUPPLY") ? "YES" : "no"}` +
-        ` | PDutil=${pct(pd.globalUtilization)}`
+        ` | PDutil=${pct(pd.globalUtilization)}` +
+        ` 営業利益計=${fmt(op / 1e6)}M 現金計=${fmt(cash / 1e6)}M 現金マイナス社数=${negCash}`
     );
   }
   console.log("");
