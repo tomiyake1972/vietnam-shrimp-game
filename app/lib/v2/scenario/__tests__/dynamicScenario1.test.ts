@@ -336,12 +336,18 @@ test("DS1: production の既定シナリオは変えていない", () => {
   assert.equal(ALL_SCENARIO_DEFINITIONS[0].scenarioId, BASELINE_SCENARIO.scenarioId);
 });
 
-test("DS1 以外のシナリオは従来どおり（上書き機構を使っていない）", () => {
+test("DS1 系以外のシナリオは従来どおり（上書き機構を使っていない）", () => {
+  // Dynamic Scenario 2 は DS1 をスプレッドで継承しているので、同じ上書き機構を持つ。
+  // ここで見たいのは「baseline 等の既存シナリオが巻き込まれていないこと」。
+  const ds1Family = ALL_SCENARIO_DEFINITIONS.filter((d) => d.scenarioId.startsWith("dynamic-scenario-")).map((d) => d.scenarioId);
   for (const definition of ALL_SCENARIO_DEFINITIONS) {
-    if (definition.scenarioId === DYNAMIC_SCENARIO_1.scenarioId) continue;
+    if (ds1Family.includes(definition.scenarioId)) continue;
     assert.equal(definition.productLifecycleOverrides, undefined, definition.scenarioId);
     assert.equal(definition.structuralDemandAnchor, undefined, definition.scenarioId);
     assert.equal(definition.requiredCapabilities, undefined, definition.scenarioId);
+    assert.equal(definition.initialCompanyVapCapacityTons, undefined, definition.scenarioId);
+    assert.equal(definition.vapCapacitySignal, undefined, definition.scenarioId);
+    assert.equal(definition.initialCompanyDebtUsd, undefined, definition.scenarioId);
   }
 });
 

@@ -412,6 +412,27 @@ export interface ScenarioDefinition {
    * 既存シナリオの挙動を変えないため、切り替えはシナリオ側の宣言に委ねる。
    */
   readonly vapCapacitySignal?: "plannedProduction" | "nominalEquipment";
+
+  /**
+   * 会社の初期借入（USD）の部分上書き（opt-in）。
+   *
+   * 【なぜシナリオが持つか】「その世界で各社がどれだけ借金を背負って始めるか」は、
+   * 会社の性格というより開始時点の財務条件の置き方であり、テスト版ごとに変えたい。
+   * 未指定のシナリオは finance/initialState.ts の共有フィクスチャをそのまま使い、
+   * 既存挙動と完全に一致する。
+   *
+   * 【貸借は自動で合う】初期BSは利益剰余金を残差
+   * （retainedEarnings = 資産 − 負債 − 資本金）として決めるため、借入を下げると
+   * その分だけ利益剰余金が増え、資産＝負債＋純資産は常に成立する。
+   * 追加の調整項目は持たせない。
+   */
+  readonly initialCompanyDebtUsd?: Readonly<Record<string, InitialCompanyDebtOverride>>;
+}
+
+/** 1社ぶんの初期借入上書き。省略した側は共有フィクスチャの値を使う。 */
+export interface InitialCompanyDebtOverride {
+  readonly shortTermLoans?: number;
+  readonly longTermLoans?: number;
 }
 
 /**

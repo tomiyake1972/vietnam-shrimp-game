@@ -430,7 +430,10 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
 
   // 【Phase 8A】5社の初期財務状態。原料在庫の初期金額は各社の初期原料ロット
   // （実データ）から算出し、開始時点の貸借一致を構造的に保証する。
-  const initialFinanceCompanies = fixtures.map((f) => buildInitialCompanyFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod));
+  // シナリオが初期借入を宣言していればそれを渡す（未宣言なら共有フィクスチャのまま）。
+  const initialFinanceCompanies = fixtures.map((f) =>
+    buildInitialCompanyFinanceState(f.companyId, f.initialRawMaterialLots, startPeriod, definition.initialCompanyDebtUsd?.[f.companyId])
+  );
 
   // 【初期成約】初期売掛金に対応する「前期営業成約」を配置し、
   // 「当期にデリバリーされる契約」として明示的に定義する。

@@ -77,12 +77,26 @@ export function rawMaterialInventoryValueUsd(lots: readonly RawMaterialLot[], co
 export function buildInitialCompanyFinanceState(
   companyId: CompanyId,
   initialRawMaterialLots: readonly RawMaterialLot[],
-  startPeriod: PeriodV2
+  startPeriod: PeriodV2,
+  /**
+   * シナリオ側からの初期借入の上書き（opt-in）。未指定なら共有フィクスチャのまま。
+   * 借入を下げても、利益剰余金が残差で決まるため貸借は自動的に一致する
+   * （下の retainedEarnings の計算を参照）。
+   */
+  debtOverride?: { readonly shortTermLoans?: number; readonly longTermLoans?: number }
 ): CompanyFinanceState {
-  const fixture = INITIAL_FINANCE_FIXTURES_V1.find((f) => f.companyId === companyId);
-  if (!fixture) {
+  const baseFixture = INITIAL_FINANCE_FIXTURES_V1.find((f) => f.companyId === companyId);
+  if (!baseFixture) {
     throw new FinanceValidationError(`初期財務フィクスチャが定義されていない会社IDです: ${companyId}`);
   }
+  const fixture: InitialFinanceFixture =
+    debtOverride === undefined
+      ? baseFixture
+      : {
+          ...baseFixture,
+          shortTermLoans: Math.max(0, debtOverride.shortTermLoans ?? baseFixture.shortTermLoans),
+          longTermLoans: Math.max(0, debtOverride.longTermLoans ?? baseFixture.longTermLoans),
+        };
   const rawMaterialInventory = rawMaterialInventoryValueUsd(initialRawMaterialLots, companyId);
 
   const totalAssets = fixture.cash + fixture.initialAccountsReceivable + rawMaterialInventory + fixture.otherCurrentAssets + fixture.fixedAssetsGross;

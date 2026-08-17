@@ -12,9 +12,10 @@ test("shortScenarioAlias: バージョン接尾辞を取り除く", () => {
 test("listScenarioAliases: 選択可能なシナリオをすべて列挙する", () => {
   const entries = listScenarioAliases();
   assert.equal(entries.length, ALL_SCENARIO_DEFINITIONS.length);
-  // Testplay 用に Dynamic Scenario 1 を加えて6本。
-  assert.equal(entries.length, 6);
+  // Testplay 用に Dynamic Scenario 1・2 を加えて7本。
+  assert.equal(entries.length, 7);
   assert.ok(entries.some((e) => e.alias === "dynamic-scenario-1"));
+  assert.ok(entries.some((e) => e.alias === "dynamic-scenario-2"));
 });
 
 test("resolveScenarioDefinition: 完全なscenarioIdで解決できる", () => {
