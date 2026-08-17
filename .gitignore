@@ -63,3 +63,7 @@ next-env.d.ts
 # 大量のCSV/JSON生成物はGit管理対象にしない
 # （生成スクリプト scripts/test15PdMechanizationPreflightCalibration.ts のみGit管理する）。
 /artifacts/test15/
+
+# 別branchを並行作業するための git worktree の置き場所（各worktreeはそれ自身の
+# .gitで独立管理されるローカル作業ディレクトリであり、このrepoの追跡対象ではない）。
+/.worktrees/
