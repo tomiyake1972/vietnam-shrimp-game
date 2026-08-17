@@ -1,4 +1,4 @@
-// ShrimpX V2 — AI Management Meeting: ExecutiveBriefingPacket 組み立て（AMM-M0/M1）
+// ShrimpX V2 — AI Management Meeting: ExecutiveBriefingPacket 組み立て（AMM-M0/M1・M2.1）
 //
 // 【新しい状態読み込み経路を作らない】既存のaiExplanation/buildExplanationContext.ts
 // （プレイヤー画面が既に見ている範囲だけをALLOWLISTしたContext）をそのまま入力として
@@ -16,8 +16,21 @@
 //
 // 【derived object・非永続】この関数群はいずれもpersistent stateを新設しない。
 // 呼び出しのたびにExplanationContextから再構築する。
+//
+// 【M2.1・Backlog Semantics / Fact Grounding訂正】初版のcommon.overdueBacklogTopNは、
+// 名前に反してoverdue（納期超過）かどうかを一切判定していなかった
+// （computeBacklogByMarketProductの単純な合計をそのまま「overdue」と誤命名していた）。
+// backlogSemantics.tsのcomputeBacklogSemantics（既存SalesContract.dueDate・
+// outstandingQuantityだけから導出、新しい観測は追加しない）を使い、Healthy Forward /
+// Due This Turn / Overdueを明示的に分離した値だけを渡す。あわせて、supplyPressure/
+// lifecycleTrendの生カウントだけを渡す設計（Claudeが自由に意味解釈してしまう余地が
+// あった）をやめ、既存の分類ラベル（classifySupplyPressure等）にhumanMeaningを
+// 付与した形へ変更した。
 
 import { ExplanationContext } from "../aiExplanation/buildExplanationContext";
+import { computeBacklogSemantics } from "./backlogSemantics";
+import { SalesContract } from "../../sales/types";
+import { LifecycleTrendLabel, SupplyPressureLabel } from "../aiMarketInfoSummary";
 import { ExecutiveRole } from "./types";
 
 /** previousQuarterFinancials/previousQuarterMarketは既存のPlayerScreenViewModel型（app/v2層）
@@ -27,6 +40,8 @@ export interface PreviousQuarterDelta {
   readonly cashUsd: number | null;
   readonly netRevenueUsd: number | null;
   readonly operatingProfitUsd: number | null;
+  /** 【M2.1追加】この数値がどのturn/四半期のものかを明示するラベル（例: "2015年Q1"）。turn1等でnullの場合は前四半期データ自体が存在しない。 */
+  readonly periodLabel: string | null;
 }
 
 /** プレイヤーの現在draft（未提出の編集中案）の要約。app/v2層のCompanyDecisionDraftから
@@ -42,11 +57,20 @@ export interface BriefingBuildInput {
   readonly context: ExplanationContext;
   readonly previousQuarter: PreviousQuarterDelta | null;
   readonly playerDraft: PlayerDraftSummary | null;
+  /** 【M2.1追加】Healthy Forward / Due This Turn / Overdueを分離するための生contracts（新しい観測ではなく、既存ownState.contractsをそのまま渡すだけ）。 */
+  readonly contracts: readonly SalesContract[];
 }
 
-const TOP_N_BACKLOG = 5;
 const TOP_N_FACTORY = 5;
 const TOP_N_REASON_CODES = 8;
+
+/** common.backlog・commercial.backlog双方が共有する、Healthy Forward/Due/Overdueの要約。 */
+export interface BacklogSummaryFacts {
+  readonly totalTons: number;
+  readonly healthyForwardTons: number;
+  readonly dueThisTurnTons: number;
+  readonly overdueTons: number;
+}
 
 export interface BriefingCommonFacts {
   readonly companyId: string;
@@ -56,7 +80,7 @@ export interface BriefingCommonFacts {
   readonly cashUsd: number;
   readonly bindingCapacityTons: number;
   readonly bindingConstraintLabel: string;
-  readonly overdueBacklogTopN: readonly { readonly market: string; readonly product: string; readonly outstandingTons: number; readonly nearestDueDateLabel: string }[];
+  readonly backlog: BacklogSummaryFacts;
   readonly playerDraft: PlayerDraftSummary | null;
   readonly standardAiReasonCodesTopN: readonly { readonly code: string; readonly domain: string; readonly severity: string; readonly targetFactoryId?: string }[];
 }
@@ -84,17 +108,48 @@ export interface CooBriefing {
   readonly rawMaterialTotalTons: number;
   readonly totalRegularHeadcount: number;
   readonly qualityScoreByProduct: Readonly<Partial<Record<string, number>>>;
+  /** 【M2.1追加】商品別のbacklog内訳（overdue分離済み）。生産計画の参考情報。 */
+  readonly backlogByProduct: readonly { readonly product: string; readonly totalTons: number; readonly overdueTons: number }[];
+}
+
+export interface SupplyPressureFact {
+  readonly product: string;
+  readonly value: number;
+  readonly label: SupplyPressureLabel;
+  readonly humanMeaning: string;
+}
+
+export interface LifecycleTrendSummary {
+  readonly growingCount: number;
+  readonly shrinkingCount: number;
+  readonly flatCount: number;
+  readonly humanMeaning: string;
 }
 
 export interface CommercialBriefing {
-  readonly backlogByMarketProduct: readonly { readonly market: string; readonly product: string; readonly outstandingTons: number; readonly contractCount: number }[];
+  readonly backlog: BacklogSummaryFacts;
+  readonly backlogByMarket: readonly { readonly market: string; readonly totalTons: number; readonly overdueTons: number }[];
+  readonly backlogByProduct: readonly { readonly product: string; readonly totalTons: number; readonly overdueTons: number }[];
+  readonly backlogByMarketProduct: readonly {
+    readonly market: string;
+    readonly product: string;
+    readonly totalTons: number;
+    readonly overdueTons: number;
+    readonly dueThisTurnTons: number;
+    readonly healthyForwardTons: number;
+    readonly earliestDueLabel: string;
+  }[];
   readonly customerTrustByMarket: Readonly<Partial<Record<string, number>>>;
   readonly deliveryReliabilityByMarket: Readonly<Partial<Record<string, number>>>;
   readonly salesForceHeadcountTotal: number;
   readonly salesForceCoverageScore: number;
+  /** 【M2.1追加】直近の実績売上（previousQuarterと同じ値だが、Commercial自身が「いつの売上か」を誤ラベルしないよう、periodLabelとセットでここにも持たせる）。 */
+  readonly lastQuarterNetRevenueUsd: number | null;
+  readonly lastQuarterLabel: string | null;
   readonly hasPriorMarketData: boolean;
-  readonly lifecycleTrendCount: number;
-  readonly supplyPressureCount: number;
+  /** 【M2.1訂正】単なる件数(count)ではなく、各商品の供給圧力ラベル＋意味説明を渡す（生key解釈をClaudeへ委ねない）。 */
+  readonly supplyPressureFacts: readonly SupplyPressureFact[];
+  readonly lifecycleTrendSummary: LifecycleTrendSummary | null;
 }
 
 export interface CeoBriefing {
@@ -116,15 +171,30 @@ function severityRank(s: string): number {
   return 1;
 }
 
+const SUPPLY_PRESSURE_MEANING: Readonly<Record<SupplyPressureLabel, string>> = {
+  oversupply: "市場全体で供給が需要を上回る方向（価格・受注獲得はしやすいが、過剰在庫リスクに注意）",
+  undersupply: "市場全体で供給が需要に対して不足気味（受注は取りやすいが、供給側の制約に注意）",
+  balanced: "市場全体の需給はおおむね均衡",
+};
+
+const LIFECYCLE_TREND_MEANING: Readonly<Record<LifecycleTrendLabel, string>> = {
+  growing: "この市場×商品の構成比が拡大傾向",
+  shrinking: "この市場×商品の構成比が縮小傾向",
+  flat: "この市場×商品の構成比はほぼ横ばい",
+};
+
 export function buildExecutiveBriefingPacket(input: BriefingBuildInput): ExecutiveBriefingPacket {
-  const { context, previousQuarter, playerDraft } = input;
+  const { context, previousQuarter, playerDraft, contracts } = input;
   const ownState = context.ownState;
   const diagEntries = context.standardAi.diagnosticEntries;
 
-  const overdueBacklogTopN = [...ownState.contractBacklog]
-    .sort((a, b) => b.outstandingTons - a.outstandingTons)
-    .slice(0, TOP_N_BACKLOG)
-    .map((b) => ({ market: b.market, product: b.product, outstandingTons: b.outstandingTons, nearestDueDateLabel: b.nearestDueDateLabel }));
+  const backlogSemantics = computeBacklogSemantics(contracts, context.identity.companyId, context.identity.year, context.identity.quarter);
+  const backlogSummary: BacklogSummaryFacts = {
+    totalTons: backlogSemantics.totalTons,
+    healthyForwardTons: backlogSemantics.healthyForwardTons,
+    dueThisTurnTons: backlogSemantics.dueThisTurnTons,
+    overdueTons: backlogSemantics.overdueTons,
+  };
 
   const reasonCodesTopN = [...diagEntries]
     .sort((a, b) => severityRank(b.severity) - severityRank(a.severity))
@@ -139,7 +209,7 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     cashUsd: ownState.balanceSheet.cashUsd,
     bindingCapacityTons: ownState.productionCapacitySummary.bindingTotalTons,
     bindingConstraintLabel: ownState.productionCapacitySummary.bindingConstraintLabel,
-    overdueBacklogTopN,
+    backlog: backlogSummary,
     playerDraft,
     standardAiReasonCodesTopN: reasonCodesTopN,
   };
@@ -170,22 +240,41 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     rawMaterialTotalTons: ownState.rawMaterialInventory.totalTons,
     totalRegularHeadcount: ownState.workforce.totalRegularHeadcount,
     qualityScoreByProduct: ownState.qualityScoreByProduct,
+    backlogByProduct: backlogSemantics.byProduct,
   };
 
+  const supplyPressureFacts: SupplyPressureFact[] = (context.marketInfo.supplyPressure ?? []).map((row) => ({
+    product: row.product,
+    value: row.value,
+    label: row.label,
+    humanMeaning: SUPPLY_PRESSURE_MEANING[row.label],
+  }));
+
+  const lifecycleTrends = context.marketInfo.lifecycleTrends ?? [];
+  const lifecycleTrendSummary: LifecycleTrendSummary | null =
+    lifecycleTrends.length > 0
+      ? {
+          growingCount: lifecycleTrends.filter((t) => t.label === "growing").length,
+          shrinkingCount: lifecycleTrends.filter((t) => t.label === "shrinking").length,
+          flatCount: lifecycleTrends.filter((t) => t.label === "flat").length,
+          humanMeaning: `growing=${LIFECYCLE_TREND_MEANING.growing}、shrinking=${LIFECYCLE_TREND_MEANING.shrinking}、flat=${LIFECYCLE_TREND_MEANING.flat}`,
+        }
+      : null;
+
   const commercial: CommercialBriefing = {
-    backlogByMarketProduct: ownState.contractBacklog.map((b) => ({
-      market: b.market,
-      product: b.product,
-      outstandingTons: b.outstandingTons,
-      contractCount: b.contractCount,
-    })),
+    backlog: backlogSummary,
+    backlogByMarket: backlogSemantics.byMarket,
+    backlogByProduct: backlogSemantics.byProduct,
+    backlogByMarketProduct: backlogSemantics.byMarketProduct,
     customerTrustByMarket: ownState.customerTrustByMarket,
     deliveryReliabilityByMarket: ownState.deliveryReliabilityByMarket,
     salesForceHeadcountTotal: ownState.salesForce.headcountTotal,
     salesForceCoverageScore: ownState.salesForce.coverageScore,
+    lastQuarterNetRevenueUsd: previousQuarter?.netRevenueUsd ?? null,
+    lastQuarterLabel: previousQuarter?.periodLabel ?? null,
     hasPriorMarketData: context.marketInfo.hasPriorMarketData,
-    lifecycleTrendCount: context.marketInfo.lifecycleTrends?.length ?? 0,
-    supplyPressureCount: context.marketInfo.supplyPressure?.length ?? 0,
+    supplyPressureFacts,
+    lifecycleTrendSummary,
   };
 
   const ceo: CeoBriefing = {

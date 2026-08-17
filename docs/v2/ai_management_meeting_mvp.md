@@ -379,3 +379,124 @@ salesQuantity/salesForceの2スキーマ化）・`validation.ts`（scope別検�
 （worst-caseペイロードを新schemaへ追従）。**Standard AI・ゲームエンジン・既存の
 Decision schema自体（`app/lib/v2/sales/`等）への変更はなし**（AI Management Meeting
 モジュール内のみの修正）。
+
+## 21. M2.1（Backlog Semantics / Fact Grounding Correction）追記
+
+ChatGPT #05からの追加指示（Test26 Dynamic Scenario、BAL Turn1での実誤回答を受けた訂正）
+に基づく対応。
+
+### 21.1 root cause
+
+初版の`briefing.ts`（AMM-M0/M1時点）は、既存の`computeBacklogByMarketProduct`
+（`openingStateSummary.ts`）が返す「outstanding合計（納期を問わず全件合算）」を、
+**`overdueBacklogTopN`という名前のフィールドへそのまま格納していた**。この関数自体は
+overdue（納期超過）かどうかを一切判定しない単純な合計であり、名前だけが「overdue」を
+名乗っていた。この命名と実装のズレが、Commercial Directorに「backlogが存在する＝
+納期遅延している」と誤解釈させる直接の原因だった。
+
+さらに、Commercial向けbriefingには実売上・受注実績データが一切含まれておらず
+（財務実績は`cfo`サブセットのみに存在）、「Q2売上$66.4M」という具体的な数値は
+BriefingPacketに存在しないデータの完全な捏造だったと判断される。
+
+### 21.2 current backlog semantics（訂正後）
+
+`backlogSemantics.ts`の`computeBacklogSemantics()`が、既存の`SalesContract.dueDate`・
+`outstandingQuantity`（新しい観測は追加しない）だけから、PC-2C
+（`scripts/pc2BacklogProductDiagnosis.ts`）で確立した方法論
+（`periodIndex(dueDate) < currentPeriodIdx` ならoverdue）を再利用し、
+Healthy Forward（納期未到来）／Due This Turn（当四半期納期）／Overdue（納期超過）を
+明示的に分離する。`common.backlog`・`commercial.backlog`双方に
+`{totalTons, healthyForwardTons, dueThisTurnTons, overdueTons}`として渡し、
+`commercial.backlogByMarket`/`backlogByProduct`/`backlogByMarketProduct`
+（各エントリに`earliestDueLabel`を含む）で市場・商品別の内訳も渡す。`coo.backlogByProduct`
+にも同じ商品別内訳を渡す（生産計画の参考情報として）。
+
+### 21.3 Trust code audit result
+
+`app/lib/v2/quality/scoreUpdates.ts`の`updateDeliveryReliabilityScore`・
+`updateCustomerTrustScore`を監査した結果、engine側は`dueQuantity`（当期に納期が来た数量）・
+`onTimeQuantity`（そのうち期日通り履行できた数量）・`continuingOverdueQuantity`（持ち越しの
+overdue分）——**当期に実際に発生した履行実績**——だけでTrust/delivery reliabilityを
+更新しており、**未到来のoutstanding残高（healthy forward backlog）そのものは一切
+参照していない**ことを確認した。engine側の設計は既にご指摘の原則（Backlog != Overdue）
+どおりであり、変更不要と判断した。「#04設計問題」として報告すべき事象は見つからなかった。
+
+### 21.4 BriefingPacket before/after
+
+| フィールド | Before（バグ） | After（訂正後） |
+|---|---|---|
+| `common.overdueBacklogTopN` | 全backlogを`outstandingTons`降順で上位5件（overdue未判定なのに"overdue"と命名） | `common.backlog: {totalTons, healthyForwardTons, dueThisTurnTons, overdueTons}`（廃止し置換） |
+| `commercial.backlogByMarketProduct` | `{market, product, outstandingTons, contractCount}`（overdue区別なし） | `commercial.backlog`＋`backlogByMarket`/`backlogByProduct`/`backlogByMarketProduct`（各々overdueTons/dueThisTurnTons/healthyForwardTons分離、earliestDueLabel付き） |
+| `commercial.lifecycleTrendCount`/`supplyPressureCount` | 生の配列長（意味不明なraw count） | `commercial.supplyPressureFacts: {product, value, label, humanMeaning}[]`／`lifecycleTrendSummary: {growingCount, shrinkingCount, flatCount, humanMeaning}` |
+| Commercialの売上実績 | 存在しない（CFOのみ保持） | `commercial.lastQuarterNetRevenueUsd`＋`commercial.lastQuarterLabel`（同じ値をperiodLabel付きでCommercialにも持たせる） |
+
+### 21.5 supplyPressureCount definition
+
+`context.marketInfo.supplyPressure`（`buildSupplyPressureRows`、`aiMarketInfoSummary.ts`）は
+**常にPD・VAPの2要素**を返す固定長配列であり、`length`（count）自体には「供給の余裕度」を
+示す意味は一切ない。各要素が持つ`label`（`SupplyPressureLabel`: `oversupply`/`undersupply`/
+`balanced`、`classifySupplyPressure`が算出）こそが実際の意味を持つ。「supplyPressureCount=2
+→ 市場は供給に余裕」という説明は、この生カウントを独自解釈した完全な誤りであり、コード上の
+正式な意味に一切裏付けられていなかった。訂正後は、`label`ごとに固定の`humanMeaning`文字列
+（例: `balanced`→「市場全体の需給はおおむね均衡」）を付与して渡す。
+
+### 21.6 quarter label audit
+
+`common.year`/`common.quarter`（`context.identity`由来）自体は正しくturnに対応している。
+問題は「Q2売上」という**Commercial自身の発言**が、そもそもBriefingPacketに存在しない
+実売上額を、存在しない四半期ラベルとセットで述べていたことにある。訂正後は
+`commercial.lastQuarterLabel`（前四半期の正確なラベル。turn1等で前四半期が存在しない場合は
+`null`）を明示的に渡し、prompt側にも「四半期に言及する際は必ずBriefingPacket内のラベルを
+使い、推測して作らない」ことを明記した（§20.3のプロンプト追加参照）。
+
+### 21.7 numeric hallucination cause
+
+2つの要因が重なっていたと判断する。(1) Commercial向けbriefingに実売上データが無かった
+ため、「$66.4M」は完全な捏造だった。(2) 3,063.42tを「3,600t超」と述べた点については、
+`overdueBacklogTopN`というフィールド名が実際にはoverdue判定を伴わない単純合計だった
+という構造的な誤解に加え、正確な数値が提供されていても大きく異なる数値へ丸めてしまう
+挙動が見られた。訂正後は、`factsUsed`に記録されたBriefingPacketの実在フィールドのみを
+使うこと、丸める場合も有効数字を大きく変えないこと（例: 3,063t→約3,100t）をprompt本文へ
+明記した。
+
+### 21.8 code changes
+
+新設: `backlogSemantics.ts`（Healthy Forward/Due This Turn/Overdue分離）。変更:
+`briefing.ts`（`BriefingBuildInput`へ`contracts`追加、`overdueBacklogTopN`廃止、
+`commercial`/`coo`へbacklog内訳・売上実績・ラベル付き市場シグナルを追加）・`prompt.ts`
+（backlog解釈原則・数値グラウンディング・四半期ラベル使用の明示、`AI_MEETING_PROMPT_VERSION`
+をv1→v2へ）・API `handlers.ts`（`viewModel.ownState.contracts`を渡す配線、
+`previousQuarter.periodLabel`の算出）・`scripts/aiMeetingRealApiSmokeTest.ts`
+（Test26 BAL Turn1相当のbriefingケースをsmoke testへ追加）。**Sales engine・Contract
+fulfillment mechanics・Trust mechanics・Standard AI・game parameters・backlogの定義
+（`SalesContract`型自体）への変更はなし**（AI Meetingのfact grounding/briefing/prompt
+修正のみ）。
+
+### 21.9 tests
+
+`__tests__/backlogSemantics.test.ts`を新設し、AMM-BL-1〜9（Test26 BAL Turn1相当の
+AMM-BL-7を含む）を実装。既存の`briefing.test.ts`（AMM-8/AMM-16）も新schema
+（`contracts`パラメータ追加）へ追従させた。全3136件成功、tsc/eslintエラーなし。
+
+### 21.10 real API result
+
+**REAL_API_SMOKE_NOT_RUN**（本セッションの環境に`ANTHROPIC_API_KEY`が設定されていない
+ため未実施）。`scripts/aiMeetingRealApiSmokeTest.ts`にTest26 BAL Turn1相当の再現ケース
+（「前回の営業結果を教えて」、9番目のケースとして追加）を用意済みであり、
+`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで、訂正後の実際のClaude応答
+（overdue=0のhealthy forward backlogを「納期遅延」と述べていないか等）を確認できる。
+
+### 21.11 remaining risk・readiness for continued Test26
+
+- 訂正の効果は静的なテスト（AMM-BL-1〜9）でのみ検証済みであり、実Claude APIでの
+  応答が実際に改善されたことは未確認（§21.10参照）。Test26を再開する前に、可能であれば
+  実API smoke testで確認することを推奨する。
+- `factsUsed`は依然としてClaude自身の自己申告であり、記載された数値が本当に
+  BriefingPacketの値と一致しているかを機械的に検証する仕組みはM1/M2.1のいずれにも
+  実装されていない（数値ハルシネーションの完全な技術的防止ではなく、prompt/schema設計に
+  よる緩和にとどまる）。将来phaseで、応答内の数値をBriefingPacketの値と照合する
+  post-hoc検証層を追加する余地がある。
+- lifecycleTrendSummaryは市場×商品の内訳を集約したcount+humanMeaningのみで、
+  個別の市場×商品トレンドの詳細（どの市場のどの商品が伸びているか）はCommercialへ
+  渡していない。今後、特定市場のライフサイクルについて具体的に聞かれた場合に
+  詳細不足で答えられない可能性がある。

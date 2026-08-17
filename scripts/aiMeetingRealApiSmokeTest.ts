@@ -7,7 +7,8 @@
 //
 // 8つの最低ケース（CFO質問・COO質問・Commercial質問・CEO/strategy質問・
 // CEO summary要求・primary+secondaryが必要な投資質問・structured proposalを返す質問・
-// 比較的長いPlayer message）を、claude-haiku-4-5-20251001へ実際に送信し、各callで
+// 比較的長いPlayer message）に加え、M2.1で追加したTest26 BAL Turn1の実再現ケース
+// （「前回の営業結果を教えて」）を、claude-haiku-4-5-20251001へ実際に送信し、各callで
 // model/inputTokens/outputTokens/latencyMs/stopReason/retryCount/schema validation
 // success-failure/primarySpeaker/secondary speaker/proposal countを記録する。
 // 本文内容も開発用ログへ出す（API keyそのものは一切ログへ出さない）。
@@ -25,7 +26,12 @@ import { buildRecentHistoryForPrompt } from "../app/lib/v2/companyLab/aiManageme
 import { routePlayerMessage } from "../app/lib/v2/companyLab/aiManagementMeeting/router";
 import { AiMeetingMessage } from "../app/lib/v2/companyLab/aiManagementMeeting/types";
 
-/** 実際のExecutiveBriefingPacketに近い、代表的な内容のダミーbriefing（実APIの応答品質を見るための現実的な入力）。 */
+/**
+ * 実際のExecutiveBriefingPacketに近い、代表的な内容のダミーbriefing（実APIの応答品質を
+ * 見るための現実的な入力）。【M2.1訂正】backlogはhealthy forward/due this turn/overdueを
+ * 分離した形（backlogSemantics.ts・briefing.ts参照）へ、supplyPressureは生countではなく
+ * label+humanMeaningへ更新した。
+ */
 function sampleBriefing() {
   return {
     common: {
@@ -36,10 +42,7 @@ function sampleBriefing() {
       cashUsd: 1_250_000,
       bindingCapacityTons: 5200,
       bindingConstraintLabel: "共通前処理",
-      overdueBacklogTopN: [
-        { market: "JP", product: "pd", outstandingTons: 180, nearestDueDateLabel: "2016Q1（超過中）" },
-        { market: "US", product: "hoso", outstandingTons: 40, nearestDueDateLabel: "2016Q3" },
-      ],
+      backlog: { totalTons: 220, healthyForwardTons: 220, dueThisTurnTons: 0, overdueTons: 0 },
       playerDraft: { hasDraft: true, totalDesiredSalesQuantityTons: 4200, capexProposalCount: 0, financingRequestedUsd: 0 },
       standardAiReasonCodesTopN: [
         { code: "CAPEX_DEFERRED", domain: "capex", severity: "high", targetFactoryId: "F1" },
@@ -55,7 +58,7 @@ function sampleBriefing() {
       activeLoanCount: 3,
       payablesUsd: 300_000,
       receivablesUsd: 550_000,
-      previousQuarter: { cashUsd: 1_100_000, netRevenueUsd: 2_800_000, operatingProfitUsd: 210_000 },
+      previousQuarter: { cashUsd: 1_100_000, netRevenueUsd: 2_800_000, operatingProfitUsd: 210_000, periodLabel: "2016年Q1" },
     },
     coo: {
       factoryCapacityTopN: [{ factoryId: "F1", nominalTotalTons: 8000, effectiveTotalTons: 6700 }],
@@ -64,19 +67,37 @@ function sampleBriefing() {
       rawMaterialTotalTons: 950,
       totalRegularHeadcount: 240,
       qualityScoreByProduct: { hoso: 82, pd: 78, vap: 88 },
+      backlogByProduct: [
+        { product: "pd", totalTons: 180, overdueTons: 0 },
+        { product: "hoso", totalTons: 40, overdueTons: 0 },
+      ],
     },
     commercial: {
+      backlog: { totalTons: 220, healthyForwardTons: 220, dueThisTurnTons: 0, overdueTons: 0 },
+      backlogByMarket: [
+        { market: "JP", totalTons: 180, overdueTons: 0 },
+        { market: "US", totalTons: 40, overdueTons: 0 },
+      ],
+      backlogByProduct: [
+        { product: "pd", totalTons: 180, overdueTons: 0 },
+        { product: "hoso", totalTons: 40, overdueTons: 0 },
+      ],
       backlogByMarketProduct: [
-        { market: "JP", product: "pd", outstandingTons: 180, contractCount: 5 },
-        { market: "US", product: "hoso", outstandingTons: 40, contractCount: 1 },
+        { market: "JP", product: "pd", totalTons: 180, overdueTons: 0, dueThisTurnTons: 0, healthyForwardTons: 180, earliestDueLabel: "2016年Q3" },
+        { market: "US", product: "hoso", totalTons: 40, overdueTons: 0, dueThisTurnTons: 0, healthyForwardTons: 40, earliestDueLabel: "2016年Q4" },
       ],
       customerTrustByMarket: { JP: 72, US: 65 },
       deliveryReliabilityByMarket: { JP: 90, US: 93 },
       salesForceHeadcountTotal: 22,
       salesForceCoverageScore: 0.68,
+      lastQuarterNetRevenueUsd: 2_800_000,
+      lastQuarterLabel: "2016年Q1",
       hasPriorMarketData: true,
-      lifecycleTrendCount: 3,
-      supplyPressureCount: 2,
+      supplyPressureFacts: [
+        { product: "pd", value: 0.02, label: "balanced", humanMeaning: "市場全体の需給はおおむね均衡" },
+        { product: "vap", value: 0.15, label: "oversupply", humanMeaning: "市場全体で供給が需要を上回る方向（価格・受注獲得はしやすいが、過剰在庫リスクに注意）" },
+      ],
+      lifecycleTrendSummary: { growingCount: 2, shrinkingCount: 1, flatCount: 12, humanMeaning: "growing=構成比拡大傾向、shrinking=構成比縮小傾向、flat=ほぼ横ばい" },
     },
     ceo: {
       topSeverityReasonCodesTopN: [{ code: "CAPEX_DEFERRED", severity: "high" }],
@@ -85,10 +106,80 @@ function sampleBriefing() {
   };
 }
 
+/**
+ * 【M2.1追加】Test26 BAL Turn1の実再現ケース用briefing。overdue=0の健全なforward
+ * backlog（US/EU/JP/OTHER HOSO、合計3,063.42t、すべて未到来納期）を持つturn1状態。
+ * 前四半期データが存在しない（turn1のため）ことも忠実に再現する。
+ */
+function test26Turn1Briefing() {
+  return {
+    common: {
+      companyId: "BAL",
+      turn: 1,
+      year: 2015,
+      quarter: 1,
+      cashUsd: 2_000_000,
+      bindingCapacityTons: 6000,
+      bindingConstraintLabel: "商品別実効能力",
+      backlog: { totalTons: 3063.42, healthyForwardTons: 3063.42, dueThisTurnTons: 0, overdueTons: 0 },
+      playerDraft: null,
+      standardAiReasonCodesTopN: [],
+    },
+    cfo: {
+      totalAssetsUsd: 5_000_000,
+      totalLiabilitiesUsd: 1_500_000,
+      totalEquityUsd: 3_500_000,
+      shortTermLoansUsd: 0,
+      longTermLoansUsd: 0,
+      activeLoanCount: 0,
+      payablesUsd: 0,
+      receivablesUsd: 0,
+      previousQuarter: null,
+    },
+    coo: {
+      factoryCapacityTopN: [{ factoryId: "F1", nominalTotalTons: 8000, effectiveTotalTons: 6700 }],
+      nominalTotalTons: 8000,
+      effectiveTotalTons: 6700,
+      rawMaterialTotalTons: 500,
+      totalRegularHeadcount: 200,
+      qualityScoreByProduct: { hoso: 75, pd: 70, vap: 80 },
+      backlogByProduct: [{ product: "hoso", totalTons: 3063.42, overdueTons: 0 }],
+    },
+    commercial: {
+      backlog: { totalTons: 3063.42, healthyForwardTons: 3063.42, dueThisTurnTons: 0, overdueTons: 0 },
+      backlogByMarket: [
+        { market: "US", totalTons: 1367.43, overdueTons: 0 },
+        { market: "EU", totalTons: 588.3, overdueTons: 0 },
+        { market: "JP", totalTons: 336.51, overdueTons: 0 },
+        { market: "OTHER", totalTons: 771.18, overdueTons: 0 },
+      ],
+      backlogByProduct: [{ product: "hoso", totalTons: 3063.42, overdueTons: 0 }],
+      backlogByMarketProduct: [
+        { market: "US", product: "hoso", totalTons: 1367.43, overdueTons: 0, dueThisTurnTons: 0, healthyForwardTons: 1367.43, earliestDueLabel: "2015年Q2" },
+        { market: "EU", product: "hoso", totalTons: 588.3, overdueTons: 0, dueThisTurnTons: 0, healthyForwardTons: 588.3, earliestDueLabel: "2015年Q2" },
+        { market: "JP", product: "hoso", totalTons: 336.51, overdueTons: 0, dueThisTurnTons: 0, healthyForwardTons: 336.51, earliestDueLabel: "2015年Q2" },
+        { market: "OTHER", product: "hoso", totalTons: 771.18, overdueTons: 0, dueThisTurnTons: 0, healthyForwardTons: 771.18, earliestDueLabel: "2015年Q2" },
+      ],
+      customerTrustByMarket: { US: 50, EU: 50, JP: 50, OTHER: 50 },
+      deliveryReliabilityByMarket: { US: 50, EU: 50, JP: 50, OTHER: 50 },
+      salesForceHeadcountTotal: 15,
+      salesForceCoverageScore: 0.5,
+      lastQuarterNetRevenueUsd: null,
+      lastQuarterLabel: null,
+      hasPriorMarketData: false,
+      supplyPressureFacts: [],
+      lifecycleTrendSummary: null,
+    },
+    ceo: { topSeverityReasonCodesTopN: [], domainsInvolved: [] },
+  };
+}
+
 interface SmokeCase {
   readonly label: string;
   readonly playerMessage: string;
   readonly historyCount: number;
+  /** 【M2.1追加】trueの場合、通常のsampleBriefing()ではなくtest26Turn1Briefing()を使う。 */
+  readonly useTest26Briefing?: boolean;
 }
 
 const SMOKE_CASES: readonly SmokeCase[] = [
@@ -110,6 +201,18 @@ const SMOKE_CASES: readonly SmokeCase[] = [
       "現金残高は前四半期より改善している。工場の稼働率も高めだと思うが、追加投資をすべきか、それとも営業体制を強化して" +
       "既存の生産能力の中で売り方を変えるべきか、財務・生産・営業それぞれの立場から総合的に助言してほしい。",
     historyCount: 0,
+  },
+  {
+    // 【M2.1追加・§9対応】Test26 BAL Turn1で実際に誤回答（healthy forward backlogを
+    // 「納期遅延」「Trustを蝕んでいる」と誤説明、3,063tを「3,600t超」と誤って述べ、
+    // supplyPressureCount=2から「市場は供給に余裕」と自由解釈）が発生した、実際の
+    // プレイヤー発言そのものでの再現テスト。期待する回答の方向性は、売上実績・受注実績・
+    // forward backlog・overdue=0・次期納期への準備を区別し、「納期遅延」「Trustを
+    // 蝕んでいる」を根拠なしに言わないこと。
+    label: "9. Test26 BAL Turn1再現（backlog grounding）",
+    playerMessage: "前回の営業結果を教えて",
+    historyCount: 0,
+    useTest26Briefing: true,
   },
 ];
 
@@ -143,7 +246,7 @@ interface CaseResult {
 }
 
 async function runCase(scenario: SmokeCase): Promise<CaseResult> {
-  const briefing = sampleBriefing();
+  const briefing = scenario.useTest26Briefing ? test26Turn1Briefing() : sampleBriefing();
   const history = dummyHistory(scenario.historyCount);
   const { recent, compactSummary } = buildRecentHistoryForPrompt(history);
   const routing = routePlayerMessage(scenario.playerMessage);
@@ -237,8 +340,9 @@ async function main() {
       "",
       "- CIには一切組み込まない（このスクリプトは`npm test`からは呼ばれない）。",
       "- 8つの最低ケース（CFO質問・COO質問・Commercial質問・CEO/strategy質問・CEO summary要求・",
-      "  primary+secondaryが必要な投資質問・structured proposalを返す質問・比較的長いPlayer message）を",
-      "  順に実行し、各callのmodel/inputTokens/outputTokens/latencyMs/stopReason/retryCount/",
+      "  primary+secondaryが必要な投資質問・structured proposalを返す質問・比較的長いPlayer message）に加え、",
+      "  Test26 BAL Turn1の実再現ケース（「前回の営業結果を教えて」、overdue=0のhealthy forward",
+      "  backlogのみを持つturn1状態）を含む計9ケースを順に実行し、各callのmodel/inputTokens/outputTokens/latencyMs/stopReason/retryCount/",
       "  schemaValidationResult/primarySpeaker/secondarySpeaker/proposalCountを本ファイルへ出力する。",
       "- 実行後は、本文内容（開発用ログにのみ出力。API keyはログへ出さない）を人手で確認し、",
       "  役員らしさ・役割の混在有無・数値の捏造有無・Standard AIへの反論可否・回答の簡潔さ・",

@@ -11,6 +11,7 @@
 // 一切影響を受けない（実装指示§53「Claude failure must never stop the game」に対応）。
 
 import { randomUUID } from "crypto";
+import { toYearQuarter } from "../../../../../../../../../../../lib/v2/core/period";
 import { loadPlayerScreenViewModel, PlayerScreenViewModel } from "../../../../../../../../../../../v2/company-lab/play/_lib/viewModel";
 import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/policy";
 import { buildExplanationContext } from "../../../../../../../../../../../lib/v2/companyLab/aiExplanation/buildExplanationContext";
@@ -122,6 +123,15 @@ export async function handlePostAiMeetingMessage(
         cashUsd: Number(previousFinancialResult.balanceSheet.cash),
         netRevenueUsd: Number(previousFinancialResult.profitAndLoss.netRevenue),
         operatingProfitUsd: Number(previousFinancialResult.profitAndLoss.operatingProfit),
+        // 【M2.1追加】この数値がどのturn/四半期のものかを明示する（誤って「今期の実績」と
+        // 取り違えないようにする。previousQuarterFinancials.periodは既存のPlayerScreenViewModel
+        // が既に持つ値をそのまま整形するだけで、新しい期間表現は作らない）。
+        periodLabel: (() => {
+          const period = viewModel.previousQuarterFinancials?.period;
+          if (!period) return null;
+          const yq = toYearQuarter(period as never);
+          return `${yq.year}年Q${yq.quarter}`;
+        })(),
       }
     : null;
 
@@ -129,6 +139,9 @@ export async function handlePostAiMeetingMessage(
     context,
     previousQuarter,
     playerDraft: buildPlayerDraftSummary(viewModel),
+    // 【M2.1追加】Healthy Forward/Due This Turn/Overdueの分離に必要な生contracts
+    // （既存ownState.contractsをそのまま渡すだけ。新しい状態読み込み経路ではない）。
+    contracts: viewModel.ownState.contracts,
   });
 
   const meetingId = body.meetingId ?? defaultMeetingId(labId, companyId, turn);
