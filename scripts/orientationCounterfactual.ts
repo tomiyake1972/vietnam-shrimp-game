@@ -8,11 +8,12 @@
 //   npx tsx scripts/orientationCounterfactual.ts
 
 import { initializeCompanyLab, advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo } from "../app/lib/v2/companyLab/runner";
-import { generateStandardAiDecision } from "../app/lib/v2/companyLab/standardAi/policy";
+import { generateStandardAiDecisionWithDiagnostics } from "../app/lib/v2/companyLab/standardAi/policy";
 import {
   COMPANY_ORIENTATION_BY_COMPANY_ID,
   COMPANY_ORIENTATION_PROFILES,
   CompanyOrientationProfile,
+  resolveStandardAiProfileForMode,
 } from "../app/lib/v2/companyLab/standardAi/orientationProfile";
 import { DYNAMIC_SCENARIO_2 } from "../app/lib/v2/scenario/definitions/dynamicScenario2";
 import { unwrapUnit } from "../app/lib/v2/core/units";
@@ -23,19 +24,28 @@ const PRODUCTS = ["hoso", "pd", "vap"] as const;
 const MARKETS = ["CN", "US", "EU", "JP", "OTHER"] as const;
 const SEED = "ds2-cf";
 const SNAPSHOT_TURNS = [1, 12];
+// standardAiProfileMode。実ゲームは未設定＝OFF。ON にすると engine.ts が志向を注入する。
+const MODE: "OFF" | "ON" = process.env.AI_PROFILE_MODE === "ON" ? "ON" : "OFF";
 
 const mutableMap = COMPANY_ORIENTATION_BY_COMPANY_ID as Record<string, string>;
 const mutableProfiles = COMPANY_ORIENTATION_PROFILES as Record<string, CompanyOrientationProfile>;
 const ORIGINAL_MAP = { ...mutableMap };
 const ORIGINAL_PROFILES: Record<string, CompanyOrientationProfile> = JSON.parse(JSON.stringify(COMPANY_ORIENTATION_PROFILES));
 
-/** 倍率を中立(1.0)からの乖離ぶんだけ factor 倍して強める（診断専用）。 */
+/**
+ * 倍率を中立(1.0)からの乖離ぶんだけ factor 倍して強める（診断専用）。
+ * orientationProfile.ts は許容範囲（市場 0.80〜1.25 / 商品 0.85〜1.20）を超えると
+ * 実行時エラーにする安全弁を持つため、その範囲へクランプして観測する
+ * （＝現行の設計が許す最大まで強めた場合、という意味になる）。
+ */
 function amplify(profile: CompanyOrientationProfile, factor: number): CompanyOrientationProfile {
-  const amp = (v: number) => 1 + (v - 1) * factor;
+  const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+  const ampMarket = (v: number) => clamp(1 + (v - 1) * factor, 0.8, 1.25);
+  const ampProduct = (v: number) => clamp(1 + (v - 1) * factor, 0.85, 1.2);
   return {
     ...profile,
-    marketMultipliers: Object.fromEntries(Object.entries(profile.marketMultipliers).map(([k, v]) => [k, amp(v)])) as CompanyOrientationProfile["marketMultipliers"],
-    productMultipliers: Object.fromEntries(Object.entries(profile.productMultipliers).map(([k, v]) => [k, amp(v)])) as CompanyOrientationProfile["productMultipliers"],
+    marketMultipliers: Object.fromEntries(Object.entries(profile.marketMultipliers).map(([k, v]) => [k, ampMarket(v)])) as CompanyOrientationProfile["marketMultipliers"],
+    productMultipliers: Object.fromEntries(Object.entries(profile.productMultipliers).map(([k, v]) => [k, ampProduct(v)])) as CompanyOrientationProfile["productMultipliers"],
   };
 }
 
@@ -45,7 +55,7 @@ function buildStateAt(turn: number): { state: CompanyLabState; fixtures: ReturnT
   for (let t = 1; t < turn; t++) {
     const publicInfo = buildPublicMarketInfo(state);
     const decisions = fixtures.map((f) =>
-      generateStandardAiDecision(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, state.scenarioState.currentTurn)
+      generateStandardAiDecisionWithDiagnostics(f, buildCompanyOwnState(state, f), publicInfo, state.currentPeriod, state.scenarioState.currentTurn).decision
     );
     state = advanceCompanyLabQuarter(state, fixtures, Object.fromEntries(decisions.map((d) => [d.companyId, d])));
   }
@@ -53,15 +63,23 @@ function buildStateAt(turn: number): { state: CompanyLabState; fixtures: ReturnT
 }
 
 /** 指定会社の販売計画から、商品構成％と市場構成％を出す。 */
-function salesMix(state: CompanyLabState, fixtures: ReturnType<typeof initializeCompanyLab>["fixtures"], companyId: CompanyId) {
+function salesMix(
+  state: CompanyLabState,
+  fixtures: ReturnType<typeof initializeCompanyLab>["fixtures"],
+  companyId: CompanyId,
+  mode: "OFF" | "ON"
+) {
   const fixture = fixtures.find((f) => f.companyId === companyId)!;
   const publicInfo = buildPublicMarketInfo(state);
-  const decision = generateStandardAiDecision(
+  // engine.ts:327 と同じ手順で params を解決してから渡す（実ゲームと同等の経路）。
+  const resolution = resolveStandardAiProfileForMode(companyId, mode);
+  const { decision } = generateStandardAiDecisionWithDiagnostics(
     fixture,
     buildCompanyOwnState(state, fixture),
     publicInfo,
     state.currentPeriod,
-    state.scenarioState.currentTurn
+    state.scenarioState.currentTurn,
+    resolution.params
   );
   const byProduct: Record<string, number> = { hoso: 0, pd: 0, vap: 0 };
   const byMarket: Record<string, number> = { CN: 0, US: 0, EU: 0, JP: 0, OTHER: 0 };
@@ -90,7 +108,7 @@ const TARGETS: readonly CompanyId[] = ["MASS", "JPQ", "VAP"];
 const SWAP_SOURCES: readonly CompanyId[] = ["MASS", "JPQ", "VAP"];
 
 for (const turn of SNAPSHOT_TURNS) {
-  console.log(`\n${"=".repeat(100)}\n=== Turn ${turn} 固定 state での counterfactual（seed=${SEED}）\n${"=".repeat(100)}`);
+  console.log(`\n${"=".repeat(100)}\n=== Turn ${turn} 固定 state での counterfactual（seed=${SEED}, standardAiProfileMode=${MODE}）\n${"=".repeat(100)}`);
   const { state, fixtures } = buildStateAt(turn);
 
   for (const target of TARGETS) {
@@ -99,7 +117,7 @@ for (const turn of SNAPSHOT_TURNS) {
     // 1) 自社本来の志向
     Object.assign(mutableMap, ORIGINAL_MAP);
     Object.assign(mutableProfiles, JSON.parse(JSON.stringify(ORIGINAL_PROFILES)));
-    const base = salesMix(state, fixtures, target);
+    const base = salesMix(state, fixtures, target, MODE);
     console.log(line(`自社(${ORIGINAL_MAP[target]})`, base));
 
     // 2) 他社の志向へ差し替え
@@ -108,7 +126,7 @@ for (const turn of SNAPSHOT_TURNS) {
       Object.assign(mutableMap, ORIGINAL_MAP);
       Object.assign(mutableProfiles, JSON.parse(JSON.stringify(ORIGINAL_PROFILES)));
       mutableMap[target] = ORIGINAL_MAP[source];
-      const swapped = salesMix(state, fixtures, target);
+      const swapped = salesMix(state, fixtures, target, MODE);
       const dHoso = ((swapped.byProduct.hoso / swapped.total - base.byProduct.hoso / base.total) * 100).toFixed(1);
       const dVap = ((swapped.byProduct.vap / swapped.total - base.byProduct.vap / base.total) * 100).toFixed(1);
       const dCn = ((swapped.byMarket.CN / swapped.total - base.byMarket.CN / base.total) * 100).toFixed(1);
@@ -121,12 +139,12 @@ for (const turn of SNAPSHOT_TURNS) {
     Object.assign(mutableProfiles, JSON.parse(JSON.stringify(ORIGINAL_PROFILES)));
     const ownId = ORIGINAL_MAP[target];
     mutableProfiles[ownId] = amplify(ORIGINAL_PROFILES[ownId], 2);
-    const amped = salesMix(state, fixtures, target);
+    const amped = salesMix(state, fixtures, target, MODE);
     const aHoso = ((amped.byProduct.hoso / amped.total - base.byProduct.hoso / base.total) * 100).toFixed(1);
     const aVap = ((amped.byProduct.vap / amped.total - base.byProduct.vap / base.total) * 100).toFixed(1);
     const aCn = ((amped.byMarket.CN / amped.total - base.byMarket.CN / base.total) * 100).toFixed(1);
     const aJp = ((amped.byMarket.JP / amped.total - base.byMarket.JP / base.total) * 100).toFixed(1);
-    console.log(line(`→ 自社志向を2倍（診断専用）`, amped) + `  ΔHOSO=${aHoso}pt ΔVAP=${aVap}pt ΔCN=${aCn}pt ΔJP=${aJp}pt`);
+    console.log(line(`→ 自社志向2倍(範囲上限へclamp)`, amped) + `  ΔHOSO=${aHoso}pt ΔVAP=${aVap}pt ΔCN=${aCn}pt ΔJP=${aJp}pt`);
   }
 }
 
