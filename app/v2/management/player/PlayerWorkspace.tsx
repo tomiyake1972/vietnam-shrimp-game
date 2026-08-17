@@ -34,6 +34,7 @@ import { persistResumableRun } from "../lib/persistRun";
 import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
+import { PublicDividendSummary } from "../components/PublicDividendSummary";
 import { ExportPackButton } from "../components/ExportPackButton";
 import { CompanyDatabookButton } from "./CompanyDatabookButton";
 import { buildBacklogDisplay } from "./backlogView";
@@ -339,8 +340,9 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
         ) : null}
 
         {tab === "market" ? (
-          <div className="mx-auto max-w-4xl">
+          <div className="mx-auto max-w-4xl space-y-3">
             <MarketSummary dataset={dataset} />
+            <PublicDividendSummary session={session} fixtures={session.fixtures} />
           </div>
         ) : null}
 

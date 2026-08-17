@@ -59,6 +59,7 @@ import { persistResumableRun } from "../lib/persistRun";
 import { SeriesChart } from "./SeriesChart";
 import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
+import { PublicDividendSummary } from "./PublicDividendSummary";
 import { RunSelector } from "./RunSelector";
 import { Collapsible } from "./Collapsible";
 import { StrategySummary } from "./StrategySummary";
@@ -937,6 +938,16 @@ export function ManagementConsole() {
           {dataset ? (
             <Collapsible title="Market Summary（最新ターンの市場実績）" testId="console-market-summary-toggle">
               <MarketSummary dataset={dataset} />
+            </Collapsible>
+          ) : null}
+
+          {/* 【DIV-2】配当の他社公開表示。GM画面は元々TRUE WORLD（全社の全情報）を見られる
+              前提の画面だが、ここではあえて「他社にも公開される配当情報だけ」の見え方を
+              合わせて確認できるようにする（Cash・借入枠・CAPEX計画等はこのCollapsibleには
+              含まれない。それらは既存のCompany Inspectorのみで確認する）。 */}
+          {view?.session ? (
+            <Collapsible title="株主還元（配当）— 他社公開情報" testId="console-public-dividend-toggle">
+              <PublicDividendSummary session={view.session} fixtures={view.session.fixtures} />
             </Collapsible>
           ) : null}
 
