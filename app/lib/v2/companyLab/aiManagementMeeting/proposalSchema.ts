@@ -20,6 +20,9 @@ import {
   AI_MEETING_EXECUTIVE_ROLES,
   AI_MEETING_INTENTS,
   AI_MEETING_STANCES,
+  OPENING_BRIEF_CONFIDENCE_LEVELS,
+  OPENING_BRIEF_DIRECTIONS,
+  OPENING_BRIEF_DOMAINS,
   PLAYER_CORRECTION_STATUSES,
   RUN_ADVISORY_MEMORY_ACTIONS,
   RUN_ADVISORY_MEMORY_SCOPES,
@@ -40,6 +43,11 @@ export const AI_MEETING_PROPOSAL_LIMITS = {
   // 【M2.6追加・実装指示§9】1 memory itemは短い1〜2文のcanonical statement。会話全文を保存しない。
   maxMemoryStatementChars: 200,
   maxMemoryUsedIds: 8,
+  // 【M2.7追加・実装指示§10・§16】Opening Briefのkey change上限（server-side significantChangesは最大8だが、
+  // Claude出力は3〜5点目安のため少し余裕を持たせた6を上限とする）。
+  maxOpeningBriefKeyChanges: 6,
+  maxOpeningBriefSuggestedFollowUps: 4,
+  maxOpeningBriefFactsUsedPerChange: 6,
 } as const;
 
 const executiveRoleSchema = z.enum(AI_MEETING_EXECUTIVE_ROLES);
@@ -191,3 +199,27 @@ export const aiMeetingStructuredResponseSchema = z.object({
 });
 
 export type AiMeetingStructuredResponseParsed = z.infer<typeof aiMeetingStructuredResponseSchema>;
+
+// ---------------------------------------------------------------------
+// 【M2.7追加】Opening Executive Brief — Claude構造化応答Zodスキーマ。
+// ---------------------------------------------------------------------
+
+const openingBriefKeyChangeSchema = z.object({
+  domain: z.enum(OPENING_BRIEF_DOMAINS),
+  direction: z.enum(OPENING_BRIEF_DIRECTIONS),
+  title: z.string(),
+  explanation: z.string(),
+  factsUsed: z.array(z.string()).max(AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefFactsUsedPerChange),
+  confidence: z.enum(OPENING_BRIEF_CONFIDENCE_LEVELS).optional(),
+});
+
+/** 【実装指示§15・§26】Opening BriefはCEO固定。primarySpeaker選択の余地を与えない。 */
+export const openingBriefStructuredResponseSchema = z.object({
+  speaker: z.literal("CEO"),
+  summary: z.string(),
+  keyChanges: z.array(openingBriefKeyChangeSchema).max(AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefKeyChanges),
+  suggestedFollowUps: z.array(z.string()).max(AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefSuggestedFollowUps),
+  memoryUsedIds: z.array(z.string()).max(AI_MEETING_PROPOSAL_LIMITS.maxMemoryUsedIds).default([]),
+});
+
+export type OpeningBriefStructuredResponseParsed = z.infer<typeof openingBriefStructuredResponseSchema>;

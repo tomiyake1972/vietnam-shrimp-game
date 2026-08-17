@@ -1337,3 +1337,219 @@ prompt文言の3層で揃った。次のTest26継続セッションでは、「C
 「日本優先」「次の2四半期はCAPEXなし」等のプレイヤー発言を実際に会話へ投入し、
 後続turnでの参照品質（cash floor preferenceを踏まえたCAPEX助言の変化等）を
 実APIで確認することを推奨する。
+
+## 27. M2.7（Turn Change Briefing / Automatic Opening Executive Brief）追記
+
+### 27.1 architecture
+
+新しいTurnの意思決定画面に入った際、プレイヤーが何も質問しなくても「前四半期から
+何が変わったか」を、CEOだけが3〜5点、短く説明するOpening Executive Brief機能を
+追加した。基本原則（実装指示§1）どおり、差分計算は一切Claudeにさせない。
+`turnChangeBriefing.ts`が既存モジュール（pnlSemantics/operationalSemantics/
+capacitySemantics）の関数・既存フィールドの単純な転記・差分としてのみ
+`TurnChangeBriefing`をserver-side deterministicに構築し、その中からTop 8件の
+`significantChanges`だけをClaudeへ渡す。Claudeの役割はその中から3〜5件を選んで
+経営的に短く解釈するだけに限定した（新しいtool schema・system prompt・response
+schemaを専用に用意し、既存のAI Meeting本体のprompt/schemaとは完全に分離、
+transport層（AnthropicMessagesClient・timeout/retry方針）のみ共有）。
+
+### 27.2 TurnChangeBriefing schema
+
+`TurnChangeBriefing { runId, companyId, fromTurn, toTurn, fromPeriodLabel,
+toPeriodLabel, financialChanges, commercialChanges, operationalChanges,
+capacityChanges, riskChanges, opportunityChanges, significantChanges,
+turnChangeBriefingVersion }`。Persistent SSoTにはしない（呼び出しのたびに
+2つの確定四半期スナップショットから再構築する）。
+
+### 27.3 financial deltas
+
+revenue/grossProfit/operatingProfit/operatingMargin/netIncome/cash/
+accountsReceivable/totalDebt(=balanceSheet.totalLiabilities)/interestBearingDebt
+(=shortTermLoans+longTermLoans)/borrowingHeadroomを、`MetricDelta{current,
+previous,delta,deltaPercent}`として保持。`pnlVariance`は`pnlSemantics.
+computePnlVariance`をそのまま転記（二重計算しない）。
+
+### 27.4 commercial deltas
+
+newOrders/deliveredVolume/totalBacklog/healthyForwardBacklog/
+dueThisTurnBacklog/overdueBacklog/salesForceHeadcount/trustByMarket/
+averageRealizedPriceUsdPerTon/productMixを保持。backlogは既存
+`CompanyQuarterSummary.outstandingQuantity/overdueQuantity`（runner.ts側で
+`status==="overdue"`を正しく集計している既存フィールド。M2.1が問題視した
+computeBacklogByMarketProductの誤命名フィールドとは別物）を転記するのみ。
+`volumePriceFacts`は`pnlSemantics.computeVolumePriceFacts`の転記。
+
+### 27.5 operational deltas
+
+productionVolume/rawMaterialInventory/finishedGoodsInventory/
+rawMaterialShortageTons/equipmentShortageTons/laborShortageTons/
+equipmentUtilization/laborUtilization/overtimeRate/regularWorkers/
+temporaryWorkers/qualityScoreByProduct/bottleneckChangeを保持。
+equipmentUtilizationとlaborUtilizationは常に別フィールドとして保持し、一括しない
+（M2.4の原則を維持）。
+
+### 27.6 capacity deltas
+
+5 capacity pool（common/hoso/pd/vap/freezing）の現在値と、CAPEX活動
+（ongoing/completedThisTurn/newlyStartedThisTurn、`CapitalProject.
+completedPeriod/constructionStartedPeriod`との一致判定のみ）を保持。
+【既知の簡略化】過去turnの工場別実効能力スナップショットがengine履歴に
+存在しないため、capacity poolは現在値のみを提供し、`capacityIncreasedThisTurn`
+（CAPEX完了イベントの有無）で代替する。能力増分を独自に推定・再計算することは
+しない（remaining risksに明記）。
+
+### 27.7 risk/opportunity selection・significance logic
+
+単純な優先度3段階（HIGH=構造的シグナル: sign reversal・new overdue・
+bottleneck変化・CAPEX完了、MEDIUM=閾値超えのdelta（margin deterioration
+±3pp・cash stress -15%・price shock ±8%という最小限の固定閾値のみ）、
+LOW=その他の非ゼロdelta）で候補を生成し、全候補からスコア降順でTop 8件を
+`significantChanges`とする。新しい巨大score engineは作らない（実装指示§11）。
+
+### 27.8 bottleneck change logic
+
+`operationalSemantics.computeBottleneckHierarchy`を、reportingPeriod/
+priorPeriod双方のshortfall値へそれぞれ適用し、primary bottleneckのカテゴリが
+変化したかどうかを`bottleneckChange{previous,current,changed}`として保持
+（二重ロジックなし、既存関数の2回呼び出しのみ）。
+
+### 27.9 backlog semantics
+
+healthy forward増加とoverdue増加を完全に区別する。overdueが0のままなら
+`commercial.overdue.*`候補は一切生成されず、`commercial.healthyForwardBacklog.
+delta`候補はdomain=OPPORTUNITYとして扱われる（RISKにはしない）。
+
+### 27.10 price/volume handling
+
+`pnlSemantics.computeVolumePriceFacts`の転記に加え、deliveredVolume増加かつ
+revenue減少の組み合わせを`commercial.volumeUpRevenueDown`候補
+（domain=RISK）として明示的に検出する。完全なPrice-Volume-Mix分解エンジンは
+実装しない。
+
+### 27.11 Opening CEO prompt
+
+`OPENING_BRIEF_SYSTEM_PROMPT`（`prompt.ts`）を新規追加。speakerをCEO固定
+（zod schema側でも`z.literal("CEO")`で強制）、significantChangesに存在しない
+変化を作り出さない、FACT→INTERPRETATION分離、M2.1〜M2.6の全guardrail
+（overdue語彙・P&L/CF/BS分離・utilization分離・interestBearingDebt/
+totalLiabilities分離・memoryはgame factではない）の再掲、原因不明時は
+「このデータだけでは原因を特定できません」と言えること、CFO/COO/Commercialの
+発言を代わりに生成しないこと、confidence（HIGH/MEDIUM/LOW・任意）を明記した。
+
+### 27.12 Run Memory integration
+
+`buildOpeningBriefUserMessage`が`runAdvisoryMemory`（M2.6と同じ
+`RunAdvisoryMemorySummary`）を別枠で注入する。promptには、プレイヤーの
+方針（例: Japan優先）に関連するsignificantChangesをやや優先して説明してよいが、
+他の重大riskを隠してはいけない旨を明記した（実装指示§19・§20）。
+
+### 27.13 Standard AI integration
+
+Standard AIの意思決定案は長く説明せず、重要な場合のみ1文程度の参照
+（`standardAiCurrentDecisionSummary`として渡すのみ）にとどめるようpromptへ明記。
+
+### 27.14 caching
+
+同一`labId×companyId×turn`のOpening Briefは、既存conversation.ts（AI Meeting
+の会話永続化と同じRedis namespace）を再利用してキャッシュする。新しいキャッシュ
+namespaceは作らない。会話の先頭メッセージが`messageType==="OPENING_BRIEF"`
+なら、2回目以降の呼び出しはClaudeを再度呼ばずそのまま返す。
+
+### 27.15 Turn1 handling
+
+turn1（確定四半期が存在しない）またはturn2（前々turnが無くdeltaを計算できない）
+の場合は、TurnChangeBriefingの代わりに`InitialBriefFacts`（現在の
+ExecutiveBriefingPacket.common/cooから転記した、現金・受注残・生産能力・原料在庫・
+Standard AI reason codesのみのフラットなfacts）を使う。ExecutiveBriefingPacketは
+「意思決定前の現在ownState」から組み立てられるため、turn2時点ではturn1の確定
+結果そのものを表しており、新しい状態読み込みは不要（既存packetからの転記のみ）。
+
+### 27.16 API contract
+
+`GET /api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/
+ai-meeting/opening-brief`を新設（既存`.../ai-meeting/messages`の兄弟route。
+`_lib/dependencies.ts`・`_lib/withApiContext.ts`は新規複製せず、既存
+`messages/_lib/`のものをそのまま再利用した）。応答は`{available, cached,
+meetingId, openingBrief | unavailableReason, diagnostics}`。
+
+### 27.17 persistence
+
+Opening Brief自体は、`AiMeetingMessage`へ`messageType: "OPENING_BRIEF"`
+（新規追加。省略時は既存の通常応答として扱う後方互換フィールド）を付与した上で、
+既存conversation.ts経由でconversation artifactへ保存する。Game State SSoTは
+一切変更しない。
+
+### 27.18 token impact
+
+TurnChangeBriefingはTop 8件のsignificantChangesのみをClaudeへ渡す（過去全Turn
+履歴は送らない、reportingPeriod/priorPeriodの2四半期分のみ）。M2.6のRun Memory
+summaryもrole-relevant top N件のみ。実測値は実API未実施のため今回報告できない。
+
+### 27.19 Test26 regressions
+
+§38のCase A（数量増・売上減・営業黒字→赤字を現金回収が原因にならない形で表現）・
+Case B（backlog増加をoverdue増加と誤認しない）・Case C/D（equipment/labor
+utilizationの分離・raw material shortageがequipment shortageを上回るケースの
+primary bottleneck判定）を、AMM-TCB-18〜20として実データ規模の数値で再現し確認
+した。
+
+### 27.20 code changes
+
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/turnChangeBriefing.ts`
+  （TurnChangeBriefing構築・significance選定・InitialBriefFacts）
+- 新規: `app/api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/
+  ai-meeting/opening-brief/route.ts`＋`_lib/handlers.ts`（既存`messages/_lib/`の
+  dependencies・withApiContextを再利用）
+- 変更: `types.ts`（`OpeningBriefStructuredResponse`/`OpeningExecutiveBrief`型、
+  `AiMeetingMessage.messageType`追加）
+- 変更: `proposalSchema.ts`（`openingBriefStructuredResponseSchema`追加）
+- 変更: `claudeClient.ts`（`OPENING_BRIEF_TOOL_INPUT_SCHEMA`・
+  `generateOpeningBrief`追加。既存`generateMeetingResponse`は変更しない）
+- 変更: `prompt.ts`（`OPENING_BRIEF_SYSTEM_PROMPT`・`buildOpeningBriefUserMessage`・
+  `OPENING_BRIEF_PROMPT_VERSION`追加。既存`AI_MANAGEMENT_MEETING_SYSTEM_PROMPT`・
+  `AI_MEETING_PROMPT_VERSION`は変更しない）
+- 既存のStandard AI・Vision/ManagementProfile・Game State・Finance/Sales/
+  Production/Trust/CAPEX/Scenario parametersは一切変更していない（実装指示§42の
+  禁止事項の遵守）。
+
+### 27.21 tests
+
+`turnChangeBriefing.test.ts`にAMM-TCB-1〜13・17〜20（17件）、
+`aiMeetingOpeningBrief.test.ts`にAMM-TCB-14〜16（3件、結合テスト）を新規追加。
+AMM-TCB-1〜20の20件すべてを実装した。プロジェクト全体3220件、いずれもpass。
+
+### 27.22 tsc / eslint
+
+`npx tsc --noEmit -p .`・`npx eslint .`ともにエラー0件（既存の無関係なwarning
+14件のみ、M2.7由来の新規warningは0件）。
+
+### 27.23 real API結果
+
+このセッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため未実施
+（M2.1〜M2.6と同様）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、実装指示§40の
+3フロー（10A: Turn1 Initial Brief、10B: Test26 accounting regression再現、
+10C: Test26 backlog/operational regression再現）を追加した。
+
+### 27.24 remaining risks
+
+- capacity poolの過去turn実効能力スナップショットが取得できないため、
+  capacity changesは現在値のみを提供する（CAPEX完了イベントの有無で代替）。
+- salesForceHeadcountは過去turnの実際の人員数スナップショットが存在しないため、
+  current-onlyで扱う（previous=null）。
+- significance thresholdは最小限の固定値（margin ±3pp・cash -15%・price ±8%）に
+  とどめており、実運用でのチューニングは今後の検討課題。
+- Opening Briefのキャッシュ判定は会話内の`messageType==="OPENING_BRIEF"`
+  メッセージの有無に依存するため、会話が手動で編集・削除された場合の挙動は
+  想定していない（通常のプレイフローでは発生しない）。
+- 実API未検証のため、実際の応答品質（3〜5点の選び方の妥当性・CEOらしさ）は
+  引き続き確認が必要。
+
+### 27.25 readiness for UI integration
+
+backend contract（GET opening-brief、`{available, cached, openingBrief:
+{turn, speaker, summary, keyChanges, suggestedFollowUps, factsUsed,
+memoryUsedIds, generatedAt, promptVersion, briefingVersion,
+turnChangeBriefingVersion}}`）が、コード・テスト（AMM-TCB-1〜20）・
+prompt文言の3層で揃った。UI側は、AI Meeting panelを開いた際にこのGETを1回
+呼び出し、`available=true`ならOpening Briefを先頭に表示し、Playerがそれを
+無視してすぐ質問できるようにする契約で実装可能（Modalでの強制は不要）。

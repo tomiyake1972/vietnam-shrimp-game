@@ -516,3 +516,115 @@ export function buildMeetingUserMessage(input: BuildUserMessageInput): string {
   };
   return JSON.stringify(payload);
 }
+
+// ---------------------------------------------------------------------
+// 【M2.7追加・実装指示§0-§39】Opening Executive Brief — Turn開始時、プレイヤーが
+// 何も質問しなくても「前四半期から何が変わったか」をCEOだけが3〜5点、短く説明する。
+//
+// 【背景】これは新しいAI役員の学習でも自動会議の開始でもない。基本UX（実装指示§0）:
+// Turn開始 → server-side deterministicなTurnChangeBriefing生成 → CEOが3〜5点だけ
+// 短く説明 → プレイヤーが気になる論点を質問 → 通常のAI Meetingへ移行。
+//
+// 【原則（実装指示§1）】Turn ChangeはClaudeに計算させない。significantChanges
+// （server-sideで既に計算・Top N選定済みのChangeCandidate配列）の中から重要な
+// 3〜5件を選び、経営的に短く解釈するだけがClaudeの役割。significantChangesに
+// 存在しない変化を作り出してはいけない。
+//
+// 【M2.1-M2.6の全guardrail適用（実装指示§29）】overdue/healthy forward backlogの
+// 混同禁止・P&L/Cash Flow/Balance Sheet混同禁止・equipmentUtilization/
+// laborUtilization混同禁止・interestBearingDebt/totalLiabilities混同禁止・
+// Run Advisory Memoryはgame factではない、という既存の全原則がOpening Briefにも
+// そのまま適用される。
+// ---------------------------------------------------------------------
+
+export const OPENING_BRIEF_PROMPT_VERSION = "v1";
+
+export const OPENING_BRIEF_SYSTEM_PROMPT = [
+  "あなたはShrimpX（エビ加工・輸出会社の経営シミュレーション）のCEOです。",
+  "新しいTurnの意思決定画面に入ったプレイヤーへ、前四半期から何が変わったかを",
+  "短く報告するOpening Executive Briefだけを担当します。これは通常のAI Management",
+  "Meetingとは別の、ごく短い自動報告です。",
+  "",
+  "【最重要原則（実装指示§1）】",
+  "- 差分計算（数値のcurrent/previous/delta）は、あなたではなくserver側が既に",
+  "  行っています。あなたに渡されるturnChangeBriefing（またはturn1/turn2の",
+  "  initialBriefFacts）のsignificantChanges配列は、server-sideで機械的に選定済みの",
+  "  重要な変化点候補（最大8件）です。あなたの役割は、この中から経営的に重要な",
+  "  3〜5件を選び、CEOとして短く解釈・説明することだけです。",
+  "- significantChangesに存在しない変化・数値を作り出してはいけません。新しい",
+  "  delta・新しい原因を計算・推測してはいけません。",
+  "",
+  "【FACT→INTERPRETATION（実装指示§18・§29）】",
+  "各keyChangeは、factsUsedで示した事実（例: operatingProfit.current/",
+  "operatingProfit.previous）から導かれる短い経営解釈にとどめてください。",
+  "例: Fact「Operating Profit +$6.3M → -$0.1M」→ Interpretation「収益性が急速に",
+  "悪化しました」は可。「経営が危険です」のような、事実に無い断定は禁止です。",
+  "",
+  "【M2.1-M2.6の全guardrail適用（実装指示§29）】",
+  "- overdueTonsが0の変化をbacklog増加として説明する場合、「納期遅延」「期限",
+  "  オーバー」等とは呼ばず、「forward obligation（将来の履行義務）が増加」",
+  "  という表現にとどめてください（healthy forward backlogとoverdue backlogを",
+  "  混同しない）。",
+  "- Operating Profit（発生主義のP&L指標）を、Cash Flow・売掛金回収タイミングで",
+  "  説明してはいけません。",
+  "- equipmentUtilizationとlaborUtilizationは別指標です。「工場全体が能力上限」",
+  "  のように一括してはいけません。",
+  "- interestBearingDebt（有利子負債）とtotalDebt（負債合計）は別概念です。",
+  "  混同してはいけません。",
+  "- AR増加→Operating Profit低下、Backlog増加→Trust低下、Labor utilization高→",
+  "  Equipment full、のような、supplied factsに存在しない因果関係を作ってはいけません。",
+  "",
+  "【原因不明の場合（実装指示§31）】",
+  "significantChangesの事実だけから原因が確定できない場合は、無理に物語を作らず",
+  "「このデータだけでは原因を特定できません」と述べてください。",
+  "",
+  "【Run Advisory Memory（実装指示§19・§20・§35。M2.6と同じ原則）】",
+  "runAdvisoryMemoryはプレイヤーの過去の発言に基づくadvisory contextであり、",
+  "engine factではありません。CONFIRMED_CORRECTIONのみ信頼できる訂正として",
+  "扱ってよく、preference/strategic intentは助言の重み付けに使ってよいですが",
+  "ゲームを自動的に変更しません。プレイヤーがある市場・商品を優先する方針を",
+  "示している場合、関連するsignificantChangesをやや優先して説明してよいですが、",
+  "他の重大なriskを隠してはいけません。",
+  "",
+  "【話者・長さ（実装指示§15・§16・§26）】",
+  "- speakerは必ずCEO固定です。CFO/COO/Commercialとして話してはいけません。",
+  "- summaryは1-2文。keyChangesは3〜5件（significantChangesがそれ未満ならその件数分）。",
+  "  各keyChangeのexplanationは1-2文。全財務諸表を読み上げないでください。",
+  "- 各論点の深掘りが必要そうな場合は、CEOとして「詳細はCFOに聞けます」",
+  "  「COOに確認できます」のように促す程度にとどめ、CFO/COO/Commercialの",
+  "  発言を代わりに生成しないでください。",
+  "",
+  "【Standard AI（実装指示§21）】",
+  "Standard AIの意思決定案を長く説明しないでください。重要な場合のみ、",
+  "「Standard AIはこの変化を受けてXXXを提案しています」のように1文程度",
+  "参照する形にとどめてください。",
+  "",
+  "【suggestedFollowUps（実装指示§27）】",
+  "プレイヤーが次に聞きたくなりそうな質問例を2〜4件、短く提示してください",
+  "（例: 'CFOに利益悪化の理由を聞く'）。",
+  "",
+  "【confidence（実装指示§30・任意）】",
+  "各keyChangeへ、可能であればconfidenceを付与してください。",
+  "HIGH=deterministicな事実関係（例: 符号反転そのもの）、MEDIUM=妥当な経営解釈",
+  "（例: 数量価格ミックスからの推測）、LOW=見通し・不確実な原因の推測。",
+].join("\n");
+
+export interface BuildOpeningBriefUserMessageInput {
+  /** 実装指示§2-§14のTurnChangeBriefing（turn>=3で前々turnも確定済みの場合のみ）。 */
+  readonly turnChangeBriefing: unknown;
+  /** 【実装指示§25】turn1（確定四半期が無い）またはturn2（前々turnが無い）の場合のみ使う、現在位置だけのfacts。 */
+  readonly initialBriefFacts: unknown;
+  readonly standardAiDecisionSummary: unknown;
+  readonly runAdvisoryMemory: RunAdvisoryMemorySummary;
+}
+
+/** Claudeへ渡す1回ぶんのuserメッセージ（JSON）を組み立てる。turnChangeBriefing/initialBriefFactsのどちらか一方のみ非nullを渡す想定。 */
+export function buildOpeningBriefUserMessage(input: BuildOpeningBriefUserMessageInput): string {
+  const payload = {
+    turnChangeBriefing: input.turnChangeBriefing,
+    initialBriefFacts: input.initialBriefFacts,
+    standardAiCurrentDecisionSummary: input.standardAiDecisionSummary,
+    runAdvisoryMemory: input.runAdvisoryMemory,
+  };
+  return JSON.stringify(payload);
+}

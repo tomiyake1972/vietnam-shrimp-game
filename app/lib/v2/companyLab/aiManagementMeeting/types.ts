@@ -304,6 +304,61 @@ export interface PlayerCorrectionRecord {
   readonly turn: number;
 }
 
+// ---------------------------------------------------------------------
+// 【M2.7追加】Opening Executive Brief — Turn開始時、プレイヤーが何も質問しなくても
+// 「前四半期から何が変わったか」をCEOだけが3〜5点、短く説明する機能。
+// ---------------------------------------------------------------------
+
+/** 【実装指示§10】TurnChangeBriefing.significantChangesと同じdomain区分。 */
+export const OPENING_BRIEF_DOMAINS = ["FINANCE", "COMMERCIAL", "OPERATIONS", "CAPACITY", "RISK", "OPPORTUNITY"] as const;
+export type OpeningBriefDomain = (typeof OPENING_BRIEF_DOMAINS)[number];
+
+export const OPENING_BRIEF_DIRECTIONS = ["IMPROVED", "WORSENED", "NEUTRAL"] as const;
+export type OpeningBriefDirection = (typeof OPENING_BRIEF_DIRECTIONS)[number];
+
+/** 【実装指示§30】optionalな確信度。HIGH=deterministic fact relation、MEDIUM=妥当な経営解釈、LOW=見通し・不確実な原因。 */
+export const OPENING_BRIEF_CONFIDENCE_LEVELS = ["HIGH", "MEDIUM", "LOW"] as const;
+export type OpeningBriefConfidence = (typeof OPENING_BRIEF_CONFIDENCE_LEVELS)[number];
+
+export interface OpeningBriefKeyChange {
+  readonly domain: OpeningBriefDomain;
+  readonly direction: OpeningBriefDirection;
+  readonly title: string;
+  readonly explanation: string;
+  readonly factsUsed: readonly string[];
+  readonly confidence?: OpeningBriefConfidence;
+}
+
+/** 【実装指示§17・§32】Claudeへの単一構造化呼び出しが返す応答形状（Opening Brief専用）。 */
+export interface OpeningBriefStructuredResponse {
+  /** 【実装指示§15・§26】原則CEO固定。CFO/COO/Commercialが自動で続けて話すことはない。 */
+  readonly speaker: "CEO";
+  readonly summary: string;
+  /** 【実装指示§10・§16】3〜5件目安（server-side Top N候補からClaudeが選ぶ）。 */
+  readonly keyChanges: readonly OpeningBriefKeyChange[];
+  /** 【実装指示§27】2〜4件程度。 */
+  readonly suggestedFollowUps: readonly string[];
+  /** 【実装指示§19・§28】参照したRun Advisory Memoryのid（無ければ空配列）。 */
+  readonly memoryUsedIds: readonly string[];
+}
+
+/** 【実装指示§33】API/persistence向けの最終的なOpening Brief（server-side metadataを付与済み）。 */
+export interface OpeningExecutiveBrief {
+  readonly turn: number;
+  readonly speaker: "CEO";
+  readonly summary: string;
+  readonly keyChanges: readonly OpeningBriefKeyChange[];
+  readonly suggestedFollowUps: readonly string[];
+  /** keyChanges[].factsUsedを合成した重複除去済み一覧（Claudeへ二重出力させない）。 */
+  readonly factsUsed: readonly string[];
+  readonly memoryUsedIds: readonly string[];
+  readonly generatedAt: string;
+  readonly promptVersion: string;
+  readonly briefingVersion: string;
+  /** 【実装指示§36】TurnChangeBriefingが使えたか（turn>=3で前々turnも確定済み）、Initial Brief（turn1・turn2）かの識別。 */
+  readonly turnChangeBriefingVersion: string | null;
+}
+
 export interface AiMeetingMessage {
   readonly id: string;
   readonly speaker: MessageSpeaker;
@@ -318,6 +373,11 @@ export interface AiMeetingMessage {
    * factual assertionを新しいstructured briefingより優先しない（実装指示§21）。
    */
   readonly promptVersion?: string;
+  /**
+   * 【M2.7追加・実装指示§34】通常のroleごとの応答か、Opening Executive Briefかを識別する。
+   * 省略時（既存メッセージ・M2.6以前）は通常応答として扱う（後方互換）。
+   */
+  readonly messageType?: "REPLY" | "OPENING_BRIEF";
 }
 
 export interface AiMeetingConversationState {

@@ -33,9 +33,9 @@ import {
   EXPLANATION_CLAUDE_MAX_RETRIES,
   EXPLANATION_CLAUDE_TIMEOUT_MS,
 } from "../aiExplanation/claudeClient";
-import { AI_MANAGEMENT_MEETING_SYSTEM_PROMPT } from "./prompt";
-import { aiMeetingStructuredResponseSchema, AI_MEETING_PROPOSAL_LIMITS } from "./proposalSchema";
-import { AiMeetingCallDiagnostics, AiMeetingStructuredResponse } from "./types";
+import { AI_MANAGEMENT_MEETING_SYSTEM_PROMPT, OPENING_BRIEF_SYSTEM_PROMPT } from "./prompt";
+import { aiMeetingStructuredResponseSchema, AI_MEETING_PROPOSAL_LIMITS, openingBriefStructuredResponseSchema } from "./proposalSchema";
+import { AiMeetingCallDiagnostics, AiMeetingStructuredResponse, OpeningBriefStructuredResponse } from "./types";
 
 export type { AnthropicMessagesClient, AnthropicMessageResponse } from "../aiExplanation/claudeClient";
 
@@ -441,6 +441,202 @@ export async function generateMeetingResponse(
   }
 
   const second = await attemptOnce(resolvedClient, config, userMessage, 2, logPrefix);
+  if (second.ok) return { ok: true, response: second.response!, diagnostics: second.diagnostics };
+  return { ok: false, errorCategory: second.errorCategory!, detail: second.detail, diagnostics: second.diagnostics };
+}
+
+// ---------------------------------------------------------------------
+// 【M2.7追加・実装指示§17・§32】Opening Executive Brief — 専用のtool schema・
+// system prompt・Claude呼び出し。トランスポート層（AnthropicMessagesClient・
+// timeout/retry定数・attempt/retry方針）はAI Meeting本体と共有し、domain層
+// （tool schema・system prompt・response schema）だけを分離する（既存の
+// 「transport層のみ共有」方針をそのまま踏襲）。
+// ---------------------------------------------------------------------
+
+export const OPENING_BRIEF_TOOL_NAME = "submit_opening_brief";
+
+const OPENING_BRIEF_DOMAIN_ENUM = ["FINANCE", "COMMERCIAL", "OPERATIONS", "CAPACITY", "RISK", "OPPORTUNITY"] as const;
+const OPENING_BRIEF_DIRECTION_ENUM = ["IMPROVED", "WORSENED", "NEUTRAL"] as const;
+const OPENING_BRIEF_CONFIDENCE_ENUM = ["HIGH", "MEDIUM", "LOW"] as const;
+
+export const OPENING_BRIEF_TOOL_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    speaker: { type: "string", enum: ["CEO"], description: "Opening BriefはCEO固定。他のExecutiveは選べない。" },
+    summary: { type: "string", description: "全体の短い要約（1-2文）。" },
+    keyChanges: {
+      type: "array",
+      maxItems: AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefKeyChanges,
+      description: "server-sideのsignificantChanges候補の中から、経営的に重要な3〜5件を選んで短く説明する。候補に無い変化を作り出さないこと。",
+      items: {
+        type: "object",
+        properties: {
+          domain: { type: "string", enum: OPENING_BRIEF_DOMAIN_ENUM },
+          direction: { type: "string", enum: OPENING_BRIEF_DIRECTION_ENUM },
+          title: { type: "string", description: "短い見出し（例: 'Operating Profit turned negative'）。" },
+          explanation: { type: "string", description: "1-2文の経営的解釈。事実(fact)には無い原因を捏造しないこと。原因が特定できない場合はその旨を述べる。" },
+          factsUsed: { type: "array", items: { type: "string" }, maxItems: AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefFactsUsedPerChange },
+          confidence: { type: "string", enum: OPENING_BRIEF_CONFIDENCE_ENUM, description: "HIGH=deterministicな事実関係、MEDIUM=妥当な経営解釈、LOW=見通し・不確実な原因。" },
+        },
+        required: ["domain", "direction", "title", "explanation", "factsUsed"],
+      },
+    },
+    suggestedFollowUps: {
+      type: "array",
+      maxItems: AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefSuggestedFollowUps,
+      description: "プレイヤーが次に聞きたくなりそうな質問の例（2-4件）。",
+      items: { type: "string" },
+    },
+    memoryUsedIds: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: AI_MEETING_PROPOSAL_LIMITS.maxMemoryUsedIds,
+      description: "参照したRun Advisory Memoryのid（無ければ空配列）。",
+    },
+  },
+  required: ["speaker", "summary", "keyChanges", "suggestedFollowUps"],
+} as const;
+
+export type GenerateOpeningBriefResult =
+  | { readonly ok: true; readonly response: OpeningBriefStructuredResponse; readonly diagnostics: AiMeetingCallDiagnostics }
+  | { readonly ok: false; readonly errorCategory: GenerateMeetingResponseErrorCategory; readonly detail?: string; readonly diagnostics: AiMeetingCallDiagnostics };
+
+interface OpeningBriefAttemptResult {
+  readonly diagnostics: AiMeetingCallDiagnostics;
+  readonly ok: boolean;
+  readonly response?: OpeningBriefStructuredResponse;
+  readonly errorCategory?: GenerateMeetingResponseErrorCategory;
+  readonly detail?: string;
+}
+
+async function attemptOpeningBriefOnce(
+  client: AnthropicMessagesClient,
+  config: AiMeetingModelConfig,
+  userMessage: string,
+  attemptNumber: number,
+  logPrefix: string
+): Promise<OpeningBriefAttemptResult> {
+  const startedAt = Date.now();
+  const toolDef: AnthropicToolDefinition = {
+    name: OPENING_BRIEF_TOOL_NAME,
+    description: "Turn開始時のOpening Executive Brief（CEOによる前四半期からの変化の短い要約）を提出する。",
+    input_schema: OPENING_BRIEF_TOOL_INPUT_SCHEMA,
+  };
+
+  let response: AnthropicMessageResponse;
+  try {
+    response = await client.messages.create(
+      {
+        model: config.model,
+        max_tokens: config.maxTokens,
+        system: OPENING_BRIEF_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userMessage }],
+        tools: [toolDef],
+        tool_choice: { type: "tool", name: OPENING_BRIEF_TOOL_NAME },
+      },
+      { timeout: EXPLANATION_CLAUDE_TIMEOUT_MS }
+    );
+  } catch (e) {
+    const status = typeof e === "object" && e !== null && "status" in e ? (e as { status?: unknown }).status : undefined;
+    const detail = e instanceof Error ? e.message : String(e);
+    const errorCategory: GenerateMeetingResponseErrorCategory = typeof status === "number" ? "http_error" : "network_error";
+    const latencyMs = Date.now() - startedAt;
+    console.error(`${logPrefix} attempt${attemptNumber} 失敗 category=${errorCategory} latencyMs=${latencyMs} detail=${detail}`);
+    return {
+      ok: false,
+      errorCategory,
+      detail,
+      diagnostics: { model: config.model, inputTokens: null, outputTokens: null, stopReason: null, latencyMs, retryCount: attemptNumber - 1, schemaValidationResult: errorCategory },
+    };
+  }
+
+  const latencyMs = Date.now() - startedAt;
+  const stopReason = response.stop_reason ?? null;
+  const truncated = stopReason === "max_tokens";
+  const inputTokens = response.usage?.input_tokens ?? null;
+  const outputTokens = response.usage?.output_tokens ?? null;
+
+  const toolInput = findToolUseInput(response);
+  if (toolInput === undefined) {
+    console.error(`${logPrefix} attempt${attemptNumber} tool_useブロックなし stopReason=${stopReason ?? "(なし)"} truncated=${truncated} latencyMs=${latencyMs}`);
+    return {
+      ok: false,
+      errorCategory: "invalid_json",
+      diagnostics: {
+        model: config.model,
+        inputTokens,
+        outputTokens,
+        stopReason,
+        latencyMs,
+        retryCount: attemptNumber - 1,
+        schemaValidationResult: truncated ? "max_tokens_truncation" : "empty_response",
+      },
+    };
+  }
+
+  const validated = openingBriefStructuredResponseSchema.safeParse(toolInput);
+  if (!validated.success) {
+    console.error(
+      `${logPrefix} attempt${attemptNumber} スキーマ不一致 stopReason=${stopReason ?? "(なし)"} truncated=${truncated} latencyMs=${latencyMs} issues=${validated.error.issues.length}件`
+    );
+    return {
+      ok: false,
+      errorCategory: "schema_mismatch",
+      detail: validated.error.message,
+      diagnostics: {
+        model: config.model,
+        inputTokens,
+        outputTokens,
+        stopReason,
+        latencyMs,
+        retryCount: attemptNumber - 1,
+        schemaValidationResult: truncated ? "max_tokens_truncation" : "schema_mismatch",
+      },
+    };
+  }
+
+  console.log(`${logPrefix} attempt${attemptNumber} 成功 stopReason=${stopReason ?? "(なし)"} inputTokens=${inputTokens ?? "(不明)"} outputTokens=${outputTokens ?? "(不明)"} latencyMs=${latencyMs}`);
+  return {
+    ok: true,
+    response: validated.data as OpeningBriefStructuredResponse,
+    diagnostics: { model: config.model, inputTokens, outputTokens, stopReason, latencyMs, retryCount: attemptNumber - 1, schemaValidationResult: "ok" },
+  };
+}
+
+/**
+ * Opening Executive BriefのClaude呼び出し本体。リトライ方針はgenerateMeetingResponseと
+ * 同一（invalid_json/schema_mismatch/empty_responseのみ最大1回再試行、http_error/
+ * network_errorは再試行しない）。
+ */
+export async function generateOpeningBrief(
+  userMessage: string,
+  client?: AnthropicMessagesClient,
+  logContext?: { readonly labId: string; readonly companyId: string; readonly turn: number }
+): Promise<GenerateOpeningBriefResult> {
+  const logPrefix = `[aiManagementMeeting/claudeClient openingBrief] lab=${logContext?.labId ?? "?"} company=${logContext?.companyId ?? "?"} turn=${logContext?.turn ?? "?"}`;
+
+  let resolvedClient = client;
+  if (!resolvedClient) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey || apiKey.trim().length === 0) {
+      console.error(`${logPrefix} ANTHROPIC_API_KEY未設定`);
+      return {
+        ok: false,
+        errorCategory: "missing_api_key",
+        diagnostics: { model: getMeetingModelConfig().model, inputTokens: null, outputTokens: null, stopReason: null, latencyMs: 0, retryCount: 0, schemaValidationResult: "missing_api_key" },
+      };
+    }
+    resolvedClient = createRealMeetingClient(apiKey);
+  }
+
+  const config = getMeetingModelConfig();
+  const first = await attemptOpeningBriefOnce(resolvedClient, config, userMessage, 1, logPrefix);
+  if (first.ok) return { ok: true, response: first.response!, diagnostics: first.diagnostics };
+  if (first.errorCategory === "http_error" || first.errorCategory === "network_error") {
+    return { ok: false, errorCategory: first.errorCategory, detail: first.detail, diagnostics: first.diagnostics };
+  }
+
+  const second = await attemptOpeningBriefOnce(resolvedClient, config, userMessage, 2, logPrefix);
   if (second.ok) return { ok: true, response: second.response!, diagnostics: second.diagnostics };
   return { ok: false, errorCategory: second.errorCategory!, detail: second.detail, diagnostics: second.diagnostics };
 }

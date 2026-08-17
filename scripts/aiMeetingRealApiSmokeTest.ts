@@ -26,6 +26,12 @@ import { buildRecentHistoryForPrompt } from "../app/lib/v2/companyLab/aiManageme
 import { routePlayerMessage } from "../app/lib/v2/companyLab/aiManagementMeeting/router";
 import { AiMeetingMessage, RunAdvisoryMemoryRecord } from "../app/lib/v2/companyLab/aiManagementMeeting/types";
 import { applyCandidate, buildRunAdvisoryMemorySummary } from "../app/lib/v2/companyLab/aiManagementMeeting/runAdvisoryMemory";
+import { generateOpeningBrief } from "../app/lib/v2/companyLab/aiManagementMeeting/claudeClient";
+import { buildOpeningBriefUserMessage, OPENING_BRIEF_PROMPT_VERSION } from "../app/lib/v2/companyLab/aiManagementMeeting/prompt";
+import { buildTurnChangeBriefing, InitialBriefFacts, TurnChangeQuarterSnapshot } from "../app/lib/v2/companyLab/aiManagementMeeting/turnChangeBriefing";
+import { CapacityPools } from "../app/lib/v2/companyLab/aiManagementMeeting/capacitySemantics";
+import { usd } from "../app/lib/v2/finance/types";
+import { hosoEqTons, ratio } from "../app/lib/v2/core/units";
 
 /**
  * 実際のExecutiveBriefingPacketに近い、代表的な内容のダミーbriefing（実APIの応答品質を
@@ -844,6 +850,241 @@ async function runMemoryScenario(scenario: MemoryScenarioCase): Promise<CaseResu
   };
 }
 
+/**
+ * 【M2.7追加・実装指示§40】Opening Executive Briefの実例フロー3種（最低3ケース）。
+ * turnChangeBriefing.tsの入力（TurnChangeQuarterSnapshot）は決定的なpure functionへの
+ * 入力にすぎないため、loadHistoryEntry等のrepository読み込みを経由せず、テストと同じ
+ * 方法で直接fixtureを組み立てる（実データ経路自体の検証はhandlers.ts側の結合テストで
+ * 別途行っている）。
+ */
+function openingBriefSnapshot(overrides: Partial<TurnChangeQuarterSnapshot> = {}): TurnChangeQuarterSnapshot {
+  return {
+    pnl: {
+      companyId: "BAL",
+      period: "2015Q1",
+      grossRevenue: usd(0),
+      qualitySalesDeduction: usd(0),
+      netRevenue: usd(0),
+      costOfSales: {
+        rawMaterialCost: usd(0),
+        processingCost: usd(0),
+        laborCost: usd(0),
+        factoryFixedCost: usd(0),
+        reworkCost: usd(0),
+        discardLoss: usd(0),
+        unabsorbedFixedManufacturingCost: usd(0),
+        idleLaborCost: usd(0),
+        capexMaintenanceCost: usd(0),
+      },
+      totalCostOfSales: usd(0),
+      grossProfit: usd(0),
+      sellingGeneralAdmin: usd(0),
+      operatingProfit: usd(0),
+      interestExpense: usd(0),
+      profitBeforeTax: usd(0),
+      incomeTax: usd(0),
+      netIncome: usd(0),
+    } as never,
+    balanceSheet: {
+      companyId: "BAL",
+      period: "2015Q1",
+      cash: usd(0),
+      accountsReceivable: usd(0),
+      rawMaterialInventory: usd(0),
+      finishedGoodsInventory: usd(0),
+      otherCurrentAssets: usd(0),
+      fixedAssetsNet: usd(0),
+      constructionInProgress: usd(0),
+      totalAssets: usd(0),
+      accountsPayable: usd(0),
+      shortTermLoans: usd(0),
+      longTermLoans: usd(0),
+      accruedInterestPayable: usd(0),
+      otherLiabilities: usd(0),
+      totalLiabilities: usd(0),
+      capitalStock: usd(0),
+      retainedEarnings: usd(0),
+      totalEquity: usd(0),
+      totalLiabilitiesAndEquity: usd(0),
+      balanceDifference: usd(0),
+    } as never,
+    periodLabel: "2015年Q1",
+    period: "2015Q1" as never,
+    fulfilledQuantityTons: 0,
+    summary: {
+      companyId: "BAL",
+      period: "2015Q1",
+      newContractedQuantity: hosoEqTons(0),
+      newContractedAveragePrice: 0,
+      fulfilledQuantity: hosoEqTons(0),
+      outstandingQuantity: hosoEqTons(0),
+      overdueQuantity: hosoEqTons(0),
+      domesticPurchaseQuantity: hosoEqTons(0),
+      domesticPurchasePrice: 0,
+      importInTransitQuantity: hosoEqTons(0),
+      importArrivedQuantity: hosoEqTons(0),
+      aquacultureGrowingQuantity: hosoEqTons(0),
+      aquacultureHarvestedQuantity: hosoEqTons(0),
+      rawMaterialInventory: hosoEqTons(0),
+      hosoProduced: hosoEqTons(0),
+      pdProduced: hosoEqTons(0),
+      vapProduced: hosoEqTons(0),
+      finishedGoodsInventory: hosoEqTons(0),
+      rawMaterialShortfall: hosoEqTons(0),
+      equipmentShortfall: hosoEqTons(0),
+      laborShortfall: hosoEqTons(0),
+      equipmentUtilizationRate: ratio(0),
+      laborUtilizationRate: ratio(0),
+      overtimeRate: ratio(0),
+      temporaryWorkerShare: ratio(0),
+      qualityScoreByProduct: {},
+      operationalRiskByProduct: {},
+      downgradeQuantity: hosoEqTons(0),
+      reworkQuantity: hosoEqTons(0),
+      discardQuantity: hosoEqTons(0),
+      majorIncidentCount: 0,
+      customerTrustByMarket: {},
+      deliveryReliabilityByMarket: {},
+      rampWarnings: [],
+      reasonCodes: [],
+    } as never,
+    workerAssignments: [],
+    productionEntries: [],
+    borrowingHeadroomUsd: null,
+    ...overrides,
+  };
+}
+
+const OPENING_BRIEF_CAPACITY_POOLS: CapacityPools = {
+  commonProcessingTons: 25650,
+  freezingPackagingTons: 25650,
+  hosoTons: 6840,
+  pdTons: 5985,
+  vapTons: 1282.5,
+  productLineSumTons: 14107.5,
+  bindingTons: 14107.5,
+  bindingPoolLabel: "商品別実効能力",
+};
+
+interface OpeningBriefScenario {
+  readonly label: string;
+  readonly turnChangeBriefing: unknown;
+  readonly initialBriefFacts: InitialBriefFacts | null;
+}
+
+function buildOpeningBriefScenarios(): readonly OpeningBriefScenario[] {
+  // 10A: Turn1 Initial Brief（前期実績が存在しない最初のturn。実装指示§25）。
+  const initial: InitialBriefFacts = {
+    companyId: "BAL",
+    turn: 1,
+    cashUsd: 38_200_000,
+    bindingCapacityTons: 14107.5,
+    bindingConstraintLabel: "商品別実効能力",
+    backlogTotalTons: 0,
+    backlogOverdueTons: 0,
+    rawMaterialTotalTons: 5000,
+    standardAiReasonCodesTopN: [],
+  };
+
+  // 10B: Test26 accounting regression（売上減・数量増・営業黒字→赤字）を実データベースの規模で再現。
+  const accountingTcb = buildTurnChangeBriefing({
+    runId: "smoke-run",
+    companyId: "BAL",
+    fromTurn: 1,
+    toTurn: 2,
+    current: openingBriefSnapshot({
+      periodLabel: "2015年Q2",
+      pnl: { ...(openingBriefSnapshot().pnl as object), netRevenue: usd(29_600_000), operatingProfit: usd(-60_000) } as never,
+      fulfilledQuantityTons: 1100,
+      summary: { ...(openingBriefSnapshot().summary as object), fulfilledQuantity: hosoEqTons(1100) } as never,
+    }),
+    previous: openingBriefSnapshot({
+      periodLabel: "2015年Q1",
+      pnl: { ...(openingBriefSnapshot().pnl as object), netRevenue: usd(33_300_000), operatingProfit: usd(6_300_000) } as never,
+      fulfilledQuantityTons: 950,
+      summary: { ...(openingBriefSnapshot().summary as object), fulfilledQuantity: hosoEqTons(950) } as never,
+    }),
+    capexProjects: [],
+    currentCapacityPools: OPENING_BRIEF_CAPACITY_POOLS,
+    currentSalesForceHeadcount: 15,
+  });
+
+  // 10C: Test26 backlog + operational regression（forward obligation増加・raw material bottleneck）。
+  const operationalTcb = buildTurnChangeBriefing({
+    runId: "smoke-run",
+    companyId: "BAL",
+    fromTurn: 3,
+    toTurn: 4,
+    current: openingBriefSnapshot({
+      periodLabel: "2015年Q4",
+      summary: {
+        ...(openingBriefSnapshot().summary as object),
+        outstandingQuantity: hosoEqTons(8988),
+        overdueQuantity: hosoEqTons(0),
+        equipmentUtilizationRate: ratio(0.4744),
+        laborUtilizationRate: ratio(0.9532),
+        rawMaterialShortfall: hosoEqTons(1500),
+        equipmentShortfall: hosoEqTons(1015),
+      } as never,
+    }),
+    previous: openingBriefSnapshot({
+      periodLabel: "2015年Q3",
+      summary: { ...(openingBriefSnapshot().summary as object), outstandingQuantity: hosoEqTons(3625.95), overdueQuantity: hosoEqTons(0) } as never,
+    }),
+    capexProjects: [],
+    currentCapacityPools: OPENING_BRIEF_CAPACITY_POOLS,
+    currentSalesForceHeadcount: 15,
+  });
+
+  return [
+    { label: "10A. Opening Brief: Turn1 Initial Brief", turnChangeBriefing: null, initialBriefFacts: initial },
+    { label: "10B. Opening Brief: Test26 accounting regression再現", turnChangeBriefing: accountingTcb, initialBriefFacts: null },
+    { label: "10C. Opening Brief: Test26 backlog/operational regression再現", turnChangeBriefing: operationalTcb, initialBriefFacts: null },
+  ];
+}
+
+interface OpeningBriefResult {
+  readonly label: string;
+  readonly ok: boolean;
+  readonly model: string;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly latencyMs: number;
+  readonly keyChangeCount: number;
+  readonly suggestedFollowUpCount: number;
+}
+
+async function runOpeningBriefScenario(scenario: OpeningBriefScenario): Promise<OpeningBriefResult> {
+  const userMessage = buildOpeningBriefUserMessage({
+    turnChangeBriefing: scenario.turnChangeBriefing,
+    initialBriefFacts: scenario.initialBriefFacts,
+    standardAiDecisionSummary: { topReasonCodes: [] },
+    runAdvisoryMemory: { confirmedCorrections: [], playerPreferences: [], strategicIntents: [], temporaryConstraints: [], unverifiedClaims: [], openQuestions: [] },
+  });
+  const result = await generateOpeningBrief(userMessage, undefined, { labId: "smoke", companyId: "BAL", turn: 2 });
+  if (!result.ok) {
+    console.log(`\n=== ${scenario.label} ===`);
+    console.log(`  失敗: category=${result.errorCategory}`);
+    return { label: scenario.label, ok: false, model: result.diagnostics.model, inputTokens: null, outputTokens: null, latencyMs: result.diagnostics.latencyMs, keyChangeCount: 0, suggestedFollowUpCount: 0 };
+  }
+  console.log(`\n=== ${scenario.label} (promptVersion=${OPENING_BRIEF_PROMPT_VERSION}) ===`);
+  console.log(`  [CEO] ${result.response.summary}`);
+  for (const k of result.response.keyChanges) {
+    console.log(`    - [${k.domain}/${k.direction}] ${k.title}: ${k.explanation}`);
+  }
+  console.log(`  suggestedFollowUps: ${result.response.suggestedFollowUps.join(" / ")}`);
+  return {
+    label: scenario.label,
+    ok: true,
+    model: result.diagnostics.model,
+    inputTokens: result.diagnostics.inputTokens,
+    outputTokens: result.diagnostics.outputTokens,
+    latencyMs: result.diagnostics.latencyMs,
+    keyChangeCount: result.response.keyChanges.length,
+    suggestedFollowUpCount: result.response.suggestedFollowUps.length,
+  };
+}
+
 function mean(values: readonly number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((a, b) => a + b, 0) / values.length;
@@ -877,10 +1118,14 @@ async function main() {
       "  M2.6のRun Advisory Memory実例フロー4種（A: cash floor preference→CAPEX質問、",
       "  B: Japan priority strategic intent→販売戦略質問、C: VAP price unverified claim→VAP投資質問、",
       "  D: explicit forget後の再質問）を含む計16ケースを順に実行し、各callのmodel/inputTokens/outputTokens/latencyMs/stopReason/retryCount/",
-      "  schemaValidationResult/primarySpeaker/secondarySpeaker/proposalCountを本ファイルへ出力する。",
+      "  schemaValidationResult/primarySpeaker/secondarySpeaker/proposalCountを本ファイルへ出力する。さらにM2.7の",
+      "  Opening Executive Brief実例3ケース（10A: Turn1 Initial Brief、10B: Test26 accounting regression再現、",
+      "  10C: Test26 backlog/operational regression再現）を、通常のAI Meetingとは別のgenerateOpeningBrief経路で",
+      "  実行し、model/inputTokens/outputTokens/latencyMs/keyChanges件数/suggestedFollowUps件数を出力する。",
       "- 実行後は、本文内容（開発用ログにのみ出力。API keyはログへ出さない）を人手で確認し、",
       "  役員らしさ・役割の混在有無・数値の捏造有無・Standard AIへの反論可否・回答の簡潔さ・",
-      "  factsUsedの妥当性・日本語の自然さを評価する（本スクリプトは自動評価しない）。",
+      "  factsUsedの妥当性・日本語の自然さを評価する（本スクリプトは自動評価しない）。Opening Briefについては",
+      "  重要な変化を選ぶか・長すぎないか・事実誤認なし・原因を捏造しない・CEOらしい全社視点かも確認する。",
       "",
     ];
     fs.writeFileSync(outPath, lines.join("\n") + "\n", "utf8");
@@ -898,6 +1143,12 @@ async function main() {
   for (const scenario of buildMemoryScenarios()) {
     const result = await runMemoryScenario(scenario);
     results.push(result);
+  }
+
+  const openingBriefResults: OpeningBriefResult[] = [];
+  for (const scenario of buildOpeningBriefScenarios()) {
+    const result = await runOpeningBriefScenario(scenario);
+    openingBriefResults.push(result);
   }
 
   const lines: string[] = [];
@@ -933,9 +1184,19 @@ async function main() {
   lines.push(`- outputTokens: avg=${Math.round(mean(outputTokenValues))} max=${outputTokenValues.length > 0 ? Math.max(...outputTokenValues) : "-"}`);
   lines.push(`- latencyMs: avg=${Math.round(mean(latencyValues))} max=${latencyValues.length > 0 ? Math.max(...latencyValues) : "-"}`);
   lines.push("");
+  lines.push("## Opening Executive Brief（実装指示§40。最低3ケース）の計測結果");
+  lines.push("");
+  lines.push("| ケース | ok | inputTokens | outputTokens | latencyMs | keyChanges | suggestedFollowUps |");
+  lines.push("|---|---|---|---|---|---|---|");
+  for (const r of openingBriefResults) {
+    lines.push(`| ${r.label} | ${r.ok} | ${r.inputTokens ?? "-"} | ${r.outputTokens ?? "-"} | ${r.latencyMs} | ${r.keyChangeCount} | ${r.suggestedFollowUpCount} |`);
+  }
+  lines.push("");
   lines.push("本文内容（役員らしさ・役割混在有無・数値捏造有無・反論可否・簡潔さ・factsUsed妥当性・日本語の自然さ）は、");
   lines.push("このMarkdownには含めない（開発用コンソールログにのみ出力。API keyや機微な経営数値の永続化を避けるため）。");
-  lines.push("実行した開発者が、コンソール出力を目視で確認して評価すること。");
+  lines.push("実行した開発者が、コンソール出力を目視で確認して評価すること。Opening Briefについては特に、");
+  lines.push("本当に重要な変化を選ぶか・長すぎないか・事実誤認なし・原因を捏造しない・Playerが次に質問したくなるか・");
+  lines.push("CEOらしい全社視点かを確認する（実装指示§40）。");
   lines.push("");
 
   fs.writeFileSync(outPath, lines.join("\n") + "\n", "utf8");
