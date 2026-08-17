@@ -17,9 +17,9 @@ import { listScenarioAliases } from "../../../lib/v2/industryLab/cli/scenarioAli
 import { COMPANY_LAB_COMPANY_IDS } from "../../../lib/v2/companyLab";
 import { createSimulationSession } from "../../../lib/v2/companyLab/simulation/engine";
 import { CompanyControlMode, MANAGEMENT_CONSOLE_STANDARD_TURNS } from "../../../lib/v2/companyLab/simulation/types";
-import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
-import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, SimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
-import { listSimulationRuns, saveSimulationRun, setActiveSimulationRunId } from "../lib/simulationRunStore";
+import { SimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
+import { listSimulationRuns } from "../lib/simulationRunStore";
+import { persistResumableRun } from "../lib/persistRun";
 import { upsertLiveSession } from "../lib/liveSessionRegistry";
 import { newRunId } from "../lib/runId";
 import { StrategicPosture } from "../../../lib/v2/companyLab/vision/types";
@@ -155,14 +155,14 @@ export function SetupScreen() {
       pendingDrafts: {},
       selectedCompanyId: COMPANY_LAB_COMPANY_IDS[0],
     });
-    await saveSimulationRun({
-      schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
-      run: session.run,
-      dataset: buildDatasetFromSession(session),
-      packCapture: { companyTurns: [], worldTurns: [] },
-      savedAt: nowIso(),
-    });
-    setActiveSimulationRunId(simulationRunId);
+    // 【AI Management Meeting・Turn1利用可否】以前はここでdataset単体だけを保存し、
+    // resumePayloadはPLAYER意思決定確定・Turn進行まで存在しなかったため、Turn1開始
+    // 直後はAI経営会議が使えなかった（resumePayloadが無いSimulation Runとして404）。
+    // persistResumableRun（Console・PLAYER Workspaceの両方が既に使っている唯一の
+    // 保存関数）をRun作成時にも呼ぶことで、「resumePayloadの組み立て方は1箇所にだけ
+    // 書く」という既存方針のまま、Run作成直後からresumePayloadが存在するようにする。
+    // confirmedPlayerDecisionsは何も確定していないため{}（意思決定の扱いは変更しない）。
+    await persistResumableRun(session, controlModes, {});
     router.push(`/v2/management?run=${encodeURIComponent(simulationRunId)}`);
   }, [
     selectedScenario,
