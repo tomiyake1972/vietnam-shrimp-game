@@ -29,7 +29,7 @@ import {
   initializeCompanyLab,
 } from "../runner";
 import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../standardAi/policy";
-import { resolveStandardAiProfileForMode } from "../standardAi/orientationProfile";
+import { DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE, resolveStandardAiProfileForMode } from "../standardAi/orientationProfile";
 import { StandardAiDiagnosticEntry } from "../standardAi/reasonCodes";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState } from "../types";
 import {
@@ -138,7 +138,15 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     seed: input.seed,
     turns: requestedTurns,
     visionOverrides: input.visionOverrides,
-    standardAiProfileMode: input.standardAiProfileMode,
+    /**
+     * 【Phase SAI-5B】新規Runの既定は DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE（="ON"）。
+     * 会社別ManagementProfile/CompanyOrientationProfileは実ゲームで一度も有効化されて
+     * いなかったため（SP-Q1監査）、ここで明示的にconfigへ書き込んで有効化する。
+     * ablation/diagnosticは従来どおり input.standardAiProfileMode: "OFF" で無効化できる。
+     * 保存済みRunのresumeはこの関数を通らない（persistence/resume.tsがconfigをそのまま
+     * 復元する）ため、既存Runの挙動は変わらない。
+     */
+    standardAiProfileMode: input.standardAiProfileMode ?? DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE,
     qualityEquipmentCapabilityDisabled: input.qualityEquipmentCapabilityDisabled,
     factoryActivationLaborFixDisabled: input.factoryActivationLaborFixDisabled,
     vapDevelopmentTierIntensityDisabled: input.vapDevelopmentTierIntensityDisabled,

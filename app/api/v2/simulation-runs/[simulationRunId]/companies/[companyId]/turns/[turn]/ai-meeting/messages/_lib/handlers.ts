@@ -23,6 +23,7 @@ import { SimulationRunRepository } from "../../../../../../../../../../../lib/v2
 import { CompanyLabRedisClient } from "../../../../../../../../../../../lib/v2/redis/companyLabTypes";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../../../../../../../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/policy";
+import { resolveStandardAiProfileForMode } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/orientationProfile";
 import { CompanyDecisionInput } from "../../../../../../../../../../../lib/v2/companyLab/types";
 import { PlayerDraftSummary } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/briefing";
 import { buildAiMeetingScenarioNews } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/scenarioNews";
@@ -101,7 +102,11 @@ export async function buildSnapshotFromSimulationRun(
   const publicInfo = buildPublicMarketInfo(state);
   const ownState = buildCompanyOwnState(state, fixture);
   const currentTurn = state.scenarioState.currentTurn;
-  const diagnostics = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, state.currentPeriod, currentTurn).diagnostics;
+  // 【Phase SAI-5B】PlayerWorkspace.tsx・simulation/engine.ts と同じ会社別params
+  // （ManagementProfile+CompanyOrientationProfile）で診断を作る。AI経営会議へ渡す
+  // 診断が会社差ゼロのparams由来だと、会議の説明と実際のAI判断が食い違うため。
+  const aiParams = resolveStandardAiProfileForMode(fixture.companyId, state.config.standardAiProfileMode).params;
+  const diagnostics = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, state.currentPeriod, currentTurn, aiParams).diagnostics;
 
   const lastRecord = state.history[state.history.length - 1] ?? null;
   const previousFinancialResult = lastRecord?.financialResults.find((r) => r.companyId === companyId) ?? null;

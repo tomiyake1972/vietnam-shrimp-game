@@ -1078,6 +1078,19 @@ function validateSai5FeatureFlags(raw: unknown, path: string): Sai5FeatureFlags 
 function validateCompanyLabConfig(raw: unknown, path: string): CompanyLabConfig {
   const obj = requireObject(raw, path);
   const sai5 = validateSai5FeatureFlags(obj.sai5, `${path}.sai5`);
+  /**
+   * 【Phase SAI-5B】standardAiProfileMode（会社別ManagementProfile/
+   * CompanyOrientationProfileを適用するか）の復元。上のsai5と全く同じ理由で、
+   * ここに書かないと保存→読み込みで黙って落ちる（Lab作成時にONを書き込んでも
+   * Redisから読み直した瞬間にOFFへ戻り、AI4社が会社差ゼロで動いてしまう）。
+   *
+   * 未指定（SAI-5B以前に保存されたLab）はundefinedのまま返し、従来どおり
+   * OFF相当の挙動になる（後方互換。マイグレーションは不要）。
+   */
+  const standardAiProfileMode =
+    obj.standardAiProfileMode === undefined || obj.standardAiProfileMode === null
+      ? undefined
+      : requireEnum(obj.standardAiProfileMode, ["OFF", "ON"] as const, `${path}.standardAiProfileMode`);
   return {
     scenarioId: requireNonEmptyString(obj.scenarioId, `${path}.scenarioId`),
     mode: requireEnum(obj.mode, SCENARIO_MODES, `${path}.mode`),
@@ -1088,6 +1101,7 @@ function validateCompanyLabConfig(raw: unknown, path: string): CompanyLabConfig 
       return n;
     })(),
     ...(sai5 === undefined ? {} : { sai5 }),
+    ...(standardAiProfileMode === undefined ? {} : { standardAiProfileMode }),
   };
 }
 

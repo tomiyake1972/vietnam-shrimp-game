@@ -30,6 +30,7 @@ import { generateUniqueLabId } from "./labIdGenerator";
 import { buildApiDecisionsProvider } from "./decisionsProvider";
 import { toDraftSummaryDto, toHistoryEntrySummaryDto, toLabStateDto, toLabSummaryDto } from "./responseDto";
 import { DEFAULT_PROCESSING_LOCK_TTL_MS } from "../../../../lib/v2/companyLab/application/companyLabQuarterFlowService";
+import { DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE } from "../../../../lib/v2/companyLab/standardAi/orientationProfile";
 
 export type ApiResult = ApiErrorResponse | { readonly status: number; readonly body: unknown };
 
@@ -60,7 +61,16 @@ export async function handleCreateLab(deps: CompanyLabApiDependencies, rawBody: 
   try {
     // 【Phase 8C-3B】playerCompanyIdはvalidation.tsで既知の5社IDであることを検証済み。
     // Application Service層（createLab）がさらにfixturesとの整合性を防御的に確認する。
-    const result = await deps.service.createLab({ labId, config: { scenarioId, mode, seed, turns }, playerCompanyId, now });
+    // 【Phase SAI-5B】新規Labの既定は DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE（="ON"）。
+    // 会社別ManagementProfile/CompanyOrientationProfileを実ゲームのCompany Labでも
+    // 有効にするため、作成時にconfigへ明示的に書き込む（保存済みLabは書き換えない＝
+    // 既存Labの挙動は変わらない）。Standard AIへ実際に渡す経路は decisionsProvider.ts。
+    const result = await deps.service.createLab({
+      labId,
+      config: { scenarioId, mode, seed, turns, standardAiProfileMode: DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE },
+      playerCompanyId,
+      now,
+    });
     return { status: 201, body: { lab: toLabSummaryDto(result.stored) } };
   } catch (e) {
     return mapDomainErrorToHttp(e);

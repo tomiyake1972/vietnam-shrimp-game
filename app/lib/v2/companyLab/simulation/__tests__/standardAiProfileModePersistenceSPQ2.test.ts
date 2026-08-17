@@ -17,6 +17,7 @@ import { advanceSimulationTurns, applyVisionOverrideToSession, createSimulationS
 import { buildResumePayload, restoreSessionFromResumePayload } from "../persistence/resume";
 import { CompanyControlMode } from "../types";
 import { CompanyDecisionInput } from "../../types";
+import { DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE } from "../../standardAi/orientationProfile";
 
 const AT = "2026-01-01T00:00:00.000Z";
 const EMPTY_CONTROL_MODES: Readonly<Record<string, CompanyControlMode>> = {};
@@ -56,13 +57,34 @@ test("SPQ2-PERSIST-2: standardAiProfileMode=OFFで保存したRunは、resume後
   assert.equal(restored.config.standardAiProfileMode, "OFF");
 });
 
-test("SPQ2-PERSIST-3: standardAiProfileMode未指定（legacy Run相当）で保存したRunは、resume後もOFF相当（undefined）のまま", () => {
-  const session = runTurns("spq2-persist-3", 3 /* standardAiProfileMode省略 */);
-  assert.equal(session.state.config.standardAiProfileMode, undefined, "前提: 未指定のRunはundefinedのまま作られる");
+// 【Phase SAI-5B】createSimulationSessionの既定が "ON" になったため、
+// 「mode未記録のRun」はもうこの関数からは作れない。実際のlegacy Run（SAI-5B以前に
+// 保存され、configにstandardAiProfileMode自体が無いRun）と同じ形を、保存済みJSONから
+// フィールドを削って再現する。resume時にONを捏造して既存Runの挙動を書き換えないことが
+// この項目の趣旨であり、そこは変わっていない。
+test("SPQ2-PERSIST-3: standardAiProfileModeが記録されていないlegacy Runは、resume後もOFF相当（undefined）のまま", () => {
+  const session = runTurns("spq2-persist-3", 3, "ON");
   const payload = roundTripThroughJson(buildResumePayload(session, EMPTY_CONTROL_MODES, EMPTY_DECISIONS));
+  // legacy Run相当へ加工する（保存時点でこのフィールドが存在しなかったRun）。
+  delete (payload.state.config as { standardAiProfileMode?: unknown }).standardAiProfileMode;
+  assert.equal(payload.state.config.standardAiProfileMode, undefined, "前提: legacy相当のpayloadにはmodeが無い");
+
   const restored = restoreSessionFromResumePayload(session.run, payload);
   assert.equal(restored.state.config.standardAiProfileMode, undefined, "legacy Runはresume後もundefined（=OFF相当）のままであるべき。捏造しない");
   assert.equal(restored.config.standardAiProfileMode, undefined);
+});
+
+test("SPQ2-PERSIST-3b: 新規Runはmode未指定でも既定でONがconfigへ書き込まれ、resume後も保持される", () => {
+  const session = runTurns("spq2-persist-3b", 2 /* standardAiProfileMode省略 */);
+  assert.equal(
+    session.state.config.standardAiProfileMode,
+    DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE,
+    "SAI-5B以降、新規Runの既定はDEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE"
+  );
+  const payload = roundTripThroughJson(buildResumePayload(session, EMPTY_CONTROL_MODES, EMPTY_DECISIONS));
+  const restored = restoreSessionFromResumePayload(session.run, payload);
+  assert.equal(restored.state.config.standardAiProfileMode, DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE);
+  assert.equal(restored.config.standardAiProfileMode, DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE);
 });
 
 test("SPQ2-PERSIST-4: standardAiProfileModeはvisionOverridesと共存できる（両方が同時にresume後も保持される）", () => {

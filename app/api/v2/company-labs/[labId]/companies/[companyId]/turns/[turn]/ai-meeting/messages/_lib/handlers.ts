@@ -19,6 +19,7 @@
 
 import { loadPlayerScreenViewModel, PlayerScreenViewModel } from "../../../../../../../../../../../v2/company-lab/play/_lib/viewModel";
 import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/policy";
+import { resolveStandardAiProfileForMode } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/orientationProfile";
 import { AnthropicMessagesClient } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/claudeClient";
 import { PlayerDraftSummary } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/briefing";
 import { buildAiMeetingScenarioNews } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/scenarioNews";
@@ -81,7 +82,15 @@ export async function handlePostAiMeetingMessage(
 
   const diagnostics: StandardAiQuarterDiagnostics =
     viewModel.aiProposalDiagnostics ??
-    generateStandardAiDecisionWithDiagnostics(viewModel.fixture, viewModel.ownState, viewModel.publicInfo, viewModel.period, viewModel.currentTurn).diagnostics;
+    // 【Phase SAI-5B】fallback生成もAI4社（decisionsProvider.ts）と同じ会社別paramsで行う。
+    generateStandardAiDecisionWithDiagnostics(
+      viewModel.fixture,
+      viewModel.ownState,
+      viewModel.publicInfo,
+      viewModel.period,
+      viewModel.currentTurn,
+      resolveStandardAiProfileForMode(viewModel.fixture.companyId, viewModel.standardAiProfileMode).params
+    ).diagnostics;
 
   const previousFinancialResult = viewModel.previousQuarterFinancials?.financialResult ?? null;
 

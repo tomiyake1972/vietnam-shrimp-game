@@ -86,14 +86,19 @@ test("SPQ1-3: standardAiProfileMode未指定（=OFF）は、paramsがSTANDARD_AI
   assert.equal(explicitOff.params, STANDARD_AI_PARAMETERS_V1, "明示的な'OFF'も未指定と同じ結果になるべき");
 });
 
-test("SPQ1-3b: engine.tsでstandardAiProfileMode未指定の場合、PackStrategy.profileはOFF・バイアスゼロのまま記録される", async () => {
+// 【Phase SAI-5B】createSimulationSessionの既定が
+// DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE（="ON"）になったため、「未指定」ではなく
+// 明示的な"OFF"（ablation/diagnostic経路）でこの契約を固定する。
+// resolveStandardAiProfileForMode 自身の「mode未指定=OFF」という契約は変えていない
+// （上のSPQ1-3が引き続きそれを固定している）。
+test("SPQ1-3b: engine.tsでstandardAiProfileMode=OFFの場合、PackStrategy.profileはOFF・バイアスゼロのまま記録される", async () => {
   let session = createSimulationSession({
     simulationRunId: "spq1-3b",
     scenarioId: "baseline",
     seed: "spq1-3b-seed",
     requestedTurns: 2,
     startedAt: AT,
-    // standardAiProfileMode未指定
+    standardAiProfileMode: "OFF",
   });
   const outcome = advanceSimulationTurn(session, AT);
   assert.ok(outcome.advanced);

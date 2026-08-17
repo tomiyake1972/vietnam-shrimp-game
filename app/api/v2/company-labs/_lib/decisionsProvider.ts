@@ -34,7 +34,8 @@
 import { CompanyDecisionInput, CompanyFixture, CompanyLabState } from "../../../../lib/v2/companyLab/types";
 import { CompanyId } from "../../../../lib/v2/sales/types";
 import { buildCompanyOwnState } from "../../../../lib/v2/companyLab/runner";
-import { generateStandardAiDecision } from "../../../../lib/v2/companyLab/standardAi/policy";
+import { generateStandardAiDecisionWithDiagnostics } from "../../../../lib/v2/companyLab/standardAi/policy";
+import { resolveStandardAiProfileForMode } from "../../../../lib/v2/companyLab/standardAi/orientationProfile";
 import { CompanyLabDecisionContext, CompanyLabDecisionsProvider } from "../../../../lib/v2/companyLab/application/companyLabQuarterFlowService";
 import { CompanyLabQuarterProcessingError } from "../../../../lib/v2/companyLab/persistence/errors";
 import { CompanyDecisionDraft, buildDecisionInputFromDraft } from "../../../../v2/company-lab/decisionDraft";
@@ -92,7 +93,16 @@ export function buildApiDecisionsProvider(labId: string): CompanyLabDecisionsPro
         decisions[fixture.companyId] = buildPlayerDecision(labId, fixture, restoredState, submittedDraftBody);
       } else {
         const ownState = buildCompanyOwnState(restoredState, fixture);
-        decisions[fixture.companyId] = generateStandardAiDecision(fixture, ownState, publicInfo, period, turn);
+        /**
+         * 【Phase SAI-5B】simulation/engine.ts と同じ唯一のSSoT
+         * （resolveStandardAiProfileForMode）で会社別paramsを解決してから渡す。
+         * 以前はparamsを渡していなかったため、Company LabのAI4社は
+         * STANDARD_AI_PARAMETERS_V1（会社差ゼロ）で動いていた。
+         * modeはLab作成時にconfigへ書き込まれた値をそのまま使う（既存Labは
+         * mode未記録＝OFFのままで、過去のLabの挙動は変わらない）。
+         */
+        const params = resolveStandardAiProfileForMode(fixture.companyId, restoredState.config.standardAiProfileMode).params;
+        decisions[fixture.companyId] = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, params).decision;
       }
     }
     return decisions;

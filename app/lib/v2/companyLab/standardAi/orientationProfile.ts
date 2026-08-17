@@ -93,21 +93,39 @@ export const COMPANY_ORIENTATION_PROFILES: Readonly<Record<string, CompanyOrient
     growthTrendResponsiveness: 0.3,
     oversupplyRetreatSensitivity: 0.4,
   },
+  // 【Phase SAI-5B・商品志向の是正】PD と VAP の倍率を入れ替えた（pd 0.95→1.20 /
+  // vap 1.20→1.10）。root cause: SAI-5A の初期試験値では JPQ の最大商品志向が VAP に
+  // 置かれていたが、これは会社の正式な設計SSoTである Vision（vision/defaults.ts の
+  // JPQ_VISION）と矛盾していた。JPQ_VISION は
+  //   desiredProductEvolution: "PD_SCALE" / emphasisProducts: ["pd"] /
+  //   preferredEndState: "QUALITY_SCALE" /
+  //   narrative「日本市場で選ばれ続けるPDの品質を維持したまま規模を伸ばす」
+  // と定義しており、主軸は一貫して PD である（VAP は主軸ではない）。倍率の大きさ
+  // （0.85〜1.20の許容範囲）自体は変えず、どの商品を最上位に置くかだけを Vision へ
+  // 合わせている。市場志向（JP 1.25）は Vision と整合しているため変更しない。
   japanQuality: {
     id: "japanQuality",
     label: "日本・品質重視型（JPQ）",
-    description: "日本のPD・VAPを早期から重視。小さい市場でも営業基盤を先行形成し、無理な量的拡大は避ける。",
+    description: "日本のPDを主軸に据え、VAPも一定評価する。小さい市場でも営業基盤を先行形成し、無理な量的拡大は避ける。",
     marketMultipliers: { CN: 0.8, US: 0.8, EU: 0.9, JP: 1.25, OTHER: 0.9 },
-    productMultipliers: { hoso: 0.85, pd: 0.95, vap: 1.2 },
+    productMultipliers: { hoso: 0.85, pd: 1.2, vap: 1.1 },
     growthTrendResponsiveness: 0.7,
     oversupplyRetreatSensitivity: 0.6,
   },
+  // 【Phase SAI-5B・商品志向の是正】PD と VAP の倍率を入れ替えた（pd 1.20→1.10 /
+  // vap 1.10→1.20）。root cause: JPQ と同じく、SAI-5A の初期試験値では VAP社の最大
+  // 商品志向が PD に置かれており、VAP_VISION（vision/defaults.ts）の
+  //   desiredProductEvolution: "VAP_VALUE" / emphasisProducts: ["vap"] /
+  //   preferredEndState: "VALUE_SPECIALIST" /
+  //   narrative「付加価値加工品で単価と利益率を取り、小さくても強い会社であり続ける」
+  // と逆転していた。市場志向（US 1.25）は Vision に市場の指定が無く矛盾しないため
+  // 変更しない。
   usProcessedGrowth: {
     id: "usProcessedGrowth",
     label: "米国・加工品型（VAP）",
-    description: "米国など先行市場のVAP/PDを重視。成長予測に対して積極的に設備投資し、供給過熱局面でも一定期間はVAP能力を維持する。",
+    description: "米国など先行市場のVAPを最も強く志向し、PDも強めに評価する。成長予測に対して積極的に設備投資し、供給過熱局面でも一定期間はVAP能力を維持する。",
     marketMultipliers: { CN: 0.85, US: 1.25, EU: 1.0, JP: 0.95, OTHER: 0.95 },
-    productMultipliers: { hoso: 0.85, pd: 1.2, vap: 1.1 },
+    productMultipliers: { hoso: 0.85, pd: 1.1, vap: 1.2 },
     growthTrendResponsiveness: 0.9,
     oversupplyRetreatSensitivity: 0.2,
   },
@@ -268,6 +286,25 @@ export function resolveStandardAiProfileForMode(
     appliedBiasItems: [...m.appliedBiasItems, ...o.appliedBiasItems],
   };
 }
+
+/**
+ * 【Phase SAI-5B】実ゲーム（Management Console の Simulation Run・PLAYER Company
+ * Workspace・Company Lab）で新しく開始する Run / Lab の既定 profile mode。
+ *
+ * 【なぜ定数を1つ置くのか】SP-Q1 監査で判明したとおり、resolveStandardAiProfileForMode
+ * は正しく動いていたにもかかわらず、standardAiProfileMode を実際に設定する呼び出し元が
+ * app/v2・app/api のどこにも無く、実ゲームは全て mode 未指定 = OFF で動いていた
+ * （＝会社別 ManagementProfile / CompanyOrientationProfile が一度も適用されていない）。
+ * その入口を1か所へ集約し、「実ゲームの既定は何か」を単一の値で表すためのSSoT。
+ *
+ * 【mode未指定は引き続きOFFのまま】この定数は Run / Lab を**新規作成する時**にだけ
+ * 使い、config へ明示的に "ON" として書き込む。resolveStandardAiProfileForMode 自身の
+ * 「未指定 = OFF」という契約は変更しない。これにより
+ *   - 既存の保存済みRun（mode未記録）は resume 後も従来どおりの挙動を保つ
+ *   - ablation / diagnostic 用の明示的な "OFF" 指定も従来どおり機能する
+ * という2点が守られる（historical saves と diagnostic modes の非破壊性）。
+ */
+export const DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE: "OFF" | "ON" = "ON";
 
 /**
  * SAI-4経営性格プロファイルとSAI-5A志向プロファイルを合成したリゾルバを作る。

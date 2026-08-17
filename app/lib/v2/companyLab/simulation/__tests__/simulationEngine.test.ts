@@ -20,6 +20,7 @@ import { MANAGEMENT_CONSOLE_STANDARD_TURNS } from "../types";
 import { buildCompanySeries, buildCompanyInspectorSnapshot, COMPANY_COLORS } from "../series";
 import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo } from "../../runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../standardAi/policy";
+import { resolveStandardAiProfileForMode } from "../../standardAi/orientationProfile";
 import {
   FACTORY_SPACE_PARAMETERS_V1,
   computeFactoryUsedSpaceUnits,
@@ -275,12 +276,17 @@ test("CONSOLE-14: Management Console を通しても、手書きループで回�
     const publicInfo = buildPublicMarketInfo(state);
     const decisions: Record<string, ReturnType<typeof generateStandardAiDecisionWithDiagnostics>["decision"]> = {};
     for (const f of manual.fixtures) {
+      // 【Phase SAI-5B】新規Runの既定が standardAiProfileMode="ON" になったため、
+      // 手書きループ側も engine.ts:327 と同じ会社別params解決を行う。ここを省くと
+      // 「Consoleが介入している」のではなく「片方だけ会社別プロファイル無効」という
+      // 別条件の比較になってしまう。
       decisions[f.companyId] = generateStandardAiDecisionWithDiagnostics(
         f,
         buildCompanyOwnState(state, f),
         publicInfo,
         state.currentPeriod,
-        state.scenarioState.currentTurn
+        state.scenarioState.currentTurn,
+        resolveStandardAiProfileForMode(f.companyId, manual.state.config.standardAiProfileMode).params
       ).decision;
     }
     state = advanceCompanyLabQuarter(state, manual.fixtures, decisions);

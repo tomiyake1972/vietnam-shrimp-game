@@ -47,11 +47,31 @@ test("SAI-5A: 各社の市場志向倍率が指示どおりの値で取得でき
   assert.equal(resolveOrientationProfile("CONSV").marketMultipliers.EU, 1.25);
 });
 
-test("SAI-5A: 各社の商品志向倍率が指示どおりの値で取得できる（MASS=HOSO1.20、JPQ=VAP1.20、VAP=PD1.20、CONSV=PD1.15）", () => {
+// 【Phase SAI-5B】JPQ・VAP社の最上位商品を Vision（vision/defaults.ts）へ合わせて是正した。
+// 旧値は JPQ=VAP1.20 / VAP社=PD1.20 で、JPQ_VISION（desiredProductEvolution:"PD_SCALE"・
+// emphasisProducts:["pd"]）・VAP_VISION（"VAP_VALUE"・["vap"]）と逆転していた。
+// 倍率の大きさ（0.85〜1.20の許容範囲）は変えず、どの商品を最上位に置くかだけを揃えている。
+test("SAI-5B: 各社の商品志向倍率がVisionの主軸と一致する（MASS=HOSO1.20、JPQ=PD1.20、VAP=VAP1.20、CONSV=PD1.15）", () => {
   assert.equal(resolveOrientationProfile("MASS").productMultipliers.hoso, 1.2);
-  assert.equal(resolveOrientationProfile("JPQ").productMultipliers.vap, 1.2);
-  assert.equal(resolveOrientationProfile("VAP").productMultipliers.pd, 1.2);
+  assert.equal(resolveOrientationProfile("JPQ").productMultipliers.pd, 1.2);
+  assert.equal(resolveOrientationProfile("VAP").productMultipliers.vap, 1.2);
   assert.equal(resolveOrientationProfile("CONSV").productMultipliers.pd, 1.15);
+});
+
+test("SAI-5B: JPQ・VAP社は主軸商品が単独最大で、他商品を完全否定しない（0.85未満にしない）", () => {
+  const jpq = resolveOrientationProfile("JPQ").productMultipliers;
+  assert.ok(jpq.pd > jpq.vap && jpq.vap > jpq.hoso, `JPQはPD>VAP>HOSOであるべき: ${JSON.stringify(jpq)}`);
+  assert.equal(jpq.vap, 1.1, "JPQはVAPも一定評価する（1.10）");
+
+  const vap = resolveOrientationProfile("VAP").productMultipliers;
+  assert.ok(vap.vap > vap.pd && vap.pd > vap.hoso, `VAP社はVAP>PD>HOSOであるべき: ${JSON.stringify(vap)}`);
+  assert.equal(vap.pd, 1.1, "VAP社はPDも強めに評価する（1.10）");
+
+  for (const companyId of ["JPQ", "VAP"] as const) {
+    for (const p of PRODUCTS) {
+      assert.ok(resolveOrientationProfile(companyId).productMultipliers[p] >= 0.85, `${companyId}.${p}は完全否定しない`);
+    }
+  }
 });
 
 test("SAI-5A: 全プロファイルの倍率が許容範囲内（市場0.80〜1.25、商品0.85〜1.20）", () => {

@@ -26,7 +26,8 @@ import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } 
 import { extractCompanyCapexResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
-import { generateStandardAiDecision } from "../../../lib/v2/companyLab/standardAi/policy";
+import { generateStandardAiDecisionWithDiagnostics } from "../../../lib/v2/companyLab/standardAi/policy";
+import { resolveStandardAiProfileForMode } from "../../../lib/v2/companyLab/standardAi/orientationProfile";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab/types";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
 import { createEmptyStrategyDocument, CompanyStrategyDocument } from "../../../lib/v2/companyLab/strategyProfile/types";
@@ -121,11 +122,23 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
 
   const [{ ownState, aiDecision }] = useState<{
     readonly ownState: CompanyOwnState;
-    readonly aiDecision: ReturnType<typeof generateStandardAiDecision>;
+    readonly aiDecision: ReturnType<typeof generateStandardAiDecisionWithDiagnostics>["decision"];
   }>(() => {
     const publicInfo = buildPublicMarketInfo(session.state);
     const ownState = buildCompanyOwnState(session.state, fixture);
-    const aiDecision = generateStandardAiDecision(fixture, ownState, publicInfo, session.state.currentPeriod, session.state.scenarioState.currentTurn);
+    // 【Phase SAI-5B】PLAYERの初期ドラフトの土台になるStandard AI提案も、
+    // simulation/engine.ts と同じ会社別params（ManagementProfile+OrientationProfile）で
+    // 生成する。ここだけ会社差ゼロのparamsだと、同じRunの中で「AI4社が使う判断」と
+    // 「PLAYERへ提示される提案」が別物になってしまうため。
+    const params = resolveStandardAiProfileForMode(fixture.companyId, session.state.config.standardAiProfileMode).params;
+    const aiDecision = generateStandardAiDecisionWithDiagnostics(
+      fixture,
+      ownState,
+      publicInfo,
+      session.state.currentPeriod,
+      session.state.scenarioState.currentTurn,
+      params
+    ).decision;
     return { ownState, aiDecision };
   });
 

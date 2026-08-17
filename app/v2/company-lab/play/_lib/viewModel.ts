@@ -19,6 +19,7 @@ import { CompanyDecisionDraft, buildInitialDraft } from "../../decisionDraft";
 import { CompanyFixture, CompanyLabState, CompanyOwnState, CompanyQuarterSummary, CompanyReasonEntry, PublicMarketInfo } from "../../../../lib/v2/companyLab/types";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../../../../lib/v2/companyLab/standardAi/policy";
+import { resolveStandardAiProfileForMode } from "../../../../lib/v2/companyLab/standardAi/orientationProfile";
 import { restoreCompanyLabStateFromRuntimeSnapshot } from "../../../../lib/v2/companyLab/persistence/snapshot";
 import { CompanyLabPersistedStateV1, CompanyLabDraftEnvelope } from "../../../../lib/v2/companyLab/persistence/types";
 import { DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterResult } from "../../../../lib/v2/market/types";
@@ -105,6 +106,11 @@ export interface PlayerScreenViewModel {
   readonly playerDisplayName: string;
   readonly scenarioId: string;
   readonly mode: string;
+  /**
+   * 【Phase SAI-5B】このLabのStandard AI profile mode（未記録=OFF相当）。
+   * AI経営説明・AI経営会議のhandlerが、AI4社と同じ会社別paramsで診断を作り直すために使う。
+   */
+  readonly standardAiProfileMode: "OFF" | "ON" | undefined;
   readonly totalTurns: number;
   readonly currentTurn: number;
   readonly revision: number;
@@ -175,12 +181,17 @@ function coerceDraftOrRebuild(
   // Standard AIの出力を初期表示する。プレイヤーはこれをそのまま提出することも、
   // 編集してから提出することもできる＝既存の「提出」操作が変更されるわけではない）。
   const ownState = buildCompanyOwnState(restoredState, fixture);
+  // 【Phase SAI-5B】decisionsProvider.ts（AI4社）と同じ会社別paramsで生成する。
+  // ここだけ会社差ゼロのparamsを使うと、同じLabの中で「AI4社の判断」と
+  // 「PLAYERへ提示される提案」が別物になってしまう。
+  const params = resolveStandardAiProfileForMode(fixture.companyId, restoredState.config.standardAiProfileMode).params;
   const { decision: aiDecision, diagnostics } = generateStandardAiDecisionWithDiagnostics(
     fixture,
     ownState,
     publicInfo,
     restoredState.currentPeriod,
-    turn
+    turn,
+    params
   );
   // 【Phase 8D-4】ワーカー人数の出発点は、fixtureの初期値ではなく会社状態として
   // 保持されている前期末の総人数。これを渡さないと、四半期をまたぐたびに人数が
@@ -295,6 +306,7 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       playerDisplayName: fixture.displayName,
       scenarioId: stored.config.scenarioId,
       mode: stored.config.mode,
+      standardAiProfileMode: stored.config.standardAiProfileMode,
       totalTurns: stored.config.turns,
       currentTurn: turn,
       revision: stored.currentState.revision,
