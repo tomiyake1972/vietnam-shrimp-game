@@ -29,6 +29,7 @@ function makeFinanceState(overrides: Partial<CompanyFinanceState> = {}): Company
     otherLiabilities: usd(0),
     capitalStock: usd(30_000_000),
     retainedEarnings: usd(10_000_000),
+    distributableEarnings: usd(0),
     finishedGoodsCostLedger: [],
     ...overrides,
   };

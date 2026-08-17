@@ -49,6 +49,7 @@ function makeFinanceState(overrides: Partial<CompanyFinanceState> = {}): Company
     otherLiabilities: usd(5_000_000),
     capitalStock: usd(50_000_000),
     retainedEarnings: usd(-1_500_000), // 負の利益剰余金は許容される
+    distributableEarnings: usd(0),
     finishedGoodsCostLedger: [
       {
         lotId: "FG-2015Q1-hoso-BAL-F1-BAL-1",

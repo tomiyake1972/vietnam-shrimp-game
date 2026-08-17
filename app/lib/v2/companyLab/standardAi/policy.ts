@@ -681,6 +681,13 @@ export function generateStandardAiDecisionWithDiagnostics(
     workerAssignments: laborResult.workerAssignments,
     financingRequest: financingResult.financingRequest,
     vapProductDevelopmentSpendUsd: vapProductDevelopmentSpendUsdAfterCrisisGate > 0 ? vapProductDevelopmentSpendUsdAfterCrisisGate : undefined,
+    // 【Phase DIV-1・実装指示§20】Standard AIは配当を一切行わない（dividendDecision省略
+    // ＝0）。評価mechanic（Dividend Score等）導入直後にAI各社が不適切な大量配当を
+    // 始めるのを避けるため、まずStandard AI dividend=0で開始する（第一候補として
+    // 明示的に採用）。Playerだけが配当可能な状態はベンチマーク上不公平になりうるため、
+    // AI配当policy（十分なcash buffer・distress無し・原料不足懸念無し・重要CAPEX無し・
+    // 前期分配可能利益が正、を満たした場合のみ小額配当、等）の設計は次Phaseで行う。
+    dividendDecision: undefined,
     // 【新工場の提案を既存 capex 提案と同じ意思決定へ合流させる】
     // 既存増設の提案内容は一切変更せず、新工場ぶんを末尾へ足すだけにする
     // （既存の設備投資判断の挙動を変えない）。

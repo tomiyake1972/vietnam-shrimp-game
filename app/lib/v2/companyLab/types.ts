@@ -43,6 +43,7 @@ import {
 import { TurnOrchestratorDebugInfo } from "../turn/types";
 import { BatchQualityAdjustment, MarketDeliveryObservation, QualityReliabilityState } from "../quality/types";
 import { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
+import { CompanyDividendQuarterResult, DividendDecisionInput } from "../finance/dividend";
 import { CompanyFinancingState, FinancingRequestInput, FinancingState, FinancingQuarterResult } from "../financing/types";
 import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
 // 【Phase 8D-4】型のみの参照（workforce.ts 側も CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
@@ -188,6 +189,13 @@ export interface CompanyDecisionInput {
    * 構築箇所を壊さない）。
    */
   readonly vapProductDevelopmentSpendUsd?: number;
+  /**
+   * 【Phase DIV-1新設・実装指示§3】当期の配当決定（株主還元）。自由入力額
+   * （0も可）。前Turnまでに確定した分配可能利益とcashの小さい方（maxDividend）を
+   * 超える要求は全額却下される（部分執行しない。実装指示§7）。省略時は0として
+   * 扱う（後方互換。既存の意思決定構築箇所・保存データを壊さない）。
+   */
+  readonly dividendDecision?: DividendDecisionInput;
 }
 
 // ---------------------------------------------------------------------
@@ -496,6 +504,15 @@ export interface CompanyQuarterRecord {
    * （既存の永続化済み履歴・SAI-3Bパーサーへの影響なし）。
    */
   readonly sai5MarketEvolution?: Sai5MarketEvolutionRecord;
+  /**
+   * 【Phase DIV-1新設・実装指示§10】当期の会社別配当結果（要求額・適用額・
+   * 却下有無・累積配当・時間加重配当価値）。finance/dividend.tsが生成する
+   * （実績の再計算は一切行わない）。本機能導入前に確定した既存の永続化済み
+   * 履歴にはこのフィールドが存在しないため、後方互換のためoptionalとする
+   * （sai5MarketEvolution等、既存の後発フィールドと同じ扱い。省略時＝
+   * その四半期は配当0として扱う）。
+   */
+  readonly dividendResults?: readonly CompanyDividendQuarterResult[];
 }
 
 /**

@@ -83,6 +83,7 @@ function makeFinanceState(overrides: Partial<FinanceStateFields> = {}): CompanyF
     otherLiabilities: usd(f.otherLiabilities),
     capitalStock: usd(f.capitalStock),
     retainedEarnings: usd(retainedEarnings),
+    distributableEarnings: usd(0),
     finishedGoodsCostLedger: [],
   };
 }

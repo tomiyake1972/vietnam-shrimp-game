@@ -343,6 +343,7 @@ test("極端な入力（原料・完成品ゼロ、契約ゼロ、現金が大�
       otherLiabilities: usd(0),
       capitalStock: usd(0),
       retainedEarnings: usd(0),
+      distributableEarnings: usd(0),
       finishedGoodsCostLedger: [],
     },
     financingState: {

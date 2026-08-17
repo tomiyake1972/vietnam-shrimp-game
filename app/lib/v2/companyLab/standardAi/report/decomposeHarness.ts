@@ -138,6 +138,7 @@ function buildUnifiedFinanceState(companyId: CompanyId, rawMaterialLots: readonl
     otherLiabilities: nonNegativeUsd(templateFixture.otherLiabilities, "その他負債（Test B統一）"),
     capitalStock: nonNegativeUsd(templateFixture.capitalStock, "資本金（Test B統一）"),
     retainedEarnings: usd(retainedEarnings),
+    distributableEarnings: usd(0),
     finishedGoodsCostLedger: [],
   };
 }

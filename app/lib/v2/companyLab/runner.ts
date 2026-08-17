@@ -165,6 +165,7 @@ import { buildQualityEquipmentRiskMultiplierByFactory } from "./qualityControlEq
 import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { unwrapUsd } from "../finance/types";
+import { applyDividendToFinanceState, buildDividendQuarterResult, CompanyDividendQuarterResult, DividendResolution, resolveDividendDecision } from "../finance/dividend";
 import {
   FINANCING_PARAMETERS_V1,
   buildCollateralInputFromCompanyLab,
@@ -1016,14 +1017,31 @@ export function advanceCompanyLabQuarter(
   // 確定するplan.borrowingCapacity・前期末までのfinancingHistoryだけで決める）。
   const capexApprovalGateByCompanyId = new Map<CompanyId, ProposalApprovalGate>();
   const fallbackExpectedDomesticPriceUsdPerKg = 2.5; // autoPolicy.tsのDEFAULT_EXPECTED_RAW_PRICE_USD_PER_KGと同じ暫定値（要校正）。
+  // 【Phase DIV-1追加・実装指示§8・§9】配当実行結果と、配当控除後の
+  // CompanyFinanceState（以後このTurnの唯一のprevFinanceとして使う）。
+  const dividendResolutionByCompanyId = new Map<CompanyId, DividendResolution>();
+  const effectivePrevFinanceByCompanyId = new Map<CompanyId, CompanyFinanceState>();
 
   for (const f of fixtures) {
-    const prevFinance = state.financeState.companies.find((c) => c.companyId === f.companyId);
+    const rawPrevFinance = state.financeState.companies.find((c) => c.companyId === f.companyId);
     const prevFinancingState = state.financingState.companies.find((c) => c.companyId === f.companyId);
-    if (!prevFinance || !prevFinancingState) {
+    if (!rawPrevFinance || !prevFinancingState) {
       throw new CompanyLabError(`会社 ${f.companyId} の財務・資金繰り状態が初期化されていません。`);
     }
     const decision = decisions.find((d) => d.companyId === f.companyId)!;
+    // 【Phase DIV-1追加・実装指示§4・§8・§9】配当は、前Turnまでに確定した
+    // cash/distributableEarnings（rawPrevFinance）だけを基準に、当期の与信・
+    // 調達制約計算より前に解決する。以後このTurnの処理全体（与信判断・調達制約・
+    // financing/capexクローズ）は、配当控除後のCompanyFinanceState（prevFinance）
+    // を唯一の期首状態として使う。これにより「配当したCashはそのTurnの経営に
+    // 使えなくなる」（procurement capacity低下・CAPEX余力低下・borrowing need
+    // 増加）というトレードオフが、既存の与信・調達ロジックへ自然に伝播する
+    // （Turn終了後に帳尻だけCashを減らす方式は取らない）。
+    const dividendResolution = resolveDividendDecision(decision.dividendDecision, rawPrevFinance);
+    const prevFinance = applyDividendToFinanceState(rawPrevFinance, dividendResolution.appliedUsd);
+    dividendResolutionByCompanyId.set(f.companyId, dividendResolution);
+    effectivePrevFinanceByCompanyId.set(f.companyId, prevFinance);
+
     const priorQuarterResult = lastRecord?.financialResults.find((r) => r.companyId === f.companyId);
     const collateral = buildCollateralInputFromCompanyLab({
       companyId: f.companyId,
@@ -1421,13 +1439,55 @@ export function advanceCompanyLabQuarter(
   // financingロジックは再計算せず、公開結果から再構成するだけ）。
   const nextCapexCompanies: CompanyCapexState[] = [];
   const capexResults: CapexQuarterResult[] = [];
+  // 【Phase DIV-1追加・実装指示§10】当期の会社別配当結果（要求額・適用額・
+  // 却下有無・累積配当・時間加重配当価値）。
+  const dividendResults: CompanyDividendQuarterResult[] = [];
   for (const f of fixtures) {
-    const prevFinance = state.financeState.companies.find((c) => c.companyId === f.companyId);
+    // 【Phase DIV-1追加】ループ1で配当控除済みのCompanyFinanceStateを唯一の
+    // 期首状態として再利用する（state.financeState.companiesから再取得しない。
+    // 二重に配当を適用しないため）。
+    const prevFinance = effectivePrevFinanceByCompanyId.get(f.companyId);
     const prevFinancingState = state.financingState.companies.find((c) => c.companyId === f.companyId);
     const prevCapexState = state.capexState.companies.find((c) => c.companyId === f.companyId);
     if (!prevFinance || !prevFinancingState || !prevCapexState) {
       throw new CompanyLabError(`会社 ${f.companyId} の財務・資金繰り・設備投資状態が初期化されていません。`);
     }
+
+    // 【Phase DIV-1追加・実装指示§10・§11】配当履歴（要求額・適用額・累積・
+    // 時間加重価値）を確定する。累積は過去の確定履歴（state.history）から
+    // このturnまでの直近値を引き継ぐ（既存履歴にdividendResultsが無い旧保存
+    // データ・turn1では0から開始）。
+    {
+      const dividendResolution = dividendResolutionByCompanyId.get(f.companyId)!;
+      let priorCumulativeDividendUsd = 0;
+      let priorCumulativeWeightedDividendValueUsd = 0;
+      for (const pastRecord of state.history) {
+        const pastEntry = pastRecord.dividendResults?.find((d) => d.companyId === f.companyId);
+        if (pastEntry) {
+          priorCumulativeDividendUsd = pastEntry.cumulativeDividendUsd;
+          priorCumulativeWeightedDividendValueUsd = pastEntry.cumulativeWeightedDividendValueUsd;
+        }
+      }
+      dividendResults.push(
+        buildDividendQuarterResult({
+          companyId: f.companyId,
+          period: state.currentPeriod,
+          turn,
+          resolution: dividendResolution,
+          priorCumulativeDividendUsd,
+          priorCumulativeWeightedDividendValueUsd,
+          distributableEarningsAfterUsd: unwrapUsd(prevFinance.distributableEarnings),
+          cashAfterUsd: unwrapUsd(prevFinance.cash),
+          // 【実装指示§13・§27】time weightはこのRunの実際の終了turn（config.turns、
+          // 早期終了で変わりうる）ではなく、シナリオ本来の長さ（definition.durationTurns、
+          // 例: 32Turn）を基準にする。これにより、同じturnの評価は後から何ターンまで
+          // 実際にプレイしたか（同一シナリオを短く区切って実行したかどうか）に左右されず、
+          // 「Turn16終了でもTurn32終了でも同じ評価systemを使える」（実装指示§13）を満たす。
+          scenarioLength: definition.durationTurns,
+        })
+      );
+    }
+
     const companyLoad = productionRecord.companyLoadMetrics.find((m) => m.companyId === f.companyId);
     const companyDecision = decisions.find((d) => d.companyId === f.companyId);
     const actuals = buildCompanyQuarterBusinessActuals({
@@ -1642,6 +1702,7 @@ export function advanceCompanyLabQuarter(
     financialResults,
     financingResults,
     capexResults,
+    dividendResults,
     consumerMarketRecords,
     // 【SAI-5E】市場進化の因果ログ（機能有効時のみ。optionalのため既存の
     // 履歴形状・persistence・SAI-3Bパーサーへの影響はない）。

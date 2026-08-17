@@ -451,6 +451,9 @@ function validateCompanyFinanceState(raw: unknown, path: string): CompanyFinance
     otherLiabilities: requireNonNegativeUsd(obj.otherLiabilities, `${path}.otherLiabilities`),
     capitalStock: requireNonNegativeUsd(obj.capitalStock, `${path}.capitalStock`),
     retainedEarnings: requireUsd(obj.retainedEarnings, `${path}.retainedEarnings`), // 負数許容
+    // 【Phase DIV-1追加】既存保存データ（本フィールド導入前）にはキーが存在しない。
+    // 欠落時は0（=まだ配当実績がないゲーム開始直後と同じ状態）として扱う（後方互換）。
+    distributableEarnings: obj.distributableEarnings === undefined ? usd(0) : requireUsd(obj.distributableEarnings, `${path}.distributableEarnings`),
     finishedGoodsCostLedger: ledgerRaw.map((e, i) => validateLedgerEntry(e, `${path}.finishedGoodsCostLedger[${i}]`)),
   };
 }

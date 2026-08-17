@@ -119,6 +119,9 @@ export function buildInitialCompanyFinanceState(
     otherLiabilities: nonNegativeUsd(fixture.otherLiabilities, "その他負債"),
     capitalStock: nonNegativeUsd(fixture.capitalStock, "資本金"),
     retainedEarnings: usd(retainedEarnings),
+    // 【Phase DIV-1追加・実装指示§6】game-start distributable base = 0。
+    // 既存retainedEarnings（会社ごとの初期残差）は配当可能額の算定には使わない。
+    distributableEarnings: usd(0),
     finishedGoodsCostLedger: [],
   };
 }

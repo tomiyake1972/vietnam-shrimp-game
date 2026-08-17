@@ -273,6 +273,16 @@ export interface CompanyFinanceState {
   readonly capitalStock: Usd;
   /** 利益剰余金（負数を許容する。毎四半期、当期純利益でロールフォワードする）。 */
   readonly retainedEarnings: Usd;
+  /**
+   * 【Phase DIV-1追加・実装指示§5・§6】ゲーム開始後に生み出した分配可能利益
+   * （game-start distributable base = 0からシードし、以後は毎四半期当期純利益で
+   * retainedEarningsと同じ式でロールフォワードし、配当実行時にのみ減額する）。
+   * retainedEarningsとは異なり、game-start時点の初期利益剰余金（会社ごとの
+   * 残差値）を一切含まない。配当可能額(maxDividend)の算定にはこちらのみを使い、
+   * retainedEarnings全額を配当可能とはしない（実装指示§6）。負数を許容しない
+   * （配当はこの値とcashの小さい方を上限に制限されるため、通常負にはならない）。
+   */
+  readonly distributableEarnings: Usd;
   /** 完成品原価台帳（在庫評価の会社別レジャー）。 */
   readonly finishedGoodsCostLedger: readonly FinishedGoodsCostLedgerEntry[];
 }
