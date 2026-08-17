@@ -17,6 +17,8 @@ import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics
 import { buildExplanationContext } from "../../../../../../../../../../../lib/v2/companyLab/aiExplanation/buildExplanationContext";
 import { AnthropicMessagesClient, generateMeetingResponse } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/claudeClient";
 import { BorrowingHeadroomFact, buildExecutiveBriefingPacket, CrisisFact, PlayerDraftSummary } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/briefing";
+import { CompanyLabHistoryEntryNotFoundError } from "../../../../../../../../../../../lib/v2/companyLab/persistence/errors";
+import { BalanceSheet, CashFlowStatement, ProfitAndLossStatement } from "../../../../../../../../../../../lib/v2/finance/types";
 import { routePlayerMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/router";
 import { AI_MEETING_PROMPT_VERSION, buildMeetingUserMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/prompt";
 import {
@@ -151,6 +153,42 @@ export async function handlePostAiMeetingMessage(
     : null;
   const crisis: CrisisFact | null = diagnostics.crisis ? { state: diagnostics.crisis.state, summary: diagnostics.crisis.summary } : null;
 
+  // 【M2.3追加・実装指示§3-§10】P&L/Cash Flow/Balance Sheet分離・variance分析のための
+  // 直近2四半期ぶんの実績取得。reportingPeriod=直近の確定四半期（currentTurn-1）、
+  // priorPeriod=そのvariance比較対象（currentTurn-2）。既存repository.loadHistoryEntry
+  // をそのまま使うだけで、新しい永続化経路・新しい会計計算は一切追加しない。
+  // turn1・turn2等で該当履歴が存在しない場合はCompanyLabHistoryEntryNotFoundErrorを
+  // 捕捉してnullとする（捏造しない）。
+  async function loadFinancialSnapshot(targetTurn: number): Promise<{
+    readonly pnl: ProfitAndLossStatement;
+    readonly cashFlow: CashFlowStatement;
+    readonly balanceSheet: BalanceSheet;
+    readonly periodLabel: string;
+    readonly fulfilledQuantityTons: number;
+  } | null> {
+    if (targetTurn < 1) return null;
+    try {
+      const entry = await deps.repository.loadHistoryEntry(labId, targetTurn);
+      const financialResult = entry.record.financialResults.find((f) => f.companyId === companyId);
+      const summary = entry.record.companySummaries.find((s) => s.companyId === companyId);
+      if (!financialResult || !summary) return null;
+      const yq = toYearQuarter(entry.period as never);
+      return {
+        pnl: financialResult.profitAndLoss,
+        cashFlow: financialResult.cashFlow,
+        balanceSheet: financialResult.balanceSheet,
+        periodLabel: `${yq.year}年Q${yq.quarter}`,
+        fulfilledQuantityTons: Number(summary.fulfilledQuantity),
+      };
+    } catch (e) {
+      if (e instanceof CompanyLabHistoryEntryNotFoundError) return null;
+      throw e;
+    }
+  }
+
+  const reportingPeriodSnapshot = await loadFinancialSnapshot(viewModel.currentTurn - 1);
+  const priorPeriodSnapshot = await loadFinancialSnapshot(viewModel.currentTurn - 2);
+
   const briefing = buildExecutiveBriefingPacket({
     context,
     previousQuarter,
@@ -166,6 +204,10 @@ export async function handlePostAiMeetingMessage(
     capexProjects: viewModel.ownState.capexState.portfolio.projects,
     borrowingHeadroom,
     crisis,
+    financialHistory: {
+      reportingPeriod: reportingPeriodSnapshot,
+      priorPeriod: priorPeriodSnapshot ? { pnl: priorPeriodSnapshot.pnl, periodLabel: priorPeriodSnapshot.periodLabel, fulfilledQuantityTons: priorPeriodSnapshot.fulfilledQuantityTons } : null,
+    },
   });
 
   const meetingId = body.meetingId ?? defaultMeetingId(labId, companyId, turn);

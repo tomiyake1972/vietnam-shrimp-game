@@ -634,3 +634,140 @@ CAPEX mechanics・game parametersへの変更はなし**（AI Management Meeting
   発展させる余地がある。
 - 実API未検証のため、M2.1・M2.2の修正が実際にTest26の再誤答を防げているかは
   引き続き確認が必要。`ANTHROPIC_API_KEY`を持つ開発者による実行を強く推奨する。
+
+## 23. M2.3（CFO Accounting Grounding / P&L-Cash-BS Separation / Variance Analysis）追記
+
+### 23.1 root cause
+
+Test26 BAL Turn2で、CFOが「売上債権の現金回収の遅れが営業利益の赤字要因」と説明した
+（会計上の誤り。売掛金の回収タイミングはBalance Sheet/Cash Flowの事象であり、発生主義の
+Operating Profitには直接関係しない）。プレイヤーが2回訂正しても、CFOはP&Lの話へ移行した後も
+「原料費等の現金支出が売上を上回った」というcash用語のままP&Lを説明し続けた。根本原因は、
+CFO向けbriefingがP&L・Cash Flow・Balance Sheetを区別せず、`receivablesUsd`（BS残高）と
+`netRevenueUsd`（P&L）だけを渡していたため、Claudeが3表を混同する余地があったこと。
+
+### 23.2 accounting engine audit
+
+`app/lib/v2/finance/types.ts`の`ProfitAndLossStatement`・`BalanceSheet`・
+`CashFlowStatement`・`CostOfSalesBreakdown`を監査した結果、実装指示§4-§6が要求する
+全フィールド（grossRevenue〜netIncome、receiptsFromCustomers〜closingCash、
+cash〜totalEquity等）は**既にengine（`finance/quarterClose.ts`）が計算済み**であり、
+新しい会計計算を一切増設する必要がないことを確認した。M2.1（backlog）・M2.2（AR）とは異なり、
+今回はengine側に真のギャップ・バグは見つからなかった（`finance/quarterClose.ts`自体は
+一切変更していない）。
+
+### 23.3 P&L/CF/BS separation
+
+`app/lib/v2/companyLab/aiManagementMeeting/pnlSemantics.ts`（新規）に、既存の値を
+そのまま転記するだけの`PnlPacket`・`CashFlowPacket`・`BalanceSheetPacket`（実装指示
+§4-§6のフィールドを平坦化しただけ）を定義。`briefing.ts`の`CfoBriefing`へ
+`financialStatements: { pnl, cashFlow, balanceSheet } | null`として追加し、
+3表を構造的に分離して渡す。
+
+### 23.4 CFO briefing before/after
+
+- before: `cfo.receivablesUsd`（BS残高）と`cfo.previousQuarter.netRevenueUsd`（P&Lの
+  一部）のみが混在して渡され、P&L・Cash Flow・Balance Sheetの構造的な区別が無かった。
+- after: `cfo.financialStatements.{pnl,cashFlow,balanceSheet}`が3つの独立したpacketとして
+  渡され、`cfo.pnlVariance`（発生主義の前期比差分）・`cfo.volumePriceFacts`（数量/平均単価の
+  前期比）が別途追加された。
+
+### 23.5 variance analysis実装
+
+`computePnlVariance(current, prior, ...)`が、`ProfitAndLossStatement`2期分から
+revenueDelta・各コスト科目delta・operatingProfitDelta等（実装指示§9の全フィールド）を
+単純な差分として計算する（新しい会計解釈はしない）。`handlers.ts`が
+`deps.repository.loadHistoryEntry(labId, currentTurn-1)`と`(labId, currentTurn-2)`を
+それぞれ取得し（存在しなければ`CompanyLabHistoryEntryNotFoundError`を捕捉してnull、
+捏造しない）、reportingPeriod（直近確定四半期）・priorPeriod（その前期）として
+`buildExecutiveBriefingPacket`へ渡す。
+
+### 23.6 Test26 T1→T2 variance結果（fixtureによる検証）
+
+実装指示§10の実データに基づくfixture（`AMM-ACC-7`・`AMM-ACC-8`）で検証:
+Turn1 netRevenue≈$66.594M/operatingProfit≈+$6.30M → Turn2 netRevenue≈$62.938M/
+operatingProfit≈-$0.059M。`computePnlVariance`はrevenueDelta≈-$3.66M、
+operatingProfitDelta≈-$6.36Mを正しく算出することを確認した。
+
+### 23.7 price/volume解釈
+
+`computeVolumePriceFacts(currentVolumeTons, currentNetRevenueUsd, priorVolumeTons,
+priorNetRevenueUsd, ...)`が、既存のfulfilledQuantity・netRevenueの単純な除算のみで
+`averageRealizedPriceUsdPerTon`を導出する（新しいPVM分解エンジンは作らない。実装指示§12の
+「M2.3では不要」という明示的な許可の範囲内）。Turn1→Turn2で数量は増加（約12,591t→約14,407t）
+したが平均実現単価は下落しており、`AMM-ACC-9`で検証済み。
+
+### 23.8 Operating Profit vs Net Incomeの扱い
+
+`PnlPacket`は`operatingProfit`と`interestExpense`・`netIncome`を独立したフィールドとして
+保持する（`interestExpense`はOperating Profitの下）。prompt.tsに「Operating Profitの
+赤字理由の説明にInterest Expenseを含めない／Net Incomeの説明には含めてよい」という
+明示的な区別を追加した（実装指示§14）。
+
+### 23.9 RuleSemantics
+
+`briefing.ts`の`RULE_SEMANTICS`へ`operatingProfit`・`accountsReceivable`（更新）・
+`operatingCashFlow`・`interestExpense`の4エントリを追加（実装指示§16の内容を
+日本語で表現）。
+
+### 23.10 player correction handling
+
+M2.2で実装済みの`playerCorrectionStatus`/`confirmedCorrections`の仕組みをそのまま再利用。
+prompt.tsに、「P&LとCash Flowを混同している」等の会計カテゴリの誤りをプレイヤーが指摘した
+場合、単に謝るだけでなく同一meeting内で同じ種類の誤りを繰り返さない旨を明記した
+（実装指示§18。新しい永続化層は追加していない）。
+
+### 23.11 code changes
+
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/pnlSemantics.ts`
+  （PnlPacket/CashFlowPacket/BalanceSheetPacket/PnlVariance/VolumePriceFacts + builder関数）
+- 変更: `briefing.ts`（`financialHistory`入力、`financialStatements`/`pnlVariance`/
+  `volumePriceFacts`をCfoBriefingへ追加、RULE_SEMANTICS 4エントリ追加、
+  `EXECUTIVE_BRIEFING_VERSION`を"v3"→"v4"）
+- 変更: `prompt.ts`（P&L/Cash/BS分離の会計ガードレール一式を追加、
+  `AI_MEETING_PROMPT_VERSION`を"v3"→"v4"）
+- 変更: `handlers.ts`（`deps.repository.loadHistoryEntry`による直近2四半期取得を追加し、
+  `financialHistory`を`buildExecutiveBriefingPacket`へ配線）
+- 既存の`finance/quarterClose.ts`・Standard AI・Sales/pricingエンジン・Trust・
+  game parametersは一切変更していない（実装指示§21の禁止事項の遵守）。
+
+### 23.12 tests
+
+`app/lib/v2/companyLab/aiManagementMeeting/__tests__/accountingSemantics.test.ts`に
+AMM-ACC-1〜12（12件）を新規追加。既存backlogSemantics.test.ts・briefing.test.ts・
+factGrounding.test.tsは、`financialHistory`フィールド追加に伴う呼び出しシグネチャの
+変更のみ機械的に対応（`financialHistory: { reportingPeriod: null, priorPeriod: null }`）。
+factGrounding.test.tsのAMM-FG-9（version識別テスト）を"v3"→"v4"へ更新。
+AMM系テスト計49件、プロジェクト全体3157件、いずれもpass。
+
+### 23.13 real API結果
+
+このセッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため未実施
+（M2.1・M2.2と同様）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、Test26 BAL Turn2の
+実会話再現ケース「9E. Test26 BAL Turn2再現（P&L/Cash/BS混同なしの営業赤字説明）」
+（プレイヤー発言「2Qが営業赤字ですか？理由は？」、`test26Turn2Briefing()`に
+実データベースのfinancialStatements/pnlVariance/volumePriceFactsを組み込み済み）を
+追加した（計13ケース）。`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで、
+Operating Profit≈-$0.06Mへの急激な悪化・売上減少約$3.7M・処理費/労務費/固定費/SG&A増加・
+販売数量自体は増加・市場価格下落が主因・AR回収は原因ではない、という方向で
+CFOが応答するかを確認できる。
+
+### 23.14 remaining risks
+
+- M2.1・M2.2と同様、prompt文言による誘導であり、Claudeの出力を機械的に強制する
+  仕組みではない。実API未検証のため、実際の応答品質（特に9Eケースでの改善）は
+  引き続き確認が必要。
+- `financialHistory`のreportingPeriod/priorPeriodは、`CompanyLabHistoryEntryNotFoundError`
+  発生時にnullとして扱われる（捏造しない設計）。turn1・turn2等、履歴が浅い場合は
+  `financialStatements`/`pnlVariance`がnullのままとなり、CFOが「データが無いため
+  variance分析はできない」と答えることが期待されるが、実応答での確認は未実施。
+- `computeVolumePriceFacts`の`averageRealizedPriceUsdPerTon`は単純な除算であり、
+  商品構成（product mix）の変化までは分解しない（実装指示§12で明示的に許可された
+  スコープ限定）。より詳細なPrice-Volume-Mix分解が必要になった場合は将来phaseの対象。
+
+### 23.15 readiness for continued Test26
+
+P&L/Cash Flow/Balance Sheetの構造的分離・variance分析・Operating Profit/Net Incomeの
+区別・会計用語ガードレール・player correctionの会計カテゴリへの拡張が、コード・
+テスト・prompt文言の3層で揃った。次のTest26継続セッションでは、Turn2の「2Qが営業赤字
+ですか？理由は？」を含む会計関連の質問系列を優先的に再検証することを推奨する。

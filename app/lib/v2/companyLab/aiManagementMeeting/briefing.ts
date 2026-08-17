@@ -30,15 +30,25 @@
 import { ExplanationContext } from "../aiExplanation/buildExplanationContext";
 import { computeBacklogSemantics } from "./backlogSemantics";
 import { computeFinanceSemantics, FinanceSemantics } from "./financeSemantics";
+import {
+  buildBalanceSheetPacket,
+  buildCashFlowPacket,
+  buildPnlPacket,
+  computePnlVariance,
+  computeVolumePriceFacts,
+  FinancialStatementsPacket,
+  PnlVariance,
+  VolumePriceFacts,
+} from "./pnlSemantics";
 import { SalesContract } from "../../sales/types";
-import { PayableRecord, ReceivableRecord } from "../../finance/types";
+import { BalanceSheet, CashFlowStatement, PayableRecord, ProfitAndLossStatement, ReceivableRecord } from "../../finance/types";
 import { LoanRecord } from "../../financing/types";
 import { CapitalProject } from "../../capex/types";
 import { LifecycleTrendLabel, SupplyPressureLabel } from "../aiMarketInfoSummary";
 import { ExecutiveRole } from "./types";
 
 /** ExecutiveBriefingPacket・promptの整合性を識別するバージョン（実装指示§20）。prompt.tsのAI_MEETING_PROMPT_VERSIONと対にして管理する。 */
-export const EXECUTIVE_BRIEFING_VERSION = "v3";
+export const EXECUTIVE_BRIEFING_VERSION = "v4";
 
 /**
  * 【M2.2追加・実装指示§19】誤解しやすい重要ルールについての、短い固定context
@@ -51,6 +61,11 @@ export const RULE_SEMANTICS: Readonly<Record<string, string>> = {
   healthyForwardBacklog: "納期が未到来の受注残。将来需要の可視化として通常の健全な状態であり、delivery failureではない。",
   receivables: "売掛金。ShrimpXでは発生四半期からarCollectionQuarters（現在1四半期）後に、市場や商品によらず一律で現金化される。Customer Trustが回収タイミングへ影響するルールは存在しない。",
   customerTrust: "品質・納期実績を反映するスコア。売掛金の回収タイミングには影響しない（そのようなgame mechanicは存在しない）。",
+  // 【M2.3追加・実装指示§16】P&L/Cash Flow/Balance Sheetの混同を防ぐための会計用語定義。
+  operatingProfit: "発生主義会計のP&L指標（収益・費用の認識ベース）。売掛金の現金回収タイミングで説明してはいけない。",
+  accountsReceivable: "Balance Sheet上の資産（未回収の顧客残高）。回収タイミングはCash（BS/CF）に影響するが、それ自体だけではOperating Profitに影響しない。",
+  operatingCashFlow: "営業活動による現金の動き。Operating Profit（発生主義の利益）とは別概念であり同一視してはいけない。",
+  interestExpense: "Operating Profitの下（Operating Profitには含まれない）。Net Incomeの計算にのみ含まれる。",
 };
 
 /** previousQuarterFinancials/previousQuarterMarketは既存のPlayerScreenViewModel型（app/v2層）
@@ -98,6 +113,27 @@ export interface BriefingBuildInput {
   readonly capexProjects: readonly CapitalProject[];
   readonly borrowingHeadroom: BorrowingHeadroomFact | null;
   readonly crisis: CrisisFact | null;
+  /**
+   * 【M2.3追加・実装指示§3-§10】P&L/Cash Flow/Balance Sheet分離・variance分析に必要な
+   * 直近2四半期ぶんの実績（既存CompanyFinancialQuarterResult・CompanyQuarterSummaryを
+   * そのまま渡すだけ。新しい会計計算は一切しない）。reportingPeriodは「プレイヤーが
+   * 今聞いている直近の確定四半期」、priorPeriodはそのvariance比較対象（1つ前の四半期）。
+   * いずれもturn1・turn2等で実績が無い場合はnull（捏造しない）。
+   */
+  readonly financialHistory: {
+    readonly reportingPeriod: {
+      readonly pnl: ProfitAndLossStatement;
+      readonly cashFlow: CashFlowStatement;
+      readonly balanceSheet: BalanceSheet;
+      readonly periodLabel: string;
+      readonly fulfilledQuantityTons: number;
+    } | null;
+    readonly priorPeriod: {
+      readonly pnl: ProfitAndLossStatement;
+      readonly periodLabel: string;
+      readonly fulfilledQuantityTons: number;
+    } | null;
+  };
 }
 
 const TOP_N_FACTORY = 5;
@@ -151,6 +187,15 @@ export interface CfoBriefing {
   readonly borrowingHeadroom: BorrowingHeadroomFact | null;
   readonly crisis: CrisisFact | null;
   readonly previousQuarter: PreviousQuarterDelta | null;
+  /**
+   * 【M2.3追加・実装指示§3】P&L/Cash Flow/Balance Sheetを明示的に分離したセクション。
+   * turn1等、直近確定四半期の実績が存在しない場合はnull（捏造しない）。
+   */
+  readonly financialStatements: FinancialStatementsPacket | null;
+  /** 【M2.3追加・実装指示§9】直近確定四半期とその1つ前の四半期とのP&L差分。両方の実績が揃わない場合はnull。 */
+  readonly pnlVariance: PnlVariance | null;
+  /** 【M2.3追加・実装指示§12】既存fulfilledQuantity・netRevenueの単純な除算による数量・実現単価の前期比較。 */
+  readonly volumePriceFacts: VolumePriceFacts | null;
 }
 
 export interface CooBriefing {
@@ -240,9 +285,31 @@ const LIFECYCLE_TREND_MEANING: Readonly<Record<LifecycleTrendLabel, string>> = {
 };
 
 export function buildExecutiveBriefingPacket(input: BriefingBuildInput): ExecutiveBriefingPacket {
-  const { context, previousQuarter, playerDraft, contracts, receivables, payables, loans, capexProjects, borrowingHeadroom, crisis } = input;
+  const { context, previousQuarter, playerDraft, contracts, receivables, payables, loans, capexProjects, borrowingHeadroom, crisis, financialHistory } = input;
   const ownState = context.ownState;
   const diagEntries = context.standardAi.diagnosticEntries;
+
+  const { reportingPeriod, priorPeriod } = financialHistory;
+  const financialStatements: FinancialStatementsPacket | null = reportingPeriod
+    ? {
+        pnl: buildPnlPacket(reportingPeriod.pnl, reportingPeriod.periodLabel),
+        cashFlow: buildCashFlowPacket(reportingPeriod.cashFlow, reportingPeriod.periodLabel),
+        balanceSheet: buildBalanceSheetPacket(reportingPeriod.balanceSheet, reportingPeriod.periodLabel),
+      }
+    : null;
+  const pnlVariance: PnlVariance | null =
+    reportingPeriod && priorPeriod ? computePnlVariance(reportingPeriod.pnl, priorPeriod.pnl, reportingPeriod.periodLabel, priorPeriod.periodLabel) : null;
+  const volumePriceFacts: VolumePriceFacts | null =
+    reportingPeriod && priorPeriod
+      ? computeVolumePriceFacts(
+          reportingPeriod.fulfilledQuantityTons,
+          reportingPeriod.pnl.netRevenue as unknown as number,
+          priorPeriod.fulfilledQuantityTons,
+          priorPeriod.pnl.netRevenue as unknown as number,
+          reportingPeriod.periodLabel,
+          priorPeriod.periodLabel
+        )
+      : null;
 
   const backlogSemantics = computeBacklogSemantics(contracts, context.identity.companyId, context.identity.year, context.identity.quarter);
   const backlogSummary: BacklogSummaryFacts = {
@@ -300,6 +367,9 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     borrowingHeadroom,
     crisis,
     previousQuarter,
+    financialStatements,
+    pnlVariance,
+    volumePriceFacts,
   };
 
   const coo: CooBriefing = {

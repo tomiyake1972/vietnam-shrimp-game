@@ -190,12 +190,111 @@ function test26Turn1Briefing() {
   };
 }
 
+/**
+ * 【M2.3追加・実装指示§20】Test26 BAL Turn2の実再現ケース用briefing。CFOが
+ * 「売掛金の現金回収の遅れが営業利益の赤字要因」と誤回答した実会話を再現する。
+ * §10の実データ（Turn1 grossRevenue≈$66.594M/operatingProfit≈+$6.30M、
+ * Turn2 grossRevenue≈$62.938M/operatingProfit≈-$0.059M）に基づく。
+ */
+function test26Turn2Briefing() {
+  const base = test26Turn1Briefing();
+  return {
+    ...base,
+    common: { ...base.common, turn: 2, quarter: 2 },
+    cfo: {
+      ...base.cfo,
+      previousQuarter: { cashUsd: 38_200_000, netRevenueUsd: 66_594_000, operatingProfitUsd: 6_300_000, periodLabel: "2015年Q1" },
+      // 【M2.3追加・実装指示§3-§6】P&L/Cash Flow/Balance Sheetを構造的に分離したpacket。
+      financialStatements: {
+        pnl: {
+          periodLabel: "2015年Q2",
+          grossRevenue: 62_938_000,
+          qualitySalesDeduction: 1_100_000,
+          netRevenue: 61_838_000,
+          rawMaterialCost: 29_780_000,
+          processingCost: 10_760_000,
+          laborCost: 6_460_000,
+          factoryFixedCost: 5_930_000,
+          reworkCost: 200_000,
+          discardLoss: 190_000,
+          unabsorbedFixedManufacturingCost: 0,
+          idleLaborCost: 1_300_000,
+          capexMaintenanceCost: 0,
+          totalCostOfSales: 54_620_000,
+          grossProfit: 7_218_000,
+          sellingGeneralAdmin: 5_580_000,
+          operatingProfit: -59_000,
+          interestExpense: 1_131_000,
+          profitBeforeTax: -1_190_000,
+          incomeTax: 0,
+          netIncome: -1_190_000,
+        },
+        cashFlow: {
+          periodLabel: "2015年Q2",
+          receiptsFromCustomers: 66_400_000,
+          paymentsForRawMaterials: 29_780_000,
+          paymentsForManufacturing: 24_650_000,
+          paymentsForSellingGeneralAdmin: 5_580_000,
+          interestPaid: 1_131_000,
+          incomeTaxPaid: 0,
+          operatingCashFlow: 5_259_000,
+          investingCashFlow: -2_000_000,
+          financingCashFlow: -1_000_000,
+          netCashChange: 2_259_000,
+          openingCash: 38_200_000,
+          closingCash: 40_459_000,
+        },
+        balanceSheet: {
+          periodLabel: "2015年Q2",
+          cash: 40_459_000,
+          accountsReceivable: 62_938_000,
+          rawMaterialInventory: 5_000_000,
+          finishedGoodsInventory: 3_000_000,
+          accountsPayable: 4_000_000,
+          shortTermLoans: 10_600_000,
+          longTermLoans: 40_000_000,
+          totalDebt: 50_600_000,
+          totalEquity: 68_210_000,
+        },
+      },
+      // 【M2.3追加・実装指示§9・§10】Turn1→Turn2のP&L variance（発生主義の差分のみ）。
+      pnlVariance: {
+        currentPeriodLabel: "2015年Q2",
+        priorPeriodLabel: "2015年Q1",
+        revenueDelta: -3_656_000,
+        qualityDeductionDelta: 100_000,
+        rawMaterialCostDelta: -220_000,
+        processingCostDelta: 760_000,
+        laborCostDelta: 460_000,
+        factoryFixedCostDelta: 930_000,
+        reworkCostDelta: 0,
+        discardLossDelta: -110_000,
+        idleLaborCostDelta: 300_000,
+        sgaDelta: 580_000,
+        operatingProfitDelta: -6_359_000,
+      },
+      // 【M2.3追加・実装指示§12】数量は増加したが平均実現単価が下落したことを示すfacts。
+      volumePriceFacts: {
+        currentPeriodLabel: "2015年Q2",
+        priorPeriodLabel: "2015年Q1",
+        currentVolumeTons: 14_407,
+        priorVolumeTons: 12_591,
+        volumeDeltaTons: 1_816,
+        currentAverageRealizedPriceUsdPerTon: 62_938_000 / 14_407,
+        priorAverageRealizedPriceUsdPerTon: 66_594_000 / 12_591,
+      },
+    },
+  };
+}
+
 interface SmokeCase {
   readonly label: string;
   readonly playerMessage: string;
   readonly historyCount: number;
   /** 【M2.1追加】trueの場合、通常のsampleBriefing()ではなくtest26Turn1Briefing()を使う。 */
   readonly useTest26Briefing?: boolean;
+  /** 【M2.3追加】trueの場合、test26Turn2Briefing()（accounting grounding再現ケース）を使う。 */
+  readonly useTest26Turn2Briefing?: boolean;
 }
 
 const SMOKE_CASES: readonly SmokeCase[] = [
@@ -255,6 +354,17 @@ const SMOKE_CASES: readonly SmokeCase[] = [
     historyCount: 0,
     useTest26Briefing: true,
   },
+  {
+    // 【M2.3追加・実装指示§20】Test26 BAL Turn2で実際に誤回答（AR回収遅延がOperating Profit
+    // 赤字の原因、と会計上誤って説明）した、実際のプレイヤー発言そのものでの再現テスト。
+    // 期待する回答の方向性: Operating Profit≈-$0.06M（前期+$6.3Mから急激に悪化）、
+    // 売上は約$3.7M減少、加工費・労務費・工場固定費・SG&Aは増加、販売数量自体は増加、
+    // 市場価格の下落が主因、AR回収はOperating Profitの原因ではない、というP&L事実に基づく説明。
+    label: "9E. Test26 BAL Turn2再現（P&L/Cash/BS混同なしの営業赤字説明）",
+    playerMessage: "2Qが営業赤字ですか？理由は？",
+    historyCount: 0,
+    useTest26Turn2Briefing: true,
+  },
 ];
 
 function dummyHistory(count: number): AiMeetingMessage[] {
@@ -287,7 +397,7 @@ interface CaseResult {
 }
 
 async function runCase(scenario: SmokeCase): Promise<CaseResult> {
-  const briefing = scenario.useTest26Briefing ? test26Turn1Briefing() : sampleBriefing();
+  const briefing = scenario.useTest26Turn2Briefing ? test26Turn2Briefing() : scenario.useTest26Briefing ? test26Turn1Briefing() : sampleBriefing();
   const history = dummyHistory(scenario.historyCount);
   const { recent, compactSummary } = buildRecentHistoryForPrompt(history);
   const routing = routePlayerMessage(scenario.playerMessage);

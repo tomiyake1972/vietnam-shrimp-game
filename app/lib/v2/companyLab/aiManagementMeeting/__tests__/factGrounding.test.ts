@@ -194,6 +194,7 @@ test("AMM-FG-8: Test26 BAL Turn1 finance grounding（Cash≈38.2M/Debt≈50.6M/A
     capexProjects,
     borrowingHeadroom: null,
     crisis: null,
+    financialHistory: { reportingPeriod: null, priorPeriod: null },
   });
 
   assert.ok(Math.abs(packet.common.backlog.totalTons - 3063.42) < 1e-6);
@@ -207,8 +208,8 @@ test("AMM-FG-8: Test26 BAL Turn1 finance grounding（Cash≈38.2M/Debt≈50.6M/A
 });
 
 test("AMM-FG-9: prompt/briefing versionが更新され、識別可能になっている", () => {
-  assert.equal(AI_MEETING_PROMPT_VERSION, "v3");
-  assert.equal(EXECUTIVE_BRIEFING_VERSION, "v3");
+  assert.equal(AI_MEETING_PROMPT_VERSION, "v4");
+  assert.equal(EXECUTIVE_BRIEFING_VERSION, "v4");
   const context = minimalContext();
   const packet = buildExecutiveBriefingPacket({
     context,
@@ -221,6 +222,7 @@ test("AMM-FG-9: prompt/briefing versionが更新され、識別可能になっ�
     capexProjects: [],
     borrowingHeadroom: null,
     crisis: null,
+    financialHistory: { reportingPeriod: null, priorPeriod: null },
   });
   assert.equal(packet.common.briefingVersion, EXECUTIVE_BRIEFING_VERSION);
 });

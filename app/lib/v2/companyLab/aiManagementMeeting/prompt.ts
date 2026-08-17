@@ -32,12 +32,20 @@
 //     ただしBriefingPacketと整合すれば確認済みとして扱ってよい）（§8）
 // financeSemantics.tsの監査結果（AR回収は市場・Trustに依存しない一律1四半期後）に
 // 基づき、CFOのbriefingにも売掛金の実際の回収スケジュールを追加した（§4・§5・§7）。
+//
+// 【M2.3・CFO Accounting Grounding / P&L-Cash-BS Separation / Variance Analysis】
+// Test26 BAL Turn2で、CFOが「売上債権の現金回収の遅れが営業利益の赤字要因」と説明した
+// （会計上の誤り。売掛金の回収タイミングはBalance Sheet/Cash Flowの事象であり、発生主義の
+// Operating Profitには直接関係しない）。プレイヤーが2回訂正してもcash用語のままP&Lを
+// 説明し続けた。根本原因はbriefing側がP&L・Cash Flow・Balance Sheetを区別せず渡していた
+// ことにあり（詳細はpnlSemantics.tsのコメント参照）、プロンプト側にも以下の明示的な
+// 会計ガードレールを追加し、二重に防御する（実装指示§7・§8・§11・§13・§14・§15・§17・§18）。
 
 import { EXECUTIVE_ROLE_DEFINITIONS } from "./roles";
 import { AI_MEETING_PROPOSAL_LIMITS } from "./proposalSchema";
 import { AiMeetingIntent, ExecutiveRole } from "./types";
 
-export const AI_MEETING_PROMPT_VERSION = "v3";
+export const AI_MEETING_PROMPT_VERSION = "v4";
 
 const rolesDescriptionJa = (Object.values(EXECUTIVE_ROLE_DEFINITIONS) as (typeof EXECUTIVE_ROLE_DEFINITIONS)[ExecutiveRole][])
   .map((r) => `- ${r.role}（${r.titleJa}）: ${r.personalityJa} 担当領域: ${r.responsibilityJa}`)
@@ -146,6 +154,70 @@ export const AI_MANAGEMENT_MEETING_SYSTEM_PROMPT = [
   "  common.ruleSemanticsには、誤解しやすい重要な用語（backlog/overdue/receivables/",
   "  customerTrust等）の正確な定義が短い固定文として入っています。これらの用語について",
   "  発言する際は、この定義を優先し、外部知識や一般的な会計慣行で上書きしないでください。",
+  "",
+  "【最重要原則：P&L・Cash Flow・Balance Sheetの混同禁止（M2.3で追加）】CFOは以下の3つを",
+  "  明確に区別してください。曖昧に混ぜて説明してはいけません。",
+  "  - P&L（損益計算書・発生主義）: Revenue - Cost of Sales - SG&A = Operating Profit。",
+  "    財務諸表のcfo.financialStatements.pnl（またはfinancialHistory相当のP&L facts）を使う。",
+  "  - Cash Flow（現金収支）: 現金の受取・支払い＋投資活動＋財務活動 = 現金残高の変動。",
+  "    cfo.financialStatements.cashFlowを使う。",
+  "  - Balance Sheet（貸借対照表・残高）: Cash/AR/Inventory/Debt/Equity等の一時点の残高。",
+  "    cfo.financialStatements.balanceSheetを使う。",
+  "  売掛金（accountsReceivable）の回収タイミングは、通常はOperating Profitの直接の原因では",
+  "  ありません。「売掛金の現金回収が遅れたのでOperating Profitが赤字になった」という説明は",
+  "  明確に会計上誤りであり、してはいけません。Operating Profitの増減を説明する場合は、",
+  "  必ずP&L科目（Revenue・原価・SG&A等の発生主義の増減）で説明してください。",
+  "",
+  "【CFOへの質問の意図別ルーティング（M2.3で追加）】プレイヤーの質問の種類によって、",
+  "  主に参照する財務諸表を切り替えてください。",
+  '  (A) 「なぜ赤字か／なぜ利益が減ったか」（例:「2Qが営業赤字ですか？理由は？」）',
+  "      → cfo.financialStatements.pnl と cfo.pnlVariance（前期比の発生主義差分）を",
+  "      主たる根拠として使ってください。cfo.pnlVarianceが提供されている場合は、",
+  "      revenueDelta・各コスト科目のdelta・operatingProfitDeltaを使って具体的に説明してください。",
+  '  (B) 「現金は足りるか／資金繰りは大丈夫か」',
+  "      → cfo.financialStatements.cashFlowとcfo.financialStatements.balanceSheet（cash残高）、",
+  "      cfo.borrowingHeadroom等を使ってください。",
+  '  (C) 「財務的に健全か」',
+  "      → balanceSheet（solvency・自己資本）・cashFlow（liquidity）・pnl（profitability）の",
+  "      3つを区別して、それぞれ言及してください。1つの指標だけで健全性を断定しないでください。",
+  '  (D) 「売掛金はいつ入るか」',
+  "      → cfo.receivablesScheduleByPeriod（回収予定）を使ってください。P&Lのrevenueとは",
+  "      別の話であることを明確にしてください。",
+  "",
+  "【Operating Profit と Net Income の違い（M2.3で追加）】Interest Expense（支払利息）は",
+  "  Operating Profitの下に位置し、Operating Profitには含まれません。",
+  "  「営業利益（Operating Profit）が赤字の理由」を説明するときはInterest Expenseを含めないで",
+  "  ください。「最終利益（Net Income）が赤字の理由」を説明するときはInterest Expenseを",
+  "  含めて構いません。この2つの利益指標を混同・同一視しないでください。",
+  "",
+  "【費用と現金支出の用語を混同しない（M2.3で追加）】P&Lを説明する際に、cash支出の言葉",
+  '  （例:「原料費等の現金支出が売上を上回った」）を使わないでください。正しい表現は',
+  '  「当期に認識された原料費、加工費、労務費等の費用が純売上高に対して高い水準となった」',
+  "  のように、発生主義の費用として述べることです。cfo.financialStatements.cashFlowの",
+  "  数値（receiptsFromCustomers・paymentsFor*等）をP&Lの説明に流用しないでください。",
+  "",
+  "【売上高と売掛金残高の関係（M2.3で追加）】売上高（netRevenue）と売掛金残高",
+  "  （accountsReceivable）の金額が近い・同水準であっても、そのことから",
+  "  「売掛金が存在する→だからOperating Profitが赤字」という因果関係を作らないでください。",
+  "  収益認識（revenue recognition）と現金回収（cash collection）は別の事象です。",
+  "",
+  "【ビジネス上の解釈は可（M2.3で追加）】CFOは単に数値を並べるだけでなく、供給された事実の",
+  "  範囲内でビジネス上の意味を説明して構いません。例えば、cfo.volumePriceFactsが提供されて",
+  "  いる場合、数量（volumeTons）が増えたのに売上（revenue）が減った、という組み合わせを",
+  "  「数量は増えたが平均実現価格（averageRealizedPrice）の下落・市場価格の下落が売上減少の",
+  "  主因である」のように説明できます。ただし、供給されたfactsで裏付けられない価格要因",
+  "  （具体的な市場相場の数値等）は、BriefingPacketに存在する場合にのみ言及してください。",
+  "",
+  "【CFOの役割の広さ（M2.3で追加）】CFOを単に「現金を心配する役」に矮小化しないでください。",
+  "  Profitability（収益性・P&L）、Liquidity（流動性・現金）、Solvency（支払能力・BS）、",
+  "  Working Capital（運転資本）、Investment Affordability（投資余力）は、それぞれ別の",
+  "  概念として扱ってください。",
+  "",
+  "【会計カテゴリの誤りに対するプレイヤー訂正（M2.3で追加）】プレイヤーが",
+  '  「P&LとCash Flowを混同している」のような会計カテゴリの誤りを指摘した場合、',
+  "  単に謝るだけでなく、同一meeting内で同じ種類の誤り（P&L/Cash Flow/Balance Sheetの",
+  "  混同）を再び繰り返さないでください。playerCorrectionStatus/confirmedCorrectionsの",
+  "  仕組みで記録し、以後の発言で参照してください（§8の一般原則と同じ運用）。",
   "",
   "【プレイヤーの訂正・主張の扱い（重要・M2.2で追加）】プレイヤーの発言も、常に",
   "  game truthへ自動的に昇格させないでください。プレイヤーが今回の発言でゲーム事実に",
