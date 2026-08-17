@@ -441,7 +441,22 @@ export function toScenarioNewsItems(releases: readonly InformationRelease[]): re
       availableFromTurn: r.availableFromTurn,
       facts: r.structuredFacts.map((f) => ({ label: f.label, value: String(f.value), ...(f.unit !== undefined ? { unit: f.unit } : {}) })),
       estimateRange: r.estimateRange ?? null,
+      ...(r.relatedEventId !== undefined ? { relatedEventId: r.relatedEventId } : {}),
     }));
+}
+
+/**
+ * News の時間軸分類（重要度ではない）。dynamicScenario1News.ts が明記している規約
+ * （Current: isRumor=false かつイベント紐付きあり／Leading: isRumor=true／
+ * Structural: isRumor=false かつイベント紐付きなし＝トレンド由来）をそのまま使う。
+ * signalClass・scale等の非公開メタデータは一切参照しない（そもそもInformationRelease
+ * に含まれていない）。
+ */
+export type ScenarioNewsTimeAxis = "current" | "leading" | "structural";
+
+export function classifyScenarioNewsTimeAxis(item: Pick<ScenarioNewsItem, "isRumor" | "relatedEventId">): ScenarioNewsTimeAxis {
+  if (item.isRumor) return "leading";
+  return item.relatedEventId !== undefined ? "current" : "structural";
 }
 
 export interface OpeningInfoViewModel {
@@ -481,11 +496,13 @@ export interface ScenarioNewsItem {
   readonly body: string | null;
   /** 噂（Leading Indicator）か、確定した事象（Current Event / Structural Trend）か。 */
   readonly isRumor: boolean;
-  /** 0〜1。未指定なら null（確信度を捏造しない）。 */
+  /** 0〜1。未指定なら null（確信度を捏造しない）。画面には表示しない（重要度に見えるため）。 */
   readonly confidence: number | null;
   readonly availableFromTurn: number;
   /** 定性的な構造化事実（内部パラメータ値は情報エンジン側で除外済み）。 */
   readonly facts: readonly { readonly label: string; readonly value: string; readonly unit?: string }[];
   /** 見積り範囲（幅で示す量的ヒント）。無ければ null。 */
   readonly estimateRange: { readonly low: number; readonly high: number; readonly unit?: string } | null;
+  /** 紐づくシナリオイベントID（あれば）。時間軸分類（Current/Structural判定）にのみ使う。 */
+  readonly relatedEventId?: string;
 }

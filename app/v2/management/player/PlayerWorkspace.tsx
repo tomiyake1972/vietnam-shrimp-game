@@ -18,12 +18,13 @@
 // 都度書き込む。これによりOverview/Market/Inventory/Decisionタブを行き来しても、
 // また別タブでAnalysisを開いてこのタブへ戻ってきても消えない。
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "../../company-lab/decisionDraft";
 import { extractCompanyCapexResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
+import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecision } from "../../../lib/v2/companyLab/standardAi/policy";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab/types";
@@ -31,6 +32,7 @@ import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/a
 import { createEmptyStrategyDocument, CompanyStrategyDocument } from "../../../lib/v2/companyLab/strategyProfile/types";
 import { getLiveSession, LiveSessionEntry, upsertLiveSession } from "../lib/liveSessionRegistry";
 import { persistResumableRun } from "../lib/persistRun";
+import { selectScenarioNewsForTurn } from "../lib/scenarioNews";
 import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
@@ -176,6 +178,13 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
 
   const dataset = buildDatasetFromSession(session);
   const turn = session.state.scenarioState.currentTurn;
+  // 【News配線】以前はPLAYER Workspaceに一切配線されていなかった（Management
+  // Console側のGM画面には既にselectScenarioNewsForTurn経由で配線済みだった）。
+  // 同じ関数・同じ変換（toScenarioNewsItems）をそのまま使い、新しい取得ロジックは作らない。
+  const scenarioNews = useMemo(() => {
+    const feed = selectScenarioNewsForTurn(session.run.scenarioId, turn);
+    return toScenarioNewsItems(feed.releases);
+  }, [session.run.scenarioId, turn]);
   // 【Procurement Planning情報ブロック・Step 4】turnと同様、毎レンダーでsession.stateから
   // 素直に組み立てる（buildPublicMarketInfoは既存のpure function。新しい計算はしない）。
   const publicInfo = buildPublicMarketInfo(session.state);
@@ -420,6 +429,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               lastQuarterFinancialResult={lastQuarterFinancialResult}
               publicInfo={publicInfo}
               turn={turn}
+              scenarioNews={scenarioNews}
               // AI経営会議は、このSimulation Runの同じ会社・同じturnの状態で開く（別Labを作らない）。
               // サーバー側は保存済みRunから会社状態を読むため、ここではrunIdを渡すだけで、
               // 会社の数値をclientから送らない。

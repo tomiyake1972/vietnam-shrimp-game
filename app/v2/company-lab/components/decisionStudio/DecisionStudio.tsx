@@ -27,7 +27,7 @@ import { CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../../lib
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
 import { CompanyDecisionDraft } from "../../decisionDraft";
 import { buildDecisionStudioViewModel } from "../../decisionStudioViewModel";
-import type { OpeningInfoViewModel } from "../../play/_lib/openingInfoViewModel";
+import type { OpeningInfoViewModel, ScenarioNewsItem } from "../../play/_lib/openingInfoViewModel";
 import ProcurementPlanningSection from "../procurement/ProcurementPlanningSection";
 import { AreaToneLegend } from "../CollapsibleSection";
 import DecisionStudioNavigation, { DecisionStudioScreenKey } from "./DecisionStudioNavigation";
@@ -53,6 +53,11 @@ export interface DecisionStudioProps {
   readonly turn?: number;
   /** INFO画面のBS・償却資産明細・市場情報向け（PlayerScreenClient.tsxが持つ場合のみ渡す）。 */
   readonly openingInfo?: OpeningInfoViewModel;
+  /**
+   * INFO画面のNews向け（openingInfoを渡さない呼び出し元専用。openingInfoがあれば
+   * openingInfo.scenarioNewsが優先されるため、その場合は指定不要）。
+   */
+  readonly scenarioNews?: readonly ScenarioNewsItem[];
   /**
    * AI Management Meeting panel接続用（Company Lab 経路。companyIdはfixture.companyIdを使う）。
    * labId・simulationRunId のどちらも無い場合は、AuxiliaryPanelのトグル自体を表示しない
@@ -82,6 +87,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     publicInfo,
     turn,
     openingInfo,
+    scenarioNews,
     labId,
     simulationRunId,
     companyName,
@@ -152,7 +158,16 @@ export default function DecisionStudio(props: DecisionStudioProps) {
         <DecisionStudioNavigation active={activeScreen} onSelect={setActiveScreen} badgeCounts={badgeCounts} />
 
         <div className="pt-2">
-          {activeScreen === "info" && <InformationScreen fixture={fixture} ownState={ownState} turn={turn} publicInfo={publicInfo} openingInfo={openingInfo} />}
+          {activeScreen === "info" && (
+            <InformationScreen
+              fixture={fixture}
+              ownState={ownState}
+              turn={turn}
+              publicInfo={publicInfo}
+              openingInfo={openingInfo}
+              scenarioNews={scenarioNews}
+            />
+          )}
           {activeScreen === "sales" && (
             <SalesPlanningScreen
               draft={draft}

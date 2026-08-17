@@ -19,12 +19,24 @@
 // 既存のOpeningBalanceSheetPanel・既存の計算式をそのまま使って必ず表示する。
 // openingInfoがある場合はその中のbalanceSheet（同じ計算結果）を再利用し、
 // 二重計算はしない。
+//
+// 【News（世界のニュース）も同じ理由でINFOタブ上部に常時表示する】Test26 Dynamic
+// Scenarioをtestplayすると、Newsがどこにも表示されないという指摘があった。調査の
+// 結果、Newsデータ自体はシナリオ側（dynamicScenario1News.ts）に存在し、GM向けの
+// Management Console画面には既に配線されていたが、PLAYER Workspace（このINFO
+// タブ）には一度も配線されていなかった（UI配線漏れ。scenario側のNews contract・
+// 公開判定ロジックは変更していない）。openingInfoがある場合は
+// openingInfo.scenarioNews（既存のtoScenarioNewsItemsが変換した結果）をそのまま
+// 使い、無い場合は呼び出し元（PlayerWorkspace.tsx）がmanagement/lib/scenarioNews.ts
+// 経由で組み立てた同じ形のscenarioNewsをそのまま使う。ここでは新しいNews取得・
+// 変換ロジックを作らない。
 
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../../../lib/v2/companyLab";
 import OpeningCompanyStatePanel from "../OpeningCompanyStatePanel";
 import { DepreciableAssetsPanel, ObservedMarketDemandPanel, OpeningBalanceSheetPanel, OpeningMarketInfoPanel } from "../OpeningInfoPanels";
-import { buildOpeningBalanceSheet, type OpeningInfoViewModel } from "../../play/_lib/openingInfoViewModel";
+import { buildOpeningBalanceSheet, type OpeningInfoViewModel, type ScenarioNewsItem } from "../../play/_lib/openingInfoViewModel";
 import { AREA_TONES } from "../panelStyles";
+import ScenarioNewsFeed from "./ScenarioNewsFeed";
 
 function usd(v: number): string {
   return `$${Math.round(v).toLocaleString()}`;
@@ -40,14 +52,20 @@ interface InformationScreenProps {
    * まとめ。省略時はOpeningCompanyStatePanel（自社状態の要約）のみを表示する。
    */
   readonly openingInfo?: OpeningInfoViewModel;
+  /**
+   * openingInfoを渡さない呼び出し元（PlayerWorkspace.tsx）向けのNews直接指定。
+   * openingInfoがある場合はopeningInfo.scenarioNewsを優先し、こちらは無視する。
+   */
+  readonly scenarioNews?: readonly ScenarioNewsItem[];
 }
 
-export default function InformationScreen({ fixture, ownState, turn, publicInfo, openingInfo }: InformationScreenProps) {
+export default function InformationScreen({ fixture, ownState, turn, publicInfo, openingInfo, scenarioNews }: InformationScreenProps) {
   const tone = AREA_TONES.info;
   // openingInfoがあればその中のBS（同一計算結果）を再利用し、無ければownStateから
   // 直接組み立てる。どちらもbuildOpeningBalanceSheetの結果であり、計算式は1箇所のまま。
   const bs = openingInfo?.balanceSheet ?? buildOpeningBalanceSheet(ownState);
   const bsTurn = openingInfo?.turn ?? turn;
+  const news = openingInfo?.scenarioNews ?? scenarioNews;
 
   return (
     <div className="space-y-3" data-testid="decision-studio-info-screen">
@@ -77,6 +95,10 @@ export default function InformationScreen({ fixture, ownState, turn, publicInfo,
           </div>
         </div>
       </div>
+
+      {/* 【Turn Start / INFOタブ上部に常時表示】Dynamic Scenarioでは世界のニュースが
+          主要な情報源のため、期初BSのすぐ下・詳細パネル類より前に置く。 */}
+      {news !== undefined && bsTurn !== undefined && <ScenarioNewsFeed news={news} turn={bsTurn} />}
 
       {bsTurn !== undefined && <OpeningBalanceSheetPanel bs={bs} turn={bsTurn} defaultOpen />}
 
