@@ -16,7 +16,10 @@
 // 作る（コスト・レイテンシを増やさないための意図的な単純化）。
 
 import { CompanyLabRedisClient } from "../../redis/companyLabTypes";
-import { AiMeetingConversationState, AiMeetingIntent, AiMeetingMessage, ValidatedAiMeetingProposal } from "./types";
+import { AiMeetingConversationState, AiMeetingIntent, AiMeetingMessage, PlayerCorrectionRecord, ValidatedAiMeetingProposal } from "./types";
+
+/** 保持するconfirmedCorrectionsの上限（無制限に増やさない）。 */
+const MAX_CONFIRMED_CORRECTIONS = 10;
 
 export const AI_MEETING_CACHE_TIMEOUT_MS = 8_000;
 /** Claudeへ毎回送る直近メッセージ数（6-10件の範囲で実装指示に従い8を採用）。 */
@@ -75,20 +78,32 @@ export async function saveConversation(client: CompanyLabRedisClient, state: AiM
 }
 
 export function newConversation(labId: string, companyId: string, turn: number, meetingId: string): AiMeetingConversationState {
-  return { meetingId, labId, companyId, turn, messages: [], lastMeetingIntent: null, lastValidatedProposals: [], compactSummary: null };
+  return { meetingId, labId, companyId, turn, messages: [], lastMeetingIntent: null, lastValidatedProposals: [], compactSummary: null, confirmedCorrections: [] };
 }
 
-/** 新しいメッセージを会話へ追記した、更新後の状態を返す（副作用なし。呼び出し側がsaveConversationする）。 */
+/**
+ * 新しいメッセージを会話へ追記した、更新後の状態を返す（副作用なし。呼び出し側がsaveConversationする）。
+ * 【M2.2追加】newConfirmedCorrectionを渡すと、correction memory（confirmedCorrections、
+ * 「derived/meeting artifact」であり、Game SSoTには入れない）へ追記する
+ * （実装指示§9「同一meeting内で、既に確認された訂正は繰り返し間違えない」）。
+ */
 export function appendMessages(
   state: AiMeetingConversationState,
   newMessages: readonly AiMeetingMessage[],
-  update: { readonly meetingIntent?: AiMeetingIntent; readonly validatedProposals?: readonly ValidatedAiMeetingProposal[] }
+  update: {
+    readonly meetingIntent?: AiMeetingIntent;
+    readonly validatedProposals?: readonly ValidatedAiMeetingProposal[];
+    readonly newConfirmedCorrection?: PlayerCorrectionRecord;
+  }
 ): AiMeetingConversationState {
   return {
     ...state,
     messages: [...state.messages, ...newMessages],
     lastMeetingIntent: update.meetingIntent ?? state.lastMeetingIntent,
     lastValidatedProposals: update.validatedProposals ?? state.lastValidatedProposals,
+    confirmedCorrections: update.newConfirmedCorrection
+      ? [...state.confirmedCorrections, update.newConfirmedCorrection].slice(-MAX_CONFIRMED_CORRECTIONS)
+      : state.confirmedCorrections,
   };
 }
 
@@ -112,4 +127,20 @@ export function buildRecentHistoryForPrompt(messages: readonly AiMeetingMessage[
     .map((m) => `${m.speaker}: ${m.text.length > COMPACT_SUMMARY_CHARS_PER_MESSAGE ? `${m.text.slice(0, COMPACT_SUMMARY_CHARS_PER_MESSAGE)}…` : m.text}`)
     .join(" / ");
   return { recent, compactSummary };
+}
+
+/**
+ * 【M2.2追加・実装指示§21「既存meeting history」対応】旧prompt versionの下で生成された
+ * メッセージには誤ったfact assertionが含まれている可能性があるため、現在のprompt
+ * versionと異なるexecutiveメッセージには、Claudeへ渡す直前にlegacy警告を付与する
+ * （構造化フィールドを増やさず、text文字列へ短いタグを前置するだけの軽量な実装）。
+ * PLAYERメッセージ（promptVersionを持たない）にはタグを付けない。
+ */
+export function formatHistoryEntryForPrompt(message: AiMeetingMessage, currentPromptVersion: string): { readonly speaker: string; readonly text: string } {
+  const isLegacy = message.promptVersion !== undefined && message.promptVersion !== currentPromptVersion;
+  if (!isLegacy) return { speaker: message.speaker, text: message.text };
+  return {
+    speaker: message.speaker,
+    text: `[legacy ${message.promptVersion}メッセージ・古いbriefing仕様下で生成された可能性があり、その事実主張を現在のstructured briefingより優先しないこと] ${message.text}`,
+  };
 }

@@ -16,19 +16,20 @@ import { loadPlayerScreenViewModel, PlayerScreenViewModel } from "../../../../..
 import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/policy";
 import { buildExplanationContext } from "../../../../../../../../../../../lib/v2/companyLab/aiExplanation/buildExplanationContext";
 import { AnthropicMessagesClient, generateMeetingResponse } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/claudeClient";
-import { buildExecutiveBriefingPacket, PlayerDraftSummary } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/briefing";
+import { BorrowingHeadroomFact, buildExecutiveBriefingPacket, CrisisFact, PlayerDraftSummary } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/briefing";
 import { routePlayerMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/router";
-import { buildMeetingUserMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/prompt";
+import { AI_MEETING_PROMPT_VERSION, buildMeetingUserMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/prompt";
 import {
   appendMessages,
   buildRecentHistoryForPrompt,
   defaultMeetingId,
+  formatHistoryEntryForPrompt,
   loadConversation,
   newConversation,
   saveConversation,
 } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/conversation";
 import { validateAiMeetingProposals } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/validation";
-import { AiMeetingMessage, ExecutiveRole } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/types";
+import { AiMeetingMessage, ExecutiveRole, PlayerCorrectionRecord } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/types";
 import { AiMeetingApiDependencies } from "./dependencies";
 
 export type AiMeetingApiResult = { readonly status: number; readonly body: unknown };
@@ -135,6 +136,21 @@ export async function handlePostAiMeetingMessage(
       }
     : null;
 
+  // 【M2.2追加】CFO Finance Briefing監査（実装指示§4）対応。既存BorrowingCapacityResult
+  // （前四半期の銀行underwriting結果）・既存Standard AI crisis判定をそのまま転記するだけで、
+  // 新しい財務計算・危機判定ロジックは一切作らない。
+  const lastBorrowingCapacity = viewModel.ownState.lastFinancingResult?.borrowingCapacity ?? null;
+  const borrowingHeadroom: BorrowingHeadroomFact | null = lastBorrowingCapacity
+    ? {
+        availableAdditionalCapacityUsd: lastBorrowingCapacity.availableAdditionalCapacityUsd,
+        asOfLabel: (() => {
+          const yq = toYearQuarter(lastBorrowingCapacity.period);
+          return `${yq.year}年Q${yq.quarter}`;
+        })(),
+      }
+    : null;
+  const crisis: CrisisFact | null = diagnostics.crisis ? { state: diagnostics.crisis.state, summary: diagnostics.crisis.summary } : null;
+
   const briefing = buildExecutiveBriefingPacket({
     context,
     previousQuarter,
@@ -142,6 +158,14 @@ export async function handlePostAiMeetingMessage(
     // 【M2.1追加】Healthy Forward/Due This Turn/Overdueの分離に必要な生contracts
     // （既存ownState.contractsをそのまま渡すだけ。新しい状態読み込み経路ではない）。
     contracts: viewModel.ownState.contracts,
+    // 【M2.2追加】AR/AP schedule・融資延滞・CAPEXコミット残高分離に必要な生finance state
+    // （既存ownState.financeState/financingStateをそのまま渡すだけ）。
+    receivables: viewModel.ownState.financeState.receivables,
+    payables: viewModel.ownState.financeState.payables,
+    loans: viewModel.ownState.financingState.loanPortfolio.loans,
+    capexProjects: viewModel.ownState.capexState.portfolio.projects,
+    borrowingHeadroom,
+    crisis,
   });
 
   const meetingId = body.meetingId ?? defaultMeetingId(labId, companyId, turn);
@@ -153,11 +177,17 @@ export async function handlePostAiMeetingMessage(
   const userMessage = buildMeetingUserMessage({
     briefing,
     standardAiDecisionSummary: { decision: diagnostics.decision, topReasonCodes: diagnostics.entries.slice(0, 8).map((e) => e.code) },
-    recentHistory: recent.map((m) => ({ speaker: m.speaker, text: m.text })),
+    // 【M2.2追加】旧prompt versionの下で生成されたexecutiveメッセージにはlegacy警告を付与する
+    // （実装指示§21。formatHistoryEntryForPromptはtextへ短いタグを前置するだけで、新しい
+    // 構造化フィールドは増やさない）。
+    recentHistory: recent.map((m) => formatHistoryEntryForPrompt(m, AI_MEETING_PROMPT_VERSION)),
     compactSummary,
     playerMessage: body.playerMessage,
     routingHint: routing,
     meetingIntentHint: conversation.lastMeetingIntent,
+    // 【M2.2追加】同一meeting内で既にCONFIRMED済みのプレイヤー訂正（correction memory）。
+    // 以後のresponse生成で同じ誤りを繰り返さないための明示的なメモリ（実装指示§9）。
+    confirmedCorrections: conversation.confirmedCorrections.map((c) => c.note),
   });
 
   const generated = await generateMeetingResponse(userMessage, anthropicClient, { labId, companyId, turn });
@@ -213,11 +243,25 @@ export async function handlePostAiMeetingMessage(
     stance: r.stance,
     proposalIds: r.proposalIds,
     factsUsed: r.factsUsed,
+    promptVersion: AI_MEETING_PROMPT_VERSION,
   }));
+
+  // 【M2.2追加・correction memory】playerCorrectionStatus="CONFIRMED"の場合のみ、
+  // このturn限りの会話artifactへ記録する（Game SSoTには入れない。実装指示§8・§9）。
+  const newConfirmedCorrection: PlayerCorrectionRecord | undefined =
+    response.playerCorrectionStatus === "CONFIRMED"
+      ? {
+          id: randomUUID(),
+          claimText: body.playerMessage,
+          note: response.playerCorrectionNote ?? body.playerMessage,
+          turn,
+        }
+      : undefined;
 
   conversation = appendMessages(conversation, [playerMsg, ...execMessages], {
     meetingIntent: response.meetingIntent,
     validatedProposals: validated,
+    newConfirmedCorrection,
   });
 
   try {
@@ -236,6 +280,8 @@ export async function handlePostAiMeetingMessage(
       meetingIntent: response.meetingIntent,
       potentialStrategicChange: response.potentialStrategicChange,
       potentialStrategicChangeNote: response.potentialStrategicChangeNote ?? null,
+      playerCorrectionStatus: response.playerCorrectionStatus,
+      playerCorrectionNote: response.playerCorrectionNote ?? null,
       available: true,
       diagnostics: generated.diagnostics,
     },

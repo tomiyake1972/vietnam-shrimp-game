@@ -16,7 +16,7 @@
 import { z } from "zod";
 import { CAPITAL_PROJECT_TYPES } from "../../capex/types";
 import { DEMAND_MARKET_IDS } from "../../market/types";
-import { AI_MEETING_EXECUTIVE_ROLES, AI_MEETING_INTENTS, AI_MEETING_STANCES, STANDARD_AI_REFERENCE_STANCES } from "./types";
+import { AI_MEETING_EXECUTIVE_ROLES, AI_MEETING_INTENTS, AI_MEETING_STANCES, PLAYER_CORRECTION_STATUSES, STANDARD_AI_REFERENCE_STANCES } from "./types";
 
 const PRODUCTS = ["hoso", "pd", "vap"] as const;
 
@@ -153,6 +153,9 @@ export const aiMeetingStructuredResponseSchema = z.object({
   meetingIntent: z.enum(AI_MEETING_INTENTS),
   potentialStrategicChange: z.boolean(),
   potentialStrategicChangeNote: z.string().optional(),
+  // 【M2.2追加】playerCorrectionStatus/Note — see types.ts PlayerCorrectionStatus。
+  playerCorrectionStatus: z.enum(PLAYER_CORRECTION_STATUSES),
+  playerCorrectionNote: z.string().optional(),
 });
 
 export type AiMeetingStructuredResponseParsed = z.infer<typeof aiMeetingStructuredResponseSchema>;

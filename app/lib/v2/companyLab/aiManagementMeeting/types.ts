@@ -178,6 +178,15 @@ export interface AiMeetingResponseEntry {
   readonly standardAiReferences: readonly StandardAiProposalReference[];
 }
 
+/**
+ * 【M2.2追加】プレイヤーが今回の発言でゲーム事実に関する主張・訂正を行ったかどうかの
+ * 判定。「Player発言も常にgame truthへ自動昇格させない」（実装指示§8）を担保するため、
+ * ExecutiveBriefingPacketと整合する場合のみCONFIRMEDとし、根拠が無い場合はUNSUPPORTED
+ * として保留する（役員は無条件に事実認定しない）。
+ */
+export const PLAYER_CORRECTION_STATUSES = ["NOT_APPLICABLE", "CONFIRMED", "UNSUPPORTED"] as const;
+export type PlayerCorrectionStatus = (typeof PLAYER_CORRECTION_STATUSES)[number];
+
 /** Claudeへの単一構造化呼び出し（Option B）が返す応答形状。 */
 export interface AiMeetingStructuredResponse {
   readonly primarySpeaker: ExecutiveRole;
@@ -188,6 +197,22 @@ export interface AiMeetingStructuredResponse {
   readonly meetingIntent: AiMeetingIntent;
   readonly potentialStrategicChange: boolean;
   readonly potentialStrategicChangeNote?: string;
+  /** 【M2.2追加】プレイヤーの今回の発言に事実主張・訂正が含まれるかどうかの判定。 */
+  readonly playerCorrectionStatus: PlayerCorrectionStatus;
+  readonly playerCorrectionNote?: string;
+}
+
+/**
+ * 【M2.2追加】CONFIRMED（BriefingPacketと整合する）と判定されたプレイヤー訂正の記録。
+ * 会話artifact（conversation.ts）内にのみ保持する「derived/meeting artifact」であり、
+ * Game SSoTには一切書き込まない（実装指示§9「Game SSoTには入れない」）。同一meeting内で
+ * 既に確認済みの訂正を、以後のresponse生成で再び間違えないためのメモリとして使う。
+ */
+export interface PlayerCorrectionRecord {
+  readonly id: string;
+  readonly claimText: string;
+  readonly note: string;
+  readonly turn: number;
 }
 
 export interface AiMeetingMessage {
@@ -198,6 +223,12 @@ export interface AiMeetingMessage {
   readonly stance?: AiMeetingStance;
   readonly proposalIds: readonly string[];
   readonly factsUsed: readonly string[];
+  /**
+   * 【M2.2追加】このメッセージがどのprompt versionの下で生成されたか（PLAYERメッセージには
+   * 設定しない）。AI_MEETING_PROMPT_VERSIONと異なる場合、旧versionの下で生成された
+   * factual assertionを新しいstructured briefingより優先しない（実装指示§21）。
+   */
+  readonly promptVersion?: string;
 }
 
 export interface AiMeetingConversationState {
@@ -210,6 +241,8 @@ export interface AiMeetingConversationState {
   readonly lastValidatedProposals: readonly ValidatedAiMeetingProposal[];
   /** 直近履歴のみ再送するための、6-10件を超えた古いメッセージの簡潔な要約（任意）。 */
   readonly compactSummary: string | null;
+  /** 【M2.2追加】同一meeting内でCONFIRMED済みのプレイヤー訂正（correction memory）。Game SSoTには入れない。 */
+  readonly confirmedCorrections: readonly PlayerCorrectionRecord[];
 }
 
 /** Claude呼び出し1回ぶんの計測・診断（要求§14）。secretは含めない。 */

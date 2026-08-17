@@ -500,3 +500,137 @@ AMM-BL-7を含む）を実装。既存の`briefing.test.ts`（AMM-8/AMM-16）も
   個別の市場×商品トレンドの詳細（どの市場のどの商品が伸びているか）はCommercialへ
   渡していない。今後、特定市場のライフサイクルについて具体的に聞かれた場合に
   詳細不足で答えられない可能性がある。
+
+## 22. M2.2（Cross-Role Fact Grounding / Finance Semantics / Player Correction Handling）追記
+
+ChatGPT #05からの追加指示（前提commit `10c6cd4`）に基づく対応。
+
+### 22.1 root cause
+
+M2.1でCommercialのbacklog誤発言は修正されたが、その誤発言（会話履歴）を受けて
+CFOが「Trust低下→AR回収遅延→投資余力減」という、ShrimpXに存在しない因果を
+連鎖的に補完した。根本原因は2つ:
+1. 他役員の発言（会話履歴内のexecutiveメッセージ）をfactとして無条件に信頼してよいという
+   構造上の歯止めが、prompt/briefingいずれにも存在しなかった（truth hierarchyの不在）。
+2. CFO向けbriefingに「売掛金がいつ現金化されるか」という実在する事実
+   （`ReceivableRecord.dueSettlementPeriod`）が渡っておらず、一般的な企業会計の
+   常識で空白を埋めてしまった（AR collection scheduleの不在）。
+
+### 22.2 AR engine rule（監査結果・変更なし）
+
+`app/lib/v2/finance/quarterClose.ts`・`app/lib/v2/finance/parameters.ts`を監査した結果:
+- 売掛金は発生四半期から`params.workingCapital.arCollectionQuarters`（現在値=1）四半期後に、
+  市場・商品を問わず一律で決済される（`dueSettlementPeriod = 発生期 + 1`）。
+- 買掛金（輸入原料）も同様に`apImportPaymentQuarters`（現在値=1）四半期後。
+- 決済処理（`quarterClose.ts`のAR決済セクション）は`dueSettlementPeriod <= period`の
+  単純フィルタのみで、Customer Trust・delivery reliabilityを一切参照しない。
+- `ReceivableRecord`型自体にarrears（延滞）フィールドは存在しない。融資（`LoanRecord`）には
+  `arrearsPrincipalUsd`/`arrearsInterestUsd`があるが、これは返済延滞専用で売掛金とは別の仕組み。
+
+### 22.3 Trust→AR relation: **NO**
+
+`app/lib/v2/quality/scoreUpdates.ts`の監査（M2.1で実施済み、今回再確認）どおり、
+Trust/delivery reliabilityは当期の履行実績（`dueQuantity`/`onTimeQuantity`）のみで更新され、
+AR回収タイミングへの因果は存在しない。「Trust低下でAR回収が遅れる」という主張は
+コード上の根拠が一切無い、CFOによる完全な創作だったと判断する。
+
+### 22.4 CFO briefing before/after
+
+| フィールド | Before | After |
+|---|---|---|
+| 売掛金 | `receivablesUsd`（残高のみ） | `receivablesUsd`＋`receivablesScheduleByPeriod`（実際の回収予定period・turnsFromNow） |
+| 買掛金 | `payablesUsd`（残高のみ） | `payablesUsd`＋`payablesScheduleByPeriod` |
+| 融資延滞 | 無し | `loanArrearsPrincipalUsd`/`loanArrearsInterestUsd`（既存`LoanRecord`から） |
+| CAPEXコミット | 無し | `activeCapexRemainingCommitmentUsd`（承認済み未払額の合計） |
+| 借入余力 | 無し | `borrowingHeadroom`（前四半期に計算済みの実際の`BorrowingCapacityResult`を転記） |
+| 危機状態 | 無し | `crisis`（既存Standard AI `diagnostics.crisis`を転記） |
+
+### 22.5 truth hierarchy実装
+
+`prompt.ts`のシステムプロンプトへ、Engine facts→Structured diagnostics→Player訂正→
+Standard AI提案→他役員の発言→一般常識、という6段階の優先順位を明記した
+（`app/lib/v2/companyLab/aiManagementMeeting/prompt.ts`）。データ構造としての強制は
+せず（tool schemaを複雑化させない三宅さんの追加指示§7の方針を踏襲）、prompt文言のみで
+実現している。
+
+### 22.6 cross-role grounding
+
+会話履歴（`recentHistory`）はこれまでどおり`{speaker, text}`のプレーンな配列として
+渡すが、prompt側に「他roleの発言はopinionであり、自分のBriefingPacketに同じ事実が
+無ければ確定事実として扱わない」「他役員の発言に明示的に異議を述べてよい」ことを
+明記した。全員を強制的に合意させない設計原則もあわせて明記した。
+
+### 22.7 player correction handling
+
+`AiMeetingStructuredResponse`へ`playerCorrectionStatus`（NOT_APPLICABLE/CONFIRMED/
+UNSUPPORTED）・`playerCorrectionNote`を追加した。プレイヤーの事実主張・訂正は、
+BriefingPacketと整合する場合のみCONFIRMEDとし、根拠が無い場合はUNSUPPORTEDとして
+無条件に事実認定しない（`validation.ts`ではなくClaude自身の構造化出力として判定させ、
+Zodで型を検証するだけ——判定ロジック自体を機械的に検証する仕組みはM2.2の対象外）。
+
+### 22.8 correction memory
+
+CONFIRMEDと判定された訂正は、`AiMeetingConversationState.confirmedCorrections`
+（`PlayerCorrectionRecord[]`）へ、会話artifactとして記録する（Game SSoTには一切入れない）。
+以後の同一meeting内のresponse生成では、`confirmedCorrections`をuserメッセージへ含め、
+同じ誤りを繰り返さないよう明示的なメモリとして使う。上限10件（`MAX_CONFIRMED_CORRECTIONS`）。
+
+### 22.9 RuleSemantics
+
+`briefing.ts`に`RULE_SEMANTICS`（backlog/overdue/healthyForwardBacklog/receivables/
+customerTrustの5用語について、company状態に依存しない固定の短い定義）を新設し、
+`common.ruleSemantics`として常に渡す。token増大を避けるため、company別に変わる長文
+説明ではなく固定辞書とした。
+
+### 22.10 prompt version / briefing version
+
+`AI_MEETING_PROMPT_VERSION`をv2→v3、新設した`EXECUTIVE_BRIEFING_VERSION`をv3とし、
+`common.briefingVersion`として渡す。両者を揃えることで、旧versionとの混在を識別可能にした。
+
+### 22.11 legacy conversation handling
+
+`AiMeetingMessage`へ`promptVersion`（生成時のprompt version。PLAYERメッセージには
+設定しない）を追加した。`conversation.ts`の`formatHistoryEntryForPrompt()`が、
+現在のprompt versionと異なるexecutiveメッセージのtextへ`[legacy vN ...]`という
+警告タグを前置してからClaudeへ渡す。新しい構造化フィールドは増やさず、既存の
+`{speaker, text}`の枠内で実現している。
+
+### 22.12 code changes
+
+新設: `financeSemantics.ts`（AR/AP schedule・融資延滞・CAPEXコミット残高の導出）。
+変更: `types.ts`（playerCorrectionStatus・PlayerCorrectionRecord・confirmedCorrections・
+promptVersion追加）・`proposalSchema.ts`/`claudeClient.ts`（同フィールドのZod/tool schema対応）・
+`briefing.ts`（CFO finance fields・RuleSemantics・briefingVersion・crisis/borrowingHeadroom追加）・
+`conversation.ts`（correction memory・legacy message tagging）・`prompt.ts`（truth hierarchy・
+cross-role grounding・fact/judgment分離・投資余力ガイダンス・v3）・API `handlers.ts`
+（finance state・crisis・borrowingHeadroomの配線、correction memoryの永続化）。
+**Standard AI・Finance engine・Sales engine・Contract fulfillment・Customer Trust・
+CAPEX mechanics・game parametersへの変更はなし**（AI Management Meetingモジュール内のみ）。
+
+### 22.13 tests
+
+`__tests__/factGrounding.test.ts`を新設し、AMM-FG-1〜4・7〜10を実装。
+`aiMeetingHandlers.test.ts`へAMM-FG-5・6（correction memoryのhandler結合テスト）を追加。
+既存テスト（AMM-9/18等）も新schema（playerCorrectionStatus必須化）へ追従させた。
+全3146件成功、tsc/eslintエラーなし。
+
+### 22.14 real API test
+
+**REAL_API_SMOKE_NOT_RUN**（本セッションの環境に`ANTHROPIC_API_KEY`が設定されていない
+ため未実施）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、指示§22のA〜D相当の4ケース
+（Test26 BAL Turn1状態、Cash≈38.2M/Debt≈50.6M/AR≈66.4M/Backlog≈3063t/Overdue=0）を
+追加済み（計12ケース）。`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで確認できる。
+
+### 22.15 remaining risks・readiness for continued Test26
+
+- truth hierarchy・cross-role groundingはprompt文言による誘導であり、Claudeの出力を
+  機械的に強制する仕組みではない。実API未検証のため、効果は理論的な設計としてのみ
+  確認済み（静的テストで構造・文言の存在は証明したが、実際の応答品質は未検証）。
+- `playerCorrectionStatus`の判定ロジック自体（BriefingPacketとの整合性判断）はClaude内部の
+  推論に委ねられており、機械的な整合性チェック層は無い（`AiMeetingCallDiagnostics`の
+  `schemaValidationResult`は型検証のみで、内容の正しさは検証しない）。
+- `confirmedCorrections`は文字列（note）のリストであり、構造化されたfact参照ではない。
+  将来phaseで、より構造化された「何が確認されたか」の表現（例: factKeyの参照）へ
+  発展させる余地がある。
+- 実API未検証のため、M2.1・M2.2の修正が実際にTest26の再誤答を防げているかは
+  引き続き確認が必要。`ANTHROPIC_API_KEY`を持つ開発者による実行を強く推奨する。

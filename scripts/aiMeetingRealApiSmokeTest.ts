@@ -58,6 +58,13 @@ function sampleBriefing() {
       activeLoanCount: 3,
       payablesUsd: 300_000,
       receivablesUsd: 550_000,
+      receivablesScheduleByPeriod: [{ periodLabel: "2016年Q3", amountUsd: 550_000, turnsFromNow: 1 }],
+      payablesScheduleByPeriod: [{ periodLabel: "2016年Q3", amountUsd: 300_000, turnsFromNow: 1 }],
+      loanArrearsPrincipalUsd: 0,
+      loanArrearsInterestUsd: 0,
+      activeCapexRemainingCommitmentUsd: 0,
+      borrowingHeadroom: { availableAdditionalCapacityUsd: 1_200_000, asOfLabel: "2016年Q1" },
+      crisis: { state: "NORMAL", summary: "資金繰りは平常。" },
       previousQuarter: { cashUsd: 1_100_000, netRevenueUsd: 2_800_000, operatingProfitUsd: 210_000, periodLabel: "2016年Q1" },
     },
     coo: {
@@ -118,22 +125,31 @@ function test26Turn1Briefing() {
       turn: 1,
       year: 2015,
       quarter: 1,
-      cashUsd: 2_000_000,
+      cashUsd: 38_200_000,
       bindingCapacityTons: 6000,
       bindingConstraintLabel: "商品別実効能力",
       backlog: { totalTons: 3063.42, healthyForwardTons: 3063.42, dueThisTurnTons: 0, overdueTons: 0 },
       playerDraft: null,
       standardAiReasonCodesTopN: [],
     },
+    // 【M2.2追加・実装指示§17】Test26 BAL Turn1相当（Cash≈38.2M/Debt≈50.6M/AR≈66.4M）。
     cfo: {
-      totalAssetsUsd: 5_000_000,
-      totalLiabilitiesUsd: 1_500_000,
-      totalEquityUsd: 3_500_000,
-      shortTermLoansUsd: 0,
-      longTermLoansUsd: 0,
-      activeLoanCount: 0,
+      totalAssetsUsd: 120_000_000,
+      totalLiabilitiesUsd: 50_600_000,
+      totalEquityUsd: 69_400_000,
+      shortTermLoansUsd: 10_600_000,
+      longTermLoansUsd: 40_000_000,
+      activeLoanCount: 2,
       payablesUsd: 0,
-      receivablesUsd: 0,
+      receivablesUsd: 66_400_000,
+      // AR残高は「即時使える現金」ではなく、実際の回収予定四半期（1四半期後）を明示する。
+      receivablesScheduleByPeriod: [{ periodLabel: "2015年Q2", amountUsd: 66_400_000, turnsFromNow: 1 }],
+      payablesScheduleByPeriod: [],
+      loanArrearsPrincipalUsd: 0,
+      loanArrearsInterestUsd: 0,
+      activeCapexRemainingCommitmentUsd: 0,
+      borrowingHeadroom: null,
+      crisis: { state: "NORMAL", summary: "資金繰りは平常。" },
       previousQuarter: null,
     },
     coo: {
@@ -209,8 +225,33 @@ const SMOKE_CASES: readonly SmokeCase[] = [
     // プレイヤー発言そのものでの再現テスト。期待する回答の方向性は、売上実績・受注実績・
     // forward backlog・overdue=0・次期納期への準備を区別し、「納期遅延」「Trustを
     // 蝕んでいる」を根拠なしに言わないこと。
-    label: "9. Test26 BAL Turn1再現（backlog grounding）",
+    label: "9A. Test26 BAL Turn1再現（backlog grounding）",
     playerMessage: "前回の営業結果を教えて",
+    historyCount: 0,
+    useTest26Briefing: true,
+  },
+  {
+    // 【M2.2追加・実装指示§17・§22B対応】CFOのfinance grounding（false overdue・
+    // unsupported Trust→AR delayを含まないこと）を確認する。
+    label: "9B. Test26 BAL Turn1再現（investment affordability）",
+    playerMessage: "財務的にはどうでしょう。各種投資をする余裕はあるでしょうか。",
+    historyCount: 0,
+    useTest26Briefing: true,
+  },
+  {
+    // 【M2.2追加・実装指示§22C対応】AR残高($66.4M)を「2Qに入金される＝今すぐ使える」と
+    // 誤認させようとするプレイヤー発言。CFOはreceivablesScheduleByPeriod（実際の回収予定）
+    // に基づき、現金そのものではないことを区別できるかを確認する。
+    label: "9C. Test26 BAL Turn1再現（AR = 使える現金か）",
+    playerMessage: "CFOさん、売掛債権は2Qに入金されるから使えるお金ではないの？",
+    historyCount: 0,
+    useTest26Briefing: true,
+  },
+  {
+    // 【M2.2追加・実装指示§22D対応】プレイヤーによる明示的な訂正。playerCorrectionStatus=
+    // CONFIRMEDとなるべきケース（BriefingPacket上overdueTons=0で裏付けられる）。
+    label: "9D. Test26 BAL Turn1再現（player correction）",
+    playerMessage: "受注残は納期遅延ではないです。",
     historyCount: 0,
     useTest26Briefing: true,
   },
@@ -258,6 +299,7 @@ async function runCase(scenario: SmokeCase): Promise<CaseResult> {
     playerMessage: scenario.playerMessage,
     routingHint: routing,
     meetingIntentHint: null,
+    confirmedCorrections: [],
   });
 
   const result = await generateMeetingResponse(userMessage, undefined, { labId: "smoke", companyId: "BAL", turn: 6 });
@@ -342,7 +384,8 @@ async function main() {
       "- 8つの最低ケース（CFO質問・COO質問・Commercial質問・CEO/strategy質問・CEO summary要求・",
       "  primary+secondaryが必要な投資質問・structured proposalを返す質問・比較的長いPlayer message）に加え、",
       "  Test26 BAL Turn1の実再現ケース（「前回の営業結果を教えて」、overdue=0のhealthy forward",
-      "  backlogのみを持つturn1状態）を含む計9ケースを順に実行し、各callのmodel/inputTokens/outputTokens/latencyMs/stopReason/retryCount/",
+      "  backlogのみを持つturn1状態、M2.2でinvestment affordability/AR認識/player correctionの3ケースを追加）を",
+      "  含む計12ケースを順に実行し、各callのmodel/inputTokens/outputTokens/latencyMs/stopReason/retryCount/",
       "  schemaValidationResult/primarySpeaker/secondarySpeaker/proposalCountを本ファイルへ出力する。",
       "- 実行後は、本文内容（開発用ログにのみ出力。API keyはログへ出さない）を人手で確認し、",
       "  役員らしさ・役割の混在有無・数値の捏造有無・Standard AIへの反論可否・回答の簡潔さ・",

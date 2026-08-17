@@ -68,6 +68,7 @@ const STANCE_ENUM = ["SUPPORT", "CAUTION", "OPPOSE", "ALTERNATIVE", "INFORMATION
 const INTENT_ENUM = ["GROW_AGGRESSIVELY", "PROTECT_CASH", "REDUCE_BACKLOG", "PRIORITIZE_JAPAN", "DEFER_CAPEX", "CUSTOM"] as const;
 const PROPOSAL_DOMAIN_ENUM = ["SALES", "PRODUCTION", "PROCUREMENT", "LABOR", "FINANCE", "CAPEX", "VAP_PRODUCT_DEVELOPMENT"] as const;
 const STANDARD_AI_REF_STANCE_ENUM = ["SUPPORT", "MODIFY", "OPPOSE"] as const;
+const PLAYER_CORRECTION_STATUS_ENUM = ["NOT_APPLICABLE", "CONFIRMED", "UNSUPPORTED"] as const;
 
 /**
  * 【三宅さんの追加指示§7・§13】スキーマは意図的にフラットな構造にする（proposalの
@@ -185,8 +186,16 @@ export const AI_MEETING_TOOL_INPUT_SCHEMA = {
     meetingIntent: { type: "string", enum: INTENT_ENUM },
     potentialStrategicChange: { type: "boolean" },
     potentialStrategicChangeNote: { type: "string" },
+    playerCorrectionStatus: {
+      type: "string",
+      enum: PLAYER_CORRECTION_STATUS_ENUM,
+      description:
+        "プレイヤーの今回の発言がゲーム事実に関する主張・訂正を含む場合、それがExecutiveBriefingPacketと" +
+        "整合すればCONFIRMED、根拠が無ければUNSUPPORTED、事実主張ではない場合はNOT_APPLICABLE。",
+    },
+    playerCorrectionNote: { type: "string" },
   },
-  required: ["primarySpeaker", "responses", "requiresCeoSummary", "proposals", "meetingIntent", "potentialStrategicChange"],
+  required: ["primarySpeaker", "responses", "requiresCeoSummary", "proposals", "meetingIntent", "potentialStrategicChange", "playerCorrectionStatus"],
 } as const;
 
 export type GenerateMeetingResponseErrorCategory = "missing_api_key" | "http_error" | "invalid_json" | "schema_mismatch" | "empty_response" | "network_error";

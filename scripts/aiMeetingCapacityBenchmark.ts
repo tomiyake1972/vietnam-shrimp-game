@@ -95,6 +95,8 @@ function worstCaseResponse(): AiMeetingStructuredResponse {
     meetingIntent: "DEFER_CAPEX",
     potentialStrategicChange: true,
     potentialStrategicChangeNote: repeatToLength("積極拡大から慎重路線への転換を示唆", 80),
+    playerCorrectionStatus: "CONFIRMED",
+    playerCorrectionNote: repeatToLength("受注残はfuture dueでありoverdueではないという指摘を確認", 80),
   };
 }
 
@@ -152,6 +154,7 @@ async function runMockWorstCase(lines: string[]): Promise<void> {
       playerMessage: scenario.playerMessage,
       routingHint: routing,
       meetingIntentHint: null,
+      confirmedCorrections: [],
     });
     lines.push(`| ${scenario.label} | ${recent.length} | ${estimateTokens(userMessage)} |`);
 
@@ -194,6 +197,7 @@ async function runRealApiSmokeTestIfAvailable(lines: string[]): Promise<void> {
     playerMessage: "現金は足りてる？新工場を建てる余裕はある？",
     routingHint: { primary: "CFO", secondary: null },
     meetingIntentHint: null,
+    confirmedCorrections: [],
   });
 
   for (let i = 1; i <= 2; i++) {

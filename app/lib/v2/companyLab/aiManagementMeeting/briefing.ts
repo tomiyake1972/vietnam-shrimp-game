@@ -29,9 +29,29 @@
 
 import { ExplanationContext } from "../aiExplanation/buildExplanationContext";
 import { computeBacklogSemantics } from "./backlogSemantics";
+import { computeFinanceSemantics, FinanceSemantics } from "./financeSemantics";
 import { SalesContract } from "../../sales/types";
+import { PayableRecord, ReceivableRecord } from "../../finance/types";
+import { LoanRecord } from "../../financing/types";
+import { CapitalProject } from "../../capex/types";
 import { LifecycleTrendLabel, SupplyPressureLabel } from "../aiMarketInfoSummary";
 import { ExecutiveRole } from "./types";
+
+/** ExecutiveBriefingPacket・promptの整合性を識別するバージョン（実装指示§20）。prompt.tsのAI_MEETING_PROMPT_VERSIONと対にして管理する。 */
+export const EXECUTIVE_BRIEFING_VERSION = "v3";
+
+/**
+ * 【M2.2追加・実装指示§19】誤解しやすい重要ルールについての、短い固定context
+ * （company状態に依存しない定数）。毎回コンパクトなまま全roleへ渡す
+ * （token増大を最小限にするため、company別に変わる長文説明にはしない）。
+ */
+export const RULE_SEMANTICS: Readonly<Record<string, string>> = {
+  backlog: "受注残（未履行の契約数量）。納期を問わない合計であり、それ自体はoverdue（納期超過）を意味しない。",
+  overdue: "受注残のうち、納期（due turn）が既に過ぎている数量のみ。overdueTonsが0またはbriefingに無ければ、backlogを遅延として説明してはいけない。",
+  healthyForwardBacklog: "納期が未到来の受注残。将来需要の可視化として通常の健全な状態であり、delivery failureではない。",
+  receivables: "売掛金。ShrimpXでは発生四半期からarCollectionQuarters（現在1四半期）後に、市場や商品によらず一律で現金化される。Customer Trustが回収タイミングへ影響するルールは存在しない。",
+  customerTrust: "品質・納期実績を反映するスコア。売掛金の回収タイミングには影響しない（そのようなgame mechanicは存在しない）。",
+};
 
 /** previousQuarterFinancials/previousQuarterMarketは既存のPlayerScreenViewModel型（app/v2層）
  * にあるため、ここでは呼び出し側が必要な数値だけを抜き出した最小限の型として受け取る
@@ -53,12 +73,31 @@ export interface PlayerDraftSummary {
   readonly financingRequestedUsd: number;
 }
 
+/** 【M2.2追加】前四半期に計算済みの実際のBorrowingCapacityResult（既存financing/liquidityClose.tsの結果をそのまま転記するだけ。ここで再計算しない）。 */
+export interface BorrowingHeadroomFact {
+  readonly availableAdditionalCapacityUsd: number;
+  readonly asOfLabel: string;
+}
+
+/** 【M2.2追加】既存Standard AI diagnostics.crisis（crisisState.ts）をそのまま転記するだけ。新しいcrisis判定ロジックは作らない。 */
+export interface CrisisFact {
+  readonly state: "NORMAL" | "LIQUIDITY_STRESS" | "SEVERE_DISTRESS";
+  readonly summary: string;
+}
+
 export interface BriefingBuildInput {
   readonly context: ExplanationContext;
   readonly previousQuarter: PreviousQuarterDelta | null;
   readonly playerDraft: PlayerDraftSummary | null;
   /** 【M2.1追加】Healthy Forward / Due This Turn / Overdueを分離するための生contracts（新しい観測ではなく、既存ownState.contractsをそのまま渡すだけ）。 */
   readonly contracts: readonly SalesContract[];
+  /** 【M2.2追加】CFO Finance Briefing監査（実装指示§4・§5）対応の生finance state（既存ownState.financeState/financingState/capexStateをそのまま渡すだけ）。 */
+  readonly receivables: readonly ReceivableRecord[];
+  readonly payables: readonly PayableRecord[];
+  readonly loans: readonly LoanRecord[];
+  readonly capexProjects: readonly CapitalProject[];
+  readonly borrowingHeadroom: BorrowingHeadroomFact | null;
+  readonly crisis: CrisisFact | null;
 }
 
 const TOP_N_FACTORY = 5;
@@ -83,6 +122,12 @@ export interface BriefingCommonFacts {
   readonly backlog: BacklogSummaryFacts;
   readonly playerDraft: PlayerDraftSummary | null;
   readonly standardAiReasonCodesTopN: readonly { readonly code: string; readonly domain: string; readonly severity: string; readonly targetFactoryId?: string }[];
+  /** 【M2.2追加】briefing/prompt versionの識別子（実装指示§20）。 */
+  readonly briefingVersion: string;
+  /** 【M2.2追加】誤解しやすい重要ルールの短い固定定義（実装指示§19）。 */
+  readonly ruleSemantics: Readonly<Record<string, string>>;
+  /** 【M2.2追加】既存Standard AI crisis判定の転記のみ（新しい危機判定は作らない）。 */
+  readonly crisis: CrisisFact | null;
 }
 
 export interface CfoBriefing {
@@ -94,6 +139,17 @@ export interface CfoBriefing {
   readonly activeLoanCount: number;
   readonly payablesUsd: number;
   readonly receivablesUsd: number;
+  /** 【M2.2追加・実装指示§5「AR balanceとcash collection scheduleを分離」】既存ReceivableRecord.dueSettlementPeriodのみから導出。 */
+  readonly receivablesScheduleByPeriod: readonly { readonly periodLabel: string; readonly amountUsd: number; readonly turnsFromNow: number }[];
+  readonly payablesScheduleByPeriod: readonly { readonly periodLabel: string; readonly amountUsd: number; readonly turnsFromNow: number }[];
+  /** 【M2.2追加】融資の返済延滞（既存LoanRecord.arrearsPrincipalUsd/arrearsInterestUsd）。売掛金にはarrearsフィールドが存在しないため0のみで表現される。 */
+  readonly loanArrearsPrincipalUsd: number;
+  readonly loanArrearsInterestUsd: number;
+  /** 【M2.2追加】承認済み未払CAPEXコミット残高（既存CapitalProject.approvedBudgetUsd - cumulativePaidUsdの合計）。 */
+  readonly activeCapexRemainingCommitmentUsd: number;
+  /** 【M2.2追加】前四半期に計算済みの実際の追加借入余力（既存BorrowingCapacityResult.availableAdditionalCapacityUsdの転記）。turn1等でnull。 */
+  readonly borrowingHeadroom: BorrowingHeadroomFact | null;
+  readonly crisis: CrisisFact | null;
   readonly previousQuarter: PreviousQuarterDelta | null;
 }
 
@@ -184,7 +240,7 @@ const LIFECYCLE_TREND_MEANING: Readonly<Record<LifecycleTrendLabel, string>> = {
 };
 
 export function buildExecutiveBriefingPacket(input: BriefingBuildInput): ExecutiveBriefingPacket {
-  const { context, previousQuarter, playerDraft, contracts } = input;
+  const { context, previousQuarter, playerDraft, contracts, receivables, payables, loans, capexProjects, borrowingHeadroom, crisis } = input;
   const ownState = context.ownState;
   const diagEntries = context.standardAi.diagnosticEntries;
 
@@ -195,6 +251,16 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     dueThisTurnTons: backlogSemantics.dueThisTurnTons,
     overdueTons: backlogSemantics.overdueTons,
   };
+
+  const financeSemantics: FinanceSemantics = computeFinanceSemantics(
+    receivables,
+    payables,
+    loans,
+    capexProjects,
+    context.identity.companyId,
+    context.identity.year,
+    context.identity.quarter
+  );
 
   const reasonCodesTopN = [...diagEntries]
     .sort((a, b) => severityRank(b.severity) - severityRank(a.severity))
@@ -212,6 +278,9 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     backlog: backlogSummary,
     playerDraft,
     standardAiReasonCodesTopN: reasonCodesTopN,
+    briefingVersion: EXECUTIVE_BRIEFING_VERSION,
+    ruleSemantics: RULE_SEMANTICS,
+    crisis,
   };
 
   const cfo: CfoBriefing = {
@@ -223,6 +292,13 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     activeLoanCount: ownState.balanceSheet.activeLoanCount,
     payablesUsd: ownState.balanceSheet.payablesUsd,
     receivablesUsd: ownState.balanceSheet.receivablesUsd,
+    receivablesScheduleByPeriod: financeSemantics.receivablesScheduleByPeriod,
+    payablesScheduleByPeriod: financeSemantics.payablesScheduleByPeriod,
+    loanArrearsPrincipalUsd: financeSemantics.loanArrearsPrincipalUsd,
+    loanArrearsInterestUsd: financeSemantics.loanArrearsInterestUsd,
+    activeCapexRemainingCommitmentUsd: financeSemantics.activeCapexRemainingCommitmentUsd,
+    borrowingHeadroom,
+    crisis,
     previousQuarter,
   };
 

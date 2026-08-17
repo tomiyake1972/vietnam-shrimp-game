@@ -19,7 +19,7 @@ import { AnthropicMessageResponse, AnthropicMessagesClient } from "../../../../.
 import { handleCreateLab } from "../handlers";
 import { CompanyLabApiDependencies } from "../dependencies";
 import { AiMeetingApiDependencies } from "../../[labId]/companies/[companyId]/turns/[turn]/ai-meeting/messages/_lib/dependencies";
-import { handlePostAiMeetingMessage } from "../../[labId]/companies/[companyId]/turns/[turn]/ai-meeting/messages/_lib/handlers";
+import { handleGetAiMeetingConversation, handlePostAiMeetingMessage } from "../../[labId]/companies/[companyId]/turns/[turn]/ai-meeting/messages/_lib/handlers";
 
 const NOW = "2026-08-16T00:00:00.000Z";
 
@@ -81,6 +81,7 @@ const VALID_MEETING_RESPONSE = {
   proposals: [],
   meetingIntent: "PROTECT_CASH",
   potentialStrategicChange: false,
+  playerCorrectionStatus: "NOT_APPLICABLE",
 };
 
 test("AMM-1: playerMessageが空文字列の場合は400", async () => {
@@ -188,4 +189,48 @@ test("AMM-結合: 会話は会話ID単位で永続化され、2回目の呼び�
   );
   assert.equal(second.status, 200);
   assert.equal(calls, 2);
+});
+
+// AMM-FG-5: confirmed player correction retained
+// AMM-FG-6: unsupported player claim not auto-confirmed
+
+test("AMM-FG-5: playerCorrectionStatus=CONFIRMEDの応答は、会話のconfirmedCorrectionsへ記録され、次回呼び出しにも引き継がれる", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-amm-fg5");
+  const confirmedResponse = {
+    ...VALID_MEETING_RESPONSE,
+    playerCorrectionStatus: "CONFIRMED",
+    playerCorrectionNote: "受注残はfuture dueでありoverdueではない（overdueTons=0で確認済み）。",
+  };
+  const client: AnthropicMessagesClient = { messages: { create: async () => toolUseResponse(confirmedResponse) } };
+  const first = await handlePostAiMeetingMessage(deps, "lab-amm-fg5", "BAL", "1", { playerMessage: "受注残は納期遅延ではないです" }, client);
+  assert.equal(first.status, 200);
+  const firstBody = first.body as { meetingId: string; playerCorrectionStatus: string };
+  assert.equal(firstBody.playerCorrectionStatus, "CONFIRMED");
+
+  // 2回目の呼び出しでも会話が引き継がれ、confirmedCorrectionsが保持されていることをGETで確認する。
+  const getResult = await handleGetAiMeetingConversation(deps, "lab-amm-fg5", "BAL", firstBody.meetingId);
+  assert.equal(getResult.status, 200);
+  const conversation = getResult.body as { confirmedCorrections: readonly { note: string }[] };
+  assert.equal(conversation.confirmedCorrections.length, 1);
+  assert.ok(conversation.confirmedCorrections[0].note.includes("overdueTons=0"));
+});
+
+test("AMM-FG-6: playerCorrectionStatus=UNSUPPORTEDの応答は、confirmedCorrectionsへ記録されない", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-amm-fg6");
+  const unsupportedResponse = {
+    ...VALID_MEETING_RESPONSE,
+    playerCorrectionStatus: "UNSUPPORTED",
+    playerCorrectionNote: "この借金が来期全額返済されるという記載はBriefingPacketにはありません。",
+  };
+  const client: AnthropicMessagesClient = { messages: { create: async () => toolUseResponse(unsupportedResponse) } };
+  const first = await handlePostAiMeetingMessage(deps, "lab-amm-fg6", "BAL", "1", { playerMessage: "この借金は来期全部返済される" }, client);
+  assert.equal(first.status, 200);
+  const firstBody = first.body as { meetingId: string; playerCorrectionStatus: string };
+  assert.equal(firstBody.playerCorrectionStatus, "UNSUPPORTED");
+
+  const getResult = await handleGetAiMeetingConversation(deps, "lab-amm-fg6", "BAL", firstBody.meetingId);
+  const conversation = getResult.body as { confirmedCorrections: readonly unknown[] };
+  assert.equal(conversation.confirmedCorrections.length, 0);
 });
