@@ -256,6 +256,7 @@ test("AMM-ACC-12: CFO briefingのfinancialStatements/pnlVariance/volumePriceFact
     borrowingHeadroom: null,
     crisis: null,
     financialHistory,
+    operationalHistory: { reportingPeriod: null, priorPeriod: null },
   };
   const a = buildExecutiveBriefingPacket(buildInput);
   const b = buildExecutiveBriefingPacket(buildInput);

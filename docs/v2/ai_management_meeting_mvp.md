@@ -771,3 +771,164 @@ P&L/Cash Flow/Balance Sheetの構造的分離・variance分析・Operating Profi
 区別・会計用語ガードレール・player correctionの会計カテゴリへの拡張が、コード・
 テスト・prompt文言の3層で揃った。次のTest26継続セッションでは、Turn2の「2Qが営業赤字
 ですか？理由は？」を含む会計関連の質問系列を優先的に再検証することを推奨する。
+
+## 24. M2.4（Operational KPI Semantic Grounding / Forward Obligation Risk）追記
+
+### 24.1 root causes
+
+Test26 BAL Turn4「現在の当社業績を分析して」で、会議形式・役割分担は改善したが、
+Databookと照合すると複数のFact/Semantic Errorが残っていた: (1) overdueTons=0の
+健全なforward backlog（8,988.43t）と「現在の納期遅延」の混同余地、(2)
+equipmentUtilization(47.44%)とlaborUtilization(95.32%)を「utilization」に一括して
+「工場全体が能力上限」と誤解させる余地、(3) company-wide equipment utilizationだけ
+では見えない商品別ローカルボトルネック（PD equipment shortage=1,015t）、(4)
+rawMaterial(3,074.72t)/equipment(1,015t)/labor(0t)のshortfall優先順位が不明確、(5)
+opening/ending/in-transit等の在庫種別が区別されず曖昧な在庫発言の余地、(6)
+regular(4,140)/temporary(575)workerの区別欠如、(7) interest-bearing debt
+（約$49.046M）とtotal liabilities（約$64M）の混同。根本原因はCFO/COO向けbriefingが
+これらのKPIを構造的に分離せず渡していた（またはCOO側にutilization/bottleneck/
+inventory/workforceの各KPIが一切渡っていなかった）ため、Claudeが生の内部指標を
+自由解釈する余地があったこと。
+
+### 24.2 COO briefing before/after
+
+- before: `coo.rawMaterialTotalTons`・`coo.totalRegularHeadcount`のみで、utilization・
+  bottleneck優先順位・在庫種別・temporary workerは一切渡っていなかった。
+- after: `coo.utilization`（equipmentUtilizationRate/laborUtilizationRate/overtimeRate/
+  temporaryWorkerShareを別フィールドで保持）、`coo.bottleneck`（rawMaterial/equipment/
+  laborのshortfall量＋primary/secondaryBottleneck＋商品別productBottlenecks）、
+  `coo.inventory`（ending/opening/in-transit/arrived/domestic purchaseを分離）、
+  `coo.workforce`（regularWorkers/temporaryWorkers/overtimeRateを分離）が追加された。
+
+### 24.3 Commercial briefing before/after
+
+M2.1〜M2.3で既に整備済みのbacklog分離（healthyForward/dueThisTurn/overdue）・
+customerTrustByMarketをそのまま利用。M2.4での変更は無く、promptガードレール側で
+「future delivery obligation」という用語・FACT→JUDGMENTの順序を明示的に追加した
+（実装指示§1・§2）。
+
+### 24.4 CFO debt terminology
+
+`cfo.interestBearingDebtUsd`（= shortTermLoansUsd + longTermLoansUsd、既存フィールドの
+単純合算のみ）を新規追加し、既存の`cfo.totalLiabilitiesUsd`（買掛金その他負債込み）と
+明確に区別した。RuleSemanticsへ`interestBearingDebt`/`totalLiabilities`の2エントリを
+追加。
+
+### 24.5 bottleneck semantics
+
+`operationalSemantics.ts`の`computeBottleneckHierarchy`が、rawMaterialShortageTons/
+equipmentShortageTons/laborShortageTonsのうちlost production（shortfall量）が最大の
+ものをprimary、次点をsecondaryとして機械的に判定する（新しい経営判断ロジックでは
+なく、既存reasonCodes.tsの会社全体集計と同じフィルタ条件の単純な優先順位付け）。
+商品別equipment shortageは、既存`ProductionAllocationEntry`（companyId×factoryId×
+product単位）をproductでグルーピングする単純集計で導出した（新しい生産判定は
+一切追加していない）。
+
+### 24.6 utilization semantics
+
+`coo.utilization`でequipmentUtilizationRate/laborUtilizationRate/overtimeRateを
+独立したフィールドとして保持し、prompt.tsに「utilization」への一括表現の明示的な
+禁止を追加した。
+
+### 24.7 inventory semantics
+
+`coo.inventory`でendingRawMaterialInventoryTons（当期末）・
+openingRawMaterialInventoryTons（前期末、無ければnull）・
+endingFinishedGoodsInventoryTons・importInTransitTons・importArrivedTons・
+domesticPurchaseTonsを分離した。すべて既存`CompanyQuarterSummary`のフィールドを
+そのまま転記するだけで、新しい在庫計算は一切追加していない。
+
+### 24.8 workforce semantics
+
+`coo.workforce`でregularWorkers/temporaryWorkersを別フィールドとして保持した。
+既存`WorkerAssignment`（該当四半期のdecisions.workerAssignments）のregularHeadcount/
+temporaryHeadcountを会社全体で単純合算するだけで、新しい人員計算は一切追加して
+いない。
+
+### 24.9 forward obligation handling
+
+RuleSemanticsへ`futureDeliveryObligation`エントリを追加し、prompt.tsに「overdueTons=0
+の場合、納期遅延/履行遅延/納期未達/契約違反が既に発生/Trustを既に毀損という表現を
+禁止し、future delivery obligation/次四半期に履行すべき受注/capacity planning上の
+負荷/将来のdelivery riskという表現のみ許可する」旨、および「Healthy Forward Backlogが
+次期能力を超える可能性がある場合はリスクとして議論してよいが、必ずFACTを先に述べ、
+その後にJUDGMENTを続ける」という順序規律を追加した（実装指示§1・§2）。
+
+### 24.10 Test26 Turn4 reproduction
+
+`app/lib/v2/companyLab/aiManagementMeeting/__tests__/operationalSemantics.test.ts`の
+AMM-OPS-10で、実装指示冒頭の実データ（equipmentUtilization=47.44%/
+laborUtilization=95.32%/overtimeRate=8.21%、rawMaterialShortage=3,074.72t/
+equipmentShortage=1,015t/laborShortage=0t、regularWorkers=4,140/
+temporaryWorkers=575、endingRawMaterialInventory=0t）から、primary
+bottleneck=RAW_MATERIAL・secondary=EQUIPMENT・PD商品別equipmentShortageTons=1,015が
+正しく導出されることを確認した。`scripts/aiMeetingRealApiSmokeTest.ts`へ、実際の
+プレイヤー発言「現在の当社業績を分析して」を使う「9F. Test26 BAL Turn4再現」
+ケースも追加した。
+
+### 24.11 code changes
+
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/operationalSemantics.ts`
+  （UtilizationPacket/BottleneckPacket/InventoryPacket/WorkforcePacket + builder関数 +
+  computeBottleneckHierarchy）
+- 変更: `briefing.ts`（`operationalHistory`入力、`coo.utilization`/`coo.bottleneck`/
+  `coo.inventory`/`coo.workforce`/`cfo.interestBearingDebtUsd`を追加、RuleSemantics
+  9エントリ追加、`EXECUTIVE_BRIEFING_VERSION`を"v4"→"v5"）
+- 変更: `prompt.ts`（backlog現在/将来区別・utilization分離・bottleneck階層・在庫/人員
+  semantics・debt semantics・wide question 1〜2論点規律を追加、
+  `AI_MEETING_PROMPT_VERSION`を"v4"→"v5"）
+- 変更: `handlers.ts`（`loadFinancialSnapshot`を`loadQuarterSnapshot`へ拡張し、
+  companySummaries・workerAssignments（decisions）・productionAllocation.entriesを
+  同一repository呼び出しから取得、`operationalHistory`を配線）
+- 既存のfinance/quarterClose.ts・production engine・Standard AI・Sales/pricing
+  エンジン・Trust・game parametersは一切変更していない（実装指示の禁止事項の遵守）。
+
+### 24.12 tests
+
+`app/lib/v2/companyLab/aiManagementMeeting/__tests__/operationalSemantics.test.ts`に
+AMM-OPS-1〜10（10件）を新規追加。既存4テストファイル（backlogSemantics.test.ts・
+briefing.test.ts・factGrounding.test.ts・accountingSemantics.test.ts）は、
+`operationalHistory`フィールド追加に伴う呼び出しシグネチャの変更のみ機械的に対応
+（`operationalHistory: { reportingPeriod: null, priorPeriod: null }`）。
+factGrounding.test.ts AMM-FG-9のversion識別テストを"v4"→"v5"へ更新。AMM系テスト
+計59件、プロジェクト全体3167件、いずれもpass。
+
+### 24.13 real API結果
+
+このセッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため未実施
+（M2.1〜M2.3と同様）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、Test26 BAL Turn4の
+実会話再現ケース「9F. Test26 BAL Turn4再現（operational KPI grounding・wide
+question）」（プレイヤー発言「現在の当社業績を分析して」、`test26Turn4Briefing()`に
+実データベースのutilization/bottleneck/inventory/workforceを組み込み済み）を
+追加した（計14ケース）。`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで、
+「工場全体が能力上限」と言わない・PD equipment shortageを局所的制約として区別・
+primary bottleneckをraw materialと認識・labor shortageによるlost productionは無いと
+明示・8,988tをoverdue=0のforward backlogとして扱う・US PD4,000/EU PD1,550を次期
+obligationとして述べる・有利子負債と負債合計を混同しない、という方向で各役員が
+応答するかを確認できる。
+
+### 24.14 remaining risks
+
+- M2.1〜M2.3と同様、prompt文言による誘導であり、Claudeの出力を機械的に強制する
+  仕組みではない。実API未検証のため、実際の応答品質（特に9Fケースでの改善）は
+  引き続き確認が必要。
+- `operationalHistory`は`financialHistory`と同じ`CompanyLabHistoryEntryNotFoundError`
+  捕捉によりnull化される。turn1等、履歴が浅い場合は`coo.utilization`等がnullのまま
+  となり、COOが「データが無いため分析できない」と答えることが期待されるが、実応答
+  での確認は未実施。
+- 商品別bottleneck集計は、1つの`ProductionAllocationEntry`が複数のshortfallReasons
+  を同時に持つ場合、各カテゴリへ同じshortfallQuantityが重複計上される（既存
+  reasonCodes.tsの会社全体集計と同じ単純化。実装指示の範囲では許容されるが、将来
+  より精緻な内訳が必要になった場合は要検討）。
+- 「臨時/季節ワーカーの意思決定」（temporaryWorkers）は該当四半期の`decisions`
+  レコードから取得するため、turn1等でdecisionsが空の場合は0として扱われる
+  （捏造ではなく「無ければ0」という設計だが、「未決定」と「決定して0人」の区別は
+  現状できない）。
+
+### 24.15 readiness for continued Test26
+
+Operational KPIの構造的分離（utilization/bottleneck/inventory/workforce）・
+forward obligation riskのFACT→JUDGMENT順序規律・debt terminology区別・wide question
+1〜2論点規律が、コード・テスト・prompt文言の3層で揃った。次のTest26継続セッション
+では、Turn4の「現在の当社業績を分析して」を含む広範な業績分析質問系列を優先的に
+再検証することを推奨する。

@@ -144,7 +144,7 @@ test("AMM-BL-5: market別合計・product別合計はいずれもtotal backlog�
 
 test("AMM-BL-6: BriefingPacketにbacklogからTrust悪化を直接断定するfieldは存在せず、promptにも根拠なき断定禁止が明記されている", () => {
   const context = minimalContext();
-  const packet = buildExecutiveBriefingPacket({ context, previousQuarter: null, playerDraft: null, contracts: [], receivables: [], payables: [], loans: [], capexProjects: [], borrowingHeadroom: null, crisis: null, financialHistory: { reportingPeriod: null, priorPeriod: null } });
+  const packet = buildExecutiveBriefingPacket({ context, previousQuarter: null, playerDraft: null, contracts: [], receivables: [], payables: [], loans: [], capexProjects: [], borrowingHeadroom: null, crisis: null, financialHistory: { reportingPeriod: null, priorPeriod: null }, operationalHistory: { reportingPeriod: null, priorPeriod: null } });
   // customerTrustByMarket/deliveryReliabilityByMarketは既存の実測値としてそのまま渡るが、
   // backlogとtrustを結合した「trustRiskFromBacklog」のような派生フィールドは存在しないこと。
   assert.equal((packet.commercial as unknown as Record<string, unknown>).trustRiskFromBacklog, undefined);
@@ -172,7 +172,7 @@ test("AMM-BL-7: Test26 BAL Turn1 fixture相当（total 3063.42, overdue 0, US/EU
 
 test("AMM-BL-8: supplyPressureCountという生カウントは廃止され、product別のlabel+humanMeaningが渡される", () => {
   const context = minimalContext();
-  const packet = buildExecutiveBriefingPacket({ context, previousQuarter: null, playerDraft: null, contracts: [], receivables: [], payables: [], loans: [], capexProjects: [], borrowingHeadroom: null, crisis: null, financialHistory: { reportingPeriod: null, priorPeriod: null } });
+  const packet = buildExecutiveBriefingPacket({ context, previousQuarter: null, playerDraft: null, contracts: [], receivables: [], payables: [], loans: [], capexProjects: [], borrowingHeadroom: null, crisis: null, financialHistory: { reportingPeriod: null, priorPeriod: null }, operationalHistory: { reportingPeriod: null, priorPeriod: null } });
   assert.equal((packet.commercial as unknown as Record<string, unknown>).supplyPressureCount, undefined);
   assert.equal(packet.commercial.supplyPressureFacts.length, 2);
   const pd = packet.commercial.supplyPressureFacts.find((f) => f.product === "pd");
@@ -186,7 +186,7 @@ test("AMM-BL-9: turn/quarterラベルが正確（前四半期ラベルが今期�
     context,
     previousQuarter: { cashUsd: 1, netRevenueUsd: 2, operatingProfitUsd: 3, periodLabel: "2015年Q4" },
     playerDraft: null,
-    contracts: [], receivables: [], payables: [], loans: [], capexProjects: [], borrowingHeadroom: null, crisis: null, financialHistory: { reportingPeriod: null, priorPeriod: null } });
+    contracts: [], receivables: [], payables: [], loans: [], capexProjects: [], borrowingHeadroom: null, crisis: null, financialHistory: { reportingPeriod: null, priorPeriod: null }, operationalHistory: { reportingPeriod: null, priorPeriod: null } });
   assert.equal(packet.common.year, 2016);
   assert.equal(packet.common.quarter, 1);
   assert.equal(packet.commercial.lastQuarterLabel, "2015年Q4");

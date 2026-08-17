@@ -19,6 +19,8 @@ import { AnthropicMessagesClient, generateMeetingResponse } from "../../../../..
 import { BorrowingHeadroomFact, buildExecutiveBriefingPacket, CrisisFact, PlayerDraftSummary } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/briefing";
 import { CompanyLabHistoryEntryNotFoundError } from "../../../../../../../../../../../lib/v2/companyLab/persistence/errors";
 import { BalanceSheet, CashFlowStatement, ProfitAndLossStatement } from "../../../../../../../../../../../lib/v2/finance/types";
+import { CompanyQuarterSummary } from "../../../../../../../../../../../lib/v2/companyLab/types";
+import { ProductionAllocationEntry, WorkerAssignment } from "../../../../../../../../../../../lib/v2/production/types";
 import { routePlayerMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/router";
 import { AI_MEETING_PROMPT_VERSION, buildMeetingUserMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/prompt";
 import {
@@ -159,12 +161,19 @@ export async function handlePostAiMeetingMessage(
   // をそのまま使うだけで、新しい永続化経路・新しい会計計算は一切追加しない。
   // turn1・turn2等で該当履歴が存在しない場合はCompanyLabHistoryEntryNotFoundErrorを
   // 捕捉してnullとする（捏造しない）。
-  async function loadFinancialSnapshot(targetTurn: number): Promise<{
+  // 【M2.4追加・実装指示§3-§8】Operational KPI Semantic Grounding / Forward Obligation
+  // Riskのための同一四半期スナップショットへ、companySummaries・workerAssignments
+  // （decisions）・productionAllocation.entriesを追加で含める（同じrepository呼び出し
+  // 結果を再利用するだけで、新しい永続化読込経路は追加しない）。
+  async function loadQuarterSnapshot(targetTurn: number): Promise<{
     readonly pnl: ProfitAndLossStatement;
     readonly cashFlow: CashFlowStatement;
     readonly balanceSheet: BalanceSheet;
     readonly periodLabel: string;
     readonly fulfilledQuantityTons: number;
+    readonly summary: CompanyQuarterSummary;
+    readonly workerAssignments: readonly WorkerAssignment[];
+    readonly productionEntries: readonly ProductionAllocationEntry[];
   } | null> {
     if (targetTurn < 1) return null;
     try {
@@ -173,12 +182,16 @@ export async function handlePostAiMeetingMessage(
       const summary = entry.record.companySummaries.find((s) => s.companyId === companyId);
       if (!financialResult || !summary) return null;
       const yq = toYearQuarter(entry.period as never);
+      const decision = entry.record.decisions.find((d) => d.companyId === companyId);
       return {
         pnl: financialResult.profitAndLoss,
         cashFlow: financialResult.cashFlow,
         balanceSheet: financialResult.balanceSheet,
         periodLabel: `${yq.year}年Q${yq.quarter}`,
         fulfilledQuantityTons: Number(summary.fulfilledQuantity),
+        summary,
+        workerAssignments: decision?.workerAssignments ?? [],
+        productionEntries: entry.record.productionAllocation.entries.filter((e) => e.companyId === companyId),
       };
     } catch (e) {
       if (e instanceof CompanyLabHistoryEntryNotFoundError) return null;
@@ -186,8 +199,8 @@ export async function handlePostAiMeetingMessage(
     }
   }
 
-  const reportingPeriodSnapshot = await loadFinancialSnapshot(viewModel.currentTurn - 1);
-  const priorPeriodSnapshot = await loadFinancialSnapshot(viewModel.currentTurn - 2);
+  const reportingPeriodSnapshot = await loadQuarterSnapshot(viewModel.currentTurn - 1);
+  const priorPeriodSnapshot = await loadQuarterSnapshot(viewModel.currentTurn - 2);
 
   const briefing = buildExecutiveBriefingPacket({
     context,
@@ -207,6 +220,17 @@ export async function handlePostAiMeetingMessage(
     financialHistory: {
       reportingPeriod: reportingPeriodSnapshot,
       priorPeriod: priorPeriodSnapshot ? { pnl: priorPeriodSnapshot.pnl, periodLabel: priorPeriodSnapshot.periodLabel, fulfilledQuantityTons: priorPeriodSnapshot.fulfilledQuantityTons } : null,
+    },
+    operationalHistory: {
+      reportingPeriod: reportingPeriodSnapshot
+        ? {
+            summary: reportingPeriodSnapshot.summary,
+            workerAssignments: reportingPeriodSnapshot.workerAssignments,
+            productionEntries: reportingPeriodSnapshot.productionEntries,
+            periodLabel: reportingPeriodSnapshot.periodLabel,
+          }
+        : null,
+      priorPeriod: priorPeriodSnapshot ? { summary: priorPeriodSnapshot.summary } : null,
     },
   });
 

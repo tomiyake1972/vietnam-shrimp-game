@@ -40,12 +40,26 @@
 // 説明し続けた。根本原因はbriefing側がP&L・Cash Flow・Balance Sheetを区別せず渡していた
 // ことにあり（詳細はpnlSemantics.tsのコメント参照）、プロンプト側にも以下の明示的な
 // 会計ガードレールを追加し、二重に防御する（実装指示§7・§8・§11・§13・§14・§15・§17・§18）。
+//
+// 【M2.4・Operational KPI Semantic Grounding / Forward Obligation Risk】
+// Test26 BAL Turn4で「現在の当社業績を分析して」という質問に対し、会議形式・役割分担は
+// 改善したが、Databookと照合すると複数のFact/Semantic Errorが残っていた: overdue=0の
+// 健全なforward backlogと「現在の納期遅延」の混同余地、equipmentUtilization(47.44%)と
+// laborUtilization(95.32%)を「utilization」に一括して「工場全体が能力上限」と誤解させる
+// 余地、company-wide equipment utilizationだけでは見えない商品別ローカルボトルネック
+// （PD equipment shortage=1,015t）、rawMaterial/equipment/laborのshortfall優先順位が
+// 不明確、opening/ending/in-transit等の在庫種別の混同、regular/temporary workerの
+// 区別欠如、interest-bearing debtとtotal liabilitiesの混同。根本原因はbriefingが
+// これらのKPIをそのまま渡さず、Claudeが生の内部指標を自由解釈する余地があったことに
+// あり（詳細はoperationalSemantics.tsのコメント参照）、briefing側でKPIごとに意味を
+// 明示したpacketへ分離した上、プロンプト側にも以下の明示的なガードレールを追加する
+// （実装指示§1-§9）。
 
 import { EXECUTIVE_ROLE_DEFINITIONS } from "./roles";
 import { AI_MEETING_PROPOSAL_LIMITS } from "./proposalSchema";
 import { AiMeetingIntent, ExecutiveRole } from "./types";
 
-export const AI_MEETING_PROMPT_VERSION = "v4";
+export const AI_MEETING_PROMPT_VERSION = "v5";
 
 const rolesDescriptionJa = (Object.values(EXECUTIVE_ROLE_DEFINITIONS) as (typeof EXECUTIVE_ROLE_DEFINITIONS)[ExecutiveRole][])
   .map((r) => `- ${r.role}（${r.titleJa}）: ${r.personalityJa} 担当領域: ${r.responsibilityJa}`)
@@ -212,6 +226,58 @@ export const AI_MANAGEMENT_MEETING_SYSTEM_PROMPT = [
   "  Profitability（収益性・P&L）、Liquidity（流動性・現金）、Solvency（支払能力・BS）、",
   "  Working Capital（運転資本）、Investment Affordability（投資余力）は、それぞれ別の",
   "  概念として扱ってください。",
+  "",
+  "【backlog: 現在の遅延と将来のdelivery riskの区別（M2.4で追加・実装指示§1・§2）】",
+  "  overdueTonsが0の場合、「納期遅延」「履行遅延」「納期未達」「契約違反が既に発生」",
+  "  「Trustを既に毀損」という表現は禁止です。代わりに「future delivery obligation」",
+  "  「次四半期に履行すべき受注」「capacity planning上の負荷」「将来のdelivery risk」",
+  "  という表現のみ許可されます。「現在遅れている」ことと「将来遅れるリスクがある」ことを",
+  "  明確に区別してください。Healthy Forward Backlogが次期の能力を超える可能性がある場合、",
+  "  リスクとして議論して構いませんが、その際は必ずFACT（例:「US PD 4,000tが来期納期」）を",
+  "  先に述べ、その後にJUDGMENT（例:「現在のPD能力・原料制約を踏まえるとfulfillment riskが",
+  "  ある」）を続ける順序で述べてください。FACTとJUDGMENTを混ぜて、リスクをあたかも",
+  "  既に発生した事実であるかのように述べてはいけません。",
+  "",
+  "【utilization semantics（M2.4で追加・実装指示§3）】coo.utilizationの",
+  "  equipmentUtilizationRate・laborUtilizationRate・overtimeRateは別々のKPIです。",
+  "  「utilization」と一括して表現してはいけません。設備稼働率が低く労務稼働率が高い場合、",
+  "  「工場全体が能力上限」と言ってはいけません。正しい表現の例:「設備全体には余力がある",
+  "  一方、労務稼働率は高い」。",
+  "",
+  "【product-specific bottleneck（M2.4で追加・実装指示§4・§5）】coo.bottleneckの",
+  "  company-wide equipmentShortageTonsが小さくても、productBottlenecksに特定商品の",
+  "  equipmentShortageTonsが大きい値で存在する場合は、それを局所的な制約として",
+  "  説明してください（例:「全工場設備不足」ではなく「PDラインには局所的な能力制約」）。",
+  "  primaryBottleneck・secondaryBottleneckフィールドは、rawMaterialShortageTons・",
+  "  equipmentShortageTons・laborShortageTonsのうちlost production（shortfall量）が",
+  "  最大のものを機械的に示しています。この順序を無視して独自にボトルネックを",
+  "  再解釈しないでください。laborShortageTonsが0でlaborUtilizationRateが高い場合は、",
+  "  「労務稼働率は高いが、労働不足によるlost productionは無い」と区別して述べてください。",
+  "",
+  "【inventory semantics（M2.4で追加・実装指示§6）】coo.inventoryは",
+  "  endingRawMaterialInventoryTons（当期末）・openingRawMaterialInventoryTons（前期末、",
+  "  無ければnull）・endingFinishedGoodsInventoryTons・importInTransitTons（輸入未着）・",
+  "  importArrivedTons（輸入着荷）・domesticPurchaseTons（当期国内調達）を区別しています。",
+  "  「原料在庫◯◯t」とだけ言う場合はendingRawMaterialInventoryTons（当期末）の値を",
+  "  使い、どの時点の在庫かを明示してください。BriefingPacketに存在しない在庫数値を",
+  "  発言してはいけません。",
+  "",
+  "【workforce semantics（M2.4で追加・実装指示§7）】coo.workforceは",
+  "  regularWorkers（常用ワーカー）とtemporaryWorkers（臨時ワーカー）を別項目で",
+  "  保持しています。この2つを合算した独自の人数や、BriefingPacketに存在しない",
+  "  人数を発言してはいけません。overtimeRateもworkforceとは別の指標として扱って",
+  "  ください。",
+  "",
+  "【debt semantics（M2.4で追加・実装指示§8）】cfo.interestBearingDebtUsd（短期借入＋",
+  "  長期借入の有利子負債のみ）とcfo.totalLiabilitiesUsd（買掛金その他負債を含む負債",
+  "  合計）は別の概念です。「有利子負債」と言う場合はinterestBearingDebtUsdのみを使い、",
+  "  totalLiabilitiesUsdの値を「有利子負債」として述べてはいけません。",
+  "",
+  "【wide questionへの応答（M2.4で追加・実装指示§9）】「現在の当社業績を分析して」",
+  "  のような広い質問の場合、各役員は全KPIを羅列するのではなく、それぞれ最も重要な",
+  "  論点を1〜2個選んで述べてください。推奨方向: CFOはprofitability/liquidity/",
+  "  leverageから、COOはreal bottleneck/次期執行リスクから、Commercialはforward order",
+  "  book/pricing/trust/sales opportunityから、それぞれ最重要のものを選択してください。",
   "",
   "【会計カテゴリの誤りに対するプレイヤー訂正（M2.3で追加）】プレイヤーが",
   '  「P&LとCash Flowを混同している」のような会計カテゴリの誤りを指摘した場合、',

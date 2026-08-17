@@ -287,6 +287,85 @@ function test26Turn2Briefing() {
   };
 }
 
+/**
+ * 【M2.4追加・実装指示§10】Test26 BAL Turn4の実再現ケース用briefing。「現在の当社業績を
+ * 分析して」への回答で、utilization混同・商品別equipment shortageの見落とし・
+ * interest-bearing debtとtotal liabilitiesの混同等が残っていた実会話を再現する。
+ * 実装指示冒頭の実データ（Cash≈$41.196M、短期借入≈$25.046M、長期借入≈$24.000M、
+ * backlog=8,988.43t/overdue=0、equipmentUtilization=47.44%/laborUtilization=95.32%/
+ * overtimeRate=8.21%、regularWorkers=4,140/temporaryWorkers=575、
+ * endingRawMaterialInventory=0t、rawMaterialShortage=3,074.72t/
+ * equipmentShortage=1,015t/laborShortage=0t）に基づく。
+ */
+function test26Turn4Briefing() {
+  const base = test26Turn1Briefing();
+  return {
+    ...base,
+    common: {
+      ...base.common,
+      turn: 4,
+      quarter: 4,
+      cashUsd: 41_196_000,
+      backlog: { totalTons: 8988.43, healthyForwardTons: 8988.43, dueThisTurnTons: 0, overdueTons: 0 },
+    },
+    cfo: {
+      ...base.cfo,
+      totalAssetsUsd: 150_000_000,
+      totalLiabilitiesUsd: 64_000_000,
+      totalEquityUsd: 86_000_000,
+      shortTermLoansUsd: 25_046_000,
+      longTermLoansUsd: 24_000_000,
+      // 【M2.4追加・実装指示§8】interestBearingDebtUsd（有利子負債のみ）とtotalLiabilitiesUsd（負債合計）を区別。
+      interestBearingDebtUsd: 49_046_000,
+    },
+    coo: {
+      ...base.coo,
+      rawMaterialTotalTons: 0,
+      totalRegularHeadcount: 4140,
+      qualityScoreByProduct: { hoso: 76.99, pd: 77.1, vap: 77.26 },
+      // 【M2.4追加・実装指示§3】equipmentUtilization/laborUtilization/overtimeRateを別KPIとして保持。
+      utilization: {
+        periodLabel: "2015年Q4",
+        equipmentUtilizationRate: 0.4744,
+        laborUtilizationRate: 0.9532,
+        overtimeRate: 0.0821,
+        temporaryWorkerShare: 575 / (4140 + 575),
+      },
+      // 【M2.4追加・実装指示§4・§5】rawMaterial/equipment/laborのshortfall優先順位＋商品別equipment shortage。
+      bottleneck: {
+        periodLabel: "2015年Q4",
+        rawMaterialShortageTons: 3074.72,
+        equipmentShortageTons: 1015,
+        laborShortageTons: 0,
+        primaryBottleneck: "RAW_MATERIAL",
+        secondaryBottleneck: "EQUIPMENT",
+        productBottlenecks: [{ product: "pd", rawMaterialShortageTons: 0, equipmentShortageTons: 1015, laborShortageTons: 0 }],
+      },
+      // 【M2.4追加・実装指示§6】opening/ending/in-transit/domestic purchaseを区別した在庫。
+      inventory: {
+        periodLabel: "2015年Q4",
+        endingRawMaterialInventoryTons: 0,
+        openingRawMaterialInventoryTons: 1200,
+        endingFinishedGoodsInventoryTons: 2500,
+        importInTransitTons: 300,
+        importArrivedTons: 4500,
+        domesticPurchaseTons: 6000,
+      },
+      // 【M2.4追加・実装指示§7】regular/temporary workerを別項目化。
+      workforce: { periodLabel: "2015年Q4", regularWorkers: 4140, temporaryWorkers: 575, overtimeRate: 0.0821 },
+    },
+    commercial: {
+      ...base.commercial,
+      backlog: { totalTons: 8988.43, healthyForwardTons: 8988.43, dueThisTurnTons: 0, overdueTons: 0 },
+      backlogByMarketProduct: [
+        { market: "US", product: "pd", totalTons: 4000, overdueTons: 0, dueThisTurnTons: 0, healthyForwardTons: 4000, earliestDueLabel: "2016年Q1" },
+        { market: "EU", product: "pd", totalTons: 1549.61, overdueTons: 0, dueThisTurnTons: 0, healthyForwardTons: 1549.61, earliestDueLabel: "2016年Q1" },
+      ],
+      customerTrustByMarket: { US: 56.5, EU: 56.5, JP: 56.5, OTHER: 56.5 },
+    },
+  };
+}
+
 interface SmokeCase {
   readonly label: string;
   readonly playerMessage: string;
@@ -295,6 +374,8 @@ interface SmokeCase {
   readonly useTest26Briefing?: boolean;
   /** 【M2.3追加】trueの場合、test26Turn2Briefing()（accounting grounding再現ケース）を使う。 */
   readonly useTest26Turn2Briefing?: boolean;
+  /** 【M2.4追加】trueの場合、test26Turn4Briefing()（operational KPI grounding再現ケース）を使う。 */
+  readonly useTest26Turn4Briefing?: boolean;
 }
 
 const SMOKE_CASES: readonly SmokeCase[] = [
@@ -365,6 +446,19 @@ const SMOKE_CASES: readonly SmokeCase[] = [
     historyCount: 0,
     useTest26Turn2Briefing: true,
   },
+  {
+    // 【M2.4追加・実装指示§10・§20】Test26 BAL Turn4で実際に問題が残った、実際の
+    // プレイヤー発言そのものでの再現テスト。期待する回答の方向性: 「工場全体が能力上限」
+    // と言わない（equipmentUtilization 47.44% != laborUtilization 95.32%）、PD equipment
+    // shortage(1,015t)を局所的制約として区別、primary bottleneckはraw material、
+    // labor shortageによるlost productionは無いと明示、backlog 8,988tはoverdue=0の
+    // forward backlogであり現在の納期遅延ではない、US PD4,000/EU PD1,550は次期納期の
+    // obligationとして述べる、有利子負債($49.0M)と負債合計($64M)を混同しない。
+    label: "9F. Test26 BAL Turn4再現（operational KPI grounding・wide question）",
+    playerMessage: "現在の当社業績を分析して",
+    historyCount: 0,
+    useTest26Turn4Briefing: true,
+  },
 ];
 
 function dummyHistory(count: number): AiMeetingMessage[] {
@@ -397,7 +491,13 @@ interface CaseResult {
 }
 
 async function runCase(scenario: SmokeCase): Promise<CaseResult> {
-  const briefing = scenario.useTest26Turn2Briefing ? test26Turn2Briefing() : scenario.useTest26Briefing ? test26Turn1Briefing() : sampleBriefing();
+  const briefing = scenario.useTest26Turn4Briefing
+    ? test26Turn4Briefing()
+    : scenario.useTest26Turn2Briefing
+      ? test26Turn2Briefing()
+      : scenario.useTest26Briefing
+        ? test26Turn1Briefing()
+        : sampleBriefing();
   const history = dummyHistory(scenario.historyCount);
   const { recent, compactSummary } = buildRecentHistoryForPrompt(history);
   const routing = routePlayerMessage(scenario.playerMessage);

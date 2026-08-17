@@ -46,9 +46,21 @@ import { LoanRecord } from "../../financing/types";
 import { CapitalProject } from "../../capex/types";
 import { LifecycleTrendLabel, SupplyPressureLabel } from "../aiMarketInfoSummary";
 import { ExecutiveRole } from "./types";
+import {
+  buildBottleneckPacket,
+  buildInventoryPacket,
+  buildUtilizationPacket,
+  buildWorkforcePacket,
+  BottleneckPacket,
+  InventoryPacket,
+  UtilizationPacket,
+  WorkforcePacket,
+} from "./operationalSemantics";
+import { CompanyQuarterSummary } from "../types";
+import { ProductionAllocationEntry, WorkerAssignment } from "../../production/types";
 
 /** ExecutiveBriefingPacket・promptの整合性を識別するバージョン（実装指示§20）。prompt.tsのAI_MEETING_PROMPT_VERSIONと対にして管理する。 */
-export const EXECUTIVE_BRIEFING_VERSION = "v4";
+export const EXECUTIVE_BRIEFING_VERSION = "v5";
 
 /**
  * 【M2.2追加・実装指示§19】誤解しやすい重要ルールについての、短い固定context
@@ -66,6 +78,16 @@ export const RULE_SEMANTICS: Readonly<Record<string, string>> = {
   accountsReceivable: "Balance Sheet上の資産（未回収の顧客残高）。回収タイミングはCash（BS/CF）に影響するが、それ自体だけではOperating Profitに影響しない。",
   operatingCashFlow: "営業活動による現金の動き。Operating Profit（発生主義の利益）とは別概念であり同一視してはいけない。",
   interestExpense: "Operating Profitの下（Operating Profitには含まれない）。Net Incomeの計算にのみ含まれる。",
+  // 【M2.4追加・実装指示§1-§8】操業KPI・在庫・人員・負債の意味混同を防ぐための用語定義。
+  futureDeliveryObligation: "納期が未到来の受注残（healthyForwardBacklogと同義）。overdueTonsが0またはbriefingに無ければ、「現在遅れている」ではなく「将来履行すべき受注」「次期のcapacity planning上の負荷」としてのみ説明してよい。",
+  equipmentUtilization: "設備稼働率。laborUtilization（労務稼働率）・overtimeRate（残業率）とは別の指標であり、「utilization」と一括して表現してはいけない。",
+  laborUtilization: "労務稼働率。equipmentUtilization（設備稼働率）とは別の指標。片方が高くても他方が低い場合、「工場全体が能力上限」と表現してはいけない。",
+  overtimeRate: "残業率。equipmentUtilization・laborUtilizationとは別の指標として扱う。",
+  bottleneck: "rawMaterialShortageTons・equipmentShortageTons・laborShortageTonsのうち、lost production（shortfall量）が最大のものがprimary bottleneck。company-wide equipment utilizationが低くても、特定商品にequipment shortageがある場合はproduct-specificな局所制約として区別する。",
+  rawMaterialInventory: "opening（前期末）・ending（当期末）・in-transit（輸入未着）・arrived（輸入着荷）・domestic purchase（当期国内調達）を区別する。単に「原料在庫◯◯t」とだけ言う場合はending（当期末）の値を使うこと。",
+  workforce: "regularWorkers（常用ワーカー）とtemporaryWorkers（臨時ワーカー）は別項目。briefingに存在しない人数を発言してはいけない。",
+  interestBearingDebt: "短期借入＋長期借入（有利子負債）。totalLiabilities（買掛金その他負債を含む負債合計）とは別の、より狭い概念。「有利子負債」と言う場合はinterestBearingDebtの値のみを使うこと。",
+  totalLiabilities: "買掛金・その他負債を含む負債合計。interestBearingDebt（有利子負債＝短期借入＋長期借入のみ）より広い概念であり、同一視してはいけない。",
 };
 
 /** previousQuarterFinancials/previousQuarterMarketは既存のPlayerScreenViewModel型（app/v2層）
@@ -134,6 +156,25 @@ export interface BriefingBuildInput {
       readonly fulfilledQuantityTons: number;
     } | null;
   };
+  /**
+   * 【M2.4追加・実装指示§3-§8】Operational KPI Semantic Grounding / Forward Obligation
+   * Riskに必要な直近2四半期ぶんの操業実績（既存CompanyQuarterSummary・
+   * ProductionAllocationEntry・WorkerAssignmentをそのまま渡すだけ。新しい生産計算は
+   * 一切しない）。reportingPeriodはfinancialHistoryと同じ「直近の確定四半期」、
+   * priorPeriodはopening inventory算出用（前期末=当期のopening）。
+   * turn1・turn2等で実績が無い場合はnull（捏造しない）。
+   */
+  readonly operationalHistory: {
+    readonly reportingPeriod: {
+      readonly summary: CompanyQuarterSummary;
+      readonly workerAssignments: readonly WorkerAssignment[];
+      readonly productionEntries: readonly ProductionAllocationEntry[];
+      readonly periodLabel: string;
+    } | null;
+    readonly priorPeriod: {
+      readonly summary: CompanyQuarterSummary;
+    } | null;
+  };
 }
 
 const TOP_N_FACTORY = 5;
@@ -196,6 +237,8 @@ export interface CfoBriefing {
   readonly pnlVariance: PnlVariance | null;
   /** 【M2.3追加・実装指示§12】既存fulfilledQuantity・netRevenueの単純な除算による数量・実現単価の前期比較。 */
   readonly volumePriceFacts: VolumePriceFacts | null;
+  /** 【M2.4追加・実装指示§8】有利子負債（短期借入＋長期借入）。totalLiabilitiesUsd（買掛金その他負債込みの負債合計）とは別概念であることを明示するための単純合算。 */
+  readonly interestBearingDebtUsd: number;
 }
 
 export interface CooBriefing {
@@ -211,6 +254,14 @@ export interface CooBriefing {
   readonly qualityScoreByProduct: Readonly<Partial<Record<string, number>>>;
   /** 【M2.1追加】商品別のbacklog内訳（overdue分離済み）。生産計画の参考情報。 */
   readonly backlogByProduct: readonly { readonly product: string; readonly totalTons: number; readonly overdueTons: number }[];
+  /** 【M2.4追加・実装指示§3】equipmentUtilization/laborUtilization/overtimeRateを別KPIとして保持。直近確定四半期の実績が無い場合はnull。 */
+  readonly utilization: UtilizationPacket | null;
+  /** 【M2.4追加・実装指示§4・§5】rawMaterial/equipment/laborのshortfall優先順位＋商品別equipment shortage内訳。 */
+  readonly bottleneck: BottleneckPacket | null;
+  /** 【M2.4追加・実装指示§6】opening/ending/in-transit/domestic purchaseを区別した在庫。 */
+  readonly inventory: InventoryPacket | null;
+  /** 【M2.4追加・実装指示§7】regular/temporary workerを別項目化。 */
+  readonly workforce: WorkforcePacket | null;
 }
 
 export interface SupplyPressureFact {
@@ -285,11 +336,23 @@ const LIFECYCLE_TREND_MEANING: Readonly<Record<LifecycleTrendLabel, string>> = {
 };
 
 export function buildExecutiveBriefingPacket(input: BriefingBuildInput): ExecutiveBriefingPacket {
-  const { context, previousQuarter, playerDraft, contracts, receivables, payables, loans, capexProjects, borrowingHeadroom, crisis, financialHistory } = input;
+  const { context, previousQuarter, playerDraft, contracts, receivables, payables, loans, capexProjects, borrowingHeadroom, crisis, financialHistory, operationalHistory } = input;
   const ownState = context.ownState;
   const diagEntries = context.standardAi.diagnosticEntries;
 
   const { reportingPeriod, priorPeriod } = financialHistory;
+  const opsReportingPeriod = operationalHistory.reportingPeriod;
+  const opsPriorPeriod = operationalHistory.priorPeriod;
+  const utilization: UtilizationPacket | null = opsReportingPeriod ? buildUtilizationPacket(opsReportingPeriod.summary, opsReportingPeriod.periodLabel) : null;
+  const bottleneck: BottleneckPacket | null = opsReportingPeriod
+    ? buildBottleneckPacket(opsReportingPeriod.summary, opsReportingPeriod.productionEntries, opsReportingPeriod.periodLabel)
+    : null;
+  const inventory: InventoryPacket | null = opsReportingPeriod
+    ? buildInventoryPacket(opsReportingPeriod.summary, opsPriorPeriod?.summary ?? null, opsReportingPeriod.periodLabel)
+    : null;
+  const workforce: WorkforcePacket | null = opsReportingPeriod
+    ? buildWorkforcePacket(opsReportingPeriod.workerAssignments, opsReportingPeriod.summary, opsReportingPeriod.periodLabel)
+    : null;
   const financialStatements: FinancialStatementsPacket | null = reportingPeriod
     ? {
         pnl: buildPnlPacket(reportingPeriod.pnl, reportingPeriod.periodLabel),
@@ -370,6 +433,7 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     financialStatements,
     pnlVariance,
     volumePriceFacts,
+    interestBearingDebtUsd: ownState.balanceSheet.shortTermLoansUsd + ownState.balanceSheet.longTermLoansUsd,
   };
 
   const coo: CooBriefing = {
@@ -387,6 +451,10 @@ export function buildExecutiveBriefingPacket(input: BriefingBuildInput): Executi
     totalRegularHeadcount: ownState.workforce.totalRegularHeadcount,
     qualityScoreByProduct: ownState.qualityScoreByProduct,
     backlogByProduct: backlogSemantics.byProduct,
+    utilization,
+    bottleneck,
+    inventory,
+    workforce,
   };
 
   const supplyPressureFacts: SupplyPressureFact[] = (context.marketInfo.supplyPressure ?? []).map((row) => ({
