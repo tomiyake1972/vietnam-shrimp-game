@@ -63,6 +63,24 @@ function scoreEntry(entry: KnowledgeEntry, question: string): number {
   return score;
 }
 
+/**
+ * 【M2.8.1 RC-1の修正】roleは「除外条件」ではなく「順位付けの選好」。
+ *
+ * M2.8では role を hard AND filter にしていたため、たとえば
+ * 「営業1人当たり何トン？」をCFOが受けると SALES domain が丸ごと除外され、
+ * 注入知識が **0件** になっていた（実測: Q1[CFO] ids=[]）。
+ * 知識ゼロで回答させた結果、Claudeがbriefingの売上÷営業人数という
+ * 存在しないルールを逆算した。ゲームルールの正しさはroleに依存しないため、
+ * roleは加点のみに使い、最良一致entryを落とさない。
+ */
+function roleBonus(entry: KnowledgeEntry, role: KnowledgeRole | undefined): number {
+  if (!role) return 0;
+  let bonus = 0;
+  if (ROLE_DOMAINS[role].includes(entry.domain)) bonus += 4;
+  if (entry.appliesToRoles.includes(role)) bonus += 2;
+  return bonus;
+}
+
 export interface RetrieveKnowledgeInput {
   readonly question: string;
   /** 指定するとそのroleの担当domainのみへ絞る（実装指示§27）。 */
@@ -94,16 +112,18 @@ export function getGameKnowledgeForQuestion(input: RetrieveKnowledgeInput): Know
   const { question, role, domains, topN = DEFAULT_KNOWLEDGE_TOP_N, parameters = DEFAULT_GAME_KNOWLEDGE_PARAMETERS } = input;
   const intent = classifyQuestionIntent(question);
 
-  const allowedDomains = domains ?? (role ? ROLE_DOMAINS[role] : undefined);
+  // domainsの明示指定だけをhard filterとして残す（他Agentからのdomain限定取得用）。
+  // roleはhard filterにしない（上記 roleBonus のコメント参照＝M2.8.1 RC-1）。
   const candidates = GAME_KNOWLEDGE_ENTRIES.filter((entry) => {
-    if (allowedDomains && !allowedDomains.includes(entry.domain)) return false;
-    if (role && !entry.appliesToRoles.includes(role)) return false;
+    if (domains && !domains.includes(entry.domain)) return false;
     return true;
   });
 
   const scored = candidates
-    .map((entry) => ({ entry, score: scoreEntry(entry, question) }))
-    .filter((s) => s.score > 0)
+    // キーワード一致が無いentryにrole加点だけで浮上させない（無関係知識で埋めない＝§31）。
+    .map((entry) => ({ entry, keywordScore: scoreEntry(entry, question) }))
+    .filter((s) => s.keywordScore > 0)
+    .map((s) => ({ entry: s.entry, score: s.keywordScore + roleBonus(s.entry, role) }))
     // 同点は id 昇順で決定論的に並べる。
     .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.entry.id.localeCompare(b.entry.id)));
 
