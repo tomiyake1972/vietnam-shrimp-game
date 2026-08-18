@@ -45,6 +45,7 @@ test("AMM-9: proposal-schema-validation — 有効な構造化応答はZodを通
     proposals: [],
     meetingIntent: "PROTECT_CASH",
     potentialStrategicChange: false,
+    playerCorrectionStatus: "NOT_APPLICABLE",
   };
   const result = aiMeetingStructuredResponseSchema.safeParse(valid);
   assert.equal(result.success, true);
@@ -166,6 +167,7 @@ test("AMM-18: Standard-AI-proposal-references-preserved — standardAiReferences
     proposals: [] as AiMeetingProposal[],
     meetingIntent: "CUSTOM",
     potentialStrategicChange: false,
+    playerCorrectionStatus: "NOT_APPLICABLE",
   };
   const result = aiMeetingStructuredResponseSchema.safeParse(withReference);
   assert.equal(result.success, true);

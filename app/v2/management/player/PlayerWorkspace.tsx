@@ -23,8 +23,9 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "../../company-lab/decisionDraft";
-import { extractCompanyCapexResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
+import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
+import { computeCurrentDividendValueUsd } from "../../../lib/v2/companyLab/evaluation/evaluationSemantics";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../../lib/v2/companyLab/standardAi/policy";
 import { resolveStandardAiProfileForMode } from "../../../lib/v2/companyLab/standardAi/orientationProfile";
@@ -37,6 +38,7 @@ import { selectScenarioNewsForTurn } from "../lib/scenarioNews";
 import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
+import { TsvLeaderboardPanel } from "../components/TsvLeaderboardPanel";
 import { ExportPackButton } from "../components/ExportPackButton";
 import { CompanyDatabookButton } from "./CompanyDatabookButton";
 import { buildBacklogDisplay } from "./backlogView";
@@ -210,6 +212,8 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const backlog = buildBacklogDisplay(summary, previousSummary);
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
+  const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
+  const currentDividendValueUsd = computeCurrentDividendValueUsd(session.state.history, companyId, turn);
   const controlMode = entry.companyControlModes[companyId] ?? "STANDARD_AI";
 
   return (
@@ -363,8 +367,9 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
         ) : null}
 
         {tab === "market" ? (
-          <div className="mx-auto max-w-4xl">
+          <div className="mx-auto max-w-4xl space-y-3">
             <MarketSummary dataset={dataset} />
+            <TsvLeaderboardPanel session={session} fixtures={session.fixtures} ownCompanyId={companyId} />
           </div>
         ) : null}
 
@@ -437,6 +442,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               onChange={setDraft}
               disabled={false}
               period={session.state.currentPeriod}
+              turn={turn}
               lastQuarterCapexEvents={lastQuarterCapexResult?.events}
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
@@ -448,6 +454,11 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               // 会社の数値をclientから送らない。
               simulationRunId={runId}
               companyName={fixture.displayName}
+              // 【DIV-1由来】lastQuarterDividendResult・currentDividendValueUsdは計算済みの
+              // まま保持する（Final Results画面での自社Dividend Value表示に使う）。Decision
+              // Studioの意思決定入力フロー自体にはまだ配当入力UIが無いため渡さない
+              // （既存のDecisionEditorベースの配当UIをDecision Studioへ移植するのは今回の
+              // Game End / Final Results実装のスコープ外）。
             />
           </div>
         ) : null}

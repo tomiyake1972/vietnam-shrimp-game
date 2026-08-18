@@ -490,6 +490,11 @@ function validateCompanyFinanceState(raw: unknown, path: string): CompanyFinance
     otherLiabilities: requireNonNegativeUsdLike(obj.otherLiabilities, `${path}.otherLiabilities`) as CompanyFinanceState["otherLiabilities"],
     capitalStock: requireNonNegativeUsdLike(obj.capitalStock, `${path}.capitalStock`) as CompanyFinanceState["capitalStock"],
     retainedEarnings: requireUsdLike(obj.retainedEarnings, `${path}.retainedEarnings`) as CompanyFinanceState["retainedEarnings"],
+    // 【Phase DIV-1追加】既存保存データ（本フィールド導入前のRun）にはキーが存在しない。
+    // 欠落時は0（=まだ配当実績がないゲーム開始直後と同じ状態）として扱う（後方互換）。
+    distributableEarnings: (obj.distributableEarnings === undefined
+      ? 0
+      : requireUsdLike(obj.distributableEarnings, `${path}.distributableEarnings`)) as CompanyFinanceState["distributableEarnings"],
     finishedGoodsCostLedger: ledgerRaw.map((e, i) => validateLedgerEntry(e, `${path}.finishedGoodsCostLedger[${i}]`)),
   };
 }

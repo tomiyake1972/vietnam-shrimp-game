@@ -63,6 +63,7 @@ function makeFinanceState(cash: number): CompanyFinanceState {
     otherLiabilities: usd(0),
     capitalStock: usd(capitalStock),
     retainedEarnings: usd(retainedEarnings),
+    distributableEarnings: usd(0),
     finishedGoodsCostLedger: [],
   };
 }

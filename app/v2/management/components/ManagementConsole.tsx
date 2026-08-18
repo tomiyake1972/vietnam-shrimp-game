@@ -61,6 +61,7 @@ import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
 import { ScenarioNewsPanel } from "./ScenarioNewsPanel";
 import { resolveNewsTurn, selectScenarioNewsForTurn } from "../lib/scenarioNews";
+import { TsvLeaderboardPanel } from "./TsvLeaderboardPanel";
 import { RunSelector } from "./RunSelector";
 import { Collapsible } from "./Collapsible";
 import { StrategySummary } from "./StrategySummary";
@@ -965,6 +966,18 @@ export function ManagementConsole() {
               hint="プレイヤーが読むのと同じ記事です。"
             >
               <ScenarioNewsPanel turn={scenarioNews.turn} releases={scenarioNews.releases} scenarioNotFound={scenarioNews.scenarioNotFound} />
+            </Collapsible>
+          ) : null}
+
+          {/* 【TSV正式化】総株主価値の公式Leaderboard。GM画面は元々TRUE WORLD
+              （全社の全情報）を見られる前提の画面だが、ここではあえて「全社に
+              公開されるTSV/Dividend Value/Current Company Valueだけ」の
+              見え方を合わせて確認できるようにする（Cash・Debt・正常化CFの
+              内訳はselectedCompanyIdの自社内訳としてのみ表示。それ以外の
+              Cash・借入枠・CAPEX計画等は既存のCompany Inspectorのみで確認する）。 */}
+          {view?.session && fixtures.length > 0 ? (
+            <Collapsible title="総株主価値（TSV）— 公式Leaderboard" testId="console-tsv-leaderboard-toggle">
+              <TsvLeaderboardPanel session={view.session} fixtures={view.session.fixtures} ownCompanyId={selectedCompanyId} />
             </Collapsible>
           ) : null}
 

@@ -1105,6 +1105,11 @@ export function closeFinancialQuarter(
   const fixedAssetsNet = fixedAssetsGrossEnd - accumulatedDepreciationEnd;
   const constructionInProgressEnd = capex ? capex.endingConstructionInProgressUsd : 0;
   const retainedEarningsEnd = (prev.retainedEarnings as number) + netIncome;
+  // 【Phase DIV-1追加・実装指示§5・§6】distributableEarningsは、retainedEarningsと
+  // 同じロールフォワード式（前期値+当期純利益）を使うが、game-start時点の初期残差を
+  // 含まない別カウンタ（配当実行時にのみ減額される。減額自体はrunner.ts側でprevへ
+  // 事前適用されるため、ここでは通常のロールフォワードのみを行う）。
+  const distributableEarningsEnd = (prev.distributableEarnings as number) + netIncome;
 
   // 【Phase 8B-1】financing指定時は融資ポートフォリオ由来の期末残高を使う。省略時はprevから不変（Phase 8A同一）。
   const endingShortTermLoans = financing ? financing.endingShortTermLoansUsd : (prev.shortTermLoans as number);
@@ -1367,6 +1372,7 @@ export function closeFinancialQuarter(
     otherLiabilities: prev.otherLiabilities,
     capitalStock: prev.capitalStock,
     retainedEarnings: usd(retainedEarningsEnd),
+    distributableEarnings: usd(distributableEarningsEnd),
     finishedGoodsCostLedger: nextLedger,
   };
 

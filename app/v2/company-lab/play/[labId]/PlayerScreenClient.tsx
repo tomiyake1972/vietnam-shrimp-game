@@ -512,11 +512,11 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               onChange={setDraft}
               disabled={!isEditing || busy}
               period={viewModel.period}
+              turn={viewModel.currentTurn}
               lastQuarterCapexEvents={viewModel.lastQuarterCapexEvents}
               lastQuarterRejectedCapexProposals={viewModel.lastQuarterRejectedCapexProposals}
               lastQuarterFinancialResult={viewModel.lastQuarterResult?.financialResult ?? null}
               publicInfo={viewModel.publicInfo}
-              turn={viewModel.currentTurn}
               openingInfo={viewModel.openingInfo}
               labId={viewModel.labId}
               companyName={viewModel.playerDisplayName}

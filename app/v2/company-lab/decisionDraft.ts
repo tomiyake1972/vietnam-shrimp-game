@@ -190,6 +190,12 @@ export interface CompanyDecisionDraft {
    * 未設定（自動方針が値を生成しなかった場合）は0として扱う。
    */
   readonly vapProductDevelopmentSpendUsd: number;
+  /**
+   * 【DIV-1新設】今四半期の配当希望額（自由入力・0可）。未指定・省略時は0
+   * （配当なし）として扱う。省略可能なのは、この機能導入前に保存された
+   * 下書きにこのフィールドが無いため（読み込み側は `?? 0` として扱う）。
+   */
+  readonly dividendAmountUsd?: number;
 }
 
 // ---------------------------------------------------------------------
@@ -522,6 +528,9 @@ export function buildInitialDraft(
     salesForceHireCount: 0,
     salesForceLayoffCount: 0,
     vapProductDevelopmentSpendUsd: autoDecision.vapProductDevelopmentSpendUsd ?? 0,
+    // 【DIV-1新設】新しい四半期のドラフトは常に配当希望額0から始まる
+    // （前四半期の配当決定を引き継がない。「今回の配当」は毎回新しい意思決定であるため）。
+    dividendAmountUsd: 0,
   };
 }
 
@@ -641,5 +650,9 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
     salesForceHireCount: Math.round(safeNonNegative(draft.salesForceHireCount ?? 0)),
     salesForceLayoffCount: Math.round(safeNonNegative(draft.salesForceLayoffCount ?? 0)),
     vapProductDevelopmentSpendUsd: isValidVapProductDevelopmentSpendTier(draft.vapProductDevelopmentSpendUsd) ? draft.vapProductDevelopmentSpendUsd : 0,
+    // 【DIV-1新設】配当希望額は自由入力・0可。負値・NaN・Infinityは0へ丸める
+    // （マイナスの配当という構造的誤用はここでは起こり得ない設計にする。
+    // maxDividendを超える金額は resolveDividendDecision 側で全額拒否される）。
+    dividendDecision: { dividendAmountUsd: safeNonNegative(draft.dividendAmountUsd ?? 0) },
   };
 }

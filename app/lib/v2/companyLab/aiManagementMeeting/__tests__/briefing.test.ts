@@ -76,7 +76,7 @@ function minimalContext(): ExplanationContext {
 
 test("AMM-8: briefingは既存Contextのフィールドだけから構築される（捏造なし）", () => {
   const context = minimalContext();
-  const packet = buildExecutiveBriefingPacket({ context, previousQuarter: null, playerDraft: null });
+  const packet = buildExecutiveBriefingPacket({ context, previousQuarter: null, playerDraft: null, contracts: [], receivables: [], payables: [], loans: [], capexProjects: [], borrowingHeadroom: null, crisis: null, financialHistory: { reportingPeriod: null, priorPeriod: null }, operationalHistory: { reportingPeriod: null, priorPeriod: null } });
 
   assert.equal(packet.common.companyId, context.identity.companyId);
   assert.equal(packet.common.cashUsd, context.ownState.balanceSheet.cashUsd);
@@ -93,7 +93,7 @@ test("AMM-8: briefingは既存Contextのフィールドだけから構築され�
 
 test("AMM-16: 同一入力からは常に同一Packetが得られる（決定論的）", () => {
   const context = minimalContext();
-  const a = buildExecutiveBriefingPacket({ context, previousQuarter: null, playerDraft: null });
-  const b = buildExecutiveBriefingPacket({ context, previousQuarter: null, playerDraft: null });
+  const a = buildExecutiveBriefingPacket({ context, previousQuarter: null, playerDraft: null, contracts: [], receivables: [], payables: [], loans: [], capexProjects: [], borrowingHeadroom: null, crisis: null, financialHistory: { reportingPeriod: null, priorPeriod: null }, operationalHistory: { reportingPeriod: null, priorPeriod: null } });
+  const b = buildExecutiveBriefingPacket({ context, previousQuarter: null, playerDraft: null, contracts: [], receivables: [], payables: [], loans: [], capexProjects: [], borrowingHeadroom: null, crisis: null, financialHistory: { reportingPeriod: null, priorPeriod: null }, operationalHistory: { reportingPeriod: null, priorPeriod: null } });
   assert.deepEqual(a, b);
 });

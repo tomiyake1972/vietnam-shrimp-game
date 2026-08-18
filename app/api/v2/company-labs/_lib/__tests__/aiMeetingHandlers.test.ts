@@ -19,7 +19,7 @@ import { AnthropicMessageResponse, AnthropicMessagesClient } from "../../../../.
 import { handleCreateLab } from "../handlers";
 import { CompanyLabApiDependencies } from "../dependencies";
 import { AiMeetingApiDependencies } from "../../[labId]/companies/[companyId]/turns/[turn]/ai-meeting/messages/_lib/dependencies";
-import { handlePostAiMeetingMessage } from "../../[labId]/companies/[companyId]/turns/[turn]/ai-meeting/messages/_lib/handlers";
+import { handleGetAiMeetingConversation, handlePostAiMeetingMessage } from "../../[labId]/companies/[companyId]/turns/[turn]/ai-meeting/messages/_lib/handlers";
 
 const NOW = "2026-08-16T00:00:00.000Z";
 
@@ -81,6 +81,7 @@ const VALID_MEETING_RESPONSE = {
   proposals: [],
   meetingIntent: "PROTECT_CASH",
   potentialStrategicChange: false,
+  playerCorrectionStatus: "NOT_APPLICABLE",
 };
 
 test("AMM-1: playerMessageが空文字列の場合は400", async () => {
@@ -188,4 +189,149 @@ test("AMM-結合: 会話は会話ID単位で永続化され、2回目の呼び�
   );
   assert.equal(second.status, 200);
   assert.equal(calls, 2);
+});
+
+// AMM-FG-5: confirmed player correction retained
+// AMM-FG-6: unsupported player claim not auto-confirmed
+
+test("AMM-FG-5: playerCorrectionStatus=CONFIRMEDの応答は、会話のconfirmedCorrectionsへ記録され、次回呼び出しにも引き継がれる", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-amm-fg5");
+  const confirmedResponse = {
+    ...VALID_MEETING_RESPONSE,
+    playerCorrectionStatus: "CONFIRMED",
+    playerCorrectionNote: "受注残はfuture dueでありoverdueではない（overdueTons=0で確認済み）。",
+  };
+  const client: AnthropicMessagesClient = { messages: { create: async () => toolUseResponse(confirmedResponse) } };
+  const first = await handlePostAiMeetingMessage(deps, "lab-amm-fg5", "BAL", "1", { playerMessage: "受注残は納期遅延ではないです" }, client);
+  assert.equal(first.status, 200);
+  const firstBody = first.body as { meetingId: string; playerCorrectionStatus: string };
+  assert.equal(firstBody.playerCorrectionStatus, "CONFIRMED");
+
+  // 2回目の呼び出しでも会話が引き継がれ、confirmedCorrectionsが保持されていることをGETで確認する。
+  const getResult = await handleGetAiMeetingConversation(deps, "lab-amm-fg5", "BAL", firstBody.meetingId);
+  assert.equal(getResult.status, 200);
+  const conversation = getResult.body as { confirmedCorrections: readonly { note: string }[] };
+  assert.equal(conversation.confirmedCorrections.length, 1);
+  assert.ok(conversation.confirmedCorrections[0].note.includes("overdueTons=0"));
+});
+
+test("AMM-FG-6: playerCorrectionStatus=UNSUPPORTEDの応答は、confirmedCorrectionsへ記録されない", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-amm-fg6");
+  const unsupportedResponse = {
+    ...VALID_MEETING_RESPONSE,
+    playerCorrectionStatus: "UNSUPPORTED",
+    playerCorrectionNote: "この借金が来期全額返済されるという記載はBriefingPacketにはありません。",
+  };
+  const client: AnthropicMessagesClient = { messages: { create: async () => toolUseResponse(unsupportedResponse) } };
+  const first = await handlePostAiMeetingMessage(deps, "lab-amm-fg6", "BAL", "1", { playerMessage: "この借金は来期全部返済される" }, client);
+  assert.equal(first.status, 200);
+  const firstBody = first.body as { meetingId: string; playerCorrectionStatus: string };
+  assert.equal(firstBody.playerCorrectionStatus, "UNSUPPORTED");
+
+  const getResult = await handleGetAiMeetingConversation(deps, "lab-amm-fg6", "BAL", firstBody.meetingId);
+  const conversation = getResult.body as { confirmedCorrections: readonly unknown[] };
+  assert.equal(conversation.confirmedCorrections.length, 0);
+});
+
+test("AMM-DUE-5: overdue=0で禁止語彙を含む応答は1回だけrepairされ、repair後の応答が使われる", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-amm-due5");
+  const violatingResponse = {
+    ...VALID_MEETING_RESPONSE,
+    responses: [{ ...VALID_MEETING_RESPONSE.responses[0], text: "未納期限オーバー分がありますが、財務的には問題ありません。" }],
+  };
+  const repairedResponse = {
+    ...VALID_MEETING_RESPONSE,
+    responses: [{ ...VALID_MEETING_RESPONSE.responses[0], text: "受注残は次四半期の履行義務であり、財務的には問題ありません。" }],
+  };
+  let callCount = 0;
+  const client: AnthropicMessagesClient = {
+    messages: {
+      create: async () => {
+        callCount += 1;
+        return toolUseResponse(callCount === 1 ? violatingResponse : repairedResponse);
+      },
+    },
+  };
+  const result = await handlePostAiMeetingMessage(deps, "lab-amm-due5", "BAL", "1", { playerMessage: "現状を分析してください" }, client);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(callCount, 2, "1回目で違反が検知され、repairのため2回目のAPI呼び出しが発生するはず");
+  const body = result.body as { messages: readonly { speaker: string; text: string }[]; diagnostics: { semanticGuardResult?: string } };
+  const cfoMessage = body.messages.find((m) => m.speaker === "CFO");
+  assert.ok(cfoMessage?.text.includes("次四半期の履行義務"), "repair後の応答テキストが使われるべき");
+  assert.equal(body.diagnostics.semanticGuardResult, "repaired");
+});
+
+test("AMM-DUE-6: overdue=0で禁止語彙を含まない応答はrepairされない（1回のAPI呼び出しのみ）", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-amm-due6");
+  let callCount = 0;
+  const client: AnthropicMessagesClient = {
+    messages: {
+      create: async () => {
+        callCount += 1;
+        return toolUseResponse(VALID_MEETING_RESPONSE);
+      },
+    },
+  };
+  const result = await handlePostAiMeetingMessage(deps, "lab-amm-due6", "BAL", "1", { playerMessage: "現状を分析してください" }, client);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(callCount, 1, "違反が無ければrepair呼び出しは発生しないはず");
+  const body = result.body as { diagnostics: { semanticGuardResult?: string } };
+  assert.equal(body.diagnostics.semanticGuardResult, "ok");
+});
+
+// AMM-MEM-18: Run Advisory Memoryの読み込み・保存に使うRedisキーだけ失敗させても、
+// AI Meeting応答そのものは失敗せずに継続する（実装指示§38）。
+// AMM-MEM-19: memoryが1件も存在しない既存Runでも、memory機能追加前と同様に正常応答する。
+
+function createMemoryFailingRedisClient(): CompanyLabRedisClient {
+  const base = createInMemoryRedisClient();
+  return {
+    ...base,
+    get: async (key: string) => {
+      if (key.endsWith(":aiMeetingMemory")) {
+        throw new Error("simulated redis failure for memory key");
+      }
+      return base.get(key);
+    },
+    set: async (key: string, value: string, options?: CompanyLabRedisSetOptions) => {
+      if (key.endsWith(":aiMeetingMemory")) {
+        throw new Error("simulated redis failure for memory key");
+      }
+      return base.set(key, value, options);
+    },
+  };
+}
+
+test("AMM-MEM-18: Run Advisory Memory用Redisキーの読み書きが失敗しても、AI Meeting応答自体は200で継続する（memoryなしにフォールバック）", async () => {
+  const repository = createInMemoryCompanyLabStateRepository();
+  const service = createCompanyLabQuarterFlowService({ repository });
+  const redisClient = createMemoryFailingRedisClient();
+  const deps = { repository, service, redisClient } as CompanyLabApiDependencies & { redisClient: CompanyLabRedisClient };
+  await createBaselineLab(deps, "lab-amm-mem18");
+
+  const responseWithCandidate = {
+    ...VALID_MEETING_RESPONSE,
+    memoryCandidates: [
+      { action: "SAVE", type: "PLAYER_PREFERENCE", topic: "CASH_FLOOR", statement: "Cashは最低30M維持を希望。", requestedScope: "RUN", normalizedValue: 30_000_000 },
+    ],
+  };
+  const client: AnthropicMessagesClient = { messages: { create: async () => toolUseResponse(responseWithCandidate) } };
+  const result = await handlePostAiMeetingMessage(deps, "lab-amm-mem18", "BAL", "1", { playerMessage: "Cashは最低30M維持したい" }, client);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  const body = result.body as { meetingIntent: string };
+  assert.equal(body.meetingIntent, "PROTECT_CASH", "memory書き込み失敗時も会話・応答本体は正常に返るはず");
+});
+
+test("AMM-MEM-19: memoryが1件も無い既存Runでも通常どおり応答し、memoryUsedIdsは空配列で返る", async () => {
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-amm-mem19");
+  const client: AnthropicMessagesClient = { messages: { create: async () => toolUseResponse(VALID_MEETING_RESPONSE) } };
+  const result = await handlePostAiMeetingMessage(deps, "lab-amm-mem19", "BAL", "1", { playerMessage: "現金は足りてる？" }, client);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  const body = result.body as { memoryUsedIds: readonly string[] };
+  assert.deepEqual(body.memoryUsedIds, []);
 });

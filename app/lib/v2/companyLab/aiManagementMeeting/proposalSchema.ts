@@ -16,7 +16,20 @@
 import { z } from "zod";
 import { CAPITAL_PROJECT_TYPES } from "../../capex/types";
 import { DEMAND_MARKET_IDS } from "../../market/types";
-import { AI_MEETING_EXECUTIVE_ROLES, AI_MEETING_INTENTS, AI_MEETING_STANCES, STANDARD_AI_REFERENCE_STANCES } from "./types";
+import {
+  AI_MEETING_EXECUTIVE_ROLES,
+  AI_MEETING_INTENTS,
+  AI_MEETING_STANCES,
+  OPENING_BRIEF_CONFIDENCE_LEVELS,
+  OPENING_BRIEF_DIRECTIONS,
+  OPENING_BRIEF_DOMAINS,
+  PLAYER_CORRECTION_STATUSES,
+  RUN_ADVISORY_MEMORY_ACTIONS,
+  RUN_ADVISORY_MEMORY_SCOPES,
+  RUN_ADVISORY_MEMORY_TOPICS,
+  RUN_ADVISORY_MEMORY_TYPES,
+  STANDARD_AI_REFERENCE_STANCES,
+} from "./types";
 
 const PRODUCTS = ["hoso", "pd", "vap"] as const;
 
@@ -25,6 +38,16 @@ export const AI_MEETING_PROPOSAL_LIMITS = {
   maxProposals: 3,
   maxFactsUsedPerResponse: 6,
   maxStandardAiReferencesPerResponse: 3,
+  // 【M2.6追加・実装指示§13】1 callで生成できるmemory候補の上限（毎messageでmemoryを乱造しない）。
+  maxMemoryCandidates: 3,
+  // 【M2.6追加・実装指示§9】1 memory itemは短い1〜2文のcanonical statement。会話全文を保存しない。
+  maxMemoryStatementChars: 200,
+  maxMemoryUsedIds: 8,
+  // 【M2.7追加・実装指示§10・§16】Opening Briefのkey change上限（server-side significantChangesは最大8だが、
+  // Claude出力は3〜5点目安のため少し余裕を持たせた6を上限とする）。
+  maxOpeningBriefKeyChanges: 6,
+  maxOpeningBriefSuggestedFollowUps: 4,
+  maxOpeningBriefFactsUsedPerChange: 6,
 } as const;
 
 const executiveRoleSchema = z.enum(AI_MEETING_EXECUTIVE_ROLES);
@@ -145,6 +168,20 @@ const responseEntrySchema = z.object({
   standardAiReferences: z.array(standardAiProposalReferenceSchema).max(AI_MEETING_PROPOSAL_LIMITS.maxStandardAiReferencesPerResponse),
 });
 
+// 【M2.6追加・実装指示§13】memory候補のZodスキーマ。server-side validationの第一段
+// （型・enum・文字数）。dedupe/confirmation/上限判定等の意味論的なvalidationは
+// runAdvisoryMemory.ts側で行う（実装指示§14「AIに保存可否を最終決定させない」）。
+const memoryCandidateSchema = z.object({
+  action: z.enum(RUN_ADVISORY_MEMORY_ACTIONS),
+  type: z.enum(RUN_ADVISORY_MEMORY_TYPES),
+  topic: z.enum(RUN_ADVISORY_MEMORY_TOPICS),
+  statement: z.string().min(1).max(AI_MEETING_PROPOSAL_LIMITS.maxMemoryStatementChars),
+  requestedScope: z.enum(RUN_ADVISORY_MEMORY_SCOPES),
+  verificationHint: z.string().optional(),
+  normalizedValue: z.number().finite().optional(),
+  expiresAfterTurn: z.number().finite().optional(),
+});
+
 export const aiMeetingStructuredResponseSchema = z.object({
   primarySpeaker: executiveRoleSchema,
   responses: z.array(responseEntrySchema).min(1).max(AI_MEETING_PROPOSAL_LIMITS.maxResponses),
@@ -153,6 +190,36 @@ export const aiMeetingStructuredResponseSchema = z.object({
   meetingIntent: z.enum(AI_MEETING_INTENTS),
   potentialStrategicChange: z.boolean(),
   potentialStrategicChangeNote: z.string().optional(),
+  // 【M2.2追加】playerCorrectionStatus/Note — see types.ts PlayerCorrectionStatus。
+  playerCorrectionStatus: z.enum(PLAYER_CORRECTION_STATUSES),
+  playerCorrectionNote: z.string().optional(),
+  // 【M2.6追加】Run Advisory Memory候補・応答で参照したmemoryのid。
+  memoryCandidates: z.array(memoryCandidateSchema).max(AI_MEETING_PROPOSAL_LIMITS.maxMemoryCandidates).default([]),
+  memoryUsedIds: z.array(z.string()).max(AI_MEETING_PROPOSAL_LIMITS.maxMemoryUsedIds).default([]),
 });
 
 export type AiMeetingStructuredResponseParsed = z.infer<typeof aiMeetingStructuredResponseSchema>;
+
+// ---------------------------------------------------------------------
+// 【M2.7追加】Opening Executive Brief — Claude構造化応答Zodスキーマ。
+// ---------------------------------------------------------------------
+
+const openingBriefKeyChangeSchema = z.object({
+  domain: z.enum(OPENING_BRIEF_DOMAINS),
+  direction: z.enum(OPENING_BRIEF_DIRECTIONS),
+  title: z.string(),
+  explanation: z.string(),
+  factsUsed: z.array(z.string()).max(AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefFactsUsedPerChange),
+  confidence: z.enum(OPENING_BRIEF_CONFIDENCE_LEVELS).optional(),
+});
+
+/** 【実装指示§15・§26】Opening BriefはCEO固定。primarySpeaker選択の余地を与えない。 */
+export const openingBriefStructuredResponseSchema = z.object({
+  speaker: z.literal("CEO"),
+  summary: z.string(),
+  keyChanges: z.array(openingBriefKeyChangeSchema).max(AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefKeyChanges),
+  suggestedFollowUps: z.array(z.string()).max(AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefSuggestedFollowUps),
+  memoryUsedIds: z.array(z.string()).max(AI_MEETING_PROPOSAL_LIMITS.maxMemoryUsedIds).default([]),
+});
+
+export type OpeningBriefStructuredResponseParsed = z.infer<typeof openingBriefStructuredResponseSchema>;

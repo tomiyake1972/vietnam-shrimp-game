@@ -7,18 +7,18 @@
 
 使用モデル: claude-haiku-4-5-20251001 / maxTokens: 4096
 
-- worst-case構造化応答（responses3件＋proposals3件＋factsUsed6件＋standardAiReferences3件）のJSON長: 2541文字
-- 出力トークン概算（2.8文字/トークン経験則）: 908トークン
-- maxTokens(4096)に対する余裕: 3188トークン（78%）
+- worst-case構造化応答（responses3件＋proposals3件＋factsUsed6件＋standardAiReferences3件）のJSON長: 2684文字
+- 出力トークン概算（2.8文字/トークン経験則）: 959トークン
+- maxTokens(4096)に対する余裕: 3137トークン（77%）
 
 | シナリオ | 履歴件数(truncation後) | userMessage概算トークン |
 |---|---|---|
-| short question | 0 | 156 |
-| long player question | 0 | 368 |
-| primary + secondary | 2 | 266 |
-| CEO summaryあり（対立あり） | 4 | 375 |
-| proposal 3件 | 2 | 270 |
-| 10 message history | 8 | 646 |
+| short question | 0 | 165 |
+| long player question | 0 | 377 |
+| primary + secondary | 2 | 275 |
+| CEO summaryあり（対立あり） | 4 | 385 |
+| proposal 3件 | 2 | 279 |
+| 10 message history | 8 | 655 |
 
 全6シナリオとも、worst-case応答をmockから受け取った場合にattempt1回（リトライなし）でZod検証を通過することを確認した（truncation/schema mismatch observed: no）。
 

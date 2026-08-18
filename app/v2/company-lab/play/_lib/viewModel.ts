@@ -38,11 +38,13 @@ import {
 import { ConsumerMarketQuarterRecord } from "../../../../lib/v2/market/consumerInventory";
 import { CapexProjectQuarterEvent, CapexQuarterResult, CapexRejectedProposal } from "../../../../lib/v2/capex";
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
+import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividend";
+import { computeCurrentDividendValueUsd } from "../../../../lib/v2/companyLab/evaluation/evaluationSemantics";
 import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
 import { CompanyLabApiDependencies } from "../../../../api/v2/company-labs/_lib/dependencies";
 import { toHistoryEntrySummaryDto, CompanyLabHistoryEntrySummaryDto } from "../../../../api/v2/company-labs/_lib/responseDto";
 import { isPlausibleCompanyDecisionDraft } from "../../../../api/v2/company-labs/_lib/decisionsProvider";
-import { extractCompanyCapexResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "./financialViewSelectors";
+import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "./financialViewSelectors";
 
 export type PlayerScreenPhase = "editing" | "submitted" | "completed";
 
@@ -135,6 +137,10 @@ export interface PlayerScreenViewModel {
   readonly lastQuarterResult: PlayerLastQuarterResult | null;
   readonly lastQuarterCapexEvents: readonly CapexProjectQuarterEvent[] | undefined;
   readonly lastQuarterRejectedCapexProposals: readonly CapexRejectedProposal[] | undefined;
+  /** 【DIV-1新設】直近確定四半期の配当結果（累積配当・加重配当価値・却下理由の表示用）。 */
+  readonly lastQuarterDividendResult: CompanyDividendQuarterResult | null;
+  /** 【TSV正式化】現在Turn基準・年率15%複利のDividend Value（Leaderboardと同一関数）。 */
+  readonly currentDividendValueUsd: number;
   /** 前期（turn-1）ぶんの財務・資金・設備投資（当期・前期・増減表示用）。前期が存在しなければnull。 */
   readonly previousQuarterFinancials: PlayerPreviousQuarterFinancials | null;
   /** 前期（turn-1）ぶんの公開市場結果（市場情報パネルの前四半期比表示用）。前期が存在しなければnull。 */
@@ -245,6 +251,8 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
   }
 
   const lastQuarterCapexResult = latestEntry !== null ? extractCompanyCapexResult(latestEntry.record, stored.playerCompanyId) : null;
+  const lastQuarterDividendResult = latestEntry !== null ? extractCompanyDividendResult(latestEntry.record, stored.playerCompanyId) : null;
+  const currentDividendValueUsd = computeCurrentDividendValueUsd(restoredState.history, stored.playerCompanyId, turn);
 
   const lastQuarterResult: PlayerLastQuarterResult | null =
     latestEntry !== null
@@ -322,6 +330,8 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       draftUpdatedAt: draftEnvelope?.updatedAt ?? null,
       lastQuarterResult,
       lastQuarterCapexEvents: lastQuarterCapexResult?.events,
+      lastQuarterDividendResult,
+      currentDividendValueUsd,
       lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,
       previousQuarterFinancials,
       previousQuarterMarket,

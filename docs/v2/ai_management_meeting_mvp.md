@@ -379,3 +379,1177 @@ salesQuantity/salesForceの2スキーマ化）・`validation.ts`（scope別検�
 （worst-caseペイロードを新schemaへ追従）。**Standard AI・ゲームエンジン・既存の
 Decision schema自体（`app/lib/v2/sales/`等）への変更はなし**（AI Management Meeting
 モジュール内のみの修正）。
+
+## 21. M2.1（Backlog Semantics / Fact Grounding Correction）追記
+
+ChatGPT #05からの追加指示（Test26 Dynamic Scenario、BAL Turn1での実誤回答を受けた訂正）
+に基づく対応。
+
+### 21.1 root cause
+
+初版の`briefing.ts`（AMM-M0/M1時点）は、既存の`computeBacklogByMarketProduct`
+（`openingStateSummary.ts`）が返す「outstanding合計（納期を問わず全件合算）」を、
+**`overdueBacklogTopN`という名前のフィールドへそのまま格納していた**。この関数自体は
+overdue（納期超過）かどうかを一切判定しない単純な合計であり、名前だけが「overdue」を
+名乗っていた。この命名と実装のズレが、Commercial Directorに「backlogが存在する＝
+納期遅延している」と誤解釈させる直接の原因だった。
+
+さらに、Commercial向けbriefingには実売上・受注実績データが一切含まれておらず
+（財務実績は`cfo`サブセットのみに存在）、「Q2売上$66.4M」という具体的な数値は
+BriefingPacketに存在しないデータの完全な捏造だったと判断される。
+
+### 21.2 current backlog semantics（訂正後）
+
+`backlogSemantics.ts`の`computeBacklogSemantics()`が、既存の`SalesContract.dueDate`・
+`outstandingQuantity`（新しい観測は追加しない）だけから、PC-2C
+（`scripts/pc2BacklogProductDiagnosis.ts`）で確立した方法論
+（`periodIndex(dueDate) < currentPeriodIdx` ならoverdue）を再利用し、
+Healthy Forward（納期未到来）／Due This Turn（当四半期納期）／Overdue（納期超過）を
+明示的に分離する。`common.backlog`・`commercial.backlog`双方に
+`{totalTons, healthyForwardTons, dueThisTurnTons, overdueTons}`として渡し、
+`commercial.backlogByMarket`/`backlogByProduct`/`backlogByMarketProduct`
+（各エントリに`earliestDueLabel`を含む）で市場・商品別の内訳も渡す。`coo.backlogByProduct`
+にも同じ商品別内訳を渡す（生産計画の参考情報として）。
+
+### 21.3 Trust code audit result
+
+`app/lib/v2/quality/scoreUpdates.ts`の`updateDeliveryReliabilityScore`・
+`updateCustomerTrustScore`を監査した結果、engine側は`dueQuantity`（当期に納期が来た数量）・
+`onTimeQuantity`（そのうち期日通り履行できた数量）・`continuingOverdueQuantity`（持ち越しの
+overdue分）——**当期に実際に発生した履行実績**——だけでTrust/delivery reliabilityを
+更新しており、**未到来のoutstanding残高（healthy forward backlog）そのものは一切
+参照していない**ことを確認した。engine側の設計は既にご指摘の原則（Backlog != Overdue）
+どおりであり、変更不要と判断した。「#04設計問題」として報告すべき事象は見つからなかった。
+
+### 21.4 BriefingPacket before/after
+
+| フィールド | Before（バグ） | After（訂正後） |
+|---|---|---|
+| `common.overdueBacklogTopN` | 全backlogを`outstandingTons`降順で上位5件（overdue未判定なのに"overdue"と命名） | `common.backlog: {totalTons, healthyForwardTons, dueThisTurnTons, overdueTons}`（廃止し置換） |
+| `commercial.backlogByMarketProduct` | `{market, product, outstandingTons, contractCount}`（overdue区別なし） | `commercial.backlog`＋`backlogByMarket`/`backlogByProduct`/`backlogByMarketProduct`（各々overdueTons/dueThisTurnTons/healthyForwardTons分離、earliestDueLabel付き） |
+| `commercial.lifecycleTrendCount`/`supplyPressureCount` | 生の配列長（意味不明なraw count） | `commercial.supplyPressureFacts: {product, value, label, humanMeaning}[]`／`lifecycleTrendSummary: {growingCount, shrinkingCount, flatCount, humanMeaning}` |
+| Commercialの売上実績 | 存在しない（CFOのみ保持） | `commercial.lastQuarterNetRevenueUsd`＋`commercial.lastQuarterLabel`（同じ値をperiodLabel付きでCommercialにも持たせる） |
+
+### 21.5 supplyPressureCount definition
+
+`context.marketInfo.supplyPressure`（`buildSupplyPressureRows`、`aiMarketInfoSummary.ts`）は
+**常にPD・VAPの2要素**を返す固定長配列であり、`length`（count）自体には「供給の余裕度」を
+示す意味は一切ない。各要素が持つ`label`（`SupplyPressureLabel`: `oversupply`/`undersupply`/
+`balanced`、`classifySupplyPressure`が算出）こそが実際の意味を持つ。「supplyPressureCount=2
+→ 市場は供給に余裕」という説明は、この生カウントを独自解釈した完全な誤りであり、コード上の
+正式な意味に一切裏付けられていなかった。訂正後は、`label`ごとに固定の`humanMeaning`文字列
+（例: `balanced`→「市場全体の需給はおおむね均衡」）を付与して渡す。
+
+### 21.6 quarter label audit
+
+`common.year`/`common.quarter`（`context.identity`由来）自体は正しくturnに対応している。
+問題は「Q2売上」という**Commercial自身の発言**が、そもそもBriefingPacketに存在しない
+実売上額を、存在しない四半期ラベルとセットで述べていたことにある。訂正後は
+`commercial.lastQuarterLabel`（前四半期の正確なラベル。turn1等で前四半期が存在しない場合は
+`null`）を明示的に渡し、prompt側にも「四半期に言及する際は必ずBriefingPacket内のラベルを
+使い、推測して作らない」ことを明記した（§20.3のプロンプト追加参照）。
+
+### 21.7 numeric hallucination cause
+
+2つの要因が重なっていたと判断する。(1) Commercial向けbriefingに実売上データが無かった
+ため、「$66.4M」は完全な捏造だった。(2) 3,063.42tを「3,600t超」と述べた点については、
+`overdueBacklogTopN`というフィールド名が実際にはoverdue判定を伴わない単純合計だった
+という構造的な誤解に加え、正確な数値が提供されていても大きく異なる数値へ丸めてしまう
+挙動が見られた。訂正後は、`factsUsed`に記録されたBriefingPacketの実在フィールドのみを
+使うこと、丸める場合も有効数字を大きく変えないこと（例: 3,063t→約3,100t）をprompt本文へ
+明記した。
+
+### 21.8 code changes
+
+新設: `backlogSemantics.ts`（Healthy Forward/Due This Turn/Overdue分離）。変更:
+`briefing.ts`（`BriefingBuildInput`へ`contracts`追加、`overdueBacklogTopN`廃止、
+`commercial`/`coo`へbacklog内訳・売上実績・ラベル付き市場シグナルを追加）・`prompt.ts`
+（backlog解釈原則・数値グラウンディング・四半期ラベル使用の明示、`AI_MEETING_PROMPT_VERSION`
+をv1→v2へ）・API `handlers.ts`（`viewModel.ownState.contracts`を渡す配線、
+`previousQuarter.periodLabel`の算出）・`scripts/aiMeetingRealApiSmokeTest.ts`
+（Test26 BAL Turn1相当のbriefingケースをsmoke testへ追加）。**Sales engine・Contract
+fulfillment mechanics・Trust mechanics・Standard AI・game parameters・backlogの定義
+（`SalesContract`型自体）への変更はなし**（AI Meetingのfact grounding/briefing/prompt
+修正のみ）。
+
+### 21.9 tests
+
+`__tests__/backlogSemantics.test.ts`を新設し、AMM-BL-1〜9（Test26 BAL Turn1相当の
+AMM-BL-7を含む）を実装。既存の`briefing.test.ts`（AMM-8/AMM-16）も新schema
+（`contracts`パラメータ追加）へ追従させた。全3136件成功、tsc/eslintエラーなし。
+
+### 21.10 real API result
+
+**REAL_API_SMOKE_NOT_RUN**（本セッションの環境に`ANTHROPIC_API_KEY`が設定されていない
+ため未実施）。`scripts/aiMeetingRealApiSmokeTest.ts`にTest26 BAL Turn1相当の再現ケース
+（「前回の営業結果を教えて」、9番目のケースとして追加）を用意済みであり、
+`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで、訂正後の実際のClaude応答
+（overdue=0のhealthy forward backlogを「納期遅延」と述べていないか等）を確認できる。
+
+### 21.11 remaining risk・readiness for continued Test26
+
+- 訂正の効果は静的なテスト（AMM-BL-1〜9）でのみ検証済みであり、実Claude APIでの
+  応答が実際に改善されたことは未確認（§21.10参照）。Test26を再開する前に、可能であれば
+  実API smoke testで確認することを推奨する。
+- `factsUsed`は依然としてClaude自身の自己申告であり、記載された数値が本当に
+  BriefingPacketの値と一致しているかを機械的に検証する仕組みはM1/M2.1のいずれにも
+  実装されていない（数値ハルシネーションの完全な技術的防止ではなく、prompt/schema設計に
+  よる緩和にとどまる）。将来phaseで、応答内の数値をBriefingPacketの値と照合する
+  post-hoc検証層を追加する余地がある。
+- lifecycleTrendSummaryは市場×商品の内訳を集約したcount+humanMeaningのみで、
+  個別の市場×商品トレンドの詳細（どの市場のどの商品が伸びているか）はCommercialへ
+  渡していない。今後、特定市場のライフサイクルについて具体的に聞かれた場合に
+  詳細不足で答えられない可能性がある。
+
+## 22. M2.2（Cross-Role Fact Grounding / Finance Semantics / Player Correction Handling）追記
+
+ChatGPT #05からの追加指示（前提commit `10c6cd4`）に基づく対応。
+
+### 22.1 root cause
+
+M2.1でCommercialのbacklog誤発言は修正されたが、その誤発言（会話履歴）を受けて
+CFOが「Trust低下→AR回収遅延→投資余力減」という、ShrimpXに存在しない因果を
+連鎖的に補完した。根本原因は2つ:
+1. 他役員の発言（会話履歴内のexecutiveメッセージ）をfactとして無条件に信頼してよいという
+   構造上の歯止めが、prompt/briefingいずれにも存在しなかった（truth hierarchyの不在）。
+2. CFO向けbriefingに「売掛金がいつ現金化されるか」という実在する事実
+   （`ReceivableRecord.dueSettlementPeriod`）が渡っておらず、一般的な企業会計の
+   常識で空白を埋めてしまった（AR collection scheduleの不在）。
+
+### 22.2 AR engine rule（監査結果・変更なし）
+
+`app/lib/v2/finance/quarterClose.ts`・`app/lib/v2/finance/parameters.ts`を監査した結果:
+- 売掛金は発生四半期から`params.workingCapital.arCollectionQuarters`（現在値=1）四半期後に、
+  市場・商品を問わず一律で決済される（`dueSettlementPeriod = 発生期 + 1`）。
+- 買掛金（輸入原料）も同様に`apImportPaymentQuarters`（現在値=1）四半期後。
+- 決済処理（`quarterClose.ts`のAR決済セクション）は`dueSettlementPeriod <= period`の
+  単純フィルタのみで、Customer Trust・delivery reliabilityを一切参照しない。
+- `ReceivableRecord`型自体にarrears（延滞）フィールドは存在しない。融資（`LoanRecord`）には
+  `arrearsPrincipalUsd`/`arrearsInterestUsd`があるが、これは返済延滞専用で売掛金とは別の仕組み。
+
+### 22.3 Trust→AR relation: **NO**
+
+`app/lib/v2/quality/scoreUpdates.ts`の監査（M2.1で実施済み、今回再確認）どおり、
+Trust/delivery reliabilityは当期の履行実績（`dueQuantity`/`onTimeQuantity`）のみで更新され、
+AR回収タイミングへの因果は存在しない。「Trust低下でAR回収が遅れる」という主張は
+コード上の根拠が一切無い、CFOによる完全な創作だったと判断する。
+
+### 22.4 CFO briefing before/after
+
+| フィールド | Before | After |
+|---|---|---|
+| 売掛金 | `receivablesUsd`（残高のみ） | `receivablesUsd`＋`receivablesScheduleByPeriod`（実際の回収予定period・turnsFromNow） |
+| 買掛金 | `payablesUsd`（残高のみ） | `payablesUsd`＋`payablesScheduleByPeriod` |
+| 融資延滞 | 無し | `loanArrearsPrincipalUsd`/`loanArrearsInterestUsd`（既存`LoanRecord`から） |
+| CAPEXコミット | 無し | `activeCapexRemainingCommitmentUsd`（承認済み未払額の合計） |
+| 借入余力 | 無し | `borrowingHeadroom`（前四半期に計算済みの実際の`BorrowingCapacityResult`を転記） |
+| 危機状態 | 無し | `crisis`（既存Standard AI `diagnostics.crisis`を転記） |
+
+### 22.5 truth hierarchy実装
+
+`prompt.ts`のシステムプロンプトへ、Engine facts→Structured diagnostics→Player訂正→
+Standard AI提案→他役員の発言→一般常識、という6段階の優先順位を明記した
+（`app/lib/v2/companyLab/aiManagementMeeting/prompt.ts`）。データ構造としての強制は
+せず（tool schemaを複雑化させない三宅さんの追加指示§7の方針を踏襲）、prompt文言のみで
+実現している。
+
+### 22.6 cross-role grounding
+
+会話履歴（`recentHistory`）はこれまでどおり`{speaker, text}`のプレーンな配列として
+渡すが、prompt側に「他roleの発言はopinionであり、自分のBriefingPacketに同じ事実が
+無ければ確定事実として扱わない」「他役員の発言に明示的に異議を述べてよい」ことを
+明記した。全員を強制的に合意させない設計原則もあわせて明記した。
+
+### 22.7 player correction handling
+
+`AiMeetingStructuredResponse`へ`playerCorrectionStatus`（NOT_APPLICABLE/CONFIRMED/
+UNSUPPORTED）・`playerCorrectionNote`を追加した。プレイヤーの事実主張・訂正は、
+BriefingPacketと整合する場合のみCONFIRMEDとし、根拠が無い場合はUNSUPPORTEDとして
+無条件に事実認定しない（`validation.ts`ではなくClaude自身の構造化出力として判定させ、
+Zodで型を検証するだけ——判定ロジック自体を機械的に検証する仕組みはM2.2の対象外）。
+
+### 22.8 correction memory
+
+CONFIRMEDと判定された訂正は、`AiMeetingConversationState.confirmedCorrections`
+（`PlayerCorrectionRecord[]`）へ、会話artifactとして記録する（Game SSoTには一切入れない）。
+以後の同一meeting内のresponse生成では、`confirmedCorrections`をuserメッセージへ含め、
+同じ誤りを繰り返さないよう明示的なメモリとして使う。上限10件（`MAX_CONFIRMED_CORRECTIONS`）。
+
+### 22.9 RuleSemantics
+
+`briefing.ts`に`RULE_SEMANTICS`（backlog/overdue/healthyForwardBacklog/receivables/
+customerTrustの5用語について、company状態に依存しない固定の短い定義）を新設し、
+`common.ruleSemantics`として常に渡す。token増大を避けるため、company別に変わる長文
+説明ではなく固定辞書とした。
+
+### 22.10 prompt version / briefing version
+
+`AI_MEETING_PROMPT_VERSION`をv2→v3、新設した`EXECUTIVE_BRIEFING_VERSION`をv3とし、
+`common.briefingVersion`として渡す。両者を揃えることで、旧versionとの混在を識別可能にした。
+
+### 22.11 legacy conversation handling
+
+`AiMeetingMessage`へ`promptVersion`（生成時のprompt version。PLAYERメッセージには
+設定しない）を追加した。`conversation.ts`の`formatHistoryEntryForPrompt()`が、
+現在のprompt versionと異なるexecutiveメッセージのtextへ`[legacy vN ...]`という
+警告タグを前置してからClaudeへ渡す。新しい構造化フィールドは増やさず、既存の
+`{speaker, text}`の枠内で実現している。
+
+### 22.12 code changes
+
+新設: `financeSemantics.ts`（AR/AP schedule・融資延滞・CAPEXコミット残高の導出）。
+変更: `types.ts`（playerCorrectionStatus・PlayerCorrectionRecord・confirmedCorrections・
+promptVersion追加）・`proposalSchema.ts`/`claudeClient.ts`（同フィールドのZod/tool schema対応）・
+`briefing.ts`（CFO finance fields・RuleSemantics・briefingVersion・crisis/borrowingHeadroom追加）・
+`conversation.ts`（correction memory・legacy message tagging）・`prompt.ts`（truth hierarchy・
+cross-role grounding・fact/judgment分離・投資余力ガイダンス・v3）・API `handlers.ts`
+（finance state・crisis・borrowingHeadroomの配線、correction memoryの永続化）。
+**Standard AI・Finance engine・Sales engine・Contract fulfillment・Customer Trust・
+CAPEX mechanics・game parametersへの変更はなし**（AI Management Meetingモジュール内のみ）。
+
+### 22.13 tests
+
+`__tests__/factGrounding.test.ts`を新設し、AMM-FG-1〜4・7〜10を実装。
+`aiMeetingHandlers.test.ts`へAMM-FG-5・6（correction memoryのhandler結合テスト）を追加。
+既存テスト（AMM-9/18等）も新schema（playerCorrectionStatus必須化）へ追従させた。
+全3146件成功、tsc/eslintエラーなし。
+
+### 22.14 real API test
+
+**REAL_API_SMOKE_NOT_RUN**（本セッションの環境に`ANTHROPIC_API_KEY`が設定されていない
+ため未実施）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、指示§22のA〜D相当の4ケース
+（Test26 BAL Turn1状態、Cash≈38.2M/Debt≈50.6M/AR≈66.4M/Backlog≈3063t/Overdue=0）を
+追加済み（計12ケース）。`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで確認できる。
+
+### 22.15 remaining risks・readiness for continued Test26
+
+- truth hierarchy・cross-role groundingはprompt文言による誘導であり、Claudeの出力を
+  機械的に強制する仕組みではない。実API未検証のため、効果は理論的な設計としてのみ
+  確認済み（静的テストで構造・文言の存在は証明したが、実際の応答品質は未検証）。
+- `playerCorrectionStatus`の判定ロジック自体（BriefingPacketとの整合性判断）はClaude内部の
+  推論に委ねられており、機械的な整合性チェック層は無い（`AiMeetingCallDiagnostics`の
+  `schemaValidationResult`は型検証のみで、内容の正しさは検証しない）。
+- `confirmedCorrections`は文字列（note）のリストであり、構造化されたfact参照ではない。
+  将来phaseで、より構造化された「何が確認されたか」の表現（例: factKeyの参照）へ
+  発展させる余地がある。
+- 実API未検証のため、M2.1・M2.2の修正が実際にTest26の再誤答を防げているかは
+  引き続き確認が必要。`ANTHROPIC_API_KEY`を持つ開発者による実行を強く推奨する。
+
+## 23. M2.3（CFO Accounting Grounding / P&L-Cash-BS Separation / Variance Analysis）追記
+
+### 23.1 root cause
+
+Test26 BAL Turn2で、CFOが「売上債権の現金回収の遅れが営業利益の赤字要因」と説明した
+（会計上の誤り。売掛金の回収タイミングはBalance Sheet/Cash Flowの事象であり、発生主義の
+Operating Profitには直接関係しない）。プレイヤーが2回訂正しても、CFOはP&Lの話へ移行した後も
+「原料費等の現金支出が売上を上回った」というcash用語のままP&Lを説明し続けた。根本原因は、
+CFO向けbriefingがP&L・Cash Flow・Balance Sheetを区別せず、`receivablesUsd`（BS残高）と
+`netRevenueUsd`（P&L）だけを渡していたため、Claudeが3表を混同する余地があったこと。
+
+### 23.2 accounting engine audit
+
+`app/lib/v2/finance/types.ts`の`ProfitAndLossStatement`・`BalanceSheet`・
+`CashFlowStatement`・`CostOfSalesBreakdown`を監査した結果、実装指示§4-§6が要求する
+全フィールド（grossRevenue〜netIncome、receiptsFromCustomers〜closingCash、
+cash〜totalEquity等）は**既にengine（`finance/quarterClose.ts`）が計算済み**であり、
+新しい会計計算を一切増設する必要がないことを確認した。M2.1（backlog）・M2.2（AR）とは異なり、
+今回はengine側に真のギャップ・バグは見つからなかった（`finance/quarterClose.ts`自体は
+一切変更していない）。
+
+### 23.3 P&L/CF/BS separation
+
+`app/lib/v2/companyLab/aiManagementMeeting/pnlSemantics.ts`（新規）に、既存の値を
+そのまま転記するだけの`PnlPacket`・`CashFlowPacket`・`BalanceSheetPacket`（実装指示
+§4-§6のフィールドを平坦化しただけ）を定義。`briefing.ts`の`CfoBriefing`へ
+`financialStatements: { pnl, cashFlow, balanceSheet } | null`として追加し、
+3表を構造的に分離して渡す。
+
+### 23.4 CFO briefing before/after
+
+- before: `cfo.receivablesUsd`（BS残高）と`cfo.previousQuarter.netRevenueUsd`（P&Lの
+  一部）のみが混在して渡され、P&L・Cash Flow・Balance Sheetの構造的な区別が無かった。
+- after: `cfo.financialStatements.{pnl,cashFlow,balanceSheet}`が3つの独立したpacketとして
+  渡され、`cfo.pnlVariance`（発生主義の前期比差分）・`cfo.volumePriceFacts`（数量/平均単価の
+  前期比）が別途追加された。
+
+### 23.5 variance analysis実装
+
+`computePnlVariance(current, prior, ...)`が、`ProfitAndLossStatement`2期分から
+revenueDelta・各コスト科目delta・operatingProfitDelta等（実装指示§9の全フィールド）を
+単純な差分として計算する（新しい会計解釈はしない）。`handlers.ts`が
+`deps.repository.loadHistoryEntry(labId, currentTurn-1)`と`(labId, currentTurn-2)`を
+それぞれ取得し（存在しなければ`CompanyLabHistoryEntryNotFoundError`を捕捉してnull、
+捏造しない）、reportingPeriod（直近確定四半期）・priorPeriod（その前期）として
+`buildExecutiveBriefingPacket`へ渡す。
+
+### 23.6 Test26 T1→T2 variance結果（fixtureによる検証）
+
+実装指示§10の実データに基づくfixture（`AMM-ACC-7`・`AMM-ACC-8`）で検証:
+Turn1 netRevenue≈$66.594M/operatingProfit≈+$6.30M → Turn2 netRevenue≈$62.938M/
+operatingProfit≈-$0.059M。`computePnlVariance`はrevenueDelta≈-$3.66M、
+operatingProfitDelta≈-$6.36Mを正しく算出することを確認した。
+
+### 23.7 price/volume解釈
+
+`computeVolumePriceFacts(currentVolumeTons, currentNetRevenueUsd, priorVolumeTons,
+priorNetRevenueUsd, ...)`が、既存のfulfilledQuantity・netRevenueの単純な除算のみで
+`averageRealizedPriceUsdPerTon`を導出する（新しいPVM分解エンジンは作らない。実装指示§12の
+「M2.3では不要」という明示的な許可の範囲内）。Turn1→Turn2で数量は増加（約12,591t→約14,407t）
+したが平均実現単価は下落しており、`AMM-ACC-9`で検証済み。
+
+### 23.8 Operating Profit vs Net Incomeの扱い
+
+`PnlPacket`は`operatingProfit`と`interestExpense`・`netIncome`を独立したフィールドとして
+保持する（`interestExpense`はOperating Profitの下）。prompt.tsに「Operating Profitの
+赤字理由の説明にInterest Expenseを含めない／Net Incomeの説明には含めてよい」という
+明示的な区別を追加した（実装指示§14）。
+
+### 23.9 RuleSemantics
+
+`briefing.ts`の`RULE_SEMANTICS`へ`operatingProfit`・`accountsReceivable`（更新）・
+`operatingCashFlow`・`interestExpense`の4エントリを追加（実装指示§16の内容を
+日本語で表現）。
+
+### 23.10 player correction handling
+
+M2.2で実装済みの`playerCorrectionStatus`/`confirmedCorrections`の仕組みをそのまま再利用。
+prompt.tsに、「P&LとCash Flowを混同している」等の会計カテゴリの誤りをプレイヤーが指摘した
+場合、単に謝るだけでなく同一meeting内で同じ種類の誤りを繰り返さない旨を明記した
+（実装指示§18。新しい永続化層は追加していない）。
+
+### 23.11 code changes
+
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/pnlSemantics.ts`
+  （PnlPacket/CashFlowPacket/BalanceSheetPacket/PnlVariance/VolumePriceFacts + builder関数）
+- 変更: `briefing.ts`（`financialHistory`入力、`financialStatements`/`pnlVariance`/
+  `volumePriceFacts`をCfoBriefingへ追加、RULE_SEMANTICS 4エントリ追加、
+  `EXECUTIVE_BRIEFING_VERSION`を"v3"→"v4"）
+- 変更: `prompt.ts`（P&L/Cash/BS分離の会計ガードレール一式を追加、
+  `AI_MEETING_PROMPT_VERSION`を"v3"→"v4"）
+- 変更: `handlers.ts`（`deps.repository.loadHistoryEntry`による直近2四半期取得を追加し、
+  `financialHistory`を`buildExecutiveBriefingPacket`へ配線）
+- 既存の`finance/quarterClose.ts`・Standard AI・Sales/pricingエンジン・Trust・
+  game parametersは一切変更していない（実装指示§21の禁止事項の遵守）。
+
+### 23.12 tests
+
+`app/lib/v2/companyLab/aiManagementMeeting/__tests__/accountingSemantics.test.ts`に
+AMM-ACC-1〜12（12件）を新規追加。既存backlogSemantics.test.ts・briefing.test.ts・
+factGrounding.test.tsは、`financialHistory`フィールド追加に伴う呼び出しシグネチャの
+変更のみ機械的に対応（`financialHistory: { reportingPeriod: null, priorPeriod: null }`）。
+factGrounding.test.tsのAMM-FG-9（version識別テスト）を"v3"→"v4"へ更新。
+AMM系テスト計49件、プロジェクト全体3157件、いずれもpass。
+
+### 23.13 real API結果
+
+このセッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため未実施
+（M2.1・M2.2と同様）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、Test26 BAL Turn2の
+実会話再現ケース「9E. Test26 BAL Turn2再現（P&L/Cash/BS混同なしの営業赤字説明）」
+（プレイヤー発言「2Qが営業赤字ですか？理由は？」、`test26Turn2Briefing()`に
+実データベースのfinancialStatements/pnlVariance/volumePriceFactsを組み込み済み）を
+追加した（計13ケース）。`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで、
+Operating Profit≈-$0.06Mへの急激な悪化・売上減少約$3.7M・処理費/労務費/固定費/SG&A増加・
+販売数量自体は増加・市場価格下落が主因・AR回収は原因ではない、という方向で
+CFOが応答するかを確認できる。
+
+### 23.14 remaining risks
+
+- M2.1・M2.2と同様、prompt文言による誘導であり、Claudeの出力を機械的に強制する
+  仕組みではない。実API未検証のため、実際の応答品質（特に9Eケースでの改善）は
+  引き続き確認が必要。
+- `financialHistory`のreportingPeriod/priorPeriodは、`CompanyLabHistoryEntryNotFoundError`
+  発生時にnullとして扱われる（捏造しない設計）。turn1・turn2等、履歴が浅い場合は
+  `financialStatements`/`pnlVariance`がnullのままとなり、CFOが「データが無いため
+  variance分析はできない」と答えることが期待されるが、実応答での確認は未実施。
+- `computeVolumePriceFacts`の`averageRealizedPriceUsdPerTon`は単純な除算であり、
+  商品構成（product mix）の変化までは分解しない（実装指示§12で明示的に許可された
+  スコープ限定）。より詳細なPrice-Volume-Mix分解が必要になった場合は将来phaseの対象。
+
+### 23.15 readiness for continued Test26
+
+P&L/Cash Flow/Balance Sheetの構造的分離・variance分析・Operating Profit/Net Incomeの
+区別・会計用語ガードレール・player correctionの会計カテゴリへの拡張が、コード・
+テスト・prompt文言の3層で揃った。次のTest26継続セッションでは、Turn2の「2Qが営業赤字
+ですか？理由は？」を含む会計関連の質問系列を優先的に再検証することを推奨する。
+
+## 24. M2.4（Operational KPI Semantic Grounding / Forward Obligation Risk）追記
+
+### 24.1 root causes
+
+Test26 BAL Turn4「現在の当社業績を分析して」で、会議形式・役割分担は改善したが、
+Databookと照合すると複数のFact/Semantic Errorが残っていた: (1) overdueTons=0の
+健全なforward backlog（8,988.43t）と「現在の納期遅延」の混同余地、(2)
+equipmentUtilization(47.44%)とlaborUtilization(95.32%)を「utilization」に一括して
+「工場全体が能力上限」と誤解させる余地、(3) company-wide equipment utilizationだけ
+では見えない商品別ローカルボトルネック（PD equipment shortage=1,015t）、(4)
+rawMaterial(3,074.72t)/equipment(1,015t)/labor(0t)のshortfall優先順位が不明確、(5)
+opening/ending/in-transit等の在庫種別が区別されず曖昧な在庫発言の余地、(6)
+regular(4,140)/temporary(575)workerの区別欠如、(7) interest-bearing debt
+（約$49.046M）とtotal liabilities（約$64M）の混同。根本原因はCFO/COO向けbriefingが
+これらのKPIを構造的に分離せず渡していた（またはCOO側にutilization/bottleneck/
+inventory/workforceの各KPIが一切渡っていなかった）ため、Claudeが生の内部指標を
+自由解釈する余地があったこと。
+
+### 24.2 COO briefing before/after
+
+- before: `coo.rawMaterialTotalTons`・`coo.totalRegularHeadcount`のみで、utilization・
+  bottleneck優先順位・在庫種別・temporary workerは一切渡っていなかった。
+- after: `coo.utilization`（equipmentUtilizationRate/laborUtilizationRate/overtimeRate/
+  temporaryWorkerShareを別フィールドで保持）、`coo.bottleneck`（rawMaterial/equipment/
+  laborのshortfall量＋primary/secondaryBottleneck＋商品別productBottlenecks）、
+  `coo.inventory`（ending/opening/in-transit/arrived/domestic purchaseを分離）、
+  `coo.workforce`（regularWorkers/temporaryWorkers/overtimeRateを分離）が追加された。
+
+### 24.3 Commercial briefing before/after
+
+M2.1〜M2.3で既に整備済みのbacklog分離（healthyForward/dueThisTurn/overdue）・
+customerTrustByMarketをそのまま利用。M2.4での変更は無く、promptガードレール側で
+「future delivery obligation」という用語・FACT→JUDGMENTの順序を明示的に追加した
+（実装指示§1・§2）。
+
+### 24.4 CFO debt terminology
+
+`cfo.interestBearingDebtUsd`（= shortTermLoansUsd + longTermLoansUsd、既存フィールドの
+単純合算のみ）を新規追加し、既存の`cfo.totalLiabilitiesUsd`（買掛金その他負債込み）と
+明確に区別した。RuleSemanticsへ`interestBearingDebt`/`totalLiabilities`の2エントリを
+追加。
+
+### 24.5 bottleneck semantics
+
+`operationalSemantics.ts`の`computeBottleneckHierarchy`が、rawMaterialShortageTons/
+equipmentShortageTons/laborShortageTonsのうちlost production（shortfall量）が最大の
+ものをprimary、次点をsecondaryとして機械的に判定する（新しい経営判断ロジックでは
+なく、既存reasonCodes.tsの会社全体集計と同じフィルタ条件の単純な優先順位付け）。
+商品別equipment shortageは、既存`ProductionAllocationEntry`（companyId×factoryId×
+product単位）をproductでグルーピングする単純集計で導出した（新しい生産判定は
+一切追加していない）。
+
+### 24.6 utilization semantics
+
+`coo.utilization`でequipmentUtilizationRate/laborUtilizationRate/overtimeRateを
+独立したフィールドとして保持し、prompt.tsに「utilization」への一括表現の明示的な
+禁止を追加した。
+
+### 24.7 inventory semantics
+
+`coo.inventory`でendingRawMaterialInventoryTons（当期末）・
+openingRawMaterialInventoryTons（前期末、無ければnull）・
+endingFinishedGoodsInventoryTons・importInTransitTons・importArrivedTons・
+domesticPurchaseTonsを分離した。すべて既存`CompanyQuarterSummary`のフィールドを
+そのまま転記するだけで、新しい在庫計算は一切追加していない。
+
+### 24.8 workforce semantics
+
+`coo.workforce`でregularWorkers/temporaryWorkersを別フィールドとして保持した。
+既存`WorkerAssignment`（該当四半期のdecisions.workerAssignments）のregularHeadcount/
+temporaryHeadcountを会社全体で単純合算するだけで、新しい人員計算は一切追加して
+いない。
+
+### 24.9 forward obligation handling
+
+RuleSemanticsへ`futureDeliveryObligation`エントリを追加し、prompt.tsに「overdueTons=0
+の場合、納期遅延/履行遅延/納期未達/契約違反が既に発生/Trustを既に毀損という表現を
+禁止し、future delivery obligation/次四半期に履行すべき受注/capacity planning上の
+負荷/将来のdelivery riskという表現のみ許可する」旨、および「Healthy Forward Backlogが
+次期能力を超える可能性がある場合はリスクとして議論してよいが、必ずFACTを先に述べ、
+その後にJUDGMENTを続ける」という順序規律を追加した（実装指示§1・§2）。
+
+### 24.10 Test26 Turn4 reproduction
+
+`app/lib/v2/companyLab/aiManagementMeeting/__tests__/operationalSemantics.test.ts`の
+AMM-OPS-10で、実装指示冒頭の実データ（equipmentUtilization=47.44%/
+laborUtilization=95.32%/overtimeRate=8.21%、rawMaterialShortage=3,074.72t/
+equipmentShortage=1,015t/laborShortage=0t、regularWorkers=4,140/
+temporaryWorkers=575、endingRawMaterialInventory=0t）から、primary
+bottleneck=RAW_MATERIAL・secondary=EQUIPMENT・PD商品別equipmentShortageTons=1,015が
+正しく導出されることを確認した。`scripts/aiMeetingRealApiSmokeTest.ts`へ、実際の
+プレイヤー発言「現在の当社業績を分析して」を使う「9F. Test26 BAL Turn4再現」
+ケースも追加した。
+
+### 24.11 code changes
+
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/operationalSemantics.ts`
+  （UtilizationPacket/BottleneckPacket/InventoryPacket/WorkforcePacket + builder関数 +
+  computeBottleneckHierarchy）
+- 変更: `briefing.ts`（`operationalHistory`入力、`coo.utilization`/`coo.bottleneck`/
+  `coo.inventory`/`coo.workforce`/`cfo.interestBearingDebtUsd`を追加、RuleSemantics
+  9エントリ追加、`EXECUTIVE_BRIEFING_VERSION`を"v4"→"v5"）
+- 変更: `prompt.ts`（backlog現在/将来区別・utilization分離・bottleneck階層・在庫/人員
+  semantics・debt semantics・wide question 1〜2論点規律を追加、
+  `AI_MEETING_PROMPT_VERSION`を"v4"→"v5"）
+- 変更: `handlers.ts`（`loadFinancialSnapshot`を`loadQuarterSnapshot`へ拡張し、
+  companySummaries・workerAssignments（decisions）・productionAllocation.entriesを
+  同一repository呼び出しから取得、`operationalHistory`を配線）
+- 既存のfinance/quarterClose.ts・production engine・Standard AI・Sales/pricing
+  エンジン・Trust・game parametersは一切変更していない（実装指示の禁止事項の遵守）。
+
+### 24.12 tests
+
+`app/lib/v2/companyLab/aiManagementMeeting/__tests__/operationalSemantics.test.ts`に
+AMM-OPS-1〜10（10件）を新規追加。既存4テストファイル（backlogSemantics.test.ts・
+briefing.test.ts・factGrounding.test.ts・accountingSemantics.test.ts）は、
+`operationalHistory`フィールド追加に伴う呼び出しシグネチャの変更のみ機械的に対応
+（`operationalHistory: { reportingPeriod: null, priorPeriod: null }`）。
+factGrounding.test.ts AMM-FG-9のversion識別テストを"v4"→"v5"へ更新。AMM系テスト
+計59件、プロジェクト全体3167件、いずれもpass。
+
+### 24.13 real API結果
+
+このセッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため未実施
+（M2.1〜M2.3と同様）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、Test26 BAL Turn4の
+実会話再現ケース「9F. Test26 BAL Turn4再現（operational KPI grounding・wide
+question）」（プレイヤー発言「現在の当社業績を分析して」、`test26Turn4Briefing()`に
+実データベースのutilization/bottleneck/inventory/workforceを組み込み済み）を
+追加した（計14ケース）。`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで、
+「工場全体が能力上限」と言わない・PD equipment shortageを局所的制約として区別・
+primary bottleneckをraw materialと認識・labor shortageによるlost productionは無いと
+明示・8,988tをoverdue=0のforward backlogとして扱う・US PD4,000/EU PD1,550を次期
+obligationとして述べる・有利子負債と負債合計を混同しない、という方向で各役員が
+応答するかを確認できる。
+
+### 24.14 remaining risks
+
+- M2.1〜M2.3と同様、prompt文言による誘導であり、Claudeの出力を機械的に強制する
+  仕組みではない。実API未検証のため、実際の応答品質（特に9Fケースでの改善）は
+  引き続き確認が必要。
+- `operationalHistory`は`financialHistory`と同じ`CompanyLabHistoryEntryNotFoundError`
+  捕捉によりnull化される。turn1等、履歴が浅い場合は`coo.utilization`等がnullのまま
+  となり、COOが「データが無いため分析できない」と答えることが期待されるが、実応答
+  での確認は未実施。
+- 商品別bottleneck集計は、1つの`ProductionAllocationEntry`が複数のshortfallReasons
+  を同時に持つ場合、各カテゴリへ同じshortfallQuantityが重複計上される（既存
+  reasonCodes.tsの会社全体集計と同じ単純化。実装指示の範囲では許容されるが、将来
+  より精緻な内訳が必要になった場合は要検討）。
+- 「臨時/季節ワーカーの意思決定」（temporaryWorkers）は該当四半期の`decisions`
+  レコードから取得するため、turn1等でdecisionsが空の場合は0として扱われる
+  （捏造ではなく「無ければ0」という設計だが、「未決定」と「決定して0人」の区別は
+  現状できない）。
+
+### 24.15 readiness for continued Test26
+
+Operational KPIの構造的分離（utilization/bottleneck/inventory/workforce）・
+forward obligation riskのFACT→JUDGMENT順序規律・debt terminology区別・wide question
+1〜2論点規律が、コード・テスト・prompt文言の3層で揃った。次のTest26継続セッション
+では、Turn4の「現在の当社業績を分析して」を含む広範な業績分析質問系列を優先的に
+再検証することを推奨する。
+
+## 25. M2.5（Due-Date Grounding Enforcement / Capacity Pool Semantics）追記
+
+### 25.1 root cause
+
+Test26系の新規BAL Turn1「現状を分析してください」で、COO/CFO/Commercialが揃って、
+overdueTons=0のfuture backlog（US HOSO 1,443.43t・OTHER HOSO 814.04t、いずれも
+2015Q2納期＝次四半期）を「期限オーバー」「納期内に納めるにはCAPEX・人員増が必要」と
+誤って説明した。COOはさらに、14,107.5t（HOSO 6,840+PD 5,985+VAP 1,282.5の商品別
+専用ライン合計）を「実効能力で天井」と述べ、common preprocessing（25,650t）・
+freezing/packing（25,650t）という遥かに大きい別のcapacity poolの存在を無視した。
+
+### 25.2 why M2.4 prompt guard was insufficient
+
+M2.1〜M2.4のprompt文言（backlog=overdueと呼ばない・healthyForward/dueThisTurn/
+overdueTonsの3値分離）は既に存在していたが、3値を見た上で「どれが優勢か」をClaude
+自身が都度解釈する余地が残っていた。overdueTons=0・dueThisTurnTons=0・
+healthyForwardTons>0という組み合わせから、Claudeが独自に「大部分は将来納期だが
+一部は期限が近い」のような曖昧な言い換えを行い、結果として「期限オーバー」という
+単語そのものを使ってしまう余地があった。prompt文言による誘導だけでは、語彙選択の
+最終決定権がClaude側に残っており、構造的な強制力が無かったことが直接の原因。
+
+### 25.3 due status deterministic grounding
+
+`backlogSemantics.ts`へ`classifyBacklogDueStatus(overdueTons, dueThisTurnTons,
+healthyForwardTons)`を追加し、`"OVERDUE"|"DUE_THIS_TURN"|"FUTURE_DUE"|"MIXED"`という
+唯一の分類結果を、common.backlog・commercial.backlog・coo.backlogByProduct・
+commercial.backlogByMarket/backlogByProduct/backlogByMarketProductの全集計へ
+`status`フィールドとして付与した。Claudeはこの値をそのまま使うだけでよく、3値の
+大小関係から再判定する必要が無い（prompt側にも「再判定してはいけない」旨を明記）。
+
+### 25.4 wording guard
+
+overdueTonsが0の場合、prompt.tsに「overdue/late/delayed/past due/deadline
+missed/納期遅延/期限オーバー/未達/契約違反」の使用を明示的に禁止する強い語彙
+ガードを追加した。future backlogについては「next-quarter obligation/forward
+order book/scheduled delivery/upcoming fulfillment requirement/将来納期の受注残/
+次四半期の履行義務」という表現のみを許可し、「Q2中に消化できれば評価改善」という
+誤表現も明示的に禁止した（正しくは「Q2納期なのでQ2中に予定どおり履行する必要が
+ある」）。
+
+### 25.5 response validator採否
+
+**採否: 採用した。** `dueWordingGuard.ts`の`findOverdueWordingViolations`が、
+overdueTons=0のときのみ応答テキストを走査し、禁止語彙（訂正文脈の否定表現近傍を
+除く）を検知する。`handlers.ts`が、通常のClaude呼び出し後にこの検知を行い、
+違反があれば最大1回だけ`repairNote`付きの同一入力で再呼び出しする（schema_mismatch
+由来の既存retryとは別レイヤー。既存claudeClient.tsのretryポリシーは変更していない）。
+採用理由: 平常時（違反が無い場合）のtoken・latencyコストは走査コストのみで
+ほぼゼロであり、違反が実際に発生した稀なケースにのみ追加API呼び出しが発生する
+ため、トレードオフが良好と判断した。限界: 完全な自然言語理解ではなく単純な文字列
+マッチ＋否定表現の近傍一致であるため、「プレイヤーは『納期遅延』と述べましたが」
+のような複雑な引用文脈までは正確に除外できない（remaining risksに明記）。
+
+### 25.6 capacity pool semantics
+
+`capacitySemantics.ts`の`buildCapacityPools`が、既存`ownState.factoryCapacity`
+（commonProcessing/hoso/pd/vap/freezingPackagingの5フィールドを既に保持している）
+を単純合算し、`coo.capacityPools`として明示的に分離する。`productLineSumTons`
+（hoso+pd+vap）は「会社全体の実効生産能力」ではなく商品別専用ラインの合計に
+すぎないことをRuleSemantics・prompt双方で明記し、`bindingPoolLabel`（既存
+`computeProductionCapacitySummary`が既に正しく算出済みの"商品別実効能力"|
+"共通前処理"|"凍結・包装"）を必ず明示するようCOOへ指示した。
+
+### 25.7 raw material semantics
+
+`coo.rawMaterialAvailability.currentOnHandTons`として、decision時点の現在在庫
+（既存`ownState.rawMaterialInventory.totalTons`の転記のみ）を明示的にラベル付け。
+今期のquarter processing中に発生し得るdomestic purchase/import arrivalsはこの
+数値に含まれないことをpromptで明記し、「現在在庫0＝今期生産不可能」という誤った
+断定を禁止した。
+
+### 25.8 preview semantics
+
+RuleSemantics.productionPreviewエントリと、promptの明示的な指示により、player
+draftの現在の入力に基づく生産見込み（forecast/preview/current-input estimate）を
+確定した生産能力・確定生産量と混同しないよう規定した。新しいpreview計算・新しい
+観測フィールドは追加していない（現時点でAI Meeting briefingにpreview数値を渡す
+経路自体が無いため、原則の明文化のみ）。
+
+### 25.9 CAPEX grounding
+
+CFO・COOがCAPEX必要性を述べる場合、現在のoverdue backlogだけを理由にせず、
+(a) 商品別capacity gap、(b) forward obligationのstatus・期間、(c) 既存CAPEX
+（cfo.activeCapexRemainingCommitmentUsd等）、(d) 財務的実現可能性、のうち複数の
+根拠を示すことを要求する原則をprompt.tsへ追加した。future backlogが存在するという
+事実だけで「CAPEXが必要」と断定することを明示的に禁止した。
+
+### 25.10 Test26 BAL Turn1 reproduction
+
+実装指示§9の実データ（ending backlog=3,625.95t/overdue=0、US HOSO 1,443.43t・
+OTHER HOSO 814.04t（いずれも次四半期納期）、capacity pools common=25,650t/
+HOSO=6,840t/PD=5,985t/VAP=1,282.5t/freezing=25,650t、ending raw inventory=0t）を
+`dueCapacitySemantics.test.ts`のAMM-CAP-10で再現し、due status=FUTURE_DUE・
+capacity pools分離・raw material=0の正しい算出を確認した。
+`scripts/aiMeetingRealApiSmokeTest.ts`へ、実際のプレイヤー発言「現状を分析して
+ください」を使う「9G. Test26 BAL Turn1再現（due-date grounding・capacity pool
+semantics）」ケースも追加した。
+
+### 25.11 code changes
+
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/capacitySemantics.ts`
+  （CapacityPools/RawMaterialAvailabilityFact + builder関数）
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/dueWordingGuard.ts`
+  （overdue関連禁止語彙の検知関数、訂正文脈の否定表現近傍除外を含む）
+- 変更: `backlogSemantics.ts`（`classifyBacklogDueStatus`・`BacklogDueStatus`型を
+  追加し、全集計エントリへ`status`フィールドを付与）
+- 変更: `briefing.ts`（`coo.capacityPools`/`coo.rawMaterialAvailability`/
+  `cfo`・`commercial`各backlog集計への`status`追加、RuleSemantics 5エントリ追加、
+  `EXECUTIVE_BRIEFING_VERSION`を"v5"→"v6"）
+- 変更: `prompt.ts`（due status唯一分類・強い語彙ガード・capacity pool説明規律・
+  raw material/preview区別・CAPEX根拠要求・repairNote処理を追加、
+  `AI_MEETING_PROMPT_VERSION`を"v5"→"v6"）
+- 変更: `types.ts`（`AiMeetingCallDiagnostics.semanticGuardResult`をoptional追加）
+- 変更: `handlers.ts`（overdue語彙違反検知時の最大1回repair呼び出しを追加、
+  `diagnostics.semanticGuardResult`を返す）
+- 既存のStandard AI・Production/Sales/Contract fulfillment/Finance/Trust
+  mechanicsは一切変更していない（実装指示の禁止事項の遵守）。
+
+### 25.12 tests
+
+`app/lib/v2/companyLab/aiManagementMeeting/__tests__/dueCapacitySemantics.test.ts`に
+AMM-DUE-1〜4・AMM-CAP-1〜6・AMM-CAP-10（Test26 Turn1 reproduction）の11件を新規追加。
+`app/api/v2/company-labs/_lib/__tests__/aiMeetingHandlers.test.ts`にAMM-DUE-5
+（repair発火）・AMM-DUE-6（repair不発火）の結合テスト2件を追加。既存
+backlogSemantics.test.ts等は`status`フィールド追加が構造的に既存アサーションを
+壊さないことを確認済み。factGrounding.test.ts AMM-FG-9のversion識別テストを
+"v5"→"v6"へ更新。AMM系テスト計72件（59+11+2）、プロジェクト全体3180件、いずれも
+pass。
+
+### 25.13 real API結果
+
+このセッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため未実施
+（M2.1〜M2.4と同様）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、Test26 BAL Turn1の
+実会話再現ケース「9G. Test26 BAL Turn1再現（due-date grounding・capacity pool
+semantics）」（プレイヤー発言「現状を分析してください」、実データベースの
+due status・capacityPools・rawMaterialAvailabilityを組み込み済み）を追加した
+（計15ケース）。`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで、「期限
+オーバー」等の禁止語彙を使わない・US HOSO/OTHER HOSOを次四半期の履行義務として
+説明する・14,107.5tを会社全体の天井と呼ばない・common/freezing poolの存在を
+明示する・現在在庫0と今期調達可能性を分離する・future backlogだけでCAPEXを
+断定しない、という方向で各役員が応答するかを確認できる。
+
+### 25.14 remaining risks
+
+- prompt文言・response validatorともに、Claudeの出力を完全に機械的強制する
+  仕組みではない。実API未検証のため、実際の応答品質（特に9Gケースでの改善）は
+  引き続き確認が必要。
+- `dueWordingGuard.ts`の訂正文脈除外は、否定表現の近傍一致という単純な
+  ヒューリスティックであり、「プレイヤーは『納期遅延』と述べましたが」のような
+  複雑な引用文脈までは正確に除外できない（既知の限界。将来phaseでより精緻な
+  文脈解析が必要になった場合は要検討）。
+- repair呼び出しは、1回のみで打ち切る設計のため、repair後も違反が残った場合
+  （`semanticGuardResult="violation_after_repair"`）はそのまま応答を返す
+  （無限リトライを避けるための意図的な設計）。
+- `coo.capacityPools`は既存`ownState.factoryCapacity`の単純合算であり、
+  factory単位の内訳（どの工場のどのラインが逼迫しているか）はfactoryCapacityTopN
+  （上位N件）からしか読み取れない。全factory詳細が必要な場合は別途監査が必要。
+
+### 25.15 readiness
+
+due status・capacity pool・raw material/preview semantics・CAPEX根拠要求・
+response validatorが、コード・テスト・prompt文言の3層で揃った。次のTest26継続
+セッションでは、新規BAL Turn1の「現状を分析してください」を含む、backlogと
+capacityに関する質問系列を優先的に再検証することを推奨する。
+
+## 26. M2.6（Run Advisory Memory / Player Correction Memory）追記
+
+### 26.1 branch / HEAD
+
+`feature/v2-32q-management-console`。M2.5コミット`7d9e621`を前提に開始し、本節は
+その続きとして追記した。M2.1〜M2.5のFact Grounding/Backlog Semantics/Finance
+Semantics/Accounting Semantics/Operational KPI Semantics/Due-Date Groundingは
+すべて維持されている（既存テストの再実行で確認済み）。
+
+### 26.2 architecture
+
+Run Advisory Memoryは、Standard AIの学習でもGame Engineの学習でもない、AI
+Management Meeting専用のRun-scoped advisory memoryである。プレイヤーが会話中に
+明示した訂正・そのRun固有の方針・優先順位・一時的な制約・未確認見解を保持し、
+同一Run（=既存の`labId`）内の後続turnでAI役員が参照できるようにする。永続化は
+Game State SSoTとは完全に分離した独立Redisキー（`companylab:v2:{labId}:
+{companyId}:aiMeetingMemory`）で行い、既存の会話永続化（conversation.ts）と
+並行するパターンを採用した。抽出は既存の単一structured Claude callの応答へ
+`memoryCandidates[]`を追加するのみで、追加のClaude呼び出しは発生しない。
+
+### 26.3 memory scopes
+
+実装指示§1どおり最低3スコープ（MEETING/TURN/RUN）を型として定義し、MVPでは
+RUNスコープのみを実際に永続化・注入する（`RunAdvisoryMemoryScope`型・
+`RUN_ADVISORY_MEMORY_SCOPES`定数）。MEETING/TURNスコープは将来拡張のため型のみ
+用意した。
+
+### 26.4 memory types
+
+実装指示§2どおり最低6種（CONFIRMED_CORRECTION/PLAYER_PREFERENCE/
+STRATEGIC_INTENT/TEMPORARY_CONSTRAINT/UNVERIFIED_CLAIM/OPEN_QUESTION）を
+`RunAdvisoryMemoryType`として定義した。
+
+### 26.5 extraction logic
+
+`claudeClient.ts`のtool schemaへ`memoryCandidates`（optional・最大3件）を追加し、
+`prompt.ts`に「今期の売上は？」のような通常質問には候補を生成しないこと、明示的な
+訂正・「今後は」「このRunでは」「当面」等の継続宣言・明確な優先順位・明確な禁止
+事項のみを対象とすることを明記した（実装指示§12・§13）。候補はPlayerメッセージ
+由来のみとし、executiveの発言・推論からの生成を明示的に禁止した（実装指示§29・
+hallucination防止）。
+
+### 26.6 confirmation logic
+
+`confirmMemoryCandidate()`が機械照合可能な唯一のケース（`type=
+CONFIRMED_CORRECTION`かつ`topic=BACKLOG_SEMANTICS`）をbriefingの
+`backlog.status`（M2.5のdue status）と突合し、`SUPPORTED`/`CONTRADICTED`を判定
+する。それ以外はClaudeの主張だけでは確定せず、`NOT_VERIFIABLE`へ分類し
+`CONFIRMED_CORRECTION`は`UNVERIFIED_CLAIM`へ自動的に降格される（実装指示§4・
+§15「Claudeだけでconfirmedにしない」）。
+
+### 26.7 truth hierarchy integration
+
+既存の6段階のTruth Hierarchy（Engine/Briefing facts > Structured diagnostics >
+確認済みPlayer correction > Standard AI proposal > 他executiveの発言 > 一般的business
+knowledge）は変更していない。CONFIRMED_CORRECTIONのみがlevel-3相当として扱われる
+ことをpromptに明記した（実装指示§5）。
+
+### 26.8 persistence
+
+Game State SSoTとは別の独立Redisキー（`companylab:v2:{labId}:{companyId}:
+aiMeetingMemory`）に、run×company単位で1キー・全記録を1つのJSON配列として保持する
+（record単位のキー分割はしない）。既存のsave/resumeには一切影響しない
+（キー自体が既存の状態保存経路とは独立しているため構造的に無関係、実装指示§6）。
+
+### 26.9 memory record schema
+
+`RunAdvisoryMemoryRecord`（id/runId/companyId/createdTurn/updatedTurn/scope/type/
+topic/statement/normalizedValue?/verificationStatus/sourceMessageId/isActive/
+expiresAfterTurn?/createdAt/updatedAt）。実装指示§8の要求フィールドをすべて
+含む。statementは1〜2文の簡潔な文（実装指示§9）で、最大200文字にzodで制限した。
+
+### 26.10 dedupe / update
+
+同一`(topic, type)`ペア（CUSTOMトピックのみ正規化済み文字列完全一致）を重複と
+判定し、新しいrecordを追加する代わりに既存recordを更新する（同一idを保持、
+statement/normalizedValue/verificationStatus/updatedTurn/updatedAtを上書き）。
+これにより、同一トピックについて履歴が積み増されず「最新の明示的発言が古い
+記憶を上書きする」（実装指示§10・§22）を実現した。
+
+### 26.11 expiry
+
+`TEMPORARY_CONSTRAINT`は`expiresAfterTurn`を持てる。`expireRunMemories()`が
+`currentTurn > expiresAfterTurn`のrecordを`isActive=false`へ変更する純粋関数
+として実装され、handlers.tsがmemory読み込み直後に毎回適用する（実装指示§18）。
+
+### 26.12 forget handling
+
+candidateに`action: "SAVE"|"FORGET"`を追加した（元の実装指示にない拡張フィールド
+だが、§25「さっきのJapan優先は忘れて」を実装するために必要と判断した）。FORGETは
+同一`(topic, type)`の全active recordを`isActive=false`へ変更するのみで、record
+自体は削除しない（実装指示§25「完全削除よりinactive推奨」）。
+
+### 26.13 role relevance filtering
+
+単一structured callアーキテクチャ（1回のClaude呼び出しで複数役員が発言し得る）
+のため、役割ごとに別プロンプトを構築することができない。そのため`ROLE_RELEVANT_
+TOPICS`によるtopic→role逆引きで各summary itemに`relevantRoles`タグを付与し、
+Claude自身が役割に応じた参照規律を適用できるようにした（実装指示§20の精神を
+単一callアーキテクチャへ適応させた実装）。
+
+### 26.14 prompt injection
+
+`buildRunAdvisoryMemorySummary()`が6カテゴリ（confirmedCorrections/
+playerPreferences/strategicIntents/temporaryConstraints/unverifiedClaims/
+openQuestions）へグループ化し、各カテゴリ最大5件（`SUMMARY_ITEMS_PER_CATEGORY`）
+の最近更新順で圧縮する。`ExecutiveBriefingPacket`とは別の`runAdvisoryMemory`
+フィールドとして`buildMeetingUserMessage`のペイロードへ注入する（実装指示§19
+「別枠として注入・mergeしない」）。promptには実装指示§35の6原則（player memoriesは
+advisory contextでありengine factではない・confirmed correctionのみ信頼できる・
+preference/strategic intentはゲームを自動的に変更しない・unverified claimをgame
+factとして提示しない・現在のbriefingが古いmemoryより優先・現在のplayer
+messageが古いpreferenceより優先）を英語原文の形で明記した。
+
+### 26.15 factsUsed vs memoryUsedIds
+
+`AiMeetingStructuredResponse`へ`memoryUsedIds[]`を`factsUsed`とは別フィールドと
+して追加した（実装指示§28）。`factsUsed`はゲーム事実の参照のみ、`memoryUsedIds`は
+player/run advisory context（memory）の参照のみを表す。
+
+### 26.16 API contract
+
+MVPでUI実装は不要（実装指示§23・§42）だが、`app/api/v2/company-labs/[labId]/
+companies/[companyId]/ai-meeting/memory/route.ts`にGET（active memory一覧）・
+DELETE（`?id=`で個別memoryをinactive化）を実装した。既存`turns/[turn]/ai-meeting/
+messages`とは別の、labId×companyId直下のRun-scopedなルートとして配置した
+（memoryはturnスコープではなくrunスコープのため）。
+
+### 26.17 Redis failure behavior
+
+memoryの読み込み・保存いずれかが失敗しても、AI Meeting応答自体は例外を投げず
+継続する（読み込み失敗時はmemoryなしで継続、保存失敗時は応答はそのまま返す）。
+ゲーム状態は一切変更されない（実装指示§38）。AMM-MEM-18で結合テストとして確認
+した。
+
+### 26.18 token impact
+
+保存上限20件のうち、注入時は`SUMMARY_ITEMS_PER_CATEGORY=5`によりカテゴリごと
+最大5件・全体最大30件相当（6カテゴリ×5）に圧縮する。各statementは200文字以下の
+ため、増分は測定可能な範囲に収まる設計とした（実API未実施のため実測値は今回
+報告できない。実装指示§39）。
+
+### 26.19 Test26 correction example（§30）
+
+Test26のbacklog-is-not-overdue訂正ケース（受注残はfuture dueでありoverdueでは
+ない）は、`confirmMemoryCandidate()`でCONFIRMED_CORRECTION/BACKLOG_SEMANTICS/
+SUPPORTEDと正しく判定される一方、`isRedundantWithSystemRule()`がこの組み合わせを
+検知し、`applyCandidate()`が実際の永続化をスキップする（`skippedReason=
+"redundant_with_system_rule"`）。M2.5で既にこの訂正は決定的なdue status
+ルール＋強い語彙ガードとしてシステムルール化されているため、冗長なRUN memoryを
+残さないという実装指示§30の推奨を採用した。AMM-MEM-2で確認済み。
+
+### 26.20 preference example
+
+「Cashは最低30M維持を希望」→`PLAYER_PREFERENCE`/`CASH_FLOOR`/`normalizedValue=
+30,000,000`として保存され、事実確認は不要（実装指示§16）、`buildRunAdvisoryMemory
+Summary()`で`relevantRoles`に`CFO`・`CEO`が付与される。AMM-MEM-4・13で確認済み。
+
+### 26.21 unverified claim example
+
+「来期VAP価格は絶対上がる」→`UNVERIFIED_CLAIM`/`CUSTOM`として保存され、
+promptで「game factとして提示してはならない」ことを明記。AMM-MEM-16で確認済み。
+
+### 26.22 code changes
+
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/runAdvisoryMemory.ts`
+  （persistence/confirmation/dedupe/expiry/role relevance/summary構築）
+- 新規: `app/api/v2/company-labs/[labId]/companies/[companyId]/ai-meeting/
+  memory/route.ts`＋`_lib/{dependencies,handlers,withApiContext}.ts`
+- 変更: `types.ts`（`AiMeetingStructuredResponse.memoryCandidates/
+  memoryUsedIds`、Run Advisory Memory型一式追加）
+- 変更: `proposalSchema.ts`（`memoryCandidateSchema`、structured responseへの
+  組み込み、上限定数追加）
+- 変更: `claudeClient.ts`（tool input schemaへ`memoryCandidates`/
+  `memoryUsedIds`追加、いずれもoptional）
+- 変更: `prompt.ts`（memory summary注入・抽出規律・実装指示§35原則・
+  `AI_MEETING_PROMPT_VERSION`を"v6"→"v7"）
+- 変更: `handlers.ts`（memory読込→expire→注入→応答後の候補処理→永続化の配線、
+  レスポンスへ`memoryUsedIds`追加）
+- `EXECUTIVE_BRIEFING_VERSION`は変更していない（memory注入はExecutiveBriefing
+  Packetとは別枠のため）
+- 既存のStandard AI・Vision/ManagementProfile・Game State・Finance/Sales/
+  Production/Trust/CAPEX/Scenario parametersは一切変更していない（実装指示§43の
+  禁止事項の遵守）。
+
+### 26.23 tests
+
+`app/lib/v2/companyLab/aiManagementMeeting/__tests__/runAdvisoryMemory.test.ts`に
+AMM-MEM-1〜17・20（18件）を新規追加。`app/api/v2/company-labs/_lib/__tests__/
+aiMeetingHandlers.test.ts`にAMM-MEM-18（Redis失敗時のフォールバック）・
+AMM-MEM-19（memoryなしの既存Run）の結合テスト2件を追加。AMM-MEM-1〜20の20件
+すべてを実装した。AMM系テスト（`aiManagementMeeting/__tests__/*`配下）は88件、
+結合テスト（`aiMeetingHandlers.test.ts`）は15件、プロジェクト全体3200件、
+いずれもpass。
+
+### 26.24 tsc / eslint
+
+`npx tsc --noEmit -p .`・`npx eslint .`ともにエラー0件（既存の無関係な
+warning 14件のみ、M2.6由来の新規warningは0件）。
+
+### 26.25 real API結果
+
+このセッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため未実施
+（M2.1〜M2.5と同様）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、実装指示§41の
+4フロー（10A: cash floor preference→CAPEX質問、10B: Japan priority strategic
+intent→販売戦略質問、10C: VAP price unverified claim→VAP投資質問、10D:
+explicit forget後の再質問）を追加した（計16ケース）。各フローは、
+`applyCandidate`/`buildRunAdvisoryMemorySummary`で決定的に構築したmemory
+recordを2回目の質問callへ注入する構成とした（candidate抽出自体はunit testで
+別途検証済みのため、smoke testではmemory注入後の参照品質を確認する）。
+`ANTHROPIC_API_KEY`を持つ開発者が手動実行することで、各役員がmemoryを適切に
+参照するか（cash floor preferenceを踏まえたCAPEX助言・Japan priorityを踏まえた
+販売戦略・VAP price claimをgame factとして扱わない・forget後にJapan priorityへ
+言及しない）を確認できる。
+
+### 26.26 remaining risks
+
+- memory抽出はClaudeの自発的なcandidate生成に依存しており、実装指示§12の
+  「明示的な訂正・継続宣言・明確な優先順位・明確な禁止事項」の境界線は
+  prompt文言による誘導にとどまる。実API未検証のため、過剰生成・過少生成の
+  傾向は今回確認できていない。
+- 20件上限到達後は新規topicの保存を見送るのみで、既存recordの自動追い出し
+  （LRU等）は実装していない。同一topicの更新は上限に関係なく通るため実運用上の
+  影響は限定的と考えるが、多数の異なるtopicを扱うRunでは上限到達時の挙動を
+  プレイヤーへ明示する必要が将来的に生じる可能性がある。
+- role relevance filteringはハード制約ではなくtag付けのみであり、Claudeが
+  無関係な役員へmemoryを参照させてしまう可能性を完全には排除できない。
+- Redis障害時のフォールバックはユニット・結合テストで確認済みだが、実際の
+  Redis接続断（タイムアウト等）はモックでのみ検証しており、実インフラでの
+  挙動は未検証。
+
+### 26.27 readiness for continued Test26
+
+Run Advisory Memoryの型・永続化・confirmation・dedupe・expiry・forget・role
+relevance・prompt注入・API contractが、コード・テスト（AMM-MEM-1〜20）・
+prompt文言の3層で揃った。次のTest26継続セッションでは、「Cash≥30M維持」
+「日本優先」「次の2四半期はCAPEXなし」等のプレイヤー発言を実際に会話へ投入し、
+後続turnでの参照品質（cash floor preferenceを踏まえたCAPEX助言の変化等）を
+実APIで確認することを推奨する。
+
+## 27. M2.7（Turn Change Briefing / Automatic Opening Executive Brief）追記
+
+### 27.1 architecture
+
+新しいTurnの意思決定画面に入った際、プレイヤーが何も質問しなくても「前四半期から
+何が変わったか」を、CEOだけが3〜5点、短く説明するOpening Executive Brief機能を
+追加した。基本原則（実装指示§1）どおり、差分計算は一切Claudeにさせない。
+`turnChangeBriefing.ts`が既存モジュール（pnlSemantics/operationalSemantics/
+capacitySemantics）の関数・既存フィールドの単純な転記・差分としてのみ
+`TurnChangeBriefing`をserver-side deterministicに構築し、その中からTop 8件の
+`significantChanges`だけをClaudeへ渡す。Claudeの役割はその中から3〜5件を選んで
+経営的に短く解釈するだけに限定した（新しいtool schema・system prompt・response
+schemaを専用に用意し、既存のAI Meeting本体のprompt/schemaとは完全に分離、
+transport層（AnthropicMessagesClient・timeout/retry方針）のみ共有）。
+
+### 27.2 TurnChangeBriefing schema
+
+`TurnChangeBriefing { runId, companyId, fromTurn, toTurn, fromPeriodLabel,
+toPeriodLabel, financialChanges, commercialChanges, operationalChanges,
+capacityChanges, riskChanges, opportunityChanges, significantChanges,
+turnChangeBriefingVersion }`。Persistent SSoTにはしない（呼び出しのたびに
+2つの確定四半期スナップショットから再構築する）。
+
+### 27.3 financial deltas
+
+revenue/grossProfit/operatingProfit/operatingMargin/netIncome/cash/
+accountsReceivable/totalDebt(=balanceSheet.totalLiabilities)/interestBearingDebt
+(=shortTermLoans+longTermLoans)/borrowingHeadroomを、`MetricDelta{current,
+previous,delta,deltaPercent}`として保持。`pnlVariance`は`pnlSemantics.
+computePnlVariance`をそのまま転記（二重計算しない）。
+
+### 27.4 commercial deltas
+
+newOrders/deliveredVolume/totalBacklog/healthyForwardBacklog/
+dueThisTurnBacklog/overdueBacklog/salesForceHeadcount/trustByMarket/
+averageRealizedPriceUsdPerTon/productMixを保持。backlogは既存
+`CompanyQuarterSummary.outstandingQuantity/overdueQuantity`（runner.ts側で
+`status==="overdue"`を正しく集計している既存フィールド。M2.1が問題視した
+computeBacklogByMarketProductの誤命名フィールドとは別物）を転記するのみ。
+`volumePriceFacts`は`pnlSemantics.computeVolumePriceFacts`の転記。
+
+### 27.5 operational deltas
+
+productionVolume/rawMaterialInventory/finishedGoodsInventory/
+rawMaterialShortageTons/equipmentShortageTons/laborShortageTons/
+equipmentUtilization/laborUtilization/overtimeRate/regularWorkers/
+temporaryWorkers/qualityScoreByProduct/bottleneckChangeを保持。
+equipmentUtilizationとlaborUtilizationは常に別フィールドとして保持し、一括しない
+（M2.4の原則を維持）。
+
+### 27.6 capacity deltas
+
+5 capacity pool（common/hoso/pd/vap/freezing）の現在値と、CAPEX活動
+（ongoing/completedThisTurn/newlyStartedThisTurn、`CapitalProject.
+completedPeriod/constructionStartedPeriod`との一致判定のみ）を保持。
+【既知の簡略化】過去turnの工場別実効能力スナップショットがengine履歴に
+存在しないため、capacity poolは現在値のみを提供し、`capacityIncreasedThisTurn`
+（CAPEX完了イベントの有無）で代替する。能力増分を独自に推定・再計算することは
+しない（remaining risksに明記）。
+
+### 27.7 risk/opportunity selection・significance logic
+
+単純な優先度3段階（HIGH=構造的シグナル: sign reversal・new overdue・
+bottleneck変化・CAPEX完了、MEDIUM=閾値超えのdelta（margin deterioration
+±3pp・cash stress -15%・price shock ±8%という最小限の固定閾値のみ）、
+LOW=その他の非ゼロdelta）で候補を生成し、全候補からスコア降順でTop 8件を
+`significantChanges`とする。新しい巨大score engineは作らない（実装指示§11）。
+
+### 27.8 bottleneck change logic
+
+`operationalSemantics.computeBottleneckHierarchy`を、reportingPeriod/
+priorPeriod双方のshortfall値へそれぞれ適用し、primary bottleneckのカテゴリが
+変化したかどうかを`bottleneckChange{previous,current,changed}`として保持
+（二重ロジックなし、既存関数の2回呼び出しのみ）。
+
+### 27.9 backlog semantics
+
+healthy forward増加とoverdue増加を完全に区別する。overdueが0のままなら
+`commercial.overdue.*`候補は一切生成されず、`commercial.healthyForwardBacklog.
+delta`候補はdomain=OPPORTUNITYとして扱われる（RISKにはしない）。
+
+### 27.10 price/volume handling
+
+`pnlSemantics.computeVolumePriceFacts`の転記に加え、deliveredVolume増加かつ
+revenue減少の組み合わせを`commercial.volumeUpRevenueDown`候補
+（domain=RISK）として明示的に検出する。完全なPrice-Volume-Mix分解エンジンは
+実装しない。
+
+### 27.11 Opening CEO prompt
+
+`OPENING_BRIEF_SYSTEM_PROMPT`（`prompt.ts`）を新規追加。speakerをCEO固定
+（zod schema側でも`z.literal("CEO")`で強制）、significantChangesに存在しない
+変化を作り出さない、FACT→INTERPRETATION分離、M2.1〜M2.6の全guardrail
+（overdue語彙・P&L/CF/BS分離・utilization分離・interestBearingDebt/
+totalLiabilities分離・memoryはgame factではない）の再掲、原因不明時は
+「このデータだけでは原因を特定できません」と言えること、CFO/COO/Commercialの
+発言を代わりに生成しないこと、confidence（HIGH/MEDIUM/LOW・任意）を明記した。
+
+### 27.12 Run Memory integration
+
+`buildOpeningBriefUserMessage`が`runAdvisoryMemory`（M2.6と同じ
+`RunAdvisoryMemorySummary`）を別枠で注入する。promptには、プレイヤーの
+方針（例: Japan優先）に関連するsignificantChangesをやや優先して説明してよいが、
+他の重大riskを隠してはいけない旨を明記した（実装指示§19・§20）。
+
+### 27.13 Standard AI integration
+
+Standard AIの意思決定案は長く説明せず、重要な場合のみ1文程度の参照
+（`standardAiCurrentDecisionSummary`として渡すのみ）にとどめるようpromptへ明記。
+
+### 27.14 caching
+
+同一`labId×companyId×turn`のOpening Briefは、既存conversation.ts（AI Meeting
+の会話永続化と同じRedis namespace）を再利用してキャッシュする。新しいキャッシュ
+namespaceは作らない。会話の先頭メッセージが`messageType==="OPENING_BRIEF"`
+なら、2回目以降の呼び出しはClaudeを再度呼ばずそのまま返す。
+
+### 27.15 Turn1 handling
+
+turn1（確定四半期が存在しない）またはturn2（前々turnが無くdeltaを計算できない）
+の場合は、TurnChangeBriefingの代わりに`InitialBriefFacts`（現在の
+ExecutiveBriefingPacket.common/cooから転記した、現金・受注残・生産能力・原料在庫・
+Standard AI reason codesのみのフラットなfacts）を使う。ExecutiveBriefingPacketは
+「意思決定前の現在ownState」から組み立てられるため、turn2時点ではturn1の確定
+結果そのものを表しており、新しい状態読み込みは不要（既存packetからの転記のみ）。
+
+### 27.16 API contract
+
+`GET /api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/
+ai-meeting/opening-brief`を新設（既存`.../ai-meeting/messages`の兄弟route。
+`_lib/dependencies.ts`・`_lib/withApiContext.ts`は新規複製せず、既存
+`messages/_lib/`のものをそのまま再利用した）。応答は`{available, cached,
+meetingId, openingBrief | unavailableReason, diagnostics}`。
+
+### 27.17 persistence
+
+Opening Brief自体は、`AiMeetingMessage`へ`messageType: "OPENING_BRIEF"`
+（新規追加。省略時は既存の通常応答として扱う後方互換フィールド）を付与した上で、
+既存conversation.ts経由でconversation artifactへ保存する。Game State SSoTは
+一切変更しない。
+
+### 27.18 token impact
+
+TurnChangeBriefingはTop 8件のsignificantChangesのみをClaudeへ渡す（過去全Turn
+履歴は送らない、reportingPeriod/priorPeriodの2四半期分のみ）。M2.6のRun Memory
+summaryもrole-relevant top N件のみ。実測値は実API未実施のため今回報告できない。
+
+### 27.19 Test26 regressions
+
+§38のCase A（数量増・売上減・営業黒字→赤字を現金回収が原因にならない形で表現）・
+Case B（backlog増加をoverdue増加と誤認しない）・Case C/D（equipment/labor
+utilizationの分離・raw material shortageがequipment shortageを上回るケースの
+primary bottleneck判定）を、AMM-TCB-18〜20として実データ規模の数値で再現し確認
+した。
+
+### 27.20 code changes
+
+- 新規: `app/lib/v2/companyLab/aiManagementMeeting/turnChangeBriefing.ts`
+  （TurnChangeBriefing構築・significance選定・InitialBriefFacts）
+- 新規: `app/api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/
+  ai-meeting/opening-brief/route.ts`＋`_lib/handlers.ts`（既存`messages/_lib/`の
+  dependencies・withApiContextを再利用）
+- 変更: `types.ts`（`OpeningBriefStructuredResponse`/`OpeningExecutiveBrief`型、
+  `AiMeetingMessage.messageType`追加）
+- 変更: `proposalSchema.ts`（`openingBriefStructuredResponseSchema`追加）
+- 変更: `claudeClient.ts`（`OPENING_BRIEF_TOOL_INPUT_SCHEMA`・
+  `generateOpeningBrief`追加。既存`generateMeetingResponse`は変更しない）
+- 変更: `prompt.ts`（`OPENING_BRIEF_SYSTEM_PROMPT`・`buildOpeningBriefUserMessage`・
+  `OPENING_BRIEF_PROMPT_VERSION`追加。既存`AI_MANAGEMENT_MEETING_SYSTEM_PROMPT`・
+  `AI_MEETING_PROMPT_VERSION`は変更しない）
+- 既存のStandard AI・Vision/ManagementProfile・Game State・Finance/Sales/
+  Production/Trust/CAPEX/Scenario parametersは一切変更していない（実装指示§42の
+  禁止事項の遵守）。
+
+### 27.21 tests
+
+`turnChangeBriefing.test.ts`にAMM-TCB-1〜13・17〜20（17件）、
+`aiMeetingOpeningBrief.test.ts`にAMM-TCB-14〜16（3件、結合テスト）を新規追加。
+AMM-TCB-1〜20の20件すべてを実装した。プロジェクト全体3220件、いずれもpass。
+
+### 27.22 tsc / eslint
+
+`npx tsc --noEmit -p .`・`npx eslint .`ともにエラー0件（既存の無関係なwarning
+14件のみ、M2.7由来の新規warningは0件）。
+
+### 27.23 real API結果
+
+このセッションの実行環境には`ANTHROPIC_API_KEY`が設定されていないため未実施
+（M2.1〜M2.6と同様）。`scripts/aiMeetingRealApiSmokeTest.ts`へ、実装指示§40の
+3フロー（10A: Turn1 Initial Brief、10B: Test26 accounting regression再現、
+10C: Test26 backlog/operational regression再現）を追加した。
+
+### 27.24 remaining risks
+
+- capacity poolの過去turn実効能力スナップショットが取得できないため、
+  capacity changesは現在値のみを提供する（CAPEX完了イベントの有無で代替）。
+- salesForceHeadcountは過去turnの実際の人員数スナップショットが存在しないため、
+  current-onlyで扱う（previous=null）。
+- significance thresholdは最小限の固定値（margin ±3pp・cash -15%・price ±8%）に
+  とどめており、実運用でのチューニングは今後の検討課題。
+- Opening Briefのキャッシュ判定は会話内の`messageType==="OPENING_BRIEF"`
+  メッセージの有無に依存するため、会話が手動で編集・削除された場合の挙動は
+  想定していない（通常のプレイフローでは発生しない）。
+- 実API未検証のため、実際の応答品質（3〜5点の選び方の妥当性・CEOらしさ）は
+  引き続き確認が必要。
+
+### 27.25 readiness for UI integration
+
+backend contract（GET opening-brief、`{available, cached, openingBrief:
+{turn, speaker, summary, keyChanges, suggestedFollowUps, factsUsed,
+memoryUsedIds, generatedAt, promptVersion, briefingVersion,
+turnChangeBriefingVersion}}`）が、コード・テスト（AMM-TCB-1〜20）・
+prompt文言の3層で揃った。UI側は、AI Meeting panelを開いた際にこのGETを1回
+呼び出し、`available=true`ならOpening Briefを先頭に表示し、Playerがそれを
+無視してすぐ質問できるようにする契約で実装可能（Modalでの強制は不要）。
