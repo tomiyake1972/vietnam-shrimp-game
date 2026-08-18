@@ -13,6 +13,7 @@ import {
   computeAllCompaniesEvaluationSnapshot,
   rankCompaniesByTotalShareholderValue,
 } from "../../../lib/v2/companyLab/evaluation/evaluationSemantics";
+import { resolveEvaluationHistory } from "../../../lib/v2/companyLab/evaluation/evaluationHistory";
 import { SimulationRun, SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 
 /**
@@ -29,10 +30,20 @@ export function lastCompletedTurn(session: SimulationSession): number {
   return session.run.completedTurns;
 }
 
-/** 直近確定Turn時点の5社Evaluation Snapshotを計算する（既存関数の呼び出しのみ・新しい計算はしない）。 */
+/**
+ * 直近確定Turn時点の5社Evaluation Snapshotを計算する（既存関数の呼び出しのみ・新しい計算はしない）。
+ *
+ * 【Final Results履歴修正】入力は state.history ではなく評価専用の全Turn履歴にする。
+ * state.history はresume時に直近数Turnへ間引かれるため、reload後にGame Endを押すと
+ * Dividend Valueが「直近数Turnぶんの配当」しか含まない過小評価になっていた。
+ * これはTurn別TSV履歴の不整合とまったく同じ原因であり、両者が常に同じ入力
+ * （resolveEvaluationHistory）を見ることで、
+ * 「history[gameEndTurn].TSV === finalEvaluationSnapshot.TSV」が構造的に保証される（§12）。
+ */
 export function computeFinalEvaluationSnapshot(session: SimulationSession): readonly CompanyEvaluationSnapshot[] {
   const companyIds = session.fixtures.map((f) => f.companyId);
-  return computeAllCompaniesEvaluationSnapshot(session.state.history, companyIds, lastCompletedTurn(session));
+  const history = resolveEvaluationHistory({ evaluationHistory: session.evaluationHistory, stateHistory: session.state.history });
+  return computeAllCompaniesEvaluationSnapshot(history, companyIds, lastCompletedTurn(session));
 }
 
 /** ゲームを終了した状態のSimulationRunを構築する（既存フィールドは一切変更しない・追加フィールドのみ設定）。 */

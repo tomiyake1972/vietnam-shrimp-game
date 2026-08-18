@@ -30,6 +30,7 @@ import { CompanyDecisionInput, CompanyFixture, CompanyLabState } from "../../typ
 import { SimulationAiTurnTrace } from "../analytics/aiTrace";
 import { ObservedDemandSnapshot } from "../analytics/dataset";
 import { CompanyLabRuntimeSnapshot } from "../../persistence/types";
+import { EvaluationHistoryRecord } from "../../evaluation/evaluationHistory";
 
 /**
  * 保存スキーマ版。
@@ -159,6 +160,20 @@ export interface SimulationResumePayload {
    * （そのRunのDatabookは期首欄なしで組み立てるか、後方互換の扱いをする）。
    */
   readonly latestQuarterPreProcessingSnapshot: CompanyLabRuntimeSnapshot | null;
+  /**
+   * 【Final Results履歴修正】Turn1からGame End Turnまでの、評価（TSV / 配当）専用の
+   * 軽量履歴（SimulationSession.evaluationHistory）。
+   *
+   * state.history は ROLLING_RESUME_HISTORY_WINDOW(=4) Turnへ間引いて保存するため、
+   * これが無いとreload後のFinal Resultsが直近数Turnしか描けず、さらにGame End Turnの
+   * TSVも「直近数Turnぶんの配当しか含まないDividend Value」になってしまう。
+   * こちらは間引かずに全Turnぶん保存する（財務諸表・配当実績のみの射影であり、
+   * state.history全件を保存へ戻すのとは規模が違う）。
+   *
+   * このフィールド新設より前に保存された既存Runには存在しないためoptional。
+   * 復元側は undefined ならこれまでどおり state.history へフォールバックする。
+   */
+  readonly evaluationHistory?: readonly EvaluationHistoryRecord[];
 }
 
 /**

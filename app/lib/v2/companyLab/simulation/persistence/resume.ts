@@ -13,6 +13,7 @@ import { RawMaterialLot } from "../../../rawMaterials/types";
 import { COMMERCIAL_HISTORY_RETAINED_QUARTERS } from "../../commercialHistoryState";
 import { PeriodV2, previousPeriod } from "../../../core/period";
 import { usd } from "../../../finance/types";
+import { mergeEvaluationHistory, toEvaluationHistoryRecord } from "../../evaluation/evaluationHistory";
 
 /**
  * 【Save/Resume 長期永続化・鮮度整合 BLOCKER修正】resumePayload.state.history に
@@ -215,6 +216,11 @@ export function buildResumePayload(
     salesHeadcountByTurn: session.salesHeadcountByTurn,
     capacityByTurn: session.capacityByTurn,
     latestQuarterPreProcessingSnapshot: trimLatestQuarterPreProcessingSnapshotForResume(session.latestQuarterPreProcessingSnapshot),
+    // 【Final Results履歴】ここは間引かない。state.historyの rolling window とは
+    // 目的が違い、Turn1からGame End TurnまでのTSV・配当推移の唯一の入力になる。
+    // まだ evaluationHistory を持たないsession（この機能より前に作られたsessionを
+    // 経由した場合）でも、その時点の state.history から復元できるぶんは拾っておく。
+    evaluationHistory: mergeEvaluationHistory(session.evaluationHistory, session.state.history.map(toEvaluationHistoryRecord)),
   };
 }
 
@@ -321,5 +327,10 @@ export function restoreSessionFromResumePayload(
     packWorldTurns: packCapture?.worldTurns ?? [],
     latestQuarterPreProcessingSnapshot: resumePayload.latestQuarterPreProcessingSnapshot,
     priorAnalyticsDataset,
+    // 【Final Results履歴】保存済みの全Turnぶんの評価履歴を復元し、間引かれた
+    // state.historyぶんとマージする（保存後に進めたTurnがある場合の取りこぼし防止）。
+    // このフィールドを持たない既存Runでは、state.historyから作れるぶんだけになる
+    // ＝これまでとまったく同じ表示になる（勝手な推測値は作らない）。
+    evaluationHistory: mergeEvaluationHistory(resumePayload.evaluationHistory, (resumePayload.state?.history ?? []).map(toEvaluationHistoryRecord)),
   };
 }

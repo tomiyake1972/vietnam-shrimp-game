@@ -17,6 +17,7 @@ import { useCallback, useState } from "react";
 import { CompanyFixture } from "../../../lib/v2/companyLab/types";
 import { SimulationRun, SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { buildDividendSeries, buildTsvSeries } from "../../../lib/v2/companyLab/simulation/analytics/finalResultsSeries";
+import { resolveEvaluationHistory } from "../../../lib/v2/companyLab/evaluation/evaluationHistory";
 
 interface Props {
   readonly run: SimulationRun;
@@ -51,8 +52,10 @@ export function FinalDataDownloadButton({ run, fixtures, session }: Props) {
       gameEndTurn: run.gameEndTurn,
       finishedAt: run.gameEndedAt,
       finalEvaluationSnapshot: run.finalEvaluationSnapshot,
-      totalShareholderValueHistory: session ? buildTsvSeries(session.state.history, fixtures, run.gameEndTurn) : null,
-      dividendHistory: session ? buildDividendSeries(session.state.history, fixtures, run.gameEndTurn) : null,
+      // 【Final Results履歴修正】state.historyはresume時に直近数Turnへ間引かれるため、
+      // Turn1からの推移は評価専用の全Turn履歴（evaluationHistory）から作る。
+      totalShareholderValueHistory: session ? buildTsvSeries(resolveEvaluationHistory({ evaluationHistory: session.evaluationHistory, stateHistory: session.state.history }), fixtures, run.gameEndTurn) : null,
+      dividendHistory: session ? buildDividendSeries(resolveEvaluationHistory({ evaluationHistory: session.evaluationHistory, stateHistory: session.state.history }), fixtures, run.gameEndTurn) : null,
       note: session
         ? null
         : "このタブはこのRunの確定履歴（history）を保持していないため、Turn別のTSV・配当推移は含めていません（Final Evaluation Snapshotのみ）。",

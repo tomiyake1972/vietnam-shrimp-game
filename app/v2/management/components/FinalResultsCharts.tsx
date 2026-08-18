@@ -10,10 +10,11 @@
 // 【32Turn固定にしない(指示§10/§13)】totalTurnsは呼び出し側が渡すGame End Turn。
 // Turn12で終わったRunでも、Turn32まで走ったRunでも、同じコンポーネントで描く。
 
-import { CompanyFixture, CompanyQuarterRecord } from "../../../lib/v2/companyLab/types";
+import { CompanyFixture } from "../../../lib/v2/companyLab/types";
 import { SimulationAnalyticsDataset } from "../../../lib/v2/companyLab/simulation/analytics/types";
 import { toCompanySeries } from "../../../lib/v2/companyLab/simulation/analytics/views";
 import { buildDividendSeries, buildTsvSeries } from "../../../lib/v2/companyLab/simulation/analytics/finalResultsSeries";
+import { EvaluationHistoryRecord } from "../../../lib/v2/companyLab/evaluation/evaluationHistory";
 import { SeriesChart } from "./SeriesChart";
 
 export function FinalResultsCharts({
@@ -24,7 +25,8 @@ export function FinalResultsCharts({
   highlightKey,
 }: {
   readonly dataset: SimulationAnalyticsDataset;
-  readonly history: readonly CompanyQuarterRecord[];
+  /** 【Final Results履歴修正】評価専用の全Turn履歴（resolveEvaluationHistoryを通したもの）。 */
+  readonly history: readonly EvaluationHistoryRecord[];
   readonly fixtures: readonly CompanyFixture[];
   readonly gameEndTurn: number;
   readonly highlightKey?: string | null;

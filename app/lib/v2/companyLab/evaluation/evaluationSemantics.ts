@@ -78,7 +78,13 @@
 // であり、混同・共通化しない（指示§8）。
 
 import { CompanyId } from "../../sales/types";
-import { CompanyQuarterRecord } from "../types";
+// 【入力型について】評価が実際に読むのは CompanyQuarterRecord のうち
+// financialResults / financingResults / companySummaries / dividendResults だけである。
+// 引数型をその射影（EvaluationHistoryRecord）にしておくことで、
+// resumeで間引かれない評価専用の軽量履歴をそのまま渡せる（CompanyQuarterRecord[]も
+// 構造的部分型としてこれまでどおり渡せるため、既存呼び出し元は無変更）。
+// TSVの式・DCF・15%複利・正常化CFのlookbackは引き続き本ファイルがSSoTである。
+import { EvaluationHistoryRecord } from "./evaluationHistory";
 
 // ---------------------------------------------------------------------
 // パラメータ
@@ -173,7 +179,7 @@ export interface CompanyEvaluationSnapshot {
 // 内部ヘルパー
 // ---------------------------------------------------------------------
 
-function sumAt<T>(records: readonly CompanyQuarterRecord[], companyId: CompanyId, pick: (record: CompanyQuarterRecord) => T | undefined): T[] {
+function sumAt<T>(records: readonly EvaluationHistoryRecord[], companyId: CompanyId, pick: (record: EvaluationHistoryRecord) => T | undefined): T[] {
   const values: T[] = [];
   for (const record of records) {
     const value = pick(record);
@@ -182,7 +188,7 @@ function sumAt<T>(records: readonly CompanyQuarterRecord[], companyId: CompanyId
   return values;
 }
 
-function scopedHistory(history: readonly CompanyQuarterRecord[], asOfTurn: number): readonly CompanyQuarterRecord[] {
+function scopedHistory(history: readonly EvaluationHistoryRecord[], asOfTurn: number): readonly EvaluationHistoryRecord[] {
   return history.filter((r) => r.turn <= asOfTurn).sort((a, b) => a.turn - b.turn);
 }
 
@@ -195,7 +201,7 @@ function scopedHistory(history: readonly CompanyQuarterRecord[], asOfTurn: numbe
  * historyが何Turnぶんであっても（Run全体が16Turnで終わっていても32Turn走っていても）、
  * 同じロジックで動く（§13）。
  */
-export function computeCompanyKpiSnapshot(history: readonly CompanyQuarterRecord[], companyId: CompanyId, asOfTurn: number): CompanyKpiSnapshot {
+export function computeCompanyKpiSnapshot(history: readonly EvaluationHistoryRecord[], companyId: CompanyId, asOfTurn: number): CompanyKpiSnapshot {
   const scoped = scopedHistory(history, asOfTurn);
 
   const financialResults = sumAt(scoped, companyId, (r) => r.financialResults.find((f) => f.companyId === companyId));
@@ -253,7 +259,7 @@ export function computeCompanyKpiSnapshot(history: readonly CompanyQuarterRecord
  * 【指示§2】直近min(3,確定Turn数)のoperatingCashFlow単純平均。確定実績が
  * asOfTurnまでに1件も無ければnull（0で埋めない＝存在しないことを明示する）。
  */
-export function computeNormalizedQuarterlyCashFlowUsd(history: readonly CompanyQuarterRecord[], companyId: CompanyId, asOfTurn: number): number | null {
+export function computeNormalizedQuarterlyCashFlowUsd(history: readonly EvaluationHistoryRecord[], companyId: CompanyId, asOfTurn: number): number | null {
   const scoped = scopedHistory(history, asOfTurn);
   const financialResults = sumAt(scoped, companyId, (r) => r.financialResults.find((f) => f.companyId === companyId));
   if (financialResults.length === 0) return null;
@@ -268,7 +274,7 @@ export function computeNormalizedQuarterlyCashFlowUsd(history: readonly CompanyQ
  * Turnを含まないため、未来の配当を混入させる余地が構造的に存在しない
  * （Future leakage禁止）。d=asOfTurnの配当は指数0＝1.0倍。
  */
-export function computeCurrentDividendValueUsd(history: readonly CompanyQuarterRecord[], companyId: CompanyId, asOfTurn: number): number {
+export function computeCurrentDividendValueUsd(history: readonly EvaluationHistoryRecord[], companyId: CompanyId, asOfTurn: number): number {
   const scoped = scopedHistory(history, asOfTurn);
   let total = 0;
   for (const record of scoped) {
@@ -283,7 +289,7 @@ export function computeCurrentDividendValueUsd(history: readonly CompanyQuarterR
 
 /** 【指示§11】自社詳細内訳。Cash/Debt/NormalizedCFは他社非公開（呼び出し側で表示範囲を制御する）。 */
 export function computeCompanyCurrentCompanyValueBreakdown(
-  history: readonly CompanyQuarterRecord[],
+  history: readonly EvaluationHistoryRecord[],
   companyId: CompanyId,
   asOfTurn: number
 ): CompanyCurrentCompanyValueBreakdown {
@@ -312,7 +318,7 @@ export function computeCompanyCurrentCompanyValueBreakdown(
  * いても同じ関数で計算できる（asOfTurn以下のTurnだけを見るため、その後に
  * Runが何Turn続いたかによって値が変化しない）。
  */
-export function computeCompanyEvaluationSnapshot(history: readonly CompanyQuarterRecord[], companyId: CompanyId, asOfTurn: number): CompanyEvaluationSnapshot {
+export function computeCompanyEvaluationSnapshot(history: readonly EvaluationHistoryRecord[], companyId: CompanyId, asOfTurn: number): CompanyEvaluationSnapshot {
   const kpis = computeCompanyKpiSnapshot(history, companyId, asOfTurn);
   const scoped = scopedHistory(history, asOfTurn);
   const dividendResultsScoped = sumAt(scoped, companyId, (r) => (r.dividendResults ?? []).find((d) => d.companyId === companyId));
@@ -337,7 +343,7 @@ export function computeCompanyEvaluationSnapshot(history: readonly CompanyQuarte
 
 /** 複数社ぶんの評価スナップショットを一括で計算する（Leaderboard・End Game / GM画面向け）。 */
 export function computeAllCompaniesEvaluationSnapshot(
-  history: readonly CompanyQuarterRecord[],
+  history: readonly EvaluationHistoryRecord[],
   companyIds: readonly CompanyId[],
   asOfTurn: number
 ): readonly CompanyEvaluationSnapshot[] {
