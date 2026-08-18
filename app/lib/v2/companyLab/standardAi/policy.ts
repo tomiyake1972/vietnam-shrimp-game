@@ -30,6 +30,7 @@ import { buildStandardAiWorkerAssignments } from "./decision/labor";
 import { buildStandardAiFinancingRequest } from "./decision/finance";
 import { buildStandardAiCapexDecision } from "./decision/capex";
 import { buildStandardAiVapProductDevelopmentDecision } from "./decision/vapProductDevelopment";
+import { buildStandardAiDividendDecision } from "./decision/dividend";
 import { sumProductAmount } from "./types";
 import { computeBindingProductionCapacityTons } from "./bindingCapacity";
 import { StandardAiDiagnosticEntry } from "./reasonCodes";
@@ -669,6 +670,29 @@ export function generateStandardAiDecisionWithDiagnostics(
   const vapProductDevelopmentSpendUsdAfterCrisisGate = isSevereDistress ? 0 : vapProductDevelopmentResult.spendUsd;
   const vapProductDevelopmentSuppressedByCrisis = isSevereDistress && vapProductDevelopmentResult.spendUsd > 0;
 
+  // 【Phase DIV-3】新規設備投資提案（既存増設＋新工場）をCrisis Gate適用後の
+  // 最終形へ合流させる。この最終形は下のdecision.capexDecisionでそのまま使い、
+  // 同時に配当判断の「当期CAPEX新規提案なし」条件の入力にもなる（同じ値を2度
+  // 計算しない）。
+  const finalCapexDecision =
+    newFactoryProposalsAfterCrisisGate.length > 0
+      ? {
+          ...capexDecisionAfterCrisisGate,
+          newProjectProposals: [...capexDecisionAfterCrisisGate.newProjectProposals, ...newFactoryProposalsAfterCrisisGate],
+        }
+      : capexDecisionAfterCrisisGate;
+
+  // 【Phase DIV-3】Standard AI配当ポリシー（基準配当ルール＋経営性格バイアス）。
+  // 新しい会計ロジックは作らず、上限は必ずPlayerと同じcomputeMaxDividendUsdで
+  // クランプする（decision/dividend.ts参照）。
+  const dividendResult = buildStandardAiDividendDecision({
+    companyId: fixture.companyId,
+    financeState: ownState.financeState,
+    lastQuarterFinancialHealthTier: observation.lastQuarterFinancialHealthTier,
+    newCapexProposalCount: finalCapexDecision.newProjectProposals.length,
+    params,
+  });
+
   const decision: CompanyDecisionInput = {
     companyId: fixture.companyId,
     salesPlans: salesResult.salesPlans,
@@ -681,23 +705,16 @@ export function generateStandardAiDecisionWithDiagnostics(
     workerAssignments: laborResult.workerAssignments,
     financingRequest: financingResult.financingRequest,
     vapProductDevelopmentSpendUsd: vapProductDevelopmentSpendUsdAfterCrisisGate > 0 ? vapProductDevelopmentSpendUsdAfterCrisisGate : undefined,
-    // 【Phase DIV-1・実装指示§20】Standard AIは配当を一切行わない（dividendDecision省略
-    // ＝0）。評価mechanic（Dividend Score等）導入直後にAI各社が不適切な大量配当を
-    // 始めるのを避けるため、まずStandard AI dividend=0で開始する（第一候補として
-    // 明示的に採用）。Playerだけが配当可能な状態はベンチマーク上不公平になりうるため、
-    // AI配当policy（十分なcash buffer・distress無し・原料不足懸念無し・重要CAPEX無し・
-    // 前期分配可能利益が正、を満たした場合のみ小額配当、等）の設計は次Phaseで行う。
-    dividendDecision: undefined,
+    // 【Phase DIV-3】DIV-1では「Standard AIは配当を一切行わない」（dividendDecision
+    // 固定undefined）としていたが、DIV-3設計提案§4の合意に基づき、財務健全性=healthy・
+    // 当期の新規設備投資提案なし・分配可能利益>0の3条件をすべて満たすTurnにだけ、
+    // 分配可能利益の一部（基準配当性向＝経営性格バイアス適用後のdividendBasePayoutRatio）
+    // を配当する。条件を満たさないTurnはundefined（＝配当0）でDIV-1と同一の挙動に戻る。
+    dividendDecision: dividendResult.dividendDecision,
     // 【新工場の提案を既存 capex 提案と同じ意思決定へ合流させる】
     // 既存増設の提案内容は一切変更せず、新工場ぶんを末尾へ足すだけにする
     // （既存の設備投資判断の挙動を変えない）。
-    capexDecision:
-      newFactoryProposalsAfterCrisisGate.length > 0
-        ? {
-            ...capexDecisionAfterCrisisGate,
-            newProjectProposals: [...capexDecisionAfterCrisisGate.newProjectProposals, ...newFactoryProposalsAfterCrisisGate],
-          }
-        : capexDecisionAfterCrisisGate,
+    capexDecision: finalCapexDecision,
   };
 
   const strategicTargetScaleDiagnostic: StandardAiDiagnosticEntry = {
@@ -749,6 +766,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...laborResult.diagnostics,
     ...financingResult.diagnostics,
     ...capexResult.diagnostics,
+    ...dividendResult.diagnostics,
     ...vapProductDevelopmentResult.diagnostics,
     ...deliveryDemandResult.diagnostics,
     ...situationDiagnosisResult.diagnostics,

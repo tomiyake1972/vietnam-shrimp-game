@@ -1,4 +1,4 @@
-=== TSV Benchmark 1: baseline（5社すべてStandard AI・配当0）===
+=== TSV Benchmark 1: baseline（5社すべてautoPolicy・配当0）===
 
 --- Turn 8 ---
 Rank | Company | TSV | DividendValue | NormalizedCF | EV | Cash | Debt | CurrentCompanyValue
@@ -39,3 +39,119 @@ Turn 8: baseline(配当0) TSV=328.29M / aggressive(全額配当) TSV=315.92M / �
 Turn 16: baseline(配当0) TSV=407.24M / aggressive(全額配当) TSV=435.82M / 差=7.0% | aggressiveのDividendValue=169.91M / CurrentCompanyValue=265.91M
 Turn 24: baseline(配当0) TSV=527.21M / aggressive(全額配当) TSV=618.10M / 差=17.2% | aggressiveのDividendValue=310.15M / CurrentCompanyValue=307.96M
 Turn 32: baseline(配当0) TSV=615.99M / aggressive(全額配当) TSV=820.58M / 差=33.2% | aggressiveのDividendValue=497.28M / CurrentCompanyValue=323.31M
+
+
+=== TSV Benchmark 3: Standard AI配当ポリシー（DIV-3）ON/OFF比較 ===
+5社すべてStandard AI（経営性格プロファイルON）。dividendBasePayoutRatioだけを変えて32Turn実行し、
+AI配当が(a)TSVを不当に押し上げる支配戦略になっていないか、(b)会社の運転資金を痩せさせていないか、を同時に見る。
+ratio=0がAI配当OFF（DIV-1と完全に同じ挙動）。
+
+--- dividendBasePayoutRatio = 0%（AI配当OFF） / Turn 32 時点 ---
+Company | TSV | DividendValue | 累計配当 | 配当Turn数 | 期末Cash | 生産0四半期 | distress四半期
+BAL | 595.71M | 0.00M | 0.00M | 0 | 321.85M | 0 | 0
+MASS | 621.84M | 0.00M | 0.00M | 0 | 117.40M | 0 | 4
+JPQ | 896.60M | 0.00M | 0.00M | 0 | 359.62M | 0 | 0
+VAP | 737.00M | 0.00M | 0.00M | 0 | 303.63M | 0 | 0
+CONSV | 757.14M | 0.00M | 0.00M | 0 | 322.71M | 0 | 0
+
+--- dividendBasePayoutRatio = 1% / Turn 32 時点 ---
+Company | TSV | DividendValue | 累計配当 | 配当Turn数 | 期末Cash | 生産0四半期 | distress四半期
+BAL | 603.27M | 69.23M | 49.83M | 22 | 271.47M | 0 | 0
+MASS | 507.91M | 31.18M | 24.58M | 21 | 100.03M | 0 | 4
+JPQ | 905.47M | 49.76M | 37.66M | 19 | 321.62M | 0 | 0
+VAP | 618.97M | 37.48M | 24.15M | 20 | 253.79M | 0 | 0
+CONSV | 772.38M | 64.83M | 47.18M | 25 | 275.60M | 0 | 0
+
+--- dividendBasePayoutRatio = 2% / Turn 32 時点 ---
+Company | TSV | DividendValue | 累計配当 | 配当Turn数 | 期末Cash | 生産0四半期 | distress四半期
+BAL | 347.48M | 117.59M | 78.97M | 21 | 226.33M | 0 | 0
+MASS | 531.97M | 59.23M | 46.50M | 21 | 99.25M | 0 | 4
+JPQ | 933.85M | 29.54M | 14.24M | 11 | 357.95M | 0 | 0
+VAP | 590.05M | 69.15M | 42.55M | 20 | 241.14M | 0 | 0
+CONSV | 792.14M | 121.02M | 87.48M | 25 | 236.85M | 0 | 0
+
+--- dividendBasePayoutRatio = 5% / Turn 32 時点 ---
+Company | TSV | DividendValue | 累計配当 | 配当Turn数 | 期末Cash | 生産0四半期 | distress四半期
+BAL | 438.73M | 254.07M | 168.03M | 22 | 141.21M | 0 | 0
+MASS | 182.51M | 108.49M | 81.31M | 20 | 79.12M | 0 | 4
+JPQ | 963.70M | 247.23M | 176.77M | 24 | 180.64M | 0 | 0
+VAP | 630.24M | 152.56M | 93.03M | 20 | 193.82M | 0 | 0
+CONSV | 833.66M | 254.09M | 178.55M | 26 | 148.81M | 0 | 0
+
+--- dividendBasePayoutRatio = 10% / Turn 32 時点 ---
+Company | TSV | DividendValue | 累計配当 | 配当Turn数 | 期末Cash | 生産0四半期 | distress四半期
+BAL | 725.05M | 399.58M | 265.46M | 21 | 97.55M | 0 | 0
+MASS | 391.76M | 173.31M | 126.84M | 20 | 78.50M | 0 | 5
+JPQ | 1015.27M | 390.73M | 272.84M | 24 | 87.25M | 0 | 0
+VAP | 731.36M | 283.46M | 180.17M | 22 | 119.56M | 0 | 0
+CONSV | 861.78M | 361.96M | 249.71M | 25 | 68.26M | 0 | 0
+
+--- dividendBasePayoutRatio = 15% / Turn 32 時点 ---
+Company | TSV | DividendValue | 累計配当 | 配当Turn数 | 期末Cash | 生産0四半期 | distress四半期
+BAL | 991.71M | 515.39M | 348.54M | 24 | 59.35M | 0 | 0
+MASS | 463.51M | 241.55M | 178.82M | 23 | 37.89M | 0 | 5
+JPQ | 917.58M | 462.00M | 310.80M | 25 | 58.11M | 0 | 0
+VAP | 721.32M | 336.14M | 207.48M | 21 | 80.20M | 0 | 0
+CONSV | 771.56M | 312.49M | 187.06M | 18 | 108.14M | 0 | 0
+
+
+=== TSV Benchmark 4: AI配当が支配戦略化していないかの診断（§24と同じ観点）===
+各ratioのTurn32 TSVを、AI配当OFF（ratio=0）比の変化率として並べる。
+Company | 0% | 1% | 2% | 5% | 10% | 15%
+BAL | 0.0% | 1.3% | -41.7% | -26.4% | 21.7% | 66.5%
+MASS | 0.0% | -18.3% | -14.5% | -70.6% | -37.0% | -25.5%
+JPQ | 0.0% | 1.0% | 4.2% | 7.5% | 13.2% | 2.3%
+VAP | 0.0% | -16.0% | -19.9% | -14.5% | -0.8% | -2.1%
+CONSV | 0.0% | 2.0% | 4.6% | 10.1% | 13.8% | 1.9%
+
+運転資金への副作用（生産0四半期の合計・5社計）:
+ratio=0%: 生産0四半期=0 / distress四半期=4 / 配当発火Turn数(5社計)=0
+ratio=1%: 生産0四半期=0 / distress四半期=4 / 配当発火Turn数(5社計)=107
+ratio=2%: 生産0四半期=0 / distress四半期=4 / 配当発火Turn数(5社計)=98
+ratio=5%: 生産0四半期=0 / distress四半期=4 / 配当発火Turn数(5社計)=112
+ratio=10%: 生産0四半期=0 / distress四半期=5 / 配当発火Turn数(5社計)=112
+ratio=15%: 生産0四半期=0 / distress四半期=5 / 配当発火Turn数(5社計)=111
+
+
+=== TSV Benchmark 5: seed頑健性診断（既存CCI-9と同一条件）===
+既存の頑健性回帰CCI-9（companyLab/vision/__tests__/commercialCommitmentIntegration.test.ts）と
+同じ会社全体営業能力モデル・同じseed群で、dividendBasePayoutRatioだけを変えて32Turn実行する。
+CCI-9の合格条件: 生産0四半期=0 かつ 最小現金>=0 かつ 期末完成品在庫<60,000t。
+
+ratio=0%
+  PASS phase6c-regression: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=23023t / 配当発火Turn数(5社計)=0
+  PASS seed-a: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=26773t / 配当発火Turn数(5社計)=0
+  PASS seed-b: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=29956t / 配当発火Turn数(5社計)=0
+  PASS management-console-32q: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=29474t / 配当発火Turn数(5社計)=0
+
+ratio=1%
+  PASS phase6c-regression: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=22817t / 配当発火Turn数(5社計)=99
+  FAIL seed-a: 生産0四半期=0 / 最小現金=-0.00USD / 期末完成品在庫=29601t / 配当発火Turn数(5社計)=112
+  PASS seed-b: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=29192t / 配当発火Turn数(5社計)=108
+  PASS management-console-32q: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=29388t / 配当発火Turn数(5社計)=105
+
+ratio=2%
+  PASS phase6c-regression: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=25990t / 配当発火Turn数(5社計)=101
+  PASS seed-a: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=26270t / 配当発火Turn数(5社計)=108
+  PASS seed-b: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=27669t / 配当発火Turn数(5社計)=111
+  PASS management-console-32q: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=30867t / 配当発火Turn数(5社計)=98
+
+ratio=5%
+  PASS phase6c-regression: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=18487t / 配当発火Turn数(5社計)=99
+  PASS seed-a: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=26053t / 配当発火Turn数(5社計)=106
+  PASS seed-b: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=23003t / 配当発火Turn数(5社計)=110
+  PASS management-console-32q: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=25673t / 配当発火Turn数(5社計)=103
+
+ratio=10%
+  FAIL phase6c-regression: 生産0四半期=12 / 最小現金=-121330000.00USD / 期末完成品在庫=15524t / 配当発火Turn数(5社計)=84
+  PASS seed-a: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=20142t / 配当発火Turn数(5社計)=110
+  PASS seed-b: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=25525t / 配当発火Turn数(5社計)=106
+  PASS management-console-32q: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=22283t / 配当発火Turn数(5社計)=107
+
+ratio=15%
+  FAIL phase6c-regression: 生産0四半期=14 / 最小現金=-143390000.00USD / 期末完成品在庫=8483t / 配当発火Turn数(5社計)=69
+  PASS seed-a: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=5860t / 配当発火Turn数(5社計)=107
+  PASS seed-b: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=19046t / 配当発火Turn数(5社計)=105
+  PASS management-console-32q: 生産0四半期=0 / 最小現金=0.00USD / 期末完成品在庫=20685t / 配当発火Turn数(5社計)=107
+
+注: 最小現金が-0.00USD（浮動小数点の丸め誤差レベル）のFAILは、資金枯渇ではなくCCI-9の判定式（>= 0）が厳密比較であることによるもの。生産0四半期・現金が実額で負になる崩壊はratio=10%以上のphase6c-regressionでのみ発生している。

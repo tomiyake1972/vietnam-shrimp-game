@@ -50,6 +50,12 @@ export type StandardAiReasonCode =
   // --- 設備投資 ---
   | "CAPEX_DEFERRED" // 設備投資を見送り（既定の正常な結果）
   | "CAPEX_PROPOSED" // 持続的なボトルネック解消のため設備投資を提案
+  // --- 【Phase DIV-3】Standard AI配当ポリシー ---
+  | "DIVIDEND_PROPOSED" // 基準配当ルールの全条件を満たしたため配当を実施
+  | "DIVIDEND_SKIPPED_NOT_HEALTHY" // 前Turnの財務健全性がhealthyでない（未確定を含む）ため配当を見送り
+  | "DIVIDEND_SKIPPED_CAPEX_PLANNED" // 当期に新規設備投資（増設・新工場）を提案しているため配当を見送り
+  | "DIVIDEND_SKIPPED_NO_DISTRIBUTABLE_EARNINGS" // 分配可能利益が正でないため配当を見送り
+  | "DIVIDEND_LIMITED_BY_MAX" // 基準配当額が配当可能上限（min(Cash, 分配可能利益)）を超えたため上限でクランプ
   // --- 【SAI-5】市場・商品志向／ライフサイクル／営業基盤／供給圧力 ---
   | "MARKET_ORIENTATION_APPLIED" // 市場志向倍率による市場間の再配分を適用
   | "PRODUCT_ORIENTATION_APPLIED" // 商品志向倍率による商品別目標数量の補正を適用
@@ -227,6 +233,11 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "LIFECYCLE_GROWTH_PURSUED",
   "SALES_BASE_ADVANTAGE",
   "SUPPLY_PRESSURE_RETREAT",
+  "DIVIDEND_PROPOSED",
+  "DIVIDEND_SKIPPED_NOT_HEALTHY",
+  "DIVIDEND_SKIPPED_CAPEX_PLANNED",
+  "DIVIDEND_SKIPPED_NO_DISTRIBUTABLE_EARNINGS",
+  "DIVIDEND_LIMITED_BY_MAX",
   "CAPEX_DEFERRED_OVERSUPPLY",
   "CAPEX_RESUME_PROPOSED",
   "VAP_GROWTH_ENTRY",

@@ -90,6 +90,21 @@ export interface ManagementProfile {
    * という一般的な財務用語を採用した）。
    */
   readonly capexHurdleBiasRatio: number;
+  /**
+   * 【Phase DIV-3追加】配当性向（dividendBasePayoutRatio）。正の値ほど、
+   * 「配当してよい」と判断したTurnに分配可能利益のうち配当へ回す割合が高くなる
+   * （＝再投資より株主還元をやや優先する経営性格）。負の値はその逆（再投資優先）。
+   *
+   * 【capexHurdleBiasRatioとの関係】投資判断のハードル（capexHurdleBiasRatio）と
+   * 対になる「資本配分の向き」の軸として設計している。ただし両者は独立した
+   * フィールドであり、片方から自動導出はしない（プロファイルごとに明示的に置く）。
+   *
+   * 【この軸が動かせるのは配当額だけ】発火条件そのもの（財務健全性=healthy・
+   * 当期の新規CAPEX提案なし・分配可能利益>0）は全社完全に同一であり、
+   * 経営性格による差は一切付けない（安全ガードは全社同一という既存の原則、
+   * 本ファイル冒頭コメント参照）。
+   */
+  readonly dividendPropensityRatio: number;
 
   // --- 絶対値バイアス（基準値が0のフィールド向け）。0 = バイアスなし。 ---
   /** 高付加価値(PD/VAP)受注選好（valueAddedOrderFactorBoost、0〜1スケールへの直接加算）。 */
@@ -144,6 +159,7 @@ const ZERO_PROFILE_BIASES: Omit<ManagementProfile, "id" | "label" | "description
   headcountPaceRatio: 0,
   aquacultureSelfSufficiencyRatio: 0,
   capexHurdleBiasRatio: 0,
+  dividendPropensityRatio: 0,
   valueAddedPreferenceAbsolute: 0,
   valueAddedCapexTimingAbsolute: 0,
 };
@@ -188,6 +204,9 @@ export const MANAGEMENT_PROFILES: Readonly<Record<ManagementProfileId, Managemen
     salesAggressivenessRatio: 0.05,
     discountToleranceRatio: 0.05,
     headcountPaceRatio: 0.05,
+    // 【Phase DIV-3】成長・シェア重視＝稼いだ利益は再投資へ回したい経営性格のため、
+    // 基準配当性向をやや低め（-5%）にする（DIV-3設計提案§3案C-2の割当てどおり）。
+    dividendPropensityRatio: -0.05,
   },
   // C社相当：財務保守・CFO視点。過剰な販売コミットや値引き、輸入依存、性急な
   // 人員固定費増加、単一調達チャネルへの集中を避け、在庫是正も急がず慎重に行う。
@@ -218,6 +237,10 @@ export const MANAGEMENT_PROFILES: Readonly<Record<ManagementProfileId, Managemen
     headcountPaceRatio: -0.05,
     aquacultureSelfSufficiencyRatio: -0.05,
     capexHurdleBiasRatio: 0.05,
+    // 【Phase DIV-3】投資へは慎重（capexHurdleBiasRatio: +0.05）である一方、
+    // 手元に積み上がった分配可能利益は株主へ配る、というCFO視点の資本配分として
+    // 基準配当性向をやや高め（+5%）にする（DIV-3設計提案§3案C-2の割当てどおり）。
+    dividendPropensityRatio: 0.05,
   },
   // D社相当：高付加価値（PD/VAP）重視。受注量係数を直接押し上げ、PD/VAP能力への
   // 設備投資判断をやや前倒しし、原料の自給（品質管理）をやや重視する。
@@ -231,6 +254,10 @@ export const MANAGEMENT_PROFILES: Readonly<Record<ManagementProfileId, Managemen
     aquacultureSelfSufficiencyRatio: 0.05,
     valueAddedPreferenceAbsolute: 0.05,
     valueAddedCapexTimingAbsolute: 0.05,
+    // 【Phase DIV-3】PD/VAP能力への設備投資を前倒しする経営性格であり、
+    // 資本配分としては再投資優先。基準配当性向をやや低め（-5%）にする
+    // （DIV-3設計提案§3案C-2の割当てどおり）。
+    dividendPropensityRatio: -0.05,
   },
   // E社相当：機会追求・反応の速さ。ただし新しい状態管理（記憶・カウンタ等）は
   // 一切追加せず、既存の「在庫是正の反応速度（inventoryCorrectionDamping）」
@@ -249,6 +276,13 @@ export const MANAGEMENT_PROFILES: Readonly<Record<ManagementProfileId, Managemen
     ...ZERO_PROFILE_BIASES,
     inventoryResponsivenessRatio: 0.08,
     salesAggressivenessRatio: 0.03,
+    // 【Phase DIV-3】配当性向バイアスは置かない（0＝基準どおり）。DIV-3設計提案
+    // §3案C-2が符号方向を明示しているのはconservative（+）とgrowth/valueAdded（-）
+    // の3社だけであり、E社の「機会追求・速い反応」という物語からは配当性向の
+    // 向きが一意に決まらないため、設計上の根拠が無い値を発明しない。
+    // （E社は「既存の在庫是正速度・販売積極性の2項目だけをバイアス対象とする」
+    // という設計を維持する。managementProfile.test.tsのappliedBiasItems=2件の
+    // アサーションはこの設計の明示である。）
   },
 };
 
@@ -366,6 +400,18 @@ export function deriveStandardAiParameters(
     profile.capexHurdleBiasRatio
   );
 
+  /**
+   * 【Phase DIV-3追加】基準配当性向（dividendBasePayoutRatio）への比率バイアス。
+   * 既存の各バイアスとまったく同じapplyRatio（±10%の自動チェックつき）を通す。
+   * 配当の発火条件・上限（computeMaxDividendUsd）には一切影響しない。
+   */
+  const dividendBasePayoutRatio = applyRatio(
+    "dividendBasePayoutRatio",
+    "配当性向（分配可能利益のうち配当へ回す割合）",
+    base.dividendBasePayoutRatio,
+    profile.dividendPropensityRatio
+  );
+
   // 【重要】バイアスが0（=A社balancedを含む大半のプロファイル）の場合は、baseの
   // capexShortfallThresholdBiasByProductをキー単位でも一切書き換えない（{}のままにする）。
   // 「0を明示的に書き込む」と、STANDARD_AI_PARAMETERS_V1（{}）とは値として同値でも
@@ -397,6 +443,7 @@ export function deriveStandardAiParameters(
     valueAddedOrderFactorBoost,
     capexShortfallThresholdBiasByProduct,
     capexCurrentShortfallRatioThreshold,
+    dividendBasePayoutRatio,
   };
 
   return { params, appliedBiasItems };

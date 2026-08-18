@@ -300,6 +300,46 @@ export interface StandardAiParameters {
    * （三宅さんご指示§23 capacity bufferに対応する簡易版）。
    */
   readonly targetScaleWithinBandTolerance: number;
+
+  // --- 【Phase DIV-3新設】Standard AI配当ポリシー ---
+  /**
+   * 【Phase DIV-3】基準配当性向。Standard AIが「配当してよい」と判断したTurnに、
+   * 前Turnまでに確定した分配可能利益（CompanyFinanceState.distributableEarnings）の
+   * 何割を配当するかの比率。
+   *
+   * 【値の由来と、提案書の初期候補（15%）を採らなかった理由】
+   * DIV-3設計提案（docs/v2/design/standard_ai_dividend_policy_div3_proposal.md）
+   * §3案C・§5論点1は初期候補として15%を挙げ、「§5のベンチマークで調整」と
+   * 明記している。その調整をscripts/tsvLeaderboardBenchmark.ts（Benchmark 3〜5）で
+   * 実施した結果、15%は既存のStandard AI頑健性回帰（CCI-9「複数seedでも
+   * 生産停止ゼロ・現金負ゼロ」）をseed=phase6c-regressionで破ることが判明した
+   * （生産0四半期14期・最小現金 -143M USD）。10%でも同seedで破れる
+   * （生産0四半期12期・最小現金 -121M USD）。5%以下では検証した4seedすべてで
+   * 生産停止0・現金負0を維持する。
+   *
+   * 【なぜ15%が「少額配当」にならないのか】distributableEarningsは四半期利益の
+   * フローではなく、game-start以降の累計利益から配当実行分を引いた「ストック」で
+   * ある（finance/dividend.ts冒頭コメント参照）。そのストックの15%を、条件を
+   * 満たす四半期のたびに繰り返し取り崩すため、実質的には提案書が想定していた
+   * 「少額配当」よりはるかに大きい現金流出になる。
+   *
+   * したがって、提案書§5論点1が明示的に想定していた「ベンチマークで調整」の
+   * 範囲内の判断として5%を採用した。この値の妥当性・および「配当基準を
+   * 累計ストックではなく当期フローに変えるべきか」は、DIV-3の最終報告で
+   * 設計側（ChatGPT）へ確認を依頼している未決事項である。
+   *
+   * 【この値は「配当額の上限」ではない】実際の配当額は、必ず
+   * finance/dividend.tsのcomputeMaxDividendUsd（＝min(Cash, distributableEarnings)、
+   * Playerとまったく同じ単一の会計ソース）でクランプされる。AI専用の上限は作らない。
+   *
+   * 【経営性格バイアスの適用先】ManagementProfile.dividendPropensityRatioは、
+   * 既存の他の比率バイアスとまったく同じ枠組み（±5%、最大±10%）で、この値に
+   * 乗算される（managementProfile.tsのderiveStandardAiParameters参照）。
+   *
+   * 【0にすると配当ポリシー自体が無効化される】ベンチマークのAI配当OFF側は、
+   * この値を0にすることで実現する（別のフラグ・別の分岐を増やさない）。
+   */
+  readonly dividendBasePayoutRatio: number;
 }
 
 /**
@@ -386,6 +426,10 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   // 主軸とすることでTarget Scale Bandの粘着性を構造的に確保する（1.0=能力のみ）。
   targetScaleCapacityWeightInBaseline: 1.0,
   targetScaleWithinBandTolerance: 0.05,
+
+  // 【Phase DIV-3】提案書§5論点1の初期候補は15%だが、ベンチマークで既存の
+  // Standard AI頑健性回帰を破ることを確認したため5%を採用した（上記docコメント参照）。
+  dividendBasePayoutRatio: 0.05,
 };
 
 // ---------------------------------------------------------------------
