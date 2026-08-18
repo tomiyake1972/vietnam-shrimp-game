@@ -294,7 +294,7 @@ console.log("\n### 12. 5社の生産能力と稼働（終盤・工場能力が�
       const produced = unwrapUnit(s.hosoProduced) + unwrapUnit(s.pdProduced) + unwrapUnit(s.vapProduced);
       console.log(
         `    ${companyId.padEnd(6)} 生産=${n0(produced).padStart(8)}t  調達=${n0(unwrapUnit(s.domesticPurchaseQuantity)).padStart(8)}t` +
-          `  受注残=${n0(unwrapUnit(s.outstandingBacklog ?? 0)).padStart(8)}t  製品在庫=${n0(unwrapUnit(s.finishedGoodsInventory)).padStart(8)}t`
+          `  受注残=${n0(unwrapUnit(s.outstandingQuantity)).padStart(8)}t  製品在庫=${n0(unwrapUnit(s.finishedGoodsInventory)).padStart(8)}t`
       );
     }
   }
