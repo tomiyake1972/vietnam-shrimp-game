@@ -1,0 +1,41 @@
+=== TSV Benchmark 1: baseline（5社すべてStandard AI・配当0）===
+
+--- Turn 8 ---
+Rank | Company | TSV | DividendValue | NormalizedCF | EV | Cash | Debt | CurrentCompanyValue
+1 | バランス型水産 | 328.29M | 0.00M | 11.46M | 281.61M | 64.68M | 18.00M | 328.29M
+2 | 日本・品質志向水産 | 269.83M | 0.00M | 9.57M | 235.10M | 48.63M | 13.90M | 269.83M
+3 | VAP特化水産 | 180.32M | 0.00M | 7.14M | 175.40M | 46.28M | 41.36M | 180.32M
+4 | 保守的・財務慎重水産 | 95.00M | 0.00M | 2.01M | 49.41M | 50.39M | 4.80M | 95.00M
+5 | 大量生産・価格競争水産 | -225.08M | 0.00M | -5.17M | -127.15M | -10.14M | 87.79M | -225.08M
+
+--- Turn 16 ---
+Rank | Company | TSV | DividendValue | NormalizedCF | EV | Cash | Debt | CurrentCompanyValue
+1 | バランス型水産 | 407.24M | 0.00M | 11.10M | 272.72M | 140.52M | 6.00M | 407.24M
+2 | VAP特化水産 | 218.95M | 0.00M | 6.52M | 160.25M | 64.70M | 6.00M | 218.95M
+3 | 保守的・財務慎重水産 | 129.06M | 0.00M | 2.60M | 64.00M | 66.66M | 1.60M | 129.06M
+4 | 日本・品質志向水産 | 92.76M | 0.00M | 1.30M | 31.90M | 64.87M | 4.00M | 92.76M
+5 | 大量生産・価格競争水産 | -516.59M | 0.00M | -13.17M | -323.60M | -101.01M | 91.99M | -516.59M
+
+--- Turn 24 ---
+Rank | Company | TSV | DividendValue | NormalizedCF | EV | Cash | Debt | CurrentCompanyValue
+1 | バランス型水産 | 527.21M | 0.00M | 12.07M | 296.72M | 230.50M | 0.00M | 527.21M
+2 | VAP特化水産 | 253.37M | 0.00M | 5.85M | 143.66M | 109.71M | 0.00M | 253.37M
+3 | 保守的・財務慎重水産 | 153.86M | 0.00M | 2.69M | 66.12M | 87.74M | 0.00M | 153.86M
+4 | 日本・品質志向水産 | -41.83M | 0.00M | -3.63M | -89.30M | 47.47M | 0.00M | -41.83M
+5 | 大量生産・価格競争水産 | -621.92M | 0.00M | -13.17M | -323.60M | -206.33M | 91.99M | -621.92M
+
+--- Turn 32 ---
+Rank | Company | TSV | DividendValue | NormalizedCF | EV | Cash | Debt | CurrentCompanyValue
+1 | バランス型水産 | 615.99M | 0.00M | 11.91M | 292.75M | 323.24M | 0.00M | 615.99M
+2 | VAP特化水産 | 273.38M | 0.00M | 5.07M | 124.58M | 148.79M | 0.00M | 273.38M
+3 | 保守的・財務慎重水産 | 163.46M | 0.00M | 2.39M | 58.63M | 104.84M | 0.00M | 163.46M
+4 | 日本・品質志向水産 | -170.19M | 0.00M | -6.79M | -166.86M | 20.46M | 23.79M | -170.19M
+5 | 大量生産・価格競争水産 | -727.24M | 0.00M | -13.17M | -323.60M | -311.66M | 91.99M | -727.24M
+
+
+=== TSV Benchmark 2: 15%支配戦略チェック（§24）===
+対象会社: バランス型水産（毎Turン分配可能利益を全額配当 vs 同社の配当0ベースライン）
+Turn 8: baseline(配当0) TSV=328.29M / aggressive(全額配当) TSV=315.92M / 差=-3.8% | aggressiveのDividendValue=68.28M / CurrentCompanyValue=247.64M
+Turn 16: baseline(配当0) TSV=407.24M / aggressive(全額配当) TSV=435.82M / 差=7.0% | aggressiveのDividendValue=169.91M / CurrentCompanyValue=265.91M
+Turn 24: baseline(配当0) TSV=527.21M / aggressive(全額配当) TSV=618.10M / 差=17.2% | aggressiveのDividendValue=310.15M / CurrentCompanyValue=307.96M
+Turn 32: baseline(配当0) TSV=615.99M / aggressive(全額配当) TSV=820.58M / 差=33.2% | aggressiveのDividendValue=497.28M / CurrentCompanyValue=323.31M

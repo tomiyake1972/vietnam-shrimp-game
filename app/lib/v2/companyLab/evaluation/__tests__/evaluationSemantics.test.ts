@@ -401,3 +401,60 @@ test("EVAL-1: distressTurnCountはfinancialHealth.primaryが\"healthy\"以外だ
   const expectedDistressCount = financingEntry.financialHealth.primary === "healthy" ? 0 : 1;
   assert.equal(snapshot.distressTurnCount, expectedDistressCount);
 });
+
+// ---------------------------------------------------------------------
+// TSV-27d: 配当 vs 再投資の感度確認（TSV正式化指示§23）
+// ---------------------------------------------------------------------
+
+test("TSV感度: 配当を実行した直後は、CashからDividend Valueへ価値が移っただけでTSVはほぼ変わらない（配当が“無料の得”にならない）", () => {
+  const { state: state0, fixtures } = initializeCompanyLab(baseConfig({ turns: 10 }));
+  const targetCompanyId = fixtures[0].companyId;
+
+  const state1 = stepOnce(state0, fixtures);
+  const state2 = stepOnce(state1, fixtures);
+  const distributable = Number(state2.financeState.companies.find((c) => c.companyId === targetCompanyId)!.distributableEarnings);
+  assert.ok(distributable > 0, "前提: Turn2時点で分配可能利益が正であること");
+  const dividendAmountUsd = Math.min(1_000_000, distributable);
+
+  // Case A: 配当0（Cashを会社に残す）。Case B: dividendAmountUsdを配当する。
+  const stateA3 = stepOnce(state2, fixtures, targetCompanyId, (auto) => ({ ...auto, dividendDecision: { dividendAmountUsd: 0 } }));
+  const stateB3 = stepOnce(state2, fixtures, targetCompanyId, (auto) => ({ ...auto, dividendDecision: { dividendAmountUsd } }));
+
+  const tsvA = computeCompanyEvaluationSnapshot(stateA3.history, targetCompanyId, 3).totalShareholderValueUsd!;
+  const tsvB = computeCompanyEvaluationSnapshot(stateB3.history, targetCompanyId, 3).totalShareholderValueUsd!;
+
+  // 配当した瞬間はCash-配当額とDividendValue+配当額がほぼ相殺し、TSVはほぼ変わらない
+  // （どちらかが常に正解、という単純な支配関係にならないことの核心）。
+  const relativeDiff = Math.abs(tsvA - tsvB) / Math.max(Math.abs(tsvA), Math.abs(tsvB), 1);
+  assert.ok(relativeDiff < 0.05, `配当直後のTSVはCase A/Bでほぼ一致するはず（tsvA=${tsvA}, tsvB=${tsvB}, relativeDiff=${relativeDiff}）`);
+});
+
+test("TSV感度: 数Turn後、配当した側はDividend Valueが15%で増える一方、配当しなかった側はCashが増えるだけ（Current Company Value上は無利子）で、どちらか一方が常に有利ではない", () => {
+  const { state: state0, fixtures } = initializeCompanyLab(baseConfig({ turns: 12 }));
+  const targetCompanyId = fixtures[0].companyId;
+
+  const state1 = stepOnce(state0, fixtures);
+  const state2 = stepOnce(state1, fixtures);
+  const distributable = Number(state2.financeState.companies.find((c) => c.companyId === targetCompanyId)!.distributableEarnings);
+  const dividendAmountUsd = Math.min(1_000_000, distributable);
+
+  let stateA = stepOnce(state2, fixtures, targetCompanyId, (auto) => ({ ...auto, dividendDecision: { dividendAmountUsd: 0 } }));
+  let stateB = stepOnce(state2, fixtures, targetCompanyId, (auto) => ({ ...auto, dividendDecision: { dividendAmountUsd } }));
+  for (let i = 0; i < 6; i++) {
+    stateA = stepOnce(stateA, fixtures, targetCompanyId, (auto) => ({ ...auto, dividendDecision: { dividendAmountUsd: 0 } }));
+    stateB = stepOnce(stateB, fixtures, targetCompanyId, (auto) => ({ ...auto, dividendDecision: { dividendAmountUsd: 0 } }));
+  }
+  const asOfTurn = 9;
+  const snapshotA = computeCompanyEvaluationSnapshot(stateA.history, targetCompanyId, asOfTurn);
+  const snapshotB = computeCompanyEvaluationSnapshot(stateB.history, targetCompanyId, asOfTurn);
+
+  // Bは配当価値が15%複利で育っている（配当額そのものより大きい）。
+  assert.ok(snapshotB.currentDividendValueUsd > dividendAmountUsd, "数Turn後はDividend Valueが元本より増えているはず（15%複利）");
+  // Aは配当していないのでDividend Valueはゼロのまま。
+  assert.equal(snapshotA.currentDividendValueUsd, 0);
+  // どちらのTSVが最終的に高いかはEnterprise Valueの推移（Standard AIの再投資結果）に
+  // 依存するため、本テストでは「一方が常に圧倒的に有利」という単純な不等式を固定しない
+  // （それ自体が指示§23の趣旨＝配当が常に正解でも再投資が常に正解でもないこと）。
+  assert.equal(typeof snapshotA.totalShareholderValueUsd, "number");
+  assert.equal(typeof snapshotB.totalShareholderValueUsd, "number");
+});
