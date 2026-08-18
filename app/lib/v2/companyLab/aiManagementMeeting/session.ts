@@ -39,7 +39,7 @@ import { buildCapacityPools } from "./capacitySemantics";
 import { buildInitialBriefFacts, buildTurnChangeBriefing, TurnChangeQuarterSnapshot } from "./turnChangeBriefing";
 import { AiMeetingNewsItem } from "./scenarioNews";
 import { routePlayerMessage } from "./router";
-import { buildMeetingUserMessage, buildOpeningBriefUserMessage, OPENING_BRIEF_PROMPT_VERSION } from "./prompt";
+import { buildMeetingUserMessage, buildOpeningBriefUserMessage, OPENING_BRIEF_PROMPT_VERSION, OPENING_BRIEF_UNAVAILABLE_REASON_JA } from "./prompt";
 import { appendMessages, buildRecentHistoryForPrompt, defaultMeetingId, loadConversation, newConversation, saveConversation } from "./conversation";
 import { validateAiMeetingProposals } from "./validation";
 import { AiMeetingMessage, ExecutiveRole, OpeningExecutiveBrief, RunAdvisoryMemoryRecord } from "./types";
@@ -501,7 +501,9 @@ export async function runOpeningBrief(input: {
         available: false,
         cached: false,
         meetingId,
-        unavailableReason: "Opening Executive Briefは現在利用できません。しばらくしてから再度お試しください。",
+        // 【Opening Brief Japanese Output Enforcement】fallback文言はprompt.tsの
+        // 共有定数（company-labs経路と同一）を使う（AMM-LANG-5）。
+        unavailableReason: OPENING_BRIEF_UNAVAILABLE_REASON_JA,
         diagnostics: generated.diagnostics,
       },
     };

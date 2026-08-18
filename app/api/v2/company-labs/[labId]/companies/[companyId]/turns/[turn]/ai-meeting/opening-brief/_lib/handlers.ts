@@ -24,7 +24,7 @@ import { CompanyLabHistoryEntryNotFoundError } from "../../../../../../../../../
 import { BalanceSheet, CashFlowStatement, ProfitAndLossStatement } from "../../../../../../../../../../../lib/v2/finance/types";
 import { CompanyQuarterSummary } from "../../../../../../../../../../../lib/v2/companyLab/types";
 import { ProductionAllocationEntry, WorkerAssignment } from "../../../../../../../../../../../lib/v2/production/types";
-import { OPENING_BRIEF_PROMPT_VERSION, buildOpeningBriefUserMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/prompt";
+import { OPENING_BRIEF_PROMPT_VERSION, OPENING_BRIEF_UNAVAILABLE_REASON_JA, buildOpeningBriefUserMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/prompt";
 import { appendMessages, defaultMeetingId, loadConversation, newConversation, saveConversation } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/conversation";
 import { AiMeetingMessage, OpeningExecutiveBrief, RunAdvisoryMemoryRecord } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/types";
 import { buildCapacityPools } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/capacitySemantics";
@@ -267,10 +267,9 @@ export async function handleGetOpeningBrief(
         available: false,
         cached: false,
         meetingId,
-        // 【Opening Brief Japanese Output Enforcement】fallback文言も日本語であることを固定する
-        // （AMM-LANG-5）。Claude呼び出し失敗時でも英語の文言をUIへ出さない。
-        unavailableReason:
-          "AI Management MeetingのOpening Briefを生成できませんでした。必要に応じて経営陣へ質問してください。",
+        // 【Opening Brief Japanese Output Enforcement】fallback文言はprompt.tsの
+        // 共有定数（simulation-runs経路と同一）を使う（AMM-LANG-5）。
+        unavailableReason: OPENING_BRIEF_UNAVAILABLE_REASON_JA,
         diagnostics: generated.diagnostics,
       },
     };
