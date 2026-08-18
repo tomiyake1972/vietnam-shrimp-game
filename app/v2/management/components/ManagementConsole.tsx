@@ -60,6 +60,7 @@ import { computeFinalEvaluationSnapshot, buildGameEndedRun, isGameFinished, last
 import { SeriesChart } from "./SeriesChart";
 import { FinalResultsSummary } from "./FinalResultsSummary";
 import { FinalResultsCharts } from "./FinalResultsCharts";
+import { resolveEvaluationHistory } from "../../../lib/v2/companyLab/evaluation/evaluationHistory";
 import { FinalDataDownloadButton } from "./FinalDataDownloadButton";
 import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
@@ -1054,7 +1055,7 @@ export function ManagementConsole() {
               <div className="mt-3">
                 <FinalResultsCharts
                   dataset={view.dataset}
-                  history={view.session?.state.history ?? []}
+                  history={view.session ? resolveEvaluationHistory({ evaluationHistory: view.session.evaluationHistory, stateHistory: view.session.state.history }) : []}
                   fixtures={view.session?.fixtures ?? fixtures}
                   gameEndTurn={view.run.gameEndTurn ?? completedTurns}
                   highlightKey={selectedCompanyId}

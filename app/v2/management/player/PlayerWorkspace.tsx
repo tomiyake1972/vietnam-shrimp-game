@@ -42,6 +42,7 @@ import { TsvLeaderboardPanel } from "../components/TsvLeaderboardPanel";
 import { ExportPackButton } from "../components/ExportPackButton";
 import { FinalResultsSummary } from "../components/FinalResultsSummary";
 import { FinalResultsCharts } from "../components/FinalResultsCharts";
+import { resolveEvaluationHistory } from "../../../lib/v2/companyLab/evaluation/evaluationHistory";
 import { FinalDataDownloadButton } from "../components/FinalDataDownloadButton";
 import { CompanyDatabookButton } from "./CompanyDatabookButton";
 import { buildBacklogDisplay } from "./backlogView";
@@ -265,7 +266,13 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
             testIdPrefix="player-final-results"
           />
 
-          <FinalResultsCharts dataset={dataset} history={session.state.history} fixtures={session.fixtures} gameEndTurn={finalGameEndTurn} highlightKey={companyId} />
+          <FinalResultsCharts
+            dataset={dataset}
+            history={resolveEvaluationHistory({ evaluationHistory: session.evaluationHistory, stateHistory: session.state.history })}
+            fixtures={session.fixtures}
+            gameEndTurn={finalGameEndTurn}
+            highlightKey={companyId}
+          />
 
           <FinalDataDownloadButton run={session.run} fixtures={session.fixtures} session={session} />
 

@@ -14,6 +14,7 @@ import type { PackCapitalProject, PackCompanyStateSnapshot, PackStrategy, PackWo
 import type { CompanyLabRuntimeSnapshot } from "../persistence/types";
 import type { SimulationAnalyticsDataset } from "./analytics/types";
 import type { CompanyEvaluationSnapshot } from "../evaluation/evaluationSemantics";
+import type { EvaluationHistoryRecord } from "../evaluation/evaluationHistory";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -171,6 +172,21 @@ export interface SimulationSession {
    * （dataset.ts の mergeAnalyticsDatasets参照）。新規Runでは未設定。
    */
   readonly priorAnalyticsDataset?: SimulationAnalyticsDataset;
+  /**
+   * 【Final Results履歴修正】Turn1からGame End Turnまでの、評価（TSV / 配当）専用の
+   * 軽量履歴。priorAnalyticsDatasetとまったく同じ理由で存在する。
+   *
+   * resumePayload.state.history は ROLLING_RESUME_HISTORY_WINDOW(=4) Turnへ間引かれる
+   * ため、reload後はそのままではTurn1〜28の評価ができず、さらにTurn32のTSVも
+   * 「直近4Turnぶんの配当しか含まないDividend Value」で計算されてしまう。
+   * このフィールドは間引かれず全Turnぶん保持され、Final Resultsの
+   * TSV推移・配当推移の唯一の入力になる（評価式自体は
+   * evaluation/evaluationSemantics.ts が引き続きSSoT）。
+   *
+   * 本機能より前に保存された既存Runには存在しないためoptional。
+   * その場合は従来どおり state.history へフォールバックする（挙動不変）。
+   */
+  readonly evaluationHistory?: readonly EvaluationHistoryRecord[];
 }
 
 /** 1ターン・1社ぶんの期首／期末スナップショットと期末の投資案件。 */

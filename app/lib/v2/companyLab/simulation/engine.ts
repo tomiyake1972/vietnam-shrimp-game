@@ -58,6 +58,7 @@ import {
   captureWorldTurn,
 } from "./aiPack/capture";
 import type { ObservedDemandSnapshot } from "./analytics/dataset";
+import { mergeEvaluationHistory, toEvaluationHistoryRecord } from "../evaluation/evaluationHistory";
 import type { PublicMarketInfo } from "../types";
 
 /** ゲームパラメータの版（再現性の記録用。複数モジュールの版を連結する）。 */
@@ -183,6 +184,7 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     packCompanyTurns: [],
     packWorldTurns: [],
     latestQuarterPreProcessingSnapshot: null,
+    evaluationHistory: [],
   };
 }
 
@@ -450,6 +452,13 @@ export function advanceSimulationTurn(
         // まだ書き換わっていない、advanceCompanyLabQuarter呼び出し前の値）を、直近1ターン
         // ぶんだけ保持する（履歴として積み増さない）。
         latestQuarterPreProcessingSnapshot: createCompanyLabRuntimeSnapshot(session.state),
+        // 【Final Results履歴】このTurnで確定した記録の評価専用射影を追記する。
+        // state.history はresume時に直近数Turnへ間引かれるため、Turn1からの
+        // TSV・配当推移を描くにはこちらを積み上げておく必要がある
+        // （priorAnalyticsDatasetと同じ理由・同じ方式）。値の加工はしない。
+        evaluationHistory: finalizedRecord
+          ? mergeEvaluationHistory(session.evaluationHistory, [toEvaluationHistoryRecord(finalizedRecord)])
+          : session.evaluationHistory,
         run: {
           ...session.run,
           completedTurns,
