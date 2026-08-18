@@ -32,6 +32,7 @@
 // 変換ロジックを作らない。
 
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../../../lib/v2/companyLab";
+import CollapsibleSection from "../CollapsibleSection";
 import OpeningCompanyStatePanel from "../OpeningCompanyStatePanel";
 import { DepreciableAssetsPanel, ObservedMarketDemandPanel, OpeningBalanceSheetPanel, OpeningMarketInfoPanel } from "../OpeningInfoPanels";
 import { buildOpeningBalanceSheet, type OpeningInfoViewModel, type ScenarioNewsItem } from "../../play/_lib/openingInfoViewModel";
@@ -69,8 +70,9 @@ export default function InformationScreen({ fixture, ownState, turn, publicInfo,
 
   return (
     <div className="space-y-3" data-testid="decision-studio-info-screen">
-      {/* 【最上段・常時表示】スクロールしなくてもCash / Debt / Equity / Total Assetsが
-          見えるよう、開閉不要な一覧をタブの一番上に置く。値はbsそのまま（捏造・再計算なし）。 */}
+      {/* 【最上段・常時表示】スクロールしなくても現金・有利子負債・純資産・資産合計が
+          見えるよう、開閉不要な一覧をタブの一番上に置く。値はbsそのまま（捏造・再計算なし）。
+          Player-facing表示のため見出しは日本語のみ（英語併記はしない）。 */}
       <div className={`rounded-lg p-3 ${tone.section}`} data-testid="info-screen-opening-bs-glance">
         <div className="mb-1 flex items-center gap-2">
           <span className={`text-[10px] rounded px-1.5 py-0.5 ${tone.badge}`}>{tone.label}</span>
@@ -78,29 +80,34 @@ export default function InformationScreen({ fixture, ownState, turn, publicInfo,
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div>
-            <div className="text-[10px] text-gray-500">現金 (Cash)</div>
+            <div className="text-[10px] text-gray-500">現金</div>
             <div className="text-sm font-semibold tabular-nums text-gray-100">{usd(bs.cash)}</div>
           </div>
           <div>
-            <div className="text-[10px] text-gray-500">有利子負債 (Debt)</div>
+            <div className="text-[10px] text-gray-500">有利子負債</div>
             <div className="text-sm font-semibold tabular-nums text-gray-100">{usd(bs.totalDebt)}</div>
           </div>
           <div>
-            <div className="text-[10px] text-gray-500">純資産 (Equity)</div>
+            <div className="text-[10px] text-gray-500">純資産</div>
             <div className="text-sm font-semibold tabular-nums text-gray-100">{usd(bs.totalEquity)}</div>
           </div>
           <div>
-            <div className="text-[10px] text-gray-500">資産合計 (Total Assets)</div>
+            <div className="text-[10px] text-gray-500">資産合計</div>
             <div className="text-sm font-semibold tabular-nums text-gray-100">{usd(bs.totalAssets)}</div>
           </div>
         </div>
       </div>
 
       {/* 【Turn Start / INFOタブ上部に常時表示】Dynamic Scenarioでは世界のニュースが
-          主要な情報源のため、期初BSのすぐ下・詳細パネル類より前に置く。 */}
+          主要な情報源のため、期初BSのすぐ下・詳細パネル類より前に置く。News一覧は
+          「Turn開始時に必ず見せたい概要情報」として今回のdefault collapsed化の対象外。 */}
       {news !== undefined && bsTurn !== undefined && <ScenarioNewsFeed news={news} turn={bsTurn} />}
 
-      {bsTurn !== undefined && <OpeningBalanceSheetPanel bs={bs} turn={bsTurn} defaultOpen />}
+      {/* 【表示調整】詳細な貸借対照表は情報閲覧用パネルのため、既定で折り畳む
+          （上のBS一目summaryで主要4項目は常に見えているため、内訳は必要な人だけ
+          クリックして開く）。defaultOpenを渡さないことでOpeningBalanceSheetPanel
+          既定のfalseに戻す。 */}
+      {bsTurn !== undefined && <OpeningBalanceSheetPanel bs={bs} turn={bsTurn} />}
 
       <div className={`rounded-lg p-3 ${tone.section}`}>
         <div className="mb-1 flex items-center gap-2">
@@ -126,7 +133,11 @@ export default function InformationScreen({ fixture, ownState, turn, publicInfo,
       )}
 
       {turn !== undefined ? (
-        <OpeningCompanyStatePanel ownState={ownState} fixture={fixture} turn={turn} />
+        // 【表示調整】PlayerScreenClient.tsxの既存レイアウトと同じCollapsibleSectionで
+        // 包み、既定で折り畳む（自社状態要約も情報閲覧用の詳細パネルのため）。
+        <CollapsibleSection title={`自社の状態（turn ${turn} 開始時点）`} tone="info" defaultOpen={false} testId="opening-company-state-section">
+          <OpeningCompanyStatePanel ownState={ownState} fixture={fixture} turn={turn} />
+        </CollapsibleSection>
       ) : (
         <p className="text-xs text-gray-500">turn番号が未確定のため、自社状態要約（backlog・原料在庫・完成品在庫・工場・Worker・資金/負債）を表示できません。</p>
       )}
