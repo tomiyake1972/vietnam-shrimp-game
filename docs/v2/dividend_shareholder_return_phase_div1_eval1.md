@@ -38,6 +38,22 @@ Phaseで完成させるのは配当メカニクスと評価基盤のみであり
 - **Turn数非依存**: `asOfTurn`以下のTurnだけを集計するため、Runが16Turnで終わっても32Turn走っても同じ関数・同じ結果になる（テストで、同一Turnの評価がその後何Turn続いたかに関わらず一致することを確認済み）。
 - GM Management Consoleに読み取り専用プレビューパネル（`EvaluationSummaryPanel.tsx`）を追加。「今このTurnで終了したら」という体で表示するのみで、実際にRunを終了させるミューテーションは実装していない（`SimulationRun`の版管理された永続化スキーマへの変更が必要になるため、今回はサービス層の基盤のみとし、UIは意図的に読み取り専用に留めた）。
 
+## TSV正式化（2026-08-18指示）
+
+第一目標をTotal Shareholder Value（総株主価値）の最大化と定め、以下を正式式として実装した（`app/lib/v2/companyLab/evaluation/evaluationSemantics.ts`）。評価は最終Turnだけでなく、常に「現在Turn時点の現在価値」として毎Turn再計算する（Turn32想定値は使わない）。
+
+```
+TSV(t) = DividendValue(t) + CurrentCompanyValue(t)
+CurrentCompanyValue(t) = EnterpriseValue(t) + Cash(t) - Debt(t)
+```
+
+- **DividendValue(t)**: 各Turnの実配当額（`appliedDividendUsd`）を、支払Turnから現在Turnまで年率15%で複利評価し合算。旧DIV-2の段階係数（Turn32基準の逆算）は使わない（`legacyWeightedDividendValueUsd`として後方参照のみ残す）。
+- **EnterpriseValue(t)**: 直近min(3,確定Turn数)の`CashFlowStatement.operatingCashFlow`平均を年換算し、10年・年率10%でDCF（Terminal Valueなし）。10%（EV側）と15%（配当側）は意図的に別レート。
+- 未来Turnのデータは`asOfTurn`以下へのフィルタで構造的に参照できない（Future leakage禁止）。
+- `shareholderValueModelVersion: "tsv-dcf-v1"`。
+
+Leaderboard（`TsvLeaderboardPanel.tsx`）はRank/TSV/DividendValue/CurrentCompanyValueを全社公開し、自社のみEnterpriseValue/正常化CF/Cash/Debtの内訳を追加表示する。ベンチマーク（`scripts/tsvLeaderboardBenchmark.ts`、出力: `docs/v2/reports/tsv_leaderboard_benchmark_output.txt`）で、15%が即座に支配戦略化していないこと（初期は横ばい〜マイナス、Turn32にかけて緩やかに優位化）を確認済み。
+
 ## 保存互換性
 
 - `CompanyFinanceState.distributableEarnings`: 深いバリデーションを行う`schema.ts`側で `undefined → 0` のデフォルト補完を追加（companyLab/persistence・persistence両方）。
@@ -46,7 +62,6 @@ Phaseで完成させるのは配当メカニクスと評価基盤のみであり
 
 ## 未実装・次Phaseへの持ち越し
 
-- Current Shareholder Valueの正式な算定式（EVAL-2）。
-- Standard AIの本格的な配当ポリシー（DIV-3相当）。
+- Standard AIの本格的な配当ポリシー（DIV-3相当）。AIは引き続き配当0のため、現時点ではPlayerだけが配当時間価値を得られる（次Phaseの論点として明記）。
 - 「End Game」を実際に実行するミューテーション（SimulationRunの状態遷移・確認ダイアログ）。
 - Awards（表彰）の正式スコア化。
