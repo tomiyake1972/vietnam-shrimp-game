@@ -75,6 +75,7 @@ import {
   SalesParameters,
 } from "../sales/parameters";
 import { MARKET_PARAMETERS_V1 } from "../market/parameters";
+import { applyScenarioSalesCapacityOverride } from "../scenario/salesCapacityOverride";
 import {
   applyProductSubstitution,
   computeAddressableDemand,
@@ -1029,7 +1030,9 @@ export function advanceCompanyLabQuarter(
   // 【監査指摘B】当期の成約配分に実際に使うSalesParametersと、市場進化パラメータ。
   // 供給圧力の分母（addressable demand）は前者のexternalOptionWeightから導くため、
   // 両者が同じ値を参照することを1箇所で保証する。
-  const salesParametersForThisQuarter: SalesParameters = salesParametersFor(state.config);
+  // 【Dynamic Scenario 3】シナリオが会社営業組織能力の上書きを宣言している場合だけ、
+  // 市場清算側の SalesParameters へ適用する（未宣言なら同一参照のまま＝挙動不変）。
+  const salesParametersForThisQuarter: SalesParameters = applyScenarioSalesCapacityOverride(salesParametersFor(state.config), definition);
   const marketEvolutionParameters: MarketEvolutionParameters = state.config.sai5?.supplyPressureDefinition
     ? { ...MARKET_EVOLUTION_PARAMETERS_V1, supplyPressureDefinition: state.config.sai5.supplyPressureDefinition }
     : MARKET_EVOLUTION_PARAMETERS_V1;

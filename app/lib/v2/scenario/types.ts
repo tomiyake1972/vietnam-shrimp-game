@@ -427,6 +427,45 @@ export interface ScenarioDefinition {
    * 追加の調整項目は持たせない。
    */
   readonly initialCompanyDebtUsd?: Readonly<Record<string, InitialCompanyDebtOverride>>;
+
+  /**
+   * 【Dynamic Scenario 3】会社営業組織能力（sales/salesCapacityModel.ts の
+   * capacity(h) = baseline + maxIncrement × h/(h + saturation)）の上書き。
+   *
+   * 【なぜシナリオ側の opt-in にするか】DS2 監査で、5社の四半期販売量は
+   * 市場規模でも供給者シェア上限35%でもなく、この曲線の漸近上限
+   * （96,000 営業工数t/四半期）で頭打ちになることが分かった。MASSの商品構成
+   * （HOSO 67 / PD 24 / VAP 9、平均営業工数係数 1.228）では物理換算 78,176 t/Turn が
+   * 人員無限大でも越えられない天井になる。より大きな企業規模を扱うシナリオでは
+   * この曲線自体を引き上げる必要があるが、グローバル既定を変えると
+   * baseline・DS1・DS2 の既存Run・既存ベンチマークがすべて動いてしまう。
+   *
+   * 【指定しなければ完全な恒等変換】未指定のシナリオでは解決結果が
+   * SalesParameters と同一オブジェクト参照のまま返るため、既存挙動と
+   * ビット単位で一致する（initialCompanyVapCapacityTons と同じ opt-in の作り）。
+   *
+   * 【営業工数係数は対象外】salesEffortCoefficients（HOSO 1.0 / PD 1.2 / VAP 3.0）は
+   * ここでは変更できない。商品ごとの営業の重さは世界共通の性質として扱う。
+   */
+  readonly salesOrganizationCapacityOverride?: SalesOrganizationCapacityOverride;
+}
+
+/**
+ * 会社営業組織能力曲線の上書き（すべて任意。指定した項目だけが差し替わる）。
+ *
+ *   capacity(h) = companyBaselineCapacityTons
+ *               + companyCapacityMaxIncrementTons × h / (h + companyCapacitySaturationHeadcount)
+ *
+ * 単位は「営業工数トン／四半期」。物理トンへ換算するには商品構成で加重した
+ * salesEffortCoefficients（HOSO 1.0 / PD 1.2 / VAP 3.0）で割る。
+ */
+export interface SalesOrganizationCapacityOverride {
+  /** 人員0でも持つ基礎能力。 */
+  readonly companyBaselineCapacityTons?: number;
+  /** 人員を増やして得られる増分の上限（漸近上限 = baseline + これ）。 */
+  readonly companyCapacityMaxIncrementTons?: number;
+  /** 増分の半分に到達する人員数（曲線の立ち上がりの速さ）。 */
+  readonly companyCapacitySaturationHeadcount?: number;
 }
 
 /** 1社ぶんの初期借入上書き。省略した側は共有フィクスチャの値を使う。 */

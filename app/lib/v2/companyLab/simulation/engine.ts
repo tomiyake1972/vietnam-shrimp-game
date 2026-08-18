@@ -45,6 +45,8 @@ import { unwrapUnit } from "../../core/units";
 import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
 import { FINANCE_PARAMETERS_V1 } from "../../finance/parameters";
 import { STANDARD_AI_PARAMETERS_V1 } from "../standardAi/parameters";
+import { SALES_PARAMETERS_V1 } from "../../sales/parameters";
+import { applyScenarioSalesCapacityOverride } from "../../scenario/salesCapacityOverride";
 import { STRATEGY_PROFILE_SCHEMA_VERSION } from "../strategyProfile/types";
 import { CapacitySnapshot, CompanyControlMode, DecisionOwner, MANAGEMENT_CONSOLE_STANDARD_TURNS, SimulationRun, SimulationSession, SimulationTurnOutcome } from "./types";
 import { extractAiTurnTrace } from "./analytics/aiTrace";
@@ -344,6 +346,15 @@ export function advanceSimulationTurn(
         ...(session.state.config.factoryActivationLaborFixDisabled ? { factoryActivationLaborFixEnabled: false } : {}),
         ...(session.state.config.vapDevelopmentTierIntensityDisabled ? { vapDevelopmentTierIntensityEnabled: false } : {}),
       };
+      /**
+       * 【Dynamic Scenario 3】Standard AI 自身の販売計画も、市場清算側と同じ
+       * 会社営業組織能力の上書きを見て立てる必要がある。DS2 監査で「実配分＝AIの
+       * 希望販売量」であり、AIが求めた以上には決して売れないことが確定しているため、
+       * ここを既定のままにすると市場側だけ天井を上げても規模は1トンも動かない。
+       * 上書きを宣言していないシナリオでは SALES_PARAMETERS_V1 と同一参照が返るため、
+       * 既存Run・既存テストの出力はビット単位で不変。
+       */
+      const aiSalesParams = applyScenarioSalesCapacityOverride(SALES_PARAMETERS_V1, session.state.scenarioState.definition);
       const { decision: aiDecision, diagnostics: rawDiagnostics } = generateStandardAiDecisionWithDiagnostics(
         fixture,
         ownState,
@@ -351,7 +362,7 @@ export function advanceSimulationTurn(
         session.state.currentPeriod,
         turn,
         effectiveParams,
-        undefined,
+        aiSalesParams,
         session.state.config.visionOverrides
       );
       /**
