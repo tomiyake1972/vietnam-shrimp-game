@@ -20,7 +20,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AREA_TONES } from "../panelStyles";
 import { fetchAiMeetingConversationAction, sendAiMeetingMessageAction } from "../../play/[labId]/actions";
-import { fetchRunAiMeetingConversationAction, sendRunAiMeetingMessageAction } from "../../../management/player/aiMeetingActions";
+import { fetchRunAiMeetingConversationAction, fetchRunOpeningBriefAction, sendRunAiMeetingMessageAction } from "../../../management/player/aiMeetingActions";
 import { AiMeetingCallDiagnostics, AiMeetingMessage, ExecutiveRole, ValidatedAiMeetingProposal } from "../../../../lib/v2/companyLab/aiManagementMeeting/types";
 
 type MessageSpeaker = "PLAYER" | ExecutiveRole;
@@ -118,6 +118,32 @@ export default function AuxiliaryPanel({ source, companyId, turn, onClose }: Aux
       }
       if (!result.found) {
         setMeetingId(restoreMeetingId);
+        // 【M2.7配線・Fast Track統合】まだ会話が1件も無い＝この新しいTurnで初めて
+        // 会議を開いた瞬間。CEOのOpening Executive Briefを取得して先頭へ表示する。
+        // 「同一Turn再訪では再生成しない（cache）」「プレイヤーが先に発言していたら
+        // 割り込まない」の判定はいずれもサーバー側（session.ts runOpeningBrief）が行う。
+        // 取得に失敗しても会議そのものは通常どおり使えるため、エラーは表示しない。
+        if (source.kind === "simulationRun") {
+          const brief = await fetchRunOpeningBriefAction(source.simulationRunId, companyId, turn);
+          if (cancelled) return;
+          if (brief.ok && brief.available) {
+            if (brief.message) setMessages([brief.message]);
+            else if (brief.openingBrief) {
+              setMessages([
+                {
+                  id: `opening-brief-${turn}`,
+                  speaker: "CEO",
+                  text: brief.openingBrief.summary,
+                  turn,
+                  proposalIds: [],
+                  factsUsed: brief.openingBrief.factsUsed,
+                  messageType: "OPENING_BRIEF",
+                },
+              ]);
+            }
+            if (brief.meetingId) setMeetingId(brief.meetingId);
+          }
+        }
         return;
       }
       setMessages(result.messages ?? []);

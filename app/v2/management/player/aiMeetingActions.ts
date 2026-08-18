@@ -23,10 +23,11 @@ import { createDefaultCompanyLabRedisClient } from "../../../lib/v2/redis/compan
 import { createSimulationRunRepository } from "../../../api/v2/simulation-runs/_lib/context";
 import {
   handleGetRunAiMeetingConversation,
+  handleGetRunOpeningBrief,
   handlePostRunAiMeetingMessage,
   RunAiMeetingDependencies,
 } from "../../../api/v2/simulation-runs/[simulationRunId]/companies/[companyId]/turns/[turn]/ai-meeting/messages/_lib/handlers";
-import { AiMeetingCallDiagnostics, AiMeetingIntent, AiMeetingMessage, ValidatedAiMeetingProposal } from "../../../lib/v2/companyLab/aiManagementMeeting/types";
+import { AiMeetingCallDiagnostics, AiMeetingIntent, AiMeetingMessage, OpeningExecutiveBrief, ValidatedAiMeetingProposal } from "../../../lib/v2/companyLab/aiManagementMeeting/types";
 
 const NOT_LOGGED_IN_MESSAGE =
   "AI経営会議を使うには staging 管理ログインが必要です（/v2/company-lab/play/login）。ログイン後、この画面へ戻って再度お試しください。ゲームの状態には影響ありません。";
@@ -151,5 +152,64 @@ export async function fetchRunAiMeetingConversationAction(
     unstable_rethrow(e);
     console.error(`${logPrefix} 予期しない例外を捕捉しました:`, e instanceof Error ? e.message : String(e));
     return { ok: false, found: false, errorMessage: "サーバー内部で予期しないエラーが発生しました。" };
+  }
+}
+
+// ---------------------------------------------------------------------
+// 【M2.7配線・Fast Track統合】Opening Executive Brief
+//
+// 新しいTurnの意思決定画面へ入った直後に、プレイヤーが何も質問しなくても
+// CEOが「前四半期から何が変わったか」を短く説明する。cache（同一turn再訪では
+// 再生成しない）・割り込み禁止（既にプレイヤーが発言済みなら生成しない）は
+// いずれもサーバー側（session.ts runOpeningBrief）が判定する。
+// ---------------------------------------------------------------------
+
+export interface RunOpeningBriefActionResult {
+  readonly ok: boolean;
+  readonly available: boolean;
+  readonly cached?: boolean;
+  readonly meetingId?: string;
+  /** 生成された場合の本体（cachedのときはmessageのみ返る）。 */
+  readonly openingBrief?: OpeningExecutiveBrief;
+  /** cache hit時に返る、会話へ既に記録済みのOPENING_BRIEFメッセージ。 */
+  readonly message?: AiMeetingMessage;
+  readonly unavailableReason?: string;
+  readonly errorMessage?: string;
+}
+
+export async function fetchRunOpeningBriefAction(simulationRunId: string, companyId: string, turn: number): Promise<RunOpeningBriefActionResult> {
+  const logPrefix = `[fetchRunOpeningBriefAction] run=${simulationRunId} company=${companyId} turn=${turn}`;
+  try {
+    const g = await guard();
+    if (!g.ok) return { ok: false, available: false, errorMessage: g.message };
+
+    const deps = await resolveDependencies();
+    const result = await handleGetRunOpeningBrief(deps, simulationRunId, companyId, String(turn));
+
+    if (result.status !== 200) {
+      const body = result.body as { error?: { message?: string } } | undefined;
+      return { ok: false, available: false, errorMessage: body?.error?.message ?? "Opening Briefの取得に失敗しました。" };
+    }
+    const body = result.body as {
+      available: boolean;
+      cached?: boolean;
+      meetingId?: string;
+      openingBrief?: OpeningExecutiveBrief;
+      message?: AiMeetingMessage;
+      unavailableReason?: string;
+    };
+    return {
+      ok: true,
+      available: body.available,
+      cached: body.cached,
+      meetingId: body.meetingId,
+      openingBrief: body.openingBrief,
+      message: body.message,
+      unavailableReason: body.unavailableReason,
+    };
+  } catch (e) {
+    unstable_rethrow(e);
+    console.error(`${logPrefix} 予期しない例外を捕捉しました:`, e instanceof Error ? e.message : String(e));
+    return { ok: false, available: false, errorMessage: "サーバー内部で予期しないエラーが発生しました。" };
   }
 }

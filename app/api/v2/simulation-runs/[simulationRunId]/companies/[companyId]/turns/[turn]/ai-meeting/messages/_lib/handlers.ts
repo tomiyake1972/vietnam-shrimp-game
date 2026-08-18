@@ -32,6 +32,7 @@ import {
   AiMeetingCompanySnapshot,
   loadAiMeetingConversation,
   runAiMeetingTurn,
+  runOpeningBrief,
   simulationRunContextId,
 } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/session";
 import { AnthropicMessagesClient } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/claudeClient";
@@ -85,15 +86,20 @@ function buildQuarterSnapshot(history: readonly CompanyQuarterRecord[], companyI
   if (!financialResult || !summary) return null;
   const yq = toYearQuarter(entry.period);
   const decision = entry.decisions.find((d) => d.companyId === companyId);
+  const financingResult = entry.financingResults.find((f) => f.companyId === companyId);
   return {
     pnl: financialResult.profitAndLoss,
     cashFlow: financialResult.cashFlow,
     balanceSheet: financialResult.balanceSheet,
     periodLabel: `${yq.year}年Q${yq.quarter}`,
+    // 【M2.7配線】company-labs handler.ts の loadQuarterSnapshot と同じ形にそろえる
+    // （TurnChangeQuarterSnapshot が要求する period / borrowingHeadroomUsd）。
+    period: entry.period,
     fulfilledQuantityTons: Number(summary.fulfilledQuantity),
     summary,
     workerAssignments: decision?.workerAssignments ?? [],
     productionEntries: entry.productionAllocation.entries.filter((e) => e.companyId === companyId),
+    borrowingHeadroomUsd: financingResult ? financingResult.borrowingCapacity.availableAdditionalCapacityUsd : null,
   };
 }
 
@@ -210,6 +216,10 @@ export async function buildSnapshotFromSimulationRun(
         : null,
       priorPeriod: priorPeriodSnapshot ? { summary: priorPeriodSnapshot.summary } : null,
     },
+    // 【M2.7配線】Opening Brief の Turn Change Briefing 用。既に上で組み立てた
+    // 同じスナップショットをそのまま渡すだけで、新しい取得経路は増やさない。
+    reportingPeriodSnapshot,
+    priorPeriodSnapshot,
   };
   return { ok: true, snapshot };
 }
@@ -232,6 +242,29 @@ export async function handlePostRunAiMeetingMessage(
     requestedTurn: Number(turnParam),
     playerMessage: body.playerMessage,
     meetingId: body.meetingId,
+    anthropicClient,
+  });
+}
+
+/**
+ * 【M2.7配線】GET: Simulation Run の現在状態から Opening Executive Brief を返す。
+ * 会議1回ぶんの処理と同じく、状態の読み出しだけがここの責務で、生成手順は
+ * session.ts の runOpeningBrief（company-labs 経路と同じ共通関数群）が持つ。
+ */
+export async function handleGetRunOpeningBrief(
+  deps: RunAiMeetingDependencies,
+  simulationRunId: string,
+  companyId: string,
+  turnParam: string,
+  anthropicClient?: AnthropicMessagesClient
+): Promise<AiMeetingApiResult> {
+  const built = await buildSnapshotFromSimulationRun(deps.repository, simulationRunId, companyId);
+  if (!built.ok) return built.result;
+
+  return runOpeningBrief({
+    redisClient: deps.redisClient,
+    snapshot: built.snapshot,
+    requestedTurn: Number(turnParam),
     anthropicClient,
   });
 }
