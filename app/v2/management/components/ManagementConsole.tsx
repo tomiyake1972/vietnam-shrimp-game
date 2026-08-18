@@ -59,8 +59,7 @@ import { persistResumableRun } from "../lib/persistRun";
 import { SeriesChart } from "./SeriesChart";
 import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
-import { PublicDividendSummary } from "./PublicDividendSummary";
-import { EvaluationSummaryPanel } from "./EvaluationSummaryPanel";
+import { TsvLeaderboardPanel } from "./TsvLeaderboardPanel";
 import { RunSelector } from "./RunSelector";
 import { Collapsible } from "./Collapsible";
 import { StrategySummary } from "./StrategySummary";
@@ -942,13 +941,15 @@ export function ManagementConsole() {
             </Collapsible>
           ) : null}
 
-          {/* 【DIV-2】配当の他社公開表示。GM画面は元々TRUE WORLD（全社の全情報）を見られる
-              前提の画面だが、ここではあえて「他社にも公開される配当情報だけ」の見え方を
-              合わせて確認できるようにする（Cash・借入枠・CAPEX計画等はこのCollapsibleには
-              含まれない。それらは既存のCompany Inspectorのみで確認する）。 */}
-          {view?.session ? (
-            <Collapsible title="株主還元（配当）— 他社公開情報" testId="console-public-dividend-toggle">
-              <PublicDividendSummary session={view.session} fixtures={view.session.fixtures} />
+          {/* 【TSV正式化】総株主価値の公式Leaderboard。GM画面は元々TRUE WORLD
+              （全社の全情報）を見られる前提の画面だが、ここではあえて「全社に
+              公開されるTSV/Dividend Value/Current Company Valueだけ」の
+              見え方を合わせて確認できるようにする（Cash・Debt・正常化CFの
+              内訳はselectedCompanyIdの自社内訳としてのみ表示。それ以外の
+              Cash・借入枠・CAPEX計画等は既存のCompany Inspectorのみで確認する）。 */}
+          {view?.session && fixtures.length > 0 ? (
+            <Collapsible title="総株主価値（TSV）— 公式Leaderboard" testId="console-tsv-leaderboard-toggle">
+              <TsvLeaderboardPanel session={view.session} fixtures={view.session.fixtures} ownCompanyId={selectedCompanyId} />
             </Collapsible>
           ) : null}
 
@@ -1046,15 +1047,6 @@ export function ManagementConsole() {
               <p className="text-sm text-slate-400">読み込み中…</p>
             )}
           </div>
-
-          {/* 【EVAL-1】任意Turn評価サービスの基盤（プレビュー表示・読み取り専用）。
-              End Gameを実際に実行するボタンはまだ無い（§14/§32・Run/Labライフサイクルへの
-              大きな変更を避けるため今回はサービス層の基盤のみ）。 */}
-          {view?.session && fixtures.length > 0 ? (
-            <Collapsible title="評価サマリー（EVAL-1・プレビュー）" testId="console-evaluation-summary-toggle">
-              <EvaluationSummaryPanel session={view.session} fixture={fixtures.find((f) => f.companyId === selectedCompanyId) ?? fixtures[0]} />
-            </Collapsible>
-          ) : null}
         </aside>
       </div>
     </div>

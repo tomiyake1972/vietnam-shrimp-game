@@ -37,6 +37,7 @@ import {
   initializeCompanyLab,
 } from "../../lib/v2/companyLab";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "./decisionDraft";
+import { computeCurrentDividendValueUsd } from "../../lib/v2/companyLab/evaluation/evaluationSemantics";
 import LabBanner from "./components/LabBanner";
 import ScenarioControls, { CompanyOption, ScenarioOption } from "./components/ScenarioControls";
 import DecisionEditor from "./components/DecisionEditor";
@@ -226,6 +227,8 @@ export default function CompanyLabPage() {
   // 【DIV-1新設】直近確定四半期の配当結果（累積配当・加重配当価値・却下理由の表示用）。
   const lastQuarterDividendResultForPlayer =
     (latestHistoryRecord?.dividendResults ?? []).find((r) => r.companyId === draftPlayerCompanyId) ?? null;
+  // 【TSV正式化】現在Turn基準・年率15%複利のDividend Value（Leaderboardと同一関数）。
+  const currentDividendValueUsdForPlayer = labState ? computeCurrentDividendValueUsd(labState.history, draftPlayerCompanyId, labState.scenarioState.currentTurn) : 0;
   // 【Phase 8B-3補足確認】前四半期に却下された新規投資案件（同時進行中案件数の上限超過等）。
   // エンジンは例外を投げず理由つきで却下結果を返すため、これを表示しないと「見送られたのに
   // 画面上は何も起きなかったように見える」という分かりにくさが残る（今回の確認で発見・修正）。
@@ -348,6 +351,7 @@ export default function CompanyLabPage() {
                     lastQuarterRejectedCapexProposals={lastQuarterRejectedCapexProposalsForPlayer}
                     lastQuarterFinancialResult={lastQuarterFinancialResultForPlayer}
                     lastQuarterDividendResult={lastQuarterDividendResultForPlayer}
+                    currentDividendValueUsd={currentDividendValueUsdForPlayer}
                   />
                 ) : (
                   <div className="text-sm text-gray-400">このシナリオはすでに完了しています。</div>

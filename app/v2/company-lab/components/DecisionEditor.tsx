@@ -54,7 +54,7 @@ import { buildCompanyInvestmentPlanningViewModel } from "../investmentPlanningVi
 import { applyHeadcountChange, WORKFORCE_EXPLANATION_TEXT } from "../../../lib/v2/companyLab/workforce";
 import { computeMaxSalesHiresPerQuarter } from "../../../lib/v2/companyLab/salesForceHiring";
 import { CompanyFinancialQuarterResult, unwrapUsd } from "../../../lib/v2/finance/types";
-import { computeMaxDividendUsd, computeWeightedDividendValueUsd, CompanyDividendQuarterResult, getDividendTimeWeight } from "../../../lib/v2/finance/dividend";
+import { computeMaxDividendUsd, CompanyDividendQuarterResult } from "../../../lib/v2/finance/dividend";
 import CapacityEffectiveRatePanel from "./CapacityEffectiveRatePanel";
 import ProcessingForecastPanel from "./ProcessingForecastPanel";
 import CapexDraftList from "./CapexDraftList";
@@ -76,7 +76,7 @@ interface DecisionEditorProps {
   readonly disabled: boolean;
   /** 【Phase 8B-3】設備投資セクション用の当四半期（プレビュー・稼働開始判定の基準）。 */
   readonly period: PeriodV2;
-  /** 【DIV-1新設】現在のTurn番号（1始まり）。配当の時間加重スコア計算（getDividendTimeWeight）にのみ使う。 */
+  /** 【DIV-1新設】現在のTurn番号（1始まり）。配当価値（Dividend Value）表示にのみ使う。 */
   readonly turn: number;
   /** 【Phase 8B-3】直近確定四半期の設備投資イベント（今期の実際の支払額表示用、参考情報）。未実行なら省略可。 */
   readonly lastQuarterCapexEvents?: readonly CapexProjectQuarterEvent[];
@@ -99,6 +99,12 @@ interface DecisionEditorProps {
    * として表示する。
    */
   readonly lastQuarterDividendResult?: CompanyDividendQuarterResult | null;
+  /**
+   * 【TSV正式化】現在Turn基準・年率15%複利で評価した、これまでの配当のDividend
+   * Value（evaluation/evaluationSemantics.ts computeCurrentDividendValueUsd）。
+   * 未指定時は0として扱う（履歴が無い初回四半期等）。
+   */
+  readonly currentDividendValueUsd?: number;
 }
 
 const LOAN_TYPE_LABELS: Record<CompanyDecisionDraft["financingRequest"]["desiredLoanType"], string> = {
@@ -194,6 +200,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
     lastQuarterRejectedCapexProposals,
     lastQuarterFinancialResult,
     lastQuarterDividendResult,
+    currentDividendValueUsd,
   } = props;
 
   // --- 【Phase 8G §1】営業人員配分の集計。「配分済み/配分可能/未配分（or 超過）」の
@@ -312,9 +319,10 @@ export default function DecisionEditor(props: DecisionEditorProps) {
   const cashAfterDividendUsd = currentCashUsd - dividendAmountUsd;
   const dividendExceedsMax = dividendAmountUsd > maxDividendUsd;
   const cumulativeDividendUsd = lastQuarterDividendResult?.cumulativeDividendUsd ?? 0;
-  const cumulativeWeightedDividendValueUsd = lastQuarterDividendResult?.cumulativeWeightedDividendValueUsd ?? 0;
-  const currentTimeWeight = getDividendTimeWeight(turn);
-  const projectedWeightedDividendValueUsd = computeWeightedDividendValueUsd(dividendAmountUsd, turn);
+  // 【TSV正式化】旧DIV-2の段階係数（Turn32を暗黙の基準にした逆算）は正式評価では
+  // 使わない。現在Turn基準・年率15%複利のDividend Value（Leaderboardと同じ
+  // evaluationSemantics.computeCurrentDividendValueUsd）を呼び出し側から受け取る。
+  const currentDividendValueUsdResolved = currentDividendValueUsd ?? 0;
 
   // --- 【Test15新設】新工場建設（4工場上限のブロック判定） ---
   const newFactoryConstructionBlocked = isNewFactoryConstructionBlockedByCap(draft, fixture.factories.length, ownState.capexState.portfolio.projects);
@@ -1299,7 +1307,7 @@ export default function DecisionEditor(props: DecisionEditorProps) {
             累積配当（当ゲーム開始後） <span className={INFO_VALUE_CLASS}>{formatUsd(cumulativeDividendUsd)}</span>
           </div>
           <div>
-            累積加重配当価値 <span className={INFO_VALUE_CLASS}>{formatUsd(cumulativeWeightedDividendValueUsd)}</span>
+            配当価値（Dividend Value・Turn {turn}時点） <span className={INFO_VALUE_CLASS}>{formatUsd(currentDividendValueUsdResolved)}</span>
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-4 text-xs text-gray-300">
@@ -1314,13 +1322,14 @@ export default function DecisionEditor(props: DecisionEditorProps) {
               onChange={(n) => onChange({ ...draft, dividendAmountUsd: n })}
             />
           </label>
-          <div>
-            時間加重係数（Turn {turn}） <span className={INFO_VALUE_CLASS}>×{currentTimeWeight.toFixed(2)}</span>
-          </div>
-          <div>
-            加重配当価値見込み <span className={INFO_VALUE_CLASS}>{formatUsd(projectedWeightedDividendValueUsd)}</span>
-          </div>
         </div>
+        {/* 【TSV正式化・指示§21】「Turn32まで持つと○○」という将来値の投影は行わない
+            （指示§6禁止）。配当は支払時点から現在Turnまで年率15%で評価され、Turnが
+            進むごとにその評価額が15%で積み上がっていくという「仕組み」だけを説明する。 */}
+        <p className="text-[11px] text-gray-400">
+          配当価値（Dividend Value）は、株主還元（TSV）ランキングで使う正式な評価です。配当を支払った時点から現在Turnまで、年率15%で複利評価します。
+          今Turnで配当を実行しても、その時点ではまだ1.0倍（現在価値=支払額）ですが、以後Turnが進むごとに評価額が年率15%で積み上がっていきます。
+        </p>
         {dividendExceedsMax && (
           <p className="text-[11px] text-red-400" data-testid="dividend-exceeds-max-warning" role="alert">
             入力額（{formatUsd(dividendAmountUsd)}）が配当可能上限（{formatUsd(maxDividendUsd)}）を超えています。

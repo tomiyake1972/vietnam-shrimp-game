@@ -24,6 +24,7 @@ import { useSearchParams } from "next/navigation";
 import DecisionEditor from "../../company-lab/components/DecisionEditor";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "../../company-lab/decisionDraft";
 import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
+import { computeCurrentDividendValueUsd } from "../../../lib/v2/companyLab/evaluation/evaluationSemantics";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecision } from "../../../lib/v2/companyLab/standardAi/policy";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab/types";
@@ -34,7 +35,7 @@ import { persistResumableRun } from "../lib/persistRun";
 import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
-import { PublicDividendSummary } from "../components/PublicDividendSummary";
+import { TsvLeaderboardPanel } from "../components/TsvLeaderboardPanel";
 import { ExportPackButton } from "../components/ExportPackButton";
 import { CompanyDatabookButton } from "./CompanyDatabookButton";
 import { buildBacklogDisplay } from "./backlogView";
@@ -187,6 +188,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
   const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
+  const currentDividendValueUsd = computeCurrentDividendValueUsd(session.state.history, companyId, turn);
   const controlMode = entry.companyControlModes[companyId] ?? "STANDARD_AI";
 
   return (
@@ -342,7 +344,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
         {tab === "market" ? (
           <div className="mx-auto max-w-4xl space-y-3">
             <MarketSummary dataset={dataset} />
-            <PublicDividendSummary session={session} fixtures={session.fixtures} />
+            <TsvLeaderboardPanel session={session} fixtures={session.fixtures} ownCompanyId={companyId} />
           </div>
         ) : null}
 
@@ -420,6 +422,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
               lastQuarterDividendResult={lastQuarterDividendResult}
+              currentDividendValueUsd={currentDividendValueUsd}
             />
           </div>
         ) : null}
