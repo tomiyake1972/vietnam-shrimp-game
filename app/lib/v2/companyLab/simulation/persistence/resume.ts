@@ -12,6 +12,7 @@ import { SalesContract } from "../../../sales/types";
 import { RawMaterialLot } from "../../../rawMaterials/types";
 import { COMMERCIAL_HISTORY_RETAINED_QUARTERS } from "../../commercialHistoryState";
 import { PeriodV2, previousPeriod } from "../../../core/period";
+import { usd } from "../../../finance/types";
 
 /**
  * 【Save/Resume 長期永続化・鮮度整合 BLOCKER修正】resumePayload.state.history に
@@ -225,6 +226,48 @@ export function buildResumePayload(
  * （呼び出し側がstored.packCaptureを渡す。無ければ空のまま＝AI Analysis Packの
  * 該当セクションはNOT_RECORDEDとして扱われる。既存の後方互換方針と同じ）。
  */
+/**
+ * 【Turn8 NaN停止 BLOCKER修正】保存済みresumePayload.stateを、現行コードが要求する
+ * フィールドを満たす形へ正規化してから復元する。
+ *
+ * 【なぜ必要か】company-labs経路（companyLab/persistence/schema.ts）は
+ * validateCompanyFinanceStateで「保存時に存在しなかった新フィールドは規約どおりの
+ * 既定値で補完する」ことを既に行っている。しかしSimulation Runのresume経路は
+ * resumePayload.stateをそのまま返しており、この補完を一切通っていなかった。
+ * そのため、あるフィールドの導入前に保存されたRunを新しいコードで再開すると、
+ * そのフィールドがundefinedのままエンジンへ流れ込む。
+ *
+ * 【distributableEarningsの場合に何が起きたか】DIV-1導入前に保存されたRunでは
+ * CompanyFinanceState.distributableEarningsが存在せず、DIV-4のStandard AI配当が
+ * 年度末Q4で初めてそれを読んだ時点で
+ *   computeMaxDividendUsd = Math.max(0, Math.min(cash, undefined)) = NaN
+ * となる。さらにNaNとの比較（NaN <= EPS）は常にfalseのため、
+ * 「分配可能利益が正か」「配当可能上限が正か」の各Gateを素通りし、
+ * 最終的にusd(NaN)がFinanceValidationErrorを投げてTurnが停止していた。
+ *
+ * 【0で補完する根拠】distributableEarningsはDIV-1の定義上「そのゲームの開始後に
+ * 稼いだ、まだ配当していない利益」であり、game-startでは必ず0から始まる
+ * （finance/initialState.ts）。このフィールドが存在しないRunは配当機能の導入前に
+ * 作られたものであり、配当実績も必然的に0である。過去に稼いだ利益額そのものは
+ * 保存されていない以上リプレイなしには復元できないため、
+ * companyLab/persistence/schema.tsが既に採用しているのと同一の規約
+ * （欠落 → 0）へそろえる。結果として「旧Runでは当面配当できない」＝
+ * 配当可能額を過小評価する安全側になり、NaNを黙って0へ潰す弥縫策ではなく、
+ * DIV-1が定めたstateのsemanticsをresume経路にも一貫して適用する修正である。
+ */
+export function normalizeRestoredStateForForwardCompatibility(state: CompanyLabState): CompanyLabState {
+  if (!state?.financeState?.companies) return state;
+  let changed = false;
+  const companies = state.financeState.companies.map((c) => {
+    if (Number.isFinite(c.distributableEarnings as unknown as number)) return c;
+    changed = true;
+    return { ...c, distributableEarnings: usd(0) };
+  });
+  if (!changed) return state;
+  console.log("[resume] 保存済みstateにdistributableEarningsが無い会社を検出したため、DIV-1の規約どおり0で補完しました（配当機能導入前に保存されたRun）。");
+  return { ...state, financeState: { ...state.financeState, companies } };
+}
+
 export function restoreSessionFromResumePayload(
   run: SimulationRun,
   resumePayload: SimulationResumePayload,
@@ -267,7 +310,7 @@ export function restoreSessionFromResumePayload(
   };
   return {
     run,
-    state: resumePayload.state,
+    state: normalizeRestoredStateForForwardCompatibility(resumePayload.state),
     fixtures: resumePayload.fixtures,
     config,
     aiTurnTraces: resumePayload.aiTurnTraces,

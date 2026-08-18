@@ -58,6 +58,7 @@ export type StandardAiReasonCode =
   | "DIVIDEND_SKIPPED_CAPEX_PLANNED" // 当期に新規設備投資（増設・新工場）を提案しているため配当を見送り
   | "DIVIDEND_SKIPPED_NO_CURRENT_EARNINGS" // 【DIV-4】直近確定四半期の当期純利益が正でないため配当を見送り（累計利益は取り崩さない）
   | "DIVIDEND_SKIPPED_NO_DISTRIBUTABLE_EARNINGS" // 分配可能利益（または配当可能上限）が正でないため配当を見送り
+  | "DIVIDEND_SKIPPED_INVALID_FINANCIAL_INPUT" // 【INT-NA】配当判定の入力（分配可能利益・現金・当期純利益）が有限数でないため配当を見送り
   | "DIVIDEND_LIMITED_BY_DISTRIBUTABLE_EARNINGS" // 【DIV-4】当期純利益基準の配当額が累計分配可能利益を超えたため、分配可能利益まで縮小
   | "DIVIDEND_LIMITED_BY_MAX" // 基準配当額が配当可能上限（min(Cash, 分配可能利益)）を超えたため上限でクランプ
   // --- 【SAI-5】市場・商品志向／ライフサイクル／営業基盤／供給圧力 ---
@@ -244,6 +245,7 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "DIVIDEND_SKIPPED_CAPEX_PLANNED",
   "DIVIDEND_SKIPPED_NO_CURRENT_EARNINGS",
   "DIVIDEND_SKIPPED_NO_DISTRIBUTABLE_EARNINGS",
+  "DIVIDEND_SKIPPED_INVALID_FINANCIAL_INPUT",
   "DIVIDEND_LIMITED_BY_DISTRIBUTABLE_EARNINGS",
   "DIVIDEND_LIMITED_BY_MAX",
   "CAPEX_DEFERRED_OVERSUPPLY",

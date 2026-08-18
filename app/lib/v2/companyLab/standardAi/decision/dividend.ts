@@ -161,6 +161,39 @@ export function buildStandardAiDividendDecision(input: {
     });
   }
 
+  // 【Gate A2・INT-NA】配当判定の入力が「有限の数値」であることを先に確認する。
+  //
+  // 以降のGate F/GはすべてEPS_USDとの大小比較（x <= EPS_USD）で「配らない」側へ倒す
+  // 構造になっている。ところがJavaScriptでは NaN <= x も undefined <= x も常にfalseに
+  // なるため、入力が有限数でない場合これらのGateは「条件を満たしている」扱いで素通り
+  // してしまい、最終的に NaN の配当額が usd() に渡って FinanceValidationError で
+  // シミュレーションごと停止する（Turn 8 NaN停止の直接原因）。
+  //
+  // ここでの意味論は「値が壊れているなら配当は行わない」であり、壊れた値を0とみなして
+  // 計算を続行するのではない。配当は任意の裁量的支出なので、判断材料が信頼できない
+  // ときに見送るのが唯一安全な既定動作である（未確定Net IncomeをGate Eで見送るのと同じ扱い）。
+  // 値が壊れていること自体はwarningとして必ず診断へ残し、握り潰さない。
+  if (
+    !Number.isFinite(distributableEarningsUsd) ||
+    !Number.isFinite(cashUsd) ||
+    !Number.isFinite(maxDividendUsd) ||
+    (currentQuarterNetIncomeUsd !== null && !Number.isFinite(currentQuarterNetIncomeUsd))
+  ) {
+    return none({
+      code: "DIVIDEND_SKIPPED_INVALID_FINANCIAL_INPUT",
+      domain: "finance",
+      companyId,
+      severity: "warning",
+      keyValues: { distributableEarningsUsd, cashUsd, maxDividendUsd, currentQuarterNetIncomeUsd: netIncomeUsd },
+      decisionSummary: "配当なし（財務入力値が有限数でない）",
+      message:
+        "配当判定の入力（分配可能利益・現金・当期純利益）に有限でない数値が含まれるため配当を行わない" +
+        `（distributableEarnings=${String(distributableEarningsUsd)} / cash=${String(cashUsd)} / ` +
+        `maxDividend=${String(maxDividendUsd)} / netIncome=${String(currentQuarterNetIncomeUsd)}）。` +
+        "値を0とみなして配当を続行することはしない。",
+    });
+  }
+
   // 【Gate B・実装指示§5B】財務健全性がhealthyであること（DIV-3の定義を維持）。
   // null（Turn1等、まだ1Turnも確定していない）は「healthyであることを確認できて
   // いない」ため、安全側に倒して配当しない。

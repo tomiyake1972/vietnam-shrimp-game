@@ -79,6 +79,15 @@ export function resolveDividendDecision(requested: DividendDecisionInput | undef
   const maxDividendUsd = computeMaxDividendUsd(prevFinance);
   const requestedUsd = requested?.dividendAmountUsd ?? 0;
 
+  // 【INT-NA】有限でない配当要求額は「0扱い」にしてはならない。
+  // requestedUsdがNaN/Infinityの場合、以下の比較（< -EPS / <= EPS / > cash / > distributable）は
+  // すべてfalseになり、素通りしてappliedUsd=NaNが返る。その値はapplyDividendToFinanceStateで
+  // usd()へ渡され、「Usd金額が有限の数値ではありません: NaN」という原因の分からない例外で
+  // シミュレーションが停止する。ここで負数と同じ「構造的な誤用」として明示的に弾き、
+  // どの入力が壊れているかをメッセージに残す。
+  if (!Number.isFinite(requestedUsd)) {
+    throw new DividendValidationError(`配当額が有限の数値ではありません: ${String(requested?.dividendAmountUsd)}`);
+  }
   if (requestedUsd < -EPS_USD) {
     throw new DividendValidationError(`配当額はマイナスにできません: ${requestedUsd}`);
   }
@@ -88,6 +97,15 @@ export function resolveDividendDecision(requested: DividendDecisionInput | undef
 
   const availableCashUsd = unwrapUsd(prevFinance.cash);
   const distributableEarningsUsd = unwrapUsd(prevFinance.distributableEarnings);
+
+  // 【INT-NA】上限側が有限でない場合も同様に素通りする（NaNとの比較は常にfalse）。
+  // 「上限が不明なのだから配ってよい」ではなく「上限を確認できないので配れない」が
+  // 正しい会計上の意味なので、0扱いにも無制限扱いにもせず、状態異常として明示的に弾く。
+  if (!Number.isFinite(availableCashUsd) || !Number.isFinite(distributableEarningsUsd)) {
+    throw new DividendValidationError(
+      `配当可能額を判定できません（現金または分配可能利益が有限の数値ではありません）: cash=${String(availableCashUsd)} distributableEarnings=${String(distributableEarningsUsd)}`
+    );
+  }
 
   if (requestedUsd > availableCashUsd + EPS_USD) {
     return {
