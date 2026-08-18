@@ -363,7 +363,10 @@ export function advanceSimulationTurn(
         turn,
         effectiveParams,
         aiSalesParams,
-        session.state.config.visionOverrides
+        session.state.config.visionOverrides,
+        // 【Dynamic Scenario 3】シナリオ宣言によるVision成長軌道の上書き。
+        // 未宣言のシナリオでは undefined＝既定Visionのままで挙動不変。
+        session.state.scenarioState.definition.visionGrowthOverrides
       );
       /**
        * 【指示§25】バイアスが1件でも適用されている場合のみ、基準パラメータ

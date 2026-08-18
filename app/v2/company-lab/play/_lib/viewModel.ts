@@ -197,7 +197,11 @@ function coerceDraftOrRebuild(
     publicInfo,
     restoredState.currentPeriod,
     turn,
-    params
+    params,
+    undefined,
+    restoredState.config.visionOverrides,
+    // 【Dynamic Scenario 3】シナリオ宣言のVision成長軌道上書き（未宣言なら挙動不変）。
+    restoredState.scenarioState.definition.visionGrowthOverrides
   );
   // 【Phase 8D-4】ワーカー人数の出発点は、fixtureの初期値ではなく会社状態として
   // 保持されている前期末の総人数。これを渡さないと、四半期をまたぐたびに人数が

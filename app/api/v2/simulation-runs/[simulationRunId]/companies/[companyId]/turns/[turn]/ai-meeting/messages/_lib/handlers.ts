@@ -140,7 +140,17 @@ export async function buildSnapshotFromSimulationRun(
   // （ManagementProfile+CompanyOrientationProfile）で診断を作る。AI経営会議へ渡す
   // 診断が会社差ゼロのparams由来だと、会議の説明と実際のAI判断が食い違うため。
   const aiParams = resolveStandardAiProfileForMode(fixture.companyId, state.config.standardAiProfileMode).params;
-  const diagnostics = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, state.currentPeriod, currentTurn, aiParams).diagnostics;
+  const diagnostics = generateStandardAiDecisionWithDiagnostics(
+    fixture,
+    ownState,
+    publicInfo,
+    state.currentPeriod,
+    currentTurn,
+    aiParams,
+    undefined,
+    state.config.visionOverrides,
+    state.scenarioState.definition.visionGrowthOverrides
+  ).diagnostics;
 
   const lastRecord = state.history[state.history.length - 1] ?? null;
   const previousFinancialResult = lastRecord?.financialResults.find((r) => r.companyId === companyId) ?? null;

@@ -448,6 +448,46 @@ export interface ScenarioDefinition {
    * ここでは変更できない。商品ごとの営業の重さは世界共通の性質として扱う。
    */
   readonly salesOrganizationCapacityOverride?: SalesOrganizationCapacityOverride;
+
+  /**
+   * 【Dynamic Scenario 3】会社別 Vision の成長軌道の上書き（シナリオ限定）。
+   *
+   * 【なぜ必要か】DS2 監査で、会社の四半期販売量を実際に縛っているのは
+   *   ① submissionTargetTons ≤ attainableProfitableTons × realisticShareOfOpportunity
+   *   ② commercialAmbition ≤ visionTargetScaleAtCurrentTurn（Vision が上限でもある）
+   * の2段であることが分かった。①は市場側（シナリオの需要）で動かせるが、②は
+   * vision/defaults.ts が SSoT で baseline・DS1・DS2 と共有されているため、そこを
+   * 直接触ると既存シナリオの挙動まで変わってしまう。
+   *
+   * 【固定トン数を与えない】ここで指定するのは会社ごとの**倍率と性格**であり、
+   * 「この会社は◯◯トン売れ」という目標値ではない。会社ごとの成長軌道の形
+   * （referenceGrowthPath の凸型・waypoint 間隔）はそのまま保たれ、水準だけが
+   * スケールする。実際にどこまで伸びるかは、市場機会・採算・生産能力・資金が
+   * 従来どおり決める（Vision は上限であって保証ではない）。
+   *
+   * 【未指定なら完全な恒等変換】宣言の無いシナリオでは既定 Vision がそのまま
+   * 返るため、baseline・DS1・DS2 の挙動はビット単位で不変。
+   */
+  readonly visionGrowthOverrides?: Readonly<Record<string, ScenarioVisionGrowthOverride>>;
+}
+
+/**
+ * 1社ぶんの Vision 成長軌道の上書き（すべて任意）。
+ * 指定した項目だけが既定 Vision から差し替わる。
+ */
+export interface ScenarioVisionGrowthOverride {
+  /**
+   * referenceGrowthPath の各 waypoint と targetScaleTonsPerQuarterAtQ32 に掛ける倍率。
+   * 1.0 は恒等。会社ごとの軌道の形は保たれ、水準だけがスケールする。
+   */
+  readonly scaleMultiplier?: number;
+  /**
+   * 成長意欲の差し替え（commercialAmbition の maxStepRatioByAmbition に効く＝
+   * 1四半期あたりどれだけ規模を引き上げられるか）。
+   */
+  readonly growthAmbition?: "LOW" | "MEDIUM" | "HIGH";
+  /** 新工場を建てる意欲の差し替え（能力アンカーの伸びに効く）。 */
+  readonly willingnessToBuildFactories?: "LOW" | "MEDIUM" | "HIGH";
 }
 
 /**

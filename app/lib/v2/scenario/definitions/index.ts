@@ -7,6 +7,7 @@ export { GLOBAL_DISEASE_CRISIS_SCENARIO } from "./globalDiseaseCrisis";
 export { GLOBAL_DEMAND_BOOM_SCENARIO } from "./globalDemandBoom";
 export { DYNAMIC_SCENARIO_1 } from "./dynamicScenario1";
 export { DYNAMIC_SCENARIO_2 } from "./dynamicScenario2";
+export { DYNAMIC_SCENARIO_3 } from "./dynamicScenario3";
 
 import { BASELINE_SCENARIO } from "./baseline";
 import { ECUADOR_EARLY_EXPANSION_SCENARIO } from "./ecuadorEarlyExpansion";
@@ -15,6 +16,7 @@ import { GLOBAL_DISEASE_CRISIS_SCENARIO } from "./globalDiseaseCrisis";
 import { GLOBAL_DEMAND_BOOM_SCENARIO } from "./globalDemandBoom";
 import { DYNAMIC_SCENARIO_1 } from "./dynamicScenario1";
 import { DYNAMIC_SCENARIO_2 } from "./dynamicScenario2";
+import { DYNAMIC_SCENARIO_3 } from "./dynamicScenario3";
 import { ScenarioDefinition } from "../types";
 
 /**
@@ -33,6 +35,8 @@ export const ALL_SCENARIO_DEFINITIONS: readonly ScenarioDefinition[] = [
   GLOBAL_DEMAND_BOOM_SCENARIO,
   DYNAMIC_SCENARIO_1,
   DYNAMIC_SCENARIO_2,
+  // 【Dynamic Scenario 3】Management Console の Setup 画面から選べるようにする（§17）。
+  DYNAMIC_SCENARIO_3,
 ];
 
 /**

@@ -25,6 +25,7 @@
 
 import { CompanyVision, CompanyVisionDocument, resolveVisionAtTurn, StrategicPosture } from "./types";
 import { defaultVisionDocumentFor } from "./defaults";
+import { ScenarioVisionGrowthOverride } from "../../scenario/types";
 
 /**
  * Management Console から編集された、ある時点から有効な Vision の差分。
@@ -75,12 +76,49 @@ export function isVisionTargetScaleInValidRange(value: number): boolean {
  *
  * 未知の会社IDには架空のVisionを作らずnullを返す（defaultVisionDocumentForと同じ規約）。
  */
-export function resolveCompanyVision(companyId: string, turn: number, overrides?: CompanyLabVisionOverrides): CompanyVision | null {
+/**
+ * 【Dynamic Scenario 3】シナリオ宣言による Vision 成長軌道の上書きを1社ぶん適用する。
+ *
+ * 会社ごとの軌道の形（referenceGrowthPath の凸型・waypoint 間隔）は保ったまま、
+ * 水準だけを scaleMultiplier でスケールする。固定トン数の目標を与える機構ではない。
+ * 未宣言なら同一オブジェクト参照をそのまま返す（恒等変換）。
+ */
+export function applyScenarioVisionGrowthOverride(
+  vision: CompanyVision,
+  override: ScenarioVisionGrowthOverride | undefined
+): CompanyVision {
+  if (override === undefined) return vision;
+  const multiplier = override.scaleMultiplier;
+  const scaled = multiplier === undefined || multiplier === 1 ? vision : {
+    ...vision,
+    targetScaleTonsPerQuarterAtQ32: vision.targetScaleTonsPerQuarterAtQ32 * multiplier,
+    referenceGrowthPath: vision.referenceGrowthPath.map((w) => ({ ...w, scaleTonsPerQuarter: w.scaleTonsPerQuarter * multiplier })),
+  };
+  return {
+    ...scaled,
+    ...(override.growthAmbition === undefined ? {} : { growthAmbition: override.growthAmbition }),
+    ...(override.willingnessToBuildFactories === undefined ? {} : { willingnessToBuildFactories: override.willingnessToBuildFactories }),
+  };
+}
+
+export function resolveCompanyVision(
+  companyId: string,
+  turn: number,
+  overrides?: CompanyLabVisionOverrides,
+  /**
+   * 【Dynamic Scenario 3】シナリオ宣言による成長軌道の上書き（会社ID→上書き）。
+   * 未指定なら従来どおり既定Visionをそのまま使う（既存の全呼び出し元は無変更で挙動不変）。
+   * Run固有のoverride（Management Console の Setup 画面）より **先** に適用するため、
+   * 人手で Q32 目標を入れ直した場合はそちらが最終的に勝つ。
+   */
+  scenarioGrowthOverrides?: Readonly<Record<string, ScenarioVisionGrowthOverride>>
+): CompanyVision | null {
   const defaultDocument = defaultVisionDocumentFor(companyId);
   if (!defaultDocument) return null;
 
-  const defaultVision = resolveVisionAtTurn(defaultDocument, turn);
-  if (!defaultVision) return null;
+  const resolvedDefault = resolveVisionAtTurn(defaultDocument, turn);
+  if (!resolvedDefault) return null;
+  const defaultVision = applyScenarioVisionGrowthOverride(resolvedDefault, scenarioGrowthOverrides?.[companyId]);
 
   const companyOverrides = (overrides ?? EMPTY_OVERRIDES)[companyId] ?? [];
   const applicable = companyOverrides
@@ -92,7 +130,10 @@ export function resolveCompanyVision(companyId: string, turn: number, overrides?
   const latest = applicable[applicable.length - 1];
   // overrideが有効になった時点でのdefault Vision（会社の人格・成長軌道の形自体は
   // そこから引き継ぎ、規模とposture「だけ」を差し替える）。
-  const baseVision = resolveVisionAtTurn(defaultDocument, latest.effectiveFromTurn) ?? defaultVision;
+  const baseVision = applyScenarioVisionGrowthOverride(
+    resolveVisionAtTurn(defaultDocument, latest.effectiveFromTurn) ?? defaultVision,
+    scenarioGrowthOverrides?.[companyId]
+  );
 
   return {
     ...baseVision,

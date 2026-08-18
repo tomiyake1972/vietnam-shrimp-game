@@ -143,7 +143,11 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
       publicInfo,
       session.state.currentPeriod,
       session.state.scenarioState.currentTurn,
-      params
+      params,
+      undefined,
+      session.state.config.visionOverrides,
+      // 【Dynamic Scenario 3】シナリオ宣言のVision成長軌道上書き（未宣言なら挙動不変）。
+      session.state.scenarioState.definition.visionGrowthOverrides
     ).decision;
     return { ownState, aiDecision };
   });

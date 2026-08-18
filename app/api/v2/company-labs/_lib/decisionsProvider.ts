@@ -102,7 +102,18 @@ export function buildApiDecisionsProvider(labId: string): CompanyLabDecisionsPro
          * mode未記録＝OFFのままで、過去のLabの挙動は変わらない）。
          */
         const params = resolveStandardAiProfileForMode(fixture.companyId, restoredState.config.standardAiProfileMode).params;
-        decisions[fixture.companyId] = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, params).decision;
+        decisions[fixture.companyId] = generateStandardAiDecisionWithDiagnostics(
+          fixture,
+          ownState,
+          publicInfo,
+          period,
+          turn,
+          params,
+          undefined,
+          restoredState.config.visionOverrides,
+          // 【Dynamic Scenario 3】シナリオ宣言のVision成長軌道上書き（未宣言なら挙動不変）。
+          restoredState.scenarioState.definition.visionGrowthOverrides
+        ).decision;
       }
     }
     return decisions;

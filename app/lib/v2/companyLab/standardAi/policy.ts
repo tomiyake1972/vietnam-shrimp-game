@@ -54,6 +54,7 @@ import { computeTargetCapability } from "./targetCapability";
 import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "./strategicIntent";
 import { CompanyVision } from "../vision/types";
 import { resolveCompanyVision, CompanyLabVisionOverrides } from "../vision/overrides";
+import { ScenarioVisionGrowthOverride } from "../../scenario/types";
 import { computeStrategicGrowthState, StrategicGrowthState } from "../vision/strategicGrowth";
 import { CommercialAmbition, computeCommercialAmbition } from "../vision/commercialAmbition";
 import { computeUnservedOpportunity, UnservedOpportunity } from "../vision/unservedOpportunity";
@@ -373,7 +374,13 @@ export function generateStandardAiDecisionWithDiagnostics(
    * Vision解決は必ずvision/overrides.tsのresolveCompanyVision（唯一のSSoT）を
    * 通す。ここでdefaultVisionDocumentFor/resolveVisionAtTurnを直接呼ばない。
    */
-  visionOverrides?: CompanyLabVisionOverrides
+  visionOverrides?: CompanyLabVisionOverrides,
+  /**
+   * 【Dynamic Scenario 3】シナリオ宣言によるVision成長軌道の上書き
+   * （会社ID→倍率・成長意欲）。未指定なら従来どおり既定Visionのまま＝挙動不変。
+   * 会社ID分岐はここに持たず、resolveCompanyVision（唯一のSSoT）へそのまま渡すだけ。
+   */
+  scenarioVisionGrowthOverrides?: Readonly<Record<string, ScenarioVisionGrowthOverride>>
 ): StandardAiDecisionWithDiagnostics {
   const observation = buildStandardAiObservation(fixture, ownState, publicInfo, period, turn);
   const pressures = computePressureScores(observation, fixture, params);
@@ -395,7 +402,7 @@ export function generateStandardAiDecisionWithDiagnostics(
   // Phase 5 では Vision が新工場判断にしか届いておらず、販売希望量は
   // 「自社能力 × salesUtilizationTarget」だけで決まっていた（監査で実測）。
   const targetScaleResult = computeTargetScaleBand(fixture, observation, STANDARD_AI_STRATEGIC_INTENT_V1, params);
-  const vision: CompanyVision | null = resolveCompanyVision(fixture.companyId, turn, visionOverrides);
+  const vision: CompanyVision | null = resolveCompanyVision(fixture.companyId, turn, visionOverrides, scenarioVisionGrowthOverrides);
   const strategicGrowth: StrategicGrowthState | null = vision
     ? computeStrategicGrowthState({ vision, turn, currentSustainableScaleTons: targetScaleResult.currentSustainableScaleTons })
     : null;
