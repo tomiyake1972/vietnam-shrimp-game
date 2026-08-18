@@ -26,13 +26,14 @@ import { StandardAiQuarterDiagnostics } from "../standardAi/policy";
 import { CompanyLabRedisClient } from "../../redis/companyLabTypes";
 import { buildExplanationContext } from "../aiExplanation/buildExplanationContext";
 import { AnthropicMessagesClient, generateMeetingResponse } from "./claudeClient";
-import { buildExecutiveBriefingPacket, PlayerDraftSummary, PreviousQuarterDelta } from "./briefing";
+import { BorrowingHeadroomFact, buildExecutiveBriefingPacket, BriefingBuildInput, CrisisFact, PlayerDraftSummary, PreviousQuarterDelta } from "./briefing";
 import { AiMeetingNewsItem } from "./scenarioNews";
 import { routePlayerMessage } from "./router";
 import { buildMeetingUserMessage } from "./prompt";
 import { appendMessages, buildRecentHistoryForPrompt, defaultMeetingId, loadConversation, newConversation, saveConversation } from "./conversation";
 import { validateAiMeetingProposals } from "./validation";
 import { AiMeetingMessage, ExecutiveRole } from "./types";
+import { buildRunAdvisoryMemorySummary } from "./runAdvisoryMemory";
 
 export interface AiMeetingApiResult {
   readonly status: number;
@@ -60,6 +61,22 @@ export interface AiMeetingCompanySnapshot {
   readonly previousQuarter: PreviousQuarterDelta | null;
   readonly playerDraft: PlayerDraftSummary | null;
   readonly scenarioNews: readonly AiMeetingNewsItem[];
+  /**
+   * 【M2.1〜M2.4追加分をSimulation Run経路へも配線】company-labs handler.tsが
+   * 直接組み立てているのと同じ生データ（既存ownState.contracts/financeState/
+   * financingState/capexStateをそのまま渡すだけ。新しい計算式は作らない）。
+   * BriefingBuildInputの該当フィールドをindexed accessでそのまま再利用し、
+   * 型定義を2箇所に複製しない。
+   */
+  readonly contracts: BriefingBuildInput["contracts"];
+  readonly receivables: BriefingBuildInput["receivables"];
+  readonly payables: BriefingBuildInput["payables"];
+  readonly loans: BriefingBuildInput["loans"];
+  readonly capexProjects: BriefingBuildInput["capexProjects"];
+  readonly borrowingHeadroom: BorrowingHeadroomFact | null;
+  readonly crisis: CrisisFact | null;
+  readonly financialHistory: BriefingBuildInput["financialHistory"];
+  readonly operationalHistory: BriefingBuildInput["operationalHistory"];
 }
 
 export interface RunAiMeetingTurnInput {
@@ -133,6 +150,15 @@ export async function runAiMeetingTurn(input: RunAiMeetingTurnInput): Promise<Ai
     previousQuarter: snapshot.previousQuarter,
     playerDraft: snapshot.playerDraft,
     scenarioNews: snapshot.scenarioNews,
+    contracts: snapshot.contracts,
+    receivables: snapshot.receivables,
+    payables: snapshot.payables,
+    loans: snapshot.loans,
+    capexProjects: snapshot.capexProjects,
+    borrowingHeadroom: snapshot.borrowingHeadroom,
+    crisis: snapshot.crisis,
+    financialHistory: snapshot.financialHistory,
+    operationalHistory: snapshot.operationalHistory,
   });
 
   const meetingId = input.meetingId ?? defaultMeetingId(contextId, companyId, turn);
@@ -141,6 +167,9 @@ export async function runAiMeetingTurn(input: RunAiMeetingTurnInput): Promise<Ai
   const routing = routePlayerMessage(playerMessage);
   const { recent, compactSummary } = buildRecentHistoryForPrompt(conversation.messages);
 
+  // 【M2.6未配線】Run Advisory Memoryの永続化（Redis保存・読込）はSimulation Run経路へは
+  // まだ配線していない（company-labs handler.tsのみ対応）。空のmemoryとして扱うことで
+  // 機能を止めず、捏造もしない（実際には0件のRunとして正しく振る舞う）。
   const userMessage = buildMeetingUserMessage({
     briefing,
     standardAiDecisionSummary: { decision: snapshot.diagnostics.decision, topReasonCodes: snapshot.diagnostics.entries.slice(0, 8).map((e) => e.code) },
@@ -149,6 +178,9 @@ export async function runAiMeetingTurn(input: RunAiMeetingTurnInput): Promise<Ai
     playerMessage,
     routingHint: routing,
     meetingIntentHint: conversation.lastMeetingIntent,
+    confirmedCorrections: conversation.confirmedCorrections.map((c) => c.note),
+    repairNote: null,
+    runAdvisoryMemory: buildRunAdvisoryMemorySummary([]),
   });
 
   const generated = await generateMeetingResponse(userMessage, anthropicClient, { labId: contextId, companyId, turn });

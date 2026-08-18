@@ -184,6 +184,15 @@ test("RUN-AMM-B: BALの会議contextにMASSのprivate stateが混入しない", 
     previousQuarter: bal.snapshot.previousQuarter,
     playerDraft: bal.snapshot.playerDraft,
     scenarioNews: bal.snapshot.scenarioNews,
+    contracts: bal.snapshot.contracts,
+    receivables: bal.snapshot.receivables,
+    payables: bal.snapshot.payables,
+    loans: bal.snapshot.loans,
+    capexProjects: bal.snapshot.capexProjects,
+    borrowingHeadroom: bal.snapshot.borrowingHeadroom,
+    crisis: bal.snapshot.crisis,
+    financialHistory: bal.snapshot.financialHistory,
+    operationalHistory: bal.snapshot.operationalHistory,
   });
   assert.equal(balPacket.common.companyId, "BAL");
   assert.equal(JSON.stringify(balPacket).includes("MASS"), false);
@@ -308,6 +317,15 @@ test("RUN-AMM-E3: briefing packetのcommonへNewsが載る（AI役員が人間�
     previousQuarter: built.snapshot.previousQuarter,
     playerDraft: built.snapshot.playerDraft,
     scenarioNews: built.snapshot.scenarioNews,
+    contracts: built.snapshot.contracts,
+    receivables: built.snapshot.receivables,
+    payables: built.snapshot.payables,
+    loans: built.snapshot.loans,
+    capexProjects: built.snapshot.capexProjects,
+    borrowingHeadroom: built.snapshot.borrowingHeadroom,
+    crisis: built.snapshot.crisis,
+    financialHistory: built.snapshot.financialHistory,
+    operationalHistory: built.snapshot.operationalHistory,
   });
   assert.equal(packet.common.scenarioNews.length, built.snapshot.scenarioNews.length);
   assert.ok(packet.common.scenarioNews.length > 0, "DS1のTurn1では既に読めるNewsがある");

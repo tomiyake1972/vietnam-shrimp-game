@@ -447,7 +447,6 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
               publicInfo={publicInfo}
-              turn={turn}
               scenarioNews={scenarioNews}
               // AI経営会議は、このSimulation Runの同じ会社・同じturnの状態で開く（別Labを作らない）。
               // サーバー側は保存済みRunから会社状態を読むため、ここではrunIdを渡すだけで、

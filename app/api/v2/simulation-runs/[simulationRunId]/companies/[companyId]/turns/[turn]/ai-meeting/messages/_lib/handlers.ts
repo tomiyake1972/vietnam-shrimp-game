@@ -24,8 +24,8 @@ import { CompanyLabRedisClient } from "../../../../../../../../../../../lib/v2/r
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../../../../../../../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/policy";
 import { resolveStandardAiProfileForMode } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/orientationProfile";
-import { CompanyDecisionInput } from "../../../../../../../../../../../lib/v2/companyLab/types";
-import { PlayerDraftSummary } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/briefing";
+import { CompanyDecisionInput, CompanyQuarterRecord } from "../../../../../../../../../../../lib/v2/companyLab/types";
+import { BorrowingHeadroomFact, CrisisFact, PlayerDraftSummary } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/briefing";
 import { buildAiMeetingScenarioNews } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/scenarioNews";
 import {
   AiMeetingApiResult,
@@ -36,6 +36,7 @@ import {
 } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/session";
 import { AnthropicMessagesClient } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/claudeClient";
 import { resolveScenarioDefinition } from "../../../../../../../../../../../lib/v2/industryLab/cli/scenarioAliases";
+import { toYearQuarter } from "../../../../../../../../../../../lib/v2/core/period";
 
 function notFound(message: string): AiMeetingApiResult {
   return { status: 404, body: { error: { code: "NOT_FOUND", message } } };
@@ -66,6 +67,33 @@ function buildPlayerDraftSummary(decision: CompanyDecisionInput | undefined): Pl
     totalDesiredSalesQuantityTons: decision.salesPlans.reduce((sum, p) => sum + p.desiredQuantity, 0),
     capexProposalCount: decision.capexDecision.newProjectProposals.length,
     financingRequestedUsd: decision.financingRequest.desiredAmountUsd,
+  };
+}
+
+/**
+ * state.history（turn昇順・欠番無し）から、指定turnの確定四半期スナップショットを
+ * 会議briefing向けの形へ整形する。company-labs handler.tsのloadQuarterSnapshotと
+ * 同じ項目・同じ既存フィールドの転記のみ（新しい会計・生産計算はしない）。
+ * 該当turnの実績が無い場合（turn1・turn2等）はnull（捏造しない）。
+ */
+function buildQuarterSnapshot(history: readonly CompanyQuarterRecord[], companyId: string, targetTurn: number) {
+  if (targetTurn < 1) return null;
+  const entry = history.find((r) => r.turn === targetTurn);
+  if (!entry) return null;
+  const financialResult = entry.financialResults.find((f) => f.companyId === companyId);
+  const summary = entry.companySummaries.find((s) => s.companyId === companyId);
+  if (!financialResult || !summary) return null;
+  const yq = toYearQuarter(entry.period);
+  const decision = entry.decisions.find((d) => d.companyId === companyId);
+  return {
+    pnl: financialResult.profitAndLoss,
+    cashFlow: financialResult.cashFlow,
+    balanceSheet: financialResult.balanceSheet,
+    periodLabel: `${yq.year}年Q${yq.quarter}`,
+    fulfilledQuantityTons: Number(summary.fulfilledQuantity),
+    summary,
+    workerAssignments: decision?.workerAssignments ?? [],
+    productionEntries: entry.productionAllocation.entries.filter((e) => e.companyId === companyId),
   };
 }
 
@@ -110,6 +138,38 @@ export async function buildSnapshotFromSimulationRun(
 
   const lastRecord = state.history[state.history.length - 1] ?? null;
   const previousFinancialResult = lastRecord?.financialResults.find((r) => r.companyId === companyId) ?? null;
+  const previousQuarter =
+    previousFinancialResult && lastRecord
+      ? {
+          cashUsd: Number(previousFinancialResult.balanceSheet.cash),
+          netRevenueUsd: Number(previousFinancialResult.profitAndLoss.netRevenue),
+          operatingProfitUsd: Number(previousFinancialResult.profitAndLoss.operatingProfit),
+          periodLabel: (() => {
+            const yq = toYearQuarter(lastRecord.period);
+            return `${yq.year}年Q${yq.quarter}`;
+          })(),
+        }
+      : null;
+
+  // 【M2.2追加分をSimulation Run経路へも配線】company-labs handler.tsと同じ既存
+  // ownState/diagnosticsの転記のみ（新しい財務・危機判定ロジックは作らない）。
+  const lastBorrowingCapacity = ownState.lastFinancingResult?.borrowingCapacity ?? null;
+  const borrowingHeadroom: BorrowingHeadroomFact | null = lastBorrowingCapacity
+    ? {
+        availableAdditionalCapacityUsd: lastBorrowingCapacity.availableAdditionalCapacityUsd,
+        asOfLabel: (() => {
+          const yq = toYearQuarter(lastBorrowingCapacity.period);
+          return `${yq.year}年Q${yq.quarter}`;
+        })(),
+      }
+    : null;
+  const crisis: CrisisFact | null = diagnostics.crisis ? { state: diagnostics.crisis.state, summary: diagnostics.crisis.summary } : null;
+
+  // 【M2.3/M2.4追加分をSimulation Run経路へも配線】state.historyは既にRun全体ぶん
+  // メモリ上に確定済みのため、company-labs handler.tsのような非同期repository読込は
+  // 不要（同じ既存フィールドをその場で転記するだけ）。
+  const reportingPeriodSnapshot = buildQuarterSnapshot(state.history, companyId, currentTurn - 1);
+  const priorPeriodSnapshot = buildQuarterSnapshot(state.history, companyId, currentTurn - 2);
 
   const snapshot: AiMeetingCompanySnapshot = {
     contextId: simulationRunContextId(simulationRunId),
@@ -121,17 +181,35 @@ export async function buildSnapshotFromSimulationRun(
     ownState,
     publicInfo,
     diagnostics,
-    previousQuarter: previousFinancialResult
-      ? {
-          cashUsd: Number(previousFinancialResult.balanceSheet.cash),
-          netRevenueUsd: Number(previousFinancialResult.profitAndLoss.netRevenue),
-          operatingProfitUsd: Number(previousFinancialResult.profitAndLoss.operatingProfit),
-        }
-      : null,
+    previousQuarter,
     playerDraft: buildPlayerDraftSummary(resume.confirmedPlayerDecisions[companyId]),
     // Player が読める News と同じ集合（getAvailableInformation 経由）。
     // シナリオIDでの分岐は無く、informationReleases が無いシナリオでは空配列になる。
     scenarioNews: buildAiMeetingScenarioNews(resolveScenarioDefinition(stored.run.scenarioId), currentTurn),
+    contracts: ownState.contracts,
+    receivables: ownState.financeState.receivables,
+    payables: ownState.financeState.payables,
+    loans: ownState.financingState.loanPortfolio.loans,
+    capexProjects: ownState.capexState.portfolio.projects,
+    borrowingHeadroom,
+    crisis,
+    financialHistory: {
+      reportingPeriod: reportingPeriodSnapshot,
+      priorPeriod: priorPeriodSnapshot
+        ? { pnl: priorPeriodSnapshot.pnl, periodLabel: priorPeriodSnapshot.periodLabel, fulfilledQuantityTons: priorPeriodSnapshot.fulfilledQuantityTons }
+        : null,
+    },
+    operationalHistory: {
+      reportingPeriod: reportingPeriodSnapshot
+        ? {
+            summary: reportingPeriodSnapshot.summary,
+            workerAssignments: reportingPeriodSnapshot.workerAssignments,
+            productionEntries: reportingPeriodSnapshot.productionEntries,
+            periodLabel: reportingPeriodSnapshot.periodLabel,
+          }
+        : null,
+      priorPeriod: priorPeriodSnapshot ? { summary: priorPeriodSnapshot.summary } : null,
+    },
   };
   return { ok: true, snapshot };
 }
