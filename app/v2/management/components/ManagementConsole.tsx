@@ -70,6 +70,7 @@ import { RunSelector } from "./RunSelector";
 import { Collapsible } from "./Collapsible";
 import { StrategySummary } from "./StrategySummary";
 import { ExportPackButton } from "./ExportPackButton";
+import { StandardAiAuditWorkbookButton } from "./StandardAiAuditWorkbookButton";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
 import { listScenarioAliases } from "../../../lib/v2/industryLab/cli/scenarioAliases";
 import { newRunId } from "../lib/runId";
@@ -1063,6 +1064,14 @@ export function ManagementConsole() {
               <div className="mt-3">
                 <FinalDataDownloadButton run={view.run} fixtures={view.session?.fixtures ?? fixtures} session={view.session} />
               </div>
+              {/* 【実装指示§32】Game End 画面からもStandard AI監査Excelを1クリックで出せるようにする。 */}
+              <div className="mt-3">
+                <StandardAiAuditWorkbookButton
+                  simulationRunId={view.run.simulationRunId}
+                  completedTurns={view.run.gameEndTurn ?? completedTurns}
+                  liveHistory={view.session?.state.history}
+                />
+              </div>
             </section>
           ) : null}
 
@@ -1129,6 +1138,13 @@ export function ManagementConsole() {
             scenarioId={view?.run.scenarioId ?? null}
             seed={view?.run.seed ?? null}
             completedTurns={completedTurns}
+          />
+
+          {/* 【実装指示§31/§32】既存の AI Analysis Pack とは別物の、Standard AI 監査専用 Excel。 */}
+          <StandardAiAuditWorkbookButton
+            simulationRunId={view?.run.simulationRunId ?? null}
+            completedTurns={completedTurns}
+            liveHistory={view?.session?.state.history}
           />
 
           <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
