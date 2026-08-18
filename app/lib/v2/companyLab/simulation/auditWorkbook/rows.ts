@@ -24,6 +24,7 @@ import { CompanyId } from "../../../sales/types";
 import { DemandMarketId, Product } from "../../../market/types";
 import { CompanyMetricKey } from "../analytics/types";
 import { computeAllCompaniesEvaluationSnapshot, computeCompanyEvaluationSnapshot, rankCompaniesByTotalShareholderValue } from "../../evaluation/evaluationSemantics";
+import { resolveEvaluationHistory } from "../../evaluation/evaluationHistory";
 import { MANAGEMENT_PROFILE_BY_COMPANY_ID, MANAGEMENT_PROFILES } from "../../standardAi/managementProfile";
 import { COMPANY_ORIENTATION_BY_COMPANY_ID } from "../../standardAi/orientationProfile";
 import { STANDARD_AI_PARAMETERS_V1 } from "../../standardAi/parameters";
@@ -89,6 +90,14 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
   const savedHistory: readonly CompanyQuarterRecord[] = resume?.state?.history ?? [];
   // live history があればそちらを優先し、無ければ保存済み（間引き済み）を使う。
   const history: readonly CompanyQuarterRecord[] = (input.liveHistory?.length ?? 0) > 0 ? (input.liveHistory as readonly CompanyQuarterRecord[]) : savedHistory;
+  // 【評価履歴】Final Results と同じ唯一の入口を使う。evaluationHistory（全Turnの
+  // 軽量射影。resume時に間引かれない）があればそれを、無い場合は state.history を使う。
+  // これにより保存済みRunからのexportでもTurn1〜のTSVが埋まる（旧Runは従来どおり
+  // 記録のあるTurnだけ）。TSVの式そのものはここでも一切持たない。
+  const evaluationHistory = resolveEvaluationHistory({
+    evaluationHistory: resume?.evaluationHistory,
+    stateHistory: history,
+  });
   const aiTurnTraces = resume?.aiTurnTraces ?? [];
   const capacityByTurn = resume?.capacityByTurn ?? [];
   const salesHeadcountByTurn = resume?.salesHeadcountByTurn ?? [];
@@ -136,6 +145,7 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
   };
 
   // ---- 欠損の申告（実装指示§29・§35） ----
+  const evaluationTurnsForNotes = new Set(evaluationHistory.map((r) => r.turn));
   const historyTurns = new Set(history.map((r) => r.turn));
   const missingHistoryTurns = turns.filter((t) => !historyTurns.has(t));
   if (packTurns.length === 0) {
@@ -149,9 +159,15 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
         `(companyValueUsd / dividendValueUsd / totalShareholderValueUsd in 03_TURN_KPI) are blank for turns [${missingHistoryTurns.join(",")}]. ` +
         `All-turn coverage is preserved in 03_TURN_KPI core KPIs, 04_STANDARD_AI_DECISIONS, 05_DECISION_DIAGNOSTICS, 19_AI_PROFILE_VISION and 13_MARKET_DETAIL, which read the analytics dataset and pack capture instead.`
     );
-    missingDataNotes.push(
-      "This is also why Final Results / TSV history can appear to start only near the end of a run: the shareholder-value service needs confirmed cash-flow statements, which live in the trimmed history window. The valuation engine itself was NOT modified for this export."
-    );
+    if (turns.every((t) => evaluationTurnsForNotes.has(t))) {
+      missingDataNotes.push(
+        "Shareholder value columns (companyValueUsd / dividendValueUsd / totalShareholderValueUsd) ARE available for every turn: they are computed from the compact all-turn evaluationHistory, which is not trimmed. Only the detailed statement columns above are limited to the retained window."
+      );
+    } else {
+      missingDataNotes.push(
+        "Shareholder value columns are limited to the same retained window because this run predates the all-turn evaluationHistory projection. The valuation engine itself was NOT modified for this export."
+      );
+    }
   }
   if (aiTurnTraces.length === 0) {
     missingDataNotes.push("Standard AI six-stage traces are unavailable for this run; 05_DECISION_DIAGNOSTICS falls back to the analytics dataset aiTrace facts where present.");
@@ -221,11 +237,12 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
   const profileVision: AuditProfileVisionRow[] = [];
 
   // 評価スナップショット（historyがあるTurnのみ算出できる）。
+  const evaluationTurns = new Set(evaluationHistory.map((r) => r.turn));
   const evaluationByCompanyTurn = new Map<string, ReturnType<typeof computeCompanyEvaluationSnapshot>>();
   for (const turn of turns) {
-    if (!historyByTurn.has(turn)) continue;
+    if (!evaluationTurns.has(turn)) continue;
     for (const companyId of companyIds) {
-      evaluationByCompanyTurn.set(`${companyId}#${turn}`, computeCompanyEvaluationSnapshot(history, companyId as CompanyId, turn));
+      evaluationByCompanyTurn.set(`${companyId}#${turn}`, computeCompanyEvaluationSnapshot(evaluationHistory as never, companyId as CompanyId, turn));
     }
   }
 
@@ -1020,7 +1037,7 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
   }
 
   // ---------------- 02_COMPANY_SUMMARY / 16_FINAL_RESULTS ----------------
-  const finalSnapshots = computeAllCompaniesEvaluationSnapshot(history, companyIds as readonly CompanyId[], asOfTurn);
+  const finalSnapshots = computeAllCompaniesEvaluationSnapshot(evaluationHistory as never, companyIds as readonly CompanyId[], asOfTurn);
   const ranked = rankCompaniesByTotalShareholderValue(finalSnapshots);
   const rankByCompany = new Map(ranked.map((s, index) => [s.companyId as string, index + 1]));
 
@@ -1093,10 +1110,9 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
     distressTurnCount: snapshot.kpis.distressTurnCount,
     cumulativeDividendUsd: snapshot.kpis.cumulativeDividendUsd,
     shareholderValueModelVersion: snapshot.shareholderValueModelVersion,
-    finalSnapshotSource:
-      missingHistoryTurns.length > 0
-        ? "RECOMPUTED_FROM_TRIMMED_HISTORY (cumulative KPI columns here cover only the retained history window; use 02_COMPANY_SUMMARY for all-turn cumulative KPIs)"
-        : "RECOMPUTED_FROM_FULL_HISTORY",
+    finalSnapshotSource: turns.every((t) => evaluationTurnsForNotes.has(t))
+      ? "RECOMPUTED_FROM_ALL_TURN_EVALUATION_HISTORY"
+      : "RECOMPUTED_FROM_PARTIAL_HISTORY (this run predates the all-turn evaluationHistory projection; use 02_COMPANY_SUMMARY for all-turn cumulative KPIs)",
   }));
 
   return {

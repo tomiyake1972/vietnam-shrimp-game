@@ -102,16 +102,26 @@ Excel用にゲームロジックを再実装した箇所は無い。
 そのため**保存済みRunだけから出力した場合**、以下は直近4Turnぶんしか埋まらない:
 - 11_FINANCE_DETAIL の P&L 明細行（原料費・加工費・SGA・利息・税・CF）
 - 07_PRODUCTION_DETAIL の工場×商品の内訳
-- 03_TURN_KPI の `companyValueUsd` / `dividendValueUsd` / `totalShareholderValueUsd`
+- 09_WORKFORCE_DETAIL の工場別内訳
 
-**これは Final Results / TSV履歴が終盤Turnからしか値を持たない現象の原因でもある**
+**これは Final Results / TSV履歴が終盤Turnからしか値を持たなかった現象と同一原因である**
 （実装指示§23の監査対象）。株主価値サービスは確定CF計算書を必要とし、それが
-間引きwindowの中にしか無いため。valuation engine側の不具合ではない。
+間引きwindowの中にしか無かったため。valuation engine側の不具合ではない。
 
-**対策**: Management Console は live session を保持しているため、ボタンは
-`liveHistory` としてその確定履歴を渡す。これにより Console から出力する限り
-全32Turnの詳細シートとTurn別TSVが埋まる。渡せない場合もexportは失敗せず、
-欠損理由が 00_README の `missingDataNote` 行へ必ず記録される。
+**株主価値については解消済み**: `evaluation/evaluationHistory.ts` の
+`EvaluationHistoryRecord`（評価が実際に読むスカラーだけの軽量射影。resume時に
+間引かれない）が全Turnぶん保存されるようになったため、本Workbookも
+`resolveEvaluationHistory` を唯一の入口として使う。これにより
+**保存済みRunだけから出力しても 03_TURN_KPI の `companyValueUsd` /
+`dividendValueUsd` / `totalShareholderValueUsd` はTurn1〜全Turン埋まる**
+（実測: 32/32 Turn、最終TSVは live history から出した値と完全一致）。
+この射影を持たない旧Runは従来どおり記録のあるTurnだけになり、
+その旨が 00_README へ記録される。
+
+**詳細シートの対策**: Management Console は live session を保持しているため、
+ボタンは `liveHistory` としてその確定履歴を渡す。これにより Console から
+出力する限り上記の詳細シートも全32Turnぶん埋まる。渡せない場合もexportは
+失敗せず、欠損理由が 00_README の `missingDataNote` 行へ必ず記録される。
 
 ### 6.2 Standard AI diagnostics の構造化フィールド
 
