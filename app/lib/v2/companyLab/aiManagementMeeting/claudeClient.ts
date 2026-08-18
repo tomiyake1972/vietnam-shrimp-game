@@ -241,6 +241,13 @@ export const AI_MEETING_TOOL_INPUT_SCHEMA = {
       maxItems: AI_MEETING_PROPOSAL_LIMITS.maxMemoryUsedIds,
       description: "今回の応答で参照したRun Advisory Memoryのid（factsUsedとは分離。ゲーム事実ではない）。",
     },
+    knowledgeUsedIds: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: AI_MEETING_PROPOSAL_LIMITS.maxKnowledgeUsedIds,
+      description:
+        "応答の根拠として使ったGame Knowledge entryのid（例: 'FINANCE.AR_SETTLEMENT'）。userメッセージのgameKnowledgeに入っていたidだけを書く。ゲームルールの参照であり、factsUsed（このRunの実データ）・memoryUsedIds（player固有の方針）とは分けて記録する。",
+    },
   },
   required: ["primarySpeaker", "responses", "requiresCeoSummary", "proposals", "meetingIntent", "potentialStrategicChange", "playerCorrectionStatus"],
 } as const;

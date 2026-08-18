@@ -43,6 +43,9 @@ export const AI_MEETING_PROPOSAL_LIMITS = {
   // 【M2.6追加・実装指示§9】1 memory itemは短い1〜2文のcanonical statement。会話全文を保存しない。
   maxMemoryStatementChars: 200,
   maxMemoryUsedIds: 8,
+  // 【M2.8追加・実装指示§34】1応答が参照できるGame Knowledge entryの上限。
+  // 注入自体がTop N（既定6件）であるため、それを超えるidが返ることは無い。
+  maxKnowledgeUsedIds: 8,
   // 【M2.7追加・実装指示§10・§16】Opening Briefのkey change上限（server-side significantChangesは最大8だが、
   // Claude出力は3〜5点目安のため少し余裕を持たせた6を上限とする）。
   maxOpeningBriefKeyChanges: 6,
@@ -196,6 +199,10 @@ export const aiMeetingStructuredResponseSchema = z.object({
   // 【M2.6追加】Run Advisory Memory候補・応答で参照したmemoryのid。
   memoryCandidates: z.array(memoryCandidateSchema).max(AI_MEETING_PROPOSAL_LIMITS.maxMemoryCandidates).default([]),
   memoryUsedIds: z.array(z.string()).max(AI_MEETING_PROPOSAL_LIMITS.maxMemoryUsedIds).default([]),
+  // 【M2.8追加・実装指示§32/§33】応答の根拠にしたGame Knowledge entryのid。
+  // factsUsed（current run data）・memoryUsedIds（player固有のpreference）とは
+  // 別のレイヤーとして分けて保持する。
+  knowledgeUsedIds: z.array(z.string()).max(AI_MEETING_PROPOSAL_LIMITS.maxKnowledgeUsedIds).default([]),
 });
 
 export type AiMeetingStructuredResponseParsed = z.infer<typeof aiMeetingStructuredResponseSchema>;

@@ -23,6 +23,7 @@ import { CompanyQuarterSummary } from "../../../../../../../../../../../lib/v2/c
 import { ProductionAllocationEntry, WorkerAssignment } from "../../../../../../../../../../../lib/v2/production/types";
 import { routePlayerMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/router";
 import { AI_MEETING_PROMPT_VERSION, buildMeetingUserMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/prompt";
+import { buildMeetingKnowledgeInjection } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/knowledgeInjection";
 import {
   appendMessages,
   buildRecentHistoryForPrompt,
@@ -263,6 +264,12 @@ export async function handlePostAiMeetingMessage(
   }
   const runAdvisoryMemorySummary = buildRunAdvisoryMemorySummary(runMemories);
 
+  // 【M2.8】Game Knowledge Registry。プレイヤーの質問に関連するShrimpX固有の
+  // ゲームルールを、現在のparameter値を差し込んだ状態でTop N件だけ注入する
+  // （全文Manualは入れない。実装指示§34）。company-labs経路とsimulation-runs経路の
+  // 両方が同じ共通関数を通る（実装指示§41）。
+  const knowledgeInjection = buildMeetingKnowledgeInjection({ playerMessage: body.playerMessage, primarySpeaker: routing.primary });
+
   const userMessage = buildMeetingUserMessage({
     briefing,
     standardAiDecisionSummary: { decision: diagnostics.decision, topReasonCodes: diagnostics.entries.slice(0, 8).map((e) => e.code) },
@@ -281,6 +288,9 @@ export async function handlePostAiMeetingMessage(
     repairNote: null,
     // 【M2.6追加・実装指示§19】Run Advisory Memory Summary（role-relevant top N件、compact）。
     runAdvisoryMemory: runAdvisoryMemorySummary,
+    gameKnowledge: knowledgeInjection.gameKnowledge,
+    gameKnowledgeEstimates: knowledgeInjection.gameKnowledgeEstimates,
+    questionIntent: knowledgeInjection.questionIntent,
   });
 
   let generated = await generateMeetingResponse(userMessage, anthropicClient, { labId, companyId, turn });
@@ -448,6 +458,11 @@ export async function handlePostAiMeetingMessage(
       playerCorrectionNote: response.playerCorrectionNote ?? null,
       // 【M2.6追加・実装指示§28】応答の根拠として使ったmemoryのid（factsUsedとは分離）。
       memoryUsedIds: response.memoryUsedIds,
+      // 【M2.8配線・実装指示§32/§33】応答の根拠として使ったGame Knowledgeのid。
+      // factsUsed（run data）・memoryUsedIds（player固有）とは別レイヤーとして返す。
+      // 注入していないidをClaudeが返しても記録しない（存在しないルールの参照を残さない）。
+      knowledgeUsedIds: (response.knowledgeUsedIds ?? []).filter((id) => knowledgeInjection.injectedIds.includes(id)),
+      questionIntent: knowledgeInjection.questionIntent,
       available: true,
       diagnostics: { ...generated.diagnostics, semanticGuardResult },
     },

@@ -88,7 +88,9 @@ import { AI_MEETING_PROPOSAL_LIMITS } from "./proposalSchema";
 import { AiMeetingIntent, ExecutiveRole } from "./types";
 import { RunAdvisoryMemorySummary } from "./runAdvisoryMemory";
 
-export const AI_MEETING_PROMPT_VERSION = "v7";
+// 【M2.8】Game Knowledge Registryの注入・Truth Hierarchyの拡張・
+// 「実績値をルール値として提示しない」原則の追加により v8 へ。
+export const AI_MEETING_PROMPT_VERSION = "v8";
 
 const rolesDescriptionJa = (Object.values(EXECUTIVE_ROLE_DEFINITIONS) as (typeof EXECUTIVE_ROLE_DEFINITIONS)[ExecutiveRole][])
   .map((r) => `- ${r.role}（${r.titleJa}）: ${r.personalityJa} 担当領域: ${r.responsibilityJa}`)
@@ -103,10 +105,13 @@ export const AI_MANAGEMENT_MEETING_SYSTEM_PROMPT = [
   "【情報の優先順位（Truth Hierarchy・重要）】矛盾する情報がある場合、必ず以下の優先順位に従ってください:",
   "  1. Engine / ExecutiveBriefingPacketの事実（common/cfo/coo/commercial/ceo各フィールド）",
   "  2. Structured diagnostics（standardAiReasonCodesTopN等）",
-  "  3. プレイヤーの明示的な方針・訂正（ただしBriefingPacketと整合する場合に限る。§8参照）",
-  "  4. Standard AIの提案（decision）",
-  "  5. 他役員の発言（会話履歴内のexecutiveメッセージ）",
-  "  6. 一般的なbusiness knowledge",
+  "  3. 【M2.8追加】gameKnowledge（Game Knowledge Registry）のcode/parameter由来の現在値",
+  "  4. 【M2.8追加】gameKnowledgeのformal game ruleの意味論（定義・タイミング・制約）",
+  "  5. プレイヤーの明示的な方針・訂正（ただしBriefingPacketと整合する場合に限る。§8参照）",
+  "  6. Run Advisory Memoryのpreference / strategic intent",
+  "  7. Standard AIの提案（decision）",
+  "  8. 他役員の発言（会話履歴内のexecutiveメッセージ）",
+  "  9. 一般的なbusiness knowledge",
   "他役員の発言（会話履歴）はfactではなくopinion/interpretationとして扱ってください。",
   "他役員が誤った事実を述べても、その誤りを鵜呑みにして増幅してはいけません。",
   "",
@@ -120,6 +125,27 @@ export const AI_MANAGEMENT_MEETING_SYSTEM_PROMPT = [
   "  会話履歴内に`[legacy ...]`という接頭辞が付いたメッセージがある場合、それは古いprompt",
   "  versionの下で生成された可能性があるという警告です。その事実主張を、あなたが今受け取っている",
   "  現在のBriefingPacketより優先しないでください。",
+  "",
+  "【Game Knowledge Registry（M2.8）】userメッセージのgameKnowledgeには、この質問に",
+  "  関連するShrimpX固有のゲームルールが、現在のparameter値を差し込んだ状態で入っています。",
+  "  ShrimpXのルール・定義・タイミング・計算式を答えるときは、必ずこれを根拠にしてください。",
+  "  各項目のid（例: SALES.SALESPERSON_CAPACITY）を参照した場合は、そのidを",
+  "  knowledgeUsedIdsへ入れてください（factsUsed・memoryUsedIdsとは分けて記録します）。",
+  "  各項目の「注意」に書かれている誤読パターンは、絶対に犯さないでください。",
+  "  gameKnowledgeにもBriefingPacketにも無いルールを聞かれた場合は、推測せず",
+  "  「ShrimpXの現行ルール上、この情報は確認できません」と答えてください。",
+  "",
+  "【実績値をルール値として提示しない（M2.8・重要）】当期の実績を人数・設備数等で",
+  "  単純に割った値を、ゲームの能力値・原単位として提示してはいけません。",
+  "  例: 「販売実績3,100t ÷ 営業60人 = 52t/人が営業1人当たりの販売能力」は誤りです。",
+  "  実績は需要・価格競争力・生産能力・在庫でも決まる結果値であり、能力値ではありません。",
+  "  能力を問われた場合は、(1) ゲームルール上の決まり方、(2) 現在のparameter値、",
+  "  (3) 当社の現状、(4) 実績値を参考として述べる場合は「これは実績であり能力ではない」",
+  "  という但し書き、の順で区別して答えてください。",
+  "",
+  "【gameKnowledgeEstimatesの扱い（M2.8）】userメッセージにgameKnowledgeEstimatesがある場合、",
+  "  それはserver側がengineの関数と現在のparameterでdeterministicに計算した目安です。",
+  "  あなたが暗算し直さず、その数値をそのまま使い、同梱されたcaveatsも必ず伝えてください。",
   "",
   "【ゲームに存在しないルールを補完しない（重要）】ShrimpXに存在しないbusiness ruleを、",
   "  一般企業の常識から補完してはいけません。例: 「Customer Trustが下がると顧客が支払期限を",
@@ -487,6 +513,22 @@ export interface BuildUserMessageInput {
   readonly repairNote: string | null;
   /** 【M2.6追加・実装指示§19】RunAdvisoryMemorySummary（role-relevant top N件、compact）。memoryが1件も無い場合も空配列のカテゴリを持つオブジェクトを渡す（既存Runとの互換性維持）。 */
   readonly runAdvisoryMemory: RunAdvisoryMemorySummary;
+  /** 【M2.8追加】この質問に関連するGame Knowledge（Top N件、動的値解決済み）。無関係なら空配列。 */
+  readonly gameKnowledge?: readonly GameKnowledgeForPrompt[];
+  /** 【M2.8追加】server側でdeterministicに計算した目安（営業能力・必要Worker等）。無ければ省略。 */
+  readonly gameKnowledgeEstimates?: unknown;
+  /** 【M2.8追加】質問意図の分類（GAME_RULE / CURRENT_STATE / STRATEGY / MIXED）。 */
+  readonly questionIntent?: string;
+}
+
+/** プロンプトへ載せるcompactなGame Knowledge 1件（実装指示§34）。 */
+export interface GameKnowledgeForPrompt {
+  readonly id: string;
+  readonly domain: string;
+  readonly title: string;
+  readonly explanation: string;
+  readonly semanticWarnings?: readonly string[];
+  readonly sourceReference: string;
 }
 
 /**
@@ -513,6 +555,10 @@ export function buildMeetingUserMessage(input: BuildUserMessageInput): string {
     repairNote: input.repairNote,
     // 【M2.6追加・実装指示§19】Run Advisory Memory Summary（role-relevant top N件、compact）。
     runAdvisoryMemory: input.runAdvisoryMemory,
+    // 【M2.8追加】Game Knowledge Registry から引いた、この質問に関連するゲームルール。
+    gameKnowledge: input.gameKnowledge ?? [],
+    gameKnowledgeEstimates: input.gameKnowledgeEstimates ?? null,
+    questionIntent: input.questionIntent ?? null,
   };
   return JSON.stringify(payload);
 }

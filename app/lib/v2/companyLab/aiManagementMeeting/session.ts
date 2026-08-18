@@ -40,6 +40,7 @@ import { buildInitialBriefFacts, buildTurnChangeBriefing, TurnChangeQuarterSnaps
 import { AiMeetingNewsItem } from "./scenarioNews";
 import { routePlayerMessage } from "./router";
 import { buildMeetingUserMessage, buildOpeningBriefUserMessage, OPENING_BRIEF_PROMPT_VERSION, OPENING_BRIEF_UNAVAILABLE_REASON_JA } from "./prompt";
+import { buildMeetingKnowledgeInjection } from "./knowledgeInjection";
 import { appendMessages, buildRecentHistoryForPrompt, defaultMeetingId, loadConversation, newConversation, saveConversation } from "./conversation";
 import { validateAiMeetingProposals } from "./validation";
 import { AiMeetingMessage, ExecutiveRole, OpeningExecutiveBrief, RunAdvisoryMemoryRecord } from "./types";
@@ -210,6 +211,12 @@ export async function runAiMeetingTurn(input: RunAiMeetingTurnInput): Promise<Ai
   }
   const runAdvisoryMemorySummary = buildRunAdvisoryMemorySummary(runMemories);
 
+  // 【M2.8】Game Knowledge Registry。プレイヤーの質問に関連するShrimpX固有の
+  // ゲームルールを、現在のparameter値を差し込んだ状態でTop N件だけ注入する
+  // （全文Manualは入れない。実装指示§34）。company-labs経路とsimulation-runs経路の
+  // 両方が同じ共通関数を通る（実装指示§41）。
+  const knowledgeInjection = buildMeetingKnowledgeInjection({ playerMessage, primarySpeaker: routing.primary });
+
   const userMessage = buildMeetingUserMessage({
     briefing,
     standardAiDecisionSummary: { decision: snapshot.diagnostics.decision, topReasonCodes: snapshot.diagnostics.entries.slice(0, 8).map((e) => e.code) },
@@ -222,6 +229,9 @@ export async function runAiMeetingTurn(input: RunAiMeetingTurnInput): Promise<Ai
     // 【M2.5配線】通常のcallではnull。overdue語彙違反検知時のみ、下でrepair呼び出しに使う。
     repairNote: null,
     runAdvisoryMemory: runAdvisoryMemorySummary,
+    gameKnowledge: knowledgeInjection.gameKnowledge,
+    gameKnowledgeEstimates: knowledgeInjection.gameKnowledgeEstimates,
+    questionIntent: knowledgeInjection.questionIntent,
   });
 
   let generated = await generateMeetingResponse(userMessage, anthropicClient, { labId: contextId, companyId, turn });
@@ -372,6 +382,11 @@ export async function runAiMeetingTurn(input: RunAiMeetingTurnInput): Promise<Ai
       playerCorrectionNote: response.playerCorrectionNote ?? null,
       // 【M2.6配線】応答の根拠として使ったmemoryのid（factsUsedとは分離）。
       memoryUsedIds: response.memoryUsedIds,
+      // 【M2.8配線・実装指示§32/§33】応答の根拠として使ったGame Knowledgeのid。
+      // factsUsed（run data）・memoryUsedIds（player固有）とは別レイヤーとして返す。
+      // 注入していないidをClaudeが返しても記録しない（存在しないルールの参照を残さない）。
+      knowledgeUsedIds: (response.knowledgeUsedIds ?? []).filter((id) => knowledgeInjection.injectedIds.includes(id)),
+      questionIntent: knowledgeInjection.questionIntent,
       available: true,
       diagnostics: { ...generated.diagnostics, semanticGuardResult },
     },

@@ -204,6 +204,15 @@ export interface AiMeetingStructuredResponse {
   readonly memoryCandidates: readonly RunAdvisoryMemoryCandidate[];
   /** 【M2.6追加・実装指示§28】応答の根拠として使ったmemoryのid（factsUsedとは分離。ゲーム事実ではなくplayer/run advisory contextの参照）。 */
   readonly memoryUsedIds: readonly string[];
+  /**
+   * 【M2.8追加・実装指示§32/§33】応答の根拠として使ったGame Knowledge entryのid
+   * （例: "FINANCE.AR_SETTLEMENT"）。3つのレイヤーを別々に監査できるようにする:
+   *   factsUsed        … current run data（このRunの実際の数値）
+   *   knowledgeUsedIds … game rule（ShrimpX固有の恒常的なルール）
+   *   memoryUsedIds    … player-specific preference（このRunでの方針・訂正）
+   * 本フィールドを持たない旧保存データとの互換のためoptional。
+   */
+  readonly knowledgeUsedIds?: readonly string[];
 }
 
 // ---------------------------------------------------------------------
