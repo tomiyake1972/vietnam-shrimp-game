@@ -301,32 +301,23 @@ export interface StandardAiParameters {
    */
   readonly targetScaleWithinBandTolerance: number;
 
-  // --- 【Phase DIV-3新設】Standard AI配当ポリシー ---
+  // --- 【Phase DIV-3新設・DIV-4で意味を変更】Standard AI配当ポリシー ---
   /**
-   * 【Phase DIV-3】基準配当性向。Standard AIが「配当してよい」と判断したTurnに、
-   * 前Turnまでに確定した分配可能利益（CompanyFinanceState.distributableEarnings）の
-   * 何割を配当するかの比率。
+   * 【Phase DIV-4】基準配当性向。Standard AIが「配当してよい」と判断した年度末（Q4）に、
+   * **直近確定四半期の当期純利益（flow）** の何割を配当するかの比率。
    *
-   * 【値の由来と、提案書の初期候補（15%）を採らなかった理由】
-   * DIV-3設計提案（docs/v2/design/standard_ai_dividend_policy_div3_proposal.md）
-   * §3案C・§5論点1は初期候補として15%を挙げ、「§5のベンチマークで調整」と
-   * 明記している。その調整をscripts/tsvLeaderboardBenchmark.ts（Benchmark 3〜5）で
-   * 実施した結果、15%は既存のStandard AI頑健性回帰（CCI-9「複数seedでも
-   * 生産停止ゼロ・現金負ゼロ」）をseed=phase6c-regressionで破ることが判明した
-   * （生産0四半期14期・最小現金 -143M USD）。10%でも同seedで破れる
-   * （生産0四半期12期・最小現金 -121M USD）。5%以下では検証した4seedすべてで
-   * 生産停止0・現金負0を維持する。
+   * 【DIV-3からの変更】DIV-3ではこの比率を`distributableEarnings`（game-start以降の
+   * 累計利益stock）へ掛けていた。それは「過去利益を毎四半期一定割合ずつ繰り返し
+   * 取り崩す」挙動になり、period payout policyの基準として正しくない（DIV-3
+   * ベンチマークでratio=10%以上が会社の運転資金を枯渇させることも実測された）。
+   * DIV-4では算定baseを当期純利益へ変更し、`distributableEarnings`は
+   * `computeMaxDividendUsd`経由の **上限** としてのみ使う。
    *
-   * 【なぜ15%が「少額配当」にならないのか】distributableEarningsは四半期利益の
-   * フローではなく、game-start以降の累計利益から配当実行分を引いた「ストック」で
-   * ある（finance/dividend.ts冒頭コメント参照）。そのストックの15%を、条件を
-   * 満たす四半期のたびに繰り返し取り崩すため、実質的には提案書が想定していた
-   * 「少額配当」よりはるかに大きい現金流出になる。
-   *
-   * したがって、提案書§5論点1が明示的に想定していた「ベンチマークで調整」の
-   * 範囲内の判断として5%を採用した。この値の妥当性・および「配当基準を
-   * 累計ストックではなく当期フローに変えるべきか」は、DIV-3の最終報告で
-   * 設計側（ChatGPT）へ確認を依頼している未決事項である。
+   * 【値の由来】DIV-4実装指示§6「Flow + annual frequencyへ変更後、15%を中心値として
+   * 再benchmark」に従い、10/15/20/25%（＋0%と、DIV-3暫定値5%のcontrol）を
+   * scripts/tsvLeaderboardBenchmark.ts（Benchmark 3〜5）で比較した。15%は
+   * 既存頑健性回帰CCI-9と同一条件の4seedすべてでPASSし、TSVもpayout ratioに対して
+   * 全社一様には上昇しない（支配戦略化していない）ことを確認した中心値である。
    *
    * 【この値は「配当額の上限」ではない】実際の配当額は、必ず
    * finance/dividend.tsのcomputeMaxDividendUsd（＝min(Cash, distributableEarnings)、
@@ -427,9 +418,9 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   targetScaleCapacityWeightInBaseline: 1.0,
   targetScaleWithinBandTolerance: 0.05,
 
-  // 【Phase DIV-3】提案書§5論点1の初期候補は15%だが、ベンチマークで既存の
-  // Standard AI頑健性回帰を破ることを確認したため5%を採用した（上記docコメント参照）。
-  dividendBasePayoutRatio: 0.05,
+  // 【Phase DIV-4】実装指示§6の中心値15%。Flow基準＋年1回へ変更したうえで
+  // 10/15/20/25%を再benchmarkし、CCI-9頑健性・支配戦略診断ともに問題ないことを確認済み。
+  dividendBasePayoutRatio: 0.15,
 };
 
 // ---------------------------------------------------------------------

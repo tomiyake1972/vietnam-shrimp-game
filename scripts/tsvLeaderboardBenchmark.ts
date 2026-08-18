@@ -119,25 +119,33 @@ for (const turn of CHECKPOINT_TURNS) {
 
 
 // ---------------------------------------------------------------------
-// 【Phase DIV-3】Benchmark 3・4: Standard AI配当ポリシーのON/OFF比較
+// 【Phase DIV-4】Benchmark 3・4・5: Standard AI配当ポリシー（Flow-Based Annual）の
+// ON/OFF・payout ratio別比較
 // ---------------------------------------------------------------------
 
-console.log("\n\n=== TSV Benchmark 3: Standard AI配当ポリシー（DIV-3）ON/OFF比較 ===");
+console.log("\n\n=== TSV Benchmark 3: Standard AI配当ポリシー（DIV-4 Flow-Based Annual）ratio別比較 ===");
 console.log(
-  "5社すべてStandard AI（経営性格プロファイルON）。dividendBasePayoutRatioだけを変えて32Turn実行し、\n" +
-    "AI配当が(a)TSVを不当に押し上げる支配戦略になっていないか、(b)会社の運転資金を痩せさせていないか、を同時に見る。\n" +
-    "ratio=0がAI配当OFF（DIV-1と完全に同じ挙動）。"
+  "5社すべてStandard AI（経営性格プロファイルON）。dividendBasePayoutRatioだけを変えて32Turn実行する。\n" +
+    "DIV-4のStandard AI配当は「年度末Q4のみ・当期純利益×payoutRatio・distributableEarningsは上限としてのみ使用」。\n" +
+    "ratio=0がAI配当OFF（DIV-1と完全に同じ挙動）。ratio=5%はDIV-3暫定値をcontrolとして残したもの。"
 );
 
 interface AiRunCompanyMetrics {
   readonly companyId: string;
   readonly tsvUsd: number | null;
   readonly dividendValueUsd: number | null;
+  readonly companyValueUsd: number | null;
   readonly cumulativeDividendUsd: number;
   readonly dividendTurnCount: number;
+  readonly dividendTurns: readonly number[];
   readonly endingCashUsd: number;
+  readonly minimumCashUsd: number;
+  readonly endingDebtUsd: number;
   readonly zeroProductionQuarters: number;
   readonly distressQuarters: number;
+  readonly capexCompletedCount: number;
+  readonly newFactoryActivationTurns: readonly number[];
+  readonly totalCapexPaidUsd: number;
 }
 
 function runStandardAi(seed: string, payoutRatio: number): readonly AiRunCompanyMetrics[] {
@@ -160,15 +168,22 @@ function runStandardAi(seed: string, payoutRatio: number): readonly AiRunCompany
   return ids.map((companyId) => {
     const snapshot = snapshots.find((s) => s.companyId === companyId);
     let cumulativeDividendUsd = 0;
-    let dividendTurnCount = 0;
+    const dividendTurns: number[] = [];
     let zeroProductionQuarters = 0;
     let distressQuarters = 0;
     let endingCashUsd = 0;
+    let minimumCashUsd = Infinity;
+    let endingDebtUsd = 0;
+    let capexCompletedCount = 0;
+    let totalCapexPaidUsd = 0;
+    const newFactoryActivationTurns: number[] = [];
+    const seenFactoryProjects = new Set<string>();
+
     for (const record of state.history) {
       const dividend = record.dividendResults?.find((d) => d.companyId === companyId);
       if (dividend && dividend.appliedDividendUsd > 0) {
         cumulativeDividendUsd = dividend.cumulativeDividendUsd;
-        dividendTurnCount++;
+        dividendTurns.push(record.turn);
       }
       const summary = record.companySummaries.find((c) => c.companyId === companyId);
       if (summary && Number(summary.hosoProduced) + Number(summary.pdProduced) + Number(summary.vapProduced) <= 0) {
@@ -177,66 +192,111 @@ function runStandardAi(seed: string, payoutRatio: number): readonly AiRunCompany
       const financing = record.financingResults.find((f) => f.companyId === companyId);
       if (financing && financing.financialHealth.primary !== "healthy") distressQuarters++;
       const financial = record.financialResults.find((f) => f.companyId === companyId);
-      if (financial) endingCashUsd = Number(financial.balanceSheet.cash);
+      if (financial) {
+        endingCashUsd = Number(financial.balanceSheet.cash);
+        minimumCashUsd = Math.min(minimumCashUsd, endingCashUsd);
+        endingDebtUsd = Number(financial.balanceSheet.shortTermLoans) + Number(financial.balanceSheet.longTermLoans);
+      }
+      const capex = record.capexResults.find((c) => c.companyId === companyId);
+      for (const event of capex?.events ?? []) {
+        totalCapexPaidUsd += event.paymentSucceededUsd;
+        if (event.statusAfter === "completed" && event.statusBefore !== "completed") {
+          capexCompletedCount++;
+          // 新工場（newFactory）の稼働開始タイミングだけを別途記録する。
+          if (event.projectType === "newFactoryConstruction" && !seenFactoryProjects.has(event.projectId)) {
+            seenFactoryProjects.add(event.projectId);
+            newFactoryActivationTurns.push(record.turn);
+          }
+        }
+      }
     }
     return {
       companyId,
       tsvUsd: snapshot?.totalShareholderValueUsd ?? null,
       dividendValueUsd: snapshot?.currentDividendValueUsd ?? null,
+      companyValueUsd: snapshot?.currentCompanyValue.currentCompanyValueUsd ?? null,
       cumulativeDividendUsd,
-      dividendTurnCount,
+      dividendTurnCount: dividendTurns.length,
+      dividendTurns,
       endingCashUsd,
+      minimumCashUsd: minimumCashUsd === Infinity ? 0 : minimumCashUsd,
+      endingDebtUsd,
       zeroProductionQuarters,
       distressQuarters,
+      capexCompletedCount,
+      newFactoryActivationTurns,
+      totalCapexPaidUsd,
     };
   });
 }
 
 const AI_DIVIDEND_SEED = "div3-ai-dividend-001";
-// 0（OFF）と、DIV-3設計提案§5論点1の初期候補（0.15）を含むスイープ。
-const PAYOUT_RATIOS = [0, 0.01, 0.02, 0.05, 0.1, 0.15];
+// 【実装指示§6】Flow + annual frequencyへ変更後、15%を中心値として10/15/20/25%を比較。
+// 0%（OFF）と、DIV-3暫定値の5%をcontrolとして残す。
+const PAYOUT_RATIOS = [0, 0.05, 0.1, 0.15, 0.2, 0.25];
 const aiRuns = new Map<number, readonly AiRunCompanyMetrics[]>();
 for (const ratio of PAYOUT_RATIOS) aiRuns.set(ratio, runStandardAi(AI_DIVIDEND_SEED, ratio));
 
 const aiCompanyIds = (aiRuns.get(0) ?? []).map((m) => m.companyId);
 for (const ratio of PAYOUT_RATIOS) {
   console.log(`\n--- dividendBasePayoutRatio = ${(ratio * 100).toFixed(0)}%${ratio === 0 ? "（AI配当OFF）" : ""} / Turn ${TOTAL_TURNS} 時点 ---`);
-  console.log("Company | TSV | DividendValue | 累計配当 | 配当Turn数 | 期末Cash | 生産0四半期 | distress四半期");
+  console.log(
+    "Company | TSV | CompanyValue | DividendValue | 累計配当 | 配当回数 | 配当Turn | 期末Cash | 最小Cash | 期末Debt | CAPEX完了 | 新工場稼働Turn | 生産0 | distress"
+  );
   for (const m of aiRuns.get(ratio) ?? []) {
     console.log(
-      `${m.companyId} | ${fmt(m.tsvUsd)} | ${fmt(m.dividendValueUsd)} | ${fmt(m.cumulativeDividendUsd)} | ` +
-        `${m.dividendTurnCount} | ${fmt(m.endingCashUsd)} | ${m.zeroProductionQuarters} | ${m.distressQuarters}`
+      `${m.companyId} | ${fmt(m.tsvUsd)} | ${fmt(m.companyValueUsd)} | ${fmt(m.dividendValueUsd)} | ${fmt(m.cumulativeDividendUsd)} | ` +
+        `${m.dividendTurnCount} | [${m.dividendTurns.join(",")}] | ${fmt(m.endingCashUsd)} | ${fmt(m.minimumCashUsd)} | ${fmt(m.endingDebtUsd)} | ` +
+        `${m.capexCompletedCount} | [${m.newFactoryActivationTurns.join(",")}] | ${m.zeroProductionQuarters} | ${m.distressQuarters}`
     );
   }
 }
 
-console.log("\n\n=== TSV Benchmark 4: AI配当が支配戦略化していないかの診断（§24と同じ観点）===");
-console.log("各ratioのTurn32 TSVを、AI配当OFF（ratio=0）比の変化率として並べる。");
+console.log("\n\n=== TSV Benchmark 4: 支配戦略診断（実装指示§12・TSV正式化§24と同じ観点）===");
+console.log(
+  "各ratioのTurn32 TSVを、AI配当OFF（ratio=0）比の変化率として並べる。\n" +
+    "payout ratioを増やすほど全社一様にTSVが上昇するならStop Condition（配当が支配戦略）。"
+);
 const offById = new Map((aiRuns.get(0) ?? []).map((m) => [m.companyId, m]));
 console.log(`Company | ${PAYOUT_RATIOS.map((r) => `${(r * 100).toFixed(0)}%`).join(" | ")}`);
+const monotonicCompanies: string[] = [];
 for (const companyId of aiCompanyIds) {
   const offTsv = offById.get(companyId)?.tsvUsd ?? null;
-  const cells = PAYOUT_RATIOS.map((ratio) => {
-    const tsv = (aiRuns.get(ratio) ?? []).find((m) => m.companyId === companyId)?.tsvUsd ?? null;
+  const tsvByRatio = PAYOUT_RATIOS.map((ratio) => (aiRuns.get(ratio) ?? []).find((m) => m.companyId === companyId)?.tsvUsd ?? null);
+  const cells = tsvByRatio.map((tsv) => {
     if (offTsv === null || tsv === null || offTsv === 0) return "n/a";
     return `${(((tsv - offTsv) / Math.abs(offTsv)) * 100).toFixed(1)}%`;
   });
   console.log(`${companyId} | ${cells.join(" | ")}`);
+  // ratioに対して単調増加しているかどうか（支配戦略の兆候）を機械的に判定する。
+  let monotonic = true;
+  for (let i = 1; i < tsvByRatio.length; i++) {
+    const prev = tsvByRatio[i - 1];
+    const cur = tsvByRatio[i];
+    if (prev === null || cur === null || cur <= prev) monotonic = false;
+  }
+  if (monotonic) monotonicCompanies.push(companyId);
 }
+console.log(
+  `\n支配戦略判定: payout ratioに対しTSVが単調増加した会社 = ${monotonicCompanies.length === 0 ? "なし" : monotonicCompanies.join(",")}` +
+    `（5社中${monotonicCompanies.length}社）。全社一様に単調増加した場合のみStop Conditionとする。`
+);
 
-console.log("\n運転資金への副作用（生産0四半期の合計・5社計）:");
+console.log("\n配当頻度・運転資金への副作用（5社計）:");
 for (const ratio of PAYOUT_RATIOS) {
   const runs = aiRuns.get(ratio) ?? [];
   const zeroProduction = runs.reduce((sum, m) => sum + m.zeroProductionQuarters, 0);
   const distress = runs.reduce((sum, m) => sum + m.distressQuarters, 0);
   const dividendTurns = runs.reduce((sum, m) => sum + m.dividendTurnCount, 0);
+  const cumulativeDividend = runs.reduce((sum, m) => sum + m.cumulativeDividendUsd, 0);
+  const capexCompleted = runs.reduce((sum, m) => sum + m.capexCompletedCount, 0);
   console.log(
-    `ratio=${(ratio * 100).toFixed(0)}%: 生産0四半期=${zeroProduction} / distress四半期=${distress} / 配当発火Turn数(5社計)=${dividendTurns}`
+    `ratio=${(ratio * 100).toFixed(0)}%: 配当発火回数=${dividendTurns}（理論上限40=5社×8年度） / 累計配当=${fmt(cumulativeDividend)} / ` +
+      `CAPEX完了=${capexCompleted}件 / 生産0四半期=${zeroProduction} / distress四半期=${distress}`
   );
 }
 
-
-console.log("\n\n=== TSV Benchmark 5: seed頑健性診断（既存CCI-9と同一条件）===");
+console.log("\n\n=== TSV Benchmark 5: seed頑健性診断（既存CCI-9と同一条件・実装指示§16 DIV-FLOW-15）===");
 console.log(
   "既存の頑健性回帰CCI-9（companyLab/vision/__tests__/commercialCommitmentIntegration.test.ts）と\n" +
     "同じ会社全体営業能力モデル・同じseed群で、dividendBasePayoutRatioだけを変えて32Turn実行する。\n" +
@@ -275,6 +335,7 @@ for (const ratio of PAYOUT_RATIOS) {
     let zeroProductionQuarters = 0;
     let minimumCashUsd = Infinity;
     let dividendTurns = 0;
+    let endingDebtUsd = 0;
     for (const h of result.history) {
       for (const c of h.companySummaries) {
         if (unwrapUnit(c.hosoProduced) + unwrapUnit(c.pdProduced) + unwrapUnit(c.vapProduced) <= 0) zeroProductionQuarters++;
@@ -282,11 +343,14 @@ for (const ratio of PAYOUT_RATIOS) {
       for (const f of h.financialResults) minimumCashUsd = Math.min(minimumCashUsd, unwrapUsd(f.balanceSheet.cash));
       for (const d of h.dividendResults ?? []) if (d.appliedDividendUsd > 0) dividendTurns++;
     }
+    for (const f of result.history[TOTAL_TURNS - 1].financialResults) {
+      endingDebtUsd += unwrapUsd(f.balanceSheet.shortTermLoans) + unwrapUsd(f.balanceSheet.longTermLoans);
+    }
     const finishedGoodsTons = result.history[TOTAL_TURNS - 1].companySummaries.reduce((sum, c) => sum + unwrapUnit(c.finishedGoodsInventory), 0);
     const pass = zeroProductionQuarters === 0 && minimumCashUsd >= 0 && finishedGoodsTons < 60_000;
     lines.push(
       `  ${pass ? "PASS" : "FAIL"} ${seed}: 生産0四半期=${zeroProductionQuarters} / 最小現金=${minimumCashUsd.toFixed(2)}USD / ` +
-        `期末完成品在庫=${Math.round(finishedGoodsTons)}t / 配当発火Turn数(5社計)=${dividendTurns}`
+        `期末完成品在庫=${Math.round(finishedGoodsTons)}t / 期末Debt(5社計)=${fmt(endingDebtUsd)} / 配当発火回数(5社計)=${dividendTurns}`
     );
   }
   console.log(`\nratio=${(ratio * 100).toFixed(0)}%`);
@@ -295,6 +359,5 @@ for (const ratio of PAYOUT_RATIOS) {
 
 console.log(
   "\n注: 最小現金が-0.00USD（浮動小数点の丸め誤差レベル）のFAILは、資金枯渇ではなく" +
-    "CCI-9の判定式（>= 0）が厳密比較であることによるもの。生産0四半期・現金が実額で負になる" +
-    "崩壊はratio=10%以上のphase6c-regressionでのみ発生している。"
+    "CCI-9の判定式（>= 0）が厳密比較であることによるもの。"
 );

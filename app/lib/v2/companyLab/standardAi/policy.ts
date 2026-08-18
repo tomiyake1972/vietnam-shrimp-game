@@ -19,6 +19,7 @@
 
 import { PeriodV2 } from "../../core/period";
 import { unwrapUnit } from "../../core/units";
+import { unwrapUsd } from "../../finance/types";
 import { CompanyDecisionInput, CompanyDecisionProvider, CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../types";
 import { buildStandardAiObservation } from "./observation";
 import { computePressureScores } from "./pressures";
@@ -682,13 +683,22 @@ export function generateStandardAiDecisionWithDiagnostics(
         }
       : capexDecisionAfterCrisisGate;
 
-  // 【Phase DIV-3】Standard AI配当ポリシー（基準配当ルール＋経営性格バイアス）。
+  // 【Phase DIV-4】Standard AI配当ポリシー（Flow-Based Annual Dividend Policy）。
+  // 年度末Q4のみ・当期純利益基準・distributableEarningsは上限としてのみ使用。
   // 新しい会計ロジックは作らず、上限は必ずPlayerと同じcomputeMaxDividendUsdで
   // クランプする（decision/dividend.ts参照）。
+  //
+  // 【当期純利益のsingle source（実装指示§3）】ownState.lastFinancialResultは
+  // runner.tsが確定させstate.historyへ保存済みのCompanyFinancialQuarterResultその
+  // ものであり、ここで独自計算はしない。Operating Profit・Cash Flowで代用もしない。
   const dividendResult = buildStandardAiDividendDecision({
     companyId: fixture.companyId,
+    period,
     financeState: ownState.financeState,
+    currentQuarterNetIncomeUsd: ownState.lastFinancialResult ? unwrapUsd(ownState.lastFinancialResult.profitAndLoss.netIncome) : null,
+    netIncomeSourcePeriod: ownState.lastFinancialResult?.period ?? null,
     lastQuarterFinancialHealthTier: observation.lastQuarterFinancialHealthTier,
+    crisisState: crisisAssessment.state,
     newCapexProposalCount: finalCapexDecision.newProjectProposals.length,
     params,
   });
@@ -705,11 +715,11 @@ export function generateStandardAiDecisionWithDiagnostics(
     workerAssignments: laborResult.workerAssignments,
     financingRequest: financingResult.financingRequest,
     vapProductDevelopmentSpendUsd: vapProductDevelopmentSpendUsdAfterCrisisGate > 0 ? vapProductDevelopmentSpendUsdAfterCrisisGate : undefined,
-    // 【Phase DIV-3】DIV-1では「Standard AIは配当を一切行わない」（dividendDecision
-    // 固定undefined）としていたが、DIV-3設計提案§4の合意に基づき、財務健全性=healthy・
-    // 当期の新規設備投資提案なし・分配可能利益>0の3条件をすべて満たすTurnにだけ、
-    // 分配可能利益の一部（基準配当性向＝経営性格バイアス適用後のdividendBasePayoutRatio）
-    // を配当する。条件を満たさないTurnはundefined（＝配当0）でDIV-1と同一の挙動に戻る。
+    // 【Phase DIV-4】DIV-1では「Standard AIは配当を一切行わない」（dividendDecision
+    // 固定undefined）だった。DIV-3で条件つき配当を導入し、DIV-4で算定baseを
+    // 累計利益stock（distributableEarnings）から当期純利益flowへ変更し、
+    // 頻度を年1回（年度末Q4のみ）へ変更した。条件を満たさないTurnは
+    // undefined（＝配当0）となり、DIV-1と同一の挙動に戻る。
     dividendDecision: dividendResult.dividendDecision,
     // 【新工場の提案を既存 capex 提案と同じ意思決定へ合流させる】
     // 既存増設の提案内容は一切変更せず、新工場ぶんを末尾へ足すだけにする

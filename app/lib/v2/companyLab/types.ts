@@ -236,6 +236,18 @@ export interface CompanyOwnState {
    * 直近確定Turnがまだ無い場合（Turn1の意思決定時点）はundefined。
    */
   readonly lastFinancingResult?: FinancingQuarterResult;
+  /**
+   * 【Phase DIV-4】直近に確定した四半期の財務諸表（P&L・BS・CF）。
+   * lastFinancingResultとまったく同じ規約で、runner.tsが既にstate.historyへ
+   * 保存しているCompanyFinancialQuarterResultを1件そのまま渡すだけであり、
+   * 新しい会計計算は一切しない。直近確定Turnがまだ無い場合（Turn1の
+   * 意思決定時点）はundefined。
+   *
+   * 【用途】Standard AI配当ポリシー（DIV-4）が配当額の算定baseとして使う
+   * 「当期純利益（profitAndLoss.netIncome）」の唯一のsource。Operating Profitや
+   * Cash Flowで代用しない（実装指示§3）。
+   */
+  readonly lastFinancialResult?: CompanyFinancialQuarterResult;
   /** 【Phase 8B-2A】前期末までの自社設備投資状態（案件ポートフォリオ）。 */
   readonly capexState: CompanyCapexState;
   /**
