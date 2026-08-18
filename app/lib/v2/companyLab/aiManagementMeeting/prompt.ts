@@ -537,13 +537,35 @@ export function buildMeetingUserMessage(input: BuildUserMessageInput): string {
 // そのまま適用される。
 // ---------------------------------------------------------------------
 
-export const OPENING_BRIEF_PROMPT_VERSION = "v1";
+// 【AI Management Meeting Hotfix: Opening Brief Japanese Output Enforcement】
+// v1では出力言語を明示していなかったため、Opening Briefだけが英語で生成される
+// 事象が実プレイで発生した（通常のAI Meeting会話はPlayerが日本語で質問するため
+// 日本語で返っていたが、Opening BriefはPlayer発言が存在せず、userメッセージが
+// 英語キーのJSON payloadだけであるため、モデルが英語を選びやすかった）。
+// v2で出力言語を日本語に明示する（下記【出力言語】節）。
+export const OPENING_BRIEF_PROMPT_VERSION = "v2";
 
 export const OPENING_BRIEF_SYSTEM_PROMPT = [
   "あなたはShrimpX（エビ加工・輸出会社の経営シミュレーション）のCEOです。",
   "新しいTurnの意思決定画面に入ったプレイヤーへ、前四半期から何が変わったかを",
   "短く報告するOpening Executive Briefだけを担当します。これは通常のAI Management",
   "Meetingとは別の、ごく短い自動報告です。",
+  "",
+  "【出力言語（必ず日本語）】",
+  "- 出力は必ず日本語で書いてください。summary・keyChanges[].title・",
+  "  keyChanges[].explanation・suggestedFollowUps[]のすべての文章を、",
+  "  自然な日本語（日本語UIの経営シミュレーションとして自然な文体）で書きます。",
+  "- 商品名・コード識別子・市場ラベル・避けられない固有名詞の引用を除き、",
+  "  英語の文を出力してはいけません。",
+  "- CEO / CFO / COO / Commercial Director といった役職ラベルは役職名として",
+  "  英語のまま使ってかまいませんが、発話内容そのものは必ず日本語にしてください。",
+  "- Operating Profit・Backlog・Turn等の既にゲーム内で使われている用語は、",
+  "  そのまま日本語の文中で使ってかまいません（用語を無理に訳す必要はありません）。",
+  "",
+  "  悪い例: \"We're entering Turn 2 with solid cash reserves of $49.2M...\"",
+  "  良い例: 「Turn 2開始時点では、現金約4,920万ドルを確保しており、財務面には",
+  "  一定の余裕があります。一方で、生産能力と原料確保が今期の主要な運営上の",
+  "  制約になりつつあります。」",
   "",
   "【最重要原則（実装指示§1）】",
   "- 差分計算（数値のcurrent/previous/delta）は、あなたではなくserver側が既に",

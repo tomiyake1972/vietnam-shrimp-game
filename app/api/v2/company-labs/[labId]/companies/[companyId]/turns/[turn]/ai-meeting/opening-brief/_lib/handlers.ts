@@ -267,7 +267,10 @@ export async function handleGetOpeningBrief(
         available: false,
         cached: false,
         meetingId,
-        unavailableReason: "Opening Executive Briefは現在利用できません。しばらくしてから再度お試しください。",
+        // 【Opening Brief Japanese Output Enforcement】fallback文言も日本語であることを固定する
+        // （AMM-LANG-5）。Claude呼び出し失敗時でも英語の文言をUIへ出さない。
+        unavailableReason:
+          "AI Management MeetingのOpening Briefを生成できませんでした。必要に応じて経営陣へ質問してください。",
         diagnostics: generated.diagnostics,
       },
     };
