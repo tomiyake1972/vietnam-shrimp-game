@@ -56,7 +56,11 @@ import {
   setActiveSimulationRunId,
 } from "../lib/simulationRunStore";
 import { persistResumableRun } from "../lib/persistRun";
+import { computeFinalEvaluationSnapshot, buildGameEndedRun, isGameFinished, lastCompletedTurn } from "../lib/gameEnd";
 import { SeriesChart } from "./SeriesChart";
+import { FinalResultsSummary } from "./FinalResultsSummary";
+import { FinalResultsCharts } from "./FinalResultsCharts";
+import { FinalDataDownloadButton } from "./FinalDataDownloadButton";
 import { CompanyInspector } from "./CompanyInspector";
 import { MarketSummary } from "./MarketSummary";
 import { ScenarioNewsPanel } from "./ScenarioNewsPanel";
@@ -174,6 +178,10 @@ export function ManagementConsole() {
   const [confirmedPlayerDecisions, setConfirmedPlayerDecisions] = useState<Readonly<Record<string, CompanyDecisionInput>>>({});
   const [confirmedPlayerDrafts, setConfirmedPlayerDrafts] = useState<Readonly<Record<string, CompanyDecisionDraft>>>({});
   const [waitingForPlayerCompanyIds, setWaitingForPlayerCompanyIds] = useState<readonly string[]>([]);
+
+  // --- 【Game End / Final Results・END-1】任意TurnでGame Masterがゲームを終了する ---
+  const [gameEndConfirmOpen, setGameEndConfirmOpen] = useState(false);
+  const [endingGame, setEndingGame] = useState(false);
 
   /** 新しい実行を始めるときは、経営モード・確定済み意思決定をすべてdefaultへ戻す（指示§3/§29/§30）。 */
   const resetControlState = useCallback(() => {
@@ -420,6 +428,35 @@ export function ManagementConsole() {
   );
 
   /**
+   * 【Game End / Final Results・END-1】GMが確認ダイアログで確定した瞬間に呼ぶ。
+   * 新しい評価ロジックは持たず、既存evaluation service（computeAllCompaniesEvaluationSnapshot）
+   * を現在Turnで1回呼び、その結果をFinal Snapshotとしてrunへ焼き込んで保存するだけ。
+   * 【Reopenは今回無い(指示§3)】gameEndedAtは一度設定したら、このConsoleから解除する
+   * 手段を一切持たない（サーバー側のmutation lockとあわせて、以後この会社の
+   * Advance Turn・Decision変更は構造的にできなくなる）。
+   */
+  const handleEndGame = useCallback(async () => {
+    if (!view?.session) return;
+    setEndingGame(true);
+    const session = view.session;
+    const gameEndTurn = lastCompletedTurn(session);
+    const snapshot = computeFinalEvaluationSnapshot(session);
+    const finishedAt = nowIso();
+    const endedRun = buildGameEndedRun(session.run, gameEndTurn, finishedAt, snapshot);
+    const endedSession: SimulationSession = { ...session, run: endedRun };
+    setView(viewFromSession(endedSession));
+    const ok = await persist(endedSession, companyControlModes, confirmedPlayerDecisions);
+    setEndingGame(false);
+    setGameEndConfirmOpen(false);
+    if (!ok) {
+      setErrorMessage(
+        "ゲーム終了状態の保存に失敗しました。この画面を再読み込みすると、保存が実際に成立したかどうか確認できます" +
+          "（画面下部の保存先表示も参照してください）。"
+      );
+    }
+  }, [view, persist, companyControlModes, confirmedPlayerDecisions]);
+
+  /**
    * 【Management Console Vision Calibration・指示§12】実行中のRunへVision
    * overrideを適用する。session.state.config.visionOverridesを更新した新しい
    * sessionへ差し替えるだけで、過去Turnのcapture・現在の意思決定計算そのものは
@@ -430,7 +467,8 @@ export function ManagementConsole() {
    */
   const handleApplyVisionOverride = useCallback(
     (companyId: string, entry: CompanyVisionOverrideEntry) => {
-      if (!view?.session) return;
+      // 【Game End / Final Results・指示§5】終了後はUI操作でも変更しない。
+      if (!view?.session || isGameFinished(view.run)) return;
       const updated = applyVisionOverrideToSession(view.session, companyId, entry);
       setView(viewFromSession(updated));
       void persist(updated, companyControlModes, confirmedPlayerDecisions);
@@ -440,7 +478,7 @@ export function ManagementConsole() {
 
   const handleResetVisionOverride = useCallback(
     (companyId: string) => {
-      if (!view?.session) return;
+      if (!view?.session || isGameFinished(view.run)) return;
       const updated = resetVisionOverrideForSessionCompany(view.session, companyId);
       setView(viewFromSession(updated));
       void persist(updated, companyControlModes, confirmedPlayerDecisions);
@@ -450,6 +488,12 @@ export function ManagementConsole() {
 
   const runInternal = useCallback(
     async (turns: number) => {
+      // 【Game End / Final Results・指示§3/§5】終了済みのRunはTurnを進めない
+      // （ボタン側もdisabledにするが、ここでも構造的に拒否する。二重の砦）。
+      if (isGameFinished(view?.run)) {
+        setErrorMessage("このRunは既にGame Masterによって終了しています。Turnを進めることはできません。");
+        return;
+      }
       // 【Persistence Architecture Phase 3・指示§6/§8】サーバー保存（正本）が
       // 失敗している場合、見た目のTurnだけ進んで保存正本が追いつかない状態を許さない
       // （ブラウザの軽量キャッシュはgameplay resumeを保証する層ではないため、
@@ -615,6 +659,8 @@ export function ManagementConsole() {
    */
   const handleChangeControlMode = useCallback(
     (companyId: string, mode: CompanyControlMode) => {
+      // 【Game End / Final Results・指示§5】終了後は経営モードも変更しない。
+      if (isGameFinished(view?.run)) return;
       setCompanyControlModes((prev) => {
         const next = { ...prev, [companyId]: mode };
         const session = view?.session;
@@ -677,6 +723,15 @@ export function ManagementConsole() {
   const busy = phase !== "idle";
   const isComplete = completedTurns >= MANAGEMENT_CONSOLE_STANDARD_TURNS;
   const isRestoredOnly = view !== null && view.session === null && completedTurns > 0;
+  // 【Game End / Final Results・指示§5/§13】gameEndedAtが立っていればこのRunはFINISHED。
+  // 32Turn固定ではなく、任意Turnでこの状態になり得る。
+  const finished = isGameFinished(view?.run ?? null);
+  // 【指示§4】保存済みFinal Snapshotを優先する。無い（旧形式Run等）場合だけ、
+  // 生きたsessionがあればその場でcomputeAllCompaniesEvaluationSnapshotへフォールバックする
+  // （新しい計算式は一切持たない・既存関数の呼び出しのみ）。
+  const finalSnapshot = finished
+    ? (view?.run.finalEvaluationSnapshot ?? (view?.session ? computeFinalEvaluationSnapshot(view.session) : null))
+    : null;
 
   // 【Dynamic Scenario 1 Testplay】そのターンに公開してよいシナリオNews。
   // 実行中のセッションがあればシナリオが今いるターン、保存済み実行を眺めている
@@ -700,6 +755,39 @@ export function ManagementConsole() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
+      {/* 【Game End / Final Results・指示§3】確認なしに即終了しない。 */}
+      {gameEndConfirmOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" data-testid="end-game-confirm-dialog">
+          <div className="w-full max-w-md rounded-lg border-2 border-amber-500 bg-slate-900 p-4 shadow-xl">
+            <h2 className="mb-2 text-base font-bold text-amber-300">ゲームを終了しますか？</h2>
+            <p className="text-sm leading-relaxed text-slate-200">
+              現在の Turn{view?.session ? lastCompletedTurn(view.session) : ""}でゲームを終了します。
+              終了後は意思決定やTurn進行はできません。最終成績が確定します。
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setGameEndConfirmOpen(false)}
+                disabled={endingGame}
+                data-testid="end-game-cancel"
+                className="rounded border border-slate-600 px-3 py-1.5 text-sm hover:bg-slate-800 disabled:opacity-40"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleEndGame()}
+                disabled={endingGame}
+                data-testid="end-game-confirm"
+                className="rounded bg-amber-600 px-3 py-1.5 text-sm font-bold text-slate-950 hover:bg-amber-500 disabled:opacity-40"
+              >
+                {endingGame ? "終了処理中…" : "このTurnでゲームを終了"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* ---------------- TOP BAR ---------------- */}
       <header className="sticky top-0 z-10 border-b border-slate-700 bg-slate-900/95 px-4 py-2.5 backdropblur">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -728,21 +816,33 @@ export function ManagementConsole() {
           </dl>
 
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
-            <button type="button" onClick={() => run(1)} disabled={busy || restoring || persistenceBlocked} data-testid="run-1"
+            <button type="button" onClick={() => run(1)} disabled={busy || restoring || persistenceBlocked || finished} data-testid="run-1"
               className="rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40">
               1 Turn
             </button>
-            <button type="button" onClick={() => run(4)} disabled={busy || restoring || persistenceBlocked} data-testid="run-4"
+            <button type="button" onClick={() => run(4)} disabled={busy || restoring || persistenceBlocked || finished} data-testid="run-4"
               className="rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40">
               4 Turns
             </button>
-            <button type="button" onClick={() => run(MANAGEMENT_CONSOLE_STANDARD_TURNS)} disabled={busy || restoring || persistenceBlocked} data-testid="run-32"
+            <button type="button" onClick={() => run(MANAGEMENT_CONSOLE_STANDARD_TURNS)} disabled={busy || restoring || persistenceBlocked || finished} data-testid="run-32"
               className="rounded bg-emerald-700 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40">
               32 Turns
             </button>
             <button type="button" onClick={() => { stopRequested.current = true; setPhase("stopping"); }} disabled={phase !== "running"} data-testid="stop"
               className="rounded bg-rose-700 px-3 py-1.5 text-sm font-semibold hover:bg-rose-600 disabled:opacity-40">
               STOP
+            </button>
+            {/* 【Game End / Final Results・指示§3】通常のTurn進行ボタンとは視覚的に
+                明確に区別する（独立した危険操作色・太い枠）。押下では即終了せず、
+                確認ダイアログを開くだけ。 */}
+            <button
+              type="button"
+              onClick={() => setGameEndConfirmOpen(true)}
+              disabled={!view?.session || busy || restoring || finished}
+              data-testid="end-game"
+              className="rounded border-2 border-amber-400 bg-amber-950/60 px-3 py-1.5 text-sm font-bold text-amber-300 hover:bg-amber-900 disabled:opacity-40"
+            >
+              ⏹ ゲームを終了
             </button>
             <button type="button" onClick={reset} disabled={busy}
               className="rounded border border-slate-600 px-3 py-1.5 text-sm hover:bg-slate-800 disabled:opacity-40">
@@ -933,6 +1033,39 @@ export function ManagementConsole() {
       <div className="flex flex-col gap-3 p-3 lg:flex-row">
         {/* LEFT: Game Overview 約65% */}
         <main className="flex flex-col gap-3 lg:w-[65%]">
+          {/* 【Game End / Final Results・指示§16】GM側もFinal Ranking・TSV・
+              5社チャート・Final Data Downloadを見られるようにする。GMはこの下に
+              既存のCompany Inspector・TSV Leaderboard等でさらに詳細（Cash・Debt等）を
+              確認できるため、ここではPlayer公開範囲と同じ表（TSV/DividendValue/
+              CurrentCompanyValue止まり）を「公式Final Ranking」として出す（指示§16「conflateしない」）。 */}
+          {finished && view && finalSnapshot ? (
+            <section className="rounded-lg border-2 border-amber-600 bg-amber-950/10 p-3" data-testid="gm-final-results">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-bold text-amber-300">ゲーム終了 — Final Results（Game Master向け）</h2>
+                <span className="rounded bg-amber-900/60 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200">FINISHED</span>
+              </div>
+              <FinalResultsSummary
+                snapshot={finalSnapshot}
+                fixtures={view.session?.fixtures ?? fixtures}
+                gameEndTurn={view.run.gameEndTurn ?? completedTurns}
+                finishedAt={view.run.gameEndedAt ?? "－"}
+                testIdPrefix="gm-final-results-summary"
+              />
+              <div className="mt-3">
+                <FinalResultsCharts
+                  dataset={view.dataset}
+                  history={view.session?.state.history ?? []}
+                  fixtures={view.session?.fixtures ?? fixtures}
+                  gameEndTurn={view.run.gameEndTurn ?? completedTurns}
+                  highlightKey={selectedCompanyId}
+                />
+              </div>
+              <div className="mt-3">
+                <FinalDataDownloadButton run={view.run} fixtures={view.session?.fixtures ?? fixtures} session={view.session} />
+              </div>
+            </section>
+          ) : null}
+
           <SeriesChart
             title="Revenue Trend（5社 / 32Q）"
             series={revenueSeries}

@@ -23,9 +23,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "../../company-lab/decisionDraft";
-import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
+import { extractCompanyCapexResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
-import { computeCurrentDividendValueUsd } from "../../../lib/v2/companyLab/evaluation/evaluationSemantics";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../../lib/v2/companyLab/standardAi/policy";
 import { resolveStandardAiProfileForMode } from "../../../lib/v2/companyLab/standardAi/orientationProfile";
@@ -36,10 +35,14 @@ import { getLiveSession, LiveSessionEntry, upsertLiveSession } from "../lib/live
 import { persistResumableRun } from "../lib/persistRun";
 import { selectScenarioNewsForTurn } from "../lib/scenarioNews";
 import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
+import { computeFinalEvaluationSnapshot, isGameFinished, lastCompletedTurn } from "../lib/gameEnd";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
 import { TsvLeaderboardPanel } from "../components/TsvLeaderboardPanel";
 import { ExportPackButton } from "../components/ExportPackButton";
+import { FinalResultsSummary } from "../components/FinalResultsSummary";
+import { FinalResultsCharts } from "../components/FinalResultsCharts";
+import { FinalDataDownloadButton } from "../components/FinalDataDownloadButton";
 import { CompanyDatabookButton } from "./CompanyDatabookButton";
 import { buildBacklogDisplay } from "./backlogView";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
@@ -212,9 +215,80 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const backlog = buildBacklogDisplay(summary, previousSummary);
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
-  const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
-  const currentDividendValueUsd = computeCurrentDividendValueUsd(session.state.history, companyId, turn);
   const controlMode = entry.companyControlModes[companyId] ?? "STANDARD_AI";
+
+  // 【Game End / Final Results・指示§5】FINISHED（gameEndedAt設定済み）なら、
+  // 通常のDecision Studio・タブ構成を一切表示しない。Player は Final Results・
+  // グラフ・ダウンロードだけを見られる（Decision変更・Submit・Advance Turn等の
+  // 導線はこの画面のどこにも存在しなくなる。server側のmutation lockと二重で守る）。
+  const gameFinished = isGameFinished(session.run);
+  if (gameFinished) {
+    // 【指示§4】保存済みFinal Snapshotを優先する。無ければ（旧形式Run）その場で
+    // 既存evaluation serviceを呼ぶだけ（新しい計算式は持たない）。
+    const finalSnapshot = session.run.finalEvaluationSnapshot ?? computeFinalEvaluationSnapshot(session);
+    const finalGameEndTurn = session.run.gameEndTurn ?? lastCompletedTurn(session);
+    const finalFinishedAt = session.run.gameEndedAt ?? "－";
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <header className="sticky top-0 z-10 border-b border-slate-700 bg-slate-900/95 px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h1 className="text-base font-bold tracking-tight" data-testid="workspace-heading">
+                {fixture.displayName}（{companyId}）— Final Results
+              </h1>
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                Scenario {session.run.scenarioId} / Seed {session.run.seed} / Run ID {session.run.simulationRunId}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded bg-amber-900/60 px-2 py-1 text-[11px] font-semibold text-amber-300" data-testid="workspace-finished-badge">
+                ゲーム終了済み（FINISHED）
+              </span>
+              <Link
+                href={consoleHref}
+                data-testid="workspace-back-to-console"
+                className="flex items-center gap-1.5 rounded border-2 border-slate-500 bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-100 hover:border-slate-400 hover:bg-slate-700"
+              >
+                <span aria-hidden="true">←</span> 経営管制室へ戻る
+              </Link>
+            </div>
+          </div>
+        </header>
+
+        <div className="mx-auto max-w-4xl space-y-3 p-3">
+          <FinalResultsSummary
+            snapshot={finalSnapshot}
+            fixtures={session.fixtures}
+            ownCompanyId={companyId}
+            gameEndTurn={finalGameEndTurn}
+            finishedAt={finalFinishedAt}
+            testIdPrefix="player-final-results"
+          />
+
+          <FinalResultsCharts dataset={dataset} history={session.state.history} fixtures={session.fixtures} gameEndTurn={finalGameEndTurn} highlightKey={companyId} />
+
+          <FinalDataDownloadButton run={session.run} fixtures={session.fixtures} session={session} />
+
+          <div className="rounded-lg border border-emerald-800/60 bg-emerald-950/20 p-3">
+            <h2 className="mb-1 text-sm font-semibold text-emerald-300">会社Databook（{companyId}だけの最終データ）</h2>
+            <p className="mb-2 text-[11px] text-slate-400">PL・BS・CF・契約・在庫・工場・借入等、通常プレイと同じ内容をこの会社ぶんだけ出力します。</p>
+            <CompanyDatabookButton session={session} companyId={companyId} />
+          </div>
+
+          <div>
+            <p className="mb-1 text-[11px] text-slate-500">ⓘ 以下はこのRun全体（5社ぶん）の、研究用AI Analysis Packです。</p>
+            <ExportPackButton
+              simulationRunId={session.run.simulationRunId}
+              scenarioId={session.run.scenarioId}
+              seed={session.run.seed}
+              completedTurns={session.run.completedTurns}
+              compact
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -453,11 +527,9 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               // 会社の数値をclientから送らない。
               simulationRunId={runId}
               companyName={fixture.displayName}
-              // 【DIV-1由来】lastQuarterDividendResult・currentDividendValueUsdは計算済みの
-              // まま保持する（Final Results画面での自社Dividend Value表示に使う）。Decision
-              // Studioの意思決定入力フロー自体にはまだ配当入力UIが無いため渡さない
-              // （既存のDecisionEditorベースの配当UIをDecision Studioへ移植するのは今回の
-              // Game End / Final Results実装のスコープ外）。
+              // 【DIV-1由来】Decision Studioの意思決定入力フロー自体にはまだ配当入力UIが
+              // 無いため渡さない（既存のDecisionEditorベースの配当UIをDecision Studioへ
+              // 移植するのは今回のGame End / Final Results実装のスコープ外）。
             />
           </div>
         ) : null}

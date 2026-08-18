@@ -13,6 +13,7 @@ import type { ObservedDemandSnapshot } from "./analytics/dataset";
 import type { PackCapitalProject, PackCompanyStateSnapshot, PackStrategy, PackWorldTurn } from "./aiPack/types";
 import type { CompanyLabRuntimeSnapshot } from "../persistence/types";
 import type { SimulationAnalyticsDataset } from "./analytics/types";
+import type { CompanyEvaluationSnapshot } from "../evaluation/evaluationSemantics";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -84,6 +85,24 @@ export interface SimulationRun {
   readonly companyControlModes?: Readonly<Record<string, CompanyControlMode>>;
   /** 【Phase 8・Game Setup】Setup画面で任意入力できるRun名・メモ。未入力ならundefined。 */
   readonly runName?: string;
+  /**
+   * 【Game End / Final Results・END-1】Game Masterが任意Turnでゲームを終了した日時
+   * （metadata。判断には使わない）。未設定＝ゲームはまだ進行中（ACTIVE）。
+   * 設定済み＝ゲームは終了済み（FINISHED）で、以後Turn進行・Decision変更は拒否する
+   * （既存のstopReason/completedAtとは別概念。あちらは「要求ターン数を使い切った」を表し、
+   * こちらは「任意Turnで公式に終了を確定した」を表す）。
+   */
+  readonly gameEndedAt?: string | null;
+  /** ゲームを終了した時点のTurn番号（Final Resultsの基準Turn）。gameEndedAtとセットで設定する。 */
+  readonly gameEndTurn?: number | null;
+  /**
+   * 【指示§4】ゲーム終了時点で確定した公式Final Snapshot。既存のevaluation service
+   * （computeAllCompaniesEvaluationSnapshot、唯一のsource of truth）が返す結果を
+   * そのまま保存するだけで、UI側で新しい計算式は持たない。Final Results表示は
+   * 将来のmodel/DCF/WACC変更が既に終了したゲームの公式結果を遡及して変えないよう、
+   * 可能な限りこの保存済みsnapshotを優先して使う。
+   */
+  readonly finalEvaluationSnapshot?: readonly CompanyEvaluationSnapshot[] | null;
 }
 
 /** 実行中のセッション（状態 + fixtures + run メタデータ）。 */
