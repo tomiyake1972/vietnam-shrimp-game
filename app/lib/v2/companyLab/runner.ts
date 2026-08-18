@@ -566,6 +566,10 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // financialHealth等）をそのまま渡す。新しい計算はしない。まだ1Turnも
     // 確定していない場合（lastRecordが無い）はundefined。
     lastFinancingResult: lastRecord?.financingResults.find((f) => f.companyId === fixture.companyId),
+    // 【Phase DIV-4】直近確定四半期の財務諸表（P&L・BS・CF）。lastFinancingResultと
+    // まったく同じ規約で、既にstate.historyへ保存済みの値を1件そのまま渡すだけ
+    // （新しい会計計算はしない）。Standard AI配当ポリシーが当期純利益のsourceとして使う。
+    lastFinancialResult: lastRecord?.financialResults.find((f) => f.companyId === fixture.companyId),
     capexState: capexStateForCompany,
     workforceState: workforceStateForCompany,
     salesForceHiringState: salesForceHiringStateForCompany,

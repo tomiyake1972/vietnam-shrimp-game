@@ -300,6 +300,37 @@ export interface StandardAiParameters {
    * （三宅さんご指示§23 capacity bufferに対応する簡易版）。
    */
   readonly targetScaleWithinBandTolerance: number;
+
+  // --- 【Phase DIV-3新設・DIV-4で意味を変更】Standard AI配当ポリシー ---
+  /**
+   * 【Phase DIV-4】基準配当性向。Standard AIが「配当してよい」と判断した年度末（Q4）に、
+   * **直近確定四半期の当期純利益（flow）** の何割を配当するかの比率。
+   *
+   * 【DIV-3からの変更】DIV-3ではこの比率を`distributableEarnings`（game-start以降の
+   * 累計利益stock）へ掛けていた。それは「過去利益を毎四半期一定割合ずつ繰り返し
+   * 取り崩す」挙動になり、period payout policyの基準として正しくない（DIV-3
+   * ベンチマークでratio=10%以上が会社の運転資金を枯渇させることも実測された）。
+   * DIV-4では算定baseを当期純利益へ変更し、`distributableEarnings`は
+   * `computeMaxDividendUsd`経由の **上限** としてのみ使う。
+   *
+   * 【値の由来】DIV-4実装指示§6「Flow + annual frequencyへ変更後、15%を中心値として
+   * 再benchmark」に従い、10/15/20/25%（＋0%と、DIV-3暫定値5%のcontrol）を
+   * scripts/tsvLeaderboardBenchmark.ts（Benchmark 3〜5）で比較した。15%は
+   * 既存頑健性回帰CCI-9と同一条件の4seedすべてでPASSし、TSVもpayout ratioに対して
+   * 全社一様には上昇しない（支配戦略化していない）ことを確認した中心値である。
+   *
+   * 【この値は「配当額の上限」ではない】実際の配当額は、必ず
+   * finance/dividend.tsのcomputeMaxDividendUsd（＝min(Cash, distributableEarnings)、
+   * Playerとまったく同じ単一の会計ソース）でクランプされる。AI専用の上限は作らない。
+   *
+   * 【経営性格バイアスの適用先】ManagementProfile.dividendPropensityRatioは、
+   * 既存の他の比率バイアスとまったく同じ枠組み（±5%、最大±10%）で、この値に
+   * 乗算される（managementProfile.tsのderiveStandardAiParameters参照）。
+   *
+   * 【0にすると配当ポリシー自体が無効化される】ベンチマークのAI配当OFF側は、
+   * この値を0にすることで実現する（別のフラグ・別の分岐を増やさない）。
+   */
+  readonly dividendBasePayoutRatio: number;
 }
 
 /**
@@ -386,6 +417,10 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   // 主軸とすることでTarget Scale Bandの粘着性を構造的に確保する（1.0=能力のみ）。
   targetScaleCapacityWeightInBaseline: 1.0,
   targetScaleWithinBandTolerance: 0.05,
+
+  // 【Phase DIV-4】実装指示§6の中心値15%。Flow基準＋年1回へ変更したうえで
+  // 10/15/20/25%を再benchmarkし、CCI-9頑健性・支配戦略診断ともに問題ないことを確認済み。
+  dividendBasePayoutRatio: 0.15,
 };
 
 // ---------------------------------------------------------------------
