@@ -545,6 +545,15 @@ export function buildMeetingUserMessage(input: BuildUserMessageInput): string {
 // v2で出力言語を日本語に明示する（下記【出力言語】節）。
 export const OPENING_BRIEF_PROMPT_VERSION = "v2";
 
+/**
+ * 【Opening Brief Japanese Output Enforcement】Claude呼び出し失敗時にUIへ出す文言。
+ * Opening Briefはcompany-labs経路（api/.../opening-brief/_lib/handlers.ts）と
+ * simulation-runs経路（aiManagementMeeting/session.ts）の2箇所から生成されるため、
+ * 片方だけ英語のまま残る事故を防ぐよう文言をここへ集約する（AMM-LANG-5）。
+ */
+export const OPENING_BRIEF_UNAVAILABLE_REASON_JA =
+  "AI Management MeetingのOpening Briefを生成できませんでした。必要に応じて経営陣へ質問してください。";
+
 export const OPENING_BRIEF_SYSTEM_PROMPT = [
   "あなたはShrimpX（エビ加工・輸出会社の経営シミュレーション）のCEOです。",
   "新しいTurnの意思決定画面に入ったプレイヤーへ、前四半期から何が変わったかを",

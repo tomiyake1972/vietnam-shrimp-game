@@ -18,7 +18,7 @@ import { CompanyLabApiDependencies } from "../dependencies";
 import { AiMeetingApiDependencies } from "../../[labId]/companies/[companyId]/turns/[turn]/ai-meeting/messages/_lib/dependencies";
 import { handlePostAiMeetingMessage } from "../../[labId]/companies/[companyId]/turns/[turn]/ai-meeting/messages/_lib/handlers";
 import { handleGetOpeningBrief } from "../../[labId]/companies/[companyId]/turns/[turn]/ai-meeting/opening-brief/_lib/handlers";
-import { OPENING_BRIEF_PROMPT_VERSION, OPENING_BRIEF_SYSTEM_PROMPT } from "../../../../../lib/v2/companyLab/aiManagementMeeting/prompt";
+import { OPENING_BRIEF_PROMPT_VERSION, OPENING_BRIEF_SYSTEM_PROMPT, OPENING_BRIEF_UNAVAILABLE_REASON_JA } from "../../../../../lib/v2/companyLab/aiManagementMeeting/prompt";
 import { OPENING_BRIEF_TOOL_INPUT_SCHEMA } from "../../../../../lib/v2/companyLab/aiManagementMeeting/claudeClient";
 
 const NOW = "2026-08-17T00:00:00.000Z";
@@ -254,6 +254,27 @@ test("AMM-LANG-5: Claude呼び出し失敗時のfallback文言が日本語であ
   assert.equal(body.available, false);
   assert.ok(body.unavailableReason, "fallback文言が返るはず");
   assert.ok(containsJapanese(body.unavailableReason!), `fallback文言が日本語でない: ${body.unavailableReason}`);
+});
+
+test("AMM-LANG-5c: Opening Briefのfallback文言は共有定数であり、両生成経路（company-labs / simulation-runs）で同一・日本語である", async () => {
+  // Opening Briefはcompany-labs経路（handlers.ts）とsimulation-runs経路（session.ts、
+  // CURRENT PLAYTESTのPlayer Workspaceが通る側）の2箇所から生成される。
+  // 片方だけ英語のまま残る事故を防ぐため、文言はprompt.tsの1定数へ集約している。
+  assert.ok(containsJapanese(OPENING_BRIEF_UNAVAILABLE_REASON_JA));
+  assert.ok(!/[A-Za-z]{4,}\s+[A-Za-z]{4,}\s+[A-Za-z]{4,}/.test(OPENING_BRIEF_UNAVAILABLE_REASON_JA), "英語の文になっていてはいけない");
+
+  const deps = makeDeps();
+  await createBaselineLab(deps, "lab-lang-5c");
+  const failingClient: AnthropicMessagesClient = {
+    messages: {
+      create: async () => {
+        throw Object.assign(new Error("boom"), { status: 500 });
+      },
+    },
+  };
+  const result = await handleGetOpeningBrief(deps, "lab-lang-5c", "BAL", "1", failingClient);
+  const body = result.body as { unavailableReason?: string };
+  assert.equal(body.unavailableReason, OPENING_BRIEF_UNAVAILABLE_REASON_JA, "company-labs経路は共有定数を返すはず");
 });
 
 test("AMM-LANG-5b: Playerが既に発言済みの場合のunavailableReasonも日本語である", async () => {
