@@ -463,7 +463,7 @@ export const OPENING_BRIEF_TOOL_INPUT_SCHEMA = {
   type: "object",
   properties: {
     speaker: { type: "string", enum: ["CEO"], description: "Opening BriefはCEO固定。他のExecutiveは選べない。" },
-    summary: { type: "string", description: "全体の短い要約（1-2文）。" },
+    summary: { type: "string", description: "全体の短い要約（1-2文）。必ず日本語で書くこと。" },
     keyChanges: {
       type: "array",
       maxItems: AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefKeyChanges,
@@ -473,8 +473,8 @@ export const OPENING_BRIEF_TOOL_INPUT_SCHEMA = {
         properties: {
           domain: { type: "string", enum: OPENING_BRIEF_DOMAIN_ENUM },
           direction: { type: "string", enum: OPENING_BRIEF_DIRECTION_ENUM },
-          title: { type: "string", description: "短い見出し（例: 'Operating Profit turned negative'）。" },
-          explanation: { type: "string", description: "1-2文の経営的解釈。事実(fact)には無い原因を捏造しないこと。原因が特定できない場合はその旨を述べる。" },
+          title: { type: "string", description: "短い見出し。必ず日本語で書くこと（例: 'Operating Profitが赤字に転落'）。" },
+          explanation: { type: "string", description: "1-2文の経営的解釈。必ず日本語で書くこと。事実(fact)には無い原因を捏造しないこと。原因が特定できない場合はその旨を述べる。" },
           factsUsed: { type: "array", items: { type: "string" }, maxItems: AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefFactsUsedPerChange },
           confidence: { type: "string", enum: OPENING_BRIEF_CONFIDENCE_ENUM, description: "HIGH=deterministicな事実関係、MEDIUM=妥当な経営解釈、LOW=見通し・不確実な原因。" },
         },
@@ -484,7 +484,7 @@ export const OPENING_BRIEF_TOOL_INPUT_SCHEMA = {
     suggestedFollowUps: {
       type: "array",
       maxItems: AI_MEETING_PROPOSAL_LIMITS.maxOpeningBriefSuggestedFollowUps,
-      description: "プレイヤーが次に聞きたくなりそうな質問の例（2-4件）。",
+      description: "プレイヤーが次に聞きたくなりそうな質問の例（2-4件）。必ず日本語で書くこと。",
       items: { type: "string" },
     },
     memoryUsedIds: {
@@ -519,7 +519,7 @@ async function attemptOpeningBriefOnce(
   const startedAt = Date.now();
   const toolDef: AnthropicToolDefinition = {
     name: OPENING_BRIEF_TOOL_NAME,
-    description: "Turn開始時のOpening Executive Brief（CEOによる前四半期からの変化の短い要約）を提出する。",
+    description: "Turn開始時のOpening Executive Brief（CEOによる前四半期からの変化の短い要約）を提出する。文章フィールドはすべて日本語で記述する。",
     input_schema: OPENING_BRIEF_TOOL_INPUT_SCHEMA,
   };
 
