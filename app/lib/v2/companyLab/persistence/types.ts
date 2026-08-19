@@ -37,6 +37,7 @@ import type { CommercialHistoryState } from "../commercialHistoryState";
 import type { MarketEvolutionState } from "../marketEvolution";
 import type { ConsumerMarketCarryStateTable } from "../../market/consumerInventory";
 import type { PdMechanizationState } from "../pdMechanizationState";
+import type { FactoryLifecycleStateTable } from "../../capex/factoryLifecycle";
 import type { ProductDevelopmentState } from "../productDevelopmentState";
 
 // ---------------------------------------------------------------------
@@ -142,7 +143,7 @@ import type { ProductDevelopmentState } from "../productDevelopmentState";
  *        （develop/v2の5・6とは意味の異なる別の変更であるため、単純な
  *        5→6への読み替えではなく、develop/v2の6の続き番号として7を採番した）。
  */
-export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 7;
+export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 8;
 
 // ---------------------------------------------------------------------
 // 1. ランタイムスナップショット（history非包含。§2-1・§2-2）
@@ -243,6 +244,16 @@ export interface CompanyLabRuntimeSnapshot {
    * findPreviousQuarterPdUtilizationが既定どおりinitialPdUtilizationRatio(0.0)
    * を返す（履歴からの再構築・推測値の捏造はしない）。
    */
+  /**
+   * 【ENG-FAC-1・schemaVersion 8で追加】会社別のFactory lifecycle決定ログ
+   * （工場の一時休止・再稼働・売却。capex/factoryLifecycle.ts）。optional。
+   * キー欠落（v1〜v7）はundefinedとして復元し、全工場OPERATING扱いになる
+   * （決定ログが空であることと厳密に同義であり、推測値の捏造は不要）。
+   *
+   * 保存量は1工場あたり最大でも決定件数ぶんの小さなレコードであり、四半期ごとに
+   * 際限なく増える種類のデータではない（履歴エントリへ複製されても影響は小さい）。
+   */
+  readonly factoryLifecycleState?: FactoryLifecycleStateTable;
   readonly pdMechanizationState?: PdMechanizationState;
   /**
    * 【Test15・schemaVersion 7で追加】会社単位のVAP商品開発スコア（前四半期末

@@ -59,3 +59,38 @@ export function computeExistingAssetDepreciationUsd(
 
   return { buildingUsd, machineryUsd, totalUsd: buildingUsd + machineryUsd };
 }
+
+/**
+ * 【ENG-FAC-1追加】既存固定資産の**累計**減価償却額を、上と全く同じ閉形式から導出する。
+ *
+ * 【新しい台帳を作らないこと】computeExistingAssetDepreciationUsdは各四半期の
+ * 償却額が「配分額 ÷ 残存耐用年数」で一定（耐用年数を過ぎたら0）という構造なので、
+ * 累計は「経過四半期数を耐用年数で頭打ちにした回数 × 1回分」で厳密に再構成できる。
+ * したがって工場別NBVの導出のために別途の固定資産台帳を新設する必要はない
+ * （実装指示§1「新しい工場別Fixed Asset Ledgerを新設して既存BSを再定義しない」）。
+ *
+ * 【会社BSが最終SSoTであること】本関数は会計上の実績値そのものではなく、
+ * 会社BSのaccumulatedDepreciationを工場別へ説明するためのderived projectionである。
+ * quarterClose側には極端なデータ不整合に対する純額フロアがあり、それが効いた場合は
+ * 本関数の値と実績がずれうる。そのため呼び出し側（capex/factoryAssetProjection.ts）は
+ * 必ず会社BSの実績値でクランプし、除却額が会社BSを超えないことを保証する。
+ */
+export function computeExistingAssetAccumulatedDepreciationUsd(
+  openingGrossUsd: number,
+  gameStartPeriod: PeriodV2,
+  currentPeriod: PeriodV2,
+  params: FinanceParameters
+): ExistingAssetDepreciation {
+  const cfg = params.finance.existingAssetDepreciation;
+  const buildingOpeningUsd = openingGrossUsd * cfg.buildingOpeningRatio;
+  const machineryOpeningUsd = openingGrossUsd * cfg.machineryOpeningRatio;
+  const elapsedQuarters = Math.max(0, quartersBetween(gameStartPeriod, currentPeriod) + 1);
+
+  const buildingQuarters = Math.min(elapsedQuarters, cfg.buildingRemainingLifeQuartersAtGameStart);
+  const machineryQuarters = Math.min(elapsedQuarters, cfg.machineryRemainingLifeQuartersAtGameStart);
+
+  const buildingUsd = (buildingOpeningUsd / cfg.buildingRemainingLifeQuartersAtGameStart) * buildingQuarters;
+  const machineryUsd = (machineryOpeningUsd / cfg.machineryRemainingLifeQuartersAtGameStart) * machineryQuarters;
+
+  return { buildingUsd, machineryUsd, totalUsd: buildingUsd + machineryUsd };
+}

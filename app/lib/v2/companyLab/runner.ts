@@ -39,7 +39,7 @@
 // （PD/VAP供給増加が当期のプレミアムを引き下げる、という受入条件を満たすために
 // 必須の配線）。
 
-import { PeriodV2 } from "../core/period";
+import { PeriodV2, previousPeriod } from "../core/period";
 import { HosoEqTons, hosoEqTons, ratio, roundHosoEqTons, Score0to100, score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { DOMESTIC_PURCHASE_GUARANTEE_TURN, clearDomesticReferencePrice } from "./domesticReferencePrice";
 import { buildObservedMarketDemand } from "./marketDemandObservation";
@@ -123,6 +123,7 @@ import {
 import {
   CompanyLoadMetrics,
   ContractFulfillmentPlan,
+  Factory,
   FinishedGoodsLot,
   FinishedGoodsUsageRecord,
   ProductionAllocationEntry,
@@ -187,6 +188,19 @@ import {
   closeQuarterWithCapex,
 } from "../capex";
 import type { CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
+import {
+  EMPTY_FACTORY_LIFECYCLE_STATE,
+  applyFactoryLifecycleDecisions,
+  findCompanyFactoryLifecycleState,
+  upsertCompanyFactoryLifecycleState,
+} from "../capex/factoryLifecycle";
+import type { FactoryLifecycleStateTable } from "../capex/factoryLifecycle";
+import { computeFactorySlotRelease, listOwnedFactoryIdsForCompany } from "../capex/factoryConstruction";
+import { attributeProjectToFactoryId, listDerecognizedCapexProjectIds } from "../capex/factoryAssetProjection";
+import { computeFactoryLifecycleAccounting } from "../capex/factoryDisposal";
+import type { FactoryLifecycleEvent } from "../capex/factoryDisposal";
+import { isActiveStatus } from "../capex/projectLifecycle";
+import { normalCashFixedFactoryCostUsdPerQuarter } from "../finance/parameters";
 import type { ProposalApprovalGate } from "../capex/projectLifecycle";
 import { calculateExternalProcessorIntent } from "./externalDemand";
 import { EXTERNAL_PROCESSOR_DEMAND_ASSUMPTIONS_V1, REFERENCE_WORLD_CONSUMPTION_TONS } from "./parameters";
@@ -503,6 +517,48 @@ export function initializeCompanyLab(config: CompanyLabConfig): CompanyLabInitRe
 }
 
 /** 自社ぶんに絞り込んだCompanyOwnStateを組み立てる（自動方針・プレイヤー入力編集の双方が使う）。 */
+/**
+ * 【ENG-FAC-1】当四半期のFactory lifecycle意思決定を検証・受理して決定ログへ追記する。
+ *
+ * 検証（capex/factoryLifecycle.ts validateFactoryLifecycleDecision）は
+ *   - 工場の実在
+ *   - 現在stateとの整合（OPERATINGでないと休止できない等）
+ *   - 最低1工場ルール（売却後の保有工場数 >= 1）
+ *   - 対象工場に未完了の設備投資案件が無いこと
+ * を課す。構造的な誤用はFactoryLifecycleValidationErrorとして送出され、
+ * 当四半期は一切適用されない（部分適用しない）。
+ *
+ * 会社固有の条件はここにもvalidate側にも存在しない（実装指示§21）。
+ */
+function applyFactoryLifecycleDecisionsForQuarter(
+  state: CompanyLabState,
+  fixtures: readonly CompanyFixture[],
+  decisions: readonly CompanyDecisionInput[],
+  baseFactories: readonly Factory[],
+  period: PeriodV2
+): FactoryLifecycleStateTable {
+  let table = state.factoryLifecycleState ?? EMPTY_FACTORY_LIFECYCLE_STATE;
+  // lifecycleを適用**しない**Factory[]（売却済みも含む全保有工場）を検証の母集合にする。
+  const factoriesBeforeLifecycle = computeEffectiveFactories(baseFactories, state.capexState, period);
+  for (const fixture of fixtures) {
+    const inputs = decisions.find((d) => d.companyId === fixture.companyId)?.factoryLifecycleDecisions ?? [];
+    if (inputs.length === 0) continue;
+    const prev = findCompanyFactoryLifecycleState(table, fixture.companyId) ?? { companyId: fixture.companyId, decisions: [] };
+    const primaryFactoryId = fixture.factories[0]?.factoryId;
+    const activeProjectFactoryIds = (state.capexState.companies.find((c) => c.companyId === fixture.companyId)?.portfolio.projects ?? [])
+      .filter((p) => isActiveStatus(p.status))
+      .map((p) => attributeProjectToFactoryId(p, primaryFactoryId))
+      .filter((id): id is string => id !== undefined);
+    const next = applyFactoryLifecycleDecisions(prev, inputs, {
+      ownedFactoryIds: listOwnedFactoryIdsForCompany(factoriesBeforeLifecycle, fixture.companyId, prev.decisions, period),
+      period,
+      activeProjectFactoryIds,
+    });
+    table = upsertCompanyFactoryLifecycleState(table, next);
+  }
+  return table;
+}
+
 export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFixture): CompanyOwnState {
   const lastRecord = state.history[state.history.length - 1];
   const factoryIds = new Set(fixture.factories.map((f) => f.factoryId));
@@ -548,7 +604,15 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
   // 会社に関する結果は一致する）。advanceCompanyLabQuarterと同じ「前四半期末
   // までのcapex状態」（state.capexState）を基準にする（当期の意思決定を作る
   // 本関数呼び出し時点では、当期のcapexクローズはまだ実行されていないため）。
-  const effectiveFactories = computeEffectiveFactories(fixture.factories, { companies: [capexStateForCompany] }, state.currentPeriod);
+  // 【ENG-FAC-1】lifecycle stateも同じcanonical pointへ渡す。これにより意思決定側
+  // （PLAYER画面・Standard AI）とエンジン処理が、休止中・売却済みの工場について
+  // 同じFactory[]を見ることが構造的に保証される。
+  const effectiveFactories = computeEffectiveFactories(
+    fixture.factories,
+    { companies: [capexStateForCompany] },
+    state.currentPeriod,
+    state.factoryLifecycleState
+  );
 
   return {
     companyId: fixture.companyId,
@@ -1296,7 +1360,25 @@ export function advanceCompanyLabQuarter(
   // capex/factoryConstruction.ts の computeEffectiveFactories（唯一の計算箇所）を
   // 経由する。buildCompanyOwnState（意思決定側）も同じ関数を呼ぶため、
   // プレイヤー入力画面とこのエンジン処理が異なるFactory[]を見ることは構造的にない。
-  const factoriesWithCapex = computeEffectiveFactories(baseFactories, state.capexState, state.currentPeriod);
+  // 【ENG-FAC-1】当期のFactory lifecycle意思決定（休止・再稼働・売却）を受理して
+  // 決定ログへ追記する。いずれも当期は通常操業のままで、効き始めるのは翌四半期
+  // （T+1）であるため、当期のFactory[]はこの追記によって変化しない
+  // （resolveFactoryLifecycleStateAtが決定期そのものを従前stateのまま返す）。
+  // 追記を先に済ませるのは、当期に売却を決定した工場を次四半期以降ぶれなく
+  // 追跡するためであり、当期の挙動を変えるためではない。
+  const factoryLifecycleStateAfterDecisions = applyFactoryLifecycleDecisionsForQuarter(
+    state,
+    fixtures,
+    decisions,
+    baseFactories,
+    state.currentPeriod
+  );
+  const factoriesWithCapex = computeEffectiveFactories(
+    baseFactories,
+    state.capexState,
+    state.currentPeriod,
+    factoryLifecycleStateAfterDecisions
+  );
   // 【Test15新設・PD省人化投資】当四半期の実効PD係数の上書きは、必ず「前四半期末
   // までのPD稼働率」（state.pdMechanizationState）と「前四半期末までのcapex状態」
   // （state.capexState、上のfactoriesWithCapex算出と同じ基準）から算出する。
@@ -1310,10 +1392,23 @@ export function advanceCompanyLabQuarter(
     factoriesWithCapex,
     state.currentPeriod
   );
+  // 【ENG-FAC-1】売却完了(SOLD)した工場は、当四半期のFactory[]から消えている
+  // （もはや保有していないため）。意思決定の作り手（PLAYER画面・Standard AI・
+  // autoPolicy）が売却前の工場一覧を基に生産計画・ワーカー配置を出していた場合に
+  // 備え、エンジン側で「存在しない工場宛の入力」を落とす。
+  //
+  // これはWorkerの自動削減ではない（実装指示§15）。落とすのは「どの工場で
+  // 働かせるか」という配置指示だけであり、正社員はそのまま会社に在籍し続けて
+  // 人件費も発生する（配属されない正社員は既存の遊休労務費 idleLaborCost として
+  // 当期費用に計上される）。人員そのものの縮小は別のDecisionの責任範囲である。
+  //
+  // MOTHBALLED・SALE_PENDINGの工場はFactory[]に残る（status=idle/suspended）ため
+  // ここでは落とされず、既存の能力0ロジックによって生産量が0になるだけである。
+  const existingFactoryIds = new Set(factoriesWithCapex.map((factory) => factory.factoryId));
   const productionInput: ProductionQuarterInput = {
     factories: factoriesWithCapex,
-    workerAssignments: decisions.flatMap((d) => d.workerAssignments),
-    plans: decisions.flatMap((d) => d.productionPlans),
+    workerAssignments: decisions.flatMap((d) => d.workerAssignments).filter((a) => existingFactoryIds.has(a.factoryId)),
+    plans: decisions.flatMap((d) => d.productionPlans).filter((p) => existingFactoryIds.has(p.factoryId)),
     companyCountry,
     pdCoefficientOverrideByFactoryId,
   };
@@ -1556,6 +1651,8 @@ export function advanceCompanyLabQuarter(
   // 【Phase DIV-1追加・実装指示§10】当期の会社別配当結果（要求額・適用額・
   // 却下有無・累積配当・時間加重配当価値）。
   const dividendResults: CompanyDividendQuarterResult[] = [];
+  /** 【ENG-FAC-1・実装指示§18】当四半期のFactory lifecycle監査イベント（全社分）。 */
+  const factoryLifecycleEvents: FactoryLifecycleEvent[] = [];
   for (const f of fixtures) {
     // 【Phase DIV-1追加】ループ1で配当控除済みのCompanyFinanceStateを唯一の
     // 期首状態として再利用する（state.financeState.companiesから再取得しない。
@@ -1566,6 +1663,29 @@ export function advanceCompanyLabQuarter(
     if (!prevFinance || !prevFinancingState || !prevCapexState) {
       throw new CompanyLabError(`会社 ${f.companyId} の財務・資金繰り・設備投資状態が初期化されていません。`);
     }
+
+    // 【ENG-FAC-1】Factory lifecycleの会計効果（carrying cost / holding cost /
+    // reactivation cost / PPE除却 / sale proceeds / disposal gain-loss）と監査イベント。
+    // lifecycle決定が1件も無い会社では undefined のままとし、既存の挙動を一切
+    // 変えない（baseline regressionの担保）。
+    const companyLifecycleState = findCompanyFactoryLifecycleState(factoryLifecycleStateAfterDecisions, f.companyId);
+    const lifecycleAccounting =
+      companyLifecycleState && companyLifecycleState.decisions.length > 0
+        ? computeFactoryLifecycleAccounting({
+            companyId: f.companyId,
+            period: state.currentPeriod,
+            decisions: companyLifecycleState.decisions,
+            baselineFactories: f.factories,
+            projects: prevCapexState.portfolio.projects,
+            companyFixedAssetsGrossUsd: unwrapUsd(prevFinance.fixedAssetsGross),
+            companyAccumulatedDepreciationUsd: unwrapUsd(prevFinance.accumulatedDepreciation),
+            normalCashFixedFactoryCostUsdPerQuarter: normalCashFixedFactoryCostUsdPerQuarter(FINANCE_PARAMETERS_V1),
+            financeParams: FINANCE_PARAMETERS_V1,
+            capexParams: CAPEX_PARAMETERS_V1,
+          })
+        : undefined;
+    if (lifecycleAccounting) factoryLifecycleEvents.push(...lifecycleAccounting.events);
+    const lifecycleDecisionsForCompany = companyLifecycleState?.decisions ?? [];
 
     // 【Phase DIV-1追加・実装指示§10・§11】配当履歴（要求額・適用額・累積・
     // 時間加重価値）を確定する。累積は過去の確定履歴（state.history）から
@@ -1728,6 +1848,25 @@ export function advanceCompanyLabQuarter(
         // 【Test15新設】newFactoryConstruction提案の1社あたり工場数上限（4工場）判定に使う、
         // この会社の既存（静的fixture）工場数。capex/factoryConstruction.ts参照。
         existingFactoryCount: f.factories.length,
+        // 【ENG-FAC-1・実装指示§13】売却完了した工場のスロットを解放する。
+        // SALE_PENDING中は解放しない（computeFactorySlotRelease参照）。
+        factorySlotRelease: computeFactorySlotRelease(f.factories, lifecycleDecisionsForCompany, state.currentPeriod),
+        // 【ENG-FAC-1】売却完了工場へ帰属するcapex資産の扱い。
+        //   - 前四半期までに除却済み → 既存資産の償却ベース復元から除外
+        //   - 当四半期時点で除却     → 当四半期の減価償却・固定保守費から除外（§12）
+        capexProjectIdsDerecognizedBeforePeriod: listDerecognizedCapexProjectIds(
+          prevCapexState.portfolio.projects,
+          f.factories,
+          lifecycleDecisionsForCompany,
+          previousPeriod(state.currentPeriod)
+        ),
+        capexProjectIdsDerecognizedAsOfPeriod: listDerecognizedCapexProjectIds(
+          prevCapexState.portfolio.projects,
+          f.factories,
+          lifecycleDecisionsForCompany,
+          state.currentPeriod
+        ),
+        factoryLifecycleAdjustment: lifecycleAccounting?.adjustment,
         // 【develop/v2統合・Phase2監査2-3】pdMechanization提案のtargetFactoryIdが実在するか
         // どうかの判定に使う、この会社の当四半期時点の実効Factory ID一覧（稼働開始済み
         // 新設Factoryを含む。factoriesWithCapexはcomputeEffectiveFactoriesの出力そのもの）。
@@ -1817,6 +1956,9 @@ export function advanceCompanyLabQuarter(
     financingResults,
     capexResults,
     dividendResults,
+    // 【ENG-FAC-1・実装指示§18】当四半期のFactory lifecycle監査イベント。
+    // 1件も無い四半期ではキー自体を持たせない（既存履歴と同一の形になる）。
+    ...(factoryLifecycleEvents.length > 0 ? { factoryLifecycleEvents } : {}),
     consumerMarketRecords,
     // 【SAI-5E】市場進化の因果ログ（機能有効時のみ。optionalのため既存の
     // 履歴形状・persistence・SAI-3Bパーサーへの影響はない）。
@@ -1851,6 +1993,11 @@ export function advanceCompanyLabQuarter(
     financeState: financeStateAfter,
     financingState: financingStateAfter,
     capexState: capexStateAfter,
+    // 【ENG-FAC-1】次期へ繰り越すFactory lifecycle決定ログ。当四半期に受理した
+    // 決定（休止・再稼働・売却）がここへ追記済みであり、翌四半期以降のstateは
+    // すべてこのログから導出される（別途の遷移状態を持たない）。決定が一度も
+    // 無いRunでは空のまま保存され、既存の保存物と同一の内容になる。
+    ...(factoryLifecycleStateAfterDecisions.companies.length > 0 ? { factoryLifecycleState: factoryLifecycleStateAfterDecisions } : {}),
     // 【Phase 8D-4】次期へ繰り越すWorker総人数は、当期にエンジンが実際に使った
     // WorkerAssignment の絶対人数そのもの。UI側の増減計算とずれないよう、
     // 差分を足し直すのではなく「実際に動かした人数」を保存する。

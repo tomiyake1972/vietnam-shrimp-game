@@ -84,3 +84,44 @@ export function computeCapexComponentDepreciationUsd(
 
   return { buildingUsd, machineryUsd, totalUsd: buildingUsd + machineryUsd };
 }
+
+/**
+ * 【ENG-FAC-1追加】新規capex資産の**累計**減価償却額を、上と同じ閉形式から導出する。
+ *
+ * 各コンポーネントの四半期償却費は「取得原価×比率÷耐用年数」で一定であり、
+ * 稼働開始四半期から耐用年数ぶんちょうど計上して打ち切る構造なので、累計は
+ * 「稼働開始からの経過四半期数を耐用年数で頭打ちにした回数 × 1回分」で
+ * 厳密に再構成できる。CapitalProjectへ新しい永続フィールドは追加しない
+ * （実装指示§9「原則として永続化しない」を維持）。
+ *
+ * 工場売却時のPPE除却額（accumulated depreciation除却分）を求めるために使う。
+ */
+export function computeCapexComponentAccumulatedDepreciationUsd(
+  projects: readonly CapitalProject[],
+  params: CapexParameters,
+  period: PeriodV2
+): CapexComponentDepreciation {
+  let buildingUsd = 0;
+  let machineryUsd = 0;
+
+  for (const project of projects) {
+    if (project.status !== "completed" || project.completedPeriod === undefined || project.capitalizedAmountUsd === undefined) continue;
+
+    const template = params.templatesByType[project.projectType];
+    const readiness = project.futureCapacityEffect?.readinessQuartersAfterCompletion ?? 0;
+    const opStart = computeOperationalStartPeriod(project.completedPeriod, readiness);
+    const elapsedOperationalQuarters = quartersBetween(opStart, period) + 1;
+    if (elapsedOperationalQuarters <= 0) continue; // まだ稼働開始していない（償却も始まっていない）。
+
+    const buildingAmountUsd = project.capitalizedAmountUsd * template.buildingRatio;
+    const machineryAmountUsd = project.capitalizedAmountUsd * template.machineryRatio;
+
+    const buildingQuarters = Math.min(elapsedOperationalQuarters, params.componentUsefulLifeQuarters.building);
+    const machineryQuarters = Math.min(elapsedOperationalQuarters, params.componentUsefulLifeQuarters.machinery);
+
+    buildingUsd += (buildingAmountUsd / params.componentUsefulLifeQuarters.building) * buildingQuarters;
+    machineryUsd += (machineryAmountUsd / params.componentUsefulLifeQuarters.machinery) * machineryQuarters;
+  }
+
+  return { buildingUsd, machineryUsd, totalUsd: buildingUsd + machineryUsd };
+}
