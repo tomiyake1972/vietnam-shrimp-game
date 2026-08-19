@@ -65,6 +65,8 @@ import { ConversionObservation, observeContractConversion } from "./commercialHi
 import { companySalesOrganizationCapacity, marketFragmentationFactor } from "../../sales/salesCapacityModel";
 import { processingCapacity } from "../../sales/salesForce";
 import { StandardAiObservation } from "./types";
+import { assessGrowthPressure } from "./growth";
+import { GrowthPressureAssessment } from "./growth/types";
 import {
   assessStandardAiCrisisState,
   applyCrisisGateToCommercialCommitment,
@@ -136,6 +138,15 @@ export interface StandardAiQuarterDiagnostics {
   readonly conversionObservation?: ConversionObservation;
   /** 【Phase 6C・#05 §6】営業採用判断の構造化記録（採用0でも必ず理由が入る）。 */
   readonly salesHiring?: SalesHiringDiagnosticsRecord;
+  /**
+   * 【Phase SAI-GROW-1】Shadow Growth Pressure（診断専用）。
+   *
+   * **この値はStandard AIの意思決定に一切使われない。** 販売希望量・営業採用・
+   * 生産・調達・CAPEX・配当のいずれもこのassessmentを読まない（実装指示§0・§26）。
+   * すべての意思決定が確定した**後**に、確定済みの値だけを入力として評価するため、
+   * 構造的にDecisionへ影響し得ない。GROW-2以降で接続を検討する。
+   */
+  readonly growthPressure?: GrowthPressureAssessment;
   /**
    * 【Standard AI Crisis Management・Phase CM-1・指示§15】この四半期のCrisis State
    * 判断そのもの。Management Console・Analysis Pack・Claude explanationが読む
@@ -790,6 +801,36 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...(vapDevCrisisDiagnostic ? [vapDevCrisisDiagnostic] : []),
   ];
 
+  // 【Phase SAI-GROW-1・実装指示§26】Shadow Growth Pressure。
+  //
+  // **すべての意思決定（decision）が確定した後**に、確定済みの値だけを読んで評価する。
+  // ここより上のコードはこの結果を参照しないため、Shadowの有無でDecisionが変わることは
+  // 構造上あり得ない（テストSAI-GROW-18/19で bit-equivalence を固定している）。
+  const growthPressure = assessGrowthPressure({
+    companyId: fixture.companyId,
+    turn,
+    period,
+    observation,
+    contracts: ownState.contracts,
+    // Vision参照規模。Visionが無い会社ではnull（架空のVisionを作らない）。
+    visionReferenceScaleTons: strategicGrowth ? strategicGrowth.visionTargetScaleAtCurrentTurn : null,
+    growthAmbition: vision ? vision.growthAmbition : null,
+    commercialAmbition,
+    commercialCommitment,
+    attainableProfitableTons: observableOpportunity.attainableProfitableTons,
+    weightedContributionUsdPerKg: observableOpportunity.weightedContributionUsdPerKg,
+    priceObservationMissing: observableOpportunity.priceObservationMissing,
+    observedConversionRatio: conversionObservation.conversionRatio,
+    finishedGoodsExcessRatioByProduct: pressures.finishedGoodsExcessRatioByProduct,
+    crisisState: crisisAssessment.state,
+    lastQuarterFinancialHealthTier: observation.lastQuarterFinancialHealthTier,
+    unservedOpportunity,
+    salesHiringZeroReason: salesForceHiringResult.hiringDiagnostics.zeroHireReason,
+    salesForceHireCount: salesForceHireCountAfterCrisisGate,
+    newCapexProposalCount: finalCapexDecision.newProjectProposals.length,
+    salesParams,
+  });
+
   return {
     decision,
     diagnostics: {
@@ -811,6 +852,8 @@ export function generateStandardAiDecisionWithDiagnostics(
       commercialCommitment,
       conversionObservation,
       salesHiring: salesForceHiringResult.hiringDiagnostics,
+      // 【Phase SAI-GROW-1】診断専用のShadow Growth Pressure（Decisionには未接続）。
+      growthPressure,
       // 【Standard AI Crisis Management・Phase CM-1・指示§15】Analysis Pack・
       // Company Inspector・Claude explanationが読む、この四半期のCrisis判断そのもの。
       crisis: {
