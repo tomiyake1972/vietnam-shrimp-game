@@ -22,6 +22,7 @@ import { countProspectiveFactories } from "../../lib/v2/capex/factoryConstructio
 import { PD_MECHANIZATION_PARAMETERS_V1 } from "../../lib/v2/capex/pdMechanization";
 import { buildPdMechanizationStatusByFactory } from "../../lib/v2/companyLab/pdMechanizationState";
 import { CompanyFinancialQuarterResult } from "../../lib/v2/finance/types";
+import { computeMaxDividendUsd } from "../../lib/v2/finance/dividend";
 import { buildCompanyProcessingCapacityViewModel } from "./processingCapacityViewModel";
 import { buildCompanyProcessingForecast } from "./processingForecastViewModel";
 import { buildCompanyInvestmentPlanningViewModel } from "./investmentPlanningViewModel";
@@ -111,6 +112,12 @@ export function buildDecisionStudioViewModel(input: BuildDecisionStudioViewModel
     return sum + budget * (template.paymentRatios[0] ?? 0);
   }, 0);
   const currentCashUsd = ownState.financeState.cash as number;
+  // 【配当Decision UI接続】利益剰余金・配当可能額はfinance/dividend.tsの
+  // 既存関数（computeMaxDividendUsd = min(cash, distributableEarnings)）を
+  // そのまま呼ぶだけで、新しい計算式は持たない。
+  const retainedEarningsUsd = ownState.financeState.retainedEarnings as number;
+  const distributableEarningsUsd = ownState.financeState.distributableEarnings as number;
+  const maxDividendUsd = computeMaxDividendUsd(ownState.financeState);
 
   const existingLoans = ownState.financingState.loanPortfolio.loans.filter((l) => l.status !== "closed");
   const existingLoanBalanceUsd = existingLoans.reduce((sum, l) => sum + l.currentPrincipalUsd, 0);
@@ -160,6 +167,9 @@ export function buildDecisionStudioViewModel(input: BuildDecisionStudioViewModel
     capexCandidateBudgetByType,
     capexDraftThisQuarterPaymentUsd,
     currentCashUsd,
+    retainedEarningsUsd,
+    distributableEarningsUsd,
+    maxDividendUsd,
     existingLoans,
     existingLoanBalanceUsd,
     accruedInterestPayableUsd,
