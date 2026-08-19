@@ -109,6 +109,8 @@ function commercialAmbition(overrides: Partial<CommercialAmbition> = {}): Commer
     visionPullTons: 4900,
     // 志・観測できる採算機会に支えられた強い自社成長根拠（32%）。
     ambitionMultiplier: 1.32,
+    baseStepRatio: 0.12,
+    effectiveStepRatio: 0.12,
     realisticOpportunityTons: 25000,
     limiter: "NONE",
     expanded: true,

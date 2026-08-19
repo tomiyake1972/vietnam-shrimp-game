@@ -196,6 +196,9 @@ export type StandardAiReasonCode =
   | "GROWTH_SHARE_REDUCED_BY_CONVERSION" // 直近の成約率悪化により拡張幅を縮小
   | "GROWTH_SHARE_REDUCED_BY_MARGIN" // 採算悪化（またはvalue志向の採算条件）により拡張幅を縮小
   | "GROWTH_SHARE_REDUCED_BY_INVENTORY"
+  // --- Adaptive Growth Step（Phase SAI-GROW-3A） ---
+  | "GROWTH_STEP_LIMIT_EXPANDED" // observable evidenceが揃ったため1四半期の伸び幅上限を拡大した
+  | "GROWTH_STEP_LIMIT_BINDING"
   // --- Strategy Profile Quantification（Phase SP-Q1） ---
   | "PROFILE_BIAS_APPLIED" // 会社別ManagementProfile/OrientationProfileのバイアスをStandardAiParametersへ適用した（mode=ONの時のみ）
   // --- 【Standard AI Capability Expansion・Phase CE-1】PD機械化 ---
@@ -418,6 +421,8 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "GROWTH_SHARE_REDUCED_BY_CONVERSION",
   "GROWTH_SHARE_REDUCED_BY_MARGIN",
   "GROWTH_SHARE_REDUCED_BY_INVENTORY",
+  "GROWTH_STEP_LIMIT_EXPANDED",
+  "GROWTH_STEP_LIMIT_BINDING",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

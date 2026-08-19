@@ -132,6 +132,9 @@ function runScenario(scenarioId: string, seed: string): Row[] {
         candidate = assessGrowthPressure({
           core: candidateCore,
           observation: observations.get(d.companyId)!,
+          commercialAmbition: d.commercialAmbition,
+          ambitionTonsWithBaseStep: d.commercialAmbition.ambitionTons,
+          ambitionTonsWithoutStepLimit: d.commercialAmbition.ambitionTons,
           unservedOpportunity: d.unservedOpportunity,
           salesHiringZeroReason: d.salesHiring.zeroHireReason,
           salesForceHireCount: 0,

@@ -25,7 +25,7 @@ import { SalesContract } from "../../../sales/types";
 import { PeriodV2, toYearQuarter } from "../../../core/period";
 import { SalesParameters, SALES_PARAMETERS_V1 } from "../../../sales/parameters";
 import { computeBacklogSemantics } from "../../aiManagementMeeting/backlogSemantics";
-import { COMMERCIAL_AMBITION_PARAMETERS_V1 } from "../../vision/commercialAmbition";
+import { CommercialAmbition, COMMERCIAL_AMBITION_PARAMETERS_V1 } from "../../vision/commercialAmbition";
 import { COMMERCIAL_COMMITMENT_PARAMETERS_V1 } from "../../vision/commercialCommitment";
 import { STRATEGIC_GROWTH_PARAMETERS_V1 } from "../../vision/strategicGrowth";
 import { GrowthAmbition, FinancialRiskTolerance, StrategicPosture } from "../../vision/types";
@@ -84,6 +84,14 @@ export interface GrowthPressureParameters {
   readonly conversionFeedbackFloor: number;
   /** financialRiskTolerance別の財務規律の強さ（gateの指数。大きいほど厳しい）。 */
   readonly financialDisciplineExponentByRiskTolerance: Readonly<Record<FinancialRiskTolerance, number>>;
+
+  // --- 【Phase SAI-GROW-3A】Adaptive Growth Step ---
+  /**
+   * 1四半期の伸び幅上限（Commercial Ambitionのstep limit）に掛けられる最大倍率。
+   * 1.0 = 拡張なし（GROW-2と完全同一）。observable evidenceが完全に揃ったときのみ
+   * この倍率まで連続的に上がる。**step limit自体は削除していない**。
+   */
+  readonly maxGrowthStepMultiplier: number;
 }
 
 /**
@@ -126,6 +134,10 @@ export const GROWTH_PRESSURE_PARAMETERS_V1: GrowthPressureParameters = {
   maxCommitmentOpportunityShare: 0.85,
   conversionFeedbackFloor: COMMERCIAL_COMMITMENT_PARAMETERS_V1.targetConversionFloor,
   financialDisciplineExponentByRiskTolerance: { HIGH: 0, MEDIUM: 1, LOW: 2 },
+  // 【GROW-3Aベンチマークで決定】DS1/DS2×3seedで 1.0 / 2.0 / 3.0 / 5.0 を比較し、
+  // desired salesの伸びと安全性（distress・zero production・在庫・採算）の
+  // バランスから選定した値。詳細は docs/v2/SAI_GROWTH_STEP_G3A.md を参照。
+  maxGrowthStepMultiplier: 3.0,
 };
 
 /**
@@ -199,6 +211,18 @@ export interface GrowthPressureCore {
   readonly currentSubmissionCeilingTons: number;
   readonly adaptiveSubmissionCeilingTons: number;
   readonly incrementalDesiredSalesFromGrowthTons: number;
+  // --- 【GROW-3A】Adaptive Growth Step ---
+  /**
+   * step limitへ掛ける倍率（1.0 = 従来と完全同一）。
+   * = 1 + (maxGrowthStepMultiplier − 1) × growthStepExpansionRatio
+   */
+  readonly growthEvidenceMultiplier: number;
+  /**
+   * 0〜1。step拡大の根拠の強さ。GROW-2の shareExpansionRatio をそのまま再利用する
+   * （Growth Pressure score・市場headroom・成約率・採算・在庫・財務・危機・
+   * value志向・財務規律をすべて含む合成値。同じ閾値体系を二重に増やさない）。
+   */
+  readonly growthStepExpansionRatio: number;
   readonly reasonCodes: readonly StandardAiReasonCode[];
 }
 
@@ -375,6 +399,14 @@ export function computeGrowthPressureCore(input: GrowthPressureCoreInput): Growt
     if (inventoryFeedback < 1 - EPSILON) reasonCodes.push("GROWTH_SHARE_REDUCED_BY_INVENTORY");
   }
 
+  // --- 7. Adaptive Growth Step（実装指示 GROW-3A） -----------------------
+  // step limitは削除しない。GROW-2で既に計算した evidence（shareExpansionRatio）を
+  // そのまま再利用し、1.0〜maxGrowthStepMultiplier の範囲で連続的に拡大するだけ。
+  // Growth Pressure LOW・機会なし・成約悪化・採算悪化・在庫過剰・危機・財務悪化では
+  // shareExpansionRatio が 0 になるため、倍率も 1.0（＝従来と完全同一）になる。
+  const growthStepExpansionRatio = shareExpansionRatio;
+  const growthEvidenceMultiplier = 1 + (params.maxGrowthStepMultiplier - 1) * growthStepExpansionRatio;
+
   return {
     level,
     score,
@@ -408,6 +440,8 @@ export function computeGrowthPressureCore(input: GrowthPressureCoreInput): Growt
     currentSubmissionCeilingTons,
     adaptiveSubmissionCeilingTons,
     incrementalDesiredSalesFromGrowthTons,
+    growthEvidenceMultiplier,
+    growthStepExpansionRatio,
     reasonCodes,
   };
 }
@@ -416,6 +450,15 @@ export function computeGrowthPressureCore(input: GrowthPressureCoreInput): Growt
 export interface GrowthConstraintRoutingInput {
   readonly core: GrowthPressureCore;
   readonly observation: StandardAiObservation;
+  /** 【GROW-3A】実際に採用されたCommercial Ambition（step limitの効き方を診断へ出す）。 */
+  readonly commercialAmbition: CommercialAmbition;
+  /**
+   * 【GROW-3A】step倍率を掛けなかった場合（baseStepのみ）のambitionTons。
+   * 呼び出し側が同じ純粋関数をもう一度baseStepで評価して渡す（差分＝拡大の効果）。
+   */
+  readonly ambitionTonsWithBaseStep: number;
+  /** step limitが無ければ到達していた水準 = min(visionCeiling, realisticOpportunity)。 */
+  readonly ambitionTonsWithoutStepLimit: number;
   readonly unservedOpportunity: UnservedOpportunity;
   readonly salesHiringZeroReason: string | null;
   readonly salesForceHireCount: number;
@@ -471,6 +514,11 @@ export function assessGrowthPressure(input: GrowthConstraintRoutingInput): Growt
       reasonCodes.push("GROWTH_BLOCKED_BY_ENGINE_CAP");
       reasonCodes.push("EXTERNAL_ENGINE_CAPACITY_LIMIT");
     }
+  }
+  if (input.commercialAmbition.effectiveStepRatio > input.commercialAmbition.baseStepRatio + EPSILON) {
+    reasonCodes.push("GROWTH_STEP_LIMIT_EXPANDED");
+  } else if (input.commercialAmbition.limiter === "STEP_LIMIT") {
+    reasonCodes.push("GROWTH_STEP_LIMIT_BINDING");
   }
   if (ceilingSuppressedOpportunityTons > EPSILON) reasonCodes.push("GROWTH_OPPORTUNITY_SUPPRESSED_BY_SUBMISSION_CAP");
   if (!noMarketOpportunity && core.observedOpportunityTons > EPSILON) reasonCodes.push("GROWTH_OPPORTUNITY_AVAILABLE");
@@ -543,6 +591,14 @@ export function assessGrowthPressure(input: GrowthConstraintRoutingInput): Growt
     currentSubmissionCeilingTons: core.currentSubmissionCeilingTons,
     adaptiveSubmissionCeilingTons: core.adaptiveSubmissionCeilingTons,
     incrementalDesiredSalesFromGrowthTons: core.incrementalDesiredSalesFromGrowthTons,
+    baseStepLimit: input.commercialAmbition.baseStepRatio,
+    effectiveStepLimit: input.commercialAmbition.effectiveStepRatio,
+    growthEvidenceMultiplier: core.growthEvidenceMultiplier,
+    growthStepExpansionRatio: core.growthStepExpansionRatio,
+    ambitionBeforeStepLimit: input.ambitionTonsWithoutStepLimit,
+    ambitionAfterStepLimit: input.commercialAmbition.ambitionTons,
+    incrementalDesiredSalesFromAdaptiveStep: Math.max(0, input.commercialAmbition.ambitionTons - input.ambitionTonsWithBaseStep),
+    ambitionLimiter: input.commercialAmbition.limiter,
     reasonCodes,
   };
 }

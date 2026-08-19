@@ -40,6 +40,8 @@ function ambition(baselineTons: number): CommercialAmbition {
     visionPullTons: 0,
     ambitionMultiplier: 1,
     realisticOpportunityTons: 0,
+    baseStepRatio: 0,
+    effectiveStepRatio: 0,
     limiter: "NONE",
     expanded: false,
   };
@@ -134,9 +136,13 @@ function input(overrides: TestOverrides = {}): GrowthPressureCoreInput {
 
 function assess(overrides: TestOverrides = {}) {
   const coreInput = input(overrides);
+  const amb = overrides.commercialAmbition ?? ambition(coreInput.currentRelevantScaleTons);
   return assessGrowthPressure({
     core: computeGrowthPressureCore(coreInput),
     observation: coreInput.observation,
+    commercialAmbition: amb,
+    ambitionTonsWithBaseStep: amb.ambitionTons,
+    ambitionTonsWithoutStepLimit: amb.ambitionTons,
     unservedOpportunity: overrides.unservedOpportunity ?? unserved(),
     salesHiringZeroReason: overrides.salesHiringZeroReason ?? null,
     salesForceHireCount: overrides.salesForceHireCount ?? 0,
@@ -450,6 +456,9 @@ test("SAI-GROW-20: Vision shadow sweep（候補Vision）はDecisionを一切変�
     const candidate = assessGrowthPressure({
       core: candidateCore,
       observation: observation(),
+      commercialAmbition: r.diagnostics.commercialAmbition!,
+      ambitionTonsWithBaseStep: r.diagnostics.commercialAmbition!.ambitionTons,
+      ambitionTonsWithoutStepLimit: r.diagnostics.commercialAmbition!.ambitionTons,
       unservedOpportunity: r.diagnostics.unservedOpportunity!,
       salesHiringZeroReason: r.diagnostics.salesHiring!.zeroHireReason,
       salesForceHireCount: 0,

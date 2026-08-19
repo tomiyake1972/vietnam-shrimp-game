@@ -458,13 +458,15 @@ export function generateStandardAiDecisionWithDiagnostics(
     params: params.growthPressure,
   });
 
-  const commercialAmbition = computeCommercialAmbition({
+  const commercialAmbitionInput = {
     vision,
     strategicGrowth,
     capacityAnchorTons,
     recentActualScaleTons,
     // 【GROW-2】機会shareだけをGrowth Pressureで可変にする（他の式は無変更）。
     params: { ...COMMERCIAL_AMBITION_PARAMETERS_V1, realisticShareOfProfitableOpportunity: growthCore.effectiveOpportunityShare.ambition },
+    // 【GROW-3A】1四半期の伸び幅上限に掛ける倍率（observable evidenceが無ければ1＝従来と同一）。
+    stepLimitMultiplier: growthCore.growthEvidenceMultiplier,
     attainableProfitableTons: observableOpportunity.attainableProfitableTons,
     weightedContributionUsdPerKg: observableOpportunity.weightedContributionUsdPerKg,
     priceObservationMissing: observableOpportunity.priceObservationMissing,
@@ -473,7 +475,15 @@ export function generateStandardAiDecisionWithDiagnostics(
       pressures.finishedGoodsExcessRatioByProduct.pd,
       pressures.finishedGoodsExcessRatioByProduct.vap
     ),
-  });
+  };
+  const commercialAmbition = computeCommercialAmbition(commercialAmbitionInput);
+  // 【GROW-3A診断用】step倍率を掛けなかった場合のambition（差分＝拡大の効果）。
+  // 純粋関数の再評価のみで、ゲーム状態・他の判断には一切影響しない。
+  const commercialAmbitionWithBaseStep =
+    growthCore.growthEvidenceMultiplier > 1
+      ? computeCommercialAmbition({ ...commercialAmbitionInput, stepLimitMultiplier: 1 })
+      : commercialAmbition;
+
 
   // 【Phase 6C】Commercial Ambition（売りたい量）から Commercial Commitment
   // （今期どこまで取りに行くか）を分離する。過去の「提出 → 成約」転換率を
@@ -854,6 +864,13 @@ export function generateStandardAiDecisionWithDiagnostics(
     core: growthCore,
     observation,
     unservedOpportunity,
+    commercialAmbition,
+    ambitionTonsWithBaseStep: commercialAmbitionWithBaseStep.ambitionTons,
+    // step limitが無ければ到達していた水準（Visionと観測機会の小さい方）。
+    ambitionTonsWithoutStepLimit: Math.min(
+      Math.max(commercialAmbition.baselineTons, strategicGrowth ? strategicGrowth.visionTargetScaleAtCurrentTurn : commercialAmbition.baselineTons),
+      commercialAmbition.realisticOpportunityTons > 0 ? commercialAmbition.realisticOpportunityTons : commercialAmbition.baselineTons
+    ),
     salesHiringZeroReason: salesForceHiringResult.hiringDiagnostics.zeroHireReason,
     salesForceHireCount: salesForceHireCountAfterCrisisGate,
     newCapexProposalCount: finalCapexDecision.newProjectProposals.length,

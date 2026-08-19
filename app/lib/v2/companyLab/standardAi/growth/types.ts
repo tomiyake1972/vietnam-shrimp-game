@@ -131,6 +131,24 @@ export interface GrowthPressureAssessment {
   /** 上2つの差＝Growth Pressureによって増えた販売希望の上限幅。 */
   readonly incrementalDesiredSalesFromGrowthTons: number;
 
+  // --- 【GROW-3A】Adaptive Growth Step（1四半期の伸び幅上限） ---
+  /** 拡張前の伸び幅（maxStep × intensity）。 */
+  readonly baseStepLimit: number;
+  /** 実際に適用した伸び幅（baseStepLimit × growthEvidenceMultiplier）。 */
+  readonly effectiveStepLimit: number;
+  /** step limitへ掛けた倍率（1.0＝従来と完全同一）。 */
+  readonly growthEvidenceMultiplier: number;
+  /** 0〜1。step拡大の根拠の強さ（GROW-2のshareExpansionRatioを再利用）。 */
+  readonly growthStepExpansionRatio: number;
+  /** step limitが無ければ到達していたambition（min(visionCeiling, realisticOpportunity)）。 */
+  readonly ambitionBeforeStepLimit: number;
+  /** 実際のambition（step limit適用後）。 */
+  readonly ambitionAfterStepLimit: number;
+  /** step拡大によって増えた販売希望量（baseStepでのambitionとの差）。 */
+  readonly incrementalDesiredSalesFromAdaptiveStep: number;
+  /** Commercial Ambition側のlimiter（STEP_LIMIT / VISION_ON_TRACK / MARKET_WEAK 等）。 */
+  readonly ambitionLimiter: string;
+
   /** 既存のdiagnostic architectureと同じreason code語彙（reasonCodes.tsに登録済み）。 */
   readonly reasonCodes: readonly StandardAiReasonCode[];
 }

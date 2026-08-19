@@ -107,6 +107,13 @@ export interface CommercialAmbitionInput {
   readonly priceObservationMissing: boolean;
   /** 完成品在庫の過剰比率（最大値。pressures.finishedGoodsExcessRatioByProduct 由来）。 */
   readonly maxFinishedGoodsExcessRatio: number;
+  /**
+   * 【Phase SAI-GROW-3A】1四半期の伸び幅上限（step limit）に掛ける倍率。
+   * 未指定なら1＝**従来と完全に同一**。observable evidence（市場headroom・成約率・
+   * 採算・在庫・財務・危機）が揃ったときだけ、呼び出し側（standardAi/growth）が
+   * 1より大きい値を渡す。ここでevidenceの判定はしない（この層は志の計算に専念する）。
+   */
+  readonly stepLimitMultiplier?: number;
   readonly params?: CommercialAmbitionParameters;
 }
 
@@ -119,6 +126,10 @@ export interface CommercialAmbition {
   readonly visionPullTons: number;
   /** baseline に対する倍率。sales の希望量ベクトルへ掛ける係数そのもの。 */
   readonly ambitionMultiplier: number;
+  /** 【GROW-3A】適用前の1四半期の伸び幅（maxStep × intensity）。 */
+  readonly baseStepRatio: number;
+  /** 【GROW-3A】実際に適用した伸び幅（baseStepRatio × stepLimitMultiplier）。 */
+  readonly effectiveStepRatio: number;
   /** 現実的に狙ってよいと判断した機会量（上限として効いたか判定するための値）。 */
   readonly realisticOpportunityTons: number;
   readonly limiter: CommercialAmbitionLimiter;
@@ -141,6 +152,8 @@ export function computeCommercialAmbition(input: CommercialAmbitionInput): Comme
     baselineTons,
     visionPullTons: 0,
     ambitionMultiplier: 1,
+    baseStepRatio: 0,
+    effectiveStepRatio: 0,
     realisticOpportunityTons: input.attainableProfitableTons * params.realisticShareOfProfitableOpportunity,
     limiter,
     expanded: false,
@@ -168,7 +181,11 @@ export function computeCommercialAmbition(input: CommercialAmbitionInput): Comme
   // --- ここまで来て初めて、志を理由に規模を引き上げる ---
   const maxStep = params.maxStepRatioByAmbition[input.vision.growthAmbition];
   const intensity = params.stepIntensityByPressure[input.strategicGrowth.growthPressure];
-  const stepRatio = maxStep * intensity;
+  const baseStepRatio = maxStep * intensity;
+  // 【GROW-3A】step limitは削除しない。observable evidenceが揃ったときだけ、
+  // 呼び出し側が渡す倍率（既定1＝従来と完全同一）で連続的に拡大する。
+  const stepLimitMultiplier = Math.max(1, input.stepLimitMultiplier ?? 1);
+  const stepRatio = baseStepRatio * stepLimitMultiplier;
   const stepped = baselineTons * (1 + stepRatio);
 
   // 志の参考規模を超えて背伸びしない（Vision は上限でもある）。
@@ -190,6 +207,8 @@ export function computeCommercialAmbition(input: CommercialAmbitionInput): Comme
     baselineTons,
     visionPullTons: Math.max(0, ambitionTons - baselineTons),
     ambitionMultiplier: baselineTons > EPSILON ? ambitionTons / baselineTons : 1,
+    baseStepRatio,
+    effectiveStepRatio: stepRatio,
     realisticOpportunityTons,
     limiter,
     expanded: ambitionTons > baselineTons + EPSILON,
