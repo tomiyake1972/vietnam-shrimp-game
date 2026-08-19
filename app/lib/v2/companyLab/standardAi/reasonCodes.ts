@@ -215,6 +215,13 @@ export type StandardAiReasonCode =
   | "DELIVERABLE_LIMIT_RAW_MATERIAL"
   | "DELIVERABLE_LIMIT_BACKLOG"
   | "DELIVERABLE_LIMIT_LIQUIDITY"
+  | "GROWTH_ROUTE_NONE"
+  | "GROWTH_ROUTE_PRODUCTION_CAPEX"
+  | "GROWTH_ROUTE_WORKFORCE"
+  | "GROWTH_ROUTE_PROCUREMENT"
+  | "GROWTH_ROUTE_LIQUIDITY"
+  | "GROWTH_ROUTE_SALES_HIRING"
+  | "GROWTH_ROUTE_BACKLOG_RECOVERY"
   // --- Strategy Profile Quantification（Phase SP-Q1） ---
   | "PROFILE_BIAS_APPLIED" // 会社別ManagementProfile/OrientationProfileのバイアスをStandardAiParametersへ適用した（mode=ONの時のみ）
   // --- 【Standard AI Capability Expansion・Phase CE-1】PD機械化 ---
@@ -454,6 +461,13 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "DELIVERABLE_LIMIT_RAW_MATERIAL",
   "DELIVERABLE_LIMIT_BACKLOG",
   "DELIVERABLE_LIMIT_LIQUIDITY",
+  "GROWTH_ROUTE_NONE",
+  "GROWTH_ROUTE_PRODUCTION_CAPEX",
+  "GROWTH_ROUTE_WORKFORCE",
+  "GROWTH_ROUTE_PROCUREMENT",
+  "GROWTH_ROUTE_LIQUIDITY",
+  "GROWTH_ROUTE_SALES_HIRING",
+  "GROWTH_ROUTE_BACKLOG_RECOVERY",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

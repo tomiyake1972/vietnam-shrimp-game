@@ -324,7 +324,17 @@ export function buildStandardAiCapexDecision(
    * 【Phase SAI-GROW-3B-1】Liquidity SSoT。未指定なら従来の案件単独ゲート（後方互換）。
    * 指定された場合、同一Turnに先に承認した提案の支払を差し引いて判定する。
    */
-  liquidity?: LiquidityGateContext
+  liquidity?: LiquidityGateContext,
+  /**
+   * 【Phase SAI-GROW-3C・実装指示§3/§7】Deliverability Gapを能力側へ返した量（商品別）。
+   * 3B-3のDeliverable Commitment capにより、生産必要量（＝この関数のボトルネック判定の分子）
+   * が「今受けてよい量」まで縮んでいるため、Ambitionがあっても能力不足のsignalが
+   * capexへ届かなくなっていた。growthRouting.tsがroute==="PRODUCTION_CAPEX"かつ
+   * 持続的と判定したときだけ渡され、ボトルネック判定の分子を志側へ戻す。
+   * **undefinedのときは従来と完全に同一の挙動**であり、既存のsustained / noExcess /
+   * financial gate（3B-1 Liquidity SSoT）はいずれも変更していない。
+   */
+  deliverabilityGrowthDemandByProduct?: ProductAmount
 ): CapexPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const proposals: CapexProjectProposalInput[] = [];
@@ -535,7 +545,11 @@ export function buildStandardAiCapexDecision(
     // 変更しない。
     const capacity = observation.totalEffectiveCapacityByProduct[product];
     if (capacity <= EPSILON) continue;
-    const shortfallRatio = productionNeededByProductBeforeCap[product] / capacity;
+    // 【Phase SAI-GROW-3C】志側へ戻した需要があれば、そちらも分子の候補にする
+    // （Deliverability capで縮んだ生産必要量だけを見て「能力は足りている」と誤認しない）。
+    const growthDemandForProduct = deliverabilityGrowthDemandByProduct?.[product] ?? 0;
+    const shortfallBasisTons = Math.max(productionNeededByProductBeforeCap[product], growthDemandForProduct);
+    const shortfallRatio = shortfallBasisTons / capacity;
     const noExcess = observation.finishedGoodsByProduct[product] <= capacity * params.finishedGoodsTargetQuarters * params.excessInventoryRatioForDiscount;
     const alreadyPlanned = observation.activeCapexProjectTargets.has(product);
 
