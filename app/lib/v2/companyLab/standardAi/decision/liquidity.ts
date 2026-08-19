@@ -81,6 +81,31 @@ export interface LiquidityAssessment {
    * （DS3のBAL崩壊がまさにこの経路だった）。
    */
   readonly cashBasedHeadroomUsd: number;
+  /**
+   * 【Phase SAI-GROW-3B-1.1】当四半期に「実際に引けて、かつ成長投資へ回せる」借入。
+   *
+   * engine実測（下記§engine timing）では、承認された通常融資は
+   *   closeQuarterWithFinancing（loanDrawUsd）→ balanceSheet.cash
+   *   → closeQuarterWithCapex の preCapexCashUsd
+   * という順で**同一Turnの設備投資支払原資になる**。したがって借入を当期判定から
+   * 完全排除するのは engine の挙動より保守的すぎる（3B-1の実測: DS3 3seed×5社で
+   * T32 debt=0、baseline MASSの新工場承認がT31まで後ろ倒し）。
+   *
+   * ただし realisticallyAvailableBorrowingUsd をそのまま当期現金同等にはしない:
+   *   ① 同じ承認融資は engine の computeProcurementConstraint で**原料調達の原資**
+   *      にもなるため、まず運転資金需要（financingNeedUsd）へ充当し、
+   *      **その残りだけ**を成長投資へ回せる額とする（Cash/Debtの二重利用を防ぐ）。
+   *   ② 信用状態・危機状態のgate（既存 financeGateByTier / crisisGateByState）を掛ける。
+   * 常に currentTurnFundableBorrowingUsd <= realisticallyAvailableBorrowingUsd。
+   */
+  readonly currentTurnFundableBorrowingUsd: number;
+  /**
+   * 【Phase SAI-GROW-3B-1.1】当四半期に実行可能な投資の余力。
+   *   cashBasedHeadroomUsd + currentTurnFundableBorrowingUsd
+   * ARは含めない（engineの調達ゲートが当期AR回収を原料原資にしないため）。
+   * 当期の投資判定はこの値で行う（cashBasedHeadroomUsdは診断用のcash-only指標）。
+   */
+  readonly currentTurnFundableHeadroomUsd: number;
   /** 運転資金を賄うために必要な借入額（Finance決定が申請する額の根拠）。 */
   readonly financingNeedUsd: number;
   /**
@@ -224,6 +249,16 @@ export function assessCommittedCashRequirement(input: CommittedCashRequirementIn
     expectedArCollectionUsd;
   const financingNeedUsd = Math.max(0, fundingNeedBeforeBorrowingUsd);
 
+  // 【実装指示 3B-1.1 §「必須設計」】当期に成長投資へ回せる借入。
+  // まず運転資金needへ充当し、残りへ信用・危機gateを掛ける。新しいparameterは足さない
+  // （financeGateByTier / crisisGateByState は上のcrisis buffer算出で既に使っている）。
+  const borrowingAfterWorkingCapitalUsd = Math.max(0, borrowingUsd - financingNeedUsd);
+  const currentTurnFundableBorrowingUsd = Math.min(
+    borrowingUsd,
+    borrowingAfterWorkingCapitalUsd * Math.max(0, Math.min(crisisGate, healthGate))
+  );
+  const currentTurnFundableHeadroomUsd = cashBasedHeadroomUsd + currentTurnFundableBorrowingUsd;
+
   return {
     currentCashUsd,
     expectedArCollectionUsd,
@@ -239,6 +274,8 @@ export function assessCommittedCashRequirement(input: CommittedCashRequirementIn
     protectedFundingRequirementUsd,
     liquidityHeadroomUsd,
     cashBasedHeadroomUsd,
+    currentTurnFundableBorrowingUsd,
+    currentTurnFundableHeadroomUsd,
     financingNeedUsd,
     fundingBalanceBeforeBorrowingUsd: fundingNeedBeforeBorrowingUsd,
     workingCapital,
@@ -250,8 +287,13 @@ export interface InvestmentAffordability {
   readonly affordable: boolean;
   /** 当四半期に出る支払（＝借入を当てにせず手元で払えなければならない額）。 */
   readonly proposedPaymentsThisQuarterUsd: number;
-  /** 当四半期の手元資金だけで見た投資後余力。 */
+  /** 当四半期に実行可能な資金（現金＋当期調達可能借入）で見た投資後余力。 */
   readonly postInvestmentCashHeadroomUsd: number;
+  /**
+   * 【Phase SAI-GROW-3B-1.1】この案件の当期支払のうち、借入で賄う必要がある額。
+   * Finance決定が申請額へ確実に載せられるよう、判定と同じ計算で返す。
+   */
+  readonly currentTurnBorrowingUsedUsd: number;
   /** この案件がhorizon内に要求する支払（＝新規に増える確定支払）。 */
   readonly proposedInvestmentPaymentsUsd: number;
   /** 同一Turnに既に承認した提案の支払合計（実装指示§3）。 */
@@ -286,13 +328,19 @@ export function evaluateInvestmentAffordability(
   // ① horizon（当期＋今後）: 借入余力も含めた流動性で見る＝Debtを使った成長投資を許す。
   const postInvestmentLiquidityUsd =
     assessment.liquidityHeadroomUsd - alreadyApprovedThisTurnUsd - proposedInvestmentPaymentsUsd - safetyMarginUsd;
-  // ② 当四半期: 借入を一切当てにせず、手元資金だけで払えること。
-  //    （借りられる保証のない金額を当期の支払原資にしない＝実装指示§2）
+  // ② 当四半期: 手元現金＋**当期に実際に引ける借入**の範囲で払えること
+  //    （3B-1.1。engineは承認融資を同一Turnの設備投資支払原資にするため、
+  //     健全な借入まで当期判定から排除しない。ただしARは含めない）。
   const postInvestmentCashHeadroomUsd =
-    assessment.cashBasedHeadroomUsd - alreadyApprovedThisQuarterUsd - thisQuarterUsd - safetyMarginUsd;
+    assessment.currentTurnFundableHeadroomUsd - alreadyApprovedThisQuarterUsd - thisQuarterUsd - safetyMarginUsd;
+
+  // この案件の当期支払のうち、cash-onlyでは賄えず借入に依存する額。
+  const cashOnlyRemainingUsd = assessment.cashBasedHeadroomUsd - alreadyApprovedThisQuarterUsd - safetyMarginUsd;
+  const currentTurnBorrowingUsedUsd = Math.max(0, Math.min(thisQuarterUsd, thisQuarterUsd - cashOnlyRemainingUsd));
 
   return {
     affordable: postInvestmentLiquidityUsd >= 0 && postInvestmentCashHeadroomUsd >= 0,
+    currentTurnBorrowingUsedUsd,
     proposedInvestmentPaymentsUsd,
     proposedPaymentsThisQuarterUsd: thisQuarterUsd,
     alreadyApprovedThisTurnUsd,

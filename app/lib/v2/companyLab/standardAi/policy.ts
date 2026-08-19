@@ -632,6 +632,9 @@ export function generateStandardAiDecisionWithDiagnostics(
       crisisBuffer: liquidityAssessment.crisisBufferUsd,
       protectedFundingRequirement: liquidityAssessment.protectedFundingRequirementUsd,
       liquidityHeadroom: liquidityAssessment.liquidityHeadroomUsd,
+      cashBasedHeadroom: liquidityAssessment.cashBasedHeadroomUsd,
+      currentTurnFundableBorrowing: liquidityAssessment.currentTurnFundableBorrowingUsd,
+      currentTurnFundableHeadroom: liquidityAssessment.currentTurnFundableHeadroomUsd,
       financingNeed: liquidityAssessment.financingNeedUsd,
     },
     decisionSummary:
@@ -837,6 +840,11 @@ export function generateStandardAiDecisionWithDiagnostics(
   const financingResult = buildStandardAiFinancingRequest(observation, pressures, params, procurementCashPlan, {
     assessment: liquidityAssessment,
     approvedInvestmentPaymentsThisQuarterUsd: isSevereDistress ? 0 : approvedInvestmentPaymentsThisQuarterUsd,
+    // 【Phase SAI-GROW-3B-1.1】当期承認した投資のうち、手元現金の余力
+    // （cashBasedHeadroomUsd）を超える分＝当期借入を前提に承認した額。
+    approvedInvestmentBorrowingThisQuarterUsd: isSevereDistress
+      ? 0
+      : Math.max(0, approvedInvestmentPaymentsThisQuarterUsd - Math.max(0, liquidityAssessment.cashBasedHeadroomUsd)),
   });
 
   // 【Phase DIV-4】Standard AI配当ポリシー（Flow-Based Annual Dividend Policy）。

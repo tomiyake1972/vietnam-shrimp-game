@@ -106,9 +106,13 @@ test("G3B1-3: 投資後に次期の最低操業資金を割る案件は延期さ
   const a = assess({ cashUsd: 40 * MILLION });
   // 手元余力 = 現金 − (最低操業 + 元利 + 当期確定投資 + 最低現金)
   assert.ok(a.cashBasedHeadroomUsd < 40 * MILLION);
-  const tooBig = evaluateInvestmentAffordability(a, a.cashBasedHeadroomUsd + MILLION, 0, 0, a.cashBasedHeadroomUsd + MILLION, 0);
+  // 【Phase SAI-GROW-3B-1.1】当期の実行可能額は現金だけでなく「当期に実際に引ける借入」も
+  // 含む（engineは承認融資を同一Turnの設備投資支払原資にする）。この受入の趣旨は
+  // 「当期に払える額を超える案件は延期される」ことなので、境界を当期実行可能余力へ更新した。
+  const limitUsd = a.currentTurnFundableHeadroomUsd;
+  const tooBig = evaluateInvestmentAffordability(a, limitUsd + MILLION, 0, 0, limitUsd + MILLION, 0);
   assert.equal(tooBig.affordable, false);
-  const justFits = evaluateInvestmentAffordability(a, a.cashBasedHeadroomUsd, 0, 0, a.cashBasedHeadroomUsd, 0);
+  const justFits = evaluateInvestmentAffordability(a, limitUsd, 0, 0, limitUsd, 0);
   assert.equal(justFits.affordable, true);
 });
 
