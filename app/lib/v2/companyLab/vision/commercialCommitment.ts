@@ -80,6 +80,23 @@ export interface CommercialCommitmentParameters {
    * 「production 0 など不自然な停止」を避ける）。
    */
   readonly productionExpectedConversionFloor: number;
+  /**
+   * 【Phase SAI-VISION-1 tech debt cleanup】過剰受注時でも市場から退出しないための、
+   * 納品可能量に対する新規提出の最低比率（SAI-GROW-3B-3 の market presence floor）。
+   *
+   * 【なぜこのparameterを新設したか】3B-3では同じ目的で
+   * `StandardAiParameters.minDomesticPurchaseRatioOfBase`（＝**調達**の最低確保比）を
+   * domainを跨いで流用していた。3D PRE-AUDIT §14 の監査結果:
+   *   ・floorそのものは必要（外すと能力が一時的に落ちた会社の新規提出が0になり、
+   *     「生産能力不足を販売へ機械的に伝播させない」という既存受入条件に抵触する）
+   *   ・sales / commitment ドメインに同義のparameterは存在しない
+   *   ・調達の最低確保比を将来調達都合で動かすと、意図せず提出量の下限が動く
+   * したがって sales 側の意味を持つparameterとしてここへ移す。
+   *
+   * **値は流用元と完全に同一の 0.2 であり、経済挙動は1ビットも変わらない**
+   * （bit-identical testで固定）。数値の再校正は別判断とする。
+   */
+  readonly minimumMarketPresenceRatioOfDeliverable: number;
 }
 
 /**
@@ -98,6 +115,8 @@ export const COMMERCIAL_COMMITMENT_PARAMETERS_V1: CommercialCommitmentParameters
   conversionLearningRate: 0.7,
   realisticShareOfOpportunity: 0.5,
   productionExpectedConversionFloor: 0.5,
+  // 【tech debt cleanup】流用元 StandardAiParameters.minDomesticPurchaseRatioOfBase と同一値。
+  minimumMarketPresenceRatioOfDeliverable: 0.2,
 };
 
 export interface CommercialCommitmentInput {

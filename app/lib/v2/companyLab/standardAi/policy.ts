@@ -571,7 +571,10 @@ export function generateStandardAiDecisionWithDiagnostics(
       fundableRawMaterialView.priceKnown &&
       fundableRawMaterialView.fundableDomesticProcurementTons < nearTermBindingProductionCapacityTons,
     deliveryLeadTimeQuarters: observation.deliveryLeadTimeQuarters,
-    minimumMarketPresenceRatio: params.minDomesticPurchaseRatioOfBase,
+    // 【Phase SAI-VISION-1 tech debt cleanup】3B-3では調達の最低確保比
+    // （minDomesticPurchaseRatioOfBase）をdomainを跨いで流用していた。
+    // 値は完全に同一（0.2）のまま、sales側の意味を持つparameterへ参照先だけ移す。
+    minimumMarketPresenceRatio: COMMERCIAL_COMMITMENT_PARAMETERS_V1.minimumMarketPresenceRatioOfDeliverable,
   });
   const applyDeliverabilityCap = crisisAssessment.state === "NORMAL" && deliverableCommitment.applied;
   const commercialCommitmentAfterDeliverability: CommercialCommitmentState = applyDeliverabilityCap
