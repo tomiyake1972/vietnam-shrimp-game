@@ -438,6 +438,23 @@ function computeProductionCosting(
   let qualityDiscardLoss = 0;
   let unabsorbedVariable = 0;
   let fixedAbsorbedIntoInventory = 0;
+  /**
+   * 【会計整合性修正】産出ゼロのバッチ（adjustedTons≈0）へ実際に配属されていた
+   * 常用労務費。"actual"モードのallocRegularLaborCostは数量シェアではなく
+   * 「そのバッチへ配属された人数×単価」で直接決まるため、そのバッチが1トンも
+   * 産出しなかった場合、この費用は在庫へも配賦されず、かつidleLaborCost
+   * （＝どのバッチにも配属されなかった人員の給与）にも含まれない。給与は現金で
+   * 支払われているのに損益にも資産にも現れず、貸借が合わなくなる。
+   * 発生した期の期間費用（未吸収製造費）として認識するためにここへ集計する。
+   */
+  let unabsorbedRegularLaborFromZeroOutputBatches = 0;
+  /**
+   * 【会計整合性修正】原料投入そのものがゼロだったバッチ（originalTons≈0）へ
+   * 配属されていた変動労務費（臨時ワーカー＋残業）。廃棄損は
+   * 「変動費単価×廃棄数量」で認識されるが、originalTons=0では変動費単価が
+   * 0になるため、この経路でも一切認識されない。上と同じ理由で期間費用とする。
+   */
+  let unabsorbedVariableFromZeroInputBatches = 0;
   const variableQualityCostByProduct = new Map<Product, number>();
   const addQualityCost = (product: Product, amount: number) => {
     variableQualityCostByProduct.set(product, (variableQualityCostByProduct.get(product) ?? 0) + amount);
@@ -530,14 +547,36 @@ function computeProductionCosting(
         `品質調整後数量が正(${b.adjustedTons})なのに完成品ロットIDがないバッチです（原価の在庫振替先がありません）: ${b.batchId}`
       );
     } else {
-      // 全量廃棄バッチ（adjustedTons≈0）: 変動費は上のbatchDiscardLossで全額認識済み
-      // （variableUnit×discardTons = batchVariableTotal になる）。固定費は
-      // adjustedShare=0のため配賦されず、他バッチへ配賦されるか未配賦扱いになる。
+      // 産出ゼロのバッチ（adjustedTons≈0）。
+      //
+      // ・nonLaborFixed（工場固定費・固定ユーティリティ・減価償却）は adjustedShare=0 の
+      //   ため配賦されず、adjustedShareの合計が1になる他バッチへ自動的に配賦される
+      //   （取りこぼしは起きない）。
+      // ・常用労務費は "actual" モードでは数量シェアではなく実配属人数で決まるため、
+      //   ここで明示的に期間費用へ回さないと、支払済みなのにどこにも現れない。
+      unabsorbedRegularLaborFromZeroOutputBatches += allocRegularLaborCost;
+      // ・変動費（臨時ワーカー・残業・変動ユーティリティ・加工費・原料）は、
+      //   originalTons>0 なら batchDiscardLoss（変動費単価×廃棄数量＝全量）で認識済み。
+      //   originalTons≈0（そもそも原料を投入できなかった）の場合は変動費単価が0になり
+      //   廃棄損でも認識されないため、ここで期間費用へ回す。この場合の
+      //   batchVariableTotal は実質 allocVariableLabor（臨時＋残業）のみである。
+      if (b.originalTons <= QUANTITY_EPSILON) {
+        unabsorbedVariableFromZeroInputBatches += batchVariableTotal;
+      }
     }
   }
 
-  const unabsorbedFixedPortion = totalAdjustedTons <= QUANTITY_EPSILON ? fixedManufacturingTotal : 0;
-  const unabsorbedManufacturingCost = unabsorbedFixedPortion + unabsorbedVariable;
+  // 【会計整合性修正】未吸収製造費の確定。
+  //
+  // 会社全体で産出ゼロ／投入ゼロという退化ケースでは、従来どおり会社全体の合計額を
+  // そのまま期間費用にする（この経路の挙動は一切変更しない）。一方、一部のバッチだけが
+  // 産出ゼロだった場合は、そのバッチへ配属されていた労務費が従来はどこにも計上されずに
+  // 消えていた。上のループで集計した金額をここで期間費用として認識する。
+  // 両者は排他であり、二重計上は起きない。
+  const unabsorbedFixedPortion =
+    totalAdjustedTons <= QUANTITY_EPSILON ? fixedManufacturingTotal : unabsorbedRegularLaborFromZeroOutputBatches;
+  const unabsorbedVariablePortion = totalOriginalTons <= QUANTITY_EPSILON ? unabsorbedVariable : unabsorbedVariableFromZeroInputBatches;
+  const unabsorbedManufacturingCost = unabsorbedFixedPortion + unabsorbedVariablePortion;
 
   const manufacturing: ManufacturingCostBreakdown = {
     domesticRawMaterialCost: usd(rawDomestic),
