@@ -91,12 +91,16 @@ const BAL_VISION: CompanyVision = {
   visionId: "BAL-vision-v1",
   effectiveFromTurn: 1,
   growthAmbition: "HIGH",
-  targetScaleTonsPerQuarterAtQ32: 34000,
+  // 【SAI-VISION-1】Q32目標のみ 34,000 → 60,000 へ更新（夜間sensitivity Case A1）。
+  // growthAmbition / willingnessToBuildFactories / financialRiskTolerance /
+  // strategicPosture / desiredProductEvolution / emphasisProducts は一切変更しない。
+  // referenceGrowthPathは開始規模16,000を保ちQ32まで線形（Case A1と同一の軌道）。
+  targetScaleTonsPerQuarterAtQ32: 60000,
   preferredEndState: "LARGE_INTEGRATED",
   willingnessToBuildFactories: "HIGH",
   financialRiskTolerance: "MEDIUM",
   desiredProductEvolution: "INTEGRATED",
-  referenceGrowthPath: waypoints(16000, 18500, 23000, 28500, 34000),
+  referenceGrowthPath: waypoints(16000, 25935, 37290, 48645, 60000),
   longTermNarrative:
     "HOSO・PD・VAPのすべてを自社で扱える総合水産会社になる。規模も追うが、特定商品・特定市場に依存しない構成を保つ。財務は無理をしない範囲で攻める。",
   emphasisProducts: ["hoso", "pd", "vap"],
@@ -107,12 +111,14 @@ const JPQ_VISION: CompanyVision = {
   visionId: "JPQ-vision-v1",
   effectiveFromTurn: 1,
   growthAmbition: "HIGH",
-  targetScaleTonsPerQuarterAtQ32: 30000,
+  // 【SAI-VISION-1】Q32目標のみ 30,000 → 50,000 へ更新（夜間sensitivity Case A1）。
+  // growthAmbition は HIGH のまま（MEDIUMへ落としても挙動が完全に同一であることを実測済み）。
+  targetScaleTonsPerQuarterAtQ32: 50000,
   preferredEndState: "QUALITY_SCALE",
   willingnessToBuildFactories: "MEDIUM",
   financialRiskTolerance: "MEDIUM",
   desiredProductEvolution: "PD_SCALE",
-  referenceGrowthPath: waypoints(16000, 18000, 21500, 25500, 30000),
+  referenceGrowthPath: waypoints(16000, 23677, 32452, 41226, 50000),
   longTermNarrative:
     "品質を落とさずに大きくなる。日本市場で選ばれ続けるPDの品質を維持したまま規模を伸ばす。品質を守れないと判断すれば、規模の方を諦める。",
   emphasisProducts: ["pd"],
@@ -123,12 +129,14 @@ const CONSV_VISION: CompanyVision = {
   visionId: "CONSV-vision-v1",
   effectiveFromTurn: 1,
   growthAmbition: "MEDIUM",
-  targetScaleTonsPerQuarterAtQ32: 27000,
+  // 【SAI-VISION-1】Q32目標のみ 27,000 → 45,000 へ更新（夜間sensitivity Case A1）。
+  // financialRiskTolerance は LOW のまま（DS3実測で借入0・distress 0を維持することを確認済み）。
+  targetScaleTonsPerQuarterAtQ32: 45000,
   preferredEndState: "LARGE_INTEGRATED",
   willingnessToBuildFactories: "MEDIUM",
   financialRiskTolerance: "LOW",
   desiredProductEvolution: "INTEGRATED",
-  referenceGrowthPath: waypoints(15000, 16500, 19500, 23000, 27000),
+  referenceGrowthPath: waypoints(15000, 21774, 29516, 37258, 45000),
   longTermNarrative:
     "潰れない会社であり続けたうえで、着実に大きくなる。手元資金と負債水準に余裕があるときにだけ投資する。無理な成長で財務を痛めるくらいなら成長を遅らせる。",
   emphasisProducts: ["hoso", "pd"],
