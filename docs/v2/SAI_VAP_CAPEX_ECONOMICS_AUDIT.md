@@ -1,5 +1,8 @@
 # SAI-EXEC-1 PRE-AUDIT（別紙） — VAP CAPEX Economics / 合理的規模の評価
 
+> **【2026-08-19 追記】** Vision 正式変更（`1319e57`）は SC-1/SC-2/SC-3 により revert された。
+> VAP の既定 Vision（17,000）は元から変更していないため、**本書の測定結果はすべて有効**。
+
 **本書は監査のみ。VAP CAPEX 価格・Worker 生産性・raw material economics・
 VAP Vision はいずれも変更していない。** 価格 75% / 50% の比較はプロセス内の
 shadow 実行のみであり、`capex/parameters.ts` は無変更。

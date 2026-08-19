@@ -1,5 +1,17 @@
 # SAI-EXEC-1 PRE-AUDIT — MASS / VAP Execution Bottleneck
 
+> **【2026-08-19 追記・Vision 正式採用は撤回された】**
+> 本書 §Stop Condition の SC-1 / SC-2 / SC-3 が成立したため、#05 の判断により
+> Vision 正式変更（`1319e57`）は revert された（BAL 60,000→34,000 /
+> JPQ 50,000→30,000 / CONSV 45,000→27,000、`referenceGrowthPath` も完全復元）。
+> **既定 Vision は 1319e57 以前の値に戻っている。**
+> 以下の本文中、BAL/JPQ/CONSV の Vision が新値である前提で書かれている箇所
+> （§0 の DS3 実効値の説明、§3 の A1 再現検証、Stop Condition 節）は、
+> 「その Vision を採用したらどうなるか」を測った監査記録として読むこと。
+> **MASS / VAP は元から変更しておらず、本書の Phase B〜J の実行ボトルネック分析
+> （凍結・包装能力・binding capacity 定義・同時 3 案件枠・DS2 資金・VAP 経済性）は
+> Vision revert の影響を受けない。** 測定手法の訂正（§0 の engine 4引数）も有効。
+
 **本書は監査のみ。実装は一切していない。**
 本 PRE-AUDIT で production code に加えた変更は Vision 正式値（`1319e57`）だけであり、
 それは別 commit として分離済み。Standard AI ロジック・Engine・Scenario・
