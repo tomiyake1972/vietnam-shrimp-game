@@ -25,6 +25,7 @@ import { PeriodV2 } from "../../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../../../lib/v2/companyLab";
 import { CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../../lib/v2/capex";
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
+import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividend";
 import { CompanyDecisionDraft } from "../../decisionDraft";
 import { buildDecisionStudioViewModel } from "../../decisionStudioViewModel";
 import type { OpeningInfoViewModel, ScenarioNewsItem } from "../../play/_lib/openingInfoViewModel";
@@ -49,6 +50,8 @@ export interface DecisionStudioProps {
   readonly lastQuarterCapexEvents?: readonly CapexProjectQuarterEvent[];
   readonly lastQuarterRejectedCapexProposals?: readonly CapexRejectedProposal[];
   readonly lastQuarterFinancialResult?: CompanyFinancialQuarterResult | null;
+  /** 【配当Decision UI接続】直近確定四半期の配当結果（累積配当・却下理由の表示用）。 */
+  readonly lastQuarterDividendResult?: CompanyDividendQuarterResult | null;
   readonly publicInfo?: PublicMarketInfo;
   readonly turn?: number;
   /** INFO画面のBS・償却資産明細・市場情報向け（PlayerScreenClient.tsxが持つ場合のみ渡す）。 */
@@ -84,6 +87,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     lastQuarterCapexEvents,
     lastQuarterRejectedCapexProposals,
     lastQuarterFinancialResult,
+    lastQuarterDividendResult,
     publicInfo,
     turn,
     openingInfo,
@@ -204,7 +208,16 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               lastQuarterRejectedCapexProposals={lastQuarterRejectedCapexProposals}
             />
           )}
-          {activeScreen === "finance" && <FinancePlanningScreen draft={draft} onChange={onChange} disabled={disabled} vm={vm} />}
+          {activeScreen === "finance" && (
+            <FinancePlanningScreen
+              draft={draft}
+              onChange={onChange}
+              disabled={disabled}
+              vm={vm}
+              lastQuarterFinancialResult={lastQuarterFinancialResult}
+              lastQuarterDividendResult={lastQuarterDividendResult}
+            />
+          )}
         </div>
       </div>
 

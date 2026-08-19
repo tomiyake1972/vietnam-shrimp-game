@@ -23,7 +23,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "../../company-lab/decisionDraft";
-import { extractCompanyCapexResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
+import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../../lib/v2/companyLab/standardAi/policy";
@@ -215,6 +215,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const backlog = buildBacklogDisplay(summary, previousSummary);
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
+  const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
   const controlMode = entry.companyControlModes[companyId] ?? "STANDARD_AI";
 
   // 【Game End / Final Results・指示§5】FINISHED（gameEndedAt設定済み）なら、
@@ -520,6 +521,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               lastQuarterCapexEvents={lastQuarterCapexResult?.events}
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
+              lastQuarterDividendResult={lastQuarterDividendResult}
               publicInfo={publicInfo}
               scenarioNews={scenarioNews}
               // AI経営会議は、このSimulation Runの同じ会社・同じturnの状態で開く（別Labを作らない）。
@@ -527,9 +529,6 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               // 会社の数値をclientから送らない。
               simulationRunId={runId}
               companyName={fixture.displayName}
-              // 【DIV-1由来】Decision Studioの意思決定入力フロー自体にはまだ配当入力UIが
-              // 無いため渡さない（既存のDecisionEditorベースの配当UIをDecision Studioへ
-              // 移植するのは今回のGame End / Final Results実装のスコープ外）。
             />
           </div>
         ) : null}
