@@ -31,6 +31,7 @@ import { buildStandardAiWorkerAssignments } from "./decision/labor";
 import { buildStandardAiFinancingRequest } from "./decision/finance";
 import { buildStandardAiCapexDecision, LiquidityGateContext } from "./decision/capex";
 import { assessCommittedCashRequirement, LiquidityAssessment } from "./decision/liquidity";
+import { assessFundableOperations, FundableOperationsAssessment, growthPausedForRecovery } from "./decision/fundableOperations";
 import { COMMITTED_CAPEX_HORIZON_QUARTERS } from "./observation";
 import { buildStandardAiVapProductDevelopmentDecision } from "./decision/vapProductDevelopment";
 import { buildStandardAiDividendDecision } from "./decision/dividend";
@@ -147,6 +148,12 @@ export interface StandardAiQuarterDiagnostics {
   readonly liquidity?: LiquidityAssessment;
   /** 当期にゲートを通した新規投資の支払額（horizon内合計）。 */
   readonly approvedInvestmentPaymentsThisTurnUsd?: number;
+  /**
+   * 【Phase SAI-GROW-3B-2】Fundable Operations / Survival & Recovery の評価結果。
+   * ベンチマーク・受入テスト・Management Consoleがこの1件だけを読めば、
+   * posture・fundable量・縮退の有無を追跡できる。
+   */
+  readonly fundableOperations?: FundableOperationsAssessment;
   /**
    * 【Phase SAI-GROW-1】Shadow Growth Pressure（診断専用）。
    *
@@ -567,10 +574,34 @@ export function generateStandardAiDecisionWithDiagnostics(
   );
   const finalProductionRequirementByProduct = computeFinalProductionRequirement(basicProductionRequirementByProduct);
 
-  const productionResult = buildStandardAiProductionPlans(fixture, observation, pressures, finalProductionRequirementByProduct);
+  // 【Phase SAI-GROW-3B-2・実装指示§2】Fundable Operations。
+  // engineのcomputeProcurementConstraintと同じ式で「当期に資金手当てできる原料量」を
+  // 生産計画より**前**に求める。procurementCashPlanには依存しないため循環しない
+  // （借入見込みは3B-1のrealisticallyAvailableBorrowingUsdをそのまま再利用する）。
+  const fundableOperations: FundableOperationsAssessment = assessFundableOperations({
+    observation,
+    pressures,
+    params,
+    crisisState: crisisAssessment.state,
+    financialRiskTolerance: vision ? vision.financialRiskTolerance : null,
+    productionRequirementTons: sumProductAmount(finalProductionRequirementByProduct),
+    growthParams: params.growthPressure,
+  });
+
+  const productionResult = buildStandardAiProductionPlans(
+    fixture,
+    observation,
+    pressures,
+    finalProductionRequirementByProduct,
+    // NORMAL時はundefinedを渡す＝現行挙動を完全に維持する（実装指示§3）。
+    fundableOperations.appliesProductionCap ? fundableOperations.fundableRawMaterialTons : undefined
+  );
   const requiredRawMaterial = productionResult.productionPlans.reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
   const requiredRawMaterialUnconstrained = sumProductAmount(productionResult.neededByProduct);
 
+  // 【実装指示§4】調達計画は縮退後のproduction requirementへ自動的に追従する
+  // （requiredRawMaterialが縮退後の生産計画から算出されるため、
+  //  「毎期18,963t希望し続けてengine側で0へ削られる」状態にならない）。
   const procurementResult = buildStandardAiProcurementPlan(fixture, observation, pressures, requiredRawMaterial, period, params);
   const laborResult = buildStandardAiWorkerAssignments(fixture, observation, pressures, productionResult.productionPlans, params);
   // 【Test16】資金繰り判断へ当期の原料調達計画を渡す。これにより「原料を買うのに
@@ -793,6 +824,9 @@ export function generateStandardAiDecisionWithDiagnostics(
     targetScaleBand: targetScaleResult.targetScaleBand,
     hasNearTermCapexUnderConstruction: targetCapabilityResult.hasNearTermCapexUnderConstruction,
     commercialAmbitionTons: commercialAmbition.ambitionTons,
+    // 【Phase SAI-GROW-3B-2・実装指示§6】深刻かつ持続する危機のときだけ、
+    // 既存の減員ロジックの在庫制約ブロックを外す（一時的Stressでは外さない）。
+    allowsSurvivalReduction: fundableOperations.allowsSalesForceReduction,
   });
 
   // 【指示§9・Crisis Gate】SEVERE_DISTRESS時、新規設備投資提案（既存増設＋新工場の
@@ -801,11 +835,16 @@ export function generateStandardAiDecisionWithDiagnostics(
   // projectを勝手にキャンセルしない」ため、cancelRequests/resumeRequestsは
   // capexResultの計算結果をそのまま使う＝一切触らない）。
   const isSevereDistress = crisisAssessment.state === "SEVERE_DISTRESS";
-  const newFactoryProposalsAfterCrisisGate = isSevereDistress ? [] : newFactoryResult.proposals;
-  const capexDecisionAfterCrisisGate = isSevereDistress
+  // 【Phase SAI-GROW-3B-2・実装指示§9】SURVIVAL/RECOVERYのあいだは新規の成長投資を
+  // 止める。1Turn資金が戻っただけでGrowth全開へ戻さない（bounded recovery）。
+  // 既に着工済みprojectはCM-1と同じくキャンセルしない（cancel/resumeには触れない）。
+  const growthPaused = growthPausedForRecovery(fundableOperations);
+  const suppressNewGrowth = isSevereDistress || growthPaused;
+  const newFactoryProposalsAfterCrisisGate = suppressNewGrowth ? [] : newFactoryResult.proposals;
+  const capexDecisionAfterCrisisGate = suppressNewGrowth
     ? { ...capexResult.capexDecision, newProjectProposals: [] }
     : capexResult.capexDecision;
-  const capexSuppressedByCrisis = isSevereDistress && (capexResult.capexDecision.newProjectProposals.length > 0 || newFactoryResult.proposals.length > 0);
+  const capexSuppressedByCrisis = suppressNewGrowth && (capexResult.capexDecision.newProjectProposals.length > 0 || newFactoryResult.proposals.length > 0);
 
   // 【指示§10・Crisis Gate】SEVERE_DISTRESS時、営業採用を0にする。既存営業人員の
   // 自動大量解雇は今回追加しない（salesForceLayoffCountはそのまま。指示§10
@@ -813,8 +852,8 @@ export function generateStandardAiDecisionWithDiagnostics(
   // 必要量（Commercial Commitment Gate経由）にbuildStandardAiWorkerAssignments自体が
   // 追随するため、別途のgateを追加していない（laborResult.workerAssignmentsは
   // 生産計画から逆算する既存ロジックそのまま）。
-  const salesForceHireCountAfterCrisisGate = isSevereDistress ? 0 : salesForceHiringResult.salesForceHireCount;
-  const salesHiringSuppressedByCrisis = isSevereDistress && salesForceHiringResult.salesForceHireCount > 0;
+  const salesForceHireCountAfterCrisisGate = suppressNewGrowth ? 0 : salesForceHiringResult.salesForceHireCount;
+  const salesHiringSuppressedByCrisis = suppressNewGrowth && salesForceHiringResult.salesForceHireCount > 0;
   // 【Standard AI Capability Expansion・Phase CE-2・Crisis Gate】SEVERE_DISTRESSでは
   // 新規のVAP商品開発支出（新たな裁量的コミットメント）も停止する（CM-1の
   // 「新規提案・新規採用を止める」思想をそのまま踏襲。既に投じたスコアの蓄積
@@ -916,6 +955,89 @@ export function generateStandardAiDecisionWithDiagnostics(
     }。`,
   };
 
+  // 【Phase SAI-GROW-3B-2・実装指示§11】Survival / Recovery の1Turn追跡。
+  // crisisState・posture・fundable量・計画量・人員・流動性を1件で追える形にする。
+  const plannedProductionTons = productionResult.productionPlans.reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
+  const plannedWorkerTotal = laborResult.workerAssignments.reduce((sum, w) => sum + w.regularHeadcount, 0);
+  const fundableOperationsDiagnostic: StandardAiDiagnosticEntry = {
+    code:
+      fundableOperations.posture === "SURVIVAL"
+        ? "SURVIVAL_MODE"
+        : fundableOperations.posture === "RECOVERY"
+          ? "RECOVERY_MODE"
+          : "GROWTH_PAUSED_FOR_RECOVERY",
+    domain: "finance",
+    companyId: fixture.companyId,
+    severity: fundableOperations.posture === "SURVIVAL" ? "warning" : "info",
+    keyValues: {
+      crisisStateIsSevere: crisisAssessment.state === "SEVERE_DISTRESS" ? 1 : 0,
+      crisisStateIsStress: crisisAssessment.state === "LIQUIDITY_STRESS" ? 1 : 0,
+      postureIsSurvival: fundableOperations.posture === "SURVIVAL" ? 1 : 0,
+      postureIsRecovery: fundableOperations.posture === "RECOVERY" ? 1 : 0,
+      sustainedDistress: fundableOperations.sustainedDistress ? 1 : 0,
+      procurementFundingUsd: fundableOperations.procurementFundingUsd,
+      expectedBorrowingForOperationsUsd: fundableOperations.expectedBorrowingForOperationsUsd,
+      fundableProcurementTons: fundableOperations.fundableDomesticProcurementTons,
+      fundableRawMaterialTons: fundableOperations.fundableRawMaterialTons,
+      fundableProductionTons: fundableOperations.fundableProductionTons,
+      productionRequirementTons: sumProductAmount(finalProductionRequirementByProduct),
+      plannedProductionTons,
+      plannedProcurementTons: unwrapUnit(procurementResult.domesticPurchasePlan.desiredQuantity),
+      workerCurrent: observation.regularHeadcountTotal,
+      workerPlanned: plannedWorkerTotal,
+      workerChange: plannedWorkerTotal - observation.regularHeadcountTotal,
+      salesHeadcountCurrent: observation.salesForceHeadcountTotal,
+      salesHeadcountChange: salesForceHireCountAfterCrisisGate - salesForceHiringResult.salesForceLayoffCount,
+      liquidityHeadroomUsd: liquidityAssessment.liquidityHeadroomUsd,
+      availableBorrowingUsd: liquidityAssessment.realisticallyAvailableBorrowingUsd,
+      growthPaused: growthPaused ? 1 : 0,
+    },
+    decisionSummary:
+      fundableOperations.posture === "NORMAL"
+        ? "通常運転（資金による規模の縮退なし）"
+        : fundableOperations.posture === "SURVIVAL"
+          ? `資金手当て可能な規模（原料${Math.round(fundableOperations.fundableRawMaterialTons).toLocaleString()}t）で操業する`
+          : "資金は回復。規模の回復を優先し、新規の成長投資は見送る",
+    message: fundableOperations.reason,
+  };
+
+  // 【実装指示§11】縮退が実際に効いたときだけ、対象ドメインの理由codeを立てる。
+  const survivalActionDiagnostics: StandardAiDiagnosticEntry[] = [];
+  if (fundableOperations.appliesProductionCap) {
+    survivalActionDiagnostics.push({
+      code: "PROCUREMENT_REDUCED_BY_LIQUIDITY",
+      domain: "procurement",
+      companyId: fixture.companyId,
+      severity: "warning",
+      keyValues: {
+        plannedProcurementTons: unwrapUnit(procurementResult.domesticPurchasePlan.desiredQuantity),
+        fundableProcurementTons: fundableOperations.fundableDomesticProcurementTons,
+        procurementFundingUsd: fundableOperations.procurementFundingUsd,
+      },
+      decisionSummary: "資金手当て可能な調達規模へ計画を合わせる",
+      message:
+        "生産計画を資金手当て可能な規模へ縮退させたため、原料調達計画もその生産必要量へ追従させる" +
+        "（engine側で事後的に削られる量を希望し続けない）。",
+    });
+  }
+  if (fundableOperations.posture === "SURVIVAL" && plannedWorkerTotal < observation.regularHeadcountTotal) {
+    survivalActionDiagnostics.push({
+      code: "WORKFORCE_REDUCED_FOR_SURVIVAL",
+      domain: "labor",
+      companyId: fixture.companyId,
+      severity: "warning",
+      keyValues: {
+        workerCurrent: observation.regularHeadcountTotal,
+        workerPlanned: plannedWorkerTotal,
+        workerChange: plannedWorkerTotal - observation.regularHeadcountTotal,
+      },
+      decisionSummary: `常用ワーカーを${observation.regularHeadcountTotal - plannedWorkerTotal}人縮小`,
+      message:
+        "資金手当て可能な生産規模に合わせて必要人数が下がったため、既存の段階的な人員調整" +
+        "（regularHeadcountAdjustmentDamping）の範囲で常用ワーカーを縮小する（一括解雇はしない）。",
+    });
+  }
+
   const newSalesSuppressedByCrisis = crisisAssessment.state !== "NORMAL";
   const crisisDiagnostics = buildCrisisDiagnostics(fixture.companyId, crisisAssessment, observation, {
     newSalesSuppressed: newSalesSuppressedByCrisis,
@@ -951,6 +1073,8 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...newFactoryResult.diagnostics,
     ...buildCommitmentDiagnostics(fixture.companyId, commercialCommitment, conversionObservation),
     liquidityDiagnostic,
+    fundableOperationsDiagnostic,
+    ...survivalActionDiagnostics,
     ...crisisDiagnostics,
     ...(vapDevCrisisDiagnostic ? [vapDevCrisisDiagnostic] : []),
   ];
@@ -1002,6 +1126,7 @@ export function generateStandardAiDecisionWithDiagnostics(
       // 【Phase SAI-GROW-3B-1】Liquidity SSoT の評価内訳。Finance・CAPEX・新工場が
       // 参照したのとまったく同じ値（実装指示§13）。
       liquidity: liquidityAssessment,
+      fundableOperations,
       approvedInvestmentPaymentsThisTurnUsd,
       // 【Phase SAI-GROW-1】診断専用のShadow Growth Pressure（Decisionには未接続）。
       growthPressure,

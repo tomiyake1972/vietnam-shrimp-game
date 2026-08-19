@@ -138,7 +138,21 @@ export interface CommittedCashRequirementInput {
  * 代わりに、**AI自身が既に持っている借入方針の上限**（pressures.borrowingPressure の
  * 定義そのもの）を使い、そこへ既存の規律パラメータでhaircutする。
  */
-function realisticallyAvailableBorrowingUsd(input: CommittedCashRequirementInput, growthParams: GrowthPressureParameters): number {
+/**
+ * 【Phase SAI-GROW-3B-2】procurementCashPlanに依存しない入力だけを取る。
+ * Fundable Operations（fundableOperations.ts）は調達計画を作る**前**にこの値を
+ * 必要とするため、CommittedCashRequirementInput全体を要求しない
+ * （CommittedCashRequirementInputはこの型を満たすので呼び出し側は無変更）。
+ */
+export interface BorrowingCapacityViewInput {
+  readonly observation: StandardAiObservation;
+  readonly pressures: PressureScores;
+  readonly params: StandardAiParameters;
+  readonly crisisState: StandardAiCrisisState;
+  readonly financialRiskTolerance: FinancialRiskTolerance | null;
+}
+
+export function realisticallyAvailableBorrowingUsd(input: BorrowingCapacityViewInput, growthParams: GrowthPressureParameters): number {
   const { observation, pressures, params, crisisState } = input;
 
   // 借りられない状態では1ドルも数えない（実装指示§2）。

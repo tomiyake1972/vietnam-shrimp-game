@@ -203,6 +203,13 @@ export type StandardAiReasonCode =
   | "CAPEX_DEFERRED_LIQUIDITY" // 投資後にProtected Funding Requirementを割るため見送り
   | "CAPEX_DEFERRED_COMMITTED_PAYMENTS" // 既承認案件の今後の支払で余力が無いため見送り
   | "LIQUIDITY_ASSESSED"
+  | "SURVIVAL_MODE"
+  | "RECOVERY_MODE"
+  | "PRODUCTION_REDUCED_BY_LIQUIDITY"
+  | "PROCUREMENT_REDUCED_BY_LIQUIDITY"
+  | "WORKFORCE_REDUCED_FOR_SURVIVAL"
+  | "SALES_FORCE_REDUCED_FOR_SURVIVAL"
+  | "GROWTH_PAUSED_FOR_RECOVERY"
   // --- Strategy Profile Quantification（Phase SP-Q1） ---
   | "PROFILE_BIAS_APPLIED" // 会社別ManagementProfile/OrientationProfileのバイアスをStandardAiParametersへ適用した（mode=ONの時のみ）
   // --- 【Standard AI Capability Expansion・Phase CE-1】PD機械化 ---
@@ -430,6 +437,13 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "CAPEX_DEFERRED_LIQUIDITY",
   "CAPEX_DEFERRED_COMMITTED_PAYMENTS",
   "LIQUIDITY_ASSESSED",
+  "SURVIVAL_MODE",
+  "RECOVERY_MODE",
+  "PRODUCTION_REDUCED_BY_LIQUIDITY",
+  "PROCUREMENT_REDUCED_BY_LIQUIDITY",
+  "WORKFORCE_REDUCED_FOR_SURVIVAL",
+  "SALES_FORCE_REDUCED_FOR_SURVIVAL",
+  "GROWTH_PAUSED_FOR_RECOVERY",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */
