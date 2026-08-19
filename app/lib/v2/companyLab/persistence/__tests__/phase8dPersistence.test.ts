@@ -219,8 +219,8 @@ test("PS-5（必須14）: 履歴も無い旧データでも例外にならず、
   }
 });
 
-test("PS-6: 現行スキーマのバージョン番号が7へ上がっており、1〜6のデータも受け付ける（#05営業人員forward-portでv4→v6、Test15統合でv6→v7に再採番。CompanyLabRuntimeSnapshotの構造としてはpdMechanizationState・productDevelopmentStateがoptionalで追加）", () => {
-  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 7);
+test("PS-6: 現行スキーマのバージョン番号が8へ上がっており、1〜7のデータも受け付ける（#05営業人員forward-portでv4→v6、Test15統合でv6→v7、ENG-FAC-1のfactoryLifecycleStateでv7→v8に再採番。CompanyLabRuntimeSnapshotの構造としてはいずれもoptionalで追加）", () => {
+  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 8);
 });
 
 // ---------------------------------------------------------------------

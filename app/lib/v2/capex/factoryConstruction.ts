@@ -26,6 +26,14 @@ import { deriveDefaultFactorySpaceUnits } from "../production/factorySpace";
 import { applyCapexCapacityToFactories, computeOperationalStartPeriod, isCapexProjectOperationalAt } from "./capacityEffect";
 import { isActiveStatus } from "./projectLifecycle";
 import { CapexState, CapitalProject } from "./types";
+import {
+  FactoryLifecycleDecisionRecord,
+  FactoryLifecycleStateTable,
+  findCompanyFactoryLifecycleState,
+  isProducingFactoryLifecycleState,
+  occupiesFactorySlot,
+  resolveFactoryLifecycleStateAt,
+} from "./factoryLifecycle";
 
 // ---------------------------------------------------------------------
 // 期間演算（capacityEffect.ts・depreciation.tsと同じローカル実装パターンを踏襲。
@@ -219,7 +227,17 @@ export function applyNewFactoryConstructionToFactories(factories: readonly Facto
  * 「今使えるFactory[]」の計算箇所を本関数の1箇所へ統一し、両者が食い違うことを
  * 構造的に防ぐ（実装指示「ONE canonical place」）。
  */
-export function computeEffectiveFactories(baseFactories: readonly Factory[], capexState: CapexState, period: PeriodV2): readonly Factory[] {
+export function computeEffectiveFactories(
+  baseFactories: readonly Factory[],
+  capexState: CapexState,
+  period: PeriodV2,
+  /**
+   * 【ENG-FAC-1】会社別のFactory lifecycle決定ログ（capex/factoryLifecycle.ts）。
+   * 省略時はlifecycleを一切適用しない＝この機能の導入前と完全に同一の挙動になる
+   * （既存の呼び出し元・既存テストとの後方互換）。
+   */
+  factoryLifecycleState?: FactoryLifecycleStateTable
+): readonly Factory[] {
   // 【複数工場CAPEX Targeting修正】先に稼働開始済み新設Factoryを合成してから
   // 能力増強効果を適用する（順序を入れ替えた）。理由: targetFactoryIdが
   // 新設Factory（例: BAL-NEWF-...）を指す案件が完成した場合、applyCapexCapacityToFactories
@@ -228,7 +246,75 @@ export function computeEffectiveFactories(baseFactories: readonly Factory[], cap
   // 新設Factoryを純粋に追加するだけで、baseFactories側の能力増強有無には
   // 依存しないため、順序を入れ替えても既存工場側の結果は変わらない。
   const withNewFactories = applyNewFactoryConstructionToFactories(baseFactories, capexState, period);
-  return applyCapexCapacityToFactories(withNewFactories, capexState, period);
+  const withCapexCapacity = applyCapexCapacityToFactories(withNewFactories, capexState, period);
+  // 【ENG-FAC-1・実装指示§2 canonical point】lifecycle stateのFactoryへの適用は
+  // 必ずこの1箇所で行う。fixture.factoriesは決して書き換えない。
+  return applyFactoryLifecycleToFactories(withCapexCapacity, factoryLifecycleState, period);
+}
+
+// ---------------------------------------------------------------------
+// 3c. Factory lifecycle（ENG-FAC-1）の適用
+// ---------------------------------------------------------------------
+
+/**
+ * 【ENG-FAC-1】lifecycle stateを実効Factory[]へ写像する。
+ *
+ *   OPERATING    : 変更なし
+ *   MOTHBALLED   : FactoryStatus="idle"      → production/capacity.tsが能力0にする
+ *   SALE_PENDING : FactoryStatus="suspended" → 同上
+ *   SOLD         : Factory[]から除去（もはや保有していない）
+ *
+ * 【既存の能力0ロジックを再利用する（実装指示§4 Capacity）】ここで能力値そのものを
+ * 0で上書きしない。production/capacity.tsのcalculateFactoryEffectiveCapacityが
+ * すでに status!=="active" で全能力プールを0にしているため、statusを落とすだけで
+ * 「PD機械化等の設備能力も利用不可」まで含めて既存経路で満たされる。
+ * 能力値を残しておくことで、按分キーや診断表示が壊れないという利点もある。
+ *
+ * MOTHBALLEDに"idle"、SALE_PENDINGに"suspended"を割り当てているのは、既存
+ * FactoryStatusの語義（idle=一時的に動かしていない／suspended=操業を止めている）へ
+ * 素直に対応させるためであり、能力・固定費の扱いは両者とも同一である
+ * （固定費の差はcarrying cost率25%とholding cost率10%として会計側が持つ）。
+ */
+export function applyFactoryLifecycleToFactories(
+  factories: readonly Factory[],
+  factoryLifecycleState: FactoryLifecycleStateTable | undefined,
+  period: PeriodV2
+): readonly Factory[] {
+  if (!factoryLifecycleState || factoryLifecycleState.companies.length === 0) return factories;
+
+  const result: Factory[] = [];
+  for (const factory of factories) {
+    const company = findCompanyFactoryLifecycleState(factoryLifecycleState, factory.companyId);
+    if (!company || company.decisions.length === 0) {
+      result.push(factory);
+      continue;
+    }
+    const state = resolveFactoryLifecycleStateAt(company.decisions, factory.factoryId, period);
+    if (state === "SOLD") continue; // 保有していないためFactory[]から消える。
+    if (isProducingFactoryLifecycleState(state)) {
+      result.push(factory);
+      continue;
+    }
+    result.push({ ...factory, status: state === "MOTHBALLED" ? "idle" : "suspended" });
+  }
+  return result;
+}
+
+/**
+ * 【ENG-FAC-1】当四半期に会社が保有している（＝SOLDでない）完成済み工場のID一覧。
+ * lifecycle適用前のFactory[]（SOLDも含む）を渡すこと。validation（最低1工場ルール）と
+ * スロット計算の双方が同じ定義を使うためのヘルパー。
+ */
+export function listOwnedFactoryIdsForCompany(
+  factoriesBeforeLifecycle: readonly Factory[],
+  companyId: string,
+  decisions: readonly FactoryLifecycleDecisionRecord[],
+  period: PeriodV2
+): readonly string[] {
+  return factoriesBeforeLifecycle
+    .filter((f) => f.companyId === companyId)
+    .filter((f) => resolveFactoryLifecycleStateAt(decisions, f.factoryId, period) !== "SOLD")
+    .map((f) => f.factoryId);
 }
 
 // ---------------------------------------------------------------------
@@ -246,14 +332,55 @@ export const MAX_FACTORIES_PER_COMPANY = 4;
  * を満たす（isActiveStatusはapproved/underConstruction/suspendedを指す。これに
  * completedを加えたものが「取消以外すべて」と一致する）。
  */
-export function countProspectiveFactories(existingFactoryCount: number, projects: readonly CapitalProject[]): number {
+export function countProspectiveFactories(
+  existingFactoryCount: number,
+  projects: readonly CapitalProject[],
+  /**
+   * 【ENG-FAC-1・実装指示§13】スロットを解放した工場の情報。省略時は解放なし
+   * （この機能の導入前と同一の挙動）。
+   *   - soldBaselineFactoryCount : 売却完了(SOLD)した**初期工場**の数
+   *   - soldNewFactoryIds        : 売却完了(SOLD)した**新設工場**のFactory ID集合
+   * SALE_PENDINGは売却完了までスロットを占有し続けるため、ここには含めない
+   * （occupiesFactorySlot参照）。
+   */
+  slotRelease?: { readonly soldBaselineFactoryCount: number; readonly soldNewFactoryIds: ReadonlySet<string> }
+): number {
+  const soldNewFactoryIds = slotRelease?.soldNewFactoryIds;
   const newFactoryProjectCount = projects.filter(
-    (p) => p.projectType === "newFactoryConstruction" && (isActiveStatus(p.status) || p.status === "completed")
+    (p) =>
+      p.projectType === "newFactoryConstruction" &&
+      (isActiveStatus(p.status) || p.status === "completed") &&
+      !(soldNewFactoryIds?.has(buildNewFactoryId(p)) ?? false)
   ).length;
-  return existingFactoryCount + newFactoryProjectCount;
+  return Math.max(0, existingFactoryCount - (slotRelease?.soldBaselineFactoryCount ?? 0)) + newFactoryProjectCount;
 }
 
 /** 新工場建設の追加提案1件を承認すると上限(4工場)を超えるか。 */
-export function wouldExceedMaxFactories(existingFactoryCount: number, projects: readonly CapitalProject[]): boolean {
-  return countProspectiveFactories(existingFactoryCount, projects) + 1 > MAX_FACTORIES_PER_COMPANY;
+export function wouldExceedMaxFactories(
+  existingFactoryCount: number,
+  projects: readonly CapitalProject[],
+  slotRelease?: { readonly soldBaselineFactoryCount: number; readonly soldNewFactoryIds: ReadonlySet<string> }
+): boolean {
+  return countProspectiveFactories(existingFactoryCount, projects, slotRelease) + 1 > MAX_FACTORIES_PER_COMPANY;
+}
+
+/**
+ * 【ENG-FAC-1】lifecycle決定ログから、スロットを解放した工場の内訳を求める
+ * （countProspectiveFactories / wouldExceedMaxFactoriesへ渡す形）。
+ * SALE_PENDINGはまだ占有しているため含まれない（occupiesFactorySlot=trueのまま）。
+ */
+export function computeFactorySlotRelease(
+  baselineFactories: readonly Factory[],
+  decisions: readonly FactoryLifecycleDecisionRecord[],
+  period: PeriodV2
+): { readonly soldBaselineFactoryCount: number; readonly soldNewFactoryIds: ReadonlySet<string> } {
+  const baselineIds = new Set(baselineFactories.map((f) => f.factoryId));
+  let soldBaselineFactoryCount = 0;
+  const soldNewFactoryIds = new Set<string>();
+  for (const factoryId of new Set(decisions.map((d) => d.factoryId))) {
+    if (occupiesFactorySlot(resolveFactoryLifecycleStateAt(decisions, factoryId, period))) continue;
+    if (baselineIds.has(factoryId)) soldBaselineFactoryCount += 1;
+    else soldNewFactoryIds.add(factoryId);
+  }
+  return { soldBaselineFactoryCount, soldNewFactoryIds };
 }

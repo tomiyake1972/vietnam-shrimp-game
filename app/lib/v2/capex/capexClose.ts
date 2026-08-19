@@ -51,6 +51,7 @@ import {
   validateResumeRequest,
 } from "./projectLifecycle";
 import { MAX_FACTORIES_PER_COMPANY, wouldExceedMaxFactories } from "./factoryConstruction";
+import type { FactoryLifecycleAdjustment } from "./factoryDisposal";
 import { CapexDecisionInput, CapexQuarterResult, CapexRejectedProposal, CapexValidationError, CapitalProject, CompanyCapexState } from "./types";
 
 export interface CloseQuarterWithCapexInput {
@@ -94,6 +95,26 @@ export interface CloseQuarterWithCapexInput {
   /** スペース係数（省略時は FACTORY_SPACE_PARAMETERS_V1）。 */
   readonly factorySpaceParams?: FactorySpaceParameters;
   /**
+   * 【ENG-FAC-1】Factory lifecycle（Mothball / Sale）の会計効果。
+   * 算出はcapex/factoryDisposal.tsのcomputeFactoryLifecycleAccountingが行い、
+   * ここでは受け取ってcloseFinancialQuarterへ素通しするだけ（再計算しない）。
+   * 省略時は本機能の導入前と完全に同一の挙動になる。
+   */
+  readonly factoryLifecycleAdjustment?: FactoryLifecycleAdjustment;
+  /**
+   * 【ENG-FAC-1】**当四半期の期首より前に**売却完了して会社BSから除却済みの
+   * Capital Project ID集合。既存資産の減価償却ベース復元
+   * （nonDepreciatingCapexGrossAtPeriodStartUsd）から除外する。
+   * 当四半期に売却完了する分はまだ期首BSに載っているため、ここには含めない。
+   */
+  readonly capexProjectIdsDerecognizedBeforePeriod?: ReadonlySet<string>;
+  /**
+   * 【ENG-FAC-1】**当四半期時点で**売却完了（SOLD）した工場へ帰属する
+   * Capital Project ID集合。当四半期の減価償却・固定保守費から除外する
+   * （実装指示§12「SOLD: depreciationなし」）。
+   */
+  readonly capexProjectIdsDerecognizedAsOfPeriod?: ReadonlySet<string>;
+  /**
    * 【Test15新設】この会社の既存（静的fixture由来）工場数。newFactoryConstruction
    * 提案の1社あたり工場数上限（capex/factoryConstruction.tsのMAX_FACTORIES_PER_COMPANY）
    * 判定に使う。省略時は0扱い（Phase 8D以前の呼び出し元・既存テストとの後方互換。
@@ -101,6 +122,13 @@ export interface CloseQuarterWithCapexInput {
    * 上限判定が甘くなるため、新工場建設を扱う呼び出し元は必ず渡すこと）。
    */
   readonly existingFactoryCount?: number;
+  /**
+   * 【ENG-FAC-1・実装指示§13】売却完了(SOLD)によって解放された工場スロットの内訳。
+   * capex/factoryConstruction.tsのcomputeFactorySlotReleaseが算出する。
+   * 省略時は解放なし（本機能の導入前と同一の挙動）。SALE_PENDINGは売却完了まで
+   * スロットを占有し続けるため、ここには現れない。
+   */
+  readonly factorySlotRelease?: { readonly soldBaselineFactoryCount: number; readonly soldNewFactoryIds: ReadonlySet<string> };
   /**
    * 【develop/v2統合・Phase2監査2-3】この会社の当四半期時点の実在Factory ID一覧
    * （稼働開始済み新設Factoryを含む、呼び出し元がcomputeEffectiveFactories基準で
@@ -201,7 +229,10 @@ export function closeQuarterWithCapex(
     // 逐次更新）、同じ四半期に複数のnewFactoryConstructionを提案しても正しく積み上がる。
     const factoryCountGate: ProposalFactoryCountGate | undefined =
       proposal.projectType === "newFactoryConstruction"
-        ? { wouldExceedMax: wouldExceedMaxFactories(existingFactoryCount, projects), maxFactoriesPerCompany: MAX_FACTORIES_PER_COMPANY }
+        ? {
+            wouldExceedMax: wouldExceedMaxFactories(existingFactoryCount, projects, input.factorySlotRelease),
+            maxFactoriesPerCompany: MAX_FACTORIES_PER_COMPANY,
+          }
         : undefined;
     // 【Test15新設、複数工場CAPEX Targeting修正で全案件種別のtargetFactoryExists判定へ拡張】
     // hasActiveProjectForSameFactory（同一Factoryへの重複進行）はpdMechanization固有の
@@ -275,20 +306,28 @@ export function closeQuarterWithCapex(
 
   // --- 6. 期末建設中勘定・非減価償却対象額 ---
   const endingConstructionInProgressUsd = projects.filter((p) => isActiveStatus(p.status)).reduce((s, p) => s + p.cumulativePaidUsd, 0);
+  // 【ENG-FAC-1】過去の四半期に売却完了して会社BSから除却済みの資産は、この復元式から
+  // 除外する（除外しないと、既に存在しない資産ぶんだけ既存資産の償却ベースが目減りする）。
+  const derecognizedBeforePeriod = input.capexProjectIdsDerecognizedBeforePeriod;
   const nonDepreciatingCapexGrossAtPeriodStartUsd = prevCapexState.portfolio.projects
     .filter((p) => p.status === "completed")
+    .filter((p) => !(derecognizedBeforePeriod?.has(p.projectId) ?? false))
     .reduce((s, p) => s + (p.capitalizedAmountUsd ?? 0), 0);
+  // 【ENG-FAC-1】売却完了した工場へ帰属する資産は、当四半期から減価償却・固定保守費の
+  // 対象外になる。
+  const derecognizedAsOfPeriod = input.capexProjectIdsDerecognizedAsOfPeriod;
+  const projectsStillOwned = derecognizedAsOfPeriod ? projects.filter((p) => !derecognizedAsOfPeriod.has(p.projectId)) : projects;
 
   // --- 6.5. 【Phase 8B-2B、Phase 8B-2Cでコンポーネント別に変更】当期の新規capex
   //          資産の建物・機械別減価償却費・固定保守費 ---
   // 当四半期に完成した案件はoperationalStartPeriodが必ず翌四半期以降になるため
   // （completedPeriodの翌四半期＋readiness）、支払処理後のprojects（=completed
   // 判定済み）を使っても、当期完成分がここで誤って計上されることはない。
-  const capexDepreciation = computeCapexComponentDepreciationUsd(projects, params, period);
+  const capexDepreciation = computeCapexComponentDepreciationUsd(projectsStillOwned, params, period);
   const capexAssetsDepreciationUsd = capexDepreciation.totalUsd;
   const capexAssetsBuildingDepreciationUsd = capexDepreciation.buildingUsd;
   const capexAssetsMachineryDepreciationUsd = capexDepreciation.machineryUsd;
-  const capexMaintenanceCostUsd = computeCapexMaintenanceCostUsd(projects, params, period);
+  const capexMaintenanceCostUsd = computeCapexMaintenanceCostUsd(projectsStillOwned, params, period);
 
   const capexAdjustment: CapexAdjustment = {
     capexPaymentCashUsd: totalPaidThisQuarterUsd,
@@ -314,7 +353,15 @@ export function closeQuarterWithCapex(
   };
 
   // --- 8. 三段目のclosefinancialQuarter呼び出し（最終PL/BS/CF） ---
-  const passThree = closeFinancialQuarter(input.prevFinanceState, input.actuals, financeParams, processingRateByProduct, reconstructedFinancing, capexAdjustment);
+  const passThree = closeFinancialQuarter(
+    input.prevFinanceState,
+    input.actuals,
+    financeParams,
+    processingRateByProduct,
+    reconstructedFinancing,
+    capexAdjustment,
+    input.factoryLifecycleAdjustment
+  );
 
   const nextCapexState: CompanyCapexState = {
     companyId,
