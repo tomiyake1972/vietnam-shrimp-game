@@ -49,6 +49,7 @@ import {
 import { buildStandardAiUnitEconomics } from "./diagnosis/forwardUnitEconomics";
 import { buildStandardAiSalesForceHiringDecision, SalesHiringDiagnosticsRecord } from "./decision/salesForceHiring";
 import { SALES_PARAMETERS_V1, SalesParameters } from "../../sales/parameters";
+import { resolveCompanySalesParams } from "../../scenario/salesCapacityOverride";
 import { computeTargetScaleBand } from "./targetScale";
 import { computeTargetCapability } from "./targetCapability";
 import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "./strategicIntent";
@@ -367,7 +368,7 @@ export function generateStandardAiDecisionWithDiagnostics(
   turn: number,
   params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
   /** 【Phase 6B】営業パラメータの上書き（比較用。未指定なら既定）。 */
-  salesParams: SalesParameters = SALES_PARAMETERS_V1,
+  salesParamsInput: SalesParameters = SALES_PARAMETERS_V1,
   /**
    * 【Management Console Vision Calibration・指示§17】Run固有のVision上書き
    * （未指定なら従来どおりvision/defaults.tsの既定Visionのみを使う。挙動不変）。
@@ -382,6 +383,10 @@ export function generateStandardAiDecisionWithDiagnostics(
    */
   scenarioVisionGrowthOverrides?: Readonly<Record<string, ScenarioVisionGrowthOverride>>
 ): StandardAiDecisionWithDiagnostics {
+  // 【Dynamic Scenario 3】会社別の営業能力モデルが宣言されていれば、この会社ぶんへ
+  // 解決してから以降の判断で使う。未宣言なら同一オブジェクト参照が返る（挙動不変）。
+  // 会社IDによる分岐はこの1行だけで、decision/*.ts の内部には持ち込まない。
+  const salesParams = resolveCompanySalesParams(salesParamsInput, fixture.companyId);
   const observation = buildStandardAiObservation(fixture, ownState, publicInfo, period, turn);
   const pressures = computePressureScores(observation, fixture, params);
 

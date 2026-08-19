@@ -16,8 +16,9 @@
 // 商品ごとの営業の重さという世界共通の性質なので、シナリオからは変更できない。
 
 import { SalesParameters } from "../sales/parameters";
+import { SalesCapacityModel } from "../sales/salesCapacityModel";
 import { SALES_CAPACITY_MODEL_COMPANY_ORGANIZATION_V1 } from "../sales/salesCapacityModel";
-import { ScenarioDefinition } from "./types";
+import { ScenarioDefinition, SalesOrganizationCapacityTuning } from "./types";
 
 /**
  * シナリオ定義の salesOrganizationCapacityOverride を SalesParameters へ適用する。
@@ -30,17 +31,43 @@ export function applyScenarioSalesCapacityOverride(base: SalesParameters, defini
   // 上書きの土台は、その SalesParameters が既に持つモデル（無ければ正式モデル）。
   // kind は変えない（perMarket のシナリオを勝手に companyWide にしない）。
   const model = base.salesCapacityModel ?? SALES_CAPACITY_MODEL_COMPANY_ORGANIZATION_V1;
+  const tuned = tune(model, override);
+  const byCompany = override.byCompany;
   return {
     ...base,
-    salesCapacityModel: {
-      ...model,
-      ...(override.companyBaselineCapacityTons === undefined ? {} : { companyBaselineCapacityTons: override.companyBaselineCapacityTons }),
-      ...(override.companyCapacityMaxIncrementTons === undefined
-        ? {}
-        : { companyCapacityMaxIncrementTons: override.companyCapacityMaxIncrementTons }),
-      ...(override.companyCapacitySaturationHeadcount === undefined
-        ? {}
-        : { companyCapacitySaturationHeadcount: override.companyCapacitySaturationHeadcount }),
-    },
+    salesCapacityModel: tuned,
+    // 会社別の宣言があれば、共通値（tuned）へさらに重ねた会社別モデルを作る。
+    ...(byCompany === undefined
+      ? {}
+      : {
+          salesCapacityModelByCompany: Object.fromEntries(
+            Object.entries(byCompany).map(([companyId, companyTuning]) => [companyId, tune(tuned, companyTuning)])
+          ),
+        }),
   };
+}
+
+/** 指定された項目だけを差し替えた営業能力モデルを返す（kind は保つ）。 */
+function tune(model: SalesCapacityModel, tuning: SalesOrganizationCapacityTuning): SalesCapacityModel {
+  return {
+    ...model,
+    ...(tuning.companyBaselineCapacityTons === undefined ? {} : { companyBaselineCapacityTons: tuning.companyBaselineCapacityTons }),
+    ...(tuning.companyCapacityMaxIncrementTons === undefined
+      ? {}
+      : { companyCapacityMaxIncrementTons: tuning.companyCapacityMaxIncrementTons }),
+    ...(tuning.companyCapacitySaturationHeadcount === undefined
+      ? {}
+      : { companyCapacitySaturationHeadcount: tuning.companyCapacitySaturationHeadcount }),
+  };
+}
+
+/**
+ * 【Dynamic Scenario 3】会社別の営業能力モデルを解決した SalesParameters を返す。
+ * 会社別宣言が無ければ base を同一参照のまま返す（恒等変換）。
+ * Standard AI 側（policy.ts）が自社の能力天井を読むときに使う。
+ */
+export function resolveCompanySalesParams(base: SalesParameters, companyId: string): SalesParameters {
+  const companyModel = base.salesCapacityModelByCompany?.[companyId];
+  if (companyModel === undefined) return base;
+  return { ...base, salesCapacityModel: companyModel };
 }

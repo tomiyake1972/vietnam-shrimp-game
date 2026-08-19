@@ -15,6 +15,9 @@ import { DYNAMIC_SCENARIO_3 } from "../app/lib/v2/scenario/definitions/dynamicSc
 import { DS3_DOWN_CYCLE_SENSITIVITY, DS3_VIETNAM_DISASTER_CASE_B } from "../app/lib/v2/scenario/definitions/dynamicScenario3Parameters";
 import { DS3_EVENT_IDS } from "../app/lib/v2/scenario/definitions/dynamicScenario3News";
 import { ScenarioEffect, ScenarioEvent } from "../app/lib/v2/scenario/types";
+import { applyScenarioSalesCapacityOverride } from "../app/lib/v2/scenario/salesCapacityOverride";
+import { SALES_PARAMETERS_V1 } from "../app/lib/v2/sales/parameters";
+import { companySalesOrganizationCapacity } from "../app/lib/v2/sales/salesCapacityModel";
 import { unwrapUnit } from "../app/lib/v2/core/units";
 import { CountryId, DemandMarketId } from "../app/lib/v2/market/types";
 
@@ -76,6 +79,45 @@ function applySensitivityOverrides(): string[] {
     }
   }
 
+  // SALES_CAP=off|uniform200|uniform300|tiered  … 営業能力上限の感度比較（§1）
+  const balVision = process.env.BAL_VISION ? Number(process.env.BAL_VISION) : undefined;
+  if (balVision !== undefined) {
+    const v = DYNAMIC_SCENARIO_3.visionGrowthOverrides as Record<string, { scaleMultiplier?: number }>;
+    v.BAL = { ...v.BAL, scaleMultiplier: balVision };
+    notes.push(`BAL Vision倍率=${balVision}`);
+  }
+
+  const cap = process.env.SALES_CAP;
+  if (cap && cap !== "off") {
+    const presets: Record<string, unknown> = {
+      uniform200: { companyCapacityMaxIncrementTons: 200_000, companyCapacitySaturationHeadcount: 240 },
+      uniform300: { companyCapacityMaxIncrementTons: 300_000, companyCapacitySaturationHeadcount: 280 },
+      // 会社差つき・BAL は既定のまま（BAL の早期過剰投資の切り分け用）
+      tieredNoBal: {
+        byCompany: {
+          MASS: { companyCapacityMaxIncrementTons: 260_000, companyCapacitySaturationHeadcount: 250 },
+          JPQ: { companyCapacityMaxIncrementTons: 150_000, companyCapacitySaturationHeadcount: 230 },
+          VAP: { companyCapacityMaxIncrementTons: 150_000, companyCapacitySaturationHeadcount: 230 },
+          CONSV: { companyCapacityMaxIncrementTons: 120_000, companyCapacitySaturationHeadcount: 220 },
+        },
+      },
+      // 会社差つき（MASS 高 / BAL 中〜高 / JPQ 中 / VAP 中 / CONSV 中〜低）
+      tiered: {
+        byCompany: {
+          MASS: { companyCapacityMaxIncrementTons: 260_000, companyCapacitySaturationHeadcount: 250 },
+          BAL: { companyCapacityMaxIncrementTons: 190_000, companyCapacitySaturationHeadcount: 240 },
+          JPQ: { companyCapacityMaxIncrementTons: 150_000, companyCapacitySaturationHeadcount: 230 },
+          VAP: { companyCapacityMaxIncrementTons: 150_000, companyCapacitySaturationHeadcount: 230 },
+          CONSV: { companyCapacityMaxIncrementTons: 120_000, companyCapacitySaturationHeadcount: 220 },
+        },
+      },
+    };
+    if (presets[cap]) {
+      (DYNAMIC_SCENARIO_3 as { salesOrganizationCapacityOverride?: unknown }).salesOrganizationCapacityOverride = presets[cap];
+      notes.push(`SALES_CAP=${cap}`);
+    }
+  }
+
   if (process.env.VN_CASE === "B" && !find(DS3_EVENT_IDS.vietnamDisasterCaseB)) {
     events.push({
       eventId: DS3_EVENT_IDS.vietnamDisasterCaseB,
@@ -129,6 +171,8 @@ interface CompanyTurn {
   readonly salesByProduct: Record<string, number>;
   readonly salesByMarket: Record<string, number>;
   readonly capexEvents: number;
+  readonly domesticPurchase: number;
+  readonly importArrived: number;
 }
 
 interface WorldTurn {
@@ -147,6 +191,13 @@ interface SeedResult {
   readonly seed: string;
   readonly companyTurns: readonly CompanyTurn[];
   readonly worldTurns: readonly WorldTurn[];
+  readonly headcountByTurn: readonly { readonly turn: number; readonly companyId: string; readonly headcount: number }[];
+  readonly capacityByTurn: readonly {
+    readonly turn: number;
+    readonly companyId: string;
+    readonly productionCapacity: number;
+    readonly salesEffortCapacity: number;
+  }[];
 }
 
 function runSeed(seed: string): SeedResult {
@@ -230,10 +281,24 @@ function runSeed(seed: string): SeedResult {
         salesByProduct,
         salesByMarket,
         capexEvents: (record.capexResults ?? []).find((r) => r.companyId === companyId)?.events?.length ?? 0,
+        domesticPurchase: purchased,
+        importArrived: summary ? unwrapUnit(summary.importArrivedQuantity) : 0,
       });
     }
   }
-  return { seed, companyTurns, worldTurns };
+  // 営業能力（工数t）は sales/salesCapacityModel.ts の曲線をそのまま使う（別式を作らない）。
+  const model = applyScenarioSalesCapacityOverride(SALES_PARAMETERS_V1, DYNAMIC_SCENARIO_3);
+  const capacityByTurn = session.capacityByTurn.map((c) => {
+    const companyModel = model.salesCapacityModelByCompany?.[c.companyId] ?? model.salesCapacityModel!;
+    const hc = session.salesHeadcountByTurn.find((x) => x.turn === c.turn && x.companyId === c.companyId)?.headcount ?? 0;
+    return {
+      turn: c.turn,
+      companyId: c.companyId,
+      productionCapacity: Math.min(c.hoso + c.pd + c.vap, c.commonProcessing),
+      salesEffortCapacity: companySalesOrganizationCapacity(hc, companyModel),
+    };
+  });
+  return { seed, companyTurns, worldTurns, headcountByTurn: session.salesHeadcountByTurn, capacityByTurn };
 }
 
 console.log(`=== Dynamic Scenario 3 benchmark（scenarioId=${SCENARIO_ID} / ${TURNS}Turn / seed×${SEEDS.length}）===`);
@@ -346,6 +411,28 @@ if (!SUMMARY_ONLY) {
           `${n0(avg((c) => c.finishedGoods)).padStart(12)}${n0(avg((c) => c.backlog)).padStart(10)}${capex.toFixed(1).padStart(11)}`
       );
     }
+  }
+}
+
+console.log("\n### §7 会社別 制約フルテーブル（全seed平均）");
+console.log("  ※ SALES_CAP=営業能力(工数t) / 生産能力=工場処理能力 / 調達=国内+輸入 / 輸入比率=輸入/(国内+輸入)");
+for (const turn of [24, 28, 32].filter((t) => t <= TURNS)) {
+  console.log(`\n  [T${turn}] 会社   営業人員 営業能力 生産能力  ambition   target   actual  調達t  輸入比率  現金M  借入M`);
+  for (const companyId of COMPANIES) {
+    const avg = (pick: (r: SeedResult) => number) => results.reduce((a, r) => a + pick(r), 0) / results.length;
+    const hc = avg((r) => r.headcountByTurn.find((x) => x.turn === turn && x.companyId === companyId)?.headcount ?? 0);
+    const salesCap = avg((r) => r.capacityByTurn.find((x) => x.turn === turn && x.companyId === companyId)?.salesEffortCapacity ?? 0);
+    const prodCap = avg((r) => r.capacityByTurn.find((x) => x.turn === turn && x.companyId === companyId)?.productionCapacity ?? 0);
+    const c = (r: SeedResult) => at(r, turn, companyId);
+    const domestic = avg((r) => c(r).domesticPurchase);
+    const imported = avg((r) => c(r).importArrived);
+    console.log(
+      `        ${companyId.padEnd(7)}${n0(hc).padStart(8)}${n0(salesCap).padStart(9)}${n0(prodCap).padStart(9)}` +
+        `${n0(avg((r) => c(r).commercialAmbitionTons)).padStart(10)}${n0(avg((r) => c(r).submissionTargetTons)).padStart(9)}` +
+        `${n0(avg((r) => c(r).allocatedSalesTons)).padStart(9)}${n0(domestic + imported).padStart(8)}` +
+        `${(((imported / Math.max(1, domestic + imported)) * 100).toFixed(1) + "%").padStart(9)}` +
+        `${M(avg((r) => c(r).cash)).padStart(8)}${M(avg((r) => c(r).debt)).padStart(7)}`
+    );
   }
 }
 

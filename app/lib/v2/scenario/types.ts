@@ -499,13 +499,25 @@ export interface ScenarioVisionGrowthOverride {
  * 単位は「営業工数トン／四半期」。物理トンへ換算するには商品構成で加重した
  * salesEffortCoefficients（HOSO 1.0 / PD 1.2 / VAP 3.0）で割る。
  */
-export interface SalesOrganizationCapacityOverride {
+export interface SalesOrganizationCapacityTuning {
   /** 人員0でも持つ基礎能力。 */
   readonly companyBaselineCapacityTons?: number;
   /** 人員を増やして得られる増分の上限（漸近上限 = baseline + これ）。 */
   readonly companyCapacityMaxIncrementTons?: number;
   /** 増分の半分に到達する人員数（曲線の立ち上がりの速さ）。 */
   readonly companyCapacitySaturationHeadcount?: number;
+}
+
+export interface SalesOrganizationCapacityOverride extends SalesOrganizationCapacityTuning {
+  /**
+   * 【会社別の上書き】共通値（上の3項目）へ重ねて、会社ごとに差し替える。
+   *
+   * 全社一律の大幅引き上げは、営業能力に余裕のある会社が過剰投資へ走って
+   * 資金を枯らす副作用を生む（DS3 実測：全社 95k→300k で MASS は 42,644→71,322t へ
+   * 伸びた一方、BAL は 0t へ崩壊した）。会社の Vision・財務余力に見合った
+   * 会社差を付けられるようにするための注入口。
+   */
+  readonly byCompany?: Readonly<Record<string, SalesOrganizationCapacityTuning>>;
 }
 
 /** 1社ぶんの初期借入上書き。省略した側は共有フィクスチャの値を使う。 */

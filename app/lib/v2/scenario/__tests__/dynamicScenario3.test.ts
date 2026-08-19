@@ -20,6 +20,8 @@ import {
 } from "../definitions/dynamicScenario3Parameters";
 import { ALL_SCENARIO_DEFINITIONS } from "../definitions";
 import { assertValidScenarioDefinition } from "../validation";
+import { applyScenarioSalesCapacityOverride } from "../salesCapacityOverride";
+import { SALES_PARAMETERS_V1 } from "../../sales/parameters";
 import { defaultVisionDocumentFor } from "../../companyLab/vision/defaults";
 import { resolveCompanyVision } from "../../companyLab/vision/overrides";
 
@@ -49,8 +51,35 @@ test("DS3-3: DS1 / DS2 は DS3 の新機構をひとつも宣言していない�
   }
 });
 
-test("DS3-4: §15 のとおり DS3 自身も営業能力上限の上書きは宣言しない", () => {
-  assert.equal(DYNAMIC_SCENARIO_3.salesOrganizationCapacityOverride, undefined);
+// 【方針変更】DS2 では営業能力上書きが規模を動かさなかった（その手前で機会上限が
+// binding していたため）が、DS3 で市場を広げた結果 SALES_CAPACITY が主要制約になった。
+// 全社一律ではなく会社差つきで宣言する（全社一律に上げると BAL が全 seed で破綻する）。
+test("DS3-4: 営業能力上限は会社別に宣言され、全社一律ではない", () => {
+  const override = DYNAMIC_SCENARIO_3.salesOrganizationCapacityOverride;
+  assert.ok(override, "DS3は会社別の営業能力上限を宣言するべき");
+  assert.ok(override!.byCompany, "会社別宣言であること");
+  // 共通値の一律引き上げはしない（BAL を巻き込まないため）。
+  assert.equal(override!.companyCapacityMaxIncrementTons, undefined, "共通値の一律引き上げはしない");
+
+  const increments = override!.byCompany!;
+  // MASS が最も高く、CONSV が最も低い（§1 の会社差：MASS 高 / JPQ・VAP 中 / CONSV 中〜低）。
+  const of = (c: string) => increments[c]?.companyCapacityMaxIncrementTons ?? 0;
+  assert.ok(of("MASS") > of("JPQ"), "MASSはJPQより高い");
+  assert.ok(of("JPQ") >= of("CONSV"), "JPQはCONSV以上");
+  assert.ok(of("CONSV") > 0, "CONSVにも会社別値がある");
+  // BAL は暫定的に宣言しない（Standard AI の早期CAPEXゲート修正待ち）。
+  assert.equal(increments.BAL, undefined, "BALは暫定的に既定のまま（理由はパラメータファイルのコメント）");
+});
+
+test("DS3-4b: 会社別の営業能力モデルが SalesParameters へ正しく解決される", () => {
+  const applied = applyScenarioSalesCapacityOverride(SALES_PARAMETERS_V1, DYNAMIC_SCENARIO_3);
+  const byCompany = applied.salesCapacityModelByCompany;
+  assert.ok(byCompany, "会社別モデルが組み立てられていること");
+  assert.equal(byCompany!.MASS.companyCapacityMaxIncrementTons, 260_000);
+  assert.equal(byCompany!.CONSV.companyCapacityMaxIncrementTons, 120_000);
+  assert.equal(byCompany!.BAL, undefined, "BALは会社別モデルを持たない＝既定の共通モデルを使う");
+  // 会社別を宣言しないシナリオ（DS1/DS2）は同一参照のまま＝挙動不変。
+  assert.equal(applyScenarioSalesCapacityOverride(SALES_PARAMETERS_V1, DYNAMIC_SCENARIO_2), SALES_PARAMETERS_V1);
 });
 
 test("DS3-5: T24〜28 の販売価格 down-cycle イベントが存在し、T23 は効果ゼロ（Newsのみの先読み点）", () => {

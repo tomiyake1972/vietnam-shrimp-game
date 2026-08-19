@@ -82,6 +82,13 @@ export interface SalesParameters {
    * 正式モデルはまだ決めていない（#04 §16）。
    */
   readonly salesCapacityModel?: SalesCapacityModel;
+  /**
+   * 【Dynamic Scenario 3】会社別の営業能力モデル。指定された会社だけ
+   * salesCapacityModel の代わりにこちらを使う。未指定（既定）なら
+   * 全社が salesCapacityModel を使う＝従来挙動とビット単位で同一。
+   * シナリオ定義の salesOrganizationCapacityOverride.byCompany から組み立てる。
+   */
+  readonly salesCapacityModelByCompany?: Readonly<Record<string, SalesCapacityModel>>;
 
   // --- 成約競争力の合成ウェイト（合計1.0を推奨） ---
   readonly competitivenessWeights: {

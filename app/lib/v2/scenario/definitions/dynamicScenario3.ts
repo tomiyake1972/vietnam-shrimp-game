@@ -52,6 +52,7 @@ import {
   DS3_PRICE_DOWN_CYCLE,
   DS3_PRODUCT_LIFECYCLE_OVERRIDES,
   DS3_REGIONAL_DEMAND_KEYFRAMES,
+  DS3_SALES_ORGANIZATION_CAPACITY,
   DS3_VISION_GROWTH_OVERRIDES,
 } from "./dynamicScenario3Parameters";
 import { DS3_EVENT_IDS, DS3_INFORMATION_RELEASES, ds3InformationIdsForEvent } from "./dynamicScenario3News";
@@ -381,6 +382,9 @@ export const DYNAMIC_SCENARIO_3: ScenarioDefinition = {
   // 【DS3 限定】会社別の成長余地。固定トン数の販売目標ではなく、Vision の軌道の倍率。
   visionGrowthOverrides: DS3_VISION_GROWTH_OVERRIDES,
 
-  // 【§15】営業組織能力の上書きは規模をほぼ動かさない（実測 +0.04%）ことが確認済みのため、
-  // DS3 では宣言しない。汎用機構は将来のために残してある。
+  // 【§1・方針変更後】会社別の営業組織能力上限。DS2 では規模を動かさなかったが
+  // （その手前で機会上限が binding していたため）、DS3 で市場を広げた結果
+  // SALES_CAPACITY が主要制約になったため会社差つきで宣言する。
+  // BAL だけ宣言していない理由は dynamicScenario3Parameters.ts のコメント参照。
+  salesOrganizationCapacityOverride: DS3_SALES_ORGANIZATION_CAPACITY,
 };

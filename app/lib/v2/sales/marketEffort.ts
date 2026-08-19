@@ -205,7 +205,10 @@ export function applyMarketSalesEffortCapacity(
         headcountByMarket.set(e.market, e.salesForceHeadcount);
       }
       const totalHeadcount = [...headcountByMarket.values()].reduce((s2, v) => s2 + v, 0);
-      const capacities = computeMarketSalesCapacities(totalHeadcount, effortDemandByMarket, headcountByMarket, params, model);
+      // 【Dynamic Scenario 3】会社別の営業能力モデルが宣言されていればそれを使う。
+      // 未宣言なら共通モデル（model）のままで、従来挙動とビット単位で同一。
+      const companyModel = params.salesCapacityModelByCompany?.[companyId] ?? model;
+      const capacities = computeMarketSalesCapacities(totalHeadcount, effortDemandByMarket, headcountByMarket, params, companyModel);
       for (const [market, capacity] of capacities) capacityByGroup.set(`${companyId}::${market}`, capacity);
     }
   }

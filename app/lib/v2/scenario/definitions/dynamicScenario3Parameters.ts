@@ -355,3 +355,43 @@ export const DS3_CN_HOSO_SPIKES: readonly { readonly turn: number; readonly magn
   { turn: 23, magnitude: 1.22, cause: "内需回復による買付集中" },
   { turn: 31, magnitude: 1.18, cause: "供給正常化局面での在庫復元" },
 ];
+
+// ---------------------------------------------------------------------
+// 9. 会社別 営業組織能力の上限（§1・会社差つき）
+// ---------------------------------------------------------------------
+//
+// 【なぜ必要か】DS3 で市場を広げて attainableProfitableTons 制約を解消した結果、
+// 次の主要制約が SALES_CAPACITY へ移った（実測：T32 の primaryGrowthConstraint と
+// commitmentLimiter がともに SALES_CAPACITY）。既定の曲線
+//   capacity(h) = 1,000 + 95,000 × h/(h+190)   （漸近上限 96,000 営業工数t/四半期）
+// のままでは、MASS の商品構成（平均営業工数係数 ≈1.23）で物理 78,176 t/Turn が
+// 人員無限大でも越えられない天井になる。
+//
+// 【全社一律にしない】実測で、全社を 200k / 300k へ一律に引き上げると
+// MASS は 43,889 → 63,743 / 72,032 t へ伸びる一方、BAL は全 seed で 0t へ崩壊した。
+// 会社の Vision・財務余力に見合った会社差を付ける。
+//
+// 【BAL だけ既定のままにしている理由（暫定措置）】
+// BAL は営業能力を上げるとほぼ確実に破綻する。root cause は営業能力そのものでは
+// なく、Standard AI の早期成長投資ゲートにある：
+//   T2–T4 に CAPEX 32.8M（開始現金 49.2M の 67%）を一度に投じる
+//   → T5 で現金枯渇 → 調達制約 → T10 に国内調達 0t → T14 に生産 0t
+//   → 以後は固定費だけが残り −8.9M/四半期で回復不能
+// 営業能力を上げるとコミットが増えて この投資が更に前倒し・大型化するため、
+// 上げるほど確実に死ぬ。Vision 倍率を 1.85→1.30 に下げても解消しない
+// （実測 19,171t。上書きしない場合の 26,149t より悪い）ため、Vision 側の問題でもない。
+// Standard AI 側の早期CAPEX支払能力ゲートが修正されるまでは、BAL は既定のままとする。
+// 修正後に BAL を 190,000 相当（MASS と JPQ の中間）へ引き上げて再測定すること。
+export const DS3_SALES_ORGANIZATION_CAPACITY = {
+  byCompany: {
+    // MASS: 最も強い volume growth。China HOSO の大量販売を支える。
+    MASS: { companyCapacityMaxIncrementTons: 260_000, companyCapacitySaturationHeadcount: 250 },
+    // JPQ: 中。品質・採算を守りながら伸びる。
+    JPQ: { companyCapacityMaxIncrementTons: 150_000, companyCapacitySaturationHeadcount: 230 },
+    // VAP: 中。VAP は営業工数係数 3.0 と重いため、物理トンでは最も伸びにくい。
+    VAP: { companyCapacityMaxIncrementTons: 150_000, companyCapacitySaturationHeadcount: 230 },
+    // CONSV: 中〜低。慎重な会社という性格を保つ。
+    CONSV: { companyCapacityMaxIncrementTons: 120_000, companyCapacitySaturationHeadcount: 220 },
+    // BAL: 宣言しない（既定 95,000 のまま）。理由は上記コメント。
+  },
+} as const;
