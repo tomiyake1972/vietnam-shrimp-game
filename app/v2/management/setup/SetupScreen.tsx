@@ -182,11 +182,31 @@ export function SetupScreen() {
   return (
     <div className="min-h-screen bg-slate-950 p-3 text-slate-100 sm:p-6">
       <div className="mx-auto max-w-3xl">
-        <header className="mb-4">
-          <h1 className="text-lg font-bold tracking-tight">ShrimpX 経営管制室 — ゲーム条件設定</h1>
-          <p className="mt-1 text-xs text-slate-400">
-            Scenario・Seed・会社ごとの経営モードを選んで、新しいSimulation Runを開始します。既存のRunはここでは変更・削除されません。
-          </p>
+        <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-bold tracking-tight">ShrimpX 経営管制室 — ゲーム条件設定</h1>
+            <p className="mt-1 text-xs text-slate-400">
+              Scenario・Seed・会社ごとの経営モードを選んで、新しいSimulation Runを開始します。既存のRunはここでは変更・削除されません。
+            </p>
+          </div>
+          {/* 【管理者ログイン固定導線】PC/iPad/別ブラウザ等、端末を変えた際に
+              staging管理認証セッションが切れていることがあり、その状態のまま
+              ゲームを開始すると後でManagement Console側の保存操作（Turn進行・
+              Game End等）が認証不足で止まる。新しい認証機構・新しいlogin page・
+              新しいtoken方式は作らず、Management Console等と共通の既存
+              staging管理ログインroute（/v2/company-lab/play/login）をそのまま
+              再利用する。既に認証済みでもこのroute自身がreturnToへ自動的に
+              戻すため、Setup画面側で認証状態を判定するロジックは持たない。
+              別タブで開き、Setup画面の入力中の設定を失わせない。 */}
+          <Link
+            href={`/v2/company-lab/play/login?returnTo=${encodeURIComponent("/v2/management/setup")}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="setup-admin-login-link"
+            className="shrink-0 rounded border border-slate-600 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:border-slate-400 hover:bg-slate-800"
+          >
+            🔐 管理者ログイン
+          </Link>
         </header>
 
         {/* --- Scenario --- */}
