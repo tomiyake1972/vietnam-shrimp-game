@@ -15,6 +15,7 @@ import { CompanyFixture } from "../types";
 import { unwrapUnit } from "../../core/units";
 import { computeQuarterlyLaborCost } from "../workforce";
 import { DemandMarketId, Product } from "../../market/types";
+import type { GrowthPressureParameters } from "./growth/growthPressure";
 
 export interface StandardAiParameters {
   // --- 在庫目標（生産・調達共通） ---
@@ -331,6 +332,14 @@ export interface StandardAiParameters {
    * この値を0にすることで実現する（別のフラグ・別の分岐を増やさない）。
    */
   readonly dividendBasePayoutRatio: number;
+
+  /**
+   * 【Phase SAI-GROW-2】Growth Pressure / Adaptive Opportunity Share のパラメータ。
+   * 未指定なら GROWTH_PRESSURE_PARAMETERS_V1（＝adaptive share有効）。
+   * `adaptiveShareEnabled: false` を渡すと、機会shareが現行値に固定され
+   * GROW-1以前と完全に同一のCommercial判断になる（ベンチマーク比較用）。
+   */
+  readonly growthPressure?: GrowthPressureParameters;
 }
 
 /**
@@ -417,6 +426,7 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
   // 主軸とすることでTarget Scale Bandの粘着性を構造的に確保する（1.0=能力のみ）。
   targetScaleCapacityWeightInBaseline: 1.0,
   targetScaleWithinBandTolerance: 0.05,
+
 
   // 【Phase DIV-4】実装指示§6の中心値15%。Flow基準＋年1回へ変更したうえで
   // 10/15/20/25%を再benchmarkし、CCI-9頑健性・支配戦略診断ともに問題ないことを確認済み。

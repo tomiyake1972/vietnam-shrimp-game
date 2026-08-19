@@ -55,17 +55,17 @@ import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "./strategicIntent";
 import { CompanyVision } from "../vision/types";
 import { resolveCompanyVision, CompanyLabVisionOverrides } from "../vision/overrides";
 import { computeStrategicGrowthState, StrategicGrowthState } from "../vision/strategicGrowth";
-import { CommercialAmbition, computeCommercialAmbition } from "../vision/commercialAmbition";
+import { CommercialAmbition, COMMERCIAL_AMBITION_PARAMETERS_V1, computeCommercialAmbition } from "../vision/commercialAmbition";
 import { computeUnservedOpportunity, UnservedOpportunity } from "../vision/unservedOpportunity";
 import { buildCommercialGrowthDiagnostics } from "./diagnosis/commercialGrowth";
-import { computeObservableCommercialOpportunity, ObservableCommercialOpportunity } from "./decision/sales";
+import { computeObservableCommercialOpportunity, computeOrientationWeightedOpportunity, ObservableCommercialOpportunity } from "./decision/sales";
 import { evaluateNewFactoryDecision, NewFactoryAssessment } from "./decision/newFactory";
-import { computeCommercialCommitment, CommercialCommitmentState } from "../vision/commercialCommitment";
+import { computeCommercialCommitment, COMMERCIAL_COMMITMENT_PARAMETERS_V1, CommercialCommitmentState } from "../vision/commercialCommitment";
 import { ConversionObservation, observeContractConversion } from "./commercialHistory";
 import { companySalesOrganizationCapacity, marketFragmentationFactor } from "../../sales/salesCapacityModel";
 import { processingCapacity } from "../../sales/salesForce";
 import { StandardAiObservation } from "./types";
-import { assessGrowthPressure } from "./growth";
+import { assessGrowthPressure, computeGrowthPressureCore } from "./growth";
 import { GrowthPressureAssessment } from "./growth/types";
 import {
   assessStandardAiCrisisState,
@@ -418,11 +418,53 @@ export function generateStandardAiDecisionWithDiagnostics(
     (observation.lastQuarterActualProductionByProduct.hoso ?? 0) +
     (observation.lastQuarterActualProductionByProduct.pd ?? 0) +
     (observation.lastQuarterActualProductionByProduct.vap ?? 0);
+  // 【Phase SAI-GROW-2】Adaptive Opportunity Share。
+  //
+  // Growth Pressureの中心部（core）を**意思決定より前**に評価し、そこから
+  // Commercial Ambition / Commercial Commitment の機会shareだけを可変にする。
+  //
+  // 【非循環である理由】coreのopportunity headroomの分母は「現在の自社規模」
+  // （= max(能力×salesUtilizationTarget, 前期実績生産)）であり、提出量にも
+  // 0.35/0.5にも依存しない。したがってshareを動かしてもheadroomは動かない。
+  //
+  // 【Growth Pressure LOWでは現行と完全同一】shareExpansionRatio=0のとき
+  // effectiveShareはlegacy値そのものになるため、LOWの会社・LOWのTurnの判断は
+  // 従来とビット単位で同一になる（実装指示§9）。
+  const orientationWeighted = computeOrientationWeightedOpportunity(
+    observation,
+    salesParams,
+    params.marketOrientationMultipliers,
+    params.productOrientationMultipliers
+  );
+  const growthCore = computeGrowthPressureCore({
+    companyId: fixture.companyId,
+    period,
+    observation,
+    contracts: ownState.contracts,
+    visionReferenceScaleTons: strategicGrowth ? strategicGrowth.visionTargetScaleAtCurrentTurn : null,
+    growthAmbition: vision ? vision.growthAmbition : null,
+    strategicPosture: vision?.strategicPosture ?? null,
+    financialRiskTolerance: vision ? vision.financialRiskTolerance : null,
+    currentRelevantScaleTons: Math.max(capacityAnchorTons, recentActualScaleTons),
+    attainableProfitableTons: observableOpportunity.attainableProfitableTons,
+    orientationWeightedOpportunityTons: orientationWeighted.weightedAttainableProfitableTons,
+    weightedContributionUsdPerKg: observableOpportunity.weightedContributionUsdPerKg,
+    priceObservationMissing: observableOpportunity.priceObservationMissing,
+    observedConversionRatio: observeContractConversion({ records: ownState.recentSalesSubmissions ?? [] }, ownState.contracts, turn).conversionRatio,
+    finishedGoodsExcessRatioByProduct: pressures.finishedGoodsExcessRatioByProduct,
+    crisisState: crisisAssessment.state,
+    lastQuarterFinancialHealthTier: observation.lastQuarterFinancialHealthTier,
+    salesParams,
+    params: params.growthPressure,
+  });
+
   const commercialAmbition = computeCommercialAmbition({
     vision,
     strategicGrowth,
     capacityAnchorTons,
     recentActualScaleTons,
+    // 【GROW-2】機会shareだけをGrowth Pressureで可変にする（他の式は無変更）。
+    params: { ...COMMERCIAL_AMBITION_PARAMETERS_V1, realisticShareOfProfitableOpportunity: growthCore.effectiveOpportunityShare.ambition },
     attainableProfitableTons: observableOpportunity.attainableProfitableTons,
     weightedContributionUsdPerKg: observableOpportunity.weightedContributionUsdPerKg,
     priceObservationMissing: observableOpportunity.priceObservationMissing,
@@ -443,6 +485,8 @@ export function generateStandardAiDecisionWithDiagnostics(
   );
   const salesCapacityTonsForCommitment = salesCapacityCeilingTons(observation, salesParams);
   const commercialCommitmentBeforeCrisisGate = computeCommercialCommitment({
+    // 【GROW-2】提出shareだけをGrowth Pressureで可変にする（転換率学習等は無変更）。
+    params: { ...COMMERCIAL_COMMITMENT_PARAMETERS_V1, realisticShareOfOpportunity: growthCore.effectiveOpportunityShare.commitment },
     ambition: commercialAmbition,
     capacityAnchorTons,
     attainableProfitableTons: observableOpportunity.attainableProfitableTons,
@@ -807,28 +851,14 @@ export function generateStandardAiDecisionWithDiagnostics(
   // ここより上のコードはこの結果を参照しないため、Shadowの有無でDecisionが変わることは
   // 構造上あり得ない（テストSAI-GROW-18/19で bit-equivalence を固定している）。
   const growthPressure = assessGrowthPressure({
-    companyId: fixture.companyId,
-    turn,
-    period,
+    core: growthCore,
     observation,
-    contracts: ownState.contracts,
-    // Vision参照規模。Visionが無い会社ではnull（架空のVisionを作らない）。
-    visionReferenceScaleTons: strategicGrowth ? strategicGrowth.visionTargetScaleAtCurrentTurn : null,
-    growthAmbition: vision ? vision.growthAmbition : null,
-    commercialAmbition,
-    commercialCommitment,
-    attainableProfitableTons: observableOpportunity.attainableProfitableTons,
-    weightedContributionUsdPerKg: observableOpportunity.weightedContributionUsdPerKg,
-    priceObservationMissing: observableOpportunity.priceObservationMissing,
-    observedConversionRatio: conversionObservation.conversionRatio,
-    finishedGoodsExcessRatioByProduct: pressures.finishedGoodsExcessRatioByProduct,
-    crisisState: crisisAssessment.state,
-    lastQuarterFinancialHealthTier: observation.lastQuarterFinancialHealthTier,
     unservedOpportunity,
     salesHiringZeroReason: salesForceHiringResult.hiringDiagnostics.zeroHireReason,
     salesForceHireCount: salesForceHireCountAfterCrisisGate,
     newCapexProposalCount: finalCapexDecision.newProjectProposals.length,
     salesParams,
+    params: params.growthPressure,
   });
 
   return {

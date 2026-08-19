@@ -189,6 +189,13 @@ export type StandardAiReasonCode =
   | "EXTERNAL_ENGINE_CAPACITY_LIMIT" // 同上（engine側の制約であることを明示する併記コード）
   | "COMMERCIAL_CAPACITY_CONSTRAINED_BY_CURRENT_PRODUCTION" // 営業採用が現在の生産能力で止められている（実装指示§21）
   | "GROWTH_PRESSURE_BLOCKED_BY_SELF_REFERENTIAL_CAPACITY_GATE" // 需要根拠が自社販売目標の自己参照で低くなっている（実装指示§22）
+  // --- Adaptive Opportunity Share（Phase SAI-GROW-2・Commercialのみへ接続） ---
+  | "GROWTH_SHARE_HELD_LOW" // Growth Pressureが低く、機会shareを現行値のまま据え置いた
+  | "GROWTH_SHARE_EXPANDED_MODERATE"
+  | "GROWTH_SHARE_EXPANDED_HIGH"
+  | "GROWTH_SHARE_REDUCED_BY_CONVERSION" // 直近の成約率悪化により拡張幅を縮小
+  | "GROWTH_SHARE_REDUCED_BY_MARGIN" // 採算悪化（またはvalue志向の採算条件）により拡張幅を縮小
+  | "GROWTH_SHARE_REDUCED_BY_INVENTORY"
   // --- Strategy Profile Quantification（Phase SP-Q1） ---
   | "PROFILE_BIAS_APPLIED" // 会社別ManagementProfile/OrientationProfileのバイアスをStandardAiParametersへ適用した（mode=ONの時のみ）
   // --- 【Standard AI Capability Expansion・Phase CE-1】PD機械化 ---
@@ -405,6 +412,12 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "EXTERNAL_ENGINE_CAPACITY_LIMIT",
   "COMMERCIAL_CAPACITY_CONSTRAINED_BY_CURRENT_PRODUCTION",
   "GROWTH_PRESSURE_BLOCKED_BY_SELF_REFERENTIAL_CAPACITY_GATE",
+  "GROWTH_SHARE_HELD_LOW",
+  "GROWTH_SHARE_EXPANDED_MODERATE",
+  "GROWTH_SHARE_EXPANDED_HIGH",
+  "GROWTH_SHARE_REDUCED_BY_CONVERSION",
+  "GROWTH_SHARE_REDUCED_BY_MARGIN",
+  "GROWTH_SHARE_REDUCED_BY_INVENTORY",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

@@ -14,7 +14,7 @@
 import { initializeCompanyLab, advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo } from "../app/lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../app/lib/v2/companyLab/standardAi/policy";
 import { buildStandardAiObservation } from "../app/lib/v2/companyLab/standardAi/observation";
-import { assessGrowthPressure } from "../app/lib/v2/companyLab/standardAi/growth";
+import { assessGrowthPressure, computeGrowthPressureCore } from "../app/lib/v2/companyLab/standardAi/growth";
 import { GrowthPressureAssessment } from "../app/lib/v2/companyLab/standardAi/growth/types";
 import { DYNAMIC_SCENARIO_1 } from "../app/lib/v2/scenario/definitions/dynamicScenario1";
 import { DYNAMIC_SCENARIO_2 } from "../app/lib/v2/scenario/definitions/dynamicScenario2";
@@ -110,23 +110,28 @@ function runScenario(scenarioId: string, seed: string): Row[] {
       let candidate: GrowthPressureAssessment | null = null;
       const cv = candidateVision(d.companyId);
       if (cv && own && d.commercialAmbition && d.commercialCommitment && d.observableOpportunity && d.conversionObservation && d.unservedOpportunity && d.salesHiring && d.crisis) {
-        candidate = assessGrowthPressure({
+        const candidateCore = computeGrowthPressureCore({
           companyId: d.companyId,
-          turn,
           period: d.period,
           observation: observations.get(d.companyId)!,
           contracts: own.contracts,
           visionReferenceScaleTons: referenceScaleAtTurn(cv, turn, current.currentRelevantScaleTons),
           growthAmbition: cv.growthAmbition,
-          commercialAmbition: d.commercialAmbition,
-          commercialCommitment: d.commercialCommitment,
+          strategicPosture: cv.strategicPosture ?? null,
+          financialRiskTolerance: cv.financialRiskTolerance,
+          currentRelevantScaleTons: current.currentRelevantScaleTons,
           attainableProfitableTons: d.observableOpportunity.attainableProfitableTons,
+          orientationWeightedOpportunityTons: current.orientationWeightedOpportunityTons,
           weightedContributionUsdPerKg: d.observableOpportunity.weightedContributionUsdPerKg,
           priceObservationMissing: d.observableOpportunity.priceObservationMissing,
           observedConversionRatio: d.conversionObservation.conversionRatio,
           finishedGoodsExcessRatioByProduct: d.pressures.finishedGoodsExcessRatioByProduct,
           crisisState: d.crisis.state,
           lastQuarterFinancialHealthTier: null,
+        });
+        candidate = assessGrowthPressure({
+          core: candidateCore,
+          observation: observations.get(d.companyId)!,
           unservedOpportunity: d.unservedOpportunity,
           salesHiringZeroReason: d.salesHiring.zeroHireReason,
           salesForceHireCount: 0,

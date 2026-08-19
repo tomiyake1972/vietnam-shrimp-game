@@ -45,12 +45,25 @@ export interface GrowthPressureAssessment {
   /** 0〜1。GROW-1ではDecisionに一切使用しない（診断・ベンチマーク専用）。 */
   readonly score: number;
 
-  // --- 中心となる2項（実装指示§31: base strategic gap × opportunity support） ---
+  // --- 中心となる2項（GROW-1 §31: base strategic gap × opportunity support） ---
   /** Vision参照規模に対する不足率（0〜1）。 */
   readonly strategicScaleGapRatio: number;
-  /** 観測上の市場機会 ÷ 現在この会社が実際に取りに行っている量。 */
+  /**
+   * 【GROW-2で意味を変更】観測機会 ÷ **現在の自社規模**（currentRelevantScaleTons）。
+   * GROW-1では分母に現在の提出上限を使っていたが、GROW-2ではその提出上限自体を
+   * Growth Pressureで動かすため、分母に使うと循環する（実装指示§2）。
+   */
   readonly observableOpportunityRatio: number;
-  /** 上の比率を0〜1へ写した支持度（1.0倍で0、飽和比率で1）。 */
+  /**
+   * 【GROW-2新設・実装指示§2】現行capから独立した市場headroom。
+   *   headroomTons  = max(0, orientation重み付き観測機会 − 現在の自社規模)
+   *   headroomRatio = headroomTons / 現在の自社規模
+   */
+  readonly observableOpportunityHeadroomTons: number;
+  readonly observableOpportunityHeadroomRatio: number;
+  /** 会社の志向で重み付けした観測機会（重みが全て1なら観測機会そのもの）。 */
+  readonly orientationWeightedOpportunityTons: number;
+  /** headroomRatioを0〜1へ写した支持度（飽和比率で1）。 */
   readonly opportunitySupport: number;
 
   // --- bounded modifier（実装指示§31: 係数を乱造しない） ---
@@ -74,9 +87,7 @@ export interface GrowthPressureAssessment {
   // --- 現行capが捨てている機会（実装指示§24。GROW-2の主要判断材料） ---
   /** 観測上、engineのmaximumSupplierShareまでなら取りうる採算つき需要（AI側の追加控除なし）。 */
   readonly observedOpportunityTons: number;
-  /** 現在この会社が実際に取りに行っている量（Commercial Commitmentの提出目標）。 */
-  readonly currentSubmissionCeilingTons: number;
-  /** 上2つの差＝現行capで捨てている観測機会。 */
+  /** observedOpportunityTons − currentSubmissionCeilingTons ＝ 現行capで捨てている観測機会。 */
   readonly ceilingSuppressedOpportunityTons: number;
 
   // --- 参照値（監査用。ここから式を再計算しないための一次情報） --- 
@@ -95,6 +106,30 @@ export interface GrowthPressureAssessment {
   // --- 将来DIV-5が参照するための最小情報（実装指示§33） ---
   /** 当期の意思決定に、実際に成長のための行動（営業採用・新規CAPEX提案）が含まれるか。 */
   readonly nearTermGrowthActionExists: boolean;
+
+  // --- 【GROW-2】Adaptive Opportunity Share（実際にDecisionへ接続する唯一の値） ---
+  /** 拡張前（現行）の機会share。ambition側 / commitment側。 */
+  readonly currentOpportunityShare: { readonly ambition: number; readonly commitment: number };
+  /** 実際に適用したshare。Growth Pressure LOWでは現行と完全同一。 */
+  readonly effectiveOpportunityShare: { readonly ambition: number; readonly commitment: number };
+  /** 0〜1。0なら現行と完全同一（拡張なし）。 */
+  readonly shareExpansionRatio: number;
+  /** 成約率フィードバック（0〜1。拡張を縮小する方向にのみ効く）。 */
+  readonly conversionFeedback: number;
+  /** 採算フィードバック（0〜1）。 */
+  readonly marginFeedback: number;
+  /** 在庫フィードバック（0〜1）。 */
+  readonly inventoryFeedback: number;
+  /** value志向（VALUE_FIRST）の会社にのみ効く追加ゲート（0〜1）。 */
+  readonly valueOrientationGate: number;
+  /** 財務規律ゲート（financialRiskTolerance=LOWの会社にのみ追加で効く。0〜1）。 */
+  readonly financialDisciplineGate: number;
+  /** 現行shareでの提出上限（＝GROW-1と同じ値）。 */
+  readonly currentSubmissionCeilingTons: number;
+  /** 拡張後のshareで見込まれる提出上限（実測値は下流のcommitmentが決める）。 */
+  readonly adaptiveSubmissionCeilingTons: number;
+  /** 上2つの差＝Growth Pressureによって増えた販売希望の上限幅。 */
+  readonly incrementalDesiredSalesFromGrowthTons: number;
 
   /** 既存のdiagnostic architectureと同じreason code語彙（reasonCodes.tsに登録済み）。 */
   readonly reasonCodes: readonly StandardAiReasonCode[];
