@@ -23,6 +23,18 @@
 import { FinanceValidationError } from "./types";
 import { Product } from "../market/types";
 
+/**
+ * 【ENG-FAC-1・実装指示§4】通常cash factory fixed cost（1工場・1四半期あたり）。
+ * 工場固定費と固定ユーティリティの合計であり、Mothball carrying cost(25%)と
+ * Sale Pending holding cost(10%)の**唯一の基準額**である。
+ *
+ * この関数がその基準額を持つ唯一の場所であり、"1.20M + 0.25M"を他所へ
+ * 直書きしてはならない（実装指示§4「この基準額は必ず1か所へ集約」）。
+ */
+export function normalCashFixedFactoryCostUsdPerQuarter(params: FinanceParameters): number {
+  return params.manufacturing.factoryFixedCostUsdPerQuarter + params.manufacturing.factoryUtilityFixedUsdPerQuarter;
+}
+
 export interface FinanceParameters {
   readonly parametersVersion: string;
 

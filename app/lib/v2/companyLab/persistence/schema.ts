@@ -72,6 +72,7 @@ import type { SalesBaseState } from "../salesBase";
 import type { CommercialHistoryState } from "../commercialHistoryState";
 import type { MarketEvolutionState, SupplyPressureDefinition } from "../marketEvolution";
 import type { PdMechanizationState } from "../pdMechanizationState";
+import type { FactoryLifecycleDecisionRecord, FactoryLifecycleStateTable } from "../../capex/factoryLifecycle";
 import type { ProductDevelopmentState } from "../productDevelopmentState";
 import {
   CompanyLabDraftEnvelope,
@@ -735,6 +736,7 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
   // 【Test15・schemaVersion 7】optionalなFactory単位PD稼働率・会社単位VAP商品開発
   // スコア。キー欠落（v1〜v6の既存データ）はundefined（未設定＝既定初期値扱い）
   // として復元する。
+  const factoryLifecycleState = validateFactoryLifecycleState(obj.factoryLifecycleState, `${path}.factoryLifecycleState`);
   const pdMechanizationState = validatePdMechanizationState(obj.pdMechanizationState, `${path}.pdMechanizationState`);
   const productDevelopmentState = validateProductDevelopmentState(obj.productDevelopmentState, `${path}.productDevelopmentState`);
   // 【Phase 6C】optionalな商業実績履歴（提出→成約の転換率観測用）。
@@ -758,6 +760,7 @@ export function validateCompanyLabRuntimeSnapshot(raw: unknown, path: string): C
     ...(salesBaseState ? { salesBaseState } : {}),
     ...(marketEvolutionState ? { marketEvolutionState } : {}),
     salesForceHiringState,
+    ...(factoryLifecycleState ? { factoryLifecycleState } : {}),
     ...(pdMechanizationState ? { pdMechanizationState } : {}),
     ...(productDevelopmentState ? { productDevelopmentState } : {}),
     ...(commercialHistoryState ? { commercialHistoryState } : {}),
@@ -974,6 +977,40 @@ function validateMarketEvolutionState(raw: unknown, path: string): MarketEvoluti
  * 返す。存在する場合はエントリごとにfactoryId・companyId・稼働率（[0,1]の
  * 有限数）を検証する。
  */
+/**
+ * 【ENG-FAC-1・schemaVersion 8】Factory lifecycle決定ログの検証。キー欠落
+ * （v1〜v7の既存データ）・nullはundefined（＝全工場OPERATING）を返す。
+ *
+ * 決定type・decidedPeriodは厳密に検証する（未知の値を黙って通すと、
+ * resolveFactoryLifecycleStateAtが不正なstateを導出しうるため）。
+ * 数値フィールドを持たないため、NaN/undefinedがエンジンへ流入する経路は無い。
+ */
+function validateFactoryLifecycleState(raw: unknown, path: string): FactoryLifecycleStateTable | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = requireObject(raw, path);
+  const companiesRaw = requireArray(obj.companies, `${path}.companies`);
+  const companies = companiesRaw.map((c, i) => {
+    const companyPath = `${path}.companies[${i}]`;
+    const companyObj = requireObject(c, companyPath);
+    const decisionsRaw = requireArray(companyObj.decisions, `${companyPath}.decisions`);
+    const decisions = decisionsRaw.map((d, j) => {
+      const decisionPath = `${companyPath}.decisions[${j}]`;
+      const decisionObj = requireObject(d, decisionPath);
+      const type = requireNonEmptyString(decisionObj.type, `${decisionPath}.type`);
+      if (type !== "MOTHBALL_FACTORY" && type !== "REACTIVATE_FACTORY" && type !== "SELL_FACTORY") {
+        fail(`${decisionPath}.type`, "MOTHBALL_FACTORY / REACTIVATE_FACTORY / SELL_FACTORY のいずれかである必要があります");
+      }
+      return {
+        factoryId: requireNonEmptyString(decisionObj.factoryId, `${decisionPath}.factoryId`),
+        type: type as FactoryLifecycleDecisionRecord["type"],
+        decidedPeriod: requirePeriod(decisionObj.decidedPeriod, `${decisionPath}.decidedPeriod`),
+      };
+    });
+    return { companyId: requireNonEmptyString(companyObj.companyId, `${companyPath}.companyId`), decisions };
+  });
+  return { companies };
+}
+
 function validatePdMechanizationState(raw: unknown, path: string): PdMechanizationState | undefined {
   if (raw === undefined || raw === null) return undefined;
   const obj = requireObject(raw, path);

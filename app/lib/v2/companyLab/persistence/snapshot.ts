@@ -55,6 +55,11 @@ export function createCompanyLabRuntimeSnapshot(state: CompanyLabState): Company
     salesForceHiringState: state.salesForceHiringState,
     // 【Test15】Factory単位PD稼働率・会社単位VAP商品開発スコア。undefinedのときは
     // キー自体を含めない（既存スナップショットと同一形状。salesBaseStateと同じ方式）。
+    // 【ENG-FAC-1】Factory lifecycle決定ログ。決定が1件も無いRunではキー自体を
+    // 含めない（既存スナップショットと同一形状を保つ）。
+    ...(state.factoryLifecycleState && state.factoryLifecycleState.companies.length > 0
+      ? { factoryLifecycleState: state.factoryLifecycleState }
+      : {}),
     ...(state.pdMechanizationState ? { pdMechanizationState: state.pdMechanizationState } : {}),
     ...(state.productDevelopmentState ? { productDevelopmentState: state.productDevelopmentState } : {}),
     isComplete: state.isComplete,
@@ -133,6 +138,12 @@ export function restoreCompanyLabStateFromRuntimeSnapshot(
     // productDevelopmentStateキーが存在しない → undefinedとして復元する。
     // 履歴からの再構築・推測値の捏造は行わない（呼び出し側が既定の初期値
     // （initialPdUtilizationRatio(0.0)・中立値50）を使う設計のため、それで十分）。
+    // 【ENG-FAC-1 後方互換】この機能の導入前に保存されたスナップショットには
+    // factoryLifecycleState キーが存在しない → undefinedとして復元する。
+    // undefinedは「全工場OPERATING」と厳密に同義であり（決定ログが空なら
+    // resolveFactoryLifecycleStateAtは常にOPERATINGを返す）、履歴からの再構築も
+    // 推測値の捏造も不要である。
+    ...(snapshot.factoryLifecycleState ? { factoryLifecycleState: snapshot.factoryLifecycleState } : {}),
     ...(snapshot.pdMechanizationState ? { pdMechanizationState: snapshot.pdMechanizationState } : {}),
     ...(snapshot.productDevelopmentState ? { productDevelopmentState: snapshot.productDevelopmentState } : {}),
     history,

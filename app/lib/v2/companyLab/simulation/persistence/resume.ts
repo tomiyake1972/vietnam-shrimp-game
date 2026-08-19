@@ -263,15 +263,44 @@ export function buildResumePayload(
  */
 export function normalizeRestoredStateForForwardCompatibility(state: CompanyLabState): CompanyLabState {
   if (!state?.financeState?.companies) return state;
+  let next: CompanyLabState = state;
+
   let changed = false;
   const companies = state.financeState.companies.map((c) => {
     if (Number.isFinite(c.distributableEarnings as unknown as number)) return c;
     changed = true;
     return { ...c, distributableEarnings: usd(0) };
   });
-  if (!changed) return state;
-  console.log("[resume] 保存済みstateにdistributableEarningsが無い会社を検出したため、DIV-1の規約どおり0で補完しました（配当機能導入前に保存されたRun）。");
-  return { ...state, financeState: { ...state.financeState, companies } };
+  if (changed) {
+    console.log("[resume] 保存済みstateにdistributableEarningsが無い会社を検出したため、DIV-1の規約どおり0で補完しました（配当機能導入前に保存されたRun）。");
+    next = { ...next, financeState: { ...next.financeState, companies } };
+  }
+
+  // 【ENG-FAC-1】Factory lifecycle決定ログの前方互換。
+  //
+  // キー自体が無い（この機能の導入前に保存されたRun）ことは**正常**であり、
+  // undefinedは「決定が1件も無い＝全工場OPERATING」と厳密に同義なので補完しない
+  // （架空の決定を捏造しない）。
+  //
+  // 一方、キーは存在するがcompanies配列が壊れている（オブジェクトではない・
+  // decisionsが配列でない）payloadは、resolveFactoryLifecycleStateAtが
+  // 配列メソッドを呼んだ時点で例外になる。restoreSessionFromResumePayloadは
+  // companyLab/persistence/schema.tsの検証を通らないため、ここで安全な空の
+  // 決定ログへ正規化しておく（DIV-1のdistributableEarnings欠落がTurn8のNaN停止を
+  // 引き起こしたのと同じ経路への予防措置）。
+  const lifecycle = next.factoryLifecycleState;
+  if (lifecycle !== undefined) {
+    const companiesRaw = (lifecycle as { companies?: unknown }).companies;
+    const isStructurallyValid =
+      Array.isArray(companiesRaw) &&
+      companiesRaw.every((c) => typeof c === "object" && c !== null && Array.isArray((c as { decisions?: unknown }).decisions));
+    if (!isStructurallyValid) {
+      console.log("[resume] 保存済みstateのfactoryLifecycleStateが不正な形状のため、空の決定ログ（全工場OPERATING）へ正規化しました。");
+      next = { ...next, factoryLifecycleState: { companies: [] } };
+    }
+  }
+
+  return next;
 }
 
 export function restoreSessionFromResumePayload(
