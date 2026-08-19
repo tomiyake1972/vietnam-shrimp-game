@@ -61,6 +61,20 @@ export interface GrowthRoutingInput {
   readonly nearTermBindingProductionCapacityTons: number;
   /** 営業組織が捌ける案件量。観測できない場合はnull。 */
   readonly salesCapacityTons: number | null;
+  /**
+   * 【Phase SAI-GROW-3C.1】当期の生産必要量（diagnosis/productionRequirement.tsが算出した
+   * finalProductionRequirementByProductの合計。deliverability capを反映済み）。
+   *
+   * これは「今この会社が実際に作らなければならない量」であり、
+   *   ・既存の未履行契約（backlog）を100%含む
+   *   ・新規営業のうち期待転換率ぶんの成約見込みを含む
+   *   ・通常在庫目標と期首完成品在庫を反映済み
+   * したがって「現在の実績」だけでなく「近い将来に合理的に実行できる増分」を既に内包する
+   * （実装指示§7）。新しい需要モデルは作っていない。
+   */
+  readonly currentPeriodProductionRequirementTons: number;
+  /** 直近実績規模（policy.tsのrecentActualScaleTonsをそのまま渡す）。需要の谷で目標が落ち込まない下限。 */
+  readonly recentActualScaleTons: number;
   readonly survivalPosture: SurvivalPosture;
   /** 3B-3のcapが実際に効いたか。 */
   readonly deliverabilityCapApplied: boolean;
@@ -76,6 +90,17 @@ export interface GrowthRoutingAssessment {
   readonly workerCapacitySupportedTons: number;
   /** 志を納品するのに要する常用Worker人数。 */
   readonly workerRequirementForAmbition: number;
+  /**
+   * 【Phase SAI-GROW-3C.1】Worker以外の制約の下で近い将来実行可能な規模。
+   * Worker採用の目標はこちらを使う（Commercial Ambitionそのものは使わない）。
+   */
+  readonly workerExpansionTargetTons: number;
+  /** 上記の規模を捌くのに要する常用Worker人数（＝labor.tsへ渡す下限）。 */
+  readonly workerRequirementForExecutableTarget: number;
+  /** 志ベースのgap（診断用。採用には使わない）。 */
+  readonly workerGapForAmbition: number;
+  /** 実行可能規模ベースのgap（＝実際に埋めにいく不足）。 */
+  readonly workerGapForExecutableTarget: number;
   readonly currentWorkerHeadcount: number;
   readonly workerGap: number;
   readonly workerLimited: boolean;
@@ -175,6 +200,57 @@ export function assessGrowthRouting(input: GrowthRoutingInput): GrowthRoutingAss
   const productionGapTons = Math.max(0, input.commercialAmbitionTons - Math.max(0, input.nearTermBindingProductionCapacityTons));
   const rawMaterialGapTons = Math.max(0, input.commercialAmbitionTons - Math.max(0, input.fundableRawMaterialTons));
   const workerGapTons = Math.max(0, input.commercialAmbitionTons - workerCapacitySupportedTons);
+
+  // --- 【Phase SAI-GROW-3C.1】Executable Workforce Growth Target ---
+  //
+  // 3CはWorker採用の目標を workerRequirementForAmbition（＝Commercial Ambition全量）
+  // にしていた。Ambitionは capacityAnchor（能力 × salesUtilizationTarget）で決まるため、
+  // 「売れる量」ではなく「作れる量」である。Ambition > 近い将来の実行可能規模 の局面では
+  // 余剰人員を先行保有し、人件費がCashとOPを先に食う
+  // （実測: DS2 ds2-s4 BAL T19 worker 7,333 → 8,930、T26 OP 75.0 → 59.6M。
+  //   CAPEX・financing・production mixはほぼ同一で差はWorker側のみ）。
+  //
+  // Worker採用の目標は「Worker以外の制約の下で近い将来実行可能な規模」にする。
+  //   ・commercialAmbition            … 志を超えては採らない
+  //   ・nearTermBindingProductionCapacity … 設備で作れない量の人は要らない
+  //   ・fundableRawMaterial           … 原料が買えない量の人は要らない
+  //   ・商業的に実行可能な規模        … 売り先（既存backlog＋期待成約）が無い量の人は要らない
+  //
+  // 【workerCapacitySupportedTonsをこのminへ入れてはいけない】(実装指示§3)
+  // 入れると「Worker不足だからWorkerを増やしたいのに、現在Workerで作れる量までしか
+  // 採用しない」という循環になり、WORKFORCE routeが構造的に無効化される。
+  //
+  // 【現在の実績だけへ固定しない】(実装指示§7)
+  // 商業側の指標には currentPeriodProductionRequirementTons を使う。これは
+  // 既存backlogを100%含み、新規営業の期待成約ぶんも含むため、
+  // 「現在の実績 ＋ 近い将来に合理的に実行できる増分」を既に内包している。
+  // 直近実績を下回らないよう max を取り、一時的な需要の谷で人員目標が落ち込まないようにする。
+  const commerciallySupportedScaleTons = Math.max(
+    Math.max(0, input.recentActualScaleTons),
+    Math.max(0, input.currentPeriodProductionRequirementTons)
+  );
+  const workerExpansionTargetTons = Math.max(
+    0,
+    Math.min(
+      input.commercialAmbitionTons,
+      Math.max(0, input.nearTermBindingProductionCapacityTons),
+      Math.max(0, input.fundableRawMaterialTons),
+      commerciallySupportedScaleTons
+    )
+  );
+  const executableMix = ambitionMixByProduct(
+    workerExpansionTargetTons,
+    input.desiredMixByProduct,
+    observation.totalEffectiveCapacityByProduct
+  );
+  const workerRequirementForExecutableTarget = computeRequiredRegularHeadcount({
+    quantityByProduct: executableMix,
+    skillByProduct,
+    attendanceRate,
+    appliedOvertimeRate: 0,
+    temporaryHeadcount: 0,
+  }).requiredRegularHeadcount;
+  const workerGapForExecutableTarget = Math.max(0, workerRequirementForExecutableTarget - currentWorkerHeadcount);
   const liquidityBlocked = liquidity.liquidityHeadroomUsd <= 0 || liquidity.currentTurnFundableHeadroomUsd <= 0;
   const workerLimited = workerGapTons > productionGapTons + EPSILON;
 
@@ -271,6 +347,10 @@ export function assessGrowthRouting(input: GrowthRoutingInput): GrowthRoutingAss
     sustainableDeliverableCapacityTons,
     workerCapacitySupportedTons,
     workerRequirementForAmbition,
+    workerExpansionTargetTons,
+    workerRequirementForExecutableTarget,
+    workerGapForAmbition: workerGap,
+    workerGapForExecutableTarget,
     currentWorkerHeadcount,
     workerGap,
     workerLimited,

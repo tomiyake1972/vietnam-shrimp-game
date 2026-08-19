@@ -72,6 +72,10 @@ function routing(overrides: Partial<GrowthRoutingInput> = {}) {
     rawMaterialLimitedByFunding: false,
     nearTermBindingProductionCapacityTons: 30000,
     salesCapacityTons: 100000,
+    // 【3C.1】既存G3C受入は「商業側は志を支えている」前提で書かれているため、
+    // 実行可能規模の商業項が既存の判定へ影響しないよう志と同水準を渡す。
+    currentPeriodProductionRequirementTons: 40000,
+    recentActualScaleTons: 40000,
     survivalPosture: "NORMAL",
     deliverabilityCapApplied: true,
     ...overrides,

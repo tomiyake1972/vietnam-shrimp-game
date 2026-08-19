@@ -728,6 +728,9 @@ export function generateStandardAiDecisionWithDiagnostics(
       fundableRawMaterialView.fundableDomesticProcurementTons < nearTermBindingProductionCapacityTons,
     nearTermBindingProductionCapacityTons,
     salesCapacityTons: salesCapacityTonsForCommitment,
+    // 【Phase SAI-GROW-3C.1】Worker採用の目標を「志」ではなく「近い将来実行可能な規模」にする。
+    currentPeriodProductionRequirementTons: sumProductAmount(finalProductionRequirementByProduct),
+    recentActualScaleTons,
     survivalPosture: fundableOperations.posture,
     deliverabilityCapApplied: applyDeliverabilityCap,
   });
@@ -741,7 +744,8 @@ export function generateStandardAiDecisionWithDiagnostics(
       pressures,
       productionResult.productionPlans,
       params,
-      growthRouting.workerRequirementForAmbition
+      // 【Phase SAI-GROW-3C.1】志ではなく「Worker以外の制約の下で実行可能な規模」に要る人数。
+      growthRouting.workerRequirementForExecutableTarget
     );
   }
 
@@ -1246,6 +1250,10 @@ export function generateStandardAiDecisionWithDiagnostics(
       routedGrowthTons: growthRouting.routedGrowthTons,
       workerCapacitySupportedTons: growthRouting.workerCapacitySupportedTons,
       workerRequirementForAmbition: growthRouting.workerRequirementForAmbition,
+      workerExpansionTargetTons: growthRouting.workerExpansionTargetTons,
+      workerRequirementForExecutableTarget: growthRouting.workerRequirementForExecutableTarget,
+      workerGapForAmbition: growthRouting.workerGapForAmbition,
+      workerGapForExecutableTarget: growthRouting.workerGapForExecutableTarget,
       currentWorkerHeadcount: growthRouting.currentWorkerHeadcount,
       workerGap: growthRouting.workerGap,
       workerLimited: growthRouting.workerLimited ? 1 : 0,
