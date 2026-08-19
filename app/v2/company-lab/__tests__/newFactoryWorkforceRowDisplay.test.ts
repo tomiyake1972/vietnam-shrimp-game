@@ -14,7 +14,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { advanceSimulationTurns, createSimulationSession } from "../../../lib/v2/companyLab/simulation/engine";
+import { advanceSimulationTurn, createSimulationSession } from "../../../lib/v2/companyLab/simulation/engine";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecision } from "../../../lib/v2/companyLab/standardAi/policy";
 import { buildDecisionInputFromDraft, buildInitialDraft } from "../decisionDraft";
@@ -24,44 +24,46 @@ import { CAPEX_PARAMETERS_V1 } from "../../../lib/v2/capex";
 const AT = "2026-01-01T00:00:00.000Z";
 
 /**
- * MASSの2つ目の工場（MASS-NEWF-MASS-CAPEX-4）がこのseedでTurn25に稼働開始する。
+ * 「新設Factoryが稼働開始した直後で、まだworkforceStateに記録が無い」四半期を探す。
  *
- * 【Standard AI Crisis Management・Phase CM-1】この定数は元々Turn20だったが、
- * Crisis Management導入（既存Finance診断シグナルからのCrisis State判定・
- * SEVERE_DISTRESS/LIQUIDITY_STRESS時の新規commitment/CAPEX抑制）により、
- * MASSの投資判断（Standard AIの既存reactiveな新工場評価ロジック自体は
- * 無変更）の実際のタイミングが後ろへずれ、対象の新設Factory IDも
- * MASS-NEWF-MASS-CAPEX-3からMASS-NEWF-MASS-CAPEX-4へ変わった（実測で確認）。
- *
- * 【Standard AI Capability Expansion・Phase CE-3】品質管理設備
- * （qualityControlEquipment）をStandard AIの投資候補へ追加したことで、同じ会社の
- * capex案件連番（nextProjectSequence）が1つ余分に消費されるようになり、稼働開始
- * ターン自体は25のまま変わらないが、新設Factory IDがMASS-NEWF-MASS-CAPEX-4から
- * MASS-NEWF-MASS-CAPEX-5へ変わった（実測で確認。指示§24の「Quality Equipmentも
- * 既存CAPEX ranking/finance capacityの中で他案件と競争する」という設計どおりの
- * 挙動であり、Standard AIの新工場評価ロジック自体は無変更）。
- *
- * 【Phase SAI-5B】新規Runの既定が standardAiProfileMode="ON" になり、MASSへ
- * 会社別プロファイル（growth+chinaVolume）が適用されるようになったことで、MASSの
- * CAPEX案件の並び順が変わり、新設Factory IDが MASS-NEWF-MASS-CAPEX-5 から
- * MASS-NEWF-MASS-CAPEX-4 へ、稼働開始が1四半期早まって「24回進行した直後
- * （currentTurn=25）」になった（実測で確認）。このテストは「稼働開始した直後で、
- * まだworkforceStateに記録が無い」状態を必要とするため、進行回数も25→24へ揃えた。
- * このテストの目的はWorker入力欄の表示バグ固定であり、新工場が実際に建つ
- * ターン・案件連番自体を固定する意図はないため、実測値へ更新した。
+ * 【SAI-GROW-3B-1】このfixtureは元々「MASSがTurn25に2工場目を稼働」と会社ID・
+ * 案件連番・ターン数を直接固定していたが、Standard AIの投資判断が変わるたびに
+ * （Crisis Management CM-1 / Capability Expansion CE-3 / Profile SAI-5B、そして
+ * 今回のLiquidity SSoT）そのすべてを実測で貼り直す運用になっていた。
+ * このテストの目的は「稼働直後（workforceState未記録）の新設Factoryで
+ * headcountChangeが0に固定されない」という表示バグの固定であり、どの会社が
+ * いつ建てるかを固定する意図はない。そのため会社ID・案件ID・ターン数を固定せず、
+ * 条件を満たす最初の四半期をfixture順・ターン昇順（決定論的）に探索する。
  */
 function sessionAtNewFactoryFirstTurn() {
-  const session = createSimulationSession({
+  let session = createSimulationSession({
     simulationRunId: "newf-vm-test",
     scenarioId: "baseline",
     seed: "management-console-32q",
     requestedTurns: 32,
     startedAt: AT,
   });
-  return advanceSimulationTurns({ session, turns: 24, timestamp: AT });
+  for (let i = 0; i < 32; i++) {
+    const outcome = advanceSimulationTurn(session, AT);
+    assert.ok(outcome.advanced, `turn ${i + 1} が進まなかった`);
+    session = outcome.session;
+    for (const fixture of session.fixtures) {
+      const ownState = buildCompanyOwnState(session.state, fixture);
+      const newFactoryId = ownState.effectiveFactories
+        .map((f) => f.factoryId)
+        .find((id) => id.includes("NEWF") && !ownState.workforceState.factories.some((w) => w.factoryId === id));
+      if (!newFactoryId) continue;
+      const existingFactoryId = ownState.effectiveFactories.map((f) => f.factoryId).find((id) => !id.includes("NEWF"));
+      assert.ok(existingFactoryId, "既存Factoryが見つからない（テスト前提の見直しが必要）");
+      return { session, companyId: fixture.companyId, newFactoryId, existingFactoryId: existingFactoryId! };
+    }
+  }
+  throw new Error("稼働開始直後（workforceState未記録）の新設Factoryが観測できる四半期が見つからなかった（テスト前提の見直しが必要）");
 }
 
-function buildPlanningForCompany(session: ReturnType<typeof sessionAtNewFactoryFirstTurn>, companyId: string, headcountOverrides?: Readonly<Record<string, number>>) {
+type NewFactoryFixture = ReturnType<typeof sessionAtNewFactoryFirstTurn>;
+
+function buildPlanningForCompany(session: NewFactoryFixture["session"], companyId: string, headcountOverrides?: Readonly<Record<string, number>>) {
   const fixture = session.fixtures.find((f) => f.companyId === companyId)!;
   const ownState = buildCompanyOwnState(session.state, fixture);
   const publicInfo = buildPublicMarketInfo(session.state);
@@ -97,9 +99,8 @@ function buildPlanningForCompany(session: ReturnType<typeof sessionAtNewFactoryF
 // NEWF-VM-1: 稼働開始したばかりの新設Factoryは、workforceStateに記録が無い
 // （＝headcountBefore=0が正しい前提）ことを確認する前提条件チェック。
 test("NEWF-VM-1: 稼働開始した直後の新設Factoryは、workforceStateにまだ記録が無い", () => {
-  const session = sessionAtNewFactoryFirstTurn();
-  const { ownState } = buildPlanningForCompany(session, "MASS");
-  const newFactoryId = "MASS-NEWF-MASS-CAPEX-4";
+  const { session, companyId, newFactoryId } = sessionAtNewFactoryFirstTurn();
+  const { ownState } = buildPlanningForCompany(session, companyId);
   assert.ok(
     ownState.effectiveFactories.some((f) => f.factoryId === newFactoryId),
     "このseed/turn前提が崩れている（新設Factoryがまだ稼働していない）"
@@ -111,10 +112,9 @@ test("NEWF-VM-1: 稼働開始した直後の新設Factoryは、workforceStateに
 // NEWF-VM-2: 新設Factoryの常用人数を編集すると、headcountChange（＝増員／減員欄の表示値）が
 // 正しく変化する（0に固定されない）。
 test("NEWF-VM-2: 新設Factoryのregularheadcountを編集すると、headcountChangeが入力どおりに変化する（常に0に戻らない）", () => {
-  const session = sessionAtNewFactoryFirstTurn();
-  const newFactoryId = "MASS-NEWF-MASS-CAPEX-4";
+  const { session, companyId, newFactoryId } = sessionAtNewFactoryFirstTurn();
 
-  const { draft, planning: beforeEdit } = buildPlanningForCompany(session, "MASS");
+  const { draft, planning: beforeEdit } = buildPlanningForCompany(session, companyId);
   const rowBefore = beforeEdit.workforceRows.find((r) => r.factoryId === newFactoryId)!;
   assert.ok(rowBefore, "新設Factoryのworkforce行が見つからない");
   // 【Standard AI Factory Activation・Phase FA-1】以前はStandard AIが新設Factoryへ
@@ -127,7 +127,7 @@ test("NEWF-VM-2: 新設Factoryのregularheadcountを編集すると、headcountC
   assert.equal(rowBefore.headcountBefore, 0, "新設FactoryのheadcountBeforeは0であるべき（workforceStateに記録が無いため）");
   assert.equal(rowBefore.headcountChange, aiProposedHeadcount, "編集前のheadcountChangeはStandard AIの提案値と一致するべき");
 
-  const { planning: afterEdit } = buildPlanningForCompany(session, "MASS", { [newFactoryId]: 500 });
+  const { planning: afterEdit } = buildPlanningForCompany(session, companyId, { [newFactoryId]: 500 });
   const rowAfter = afterEdit.workforceRows.find((r) => r.factoryId === newFactoryId)!;
   assert.equal(rowAfter.headcountAfter, 500, "変更後人数が編集値と一致しない");
   assert.equal(rowAfter.headcountBefore, 0, "新設FactoryのheadcountBeforeは0であるべき（編集値へ追従してはいけない）");
@@ -136,16 +136,15 @@ test("NEWF-VM-2: 新設Factoryのregularheadcountを編集すると、headcountC
 
 // NEWF-VM-3: 既存Factory（workforceStateに記録あり）は、修正の前後で挙動が変わらない（回帰防止）。
 test("NEWF-VM-3: 既存Factory（workforceStateに記録あり）のheadcountChangeは引き続き正しく計算される", () => {
-  const session = sessionAtNewFactoryFirstTurn();
-  const oldFactoryId = "MASS-F1";
+  const { session, companyId, existingFactoryId: oldFactoryId } = sessionAtNewFactoryFirstTurn();
 
-  const { ownState, planning: beforeEdit } = buildPlanningForCompany(session, "MASS");
+  const { ownState, planning: beforeEdit } = buildPlanningForCompany(session, companyId);
   const persisted = ownState.workforceState.factories.find((f) => f.factoryId === oldFactoryId);
   assert.ok(persisted, "テスト前提: 既存Factoryはworkforcestateに記録があるはず");
   const rowBefore = beforeEdit.workforceRows.find((r) => r.factoryId === oldFactoryId)!;
   assert.equal(rowBefore.headcountBefore, persisted!.regularHeadcount);
 
-  const { planning: afterEdit } = buildPlanningForCompany(session, "MASS", { [oldFactoryId]: persisted!.regularHeadcount + 100 });
+  const { planning: afterEdit } = buildPlanningForCompany(session, companyId, { [oldFactoryId]: persisted!.regularHeadcount + 100 });
   const rowAfter = afterEdit.workforceRows.find((r) => r.factoryId === oldFactoryId)!;
   assert.equal(rowAfter.headcountBefore, persisted!.regularHeadcount, "既存Factoryのheadcountbeforeが編集で変わってしまっている");
   assert.equal(rowAfter.headcountChange, 100, "既存Factoryの増員が正しく反映されていない");
@@ -153,14 +152,12 @@ test("NEWF-VM-3: 既存Factory（workforceStateに記録あり）のheadcountCha
 
 // NEWF-VM-4: 複数Factory（既存＋新設）を同時に編集しても、互いに独立して正しく計算される。
 test("NEWF-VM-4: 既存Factoryと新設Factoryを同時に編集しても、互いのheadcountChangeが独立して正しい", () => {
-  const session = sessionAtNewFactoryFirstTurn();
-  const oldFactoryId = "MASS-F1";
-  const newFactoryId = "MASS-NEWF-MASS-CAPEX-4";
+  const { session, companyId, newFactoryId, existingFactoryId: oldFactoryId } = sessionAtNewFactoryFirstTurn();
 
-  const baseline = buildPlanningForCompany(session, "MASS");
+  const baseline = buildPlanningForCompany(session, companyId);
   const oldFactoryPersistedHeadcount = baseline.ownState.workforceState.factories.find((f) => f.factoryId === oldFactoryId)!.regularHeadcount;
 
-  const { planning } = buildPlanningForCompany(session, "MASS", {
+  const { planning } = buildPlanningForCompany(session, companyId, {
     [oldFactoryId]: oldFactoryPersistedHeadcount + 100,
     [newFactoryId]: 500,
   });

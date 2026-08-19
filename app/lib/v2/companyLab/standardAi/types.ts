@@ -196,6 +196,11 @@ export interface StandardAiObservation {
   readonly lastQuarterLaborUtilizationRate?: number;
   /** 前期の会社×商品別の実績生産量。 */
   readonly lastQuarterActualProductionByProduct: Readonly<Partial<Record<Product, number>>>;
+  /**
+   * 【Phase SAI-GROW-3B-1】承認済み設備投資案件の今後の支払予定（USD、index0=当四半期）。
+   * CapitalProject.paymentSchedule をそのまま読んだ値であり、新しい支払ルールは無い。
+   */
+  readonly committedCapexPaymentScheduleUsd: readonly number[];
 
   // --- 市場（公開情報） ---
   readonly markets: readonly MarketObservationEntry[];

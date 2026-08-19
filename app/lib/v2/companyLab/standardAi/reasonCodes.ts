@@ -199,6 +199,10 @@ export type StandardAiReasonCode =
   // --- Adaptive Growth Step（Phase SAI-GROW-3A） ---
   | "GROWTH_STEP_LIMIT_EXPANDED" // observable evidenceが揃ったため1四半期の伸び幅上限を拡大した
   | "GROWTH_STEP_LIMIT_BINDING"
+  // --- Liquidity SSoT / Investment Discipline（Phase SAI-GROW-3B-1） ---
+  | "CAPEX_DEFERRED_LIQUIDITY" // 投資後にProtected Funding Requirementを割るため見送り
+  | "CAPEX_DEFERRED_COMMITTED_PAYMENTS" // 既承認案件の今後の支払で余力が無いため見送り
+  | "LIQUIDITY_ASSESSED"
   // --- Strategy Profile Quantification（Phase SP-Q1） ---
   | "PROFILE_BIAS_APPLIED" // 会社別ManagementProfile/OrientationProfileのバイアスをStandardAiParametersへ適用した（mode=ONの時のみ）
   // --- 【Standard AI Capability Expansion・Phase CE-1】PD機械化 ---
@@ -423,6 +427,9 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "GROWTH_SHARE_REDUCED_BY_INVENTORY",
   "GROWTH_STEP_LIMIT_EXPANDED",
   "GROWTH_STEP_LIMIT_BINDING",
+  "CAPEX_DEFERRED_LIQUIDITY",
+  "CAPEX_DEFERRED_COMMITTED_PAYMENTS",
+  "LIQUIDITY_ASSESSED",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

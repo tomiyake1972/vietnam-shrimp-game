@@ -26,6 +26,11 @@ import { effectiveEfficiencyPerHeadTons } from "../../../production/labor";
 import { FINANCE_PARAMETERS_V1 } from "../../../finance/parameters";
 import { Product } from "../../../market/types";
 import { CompanyFixture } from "../../types";
+import {
+  evaluateInvestmentAffordability,
+  LiquidityAssessment,
+  plannedInvestmentPaymentsWithinHorizonUsd,
+} from "./liquidity";
 import { minimumAcceptablePremium } from "../../premiumPolicy";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
@@ -34,6 +39,21 @@ import { StandardAiDiagnosticEntry } from "../reasonCodes";
 import { diagnoseFactoryActivation } from "../factoryActivation";
 
 const EPSILON = 1e-6;
+
+/**
+ * 【Phase SAI-GROW-3B-1】同一Turn内で「先に承認した提案」を差し引くための文脈。
+ * alreadyApprovedThisTurnUsd は評価のたびに現在値を返す関数にしてあり、
+ * 提案を1件承認するたびに呼び出し側が積み上げる（sequential portfolio評価）。
+ */
+export interface LiquidityGateContext {
+  readonly assessment: LiquidityAssessment;
+  readonly horizonQuarters: number;
+  readonly alreadyApprovedThisTurnUsd: () => number;
+  /** 同一Turnに先に承認した提案の、当四半期に出る支払合計。 */
+  readonly alreadyApprovedThisQuarterUsd: () => number;
+  /** 提案を承認したときに呼ぶ（次の提案評価から差し引かれる）。 */
+  readonly commit: (paymentsUsd: number, paymentsThisQuarterUsd: number) => void;
+}
 
 const LINE_EXPANSION_BY_PRODUCT: Readonly<Record<Product, CapitalProjectType>> = {
   hoso: "hosoLineExpansion",
@@ -110,6 +130,15 @@ interface FinancialGateDetail {
   readonly projectCostUsd: number;
   /** 投資後に残る現金の見込み（＝現金 − 投資額）。 */
   readonly cashAfterInvestmentUsd: number;
+  // --- 【Phase SAI-GROW-3B-1】Liquidity SSoTを使った場合の内訳（診断用） ---
+  readonly liquidityHeadroomUsd?: number;
+  readonly protectedFundingRequirementUsd?: number;
+  readonly committedCapitalPaymentsUsd?: number;
+  readonly proposedInvestmentPaymentsUsd?: number;
+  readonly alreadyApprovedThisTurnUsd?: number;
+  readonly postInvestmentLiquidityUsd?: number;
+  readonly postInvestmentCashHeadroomUsd?: number;
+  readonly realisticallyAvailableBorrowingUsd?: number;
 }
 
 // ---------------------------------------------------------------------
@@ -153,9 +182,54 @@ function cashAndBorrowingSafe(
   pressures: PressureScores,
   params: StandardAiParameters,
   projectType: CapitalProjectType | undefined,
-  capexParams: CapexParameters
+  capexParams: CapexParameters,
+  /**
+   * 【Phase SAI-GROW-3B-1】Liquidity SSoT。渡された場合はこちらが唯一の判定基準になる。
+   * 未指定なら従来式（後方互換。既存テスト・旧呼び出し元のため残す）。
+   */
+  liquidity?: LiquidityGateContext
 ): FinancialGateDetail {
   const projectCostUsd = projectType !== undefined ? projectCostUsdFor(projectType, capexParams) : 0;
+
+  if (liquidity) {
+    // 【新方式】「投資後もProtected Funding Requirementを満たすか」。
+    // ・確定投資（承認済み案件の今後の支払）は既に protectedFundingRequirement に入っている
+    // ・同一Turnに先に承認した提案の支払は alreadyApprovedThisTurnUsd として差し引く
+    //   （各案件が同じ現金を満額使える旧構造をここで塞ぐ）
+    const template = projectType !== undefined ? capexParams.templatesByType[projectType] : undefined;
+    const proposedPaymentsUsd =
+      template !== undefined
+        ? plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, liquidity.horizonQuarters)
+        : projectCostUsd;
+    const thisQuarterPaymentsUsd =
+      template !== undefined ? plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, 1) : projectCostUsd;
+    const affordability = evaluateInvestmentAffordability(
+      liquidity.assessment,
+      proposedPaymentsUsd,
+      liquidity.alreadyApprovedThisTurnUsd(),
+      0,
+      thisQuarterPaymentsUsd,
+      liquidity.alreadyApprovedThisQuarterUsd()
+    );
+    const borrowingSafe = pressures.borrowingPressure < 1;
+    return {
+      safe: affordability.affordable && borrowingSafe,
+      cashSafe: affordability.affordable,
+      borrowingSafe,
+      requiredCashUsd: liquidity.assessment.protectedFundingRequirementUsd + proposedPaymentsUsd,
+      projectCostUsd,
+      cashAfterInvestmentUsd: observation.cashUsd - projectCostUsd,
+      liquidityHeadroomUsd: liquidity.assessment.liquidityHeadroomUsd,
+      protectedFundingRequirementUsd: liquidity.assessment.protectedFundingRequirementUsd,
+      committedCapitalPaymentsUsd: liquidity.assessment.committedCapitalPaymentsUsd,
+      proposedInvestmentPaymentsUsd: proposedPaymentsUsd,
+      alreadyApprovedThisTurnUsd: affordability.alreadyApprovedThisTurnUsd,
+      postInvestmentLiquidityUsd: affordability.postInvestmentLiquidityUsd,
+      postInvestmentCashHeadroomUsd: affordability.postInvestmentCashHeadroomUsd,
+      realisticallyAvailableBorrowingUsd: liquidity.assessment.realisticallyAvailableBorrowingUsd,
+    };
+  }
+
   const requiredCashUsd =
     params.capexCashGateMode === "legacyMultiple"
       ? pressures.targetMinimumCashUsd * params.capexCashSafetyMultiple
@@ -245,7 +319,12 @@ export function buildStandardAiCapexDecision(
   productionNeededByProductBeforeCap: ProductAmount,
   requiredRawMaterialUnconstrained: number,
   params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
-  capexParams: CapexParameters = CAPEX_PARAMETERS_V1
+  capexParams: CapexParameters = CAPEX_PARAMETERS_V1,
+  /**
+   * 【Phase SAI-GROW-3B-1】Liquidity SSoT。未指定なら従来の案件単独ゲート（後方互換）。
+   * 指定された場合、同一Turnに先に承認した提案の支払を差し引いて判定する。
+   */
+  liquidity?: LiquidityGateContext
 ): CapexPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const proposals: CapexProjectProposalInput[] = [];
@@ -362,7 +441,51 @@ export function buildStandardAiCapexDecision(
   let vapGrowthSignalPresent = false;
   /** 投資対象ごとの財務ゲート（必要現金が投資額に依存するため案件別に判定する）。 */
   const financialGateFor = (projectType: CapitalProjectType) =>
-    cashAndBorrowingSafe(observation, pressures, params, projectType, capexParams);
+    cashAndBorrowingSafe(observation, pressures, params, projectType, capexParams, liquidity);
+  /**
+   * 【Phase SAI-GROW-3B-1・実装指示§6】財務ゲートで落ちた場合に、
+   * 「なぜ投資しなかったか」を1件のreason codeとして残す。
+   * 既承認案件の支払が主因なら CAPEX_DEFERRED_COMMITTED_PAYMENTS、
+   * それ以外の流動性不足なら CAPEX_DEFERRED_LIQUIDITY。
+   */
+  const recordLiquidityDeferral = (projectType: CapitalProjectType, gate: FinancialGateDetail) => {
+    if (!liquidity || gate.safe) return;
+    const committed = gate.committedCapitalPaymentsUsd ?? 0;
+    const dominatedByCommitted = committed > 0 && committed >= (gate.proposedInvestmentPaymentsUsd ?? 0);
+    diagnostics.push({
+      code: dominatedByCommitted ? "CAPEX_DEFERRED_COMMITTED_PAYMENTS" : "CAPEX_DEFERRED_LIQUIDITY",
+      domain: "capex",
+      companyId: fixture.companyId,
+      severity: "info",
+      keyValues: {
+        projectCostUsd: gate.projectCostUsd,
+        proposedInvestmentPaymentsUsd: gate.proposedInvestmentPaymentsUsd ?? 0,
+        alreadyApprovedThisTurnUsd: gate.alreadyApprovedThisTurnUsd ?? 0,
+        committedCapitalPaymentsUsd: committed,
+        protectedFundingRequirementUsd: gate.protectedFundingRequirementUsd ?? 0,
+        liquidityHeadroomUsd: gate.liquidityHeadroomUsd ?? 0,
+        postInvestmentLiquidityUsd: gate.postInvestmentLiquidityUsd ?? 0,
+        postInvestmentCashHeadroomUsd: gate.postInvestmentCashHeadroomUsd ?? 0,
+        realisticallyAvailableBorrowingUsd: gate.realisticallyAvailableBorrowingUsd ?? 0,
+        borrowingSafe: gate.borrowingSafe ? 1 : 0,
+      },
+      decisionSummary: `${projectType}を資金面で見送り`,
+      message:
+        `投資後の流動性が ${Math.round(gate.postInvestmentLiquidityUsd ?? 0).toLocaleString()} USD となり、` +
+        `守るべき資金（運転資金・元利返済・承認済み投資 ${Math.round(committed).toLocaleString()} USD・最低現金）を割るため見送る。`,
+    });
+  };
+
+  /** 提案を1件確定するたびに、その支払をLiquidity SSoTから差し引く（同一Turnの二重利用防止）。 */
+  const commitProposal = (projectType: CapitalProjectType) => {
+    if (!liquidity) return;
+    const template = capexParams.templatesByType[projectType];
+    if (!template) return;
+    liquidity.commit(
+      plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, liquidity.horizonQuarters),
+      plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, 1)
+    );
+  };
   // 【2026-08-09・Test16】持続性判定は投資対象設備ごとに行う（下の各分岐で算出）。
   // hadPriorQuarterUtilization は「前四半期の操業実績が存在するか」の判定にのみ使う
   // （turn1では前期実績が無いため、いかなる設備区分でも持続性は成立しない）。
@@ -456,6 +579,7 @@ export function buildStandardAiCapexDecision(
     const lineSpace = checkSpaceFeasible(LINE_EXPANSION_BY_PRODUCT[product]);
     if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned && lineSpace.feasible) {
       proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product], targetFactoryId: selectTargetFactoryId(observation, product) });
+      commitProposal(LINE_EXPANSION_BY_PRODUCT[product]);
       reserveSpace(lineSpace.requiredSpaceUnits);
       diagnostics.push({
         code: "CAPEX_PROPOSED",
@@ -485,6 +609,7 @@ export function buildStandardAiCapexDecision(
     } else if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned && !lineSpace.feasible) {
       recordSpaceInfeasible(LINE_EXPANSION_BY_PRODUCT[product], lineSpace.requiredSpaceUnits);
     } else if (isBottleneck) {
+      recordLiquidityDeferral(LINE_EXPANSION_BY_PRODUCT[product], gate);
       diagnostics.push({
         code: "CAPEX_DEFERRED",
         domain: "capex",
@@ -526,6 +651,7 @@ export function buildStandardAiCapexDecision(
       const growthEntrySpace = checkSpaceFeasible(LINE_EXPANSION_BY_PRODUCT[product]);
       if (trend !== undefined && trend >= trendThreshold && utilizationOk && noExcess && safe && growthEntrySpace.feasible) {
         proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product], targetFactoryId: selectTargetFactoryId(observation, product) });
+      commitProposal(LINE_EXPANSION_BY_PRODUCT[product]);
         reserveSpace(growthEntrySpace.requiredSpaceUnits);
         diagnostics.push({
           code: product === "vap" ? "VAP_GROWTH_ENTRY" : "LIFECYCLE_GROWTH_PURSUED",
@@ -743,6 +869,7 @@ export function buildStandardAiCapexDecision(
           (a, b) => a.paybackQuarters - b.paybackQuarters || a.factory.factoryId.localeCompare(b.factory.factoryId)
         )[0];
         proposals.push({ projectType: pdMechType, targetFactoryId: best.factory.factoryId });
+        commitProposal(pdMechType);
         reserveSpace(pdMechSpace.requiredSpaceUnits);
         diagnostics.push({
           code: "PD_MECH_PROPOSED",
@@ -973,6 +1100,7 @@ export function buildStandardAiCapexDecision(
           (a, b) => b.qualityRiskProtectionRatio - a.qualityRiskProtectionRatio || a.factory.factoryId.localeCompare(b.factory.factoryId)
         )[0];
         proposals.push({ projectType: qualityEquipType, targetFactoryId: best.factory.factoryId });
+        commitProposal(qualityEquipType);
         reserveSpace(qualityEquipSpace.requiredSpaceUnits);
         diagnostics.push({
           code: "QUALITY_EQUIP_PROPOSED",
@@ -1125,6 +1253,7 @@ export function buildStandardAiCapexDecision(
     const commonSpace = checkSpaceFeasible("commonProcessingExpansion");
     if (isBottleneck && commonSustained && safe && !alreadyPlannedCommon && commonSpace.feasible) {
       proposals.push({ projectType: "commonProcessingExpansion", targetFactoryId: selectTargetFactoryId(observation, "commonProcessing") });
+      commitProposal("commonProcessingExpansion");
       reserveSpace(commonSpace.requiredSpaceUnits);
       diagnostics.push({
         code: "CAPEX_PROPOSED",

@@ -17,15 +17,22 @@ import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../types";
 import { findFactoryRegularHeadcount } from "../workforce";
 import { isCapexProjectOperationalAt } from "../../capex/capacityEffect";
 import { computeEffectiveFactories, MAX_FACTORIES_PER_COMPANY } from "../../capex/factoryConstruction";
-import { isActiveStatus } from "../../capex/projectLifecycle";
 import { calculateFactoryEffectiveCapacity } from "../../production/capacity";
 import { computeFactoryUsedSpaceUnits, FACTORY_SPACE_PARAMETERS_V1, resolveFactoryTotalSpaceUnits } from "../../production/factorySpace";
 import { computeLoanQuarterlyInterest, computeScheduledPrincipalDue } from "../../financing/loanSchedule";
+import { isActiveStatus } from "../../capex/projectLifecycle";
 import { resolveQualityEquipmentStatusByFactory, qualityEquipmentStatusFor } from "../qualityControlEquipmentState";
 import { BatchQualityAdjustment } from "../../quality/types";
 import { FactoryObservation, MarketObservationEntry, ProductAmount, StandardAiObservation, zeroProductAmount } from "./types";
 
 const EPSILON = 1e-6;
+
+/**
+ * 【Phase SAI-GROW-3B-1】確定投資の支払を先読みする四半期数。
+ * 「当期＋次期は必ず見る」という指示§3の最低要件に、既存の新工場テンプレートの
+ * 標準工期（3四半期）まで見られる余裕を持たせた値。
+ */
+export const COMMITTED_CAPEX_HORIZON_QUARTERS = 4;
 
 function availableRawMaterialQuantity(ownState: CompanyOwnState): number {
   return ownState.rawMaterialLots.filter((l) => l.status === "available").reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
@@ -65,6 +72,28 @@ function certainInboundImportQuantityThisPeriod(ownState: CompanyOwnState, perio
   return ownState.rawMaterialLots
     .filter((l) => l.status === "inTransitImport" && l.availableFromPeriod <= period)
     .reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
+}
+
+/**
+ * 【Phase SAI-GROW-3B-1】承認済み（active）設備投資案件の、今後の四半期別支払予定。
+ * index0 = 当四半期に出る予定の支払、index1 = 次四半期、…
+ *
+ * 【新しい式を作らない】1回ぶんの支払額は capex/projectLifecycle.ts と同じ
+ * `approvedBudgetUsd × paymentSchedule[stage].plannedRatio` であり、
+ * 次に払う stage は `completedPaymentStagesCount` から決まる。
+ * suspended を含む active な案件をすべて対象にする（中断案件も再開すれば支払が戻るため、
+ * 資金計画上は無視しない＝安全側）。
+ */
+function buildCommittedCapexPaymentSchedule(ownState: CompanyOwnState, horizonQuarters = COMMITTED_CAPEX_HORIZON_QUARTERS): readonly number[] {
+  const schedule = new Array<number>(horizonQuarters).fill(0);
+  for (const project of ownState.capexState.portfolio.projects) {
+    if (!isActiveStatus(project.status)) continue;
+    const remainingStages = project.paymentSchedule.slice(project.completedPaymentStagesCount);
+    for (let i = 0; i < Math.min(horizonQuarters, remainingStages.length); i++) {
+      schedule[i] += Math.max(0, project.approvedBudgetUsd * remainingStages[i].plannedRatio);
+    }
+  }
+  return schedule;
 }
 
 function outstandingContractByProduct(ownState: CompanyOwnState): ProductAmount {
@@ -416,6 +445,10 @@ export function buildStandardAiObservation(
     lastQuarterEquipmentUtilizationRate: averageEquipmentUtilization(ownState),
     lastQuarterLaborUtilizationRate: averageLaborUtilization(ownState),
     lastQuarterActualProductionByProduct: ownState.lastQuarterActualProductionByProduct,
+    // 【Phase SAI-GROW-3B-1】承認済み設備投資案件の今後の支払予定（index0=当期）。
+    // CapitalProject.paymentSchedule（承認時スナップショット）をそのまま読むだけで、
+    // 新しい支払ルールは作らない。
+    committedCapexPaymentScheduleUsd: buildCommittedCapexPaymentSchedule(ownState),
 
     markets: buildMarkets(publicInfo),
     // 【Batch 002】観測需要のlag・出所を判断側から確認できるようにする

@@ -29,7 +29,9 @@ import { buildStandardAiProductionPlans } from "./decision/production";
 import { buildStandardAiProcurementPlan } from "./decision/procurement";
 import { buildStandardAiWorkerAssignments } from "./decision/labor";
 import { buildStandardAiFinancingRequest } from "./decision/finance";
-import { buildStandardAiCapexDecision } from "./decision/capex";
+import { buildStandardAiCapexDecision, LiquidityGateContext } from "./decision/capex";
+import { assessCommittedCashRequirement, LiquidityAssessment } from "./decision/liquidity";
+import { COMMITTED_CAPEX_HORIZON_QUARTERS } from "./observation";
 import { buildStandardAiVapProductDevelopmentDecision } from "./decision/vapProductDevelopment";
 import { buildStandardAiDividendDecision } from "./decision/dividend";
 import { sumProductAmount } from "./types";
@@ -138,6 +140,13 @@ export interface StandardAiQuarterDiagnostics {
   readonly conversionObservation?: ConversionObservation;
   /** 【Phase 6C・#05 §6】営業採用判断の構造化記録（採用0でも必ず理由が入る）。 */
   readonly salesHiring?: SalesHiringDiagnosticsRecord;
+  /**
+   * 【Phase SAI-GROW-3B-1】Liquidity SSoT の評価内訳。
+   * Finance決定・既存増設CAPEX・新工場のすべてがこの同一assessmentを参照している。
+   */
+  readonly liquidity?: LiquidityAssessment;
+  /** 当期にゲートを通した新規投資の支払額（horizon内合計）。 */
+  readonly approvedInvestmentPaymentsThisTurnUsd?: number;
   /**
    * 【Phase SAI-GROW-1】Shadow Growth Pressure（診断専用）。
    *
@@ -567,17 +576,90 @@ export function generateStandardAiDecisionWithDiagnostics(
   // 【Test16】資金繰り判断へ当期の原料調達計画を渡す。これにより「原料を買うのに
   // 資金が要る」ことが借入判断の入力になる（従来は最低現金バッファだけで決めていた）。
   // 調達計画は上で確定済みであり、循環しない。
-  const financingResult = buildStandardAiFinancingRequest(observation, pressures, params, {
+  const procurementCashPlan = {
     domesticDesiredQuantityTons: unwrapUnit(procurementResult.domesticPurchasePlan.desiredQuantity),
     importOrderedQuantityTons: procurementResult.importOrders.reduce((sum, o) => sum + unwrapUnit(o.orderedQuantity), 0),
+  };
+
+  // 【Phase SAI-GROW-3B-1・実装指示§1・§9】Liquidity SSoT。
+  //
+  // 【decision ordering の解き方（選択肢A+B）】
+  //  (A) 「いくらまで投資に回せるか」は、CAPEXとFinanceの**両方より前**に、
+  //      1つのpure resolverで確定させる（この行）。両者は同じassessmentを見る。
+  //  (B) 借入額はCAPEX確定後に決める。investment → financing の順にしたのは、
+  //      「当期承認した投資の支払」を借入必要額へ織り込むためであり、
+  //      逆順（従来）では CAPEX が Finance の結果を見られず、両者が矛盾していた。
+  //      capex/newFactory は financingResult を参照しないため、循環は生じない。
+  const liquidityAssessment = assessCommittedCashRequirement({
+    observation,
+    pressures,
+    params,
+    procurementCashPlan,
+    crisisState: crisisAssessment.state,
+    financialRiskTolerance: vision ? vision.financialRiskTolerance : null,
+    growthParams: params.growthPressure,
   });
+  // 同一Turn内に承認した提案の支払を積み上げる（各案件が同じ現金を満額使う旧構造を塞ぐ）。
+  let approvedInvestmentPaymentsThisTurnUsd = 0;
+  let approvedInvestmentPaymentsThisQuarterUsd = 0;
+  const liquidityGate: LiquidityGateContext = {
+    assessment: liquidityAssessment,
+    horizonQuarters: COMMITTED_CAPEX_HORIZON_QUARTERS,
+    alreadyApprovedThisTurnUsd: () => approvedInvestmentPaymentsThisTurnUsd,
+    alreadyApprovedThisQuarterUsd: () => approvedInvestmentPaymentsThisQuarterUsd,
+    commit: (paymentsUsd: number, paymentsThisQuarterUsd: number) => {
+      approvedInvestmentPaymentsThisTurnUsd += Math.max(0, paymentsUsd);
+      approvedInvestmentPaymentsThisQuarterUsd += Math.max(0, paymentsThisQuarterUsd);
+    },
+  };
+
+  const liquidityDiagnostic: StandardAiDiagnosticEntry = {
+    code: "LIQUIDITY_ASSESSED",
+    domain: "finance",
+    companyId: fixture.companyId,
+    severity: liquidityAssessment.liquidityHeadroomUsd < 0 ? "warning" : "info",
+    keyValues: {
+      currentCash: liquidityAssessment.currentCashUsd,
+      expectedArCollection: liquidityAssessment.expectedArCollectionUsd,
+      realisticallyAvailableBorrowing: liquidityAssessment.realisticallyAvailableBorrowingUsd,
+      availableLiquidity: liquidityAssessment.availableLiquidityUsd,
+      operatingWorkingCapitalRequirement: liquidityAssessment.operatingWorkingCapitalRequirementUsd,
+      minimumProtectedOperatingRequirement: liquidityAssessment.minimumProtectedOperatingRequirementUsd,
+      debtServiceRequirement: liquidityAssessment.debtServiceRequirementUsd,
+      committedCapitalPayments: liquidityAssessment.committedCapitalPaymentsUsd,
+      committedCapitalPaymentsThisQuarter: liquidityAssessment.committedCapitalPaymentsThisQuarterUsd,
+      minimumOperatingCashReserve: liquidityAssessment.minimumOperatingCashReserveUsd,
+      crisisBuffer: liquidityAssessment.crisisBufferUsd,
+      protectedFundingRequirement: liquidityAssessment.protectedFundingRequirementUsd,
+      liquidityHeadroom: liquidityAssessment.liquidityHeadroomUsd,
+      financingNeed: liquidityAssessment.financingNeedUsd,
+    },
+    decisionSummary:
+      liquidityAssessment.liquidityHeadroomUsd >= 0
+        ? `投資へ回せる流動性 ${Math.round(liquidityAssessment.liquidityHeadroomUsd).toLocaleString()} USD`
+        : `流動性が守るべき資金を ${Math.round(-liquidityAssessment.liquidityHeadroomUsd).toLocaleString()} USD 下回っている`,
+    message:
+      `利用可能流動性 ${Math.round(liquidityAssessment.availableLiquidityUsd).toLocaleString()} USD` +
+      `（現金 ${Math.round(liquidityAssessment.currentCashUsd).toLocaleString()} ＋ 売掛回収 ${Math.round(
+        liquidityAssessment.expectedArCollectionUsd
+      ).toLocaleString()} ＋ 現実的な借入余力 ${Math.round(liquidityAssessment.realisticallyAvailableBorrowingUsd).toLocaleString()}）に対し、` +
+      `守るべき資金 ${Math.round(liquidityAssessment.protectedFundingRequirementUsd).toLocaleString()} USD` +
+      `（最低操業 ${Math.round(liquidityAssessment.minimumProtectedOperatingRequirementUsd).toLocaleString()} ＋ 元利 ${Math.round(
+        liquidityAssessment.debtServiceRequirementUsd
+      ).toLocaleString()} ＋ 承認済み投資 ${Math.round(liquidityAssessment.committedCapitalPaymentsUsd).toLocaleString()} ＋ 最低現金 ${Math.round(
+        liquidityAssessment.minimumOperatingCashReserveUsd
+      ).toLocaleString()}${liquidityAssessment.crisisBufferUsd > 0 ? ` ＋ 危機buffer ${Math.round(liquidityAssessment.crisisBufferUsd).toLocaleString()}` : ""}）。`,
+  };
+
   const capexResult = buildStandardAiCapexDecision(
     fixture,
     observation,
     pressures,
     productionResult.neededByProduct,
     requiredRawMaterialUnconstrained,
-    params
+    params,
+    undefined,
+    liquidityGate
   );
   // 【Standard AI Capability Expansion・Phase CE-2】VAP商品開発費（tier選択）。
   // capex.tsのnewProjectProposalsとは独立した意思決定軸（CapitalProjectTypeでは
@@ -687,6 +769,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     // 「前四半期に工場を実際に満杯まで回していた（既存の sustained しきい値を再利用）」
     // かつ「今期の志がその能力を超えている」ときだけ、持続的な能力不足の根拠とみなす。
     // 新しい閾値は発明していない（capexSustainedUtilizationThreshold をそのまま使う）。
+    liquidity: liquidityGate,
     persistentCapacityCausedUnserved:
       pressures.hadPriorQuarterUtilization &&
       bindingProductionCapacityTons > 0 &&
@@ -747,6 +830,14 @@ export function generateStandardAiDecisionWithDiagnostics(
           newProjectProposals: [...capexDecisionAfterCrisisGate.newProjectProposals, ...newFactoryProposalsAfterCrisisGate],
         }
       : capexDecisionAfterCrisisGate;
+
+  // 【Phase SAI-GROW-3B-1・実装指示§8・§9】借入判断は投資確定後に行う。
+  // 当期に承認した新規投資の当期支払ぶんも資金需要へ含めるため、Crisis Gate適用後の
+  // 最終CAPEX（finalCapexDecision）が決まってから評価する。
+  const financingResult = buildStandardAiFinancingRequest(observation, pressures, params, procurementCashPlan, {
+    assessment: liquidityAssessment,
+    approvedInvestmentPaymentsThisQuarterUsd: isSevereDistress ? 0 : approvedInvestmentPaymentsThisQuarterUsd,
+  });
 
   // 【Phase DIV-4】Standard AI配当ポリシー（Flow-Based Annual Dividend Policy）。
   // 年度末Q4のみ・当期純利益基準・distributableEarningsは上限としてのみ使用。
@@ -851,6 +942,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...commercialGrowthDiagnostics,
     ...newFactoryResult.diagnostics,
     ...buildCommitmentDiagnostics(fixture.companyId, commercialCommitment, conversionObservation),
+    liquidityDiagnostic,
     ...crisisDiagnostics,
     ...(vapDevCrisisDiagnostic ? [vapDevCrisisDiagnostic] : []),
   ];
@@ -899,6 +991,10 @@ export function generateStandardAiDecisionWithDiagnostics(
       commercialCommitment,
       conversionObservation,
       salesHiring: salesForceHiringResult.hiringDiagnostics,
+      // 【Phase SAI-GROW-3B-1】Liquidity SSoT の評価内訳。Finance・CAPEX・新工場が
+      // 参照したのとまったく同じ値（実装指示§13）。
+      liquidity: liquidityAssessment,
+      approvedInvestmentPaymentsThisTurnUsd,
       // 【Phase SAI-GROW-1】診断専用のShadow Growth Pressure（Decisionには未接続）。
       growthPressure,
       // 【Standard AI Crisis Management・Phase CM-1・指示§15】Analysis Pack・
