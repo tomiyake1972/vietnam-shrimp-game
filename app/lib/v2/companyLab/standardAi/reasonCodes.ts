@@ -210,6 +210,11 @@ export type StandardAiReasonCode =
   | "WORKFORCE_REDUCED_FOR_SURVIVAL"
   | "SALES_FORCE_REDUCED_FOR_SURVIVAL"
   | "GROWTH_PAUSED_FOR_RECOVERY"
+  | "DELIVERABLE_COMMITMENT_ASSESSED"
+  | "DELIVERABLE_LIMIT_PRODUCTION"
+  | "DELIVERABLE_LIMIT_RAW_MATERIAL"
+  | "DELIVERABLE_LIMIT_BACKLOG"
+  | "DELIVERABLE_LIMIT_LIQUIDITY"
   // --- Strategy Profile Quantification（Phase SP-Q1） ---
   | "PROFILE_BIAS_APPLIED" // 会社別ManagementProfile/OrientationProfileのバイアスをStandardAiParametersへ適用した（mode=ONの時のみ）
   // --- 【Standard AI Capability Expansion・Phase CE-1】PD機械化 ---
@@ -444,6 +449,11 @@ export const STANDARD_AI_REASON_CODES: readonly StandardAiReasonCode[] = [
   "WORKFORCE_REDUCED_FOR_SURVIVAL",
   "SALES_FORCE_REDUCED_FOR_SURVIVAL",
   "GROWTH_PAUSED_FOR_RECOVERY",
+  "DELIVERABLE_COMMITMENT_ASSESSED",
+  "DELIVERABLE_LIMIT_PRODUCTION",
+  "DELIVERABLE_LIMIT_RAW_MATERIAL",
+  "DELIVERABLE_LIMIT_BACKLOG",
+  "DELIVERABLE_LIMIT_LIQUIDITY",
 ];
 
 /** 1件の意思決定理由（診断用。会社ラボの既存CompanyReasonEntryとは独立した、SAI-1専用の詳細版）。 */

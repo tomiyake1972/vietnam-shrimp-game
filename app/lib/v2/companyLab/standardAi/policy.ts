@@ -31,7 +31,8 @@ import { buildStandardAiWorkerAssignments } from "./decision/labor";
 import { buildStandardAiFinancingRequest } from "./decision/finance";
 import { buildStandardAiCapexDecision, LiquidityGateContext } from "./decision/capex";
 import { assessCommittedCashRequirement, LiquidityAssessment } from "./decision/liquidity";
-import { assessFundableOperations, FundableOperationsAssessment, growthPausedForRecovery } from "./decision/fundableOperations";
+import { assessFundableOperations, computeFundableRawMaterial, FundableOperationsAssessment, growthPausedForRecovery } from "./decision/fundableOperations";
+import { computeDeliverableCommitment, DeliverableCommitmentState } from "./decision/deliverableCommitment";
 import { COMMITTED_CAPEX_HORIZON_QUARTERS } from "./observation";
 import { buildStandardAiVapProductDevelopmentDecision } from "./decision/vapProductDevelopment";
 import { buildStandardAiDividendDecision } from "./decision/dividend";
@@ -154,6 +155,12 @@ export interface StandardAiQuarterDiagnostics {
    * posture・fundable量・縮退の有無を追跡できる。
    */
   readonly fundableOperations?: FundableOperationsAssessment;
+  /**
+   * 【Phase SAI-GROW-3B-3】Deliverable Commitment の評価結果。
+   * Commercial Ambition・cap前のCommitment・納品余力・backlog内訳・
+   * binding constraint をこの1件から追跡できる。
+   */
+  readonly deliverableCommitment?: DeliverableCommitmentState;
   /**
    * 【Phase SAI-GROW-1】Shadow Growth Pressure（診断専用）。
    *
@@ -522,6 +529,52 @@ export function generateStandardAiDecisionWithDiagnostics(
     backlogTons: sumProductAmount({ ...observation.outstandingContractByProduct } as never),
     finishedGoodsTons: sumProductAmount({ ...observation.finishedGoodsByProduct }),
   });
+  // 【Phase SAI-GROW-3B-3・実装指示§2/§3/§6】Deliverable Commitment。
+  // Commercial Ambition（志）は一切変更せず、「今期の提出量」だけを納品可能量で抑える。
+  //
+  // 【§12 Survivalとの適用順】危機時（LIQUIDITY_STRESS / SEVERE_DISTRESS）は既存の
+  // Crisis Gateと3B-2のFundable Operationsが先に効いているため、ここで重ねて抑えると
+  // 二重抑制になる。deliverability capはcrisisStateがNORMALのときだけ適用し、
+  // 危機会社には既存のCrisis / Operations制約を優先させる。
+  const fundableRawMaterialView = computeFundableRawMaterial({
+    observation,
+    pressures,
+    params,
+    crisisState: crisisAssessment.state,
+    financialRiskTolerance: vision ? vision.financialRiskTolerance : null,
+    growthParams: params.growthPressure,
+  });
+  const nearTermBindingProductionCapacityTons = computeBindingProductionCapacityTons(
+    observation.nearTermEffectiveCapacityByProduct,
+    observation.nearTermEffectiveCommonProcessingCapacity
+  );
+  const deliverableCommitment: DeliverableCommitmentState = computeDeliverableCommitment({
+    commitmentBeforeDeliverabilityTons: commercialCommitmentBeforeCrisisGate.submissionTargetTons,
+    expectedConversionRatio: commercialCommitmentBeforeCrisisGate.expectedConversionRatio,
+    finishedGoodsByProduct: observation.finishedGoodsByProduct,
+    bindingProductionCapacityTons: computeBindingProductionCapacityTons(
+      observation.totalEffectiveCapacityByProduct,
+      observation.totalEffectiveCommonProcessingCapacity
+    ),
+    nearTermBindingProductionCapacityTons,
+    fundableRawMaterialTons: fundableRawMaterialView.fundableRawMaterialTons,
+    overdueBacklogByProduct: observation.overdueBacklogByProduct,
+    healthyForwardBacklogByProduct: observation.healthyForwardBacklogByProduct,
+    rawMaterialLimitedByFunding:
+      fundableRawMaterialView.priceKnown &&
+      fundableRawMaterialView.fundableDomesticProcurementTons < nearTermBindingProductionCapacityTons,
+    deliveryLeadTimeQuarters: observation.deliveryLeadTimeQuarters,
+    minimumMarketPresenceRatio: params.minDomesticPurchaseRatioOfBase,
+  });
+  const applyDeliverabilityCap = crisisAssessment.state === "NORMAL" && deliverableCommitment.applied;
+  const commercialCommitmentAfterDeliverability: CommercialCommitmentState = applyDeliverabilityCap
+    ? {
+        ...commercialCommitmentBeforeCrisisGate,
+        submissionTargetTons: deliverableCommitment.finalSubmissionTargetTons,
+        limiter: "DELIVERABILITY",
+      }
+    : commercialCommitmentBeforeCrisisGate;
+
   // 【指示§5/§6/§7】Crisis Gate。computeCommercialCommitment自体（志の量・
   // 転換率学習等）は一切変更しない。危機時はこの出力（新規提出量の上限）だけを
   // 縮小・停止する。Vision Ambition（commercialAmbition）はこの後も一切変更しない
@@ -529,7 +582,7 @@ export function generateStandardAiDecisionWithDiagnostics(
   // outstandingContractByProduct経由で別途、生産必要量計算（confirmed）へ
   // 100%反映され続ける（このgateの影響を受けない）。
   const commercialCommitment: CommercialCommitmentState = applyCrisisGateToCommercialCommitment(
-    commercialCommitmentBeforeCrisisGate,
+    commercialCommitmentAfterDeliverability,
     crisisAssessment
   );
 
@@ -1038,6 +1091,61 @@ export function generateStandardAiDecisionWithDiagnostics(
     });
   }
 
+  // 【Phase SAI-GROW-3B-3・実装指示§13】Deliverable Commitment の1Turn追跡。
+  // 【§9 Constraint Routing】capが効いたときは「成長機会が無い」ではなく、
+  // 「何が納品を縛っているか」＝次に何へ投資すべきかをrouteする。
+  const deliverabilityConstraintCode = {
+    PRODUCTION: "DELIVERABLE_LIMIT_PRODUCTION",
+    RAW_MATERIAL: "DELIVERABLE_LIMIT_RAW_MATERIAL",
+    BACKLOG: "DELIVERABLE_LIMIT_BACKLOG",
+    LIQUIDITY: "DELIVERABLE_LIMIT_LIQUIDITY",
+    NONE: "DELIVERABLE_COMMITMENT_ASSESSED",
+  } as const;
+  const deliverableCommitmentDiagnostic: StandardAiDiagnosticEntry = {
+    code: applyDeliverabilityCap
+      ? deliverabilityConstraintCode[deliverableCommitment.bindingDeliverabilityConstraint]
+      : "DELIVERABLE_COMMITMENT_ASSESSED",
+    domain: "sales",
+    companyId: fixture.companyId,
+    severity: applyDeliverabilityCap ? "warning" : "info",
+    keyValues: {
+      commercialAmbitionTons: commercialAmbition.ambitionTons,
+      commercialCommitmentBeforeDeliverability: deliverableCommitment.commitmentBeforeDeliverabilityTons,
+      deliverableCapacityCurrentTons: deliverableCommitment.deliverableCapacityCurrentTons,
+      deliverableCapacityNearTermTons: deliverableCommitment.deliverableCapacityNearTermTons,
+      existingBacklogTons: deliverableCommitment.existingBacklogTons,
+      healthyForwardBacklogTons: deliverableCommitment.healthyForwardBacklogTons,
+      overdueBacklogTons: deliverableCommitment.overdueBacklogTons,
+      carryOverBacklogTons: deliverableCommitment.carryOverBacklogTons,
+      normalBacklogAllowanceTons: deliverableCommitment.normalBacklogAllowanceTons,
+      excessBacklogTons: deliverableCommitment.excessBacklogTons,
+      backlogDeliveryHorizonQuarters: Number.isFinite(deliverableCommitment.backlogDeliveryHorizonQuarters)
+        ? deliverableCommitment.backlogDeliveryHorizonQuarters
+        : -1,
+      remainingDeliverableHeadroomTons: deliverableCommitment.remainingDeliverableHeadroomTons,
+      deliverabilityCapTons: deliverableCommitment.deliverabilityCapTons,
+      finalSubmissionTargetTons: commercialCommitment.submissionTargetTons,
+      incrementalSubmissionReductionTons: applyDeliverabilityCap ? deliverableCommitment.incrementalSubmissionReductionTons : 0,
+      deliveryLeadTimeQuarters: observation.deliveryLeadTimeQuarters,
+      applied: applyDeliverabilityCap ? 1 : 0,
+    },
+    decisionSummary: applyDeliverabilityCap
+      ? `納品可能量に合わせて新規提出を ${Math.round(deliverableCommitment.incrementalSubmissionReductionTons).toLocaleString()}t 抑える`
+      : "納品可能量は新規提出の制約になっていない",
+    message: applyDeliverabilityCap
+      ? `志（Commercial Ambition ${Math.round(commercialAmbition.ambitionTons).toLocaleString()}t）は変えないまま、` +
+        `納期到来時点の納品余力 ${Math.round(deliverableCommitment.remainingDeliverableHeadroomTons).toLocaleString()}t` +
+        `（納品能力 ${Math.round(deliverableCommitment.deliverableCapacityNearTermTons).toLocaleString()}t − 正常水準超の受注残 ` +
+        `${Math.round(deliverableCommitment.excessBacklogTons).toLocaleString()}t）に合わせて` +
+        `今期の新規提出を ${Math.round(deliverableCommitment.commitmentBeforeDeliverabilityTons).toLocaleString()}t → ` +
+        `${Math.round(commercialCommitment.submissionTargetTons).toLocaleString()}t へ抑える。` +
+        `納品を縛っているのは ${deliverableCommitment.bindingDeliverabilityConstraint} であり、成長機会が無いのではない` +
+        `（受注残消化 ${deliverableCommitment.backlogDeliveryHorizonQuarters.toFixed(2)} 四半期分）。`
+      : `納品余力 ${Math.round(deliverableCommitment.remainingDeliverableHeadroomTons).toLocaleString()}t が` +
+        `提出目標 ${Math.round(deliverableCommitment.commitmentBeforeDeliverabilityTons).toLocaleString()}t を上回るため、` +
+        `納品可能量による抑制は行っていない。`,
+  };
+
   const newSalesSuppressedByCrisis = crisisAssessment.state !== "NORMAL";
   const crisisDiagnostics = buildCrisisDiagnostics(fixture.companyId, crisisAssessment, observation, {
     newSalesSuppressed: newSalesSuppressedByCrisis,
@@ -1074,6 +1182,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...buildCommitmentDiagnostics(fixture.companyId, commercialCommitment, conversionObservation),
     liquidityDiagnostic,
     fundableOperationsDiagnostic,
+    deliverableCommitmentDiagnostic,
     ...survivalActionDiagnostics,
     ...crisisDiagnostics,
     ...(vapDevCrisisDiagnostic ? [vapDevCrisisDiagnostic] : []),
@@ -1127,6 +1236,7 @@ export function generateStandardAiDecisionWithDiagnostics(
       // 参照したのとまったく同じ値（実装指示§13）。
       liquidity: liquidityAssessment,
       fundableOperations,
+      deliverableCommitment,
       approvedInvestmentPaymentsThisTurnUsd,
       // 【Phase SAI-GROW-1】診断専用のShadow Growth Pressure（Decisionには未接続）。
       growthPressure,

@@ -112,18 +112,34 @@ function hasDistressFootprint(observation: StandardAiObservation, severeScaleRat
 }
 
 /**
- * 【指示§2】Fundable Procurement Volume（PRE-AUDIT S-2）。
- * engineの computeProcurementConstraint と同じ経済ロジックを、Standard AI側で
- * 意思決定の**前に**評価する。別のeconomic modelは作らない。
+ * 【Phase SAI-GROW-3B-3】生産必要量に依存しない部分だけを切り出したもの。
+ * Deliverable Commitment（deliverableCommitment.ts）は Commercial Commitment を
+ * 決める時点で「資金手当てできる原料量」を必要とするが、その時点ではまだ
+ * 生産必要量が存在しない。両者が同じ1つの式を共有するために公開する
+ * （3B-2のassessFundableOperations自身もこの関数を呼ぶ＝二重実装しない）。
  */
-export function assessFundableOperations(input: FundableOperationsInput): FundableOperationsAssessment {
-  const { observation, pressures, params, crisisState, productionRequirementTons } = input;
-  const growthParams = input.growthParams ?? GROWTH_PRESSURE_PARAMETERS_V1;
-  const crisisParams = input.crisisParams ?? STANDARD_AI_CRISIS_PARAMETERS_V1;
+export interface FundableRawMaterialView {
+  readonly procurementFundingUsd: number;
+  readonly expectedBorrowingForOperationsUsd: number;
+  readonly expectedDomesticPriceUsdPerKg: number;
+  readonly fundableDomesticProcurementTons: number;
+  readonly fundableRawMaterialTons: number;
+  readonly priceKnown: boolean;
+}
 
-  // --- 当期に国内買付へ充てられる資金（engineと同一式） ---
-  // financing/liquidityClose.ts::computeProcurementConstraint:
-  //   availableLiquidityUsd = max(0, prevCash) × domesticPurchaseCashAllocationRatio + approvedNormalLoanDrawUsd
+export function computeFundableRawMaterial(input: {
+  readonly observation: StandardAiObservation;
+  readonly pressures: PressureScores;
+  readonly params: StandardAiParameters;
+  readonly crisisState: StandardAiCrisisState;
+  readonly financialRiskTolerance: FinancialRiskTolerance | null;
+  readonly growthParams?: GrowthPressureParameters;
+}): FundableRawMaterialView {
+  const { observation, pressures, params, crisisState } = input;
+  const growthParams = input.growthParams ?? GROWTH_PRESSURE_PARAMETERS_V1;
+
+  // engineと同一式（financing/liquidityClose.ts::computeProcurementConstraint）:
+  //   利用可能流動性 = max(0, 現金) × domesticPurchaseCashAllocationRatio + 承認融資
   const expectedBorrowingForOperationsUsd = realisticallyAvailableBorrowingUsd(
     { observation, pressures, params, crisisState, financialRiskTolerance: input.financialRiskTolerance },
     growthParams
@@ -135,12 +151,40 @@ export function assessFundableOperations(input: FundableOperationsInput): Fundab
   // 前期の国内参照価格（既存observation）。未知なら資金制約を判定できないため、
   // 「制約なし」ではなく「capを掛けない」側へ倒す（捏造した価格を置かない）。
   const expectedDomesticPriceUsdPerKg = observation.vietnamDomesticPriorPrice ?? 0;
-  const fundableDomesticProcurementTons =
-    expectedDomesticPriceUsdPerKg > EPSILON ? procurementFundingUsd / (expectedDomesticPriceUsdPerKg * 1000) : 0;
+  const priceKnown = expectedDomesticPriceUsdPerKg > EPSILON;
+  const fundableDomesticProcurementTons = priceKnown ? procurementFundingUsd / (expectedDomesticPriceUsdPerKg * 1000) : 0;
+  const fundableRawMaterialTons =
+    Math.max(0, pressures.rawMaterialInventoryPosition) + Math.max(0, fundableDomesticProcurementTons);
 
-  // 当期の生産に使える原料 = 既存在庫ポジション（手持ち+パイプライン。既存pressures）
-  //                        + 当期に資金手当てできる買付量
-  const fundableRawMaterialTons = Math.max(0, pressures.rawMaterialInventoryPosition) + Math.max(0, fundableDomesticProcurementTons);
+  return {
+    procurementFundingUsd,
+    expectedBorrowingForOperationsUsd,
+    expectedDomesticPriceUsdPerKg,
+    fundableDomesticProcurementTons,
+    fundableRawMaterialTons,
+    priceKnown,
+  };
+}
+
+/**
+ * 【指示§2】Fundable Procurement Volume（PRE-AUDIT S-2）。
+ * engineの computeProcurementConstraint と同じ経済ロジックを、Standard AI側で
+ * 意思決定の**前に**評価する。別のeconomic modelは作らない。
+ */
+export function assessFundableOperations(input: FundableOperationsInput): FundableOperationsAssessment {
+  const { observation, pressures, params, crisisState, productionRequirementTons } = input;
+  const growthParams = input.growthParams ?? GROWTH_PRESSURE_PARAMETERS_V1;
+  const crisisParams = input.crisisParams ?? STANDARD_AI_CRISIS_PARAMETERS_V1;
+
+  // --- 当期に国内買付へ充てられる資金（engineと同一式。3B-3で共有関数へ切り出し済み） ---
+  const {
+    procurementFundingUsd,
+    expectedBorrowingForOperationsUsd,
+    expectedDomesticPriceUsdPerKg,
+    fundableDomesticProcurementTons,
+    fundableRawMaterialTons,
+    priceKnown,
+  } = computeFundableRawMaterial({ observation, pressures, params, crisisState, financialRiskTolerance: input.financialRiskTolerance, growthParams });
 
   const sustainedDistress = hasDistressFootprint(observation, crisisParams.severeScaleRatioThreshold);
   const isSevere = crisisState === "SEVERE_DISTRESS";
@@ -183,8 +227,7 @@ export function assessFundableOperations(input: FundableOperationsInput): Fundab
   }
 
   // 参照価格が未知（Turn1等）のときは資金換算そのものができないため、capを掛けない
-  // （0t扱いで生産を止める、という捏造をしない）。
-  const priceKnown = expectedDomesticPriceUsdPerKg > EPSILON;
+  // （0t扱いで生産を止める、という捏造をしない。priceKnownは共有関数の戻り値）。
 
   // 【指示§3「縮退を強める」は段階的である・実測による訂正】
   // LIQUIDITY_STRESSは「まだ完全支払不能ではない」段階であり、crisisState.tsの

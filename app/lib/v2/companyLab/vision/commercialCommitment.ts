@@ -40,7 +40,14 @@ export type CommitmentLimiter =
    * （このモジュールの計算式は無変更）。policy.tsが計算後の結果へ上書きする際に
    * だけ使う、この型定義の追加のみ。
    */
-  | "CRISIS";
+  | "CRISIS"
+  /**
+   * 【Phase SAI-GROW-3B-3】納品可能量（既存backlogの持ち越しを差し引いた納品余力）で
+   * 新規提出量を抑えた。computeCommercialCommitment自体はこの値を一切設定しない
+   * （このモジュールの計算式は無変更）。policy.tsが計算後の結果へ上書きする際にだけ使う。
+   * **Commercial Ambition（志）は変更しない**——抑えるのは今期の提出量だけである。
+   */
+  | "DELIVERABILITY";
 
 export interface CommercialCommitmentParameters {
   /**
