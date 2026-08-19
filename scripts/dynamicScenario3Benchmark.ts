@@ -19,7 +19,19 @@ import { applyScenarioSalesCapacityOverride } from "../app/lib/v2/scenario/sales
 import { SALES_PARAMETERS_V1 } from "../app/lib/v2/sales/parameters";
 import { companySalesOrganizationCapacity } from "../app/lib/v2/sales/salesCapacityModel";
 import { unwrapUnit } from "../app/lib/v2/core/units";
+import { computeEffectiveFactories } from "../app/lib/v2/capex/factoryConstruction";
+import { PRODUCTION_PARAMETERS_V1 } from "../app/lib/v2/production/parameters";
+import { calculateFactoryEffectiveCapacity } from "../app/lib/v2/production/capacity";
 import { CountryId, DemandMarketId } from "../app/lib/v2/market/types";
+
+/**
+ * 共通前処理能力を完成品側の単位へ揃えるための販売可能回収率（歩留まり）。
+ * production/allocation.ts の段階2直後で使われている
+ * PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio をそのまま参照し、
+ * ここで別の係数を発明しない。会社単位の天井を保守的に見るため最小値を使う
+ * （現状は全商品1.0のため実質的な換算は発生しない）。
+ */
+const BENCHMARK_RECOVERY_RATE_FOR_CAPACITY = Math.min(...Object.values(PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio));
 
 const SCENARIO_ID = process.env.SCENARIO ?? DYNAMIC_SCENARIO_3.scenarioId;
 const TURNS = process.env.TURNS ? Number(process.env.TURNS) : 32;
@@ -210,12 +222,37 @@ function runSeed(seed: string): SeedResult {
   });
   const companyTurns: CompanyTurn[] = [];
   const worldTurns: WorldTurn[] = [];
+  /**
+   * 【診断表示の修正】その四半期に実際に稼働していた工場の能力プールを、
+   * エンジンの正典関数（computeEffectiveFactories → calculateFactoryEffectiveCapacity）
+   * だけから記録する。表示専用であり、シミュレーションの入力にはならない。
+   */
+  const physicalCapacityByTurn: { turn: number; companyId: string; line: number; commonProcessing: number; freezingPackaging: number }[] = [];
 
   for (let t = 0; t < TURNS; t++) {
+    // 当四半期の生産に実際に使われたFactory[]は「前四半期末までのcapex状態」から
+    // 導出される（companyLab/runner.tsと同じ基準）。advanceする前に取る。
+    const beforeState = session.state;
+    const beforeFactories = computeEffectiveFactories(
+      session.fixtures.flatMap((f) => f.factories),
+      beforeState.capexState,
+      beforeState.currentPeriod,
+      beforeState.factoryLifecycleState
+    );
     const outcome = advanceSimulationTurn(session, AT);
     if (!outcome.advanced) break;
     session = outcome.session;
     const turn = t + 1;
+    for (const companyId of COMPANIES) {
+      const caps = beforeFactories.filter((f) => f.companyId === companyId).map((f) => calculateFactoryEffectiveCapacity(f));
+      physicalCapacityByTurn.push({
+        turn,
+        companyId,
+        line: caps.reduce((a, c) => a + unwrapUnit(c.hoso) + unwrapUnit(c.pd) + unwrapUnit(c.vap), 0),
+        commonProcessing: caps.reduce((a, c) => a + unwrapUnit(c.commonProcessing), 0),
+        freezingPackaging: caps.reduce((a, c) => a + unwrapUnit(c.freezingPackaging), 0),
+      });
+    }
     const record = session.state.history[session.state.history.length - 1];
     const m = record.marketResult;
 
@@ -291,10 +328,30 @@ function runSeed(seed: string): SeedResult {
   const capacityByTurn = session.capacityByTurn.map((c) => {
     const companyModel = model.salesCapacityModelByCompany?.[c.companyId] ?? model.salesCapacityModel!;
     const hc = session.salesHeadcountByTurn.find((x) => x.turn === c.turn && x.companyId === c.companyId)?.headcount ?? 0;
+    const phys = physicalCapacityByTurn.find((x) => x.turn === c.turn && x.companyId === c.companyId);
     return {
       turn: c.turn,
       companyId: c.companyId,
-      productionCapacity: Math.min(c.hoso + c.pd + c.vap, c.commonProcessing),
+      /**
+       * 【修正】その会社が物理的に処理できる完成品量の上限（HOSO換算トン/四半期）。
+       *
+       * 旧定義は min(ライン計, 共通前処理) で、production/allocation.ts の段階3
+       * （冷凍・包装能力 freezingPackaging）が抜けていた。MASSでは冷凍・包装が
+       * 最小プールであるため、真の天井59.85ktを63.27ktと過大表示していた。
+       *
+       * 【単位の扱い】allocation.ts の段階2までは「原料投入側」の数量で、
+       * 段階2の直後に販売可能回収率（歩留まり）で完成品側へ変換される。
+       * したがって共通前処理能力だけは歩留まりを掛けて完成品側の単位へ
+       * 揃えてから比較する（段階3・4は元から完成品側の単位）。
+       * 歩留まりは production/parameters.ts の商品別 sellableRecoveryRate を
+       * そのまま使い、ここで別の係数を発明しない。
+       *
+       * 【可変制約を混ぜない】労働・原料は工場の物理能力ではないため、
+       * この値には含めない（それらは不足理由として別途観測する）。
+       */
+      productionCapacity: phys
+        ? Math.min(phys.line, phys.commonProcessing * BENCHMARK_RECOVERY_RATE_FOR_CAPACITY, phys.freezingPackaging)
+        : Math.min(c.hoso + c.pd + c.vap, c.commonProcessing),
       salesEffortCapacity: companySalesOrganizationCapacity(hc, companyModel),
     };
   });
@@ -415,7 +472,7 @@ if (!SUMMARY_ONLY) {
 }
 
 console.log("\n### §7 会社別 制約フルテーブル（全seed平均）");
-console.log("  ※ SALES_CAP=営業能力(工数t) / 生産能力=工場処理能力 / 調達=国内+輸入 / 輸入比率=輸入/(国内+輸入)");
+console.log("  ※ SALES_CAP=営業能力(工数t) / 生産能力=物理的工場能力 min(ライン計, 共通前処理×歩留, 冷凍包装) / 調達=国内+輸入 / 輸入比率=輸入/(国内+輸入)");
 for (const turn of [24, 28, 32].filter((t) => t <= TURNS)) {
   console.log(`\n  [T${turn}] 会社   営業人員 営業能力 生産能力  ambition   target   actual  調達t  輸入比率  現金M  借入M`);
   for (const companyId of COMPANIES) {
