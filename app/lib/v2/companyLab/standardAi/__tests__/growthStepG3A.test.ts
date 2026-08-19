@@ -172,12 +172,15 @@ test("GROW3A-11: Sales Capacity Engine / Vision / Sales Hiringは変更してい
   assert.equal(model.companyBaselineCapacityTons, 1000);
   assert.equal(model.companyCapacityMaxIncrementTons, 95000);
   assert.equal(SALES_PARAMETERS_V1.maximumSupplierShare, 0.35);
-  // 正式Vision値（Q32）は変更していない。
+  // 正式Vision値（Q32）。BAL/JPQ/CONSV は SAI-VISION-1（夜間sensitivity Case A1）で
+  // 正式に更新済み（34,000→60,000 / 30,000→50,000 / 27,000→45,000）。
+  // MASS 80,000・VAP 17,000 は据え置き。このテストは「意図しないdrift」を検知する
+  // ための固定値であり、正式変更に合わせて更新している（挙動の緩和ではない）。
   assert.equal(defaultVisionDocumentFor("MASS")!.visions[0].targetScaleTonsPerQuarterAtQ32, 80000);
-  assert.equal(defaultVisionDocumentFor("BAL")!.visions[0].targetScaleTonsPerQuarterAtQ32, 34000);
-  assert.equal(defaultVisionDocumentFor("JPQ")!.visions[0].targetScaleTonsPerQuarterAtQ32, 30000);
+  assert.equal(defaultVisionDocumentFor("BAL")!.visions[0].targetScaleTonsPerQuarterAtQ32, 60000);
+  assert.equal(defaultVisionDocumentFor("JPQ")!.visions[0].targetScaleTonsPerQuarterAtQ32, 50000);
   assert.equal(defaultVisionDocumentFor("VAP")!.visions[0].targetScaleTonsPerQuarterAtQ32, 17000);
-  assert.equal(defaultVisionDocumentFor("CONSV")!.visions[0].targetScaleTonsPerQuarterAtQ32, 27000);
+  assert.equal(defaultVisionDocumentFor("CONSV")!.visions[0].targetScaleTonsPerQuarterAtQ32, 45000);
   // base step ratio（HIGH .12 / MEDIUM .07 / LOW .03）も変更していない。
   assert.deepEqual(COMMERCIAL_AMBITION_PARAMETERS_V1.maxStepRatioByAmbition, { HIGH: 0.12, MEDIUM: 0.07, LOW: 0.03 });
 });
