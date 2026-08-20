@@ -15,6 +15,7 @@ import { PressureScores } from "../pressures";
 import { StandardAiObservation } from "../types";
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
 import { assessWorkingCapitalNeed, ProcurementCashPlanInput, WorkingCapitalAssessment } from "./workingCapital";
+import { LiquidityAssessment } from "./liquidity";
 
 export interface FinancingPlanResult {
   readonly financingRequest: FinancingRequestInput;
@@ -32,7 +33,26 @@ export function buildStandardAiFinancingRequest(
    * 資金が要る」ことが借入判断へ入る。** 未指定なら従来どおり最低現金バッファ
    * だけで判断する（既存呼び出し元・テストとの後方互換）。
    */
-  procurementCashPlan?: ProcurementCashPlanInput
+  procurementCashPlan?: ProcurementCashPlanInput,
+  /**
+   * 【Phase SAI-GROW-3B-1】Liquidity SSoT の評価結果と、当期に承認した新規投資の支払額。
+   * 渡された場合、借入必要額はSSoTの financingNeedUsd（確定投資支払・危機bufferを含む）と
+   * 当期承認した新規投資の支払を加えた額を下限にする。未指定なら従来どおり。
+   */
+  liquidity?: {
+    readonly assessment: LiquidityAssessment;
+    /** 当期にCAPEX/新工場ゲートを通した新規提案の、当期に出る支払額。 */
+    readonly approvedInvestmentPaymentsThisQuarterUsd: number;
+    /**
+     * 【Phase SAI-GROW-3B-1.1】そのうち手元現金だけでは賄えず、
+     * **当期の借入を前提に承認した額**。投資判断が当期調達可能借入
+     * （currentTurnFundableBorrowingUsd）を根拠に承認した以上、
+     * その借入をFinance決定が実際に申請しなければ判断が完結しない。
+     * fundingBalance経路は当期AR回収を資金に数えるため、投資が借入に依存していても
+     * 0へclampされ得る。この値を申請額の下限として別に持つ。
+     */
+    readonly approvedInvestmentBorrowingThisQuarterUsd?: number;
+  }
 ): FinancingPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const cashUsd = observation.cashUsd;
@@ -51,7 +71,28 @@ export function buildStandardAiFinancingRequest(
 
   // 借入希望額は両者の大きい方。バッファ不足のほうが大きい局面もあるため
   // 「置き換え」ではなく「いずれか大きい方」とし、既存の安全側の判断を失わない。
-  const desiredAmountUsd = Math.max(bufferShortfallUsd, workingCapital?.economicallyDesiredBorrowingUsd ?? 0);
+  // 【Phase SAI-GROW-3B-1】Liquidity SSoTがあれば、確定投資の支払・危機buffer・
+  // 当期承認した新規投資まで含めた必要額も候補に入れる（同じ「必要現金」の定義を使う）。
+  // 【重要】clamp前の過不足に投資額を足してから0でclampする。
+  // clamp後の値に足すと、現金が潤沢でも投資額ぶんだけ借りてしまう。
+  const liquidityDrivenNeedUsd = liquidity
+    ? Math.max(
+        0,
+        liquidity.assessment.fundingBalanceBeforeBorrowingUsd + Math.max(0, liquidity.approvedInvestmentPaymentsThisQuarterUsd)
+      )
+    : 0;
+  // 【Phase SAI-GROW-3B-1.1】投資判断が当期借入を前提に承認した分は、必ず申請する。
+  // 上限は投資判断が使ったのと同じ currentTurnFundableBorrowingUsd であり、
+  // 借入可能額そのものを新たに広げてはいない。
+  const growthBorrowingNeedUsd = liquidity
+    ? Math.max(0, Math.min(liquidity.approvedInvestmentBorrowingThisQuarterUsd ?? 0, liquidity.assessment.currentTurnFundableBorrowingUsd))
+    : 0;
+  const desiredAmountUsd = Math.max(
+    bufferShortfallUsd,
+    workingCapital?.economicallyDesiredBorrowingUsd ?? 0,
+    liquidityDrivenNeedUsd,
+    growthBorrowingNeedUsd
+  );
 
   // 【重要】運転資金が不足しているときは期限前返済を行わない。
   // 返済して現金を減らした直後に原料が買えなくなる、という自己矛盾を防ぐ。

@@ -90,7 +90,7 @@ import { RunAdvisoryMemorySummary } from "./runAdvisoryMemory";
 
 // 【M2.8】Game Knowledge Registryの注入・Truth Hierarchyの拡張・
 // 「実績値をルール値として提示しない」原則の追加により v8 へ。
-export const AI_MEETING_PROMPT_VERSION = "v8";
+export const AI_MEETING_PROMPT_VERSION = "v9";
 
 const rolesDescriptionJa = (Object.values(EXECUTIVE_ROLE_DEFINITIONS) as (typeof EXECUTIVE_ROLE_DEFINITIONS)[ExecutiveRole][])
   .map((r) => `- ${r.role}（${r.titleJa}）: ${r.personalityJa} 担当領域: ${r.responsibilityJa}`)
@@ -146,6 +146,37 @@ export const AI_MANAGEMENT_MEETING_SYSTEM_PROMPT = [
   "【gameKnowledgeEstimatesの扱い（M2.8）】userメッセージにgameKnowledgeEstimatesがある場合、",
   "  それはserver側がengineの関数と現在のparameterでdeterministicに計算した目安です。",
   "  あなたが暗算し直さず、その数値をそのまま使い、同梱されたcaveatsも必ず伝えてください。",
+  "",
+  "【resolvedGameRules は確定解答（M2.8.1・最重要）】userメッセージのresolvedGameRulesは、",
+  "  server側がShrimpXのengine関数と現在のparameterでルールを適用し、既に確定させた答えです。",
+  "  各要素の result / unit / canonicalFacts の数値を、あなたが変更・再計算・丸め直し・",
+  "  言い換えによる別数値化してはいけません。resultの数値をそのまま本文に書いてください。",
+  "  calculation（計算過程）とcaveats（但し書き）も省略せず伝えてください。",
+  "  resolvedGameRulesがBriefingPacketの実績値と食い違って見えても、ルールの値としては",
+  "  resolvedGameRulesが正です（実績は結果値であり能力値ではないため）。",
+  "  resolvedGameRulesの根拠となったknowledgeIdsは、必ずknowledgeUsedIdsへ入れてください。",
+  "",
+  "【GAME_RULE質問での回答テンプレート（M2.8.1・実装指示§9）】questionIntentが",
+  "  GAME_RULE または MIXED で、gameKnowledge / resolvedGameRules に該当項目がある場合、",
+  "  次の順序で答えてください:",
+  "    1. ルール: ゲーム上どう決まるか（gameKnowledgeのexplanationに基づく）",
+  "    2. 確定値: resolvedGameRulesのresult（server側で確定済み。改変禁止）",
+  "    3. 当社の現状: BriefingPacketの該当値（あれば）",
+  "    4. 但し書き: caveats / semanticWarnings",
+  "  gameKnowledge / resolvedGameRules に該当項目があるにもかかわらず、それを使わずに",
+  "  BriefingPacketの実績値から独自にルールを逆算して答えることを禁止します。",
+  "  特に「実績 ÷ 人数」「実績 ÷ 設備数」の類は、能力値・原単位としては絶対に提示しないでください。",
+  "",
+  "【Turn算術を自分で行わない（M2.8.1・実装指示§6）】発注・入荷・支払・回収の",
+  "  タイミングを問われた場合、resolvedGameRulesのタイミング解決結果をそのまま使い、",
+  "  あなたが「Turn Nに発注したのでTurn Nに使える」のような独自のturn計算を",
+  "  組み立ててはいけません。resolvedGameRulesに該当が無い場合は、",
+  "  gameKnowledgeのタイミング定義のみを述べ、具体的なturn番号を断定しないでください。",
+  "",
+  "【能力の天井を1つの数値で語らない（M2.8.1・実装指示§8）】製品ライン別能力の",
+  "  単純合計を、全社の生産能力の上限として提示してはいけません。",
+  "  実際の上限は、製品ミックス・Worker・設備・原料のうち最も制約となるプールで決まります。",
+  "  「どのプールが今の制約か」を述べ、単一の合計値を天井として断定しないでください。",
   "",
   "【ゲームに存在しないルールを補完しない（重要）】ShrimpXに存在しないbusiness ruleを、",
   "  一般企業の常識から補完してはいけません。例: 「Customer Trustが下がると顧客が支払期限を",
@@ -517,6 +548,11 @@ export interface BuildUserMessageInput {
   readonly gameKnowledge?: readonly GameKnowledgeForPrompt[];
   /** 【M2.8追加】server側でdeterministicに計算した目安（営業能力・必要Worker等）。無ければ省略。 */
   readonly gameKnowledgeEstimates?: unknown;
+  /**
+   * 【M2.8.1追加・実装指示§3】server側でルールを適用して確定させた答え（Deterministic
+   * Rule Resolution）。Claudeはこのresultを変更してはならない。該当が無ければ空配列。
+   */
+  readonly resolvedGameRules?: readonly unknown[];
   /** 【M2.8追加】質問意図の分類（GAME_RULE / CURRENT_STATE / STRATEGY / MIXED）。 */
   readonly questionIntent?: string;
 }
@@ -558,6 +594,8 @@ export function buildMeetingUserMessage(input: BuildUserMessageInput): string {
     // 【M2.8追加】Game Knowledge Registry から引いた、この質問に関連するゲームルール。
     gameKnowledge: input.gameKnowledge ?? [],
     gameKnowledgeEstimates: input.gameKnowledgeEstimates ?? null,
+    // 【M2.8.1追加】server側で確定済みのゲームルール解答。resultは改変禁止（system prompt参照）。
+    resolvedGameRules: input.resolvedGameRules ?? [],
     questionIntent: input.questionIntent ?? null,
   };
   return JSON.stringify(payload);

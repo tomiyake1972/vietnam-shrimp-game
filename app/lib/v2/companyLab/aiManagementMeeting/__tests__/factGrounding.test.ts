@@ -209,11 +209,11 @@ test("AMM-FG-8: Test26 BAL Turn1 finance grounding（Cash≈38.2M/Debt≈50.6M/A
 });
 
 test("AMM-FG-9: prompt/briefing versionが更新され、識別可能になっている", () => {
-  // 【M2.8】Game Knowledge Registryの注入・Truth Hierarchyの8段化・
-  // 「実績値をルール値として提示しない」原則の追加によりsystem promptが変わったため v7→v8。
+  // 【M2.8.1】Deterministic Rule Resolution（resolvedGameRulesのresult改変禁止）・
+  // GAME_RULE回答テンプレート・turn算術の禁止・能力の天井の扱いを追記したため v8→v9。
   // このテストの目的は「promptを変えたらversionも上げる」ことの固定であり、
   // 特定の historical version を保存することではない（過去Phaseでも同様に更新されている）。
-  assert.equal(AI_MEETING_PROMPT_VERSION, "v8");
+  assert.equal(AI_MEETING_PROMPT_VERSION, "v9");
   assert.equal(EXECUTIVE_BRIEFING_VERSION, "v6");
   const context = minimalContext();
   const packet = buildExecutiveBriefingPacket({

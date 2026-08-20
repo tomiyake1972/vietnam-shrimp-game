@@ -419,4 +419,13 @@ export interface AiMeetingCallDiagnostics {
    * （それ以上は再試行しない。呼び出し側はrepair後の応答をそのまま返す）。
    */
   readonly semanticGuardResult?: "not_applicable" | "ok" | "repaired" | "violation_after_repair";
+  /**
+   * 【M2.8.1追加・実装指示§7・§10】Game Ruleの確定解答との矛盾guardの結果。
+   * "not_applicable"=確定解答も注入knowledgeも無く判定対象外。"ok"=矛盾なし。
+   * "repaired"=矛盾を検知し1回のrepair呼び出しで解消。"violation_after_repair"=
+   * repair後も矛盾が残った（それ以上は再試行せず、repair後の応答をそのまま返す）。
+   */
+  readonly ruleAnswerGuardResult?: "not_applicable" | "ok" | "repaired" | "violation_after_repair";
+  /** 検知した矛盾のコード（監査用）。違反が無ければ空配列または省略。 */
+  readonly ruleAnswerViolationCodes?: readonly string[];
 }

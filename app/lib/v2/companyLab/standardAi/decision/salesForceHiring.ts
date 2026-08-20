@@ -280,6 +280,17 @@ export interface SalesForceHiringDecisionInput {
    * 未指定なら従来どおり TargetScaleBand だけで目標を決める。
    */
   readonly commercialAmbitionTons?: number;
+  /**
+   * 【Phase SAI-GROW-3B-2・実装指示§6】深刻かつ持続する資金危機のときだけtrue。
+   * 平時は「今期売るものが少ないだけで大量解雇しない」ため在庫制約チェックで
+   * 減員を止めているが（下記 inventoryIsLimiting）、資金が尽きて原料が買えず
+   * 在庫が空という局面では、その在庫の薄さは「営業能力が価値を持つ証拠」ではなく
+   * 資金危機の結果そのものである。trueのときだけ在庫制約による減員ブロックを外す。
+   * 減員幅は既存の組織ランプ上限（applySalesHireRampLimitと同じ比率）で必ず抑える
+   * ＝一度に営業組織を破壊せず、段階的に縮小する（Recovery不能にしない）。
+   * 一時的なLIQUIDITY_STRESSだけでは決してtrueにしない（fundableOperations.ts参照）。
+   */
+  readonly allowsSurvivalReduction?: boolean;
 }
 
 /**
@@ -742,10 +753,19 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
   // 減員候補にする。既存採用がある場合（hireCount>0）は同時に評価しない
   // （game engine側の「同一四半期に採用と減員を両方>0で入力することは禁止」制約と整合）。
   let layoffCount = 0;
+  const allowsSurvivalReduction = input.allowsSurvivalReduction === true;
   if (hireCount === 0 && currentHeadcount > 0) {
     let headcountForLayoffEval = currentHeadcount;
-    const inventoryIsLimiting = PRODUCTS.some((p) => currentFg[p] <= EPSILON) || pressures.finishedGoodsExcessRatioByProduct.hoso < 0.5;
-    for (let i = 0; i < naturalStopCeiling && headcountForLayoffEval > 0; i++) {
+    // 【Phase SAI-GROW-3B-2】survival時は在庫制約による減員ブロックを外す（上記§allowsSurvivalReduction）。
+    const inventoryIsLimiting =
+      !allowsSurvivalReduction &&
+      (PRODUCTS.some((p) => currentFg[p] <= EPSILON) || pressures.finishedGoodsExcessRatioByProduct.hoso < 0.5);
+    // 減員の1四半期あたり上限は、増員と同じ組織ランプ比率を使う（新しい上限概念を作らない）。
+    const survivalLayoffCeiling = allowsSurvivalReduction
+      ? Math.max(1, applySalesHireRampLimit(currentHeadcount, currentHeadcount).limit)
+      : naturalStopCeiling;
+    const layoffIterationCeiling = Math.min(naturalStopCeiling, survivalLayoffCeiling);
+    for (let i = 0; i < layoffIterationCeiling && headcountForLayoffEval > 0; i++) {
       const after = headcountForLayoffEval - 1;
       const salesAtCurrentH = realisticSalesAtHeadcount(headcountForLayoffEval, wishByMarket, salesParams);
       const salesAtLower = realisticSalesAtHeadcount(after, wishByMarket, salesParams);
@@ -773,7 +793,13 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
       // 在庫が販売のボトルネックになっていない場合のみ減員候補にする（三宅さんご指示§7、
       // 「今期売るものが少ないだけで大量解雇しない」ため、在庫制約チェックを必須にする）。
       const excessCapacity = lostContribution !== null && lostContribution - salaryUsdPerQuarter <= EPSILON;
-      if (!excessCapacity || inventoryIsLimiting || lostTotal <= EPSILON) {
+      // 【Phase SAI-GROW-3B-2】平時は「この1人を減らしても失う販売が観測できない」
+      // （lostTotal≈0）ときは情報が無いとみなして減員を止める。しかしsurvival時は、
+      // 販売機会が観測できないこと自体が「この営業人員が今なにも生んでいない」証拠であり、
+      // 最も明確な減員候補になる。実測（DS1 MASS）では、この break により生産0・売上0でも
+      // 営業人員が32Turn一切減らず、SG&A 1.42M/期が固定費として残り続けていた。
+      const noMarginalValue = lostTotal <= EPSILON;
+      if (!excessCapacity || inventoryIsLimiting || (noMarginalValue && !allowsSurvivalReduction)) {
         break;
       }
       // 節約額（今後の四半期給与）が退職金（2四半期分）を上回るかを確認する
@@ -810,6 +836,19 @@ export function buildStandardAiSalesForceHiringDecision(input: SalesForceHiringD
     // ただし「自由に減らせる」ことと「費用ゼロ」は別である。退職金（1人あたり
     // 四半期給与2四半期分）・当期は戦力と給与に残るという反映遅延は、
     // いずれも既存ルールのまま変更していない。
+    if (layoffCount > 0 && allowsSurvivalReduction) {
+      diagnostics.push({
+        code: "SALES_FORCE_REDUCED_FOR_SURVIVAL",
+        domain: "sales",
+        companyId: fixture.companyId,
+        severity: "warning",
+        keyValues: { layoffCount, currentHeadcount, perQuarterCeiling: layoffIterationCeiling },
+        decisionSummary: `生存のため営業${layoffCount}人を段階減員`,
+        message:
+          `深刻かつ持続する資金危機のため、営業人員を${currentHeadcount}人から${layoffCount}人減員する` +
+          `（1四半期あたりの上限${layoffIterationCeiling}人。組織を一度に破壊せず、資金回復後に再採用できる規模に留める）。`,
+      });
+    }
     if (layoffCount > 0) {
       diagnostics.push({
         code: "SALES_FORCE_EXCESS_CAPACITY",

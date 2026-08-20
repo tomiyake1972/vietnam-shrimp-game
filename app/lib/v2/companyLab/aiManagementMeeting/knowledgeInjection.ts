@@ -13,11 +13,13 @@ import {
   DEFAULT_KNOWLEDGE_TOP_N,
   estimateSalesCapacity,
   estimateWorkerRequirement,
+  getGameKnowledgeById,
   getGameKnowledgeForQuestion,
   KnowledgeRole,
   QuestionIntent,
   ResolvedKnowledgeEntry,
 } from "../../gameKnowledge";
+import { extractRecentProductQuantity, ResolvedGameRuleAnswer, resolveGameRuleAnswers } from "../../gameKnowledge/ruleResolver";
 import { GameKnowledgeForPrompt } from "./prompt";
 import { Product } from "../../market/types";
 
@@ -32,6 +34,11 @@ export function toKnowledgeRole(speaker: string | null | undefined): KnowledgeRo
 export interface MeetingKnowledgeInjection {
   readonly gameKnowledge: readonly GameKnowledgeForPrompt[];
   readonly gameKnowledgeEstimates: unknown;
+  /**
+   * 【M2.8.1・実装指示§3】server側でルールを適用して確定させた答え。
+   * Claudeはresultを変更してはならない（言い換え・再計算・丸め直しも禁止）。
+   */
+  readonly resolvedGameRules: readonly ResolvedGameRuleAnswer[];
   readonly questionIntent: QuestionIntent;
   /** 監査・テスト用（実際に注入したid）。 */
   readonly injectedIds: readonly string[];
@@ -107,10 +114,16 @@ export function buildMeetingKnowledgeInjection(input: {
   /** routingHintのprimary speaker。role relevance filteringに使う（実装指示§27）。 */
   readonly primarySpeaker?: string | null;
   readonly topN?: number;
+  /**
+   * 【M2.8.1・実装指示§5】直近の会話テキスト（古い順）。
+   * 「VAP 1,000tなら？」のような省略形の追問を、直前の商品・数量から解決するために使う。
+   */
+  readonly recentHistoryTexts?: readonly string[];
 }): MeetingKnowledgeInjection {
   const empty: MeetingKnowledgeInjection = {
     gameKnowledge: [],
     gameKnowledgeEstimates: null,
+    resolvedGameRules: [],
     questionIntent: "MIXED",
     injectedIds: [],
     truncatedCount: 0,
@@ -122,11 +135,28 @@ export function buildMeetingKnowledgeInjection(input: {
       role,
       topN: input.topN ?? DEFAULT_KNOWLEDGE_TOP_N,
     });
+    // 【M2.8.1】省略形の追問（「VAP 1,000tなら？」）を直前の会話から補完する。
+    const recent = extractRecentProductQuantity(input.recentHistoryTexts ?? []);
+    const resolvedGameRules = resolveGameRuleAnswers({
+      question: input.playerMessage,
+      previousProduct: recent.previousProduct,
+      previousTons: recent.previousTons,
+      previousAsksWorker: recent.previousAsksWorker,
+    });
+
+    // resolverが根拠にしたknowledge idは、必ずpromptにも載せる
+    // （§10の「該当knowledgeがあるのにknowledgeUsedIdsが空」検証を成立させるため）。
+    const retrievedIds = retrieval.entries.map((e) => e.id);
+    const missingIds = [...new Set(resolvedGameRules.flatMap((r) => r.knowledgeIds))].filter((id) => !retrievedIds.includes(id));
+    const extraEntries = missingIds.map((id) => getGameKnowledgeById(id)).filter((e): e is ResolvedKnowledgeEntry => e !== null);
+
+    const entries = [...retrieval.entries, ...extraEntries];
     return {
-      gameKnowledge: retrieval.entries.map(toPromptEntry),
+      gameKnowledge: entries.map(toPromptEntry),
       gameKnowledgeEstimates: buildEstimates(input.playerMessage),
+      resolvedGameRules,
       questionIntent: retrieval.intent,
-      injectedIds: retrieval.entries.map((e) => e.id),
+      injectedIds: entries.map((e) => e.id),
       truncatedCount: retrieval.truncatedCount,
     };
   } catch {

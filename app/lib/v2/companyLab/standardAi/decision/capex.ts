@@ -26,14 +26,35 @@ import { effectiveEfficiencyPerHeadTons } from "../../../production/labor";
 import { FINANCE_PARAMETERS_V1 } from "../../../finance/parameters";
 import { Product } from "../../../market/types";
 import { CompanyFixture } from "../../types";
+import {
+  evaluateInvestmentAffordability,
+  LiquidityAssessment,
+  plannedInvestmentPaymentsWithinHorizonUsd,
+} from "./liquidity";
 import { minimumAcceptablePremium } from "../../premiumPolicy";
 import { StandardAiParameters, STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { PressureScores } from "../pressures";
-import { FactoryObservation, ProductAmount, StandardAiObservation } from "../types";
+import { FactoryObservation, ProductAmount, StandardAiObservation, sumProductAmount } from "../types";
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
+import { computePhysicalCapacity, PhysicalCapacityPool } from "../bindingCapacity";
 import { diagnoseFactoryActivation } from "../factoryActivation";
 
 const EPSILON = 1e-6;
+
+/**
+ * 【Phase SAI-GROW-3B-1】同一Turn内で「先に承認した提案」を差し引くための文脈。
+ * alreadyApprovedThisTurnUsd は評価のたびに現在値を返す関数にしてあり、
+ * 提案を1件承認するたびに呼び出し側が積み上げる（sequential portfolio評価）。
+ */
+export interface LiquidityGateContext {
+  readonly assessment: LiquidityAssessment;
+  readonly horizonQuarters: number;
+  readonly alreadyApprovedThisTurnUsd: () => number;
+  /** 同一Turnに先に承認した提案の、当四半期に出る支払合計。 */
+  readonly alreadyApprovedThisQuarterUsd: () => number;
+  /** 提案を承認したときに呼ぶ（次の提案評価から差し引かれる）。 */
+  readonly commit: (paymentsUsd: number, paymentsThisQuarterUsd: number) => void;
+}
 
 const LINE_EXPANSION_BY_PRODUCT: Readonly<Record<Product, CapitalProjectType>> = {
   hoso: "hosoLineExpansion",
@@ -55,11 +76,19 @@ const LINE_EXPANSION_BY_PRODUCT: Readonly<Record<Product, CapitalProjectType>> =
  * observation.factoriesが空（テスト用の合成observation等）ならundefined
  * （呼び出し側はtargetFactoryIdを省略し、承認側の「主工場」規則にフォールバックする）。
  */
-function selectTargetFactoryId(observation: StandardAiObservation, dimension: "hoso" | "pd" | "vap" | "commonProcessing"): string | undefined {
+function selectTargetFactoryId(
+  observation: StandardAiObservation,
+  // 【Phase SAI-CAP-1】冷凍・包装も対象次元に加える（選び方は他次元と同一）。
+  dimension: "hoso" | "pd" | "vap" | "commonProcessing" | "freezingPackaging"
+): string | undefined {
   const factories = observation.factories;
   if (!factories || factories.length === 0) return undefined;
   const capacityOf = (f: (typeof factories)[number]): number =>
-    dimension === "commonProcessing" ? f.effectiveCommonProcessingCapacity : f.effectiveCapacityByProduct[dimension];
+    dimension === "commonProcessing"
+      ? f.effectiveCommonProcessingCapacity
+      : dimension === "freezingPackaging"
+        ? f.effectiveFreezingPackagingCapacity
+        : f.effectiveCapacityByProduct[dimension];
   return [...factories].sort((a, b) => capacityOf(a) - capacityOf(b) || a.factoryId.localeCompare(b.factoryId))[0]?.factoryId;
 }
 
@@ -77,6 +106,15 @@ export const STANDARD_AI_PROPOSABLE_CAPEX_TYPES: readonly CapitalProjectType[] =
   "pdLineExpansion",
   "vapLineExpansion",
   "commonProcessingExpansion",
+  // 【Phase SAI-CAP-1・2026-08-20】冷凍・包装処理能力の増設を候補へ追加した。
+  // これが無いために、Standard AI は真のボトルネック（MASS では冷凍・包装 59,850t）を
+  // 解消する手段を構造的に一つも持っていなかった（SAI-EXEC-1 / #04 DS3能力監査で確定）。
+  // 既存の CAPEX_PARAMETERS_V1.templatesByType.freezingPackagingExpansion をそのまま使い、
+  // シナリオ固有係数や新しい価格は追加していない。
+  // 【coldStorageExpansion は今回追加しない】冷凍保管はストック（同時保管量）であり、
+  // 生産段階3のフロー上限である凍結・包装とは意味が異なる。実際に binding であることが
+  // 実証された場合にのみ将来Phaseで扱う。
+  "freezingPackagingExpansion",
   // 【2026-08-09・Vision駆動の戦略成長】新工場建設を Standard AI の候補へ追加した。
   // ただし提案の判断は**このモジュールでは行わない**。既存増設が「今期このラインが
   // 足りるか」という戦術判断であるのに対し、新工場は Vision との規模ギャップから
@@ -110,6 +148,15 @@ interface FinancialGateDetail {
   readonly projectCostUsd: number;
   /** 投資後に残る現金の見込み（＝現金 − 投資額）。 */
   readonly cashAfterInvestmentUsd: number;
+  // --- 【Phase SAI-GROW-3B-1】Liquidity SSoTを使った場合の内訳（診断用） ---
+  readonly liquidityHeadroomUsd?: number;
+  readonly protectedFundingRequirementUsd?: number;
+  readonly committedCapitalPaymentsUsd?: number;
+  readonly proposedInvestmentPaymentsUsd?: number;
+  readonly alreadyApprovedThisTurnUsd?: number;
+  readonly postInvestmentLiquidityUsd?: number;
+  readonly postInvestmentCashHeadroomUsd?: number;
+  readonly realisticallyAvailableBorrowingUsd?: number;
 }
 
 // ---------------------------------------------------------------------
@@ -153,9 +200,54 @@ function cashAndBorrowingSafe(
   pressures: PressureScores,
   params: StandardAiParameters,
   projectType: CapitalProjectType | undefined,
-  capexParams: CapexParameters
+  capexParams: CapexParameters,
+  /**
+   * 【Phase SAI-GROW-3B-1】Liquidity SSoT。渡された場合はこちらが唯一の判定基準になる。
+   * 未指定なら従来式（後方互換。既存テスト・旧呼び出し元のため残す）。
+   */
+  liquidity?: LiquidityGateContext
 ): FinancialGateDetail {
   const projectCostUsd = projectType !== undefined ? projectCostUsdFor(projectType, capexParams) : 0;
+
+  if (liquidity) {
+    // 【新方式】「投資後もProtected Funding Requirementを満たすか」。
+    // ・確定投資（承認済み案件の今後の支払）は既に protectedFundingRequirement に入っている
+    // ・同一Turnに先に承認した提案の支払は alreadyApprovedThisTurnUsd として差し引く
+    //   （各案件が同じ現金を満額使える旧構造をここで塞ぐ）
+    const template = projectType !== undefined ? capexParams.templatesByType[projectType] : undefined;
+    const proposedPaymentsUsd =
+      template !== undefined
+        ? plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, liquidity.horizonQuarters)
+        : projectCostUsd;
+    const thisQuarterPaymentsUsd =
+      template !== undefined ? plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, 1) : projectCostUsd;
+    const affordability = evaluateInvestmentAffordability(
+      liquidity.assessment,
+      proposedPaymentsUsd,
+      liquidity.alreadyApprovedThisTurnUsd(),
+      0,
+      thisQuarterPaymentsUsd,
+      liquidity.alreadyApprovedThisQuarterUsd()
+    );
+    const borrowingSafe = pressures.borrowingPressure < 1;
+    return {
+      safe: affordability.affordable && borrowingSafe,
+      cashSafe: affordability.affordable,
+      borrowingSafe,
+      requiredCashUsd: liquidity.assessment.protectedFundingRequirementUsd + proposedPaymentsUsd,
+      projectCostUsd,
+      cashAfterInvestmentUsd: observation.cashUsd - projectCostUsd,
+      liquidityHeadroomUsd: liquidity.assessment.liquidityHeadroomUsd,
+      protectedFundingRequirementUsd: liquidity.assessment.protectedFundingRequirementUsd,
+      committedCapitalPaymentsUsd: liquidity.assessment.committedCapitalPaymentsUsd,
+      proposedInvestmentPaymentsUsd: proposedPaymentsUsd,
+      alreadyApprovedThisTurnUsd: affordability.alreadyApprovedThisTurnUsd,
+      postInvestmentLiquidityUsd: affordability.postInvestmentLiquidityUsd,
+      postInvestmentCashHeadroomUsd: affordability.postInvestmentCashHeadroomUsd,
+      realisticallyAvailableBorrowingUsd: liquidity.assessment.realisticallyAvailableBorrowingUsd,
+    };
+  }
+
   const requiredCashUsd =
     params.capexCashGateMode === "legacyMultiple"
       ? pressures.targetMinimumCashUsd * params.capexCashSafetyMultiple
@@ -245,7 +337,22 @@ export function buildStandardAiCapexDecision(
   productionNeededByProductBeforeCap: ProductAmount,
   requiredRawMaterialUnconstrained: number,
   params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
-  capexParams: CapexParameters = CAPEX_PARAMETERS_V1
+  capexParams: CapexParameters = CAPEX_PARAMETERS_V1,
+  /**
+   * 【Phase SAI-GROW-3B-1】Liquidity SSoT。未指定なら従来の案件単独ゲート（後方互換）。
+   * 指定された場合、同一Turnに先に承認した提案の支払を差し引いて判定する。
+   */
+  liquidity?: LiquidityGateContext,
+  /**
+   * 【Phase SAI-GROW-3C・実装指示§3/§7】Deliverability Gapを能力側へ返した量（商品別）。
+   * 3B-3のDeliverable Commitment capにより、生産必要量（＝この関数のボトルネック判定の分子）
+   * が「今受けてよい量」まで縮んでいるため、Ambitionがあっても能力不足のsignalが
+   * capexへ届かなくなっていた。growthRouting.tsがroute==="PRODUCTION_CAPEX"かつ
+   * 持続的と判定したときだけ渡され、ボトルネック判定の分子を志側へ戻す。
+   * **undefinedのときは従来と完全に同一の挙動**であり、既存のsustained / noExcess /
+   * financial gate（3B-1 Liquidity SSoT）はいずれも変更していない。
+   */
+  deliverabilityGrowthDemandByProduct?: ProductAmount
 ): CapexPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const proposals: CapexProjectProposalInput[] = [];
@@ -362,13 +469,82 @@ export function buildStandardAiCapexDecision(
   let vapGrowthSignalPresent = false;
   /** 投資対象ごとの財務ゲート（必要現金が投資額に依存するため案件別に判定する）。 */
   const financialGateFor = (projectType: CapitalProjectType) =>
-    cashAndBorrowingSafe(observation, pressures, params, projectType, capexParams);
+    cashAndBorrowingSafe(observation, pressures, params, projectType, capexParams, liquidity);
+  /**
+   * 【Phase SAI-GROW-3B-1・実装指示§6】財務ゲートで落ちた場合に、
+   * 「なぜ投資しなかったか」を1件のreason codeとして残す。
+   * 既承認案件の支払が主因なら CAPEX_DEFERRED_COMMITTED_PAYMENTS、
+   * それ以外の流動性不足なら CAPEX_DEFERRED_LIQUIDITY。
+   */
+  const recordLiquidityDeferral = (projectType: CapitalProjectType, gate: FinancialGateDetail) => {
+    if (!liquidity || gate.safe) return;
+    const committed = gate.committedCapitalPaymentsUsd ?? 0;
+    const dominatedByCommitted = committed > 0 && committed >= (gate.proposedInvestmentPaymentsUsd ?? 0);
+    diagnostics.push({
+      code: dominatedByCommitted ? "CAPEX_DEFERRED_COMMITTED_PAYMENTS" : "CAPEX_DEFERRED_LIQUIDITY",
+      domain: "capex",
+      companyId: fixture.companyId,
+      severity: "info",
+      keyValues: {
+        projectCostUsd: gate.projectCostUsd,
+        proposedInvestmentPaymentsUsd: gate.proposedInvestmentPaymentsUsd ?? 0,
+        alreadyApprovedThisTurnUsd: gate.alreadyApprovedThisTurnUsd ?? 0,
+        committedCapitalPaymentsUsd: committed,
+        protectedFundingRequirementUsd: gate.protectedFundingRequirementUsd ?? 0,
+        liquidityHeadroomUsd: gate.liquidityHeadroomUsd ?? 0,
+        postInvestmentLiquidityUsd: gate.postInvestmentLiquidityUsd ?? 0,
+        postInvestmentCashHeadroomUsd: gate.postInvestmentCashHeadroomUsd ?? 0,
+        realisticallyAvailableBorrowingUsd: gate.realisticallyAvailableBorrowingUsd ?? 0,
+        borrowingSafe: gate.borrowingSafe ? 1 : 0,
+      },
+      decisionSummary: `${projectType}を資金面で見送り`,
+      message:
+        `投資後の流動性が ${Math.round(gate.postInvestmentLiquidityUsd ?? 0).toLocaleString()} USD となり、` +
+        `守るべき資金（運転資金・元利返済・承認済み投資 ${Math.round(committed).toLocaleString()} USD・最低現金）を割るため見送る。`,
+    });
+  };
+
+  /** 提案を1件確定するたびに、その支払をLiquidity SSoTから差し引く（同一Turnの二重利用防止）。 */
+  const commitProposal = (projectType: CapitalProjectType) => {
+    if (!liquidity) return;
+    const template = capexParams.templatesByType[projectType];
+    if (!template) return;
+    liquidity.commit(
+      plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, liquidity.horizonQuarters),
+      plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, 1)
+    );
+  };
   // 【2026-08-09・Test16】持続性判定は投資対象設備ごとに行う（下の各分岐で算出）。
   // hadPriorQuarterUtilization は「前四半期の操業実績が存在するか」の判定にのみ使う
   // （turn1では前期実績が無いため、いかなる設備区分でも持続性は成立しない）。
   const hasPriorQuarter = pressures.hadPriorQuarterUtilization;
   const sustainedFor = (u: RelevantUtilization): boolean =>
     hasPriorQuarter && u.utilization >= params.capexSustainedUtilizationThreshold;
+
+  /**
+   * 【Phase SAI-CAP-1・§6】共有プール（共通前処理・冷凍・包装）の持続性判定。
+   *
+   * 従来の sustainedFor は分母＝当該プールの実効能力、分子＝**前期の実績生産量**だった。
+   * ところが実績生産量は生産エンジンの段階1〜5ですべての制約を通った後の値であり、
+   * より小さい別プールで既にクリップされている。DS3 の MASS が典型で、
+   *   共通前処理 63,270t / 冷凍・包装 59,850t / 実績生産 53,634t
+   * のとき共通前処理の稼働率は 53,634 / 63,270 = 0.847 となり、しきい値 0.92 へ
+   * **構造的に到達できない**。DS3 32Turn で commonProcessingExpansion が
+   * 一度も発火しなかったのはこのためである（#04 DS3能力監査と一致）。
+   *
+   * そこで共有プールに限り、分子へ「クリップ前の需要」も採用する。使うのは
+   * いずれも既存の指標のみで、新しい需要モデルは作らない。
+   *   ・冷凍・包装（完成品側） → productionNeededByProductBeforeCap の合計
+   *   ・共通前処理（原料投入側） → requiredRawMaterialUnconstrained
+   * 実績と需要の大きい方を採るため、需要が能力を下回る平常時は従来と同一の判定になる
+   * （＝能力に余裕がある会社で新たに投資が誘発されることはない）。
+   * しきい値 capexSustainedUtilizationThreshold（0.92）自体は変更していない。
+   */
+  const sustainedForSharedPool = (u: RelevantUtilization, unclippedDemandTons: number): boolean => {
+    if (!hasPriorQuarter || u.capacity <= EPSILON) return false;
+    const numerator = Math.max(u.actualProduction, Math.max(0, unclippedDemandTons));
+    return numerator / u.capacity >= params.capexSustainedUtilizationThreshold;
+  };
 
   /** B3: 「何の設備の何%を見たか」を必ず説明できるようにする共通keyValues。 */
   const utilizationKeyValues = (u: RelevantUtilization, gate: FinancialGateDetail): Record<string, number> => ({
@@ -387,6 +563,114 @@ export function buildStandardAiCapexDecision(
     borrowingPressure: pressures.borrowingPressure,
     // 旧方式（共通前処理能力を分母にした会社全体の稼働率）。新旧の差を追跡できるよう残す。
     legacyOverallEquipmentUtilization: pressures.equipmentUtilizationLastQuarter,
+  });
+
+  // -------------------------------------------------------------------
+  // 【Phase SAI-CAP-1】Bottleneck-aware CAPEX routing
+  // -------------------------------------------------------------------
+  //
+  // 「どの設備へ投資すると、実際に納品できる量が何トン増えるか」を候補ごとに評価する。
+  // 物理能力の算出は bindingCapacity.ts::computePhysicalCapacity（唯一の情報源）を
+  // そのまま再利用し、ここで能力式を再実装しない。
+  //
+  //   before = bindingPhysicalCapacity(現在のプール)
+  //   after  = bindingPhysicalCapacity(候補適用後のプール)
+  //   incrementalDeliverableCapacityTons = max(0, after - before)
+  //
+  // 例（MASS T24〜T32 の実測値）: line 68.8kt / common 63.3kt / freezing 59.85kt。
+  //   HOSO +4,000t  → binding は freezing のままなので incremental = 0
+  //   freezing +800t → binding が 59.85kt → 60.65kt へ動くので incremental = 800
+  // したがって冷凍・包装が優先される。冷凍・包装が解消されて common が最小になれば、
+  // 次は common へ route が移る。会社IDやシナリオIDによる分岐は一切持たない。
+  const nominalCommonTotal = observation.factories.reduce((sum, f) => sum + f.commonProcessingCapacity, 0);
+  /**
+   * 名目能力 → 実効能力の換算率（baseUtilizationRate × equipmentAvailabilityRate）。
+   * CAPEX テンプレートの capacityIncreaseTonsPerQuarter は名目値であるため、実効プールへ
+   * 加算する前に同じ率を掛ける。率は observation が既に持つ名目／実効の比から取り、
+   * ここで稼働率係数を新たに定義しない。工場が無い・能力0の会社では 1 とみなす。
+   */
+  const effectiveRateFactor =
+    nominalCommonTotal > EPSILON ? observation.totalEffectiveCommonProcessingCapacity / nominalCommonTotal : 1;
+
+  const currentPhysicalPools = {
+    effectiveCapacityByProduct: observation.totalEffectiveCapacityByProduct,
+    commonProcessingInputCapacityTons: observation.totalEffectiveCommonProcessingCapacity,
+    freezingPackagingCapacityTons: observation.totalEffectiveFreezingPackagingCapacity,
+    saleableRecoveryRatioByProduct: PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio,
+  };
+  const currentPhysical = computePhysicalCapacity(currentPhysicalPools);
+
+  /** 候補1件が増やす名目能力（プール別）。テンプレートの既存値のみを参照する。 */
+  const nominalCapacityAddedBy = (projectType: CapitalProjectType): { pool: PhysicalCapacityPool | "OTHER"; product?: Product; tons: number } => {
+    const effect = capexParams.templatesByType[projectType]?.futureCapacityEffect;
+    const tons = effect?.capacityIncreaseTonsPerQuarter ?? 0;
+    const target = effect?.targetProduct;
+    if (tons <= 0 || target === undefined) return { pool: "OTHER", tons: 0 };
+    if (target === "commonProcessing") return { pool: "COMMON_PROCESSING", tons };
+    if (target === "freezingPackaging") return { pool: "FREEZING_PACKAGING", tons };
+    if (target === "hoso" || target === "pd" || target === "vap") return { pool: "PRODUCT_LINE", product: target, tons };
+    return { pool: "OTHER", tons: 0 };
+  };
+
+  /**
+   * その候補を1件実行したときに、物理的に納品可能な量が何トン増えるか。
+   * binding ではないプールを増やす候補は 0 になる（＝優先しない根拠になる）。
+   */
+  const incrementalDeliverableCapacityFor = (projectType: CapitalProjectType): number => {
+    const added = nominalCapacityAddedBy(projectType);
+    if (added.tons <= 0) return 0;
+    const effectiveAdded = added.tons * effectiveRateFactor;
+    const next = { ...currentPhysicalPools, effectiveCapacityByProduct: { ...currentPhysicalPools.effectiveCapacityByProduct } };
+    if (added.pool === "COMMON_PROCESSING") {
+      next.commonProcessingInputCapacityTons += effectiveAdded;
+    } else if (added.pool === "FREEZING_PACKAGING") {
+      next.freezingPackagingCapacityTons += effectiveAdded;
+    } else if (added.pool === "PRODUCT_LINE" && added.product) {
+      next.effectiveCapacityByProduct[added.product] += effectiveAdded;
+    } else {
+      return 0;
+    }
+    return Math.max(0, computePhysicalCapacity(next).bindingPhysicalCapacityTons - currentPhysical.bindingPhysicalCapacityTons);
+  };
+
+  /**
+   * 【§7 / §11】その候補が「現在 binding しているプール」を対象にしているか。
+   *
+   * 判定は incremental > 0 ではなく **対象プールの headroom がゼロか**（＝そのプールが
+   * 今まさに律速しているか）で行う。理由は 2 プールが同値で並んでいる TIED の場合、
+   * どちらを 1 件増やしても binding は動かないため incremental は 0 になり、
+   * incremental > 0 だけを条件にすると**どちらも提案されず永久に詰まる**からである。
+   * TIED は「両方を順に解消していくべき状態」であって「投資しなくてよい状態」ではない。
+   *
+   * incrementalTons は §11 の診断項目として併せて返し、binding 以外のプールを増やす
+   * 候補（例: 冷凍・包装が律速しているときの HOSO ライン増設）が
+   * 「納品可能量を1トンも増やさない」ことを診断から追えるようにする。
+   *
+   * 会社ID・シナリオIDには一切依存しない（物理プールの大小関係のみで決まる）。
+   * 物理能力を増やさない案件種別（品質管理設備・PD省人化）はこの判定の対象外。
+   */
+  const improvesBindingPool = (projectType: CapitalProjectType): { readonly ok: boolean; readonly incrementalTons: number } => {
+    const incrementalTons = incrementalDeliverableCapacityFor(projectType);
+    const added = nominalCapacityAddedBy(projectType);
+    if (added.pool === "OTHER" || added.tons <= 0) return { ok: false, incrementalTons: 0 };
+    const headroom = currentPhysical.headroomByPool[added.pool as "PRODUCT_LINE" | "COMMON_PROCESSING" | "FREEZING_PACKAGING"];
+    return { ok: headroom <= EPSILON, incrementalTons };
+  };
+
+  /** 【§11】候補ごとの routing 診断（何を見て採否を決めたか）。 */
+  const routingKeyValues = (projectType: CapitalProjectType, incrementalTons: number): Record<string, number> => ({
+    physicalProductLineCapacity: currentPhysical.productLineCapacityTons,
+    physicalCommonInputCapacity: currentPhysical.commonProcessingInputCapacityTons,
+    physicalCommonSaleableCapacity: currentPhysical.commonProcessingSaleableCapacityTons,
+    physicalFreezingPackagingCapacity: currentPhysical.freezingPackagingCapacityTons,
+    bindingPhysicalCapacityTons: currentPhysical.bindingPhysicalCapacityTons,
+    bindingPoolIsProductLine: currentPhysical.bindingPhysicalPool === "PRODUCT_LINE" ? 1 : 0,
+    bindingPoolIsCommonProcessing: currentPhysical.bindingPhysicalPool === "COMMON_PROCESSING" ? 1 : 0,
+    bindingPoolIsFreezingPackaging: currentPhysical.bindingPhysicalPool === "FREEZING_PACKAGING" ? 1 : 0,
+    bindingPoolIsTied: currentPhysical.bindingPhysicalPool === "TIED" ? 1 : 0,
+    candidateNominalCapacityAdded: nominalCapacityAddedBy(projectType).tons,
+    incrementalDeliverableCapacityTons: incrementalTons,
+    candidateCostUsd: capexParams.templatesByType[projectType]?.standardBudgetUsd ?? 0,
   });
 
   // 【SAI-5F】拡張判断用の公開シグナル（前四半期までの公開情報のみ。無効時は未使用）。
@@ -412,7 +696,11 @@ export function buildStandardAiCapexDecision(
     // 変更しない。
     const capacity = observation.totalEffectiveCapacityByProduct[product];
     if (capacity <= EPSILON) continue;
-    const shortfallRatio = productionNeededByProductBeforeCap[product] / capacity;
+    // 【Phase SAI-GROW-3C】志側へ戻した需要があれば、そちらも分子の候補にする
+    // （Deliverability capで縮んだ生産必要量だけを見て「能力は足りている」と誤認しない）。
+    const growthDemandForProduct = deliverabilityGrowthDemandByProduct?.[product] ?? 0;
+    const shortfallBasisTons = Math.max(productionNeededByProductBeforeCap[product], growthDemandForProduct);
+    const shortfallRatio = shortfallBasisTons / capacity;
     const noExcess = observation.finishedGoodsByProduct[product] <= capacity * params.finishedGoodsTargetQuarters * params.excessInventoryRatioForDiscount;
     const alreadyPlanned = observation.activeCapexProjectTargets.has(product);
 
@@ -454,8 +742,15 @@ export function buildStandardAiCapexDecision(
     const safe = gate.safe;
 
     const lineSpace = checkSpaceFeasible(LINE_EXPANSION_BY_PRODUCT[product]);
-    if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned && lineSpace.feasible) {
+    // 【Phase SAI-CAP-1・§7/§8】このラインを増やしても物理的な納品可能量が1トンも
+    // 増えないなら提案しない（例: 共有プールの冷凍・包装が binding のときの HOSO 増設）。
+    // 逆に、この商品ラインが binding なら従来どおり提案される。単位差（HOSO +4,000 /
+    // PD +350 / VAP +250）で機械的に HOSO を選ぶことはせず、shortfall・稼働率・
+    // 在庫・供給圧力といった既存の商品別条件はすべてそのまま維持している。
+    const lineRouting = improvesBindingPool(LINE_EXPANSION_BY_PRODUCT[product]);
+    if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned && lineSpace.feasible && lineRouting.ok) {
       proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product], targetFactoryId: selectTargetFactoryId(observation, product) });
+      commitProposal(LINE_EXPANSION_BY_PRODUCT[product]);
       reserveSpace(lineSpace.requiredSpaceUnits);
       diagnostics.push({
         code: "CAPEX_PROPOSED",
@@ -464,6 +759,7 @@ export function buildStandardAiCapexDecision(
         severity: "info",
         keyValues: {
           ...utilizationKeyValues(utilization, gate),
+          ...routingKeyValues(LINE_EXPANSION_BY_PRODUCT[product], lineRouting.incrementalTons),
           shortfallRatio,
           effectiveShortfallThreshold,
           productThresholdBias,
@@ -485,6 +781,7 @@ export function buildStandardAiCapexDecision(
     } else if (isBottleneck && sustained && noExcess && safe && !alreadyPlanned && !lineSpace.feasible) {
       recordSpaceInfeasible(LINE_EXPANSION_BY_PRODUCT[product], lineSpace.requiredSpaceUnits);
     } else if (isBottleneck) {
+      recordLiquidityDeferral(LINE_EXPANSION_BY_PRODUCT[product], gate);
       diagnostics.push({
         code: "CAPEX_DEFERRED",
         domain: "capex",
@@ -492,6 +789,7 @@ export function buildStandardAiCapexDecision(
         severity: "info",
         keyValues: {
           ...utilizationKeyValues(utilization, gate),
+          ...routingKeyValues(LINE_EXPANSION_BY_PRODUCT[product], lineRouting.incrementalTons),
           shortfallRatio,
           effectiveShortfallThreshold,
           productThresholdBias,
@@ -524,8 +822,15 @@ export function buildStandardAiCapexDecision(
       // 【2026-08-09・Test16】成長エントリの稼働率条件も、対象商品の専用ライン稼働率で見る。
       const utilizationOk = hasPriorQuarter && utilization.utilization >= params.capexGrowthEntryUtilizationThreshold;
       const growthEntrySpace = checkSpaceFeasible(LINE_EXPANSION_BY_PRODUCT[product]);
+      // 【Phase SAI-CAP-1】成長エントリ経路には binding pool 条件を課さない。
+      // ここは「今の能力不足を解消する」判断ではなく、公開ライフサイクルトレンドに
+      // 基づく**将来の商品構成シフトへの先行投資**であり（SAI-5F）、今期どのプールが
+      // 律速しているかとは判断の目的が異なる。今期のボトルネック解消投資（上の分岐）
+      // だけを binding pool へ限定し、先行投資の意思決定は既存のトレンド・稼働率・
+      // 在庫・財務条件にそのまま委ねる。
       if (trend !== undefined && trend >= trendThreshold && utilizationOk && noExcess && safe && growthEntrySpace.feasible) {
         proposals.push({ projectType: LINE_EXPANSION_BY_PRODUCT[product], targetFactoryId: selectTargetFactoryId(observation, product) });
+      commitProposal(LINE_EXPANSION_BY_PRODUCT[product]);
         reserveSpace(growthEntrySpace.requiredSpaceUnits);
         diagnostics.push({
           code: product === "vap" ? "VAP_GROWTH_ENTRY" : "LIFECYCLE_GROWTH_PURSUED",
@@ -743,6 +1048,7 @@ export function buildStandardAiCapexDecision(
           (a, b) => a.paybackQuarters - b.paybackQuarters || a.factory.factoryId.localeCompare(b.factory.factoryId)
         )[0];
         proposals.push({ projectType: pdMechType, targetFactoryId: best.factory.factoryId });
+        commitProposal(pdMechType);
         reserveSpace(pdMechSpace.requiredSpaceUnits);
         diagnostics.push({
           code: "PD_MECH_PROPOSED",
@@ -973,6 +1279,7 @@ export function buildStandardAiCapexDecision(
           (a, b) => b.qualityRiskProtectionRatio - a.qualityRiskProtectionRatio || a.factory.factoryId.localeCompare(b.factory.factoryId)
         )[0];
         proposals.push({ projectType: qualityEquipType, targetFactoryId: best.factory.factoryId });
+        commitProposal(qualityEquipType);
         reserveSpace(qualityEquipSpace.requiredSpaceUnits);
         diagnostics.push({
           code: "QUALITY_EQUIP_PROPOSED",
@@ -1119,12 +1426,16 @@ export function buildStandardAiCapexDecision(
     // 【2026-08-09・Test16】共通前処理能力への投資は、共通前処理能力の稼働率で判定する
     // （この設備区分に限っては従来と同じ分母だが、判定経路は商品別と同じ形に揃える）。
     const commonUtilization = relevantUtilizationFor(observation, "commonProcessing");
-    const commonSustained = sustainedFor(commonUtilization);
+    // 【Phase SAI-CAP-1・§6】共通前処理は原料投入側のプールなので、クリップ前の需要も
+    // requiredRawMaterialUnconstrained（原料投入側の必要量）で見る。
+    const commonSustained = sustainedForSharedPool(commonUtilization, requiredRawMaterialUnconstrained);
     const commonGate = financialGateFor("commonProcessingExpansion");
     const safe = commonGate.safe;
     const commonSpace = checkSpaceFeasible("commonProcessingExpansion");
-    if (isBottleneck && commonSustained && safe && !alreadyPlannedCommon && commonSpace.feasible) {
+    const commonRouting = improvesBindingPool("commonProcessingExpansion");
+    if (isBottleneck && commonSustained && safe && !alreadyPlannedCommon && commonSpace.feasible && commonRouting.ok) {
       proposals.push({ projectType: "commonProcessingExpansion", targetFactoryId: selectTargetFactoryId(observation, "commonProcessing") });
+      commitProposal("commonProcessingExpansion");
       reserveSpace(commonSpace.requiredSpaceUnits);
       diagnostics.push({
         code: "CAPEX_PROPOSED",
@@ -1133,6 +1444,7 @@ export function buildStandardAiCapexDecision(
         severity: "info",
         keyValues: {
           ...utilizationKeyValues(commonUtilization, commonGate),
+          ...routingKeyValues("commonProcessingExpansion", commonRouting.incrementalTons),
           commonShortfallRatio,
           financialGate: safe ? 1 : 0,
           inventoryGate: 1,
@@ -1155,6 +1467,7 @@ export function buildStandardAiCapexDecision(
         severity: "info",
         keyValues: {
           ...utilizationKeyValues(commonUtilization, commonGate),
+          ...routingKeyValues("commonProcessingExpansion", commonRouting.incrementalTons),
           commonShortfallRatio,
           financialGate: safe ? 1 : 0,
           inventoryGate: 1,
@@ -1168,6 +1481,81 @@ export function buildStandardAiCapexDecision(
       });
     }
   }
+
+  // -------------------------------------------------------------------
+  // 【Phase SAI-CAP-1】冷凍・包装処理能力（生産段階3の共有プール）の増設判定
+  // -------------------------------------------------------------------
+  //
+  // 判定の形は共通前処理と完全に同じ（shortfall / 持続性 / 財務 / 重複 / スペース /
+  // routing）。冷凍・包装は完成品側のプールなので、shortfall と持続性の分子には
+  // 完成品側のクリップ前需要（productionNeededByProductBeforeCap の合計）を使う。
+  const freezingCapacity = observation.totalEffectiveFreezingPackagingCapacity;
+  if (freezingCapacity > EPSILON) {
+    const freezingDemandTons = sumProductAmount(productionNeededByProductBeforeCap);
+    const freezingShortfallRatio = freezingDemandTons / freezingCapacity;
+    const alreadyPlannedFreezing = observation.activeCapexProjectTargets.has("freezingPackaging");
+    const freezingIsBottleneck = freezingShortfallRatio > params.capexCurrentShortfallRatioThreshold;
+    const freezingUtilization = relevantUtilizationFor(observation, "freezingPackaging");
+    const freezingSustained = sustainedForSharedPool(freezingUtilization, freezingDemandTons);
+    const freezingGate = financialGateFor("freezingPackagingExpansion");
+    const freezingSafe = freezingGate.safe;
+    const freezingSpace = checkSpaceFeasible("freezingPackagingExpansion");
+    const freezingRouting = improvesBindingPool("freezingPackagingExpansion");
+    const freezingKeyValues = {
+      ...utilizationKeyValues(freezingUtilization, freezingGate),
+      ...routingKeyValues("freezingPackagingExpansion", freezingRouting.incrementalTons),
+      freezingShortfallRatio,
+      freezingDemandBeforeCapTons: freezingDemandTons,
+      financialGate: freezingSafe ? 1 : 0,
+      inventoryGate: 1,
+      ongoingProjectGate: alreadyPlannedFreezing ? 0 : 1,
+      shortfallGate: freezingIsBottleneck ? 1 : 0,
+      sustainedGate: freezingSustained ? 1 : 0,
+      routingGate: freezingRouting.ok ? 1 : 0,
+      spaceGate: freezingSpace.feasible ? 1 : 0,
+    };
+    if (
+      freezingIsBottleneck &&
+      freezingSustained &&
+      freezingSafe &&
+      !alreadyPlannedFreezing &&
+      freezingSpace.feasible &&
+      freezingRouting.ok
+    ) {
+      proposals.push({
+        projectType: "freezingPackagingExpansion",
+        targetFactoryId: selectTargetFactoryId(observation, "freezingPackaging"),
+      });
+      commitProposal("freezingPackagingExpansion");
+      reserveSpace(freezingSpace.requiredSpaceUnits);
+      diagnostics.push({
+        code: "CAPEX_PROPOSED",
+        domain: "capex",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: { ...freezingKeyValues, finalDecision: 1 },
+        decisionSummary: `冷凍・包装処理能力の増設を提案（冷凍・包装稼働率 ${(freezingUtilization.utilization * 100).toFixed(1)}%）`,
+        message:
+          "凍結・包装処理能力（生産段階3の共有プール）が持続的なボトルネックのため、増設案件を提案する。" +
+          `この能力を増やすと納品可能量が ${Math.round(freezingRouting.incrementalTons).toLocaleString()}t/期 増える。`,
+      });
+    } else if (freezingIsBottleneck && freezingSustained && freezingSafe && !alreadyPlannedFreezing && freezingRouting.ok && !freezingSpace.feasible) {
+      recordSpaceInfeasible("freezingPackagingExpansion", freezingSpace.requiredSpaceUnits);
+    } else if (freezingIsBottleneck) {
+      diagnostics.push({
+        code: "CAPEX_DEFERRED",
+        domain: "capex",
+        companyId: fixture.companyId,
+        severity: "info",
+        keyValues: { ...freezingKeyValues, finalDecision: 0 },
+        decisionSummary: `冷凍・包装能力の増設を見送り（冷凍・包装稼働率 ${(freezingUtilization.utilization * 100).toFixed(1)}%）`,
+        message:
+          "凍結・包装処理能力は今期は不足しているが、持続性・財務健全性・重複案件・スペース・" +
+          "納品可能量の増分のいずれかの条件を満たさないため増設を見送る。",
+      });
+    }
+  }
+
 
   if (proposals.length === 0 && diagnostics.length === 0) {
     diagnostics.push({

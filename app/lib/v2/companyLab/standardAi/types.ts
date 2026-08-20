@@ -159,6 +159,21 @@ export interface StandardAiObservation {
 
   // --- 契約・在庫 ---
   readonly outstandingContractByProduct: ProductAmount;
+  /** 【Phase SAI-GROW-3B-3】上記のうち納期超過分（overdue）。 */
+  readonly overdueBacklogByProduct: ProductAmount;
+  /** 【Phase SAI-GROW-3B-3】上記のうち将来納期の健全な確定需要。overdueではない。 */
+  readonly healthyForwardBacklogByProduct: ProductAmount;
+  /** 【Phase SAI-GROW-3B-3】今期成約した契約の納期までの四半期数（sales/parameters.ts の standardLeadTimeTurns）。 */
+  readonly deliveryLeadTimeQuarters: number;
+  /** 【Phase SAI-GROW-3B-3】納期到来時点の実効能力（承認済みCAPEXの完成・ramp反映済み）。 */
+  readonly nearTermEffectiveCapacityByProduct: ProductAmount;
+  readonly nearTermEffectiveCommonProcessingCapacity: number;
+  /**
+   * 【Phase SAI-CAP-1】納期到来時点の冷凍・包装処理能力（実効値）。
+   * 現在時点の totalEffectiveFreezingPackagingCapacity と対になる。これが無いと
+   * Deliverability の near-term 判定だけが冷凍・包装を無視した過大値になる。
+   */
+  readonly nearTermEffectiveFreezingPackagingCapacity: number;
   readonly finishedGoodsByProduct: ProductAmount;
   readonly rawMaterialAvailable: number;
   /** 輸送中輸入・養殖中など、将来利用可能になる予定の原料量。 */
@@ -196,6 +211,11 @@ export interface StandardAiObservation {
   readonly lastQuarterLaborUtilizationRate?: number;
   /** 前期の会社×商品別の実績生産量。 */
   readonly lastQuarterActualProductionByProduct: Readonly<Partial<Record<Product, number>>>;
+  /**
+   * 【Phase SAI-GROW-3B-1】承認済み設備投資案件の今後の支払予定（USD、index0=当四半期）。
+   * CapitalProject.paymentSchedule をそのまま読んだ値であり、新しい支払ルールは無い。
+   */
+  readonly committedCapexPaymentScheduleUsd: readonly number[];
 
   // --- 市場（公開情報） ---
   readonly markets: readonly MarketObservationEntry[];

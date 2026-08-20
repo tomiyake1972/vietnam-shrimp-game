@@ -25,6 +25,11 @@ import { routePlayerMessage } from "../../../../../../../../../../../lib/v2/comp
 import { AI_MEETING_PROMPT_VERSION, buildMeetingUserMessage } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/prompt";
 import { buildMeetingKnowledgeInjection } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/knowledgeInjection";
 import {
+  buildRuleAnswerRepairNote,
+  findKnowledgeUsageViolation,
+  findRuleAnswerViolations,
+} from "../../../../../../../../../../../lib/v2/gameKnowledge/ruleAnswerValidator";
+import {
   appendMessages,
   buildRecentHistoryForPrompt,
   defaultMeetingId,
@@ -268,7 +273,12 @@ export async function handlePostAiMeetingMessage(
   // ゲームルールを、現在のparameter値を差し込んだ状態でTop N件だけ注入する
   // （全文Manualは入れない。実装指示§34）。company-labs経路とsimulation-runs経路の
   // 両方が同じ共通関数を通る（実装指示§41）。
-  const knowledgeInjection = buildMeetingKnowledgeInjection({ playerMessage: body.playerMessage, primarySpeaker: routing.primary });
+  // 【M2.8.1】直近の会話も渡す（「VAP 1,000tなら？」のような省略形の追問を解決するため）。
+  const knowledgeInjection = buildMeetingKnowledgeInjection({
+    playerMessage: body.playerMessage,
+    primarySpeaker: routing.primary,
+    recentHistoryTexts: recent.map((m) => m.text),
+  });
 
   const userMessage = buildMeetingUserMessage({
     briefing,
@@ -290,6 +300,8 @@ export async function handlePostAiMeetingMessage(
     runAdvisoryMemory: runAdvisoryMemorySummary,
     gameKnowledge: knowledgeInjection.gameKnowledge,
     gameKnowledgeEstimates: knowledgeInjection.gameKnowledgeEstimates,
+    // 【M2.8.1追加・実装指示§3】server側で確定済みのゲームルール解答（resultは改変禁止）。
+    resolvedGameRules: knowledgeInjection.resolvedGameRules,
     questionIntent: knowledgeInjection.questionIntent,
   });
 
@@ -320,6 +332,11 @@ export async function handlePostAiMeetingMessage(
           `直前の応答で禁止語彙（${violations.join("、")}）が検出されました。overdueTonsは0です。` +
           "backlogの各statusフィールド（OVERDUE/DUE_THIS_TURN/FUTURE_DUE/MIXED）と一致する語彙のみを使って、同じ質問に発言し直してください。",
         runAdvisoryMemory: runAdvisoryMemorySummary,
+        // 【M2.8.1】repair呼び出しでもGame Knowledge・確定解答を落とさない。
+        gameKnowledge: knowledgeInjection.gameKnowledge,
+        gameKnowledgeEstimates: knowledgeInjection.gameKnowledgeEstimates,
+        resolvedGameRules: knowledgeInjection.resolvedGameRules,
+        questionIntent: knowledgeInjection.questionIntent,
       });
       const repaired = await generateMeetingResponse(repairUserMessage, anthropicClient, { labId, companyId, turn });
       if (repaired.ok) {
@@ -334,6 +351,67 @@ export async function handlePostAiMeetingMessage(
         // （新しい応答が得られない以上、無い袖は振れない。診断へ違反が残った旨を記録する）。
         semanticGuardResult = "violation_after_repair";
       }
+    }
+  }
+
+  // 【M2.8.1配線・実装指示§7・§10】確定解答（resolvedGameRules）との矛盾、および
+  // 「該当knowledgeを注入したのに1つも参照していない」状態を検出し、最大1回だけ
+  // repairする（overdue語彙guardと同一手順・同一の共通validatorを使う）。
+  let ruleAnswerGuardResult: AiMeetingCallDiagnostics["ruleAnswerGuardResult"] = "not_applicable";
+  let ruleAnswerViolationCodes: readonly string[] = [];
+  if (generated.ok && (knowledgeInjection.resolvedGameRules.length > 0 || knowledgeInjection.injectedIds.length > 0)) {
+    const usageViolation = findKnowledgeUsageViolation({
+      questionIntent: knowledgeInjection.questionIntent,
+      injectedIds: knowledgeInjection.injectedIds,
+      knowledgeUsedIds: generated.response.knowledgeUsedIds ?? [],
+    });
+    const ruleViolations = [
+      ...findRuleAnswerViolations(
+        generated.response.responses.map((r) => r.text),
+        knowledgeInjection.resolvedGameRules
+      ),
+      ...(usageViolation ? [usageViolation] : []),
+    ];
+    ruleAnswerGuardResult = ruleViolations.length === 0 ? "ok" : "violation_after_repair";
+    ruleAnswerViolationCodes = ruleViolations.map((v) => v.code);
+    if (ruleViolations.length > 0) {
+      console.log(`${logPrefix} Game Ruleの矛盾を検知 violations=${ruleAnswerViolationCodes.join(",")} repairを1回試行します`);
+      const repairUserMessage = buildMeetingUserMessage({
+        briefing,
+        standardAiDecisionSummary: { decision: diagnostics.decision, topReasonCodes: diagnostics.entries.slice(0, 8).map((e) => e.code) },
+        recentHistory: recent.map((m) => formatHistoryEntryForPrompt(m, AI_MEETING_PROMPT_VERSION)),
+        compactSummary,
+        playerMessage: body.playerMessage,
+        routingHint: routing,
+        meetingIntentHint: conversation.lastMeetingIntent,
+        confirmedCorrections: conversation.confirmedCorrections.map((c) => c.note),
+        repairNote: buildRuleAnswerRepairNote(ruleViolations),
+        runAdvisoryMemory: runAdvisoryMemorySummary,
+        gameKnowledge: knowledgeInjection.gameKnowledge,
+        gameKnowledgeEstimates: knowledgeInjection.gameKnowledgeEstimates,
+        resolvedGameRules: knowledgeInjection.resolvedGameRules,
+        questionIntent: knowledgeInjection.questionIntent,
+      });
+      const repaired = await generateMeetingResponse(repairUserMessage, anthropicClient, { labId, companyId, turn });
+      if (repaired.ok) {
+        const remaining = [
+          ...findRuleAnswerViolations(
+            repaired.response.responses.map((r) => r.text),
+            knowledgeInjection.resolvedGameRules
+          ),
+          ...(findKnowledgeUsageViolation({
+            questionIntent: knowledgeInjection.questionIntent,
+            injectedIds: knowledgeInjection.injectedIds,
+            knowledgeUsedIds: repaired.response.knowledgeUsedIds ?? [],
+          })
+            ? [{ code: "KNOWLEDGE_NOT_USED", message: "" }]
+            : []),
+        ];
+        generated = repaired;
+        ruleAnswerGuardResult = remaining.length === 0 ? "repaired" : "violation_after_repair";
+        ruleAnswerViolationCodes = remaining.length === 0 ? ruleAnswerViolationCodes : remaining.map((v) => v.code);
+      }
+      // repair呼び出し自体が失敗した場合は、元のgenerated（矛盾を含む）をそのまま使う。
     }
   }
 
@@ -367,7 +445,7 @@ export async function handlePostAiMeetingMessage(
         potentialStrategicChange: false,
         available: false,
         unavailableReason: "AI Management Meetingは現在利用できません。しばらくしてから再度お試しください。",
-        diagnostics: { ...generated.diagnostics, semanticGuardResult },
+        diagnostics: { ...generated.diagnostics, semanticGuardResult, ruleAnswerGuardResult, ruleAnswerViolationCodes },
       },
     };
   }
@@ -464,7 +542,7 @@ export async function handlePostAiMeetingMessage(
       knowledgeUsedIds: (response.knowledgeUsedIds ?? []).filter((id) => knowledgeInjection.injectedIds.includes(id)),
       questionIntent: knowledgeInjection.questionIntent,
       available: true,
-      diagnostics: { ...generated.diagnostics, semanticGuardResult },
+      diagnostics: { ...generated.diagnostics, semanticGuardResult, ruleAnswerGuardResult, ruleAnswerViolationCodes },
     },
   };
 }

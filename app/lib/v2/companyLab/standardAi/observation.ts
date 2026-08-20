@@ -11,21 +11,29 @@ import { hosoEqTons, unwrapUnit } from "../../core/units";
 import { DEMAND_MARKET_IDS, MarketQuarterResult, Product } from "../../market/types";
 import { deriveMarketReferencePrices } from "../../market/destinationPricing";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS } from "../../market/destinationPricingParameters";
-import { PeriodV2 } from "../../core/period";
+import { PeriodV2, nextPeriod } from "../../core/period";
 import { unwrapUsd } from "../../finance/types";
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../types";
 import { findFactoryRegularHeadcount } from "../workforce";
 import { isCapexProjectOperationalAt } from "../../capex/capacityEffect";
 import { computeEffectiveFactories, MAX_FACTORIES_PER_COMPANY } from "../../capex/factoryConstruction";
-import { isActiveStatus } from "../../capex/projectLifecycle";
 import { calculateFactoryEffectiveCapacity } from "../../production/capacity";
 import { computeFactoryUsedSpaceUnits, FACTORY_SPACE_PARAMETERS_V1, resolveFactoryTotalSpaceUnits } from "../../production/factorySpace";
 import { computeLoanQuarterlyInterest, computeScheduledPrincipalDue } from "../../financing/loanSchedule";
+import { isActiveStatus } from "../../capex/projectLifecycle";
 import { resolveQualityEquipmentStatusByFactory, qualityEquipmentStatusFor } from "../qualityControlEquipmentState";
 import { BatchQualityAdjustment } from "../../quality/types";
+import { SALES_PARAMETERS_V1 } from "../../sales/parameters";
 import { FactoryObservation, MarketObservationEntry, ProductAmount, StandardAiObservation, zeroProductAmount } from "./types";
 
 const EPSILON = 1e-6;
+
+/**
+ * 【Phase SAI-GROW-3B-1】確定投資の支払を先読みする四半期数。
+ * 「当期＋次期は必ず見る」という指示§3の最低要件に、既存の新工場テンプレートの
+ * 標準工期（3四半期）まで見られる余裕を持たせた値。
+ */
+export const COMMITTED_CAPEX_HORIZON_QUARTERS = 4;
 
 function availableRawMaterialQuantity(ownState: CompanyOwnState): number {
   return ownState.rawMaterialLots.filter((l) => l.status === "available").reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
@@ -67,6 +75,28 @@ function certainInboundImportQuantityThisPeriod(ownState: CompanyOwnState, perio
     .reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
 }
 
+/**
+ * 【Phase SAI-GROW-3B-1】承認済み（active）設備投資案件の、今後の四半期別支払予定。
+ * index0 = 当四半期に出る予定の支払、index1 = 次四半期、…
+ *
+ * 【新しい式を作らない】1回ぶんの支払額は capex/projectLifecycle.ts と同じ
+ * `approvedBudgetUsd × paymentSchedule[stage].plannedRatio` であり、
+ * 次に払う stage は `completedPaymentStagesCount` から決まる。
+ * suspended を含む active な案件をすべて対象にする（中断案件も再開すれば支払が戻るため、
+ * 資金計画上は無視しない＝安全側）。
+ */
+function buildCommittedCapexPaymentSchedule(ownState: CompanyOwnState, horizonQuarters = COMMITTED_CAPEX_HORIZON_QUARTERS): readonly number[] {
+  const schedule = new Array<number>(horizonQuarters).fill(0);
+  for (const project of ownState.capexState.portfolio.projects) {
+    if (!isActiveStatus(project.status)) continue;
+    const remainingStages = project.paymentSchedule.slice(project.completedPaymentStagesCount);
+    for (let i = 0; i < Math.min(horizonQuarters, remainingStages.length); i++) {
+      schedule[i] += Math.max(0, project.approvedBudgetUsd * remainingStages[i].plannedRatio);
+    }
+  }
+  return schedule;
+}
+
 function outstandingContractByProduct(ownState: CompanyOwnState): ProductAmount {
   const result = { hoso: 0, pd: 0, vap: 0 };
   for (const c of ownState.contracts) {
@@ -75,6 +105,29 @@ function outstandingContractByProduct(ownState: CompanyOwnState): ProductAmount 
     }
   }
   return result;
+}
+
+/**
+ * 【Phase SAI-GROW-3B-3・実装指示§4】受注残を「納期超過（overdue）」と
+ * 「将来納期の健全な確定需要（healthy forward）」へ分ける。
+ * healthy forward は悪いものではないため、同じ強さで新規受注を抑制しない。
+ *
+ * 判定は sales/backlog.ts::updateContractStatusesForQuarterEnd と同一の規約
+ * （dueDate < currentPeriod ＝ 納期超過。PeriodV2は "YYYYQn" で辞書順＝時系列順）を
+ * そのまま使い、新しい期日概念を作らない。status==="overdue" も同じ意味として扱う。
+ */
+function backlogByProductSplit(ownState: CompanyOwnState, period: PeriodV2): { overdue: ProductAmount; healthyForward: ProductAmount } {
+  const overdue = zeroProductAmount();
+  const healthyForward = zeroProductAmount();
+  for (const c of ownState.contracts) {
+    if (c.status !== "open" && c.status !== "partiallyFulfilled" && c.status !== "overdue") continue;
+    const tons = unwrapUnit(c.outstandingQuantity);
+    if (tons <= 0) continue;
+    const isPastDue = c.status === "overdue" || c.dueDate.localeCompare(period) < 0;
+    if (isPastDue) overdue[c.product] += tons;
+    else healthyForward[c.product] += tons;
+  }
+  return { overdue, healthyForward };
 }
 
 function finishedGoodsByProduct(ownState: CompanyOwnState): ProductAmount {
@@ -362,6 +415,37 @@ function pendingNewFactoryProjectCount(ownState: CompanyOwnState, period: Period
   ).length;
 }
 
+/**
+ * 【Phase SAI-GROW-3B-3・実装指示§7】納期（delivery horizon）到来時点での実効能力。
+ *
+ * 承認済み CapitalProject の完成スケジュール・新設Factoryの稼働開始・ramp-up は、
+ * すべて capex/factoryConstruction.ts::computeEffectiveFactories が既に持っている。
+ * ここでは**同じ関数を納期の四半期で呼ぶだけ**であり、新しい完成予測もramp式も作らない。
+ * 未承認の案件・Visionの構想は capexState.portfolio に存在しないため、構造的に入らない。
+ */
+function buildNearTermEffectiveCapacity(
+  fixture: CompanyFixture,
+  ownState: CompanyOwnState,
+  deliveryPeriod: PeriodV2
+): { byProduct: ProductAmount; commonProcessing: number; freezingPackaging: number } {
+  const factories = computeEffectiveFactories(fixture.factories, { companies: [ownState.capexState] }, deliveryPeriod);
+  const byProduct = zeroProductAmount();
+  let commonProcessing = 0;
+  // 【Phase SAI-CAP-1】冷凍・包装能力も納期時点で集計する。現在時点だけ集計して
+  // near-term を共通前処理までしか見ないと、Deliverability の near-term headroom
+  // だけが冷凍・包装を無視した過大値になる（SAI-EXEC-1 で MASS 35.5% 過大と実測）。
+  let freezingPackaging = 0;
+  for (const f of factories) {
+    const effective = calculateFactoryEffectiveCapacity(f);
+    byProduct.hoso += unwrapUnit(effective.hoso);
+    byProduct.pd += unwrapUnit(effective.pd);
+    byProduct.vap += unwrapUnit(effective.vap);
+    commonProcessing += unwrapUnit(effective.commonProcessing);
+    freezingPackaging += unwrapUnit(effective.freezingPackaging);
+  }
+  return { byProduct, commonProcessing, freezingPackaging };
+}
+
 export function buildStandardAiObservation(
   fixture: CompanyFixture,
   ownState: CompanyOwnState,
@@ -371,6 +455,13 @@ export function buildStandardAiObservation(
 ): StandardAiObservation {
   const factories = buildFactoryObservations(fixture, ownState, period);
   const lastMarketResult = publicInfo.lastMarketResult;
+  // 【Phase SAI-GROW-3B-3】受注残の内訳と、納期到来時点の実効能力。
+  // 納期は sales/parameters.ts::standardLeadTimeTurns（現行1四半期）をそのまま使い、
+  // 「4Q固定」のような独自のhorizonを持ち込まない。
+  const backlogSplit = backlogByProductSplit(ownState, period);
+  let deliveryPeriod = period;
+  for (let i = 0; i < Math.max(0, SALES_PARAMETERS_V1.standardLeadTimeTurns); i++) deliveryPeriod = nextPeriod(deliveryPeriod);
+  const nearTermCapacity = buildNearTermEffectiveCapacity(fixture, ownState, deliveryPeriod);
 
   // 【2026-08-09・Vision駆動成長】工場スペースは production/factorySpace.ts の
   // 既存の導出関数だけで算出する（この層で新しいスペース計算式を作らない）。
@@ -389,6 +480,12 @@ export function buildStandardAiObservation(
     turn,
 
     outstandingContractByProduct: outstandingContractByProduct(ownState),
+    overdueBacklogByProduct: backlogSplit.overdue,
+    healthyForwardBacklogByProduct: backlogSplit.healthyForward,
+    deliveryLeadTimeQuarters: SALES_PARAMETERS_V1.standardLeadTimeTurns,
+    nearTermEffectiveCapacityByProduct: nearTermCapacity.byProduct,
+    nearTermEffectiveCommonProcessingCapacity: nearTermCapacity.commonProcessing,
+    nearTermEffectiveFreezingPackagingCapacity: nearTermCapacity.freezingPackaging,
     finishedGoodsByProduct: finishedGoodsByProduct(ownState),
     rawMaterialAvailable: availableRawMaterialQuantity(ownState),
     rawMaterialPipeline: pipelineRawMaterialQuantity(ownState),
@@ -416,6 +513,10 @@ export function buildStandardAiObservation(
     lastQuarterEquipmentUtilizationRate: averageEquipmentUtilization(ownState),
     lastQuarterLaborUtilizationRate: averageLaborUtilization(ownState),
     lastQuarterActualProductionByProduct: ownState.lastQuarterActualProductionByProduct,
+    // 【Phase SAI-GROW-3B-1】承認済み設備投資案件の今後の支払予定（index0=当期）。
+    // CapitalProject.paymentSchedule（承認時スナップショット）をそのまま読むだけで、
+    // 新しい支払ルールは作らない。
+    committedCapexPaymentScheduleUsd: buildCommittedCapexPaymentSchedule(ownState),
 
     markets: buildMarkets(publicInfo),
     // 【Batch 002】観測需要のlag・出所を判断側から確認できるようにする

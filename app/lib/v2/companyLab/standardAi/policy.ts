@@ -29,11 +29,17 @@ import { buildStandardAiProductionPlans } from "./decision/production";
 import { buildStandardAiProcurementPlan } from "./decision/procurement";
 import { buildStandardAiWorkerAssignments } from "./decision/labor";
 import { buildStandardAiFinancingRequest } from "./decision/finance";
-import { buildStandardAiCapexDecision } from "./decision/capex";
+import { buildStandardAiCapexDecision, LiquidityGateContext } from "./decision/capex";
+import { assessCommittedCashRequirement, LiquidityAssessment } from "./decision/liquidity";
+import { assessFundableOperations, computeFundableRawMaterial, FundableOperationsAssessment, growthPausedForRecovery } from "./decision/fundableOperations";
+import { computeDeliverableCommitment, DeliverableCommitmentState } from "./decision/deliverableCommitment";
+import { assessGrowthRouting, GrowthRoutingAssessment } from "./decision/growthRouting";
+import { COMMITTED_CAPEX_HORIZON_QUARTERS } from "./observation";
 import { buildStandardAiVapProductDevelopmentDecision } from "./decision/vapProductDevelopment";
 import { buildStandardAiDividendDecision } from "./decision/dividend";
-import { sumProductAmount } from "./types";
+import { sumProductAmount, ProductAmount, zeroProductAmount } from "./types";
 import { computeBindingProductionCapacityTons } from "./bindingCapacity";
+import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
 import { StandardAiDiagnosticEntry } from "./reasonCodes";
 import { SalesWishEntry } from "./decision/sales";
 import { PressureScores } from "./pressures";
@@ -55,16 +61,18 @@ import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "./strategicIntent";
 import { CompanyVision } from "../vision/types";
 import { resolveCompanyVision, CompanyLabVisionOverrides } from "../vision/overrides";
 import { computeStrategicGrowthState, StrategicGrowthState } from "../vision/strategicGrowth";
-import { CommercialAmbition, computeCommercialAmbition } from "../vision/commercialAmbition";
+import { CommercialAmbition, COMMERCIAL_AMBITION_PARAMETERS_V1, computeCommercialAmbition } from "../vision/commercialAmbition";
 import { computeUnservedOpportunity, UnservedOpportunity } from "../vision/unservedOpportunity";
 import { buildCommercialGrowthDiagnostics } from "./diagnosis/commercialGrowth";
-import { computeObservableCommercialOpportunity, ObservableCommercialOpportunity } from "./decision/sales";
+import { computeObservableCommercialOpportunity, computeOrientationWeightedOpportunity, ObservableCommercialOpportunity } from "./decision/sales";
 import { evaluateNewFactoryDecision, NewFactoryAssessment } from "./decision/newFactory";
-import { computeCommercialCommitment, CommercialCommitmentState } from "../vision/commercialCommitment";
+import { computeCommercialCommitment, COMMERCIAL_COMMITMENT_PARAMETERS_V1, CommercialCommitmentState } from "../vision/commercialCommitment";
 import { ConversionObservation, observeContractConversion } from "./commercialHistory";
 import { companySalesOrganizationCapacity, marketFragmentationFactor } from "../../sales/salesCapacityModel";
 import { processingCapacity } from "../../sales/salesForce";
 import { StandardAiObservation } from "./types";
+import { assessGrowthPressure, computeGrowthPressureCore } from "./growth";
+import { GrowthPressureAssessment } from "./growth/types";
 import {
   assessStandardAiCrisisState,
   applyCrisisGateToCommercialCommitment,
@@ -136,6 +144,40 @@ export interface StandardAiQuarterDiagnostics {
   readonly conversionObservation?: ConversionObservation;
   /** 【Phase 6C・#05 §6】営業採用判断の構造化記録（採用0でも必ず理由が入る）。 */
   readonly salesHiring?: SalesHiringDiagnosticsRecord;
+  /**
+   * 【Phase SAI-GROW-3B-1】Liquidity SSoT の評価内訳。
+   * Finance決定・既存増設CAPEX・新工場のすべてがこの同一assessmentを参照している。
+   */
+  readonly liquidity?: LiquidityAssessment;
+  /** 当期にゲートを通した新規投資の支払額（horizon内合計）。 */
+  readonly approvedInvestmentPaymentsThisTurnUsd?: number;
+  /**
+   * 【Phase SAI-GROW-3B-2】Fundable Operations / Survival & Recovery の評価結果。
+   * ベンチマーク・受入テスト・Management Consoleがこの1件だけを読めば、
+   * posture・fundable量・縮退の有無を追跡できる。
+   */
+  readonly fundableOperations?: FundableOperationsAssessment;
+  /**
+   * 【Phase SAI-GROW-3B-3】Deliverable Commitment の評価結果。
+   * Commercial Ambition・cap前のCommitment・納品余力・backlog内訳・
+   * binding constraint をこの1件から追跡できる。
+   */
+  readonly deliverableCommitment?: DeliverableCommitmentState;
+  /**
+   * 【Phase SAI-GROW-3C】Deliverability Gapをどのドメインへ回付したかの評価結果。
+   * ambition / deliverable capacity / gap / binding constraint / route /
+   * worker gap / production gap / raw material gap をこの1件から追跡できる。
+   */
+  readonly growthRouting?: GrowthRoutingAssessment;
+  /**
+   * 【Phase SAI-GROW-1】Shadow Growth Pressure（診断専用）。
+   *
+   * **この値はStandard AIの意思決定に一切使われない。** 販売希望量・営業採用・
+   * 生産・調達・CAPEX・配当のいずれもこのassessmentを読まない（実装指示§0・§26）。
+   * すべての意思決定が確定した**後**に、確定済みの値だけを入力として評価するため、
+   * 構造的にDecisionへ影響し得ない。GROW-2以降で接続を検討する。
+   */
+  readonly growthPressure?: GrowthPressureAssessment;
   /**
    * 【Standard AI Crisis Management・Phase CM-1・指示§15】この四半期のCrisis State
    * 判断そのもの。Management Console・Analysis Pack・Claude explanationが読む
@@ -407,11 +449,55 @@ export function generateStandardAiDecisionWithDiagnostics(
     (observation.lastQuarterActualProductionByProduct.hoso ?? 0) +
     (observation.lastQuarterActualProductionByProduct.pd ?? 0) +
     (observation.lastQuarterActualProductionByProduct.vap ?? 0);
-  const commercialAmbition = computeCommercialAmbition({
+  // 【Phase SAI-GROW-2】Adaptive Opportunity Share。
+  //
+  // Growth Pressureの中心部（core）を**意思決定より前**に評価し、そこから
+  // Commercial Ambition / Commercial Commitment の機会shareだけを可変にする。
+  //
+  // 【非循環である理由】coreのopportunity headroomの分母は「現在の自社規模」
+  // （= max(能力×salesUtilizationTarget, 前期実績生産)）であり、提出量にも
+  // 0.35/0.5にも依存しない。したがってshareを動かしてもheadroomは動かない。
+  //
+  // 【Growth Pressure LOWでは現行と完全同一】shareExpansionRatio=0のとき
+  // effectiveShareはlegacy値そのものになるため、LOWの会社・LOWのTurnの判断は
+  // 従来とビット単位で同一になる（実装指示§9）。
+  const orientationWeighted = computeOrientationWeightedOpportunity(
+    observation,
+    salesParams,
+    params.marketOrientationMultipliers,
+    params.productOrientationMultipliers
+  );
+  const growthCore = computeGrowthPressureCore({
+    companyId: fixture.companyId,
+    period,
+    observation,
+    contracts: ownState.contracts,
+    visionReferenceScaleTons: strategicGrowth ? strategicGrowth.visionTargetScaleAtCurrentTurn : null,
+    growthAmbition: vision ? vision.growthAmbition : null,
+    strategicPosture: vision?.strategicPosture ?? null,
+    financialRiskTolerance: vision ? vision.financialRiskTolerance : null,
+    currentRelevantScaleTons: Math.max(capacityAnchorTons, recentActualScaleTons),
+    attainableProfitableTons: observableOpportunity.attainableProfitableTons,
+    orientationWeightedOpportunityTons: orientationWeighted.weightedAttainableProfitableTons,
+    weightedContributionUsdPerKg: observableOpportunity.weightedContributionUsdPerKg,
+    priceObservationMissing: observableOpportunity.priceObservationMissing,
+    observedConversionRatio: observeContractConversion({ records: ownState.recentSalesSubmissions ?? [] }, ownState.contracts, turn).conversionRatio,
+    finishedGoodsExcessRatioByProduct: pressures.finishedGoodsExcessRatioByProduct,
+    crisisState: crisisAssessment.state,
+    lastQuarterFinancialHealthTier: observation.lastQuarterFinancialHealthTier,
+    salesParams,
+    params: params.growthPressure,
+  });
+
+  const commercialAmbitionInput = {
     vision,
     strategicGrowth,
     capacityAnchorTons,
     recentActualScaleTons,
+    // 【GROW-2】機会shareだけをGrowth Pressureで可変にする（他の式は無変更）。
+    params: { ...COMMERCIAL_AMBITION_PARAMETERS_V1, realisticShareOfProfitableOpportunity: growthCore.effectiveOpportunityShare.ambition },
+    // 【GROW-3A】1四半期の伸び幅上限に掛ける倍率（observable evidenceが無ければ1＝従来と同一）。
+    stepLimitMultiplier: growthCore.growthEvidenceMultiplier,
     attainableProfitableTons: observableOpportunity.attainableProfitableTons,
     weightedContributionUsdPerKg: observableOpportunity.weightedContributionUsdPerKg,
     priceObservationMissing: observableOpportunity.priceObservationMissing,
@@ -420,7 +506,15 @@ export function generateStandardAiDecisionWithDiagnostics(
       pressures.finishedGoodsExcessRatioByProduct.pd,
       pressures.finishedGoodsExcessRatioByProduct.vap
     ),
-  });
+  };
+  const commercialAmbition = computeCommercialAmbition(commercialAmbitionInput);
+  // 【GROW-3A診断用】step倍率を掛けなかった場合のambition（差分＝拡大の効果）。
+  // 純粋関数の再評価のみで、ゲーム状態・他の判断には一切影響しない。
+  const commercialAmbitionWithBaseStep =
+    growthCore.growthEvidenceMultiplier > 1
+      ? computeCommercialAmbition({ ...commercialAmbitionInput, stepLimitMultiplier: 1 })
+      : commercialAmbition;
+
 
   // 【Phase 6C】Commercial Ambition（売りたい量）から Commercial Commitment
   // （今期どこまで取りに行くか）を分離する。過去の「提出 → 成約」転換率を
@@ -432,6 +526,8 @@ export function generateStandardAiDecisionWithDiagnostics(
   );
   const salesCapacityTonsForCommitment = salesCapacityCeilingTons(observation, salesParams);
   const commercialCommitmentBeforeCrisisGate = computeCommercialCommitment({
+    // 【GROW-2】提出shareだけをGrowth Pressureで可変にする（転換率学習等は無変更）。
+    params: { ...COMMERCIAL_COMMITMENT_PARAMETERS_V1, realisticShareOfOpportunity: growthCore.effectiveOpportunityShare.commitment },
     ambition: commercialAmbition,
     capacityAnchorTons,
     attainableProfitableTons: observableOpportunity.attainableProfitableTons,
@@ -441,6 +537,61 @@ export function generateStandardAiDecisionWithDiagnostics(
     backlogTons: sumProductAmount({ ...observation.outstandingContractByProduct } as never),
     finishedGoodsTons: sumProductAmount({ ...observation.finishedGoodsByProduct }),
   });
+  // 【Phase SAI-GROW-3B-3・実装指示§2/§3/§6】Deliverable Commitment。
+  // Commercial Ambition（志）は一切変更せず、「今期の提出量」だけを納品可能量で抑える。
+  //
+  // 【§12 Survivalとの適用順】危機時（LIQUIDITY_STRESS / SEVERE_DISTRESS）は既存の
+  // Crisis Gateと3B-2のFundable Operationsが先に効いているため、ここで重ねて抑えると
+  // 二重抑制になる。deliverability capはcrisisStateがNORMALのときだけ適用し、
+  // 危機会社には既存のCrisis / Operations制約を優先させる。
+  const fundableRawMaterialView = computeFundableRawMaterial({
+    observation,
+    pressures,
+    params,
+    crisisState: crisisAssessment.state,
+    financialRiskTolerance: vision ? vision.financialRiskTolerance : null,
+    growthParams: params.growthPressure,
+  });
+  // 【Phase SAI-CAP-1】冷凍・包装能力を含めた物理能力を渡す。3B-3 の
+  // Deliverability ロジック自体は変更していない（同じ式へ正しい能力を渡すだけ）。
+  const nearTermBindingProductionCapacityTons = computeBindingProductionCapacityTons(
+    observation.nearTermEffectiveCapacityByProduct,
+    observation.nearTermEffectiveCommonProcessingCapacity,
+    observation.nearTermEffectiveFreezingPackagingCapacity,
+    PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
+  );
+  const deliverableCommitment: DeliverableCommitmentState = computeDeliverableCommitment({
+    commitmentBeforeDeliverabilityTons: commercialCommitmentBeforeCrisisGate.submissionTargetTons,
+    expectedConversionRatio: commercialCommitmentBeforeCrisisGate.expectedConversionRatio,
+    finishedGoodsByProduct: observation.finishedGoodsByProduct,
+    bindingProductionCapacityTons: computeBindingProductionCapacityTons(
+      observation.totalEffectiveCapacityByProduct,
+      observation.totalEffectiveCommonProcessingCapacity,
+      observation.totalEffectiveFreezingPackagingCapacity,
+      PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
+    ),
+    nearTermBindingProductionCapacityTons,
+    fundableRawMaterialTons: fundableRawMaterialView.fundableRawMaterialTons,
+    overdueBacklogByProduct: observation.overdueBacklogByProduct,
+    healthyForwardBacklogByProduct: observation.healthyForwardBacklogByProduct,
+    rawMaterialLimitedByFunding:
+      fundableRawMaterialView.priceKnown &&
+      fundableRawMaterialView.fundableDomesticProcurementTons < nearTermBindingProductionCapacityTons,
+    deliveryLeadTimeQuarters: observation.deliveryLeadTimeQuarters,
+    // 【Phase SAI-VISION-1 tech debt cleanup】3B-3では調達の最低確保比
+    // （minDomesticPurchaseRatioOfBase）をdomainを跨いで流用していた。
+    // 値は完全に同一（0.2）のまま、sales側の意味を持つparameterへ参照先だけ移す。
+    minimumMarketPresenceRatio: COMMERCIAL_COMMITMENT_PARAMETERS_V1.minimumMarketPresenceRatioOfDeliverable,
+  });
+  const applyDeliverabilityCap = crisisAssessment.state === "NORMAL" && deliverableCommitment.applied;
+  const commercialCommitmentAfterDeliverability: CommercialCommitmentState = applyDeliverabilityCap
+    ? {
+        ...commercialCommitmentBeforeCrisisGate,
+        submissionTargetTons: deliverableCommitment.finalSubmissionTargetTons,
+        limiter: "DELIVERABILITY",
+      }
+    : commercialCommitmentBeforeCrisisGate;
+
   // 【指示§5/§6/§7】Crisis Gate。computeCommercialCommitment自体（志の量・
   // 転換率学習等）は一切変更しない。危機時はこの出力（新規提出量の上限）だけを
   // 縮小・停止する。Vision Ambition（commercialAmbition）はこの後も一切変更しない
@@ -448,7 +599,7 @@ export function generateStandardAiDecisionWithDiagnostics(
   // outstandingContractByProduct経由で別途、生産必要量計算（confirmed）へ
   // 100%反映され続ける（このgateの影響を受けない）。
   const commercialCommitment: CommercialCommitmentState = applyCrisisGateToCommercialCommitment(
-    commercialCommitmentBeforeCrisisGate,
+    commercialCommitmentAfterDeliverability,
     crisisAssessment
   );
 
@@ -493,26 +644,176 @@ export function generateStandardAiDecisionWithDiagnostics(
   );
   const finalProductionRequirementByProduct = computeFinalProductionRequirement(basicProductionRequirementByProduct);
 
-  const productionResult = buildStandardAiProductionPlans(fixture, observation, pressures, finalProductionRequirementByProduct);
+  // 【Phase SAI-GROW-3B-2・実装指示§2】Fundable Operations。
+  // engineのcomputeProcurementConstraintと同じ式で「当期に資金手当てできる原料量」を
+  // 生産計画より**前**に求める。procurementCashPlanには依存しないため循環しない
+  // （借入見込みは3B-1のrealisticallyAvailableBorrowingUsdをそのまま再利用する）。
+  const fundableOperations: FundableOperationsAssessment = assessFundableOperations({
+    observation,
+    pressures,
+    params,
+    crisisState: crisisAssessment.state,
+    financialRiskTolerance: vision ? vision.financialRiskTolerance : null,
+    productionRequirementTons: sumProductAmount(finalProductionRequirementByProduct),
+    growthParams: params.growthPressure,
+  });
+
+  const productionResult = buildStandardAiProductionPlans(
+    fixture,
+    observation,
+    pressures,
+    finalProductionRequirementByProduct,
+    // NORMAL時はundefinedを渡す＝現行挙動を完全に維持する（実装指示§3）。
+    fundableOperations.appliesProductionCap ? fundableOperations.fundableRawMaterialTons : undefined
+  );
   const requiredRawMaterial = productionResult.productionPlans.reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
   const requiredRawMaterialUnconstrained = sumProductAmount(productionResult.neededByProduct);
 
+  // 【実装指示§4】調達計画は縮退後のproduction requirementへ自動的に追従する
+  // （requiredRawMaterialが縮退後の生産計画から算出されるため、
+  //  「毎期18,963t希望し続けてengine側で0へ削られる」状態にならない）。
   const procurementResult = buildStandardAiProcurementPlan(fixture, observation, pressures, requiredRawMaterial, period, params);
-  const laborResult = buildStandardAiWorkerAssignments(fixture, observation, pressures, productionResult.productionPlans, params);
+  let laborResult = buildStandardAiWorkerAssignments(fixture, observation, pressures, productionResult.productionPlans, params);
   // 【Test16】資金繰り判断へ当期の原料調達計画を渡す。これにより「原料を買うのに
   // 資金が要る」ことが借入判断の入力になる（従来は最低現金バッファだけで決めていた）。
   // 調達計画は上で確定済みであり、循環しない。
-  const financingResult = buildStandardAiFinancingRequest(observation, pressures, params, {
+  const procurementCashPlan = {
     domesticDesiredQuantityTons: unwrapUnit(procurementResult.domesticPurchasePlan.desiredQuantity),
     importOrderedQuantityTons: procurementResult.importOrders.reduce((sum, o) => sum + unwrapUnit(o.orderedQuantity), 0),
+  };
+
+  // 【Phase SAI-GROW-3B-1・実装指示§1・§9】Liquidity SSoT。
+  //
+  // 【decision ordering の解き方（選択肢A+B）】
+  //  (A) 「いくらまで投資に回せるか」は、CAPEXとFinanceの**両方より前**に、
+  //      1つのpure resolverで確定させる（この行）。両者は同じassessmentを見る。
+  //  (B) 借入額はCAPEX確定後に決める。investment → financing の順にしたのは、
+  //      「当期承認した投資の支払」を借入必要額へ織り込むためであり、
+  //      逆順（従来）では CAPEX が Finance の結果を見られず、両者が矛盾していた。
+  //      capex/newFactory は financingResult を参照しないため、循環は生じない。
+  const liquidityAssessment = assessCommittedCashRequirement({
+    observation,
+    pressures,
+    params,
+    procurementCashPlan,
+    crisisState: crisisAssessment.state,
+    financialRiskTolerance: vision ? vision.financialRiskTolerance : null,
+    growthParams: params.growthPressure,
   });
+  // 同一Turn内に承認した提案の支払を積み上げる（各案件が同じ現金を満額使う旧構造を塞ぐ）。
+  let approvedInvestmentPaymentsThisTurnUsd = 0;
+  let approvedInvestmentPaymentsThisQuarterUsd = 0;
+  const liquidityGate: LiquidityGateContext = {
+    assessment: liquidityAssessment,
+    horizonQuarters: COMMITTED_CAPEX_HORIZON_QUARTERS,
+    alreadyApprovedThisTurnUsd: () => approvedInvestmentPaymentsThisTurnUsd,
+    alreadyApprovedThisQuarterUsd: () => approvedInvestmentPaymentsThisQuarterUsd,
+    commit: (paymentsUsd: number, paymentsThisQuarterUsd: number) => {
+      approvedInvestmentPaymentsThisTurnUsd += Math.max(0, paymentsUsd);
+      approvedInvestmentPaymentsThisQuarterUsd += Math.max(0, paymentsThisQuarterUsd);
+    },
+  };
+
+  // 【Phase SAI-GROW-3C・実装指示§1/§3/§4】Deliverability Constraint Routing。
+  //
+  // 3B-3のcapは1ミリも緩めない。「売れない」のではなく「作れない」のだから、
+  // Deliverability Gapを能力側（Production CAPEX / Worker / Procurement / Liquidity /
+  // Sales Hiring）へrouteする。Commercial Ambition・Vision・Commitmentのいずれにも
+  // 書き戻さない——能力が伸びれば3B-3のcapが自然に緩み、Ambitionが自力で戻る。
+  const desiredMixByProduct: ProductAmount = zeroProductAmount();
+  for (const wish of salesResult.salesWishByMarketProduct) {
+    desiredMixByProduct[wish.product] += wish.desiredQuantityBeforeEffortConstraint;
+  }
+  const growthRouting: GrowthRoutingAssessment = assessGrowthRouting({
+    observation,
+    pressures,
+    params,
+    commercialAmbitionTons: commercialAmbition.ambitionTons,
+    desiredMixByProduct,
+    deliverable: deliverableCommitment,
+    liquidity: liquidityAssessment,
+    fundableRawMaterialTons: fundableRawMaterialView.fundableRawMaterialTons,
+    rawMaterialLimitedByFunding:
+      fundableRawMaterialView.priceKnown &&
+      fundableRawMaterialView.fundableDomesticProcurementTons < nearTermBindingProductionCapacityTons,
+    nearTermBindingProductionCapacityTons,
+    salesCapacityTons: salesCapacityTonsForCommitment,
+    // 【Phase SAI-GROW-3C.1】Worker採用の目標を「志」ではなく「近い将来実行可能な規模」にする。
+    currentPeriodProductionRequirementTons: sumProductAmount(finalProductionRequirementByProduct),
+    recentActualScaleTons,
+    survivalPosture: fundableOperations.posture,
+    deliverabilityCapApplied: applyDeliverabilityCap,
+  });
+
+  // 【§4】Workerがbindingなら、Factory CAPEXより先にWorker増員を通す。
+  // 増員の刻みは既存の regularHeadcountAdjustmentDamping のままであり一括採用しない。
+  if (growthRouting.actionTaken && growthRouting.route === "WORKFORCE") {
+    laborResult = buildStandardAiWorkerAssignments(
+      fixture,
+      observation,
+      pressures,
+      productionResult.productionPlans,
+      params,
+      // 【Phase SAI-GROW-3C.1】志ではなく「Worker以外の制約の下で実行可能な規模」に要る人数。
+      growthRouting.workerRequirementForExecutableTarget
+    );
+  }
+
+  const liquidityDiagnostic: StandardAiDiagnosticEntry = {
+    code: "LIQUIDITY_ASSESSED",
+    domain: "finance",
+    companyId: fixture.companyId,
+    severity: liquidityAssessment.liquidityHeadroomUsd < 0 ? "warning" : "info",
+    keyValues: {
+      currentCash: liquidityAssessment.currentCashUsd,
+      expectedArCollection: liquidityAssessment.expectedArCollectionUsd,
+      realisticallyAvailableBorrowing: liquidityAssessment.realisticallyAvailableBorrowingUsd,
+      availableLiquidity: liquidityAssessment.availableLiquidityUsd,
+      operatingWorkingCapitalRequirement: liquidityAssessment.operatingWorkingCapitalRequirementUsd,
+      minimumProtectedOperatingRequirement: liquidityAssessment.minimumProtectedOperatingRequirementUsd,
+      debtServiceRequirement: liquidityAssessment.debtServiceRequirementUsd,
+      committedCapitalPayments: liquidityAssessment.committedCapitalPaymentsUsd,
+      committedCapitalPaymentsThisQuarter: liquidityAssessment.committedCapitalPaymentsThisQuarterUsd,
+      minimumOperatingCashReserve: liquidityAssessment.minimumOperatingCashReserveUsd,
+      crisisBuffer: liquidityAssessment.crisisBufferUsd,
+      protectedFundingRequirement: liquidityAssessment.protectedFundingRequirementUsd,
+      liquidityHeadroom: liquidityAssessment.liquidityHeadroomUsd,
+      cashBasedHeadroom: liquidityAssessment.cashBasedHeadroomUsd,
+      currentTurnFundableBorrowing: liquidityAssessment.currentTurnFundableBorrowingUsd,
+      currentTurnFundableHeadroom: liquidityAssessment.currentTurnFundableHeadroomUsd,
+      financingNeed: liquidityAssessment.financingNeedUsd,
+    },
+    decisionSummary:
+      liquidityAssessment.liquidityHeadroomUsd >= 0
+        ? `投資へ回せる流動性 ${Math.round(liquidityAssessment.liquidityHeadroomUsd).toLocaleString()} USD`
+        : `流動性が守るべき資金を ${Math.round(-liquidityAssessment.liquidityHeadroomUsd).toLocaleString()} USD 下回っている`,
+    message:
+      `利用可能流動性 ${Math.round(liquidityAssessment.availableLiquidityUsd).toLocaleString()} USD` +
+      `（現金 ${Math.round(liquidityAssessment.currentCashUsd).toLocaleString()} ＋ 売掛回収 ${Math.round(
+        liquidityAssessment.expectedArCollectionUsd
+      ).toLocaleString()} ＋ 現実的な借入余力 ${Math.round(liquidityAssessment.realisticallyAvailableBorrowingUsd).toLocaleString()}）に対し、` +
+      `守るべき資金 ${Math.round(liquidityAssessment.protectedFundingRequirementUsd).toLocaleString()} USD` +
+      `（最低操業 ${Math.round(liquidityAssessment.minimumProtectedOperatingRequirementUsd).toLocaleString()} ＋ 元利 ${Math.round(
+        liquidityAssessment.debtServiceRequirementUsd
+      ).toLocaleString()} ＋ 承認済み投資 ${Math.round(liquidityAssessment.committedCapitalPaymentsUsd).toLocaleString()} ＋ 最低現金 ${Math.round(
+        liquidityAssessment.minimumOperatingCashReserveUsd
+      ).toLocaleString()}${liquidityAssessment.crisisBufferUsd > 0 ? ` ＋ 危機buffer ${Math.round(liquidityAssessment.crisisBufferUsd).toLocaleString()}` : ""}）。`,
+  };
+
   const capexResult = buildStandardAiCapexDecision(
     fixture,
     observation,
     pressures,
     productionResult.neededByProduct,
     requiredRawMaterialUnconstrained,
-    params
+    params,
+    undefined,
+    liquidityGate,
+    // 【§3 PRODUCTION】Deliverability Gapが生産能力起因かつ持続的なときだけ、
+    // ボトルネック判定の分子を志側へ戻す（既存のsustained / noExcess / 財務ゲートは無変更）。
+    growthRouting.actionTaken && growthRouting.route === "PRODUCTION_CAPEX"
+      ? growthRouting.routedGrowthByProduct
+      : undefined
   );
   // 【Standard AI Capability Expansion・Phase CE-2】VAP商品開発費（tier選択）。
   // capex.tsのnewProjectProposalsとは独立した意思決定軸（CapitalProjectTypeでは
@@ -582,7 +883,9 @@ export function generateStandardAiDecisionWithDiagnostics(
   );
   const bindingProductionCapacityTons = computeBindingProductionCapacityTons(
     observation.totalEffectiveCapacityByProduct,
-    observation.totalEffectiveCommonProcessingCapacity
+    observation.totalEffectiveCommonProcessingCapacity,
+    observation.totalEffectiveFreezingPackagingCapacity,
+    PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
   );
   const unservedOpportunity = computeUnservedOpportunity({
     commercialAmbitionTons: commercialAmbition.ambitionTons,
@@ -622,6 +925,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     // 「前四半期に工場を実際に満杯まで回していた（既存の sustained しきい値を再利用）」
     // かつ「今期の志がその能力を超えている」ときだけ、持続的な能力不足の根拠とみなす。
     // 新しい閾値は発明していない（capexSustainedUtilizationThreshold をそのまま使う）。
+    liquidity: liquidityGate,
     persistentCapacityCausedUnserved:
       pressures.hadPriorQuarterUtilization &&
       bindingProductionCapacityTons > 0 &&
@@ -642,6 +946,9 @@ export function generateStandardAiDecisionWithDiagnostics(
     targetScaleBand: targetScaleResult.targetScaleBand,
     hasNearTermCapexUnderConstruction: targetCapabilityResult.hasNearTermCapexUnderConstruction,
     commercialAmbitionTons: commercialAmbition.ambitionTons,
+    // 【Phase SAI-GROW-3B-2・実装指示§6】深刻かつ持続する危機のときだけ、
+    // 既存の減員ロジックの在庫制約ブロックを外す（一時的Stressでは外さない）。
+    allowsSurvivalReduction: fundableOperations.allowsSalesForceReduction,
   });
 
   // 【指示§9・Crisis Gate】SEVERE_DISTRESS時、新規設備投資提案（既存増設＋新工場の
@@ -650,11 +957,16 @@ export function generateStandardAiDecisionWithDiagnostics(
   // projectを勝手にキャンセルしない」ため、cancelRequests/resumeRequestsは
   // capexResultの計算結果をそのまま使う＝一切触らない）。
   const isSevereDistress = crisisAssessment.state === "SEVERE_DISTRESS";
-  const newFactoryProposalsAfterCrisisGate = isSevereDistress ? [] : newFactoryResult.proposals;
-  const capexDecisionAfterCrisisGate = isSevereDistress
+  // 【Phase SAI-GROW-3B-2・実装指示§9】SURVIVAL/RECOVERYのあいだは新規の成長投資を
+  // 止める。1Turn資金が戻っただけでGrowth全開へ戻さない（bounded recovery）。
+  // 既に着工済みprojectはCM-1と同じくキャンセルしない（cancel/resumeには触れない）。
+  const growthPaused = growthPausedForRecovery(fundableOperations);
+  const suppressNewGrowth = isSevereDistress || growthPaused;
+  const newFactoryProposalsAfterCrisisGate = suppressNewGrowth ? [] : newFactoryResult.proposals;
+  const capexDecisionAfterCrisisGate = suppressNewGrowth
     ? { ...capexResult.capexDecision, newProjectProposals: [] }
     : capexResult.capexDecision;
-  const capexSuppressedByCrisis = isSevereDistress && (capexResult.capexDecision.newProjectProposals.length > 0 || newFactoryResult.proposals.length > 0);
+  const capexSuppressedByCrisis = suppressNewGrowth && (capexResult.capexDecision.newProjectProposals.length > 0 || newFactoryResult.proposals.length > 0);
 
   // 【指示§10・Crisis Gate】SEVERE_DISTRESS時、営業採用を0にする。既存営業人員の
   // 自動大量解雇は今回追加しない（salesForceLayoffCountはそのまま。指示§10
@@ -662,8 +974,33 @@ export function generateStandardAiDecisionWithDiagnostics(
   // 必要量（Commercial Commitment Gate経由）にbuildStandardAiWorkerAssignments自体が
   // 追随するため、別途のgateを追加していない（laborResult.workerAssignmentsは
   // 生産計画から逆算する既存ロジックそのまま）。
-  const salesForceHireCountAfterCrisisGate = isSevereDistress ? 0 : salesForceHiringResult.salesForceHireCount;
-  const salesHiringSuppressedByCrisis = isSevereDistress && salesForceHiringResult.salesForceHireCount > 0;
+  // 【Phase SAI-GROW-3C・実装指示§6】Sales Hiringは最後に評価する。
+  // Production / Worker / Raw Material / Liquidity のいずれかがbindingなのに
+  // 営業だけ増やす、ということをしない（Sales Hiringだけが先行しない）。
+  //
+  // 【「gapがあれば常に採用禁止」にしない・実測による訂正】当初 PRODUCTION / WORKFORCE /
+  // PROCUREMENT / LIQUIDITY のいずれかがbindingなら一律に採用を止めたが、成長中の会社は
+  // 常に何らかのgapを持つため事実上の採用停止になり、新工場のDEMAND_PULLゲートへ到達する
+  // 会社が消えて既存回帰テストCG-21が落ちた（実測）。
+  // 止めるべきなのは「営業だけが先行する」ケースであって、能力側へ手を打っている最中の
+  // 採用ではない。§3が明示的に「設備や営業採用を増やしてはいけない」とするLIQUIDITYと、
+  // 能力側へ何も手を打てていない（actionTaken=false）ケースだけを止める。
+  //
+  // 【範囲を絞った理由・実測による訂正】当初は PRODUCTION / WORKFORCE / PROCUREMENT /
+  // LIQUIDITY のいずれかがbindingなら一律に採用を止め、次に「能力側へ手を打てていない
+  // 場合」も止めた。しかし成長中の会社は常に何らかのgapを持つため事実上の採用停止になり、
+  // 新工場のDEMAND_PULLゲートへ到達する会社が消えて既存回帰テストCG-21が落ちた（実測）。
+  //
+  // 生産余力・原料供給制約・資金余力に対する採用ガードは、既存の
+  // buildStandardAiSalesForceHiringDecision が既に持っている
+  // （productionHeadroomSufficient / rawMaterialSupplyConstraintState / liquidityOk）。
+  // ここで二重に止める必要はない。§3が「設備や営業採用を増やしてはいけない」と
+  // 明示するLIQUIDITYだけを、この層の責務として止める。
+  const growthRouteBlocksSalesHiring = growthRouting.route === "LIQUIDITY";
+  const salesHiringSuppressedByGrowthRoute = growthRouteBlocksSalesHiring && salesForceHiringResult.salesForceHireCount > 0;
+  const salesForceHireCountAfterCrisisGate =
+    suppressNewGrowth || growthRouteBlocksSalesHiring ? 0 : salesForceHiringResult.salesForceHireCount;
+  const salesHiringSuppressedByCrisis = suppressNewGrowth && salesForceHiringResult.salesForceHireCount > 0;
   // 【Standard AI Capability Expansion・Phase CE-2・Crisis Gate】SEVERE_DISTRESSでは
   // 新規のVAP商品開発支出（新たな裁量的コミットメント）も停止する（CM-1の
   // 「新規提案・新規採用を止める」思想をそのまま踏襲。既に投じたスコアの蓄積
@@ -682,6 +1019,19 @@ export function generateStandardAiDecisionWithDiagnostics(
           newProjectProposals: [...capexDecisionAfterCrisisGate.newProjectProposals, ...newFactoryProposalsAfterCrisisGate],
         }
       : capexDecisionAfterCrisisGate;
+
+  // 【Phase SAI-GROW-3B-1・実装指示§8・§9】借入判断は投資確定後に行う。
+  // 当期に承認した新規投資の当期支払ぶんも資金需要へ含めるため、Crisis Gate適用後の
+  // 最終CAPEX（finalCapexDecision）が決まってから評価する。
+  const financingResult = buildStandardAiFinancingRequest(observation, pressures, params, procurementCashPlan, {
+    assessment: liquidityAssessment,
+    approvedInvestmentPaymentsThisQuarterUsd: isSevereDistress ? 0 : approvedInvestmentPaymentsThisQuarterUsd,
+    // 【Phase SAI-GROW-3B-1.1】当期承認した投資のうち、手元現金の余力
+    // （cashBasedHeadroomUsd）を超える分＝当期借入を前提に承認した額。
+    approvedInvestmentBorrowingThisQuarterUsd: isSevereDistress
+      ? 0
+      : Math.max(0, approvedInvestmentPaymentsThisQuarterUsd - Math.max(0, liquidityAssessment.cashBasedHeadroomUsd)),
+  });
 
   // 【Phase DIV-4】Standard AI配当ポリシー（Flow-Based Annual Dividend Policy）。
   // 年度末Q4のみ・当期純利益基準・distributableEarningsは上限としてのみ使用。
@@ -752,6 +1102,197 @@ export function generateStandardAiDecisionWithDiagnostics(
     }。`,
   };
 
+  // 【Phase SAI-GROW-3B-2・実装指示§11】Survival / Recovery の1Turn追跡。
+  // crisisState・posture・fundable量・計画量・人員・流動性を1件で追える形にする。
+  const plannedProductionTons = productionResult.productionPlans.reduce((sum, p) => sum + unwrapUnit(p.desiredQuantity), 0);
+  const plannedWorkerTotal = laborResult.workerAssignments.reduce((sum, w) => sum + w.regularHeadcount, 0);
+  const fundableOperationsDiagnostic: StandardAiDiagnosticEntry = {
+    code:
+      fundableOperations.posture === "SURVIVAL"
+        ? "SURVIVAL_MODE"
+        : fundableOperations.posture === "RECOVERY"
+          ? "RECOVERY_MODE"
+          : "GROWTH_PAUSED_FOR_RECOVERY",
+    domain: "finance",
+    companyId: fixture.companyId,
+    severity: fundableOperations.posture === "SURVIVAL" ? "warning" : "info",
+    keyValues: {
+      crisisStateIsSevere: crisisAssessment.state === "SEVERE_DISTRESS" ? 1 : 0,
+      crisisStateIsStress: crisisAssessment.state === "LIQUIDITY_STRESS" ? 1 : 0,
+      postureIsSurvival: fundableOperations.posture === "SURVIVAL" ? 1 : 0,
+      postureIsRecovery: fundableOperations.posture === "RECOVERY" ? 1 : 0,
+      sustainedDistress: fundableOperations.sustainedDistress ? 1 : 0,
+      procurementFundingUsd: fundableOperations.procurementFundingUsd,
+      expectedBorrowingForOperationsUsd: fundableOperations.expectedBorrowingForOperationsUsd,
+      fundableProcurementTons: fundableOperations.fundableDomesticProcurementTons,
+      fundableRawMaterialTons: fundableOperations.fundableRawMaterialTons,
+      fundableProductionTons: fundableOperations.fundableProductionTons,
+      productionRequirementTons: sumProductAmount(finalProductionRequirementByProduct),
+      plannedProductionTons,
+      plannedProcurementTons: unwrapUnit(procurementResult.domesticPurchasePlan.desiredQuantity),
+      workerCurrent: observation.regularHeadcountTotal,
+      workerPlanned: plannedWorkerTotal,
+      workerChange: plannedWorkerTotal - observation.regularHeadcountTotal,
+      salesHeadcountCurrent: observation.salesForceHeadcountTotal,
+      salesHeadcountChange: salesForceHireCountAfterCrisisGate - salesForceHiringResult.salesForceLayoffCount,
+      liquidityHeadroomUsd: liquidityAssessment.liquidityHeadroomUsd,
+      availableBorrowingUsd: liquidityAssessment.realisticallyAvailableBorrowingUsd,
+      growthPaused: growthPaused ? 1 : 0,
+    },
+    decisionSummary:
+      fundableOperations.posture === "NORMAL"
+        ? "通常運転（資金による規模の縮退なし）"
+        : fundableOperations.posture === "SURVIVAL"
+          ? `資金手当て可能な規模（原料${Math.round(fundableOperations.fundableRawMaterialTons).toLocaleString()}t）で操業する`
+          : "資金は回復。規模の回復を優先し、新規の成長投資は見送る",
+    message: fundableOperations.reason,
+  };
+
+  // 【実装指示§11】縮退が実際に効いたときだけ、対象ドメインの理由codeを立てる。
+  const survivalActionDiagnostics: StandardAiDiagnosticEntry[] = [];
+  if (fundableOperations.appliesProductionCap) {
+    survivalActionDiagnostics.push({
+      code: "PROCUREMENT_REDUCED_BY_LIQUIDITY",
+      domain: "procurement",
+      companyId: fixture.companyId,
+      severity: "warning",
+      keyValues: {
+        plannedProcurementTons: unwrapUnit(procurementResult.domesticPurchasePlan.desiredQuantity),
+        fundableProcurementTons: fundableOperations.fundableDomesticProcurementTons,
+        procurementFundingUsd: fundableOperations.procurementFundingUsd,
+      },
+      decisionSummary: "資金手当て可能な調達規模へ計画を合わせる",
+      message:
+        "生産計画を資金手当て可能な規模へ縮退させたため、原料調達計画もその生産必要量へ追従させる" +
+        "（engine側で事後的に削られる量を希望し続けない）。",
+    });
+  }
+  if (fundableOperations.posture === "SURVIVAL" && plannedWorkerTotal < observation.regularHeadcountTotal) {
+    survivalActionDiagnostics.push({
+      code: "WORKFORCE_REDUCED_FOR_SURVIVAL",
+      domain: "labor",
+      companyId: fixture.companyId,
+      severity: "warning",
+      keyValues: {
+        workerCurrent: observation.regularHeadcountTotal,
+        workerPlanned: plannedWorkerTotal,
+        workerChange: plannedWorkerTotal - observation.regularHeadcountTotal,
+      },
+      decisionSummary: `常用ワーカーを${observation.regularHeadcountTotal - plannedWorkerTotal}人縮小`,
+      message:
+        "資金手当て可能な生産規模に合わせて必要人数が下がったため、既存の段階的な人員調整" +
+        "（regularHeadcountAdjustmentDamping）の範囲で常用ワーカーを縮小する（一括解雇はしない）。",
+    });
+  }
+
+  // 【Phase SAI-GROW-3B-3・実装指示§13】Deliverable Commitment の1Turn追跡。
+  // 【§9 Constraint Routing】capが効いたときは「成長機会が無い」ではなく、
+  // 「何が納品を縛っているか」＝次に何へ投資すべきかをrouteする。
+  const deliverabilityConstraintCode = {
+    PRODUCTION: "DELIVERABLE_LIMIT_PRODUCTION",
+    RAW_MATERIAL: "DELIVERABLE_LIMIT_RAW_MATERIAL",
+    BACKLOG: "DELIVERABLE_LIMIT_BACKLOG",
+    LIQUIDITY: "DELIVERABLE_LIMIT_LIQUIDITY",
+    NONE: "DELIVERABLE_COMMITMENT_ASSESSED",
+  } as const;
+  const deliverableCommitmentDiagnostic: StandardAiDiagnosticEntry = {
+    code: applyDeliverabilityCap
+      ? deliverabilityConstraintCode[deliverableCommitment.bindingDeliverabilityConstraint]
+      : "DELIVERABLE_COMMITMENT_ASSESSED",
+    domain: "sales",
+    companyId: fixture.companyId,
+    severity: applyDeliverabilityCap ? "warning" : "info",
+    keyValues: {
+      commercialAmbitionTons: commercialAmbition.ambitionTons,
+      commercialCommitmentBeforeDeliverability: deliverableCommitment.commitmentBeforeDeliverabilityTons,
+      deliverableCapacityCurrentTons: deliverableCommitment.deliverableCapacityCurrentTons,
+      deliverableCapacityNearTermTons: deliverableCommitment.deliverableCapacityNearTermTons,
+      existingBacklogTons: deliverableCommitment.existingBacklogTons,
+      healthyForwardBacklogTons: deliverableCommitment.healthyForwardBacklogTons,
+      overdueBacklogTons: deliverableCommitment.overdueBacklogTons,
+      carryOverBacklogTons: deliverableCommitment.carryOverBacklogTons,
+      normalBacklogAllowanceTons: deliverableCommitment.normalBacklogAllowanceTons,
+      excessBacklogTons: deliverableCommitment.excessBacklogTons,
+      backlogDeliveryHorizonQuarters: Number.isFinite(deliverableCommitment.backlogDeliveryHorizonQuarters)
+        ? deliverableCommitment.backlogDeliveryHorizonQuarters
+        : -1,
+      remainingDeliverableHeadroomTons: deliverableCommitment.remainingDeliverableHeadroomTons,
+      deliverabilityCapTons: deliverableCommitment.deliverabilityCapTons,
+      finalSubmissionTargetTons: commercialCommitment.submissionTargetTons,
+      incrementalSubmissionReductionTons: applyDeliverabilityCap ? deliverableCommitment.incrementalSubmissionReductionTons : 0,
+      deliveryLeadTimeQuarters: observation.deliveryLeadTimeQuarters,
+      applied: applyDeliverabilityCap ? 1 : 0,
+    },
+    decisionSummary: applyDeliverabilityCap
+      ? `納品可能量に合わせて新規提出を ${Math.round(deliverableCommitment.incrementalSubmissionReductionTons).toLocaleString()}t 抑える`
+      : "納品可能量は新規提出の制約になっていない",
+    message: applyDeliverabilityCap
+      ? `志（Commercial Ambition ${Math.round(commercialAmbition.ambitionTons).toLocaleString()}t）は変えないまま、` +
+        `納期到来時点の納品余力 ${Math.round(deliverableCommitment.remainingDeliverableHeadroomTons).toLocaleString()}t` +
+        `（納品能力 ${Math.round(deliverableCommitment.deliverableCapacityNearTermTons).toLocaleString()}t − 正常水準超の受注残 ` +
+        `${Math.round(deliverableCommitment.excessBacklogTons).toLocaleString()}t）に合わせて` +
+        `今期の新規提出を ${Math.round(deliverableCommitment.commitmentBeforeDeliverabilityTons).toLocaleString()}t → ` +
+        `${Math.round(commercialCommitment.submissionTargetTons).toLocaleString()}t へ抑える。` +
+        `納品を縛っているのは ${deliverableCommitment.bindingDeliverabilityConstraint} であり、成長機会が無いのではない` +
+        `（受注残消化 ${deliverableCommitment.backlogDeliveryHorizonQuarters.toFixed(2)} 四半期分）。`
+      : `納品余力 ${Math.round(deliverableCommitment.remainingDeliverableHeadroomTons).toLocaleString()}t が` +
+        `提出目標 ${Math.round(deliverableCommitment.commitmentBeforeDeliverabilityTons).toLocaleString()}t を上回るため、` +
+        `納品可能量による抑制は行っていない。`,
+  };
+
+  // 【Phase SAI-GROW-3C・実装指示§16】Growth Routing の1Turn追跡。
+  const growthRouteCode = {
+    PRODUCTION_CAPEX: "GROWTH_ROUTE_PRODUCTION_CAPEX",
+    WORKFORCE: "GROWTH_ROUTE_WORKFORCE",
+    PROCUREMENT: "GROWTH_ROUTE_PROCUREMENT",
+    LIQUIDITY: "GROWTH_ROUTE_LIQUIDITY",
+    SALES_HIRING: "GROWTH_ROUTE_SALES_HIRING",
+    BACKLOG_RECOVERY: "GROWTH_ROUTE_BACKLOG_RECOVERY",
+    NONE: "GROWTH_ROUTE_NONE",
+  } as const;
+  const growthRoutingDiagnostic: StandardAiDiagnosticEntry = {
+    code: growthRouteCode[growthRouting.route],
+    domain: "capex",
+    companyId: fixture.companyId,
+    severity: growthRouting.actionTaken ? "info" : "warning",
+    keyValues: {
+      commercialAmbitionTons: commercialAmbition.ambitionTons,
+      deliverableCapacityTons: growthRouting.sustainableDeliverableCapacityTons,
+      deliverabilityGapTons: growthRouting.deliverabilityGrowthGapTons,
+      routedGrowthTons: growthRouting.routedGrowthTons,
+      workerCapacitySupportedTons: growthRouting.workerCapacitySupportedTons,
+      workerRequirementForAmbition: growthRouting.workerRequirementForAmbition,
+      workerExpansionTargetTons: growthRouting.workerExpansionTargetTons,
+      workerRequirementForExecutableTarget: growthRouting.workerRequirementForExecutableTarget,
+      workerGapForAmbition: growthRouting.workerGapForAmbition,
+      workerGapForExecutableTarget: growthRouting.workerGapForExecutableTarget,
+      currentWorkerHeadcount: growthRouting.currentWorkerHeadcount,
+      workerGap: growthRouting.workerGap,
+      workerLimited: growthRouting.workerLimited ? 1 : 0,
+      productionGapTons: growthRouting.productionGapTons,
+      rawMaterialGapTons: growthRouting.rawMaterialGapTons,
+      liquidityBlocked: growthRouting.liquidityBlocked ? 1 : 0,
+      persistent: growthRouting.persistent ? 1 : 0,
+      actionTaken: growthRouting.actionTaken ? 1 : 0,
+      salesHiringSuppressedByGrowthRoute: salesHiringSuppressedByGrowthRoute ? 1 : 0,
+    },
+    decisionSummary: growthRouting.actionTaken
+      ? `納品制約（${growthRouting.bindingConstraint}）を ${growthRouting.route} へ回付し ${Math.round(growthRouting.routedGrowthTons).toLocaleString()}t の能力不足を解消しにいく`
+      : growthRouting.deliverabilityGrowthGapTons > 0
+        ? `納品制約（${growthRouting.bindingConstraint}）は観測したが能力側の行動は起こさない`
+        : "納品能力は志に足りており、能力側への回付は不要",
+    message: growthRouting.actionTaken
+      ? `志 ${Math.round(commercialAmbition.ambitionTons).toLocaleString()}t に対し持続的に納品できるのは ` +
+        `${Math.round(growthRouting.sustainableDeliverableCapacityTons).toLocaleString()}t であり、` +
+        `不足 ${Math.round(growthRouting.deliverabilityGrowthGapTons).toLocaleString()}t の主因は ${growthRouting.bindingConstraint} である。` +
+        `Commercial Ambitionは変更せず、${growthRouting.route} へ回付する` +
+        `（必要Worker ${Math.round(growthRouting.workerRequirementForAmbition).toLocaleString()}人 / 現有 ` +
+        `${Math.round(growthRouting.currentWorkerHeadcount).toLocaleString()}人、生産能力不足 ` +
+        `${Math.round(growthRouting.productionGapTons).toLocaleString()}t、原料不足 ` +
+        `${Math.round(growthRouting.rawMaterialGapTons).toLocaleString()}t）。`
+      : growthRouting.actionNotTakenReason || "納品能力は志に足りている。",
+  };
+
   const newSalesSuppressedByCrisis = crisisAssessment.state !== "NORMAL";
   const crisisDiagnostics = buildCrisisDiagnostics(fixture.companyId, crisisAssessment, observation, {
     newSalesSuppressed: newSalesSuppressedByCrisis,
@@ -786,9 +1327,37 @@ export function generateStandardAiDecisionWithDiagnostics(
     ...commercialGrowthDiagnostics,
     ...newFactoryResult.diagnostics,
     ...buildCommitmentDiagnostics(fixture.companyId, commercialCommitment, conversionObservation),
+    liquidityDiagnostic,
+    fundableOperationsDiagnostic,
+    deliverableCommitmentDiagnostic,
+    growthRoutingDiagnostic,
+    ...survivalActionDiagnostics,
     ...crisisDiagnostics,
     ...(vapDevCrisisDiagnostic ? [vapDevCrisisDiagnostic] : []),
   ];
+
+  // 【Phase SAI-GROW-1・実装指示§26】Shadow Growth Pressure。
+  //
+  // **すべての意思決定（decision）が確定した後**に、確定済みの値だけを読んで評価する。
+  // ここより上のコードはこの結果を参照しないため、Shadowの有無でDecisionが変わることは
+  // 構造上あり得ない（テストSAI-GROW-18/19で bit-equivalence を固定している）。
+  const growthPressure = assessGrowthPressure({
+    core: growthCore,
+    observation,
+    unservedOpportunity,
+    commercialAmbition,
+    ambitionTonsWithBaseStep: commercialAmbitionWithBaseStep.ambitionTons,
+    // step limitが無ければ到達していた水準（Visionと観測機会の小さい方）。
+    ambitionTonsWithoutStepLimit: Math.min(
+      Math.max(commercialAmbition.baselineTons, strategicGrowth ? strategicGrowth.visionTargetScaleAtCurrentTurn : commercialAmbition.baselineTons),
+      commercialAmbition.realisticOpportunityTons > 0 ? commercialAmbition.realisticOpportunityTons : commercialAmbition.baselineTons
+    ),
+    salesHiringZeroReason: salesForceHiringResult.hiringDiagnostics.zeroHireReason,
+    salesForceHireCount: salesForceHireCountAfterCrisisGate,
+    newCapexProposalCount: finalCapexDecision.newProjectProposals.length,
+    salesParams,
+    params: params.growthPressure,
+  });
 
   return {
     decision,
@@ -811,6 +1380,15 @@ export function generateStandardAiDecisionWithDiagnostics(
       commercialCommitment,
       conversionObservation,
       salesHiring: salesForceHiringResult.hiringDiagnostics,
+      // 【Phase SAI-GROW-3B-1】Liquidity SSoT の評価内訳。Finance・CAPEX・新工場が
+      // 参照したのとまったく同じ値（実装指示§13）。
+      liquidity: liquidityAssessment,
+      fundableOperations,
+      deliverableCommitment,
+      growthRouting,
+      approvedInvestmentPaymentsThisTurnUsd,
+      // 【Phase SAI-GROW-1】診断専用のShadow Growth Pressure（Decisionには未接続）。
+      growthPressure,
       // 【Standard AI Crisis Management・Phase CM-1・指示§15】Analysis Pack・
       // Company Inspector・Claude explanationが読む、この四半期のCrisis判断そのもの。
       crisis: {

@@ -253,12 +253,21 @@ test("AMM-GK-19: 注入した知識のidが返り、注入していないidは�
   assert.deepEqual(recorded, ["FINANCE.AR_SETTLEMENT"]);
 });
 
-test("AMM-GK-20: role relevance filtering が効く", () => {
-  // CFOへは営業能力の詳細を渡さない（SALESはCFOのappliesToRolesに無い）。
+test("AMM-GK-20: role relevance は除外ではなく順位付けとして効く（M2.8.1で変更）", () => {
+  // 【M2.8.1で仕様変更】M2.8ではroleをhard filterにしていたため、CFOが営業ルールを
+  // 聞かれると知識が0件になり、briefingの実績から独自ルールを逆算する誤答が実APIで出た。
+  // ゲームルールの正しさはroleに依存しないため、roleは加点のみに使う。
   const cfo = getGameKnowledgeForQuestion({ question: "営業一人当たりの販売能力は？", role: "CFO" });
-  assert.ok(!cfo.entries.some((e) => e.domain === "SALES"), "CFOへSALES知識が漏れている");
+  assert.ok(cfo.entries.length > 0, "CFOへ知識が1件も届いていない（M2.8.1で修正した退行）");
+  assert.ok(cfo.entries.some((e) => e.id === "SALES.SALESPERSON_CAPACITY"), "CFOへ営業ルールが届いていない");
   const commercial = getGameKnowledgeForQuestion({ question: "営業一人当たりの販売能力は？", role: "COMMERCIAL" });
   assert.ok(commercial.entries.some((e) => e.id === "SALES.SALESPERSON_CAPACITY"), "Commercialへ営業知識が届いていない");
+  // roleは順位付けに効く: 担当domainのentryが同点以下に沈まない。
+  const capacityQuestion = "営業体制と生産能力のルールを教えて";
+  const forCommercial = getGameKnowledgeForQuestion({ question: capacityQuestion, role: "COMMERCIAL" });
+  const forCoo = getGameKnowledgeForQuestion({ question: capacityQuestion, role: "COO" });
+  assert.equal(forCommercial.entries[0]?.domain, "SALES", "Commercialの最上位がSALESでない");
+  assert.ok(["PRODUCTION", "LABOR", "CAPACITY", "PROCUREMENT", "CAPEX"].includes(forCoo.entries[0]?.domain ?? ""), "COOの最上位が担当domainでない");
   // CFOには財務知識が届く。
   const arForCfo = getGameKnowledgeForQuestion({ question: "売掛金はいつ入る？", role: "CFO" });
   assert.ok(arForCfo.entries.some((e) => e.id === "FINANCE.AR_SETTLEMENT"));
