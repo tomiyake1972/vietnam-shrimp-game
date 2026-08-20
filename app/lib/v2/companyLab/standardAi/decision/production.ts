@@ -42,7 +42,14 @@ export function buildStandardAiProductionPlans(
   fixture: CompanyFixture,
   observation: StandardAiObservation,
   pressures: PressureScores,
-  finalProductionRequirementByProduct: ProductAmount
+  finalProductionRequirementByProduct: ProductAmount,
+  /**
+   * 【Phase SAI-GROW-3B-2】危機時にだけ渡される、当期に資金手当てできる原料量。
+   * decision/fundableOperations.ts が engine の computeProcurementConstraint と
+   * 同じ式で事前評価した値。**undefinedのとき（NORMAL時）は現行挙動と完全に同一**
+   * であり、成長会社へ新しいcapを掛けない（実装指示§3）。
+   */
+  fundableRawMaterialTons?: number
 ): ProductionPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const backlog = observation.outstandingContractByProduct;
@@ -53,7 +60,41 @@ export function buildStandardAiProductionPlans(
   // 呼び出し側（policy.ts）がcurrentPeriodDeliveryDemand起点で算出した値をそのまま使う
   // （二重計上防止。実装指示C-2）。優先順位付け・診断メッセージのためにbacklog・fgは
   // 引き続き参照するが、量そのものには影響させない。
-  const neededByProduct: ProductAmount = finalProductionRequirementByProduct;
+  // 【Phase SAI-GROW-3B-2・実装指示§3】FundableProduction =
+  //   min(生産必要量, 資金手当てできる原料量)  … 商品別には同一比率で縮小する。
+  // 商品別の優先度付けはこの後の既存ロジック（未履行契約優先）がそのまま行うため、
+  // ここでは新しい配分ロジックを作らず比率縮小だけにとどめる。
+  let liquidityScaleFactor = 1;
+  const requirementTotal = sumProductAmount(finalProductionRequirementByProduct);
+  if (fundableRawMaterialTons !== undefined && requirementTotal > EPSILON && fundableRawMaterialTons < requirementTotal - EPSILON) {
+    liquidityScaleFactor = Math.max(0, fundableRawMaterialTons) / requirementTotal;
+  }
+  const neededByProduct: ProductAmount =
+    liquidityScaleFactor < 1
+      ? {
+          hoso: finalProductionRequirementByProduct.hoso * liquidityScaleFactor,
+          pd: finalProductionRequirementByProduct.pd * liquidityScaleFactor,
+          vap: finalProductionRequirementByProduct.vap * liquidityScaleFactor,
+        }
+      : finalProductionRequirementByProduct;
+  if (liquidityScaleFactor < 1) {
+    diagnostics.push({
+      code: "PRODUCTION_REDUCED_BY_LIQUIDITY",
+      domain: "production",
+      companyId: fixture.companyId,
+      severity: "warning",
+      keyValues: {
+        productionRequirementTons: requirementTotal,
+        fundableRawMaterialTons: fundableRawMaterialTons ?? 0,
+        scaleFactor: liquidityScaleFactor,
+      },
+      decisionSummary: `資金手当てできる原料量 ${Math.round(fundableRawMaterialTons ?? 0).toLocaleString()}t の規模で操業する`,
+      message:
+        `当期に資金手当てできる原料量（${Math.round(fundableRawMaterialTons ?? 0).toLocaleString()}t）が` +
+        `生産必要量（${Math.round(requirementTotal).toLocaleString()}t）に届かないため、` +
+        `生産計画を比率${liquidityScaleFactor.toFixed(3)}へ縮退させる（engine側で事後的に調達を削られる前に、AI自身が実行可能な規模へ合わせる）。`,
+    });
+  }
   for (const product of ["hoso", "pd", "vap"] as const) {
     if (backlog[product] > EPSILON) {
       diagnostics.push({

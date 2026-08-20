@@ -52,7 +52,18 @@ export function buildStandardAiWorkerAssignments(
   observation: StandardAiObservation,
   pressures: PressureScores,
   productionPlans: readonly CompanyProductionPlanEntry[],
-  params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1
+  params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
+  /**
+   * 【Phase SAI-GROW-3C・実装指示§4】Workerがbindingで、かつ持続的な納品制約と
+   * 判定されたときにだけ渡される「志を納品するのに要する常用Worker総人数」。
+   *
+   * 3B-3のDeliverable Commitment capにより生産計画が「今受けてよい量」まで縮むため、
+   * 生産計画から逆算するだけでは necessary headcount も縮み、Workerが永久に増えない
+   * （VAPで観測されたdeadlock）。この値が渡された場合だけ、必要人数の下限を
+   * 志側へ引き上げる。**増員の刻みは既存の regularHeadcountAdjustmentDamping のまま**
+   * であり、一気に採用しない。undefinedなら従来と完全に同一の挙動。
+   */
+  workerRequirementFloorTotal?: number
 ): LaborPlanResult {
   const diagnostics: StandardAiDiagnosticEntry[] = [];
   const assignments: WorkerAssignment[] = [];
@@ -124,7 +135,17 @@ export function buildStandardAiWorkerAssignments(
       appliedOvertimeRate: 0,
       temporaryHeadcount: 0,
     });
-    const requiredRegular = required.requiredRegularHeadcount;
+    let requiredRegular = required.requiredRegularHeadcount;
+    // 【Phase SAI-GROW-3C】志側の必要人数を工場の能力シェアで按分し、下限として使う。
+    // 按分の考え方は production.ts / 下の前期必要人数と同じ（独自の推定方式を増やさない）。
+    if (workerRequirementFloorTotal !== undefined && workerRequirementFloorTotal > requiredRegular) {
+      const companyCapacityTotal = capacityTotals.hoso + capacityTotals.pd + capacityTotals.vap;
+      const factoryCapacityTotal = factoryObs
+        ? factoryObs.capacityByProduct.hoso + factoryObs.capacityByProduct.pd + factoryObs.capacityByProduct.vap
+        : 0;
+      const share = companyCapacityTotal > EPSILON ? factoryCapacityTotal / companyCapacityTotal : 0;
+      requiredRegular = Math.max(requiredRegular, workerRequirementFloorTotal * share);
+    }
 
     // 前期時点の必要人数（この工場の商品別能力シェアで前期実績生産量を按分した近似値）。
     // production.tsの工場按分と同じ考え方（能力比按分）を使い、独自の推定方式を増やさない。

@@ -30,7 +30,15 @@ import { unwrapUnit } from "../../../../lib/v2/core/units";
 
 const AT = "2026-01-01T00:00:00.000Z";
 
-/** MASSはbaseline/management-console-32qのseedで、Q32までにNEWFの2工場目が稼働開始する。 */
+/**
+ * baseline/management-console-32qのseedで、Q32までに新設Factory（NEWF）が稼働開始する。
+ *
+ * 【SAI-GROW-3B-1】どの会社が最初に新工場を建てるかはStandard AIの投資判断次第で
+ * 変わる（このテストの過去の修正履歴も、その都度の会社・案件ID固定を追いかけていた）。
+ * ここで確認したいのはUIデータ層が「稼働開始済みの新設Factory」を既存Factoryと
+ * 同じに扱えることであって、どの会社がそれを持つかではないため、会社IDを固定せず
+ * fixture順で最初に稼働済みNEWFを持つ会社を選ぶ。
+ */
 function runToQ32WithNewFactory(turns = 32) {
   let session = createSimulationSession({
     simulationRunId: "newf-worker-test",
@@ -47,13 +55,22 @@ function runToQ32WithNewFactory(turns = 32) {
   return session;
 }
 
+/** 稼働開始済みの新設Factory（NEWF）を持つ会社を、fixture順（決定論的）で1社選ぶ。 */
+function findFixtureWithOperatingNewFactory(session: ReturnType<typeof runToQ32WithNewFactory>) {
+  for (const fixture of session.fixtures) {
+    const ownState = buildCompanyOwnState(session.state, fixture);
+    const newFactoryId = ownState.effectiveFactories.map((f) => f.factoryId).find((id) => id.includes("NEWF"));
+    if (newFactoryId) return { fixture, ownState, newFactoryId };
+  }
+  throw new Error("稼働開始済みの新設Factoryを持つ会社が1社も見つからなかった（テスト前提の見直しが必要）");
+}
+
 test("NEWF-W-1/2: 稼働開始済み新設Factoryが、既存Factoryと同じくdraft.workerAssignmentsに含まれる", () => {
   const session = runToQ32WithNewFactory();
-  const fixture = session.fixtures.find((f) => f.companyId === "MASS")!;
-  const ownState = buildCompanyOwnState(session.state, fixture);
+  const { fixture, ownState } = findFixtureWithOperatingNewFactory(session);
 
   const effectiveFactoryIds = ownState.effectiveFactories.map((f) => f.factoryId);
-  assert.ok(effectiveFactoryIds.length >= 2, "この受入前提（MASSが2工場以上）が崩れている");
+  assert.ok(effectiveFactoryIds.length >= 2, "この受入前提（対象会社が2工場以上）が崩れている");
   const newFactoryId = effectiveFactoryIds.find((id) => id.includes("NEWF"));
   assert.ok(newFactoryId, "新設Factoryが見つからない（テストの前提が崩れている）");
 
@@ -68,8 +85,7 @@ test("NEWF-W-1/2: 稼働開始済み新設Factoryが、既存Factoryと同じく
 
 test("NEWF-W-3/4: 新設Factoryの常用人数を増員・減員でき、既存Factoryと同じ計算式が使われる", () => {
   const session = runToQ32WithNewFactory();
-  const fixture = session.fixtures.find((f) => f.companyId === "MASS")!;
-  const ownState = buildCompanyOwnState(session.state, fixture);
+  const { fixture, ownState } = findFixtureWithOperatingNewFactory(session);
   const publicInfo = buildPublicMarketInfo(session.state);
   const aiDecision = generateStandardAiDecision(fixture, ownState, publicInfo, session.state.currentPeriod, session.state.scenarioState.currentTurn);
   const draft = buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories);
@@ -105,8 +121,7 @@ test("NEWF-W-3/4: 新設Factoryの常用人数を増員・減員でき、既存F
 
 test("NEWF-W-5/6: 新設Factoryの臨時人数・残業率も編集でき、buildDecisionInputFromDraftへ反映される", () => {
   const session = runToQ32WithNewFactory();
-  const fixture = session.fixtures.find((f) => f.companyId === "MASS")!;
-  const ownState = buildCompanyOwnState(session.state, fixture);
+  const { fixture, ownState } = findFixtureWithOperatingNewFactory(session);
   const publicInfo = buildPublicMarketInfo(session.state);
   const aiDecision = generateStandardAiDecision(fixture, ownState, publicInfo, session.state.currentPeriod, session.state.scenarioState.currentTurn);
   const draft = buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories);
@@ -123,8 +138,7 @@ test("NEWF-W-5/6: 新設Factoryの臨時人数・残業率も編集でき、buil
 
 test("NEWF-W-7: 既存Factoryと新設Factoryを同時に編集しても、互いの入力が漏れない", () => {
   const session = runToQ32WithNewFactory();
-  const fixture = session.fixtures.find((f) => f.companyId === "MASS")!;
-  const ownState = buildCompanyOwnState(session.state, fixture);
+  const { fixture, ownState } = findFixtureWithOperatingNewFactory(session);
   const publicInfo = buildPublicMarketInfo(session.state);
   const aiDecision = generateStandardAiDecision(fixture, ownState, publicInfo, session.state.currentPeriod, session.state.scenarioState.currentTurn);
   const draft = buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories);
@@ -146,8 +160,7 @@ test("NEWF-W-9: 新設Factoryへの増員意思決定が、実行後の次state�
   // Q32は当シナリオの最終ターン（advanceCompanyLabQuarterをこれ以上呼べない）ため、
   // Q31時点から「次のターン（Q32）」を実行して確認する。
   const session = runToQ32WithNewFactory(31);
-  const fixture = session.fixtures.find((f) => f.companyId === "MASS")!;
-  const ownState = buildCompanyOwnState(session.state, fixture);
+  const { fixture, ownState } = findFixtureWithOperatingNewFactory(session);
   const publicInfo = buildPublicMarketInfo(session.state);
   const turn = session.state.scenarioState.currentTurn;
   const aiDecision = generateStandardAiDecision(fixture, ownState, publicInfo, session.state.currentPeriod, turn);
@@ -165,10 +178,10 @@ test("NEWF-W-9: 新設Factoryへの増員意思決定が、実行後の次state�
   };
   const decision = buildDecisionInputFromDraft(edited, fixture, session.state.currentPeriod);
 
-  // 他社はAI決定のまま、MASSだけこのPLAYER決定を使う（Manual Overrideと同じ経路）。
-  const decisions: Record<string, ReturnType<typeof buildDecisionInputFromDraft>> = { MASS: decision };
+  // 他社はAI決定のまま、対象会社だけこのPLAYER決定を使う（Manual Overrideと同じ経路）。
+  const decisions: Record<string, ReturnType<typeof buildDecisionInputFromDraft>> = { [fixture.companyId]: decision };
   for (const f of session.fixtures) {
-    if (f.companyId === "MASS") continue;
+    if (f.companyId === fixture.companyId) continue;
     const os = buildCompanyOwnState(session.state, f);
     decisions[f.companyId] = generateStandardAiDecision(f, os, publicInfo, session.state.currentPeriod, turn);
   }

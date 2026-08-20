@@ -242,9 +242,13 @@ function captureCapacities(turn: number, state: CompanyLabState, fixtures: reado
           pd: acc.pd + unwrapUnit(c.pd),
           vap: acc.vap + unwrapUnit(c.vap),
           commonProcessing: acc.commonProcessing + unwrapUnit(c.commonProcessing),
+          // 【Phase SAI-CAP-1】凍結・包装能力も記録する。これが無いと、記録済み Run から
+          // 「その四半期に何が物理的な律速だったか」を後から復元できない
+          // （生産段階3の上限であり、MASS ではこれが真のボトルネックだった）。
+          freezingPackaging: acc.freezingPackaging + unwrapUnit(c.freezingPackaging),
         };
       },
-      { hoso: 0, pd: 0, vap: 0, commonProcessing: 0 }
+      { hoso: 0, pd: 0, vap: 0, commonProcessing: 0, freezingPackaging: 0 }
     );
     return { turn, companyId: fixture.companyId, ...totals };
   });

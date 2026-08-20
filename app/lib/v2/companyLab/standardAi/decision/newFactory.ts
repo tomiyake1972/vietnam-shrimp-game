@@ -20,6 +20,9 @@
 import { CapexProjectProposalInput } from "../../../capex/types";
 import { CAPEX_PARAMETERS_V1, CapexParameters } from "../../../capex/parameters";
 import { CompanyFixture } from "../../types";
+import { evaluateInvestmentAffordability, plannedInvestmentPaymentsWithinHorizonUsd } from "./liquidity";
+import { NEW_FACTORY_STRATEGY_PARAMETERS_V1, NewFactoryStrategyParameters } from "./newFactoryStrategyParameters";
+import { LiquidityGateContext } from "./capex";
 import { CompanyVision } from "../../vision/types";
 import { GrowthPressure, StrategicGrowthState, growthPressureAtLeast } from "../../vision/strategicGrowth";
 import { CommercialAmbition } from "../../vision/commercialAmbition";
@@ -28,6 +31,7 @@ import { PressureScores } from "../pressures";
 import { ProductAmount, StandardAiObservation, sumProductAmount } from "../types";
 import { StandardAiDiagnosticEntry, StandardAiReasonCode } from "../reasonCodes";
 import { computeBindingProductionCapacityTons } from "../bindingCapacity";
+import { PRODUCTION_PARAMETERS_V1 } from "../../../production/parameters";
 import { StrategicPosture } from "../../vision/types";
 import { computeForwardCapacityGap, ForwardCapacityGapResult, MarketGrowthEvidence } from "../forwardCapacityGap";
 
@@ -109,41 +113,8 @@ export interface NewFactoryDecisionResult {
   readonly diagnostics: readonly StandardAiDiagnosticEntry[];
 }
 
-export interface NewFactoryStrategyParameters {
-  /**
-   * 工場を建てることへの前向きさ別の、検討開始・提案に必要な growth pressure。
-   * LOW の会社でも「絶対に建てない」ではなく「よほどのことがない限り建てない」。
-   */
-  readonly monitoringPressureByWillingness: Readonly<Record<CompanyVision["willingnessToBuildFactories"], GrowthPressure>>;
-  readonly proposalPressureByWillingness: Readonly<Record<CompanyVision["willingnessToBuildFactories"], GrowthPressure>>;
-  /**
-   * 既存工場のスペース残がこの単位数を上回る間は、原則として既存増設を先に使う。
-   * ただし下の overlapGapRatio を超える大きな gap では併走を許す
-   * （志が桁違いに大きいとき、既存増設だけを待つのは合理的でない）。
-   */
-  readonly existingSpaceSufficientUnits: number;
-  /** この gap 比率を超えたら、既存増設余地があっても新工場の検討を併走させる。 */
-  readonly overlapGapRatio: number;
-  /** 既存能力がこの稼働率に達していないうちは、能力を増やしても意味がない。 */
-  readonly minimumUtilizationForNewFactory: number;
-  /** 当期の生産必要量が既存実効能力のこの比率を超えていること（需要の裏づけ）。 */
-  readonly minimumDemandPullRatio: number;
-  /** 労働稼働率がこれを超えていると、新工場を回す人員の確保に無理があると見る。 */
-  readonly laborStrainCeiling: number;
-  /** 財務リスク許容度別の、総投資額に対して手元で用意しておきたい比率。 */
-  readonly upfrontCoverageRatioByRiskTolerance: Readonly<Record<CompanyVision["financialRiskTolerance"], number>>;
-}
-
-export const NEW_FACTORY_STRATEGY_PARAMETERS_V1: NewFactoryStrategyParameters = {
-  monitoringPressureByWillingness: { HIGH: "MODERATE", MEDIUM: "MODERATE", LOW: "HIGH" },
-  proposalPressureByWillingness: { HIGH: "HIGH", MEDIUM: "HIGH", LOW: "URGENT" },
-  existingSpaceSufficientUnits: 3_000,
-  overlapGapRatio: 0.3,
-  minimumUtilizationForNewFactory: 0.75,
-  minimumDemandPullRatio: 0.95,
-  laborStrainCeiling: 1.15,
-  upfrontCoverageRatioByRiskTolerance: { HIGH: 0.6, MEDIUM: 0.85, LOW: 1.1 },
-};
+export { NEW_FACTORY_STRATEGY_PARAMETERS_V1 } from "./newFactoryStrategyParameters";
+export type { NewFactoryStrategyParameters } from "./newFactoryStrategyParameters";
 
 export interface NewFactoryDecisionInput {
   readonly fixture: CompanyFixture;
@@ -170,6 +141,12 @@ export interface NewFactoryDecisionInput {
   readonly persistentCapacityCausedUnserved?: boolean;
   readonly capexParams?: CapexParameters;
   readonly strategyParams?: NewFactoryStrategyParameters;
+  /**
+   * 【Phase SAI-GROW-3B-1】Liquidity SSoT。既存増設CAPEXとまったく同じ評価を使い、
+   * 「新工場だけ別の財務ルール」という状態を解消する（実装指示§7）。
+   * 未指定なら従来式（後方互換）。
+   */
+  readonly liquidity?: LiquidityGateContext;
 }
 
 function gate(gateName: string, passed: boolean, keyValues: Record<string, number>, note: string): NewFactoryGateResult {
@@ -456,7 +433,9 @@ function evaluateReactiveNewFactoryRoute(input: NewFactoryDecisionInput): NewFac
   // それを分母にする。ここで新しい能力計算式は作らず、観測値だけを使う。
   const bindingCapacityTons = computeBindingProductionCapacityTons(
     observation.totalEffectiveCapacityByProduct,
-    observation.totalEffectiveCommonProcessingCapacity
+    observation.totalEffectiveCommonProcessingCapacity,
+    observation.totalEffectiveFreezingPackagingCapacity,
+    PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
   );
   const lastQuarterProduction = sumProductAmount({
     hoso: observation.lastQuarterActualProductionByProduct.hoso ?? 0,
@@ -593,8 +572,30 @@ function evaluateReactiveNewFactoryRoute(input: NewFactoryDecisionInput): NewFac
   //   ・借入余力（borrowingPressure）を著しく損なわない。
   //   ・どれだけ手元で用意しておきたいかは、Vision の財務リスク許容度で変わる。
   const coverageRatio = sp.upfrontCoverageRatioByRiskTolerance[vision.financialRiskTolerance];
-  const requiredCashUsd = pressures.targetMinimumCashUsd + projectCostUsd * coverageRatio;
-  const cashSafe = observation.cashUsd > requiredCashUsd;
+  // 【Phase SAI-GROW-3B-1】affordabilityの定義はLiquidity SSoTへ統一する。
+  // upfrontCoverageRatio は「会社の財務リスク許容度」を表す固有の意味を持つため削除せず、
+  // SSoTの上に載る **profile固有の安全余裕** として残す（実装指示§7）。
+  const liquidity = input.liquidity;
+  const paymentsWithinHorizonUsd = liquidity
+    ? plannedInvestmentPaymentsWithinHorizonUsd(projectCostUsd, capexParams.templatesByType.newFactoryConstruction.paymentRatios, liquidity.horizonQuarters)
+    : projectCostUsd;
+  const paymentsThisQuarterUsd = liquidity
+    ? plannedInvestmentPaymentsWithinHorizonUsd(projectCostUsd, capexParams.templatesByType.newFactoryConstruction.paymentRatios, 1)
+    : projectCostUsd;
+  const affordability = liquidity
+    ? evaluateInvestmentAffordability(
+        liquidity.assessment,
+        paymentsWithinHorizonUsd,
+        liquidity.alreadyApprovedThisTurnUsd(),
+        coverageRatio,
+        paymentsThisQuarterUsd,
+        liquidity.alreadyApprovedThisQuarterUsd()
+      )
+    : null;
+  const requiredCashUsd = liquidity
+    ? liquidity.assessment.protectedFundingRequirementUsd + paymentsWithinHorizonUsd + (affordability?.safetyMarginUsd ?? 0)
+    : pressures.targetMinimumCashUsd + projectCostUsd * coverageRatio;
+  const cashSafe = affordability ? affordability.affordable : observation.cashUsd > requiredCashUsd;
   const borrowingSafe = pressures.borrowingPressure < 1;
   const financeKeyValues = {
     cashUsd: observation.cashUsd,
@@ -607,6 +608,18 @@ function evaluateReactiveNewFactoryRoute(input: NewFactoryDecisionInput): NewFac
     borrowingPressure: pressures.borrowingPressure,
     financialGateCashSafe: cashSafe ? 1 : 0,
     financialGateBorrowingSafe: borrowingSafe ? 1 : 0,
+    ...(liquidity
+      ? {
+          liquidityHeadroomUsd: liquidity.assessment.liquidityHeadroomUsd,
+          protectedFundingRequirementUsd: liquidity.assessment.protectedFundingRequirementUsd,
+          committedCapitalPaymentsUsd: liquidity.assessment.committedCapitalPaymentsUsd,
+          realisticallyAvailableBorrowingUsd: liquidity.assessment.realisticallyAvailableBorrowingUsd,
+          proposedInvestmentPaymentsUsd: paymentsWithinHorizonUsd,
+          alreadyApprovedThisTurnUsd: affordability?.alreadyApprovedThisTurnUsd ?? 0,
+          postInvestmentLiquidityUsd: affordability?.postInvestmentLiquidityUsd ?? 0,
+          profileSafetyMarginUsd: affordability?.safetyMarginUsd ?? 0,
+        }
+      : {}),
   };
   gates.push(
     gate(
@@ -642,6 +655,7 @@ function evaluateReactiveNewFactoryRoute(input: NewFactoryDecisionInput): NewFac
       strategicGrowth.strategicScaleGapTons
     ).toLocaleString()}t/期 不足しており、既存工場の増設余地・稼働率・需要・原料・労働・財務のすべての条件を満たすため、新工場の建設を提案する。`
   );
+  liquidity?.commit(paymentsWithinHorizonUsd, paymentsThisQuarterUsd);
   return finish("READY_TO_BUILD", [{ projectType: "newFactoryConstruction" }]);
 }
 
@@ -725,7 +739,9 @@ function evaluateStrategicForwardCapacityRoute(
 
   const bindingCapacityTons = computeBindingProductionCapacityTons(
     observation.totalEffectiveCapacityByProduct,
-    observation.totalEffectiveCommonProcessingCapacity
+    observation.totalEffectiveCommonProcessingCapacity,
+    observation.totalEffectiveFreezingPackagingCapacity,
+    PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
   );
   const marketGrowthEvidence = buildMarketGrowthEvidence(input, bindingCapacityTons);
   const forwardCapacityGap = computeForwardCapacityGap({
@@ -897,9 +913,29 @@ function evaluateStrategicForwardCapacityRoute(
   }
 
   // --- Gate: 財務（reactive routeのGate Lと同一の判定式。基準を緩めない） ---
+  // 【Phase SAI-GROW-3B-1】reactive routeと同じくLiquidity SSoTを使う。
   const coverageRatio = sp.upfrontCoverageRatioByRiskTolerance[vision.financialRiskTolerance];
-  const requiredCashUsd = pressures.targetMinimumCashUsd + projectCostUsd * coverageRatio;
-  const cashSafe = observation.cashUsd > requiredCashUsd;
+  const liquidity = input.liquidity;
+  const paymentsWithinHorizonUsd = liquidity
+    ? plannedInvestmentPaymentsWithinHorizonUsd(projectCostUsd, capexParams.templatesByType.newFactoryConstruction.paymentRatios, liquidity.horizonQuarters)
+    : projectCostUsd;
+  const paymentsThisQuarterUsd = liquidity
+    ? plannedInvestmentPaymentsWithinHorizonUsd(projectCostUsd, capexParams.templatesByType.newFactoryConstruction.paymentRatios, 1)
+    : projectCostUsd;
+  const affordability = liquidity
+    ? evaluateInvestmentAffordability(
+        liquidity.assessment,
+        paymentsWithinHorizonUsd,
+        liquidity.alreadyApprovedThisTurnUsd(),
+        coverageRatio,
+        paymentsThisQuarterUsd,
+        liquidity.alreadyApprovedThisQuarterUsd()
+      )
+    : null;
+  const requiredCashUsd = liquidity
+    ? liquidity.assessment.protectedFundingRequirementUsd + paymentsWithinHorizonUsd + (affordability?.safetyMarginUsd ?? 0)
+    : pressures.targetMinimumCashUsd + projectCostUsd * coverageRatio;
+  const cashSafe = affordability ? affordability.affordable : observation.cashUsd > requiredCashUsd;
   const borrowingSafe = pressures.borrowingPressure < 1;
   const financeKeyValues = {
     cashUsd: observation.cashUsd,
@@ -908,6 +944,13 @@ function evaluateStrategicForwardCapacityRoute(
     upfrontCoverageRatio: coverageRatio,
     requiredCashUsd,
     borrowingPressure: pressures.borrowingPressure,
+    ...(liquidity
+      ? {
+          liquidityHeadroomUsd: liquidity.assessment.liquidityHeadroomUsd,
+          protectedFundingRequirementUsd: liquidity.assessment.protectedFundingRequirementUsd,
+          postInvestmentLiquidityUsd: affordability?.postInvestmentLiquidityUsd ?? 0,
+        }
+      : {}),
   };
   gates.push(
     gate(
@@ -968,6 +1011,7 @@ function evaluateStrategicForwardCapacityRoute(
       forwardCapacityGap.constructionLeadTimeQuarters
     }四半期）を踏まえて今着工する。`
   );
+  liquidity?.commit(paymentsWithinHorizonUsd, paymentsThisQuarterUsd);
   return finish("READY_TO_BUILD", [{ projectType: "newFactoryConstruction" }]);
 }
 

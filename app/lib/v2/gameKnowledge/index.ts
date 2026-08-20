@@ -23,6 +23,11 @@ export {
   DEFAULT_KNOWLEDGE_TOP_N,
 } from "./retrieval";
 export { estimateSalesCapacity, estimateSalesHeadcountForTons, estimateWorkerRequirement } from "./estimators";
+// 【M2.8.1】Deterministic Rule Resolution と 意味整合validator。
+export { resolveGameRuleAnswers, extractRecentProductQuantity, normalizeQuestion } from "./ruleResolver";
+export type { ResolvedGameRuleAnswer, ResolveGameRulesInput } from "./ruleResolver";
+export { findRuleAnswerViolations, findKnowledgeUsageViolation, buildRuleAnswerRepairNote } from "./ruleAnswerValidator";
+export type { RuleAnswerViolation } from "./ruleAnswerValidator";
 export { buildDynamicValueMap, DEFAULT_GAME_KNOWLEDGE_PARAMETERS, UNRESOLVED_DYNAMIC_VALUE } from "./dynamicValues";
 export type { GameKnowledgeParameterSources } from "./dynamicValues";
 export type {

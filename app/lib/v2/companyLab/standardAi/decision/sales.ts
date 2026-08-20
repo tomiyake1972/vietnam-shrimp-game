@@ -176,6 +176,41 @@ export function computeObservableCommercialOpportunity(
   };
 }
 
+/**
+ * 【Phase SAI-GROW-2・実装指示§3・§4】会社の志向で重み付けした観測機会。
+ *
+ * 【AとBとCを混同しない】
+ *   A 市場で観測できる採算需要（＝ここで数える対象）
+ *   B 会社が現実的に取り得るshare（＝AI側の控えめ係数。**ここでは使わない**）
+ *   C 現在AIが提出する量（＝ここでは使わない。使うと循環する）
+ *
+ * engineのmaximumSupplierShareだけは制度上の上限なので掛ける（Aの定義の一部）。
+ * 重みは既存のorientation倍率（sales.tsの按分と同じclamp範囲）をそのまま再利用し、
+ * 新しい市場・商品のhardcodeは作らない。
+ */
+export function computeOrientationWeightedOpportunity(
+  observation: StandardAiObservation,
+  salesParams: SalesParameters,
+  marketOrientation: Readonly<Partial<Record<DemandMarketId, number>>>,
+  productOrientation: Readonly<Partial<Record<Product, number>>>
+): { readonly weightedAttainableProfitableTons: number; readonly orientationActive: boolean } {
+  const marketActive = Object.values(marketOrientation).some((v) => v !== undefined && v !== 1);
+  const productActive = Object.values(productOrientation).some((v) => v !== undefined && v !== 1);
+  const orientationActive = marketActive || productActive;
+  let weighted = 0;
+  for (const entry of observation.markets) {
+    for (const product of ["hoso", "pd", "vap"] as const) {
+      const cell = observableOpportunityCell(observation, entry.market, product, salesParams);
+      if (!cell.isProfitable) continue;
+      const combined = (marketOrientation[entry.market] ?? 1) * (productOrientation[product] ?? 1);
+      // 総合補正の許容範囲は既存の按分側と同一（0.70〜1.35）。
+      const clamped = Math.max(0.7, Math.min(1.35, combined));
+      weighted += cell.attainableDemand * (orientationActive ? clamped : 1);
+    }
+  }
+  return { weightedAttainableProfitableTons: weighted, orientationActive };
+}
+
 function buildMarketOpportunityWeights(
   observation: StandardAiObservation,
   markets: readonly DemandMarketId[],

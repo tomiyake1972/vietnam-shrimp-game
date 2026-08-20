@@ -103,12 +103,24 @@ Registryにも briefing にも無ければ「ShrimpXの現行ルール上、こ�
 | CFO | FINANCE / CAPEX |
 | CEO | 全domain（横断要約役のため） |
 
-`appliesToRoles` との AND で絞るため、CFOへ営業能力の詳細が流れることはない。
+**【M2.8.1で変更】role は hard filter ではなく ranking preference である。**
+
+M2.8では「担当domain AND `appliesToRoles`」で候補を絞っていたため、
+たとえば「営業1人当たり何トン？」をCFOが受けると SALES domain が丸ごと除外され、
+注入知識が **0件** になっていた（実測: `Q1[CFO] ids=[]`）。知識ゼロのまま回答させた結果、
+Claudeがbriefingの「売上 ÷ 営業人数」から存在しないルールを逆算した。
+
+ゲームルールの正しさは誰が答えるかに依存しないため、現在の実装では:
+
+- keyword一致が0のentryは引かない（無関係な知識で埋めない）
+- keyword一致があるentryは、roleに関係なく候補に残る
+- 担当domain一致で +4、`appliesToRoles` 一致で +2 の**加点**のみ行い、順位付けに使う
 
 ## 8. Retrieval（実装指示§28・§29）
 
 Embedding/RAGは使わない。keyword一致スコア + role/domainフィルタの
 **決定論的な軽量検索**。同じ質問には常に同じ知識が返る（再現性・監査性）。
+roleは除外条件ではなく加点（§7参照）。
 
 質問意図は `GAME_RULE` / `CURRENT_STATE` / `STRATEGY` / `MIXED` に分類する。
 
@@ -127,6 +139,57 @@ Claudeに暗算させない。質問に具体的な数量が含まれる場合�
 
 いずれも「これは上限の目安であり、需要・価格・信頼・生産能力で変わる」という
 caveatsを必ず同梱する。
+
+## 9.1 Deterministic Rule Resolution（M2.8.1・実装指示§3〜§6）
+
+estimatorsだけでは足りなかった。実APIでは、知識と目安を渡してもモデルが
+briefingの数字から独自にルールを逆算し、6問で誤答した。そこで
+**server側で答えそのものを確定させ、「この結果は変更してはならない」と明示して渡す**
+層を追加した（`app/lib/v2/gameKnowledge/ruleResolver.ts`）。
+
+```ts
+resolveGameRuleAnswers({ question, previousProduct?, previousTons?, previousAsksWorker? })
+  → ResolvedGameRuleAnswer[]
+```
+
+`ResolvedGameRuleAnswer` は `resolverId` / `knowledgeIds` / `canonicalFacts` /
+`calculation` / `result` / `unit` / `caveats` / `currentApplication` を持つ。
+Claudeの役割は `result` を日本語で説明することだけで、計算ではない。
+
+| resolverId | 何を確定させるか |
+| --- | --- |
+| `SALES_CAPACITY_AT_HEADCOUNT` | 営業N人の工数能力（会社全体の飽和曲線に代入） |
+| `SALES_CAPACITY_PER_PERSON` | 「1人当たり◯トン」という固定パラメータは**存在しない**こと |
+| `SALES_HEADCOUNT_FOR_TONS` | Nトンに必要な営業人数（工数観点のみ／漸近上限超なら到達不能） |
+| `WORKER_REQUIREMENT` | 商品別の必要常用Worker数（残業上限を使う場合も） |
+| `TIMING_AR` | 履行 Turn N → 入金 Turn N+1 |
+| `TIMING_IMPORT` | 発注 Turn N → 現金 N+1 → 到着・使用可 N+2 |
+| `TIMING_DOMESTIC` | 買付 Turn N → 現金 N → 使用可 N |
+| `TIMING_AQUACULTURE` | 池入れ Turn N → 収穫・使用可 N+1 |
+| `TIMING_CAPEX` | 能力が増えるのは完成した四半期から |
+| `CAPACITY_POOLS` | 能力は複数プールで構成され、ライン能力の合計は全社の天井ではない |
+
+省略形の追問（「VAP 1,000tなら？」）は `extractRecentProductQuantity(recentTexts)` が
+直前の会話から商品・数量・「直前がWorker質問だったか」を拾って解決する。
+
+## 9.2 Semantic consistency validator（M2.8.1・実装指示§7・§10）
+
+生成された日本語テキストをserver側でもう一度検査し、確定解答と矛盾する記述が
+残っていれば **1回だけrepair** する（既存のoverdue語彙guardと同一手順）。
+`app/lib/v2/gameKnowledge/ruleAnswerValidator.ts`。
+
+| code | 検出する誤り |
+| --- | --- |
+| `SALES_PER_PERSON_FIXED_CAPACITY` | 「営業1人当たり◯トン」という固定能力の断定 |
+| `SALES_CAPACITY_CANONICAL_MISSING` | 確定した営業工数能力が回答に含まれていない |
+| `WORKER_HEADCOUNT_CANONICAL_MISSING` | 確定した必要Worker数が回答に含まれていない |
+| `AR_TIMING_CONTRADICTION` | 売掛金が当四半期中に現金化されるという記述 |
+| `IMPORT_TIMING_CONTRADICTION` | 輸入原料が発注四半期に使えるという記述 |
+| `LINE_SUM_AS_COMPANY_CEILING` | 商品ライン能力の合計を全社の天井として提示 |
+| `KNOWLEDGE_NOT_USED` | GAME_RULE/MIXEDで知識を注入したのに `knowledgeUsedIds` が空 |
+
+false positiveを出さないことを優先し、曖昧な表現は違反にしない。
+結果は診断 `ruleAnswerGuardResult` / `ruleAnswerViolationCodes` に記録される。
 
 ## 10. Auditability（実装指示§32・§33）
 
@@ -160,7 +223,8 @@ Manual または engine parameter を変更したときの手順:
    - 変わり得る数値なら `dynamicValues.ts` のキーを増やし、説明文は `{{key}}` のままにする
    - ルールの意味そのものが変わったら `entries.ts` の explanation / semanticWarnings を直す
 4. `GAME_KNOWLEDGE_REGISTRY_VERSION` を更新する（`knowledgeVersion`、必要なら `manualVersion`）
-5. `app/lib/v2/gameKnowledge/__tests__/gameKnowledgeRegistry.test.ts` を実行する
+5. `app/lib/v2/gameKnowledge/__tests__/gameKnowledgeRegistry.test.ts` と
+   `gameRuleEnforcement.test.ts`（AMM-GKE-1〜14）を実行する
    （このテストは Registry の記述を **engineのparameterと突き合わせて** 固定しているため、
    engineだけ変えて Registry を直し忘れると落ちる）
 6. AI Meeting の smoke（§40の8問）を実行する
@@ -189,6 +253,9 @@ getGameKnowledgeByDomain(domain)
 getGameKnowledgeById(id)
 formatKnowledgeForPrompt(entries)
 estimateSalesCapacity / estimateWorkerRequirement / estimateSalesHeadcountForTons
+resolveGameRuleAnswers({ question, previousProduct?, previousTons?, previousAsksWorker? })
+extractRecentProductQuantity(recentTexts)
+findRuleAnswerViolations(texts, resolved) / findKnowledgeUsageViolation(...) / buildRuleAnswerRepairNote(...)
 GAME_KNOWLEDGE_REGISTRY_VERSION / GAME_KNOWLEDGE_IDS
 ```
 
