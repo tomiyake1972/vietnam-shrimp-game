@@ -334,6 +334,17 @@ export interface CostOfSalesBreakdown {
    * 同時に現金支出へ反映する（capex未指定時は常に0。実装指示§5）。
    */
   readonly capexMaintenanceCost: Usd;
+  /**
+   * 【ENG-FAC-1】Factory lifecycleにともなう工場維持費。内訳は
+   *   - MOTHBALLED工場のcarrying cost（通常cash固定費×25%）
+   *   - SALE_PENDING工場のholding cost（同×10%）
+   *   - 当四半期に再稼働を決定した工場のreactivation cost
+   * の合計。capexMaintenanceCost・idleLaborCostと同様に、完成品原価・単位原価台帳・
+   * 完成品在庫へは一切吸収せず、発生した四半期に全額を売上原価区分の独立項目として
+   * 費用化し、同時に現金支出へ反映する（休止中の工場の維持費が在庫原価へ紛れ込む
+   * ことを構造的に防ぐ）。lifecycle未使用時は常に0。
+   */
+  readonly factoryLifecycleCarryingCost: Usd;
 }
 
 /** 財務会計PL（全部原価計算）。 */
@@ -355,6 +366,13 @@ export interface ProfitAndLossStatement {
   readonly sellingGeneralAdmin: Usd;
   /** 営業利益。 */
   readonly operatingProfit: Usd;
+  /**
+   * 【ENG-FAC-1】固定資産売却損益（営業外損益）。工場売却完了四半期(T+2)に
+   *   Sale Proceeds − Net Book Value
+   * を認識する。回収率70%が既定のため通常は負値（売却損）になる。
+   * 売却が無い四半期・この機能を使わない場合は常に0。
+   */
+  readonly assetDisposalGainLoss: Usd;
   /** 支払利息（既存借入に対する簡易利息）。 */
   readonly interestExpense: Usd;
   /** 税引前利益。 */

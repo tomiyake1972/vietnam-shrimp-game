@@ -23,6 +23,7 @@ import { CompanyId } from "../sales/types";
 import { FinanceParameters } from "./parameters";
 import { amountFromPlainTonsAndUsdPerKg } from "./money";
 import { computeExistingAssetDepreciationUsd } from "./depreciation";
+import type { FactoryLifecycleAdjustment } from "../capex/factoryDisposal";
 import {
   AbsorptionVariableReconciliation,
   BalanceSheet,
@@ -438,6 +439,23 @@ function computeProductionCosting(
   let qualityDiscardLoss = 0;
   let unabsorbedVariable = 0;
   let fixedAbsorbedIntoInventory = 0;
+  /**
+   * 【会計整合性修正】産出ゼロのバッチ（adjustedTons≈0）へ実際に配属されていた
+   * 常用労務費。"actual"モードのallocRegularLaborCostは数量シェアではなく
+   * 「そのバッチへ配属された人数×単価」で直接決まるため、そのバッチが1トンも
+   * 産出しなかった場合、この費用は在庫へも配賦されず、かつidleLaborCost
+   * （＝どのバッチにも配属されなかった人員の給与）にも含まれない。給与は現金で
+   * 支払われているのに損益にも資産にも現れず、貸借が合わなくなる。
+   * 発生した期の期間費用（未吸収製造費）として認識するためにここへ集計する。
+   */
+  let unabsorbedRegularLaborFromZeroOutputBatches = 0;
+  /**
+   * 【会計整合性修正】原料投入そのものがゼロだったバッチ（originalTons≈0）へ
+   * 配属されていた変動労務費（臨時ワーカー＋残業）。廃棄損は
+   * 「変動費単価×廃棄数量」で認識されるが、originalTons=0では変動費単価が
+   * 0になるため、この経路でも一切認識されない。上と同じ理由で期間費用とする。
+   */
+  let unabsorbedVariableFromZeroInputBatches = 0;
   const variableQualityCostByProduct = new Map<Product, number>();
   const addQualityCost = (product: Product, amount: number) => {
     variableQualityCostByProduct.set(product, (variableQualityCostByProduct.get(product) ?? 0) + amount);
@@ -530,14 +548,36 @@ function computeProductionCosting(
         `品質調整後数量が正(${b.adjustedTons})なのに完成品ロットIDがないバッチです（原価の在庫振替先がありません）: ${b.batchId}`
       );
     } else {
-      // 全量廃棄バッチ（adjustedTons≈0）: 変動費は上のbatchDiscardLossで全額認識済み
-      // （variableUnit×discardTons = batchVariableTotal になる）。固定費は
-      // adjustedShare=0のため配賦されず、他バッチへ配賦されるか未配賦扱いになる。
+      // 産出ゼロのバッチ（adjustedTons≈0）。
+      //
+      // ・nonLaborFixed（工場固定費・固定ユーティリティ・減価償却）は adjustedShare=0 の
+      //   ため配賦されず、adjustedShareの合計が1になる他バッチへ自動的に配賦される
+      //   （取りこぼしは起きない）。
+      // ・常用労務費は "actual" モードでは数量シェアではなく実配属人数で決まるため、
+      //   ここで明示的に期間費用へ回さないと、支払済みなのにどこにも現れない。
+      unabsorbedRegularLaborFromZeroOutputBatches += allocRegularLaborCost;
+      // ・変動費（臨時ワーカー・残業・変動ユーティリティ・加工費・原料）は、
+      //   originalTons>0 なら batchDiscardLoss（変動費単価×廃棄数量＝全量）で認識済み。
+      //   originalTons≈0（そもそも原料を投入できなかった）の場合は変動費単価が0になり
+      //   廃棄損でも認識されないため、ここで期間費用へ回す。この場合の
+      //   batchVariableTotal は実質 allocVariableLabor（臨時＋残業）のみである。
+      if (b.originalTons <= QUANTITY_EPSILON) {
+        unabsorbedVariableFromZeroInputBatches += batchVariableTotal;
+      }
     }
   }
 
-  const unabsorbedFixedPortion = totalAdjustedTons <= QUANTITY_EPSILON ? fixedManufacturingTotal : 0;
-  const unabsorbedManufacturingCost = unabsorbedFixedPortion + unabsorbedVariable;
+  // 【会計整合性修正】未吸収製造費の確定。
+  //
+  // 会社全体で産出ゼロ／投入ゼロという退化ケースでは、従来どおり会社全体の合計額を
+  // そのまま期間費用にする（この経路の挙動は一切変更しない）。一方、一部のバッチだけが
+  // 産出ゼロだった場合は、そのバッチへ配属されていた労務費が従来はどこにも計上されずに
+  // 消えていた。上のループで集計した金額をここで期間費用として認識する。
+  // 両者は排他であり、二重計上は起きない。
+  const unabsorbedFixedPortion =
+    totalAdjustedTons <= QUANTITY_EPSILON ? fixedManufacturingTotal : unabsorbedRegularLaborFromZeroOutputBatches;
+  const unabsorbedVariablePortion = totalOriginalTons <= QUANTITY_EPSILON ? unabsorbedVariable : unabsorbedVariableFromZeroInputBatches;
+  const unabsorbedManufacturingCost = unabsorbedFixedPortion + unabsorbedVariablePortion;
 
   const manufacturing: ManufacturingCostBreakdown = {
     domesticRawMaterialCost: usd(rawDomestic),
@@ -690,7 +730,15 @@ export function closeFinancialQuarter(
   params: FinanceParameters,
   processingRateByProduct: Readonly<Record<Product, number>>,
   financing?: FinancingAdjustment,
-  capex?: CapexAdjustment
+  capex?: CapexAdjustment,
+  /**
+   * 【ENG-FAC-1】Factory lifecycle（Mothball / Sale）の会計効果。省略時は
+   * すべて0＝この機能の導入前と完全に同一の挙動になる（既存呼び出し元・
+   * 既存テストとの後方互換）。金額の算出はcapex/factoryDisposal.tsが行い、
+   * ここでは既存の費用区分・既存の投資CF・既存のPPE勘定へ合流させるだけで、
+   * 新しいCash経路は作らない（実装指示§10）。
+   */
+  factoryLifecycle?: FactoryLifecycleAdjustment
 ): QuarterCloseOutput {
   if (prev.companyId !== actuals.companyId) {
     throw new FinanceValidationError(`財務状態と実績データの会社IDが一致しません: ${prev.companyId} vs ${actuals.companyId}`);
@@ -706,9 +754,13 @@ export function closeFinancialQuarter(
   // 振替がfixedAssetsGrossへ加算する額と、この除外額が恒等的に相殺するため）。
   // これを既存資産2区分の配分基準額として使う（新規完成設備の減価償却が既存資産
   // 側の計算に混入しないことの構造的な保証。types.tsのCapexAdjustmentコメント参照）。
+  // 【ENG-FAC-1】当四半期に売却完了した初期工場のlegacy取得原価は、この四半期から
+  // 既に減価償却の対象外である（実装指示§12「SOLD: depreciationなし」）。
+  // capex帰属分は capex.nonDepreciatingCapexGrossAtPeriodStartUsd 側の除外で扱われる。
+  const disposalLegacyGrossRemovedUsd = factoryLifecycle?.disposalLegacyGrossRemovedUsd ?? 0;
   const existingAssetOpeningGrossUsd = capex
-    ? Math.max(0, (prev.fixedAssetsGross as number) - capex.nonDepreciatingCapexGrossAtPeriodStartUsd)
-    : (prev.fixedAssetsGross as number);
+    ? Math.max(0, (prev.fixedAssetsGross as number) - capex.nonDepreciatingCapexGrossAtPeriodStartUsd - disposalLegacyGrossRemovedUsd)
+    : Math.max(0, (prev.fixedAssetsGross as number) - disposalLegacyGrossRemovedUsd);
   const fixedAssetsNetBefore = (prev.fixedAssetsGross as number) - (prev.accumulatedDepreciation as number);
   // 【重要】ゲーム開始四半期はどのシナリオでも共通の定数（scenario/scenarioEngine.ts
   // のturnToPeriod(1)が常に2015Q1を返す。core/period.tsのINITIAL_PERIOD_V2と同一）。
@@ -945,6 +997,11 @@ export function closeFinancialQuarter(
   // computeProductionCosting/costing.manufacturing側には存在しない独立の
   // 現金支出項目として直接ここへ加算する。
   const capexMaintenanceCostUsd = capex ? capex.capexMaintenanceCostUsd : 0;
+  // 【ENG-FAC-1】休止・売却待ち工場の維持費と再稼働コスト。capexMaintenanceCostと
+  // 同じ扱い（在庫へ吸収せず、当期の期間費用かつ現金支出）。
+  const factoryLifecycleCarryingCostUsd = factoryLifecycle
+    ? factoryLifecycle.mothballCarryingCostUsd + factoryLifecycle.salePendingHoldingCostUsd + factoryLifecycle.reactivationCostUsd
+    : 0;
 
   const salesForceCost = actuals.salesForceHeadcount * params.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter;
   // 【営業人員の減員・退職金・forward-port続き】減員を決定した当期に、1人あたり
@@ -998,6 +1055,7 @@ export function closeFinancialQuarter(
     unabsorbedFixedManufacturingCost: usd(costing.unabsorbedManufacturingCost),
     idleLaborCost: usd(idleLaborCost),
     capexMaintenanceCost: usd(capexMaintenanceCostUsd),
+    factoryLifecycleCarryingCost: usd(factoryLifecycleCarryingCostUsd),
   };
   const totalCostOfSales =
     cogsRawMaterial +
@@ -1009,10 +1067,13 @@ export function closeFinancialQuarter(
     discardLossTotal +
     costing.unabsorbedManufacturingCost +
     idleLaborCost +
-    capexMaintenanceCostUsd;
+    capexMaintenanceCostUsd +
+    factoryLifecycleCarryingCostUsd;
   const grossProfit = netRevenue - totalCostOfSales;
   const operatingProfit = grossProfit - sgaTotal;
-  const profitBeforeTax = operatingProfit - interestExpense;
+  // 【ENG-FAC-1】固定資産売却損益は営業外損益として営業利益の下に置く（実装指示§10）。
+  const assetDisposalGainLoss = factoryLifecycle?.disposalGainLossUsd ?? 0;
+  const profitBeforeTax = operatingProfit + assetDisposalGainLoss - interestExpense;
   const incomeTax = Math.max(0, profitBeforeTax) * params.finance.incomeTaxRate;
   const netIncome = profitBeforeTax - incomeTax;
 
@@ -1027,6 +1088,7 @@ export function closeFinancialQuarter(
     grossProfit: usd(grossProfit),
     sellingGeneralAdmin: usd(sgaTotal),
     operatingProfit: usd(operatingProfit),
+    assetDisposalGainLoss: usd(assetDisposalGainLoss),
     interestExpense: usd(interestExpense),
     profitBeforeTax: usd(profitBeforeTax),
     incomeTax: usd(incomeTax),
@@ -1078,7 +1140,8 @@ export function closeFinancialQuarter(
   // 【Phase 8B-2B】稼働中capex資産の固定保守費は、発生と同時に全額現金支出される
   // 独立の製造関連キャッシュアウトとして加算する（営業CF区分。実装指示§5
   // 「営業CF...へ接続」）。
-  const paymentsForManufacturing = laborCashTotal + processingCashTotal + utilityCashTotal + factoryFixedCashTotal + capexMaintenanceCostUsd;
+  const paymentsForManufacturing =
+    laborCashTotal + processingCashTotal + utilityCashTotal + factoryFixedCashTotal + capexMaintenanceCostUsd + factoryLifecycleCarryingCostUsd;
   // 利息は発生額(interestExpense)ではなく実際の現金支払額(interestPaidCash)を減算する
   // （financing省略時はinterestPaidCash===interestExpenseのためPhase 8Aと同一）。
   const operatingCashFlow =
@@ -1087,7 +1150,8 @@ export function closeFinancialQuarter(
   // capexPaymentCashUsd=0のとき"-0"（負のゼロ）にならないよう正規化する（-0===0だが、
   // deepEqual等の厳密比較・CLI表示で"-0"となる紛らしさを避けるための数値衛生上の措置。
   // 会計上の意味は一切変えない）。
-  const investingCashFlowRaw = capex ? -capex.capexPaymentCashUsd : 0;
+  // 【ENG-FAC-1】工場売却代金は既存の投資CFへ合流させる（新しいCash経路を作らない）。
+  const investingCashFlowRaw = (capex ? -capex.capexPaymentCashUsd : 0) + (factoryLifecycle?.disposalProceedsUsd ?? 0);
   const investingCashFlow = investingCashFlowRaw === 0 ? 0 : investingCashFlowRaw;
   // 【Phase 8B-1】financing指定時は借入実行(+)・元本返済(-)の純額。省略時は0（Phase 8A同一）。
   const financingCashFlow = financing ? financing.loanDrawUsd - financing.principalRepaymentCashUsd : 0;
@@ -1099,9 +1163,20 @@ export function closeFinancialQuarter(
   const arEnd = remainingReceivables.reduce((s, r) => s + (r.amount as number), 0) + newReceivables.reduce((s, r) => s + (r.amount as number), 0);
   const apEnd = remainingPayables.reduce((s, p) => s + (p.amount as number), 0) + newPayables.reduce((s, p) => s + (p.amount as number), 0);
   const finishedGoodsInventoryEnd = nextLedger.reduce((s, e) => s + e.remainingQuantity * totalUnitCostPerTon(e.unitCost), 0);
-  const accumulatedDepreciationEnd = (prev.accumulatedDepreciation as number) + depreciationUsd;
+  // 【ENG-FAC-1・実装指示§11】売却完了工場のGross PPE・減価償却累計額を除却する。
+  // 会社BSが最終SSoTであるため、除却額が会社BSの残高を超えないようクランプする
+  // （簿価射影側でもクランプ済みだが、二重の安全網として明示する）。
+  const disposalGrossRemovedUsd = Math.min(factoryLifecycle?.disposalGrossPpeRemovedUsd ?? 0, prev.fixedAssetsGross as number);
+  const disposalAccumDepRemovedUsd = Math.min(
+    factoryLifecycle?.disposalAccumulatedDepreciationRemovedUsd ?? 0,
+    prev.accumulatedDepreciation as number
+  );
+  const accumulatedDepreciationEnd = Math.max(0, (prev.accumulatedDepreciation as number) + depreciationUsd - disposalAccumDepRemovedUsd);
   // 【Phase 8B-2A】capex指定時は当期完成振替分をfixedAssetsGrossへ加算する。省略時はprevから不変（Phase 8A/8B-1同一）。
-  const fixedAssetsGrossEnd = (prev.fixedAssetsGross as number) + (capex ? capex.completedProjectsTransferUsd : 0);
+  const fixedAssetsGrossEnd = Math.max(
+    0,
+    (prev.fixedAssetsGross as number) + (capex ? capex.completedProjectsTransferUsd : 0) - disposalGrossRemovedUsd
+  );
   const fixedAssetsNet = fixedAssetsGrossEnd - accumulatedDepreciationEnd;
   const constructionInProgressEnd = capex ? capex.endingConstructionInProgressUsd : 0;
   const retainedEarningsEnd = (prev.retainedEarnings as number) + netIncome;

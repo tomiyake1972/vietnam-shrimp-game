@@ -46,6 +46,8 @@ import { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from
 import { CompanyDividendQuarterResult, DividendDecisionInput } from "../finance/dividend";
 import { CompanyFinancingState, FinancingRequestInput, FinancingState, FinancingQuarterResult } from "../financing/types";
 import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
+import type { FactoryLifecycleDecisionInput, FactoryLifecycleStateTable } from "../capex/factoryLifecycle";
+import type { FactoryLifecycleEvent } from "../capex/factoryDisposal";
 // 【Phase 8D-4】型のみの参照（workforce.ts 側も CompanyFixture を型としてのみ参照するため、実行時の循環参照は発生しない）。
 import type { CompanyWorkforceState, WorkforceState } from "./workforce";
 // 【営業人員の追加採用・forward-port】型のみの参照（salesForceHiring.ts 側も
@@ -151,6 +153,16 @@ export interface CompanyDecisionInput {
    * 統合テスト・意思決定編集からの上書きは可能）。
    */
   readonly capexDecision: CapexDecisionInput;
+  /**
+   * 【ENG-FAC-1】当期のFactory lifecycle意思決定（工場の一時休止・再稼働・売却）。
+   * financingRequest・capexDecisionと同様、当期開始時点の情報だけで決めること。
+   * いずれの決定も当期は通常操業のままで、効き始めるのは翌四半期（T+1）であり、
+   * 売却完了はT+2である（capex/factoryLifecycle.ts参照）。
+   *
+   * 省略時は決定なし（後方互換。この機能の導入前に確定した既存の永続化済み
+   * 意思決定にはこのフィールドが存在しない）。
+   */
+  readonly factoryLifecycleDecisions?: readonly FactoryLifecycleDecisionInput[];
   /**
    * 【営業人員の追加採用・forward-port】当期の営業人員の新規採用人数（0以上の
    * 整数。増分のみ、減員・離職は対象外）。当期採用した人数は当期の配分可能
@@ -502,6 +514,13 @@ export interface CompanyQuarterRecord {
    */
   readonly capexResults: readonly CapexQuarterResult[];
   /**
+   * 【ENG-FAC-1・実装指示§18】当期のFactory lifecycle監査イベント
+   * （休止・再稼働・売却の決定と発効、PPE除却・売却損益）。
+   * イベントが1件も無い四半期・この機能の導入前に確定した既存履歴には
+   * このフィールドが存在しないため、後方互換のためoptionalとする。
+   */
+  readonly factoryLifecycleEvents?: readonly FactoryLifecycleEvent[];
+  /**
    * 【Phase 8F-1】当期の市場別・消費国在庫・購買循環モデルの確定記録
    * （market/consumerInventory.ts の settleConsumerMarketQuarter の出力を
    * そのまま保存するだけ。監査・テスト・診断表示用。財務・成約等の既存計算を
@@ -654,6 +673,13 @@ export interface CompanyLabState {
   readonly financeState: FinanceState;
   /** 【Phase 8B-1】会社別の資金繰り状態（融資ポートフォリオ・未払利息・信用/延滞履歴。ターンをまたいで保持）。 */
   readonly financingState: FinancingState;
+  /**
+   * 【ENG-FAC-1】会社別のFactory lifecycle決定ログ（追記専用）。任意四半期の
+   * lifecycle stateはここから純粋関数で導出する（capex/factoryLifecycle.ts）。
+   * 省略時は全工場OPERATING扱い（後方互換：この機能の導入前に作成されたラボ・
+   * 保存データにはこの状態が存在しない）。
+   */
+  readonly factoryLifecycleState?: FactoryLifecycleStateTable;
   /** 【Phase 8B-2A】会社別の設備投資状態（案件ポートフォリオ。ターンをまたいで保持）。 */
   readonly capexState: CapexState;
   /**
