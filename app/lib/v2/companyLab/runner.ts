@@ -668,6 +668,10 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // capexStateだけを渡しても、両関数は会社IDでフィルタして処理するため結果は
     // 一致する）。
     effectiveFactories,
+    // 【ENG-FAC-1 × SAI-CAP-1 統合】effectiveFactoriesを作ったのと同一のlifecycle state。
+    // 意思決定側（Standard AI observation）が納期時点など当期以外のperiodで
+    // computeEffectiveFactoriesを呼ぶ場合にも、同じlifecycleを適用させるために渡す。
+    ...(state.factoryLifecycleState ? { factoryLifecycleState: state.factoryLifecycleState } : {}),
   };
 }
 

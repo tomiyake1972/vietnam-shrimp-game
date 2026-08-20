@@ -582,7 +582,14 @@ export function buildStandardAiCapexDecision(
   //   freezing +800t → binding が 59.85kt → 60.65kt へ動くので incremental = 800
   // したがって冷凍・包装が優先される。冷凍・包装が解消されて common が最小になれば、
   // 次は common へ route が移る。会社IDやシナリオIDによる分岐は一切持たない。
-  const nominalCommonTotal = observation.factories.reduce((sum, f) => sum + f.commonProcessingCapacity, 0);
+  // 【ENG-FAC-1 × SAI-CAP-1 統合】名目側の母集団は、実効能力を実際に生み出している工場
+  // だけに限る。休止(MOTHBALLED)・売却手続中(SALE_PENDING)の工場はFactory[]に残ったまま
+  // 名目能力を持ち（能力0にしているのはstatus判定側であり、名目値は按分キー・診断表示の
+  // ために保持されている）、分母にだけ入って換算率を実測で半分（0.855→0.4275）に
+  // 引き下げていた。その結果、CAPEX候補が増やす能力を過小評価する。
+  const nominalCommonTotal = observation.factories
+    .filter((f) => f.effectiveCommonProcessingCapacity > EPSILON)
+    .reduce((sum, f) => sum + f.commonProcessingCapacity, 0);
   /**
    * 名目能力 → 実効能力の換算率（baseUtilizationRate × equipmentAvailabilityRate）。
    * CAPEX テンプレートの capacityIncreaseTonsPerQuarter は名目値であるため、実効プールへ

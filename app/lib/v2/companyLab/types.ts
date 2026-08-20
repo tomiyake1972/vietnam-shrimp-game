@@ -343,6 +343,21 @@ export interface CompanyOwnState {
    * 現れる（ワーカー・営業人員・需要が自動的に積み増されることはない）。
    */
   readonly effectiveFactories: readonly Factory[];
+  /**
+   * 【ENG-FAC-1 × SAI-CAP-1 統合】この会社を含むFactory lifecycle決定ログ
+   * （capex/factoryLifecycle.ts）。effectiveFactories を生成したのと同じ
+   * lifecycle state をそのまま渡す。
+   *
+   * 【なぜ必要か】意思決定側は「当期の実効Factory[]」だけでなく、
+   * 納期（当期+リードタイム）時点の実効能力も computeEffectiveFactories で
+   * 算出する（standardAi/observation.ts の near-term capacity）。period が
+   * 当期と異なるため effectiveFactories をそのまま流用できず、lifecycle state
+   * 自体を渡さないと休止・売却済み工場を能力へ数え続けてしまう。
+   *
+   * 未設定（undefined）のときは lifecycle を一切適用しない＝ENG-FAC-1導入前と
+   * 完全に同一の挙動（合成 CompanyOwnState を使う既存テストとの後方互換）。
+   */
+  readonly factoryLifecycleState?: FactoryLifecycleStateTable;
 }
 
 /** 自動方針が参照してよい公開市場情報（前四半期の実際の市場結果。当期分はまだ未確定で参照不可）。 */
