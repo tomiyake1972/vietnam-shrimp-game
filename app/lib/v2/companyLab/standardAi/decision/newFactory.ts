@@ -31,6 +31,7 @@ import { PressureScores } from "../pressures";
 import { ProductAmount, StandardAiObservation, sumProductAmount } from "../types";
 import { StandardAiDiagnosticEntry, StandardAiReasonCode } from "../reasonCodes";
 import { computeBindingProductionCapacityTons } from "../bindingCapacity";
+import { PRODUCTION_PARAMETERS_V1 } from "../../../production/parameters";
 import { StrategicPosture } from "../../vision/types";
 import { computeForwardCapacityGap, ForwardCapacityGapResult, MarketGrowthEvidence } from "../forwardCapacityGap";
 
@@ -432,7 +433,9 @@ function evaluateReactiveNewFactoryRoute(input: NewFactoryDecisionInput): NewFac
   // それを分母にする。ここで新しい能力計算式は作らず、観測値だけを使う。
   const bindingCapacityTons = computeBindingProductionCapacityTons(
     observation.totalEffectiveCapacityByProduct,
-    observation.totalEffectiveCommonProcessingCapacity
+    observation.totalEffectiveCommonProcessingCapacity,
+    observation.totalEffectiveFreezingPackagingCapacity,
+    PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
   );
   const lastQuarterProduction = sumProductAmount({
     hoso: observation.lastQuarterActualProductionByProduct.hoso ?? 0,
@@ -736,7 +739,9 @@ function evaluateStrategicForwardCapacityRoute(
 
   const bindingCapacityTons = computeBindingProductionCapacityTons(
     observation.totalEffectiveCapacityByProduct,
-    observation.totalEffectiveCommonProcessingCapacity
+    observation.totalEffectiveCommonProcessingCapacity,
+    observation.totalEffectiveFreezingPackagingCapacity,
+    PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
   );
   const marketGrowthEvidence = buildMarketGrowthEvidence(input, bindingCapacityTons);
   const forwardCapacityGap = computeForwardCapacityGap({

@@ -214,6 +214,12 @@ export interface CapacitySnapshot {
   readonly pd: number;
   readonly vap: number;
   readonly commonProcessing: number;
+  /**
+   * 【Phase SAI-CAP-1】凍結・包装処理能力（実効値、HOSO換算t/四半期）。
+   * 生産段階3の上限であり、商品別ライン・共通前処理と並ぶ物理プールの一つ。
+   * 既存 Run（この項目より前に保存されたもの）には存在しないため optional。
+   */
+  readonly freezingPackaging?: number;
 }
 
 /** 1ターン進めた結果。 */

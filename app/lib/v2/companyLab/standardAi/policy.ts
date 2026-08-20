@@ -39,6 +39,7 @@ import { buildStandardAiVapProductDevelopmentDecision } from "./decision/vapProd
 import { buildStandardAiDividendDecision } from "./decision/dividend";
 import { sumProductAmount, ProductAmount, zeroProductAmount } from "./types";
 import { computeBindingProductionCapacityTons } from "./bindingCapacity";
+import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
 import { StandardAiDiagnosticEntry } from "./reasonCodes";
 import { SalesWishEntry } from "./decision/sales";
 import { PressureScores } from "./pressures";
@@ -551,9 +552,13 @@ export function generateStandardAiDecisionWithDiagnostics(
     financialRiskTolerance: vision ? vision.financialRiskTolerance : null,
     growthParams: params.growthPressure,
   });
+  // 【Phase SAI-CAP-1】冷凍・包装能力を含めた物理能力を渡す。3B-3 の
+  // Deliverability ロジック自体は変更していない（同じ式へ正しい能力を渡すだけ）。
   const nearTermBindingProductionCapacityTons = computeBindingProductionCapacityTons(
     observation.nearTermEffectiveCapacityByProduct,
-    observation.nearTermEffectiveCommonProcessingCapacity
+    observation.nearTermEffectiveCommonProcessingCapacity,
+    observation.nearTermEffectiveFreezingPackagingCapacity,
+    PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
   );
   const deliverableCommitment: DeliverableCommitmentState = computeDeliverableCommitment({
     commitmentBeforeDeliverabilityTons: commercialCommitmentBeforeCrisisGate.submissionTargetTons,
@@ -561,7 +566,9 @@ export function generateStandardAiDecisionWithDiagnostics(
     finishedGoodsByProduct: observation.finishedGoodsByProduct,
     bindingProductionCapacityTons: computeBindingProductionCapacityTons(
       observation.totalEffectiveCapacityByProduct,
-      observation.totalEffectiveCommonProcessingCapacity
+      observation.totalEffectiveCommonProcessingCapacity,
+      observation.totalEffectiveFreezingPackagingCapacity,
+      PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
     ),
     nearTermBindingProductionCapacityTons,
     fundableRawMaterialTons: fundableRawMaterialView.fundableRawMaterialTons,
@@ -876,7 +883,9 @@ export function generateStandardAiDecisionWithDiagnostics(
   );
   const bindingProductionCapacityTons = computeBindingProductionCapacityTons(
     observation.totalEffectiveCapacityByProduct,
-    observation.totalEffectiveCommonProcessingCapacity
+    observation.totalEffectiveCommonProcessingCapacity,
+    observation.totalEffectiveFreezingPackagingCapacity,
+    PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
   );
   const unservedOpportunity = computeUnservedOpportunity({
     commercialAmbitionTons: commercialAmbition.ambitionTons,

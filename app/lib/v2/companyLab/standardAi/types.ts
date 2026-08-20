@@ -168,6 +168,12 @@ export interface StandardAiObservation {
   /** 【Phase SAI-GROW-3B-3】納期到来時点の実効能力（承認済みCAPEXの完成・ramp反映済み）。 */
   readonly nearTermEffectiveCapacityByProduct: ProductAmount;
   readonly nearTermEffectiveCommonProcessingCapacity: number;
+  /**
+   * 【Phase SAI-CAP-1】納期到来時点の冷凍・包装処理能力（実効値）。
+   * 現在時点の totalEffectiveFreezingPackagingCapacity と対になる。これが無いと
+   * Deliverability の near-term 判定だけが冷凍・包装を無視した過大値になる。
+   */
+  readonly nearTermEffectiveFreezingPackagingCapacity: number;
   readonly finishedGoodsByProduct: ProductAmount;
   readonly rawMaterialAvailable: number;
   /** 輸送中輸入・養殖中など、将来利用可能になる予定の原料量。 */

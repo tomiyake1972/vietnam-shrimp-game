@@ -16,6 +16,7 @@ import { CompanyFixture } from "../types";
 import { StandardAiParameters } from "./parameters";
 import { StandardAiObservation } from "./types";
 import { computeBindingProductionCapacityTons } from "./bindingCapacity";
+import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
 import { StrategicIntent } from "./strategicIntent";
 
 export interface TargetScaleBand {
@@ -84,7 +85,9 @@ export function computeTargetScaleBand(
     (observation.lastQuarterActualProductionByProduct.vap ?? 0);
   const effectiveCapacityTons = computeBindingProductionCapacityTons(
     observation.totalEffectiveCapacityByProduct,
-    observation.totalEffectiveCommonProcessingCapacity
+    observation.totalEffectiveCommonProcessingCapacity,
+    observation.totalEffectiveFreezingPackagingCapacity,
+    PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio
   );
 
   const capacityWeight = params.targetScaleCapacityWeightInBaseline;

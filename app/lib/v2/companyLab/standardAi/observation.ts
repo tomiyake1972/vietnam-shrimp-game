@@ -427,18 +427,23 @@ function buildNearTermEffectiveCapacity(
   fixture: CompanyFixture,
   ownState: CompanyOwnState,
   deliveryPeriod: PeriodV2
-): { byProduct: ProductAmount; commonProcessing: number } {
+): { byProduct: ProductAmount; commonProcessing: number; freezingPackaging: number } {
   const factories = computeEffectiveFactories(fixture.factories, { companies: [ownState.capexState] }, deliveryPeriod);
   const byProduct = zeroProductAmount();
   let commonProcessing = 0;
+  // 【Phase SAI-CAP-1】冷凍・包装能力も納期時点で集計する。現在時点だけ集計して
+  // near-term を共通前処理までしか見ないと、Deliverability の near-term headroom
+  // だけが冷凍・包装を無視した過大値になる（SAI-EXEC-1 で MASS 35.5% 過大と実測）。
+  let freezingPackaging = 0;
   for (const f of factories) {
     const effective = calculateFactoryEffectiveCapacity(f);
     byProduct.hoso += unwrapUnit(effective.hoso);
     byProduct.pd += unwrapUnit(effective.pd);
     byProduct.vap += unwrapUnit(effective.vap);
     commonProcessing += unwrapUnit(effective.commonProcessing);
+    freezingPackaging += unwrapUnit(effective.freezingPackaging);
   }
-  return { byProduct, commonProcessing };
+  return { byProduct, commonProcessing, freezingPackaging };
 }
 
 export function buildStandardAiObservation(
@@ -480,6 +485,7 @@ export function buildStandardAiObservation(
     deliveryLeadTimeQuarters: SALES_PARAMETERS_V1.standardLeadTimeTurns,
     nearTermEffectiveCapacityByProduct: nearTermCapacity.byProduct,
     nearTermEffectiveCommonProcessingCapacity: nearTermCapacity.commonProcessing,
+    nearTermEffectiveFreezingPackagingCapacity: nearTermCapacity.freezingPackaging,
     finishedGoodsByProduct: finishedGoodsByProduct(ownState),
     rawMaterialAvailable: availableRawMaterialQuantity(ownState),
     rawMaterialPipeline: pipelineRawMaterialQuantity(ownState),
