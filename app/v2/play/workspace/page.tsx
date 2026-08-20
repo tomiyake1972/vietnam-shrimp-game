@@ -195,6 +195,13 @@ export default function PlayerWorkspacePage() {
             </div>
           )}
 
+          {/* 【配当Decision UI接続】lastQuarterDividendResult は GM代理の
+              PlayerWorkspace.tsx と同一のpropであり、Independent Player側の
+              Decision StudioでもFINANCEタブの配当UI（累積配当・前Turnの却下
+              理由）が同じ表示になる。値はserver側のPlayerDecisionContextが
+              既に提供しているものをそのまま渡すだけで、ここに新しい配当計算・
+              推奨額・将来キャッシュ予測などは一切持たない（配当SSoTは
+              app/lib/v2/finance/dividend.ts のまま）。 */}
           {draft ? (
             <DecisionStudio
               fixture={context.fixture}
@@ -210,6 +217,7 @@ export default function PlayerWorkspacePage() {
               lastQuarterCapexEvents={context.lastQuarterCapexEvents}
               lastQuarterRejectedCapexProposals={context.lastQuarterRejectedCapexProposals}
               lastQuarterFinancialResult={context.lastQuarterFinancialResult}
+              lastQuarterDividendResult={context.lastQuarterDividendResult}
               publicInfo={context.publicInfo}
               scenarioNews={scenarioNews}
               companyName={context.companyDisplayName}
