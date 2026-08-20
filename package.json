@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsx --test \"app/lib/**/__tests__/**/*.test.ts\" \"app/v2/**/__tests__/**/*.test.ts\" \"app/api/**/__tests__/**/*.test.ts\"",
+    "test:e2e:player-flow": "playwright test --config=e2e/playwright.config.ts",
     "v2:simulate": "tsx scripts/v2Simulate.ts",
     "v2:company-simulate": "tsx scripts/v2CompanySimulate.ts",
     "sai3a:autoplay": "tsx scripts/sai3aAutoplay.ts",
@@ -24,6 +25,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

@@ -63,3 +63,12 @@ next-env.d.ts
 # 大量のCSV/JSON生成物はGit管理対象にしない
 # （生成スクリプト scripts/test15PdMechanizationPreflightCalibration.ts のみGit管理する）。
 /artifacts/test15/
+
+certificates
+
+# Independent Player Flow E2E（Playwright）の実行時生成物。
+# e2e/*.ts（config・spec）は管理対象、レポート・スクリーンショット等は対象外。
+/test-results/
+/e2e/test-results/
+/playwright-report/
+/e2e/playwright-report/

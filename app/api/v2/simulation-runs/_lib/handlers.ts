@@ -5,7 +5,28 @@
 
 import { SimulationRunPart, SimulationRunRepository, SimulationRunSchemaError } from "../../../../lib/v2/companyLab/simulation/persistence/repository";
 import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, StoredSimulationRun, StoredSimulationRunManifest, manifestToSimulationRunSummary } from "../../../../lib/v2/companyLab/simulation/persistence/types";
+import { CompanyControlMode } from "../../../../lib/v2/companyLab/simulation/types";
 import { SimulationRunApiResult } from "./context";
+
+/**
+ * 【Independent Player Flow・指示「UI disabledだけでなくserver processing側でも守る」】
+ * GMが参加linkを発行した（＝Independent Player Flowへ組み入れた）PLAYER会社について、
+ * 該当Turnの提出が揃っていなければmanifest commit（＝Turn進行の確定）を拒否する。
+ *
+ * 【GM代理操作との整合】GMが参加linkを一度も発行していない会社（従来どおりGMが
+ * 「この会社を操作」で代理入力するだけの会社）はこのgateの対象外とする
+ * （既存のClient側missingPlayerCompanies判定にそのまま委ねる。GM自身のブラウザ
+ * セッションでの代理操作は元々GM本人が信頼主体であり、今回新設する
+ * server-side gateは「独立した別セッションのPlayerが本当に提出したか」を
+ * GMが検証できない、という新しい非対称性を埋めるためのものであるため）。
+ */
+export interface PlayerSeatSubmissionGate {
+  checkTurnAdvanceAllowed(
+    runId: string,
+    completedTurn: number,
+    companyControlModes: Readonly<Record<string, CompanyControlMode>> | undefined
+  ): Promise<{ readonly allowed: boolean; readonly missingCompanyIds: readonly string[] }>;
+}
 
 function badRequest(message: string): SimulationRunApiResult {
   return { status: 400, body: { error: { code: "BAD_REQUEST", message } } };
@@ -36,6 +57,38 @@ async function checkNotAlreadyFinished(repository: SimulationRunRepository, simu
   const existingGameEndedAt = existing?.run.gameEndedAt ?? null;
   if (existingGameEndedAt) return gameFinishedConflict(simulationRunId, existingGameEndedAt);
   return null;
+}
+
+function playerSubmissionRequiredConflict(missingCompanyIds: readonly string[]): SimulationRunApiResult {
+  return {
+    status: 409,
+    body: {
+      error: {
+        code: "PLAYER_SUBMISSION_REQUIRED",
+        message: `PLAYER会社の意思決定が未提出のため、Turnを進められません（未提出: ${missingCompanyIds.join(", ")}）。`,
+        missingCompanyIds,
+      },
+    },
+  };
+}
+
+/**
+ * 【指示「UI disabledだけでなくserver processing側でも守る」】completedTurnsが
+ * 既存保存値より増える（＝Turnが新しく確定・commitされる）瞬間だけ検査する。
+ * 経営モード変更・Vision override保存等、completedTurnsが変わらない保存では
+ * 一切ブロックしない（この保存自体はTurn進行ではないため）。
+ */
+async function checkPlayerSeatsSubmittedForAdvance(
+  repository: SimulationRunRepository,
+  playerSeatGate: PlayerSeatSubmissionGate,
+  candidateRun: { readonly simulationRunId: string; readonly completedTurns: number; readonly companyControlModes?: Readonly<Record<string, CompanyControlMode>> }
+): Promise<SimulationRunApiResult | null> {
+  const existing = await repository.loadRun(candidateRun.simulationRunId);
+  const existingCompletedTurns = existing?.run.completedTurns ?? 0;
+  if (candidateRun.completedTurns <= existingCompletedTurns) return null;
+  const gate = await playerSeatGate.checkTurnAdvanceAllowed(candidateRun.simulationRunId, candidateRun.completedTurns, candidateRun.companyControlModes);
+  if (gate.allowed) return null;
+  return playerSubmissionRequiredConflict(gate.missingCompanyIds);
 }
 
 const VALID_PARTS: readonly SimulationRunPart[] = ["dataset", "resume", "pack"];
@@ -84,7 +137,11 @@ export async function handleSaveSimulationRunPart(repository: SimulationRunRepos
  * 形）からの呼び出しも引き続き受け付ける（小さいpayloadであれば単発で成立するため）。
  * その場合はrepository.saveRunへフォールバックする。
  */
-export async function handleSaveSimulationRun(repository: SimulationRunRepository, body: unknown): Promise<SimulationRunApiResult> {
+export async function handleSaveSimulationRun(
+  repository: SimulationRunRepository,
+  body: unknown,
+  playerSeatGate?: PlayerSeatSubmissionGate
+): Promise<SimulationRunApiResult> {
   if (typeof body !== "object" || body === null) {
     return badRequest("リクエストボディが JSON オブジェクトではありません。");
   }
@@ -104,6 +161,10 @@ export async function handleSaveSimulationRun(repository: SimulationRunRepositor
     };
     const lockConflict = await checkNotAlreadyFinished(repository, manifest.run.simulationRunId);
     if (lockConflict) return lockConflict;
+    if (playerSeatGate) {
+      const advanceConflict = await checkPlayerSeatsSubmittedForAdvance(repository, playerSeatGate, manifest.run);
+      if (advanceConflict) return advanceConflict;
+    }
     try {
       await repository.commitRunManifest(manifest, manifestToSimulationRunSummary(manifest));
     } catch (e) {
@@ -135,6 +196,10 @@ export async function handleSaveSimulationRun(repository: SimulationRunRepositor
   };
   const lockConflict = await checkNotAlreadyFinished(repository, stored.run.simulationRunId);
   if (lockConflict) return lockConflict;
+  if (playerSeatGate) {
+    const advanceConflict = await checkPlayerSeatsSubmittedForAdvance(repository, playerSeatGate, stored.run);
+    if (advanceConflict) return advanceConflict;
+  }
   try {
     await repository.saveRun(stored);
   } catch (e) {

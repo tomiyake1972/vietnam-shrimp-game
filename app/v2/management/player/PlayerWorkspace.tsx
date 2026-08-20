@@ -36,6 +36,7 @@ import { persistResumableRun } from "../lib/persistRun";
 import { selectScenarioNewsForTurn } from "../lib/scenarioNews";
 import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { computeFinalEvaluationSnapshot, isGameFinished, lastCompletedTurn } from "../lib/gameEnd";
+import { recordGmProxySubmission } from "../lib/playerSeats";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
 import { TsvLeaderboardPanel } from "../components/TsvLeaderboardPanel";
@@ -193,6 +194,10 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
     // 【指示§15】PLAYER意思決定の確定は保存タイミングの1つ（WAITING_FOR_PLAYER状態を
     // ハードリロード後も再現できるように、確定した瞬間に resumePayload ごと保存する）。
     void persistResumableRun(session, current?.companyControlModes ?? entry.companyControlModes, nextConfirmedPlayerDecisions);
+    // 【Independent Player Flow】この会社に参加リンクが発行済みの場合、GM代理操作でも
+    // Seat側の提出記録を追いつかせる（Turn Advance gateが参照する副次情報。
+    // 決定そのものの正本は上のresumePayload保存であり、ここは失敗しても意思決定は失われない）。
+    void recordGmProxySubmission(session.run.simulationRunId, companyId, session.state.scenarioState.currentTurn);
   }, [session, fixture, draft, companyId, entry.companyControlModes]);
 
   const dataset = buildDatasetFromSession(session);

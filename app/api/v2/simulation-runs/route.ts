@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseJsonBody, withSimulationRunApiContext } from "./_lib/context";
+import { createPlayerRepository, parseJsonBody, withSimulationRunApiContext } from "./_lib/context";
 import { handleListSimulationRuns, handleSaveSimulationRun, handleSaveSimulationRunPart } from "./_lib/handlers";
+import { createPlayerSeatSubmissionGate } from "../../../lib/v2/player/turnAdvanceGate";
 
 /**
  * POST /api/v2/simulation-runs — Simulation Run の保存。
@@ -17,9 +18,13 @@ import { handleListSimulationRuns, handleSaveSimulationRun, handleSaveSimulation
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = await parseJsonBody(req);
   const hasPart = typeof body === "object" && body !== null && "part" in body;
-  return withSimulationRunApiContext(req, (repository) =>
-    hasPart ? handleSaveSimulationRunPart(repository, body) : handleSaveSimulationRun(repository, body)
-  );
+  return withSimulationRunApiContext(req, async (repository) => {
+    if (hasPart) return handleSaveSimulationRunPart(repository, body);
+    // 【Independent Player Flow】Turn進行（completedTurns増加）を伴う保存だけ、
+    // 参加link発行済みPLAYER会社の提出状況をserver側でも検査する。
+    const playerRepository = await createPlayerRepository();
+    return handleSaveSimulationRun(repository, body, createPlayerSeatSubmissionGate(playerRepository));
+  });
 }
 
 // GET /api/v2/simulation-runs — 保存済み Simulation Run の一覧（要約のみ）。

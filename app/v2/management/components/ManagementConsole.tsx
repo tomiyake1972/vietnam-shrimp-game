@@ -41,6 +41,7 @@ import {
 import { CompanyDecisionInput } from "../../../lib/v2/companyLab/types";
 import { CompanyDecisionDraft } from "../../company-lab/decisionDraft";
 import { CompanyControlPanel } from "./CompanyControlPanel";
+import { PlayerSeatPanel } from "./PlayerSeatPanel";
 import { getLiveSession, upsertLiveSession } from "../lib/liveSessionRegistry";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
 import { SimulationAnalyticsDataset } from "../../../lib/v2/companyLab/simulation/analytics/types";
@@ -540,6 +541,24 @@ export function ManagementConsole() {
       // このrun()呼び出しの間だけ有効な、直近のPLAYER確定意思決定。
       // ターン処理後は消費してクリアする（次のPLAYERターンでは再び未入力に戻るのが正しい）。
       let pendingPlayerDecisions: Readonly<Record<string, CompanyDecisionInput>> = continuesLiveRun ? confirmedPlayerDecisions : {};
+
+      // 【Independent Player Flow】別のbrowser/deviceから独立して提出されたPLAYER意思決定
+      // （/api/v2/play/submit経由）は、このGM Consoleタブのlocal state（confirmedPlayerDecisions）
+      // には反映されていない。Turnを進める前に、サーバー側resumePayload.confirmedPlayerDecisions
+      // （正本）を取り直してmergeする（同じ会社をGM代理操作でも確定していた場合は、
+      // このタブのlocal stateを優先。取得に失敗してもベストエフォートでlocal stateのみへ
+      // fall backするだけで、既存のGM代理操作フローの進行は妨げない）。
+      if (continuesLiveRun && current.run.simulationRunId) {
+        try {
+          const latest = await loadSimulationRun(current.run.simulationRunId);
+          const serverConfirmed = latest?.resumePayload?.confirmedPlayerDecisions;
+          if (serverConfirmed) {
+            pendingPlayerDecisions = { ...serverConfirmed, ...pendingPlayerDecisions };
+          }
+        } catch {
+          // ベストエフォート。取得できなければローカルstateのみで続行する。
+        }
+      }
 
       for (let i = 0; i < turns; i++) {
         // 【本物のSTOP】次のターンへ入る前に確認する。処理中の中断はしない。
@@ -1209,6 +1228,7 @@ export function ManagementConsole() {
               保存済みの実行を表示しているため、経営モードの切替・PLAYER操作はできません（実行ボタンで新しい実行を開始してください）。
             </p>
           ) : null}
+          {fixtures.length > 0 ? <PlayerSeatPanel runId={view?.run.simulationRunId ?? null} /> : null}
 
           <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-2.5">
             <h2 className="mb-2 text-sm font-semibold">Company Inspector</h2>
