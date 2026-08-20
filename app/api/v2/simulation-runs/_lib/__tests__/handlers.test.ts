@@ -14,6 +14,8 @@ import {
   handleSaveSimulationRun,
   handleSaveSimulationRunPart,
 } from "../handlers";
+import { createInMemoryPlayerRepository } from "../../../../../lib/v2/player/repository";
+import { createPlayerSeatSubmissionGate } from "../../../../../lib/v2/player/turnAdvanceGate";
 
 const AT = "2026-01-01T00:00:00.000Z";
 const EMPTY_DATASET = { schemaVersion: "simulationAnalytics-v1", turns: [1], companies: [], companyMetrics: [], marketMetrics: [], producerCountryMetrics: [], bottlenecks: [], aiTrace: [], salesTrace: [], hiringTrace: [], investmentTrace: [] };
@@ -154,4 +156,102 @@ test("END-LOCK-5: gameEndedAtが無いRunへの通常の保存（Advance Turn相
   assert.equal(advanced.status, 200);
   const stored = await repository.loadRun("run-end-5");
   assert.equal(stored?.run.completedTurns, 2);
+});
+
+// ---------------------------------------------------------------------
+// Independent Player Flow（#07）— playerSeatGate: PLAYER会社が全社提出するまで
+// Advance Turn（completedTurnsの増加）をserver側でも拒否する
+// ---------------------------------------------------------------------
+
+test("PLAYER-GATE-1: playerSeatGateを渡さない（従来どおりの呼び出し）場合は挙動が変わらない", async () => {
+  const repository = createInMemorySimulationRunRepository();
+  await handleSaveSimulationRun(repository, body("run-gate-1", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 1 }));
+  const advanced = await handleSaveSimulationRun(repository, body("run-gate-1", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 2 }));
+  assert.equal(advanced.status, 200, "playerSeatGate省略時は後方互換のため既存呼び出し元をブロックしない");
+});
+
+test("PLAYER-GATE-2: 参加リンクを発行済みのPLAYER会社が未提出のままAdvance（completedTurns増加）しようとすると409で拒否される", async () => {
+  const repository = createInMemorySimulationRunRepository();
+  const playerRepository = createInMemoryPlayerRepository();
+  const gate = createPlayerSeatSubmissionGate(playerRepository);
+  await playerRepository.issueJoinCredential("run-gate-2", "BAL", AT);
+
+  // まだ1ターンも処理していないRun（completedTurns:0）を先に保存しておく（作成直後・
+  // PLAYER入力待ちの状態の再現。作成時点ではgateが働いても0→0で増加が無いため通る）。
+  await handleSaveSimulationRun(repository, body("run-gate-2", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 0 }), gate);
+  const rejected = await handleSaveSimulationRun(
+    repository,
+    body("run-gate-2", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 1 }),
+    gate
+  );
+  assert.equal(rejected.status, 409);
+  assert.equal((rejected.body as { error: { code: string } }).error.code, "PLAYER_SUBMISSION_REQUIRED");
+  const stored = await repository.loadRun("run-gate-2");
+  assert.equal(stored?.run.completedTurns, 0, "拒否された場合、completedTurnsが実際に進んでいないことも確認する");
+});
+
+test("PLAYER-GATE-3: 全PLAYER会社が当該Turnぶん提出済みならAdvanceは成功する", async () => {
+  const repository = createInMemorySimulationRunRepository();
+  const playerRepository = createInMemoryPlayerRepository();
+  const gate = createPlayerSeatSubmissionGate(playerRepository);
+  await playerRepository.issueJoinCredential("run-gate-3", "BAL", AT);
+  await playerRepository.recordSubmission("run-gate-3", "BAL", 1, AT);
+
+  await handleSaveSimulationRun(repository, body("run-gate-3", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 0 }), gate);
+  const advanced = await handleSaveSimulationRun(
+    repository,
+    body("run-gate-3", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 1 }),
+    gate
+  );
+  assert.equal(advanced.status, 200);
+});
+
+test("PLAYER-GATE-4: 参加リンクを一度も発行していないPLAYER会社（GM代理操作のみ）はgateの対象にならず、Advanceをブロックしない", async () => {
+  const repository = createInMemorySimulationRunRepository();
+  const playerRepository = createInMemoryPlayerRepository();
+  const gate = createPlayerSeatSubmissionGate(playerRepository);
+  // issueJoinCredentialを一度も呼ばない＝Seatが存在しない。
+
+  await handleSaveSimulationRun(repository, body("run-gate-4", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 0 }), gate);
+  const advanced = await handleSaveSimulationRun(
+    repository,
+    body("run-gate-4", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 1 }),
+    gate
+  );
+  assert.equal(advanced.status, 200);
+});
+
+test("PLAYER-GATE-5: manifestOnly保存（本番のTurn確定経路）でも同じgateが働く", async () => {
+  const repository = createInMemorySimulationRunRepository();
+  const playerRepository = createInMemoryPlayerRepository();
+  const gate = createPlayerSeatSubmissionGate(playerRepository);
+  await playerRepository.issueJoinCredential("run-gate-5", "BAL", AT);
+
+  await handleSaveSimulationRun(repository, body("run-gate-5", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 0 }), gate);
+  const rejected = await handleSaveSimulationRun(
+    repository,
+    {
+      manifestOnly: true,
+      run: run("run-gate-5", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 1 }),
+      savedAt: AT,
+      persistenceRevision: 2,
+      hasResumePayload: true,
+      hasPackCapture: false,
+    },
+    gate
+  );
+  assert.equal(rejected.status, 409);
+  assert.equal((rejected.body as { error: { code: string } }).error.code, "PLAYER_SUBMISSION_REQUIRED");
+});
+
+test("PLAYER-GATE-6: completedTurnsが増えない保存（decision下書き相当）はgateの対象にならない", async () => {
+  const repository = createInMemorySimulationRunRepository();
+  const playerRepository = createInMemoryPlayerRepository();
+  const gate = createPlayerSeatSubmissionGate(playerRepository);
+  await playerRepository.issueJoinCredential("run-gate-6", "BAL", AT);
+
+  await handleSaveSimulationRun(repository, body("run-gate-6", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 0 }), gate);
+  // completedTurnsは0のまま（変わらない）保存 — Turn進行ではないので未提出でもブロックしない。
+  const saved = await handleSaveSimulationRun(repository, body("run-gate-6", { companyControlModes: { BAL: "PLAYER" }, completedTurns: 0 }), gate);
+  assert.equal(saved.status, 200);
 });
