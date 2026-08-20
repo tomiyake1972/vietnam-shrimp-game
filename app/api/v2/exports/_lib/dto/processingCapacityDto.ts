@@ -34,6 +34,7 @@ import { CompanyId } from "../../../../../lib/v2/sales/types";
 import { PeriodV2 } from "../../../../../lib/v2/core/period";
 import { CompanyFixture } from "../../../../../lib/v2/companyLab/types";
 import { CapexState } from "../../../../../lib/v2/capex";
+import type { FactoryLifecycleStateTable } from "../../../../../lib/v2/capex/factoryLifecycle";
 import {
   buildCompanyProcessingCapacityViewModel,
   CAPACITY_POOL_DESCRIPTIONS,
@@ -229,6 +230,16 @@ export interface BuildExportProcessingCapacityInput {
   readonly rawMaterialLots?: readonly RawMaterialLot[];
   /** 【Test15新設】当期処理直後のPD省人化状態（未指定なら空配列扱い＝全工場が初期値）。 */
   readonly pdMechanizationState?: PdMechanizationState;
+  /**
+   * 【ENG-FAC-1 export consistency】当期処理直後のFactory lifecycle決定ログ。
+   * CompanyLabRuntimeSnapshot.factoryLifecycleState をそのまま渡すこと
+   * （履歴エントリのpostProcessingStateSnapshotが既に保持している。schema追加は不要）。
+   *
+   * 未指定・この機能導入前に保存されたRun（キー自体が存在しない）ではundefinedとなり、
+   * lifecycleを一切適用しない＝従来と完全に同一のExport内容になる。
+   * Export専用のMOTHBALLED / SOLD判定はここにも下流にも持たない。
+   */
+  readonly factoryLifecycleState?: FactoryLifecycleStateTable;
 }
 
 /**
@@ -243,6 +254,7 @@ export function buildExportProcessingCapacity(input: BuildExportProcessingCapaci
     baseFactories,
     capexState: input.capexState,
     period: input.asOfPeriod,
+    factoryLifecycleState: input.factoryLifecycleState,
   });
   // 画面（DecisionEditor）とまったく同じ純粋関数を呼ぶ。ここで別計算をしない。
   const forecastVm = buildCompanyProcessingForecast({
@@ -250,6 +262,7 @@ export function buildExportProcessingCapacity(input: BuildExportProcessingCapaci
     baseFactories,
     capexState: input.capexState,
     period: input.asOfPeriod,
+    factoryLifecycleState: input.factoryLifecycleState,
     productionPlans: input.productionPlans ?? [],
     workerAssignments: input.workerAssignments ?? [],
     rawMaterialLots: input.rawMaterialLots ?? [],
