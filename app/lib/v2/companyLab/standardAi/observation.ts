@@ -252,7 +252,15 @@ function buildFactoryObservations(fixture: CompanyFixture, ownState: CompanyOwnS
   // 建てた工場が観測に現れないままでは「建てても能力が増えていないと認識し続ける」
   // という致命的な不整合になる。加算規則（主工場へ寄せる・HOSO能力の上限）は
   // エンジン本体と完全に同一になり、この層で能力を再計算しない。
-  const effectiveFactories = computeEffectiveFactories(fixture.factories, { companies: [ownState.capexState] }, period);
+  // 【ENG-FAC-1 × SAI-CAP-1 統合】lifecycle stateを必ず渡す。渡さないと休止(MOTHBALLED)・
+  // 売却手続中(SALE_PENDING)・売却済(SOLD)の工場が status="active" のまま観測へ残り、
+  // Standard AI だけが実在しない能力（ghost capacity）を数え続ける。
+  const effectiveFactories = computeEffectiveFactories(
+    fixture.factories,
+    { companies: [ownState.capexState] },
+    period,
+    ownState.factoryLifecycleState
+  );
   // 【Standard AI Capability Expansion・Phase CE-3新設】品質管理設備の状態・前四半期
   // 品質実績は、いずれもFactory一覧全体を1回だけ渡して事前計算する（PD省人化投資と
   // 同じパターン。Factoryごとに毎回portfolio全体を再走査しない）。
@@ -428,7 +436,14 @@ function buildNearTermEffectiveCapacity(
   ownState: CompanyOwnState,
   deliveryPeriod: PeriodV2
 ): { byProduct: ProductAmount; commonProcessing: number; freezingPackaging: number } {
-  const factories = computeEffectiveFactories(fixture.factories, { companies: [ownState.capexState] }, deliveryPeriod);
+  // 【ENG-FAC-1 × SAI-CAP-1 統合】納期時点でもlifecycleを適用する。当期に決めた休止・
+  // 売却は T+1 から効くため、ここでlifecycleを外すと near-term 能力だけが過大になる。
+  const factories = computeEffectiveFactories(
+    fixture.factories,
+    { companies: [ownState.capexState] },
+    deliveryPeriod,
+    ownState.factoryLifecycleState
+  );
   const byProduct = zeroProductAmount();
   let commonProcessing = 0;
   // 【Phase SAI-CAP-1】冷凍・包装能力も納期時点で集計する。現在時点だけ集計して
@@ -465,7 +480,13 @@ export function buildStandardAiObservation(
 
   // 【2026-08-09・Vision駆動成長】工場スペースは production/factorySpace.ts の
   // 既存の導出関数だけで算出する（この層で新しいスペース計算式を作らない）。
-  const effectiveFactories = computeEffectiveFactories(fixture.factories, { companies: [ownState.capexState] }, period);
+  // 【ENG-FAC-1 × SAI-CAP-1 統合】工場スペースも保有・稼働中の工場だけを数える。
+  const effectiveFactories = computeEffectiveFactories(
+    fixture.factories,
+    { companies: [ownState.capexState] },
+    period,
+    ownState.factoryLifecycleState
+  );
   let factorySpaceTotalUnits = 0;
   let factorySpaceUsedUnits = 0;
   for (const f of effectiveFactories) {
