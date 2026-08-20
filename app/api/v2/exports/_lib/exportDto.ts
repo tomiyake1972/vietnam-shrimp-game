@@ -1199,6 +1199,10 @@ export function buildCompanyExportPayload(input: BuildCompanyExportPayloadInput)
             capexState: entry.postProcessingStateSnapshot.capexState,
             asOfPeriod: entry.postProcessingStateSnapshot.currentPeriod,
             pdMechanizationState: entry.postProcessingStateSnapshot.pdMechanizationState,
+            // 【ENG-FAC-1 export consistency】画面・Standard AI・Run記録と同じlifecycle stateを渡す。
+            // 保存済みRunのpostProcessingStateSnapshotが既に保持しているため、schema追加は不要。
+            // この機能導入前のRunではキーが無くundefinedになり、Export内容は従来と完全に同一。
+            factoryLifecycleState: entry.postProcessingStateSnapshot.factoryLifecycleState,
             ...pickCompanyForecastInputs(entry, companyId),
           }),
     vapProductDevelopmentScore: lookupProductDevelopmentScore(entry.postProcessingStateSnapshot.productDevelopmentState, companyId),
@@ -1294,6 +1298,8 @@ export function buildAllCompaniesExportPayload(input: BuildAllCompaniesExportPay
                 capexState: entry.postProcessingStateSnapshot.capexState,
                 asOfPeriod: entry.postProcessingStateSnapshot.currentPeriod,
                 pdMechanizationState: entry.postProcessingStateSnapshot.pdMechanizationState,
+                // 【ENG-FAC-1 export consistency】全社スコープも同じlifecycle stateを使う。
+                factoryLifecycleState: entry.postProcessingStateSnapshot.factoryLifecycleState,
               }),
         vapProductDevelopmentScore: lookupProductDevelopmentScore(entry.postProcessingStateSnapshot.productDevelopmentState, companyId),
       };
