@@ -123,7 +123,13 @@ export function buildCompanyInspectorSnapshot(
       ? undefined
       : (() => {
           const effective = capexStateForCompany
-            ? computeEffectiveFactories(fixture.factories, { companies: [capexStateForCompany] }, state.currentPeriod)
+            ? // 【ENG-FAC-1 read-path consistency】記録・表示系も lifecycle 適用後の能力を使う。
+              computeEffectiveFactories(
+                fixture.factories,
+                { companies: [capexStateForCompany] },
+                state.currentPeriod,
+                state.factoryLifecycleState
+              )
             : fixture.factories;
           return effective.reduce(
             (acc, f) => {

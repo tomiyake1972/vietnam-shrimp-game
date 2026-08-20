@@ -50,6 +50,7 @@ import {
   CAPEX_PARAMETERS_V1,
   computeEffectiveFactories,
 } from "../../lib/v2/capex";
+import type { FactoryLifecycleStateTable } from "../../lib/v2/capex/factoryLifecycle";
 import { computeOperationalStartPeriod, isCapexProjectOperationalAt } from "../../lib/v2/capex/capacityEffect";
 import { CapexDisplayStatus, CAPEX_DISPLAY_STATUS_LABELS, computeCapexDisplayStatus, TARGET_PRODUCT_LABELS } from "./capexViewModel";
 
@@ -223,6 +224,13 @@ function emptyPendingTotals(): Record<CapacityPoolKey, number> {
  * applyCapexCapacityToFactoriesの内部規則をUI側で複製しないための方法である。
  */
 export function buildCompanyProcessingCapacityViewModel(input: {
+  /**
+   * 【ENG-FAC-1 read-path consistency】Factory lifecycle決定ログ（capex/factoryLifecycle.ts）。
+   * CompanyOwnState.factoryLifecycleState をそのまま渡すこと。省略時はlifecycleを一切
+   * 適用しない＝この機能の導入前と完全に同一の表示（既存呼び出し元との後方互換）。
+   * ここで status の独自判定は行わない（判定は computeEffectiveFactories の1箇所のみ）。
+   */
+  readonly factoryLifecycleState?: FactoryLifecycleStateTable;
   readonly companyId: CompanyId;
   readonly baseFactories: readonly Factory[];
   readonly capexState: CapexState;
@@ -235,7 +243,7 @@ export function buildCompanyProcessingCapacityViewModel(input: {
   // capex/factoryConstruction.ts computeEffectiveFactoriesを使う（applyCapexCapacityToFactories
   // だけだと、稼働開始済みの新設Factory自体がcurrentFactoriesへ一切現れず、画面の
   // 加工能力一覧から新設工場が丸ごと消えてしまう欠落があった）。
-  const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period);
+  const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period, input.factoryLifecycleState);
   const currentById = new Map(currentFactories.map((f) => [f.factoryId, f]));
 
   // 【Test15・develop/v2統合（Required fix 2）】companyBaseだけでなく、稼働開始
@@ -244,7 +252,15 @@ export function buildCompanyProcessingCapacityViewModel(input: {
   // すでに完成済み能力そのものであるため）ため、baseNominalTons=0・全量を
   // addedByOperationalCapexTonsとして扱う（新設Factoryは既存工場の能力増強とは
   // 別枠、という設計に合わせた自然な表現）。
-  const allFactoryIds = Array.from(new Set([...companyBase.map((f) => f.factoryId), ...currentFactories.map((f) => f.factoryId)]));
+  // 【ENG-FAC-1 read-path consistency】売却完了(SOLD)した工場は computeEffectiveFactories が
+  // currentFactories から除いている。ここで companyBase（静的fixture）と union したまま
+  // にすると、下の `currentById.get(factoryId) ?? base!` が status="active" の元fixtureへ
+  // フォールバックし、**売却済み工場の能力が画面へ復活する**（ghost factory）。
+  // 保有していない工場は一覧から外す。lifecycle未使用時は currentFactories が companyBase を
+  // 必ず全件含むため、このfilterは何も落とさない＝従来と完全に同一の表示になる。
+  const allFactoryIds = Array.from(new Set([...companyBase.map((f) => f.factoryId), ...currentFactories.map((f) => f.factoryId)])).filter(
+    (factoryId) => currentById.has(factoryId)
+  );
   const factories: FactoryCapacityViewModel[] = allFactoryIds.map((factoryId) => {
     const base = companyBase.find((f) => f.factoryId === factoryId);
     const current = currentById.get(factoryId) ?? base!;

@@ -64,6 +64,7 @@ import { allocateProductionPlans } from "../../lib/v2/production/allocation";
 import { calculateFactoryEffectiveCapacity } from "../../lib/v2/production/capacity";
 import { PRODUCTION_PARAMETERS_V1, ProductionParameters } from "../../lib/v2/production/parameters";
 import { CapexState, computeEffectiveFactories } from "../../lib/v2/capex";
+import type { FactoryLifecycleStateTable } from "../../lib/v2/capex/factoryLifecycle";
 import { formatHosoEqTons } from "../../lib/v2/industryLab/ui/formatters";
 import { CAPACITY_POOL_DESCRIPTIONS, CAPACITY_POOL_LABELS, CAPACITY_POOL_KEYS, CapacityPoolKey } from "./processingCapacityViewModel";
 import { PRODUCT_LABELS } from "./marketPriceViewModel";
@@ -359,6 +360,13 @@ const SHARED_POOL_REASONS: readonly ProductionShortfallReason[] = [
 ];
 
 export interface BuildCompanyProcessingForecastInput {
+  /**
+   * 【ENG-FAC-1 read-path consistency】Factory lifecycle決定ログ（capex/factoryLifecycle.ts）。
+   * CompanyOwnState.factoryLifecycleState をそのまま渡すこと。省略時はlifecycleを一切
+   * 適用しない＝この機能の導入前と完全に同一の表示（既存呼び出し元との後方互換）。
+   * ここで status の独自判定は行わない（判定は computeEffectiveFactories の1箇所のみ）。
+   */
+  readonly factoryLifecycleState?: FactoryLifecycleStateTable;
   readonly companyId: CompanyId;
   /** ラボ作成時の静的な工場（capex加算前）。加算はこの関数の中で行う。 */
   readonly baseFactories: readonly Factory[];
@@ -384,7 +392,7 @@ export function buildCompanyProcessingForecast(input: BuildCompanyProcessingFore
   // を使う（applyCapexCapacityToFactoriesだけだと、稼働開始済みの新設Factory向けの
   // 生産計画・ワーカー配置が、下のfactoryById.has()フィルタで丸ごと除外されてしまい、
   // 「新設工場へ入力しても処理見込みに反映されない」という不整合が生じるため）。
-  const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period);
+  const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period, input.factoryLifecycleState);
   const factoryById = new Map(currentFactories.map((f) => [f.factoryId, f]));
 
   const companyPlans = input.productionPlans.filter((p) => p.companyId === input.companyId && factoryById.has(p.factoryId));

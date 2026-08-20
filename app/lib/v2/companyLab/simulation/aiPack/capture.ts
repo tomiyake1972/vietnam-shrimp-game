@@ -77,7 +77,9 @@ export function captureCompanyStateSnapshot(state: CompanyLabState, fixture: Com
 
   const capexForCompany = state.capexState.companies.find((c) => c.companyId === companyId);
   const effectiveFactories = capexForCompany
-    ? computeEffectiveFactories(fixture.factories, { companies: [capexForCompany] }, state.currentPeriod)
+    ? // 【ENG-FAC-1 read-path consistency】AI分析用データも Standard AI の観測と同じ基準にする
+      // （SOLD工場を fixture.factories から復活させない）。
+      computeEffectiveFactories(fixture.factories, { companies: [capexForCompany] }, state.currentPeriod, state.factoryLifecycleState)
     : fixture.factories;
 
   const capacityTotals = effectiveFactories.reduce(

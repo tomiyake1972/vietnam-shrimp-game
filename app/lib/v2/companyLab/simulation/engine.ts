@@ -232,7 +232,9 @@ function captureCapacities(turn: number, state: CompanyLabState, fixtures: reado
   return fixtures.map((fixture) => {
     const capexForCompany = state.capexState.companies.find((c) => c.companyId === fixture.companyId);
     const effective = capexForCompany
-      ? computeEffectiveFactories(fixture.factories, { companies: [capexForCompany] }, state.currentPeriod)
+      ? // 【ENG-FAC-1 read-path consistency】lifecycle state を必ず渡す。渡さないと休止・売却済み
+        // 工場が status="active" のまま記録され、Run記録だけが実在しない能力を持つ。
+        computeEffectiveFactories(fixture.factories, { companies: [capexForCompany] }, state.currentPeriod, state.factoryLifecycleState)
       : fixture.factories;
     const totals = effective.reduce(
       (acc, f) => {
