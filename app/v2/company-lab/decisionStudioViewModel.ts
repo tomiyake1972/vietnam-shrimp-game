@@ -65,6 +65,9 @@ export function buildDecisionStudioViewModel(input: BuildDecisionStudioViewModel
     baseFactories: fixture.factories,
     capexState: { companies: [ownState.capexState] },
     period,
+    // 【ENG-FAC-1 read-path consistency】Engine・Standard AIと同じlifecycle stateを渡し、
+    // 休止・売却済み工場の能力を画面へ表示しない（表示値の正本を1本にする）。
+    factoryLifecycleState: ownState.factoryLifecycleState,
     params: CAPEX_PARAMETERS_V1,
   });
   const pendingCapacityTotalTons = Object.values(capacityViewModel.pendingTotalsByPool).reduce((sum, n) => sum + n, 0);
@@ -76,6 +79,7 @@ export function buildDecisionStudioViewModel(input: BuildDecisionStudioViewModel
     baseFactories: fixture.factories,
     capexState: { companies: [ownState.capexState] },
     period,
+    factoryLifecycleState: ownState.factoryLifecycleState,
     productionPlans: decisionInputForForecast.productionPlans,
     workerAssignments: decisionInputForForecast.workerAssignments,
     rawMaterialLots: ownState.rawMaterialLots,
@@ -86,6 +90,7 @@ export function buildDecisionStudioViewModel(input: BuildDecisionStudioViewModel
     baseFactories: fixture.factories,
     capexState: { companies: [ownState.capexState] },
     period,
+    factoryLifecycleState: ownState.factoryLifecycleState,
     productionPlans: decisionInputForForecast.productionPlans,
     workerAssignments: decisionInputForForecast.workerAssignments,
     workforceState: ownState.workforceState,

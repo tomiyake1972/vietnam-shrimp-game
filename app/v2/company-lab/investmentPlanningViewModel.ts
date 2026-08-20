@@ -42,6 +42,7 @@ import {
 import { CapexParameters, CAPEX_PARAMETERS_V1, CapexState, CapitalProjectType, CAPITAL_PROJECT_TYPES } from "../../lib/v2/capex";
 import { computeCapacityEffectForCompany } from "../../lib/v2/capex/capacityEffect";
 import { computeEffectiveFactories } from "../../lib/v2/capex/factoryConstruction";
+import type { FactoryLifecycleStateTable } from "../../lib/v2/capex/factoryLifecycle";
 import { buildCompanyFactorySpaceState, computeCandidateProjectSpaceUnits } from "../../lib/v2/capex/factorySpace";
 import { CompanyFinancialQuarterResult } from "../../lib/v2/finance/types";
 import { FINANCE_PARAMETERS_V1 } from "../../lib/v2/finance/parameters";
@@ -391,6 +392,13 @@ export interface CompanyInvestmentPlanningViewModel {
 }
 
 export interface BuildCompanyInvestmentPlanningInput {
+  /**
+   * 【ENG-FAC-1 read-path consistency】Factory lifecycle決定ログ（capex/factoryLifecycle.ts）。
+   * CompanyOwnState.factoryLifecycleState をそのまま渡すこと。省略時はlifecycleを一切
+   * 適用しない＝この機能の導入前と完全に同一の表示（既存呼び出し元との後方互換）。
+   * ここで status の独自判定は行わない（判定は computeEffectiveFactories の1箇所のみ）。
+   */
+  readonly factoryLifecycleState?: FactoryLifecycleStateTable;
   readonly companyId: CompanyId;
   /** ラボ作成時の静的な工場（capex加算前）。 */
   readonly baseFactories: readonly Factory[];
@@ -489,7 +497,7 @@ export function buildCompanyInvestmentPlanningViewModel(
   // を使う（applyCapexCapacityToFactoriesだけだと、稼働開始済みの新設Factoryが
   // currentFactoriesへ現れず、投資計画・工場スペース・Worker必要人数の各表示から
   // 新設工場が漏れてしまう）。
-  const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period);
+  const currentFactories = computeEffectiveFactories(companyBase, input.capexState, input.period, input.factoryLifecycleState);
 
   // --- 現在の処理見込み（生産エンジンの出力そのもの） ---
   const forecast = buildCompanyProcessingForecast({
@@ -497,6 +505,7 @@ export function buildCompanyInvestmentPlanningViewModel(
     baseFactories: companyBase,
     capexState: input.capexState,
     period: input.period,
+    factoryLifecycleState: input.factoryLifecycleState,
     productionPlans: input.productionPlans,
     workerAssignments: input.workerAssignments,
     rawMaterialLots: input.rawMaterialLots,
@@ -688,6 +697,8 @@ export function buildCompanyInvestmentPlanningViewModel(
       const afterForecast = buildCompanyProcessingForecast({
         companyId: input.companyId,
         // すでに設備投資を反映済みのFactoryを渡すため、capexStateは空にする（二重加算の防止）。
+        // 【ENG-FAC-1】hypotheticalFactoriesはcurrentFactories由来＝lifecycle適用済みのため、
+        // factoryLifecycleStateもここでは渡さない（二重適用の防止。売却済み工場は既に不在）。
         baseFactories: hypotheticalFactories,
         capexState: { companies: [] },
         period: input.period,

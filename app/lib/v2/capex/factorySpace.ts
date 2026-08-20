@@ -219,7 +219,16 @@ export function buildCompanyFactorySpaceState(input: BuildCompanyFactorySpaceSta
       ? computeOperationalFixedSpaceUnitsByFactory(companyCapex.portfolio.projects, input.period, primaryFactoryId, spaceParams)
       : new Map<string, number>();
 
-  const factoryStates = base.map((baseFactory) =>
+  // 【ENG-FAC-1 read-path consistency】売却完了(SOLD)した工場は currentFactories から
+  // 除かれている。base（静的fixture由来）だけで回すと、下の
+  // `currentById.get(...) ?? baseFactory` が元fixtureへフォールバックし、
+  // **もう保有していない工場の床面積が総量にも使用量にも残り続ける**（CAPEX承認枠にも
+  // 効いてしまう）。保有していない工場は集計から外す。
+  // lifecycle未使用時は currentFactories が base を必ず全件含むため、このfilterは
+  // 何も落とさない＝従来と完全に同一の結果になる。
+  const factoryStates = base
+    .filter((baseFactory) => currentById.has(baseFactory.factoryId))
+    .map((baseFactory) =>
     buildFactorySpaceState({
       baseFactory,
       currentFactory: currentById.get(baseFactory.factoryId) ?? baseFactory,
