@@ -19,6 +19,7 @@ import { PlanCostExpectation } from "../../lib/v2/sales/types";
 import { Score0to100 } from "../../lib/v2/core/units";
 import { Factory, WorkerSkillEntry } from "../../lib/v2/production/types";
 import { isValidVapProductDevelopmentSpendTier, VAP_PRODUCT_DEVELOPMENT_SPEND_TIERS_USD } from "../../lib/v2/companyLab/productDevelopmentState";
+import type { FactoryLifecycleDecisionInput } from "../../lib/v2/capex/factoryLifecycle";
 
 export const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
@@ -196,6 +197,14 @@ export interface CompanyDecisionDraft {
    * 下書きにこのフィールドが無いため（読み込み側は `?? 0` として扱う）。
    */
   readonly dividendAmountUsd?: number;
+  /**
+   * 【Player工場操作Phase 1新設】今四半期のFactory Lifecycle意思決定（休止・再稼働・
+   * 売却）。既存Engine契約 CompanyDecisionInput.factoryLifecycleDecisions と同じ型を
+   * そのまま使う（新しい型・新しい計算は作らない）。1工場につき同時に1件まで
+   * （factoryLifecycleDraftActions.tsが保証する）。
+   * 省略時・空配列は「工場操作なし」であり、従来Runの結果を一切変えない。
+   */
+  readonly factoryLifecycleDecisions?: readonly FactoryLifecycleDecisionInput[];
 }
 
 // ---------------------------------------------------------------------
@@ -531,6 +540,11 @@ export function buildInitialDraft(
     // 【DIV-1新設】新しい四半期のドラフトは常に配当希望額0から始まる
     // （前四半期の配当決定を引き継がない。「今回の配当」は毎回新しい意思決定であるため）。
     dividendAmountUsd: 0,
+    // 【Player工場操作Phase 1新設】新しい四半期のドラフトは常にFactory Lifecycle
+    // 決定なし（空配列）から始まる。Standard AIの自動方針はfactoryLifecycleDecisionsを
+    // 生成しない（SAI-FAC-1はStandard AI自身の決定ロジックであり、Player draft seedとは無関係）
+    // ため、autoDecisionからの引き継ぎは行わない。
+    factoryLifecycleDecisions: [],
   };
 }
 
@@ -654,5 +668,9 @@ export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture
     // （マイナスの配当という構造的誤用はここでは起こり得ない設計にする。
     // maxDividendを超える金額は resolveDividendDecision 側で全額拒否される）。
     dividendDecision: { dividendAmountUsd: safeNonNegative(draft.dividendAmountUsd ?? 0) },
+    // 【Player工場操作Phase 1新設】既存Engine契約の型（FactoryLifecycleDecisionInput）を
+    // そのまま往復させるだけで、ここでの解釈・検証・再計算は一切行わない
+    // （validateFactoryLifecycleDecisionが唯一の正式判定。runner.ts参照）。
+    factoryLifecycleDecisions: draft.factoryLifecycleDecisions,
   };
 }

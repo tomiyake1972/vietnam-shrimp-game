@@ -205,6 +205,8 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               onChange={onChange}
               disabled={disabled}
               vm={vm}
+              period={period}
+              turn={turn}
               lastQuarterRejectedCapexProposals={lastQuarterRejectedCapexProposals}
             />
           )}

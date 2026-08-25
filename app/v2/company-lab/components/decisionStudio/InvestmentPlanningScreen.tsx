@@ -6,9 +6,11 @@
 
 import { useState } from "react";
 import { score0to100, unwrapUnit } from "../../../../lib/v2/core/units";
+import { PeriodV2 } from "../../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState } from "../../../../lib/v2/companyLab";
 import { CAPEX_PARAMETERS_V1, CapexRejectedProposal } from "../../../../lib/v2/capex";
 import { MAX_FACTORIES_PER_COMPANY } from "../../../../lib/v2/capex/factoryConstruction";
+import { FactoryLifecycleDecisionType, FactoryLifecycleState } from "../../../../lib/v2/capex/factoryLifecycle";
 import { PD_MECHANIZATION_PARAMETERS_V1, formatReductionRatioAtFullMaturityLabel } from "../../../../lib/v2/capex/pdMechanization";
 import { effectiveEfficiencyPerHeadTons, requiredHeadcountForQuantity } from "../../../../lib/v2/production/labor";
 import { PRODUCTION_PARAMETERS_V1 } from "../../../../lib/v2/production/parameters";
@@ -25,6 +27,8 @@ import {
 import { CAPEX_EXPLANATION_DETAIL_TEXT, CAPEX_EXPLANATION_TEXT } from "../../capexViewModel";
 import { CompanyDecisionDraft, VAP_PRODUCT_DEVELOPMENT_SPEND_TIER_OPTIONS_USD } from "../../decisionDraft";
 import { DecisionStudioViewModel } from "../../decisionStudioViewModel";
+import { findFactoryLifecycleDecisionInDraft, setFactoryLifecycleDecisionInDraft } from "../../factoryLifecycleDraftActions";
+import { buildFactoryOperationsViewModel, FactoryOperationsRow } from "../../factoryOperationsViewModel";
 import CapexDraftList from "../CapexDraftList";
 import CapexPortfolioList from "../CapexPortfolioList";
 import CollapsibleSection from "../CollapsibleSection";
@@ -39,10 +43,64 @@ interface InvestmentPlanningScreenProps {
   readonly onChange: (next: CompanyDecisionDraft) => void;
   readonly disabled: boolean;
   readonly vm: DecisionStudioViewModel;
+  readonly period: PeriodV2;
+  readonly turn?: number;
   readonly lastQuarterRejectedCapexProposals?: readonly CapexRejectedProposal[];
 }
 
-export default function InvestmentPlanningScreen({ fixture, ownState, draft, onChange, disabled, vm, lastQuarterRejectedCapexProposals }: InvestmentPlanningScreenProps) {
+const FACTORY_LIFECYCLE_STATUS_LABELS: Readonly<Record<FactoryLifecycleState, string>> = {
+  OPERATING: "稼働中",
+  MOTHBALLED: "休止中",
+  SALE_PENDING: "売却手続き中",
+  SOLD: "売却済み",
+};
+
+const FACTORY_LIFECYCLE_STATUS_BADGE_CLASS: Readonly<Record<FactoryLifecycleState, string>> = {
+  OPERATING: "bg-emerald-900/60 text-emerald-300",
+  MOTHBALLED: "bg-gray-800 text-gray-300",
+  SALE_PENDING: "bg-amber-900/60 text-amber-300",
+  SOLD: "bg-gray-800 text-gray-500",
+};
+
+const FACTORY_LIFECYCLE_ACTION_LABELS: Readonly<Record<FactoryLifecycleDecisionType, string>> = {
+  MOTHBALL_FACTORY: "この工場を休止する",
+  REACTIVATE_FACTORY: "この工場を再稼働する",
+  SELL_FACTORY: "この工場の売却手続きを始める",
+};
+
+function formatUsd(n: number): string {
+  return `$${Math.round(n).toLocaleString("en-US")}`;
+}
+
+/** 【実装指示§11】選択中のLifecycle Decision種別ごとの確認文言（平易な日本語・固定文）。 */
+function buildFactoryLifecycleConfirmationLines(type: FactoryLifecycleDecisionType, row: FactoryOperationsRow, effectiveTurn: number, completionTurn: number): readonly string[] {
+  if (type === "MOTHBALL_FACTORY") {
+    return [
+      `この工場はTurn ${effectiveTurn}から生産能力が0になります。`,
+      "工場を休止してもWorkerは自動的には減りません。",
+      "Worker人数はWORKERタブで別途判断してください。",
+      "既存の受注契約は消えません。",
+      `休止中は四半期あたり約${formatUsd(row.mothballCarryingCostUsdPerQuarter)}の維持費が発生します。`,
+      `再稼働には別途${formatUsd(row.reactivationCostUsd)}の費用がかかります。`,
+    ];
+  }
+  if (type === "REACTIVATE_FACTORY") {
+    return [
+      `再稼働費用${formatUsd(row.reactivationCostUsd)}が当Turnに発生します。`,
+      `生産能力が戻るのはTurn ${effectiveTurn}からです。`,
+      "Workerは自動的に採用・増員されません。",
+    ];
+  }
+  return [
+    `Turn ${effectiveTurn}からこの工場の生産能力は0になります。`,
+    "既存の受注契約は消えません。",
+    `売却完了まで2TurnのLifecycle timingがあります（Turn ${effectiveTurn}で操業停止 → Turn ${completionTurn}で売却完了）。`,
+    `売却完了時（Turn ${completionTurn}）に見込代金 約${formatUsd(row.estimatedSaleProceedsUsd)}・見込${row.estimatedDisposalGainLossUsd >= 0 ? "売却益" : "売却損"} 約${formatUsd(Math.abs(row.estimatedDisposalGainLossUsd))}が会計へ反映されます（既存Engine算出値。実際の完了時点の帳簿価額により変動しうる見込値です）。`,
+    "売却は完了後に元へ戻せません。",
+  ];
+}
+
+export default function InvestmentPlanningScreen({ fixture, ownState, draft, onChange, disabled, vm, period, turn, lastQuarterRejectedCapexProposals }: InvestmentPlanningScreenProps) {
   const {
     planning,
     capexCandidates,
@@ -64,6 +122,11 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
 
   const [factorySpecificTargetFactoryId, setFactorySpecificTargetFactoryId] = useState<string>(ownState.effectiveFactories[0]?.factoryId ?? "");
   const hasMultipleFactories = ownState.effectiveFactories.length > 1;
+
+  // 【Player工場操作Phase 1新設】表示専用ViewModel（新しい計算式は持たない。既存Engine
+  // SSoTが算出済みの値を組み立てるだけ）。turnが渡っていない呼び出し元では、Turn番号を
+  // 使う表示ができないためセクション自体を出さない（安全側）。
+  const factoryOperationsVm = turn !== undefined ? buildFactoryOperationsViewModel(fixture, ownState, period, turn) : null;
 
   const pdMechanizationTemplate = CAPEX_PARAMETERS_V1.templatesByType.pdMechanization;
   const pdMechanizationConstructionQuarters = pdMechanizationTemplate.paymentRatios.length;
@@ -321,6 +384,122 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
           />
         </div>
       </CollapsibleSection>
+
+      {/* 【Player工場操作Phase 1新設】工場の休止・再稼働・売却。当期生産量の調整ではなく
+          将来のFactory asset / capacity / fixed costを変える経営意思決定のため、
+          PRODUCTIONタブではなくここに置く。既存Factory Lifecycle Engine
+          （capex/factoryLifecycle.ts・capex/factoryDisposal.ts・capex/factoryAssetProjection.ts）
+          が算出済みの値をそのまま表示するだけで、新しい計算式はここに一切持たない。 */}
+      {factoryOperationsVm && (
+        <CollapsibleSection title="工場操作（休止・再稼働・売却）" tone="input" testId="factory-operations-section">
+          <div className="bg-amber-950/40 border border-amber-700/50 rounded px-2 py-1.5 text-[11px] text-amber-200" data-testid="factory-operations-worker-warning">
+            工場を休止・売却してもWorker人数は自動では減りません。必要に応じてWORKERタブで人数を見直してください。
+          </div>
+          <p className="text-[11px] text-gray-400">
+            金額・能力は既存Engineの算出値をそのまま表示しており、この画面では再計算しません。SOLD（売却済み）の工場はこの一覧には表示されません。
+          </p>
+
+          <div className="space-y-2">
+            {factoryOperationsVm.rows.map((row) => {
+              const capacityRow = vm.capacityViewModel.factories.find((f) => f.factoryId === row.factoryId);
+              const commonProcessingTons = capacityRow?.pools.find((p) => p.poolKey === "commonProcessing")?.currentEffectiveTons;
+              const pendingDecision = findFactoryLifecycleDecisionInDraft(draft, row.factoryId);
+              const effectiveTurn = turn !== undefined ? turn + 1 : undefined;
+              const completionTurn = turn !== undefined ? turn + 2 : undefined;
+
+              return (
+                <div
+                  key={row.factoryId}
+                  className="rounded-lg border border-gray-700/60 bg-gray-900/40 px-3 py-2 space-y-1.5"
+                  data-testid={`factory-operations-row-${row.factoryId}`}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold text-gray-100">{row.factoryId}</span>
+                    <span
+                      className={`text-[11px] rounded px-1.5 py-0.5 ${FACTORY_LIFECYCLE_STATUS_BADGE_CLASS[row.lifecycleStatus]}`}
+                      data-testid={`factory-operations-status-${row.factoryId}`}
+                    >
+                      {FACTORY_LIFECYCLE_STATUS_LABELS[row.lifecycleStatus]}
+                    </span>
+                    {row.lifecycleStatus === "SALE_PENDING" && row.saleCompletionTurn !== null && (
+                      <span className="text-[11px] text-amber-300">売却完了予定：Turn {row.saleCompletionTurn}</span>
+                    )}
+                    {row.hasActiveCapexProject && <span className="text-[11px] text-gray-400">未完了の設備投資案件があるため売却できません</span>}
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-0.5 text-[11px] text-gray-300">
+                    <div>
+                      現在使用可能な生産能力（前処理）: <span className="text-gray-100">{commonProcessingTons !== undefined ? `${commonProcessingTons.toLocaleString("en-US")} t/四半期` : NO_VALUE_TEXT}</span>
+                    </div>
+                    <div>
+                      工場別帳簿価額: <span className="text-gray-100">{formatUsd(row.netBookValueUsd)}</span>
+                    </div>
+                    <div>
+                      休止中の四半期費用: <span className="text-gray-100">{formatUsd(row.mothballCarryingCostUsdPerQuarter)}</span>
+                    </div>
+                    <div>
+                      再稼働費: <span className="text-gray-100">{formatUsd(row.reactivationCostUsd)}</span>
+                    </div>
+                    <div>
+                      売却した場合の見込代金: <span className="text-gray-100">{formatUsd(row.estimatedSaleProceedsUsd)}</span>
+                    </div>
+                    <div>
+                      見込売却損益: <span className={row.estimatedDisposalGainLossUsd >= 0 ? "text-emerald-300" : "text-rose-300"}>{formatUsd(row.estimatedDisposalGainLossUsd)}</span>
+                    </div>
+                  </div>
+
+                  {row.availableActions.length > 0 && !pendingDecision && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {row.availableActions.map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => onChange(setFactoryLifecycleDecisionInDraft(draft, row.factoryId, type))}
+                          data-testid={`factory-operations-action-${row.factoryId}-${type}`}
+                          className="text-[11px] px-2 py-1 rounded bg-sky-900/70 border border-sky-500/70 text-sky-50 hover:bg-sky-800/70 disabled:opacity-50 disabled:bg-gray-800 disabled:border-gray-600 disabled:text-gray-400"
+                        >
+                          {FACTORY_LIFECYCLE_ACTION_LABELS[type]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {pendingDecision && effectiveTurn !== undefined && completionTurn !== undefined && (
+                    <div
+                      className="bg-sky-950/40 border border-sky-700/50 rounded px-2 py-1.5 space-y-1"
+                      data-testid={`factory-operations-confirmation-${row.factoryId}`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-sky-200">選択中: {FACTORY_LIFECYCLE_ACTION_LABELS[pendingDecision.type]}</span>
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => onChange(setFactoryLifecycleDecisionInDraft(draft, row.factoryId, null))}
+                          data-testid={`factory-operations-undo-${row.factoryId}`}
+                          className="text-[11px] px-2 py-0.5 rounded border border-gray-600 text-gray-300 hover:bg-gray-800"
+                        >
+                          選択を取り消す
+                        </button>
+                      </div>
+                      <ul className="list-disc list-inside space-y-0.5">
+                        {buildFactoryLifecycleConfirmationLines(pendingDecision.type, row, effectiveTurn, completionTurn).map((line, idx) => (
+                          <li key={idx} className="text-[11px] text-sky-100">
+                            {line}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-[11px] text-gray-400">
+                        既存受注契約は残ります。能力低下により納期遅延が発生する可能性があります。
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </CollapsibleSection>
+      )}
 
       {/* 【Test15新設】VAP商品開発費 */}
       <CollapsibleSection
