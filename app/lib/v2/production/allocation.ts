@@ -191,7 +191,41 @@ export function allocateProductionPlans(
 
   const entries: ProductionAllocationEntry[] = plans.map((p, i) => {
     const desired = unwrapUnit(p.desiredQuantity);
-    const allocated = Math.min(desired, Math.max(0, laborLimited[i]));
+    // 【ENG-PROD-ALLOC-1】最終生産量は、段階1〜5のすべての実効制約の最小値にする。
+    //
+    // 【修正前の欠陥】ここは min(desired, laborLimited) だけで決まっており、段階1〜4
+    // （原料・共通前処理・冷凍包装・商品別ライン）のクリップ結果を一切参照していなかった。
+    // laborLimited は「配置済みワーカーで何t作れるか」（labor.ts の
+    // calculateLaborCapacityFromAssignedHeadcount。工場×商品のライン能力プールでは
+    // 頭打ちにするが、冷凍・包装能力や、同一プールを複数計画で分け合った後の
+    // 取り分では頭打ちにしない）であるため、ワーカーに余力のある工場では
+    // 冷凍・包装能力や商品ライン能力の取り分を超えて生産が成立していた
+    // （SAI-EXEC-2 PRE-AUDIT 276bd5e §3-2。DS1 4seed×32Tでも36件/1,875件を実測）。
+    // 段階1〜4を超えて生産すると、requiredRawMaterialQuantity（= allocated / 歩留まり）も
+    // 実際に確保できた原料を超えるため、在庫側にも影響していた。
+    //
+    // 【なぜ最後にcapするのか（Option A採用理由）】laborLimited を candidateQuantity で
+    // 事前に頭打ちにする案（Option B）も検討したが、laborLimited は
+    // ProductionAllocationEntry.stages.laborLimited として「労働**単独**の制約値」を
+    // 外へ出す診断値であり、下の shortfallReasons も「段階ごとに直前の段階から
+    // 減ったか」で理由を判定している。Option B は laborLimited の意味を
+    // 「設備制約適用後の値」へ変えてしまい、設備が先に効いた場合に労働不足が
+    // 二度と理由として出なくなる（既存の shortfall semantics の変更）。
+    // また labor.ts::allocateWorkersToPlans は production/index.ts から公開されており、
+    // 戻り値の意味を変える影響範囲が広い。したがって「各段階は各段階の制約値を返し、
+    // 合成はこの1箇所だけで行う」形（Option A）を canonical とする。
+    // 能力式そのものはどこにも二重実装していない（各段階の値をそのまま使うだけ）。
+    const allocated = Math.max(
+      0,
+      Math.min(
+        desired,
+        rawMaterialLimitedOutput[i],
+        commonCapacityLimited[i],
+        freezingPackagingLimited[i],
+        productCapacityLimited[i],
+        laborLimited[i]
+      )
+    );
     const roundedAllocated = roundHosoEqTons(allocated);
     const shortfall = Math.max(0, roundHosoEqTons(desired - roundedAllocated));
 
