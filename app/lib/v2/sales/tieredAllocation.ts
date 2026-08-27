@@ -16,6 +16,12 @@
 //      に明示的に分解する。**下限（minimumPriceCompetitiveness 相当）は使わない。**
 //      clamp は softmax の overflow 防止のみ。
 //   4. cap 前の配分（unconstrained）を確定した後、各社へ cap を適用する。
+//      cap は現行 Engine に実在するものだけ:
+//        unconstrained / desired / salesCapacity / supplierShare / approvedAllocation
+//      【ENG-TIERED-MKT-1A】「物理的な将来納品可能量（deliverable supply）」の正本は
+//      現行 Engine に存在しない（sales モジュールは完成品在庫・生産能力・受注残の
+//      いずれも入力として受け取らない）。存在しない cap を Infinity で入れて
+//      実装済みと表現しない。接続は別Phaseの仕様設計が必要。
 //      cap で削られた数量は**他社へ再配分せず外部選択肢へ移す**（水位法の
 //      「競争力が低くても他社cap後の残余で埋まる」構造を再導入しないため）。
 //
@@ -46,7 +52,16 @@ export const EXTERNAL_OPTION_PARTICIPANT_ID = "__external_option__";
 // ---------------------------------------------------------------------
 
 /** どの上限が最終成約量を決めたか。 */
-export type TieredBindingCap = "UNCONSTRAINED_DEMAND" | "DESIRED" | "SALES_CAPACITY" | "SUPPLIER_SHARE" | "DELIVERABLE_SUPPLY";
+/**
+ * どの上限が最終成約量を決めたか。
+ *
+ * 【ENG-TIERED-MKT-1A】APPROVED_ALLOCATION は CompanySalesPlanEntry.approvedAllocationCap
+ * （承認済み取引枠・供給信認枠）であり、**物理的な納品可能量ではない**。
+ * Engine には現時点で「将来納品可能量（physical deliverable supply）」の正本が存在しない
+ * ため、その名前の cap は用意していない（存在しない cap を Infinity で入れて
+ * 実装済みと表現しない）。
+ */
+export type TieredBindingCap = "UNCONSTRAINED_DEMAND" | "DESIRED" | "SALES_CAPACITY" | "SUPPLIER_SHARE" | "APPROVED_ALLOCATION";
 
 export interface TieredCompanyTierDiagnostics {
   readonly companyId: string;
@@ -90,7 +105,8 @@ export interface TieredCompanyCapDiagnostics {
   readonly desiredCap: number;
   readonly salesCapacityCap: number;
   readonly supplierShareCap: number;
-  readonly deliverableSupplyCap: number;
+  /** 承認済み取引枠・供給信認枠（sales/types.ts の approvedAllocationCap）。未指定なら Infinity。 */
+  readonly approvedAllocationCap: number;
   readonly bindingCap: TieredBindingCap;
   readonly reductionByCap: number;
   readonly finalAllocation: number;
@@ -294,10 +310,11 @@ export function allocateMarketProductTiered(input: TieredAllocationInput): Tiere
     const salesCapacityCap =
       effortCapacity !== undefined ? effortCapacity / params.salesEffortCoefficients[entry.product] : Number.POSITIVE_INFINITY;
     const supplierShareCap = demand * params.maximumSupplierShare;
-    // 【deliverableSupplyCap の正本】CompanySalesPlanEntry.approvedAllocationCap
-    // （承認済み取引枠・供給信認枠）。Engine 側で「外部から与える個社成約上限」を
-    // 表す唯一の入力であり、未指定なら制約なし。
-    const deliverableSupplyCap =
+    // 【ENG-TIERED-MKT-1A】approvedAllocationCap は「承認済み取引枠・供給信認枠」
+    // （与信・取引先管理・外部承認から与えられる任意の成約上限）であり、
+    // **「生産・在庫・受注残から見て何t追加納品できるか」という物理量ではない**。
+    // 名前と意味をそのまま維持し、physical deliverable supply として扱わない。
+    const approvedAllocationCap =
       entry.approvedAllocationCap !== undefined ? unwrapUnit(entry.approvedAllocationCap) : Number.POSITIVE_INFINITY;
     return {
       entry,
@@ -306,7 +323,7 @@ export function allocateMarketProductTiered(input: TieredAllocationInput): Tiere
       desiredCap: unwrapUnit(entry.desiredQuantity),
       salesCapacityCap,
       supplierShareCap,
-      deliverableSupplyCap,
+      approvedAllocationCap,
     };
   });
 
@@ -319,6 +336,8 @@ export function allocateMarketProductTiered(input: TieredAllocationInput): Tiere
   const weightByTier = new Map<CustomerTierId, Map<string, number>>();
   const externalUtilityByTier = new Map<CustomerTierId, number>();
   const externalWeightByTier = new Map<CustomerTierId, number>();
+  /** 層需要で加重した正規化ウェイト（全社合計 + 外部シェア = 1）。 */
+  const aggregateWeightByCompany = new Map<string, number>(prepared.map((p) => [p.entry.companyId, 0]));
 
   for (const tierId of CUSTOMER_TIER_IDS) {
     const tier = tiers[tierId];
@@ -340,6 +359,12 @@ export function allocateMarketProductTiered(input: TieredAllocationInput): Tiere
       uBreak.set(p.entry.companyId, breakdowns[i]);
       unconstrainedByCompany.set(p.entry.companyId, (unconstrainedByCompany.get(p.entry.companyId) ?? 0) + alloc);
     });
+    prepared.forEach((p, i) => {
+      aggregateWeightByCompany.set(
+        p.entry.companyId,
+        (aggregateWeightByCompany.get(p.entry.companyId) ?? 0) + tier.demandShare * companyWeights[i]
+      );
+    });
     perTierUnconstrained.set(tierId, uMap);
     weightByTier.set(tierId, wMap);
     utilityByTier.set(tierId, uBreak);
@@ -359,7 +384,7 @@ export function allocateMarketProductTiered(input: TieredAllocationInput): Tiere
       ["DESIRED", p.desiredCap],
       ["SALES_CAPACITY", p.salesCapacityCap],
       ["SUPPLIER_SHARE", p.supplierShareCap],
-      ["DELIVERABLE_SUPPLY", p.deliverableSupplyCap],
+      ["APPROVED_ALLOCATION", p.approvedAllocationCap],
     ];
     let bindingCap: TieredBindingCap = "UNCONSTRAINED_DEMAND";
     let final = unconstrained;
@@ -378,7 +403,7 @@ export function allocateMarketProductTiered(input: TieredAllocationInput): Tiere
       desiredCap: p.desiredCap,
       salesCapacityCap: p.salesCapacityCap,
       supplierShareCap: p.supplierShareCap,
-      deliverableSupplyCap: p.deliverableSupplyCap,
+      approvedAllocationCap: p.approvedAllocationCap,
       bindingCap,
       reductionByCap: Math.max(0, unconstrained - final),
       finalAllocation: final,
@@ -454,7 +479,18 @@ export function allocateMarketProductTiered(input: TieredAllocationInput): Tiere
       askPrice: askPriceUnit,
       coverageScore: coverage,
       processingCapacity: hosoEqTons(Number.isFinite(p.salesCapacityCap) ? roundHosoEqTons(p.salesCapacityCap) : 0),
-      competitivenessWeight: 0,
+      // 【ENG-TIERED-MKT-1A】以前はここを 0 固定にしていたが、この値は表示専用ではなく
+      // companyLab/runner.ts:1555 が computeAddressableDemand の分子として読む
+      // **エンジン入力**である。0 のままだと addressable demand が
+      // targetDemand × 0/(0+externalOptionWeight) = 0 へ潰れ、PD/VAP の供給圧力
+      // （marketEvolution）が壊れる。
+      // そこで「層需要で加重した正規化ウェイト（＝この会社が対象需要のうち
+      // 何割を選好されたか）」を入れる。捏造値ではなく、新方式が実際に使った
+      // 選択確率そのものの集約であり、全社合計 + 外部シェア = 1 になる。
+      // 【scale の注意】legacy の competitivenessWeight（0〜1程度の合成競争力）とは
+      // 定義が異なるため、tiered mode を Scenario で有効化する前に
+      // computeAddressableDemand 側の解釈を #08 で確定する必要がある（未解決事項）。
+      competitivenessWeight: aggregateWeightByCompany.get(p.entry.companyId) ?? 0,
       competitivenessBreakdown: breakdown,
       allocatedQuantity: hosoEqTons(roundHosoEqTons(Math.max(0, finalByCompany.get(p.entry.companyId) ?? 0))),
     };

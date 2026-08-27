@@ -30,8 +30,11 @@ export interface FixtureCompanySpec {
   readonly salesForceHeadcount: number;
   /** 営業工数能力（工数トン）。undefined なら制約なし。 */
   readonly salesEffortCapacity?: number;
-  /** deliverableSupplyCap（approvedAllocationCap）。undefined なら制約なし。 */
-  readonly deliverableSupplyCap?: number;
+  /**
+   * 承認済み取引枠・供給信認枠（approvedAllocationCap）。undefined なら制約なし。
+   * 【ENG-TIERED-MKT-1A】これは物理的な納品可能量ではない（与信・取引先管理由来の上限）。
+   */
+  readonly approvedAllocationCap?: number;
 }
 
 /** 完全対称な5社（TIER-15 用の基準形）。 */
@@ -67,7 +70,7 @@ export function buildEntries(
     deliveryReliability: score0to100(s.deliveryReliability),
     salesBaseScore: score0to100(s.salesBase),
     ...(product === "vap" ? { vapCapabilityScore: score0to100(s.differentiation) } : {}),
-    ...(s.deliverableSupplyCap !== undefined ? { approvedAllocationCap: hosoEqTons(s.deliverableSupplyCap) } : {}),
+    ...(s.approvedAllocationCap !== undefined ? { approvedAllocationCap: hosoEqTons(s.approvedAllocationCap) } : {}),
   }));
 }
 

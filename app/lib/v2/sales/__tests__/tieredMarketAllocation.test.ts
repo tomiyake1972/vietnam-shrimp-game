@@ -226,12 +226,12 @@ test("TIER-13: supplier share cap を超えない", () => {
   assert.equal(c.bindingCap, "SUPPLIER_SHARE");
 });
 
-test("TIER-14: deliverable supply cap（approvedAllocationCap）を超えない", () => {
-  const specs = symmetricCompanySpecs({ deliverableSupplyCap: 120 });
+test("TIER-14: approvedAllocationCap（承認済み取引枠）を超えない", () => {
+  const specs = symmetricCompanySpecs({ approvedAllocationCap: 120 });
   const out = run(specs);
   for (const c of out.diagnostics.companies) {
     assert.ok(c.finalAllocation <= 120 + TOL);
-    assert.equal(c.bindingCap, "DELIVERABLE_SUPPLY");
+    assert.equal(c.bindingCap, "APPROVED_ALLOCATION");
   }
 });
 
@@ -367,4 +367,114 @@ test("TIER-VAL: tier 設定なしで新方式を選ぶとエラー（既定値�
     /tieredMarketAllocation/
   );
   void usdPerHosoEqKg;
+});
+
+// =====================================================================
+// ENG-TIERED-MKT-1A: cap の意味を偽装しないことの固定（実装指示§9）
+// =====================================================================
+
+test("CAP-SEM-1: approvedAllocationCap は独立した trade/approval cap として機能する", () => {
+  // 他の cap（希望量・営業能力・供給者シェア）を非拘束にしたうえで、
+  // approvedAllocationCap だけで最終成約が決まること。
+  const specs = symmetricCompanySpecs({ desired: 5_000, approvedAllocationCap: 180 });
+  const out = run(specs);
+  for (const c of out.diagnostics.companies) {
+    assert.equal(c.bindingCap, "APPROVED_ALLOCATION");
+    assert.ok(c.finalAllocation <= 180 + TOL);
+    assert.ok(c.desiredCap > 180, "前提: 希望量は非拘束であること");
+    assert.equal(c.approvedAllocationCap, 180);
+  }
+  // 未指定なら制約なし（Infinity）＝ binding にならない。
+  const free = run(symmetricCompanySpecs({ desired: 5_000 }));
+  for (const c of free.diagnostics.companies) {
+    assert.equal(c.approvedAllocationCap, Number.POSITIVE_INFINITY);
+    assert.notEqual(c.bindingCap, "APPROVED_ALLOCATION");
+  }
+});
+
+test("CAP-SEM-2: physical deliverable cap は現行Engineに存在しない（仕様として固定）", () => {
+  // 【現行仕様】final_i = min(unconstrained, desired, salesCapacity, supplierShare, approvedAllocation)
+  // 完成品在庫・生産能力・受注残に由来する cap は Engine の成約配分に存在しない。
+  // sales モジュールはそれらを入力として受け取らないため、算出もできない。
+  const specs = symmetricCompanySpecs({ desired: 5_000 });
+  const out = run(specs);
+  const capKeys = Object.keys(out.diagnostics.companies[0]).sort();
+  assert.deepEqual(capKeys, [
+    "approvedAllocationCap",
+    "bindingCap",
+    "companyId",
+    "desiredCap",
+    "finalAllocation",
+    "reductionByCap",
+    "salesCapacityCap",
+    "supplierShareCap",
+    "unconstrainedAllocation",
+  ]);
+  // 「deliverable」を名乗る cap を持たないこと（存在しない cap を実装済みと表現しない）。
+  assert.ok(!capKeys.some((k) => /deliverable/i.test(k)), "physical deliverable cap を騙る field が存在する");
+});
+
+test("CAP-SEM-3: bindingCap の名称が実際の意味と一致する", () => {
+  const cases: readonly [string, Partial<FixtureCompanySpec>][] = [
+    ["DESIRED", { desired: 200 }],
+    ["SALES_CAPACITY", { salesEffortCapacity: 260 }],
+    ["APPROVED_ALLOCATION", { approvedAllocationCap: 150 }],
+  ];
+  for (const [expected, override] of cases) {
+    const out = run(symmetricCompanySpecs({ desired: 5_000, ...override }));
+    for (const c of out.diagnostics.companies) assert.equal(c.bindingCap, expected, `${expected} が binding になっていない`);
+  }
+  // 非拘束時は UNCONSTRAINED_DEMAND。
+  const free = run(symmetricCompanySpecs({ desired: 5_000, priceAdjustment: 1.5 }));
+  for (const c of free.diagnostics.companies) assert.equal(c.bindingCap, "UNCONSTRAINED_DEMAND");
+});
+
+test("CAP-SEM-4: legacy mode の結果が本修正で変わらない", () => {
+  const specs = symmetricCompanySpecs({ desired: 3_000, approvedAllocationCap: 900 });
+  specs[0] = { ...specs[0], priceAdjustment: 1.2 };
+  const legacy = allocateMarketProduct(
+    FIXTURE_MARKET,
+    FIXTURE_PRODUCT,
+    FIXTURE_PERIOD,
+    buildEntries(specs),
+    FIXTURE_REFERENCE_PRICE,
+    FIXTURE_TARGET_DEMAND,
+    SALES_PARAMETERS_V1
+  );
+  // legacy は approvedAllocationCap を従来どおり cap の1つとして扱う（意味も名前も不変）。
+  for (const c of legacy.companies) assert.ok(unwrapUnit(c.allocatedQuantity) <= 900 + TOL);
+  assert.equal(SALES_PARAMETERS_V1.marketAllocationMode, undefined);
+  const total = legacy.companies.reduce((s, c) => s + unwrapUnit(c.allocatedQuantity), 0) + unwrapUnit(legacy.externalOptionQuantity);
+  assert.ok(Math.abs(total - unwrapUnit(FIXTURE_TARGET_DEMAND)) < 1);
+});
+
+test("CAP-SEM-6: 同じ入力なら companyId が変わっても結果が変わらない（会社ID非依存）", () => {
+  const base = symmetricCompanySpecs({ desired: 900, approvedAllocationCap: 600 });
+  const renamed = base.map((s, i) => ({ ...s, companyId: `ZZ-${String(i)}` }));
+  const a = run(base);
+  const b = run(renamed);
+  const norm = (out: ReturnType<typeof run>) =>
+    out.diagnostics.companies.map((c) => [c.unconstrainedAllocation, c.finalAllocation, c.bindingCap, c.approvedAllocationCap]);
+  assert.deepEqual(norm(b), norm(a));
+  assert.equal(b.diagnostics.externalFinalAllocation, a.diagnostics.externalFinalAllocation);
+});
+
+test("CAP-SEM-W: competitivenessWeight は 0 固定ではなく、層需要加重の正規化ウェイトになる", () => {
+  // companyLab/runner.ts の computeAddressableDemand が分子として読む engine 入力であるため、
+  // 0 固定だと addressable demand が 0 へ潰れる。
+  const out = allocateMarketProduct(
+    FIXTURE_MARKET,
+    FIXTURE_PRODUCT,
+    FIXTURE_PERIOD,
+    buildEntries(symmetricCompanySpecs()),
+    FIXTURE_REFERENCE_PRICE,
+    FIXTURE_TARGET_DEMAND,
+    FIXTURE_PARAMS
+  );
+  const weights = out.companies.map((c) => c.competitivenessWeight);
+  for (const w of weights) assert.ok(w > 0, "competitivenessWeight が 0 のまま");
+  const tiered = run(symmetricCompanySpecs());
+  const externalShare = tiered.diagnostics.tiers.reduce((s, t) => s + t.tierShare * t.external.normalizedWeight, 0);
+  // 全社合計 + 外部シェア = 1（層需要で加重した選択確率の集約であること）。
+  assert.ok(Math.abs(weights.reduce((s, w) => s + w, 0) + externalShare - 1) < 1e-9);
 });

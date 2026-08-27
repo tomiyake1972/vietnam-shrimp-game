@@ -23,14 +23,14 @@ const REFERENCE_BY_PRODUCT: Record<Product, number> = { hoso: 4.12, pd: 4.85, va
 const TARGET_DEMAND = 10_000;
 const IDS = ["CO-A", "CO-B", "CO-C", "CO-D", "CO-E"];
 
-type CaseName = "allCapsNonBinding" | "desiredBinding" | "deliverableBinding" | "salesCapacityBinding" | "competitorCapBinding";
-const CASES: CaseName[] = ["allCapsNonBinding", "desiredBinding", "deliverableBinding", "salesCapacityBinding", "competitorCapBinding"];
+type CaseName = "allCapsNonBinding" | "desiredBinding" | "approvedAllocationBinding" | "salesCapacityBinding" | "competitorCapBinding";
+const CASES: CaseName[] = ["allCapsNonBinding", "desiredBinding", "approvedAllocationBinding", "salesCapacityBinding", "competitorCapBinding"];
 
 function build(caseName: CaseName, market: DemandMarketId, product: Product, quality: number, adj: number) {
   const entries: CompanySalesPlanEntry[] = IDS.map((companyId, i) => {
     const isTarget = i === 0;
     const desired = caseName === "desiredBinding" && isTarget ? 400 : caseName === "competitorCapBinding" && !isTarget ? 150 : 5_000;
-    const deliverable = caseName === "deliverableBinding" && isTarget ? 300 : undefined;
+    const approvedAllocation = caseName === "approvedAllocationBinding" && isTarget ? 300 : undefined;
     return {
       companyId,
       market,
@@ -43,7 +43,7 @@ function build(caseName: CaseName, market: DemandMarketId, product: Product, qua
       deliveryReliability: score0to100(60),
       salesBaseScore: score0to100(50),
       ...(product === "vap" ? { vapCapabilityScore: score0to100(isTarget ? quality : 65) } : {}),
-      ...(deliverable !== undefined ? { approvedAllocationCap: hosoEqTons(deliverable) } : {}),
+      ...(approvedAllocation !== undefined ? { approvedAllocationCap: hosoEqTons(approvedAllocation) } : {}),
     };
   });
   const capacity =
