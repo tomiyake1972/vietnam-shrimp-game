@@ -39,7 +39,7 @@ import { ConsumerMarketQuarterRecord } from "../../../../lib/v2/market/consumerI
 import { CapexProjectQuarterEvent, CapexQuarterResult, CapexRejectedProposal } from "../../../../lib/v2/capex";
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
 import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividend";
-import { MarketProductAllocationResult } from "../../../../lib/v2/sales/types";
+import { MarketProductBasePriceReference, projectMarketBasePriceReferences } from "../../../../lib/v2/sales/marketBasePriceReference";
 import { computeCurrentDividendValueUsd } from "../../../../lib/v2/companyLab/evaluation/evaluationSemantics";
 import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
 import { CompanyLabApiDependencies } from "../../../../api/v2/company-labs/_lib/dependencies";
@@ -141,11 +141,13 @@ export interface PlayerScreenViewModel {
   /** 【DIV-1新設】直近確定四半期の配当結果（累積配当・加重配当価値・却下理由の表示用）。 */
   readonly lastQuarterDividendResult: CompanyDividendQuarterResult | null;
   /**
-   * 【SALES基準価格参考表示・新設】直近確定四半期の市場×商品別配分結果（全社共通・公開情報）。
-   * SalesQuarterRecord.allocationsをそのまま渡すだけで、新しい価格計算は行わない。
+   * 【SALES基準価格参考表示・セキュリティ修正】直近確定四半期の市場×商品別「基準価格」だけの
+   * 最小DTO（market・product・basePriceのみ）。元のMarketProductAllocationResultが持つ
+   * 各社askPrice等の内訳（companies配列）は含めない（decisionContext.ts・
+   * PlayerWorkspace.tsxと同一のprojectMarketBasePriceReferencesを使う）。
    * 前四半期が存在しない（turn===1）場合はundefinedのままとし、画面側は「－」表示にする。
    */
-  readonly lastQuarterSalesAllocations: readonly MarketProductAllocationResult[] | undefined;
+  readonly lastQuarterSalesAllocations: readonly MarketProductBasePriceReference[] | undefined;
   /** 【TSV正式化】現在Turn基準・年率15%複利のDividend Value（Leaderboardと同一関数）。 */
   readonly currentDividendValueUsd: number;
   /** 前期（turn-1）ぶんの財務・資金・設備投資（当期・前期・増減表示用）。前期が存在しなければnull。 */
@@ -338,7 +340,7 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       lastQuarterResult,
       lastQuarterCapexEvents: lastQuarterCapexResult?.events,
       lastQuarterDividendResult,
-      lastQuarterSalesAllocations: latestEntry?.record.salesRecord.allocations,
+      lastQuarterSalesAllocations: projectMarketBasePriceReferences(latestEntry?.record.salesRecord.allocations),
       currentDividendValueUsd,
       lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,
       previousQuarterFinancials,

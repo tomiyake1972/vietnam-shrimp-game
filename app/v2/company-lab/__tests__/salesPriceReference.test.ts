@@ -4,6 +4,10 @@
 // MarketProductAllocationResult.basePriceを読み取るだけの関数
 // （findLastQuarterBasePrice・formatPricePerKgPlain、いずれもSalesPlanningScreen.tsx）を、
 // 実Engineで1Turn進めて得た本物のhistoryに対して検証する。
+//
+// 【セキュリティ修正】ここではSalesPlanningScreen.tsxが実際に受け取るのと同じ最小DTO
+// （projectMarketBasePriceReferencesで射影済みのMarketProductBasePriceReference[]）を
+// 使う。生のMarketProductAllocationResult（他社askPrice等を含む）をそのまま渡さない。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -11,6 +15,7 @@ import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, 
 import { generateAutoPolicyDecision } from "../../../lib/v2/companyLab/autoPolicy";
 import { CompanyDecisionInput, CompanyLabConfig } from "../../../lib/v2/companyLab/types";
 import { unwrapUnit } from "../../../lib/v2/core/units";
+import { projectMarketBasePriceReferences } from "../../../lib/v2/sales/marketBasePriceReference";
 import { buildDecisionInputFromDraft, buildInitialDraft } from "../decisionDraft";
 import { findLastQuarterBasePrice, formatPricePerKgPlain } from "../components/decisionStudio/SalesPlanningScreen";
 
@@ -18,7 +23,10 @@ function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig
   return { scenarioId: "baseline-v0.1", mode: "canonical", seed: "sales-price-reference-001", turns: 8, ...overrides };
 }
 
-/** Turn1を実Engineで確定させ、history[0]（＝Turn2意思決定時点での「前Turn」データ）を返す。 */
+/**
+ * Turn1を実Engineで確定させ、SalesPlanningScreen.tsxが実際に受け取るのと同じ
+ * 射影済み最小DTO（market/product/basePriceのみ）を返す。
+ */
 function runTurnOne() {
   const { state, fixtures } = initializeCompanyLab(baseConfig());
   const publicInfo = buildPublicMarketInfo(state);
@@ -29,22 +37,22 @@ function runTurnOne() {
   }
   const nextState = advanceCompanyLabQuarter(state, fixtures, decisions);
   const record = nextState.history[nextState.history.length - 1];
-  return { record, fixtures };
+  const rawAllocations = record.salesRecord.allocations;
+  const allocations = projectMarketBasePriceReferences(rawAllocations)!;
+  return { allocations, rawAllocations, fixtures };
 }
 
 test("SALES-PRICE-1/5: 前Turn市場基準価格は、確定済みhistoryのMarketProductAllocationResult.basePriceと完全一致する", () => {
-  const { record } = runTurnOne();
-  const allocations = record.salesRecord.allocations;
+  const { allocations, rawAllocations } = runTurnOne();
   assert.ok(allocations.length > 0, "Turn1で少なくとも1件のmarket×product配分結果が存在するはず");
-  const sample = allocations[0];
+  const sample = rawAllocations[0];
   const found = findLastQuarterBasePrice(allocations, sample.market, sample.product);
   assert.equal(found, unwrapUnit(sample.basePrice));
 });
 
 test("SALES-PRICE-2: 価格調整=0のとき、参考提示価格は前Turn市場基準価格と一致する", () => {
-  const { record } = runTurnOne();
-  const allocations = record.salesRecord.allocations;
-  const sample = allocations[0];
+  const { allocations, rawAllocations } = runTurnOne();
+  const sample = rawAllocations[0];
   const basePrice = findLastQuarterBasePrice(allocations, sample.market, sample.product)!;
   const priceAdjustment = 0;
   const referenceAskPrice = basePrice + priceAdjustment;
@@ -52,21 +60,30 @@ test("SALES-PRICE-2: 価格調整=0のとき、参考提示価格は前Turn市�
 });
 
 test("SALES-PRICE-3: 価格調整=-0.30のとき、参考提示価格は基準価格から正しく減算される", () => {
-  const { record } = runTurnOne();
-  const allocations = record.salesRecord.allocations;
-  const sample = allocations[0];
+  const { allocations, rawAllocations } = runTurnOne();
+  const sample = rawAllocations[0];
   const basePrice = findLastQuarterBasePrice(allocations, sample.market, sample.product)!;
   const referenceAskPrice = basePrice + -0.3;
   assert.ok(Math.abs(referenceAskPrice - (basePrice - 0.3)) < 1e-9);
 });
 
 test("SALES-PRICE-4: 価格調整=+0.30のとき、参考提示価格は基準価格へ正しく加算される", () => {
-  const { record } = runTurnOne();
-  const allocations = record.salesRecord.allocations;
-  const sample = allocations[0];
+  const { allocations, rawAllocations } = runTurnOne();
+  const sample = rawAllocations[0];
   const basePrice = findLastQuarterBasePrice(allocations, sample.market, sample.product)!;
   const referenceAskPrice = basePrice + 0.3;
   assert.ok(Math.abs(referenceAskPrice - (basePrice + 0.3)) < 1e-9);
+});
+
+test("SALES-PRICE-11【セキュリティ修正】: SalesPlanningScreenへ渡る最小DTOはmarket/product/basePrice以外のキーを持たない", () => {
+  const { allocations } = runTurnOne();
+  for (const entry of allocations) {
+    assert.deepEqual(Object.keys(entry).sort(), ["basePrice", "market", "product"]);
+  }
+  const serialized = JSON.stringify(allocations);
+  for (const forbidden of ["companies", "askPrice", "allocatedQuantity", "processingCapacity", "competitivenessWeight", "competitivenessBreakdown", "targetDemand", "externalOptionQuantity"]) {
+    assert.ok(!serialized.includes(forbidden), `最小DTOに"${forbidden}"が含まれてはならない`);
+  }
 });
 
 test("SALES-PRICE-6【Turn1・前Turnデータなし】: allocationsがundefinedのとき前Turn市場基準価格はnull（0で埋めない）", () => {
@@ -80,9 +97,8 @@ test("SALES-PRICE-7【旧Run・前Turn取得不能】: 空配列（当該market�
 });
 
 test("SALES-PRICE-8【入力との即時連動】: 同じbasePriceでも価格調整を変えるたびに参考提示価格が再導出される（保存された値ではなく毎回の派生値であること）", () => {
-  const { record } = runTurnOne();
-  const allocations = record.salesRecord.allocations;
-  const sample = allocations[0];
+  const { allocations, rawAllocations } = runTurnOne();
+  const sample = rawAllocations[0];
   const basePrice = findLastQuarterBasePrice(allocations, sample.market, sample.product)!;
   const adjustments = [0, -0.3, 0.5, -1.2];
   const results = adjustments.map((adj) => basePrice + adj);

@@ -22,7 +22,8 @@ import { restoreSessionFromResumePayload } from "../companyLab/simulation/persis
 import { StoredSimulationRun } from "../companyLab/simulation/persistence/types";
 import { CompanyEvaluationSnapshot, computeAllCompaniesEvaluationSnapshot } from "../companyLab/evaluation/evaluationSemantics";
 import { EvaluationHistoryRecord, resolveEvaluationHistory } from "../companyLab/evaluation/evaluationHistory";
-import { CompanyId, MarketProductAllocationResult } from "../sales/types";
+import { CompanyId } from "../sales/types";
+import { MarketProductBasePriceReference, projectMarketBasePriceReferences } from "../sales/marketBasePriceReference";
 import { CompanyFinancialQuarterResult } from "../finance/types";
 import { CompanyDividendQuarterResult } from "../finance/dividend";
 import { CapexProjectQuarterEvent, CapexRejectedProposal } from "../capex";
@@ -58,11 +59,16 @@ export interface PlayerDecisionContext {
   readonly lastQuarterFinancialResult: CompanyFinancialQuarterResult | null;
   readonly lastQuarterDividendResult: CompanyDividendQuarterResult | null;
   /**
-   * 【SALES基準価格参考表示・新設】直近確定四半期の市場×商品別配分結果（全社共通・公開情報）。
-   * 新しい価格計算は行わず、確定済みhistoryの値をそのまま返す。turn===1等で前四半期が
-   * 存在しない場合はundefined。
+   * 【SALES基準価格参考表示・セキュリティ修正】直近確定四半期の市場×商品別「基準価格」だけの
+   * 最小DTO（market・product・basePriceのみ）。
+   *
+   * 【重要】元データのMarketProductAllocationResultには各社のaskPrice・allocatedQuantity・
+   * processingCapacity・competitivenessWeight等の非公開情報を含むcompanies配列があるため、
+   * それを絶対にそのまま渡してはならない（このcontextは/api/v2/play/session経由でPlayerの
+   * ブラウザへ返る）。必ずprojectMarketBasePriceReferences経由で射影済みの値だけを保持する。
+   * 新しい価格計算は行わない。turn===1等で前四半期が存在しない場合はundefined。
    */
-  readonly lastQuarterSalesAllocations: readonly MarketProductAllocationResult[] | undefined;
+  readonly lastQuarterSalesAllocations: readonly MarketProductBasePriceReference[] | undefined;
   /** resumePayload.confirmedPlayerDecisions[companyId]が既に埋まっているか（=このTurnは提出済み）。GMの提出済み判定と同じ信号。 */
   readonly hasSubmittedThisTurn: boolean;
   /** この会社が現在companyControlModesでPLAYERとして扱われているか。falseならGMがStandard AIへ戻した後。 */
@@ -161,7 +167,7 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,
     lastQuarterFinancialResult,
     lastQuarterDividendResult,
-    lastQuarterSalesAllocations: lastRecord?.salesRecord.allocations,
+    lastQuarterSalesAllocations: projectMarketBasePriceReferences(lastRecord?.salesRecord.allocations),
     hasSubmittedThisTurn,
     isPlayerControlled,
     gameEndedAt,

@@ -11,7 +11,7 @@ import { formatHosoEqTons } from "../../../../lib/v2/industryLab/ui/formatters";
 import { computeSalesPlanTotals } from "../../salesPlanTotals";
 import { unwrapUnit } from "../../../../lib/v2/core/units";
 import { DemandMarketId, Product } from "../../../../lib/v2/market/types";
-import { MarketProductAllocationResult } from "../../../../lib/v2/sales/types";
+import { MarketProductBasePriceReference } from "../../../../lib/v2/sales/marketBasePriceReference";
 import { NumberCell, PriceAdjustmentCell } from "../InputCells";
 import CollapsibleSection from "../CollapsibleSection";
 import { INFO_TABLE_HEAD_CLASS } from "../panelStyles";
@@ -35,7 +35,7 @@ export function formatPricePerKgPlain(value: number): string {
  * 見つからない（前四半期データ自体が無い・当該組合せの配分結果が無い）場合はnull。
  */
 export function findLastQuarterBasePrice(
-  allocations: readonly MarketProductAllocationResult[] | undefined,
+  allocations: readonly MarketProductBasePriceReference[] | undefined,
   market: DemandMarketId,
   product: Product
 ): number | null {
@@ -51,8 +51,11 @@ interface SalesPlanningScreenProps {
   readonly salesForceAllocation: SalesForceAllocationSummary;
   readonly salesForceHiring: SalesForceHiringPreview;
   readonly salesForceHireLimit: number;
-  /** 【SALES基準価格参考表示・新設】直近確定四半期の市場×商品別配分結果（全社共通・公開情報）。省略時・turn1等は前Turン価格「－」表示。 */
-  readonly lastQuarterSalesAllocations?: readonly MarketProductAllocationResult[];
+  /**
+   * 【SALES基準価格参考表示・セキュリティ修正】直近確定四半期の市場×商品別「基準価格」だけの
+   * 最小DTO。省略時・turn1等は前Turン価格「－」表示。
+   */
+  readonly lastQuarterSalesAllocations?: readonly MarketProductBasePriceReference[];
 }
 
 export default function SalesPlanningScreen({

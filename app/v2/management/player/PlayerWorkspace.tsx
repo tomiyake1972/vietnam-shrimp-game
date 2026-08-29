@@ -37,6 +37,7 @@ import { selectScenarioNewsForTurn } from "../lib/scenarioNews";
 import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { computeFinalEvaluationSnapshot, isGameFinished, lastCompletedTurn } from "../lib/gameEnd";
 import { recordGmProxySubmission } from "../lib/playerSeats";
+import { projectMarketBasePriceReferences } from "../../../lib/v2/sales/marketBasePriceReference";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
 import { TsvLeaderboardPanel } from "../components/TsvLeaderboardPanel";
@@ -222,8 +223,9 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
   const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
-  // 【SALES基準価格参考表示・新設】全社共通・公開情報のためcompanyId抽出不要。新しい価格計算はしない。
-  const lastQuarterSalesAllocations = lastRecord?.salesRecord.allocations;
+  // 【SALES基準価格参考表示】market/product/basePriceだけの最小DTOへ射影する
+  // （decisionContext.ts・viewModel.tsと同じ関数。他社のaskPrice等は含めない）。
+  const lastQuarterSalesAllocations = projectMarketBasePriceReferences(lastRecord?.salesRecord.allocations);
   const controlMode = entry.companyControlModes[companyId] ?? "STANDARD_AI";
 
   // 【Game End / Final Results・指示§5】FINISHED（gameEndedAt設定済み）なら、
