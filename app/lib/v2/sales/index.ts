@@ -17,6 +17,22 @@ export { deriveVietnamBasePrices, deriveVietnamMarketReferencePrices, deriveTarg
 export { salesCoverageScore, processingCapacity, validateSalesForceHeadcountBudget } from "./salesForce";
 export { computeCompetitivenessWeight, computeCompetitivenessBreakdown, allocateMarketProduct } from "./allocation";
 export {
+  allocateMarketProductTiered,
+  computeTierUtility,
+  resolveTierParameters,
+  EXTERNAL_OPTION_PARTICIPANT_ID,
+} from "./tieredAllocation";
+export type {
+  TieredAllocationInput,
+  TieredAllocationOutput,
+  TieredAllocationDiagnostics,
+  TieredTierDiagnostics,
+  TieredCompanyTierDiagnostics,
+  TieredExternalTierDiagnostics,
+  TieredCompanyCapDiagnostics,
+  TieredBindingCap,
+} from "./tieredAllocation";
+export {
   salesEffortWeightedQuantity,
   computeMarketSalesEffort,
   allocateHeadcountAcrossMarkets,

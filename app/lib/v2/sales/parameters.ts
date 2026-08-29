@@ -12,6 +12,74 @@ import { Product } from "../market/types";
 import type { SalesCapacityModel } from "./salesCapacityModel";
 import { SALES_CAPACITY_MODEL_COMPANY_ORGANIZATION_V1, SALES_CAPACITY_MODEL_PER_MARKET } from "./salesCapacityModel";
 
+// ---------------------------------------------------------------------
+// 【ENG-TIERED-MKT-1】三層顧客＋全社同時配分（opt-in）
+// ---------------------------------------------------------------------
+
+/**
+ * 市場×商品の成約配分アルゴリズムの選択。
+ *
+ *   legacyWaterfall              … 現行の水位法（sales/allocation.ts）。**未指定時の既定**。
+ *   tieredSimultaneousAllocation … 三層顧客ごとに5社＋外部選択肢を同一分母へ入れて
+ *                                  一度に配分する新方式（sales/tieredAllocation.ts）。
+ *
+ * SalesParameters.marketAllocationMode が undefined のときは必ず legacyWaterfall として
+ * 扱う。既定パラメータ（SALES_PARAMETERS_V1 とその派生）はこの値を持たないため、
+ * 既存 Scenario・既存呼び出し元の挙動はビット単位で不変。
+ */
+export type MarketAllocationMode = "legacyWaterfall" | "tieredSimultaneousAllocation";
+
+/** 顧客層。demandShare の合計は必ず 1.0。 */
+export type CustomerTierId = "PRICE_SENSITIVE" | "STANDARD" | "PREMIUM";
+
+export const CUSTOMER_TIER_IDS: readonly CustomerTierId[] = ["PRICE_SENSITIVE", "STANDARD", "PREMIUM"];
+
+/**
+ * 1つの顧客層のパラメータ。
+ *
+ * 【重要・値の位置づけ】ShrimpX の Phase 0 仕様・既存 parameter・既存 doc のいずれにも
+ * 三層顧客モデルの確定係数は存在しない。したがって本ファイルが提供する数値は
+ * **検証fixture専用**（TIERED_MARKET_ALLOCATION_PARAMETERS_FIXTURE_V0）であり、
+ * production default へ昇格させていない（SALES_PARAMETERS_V1 はこの設定を持たない）。
+ */
+export interface CustomerTierParameters {
+  /** この層が market×product の対象需要に占める比率（3層合計 = 1.0）。 */
+  readonly demandShare: number;
+  /** 価格乖離（参照価格比）に対する効用の感応度。大きいほど値上げで急速に離れる。 */
+  readonly priceSensitivity: number;
+  /** 品質評価に対する感応度。 */
+  readonly qualitySensitivity: number;
+  /** 差別化（VAP能力等）に対する感応度。 */
+  readonly differentiationSensitivity: number;
+  /** その他の非価格要素（顧客関係・納期信頼性・営業基盤）に対する感応度。 */
+  readonly nonPriceSensitivity: number;
+  /** 留保価格 = referencePrice × この倍率。層が高いほど高い価格まで許容する。 */
+  readonly reservationPriceMultiplier: number;
+  /** 留保価格超過に対する連続的なペナルティの傾き（超過比の2乗に掛ける）。 */
+  readonly reservationSoftPenaltySlope: number;
+  /** 外部選択肢（他産地供給者・非購入）の基準効用。 */
+  readonly externalOptionBaseUtility: number;
+}
+
+/** market×product 単位の上書き（部分指定可）。 */
+export interface TieredMarketAllocationOverride {
+  readonly market: string;
+  readonly product: Product;
+  readonly tiers: Partial<Record<CustomerTierId, Partial<CustomerTierParameters>>>;
+}
+
+export interface TieredMarketAllocationParameters {
+  readonly parametersVersion: string;
+  readonly tiers: Readonly<Record<CustomerTierId, CustomerTierParameters>>;
+  /** market×product 単位の上書き（例: CNは価格感応度高め、JP/EUは品質・差別化高め）。 */
+  readonly overrides?: readonly TieredMarketAllocationOverride[];
+  /**
+   * 効用のclamp幅（±）。**経済的なfloorではなく、softmaxのoverflow防止のみが目的**。
+   * 新方式では minimumPriceCompetitiveness のような下限は使用しない。
+   */
+  readonly utilityClamp: number;
+}
+
 export interface SalesParameters {
   readonly parametersVersion: string;
 
@@ -146,6 +214,18 @@ export interface SalesParameters {
   readonly minAskPriceRatioOfBase: number;
   /** askPrice が basePrice のこの比率を上回ったら異常値としてエラー。 */
   readonly maxAskPriceRatioOfBase: number;
+
+  /**
+   * 【ENG-TIERED-MKT-1】成約配分アルゴリズムの選択。**未指定は legacyWaterfall**。
+   * 既定パラメータはこの値を持たないため、既存挙動はビット単位で不変。
+   */
+  readonly marketAllocationMode?: MarketAllocationMode;
+  /**
+   * 【ENG-TIERED-MKT-1】三層顧客モデルのパラメータ。
+   * marketAllocationMode === "tieredSimultaneousAllocation" のときのみ参照する。
+   * 未指定でこのmodeを選ぶと SalesValidationError（推測の既定値を作らない）。
+   */
+  readonly tieredMarketAllocation?: TieredMarketAllocationParameters;
 }
 
 export const SALES_PARAMETERS_V1: SalesParameters = {
@@ -280,4 +360,67 @@ export const SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1: SalesPara
     salesBase: 0.08,
     vapCapability: 0.08,
   },
+};
+
+/**
+ * 【ENG-TIERED-MKT-1・検証fixture専用】三層顧客モデルのパラメータ。
+ *
+ * **production default ではない。** ShrimpX の Phase 0 仕様・既存 parameter・既存 doc に
+ * 三層顧客モデルの確定係数は存在しないため、ここでは「単調性と構造を検証するための
+ * 暫定係数」であることを明示する。SALES_PARAMETERS_V1 はこの設定を持たず、
+ * marketAllocationMode も持たないため、この値がゲーム本体へ影響することはない。
+ * 正式係数が決まるまで、この定数を既定パラメータへ組み込んではならない。
+ *
+ * 層の設計意図（値そのものは未確定）:
+ *   PRICE_SENSITIVE … 価格感応度が最も高く、留保価格は参照価格に近い。
+ *   STANDARD        … 価格・非価格がおおむね均衡。
+ *   PREMIUM         … 品質・差別化の感応度が高く、留保価格倍率も高い。
+ */
+export const TIERED_MARKET_ALLOCATION_PARAMETERS_FIXTURE_V0: TieredMarketAllocationParameters = {
+  parametersVersion: "tiered-market-allocation-fixture-v0（検証専用・production defaultではない）",
+  tiers: {
+    PRICE_SENSITIVE: {
+      demandShare: 0.4,
+      priceSensitivity: 14,
+      qualitySensitivity: 0.6,
+      differentiationSensitivity: 0.2,
+      nonPriceSensitivity: 0.4,
+      reservationPriceMultiplier: 1.05,
+      reservationSoftPenaltySlope: 60,
+      externalOptionBaseUtility: 0.2,
+    },
+    STANDARD: {
+      demandShare: 0.4,
+      priceSensitivity: 8,
+      qualitySensitivity: 1.2,
+      differentiationSensitivity: 0.8,
+      nonPriceSensitivity: 0.8,
+      reservationPriceMultiplier: 1.15,
+      reservationSoftPenaltySlope: 40,
+      externalOptionBaseUtility: 0.2,
+    },
+    PREMIUM: {
+      demandShare: 0.2,
+      priceSensitivity: 4,
+      qualitySensitivity: 2.4,
+      differentiationSensitivity: 2.0,
+      nonPriceSensitivity: 1.2,
+      reservationPriceMultiplier: 1.35,
+      reservationSoftPenaltySlope: 25,
+      externalOptionBaseUtility: 0.2,
+    },
+  },
+  utilityClamp: 60,
+};
+
+/**
+ * 【ENG-TIERED-MKT-1・検証fixture専用】新方式を有効化した SalesParameters。
+ * 既存の SALES_PARAMETERS_V1 をそのまま継承し、modeとtier設定だけを足す。
+ * **Scenario・production default へは接続していない。**
+ */
+export const SALES_PARAMETERS_TIERED_FIXTURE_V0: SalesParameters = {
+  ...SALES_PARAMETERS_V1,
+  parametersVersion: "sales-v0.2+tiered-market-allocation-fixture-v0",
+  marketAllocationMode: "tieredSimultaneousAllocation",
+  tieredMarketAllocation: TIERED_MARKET_ALLOCATION_PARAMETERS_FIXTURE_V0,
 };

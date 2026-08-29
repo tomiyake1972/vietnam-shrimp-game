@@ -27,6 +27,7 @@ import {
   SalesValidationError,
 } from "./types";
 import { DemandMarketId, Product } from "../market/types";
+import { allocateMarketProductTiered } from "./tieredAllocation";
 import { PeriodV2 } from "../core/period";
 
 const EXTERNAL_OPTION_ID = "__external_option__";
@@ -242,6 +243,22 @@ export function allocateMarketProduct(
    */
   salesCapacityByCompanyMarket?: ReadonlyMap<string, number>
 ): MarketProductAllocationResult {
+  // 【ENG-TIERED-MKT-1】opt-in の三層顧客＋全社同時配分。**未指定は必ず legacyWaterfall**
+  // であり、その場合この分岐は素通りして以下の既存コードがそのまま動く
+  // （既定パラメータは marketAllocationMode を持たないため、既存挙動はビット単位で不変）。
+  if (params.marketAllocationMode === "tieredSimultaneousAllocation") {
+    return allocateMarketProductTiered({
+      market,
+      product,
+      period,
+      entries,
+      basePrice,
+      targetDemand,
+      params,
+      salesCapacityByCompanyMarket,
+    }).result;
+  }
+
   const relevant = entries.filter((e) => e.market === market && e.product === product);
   const sorted = [...relevant].sort((a, b) => a.companyId.localeCompare(b.companyId));
 
