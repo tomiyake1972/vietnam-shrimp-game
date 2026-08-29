@@ -491,18 +491,58 @@ export const EXTERNAL_OPTION_BASE_UTILITY_V200_CANDIDATE_V1 = 1.6;
 export const US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1 = 0.6;
 
 /**
- * 【TIERED-MKT-P1D・未確定の明示】market×product 15セル単位の demandShare。
+ * 【TIERED-MKT-P1D-2】market×product 15セルの顧客層 demandShare
+ * （Phase 1B calibrated candidate、#04 が回収・確定して支給した値）。
  *
- * 実装指示は「Phase 1B で確定候補となった 15セルの demandShare を正式候補
- * parameter へ反映する」ことを求めているが、**この repository には Phase 1B の
- * 15セル demandShare 正本が存在しない**（全 706 commit・docs 配下を検索して、
- * 顧客層別 demandShare の値は本ファイルの FIXTURE_V0 の 0.4 / 0.4 / 0.2 一組しか
- * 見つからない。docs 内の「15セル」は market×product の unit economics 表であり
- * 顧客層構成比ではない）。指示§2 の「確認できない値を推測しない／一意に復元できない
- * 場合は Stop Condition」に従い、**15セル別の demandShare は接続していない**。
- * ここでは全 market×product で FIXTURE_V0 と同一の層構成比を用いる。
+ * 順序は [PRICE_SENSITIVE, STANDARD, PREMIUM]、各セル合計 = 1.00。
+ *
+ * 【位置づけ】**V2.00 calibrated candidate であり最終固定値ではない。**
+ * 32Q試験・手動プレイの結果を見て再校正する前提の値。
+ * この表は tiered 正式候補（SALES_PARAMETERS_TIERED_V200_CANDIDATE_V1）でのみ
+ * 使われ、DS1 / DS2 / DS3 の既定 SalesParameters は marketAllocationMode を
+ * 持たないため一切影響を受けない。
+ *
+ * 【全15セルを明示する理由】base tiers の demandShare へ「代表値」を置いて
+ * 一部セルだけ override する形にすると、どのセルが校正済みでどのセルが
+ * 既定値のままか読み取れなくなる。ここでは 5市場×3商品すべてを表として持ち、
+ * resolveTierParameters の override で全セルを上書きする
+ * （base の demandShare は構造上どのセルからも参照されない）。
  */
-const TIER_DEMAND_SHARES_PENDING_PHASE_1B = {
+const TIER_DEMAND_SHARES_V200_CANDIDATE_V1: Readonly<Record<string, Readonly<Record<Product, readonly [number, number, number]>>>> = {
+  CN: {
+    hoso: [0.55, 0.35, 0.1],
+    pd: [0.6, 0.3, 0.1],
+    vap: [0.45, 0.4, 0.15],
+  },
+  JP: {
+    hoso: [0.1, 0.45, 0.45],
+    pd: [0.15, 0.45, 0.4],
+    vap: [0.1, 0.4, 0.5],
+  },
+  US: {
+    hoso: [0.5, 0.4, 0.1],
+    pd: [0.35, 0.45, 0.2],
+    vap: [0.15, 0.45, 0.4],
+  },
+  EU: {
+    hoso: [0.15, 0.5, 0.35],
+    pd: [0.2, 0.45, 0.35],
+    vap: [0.15, 0.4, 0.45],
+  },
+  OTHER: {
+    hoso: [0.45, 0.42, 0.13],
+    pd: [0.35, 0.45, 0.2],
+    vap: [0.25, 0.45, 0.3],
+  },
+};
+
+/**
+ * base tiers に置く demandShare のプレースホルダ。
+ * 上の 15セル表が全 market×product を override するため、実際の配分計算では
+ * 参照されない（tieredMarketCandidateV1.test.ts の 15セルテストで固定）。
+ * それでも型上は必須項目のため、合計 1.0 の中立値を置く。
+ */
+const TIER_DEMAND_SHARE_BASE_PLACEHOLDER_V200_CANDIDATE_V1 = {
   PRICE_SENSITIVE: 0.4,
   STANDARD: 0.4,
   PREMIUM: 0.2,
@@ -535,7 +575,7 @@ export const TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1: TieredMarket
   parametersVersion: "tiered-market-allocation-v200-candidate-v1（B-moderated-v1・プレイテスト用暫定値）",
   tiers: {
     PRICE_SENSITIVE: {
-      demandShare: TIER_DEMAND_SHARES_PENDING_PHASE_1B.PRICE_SENSITIVE,
+      demandShare: TIER_DEMAND_SHARE_BASE_PLACEHOLDER_V200_CANDIDATE_V1.PRICE_SENSITIVE,
       priceSensitivity: 6.5,
       qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.PRICE_SENSITIVE,
       differentiationSensitivity: 0.3,
@@ -545,7 +585,7 @@ export const TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1: TieredMarket
       externalOptionBaseUtility: EXTERNAL_OPTION_BASE_UTILITY_V200_CANDIDATE_V1,
     },
     STANDARD: {
-      demandShare: TIER_DEMAND_SHARES_PENDING_PHASE_1B.STANDARD,
+      demandShare: TIER_DEMAND_SHARE_BASE_PLACEHOLDER_V200_CANDIDATE_V1.STANDARD,
       priceSensitivity: 3.5,
       qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.STANDARD,
       differentiationSensitivity: 1.4,
@@ -555,7 +595,7 @@ export const TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1: TieredMarket
       externalOptionBaseUtility: EXTERNAL_OPTION_BASE_UTILITY_V200_CANDIDATE_V1,
     },
     PREMIUM: {
-      demandShare: TIER_DEMAND_SHARES_PENDING_PHASE_1B.PREMIUM,
+      demandShare: TIER_DEMAND_SHARE_BASE_PLACEHOLDER_V200_CANDIDATE_V1.PREMIUM,
       priceSensitivity: 1.7,
       qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.PREMIUM,
       differentiationSensitivity: 4.0,
@@ -566,23 +606,33 @@ export const TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1: TieredMarket
     },
   },
   utilityClamp: 60,
-  // US / EU の VAP のみ qualitySensitivity を 0.60 倍する。基準値へ係数を掛けて
-  // 生成し、係数と基準値の関係が崩れないようにする（数値を二重管理しない）。
-  overrides: (["US", "EU"] as const).map((market) => ({
-    market,
-    product: "vap" as const,
-    tiers: {
-      PRICE_SENSITIVE: {
-        qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.PRICE_SENSITIVE * US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1,
-      },
-      STANDARD: {
-        qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.STANDARD * US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1,
-      },
-      PREMIUM: {
-        qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.PREMIUM * US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1,
-      },
-    },
-  })),
+  // 【TIERED-MKT-P1D-2】15セルすべてに demandShare の override を張る。
+  // 併せて US / EU の VAP だけ qualitySensitivity を 0.60 倍する（基準値へ係数を
+  // 掛けて生成し、係数と基準値の関係が崩れないようにする＝数値を二重管理しない）。
+  overrides: Object.entries(TIER_DEMAND_SHARES_V200_CANDIDATE_V1).flatMap(([market, byProduct]) =>
+    (Object.entries(byProduct) as Array<[Product, readonly [number, number, number]]>).map(([product, shares]) => {
+      const qualityFactor =
+        (market === "US" || market === "EU") && product === "vap" ? US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1 : 1;
+      return {
+        market,
+        product,
+        tiers: {
+          PRICE_SENSITIVE: {
+            demandShare: shares[0],
+            qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.PRICE_SENSITIVE * qualityFactor,
+          },
+          STANDARD: {
+            demandShare: shares[1],
+            qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.STANDARD * qualityFactor,
+          },
+          PREMIUM: {
+            demandShare: shares[2],
+            qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.PREMIUM * qualityFactor,
+          },
+        },
+      };
+    })
+  ),
 };
 
 /**
