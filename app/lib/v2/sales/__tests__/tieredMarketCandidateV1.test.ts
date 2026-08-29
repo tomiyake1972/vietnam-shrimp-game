@@ -13,6 +13,7 @@ import {
   SALES_PARAMETERS_TIERED_V200_CANDIDATE_V1,
   TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1,
   US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1,
+  qualitySensitivityCalibrationFactorFor,
 } from "../parameters";
 import {
   FIXTURE_MARKET,
@@ -170,14 +171,16 @@ test("P1D-TIER-13: 全15セル（5市場×3商品）で demandShare 合計 = 1",
   }
 });
 
-test("P1D-TIER-14: US / EU の VAP のみ qualitySensitivity ×0.60", () => {
+test("P1D-TIER-14: US / EU の VAP のみ qualitySensitivity ×0.60（anchor calibration と合成）", () => {
   const f = US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1;
   assert.equal(f, 0.6);
   const base = TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1.tiers;
   for (const market of DEMAND_MARKET_IDS) {
     for (const product of PRODUCTS) {
       const tiers = resolveTierParameters(TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1, market, product);
-      const expectFactor = (market === "US" || market === "EU") && product === "vap" ? f : 1;
+      // 【TIERED-MKT-P1D-3】解決値 = base × US/EU VAP factor × anchor calibration factor。
+      const usEuVapFactor = (market === "US" || market === "EU") && product === "vap" ? f : 1;
+      const expectFactor = usEuVapFactor * qualitySensitivityCalibrationFactorFor(market, product);
       for (const t of CUSTOMER_TIER_IDS) {
         assert.ok(
           Math.abs(tiers[t].qualitySensitivity - base[t].qualitySensitivity * expectFactor) < 1e-12,

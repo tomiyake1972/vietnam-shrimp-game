@@ -14,6 +14,7 @@ import {
   SALES_PARAMETERS_TIERED_V200_CANDIDATE_V1,
   TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1,
   US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1,
+  qualitySensitivityCalibrationFactorFor,
 } from "../parameters";
 import { CompanySalesPlanEntry } from "../types";
 
@@ -66,11 +67,12 @@ test("P1D2-CELL-3: override は正しいセルにだけ適用される（base pl
     }
   }
   assert.equal(cellsDifferingFromBase, 15, "全15セルが 15セル表由来になっていない");
-  // qualitySensitivity の override は US/EU の VAP だけ。
+  // qualitySensitivity の override は US/EU VAP factor と anchor calibration factor の積。
   for (const market of DEMAND_MARKET_IDS) {
     for (const product of PRODUCTS) {
       const tiers = resolveTierParameters(PARAMS, market, product);
-      const factor = (market === "US" || market === "EU") && product === "vap" ? US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1 : 1;
+      const usEuVapFactor = (market === "US" || market === "EU") && product === "vap" ? US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1 : 1;
+      const factor = usEuVapFactor * qualitySensitivityCalibrationFactorFor(market, product);
       for (const t of CUSTOMER_TIER_IDS) {
         assert.ok(Math.abs(tiers[t].qualitySensitivity - base[t].qualitySensitivity * factor) < 1e-12, `${market}/${product}/${t}`);
         // demandShare / qualitySensitivity 以外は override していない。

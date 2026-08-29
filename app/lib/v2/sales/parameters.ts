@@ -559,6 +559,48 @@ const TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1 = {
 } as const;
 
 /**
+ * 【TIERED-MKT-P1D-3】market×product 別 qualitySensitivity の校正係数
+ * （anchor calibration factor）。
+ *
+ * 【何を表すか】「qualityReputation の差を顧客がどの程度 価格 premium として
+ * 評価するか」の強さ。品質設備 direct bonus（full ramp +4 point）は変更せず、
+ * その +4 point が生む price-equivalent premium を目標水準へ寄せるために、
+ * qualitySensitivity 側だけを market×product 単位で調整する。
+ *
+ * 【掛け算の順序（重要）】解決後の qualitySensitivity は
+ *   base qualitySensitivity
+ *     × US/EU VAP factor（US・EU の VAP のみ 0.60。それ以外は 1.0）
+ *     × anchor calibration factor（この表。未掲載セルは 1.0）
+ * とする。既存の US/EU VAP factor 0.60 を消したり吸収したりしない
+ * （US/EU VAP は 0.60 適用後の値へさらにこの係数が掛かる）。
+ *
+ * 【位置づけ】**V2.00 calibrated candidate であり最終固定値ではない。**
+ * 今回は 4 つの anchor cell（CN/HOSO, JP/VAP, US/VAP, EU/VAP）だけを校正し、
+ * 残り 11 セルは 1.0（＝未校正）のまま監査対象として残す。
+ * 目標 price-equivalent premium（quality +4 point 時）:
+ *   CN HOSO 約 +0.10 / JP VAP 約 +0.80 / US VAP 約 +0.40 / EU VAP 約 +0.40 USD/kg
+ */
+export const QUALITY_SENSITIVITY_CALIBRATION_V200_CANDIDATE_V1: Readonly<
+  Record<string, Readonly<Partial<Record<Product, number>>>>
+> = {
+  CN: { hoso: 2.5 },
+  JP: { vap: 3.9 },
+  US: { vap: 4.2 },
+  EU: { vap: 3.8 },
+};
+
+/** 未掲載セルの anchor calibration factor（＝未校正）。 */
+export const QUALITY_SENSITIVITY_CALIBRATION_DEFAULT_V200_CANDIDATE_V1 = 1;
+
+/**
+ * market×product の anchor calibration factor を引く。
+ * 表に無いセルは 1.0（未校正）。
+ */
+export function qualitySensitivityCalibrationFactorFor(market: string, product: Product): number {
+  return QUALITY_SENSITIVITY_CALIBRATION_V200_CANDIDATE_V1[market]?.[product] ?? QUALITY_SENSITIVITY_CALIBRATION_DEFAULT_V200_CANDIDATE_V1;
+}
+
+/**
  * 【TIERED-MKT-P1D】V2.00 三層顧客モデル 正式候補（B-moderated-v1）。
  *
  * 指示で明示された値:
@@ -611,8 +653,11 @@ export const TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1: TieredMarket
   // 掛けて生成し、係数と基準値の関係が崩れないようにする＝数値を二重管理しない）。
   overrides: Object.entries(TIER_DEMAND_SHARES_V200_CANDIDATE_V1).flatMap(([market, byProduct]) =>
     (Object.entries(byProduct) as Array<[Product, readonly [number, number, number]]>).map(([product, shares]) => {
-      const qualityFactor =
+      // 【TIERED-MKT-P1D-3】US/EU VAP factor（0.60）と anchor calibration factor は
+      // どちらも base qualitySensitivity へ「掛ける」。0.60 を anchor 側へ吸収しない。
+      const usEuVapFactor =
         (market === "US" || market === "EU") && product === "vap" ? US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1 : 1;
+      const qualityFactor = usEuVapFactor * qualitySensitivityCalibrationFactorFor(market, product);
       return {
         market,
         product,
