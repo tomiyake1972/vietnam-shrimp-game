@@ -51,13 +51,42 @@ export interface CustomerTierParameters {
   readonly qualitySensitivity: number;
   /** 差別化（VAP能力等）に対する感応度。 */
   readonly differentiationSensitivity: number;
-  /** その他の非価格要素（顧客関係・納期信頼性・営業基盤）に対する感応度。 */
+  /**
+   * その他の非価格要素（顧客関係・納期信頼性・営業基盤）に対する感応度（集約値）。
+   *
+   * 【TIERED-MKT-P1D】三要素を個別に持てるようになったため、この値は
+   * relationshipSensitivity / deliverySensitivity / salesBaseSensitivity が
+   * **いずれも指定されていない項目に対する fallback**（それぞれ nonPriceSensitivity/3）
+   * として使われる。旧 tiered parameter（この項目しか持たない）との後方互換のために
+   * 残しており、数学的には旧式 nonPriceSensitivity × (平均 − 0.5) と完全に一致する。
+   */
   readonly nonPriceSensitivity: number;
+  /**
+   * 顧客関係（customerRelationship）に対する感応度。
+   * 【TIERED-MKT-P1D】未指定なら nonPriceSensitivity / 3（旧式と一致）。
+   */
+  readonly relationshipSensitivity?: number;
+  /**
+   * 納期信頼性（deliveryReliability）に対する感応度。
+   * 【TIERED-MKT-P1D】未指定なら nonPriceSensitivity / 3（旧式と一致）。
+   */
+  readonly deliverySensitivity?: number;
+  /**
+   * 営業基盤（salesBaseScore）に対する感応度。
+   * 【TIERED-MKT-P1D】未指定なら nonPriceSensitivity / 3（旧式と一致）。
+   */
+  readonly salesBaseSensitivity?: number;
   /** 留保価格 = referencePrice × この倍率。層が高いほど高い価格まで許容する。 */
   readonly reservationPriceMultiplier: number;
   /** 留保価格超過に対する連続的なペナルティの傾き（超過比の2乗に掛ける）。 */
   readonly reservationSoftPenaltySlope: number;
-  /** 外部選択肢（他産地供給者・非購入）の基準効用。 */
+  /**
+   * 外部選択肢の基準効用。
+   *
+   * 【TIERED-MKT-P1D・正式定義】外部選択肢は「ゲームに登場しない他のベトナム企業＋
+   * 購買見送り」であり、**他産地（Ecuador / India / Indonesia 等）の供給者は含まない**。
+   * 他産地との競争は targetDemand 算出前の産地間配分で決着済み。
+   */
   readonly externalOptionBaseUtility: number;
 }
 
@@ -198,8 +227,12 @@ export interface SalesParameters {
   readonly maximumSupplierShare: number;
 
   /**
-   * 5社以外の外部選択肢（他産地供給者・非購入）の競争力ウェイト。
+   * 5社以外の外部選択肢の競争力ウェイト。
    * 5社の合成競争力と同じスケール（0〜1程度）で比較する。
+   *
+   * 【TIERED-MKT-P1D・正式定義】外部選択肢＝「ゲームに登場しない他のベトナム企業へ
+   * 流れる需要＋購買を見送る需要」。**他産地供給者は含まない**（他産地との競争は
+   * targetDemand 算出前の産地間配分で決着済み）。
    */
   readonly externalOptionWeight: number;
 
@@ -423,4 +456,144 @@ export const SALES_PARAMETERS_TIERED_FIXTURE_V0: SalesParameters = {
   parametersVersion: "sales-v0.2+tiered-market-allocation-fixture-v0",
   marketAllocationMode: "tieredSimultaneousAllocation",
   tieredMarketAllocation: TIERED_MARKET_ALLOCATION_PARAMETERS_FIXTURE_V0,
+};
+
+// ---------------------------------------------------------------------
+// 【TIERED-MKT-P1D】V2.00 三層顧客モデル 正式候補パラメータ（B-moderated-v1）
+// ---------------------------------------------------------------------
+//
+// 【位置づけ】これは「V2.00 プレイテスト用の正式候補」であり、検証fixture
+// （..._FIXTURE_V0）とは別物として定義する。ただし **production default では
+// まだない**: SALES_PARAMETERS_V1 / SAI5_SALES_BASE_V1 / TEST15_* のいずれも
+// marketAllocationMode を持たないため、DS1 / DS2 / DS3 の既定挙動には一切影響しない。
+// 起動経路は CompanyLabConfig.salesParamsOverride と診断fixtureのみ。
+//
+// 【32Q試験・手動プレイ後に再校正可能なparameterとして置く】最終固定値ではない。
+
+/**
+ * 外部選択肢の基準効用（V2.00候補）。
+ *
+ * 【正式定義】外部選択肢＝「Phase 1 の産地間配分後にベトナムへ割り当てられた需要のうち、
+ * ゲームに登場しない他のベトナム企業へ流れる需要＋購買を見送る需要」。
+ * 他産地（Ecuador / India / Indonesia 等）の供給者は含まない。
+ *
+ * 【1.6 の位置づけ】V2.00 プレイテスト用の暫定値であり最終固定値ではない。
+ * 32Q試験・手動プレイ後に再校正する前提で、名前付き定数としてここに置く
+ * （allocation 本体へマジックナンバーとして書かない）。
+ */
+export const EXTERNAL_OPTION_BASE_UTILITY_V200_CANDIDATE_V1 = 1.6;
+
+/**
+ * US / EU の VAP に適用する qualitySensitivity 補正係数（V2.00候補）。
+ * 基準層パラメータの qualitySensitivity へ乗算する（オーバーライドは
+ * resolveTierParameters が market×product 単位で適用する）。
+ */
+export const US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1 = 0.6;
+
+/**
+ * 【TIERED-MKT-P1D・未確定の明示】market×product 15セル単位の demandShare。
+ *
+ * 実装指示は「Phase 1B で確定候補となった 15セルの demandShare を正式候補
+ * parameter へ反映する」ことを求めているが、**この repository には Phase 1B の
+ * 15セル demandShare 正本が存在しない**（全 706 commit・docs 配下を検索して、
+ * 顧客層別 demandShare の値は本ファイルの FIXTURE_V0 の 0.4 / 0.4 / 0.2 一組しか
+ * 見つからない。docs 内の「15セル」は market×product の unit economics 表であり
+ * 顧客層構成比ではない）。指示§2 の「確認できない値を推測しない／一意に復元できない
+ * 場合は Stop Condition」に従い、**15セル別の demandShare は接続していない**。
+ * ここでは全 market×product で FIXTURE_V0 と同一の層構成比を用いる。
+ */
+const TIER_DEMAND_SHARES_PENDING_PHASE_1B = {
+  PRICE_SENSITIVE: 0.4,
+  STANDARD: 0.4,
+  PREMIUM: 0.2,
+} as const;
+
+/**
+ * 層別 qualitySensitivity の基準値（FIXTURE_V0 から引き継ぎ）。
+ * US/EU VAP の 0.60 倍 override をこの値から生成するため、数値を二重管理しない。
+ */
+const TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1 = {
+  PRICE_SENSITIVE: 0.6,
+  STANDARD: 1.2,
+  PREMIUM: 2.4,
+} as const;
+
+/**
+ * 【TIERED-MKT-P1D】V2.00 三層顧客モデル 正式候補（B-moderated-v1）。
+ *
+ * 指示で明示された値:
+ *   priceSensitivity          … PRICE_SENSITIVE 6.5 / STANDARD 3.5 / PREMIUM 1.7
+ *   differentiationSensitivity… PRICE_SENSITIVE 0.3 / STANDARD 1.4 / PREMIUM 4.0
+ *   externalOptionBaseUtility … 全層 1.6
+ *   US / EU の VAP            … qualitySensitivity × 0.60
+ *
+ * 指示で明示されていない項目（qualitySensitivity 基準値・nonPrice 系・
+ * reservation 系・utilityClamp・demandShare）は、**新しい値を作らず**
+ * TIERED_MARKET_ALLOCATION_PARAMETERS_FIXTURE_V0 の値をそのまま引き継ぐ。
+ */
+export const TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1: TieredMarketAllocationParameters = {
+  parametersVersion: "tiered-market-allocation-v200-candidate-v1（B-moderated-v1・プレイテスト用暫定値）",
+  tiers: {
+    PRICE_SENSITIVE: {
+      demandShare: TIER_DEMAND_SHARES_PENDING_PHASE_1B.PRICE_SENSITIVE,
+      priceSensitivity: 6.5,
+      qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.PRICE_SENSITIVE,
+      differentiationSensitivity: 0.3,
+      nonPriceSensitivity: 0.4,
+      reservationPriceMultiplier: 1.05,
+      reservationSoftPenaltySlope: 60,
+      externalOptionBaseUtility: EXTERNAL_OPTION_BASE_UTILITY_V200_CANDIDATE_V1,
+    },
+    STANDARD: {
+      demandShare: TIER_DEMAND_SHARES_PENDING_PHASE_1B.STANDARD,
+      priceSensitivity: 3.5,
+      qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.STANDARD,
+      differentiationSensitivity: 1.4,
+      nonPriceSensitivity: 0.8,
+      reservationPriceMultiplier: 1.15,
+      reservationSoftPenaltySlope: 40,
+      externalOptionBaseUtility: EXTERNAL_OPTION_BASE_UTILITY_V200_CANDIDATE_V1,
+    },
+    PREMIUM: {
+      demandShare: TIER_DEMAND_SHARES_PENDING_PHASE_1B.PREMIUM,
+      priceSensitivity: 1.7,
+      qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.PREMIUM,
+      differentiationSensitivity: 4.0,
+      nonPriceSensitivity: 1.2,
+      reservationPriceMultiplier: 1.35,
+      reservationSoftPenaltySlope: 25,
+      externalOptionBaseUtility: EXTERNAL_OPTION_BASE_UTILITY_V200_CANDIDATE_V1,
+    },
+  },
+  utilityClamp: 60,
+  // US / EU の VAP のみ qualitySensitivity を 0.60 倍する。基準値へ係数を掛けて
+  // 生成し、係数と基準値の関係が崩れないようにする（数値を二重管理しない）。
+  overrides: (["US", "EU"] as const).map((market) => ({
+    market,
+    product: "vap" as const,
+    tiers: {
+      PRICE_SENSITIVE: {
+        qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.PRICE_SENSITIVE * US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1,
+      },
+      STANDARD: {
+        qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.STANDARD * US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1,
+      },
+      PREMIUM: {
+        qualitySensitivity: TIER_QUALITY_SENSITIVITY_V200_CANDIDATE_V1.PREMIUM * US_EU_VAP_QUALITY_SENSITIVITY_FACTOR_V200_CANDIDATE_V1,
+      },
+    },
+  })),
+};
+
+/**
+ * 【TIERED-MKT-P1D】V2.00 三層顧客モデル 正式候補を有効化した SalesParameters。
+ * SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1（現行 baseline / DS2 の解決値）を継承し、
+ * mode と tier 設定だけを足す。**Scenario・production default へは接続していない。**
+ * 起動は salesParamsOverride または診断fixtureからのみ。
+ */
+export const SALES_PARAMETERS_TIERED_V200_CANDIDATE_V1: SalesParameters = {
+  ...SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1,
+  parametersVersion: "sales-v0.2+tiered-market-allocation-v200-candidate-v1",
+  marketAllocationMode: "tieredSimultaneousAllocation",
+  tieredMarketAllocation: TIERED_MARKET_ALLOCATION_PARAMETERS_V200_CANDIDATE_V1,
 };

@@ -158,7 +158,11 @@ export interface MarketProductAllocationResult {
   /** このmarket×productの対象需要（Phase3市場結果からのアダプター導出値）。 */
   readonly targetDemand: HosoEqTons;
   readonly companies: readonly CompanyAllocationEntry[];
-  /** 5社以外（他産地供給者・非購入）に流れた需要。 */
+  /**
+   * 5社以外へ流れた需要。
+   * 【TIERED-MKT-P1D・正式定義】ゲームに登場しない他のベトナム企業＋購買見送り。
+   * 他産地供給者は含まない（他産地との競争は targetDemand 算出前に決着済み）。
+   */
   readonly externalOptionQuantity: HosoEqTons;
 }
 

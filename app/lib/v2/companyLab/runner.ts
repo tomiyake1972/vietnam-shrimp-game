@@ -164,6 +164,7 @@ import {
   findPreviousQuarterPdUtilization,
 } from "./pdMechanizationState";
 import { buildQualityEquipmentRiskMultiplierByFactory } from "./qualityControlEquipmentState";
+import { applyEquipmentQualityBonusToSalesPlans, computeEquipmentQualityBonusByCompanyProduct } from "./qualityEquipmentMarketBonus";
 import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { unwrapUsd } from "../finance/types";
@@ -1291,6 +1292,30 @@ export function advanceCompanyLabQuarter(
     };
   });
 
+  // --- 【TIERED-MKT-P1D】品質管理設備の市場評価 直接ボーナス（tiered mode 専用） ---
+  // legacyWaterfall では計算も適用も一切行わない（既存挙動とビット単位で一致）。
+  // company state の qualityReputation は書き換えず、当四半期の Sales Engine 入力
+  // （turnInput.salesPlans）に対する effectiveQuality の上書きだけを行う。
+  const salesPlansForEngine =
+    salesParametersForThisQuarter.marketAllocationMode === "tieredSimultaneousAllocation"
+      ? applyEquipmentQualityBonusToSalesPlans(
+          decisions.flatMap((d) => d.salesPlans),
+          computeEquipmentQualityBonusByCompanyProduct(
+            state.capexState,
+            // 当四半期の実効Factory[]。当期のlifecycle意思決定はT+1発効のため、
+            // ここで state.factoryLifecycleState を使っても後段の factoriesWithCapex
+            // と同一のFactory集合になる（先読みもしない）。
+            computeEffectiveFactories(
+              fixtures.flatMap((f) => f.factories),
+              state.capexState,
+              state.currentPeriod,
+              state.factoryLifecycleState
+            ),
+            state.currentPeriod
+          )
+        )
+      : decisions.flatMap((d) => d.salesPlans);
+
   const turnInput: TurnOrchestratorInput = {
     currentPeriod: state.currentPeriod,
     marketInput,
@@ -1308,7 +1333,7 @@ export function advanceCompanyLabQuarter(
           ),
         }
       : {}),
-    salesPlans: decisions.flatMap((d) => d.salesPlans),
+    salesPlans: salesPlansForEngine,
     domesticPurchaseIntentSource: {
       type: "companyPlans",
       plans: constrainedDecisions.map((d) => d.domesticPurchasePlan),

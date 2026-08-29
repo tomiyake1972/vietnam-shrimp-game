@@ -9,6 +9,11 @@
 // 【この方式の考え方】
 //   1. market×product の対象需要を、顧客層（PRICE_SENSITIVE / STANDARD / PREMIUM）へ
 //      demandShare で分割する（合計 1.0）。
+//   【外部選択肢の正式定義・TIERED-MKT-P1D】Phase 1 の産地間配分後にベトナムへ
+//   割り当てられた需要のうち、(a) ゲームに登場しない他のベトナム企業へ流れる需要と
+//   (b) 購買を見送る需要をまとめた仮想選択肢。**Ecuador / India / Indonesia など
+//   他産地の供給者は含まない**（他産地との競争は targetDemand 算出前に決着済み）。
+//
 //   2. 各層について、**5社＋外部選択肢を同一分母へ一度に入れて**効用ベースの
 //      選択確率（数値安定化 softmax）で層需要を配分する。
 //      1社ずつ独立に対象需要を評価することは決してしない。
@@ -69,6 +74,16 @@ export interface TieredCompanyTierDiagnostics {
   readonly priceComponent: number;
   readonly qualityComponent: number;
   readonly differentiationComponent: number;
+  /** 【TIERED-MKT-P1D】顧客関係の寄与（旧 nonPriceComponent の内訳）。 */
+  readonly relationshipComponent: number;
+  /** 【TIERED-MKT-P1D】納期信頼性の寄与（旧 nonPriceComponent の内訳）。 */
+  readonly deliveryComponent: number;
+  /** 【TIERED-MKT-P1D】営業基盤の寄与（旧 nonPriceComponent の内訳）。 */
+  readonly salesBaseComponent: number;
+  /**
+   * 【TIERED-MKT-P1D】説明用の集約値（既存consumer互換）。
+   * = relationshipComponent + deliveryComponent + salesBaseComponent。
+   */
   readonly nonPriceComponent: number;
   readonly reservationPrice: number;
   readonly reservationExcess: number;
@@ -170,6 +185,10 @@ function assertDemandShareSumsToOne(tiers: Readonly<Record<CustomerTierId, Custo
 function scoreInputs(entry: CompanySalesPlanEntry, params: SalesParameters): {
   readonly quality: number;
   readonly differentiation: number;
+  readonly relationship: number;
+  readonly delivery: number;
+  readonly salesBase: number;
+  /** 【TIERED-MKT-P1D】旧式（3要素の単純平均）。診断・後方互換の説明用にのみ残す。 */
   readonly nonPrice: number;
 } {
   const neutral = unwrapUnit(params.neutralScore) / 100;
@@ -180,13 +199,31 @@ function scoreInputs(entry: CompanySalesPlanEntry, params: SalesParameters): {
   const relationship = pick(entry.customerRelationship !== undefined ? unwrapUnit(entry.customerRelationship) : undefined);
   const reliability = pick(entry.deliveryReliability !== undefined ? unwrapUnit(entry.deliveryReliability) : undefined);
   const salesBase = pick(entry.salesBaseScore !== undefined ? unwrapUnit(entry.salesBaseScore) : undefined);
-  return { quality, differentiation, nonPrice: (relationship + reliability + salesBase) / 3 };
+  return {
+    quality,
+    differentiation,
+    relationship,
+    delivery: reliability,
+    salesBase,
+    nonPrice: (relationship + reliability + salesBase) / 3,
+  };
 }
 
 interface UtilityBreakdown {
   readonly priceComponent: number;
   readonly qualityComponent: number;
   readonly differentiationComponent: number;
+  /** 【TIERED-MKT-P1D】顧客関係の寄与。 */
+  readonly relationshipComponent: number;
+  /** 【TIERED-MKT-P1D】納期信頼性の寄与。 */
+  readonly deliveryComponent: number;
+  /** 【TIERED-MKT-P1D】営業基盤の寄与。 */
+  readonly salesBaseComponent: number;
+  /**
+   * 【TIERED-MKT-P1D】説明用の集約値。
+   * nonPriceComponent = relationshipComponent + deliveryComponent + salesBaseComponent。
+   * 既存 diagnostics consumer を壊さないために残している（保存schemaへは入れない）。
+   */
   readonly nonPriceComponent: number;
   readonly reservationPrice: number;
   readonly reservationExcess: number;
@@ -200,16 +237,52 @@ interface UtilityBreakdown {
  *   priceComponent      = -priceSensitivity × (ask − ref) / ref
  *   qualityComponent    =  qualitySensitivity × (quality − 0.5)
  *   differentiationComponent = differentiationSensitivity × (differentiation − 0.5)
- *   nonPriceComponent   =  nonPriceSensitivity × (nonPrice − 0.5)
+ *   relationshipComponent = relationshipSensitivity × (relationship − 0.5)
+ *   deliveryComponent     = deliverySensitivity     × (delivery − 0.5)
+ *   salesBaseComponent    = salesBaseSensitivity    × (salesBase − 0.5)
+ *   nonPriceComponent     = 上記3項の和（説明用の集約値）
+ *     【TIERED-MKT-P1D】3つの感応度が未指定なら、いずれも nonPriceSensitivity/3 へ
+ *     fallback する。この場合、旧式 nonPriceSensitivity × (3要素平均 − 0.5) と
+ *     数学的に恒等（浮動小数点誤差のみ）。
  *   reservationPrice    =  ref × reservationPriceMultiplier
  *   reservationExcess   =  max(0, (ask − reservationPrice) / ref)          ← hard cutoff にしない
  *   reservationPenalty  = -reservationSoftPenaltySlope × reservationExcess²  ← 連続・加速的
  *   utility             =  上記の総和（clamp は overflow 防止のみ）
  */
+export interface NonPriceSensitivities {
+  readonly relationship: number;
+  readonly delivery: number;
+  readonly salesBase: number;
+}
+
+/**
+ * 【TIERED-MKT-P1D・legacy tiered fallback】非価格3要素の感応度を解決する。
+ * 明示指定が無い項目だけ nonPriceSensitivity/3 へ落とす（旧 tiered parameter は
+ * nonPriceSensitivity しか持たないため、この fallback で旧式と数学的に一致する）。
+ * TypeScript level の optional のみで解決しており、保存schema・Redis・migration は
+ * 一切必要ない（SalesParameters は CompanyLabConfig.salesParamsOverride 経由の
+ * in-memory 値であり、persistence/schema.ts の validateCompanyLabConfig は
+ * この項目を復元対象に含めていない）。
+ */
+export function resolveNonPriceSensitivities(tier: CustomerTierParameters): NonPriceSensitivities {
+  const third = tier.nonPriceSensitivity / 3;
+  return {
+    relationship: tier.relationshipSensitivity ?? third,
+    delivery: tier.deliverySensitivity ?? third,
+    salesBase: tier.salesBaseSensitivity ?? third,
+  };
+}
+
 export function computeTierUtility(
   askPrice: number,
   referencePrice: number,
-  scores: { readonly quality: number; readonly differentiation: number; readonly nonPrice: number },
+  scores: {
+    readonly quality: number;
+    readonly differentiation: number;
+    readonly relationship: number;
+    readonly delivery: number;
+    readonly salesBase: number;
+  },
   tier: CustomerTierParameters,
   utilityClamp: number
 ): UtilityBreakdown {
@@ -217,7 +290,11 @@ export function computeTierUtility(
   const priceComponent = -tier.priceSensitivity * priceGap;
   const qualityComponent = tier.qualitySensitivity * (scores.quality - 0.5);
   const differentiationComponent = tier.differentiationSensitivity * (scores.differentiation - 0.5);
-  const nonPriceComponent = tier.nonPriceSensitivity * (scores.nonPrice - 0.5);
+  const nonPrice = resolveNonPriceSensitivities(tier);
+  const relationshipComponent = nonPrice.relationship * (scores.relationship - 0.5);
+  const deliveryComponent = nonPrice.delivery * (scores.delivery - 0.5);
+  const salesBaseComponent = nonPrice.salesBase * (scores.salesBase - 0.5);
+  const nonPriceComponent = relationshipComponent + deliveryComponent + salesBaseComponent;
   const reservationPrice = referencePrice * tier.reservationPriceMultiplier;
   const reservationExcess = Math.max(0, (askPrice - reservationPrice) / referencePrice);
   const reservationPenalty = -tier.reservationSoftPenaltySlope * reservationExcess * reservationExcess;
@@ -228,6 +305,9 @@ export function computeTierUtility(
     priceComponent,
     qualityComponent,
     differentiationComponent,
+    relationshipComponent,
+    deliveryComponent,
+    salesBaseComponent,
     nonPriceComponent,
     reservationPrice,
     reservationExcess,
@@ -435,6 +515,9 @@ export function allocateMarketProductTiered(input: TieredAllocationInput): Tiere
         priceComponent: b.priceComponent,
         qualityComponent: b.qualityComponent,
         differentiationComponent: b.differentiationComponent,
+        relationshipComponent: b.relationshipComponent,
+        deliveryComponent: b.deliveryComponent,
+        salesBaseComponent: b.salesBaseComponent,
         nonPriceComponent: b.nonPriceComponent,
         reservationPrice: b.reservationPrice,
         reservationExcess: b.reservationExcess,

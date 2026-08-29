@@ -14,7 +14,11 @@
 //     承認済み取引枠)）を超えない（安値による過剰受注の防止）
 //   - 入力順に依存しない（配列の合計・比較はすべて順序非依存の演算のみで構成）
 //   - 上限に達した会社の未配分需要は、まだ達していない会社へ自動的に再配分される
-//   - 5社以外の外部選択肢（他産地供給者・非購入）も1参加者として競争する
+//   - 5社以外の外部選択肢も1参加者として競争する
+//     【TIERED-MKT-P1D・正式定義】外部選択肢＝「ゲームに登場しない他のベトナム企業へ
+//     流れる需要＋購買を見送る需要」。**他産地（Ecuador/India/Indonesia等）の供給者は
+//     含まない**。他産地との競争は targetDemand 算出前の産地間配分で決着済みであり、
+//     ここへ再度入れると二重計上になる。
 
 import { HosoEqTons, UsdPerHosoEqKg, hosoEqTons, roundHosoEqTons, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { processingCapacity, salesCoverageScore } from "./salesForce";

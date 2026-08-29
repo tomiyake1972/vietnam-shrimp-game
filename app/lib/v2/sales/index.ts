@@ -20,6 +20,7 @@ export {
   allocateMarketProductTiered,
   computeTierUtility,
   resolveTierParameters,
+  resolveNonPriceSensitivities,
   EXTERNAL_OPTION_PARTICIPANT_ID,
 } from "./tieredAllocation";
 export type {
@@ -31,6 +32,7 @@ export type {
   TieredExternalTierDiagnostics,
   TieredCompanyCapDiagnostics,
   TieredBindingCap,
+  NonPriceSensitivities,
 } from "./tieredAllocation";
 export {
   salesEffortWeightedQuantity,
