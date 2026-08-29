@@ -203,10 +203,37 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
     const runtime = createCompanyLabRuntimeSnapshot(state);
     // Repositoryが存在確認・current作成・labs一覧追加を原子的に行い、
     // 重複labIdはCompanyLabAlreadyExistsErrorになる（§3.1）。
+    //
+    // 【ENG-COMPANYLAB-EFFECTIVE-CONFIG-PERSIST-1】保存するのは呼び出し側が渡した
+    // raw な input.config ではなく、initializeCompanyLab が解決した
+    // **effective config（state.config）** である。
+    //
+    // 【なぜraw保存では壊れるか】initializeCompanyLab は
+    // applyScenarioRequiredCapabilities（runner.ts）で、そのシナリオが成立するのに
+    // 必要な機能フラグ（ScenarioDefinition.requiredCapabilities）を config へ
+    // マージしてから state.config に入れる。ところが以前はここで input.config を
+    // 保存していたため、シナリオ由来で追加された sai5 フラグが Redis へ入らず、
+    // resume 時（restoreCompanyLabStateFromRuntimeSnapshot は保存済み config を
+    // そのまま state.config に使う）に機能がOFFへ戻っていた。実測: DS1/DS2 は
+    // requiredCapabilities で productLifecycle / supplyPremiumFeedback /
+    // salesBaseAccumulation の3つを true 宣言しているが、保存後の config.sai5 は
+    // undefined になっていた（＝requiredCapabilities が防ごうとしていた
+    // 「シナリオが定義した世界と違う世界が動く」事象そのもの）。
+    //
+    // 【安全性】applyScenarioRequiredCapabilities は「足りなければ足す」だけで、
+    // 呼び出し側が明示した値を無効化しない。宣言を持たないシナリオでは
+    // effectiveConfig === config（同一参照）なので、baseline 等の保存内容は
+    // 一切変わらない。schema・schemaVersion・Redis key は変更していない
+    // （既に検証・復元対象である sai5 の中身が正しく入るようになるだけ）。
+    //
+    // 【既存Runは補修しない】既に requiredCapabilities 由来の sai5 が欠落した
+    // まま保存されている Run に対する migration・Redis書き換え・resume時の
+    // 自動補完は行わない（本修正の対象は「新規作成されるLabが最初から正しい
+    // effective config を保存すること」のみ）。
     const stored = await repository.createLab({
       labId: input.labId,
       engineVersion: ENGINE_VERSION_V2,
-      config: input.config,
+      config: state.config,
       fixtures,
       playerCompanyId: input.playerCompanyId,
       runtime,
