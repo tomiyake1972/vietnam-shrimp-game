@@ -1326,10 +1326,22 @@ export function advanceCompanyLabQuarter(
     marketProductMix: lifecycleMix,
     parameters: {
       destinationMarketPricing: destinationMarketPricingForThisQuarter,
-      // 【SAI-5D】営業基盤ウェイト有効化版のSalesParameters（合計1.0を保った
-      // 再配分。無効時はキー自体を渡さず、turn/runner.tsの既定
-      // SALES_PARAMETERS_V1＝salesBaseウェイト0で従来と完全に同一）。
-      ...(state.config.sai5?.salesBaseAccumulation ? { sales: salesParametersForThisQuarter } : {}),
+      // 【ENG-SALES-PARAM-SSOT-2】当四半期に解決した SalesParameters を **常に** 渡す。
+      //
+      // 【修正前の欠陥】以前はここが
+      //   ...(state.config.sai5?.salesBaseAccumulation ? { sales: salesParametersForThisQuarter } : {})
+      // となっており、salesBaseAccumulation が偽のときはキー自体を渡さなかった。
+      // その場合 turn/runner.ts が既定の SALES_PARAMETERS_V1 へフォールバックするため、
+      // salesParametersFor(config) が解決した variant が Sales Engine へ届かなかった。
+      // 実測（ENG-SALES-PARAM-SSOT-1 の variant matrix）:
+      //   - baseline / DS2（sai5未指定）… 解決値 TEST15_VAP_CAPABILITY_V1 に対し Engine は V1。
+      //     「vapProductDevelopmentCompetitiveness は明示的に false を指定しない限り既定ON」
+      //     という正式仕様に反し、vapCapability ウェイト 0.08 が成約配分へ効いていなかった
+      //     （VAP entry には vapCapabilityScore が設定されているのにウェイトだけ 0）。
+      //   - salesParamsOverride を指定しても Engine へ届かなかった。
+      // variant の決定ロジック（salesParametersFor）は一切変更していない。ここは
+      // 「解決済みの値を落とさずに渡す」ことだけを直す。
+      sales: salesParametersForThisQuarter,
       // 【SAI-5E】供給圧力フィードバック有効時のみ、PD/VAPベースプレミアム比率へ
       // 前期末stateの倍率を乗じたMarketParametersを渡す（市場モジュール内部は
       // 無変更。既存の稼働率倍率clamp・最低プレミアム床はそのまま機能する）。

@@ -93,9 +93,28 @@ test("受入確認V-3: buildCompetitivenessExplanationRowsのcompetitivenessWeig
       assert.ok(entry, "対応するCompanyAllocationEntryが見つかる");
       assert.equal(row.competitivenessWeight, entry!.competitivenessWeight);
       assert.equal(row.allocatedQuantity, unwrapUnit(entry!.allocatedQuantity));
-      // 内訳5項目の合計は必ずcompetitivenessWeightと一致する（sales/allocation.tsの保証）。
-      const sum = row.priceContribution + row.coverageContribution + row.relationshipContribution + row.qualityContribution + row.deliveryReliabilityContribution;
-      assert.equal(sum, row.competitivenessWeight);
+      // 【ENG-SALES-PARAM-SSOT-2】以前はここで「内訳5項目の合計＝competitivenessWeight」を
+      // 課していたが、これは salesBase / vapCapability のウェイトが常に 0 だった時期の前提。
+      // SalesParameters の伝播修正により、既定 Scenario でも vapCapability ウェイト 0.08 が
+      // 実際に効くようになったため、5項目だけでは合計に届かない（VAP entry で顕著）。
+      // sales/allocation.ts::sumCompetitivenessContributions が保証しているのは
+      // **7項目すべての合計**なので、そちらを不変条件として課す。
+      const b = entry!.competitivenessBreakdown;
+      const sum =
+        b.priceContribution +
+        b.coverageContribution +
+        b.relationshipContribution +
+        b.qualityContribution +
+        b.deliveryReliabilityContribution +
+        b.salesBaseContribution +
+        b.vapCapabilityContribution;
+      assert.equal(sum, entry!.competitivenessWeight);
+      // ViewModel が写している5項目は、エンジンの内訳とビット単位で一致していること。
+      assert.equal(row.priceContribution, b.priceContribution);
+      assert.equal(row.coverageContribution, b.coverageContribution);
+      assert.equal(row.relationshipContribution, b.relationshipContribution);
+      assert.equal(row.qualityContribution, b.qualityContribution);
+      assert.equal(row.deliveryReliabilityContribution, b.deliveryReliabilityContribution);
     }
   }
 });
