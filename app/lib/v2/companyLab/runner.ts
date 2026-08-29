@@ -1566,7 +1566,16 @@ export function advanceCompanyLabQuarter(
       const targetDemand = unwrapUnit(alloc.targetDemand);
       const totalCompanyWeight = alloc.companies.reduce((sum, c) => sum + c.competitivenessWeight, 0);
       targetDemandByProduct[alloc.product] += targetDemand;
-      addressableDemandByProduct[alloc.product] += computeAddressableDemand(targetDemand, totalCompanyWeight, externalOptionWeight);
+      // 【ENG-TIERED-MKT-COMPAT-1】tiered配分モードでは、各社の
+      // competitivenessWeight は既に「正規化済みシェア」（Σ_tier tierShare ×
+      // tier内正規化ウェイト）であり、外部オプションも同じ正規化の中に含まれる。
+      // したがって legacy の w/(w+externalOptionWeight) を再適用すると外部を
+      // 二重計上する。tieredでは addressableDemand = targetDemand × Σ 正規化
+      // ウェイト をそのまま用いる（marketEvolution.ts 側の関数は変更しない）。
+      addressableDemandByProduct[alloc.product] +=
+        salesParametersForThisQuarter.marketAllocationMode === "tieredSimultaneousAllocation"
+          ? targetDemand * Math.min(1, Math.max(0, totalCompanyWeight))
+          : computeAddressableDemand(targetDemand, totalCompanyWeight, externalOptionWeight);
       externalOptionQuantityByProduct[alloc.product] += unwrapUnit(alloc.externalOptionQuantity);
     }
     const evolutionInputs = {

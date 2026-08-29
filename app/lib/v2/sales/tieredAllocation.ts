@@ -488,8 +488,11 @@ export function allocateMarketProductTiered(input: TieredAllocationInput): Tiere
       // 何割を選好されたか）」を入れる。捏造値ではなく、新方式が実際に使った
       // 選択確率そのものの集約であり、全社合計 + 外部シェア = 1 になる。
       // 【scale の注意】legacy の competitivenessWeight（0〜1程度の合成競争力）とは
-      // 定義が異なるため、tiered mode を Scenario で有効化する前に
-      // computeAddressableDemand 側の解釈を #08 で確定する必要がある（未解決事項）。
+      // 定義が異なる。【ENG-TIERED-MKT-COMPAT-1 で解決済み】companyLab/runner.ts は
+      // marketAllocationMode で分岐し、tiered では
+      //   addressableDemand = targetDemand × Σ(この正規化ウェイト)
+      // を用いる（legacy の w/(w+externalOptionWeight) を再適用すると外部を
+      // 二重計上するため）。
       competitivenessWeight: aggregateWeightByCompany.get(p.entry.companyId) ?? 0,
       competitivenessBreakdown: breakdown,
       allocatedQuantity: hosoEqTons(roundHosoEqTons(Math.max(0, finalByCompany.get(p.entry.companyId) ?? 0))),
