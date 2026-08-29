@@ -70,12 +70,18 @@ test.describe("SALES 基準価格参考表示 — Independent Player Flow経由"
         balJoinUrl = await issueJoinUrl(gmPage, "BAL");
       });
 
-      await test.step("BAL: 別contextで参加 → SALESタブでTurn1は前Turン「－」表示を確認", async () => {
+      await test.step("BAL: 別contextで参加 → SALESタブでTurn1は前Turn市場基準・参考提示ともに実際に「－」表示であることを確認", async () => {
         await joinAsPlayer(balPage, balJoinUrl, "BAL");
         await balPage.getByTestId("decision-studio-tab-sales").click();
         await expect(balPage.getByTestId("sales-price-reference-disclaimer")).toBeVisible();
-        const firstRow = balPage.locator('[data-testid^="sales-price-reference-"][data-testid*="-CN-"]').first();
-        await expect(firstRow).toBeVisible();
+        const priorBaseCells = balPage.locator('[data-testid^="sales-price-reference-prior-base-"]');
+        const askCells = balPage.locator('[data-testid^="sales-price-reference-ask-"]');
+        const rowCount = await priorBaseCells.count();
+        expect(rowCount).toBeGreaterThan(0);
+        for (let i = 0; i < rowCount; i++) {
+          await expect(priorBaseCells.nth(i)).toHaveText("－");
+          await expect(askCells.nth(i)).toHaveText("－");
+        }
       });
 
       await test.step("BAL: Turn1を提出し、GMがAdvanceする", async () => {
