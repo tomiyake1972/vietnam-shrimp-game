@@ -35,6 +35,7 @@ import { PeriodV2, parsePeriod } from "../../core/period";
 import { HosoEqTons, Ratio, hosoEqTons, ratio, score0to100, unwrapUnit, usdPerHosoEqKg } from "../../core/units";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../market/types";
 import { CompanyId, ContractStatus, SalesContract } from "../../sales/types";
+import { SALES_MODEL_IDS } from "../../sales/salesModels";
 import { RawMaterialLot, RawMaterialLotStatus, RawMaterialSource } from "../../rawMaterials/types";
 import { FinishedGoodsLot, FinishedGoodsLotStatus, ProductionBatchRawMaterialConsumption } from "../../production/types";
 import {
@@ -1133,6 +1134,21 @@ function validateCompanyLabConfig(raw: unknown, path: string): CompanyLabConfig 
     obj.standardAiProfileMode === undefined || obj.standardAiProfileMode === null
       ? undefined
       : requireEnum(obj.standardAiProfileMode, ["OFF", "ON"] as const, `${path}.standardAiProfileMode`);
+  /**
+   * 【ENG-SALES-MODEL-PERSIST-2】販売モデルの versioned ID。
+   *
+   * sai5・standardAiProfileMode と全く同じ後方互換方針:
+   *   キー欠落（本機能以前に保存された全データ）は undefined を返し、従来どおり
+   *   sai5 由来の legacy variant 解決になる（＝既存 saved run の挙動は不変。
+   *   マイグレーションは不要で、schemaVersion も上げていない）。
+   * 一方、**値が入っているのに registry に無い ID は decode 失敗**にする
+   * （requireEnum。未知 ID を黙って legacy へ落とすと、tiered で保存したはずの Lab が
+   *   静かに別モデルで走ってしまうため）。
+   */
+  const salesModelId =
+    obj.salesModelId === undefined || obj.salesModelId === null
+      ? undefined
+      : requireEnum(obj.salesModelId, SALES_MODEL_IDS, `${path}.salesModelId`);
   return {
     scenarioId: requireNonEmptyString(obj.scenarioId, `${path}.scenarioId`),
     mode: requireEnum(obj.mode, SCENARIO_MODES, `${path}.mode`),
@@ -1144,6 +1160,7 @@ function validateCompanyLabConfig(raw: unknown, path: string): CompanyLabConfig 
     })(),
     ...(sai5 === undefined ? {} : { sai5 }),
     ...(standardAiProfileMode === undefined ? {} : { standardAiProfileMode }),
+    ...(salesModelId === undefined ? {} : { salesModelId }),
   };
 }
 

@@ -107,6 +107,7 @@ import { applyFulfillments, updateContractStatusesForQuarterEnd } from "../sales
 import { validateSalesForceHeadcountBudget } from "../sales/salesForce";
 import { MarketSalesEffortAdjustment } from "../sales/marketEffort";
 import { CompanyId, MarketProductAllocationResult, SalesContract } from "../sales/types";
+import { salesParametersForModelId } from "../sales/salesModels";
 import { AquacultureHarvestResult, DomesticPurchaseAllocationResult, RawMaterialLot } from "../rawMaterials/types";
 import {
   advanceProductionQuarter,
@@ -687,7 +688,18 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
  */
 function salesParametersFor(config: CompanyLabConfig): SalesParameters {
   // 【Phase 6B】比較用の上書きが指定されていればそれを使う（既定は undefined）。
+  // in-memory 専用（CLI / test / research / diagnostics）で、永続 schema には存在しない。
   if (config.salesParamsOverride) return config.salesParamsOverride;
+  // 【ENG-SALES-MODEL-PERSIST-2】次に versioned な salesModelId を見る。
+  // registry が固定値を持つモデル（tiered）はその値をそのまま使い、
+  // sai5 の機能フラグで legacy へ戻ることはない。固定値を持たない
+  // "legacy-waterfall-v1" は undefined を返すため、下の legacy variant 解決へ落ちる
+  // （＝明示指定しても SALES_PARAMETERS_V1 へ固定してしまわない）。
+  // 未知 ID は registry 側で UnknownSalesModelIdError になり、黙って既定へ落ちない。
+  if (config.salesModelId !== undefined) {
+    const fromRegistry = salesParametersForModelId(config.salesModelId);
+    if (fromRegistry !== undefined) return fromRegistry;
+  }
   const vapCapabilityOn = config.sai5?.vapProductDevelopmentCompetitiveness !== false;
   const salesBaseOn = !!config.sai5?.salesBaseAccumulation;
   if (vapCapabilityOn && salesBaseOn) return SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1;

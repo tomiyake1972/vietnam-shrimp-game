@@ -18,6 +18,7 @@ import { ConsumerMarketCarryStateTable, ConsumerMarketQuarterRecord } from "../m
 import { ScenarioMode, ScenarioState } from "../scenario/types";
 import { CompanyId, CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
 import type { SalesParameters } from "../sales/parameters";
+import type { SalesModelId } from "../sales/salesModels";
 import type { CompanyLabVisionOverrides } from "./vision/overrides";
 import type { ObservedMarketDemand } from "./marketDemandObservation";
 import {
@@ -602,6 +603,20 @@ export interface CompanyLabConfig {
    * 候補モデルの 32Q 比較のためだけに使う注入口であり、正式モデルの決定ではない。
    */
   readonly salesParamsOverride?: SalesParameters;
+  /**
+   * 【ENG-SALES-MODEL-PERSIST-2】この Lab が使う販売モデルの versioned ID（optional）。
+   *
+   * 未指定なら従来どおり sai5 の機能フラグから legacy variant を解決する
+   * （既存 Run・既存 saved run はビット単位で不変）。
+   *
+   * salesParamsOverride が SalesParameters そのもの（in-memory 専用・永続 schema に
+   * 存在しない）なのに対し、こちらは **小さな enum で保存・復元できる** ことが目的。
+   * 解決は sales/salesModels.ts の immutable registry が一手に引き受け、
+   * 一度公開した ID の指す値は書き換えない（再校正時は新 ID を追加する）。
+   *
+   * 優先順位: salesParamsOverride > salesModelId > sai5 由来の legacy variant。
+   */
+  readonly salesModelId?: SalesModelId;
   /**
    * 【Management Console Vision Calibration】Run固有のVision（Q32目標規模・
    * strategicPosture）上書き（optional）。未指定ならvision/defaults.tsの既定

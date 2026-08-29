@@ -45,7 +45,7 @@ function badRequest(message: string): ApiResult {
 export async function handleCreateLab(deps: CompanyLabApiDependencies, rawBody: unknown, now: string): Promise<ApiResult> {
   const bodyResult = validateCreateLabRequestBody(rawBody);
   if (!bodyResult.ok) return badRequest(bodyResult.message);
-  const { scenarioId, mode, seed, turns, playerCompanyId } = bodyResult.value;
+  const { scenarioId, mode, seed, turns, playerCompanyId, salesModelId } = bodyResult.value;
 
   let labId: string;
   if (bodyResult.value.labId !== undefined) {
@@ -67,7 +67,16 @@ export async function handleCreateLab(deps: CompanyLabApiDependencies, rawBody: 
     // 既存Labの挙動は変わらない）。Standard AIへ実際に渡す経路は decisionsProvider.ts。
     const result = await deps.service.createLab({
       labId,
-      config: { scenarioId, mode, seed, turns, standardAiProfileMode: DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE },
+      // 【ENG-SALES-MODEL-PERSIST-2】salesModelId は validation.ts で allowlist 済み。
+      // 未指定ならキー自体を付けない（既存 Lab と同一形状＝従来挙動）。
+      config: {
+        scenarioId,
+        mode,
+        seed,
+        turns,
+        standardAiProfileMode: DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE,
+        ...(salesModelId === undefined ? {} : { salesModelId }),
+      },
       playerCompanyId,
       now,
     });

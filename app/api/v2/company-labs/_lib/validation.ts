@@ -7,6 +7,7 @@
 import { CompanyId } from "../../../../lib/v2/sales/types";
 import { COMPANY_LAB_COMPANY_IDS } from "../../../../lib/v2/companyLab/fixtures";
 import { resolveScenarioDefinition } from "../../../../lib/v2/industryLab/cli/scenarioAliases";
+import { SALES_MODEL_IDS, SalesModelId, isSalesModelId } from "../../../../lib/v2/sales/salesModels";
 
 const MAX_LAB_ID_LENGTH = 200;
 const MAX_TURN_ID_LENGTH = 200;
@@ -54,6 +55,11 @@ export interface CreateLabRequestBody {
   readonly seed: string;
   readonly turns: number;
   readonly playerCompanyId: CompanyId;
+  /**
+   * 【ENG-SALES-MODEL-PERSIST-2】販売モデルの versioned ID（optional）。
+   * 未指定なら従来どおり（legacy variant 解決）。allowlist 外は 400。
+   */
+  readonly salesModelId?: SalesModelId;
 }
 
 /**
@@ -120,6 +126,12 @@ export function validateCreateLabRequestBody(
   if (typeof b.playerCompanyId !== "string" || !(COMPANY_LAB_COMPANY_IDS as readonly string[]).includes(b.playerCompanyId)) {
     return fail(`playerCompanyId は必須で、次のいずれかである必要があります: ${COMPANY_LAB_COMPANY_IDS.join(", ")}`);
   }
+  // 【ENG-SALES-MODEL-PERSIST-2】販売モデルは **allowlist の ID だけ** を受理する。
+  // 任意の SalesParameters JSON は API から注入できない（registry 経由のみ）。
+  // 未指定は許可（従来どおり legacy variant 解決）。未知 ID は silent fallback せず 400。
+  if (b.salesModelId !== undefined && b.salesModelId !== null && !isSalesModelId(b.salesModelId)) {
+    return fail(`salesModelId は次のいずれかである必要があります: ${SALES_MODEL_IDS.join(", ")}。受け取った値: ${JSON.stringify(b.salesModelId)}`);
+  }
   return ok({
     ...(typeof b.labId === "string" ? { labId: b.labId } : {}),
     scenarioId: b.scenarioId,
@@ -127,6 +139,7 @@ export function validateCreateLabRequestBody(
     seed: b.seed,
     turns: b.turns,
     playerCompanyId: b.playerCompanyId as CompanyId,
+    ...(isSalesModelId(b.salesModelId) ? { salesModelId: b.salesModelId } : {}),
   });
 }
 

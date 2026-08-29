@@ -13,6 +13,14 @@
 
 export * from "./types";
 export * from "./parameters";
+export {
+  SALES_MODEL_IDS,
+  isSalesModelId,
+  salesModelDefinitionForId,
+  salesParametersForModelId,
+  UnknownSalesModelIdError,
+} from "./salesModels";
+export type { SalesModelId, SalesModelDefinition } from "./salesModels";
 export { deriveVietnamBasePrices, deriveVietnamMarketReferencePrices, deriveTargetDemand } from "./marketAdapter";
 export { salesCoverageScore, processingCapacity, validateSalesForceHeadcountBudget } from "./salesForce";
 export { computeCompetitivenessWeight, computeCompetitivenessBreakdown, allocateMarketProduct } from "./allocation";
