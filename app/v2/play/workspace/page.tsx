@@ -218,6 +218,7 @@ export default function PlayerWorkspacePage() {
               lastQuarterRejectedCapexProposals={context.lastQuarterRejectedCapexProposals}
               lastQuarterFinancialResult={context.lastQuarterFinancialResult}
               lastQuarterDividendResult={context.lastQuarterDividendResult}
+              lastQuarterSalesAllocations={context.lastQuarterSalesAllocations}
               publicInfo={context.publicInfo}
               scenarioNews={scenarioNews}
               companyName={context.companyDisplayName}

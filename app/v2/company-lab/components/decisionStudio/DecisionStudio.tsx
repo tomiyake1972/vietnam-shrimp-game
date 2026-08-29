@@ -26,6 +26,7 @@ import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../../../l
 import { CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../../lib/v2/capex";
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
 import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividend";
+import { MarketProductAllocationResult } from "../../../../lib/v2/sales/types";
 import { CompanyDecisionDraft } from "../../decisionDraft";
 import { buildDecisionStudioViewModel } from "../../decisionStudioViewModel";
 import type { OpeningInfoViewModel, ScenarioNewsItem } from "../../play/_lib/openingInfoViewModel";
@@ -52,6 +53,8 @@ export interface DecisionStudioProps {
   readonly lastQuarterFinancialResult?: CompanyFinancialQuarterResult | null;
   /** 【配当Decision UI接続】直近確定四半期の配当結果（累積配当・却下理由の表示用）。 */
   readonly lastQuarterDividendResult?: CompanyDividendQuarterResult | null;
+  /** 【SALES基準価格参考表示・新設】直近確定四半期の市場×商品別配分結果（全社共通・公開情報）。新しい価格計算はしない。 */
+  readonly lastQuarterSalesAllocations?: readonly MarketProductAllocationResult[];
   readonly publicInfo?: PublicMarketInfo;
   readonly turn?: number;
   /** INFO画面のBS・償却資産明細・市場情報向け（PlayerScreenClient.tsxが持つ場合のみ渡す）。 */
@@ -88,6 +91,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     lastQuarterRejectedCapexProposals,
     lastQuarterFinancialResult,
     lastQuarterDividendResult,
+    lastQuarterSalesAllocations,
     publicInfo,
     turn,
     openingInfo,
@@ -181,6 +185,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               salesForceAllocation={vm.salesForceAllocation}
               salesForceHiring={vm.salesForceHiring}
               salesForceHireLimit={vm.salesForceHireLimit}
+              lastQuarterSalesAllocations={lastQuarterSalesAllocations}
             />
           )}
           {activeScreen === "production" && <ProductionPlanningScreen draft={draft} onChange={onChange} disabled={disabled} vm={vm} />}
