@@ -9,12 +9,38 @@
 import { CompanyDecisionDraft, resetAllSalesForceHeadcountToZero, SalesForceAllocationSummary, SalesForceHiringPreview, syncMarketSalesForceHeadcount } from "../../decisionDraft";
 import { formatHosoEqTons } from "../../../../lib/v2/industryLab/ui/formatters";
 import { computeSalesPlanTotals } from "../../salesPlanTotals";
+import { unwrapUnit } from "../../../../lib/v2/core/units";
+import { DemandMarketId, Product } from "../../../../lib/v2/market/types";
+import { MarketProductAllocationResult } from "../../../../lib/v2/sales/types";
 import { NumberCell, PriceAdjustmentCell } from "../InputCells";
 import CollapsibleSection from "../CollapsibleSection";
 import { INFO_TABLE_HEAD_CLASS } from "../panelStyles";
 
 function formatUsd(value: number): string {
   return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+/**
+ * 【SALES基準価格参考表示・新設】表示専用フォーマッタ（$X.XX固定・小数2桁）。
+ * 既存formatUsdPerHosoEqKg（最大4桁）とは意図的に異なる（今回のUI要件が2桁固定のため）。
+ * 新しい価格計算は一切しない。
+ */
+export function formatPricePerKgPlain(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+
+/**
+ * 【SALES基準価格参考表示・新設】前四半期の確定済みMarketProductAllocationResultから
+ * 該当market×productのbasePriceを読み取るだけ（新しい価格計算・予測は一切しない）。
+ * 見つからない（前四半期データ自体が無い・当該組合せの配分結果が無い）場合はnull。
+ */
+export function findLastQuarterBasePrice(
+  allocations: readonly MarketProductAllocationResult[] | undefined,
+  market: DemandMarketId,
+  product: Product
+): number | null {
+  const found = allocations?.find((a) => a.market === market && a.product === product);
+  return found ? unwrapUnit(found.basePrice) : null;
 }
 
 interface SalesPlanningScreenProps {
@@ -25,6 +51,8 @@ interface SalesPlanningScreenProps {
   readonly salesForceAllocation: SalesForceAllocationSummary;
   readonly salesForceHiring: SalesForceHiringPreview;
   readonly salesForceHireLimit: number;
+  /** 【SALES基準価格参考表示・新設】直近確定四半期の市場×商品別配分結果（全社共通・公開情報）。省略時・turn1等は前Turン価格「－」表示。 */
+  readonly lastQuarterSalesAllocations?: readonly MarketProductAllocationResult[];
 }
 
 export default function SalesPlanningScreen({
@@ -35,6 +63,7 @@ export default function SalesPlanningScreen({
   salesForceAllocation,
   salesForceHiring,
   salesForceHireLimit,
+  lastQuarterSalesAllocations,
 }: SalesPlanningScreenProps) {
   const totals = computeSalesPlanTotals(draft.salesPlans);
 
@@ -73,6 +102,12 @@ export default function SalesPlanningScreen({
             営業配分をすべて0に戻す
           </button>
         </div>
+
+        {/* 【SALES基準価格参考表示・新設】必ず表示する注意書き（表全体で1回・行ごとに繰り返さない）。 */}
+        <p className="text-[11px] text-amber-300/90" data-testid="sales-price-reference-disclaimer">
+          ※ 今Turnの実際の市場基準価格は、全社の意思決定確定後に決まります。ここに表示する参考提示価格は、前Turnの確定基準価格を使った参考値です。
+        </p>
+
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs text-gray-300">
             <thead>
@@ -85,7 +120,10 @@ export default function SalesPlanningScreen({
               </tr>
             </thead>
             <tbody>
-              {draft.salesPlans.map((row, idx) => (
+              {draft.salesPlans.map((row, idx) => {
+                const lastQuarterBasePrice = findLastQuarterBasePrice(lastQuarterSalesAllocations, row.market, row.product);
+                const referenceAskPrice = lastQuarterBasePrice !== null ? lastQuarterBasePrice + row.priceAdjustmentUsdPerHosoEqKg : null;
+                return (
                 <tr key={`${row.market}-${row.product}`} className="border-t border-gray-700/60">
                   <td className="pr-3 py-1">{row.market}</td>
                   <td className="pr-3 py-1 uppercase">{row.product}</td>
@@ -112,6 +150,20 @@ export default function SalesPlanningScreen({
                         onChange({ ...draft, salesPlans: next });
                       }}
                     />
+                    <div className="mt-0.5 whitespace-nowrap text-[10px] leading-tight text-gray-400" data-testid={`sales-price-reference-${row.market}-${row.product}`}>
+                      <div>
+                        前Turn市場基準{" "}
+                        <span data-testid={`sales-price-reference-prior-base-${row.market}-${row.product}`}>
+                          {lastQuarterBasePrice !== null ? formatPricePerKgPlain(lastQuarterBasePrice) : "－"}
+                        </span>
+                      </div>
+                      <div>
+                        参考提示{" "}
+                        <span data-testid={`sales-price-reference-ask-${row.market}-${row.product}`}>
+                          {referenceAskPrice !== null ? `${formatPricePerKgPlain(referenceAskPrice)}/kg` : "－"}
+                        </span>
+                      </div>
+                    </div>
                   </td>
                   <td className="pr-3 py-1">
                     <NumberCell
@@ -127,7 +179,8 @@ export default function SalesPlanningScreen({
                     />
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

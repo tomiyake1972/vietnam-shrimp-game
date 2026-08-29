@@ -222,6 +222,8 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
   const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
+  // 【SALES基準価格参考表示・新設】全社共通・公開情報のためcompanyId抽出不要。新しい価格計算はしない。
+  const lastQuarterSalesAllocations = lastRecord?.salesRecord.allocations;
   const controlMode = entry.companyControlModes[companyId] ?? "STANDARD_AI";
 
   // 【Game End / Final Results・指示§5】FINISHED（gameEndedAt設定済み）なら、
@@ -534,6 +536,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
               lastQuarterDividendResult={lastQuarterDividendResult}
+              lastQuarterSalesAllocations={lastQuarterSalesAllocations}
               publicInfo={publicInfo}
               scenarioNews={scenarioNews}
               // AI経営会議は、このSimulation Runの同じ会社・同じturnの状態で開く（別Labを作らない）。
