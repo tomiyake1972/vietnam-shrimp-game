@@ -18,6 +18,7 @@ import { fetchLabIndex } from "../../../../../lib/v2/companyLab/adminExport/comp
 import { resolveRequestOriginFromHeaders } from "../../../../../lib/v2/companyLab/adminExport/requestOrigin";
 import { listCompanyOptionsForUi } from "../../_lib/companyOptions";
 import PlayLabBanner from "../../components/PlayLabBanner";
+import { decodeLabIdRouteParam } from "../../_lib/labIdRouteParam";
 
 interface ExportLabPageProps {
   readonly params: Promise<{ readonly labId: string }>;
@@ -35,7 +36,10 @@ export default async function CompanyLabExportLabPage({ params, searchParams }: 
     );
   }
 
-  const { labId } = await params;
+  // 【COMPANYLAB-DETAIL-LOAD-404-1】詳細画面と同じく、動的セグメントは
+  // percent-encoded のまま渡るため保存済み labId へ復元する。
+  const { labId: rawLabId } = await params;
+  const labId = decodeLabIdRouteParam(rawLabId);
   const { turn: turnQuery, companyId: companyIdQuery } = await searchParams;
   const origin = await resolveRequestOriginFromHeaders();
   const indexResult = await fetchLabIndex(origin, labId);

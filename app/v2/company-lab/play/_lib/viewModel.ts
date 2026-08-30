@@ -46,6 +46,14 @@ import { toHistoryEntrySummaryDto, CompanyLabHistoryEntrySummaryDto } from "../.
 import { isPlausibleCompanyDecisionDraft } from "../../../../api/v2/company-labs/_lib/decisionsProvider";
 import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "./financialViewSelectors";
 import { SalesModelId } from "../../../../lib/v2/sales/salesModels";
+import {
+  CompanyLabNotFoundError,
+  CompanyLabPersistedStateParseError,
+  CompanyLabPersistedStateValidationError,
+  CompanyLabRepositoryError,
+  CompanyLabSerializationError,
+  UnsupportedCompanyLabPersistedStateVersionError,
+} from "../../../../lib/v2/companyLab/persistence/errors";
 
 export type PlayerScreenPhase = "editing" | "submitted" | "completed";
 
@@ -162,7 +170,55 @@ export interface PlayerScreenViewModel {
   readonly recentHistory: readonly CompanyLabHistoryEntrySummaryDto[];
 }
 
-export type PlayerScreenLoadResult = { readonly kind: "ok"; readonly viewModel: PlayerScreenViewModel } | { readonly kind: "notFound" };
+/**
+ * 【COMPANYLAB-DETAIL-LOAD-404-1】画面ロード結果の分類。
+ *
+ * 【修正前の欠陥】loadCurrentState の**あらゆる例外**を kind:"notFound" へ潰していたため、
+ * schema / decode / version / environment などの内部エラーが「ラボが見つかりません」という
+ * 404 表示の裏に完全に隠れ、サーバーログにも何も残らなかった。実 Redis 環境で
+ * 「一覧には出るのに詳細だけ Not Found」という事象が起きたとき、原因の切り分けが
+ * 構造的に不可能だった（Vercel runtime log にも error レベルの記録が1件も出ない）。
+ *
+ * 【修正方針】「本当に存在しない」＝ CompanyLabNotFoundError のときだけ notFound とし、
+ * それ以外は kind:"error" として区別する。画面には内部情報・stack trace を出さず、
+ * 一般的な案内と分類コードだけを見せる。詳細はサーバー側 console.error にのみ記録し、
+ * Vercel runtime log で追跡できるようにする。
+ */
+export type PlayerScreenLoadErrorReason =
+  /** 保存データの decode / schema 検証に失敗した（保存形式の不整合）。 */
+  | "persistedStateInvalid"
+  /** Redis 等の読み取り自体に失敗した（接続・環境変数など）。 */
+  | "repositoryUnavailable"
+  /** 保存データは読めたが、playerCompanyId に対応する fixture が無い（データ整合性）。 */
+  | "playerFixtureMissing"
+  /** 上記のいずれにも分類できない想定外の失敗。 */
+  | "unexpected";
+
+export type PlayerScreenLoadResult =
+  | { readonly kind: "ok"; readonly viewModel: PlayerScreenViewModel }
+  | { readonly kind: "notFound" }
+  | { readonly kind: "error"; readonly reason: PlayerScreenLoadErrorReason };
+
+/**
+ * 例外を表示用の分類コードへ落とす。**メッセージ本文は返さない**
+ * （画面へ内部情報・stack trace を出さないため）。
+ */
+export function classifyPlayerScreenLoadError(error: unknown): PlayerScreenLoadErrorReason {
+  if (error instanceof CompanyLabPersistedStateParseError) return "persistedStateInvalid";
+  if (error instanceof CompanyLabPersistedStateValidationError) return "persistedStateInvalid";
+  if (error instanceof UnsupportedCompanyLabPersistedStateVersionError) return "persistedStateInvalid";
+  if (error instanceof CompanyLabSerializationError) return "persistedStateInvalid";
+  if (error instanceof CompanyLabRepositoryError) return "repositoryUnavailable";
+  return "unexpected";
+}
+
+/**
+ * サーバー側にだけ原因を残す（応答には含めない）。
+ * Vercel runtime log の error レベルへ出すことで、Preview 実機での切り分けを可能にする。
+ */
+function logPlayerScreenLoadFailure(labId: string, reason: PlayerScreenLoadErrorReason, error: unknown): void {
+  console.error(`[company-lab detail] ラボ詳細の読み込みに失敗しました（labId=${JSON.stringify(labId)}, reason=${reason}）:`, error);
+}
 
 /** coerceDraftOrRebuildの戻り値。draftはUIへの表示・編集対象、diagnosticsは新規生成時のみStandard AIの診断情報を持つ。 */
 interface CoercedDraftResult {
@@ -219,18 +275,43 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
   let stored: CompanyLabPersistedStateV1;
   try {
     stored = await deps.repository.loadCurrentState(labId);
-  } catch {
-    return { kind: "notFound" };
+  } catch (e) {
+    // 【COMPANYLAB-DETAIL-LOAD-404-1】「本当に存在しない」ときだけ notFound。
+    // decode / schema / version / repository の失敗を 404 の裏へ隠さない。
+    if (e instanceof CompanyLabNotFoundError) return { kind: "notFound" };
+    const reason = classifyPlayerScreenLoadError(e);
+    logPlayerScreenLoadFailure(labId, reason, e);
+    return { kind: "error", reason };
   }
 
   const fixture = stored.fixtures.find((f) => f.companyId === stored.playerCompanyId);
   if (!fixture) {
-    // createLab側でplayerCompanyIdがfixturesに含まれることを保証済みのため、通常到達しない
-    // （保存データの破損等、防御的なケース）。画面へは「見つからない」として扱う。
-    return { kind: "notFound" };
+    // createLab側でplayerCompanyIdがfixturesに含まれることを保証済みのため、通常到達しない。
+    // 【COMPANYLAB-DETAIL-LOAD-404-1】ここは「ラボが無い」のではなく**保存データの整合性の
+    // 問題**であり、以前のように notFound へ潰すと原因が 404 表示の裏に隠れる。
+    const reason: PlayerScreenLoadErrorReason = "playerFixtureMissing";
+    logPlayerScreenLoadFailure(
+      labId,
+      reason,
+      new Error(
+        `playerCompanyId=${JSON.stringify(stored.playerCompanyId)} に対応する fixture がありません` +
+          `（fixtures=${JSON.stringify(stored.fixtures.map((f) => f.companyId))}）`
+      )
+    );
+    return { kind: "error", reason };
   }
 
-  const [draftEnvelope, latestEntry] = await Promise.all([deps.repository.loadDraft(labId), deps.repository.loadLatestHistoryEntry(labId)]);
+  let draftEnvelope: Awaited<ReturnType<CompanyLabApiDependencies["repository"]["loadDraft"]>>;
+  let latestEntry: Awaited<ReturnType<CompanyLabApiDependencies["repository"]["loadLatestHistoryEntry"]>>;
+  try {
+    // 【COMPANYLAB-DETAIL-LOAD-404-1】draft / 直近履歴の読み取り失敗も、以前は未捕捉のまま
+    // 画面全体のクラッシュになっていた。currentState と同じ分類で扱う（404 へは潰さない）。
+    [draftEnvelope, latestEntry] = await Promise.all([deps.repository.loadDraft(labId), deps.repository.loadLatestHistoryEntry(labId)]);
+  } catch (e) {
+    const reason = classifyPlayerScreenLoadError(e);
+    logPlayerScreenLoadFailure(labId, reason, e);
+    return { kind: "error", reason };
+  }
 
   // 【重要】turn 2以降の直近履歴注入。processQuarterの復元ロジックと同じ手順。
   const historyRecords = latestEntry !== null ? [latestEntry.record] : [];

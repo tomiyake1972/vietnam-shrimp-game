@@ -107,6 +107,14 @@ export async function handlePostAiMeetingMessage(
   if (loaded.kind === "notFound") {
     return notFound(`会社ラボ "${labId}" が見つかりません。`);
   }
+  if (loaded.kind === "error") {
+    // 【COMPANYLAB-DETAIL-LOAD-404-1】読み込み失敗を 404 と混同しない。
+    // 内部詳細は応答へ含めない（サーバー側 console.error にのみ記録済み）。
+    return {
+      status: 500,
+      body: { error: { code: "COMPANY_LAB_LOAD_FAILED", message: `会社ラボ "${labId}" の読み込みに失敗しました（分類: ${loaded.reason}）。` } },
+    };
+  }
   const viewModel = loaded.viewModel;
 
   if (viewModel.playerCompanyId !== companyId) {

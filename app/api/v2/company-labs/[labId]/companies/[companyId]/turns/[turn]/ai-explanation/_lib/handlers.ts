@@ -67,6 +67,16 @@ async function resolveRequestContext(
   if (loaded.kind === "notFound") {
     return { kind: "error", result: notFound(`会社ラボ "${labId}" が見つかりません。`) };
   }
+  if (loaded.kind === "error") {
+    // 【COMPANYLAB-DETAIL-LOAD-404-1】読み込み失敗を 404 と混同しない。
+    return {
+      kind: "error",
+      result: {
+        status: 500,
+        body: { error: { code: "COMPANY_LAB_LOAD_FAILED", message: `会社ラボ "${labId}" の読み込みに失敗しました（分類: ${loaded.reason}）。` } },
+      },
+    };
+  }
   const viewModel = loaded.viewModel;
 
   if (viewModel.playerCompanyId !== companyId) {
