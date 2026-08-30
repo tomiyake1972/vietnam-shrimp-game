@@ -27,8 +27,8 @@ function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig
  * Turn1を実Engineで確定させ、SalesPlanningScreen.tsxが実際に受け取るのと同じ
  * 射影済み最小DTO（market/product/basePriceのみ）を返す。
  */
-function runTurnOne() {
-  const { state, fixtures } = initializeCompanyLab(baseConfig());
+function runTurnOne(configOverrides: Partial<CompanyLabConfig> = {}) {
+  const { state, fixtures } = initializeCompanyLab(baseConfig(configOverrides));
   const publicInfo = buildPublicMarketInfo(state);
   const decisions: Record<string, CompanyDecisionInput> = {};
   for (const f of fixtures) {
@@ -133,4 +133,28 @@ test("SALES-PRICE-10【表示専用フォーマッタ】: formatPricePerKgPlain�
   assert.equal(formatPricePerKgPlain(8.4), "$8.40");
   assert.equal(formatPricePerKgPlain(8.1), "$8.10");
   assert.equal(formatPricePerKgPlain(0), "$0.00");
+});
+
+// --- PLAYER-UI-PLAYTEST-FIX-1・問題②③ PRICE-UI-5: legacy/tiered双方で基準価格表示が成立する ---
+
+test("PRICE-UI-5【legacy】: salesModelId未指定（従来モデル）でも基準価格の最小DTOが導出できる", () => {
+  const { allocations, rawAllocations } = runTurnOne();
+  assert.ok(allocations.length > 0, "legacyでも少なくとも1件のmarket×product配分結果が存在するはず");
+  const sample = rawAllocations[0];
+  const found = findLastQuarterBasePrice(allocations, sample.market, sample.product);
+  assert.equal(found, unwrapUnit(sample.basePrice));
+  for (const entry of allocations) {
+    assert.deepEqual(Object.keys(entry).sort(), ["basePrice", "market", "product"]);
+  }
+});
+
+test("PRICE-UI-5【tiered】: salesModelId=tiered-v200-candidate-v1でも同じ最小DTO形状で基準価格が導出できる（配分ロジックの違いに依存しない）", () => {
+  const { allocations, rawAllocations } = runTurnOne({ salesModelId: "tiered-v200-candidate-v1" });
+  assert.ok(allocations.length > 0, "tieredでも少なくとも1件のmarket×product配分結果が存在するはず");
+  const sample = rawAllocations[0];
+  const found = findLastQuarterBasePrice(allocations, sample.market, sample.product);
+  assert.equal(found, unwrapUnit(sample.basePrice));
+  for (const entry of allocations) {
+    assert.deepEqual(Object.keys(entry).sort(), ["basePrice", "market", "product"]);
+  }
 });

@@ -22,6 +22,7 @@ import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab/type
 import {
   computeBacklogByMarketProduct,
   computeFactoryCapacitySummaries,
+  computeFinishedGoodsByProduct,
   computeLaborProductivityByProduct,
   computeOpeningBalanceSheetSummary,
   computeSalesForceCapacitySummary,
@@ -55,7 +56,8 @@ export default function OpeningCompanyStatePanel({ ownState, fixture, turn }: Op
   const backlogByMarketProduct = computeBacklogByMarketProduct(ownState.contracts, ownState.companyId);
   const rawMaterialGroups = groupRawMaterialLotsByAvailability(ownState.rawMaterialLots, ownState.companyId);
   const rawMaterialTotalTons = rawMaterialGroups.reduce((sum, g) => sum + g.quantityTons, 0);
-  const finishedGoodsTons = ownState.finishedGoodsLots.reduce((sum, lot) => sum + (lot.remainingQuantity as number), 0);
+  const finishedGoodsByProduct = computeFinishedGoodsByProduct(ownState.finishedGoodsLots, ownState.companyId);
+  const finishedGoodsTons = finishedGoodsByProduct.reduce((sum, g) => sum + g.quantityTons, 0);
 
   const activeLoans = ownState.financingState.loanPortfolio.loans.filter((l) => l.status !== "closed");
 
@@ -97,6 +99,22 @@ export default function OpeningCompanyStatePanel({ ownState, fixture, turn }: Op
             <span className="sm:block font-medium">{item.value}</span>
           </div>
         ))}
+      </div>
+
+      <div className="border-t border-gray-700/60 pt-3" data-testid="finished-goods-by-product">
+        <h4 className="text-xs font-semibold text-gray-300 mb-1">製品在庫（商品別）</h4>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1">
+          {finishedGoodsByProduct.map((g) => (
+            <div key={g.product} className="flex justify-between sm:block" data-testid={`finished-goods-${g.product}`}>
+              <span className="text-gray-400">{PRODUCT_LABEL[g.product] ?? g.product}</span>
+              <span className="sm:block font-medium">{formatTons(g.quantityTons)}</span>
+            </div>
+          ))}
+          <div className="flex justify-between sm:block" data-testid="finished-goods-total">
+            <span className="text-gray-400">合計</span>
+            <span className="sm:block font-semibold">{formatTons(finishedGoodsTons)}</span>
+          </div>
+        </div>
       </div>
 
       <div className="border-t border-gray-700/60 pt-3">

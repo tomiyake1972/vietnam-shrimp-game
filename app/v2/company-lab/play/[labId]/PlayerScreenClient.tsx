@@ -369,15 +369,17 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               )}
 
               {aiExplanationState.kind === "success" && (
-                <div className="space-y-4">
-                  {/* ① 今期の基本方針 */}
-                  <div>
+                <div className="space-y-4" data-testid="ai-explanation-success">
+                  {/* ① 今期の基本方針（PLAYER-UI-PLAYTEST-FIX-1: CEO summary相当・必ず最上部）。
+                      値はaiExplanationState.report.headlineをそのまま表示するだけ（捏造・別値への
+                      置き換えは行わない。空文字列ならそのまま空で表示される＝実際の生成結果を偽らない）。 */}
+                  <div data-testid="ai-explanation-headline">
                     <h4 className="text-xs font-semibold text-indigo-100 mb-1">① 今期の基本方針</h4>
                     <p className="text-sm text-gray-100">{aiExplanationState.report.headline}</p>
                   </div>
 
-                  {/* ② 経営サマリー */}
-                  <div>
+                  {/* ② 経営サマリー（同上、report.executiveSummaryをそのまま表示） */}
+                  <div data-testid="ai-explanation-executive-summary">
                     <h4 className="text-xs font-semibold text-indigo-100 mb-1">② 経営サマリー</h4>
                     <p className="text-xs text-gray-200 whitespace-pre-wrap">{aiExplanationState.report.executiveSummary}</p>
                   </div>

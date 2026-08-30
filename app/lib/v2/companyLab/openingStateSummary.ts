@@ -24,7 +24,7 @@ import { Product } from "../market/types";
 import { calculateFactoryEffectiveCapacity } from "../production/capacity";
 import { effectiveEfficiencyPerHeadTons } from "../production/labor";
 import { PRODUCTION_PARAMETERS_V1, ProductionParameters } from "../production/parameters";
-import { Factory, FactoryEffectiveCapacity, WorkerAssignment } from "../production/types";
+import { Factory, FactoryEffectiveCapacity, FinishedGoodsLot, WorkerAssignment } from "../production/types";
 import { RawMaterialLot, RawMaterialLotStatus } from "../rawMaterials/types";
 import { SALES_PARAMETERS_V1, SalesParameters } from "../sales/parameters";
 import { processingCapacity, salesCoverageScore } from "../sales/salesForce";
@@ -391,4 +391,40 @@ export function computeBacklogByMarketProduct(
   return Array.from(groups.values())
     .map((g) => ({ ...g, nearestDueDateLabel: periodLabel(g.nearestDueDate) }))
     .sort((a, b) => b.outstandingTons - a.outstandingTons);
+}
+
+// ---------------------------------------------------------------------
+// 7. 完成品在庫（商品別）— PLAYER-UI-PLAYTEST-FIX-1・問題①
+// ---------------------------------------------------------------------
+
+/** 完成品在庫の商品別集計順（画面表示順もこれに合わせる）。 */
+const FINISHED_GOODS_PRODUCT_ORDER: readonly Product[] = ["hoso", "pd", "vap"];
+
+export interface FinishedGoodsByProductEntry {
+  readonly product: Product;
+  /** この商品の完成品在庫合計（HOSO換算トン）。該当ロットが無い場合は0。 */
+  readonly quantityTons: number;
+}
+
+/**
+ * 会社の完成品ロット（ownState.finishedGoodsLots、既存の唯一の在庫ソース）を
+ * 商品（HOSO/PD/VAP）別に集計する。新しい在庫計算は行わず、既存ロットの
+ * remainingQuantityをproductごとに合計するだけ（groupRawMaterialLotsByAvailability
+ * と同様、remainingQuantity<=0のロットは対象外）。
+ *
+ * 3商品を常に固定順で返し、該当ロットが1件も無い商品も0トンとして明示する
+ * （turn1等、finishedGoodsLotsが空の場合は3商品とも0になる）。
+ */
+export function computeFinishedGoodsByProduct(
+  lots: readonly FinishedGoodsLot[],
+  companyId: CompanyOwnState["companyId"]
+): readonly FinishedGoodsByProductEntry[] {
+  const totals = new Map<Product, number>(FINISHED_GOODS_PRODUCT_ORDER.map((p) => [p, 0]));
+  for (const lot of lots) {
+    if (lot.companyId !== companyId) continue;
+    const quantity = unwrapUnit(lot.remainingQuantity);
+    if (quantity <= 0) continue;
+    totals.set(lot.product, (totals.get(lot.product) ?? 0) + quantity);
+  }
+  return FINISHED_GOODS_PRODUCT_ORDER.map((product) => ({ product, quantityTons: totals.get(product) ?? 0 }));
 }

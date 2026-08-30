@@ -21,6 +21,7 @@ import {
   computeLaborProductivityByProduct,
   computeSalesForceCapacitySummary,
   computeBacklogByMarketProduct,
+  computeFinishedGoodsByProduct,
 } from "../openingStateSummary";
 
 const EPS_USD = 0.01;
@@ -212,4 +213,82 @@ test("computeBacklogByMarketProduct: 契約が無い（全てoutstandingQuantity
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ] as any[];
   assert.deepEqual(computeBacklogByMarketProduct(contracts, "BAL"), []);
+});
+
+// --- PLAYER-UI-PLAYTEST-FIX-1・問題① 完成品在庫（商品別） ---
+
+function makeFinishedGoodsLot(overrides: Record<string, unknown>): unknown {
+  return {
+    lotId: "lot-1",
+    companyId: "BAL",
+    factoryId: "BAL-F1",
+    product: "hoso",
+    producedPeriod: period(2015, 1),
+    originalQuantity: 100,
+    remainingQuantity: 100,
+    sourceRawMaterialLots: [],
+    rawMaterialOriginCountries: [],
+    rawMaterialUnitCost: 4,
+    baseProcessingCost: 0,
+    availableFromPeriod: period(2015, 1),
+    status: "available",
+    ...overrides,
+  };
+}
+
+test("INV-UI-1: HOSOロットの残存数量がhosoエントリへ集計される", () => {
+  const lots = [makeFinishedGoodsLot({ lotId: "A", product: "hoso", remainingQuantity: 120 })] as never[];
+  const result = computeFinishedGoodsByProduct(lots, "BAL");
+  const hoso = result.find((g) => g.product === "hoso");
+  assert.ok(hoso);
+  assert.equal(hoso!.quantityTons, 120);
+});
+
+test("INV-UI-2: PDロットの残存数量がpdエントリへ集計される", () => {
+  const lots = [makeFinishedGoodsLot({ lotId: "A", product: "pd", remainingQuantity: 45 })] as never[];
+  const result = computeFinishedGoodsByProduct(lots, "BAL");
+  const pd = result.find((g) => g.product === "pd");
+  assert.ok(pd);
+  assert.equal(pd!.quantityTons, 45);
+});
+
+test("INV-UI-3: VAPロットの残存数量がvapエントリへ集計される", () => {
+  const lots = [makeFinishedGoodsLot({ lotId: "A", product: "vap", remainingQuantity: 8.5 })] as never[];
+  const result = computeFinishedGoodsByProduct(lots, "BAL");
+  const vap = result.find((g) => g.product === "vap");
+  assert.ok(vap);
+  assert.equal(vap!.quantityTons, 8.5);
+});
+
+test("INV-UI-4: 3商品を合計した値が、商品別エントリの合計と一致する（他社ロット・remainingQuantity<=0ロットは除外）", () => {
+  const lots = [
+    makeFinishedGoodsLot({ lotId: "A", product: "hoso", remainingQuantity: 100 }),
+    makeFinishedGoodsLot({ lotId: "B", product: "pd", remainingQuantity: 30 }),
+    makeFinishedGoodsLot({ lotId: "C", product: "vap", remainingQuantity: 10 }),
+    makeFinishedGoodsLot({ lotId: "D", product: "hoso", remainingQuantity: 0, status: "allocated" }), // 除外対象
+    makeFinishedGoodsLot({ lotId: "E", companyId: "OTHER", product: "hoso", remainingQuantity: 999 }), // 除外対象（他社）
+  ] as never[];
+  const result = computeFinishedGoodsByProduct(lots, "BAL");
+  assert.equal(result.length, 3);
+  const total = result.reduce((sum, g) => sum + g.quantityTons, 0);
+  assert.equal(total, 140);
+  assert.equal(
+    result.find((g) => g.product === "hoso")!.quantityTons +
+      result.find((g) => g.product === "pd")!.quantityTons +
+      result.find((g) => g.product === "vap")!.quantityTons,
+    total
+  );
+});
+
+test("INV-UI-5: turn1（意思決定前・finishedGoodsLotsが空）はHOSO/PD/VAPすべて0トンとして明示される（省略されない）", () => {
+  const { ownState } = ownStateForCompany("BAL");
+  assert.deepEqual(ownState.finishedGoodsLots, []);
+  const result = computeFinishedGoodsByProduct(ownState.finishedGoodsLots, "BAL");
+  assert.deepEqual(
+    result.map((g) => g.product),
+    ["hoso", "pd", "vap"]
+  );
+  for (const g of result) {
+    assert.equal(g.quantityTons, 0);
+  }
 });
