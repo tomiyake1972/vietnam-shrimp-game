@@ -30,7 +30,7 @@
 import { ENGINE_VERSION_V2 } from "../../core/version";
 import { PeriodV2 } from "../../core/period";
 import { CompanyId } from "../../sales/types";
-import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabError, CompanyLabState } from "../types";
+import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabError, CompanyLabState, CompanyQuarterRecord } from "../types";
 import { advanceCompanyLabQuarter, buildPublicMarketInfo, initializeCompanyLab } from "../runner";
 import { PublicMarketInfo } from "../types";
 import { createCompanyLabRuntimeSnapshot, restoreCompanyLabStateFromRuntimeSnapshot } from "../persistence/snapshot";
@@ -182,6 +182,28 @@ export interface CompanyLabQuarterFlowService {
   submitDraft(input: SubmitDraftInput): Promise<CompanyLabDraftEnvelope>;
   withdrawDraft(input: WithdrawDraftInput): Promise<CompanyLabDraftEnvelope>;
   processQuarter(input: ProcessQuarterInput): Promise<ProcessQuarterResult>;
+}
+
+/**
+ * 【ENG-COMPANYLAB-RESUME-HISTORY-1】resume時に注入する確定履歴record（古い→新しい）。
+ *
+ * 直近2件だけを返す。全履歴はロードしない。
+ * latest はすでに呼び出し側が取得済みのものを受け取り、二重readを避ける。
+ * 1つ前のturnが履歴indexに存在するときだけ追加で1件読む。
+ */
+const RESUME_HISTORY_RECORD_COUNT = 2;
+
+async function loadRecentHistoryRecords(
+  repository: CompanyLabStateRepository,
+  labId: string,
+  latest: CompanyLabQuarterHistoryEntry
+): Promise<readonly CompanyQuarterRecord[]> {
+  const previousTurn = latest.turn - 1;
+  if (RESUME_HISTORY_RECORD_COUNT < 2 || previousTurn < 1) return [latest.record];
+  const turns = await repository.loadHistoryIndex(labId);
+  if (!turns.includes(previousTurn)) return [latest.record];
+  const previous = await repository.loadHistoryEntry(labId, previousTurn);
+  return [previous.record, latest.record];
 }
 
 export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowServiceDependencies): CompanyLabQuarterFlowService {
@@ -391,14 +413,37 @@ export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowSe
         throw new CompanyLabIntegrityError(input.labId, `currentは未処理（lastProcessedTurnIdなし）なのに履歴エントリ（turn=${latest.turn}）が存在します。`);
       }
 
-      // --- 7. スナップショット＋直近履歴recordからCompanyLabStateを復元 ---
+      // --- 7. スナップショット＋直近確定履歴recordからCompanyLabStateを復元 ---
       // 【最重要】turn 2以降のrunner（buildPreviousMarketContext・buildCompanyOwnState・
-      // buildPublicMarketInfo）は直近履歴のrecordから前四半期の市場価格・工場負荷・
+      // buildPublicMarketInfo）は確定履歴のrecordから前四半期の市場価格・工場負荷・
       // ベトナム国内前期価格を参照する。空のhistoryで復元すると例外は出ないが
       // シナリオのprehistory価格へ静かにフォールバックし、中断なし実行と異なる
-      // 結果を生成してしまうため、直近1件のrecordを必ず注入する（全履歴は不要）。
-      // turn 1開始前（履歴なし）のみ空historyが正しい。
-      const historyRecords = latest !== null ? [latest.record] : [];
+      // 結果を生成してしまう。
+      //
+      // 【ENG-COMPANYLAB-RESUME-HISTORY-1】注入するrecordを直近1件から**直近2件**へ増やす。
+      // 全履歴はロードしない（必要最小限）。
+      //
+      // 【なぜ2件必要か】resume経路のhistory consumerのうち最も長い履歴を必要とするのは
+      // buildPublicMarketInfo（runner.ts）で、次の2つがいずれも「末尾から2件目」を読む:
+      //   - 市場×商品構成比のtrend: prevRecord と prevPrevRecord（history[length-2]）の差分。
+      //     2件目が無いと決定論的な基礎曲線 computeMarketProductMix へフォールバックし、
+      //     連続実行と異なるtrendになる。
+      //   - buildObservedMarketDemand: history[length - MARKET_DEMAND_OBSERVATION_LAG_QUARTERS]
+      //     （LAG=2）。末尾からの相対位置で引くため、末尾2件を保てば同じrecordを指す。
+      // 公開市場情報はStandard AIとPlayer画面の双方が読むため、1件だけの復元では
+      // resume直後の1ターンだけ市場trendが変わり、その意思決定が以後へ伝播していた
+      // （実測: Standard AIはbaseline/DS1/DS2いずれも1件で乖離、2件以上で完全一致。
+      //  AutoPolicyはtrendを読まないため1件でも一致していた）。
+      // engine自体（配当累計・前期市場文脈）は1件で足りるが、公開情報側の要件が2件である。
+      //
+      // 【順序】古い → 新しい（[T-2, T-1]）。restoreCompanyLabStateFromRuntimeSnapshot は
+      // 受け取った配列をそのまま state.history として使い、consumer は末尾を「直近」として
+      // 読むため、逆順にしてはならない。
+      // 【履歴不足】0件なら []、1件しか無ければ [latest] のまま。エラーにはしない。
+      // 【欠損の扱い】どのturnが存在するかは既存の履歴index（唯一の正本）に従い、
+      // indexに載っているentryが読めない場合は loadFullHistory と同じく
+      // CompanyLabHistoryEntryNotFoundError が伝播する（独自のsilentな握り潰しを追加しない）。
+      const historyRecords = latest !== null ? await loadRecentHistoryRecords(repository, input.labId, latest) : [];
       const restoredState = restoreCompanyLabStateFromRuntimeSnapshot(stored.config, stored.currentState.runtime, historyRecords);
       const turn = restoredState.scenarioState.currentTurn;
       if (latest !== null && latest.turn !== turn - 1) {
