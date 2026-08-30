@@ -36,6 +36,7 @@ import { CompanyDecisionDraft, summarizeSalesForceAllocation, summarizeSalesForc
 import { PlayerScreenViewModel } from "../_lib/viewModel";
 import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
 import { fetchAiExplanationAction, processQuarterAction, saveDraftAction, submitDraftAction, withdrawDraftAction } from "./actions";
+import { DEFAULT_SALES_MODEL_ID, SALES_MODEL_DISPLAY_LABELS } from "../_lib/salesModelDisplay";
 
 /** fetchAiExplanationActionの読み込み状態（このコンポーネントのローカル表示状態専用。サーバー側の正とは無関係）。 */
 type AiExplanationLoadState =
@@ -263,6 +264,9 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
             <div className="text-xs text-gray-400 mt-0.5">
               プレイヤー会社: {viewModel.playerCompanyId}（{viewModel.playerDisplayName}） / turn {viewModel.currentTurn} / {viewModel.totalTurns} /
               revision {viewModel.revision}
+            </div>
+            <div className="text-xs text-gray-500 mt-0.5" data-testid="lab-sales-model-label">
+              販売モデル: {SALES_MODEL_DISPLAY_LABELS[viewModel.salesModelId ?? DEFAULT_SALES_MODEL_ID]}
             </div>
           </div>
           <div className="text-xs">

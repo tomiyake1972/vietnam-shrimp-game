@@ -19,6 +19,8 @@ import { useState } from "react";
 import { createLabAction } from "./actions";
 import { NewLabScenarioOption, turnBoundsForScenario } from "../_lib/newLabFormModel";
 import { CompanyOptionForUi } from "../_lib/companyOptions";
+import { DEFAULT_SALES_MODEL_ID, SALES_MODEL_DESCRIPTIONS, SALES_MODEL_DISPLAY_LABELS } from "../_lib/salesModelDisplay";
+import { SALES_MODEL_IDS } from "../../../../lib/v2/sales/salesModels";
 
 export interface NewLabFormProps {
   readonly scenarios: readonly NewLabScenarioOption[];
@@ -81,6 +83,31 @@ export default function NewLabForm({ scenarios, companies, defaultSeed }: NewLab
           <option value="canonical">canonical（基準シナリオ）</option>
           <option value="variation">variation（変動シナリオ）</option>
         </select>
+      </div>
+
+      <div>
+        <label htmlFor="salesModelId" className="block text-xs text-gray-400 mb-1">
+          販売市場モデル
+        </label>
+        <select
+          id="salesModelId"
+          name="salesModelId"
+          defaultValue={DEFAULT_SALES_MODEL_ID}
+          className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100"
+        >
+          {SALES_MODEL_IDS.map((id) => (
+            <option key={id} value={id}>
+              {SALES_MODEL_DISPLAY_LABELS[id]}
+            </option>
+          ))}
+        </select>
+        <ul className="text-[11px] text-gray-500 mt-1 space-y-0.5">
+          {SALES_MODEL_IDS.map((id) => (
+            <li key={id}>
+              {SALES_MODEL_DISPLAY_LABELS[id]}: 「{SALES_MODEL_DESCRIPTIONS[id]}」
+            </li>
+          ))}
+        </ul>
       </div>
 
       <div>

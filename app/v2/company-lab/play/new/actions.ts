@@ -12,6 +12,7 @@ import { requireStagingSession, assertSameOriginRequest } from "../../../../lib/
 import { resolveCompanyLabUiDependencies } from "../_lib/uiDependencies";
 import { handleCreateLab } from "../../../../api/v2/company-labs/_lib/handlers";
 import type { CompanyLabSummaryDto } from "../../../../api/v2/company-labs/_lib/responseDto";
+import { resolveSalesModelIdForSubmission } from "../_lib/newLabFormModel";
 
 const NEW_LAB_PATH = "/v2/company-lab/play/new";
 
@@ -36,11 +37,15 @@ export async function createLabAction(formData: FormData): Promise<void> {
   const turnsRaw = readOptionalTrimmedString(formData, "turns");
   const turns = turnsRaw !== undefined ? Number(turnsRaw) : undefined;
   const playerCompanyId = readOptionalTrimmedString(formData, "playerCompanyId");
+  // 【UI-SALES-MODEL-SELECT-1・指示§5推奨】既定選択（legacy、DEFAULT_SALES_MODEL_ID）の
+  // ままであれば salesModelId 自体を送らない。既存Runと完全に同一のpayload・挙動を
+  // 維持するため（validation.ts側のallowlistは既存のまま。ここでは値を作らない）。
+  const salesModelId = resolveSalesModelIdForSubmission(readOptionalTrimmedString(formData, "salesModelId"));
 
   const deps = await resolveCompanyLabUiDependencies();
   const result = await handleCreateLab(
     deps,
-    { ...(labId !== undefined ? { labId } : {}), scenarioId, mode, seed, turns, playerCompanyId },
+    { ...(labId !== undefined ? { labId } : {}), scenarioId, mode, seed, turns, playerCompanyId, ...(salesModelId !== undefined ? { salesModelId } : {}) },
     new Date().toISOString()
   );
 

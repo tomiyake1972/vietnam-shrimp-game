@@ -57,6 +57,12 @@ export default defineConfig({
     env: {
       STAGING_ADMIN_TOKEN: "e2e-test-token",
       V2_API_E2E_IN_MEMORY: "1",
+      // 【UI-SALES-MODEL-SELECT-1】Company Lab プレイヤー画面（app/v2/company-lab/play/**）は
+      // simulation-runsとは別のin-memoryフォールバックフラグを見る（uiDependencies.ts）。
+      // 実Upstash認証情報が無いこの検証環境でsalesModelSelector.e2e.tsを動かすために追加。
+      // 既存のindependentPlayerFlow.e2e.ts（management/setup経路）はこのフラグを参照しない
+      // ため、追加しても既存E2Eの挙動には影響しない。
+      COMPANY_LAB_UI_E2E_IN_MEMORY: "1",
       // 【V2サブシステムの制約】readAppEnvV2FromEnv()はAPP_ENVに"production"/"staging"
       // のみ許容する（"development"は不可）。本番ではないためstagingを使う。
       APP_ENV: "staging",

@@ -45,6 +45,7 @@ import { CompanyLabApiDependencies } from "../../../../api/v2/company-labs/_lib/
 import { toHistoryEntrySummaryDto, CompanyLabHistoryEntrySummaryDto } from "../../../../api/v2/company-labs/_lib/responseDto";
 import { isPlausibleCompanyDecisionDraft } from "../../../../api/v2/company-labs/_lib/decisionsProvider";
 import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "./financialViewSelectors";
+import { SalesModelId } from "../../../../lib/v2/sales/salesModels";
 
 export type PlayerScreenPhase = "editing" | "submitted" | "completed";
 
@@ -108,6 +109,12 @@ export interface PlayerScreenViewModel {
   readonly playerDisplayName: string;
   readonly scenarioId: string;
   readonly mode: string;
+  /**
+   * 【UI-SALES-MODEL-SELECT-1】この Lab の販売市場モデルID（未指定=legacy相当）。
+   * stored.config.salesModelIdをそのまま転記するだけ（新しい計算・新しい販売モデルは
+   * ここでは一切作らない）。resumeしてもstored.configから同じ値が復元される。
+   */
+  readonly salesModelId: SalesModelId | undefined;
   /**
    * 【Phase SAI-5B】このLabのStandard AI profile mode（未記録=OFF相当）。
    * AI経営説明・AI経営会議のhandlerが、AI4社と同じ会社別paramsで診断を作り直すために使う。
@@ -314,6 +321,7 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       playerDisplayName: fixture.displayName,
       scenarioId: stored.config.scenarioId,
       mode: stored.config.mode,
+      salesModelId: stored.config.salesModelId,
       standardAiProfileMode: stored.config.standardAiProfileMode,
       totalTurns: stored.config.turns,
       currentTurn: turn,
