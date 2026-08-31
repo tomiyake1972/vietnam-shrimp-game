@@ -20,6 +20,8 @@ import {
   deriveSessionSecret,
   isSameOriginHost,
   sanitizeReturnToPath,
+  buildAdminReloginHref,
+  COMPANY_LAB_UI_LOGIN_PATH,
   COMPANY_LAB_UI_SESSION_COOKIE_NAME,
 } from "../companyLabUiSession";
 
@@ -271,4 +273,49 @@ test("sanitizeReturnToPath: protocol-relative URL（'//'始まり）はopen redi
 test("sanitizeReturnToPath: '://'を含む別オリジンの絶対URLはopen redirectとしてnullを返す", () => {
   assert.equal(sanitizeReturnToPath("https://evil.com"), null);
   assert.equal(sanitizeReturnToPath("/redirect?next=https://evil.com"), null);
+});
+
+// --- buildAdminReloginHref（PLAY画面 管理者再ログイン導線・指示§1〜4） ---
+
+test("ADMIN-RELOGIN-1: クエリ無しのpathnameでは、returnToにpathnameだけを載せたログインhrefを返す", () => {
+  const href = buildAdminReloginHref("/v2/company-lab/play/lab-123", "");
+  assert.equal(href, `${COMPANY_LAB_UI_LOGIN_PATH}?returnTo=${encodeURIComponent("/v2/company-lab/play/lab-123")}`);
+});
+
+test("ADMIN-RELOGIN-2: クエリ付きURLでは、returnToにpathname+search（'?'含む）を載せる", () => {
+  const href = buildAdminReloginHref("/v2/management", "run=abc123");
+  assert.equal(href, `${COMPANY_LAB_UI_LOGIN_PATH}?returnTo=${encodeURIComponent("/v2/management?run=abc123")}`);
+});
+
+test("ADMIN-RELOGIN-3: run/companyの複数クエリを含む指示例のURL（/v2/management/player?run=<runId>&company=BAL）も、returnToへそのまま保持される", () => {
+  const href = buildAdminReloginHref("/v2/management/player", "run=run-xyz&company=BAL");
+  const decoded = new URL(href, "https://example.test");
+  assert.equal(decoded.pathname, COMPANY_LAB_UI_LOGIN_PATH);
+  assert.equal(decoded.searchParams.get("returnTo"), "/v2/management/player?run=run-xyz&company=BAL");
+});
+
+test("ADMIN-RELOGIN-4: runId/companyId等を推測・再構築せず、渡されたpathname/searchをそのまま転記するだけ（新しい値を作らない）", () => {
+  const href = buildAdminReloginHref("/v2/company-lab/play/e2e detail ascii space", "turn=7");
+  const decoded = new URL(href, "https://example.test");
+  assert.equal(decoded.searchParams.get("returnTo"), "/v2/company-lab/play/e2e detail ascii space?turn=7");
+});
+
+test("ADMIN-RELOGIN-5【セキュリティ】: buildAdminReloginHrefが生成するreturnToは、常にsanitizeReturnToPathを通過する（open redirectにならない）", () => {
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ["/v2/management", "run=abc123"],
+    ["/v2/management/player", "run=run-xyz&company=BAL"],
+    ["/v2/company-lab/play/lab-1", ""],
+    ["/", ""],
+  ];
+  for (const [pathname, search] of cases) {
+    const href = buildAdminReloginHref(pathname, search);
+    const decoded = new URL(href, "https://example.test");
+    const returnTo = decoded.searchParams.get("returnTo");
+    assert.equal(sanitizeReturnToPath(returnTo), returnTo, `returnTo=${returnTo} はsanitizeReturnToPathを素通しで通過するはず`);
+  }
+});
+
+test("ADMIN-RELOGIN-6【既存route再利用の確認】: buildAdminReloginHrefは新しいログインpathを作らず、既存のCOMPANY_LAB_UI_LOGIN_PATHへ遷移する", () => {
+  const href = buildAdminReloginHref("/v2/management", "run=abc123");
+  assert.ok(href.startsWith(`${COMPANY_LAB_UI_LOGIN_PATH}?`));
 });

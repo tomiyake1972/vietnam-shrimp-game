@@ -49,6 +49,7 @@ import { FinalDataDownloadButton } from "../components/FinalDataDownloadButton";
 import { CompanyDatabookButton } from "./CompanyDatabookButton";
 import { buildBacklogDisplay } from "./backlogView";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
+import AdminReloginLink from "../../company-lab/play/components/AdminReloginLink";
 
 type WorkspaceTab = "overview" | "market" | "inventory" | "decision";
 
@@ -252,6 +253,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
+              <AdminReloginLink />
               <span className="rounded bg-amber-900/60 px-2 py-1 text-[11px] font-semibold text-amber-300" data-testid="workspace-finished-badge">
                 ゲーム終了済み（FINISHED）
               </span>
@@ -320,6 +322,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
+            <AdminReloginLink />
             {controlMode !== "PLAYER" ? (
               <span className="rounded border border-amber-600 px-2 py-1 text-[11px] text-amber-300" data-testid="workspace-not-player-note">
                 この会社は現在 Standard AI です（経営モードでPLAYERへ切り替えてください）

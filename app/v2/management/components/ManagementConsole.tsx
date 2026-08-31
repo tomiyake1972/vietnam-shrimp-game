@@ -76,6 +76,7 @@ import { StandardAiAuditWorkbookButton } from "./StandardAiAuditWorkbookButton";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
 import { listScenarioAliases } from "../../../lib/v2/industryLab/cli/scenarioAliases";
 import { newRunId } from "../lib/runId";
+import AdminReloginLink from "../../company-lab/play/components/AdminReloginLink";
 
 const DEFAULT_SCENARIO_ID = "baseline";
 const DEFAULT_SEED = "management-console-32q";
@@ -837,6 +838,7 @@ export function ManagementConsole() {
           </dl>
 
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            <AdminReloginLink />
             <button type="button" onClick={() => run(1)} disabled={busy || restoring || persistenceBlocked || finished} data-testid="run-1"
               className="rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40">
               1 Turn

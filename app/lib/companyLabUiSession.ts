@@ -28,6 +28,14 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { checkStagingAdminToken } from "./stagingAdmin";
 import { isProduction } from "./env";
+import { COMPANY_LAB_UI_LOGIN_PATH, COMPANY_LAB_UI_HOME_PATH, sanitizeReturnToPath, buildAdminReloginHref } from "./companyLabUiReturnTo";
+
+// 【next/headersを含まないモジュールへ分離】PLAY画面 管理者再ログイン導線でClient
+// Componentからも使えるようにするため、returnTo関連の純粋関数・定数は
+// companyLabUiReturnTo.tsへ移した（next/headersはServer専用でClient
+// Componentバンドルに含められないため）。既存の呼び出し元を変更せずに済むよう、
+// ここでそのままre-exportする（唯一の実体はcompanyLabUiReturnTo.ts側）。
+export { COMPANY_LAB_UI_LOGIN_PATH, COMPANY_LAB_UI_HOME_PATH, sanitizeReturnToPath, buildAdminReloginHref };
 
 export const COMPANY_LAB_UI_SESSION_COOKIE_NAME = "shrimpx_company_lab_ui_session";
 /**
@@ -45,9 +53,6 @@ export const COMPANY_LAB_UI_SESSION_COOKIE_NAME = "shrimpx_company_lab_ui_sessio
  */
 const SESSION_TTL_MILLISECONDS = 24 * 60 * 60 * 1000; // 24時間（staging用の短命セッション）
 const SESSION_SECRET_DOMAIN_PREFIX = "company-lab-ui-session-v1:";
-
-export const COMPANY_LAB_UI_LOGIN_PATH = "/v2/company-lab/play/login";
-export const COMPANY_LAB_UI_HOME_PATH = "/v2/company-lab/play";
 
 interface SessionPayload {
   readonly iat: number;
@@ -158,22 +163,6 @@ export async function requireStagingSession(): Promise<void> {
   if (!(await hasValidStagingSession())) {
     redirect(COMPANY_LAB_UI_LOGIN_PATH);
   }
-}
-
-/**
- * 【Management Console認証Cookie整合性調査・指示§11/§17】ログイン後に
- * 「元いた画面」（Management ConsoleのRun等）へ戻すための returnTo を検証する。
- * open redirect対策として、必ず同一オリジン内の絶対パス（"/"始まり）だけを許可する
- * （"//evil.com"のようなprotocol-relative URLや"https://..."のような別オリジンURLは
- * 拒否する）。無効な値はnullを返し、呼び出し側は既定のCOMPANY_LAB_UI_HOME_PATHへ
- * フォールバックする。
- */
-export function sanitizeReturnToPath(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  if (!raw.startsWith("/")) return null;
-  if (raw.startsWith("//")) return null;
-  if (raw.includes("://")) return null;
-  return raw;
 }
 
 /**

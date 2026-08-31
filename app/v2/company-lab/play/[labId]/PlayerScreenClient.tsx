@@ -32,6 +32,7 @@ import MarketPanel from "../../components/MarketPanel";
 import ResultsPanel from "../../components/ResultsPanel";
 import FinancialResultsSection from "../../components/financial/FinancialResultsSection";
 import PlayLabBanner from "../components/PlayLabBanner";
+import AdminReloginLink from "../components/AdminReloginLink";
 import { CompanyDecisionDraft, summarizeSalesForceAllocation, summarizeSalesForceHiring } from "../../decisionDraft";
 import { PlayerScreenViewModel } from "../_lib/viewModel";
 import { StandardAiManagementReport } from "../../../../lib/v2/companyLab/aiExplanation/reportSchema";
@@ -269,7 +270,8 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               販売モデル: {SALES_MODEL_DISPLAY_LABELS[viewModel.salesModelId ?? DEFAULT_SALES_MODEL_ID]}
             </div>
           </div>
-          <div className="text-xs">
+          <div className="flex items-center gap-2 text-xs">
+            <AdminReloginLink />
             {isCompleted && <span className="bg-gray-600 text-gray-100 rounded-full px-3 py-1">完了</span>}
             {isSubmitted && <span className="bg-amber-700 text-amber-100 rounded-full px-3 py-1">提出済み・処理待ち</span>}
             {isEditing && <span className="bg-teal-700 text-teal-100 rounded-full px-3 py-1">入力中</span>}
