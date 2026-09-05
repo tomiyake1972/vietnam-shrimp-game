@@ -23,6 +23,18 @@ import { persistResumableRun } from "../lib/persistRun";
 import { upsertLiveSession } from "../lib/liveSessionRegistry";
 import { newRunId } from "../lib/runId";
 import { StrategicPosture } from "../../../lib/v2/companyLab/vision/types";
+// 【MANAGEMENT-CONSOLE-SALES-MODEL-1】販売市場モデルの唯一のSSoTは
+// lib/v2/sales/salesModels.ts（immutable registry）であり、その日本語ラベル・
+// 既定値・「既定のままなら送らない」変換は Company Lab のラボ作成フォームが
+// 既に使っている表示モジュール／純粋関数をそのまま再利用する。
+// Management Console用に別のラベル表・別の既定値を新設しない。
+import { SALES_MODEL_IDS } from "../../../lib/v2/sales/salesModels";
+import {
+  DEFAULT_SALES_MODEL_ID,
+  SALES_MODEL_DESCRIPTIONS,
+  SALES_MODEL_DISPLAY_LABELS,
+} from "../../company-lab/play/_lib/salesModelDisplay";
+import { resolveSalesModelIdForSubmission } from "../../company-lab/play/_lib/newLabFormModel";
 import {
   CompanyLabVisionOverrides,
   CompanyVisionOverrideEntry,
@@ -73,6 +85,10 @@ export function SetupScreen() {
   const [scenarioAlias, setScenarioAlias] = useState(SCENARIOS[0]?.alias ?? "baseline");
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [runName, setRunName] = useState("");
+  // 【MANAGEMENT-CONSOLE-SALES-MODEL-1】既定は従来市場モデル（legacy）。
+  // Run開始時に固定され、開始後は変更できない（この値を書き換えるUIは
+  // Management Console・PLAYER Workspaceのどちらにも作らない）。
+  const [salesModelId, setSalesModelId] = useState<string>(DEFAULT_SALES_MODEL_ID);
   const [controlModes, setControlModes] = useState<Readonly<Record<string, CompanyControlMode>>>(
     () => Object.fromEntries(COMPANY_LAB_COMPANY_IDS.map((id) => [id, "STANDARD_AI" as CompanyControlMode]))
   );
@@ -144,6 +160,9 @@ export function SetupScreen() {
       runName: runName.trim() || undefined,
       companyControlModes: controlModes,
       visionOverrides: Object.keys(visionOverrides).length > 0 ? (visionOverrides as CompanyLabVisionOverrides) : undefined,
+      // 既定（従来市場モデル）のままなら undefined ＝ createSimulationSession が
+      // configへキー自体を書き込まない（既存Runとビット単位で同一のconfig）。
+      salesModelId: resolveSalesModelIdForSubmission(salesModelId),
     });
 
     // 【指示§I】既存Runは削除・上書きしない。新しいRunを1本追加するだけ。
@@ -170,6 +189,7 @@ export function SetupScreen() {
     seed,
     runName,
     controlModes,
+    salesModelId,
     starting,
     router,
     visionTargets,
@@ -365,9 +385,36 @@ export function SetupScreen() {
           </button>
         </section>
 
+        {/* --- Sales market model --- */}
+        <section className="mb-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="setup-sales-model-section">
+          <h2 className="mb-2 text-sm font-semibold">5. 販売市場モデル</h2>
+          <select
+            value={salesModelId}
+            onChange={(e) => setSalesModelId(e.target.value)}
+            data-testid="setup-sales-model-select"
+            className="w-full rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs"
+          >
+            {SALES_MODEL_IDS.map((id) => (
+              <option key={id} value={id}>
+                {SALES_MODEL_DISPLAY_LABELS[id]}
+              </option>
+            ))}
+          </select>
+          <ul className="mt-1.5 space-y-0.5 text-[11px] leading-snug text-slate-500">
+            {SALES_MODEL_IDS.map((id) => (
+              <li key={id}>
+                {SALES_MODEL_DISPLAY_LABELS[id]}: 「{SALES_MODEL_DESCRIPTIONS[id]}」
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+            このRunで使う販売市場モデルは開始時に固定され、途中では変更できません（PLAYER会社・Standard AI会社の5社すべてが同じ市場モデルで成約を争います）。
+          </p>
+        </section>
+
         {/* --- Run name --- */}
         <section className="mb-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="setup-run-name-section">
-          <h2 className="mb-2 text-sm font-semibold">5. Run名・メモ（任意）</h2>
+          <h2 className="mb-2 text-sm font-semibold">6. Run名・メモ（任意）</h2>
           <input
             type="text"
             value={runName}

@@ -21,3 +21,18 @@ export const SALES_MODEL_DESCRIPTIONS: Readonly<Record<SalesModelId, string>> = 
 
 /** Lab作成フォームでの既定選択（未指定時のAPI挙動＝legacyと一致させる）。 */
 export const DEFAULT_SALES_MODEL_ID: SalesModelId = "legacy-waterfall-v1";
+
+/**
+ * 【MANAGEMENT-CONSOLE-SALES-MODEL-1】保存済みconfigのsalesModelId（未設定＝
+ * この機能より前に作られたRun／従来市場モデル）から、画面へ出す日本語ラベルを返す。
+ *
+ * 未設定を legacy として扱う根拠は runner.ts:salesParametersFor と同一である
+ * （config.salesModelId が undefined のとき tiered registry を引かず legacy variant
+ * 解決へ落ちる）。ここで新しい既定値・新しい意味づけを作っていない。
+ *
+ * Company Lab詳細画面・Management Console・PLAYER Workspaceがすべてこの1関数を
+ * 通ることで、「今どの販売市場モデルで動いているか」の表示が1箇所に定まる。
+ */
+export function salesModelDisplayLabelFor(salesModelId: SalesModelId | undefined): string {
+  return SALES_MODEL_DISPLAY_LABELS[salesModelId ?? DEFAULT_SALES_MODEL_ID];
+}

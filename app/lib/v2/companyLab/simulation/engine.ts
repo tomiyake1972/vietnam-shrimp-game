@@ -32,6 +32,7 @@ import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics
 import { DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE, resolveStandardAiProfileForMode } from "../standardAi/orientationProfile";
 import { StandardAiDiagnosticEntry } from "../standardAi/reasonCodes";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState } from "../types";
+import { SalesModelId } from "../../sales/salesModels";
 import {
   CompanyLabVisionOverrides,
   CompanyVisionOverrideEntry,
@@ -124,6 +125,18 @@ export interface CreateSimulationSessionInput {
    * 省略時（undefined）は既存挙動と完全に同一。
    */
   readonly vapDevelopmentTierIntensityDisabled?: boolean;
+  /**
+   * 【MANAGEMENT-CONSOLE-SALES-MODEL-1】Run開始時に固定する販売市場モデル。
+   *
+   * 値の意味・解決先は sales/salesModels.ts の immutable registry（唯一のSSoT。
+   * Company Lab の CompanyLabConfig.salesModelId と同じ契約）だけが持つ。
+   * ここは新しい販売ロジックを作らず、その ID を CompanyLabConfig へ素通しする
+   * だけである。
+   *
+   * 省略時（undefined）は config へキー自体を書き込まない ＝ 既存Runと
+   * ビット単位で同一のconfig・同一の挙動（従来市場モデル＝legacy semantics）。
+   */
+  readonly salesModelId?: SalesModelId;
 }
 
 /**
@@ -151,6 +164,14 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     qualityEquipmentCapabilityDisabled: input.qualityEquipmentCapabilityDisabled,
     factoryActivationLaborFixDisabled: input.factoryActivationLaborFixDisabled,
     vapDevelopmentTierIntensityDisabled: input.vapDevelopmentTierIntensityDisabled,
+    /**
+     * 【MANAGEMENT-CONSOLE-SALES-MODEL-1】未指定なら**キー自体を作らない**
+     * （conditional spread）。`salesModelId: undefined` と書くとキーが存在する
+     * configになり、既存Runのconfigとdeep equalでなくなるため。
+     * 指定時は state.config へそのまま入り、advanceCompanyLabQuarter →
+     * runner.ts:salesParametersFor が registry から SalesParameters を解決する。
+     */
+    ...(input.salesModelId !== undefined ? { salesModelId: input.salesModelId } : {}),
   };
   const { state, fixtures } = initializeCompanyLab(config);
   const run: SimulationRun = {

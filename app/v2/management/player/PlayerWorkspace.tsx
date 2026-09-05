@@ -49,6 +49,9 @@ import { FinalDataDownloadButton } from "../components/FinalDataDownloadButton";
 import { CompanyDatabookButton } from "./CompanyDatabookButton";
 import { buildBacklogDisplay } from "./backlogView";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
+// 【MANAGEMENT-CONSOLE-SALES-MODEL-1】PLAYERは販売市場モデルを途中で変更できない。
+// ここは read-only 表示のみ（変更UI・setterを作らない）。
+import { salesModelDisplayLabelFor } from "../../company-lab/play/_lib/salesModelDisplay";
 
 type WorkspaceTab = "overview" | "market" | "inventory" | "decision";
 
@@ -317,6 +320,9 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
             </h1>
             <p className="mt-0.5 text-[11px] text-slate-400">
               Turn {turn} / Scenario {session.run.scenarioId} / Seed {session.run.seed} / Run ID {session.run.simulationRunId}
+            </p>
+            <p className="text-[11px] text-slate-400" data-testid="workspace-sales-model">
+              販売市場モデル: {salesModelDisplayLabelFor(session.state.config.salesModelId)}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">

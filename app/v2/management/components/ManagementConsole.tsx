@@ -75,6 +75,9 @@ import { ExportPackButton } from "./ExportPackButton";
 import { StandardAiAuditWorkbookButton } from "./StandardAiAuditWorkbookButton";
 import { QUICK_NAVIGATION } from "../analysis/catalog";
 import { listScenarioAliases } from "../../../lib/v2/industryLab/cli/scenarioAliases";
+// 【MANAGEMENT-CONSOLE-SALES-MODEL-1】表示は read-only。Console側にこの値を
+// 書き換えるUI・関数は作らない（Run開始時＝Setup画面でのみ固定される）。
+import { salesModelDisplayLabelFor } from "../../company-lab/play/_lib/salesModelDisplay";
 import { newRunId } from "../lib/runId";
 
 const DEFAULT_SCENARIO_ID = "baseline";
@@ -821,6 +824,14 @@ export function ManagementConsole() {
             <div>
               <dt className="text-slate-400">Scenario</dt>
               <dd className="font-mono font-semibold">{view?.run.scenarioId ?? "－"}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-400">販売市場モデル</dt>
+              {/* session が無い（resumePayload を持たない閲覧専用Run）ときは
+                  configそのものが保存されていないため、推測せず「－」を出す。 */}
+              <dd className="font-semibold" data-testid="console-sales-model">
+                {view?.session ? salesModelDisplayLabelFor(view.session.state.config.salesModelId) : "－"}
+              </dd>
             </div>
             <div>
               <dt className="text-slate-400">Turn</dt>

@@ -342,6 +342,21 @@ export function restoreSessionFromResumePayload(
     turns: run.requestedTurns,
     visionOverrides: resumePayload.state?.config?.visionOverrides,
     standardAiProfileMode: resumePayload.state?.config?.standardAiProfileMode,
+    /**
+     * 【MANAGEMENT-CONSOLE-SALES-MODEL-1】visionOverrides/standardAiProfileModeと
+     * 同じ理由で、salesModelIdもresumePayload.state.config（trimStateForResumeが
+     * 一切変更しないフィールド）から復元する。
+     *
+     * ゲーム挙動そのものはresumePayload.stateがそのままエンジンへ渡るため
+     * これが無くても維持されるが、トップレベルconfigが欠けていると
+     * 「今このRunがどの販売市場モデルで動いているか」をsession.configから
+     * 読む表示・将来の編集操作が古い（=legacy）前提から出発してしまう。
+     *
+     * 未指定なら**キー自体を作らない**（既存Runのconfigとビット単位で同一に保つ）。
+     */
+    ...(resumePayload.state?.config?.salesModelId !== undefined
+      ? { salesModelId: resumePayload.state.config.salesModelId }
+      : {}),
   };
   return {
     run,
