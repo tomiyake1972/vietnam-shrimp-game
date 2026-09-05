@@ -27,6 +27,7 @@ import {
 import { CompanyLabConfig } from "../../types";
 import { MarketProductAllocationResult } from "../../../sales/types";
 import { simulationRunIndexKeyV2, simulationRunManifestKeyV2, simulationRunSummaryKeyV2 } from "../../../redis/simulationRunRedisKeys";
+import { salesModelIdForNextRun } from "../../../../../v2/management/lib/nextRunSalesModel";
 
 const TIERED = "tiered-v200-candidate-v1" as const;
 const LEGACY = "legacy-waterfall-v1" as const;
@@ -208,4 +209,87 @@ test("MC-SALES-10: baseline / dynamic-scenario-1 / dynamic-scenario-2 のlegacy 
 
 test("MC-SALES-registry: Setup画面の選択肢はregistryのSALES_MODEL_IDSそのもの（別のIDリストを新設していない）", () => {
   assert.deepEqual([...SALES_MODEL_IDS], [LEGACY, TIERED]);
+});
+
+// =====================================================================
+// MANAGEMENT-CONSOLE-SALES-MODEL-1B
+// Management Console 内で新しいRunを作る経路（ManagementConsole.tsx の createFresh。
+// Reset ボタン／シナリオ・seedを変えて開始）で、現在のRunの販売市場モデルを
+// 引き継ぐことを確かめる。
+//
+// createFresh は「新しいRunのsalesModelIdをどう決めるか」を純粋関数
+// salesModelIdForNextRun（app/v2/management/lib/nextRunSalesModel.ts）へ委譲し、
+// その戻り値をそのまま createSimulationSession へ渡す。ここではその純粋関数と、
+// 渡した先の createSimulationSession までを一続きで検証する。
+// =====================================================================
+
+/** createFresh（ManagementConsole.tsx）と同じ手順で次のRunを作る。 */
+function createFreshLikeConsole(
+  currentSession: ReturnType<typeof createSimulationSession> | null,
+  next: { readonly scenarioId: string; readonly seed: string }
+): ReturnType<typeof createSimulationSession> {
+  return createSimulationSession({
+    simulationRunId: `mc-fresh-${next.scenarioId}-${next.seed}`,
+    scenarioId: next.scenarioId,
+    seed: next.seed,
+    requestedTurns: 2,
+    startedAt: "2026-01-02T00:00:00.000Z",
+    salesModelId: salesModelIdForNextRun(currentSession),
+  });
+}
+
+test("MC-SALES-11: tiered Run → Console内で新しく始める → tieredが維持される", () => {
+  const current = createSimulationSession(baseInput({ salesModelId: TIERED }));
+  const fresh = createFreshLikeConsole(current, { scenarioId: "baseline", seed: "mc-sales-seed" });
+  assert.equal(fresh.config.salesModelId, TIERED);
+  assert.equal(fresh.state.config.salesModelId, TIERED);
+  // 実配分パラメータまで到達している（表示だけの引き継ぎではない）。
+  assert.equal(salesParametersForModelId(fresh.state.config.salesModelId!)!.marketAllocationMode, "tieredSimultaneousAllocation");
+});
+
+test("MC-SALES-12: legacy Run（明示legacy） → 新しく始める → legacyが維持される", () => {
+  const current = createSimulationSession(baseInput({ salesModelId: LEGACY }));
+  const fresh = createFreshLikeConsole(current, { scenarioId: "baseline", seed: "mc-sales-seed" });
+  assert.equal(fresh.state.config.salesModelId, LEGACY);
+  // registryは固定値を持たないため、従来どおりlegacy variant解決へ落ちる。
+  assert.equal(salesParametersForModelId(LEGACY), undefined);
+});
+
+test("MC-SALES-13: salesModelIdなし既存Run → 新しく始める → legacy semantics（キー自体が無い）", () => {
+  const current = createSimulationSession(baseInput());
+  assert.equal("salesModelId" in current.state.config, false);
+  const fresh = createFreshLikeConsole(current, { scenarioId: "baseline", seed: "mc-sales-seed" });
+  assert.equal("salesModelId" in fresh.config, false);
+  assert.equal("salesModelId" in fresh.state.config, false);
+
+  // 現在のRunが無い（起動直後の空セッション）・閲覧専用Run（session===null）でも同じ。
+  assert.equal(salesModelIdForNextRun(null), undefined);
+  assert.equal(salesModelIdForNextRun(undefined), undefined);
+  const blank = createFreshLikeConsole(null, { scenarioId: "baseline", seed: "mc-sales-seed" });
+  assert.equal("salesModelId" in blank.state.config, false);
+});
+
+test("MC-SALES-14: シナリオを変えて新しく始めてもsalesModelIdが維持される", () => {
+  const current = createSimulationSession(baseInput({ salesModelId: TIERED }));
+  for (const scenarioId of ["dynamic-scenario-1", "dynamic-scenario-2", "global-demand-boom"]) {
+    const fresh = createFreshLikeConsole(current, { scenarioId, seed: "mc-sales-seed" });
+    assert.equal(fresh.state.config.scenarioId, scenarioId);
+    assert.equal(fresh.state.config.salesModelId, TIERED, scenarioId);
+    // legacyのRunからシナリオを変えた場合は、legacyのまま（勝手にtieredにならない）。
+    const legacyFresh = createFreshLikeConsole(createSimulationSession(baseInput()), { scenarioId, seed: "mc-sales-seed" });
+    assert.equal("salesModelId" in legacyFresh.state.config, false, scenarioId);
+  }
+});
+
+test("MC-SALES-15: seedを変えて新しく始めてもsalesModelIdが維持される", () => {
+  const current = createSimulationSession(baseInput({ salesModelId: TIERED }));
+  const fresh = createFreshLikeConsole(current, { scenarioId: "baseline", seed: "another-seed" });
+  assert.equal(fresh.state.config.seed, "another-seed");
+  assert.equal(fresh.state.config.salesModelId, TIERED);
+
+  // 新しく始めたRunを実際に1ターン回しても tiered のまま（引き継ぎがエンジンまで届く）。
+  const outcome = advanceSimulationTurn(fresh, "2026-01-02T01:00:00.000Z");
+  assert.equal(outcome.error, null);
+  assert.equal(outcome.advanced, true);
+  assert.equal(outcome.session.state.config.salesModelId, TIERED);
 });

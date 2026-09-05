@@ -78,6 +78,8 @@ import { listScenarioAliases } from "../../../lib/v2/industryLab/cli/scenarioAli
 // 【MANAGEMENT-CONSOLE-SALES-MODEL-1】表示は read-only。Console側にこの値を
 // 書き換えるUI・関数は作らない（Run開始時＝Setup画面でのみ固定される）。
 import { salesModelDisplayLabelFor } from "../../company-lab/play/_lib/salesModelDisplay";
+import { SalesModelId } from "../../../lib/v2/sales/salesModels";
+import { salesModelIdForNextRun } from "../lib/nextRunSalesModel";
 import { newRunId } from "../lib/runId";
 
 const DEFAULT_SCENARIO_ID = "baseline";
@@ -203,15 +205,27 @@ export function ManagementConsole() {
     return Object.fromEntries(s.fixtures.map((f) => [f.companyId, createEmptyStrategyDocument(f.companyId)]));
   });
 
-  /** 空セッションを作る（fixtures はここでしか手に入らないので必ず保持する）。 */
+  /**
+   * 空セッションを作る（fixtures はここでしか手に入らないので必ず保持する）。
+   *
+   * 【MANAGEMENT-CONSOLE-SALES-MODEL-1B】販売市場モデル（salesModelId）は
+   * **呼び出し側から明示的に渡す**。scenarioId/seed と同じように state から
+   * 暗黙に読むと、この useCallback の依存に view が入り、mount 時の復元 useEffect
+   * （依存に createFresh を持つ）が view の更新ごとに再実行されてしまうため。
+   *
+   * 渡さなかった場合（＝現在のRunが無い・保存物からsalesModelIdを判定できない）は
+   * undefined のまま createSimulationSession へ渡り、config へキー自体が作られない
+   * ＝従来市場モデル（legacy semantics）。ここで別のモデルを推測しない。
+   */
   const createFresh = useCallback(
-    (startedAt: string): SimulationSession =>
+    (startedAt: string, salesModelId?: SalesModelId): SimulationSession =>
       createSimulationSession({
         simulationRunId: newRunId(`${scenarioId}-${seed}`, startedAt),
         scenarioId,
         seed,
         requestedTurns: MANAGEMENT_CONSOLE_STANDARD_TURNS,
         startedAt,
+        salesModelId,
       }),
     [scenarioId, seed]
   );
@@ -528,7 +542,11 @@ export function ManagementConsole() {
       const live = view?.session ?? null;
       const liveMatchesSettings = live !== null && live.run.scenarioId === scenarioId && live.run.seed === seed;
       const continuesLiveRun = liveMatchesSettings;
-      let current = continuesLiveRun ? live : createFresh(nowIso());
+      // 【MANAGEMENT-CONSOLE-SALES-MODEL-1B】シナリオ・seedを変えて新しいRunを
+      // 始める場合でも、現在表示中のRunの販売市場モデルをそのまま引き継ぐ
+      // （「三層でテストしていたつもりが、始め直した瞬間に従来モデルへ戻る」事故を防ぐ）。
+      // 現在のRunが閲覧専用（live===null＝configが保存されていない）なら undefined＝legacy。
+      let current = continuesLiveRun ? live : createFresh(nowIso(), salesModelIdForNextRun(live));
       // 【指示§30】シナリオ切替・新規Runでは経営モード・確定済み意思決定をdefaultへ戻す。
       // 既存Runの続きなら、これまでの経営モード切替（PLAYER化など）を引き継ぐ（指示§18）。
       // 【重要】setState は非同期のため、このrun()呼び出し内のループ判定にはstateではなく
@@ -667,14 +685,15 @@ export function ManagementConsole() {
 
   const reset = useCallback(() => {
     if (phase !== "idle") return;
-    const fresh = createFresh(nowIso());
+    // 【MANAGEMENT-CONSOLE-SALES-MODEL-1B】Resetでも現在のRunの販売市場モデルを維持する。
+    const fresh = createFresh(nowIso(), salesModelIdForNextRun(view?.session));
     setView(viewFromSession(fresh));
     setErrorMessage(null);
     setRunningTurn(null);
     setStorageNote(null);
     resetControlState();
     router.replace(`/v2/management?run=${encodeURIComponent(fresh.run.simulationRunId)}`);
-  }, [phase, createFresh, resetControlState, router]);
+  }, [phase, createFresh, resetControlState, router, view]);
 
   /**
    * 【指示§15】経営モード変更も保存タイミングの1つ。
