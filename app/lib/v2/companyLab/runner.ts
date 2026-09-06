@@ -166,7 +166,13 @@ import {
 } from "./pdMechanizationState";
 import { buildQualityEquipmentRiskMultiplierByFactory } from "./qualityControlEquipmentState";
 import { applyEquipmentQualityBonusToSalesPlans, computeEquipmentQualityBonusByCompanyProduct } from "./qualityEquipmentMarketBonus";
-import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState } from "../finance";
+import { FINANCE_PARAMETERS_V1, buildCompanyQuarterBusinessActuals, buildInitialCompanyFinanceState, financeParametersForTurn } from "../finance";
+import {
+  resolveAllOperatingCostIndices,
+  resolveConstructionCostIndex,
+  resolveConstructionCostPolicy,
+} from "../scenario/costIndex";
+import type { ConstructionCostPolicyInput } from "../capex/projectLifecycle";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { unwrapUsd } from "../finance/types";
 import { applyDividendToFinanceState, buildDividendQuarterResult, CompanyDividendQuarterResult, DividendResolution, resolveDividendDecision } from "../finance/dividend";
@@ -1032,6 +1038,26 @@ export function advanceCompanyLabQuarter(
 
   const definition = findScenarioDefinitionForCompanyLab(state.config.scenarioId);
   const turn = state.scenarioState.currentTurn;
+  /**
+   * 【ENG-DS2-COST-FOUNDATION-1】当Turnの実効 FinanceParameters と建設費方式。
+   *
+   * 指数の解決は scenario/costIndex.ts（唯一のSSoT）だけが行い、ここは受け取るだけ。
+   * シナリオが operatingCostInflation を宣言していなければ全指数1.00となり、
+   * financeParametersForTurn は FINANCE_PARAMETERS_V1 を**同一参照のまま**返すため、
+   * 既存Scenarioの計算はビット単位で一致する。
+   * 建設費方式も未指定なら "legacy-requested-cost"（現行挙動）。
+   */
+  // 【resume忠実性】指数の解決元は、コード側の登録簿（findScenarioDefinitionForCompanyLab）
+  // ではなく **そのRunが保持しているシナリオ定義のスナップショット**
+  // （state.scenarioState.definition）を使う。保存済みRunは作成時点の定義を state に
+  // 持っているため、後からコード側の定義へ数表を足しても、既存Runの再開結果は変わらない。
+  const scenarioDefinitionForRun = state.scenarioState.definition;
+  const operatingCostIndices = resolveAllOperatingCostIndices(scenarioDefinitionForRun, turn);
+  const financeParamsForTurn = financeParametersForTurn(FINANCE_PARAMETERS_V1, operatingCostIndices);
+  const constructionCostPolicy: ConstructionCostPolicyInput = {
+    policy: resolveConstructionCostPolicy(scenarioDefinitionForRun),
+    constructionCostIndex: resolveConstructionCostIndex(scenarioDefinitionForRun, turn),
+  };
   // 【営業人員の追加採用・forward-port】当期に配分可能な営業人員総数＝前期末
   // までの状態（会社状態が無ければfixtureの基準人数へフォールバック。0で
   // 埋めない）。当期の新規採用意思決定（d.salesForceHireCount）はここには
@@ -1252,7 +1278,7 @@ export function advanceCompanyLabQuarter(
         collateral,
         financingRequest: decision.financingRequest,
       },
-      FINANCE_PARAMETERS_V1,
+      financeParamsForTurn,
       FINANCING_PARAMETERS_V1
     );
     financingPlanByCompanyId.set(f.companyId, plan);
@@ -1738,8 +1764,8 @@ export function advanceCompanyLabQuarter(
             projects: prevCapexState.portfolio.projects,
             companyFixedAssetsGrossUsd: unwrapUsd(prevFinance.fixedAssetsGross),
             companyAccumulatedDepreciationUsd: unwrapUsd(prevFinance.accumulatedDepreciation),
-            normalCashFixedFactoryCostUsdPerQuarter: normalCashFixedFactoryCostUsdPerQuarter(FINANCE_PARAMETERS_V1),
-            financeParams: FINANCE_PARAMETERS_V1,
+            normalCashFixedFactoryCostUsdPerQuarter: normalCashFixedFactoryCostUsdPerQuarter(financeParamsForTurn),
+            financeParams: financeParamsForTurn,
             capexParams: CAPEX_PARAMETERS_V1,
           })
         : undefined;
@@ -1850,7 +1876,7 @@ export function advanceCompanyLabQuarter(
         financingRequest: companyDecision!.financingRequest,
         collateralForEmergency: collateral,
       },
-      FINANCE_PARAMETERS_V1,
+      financeParamsForTurn,
       FINANCING_PARAMETERS_V1,
       PRODUCTION_PARAMETERS_V1.cost.baseProcessingCostUsdPerTon
     );
@@ -1930,8 +1956,10 @@ export function advanceCompanyLabQuarter(
         // どうかの判定に使う、この会社の当四半期時点の実効Factory ID一覧（稼働開始済み
         // 新設Factoryを含む。factoriesWithCapexはcomputeEffectiveFactoriesの出力そのもの）。
         validFactoryIds: factoriesWithCapex.filter((factory) => factory.companyId === f.companyId).map((factory) => factory.factoryId),
+        // 【ENG-DS2-COST-FOUNDATION-1】建設費方式。承認Turnに一度だけ適用される。
+        constructionCostPolicy,
       },
-      FINANCE_PARAMETERS_V1,
+      financeParamsForTurn,
       CAPEX_PARAMETERS_V1,
       PRODUCTION_PARAMETERS_V1.cost.baseProcessingCostUsdPerTon
     );

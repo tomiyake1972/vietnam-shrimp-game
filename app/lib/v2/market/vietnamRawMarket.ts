@@ -21,7 +21,7 @@
 //    のみ残し、通常の市場計算で到達する経済的下限には使用しない。
 
 import { HosoEqTons, UsdPerHosoEqKg, hosoEqTons, usdPerHosoEqKg, unwrapUnit } from "../core/units";
-import { VietnamDomesticInput, VietnamDomesticResult, MarketPriceDriver } from "./types";
+import { MarketValidationError, VietnamDomesticInput, VietnamDomesticResult, MarketPriceDriver } from "./types";
 import { MarketParameters } from "./parameters";
 import { assertFinite, clamp, safeDivide } from "./validation";
 
@@ -98,8 +98,30 @@ export function applyMinimumOfftakeRule(
 export function clearVietnamRawMarket(
   vietnamHosoFobPrice: UsdPerHosoEqKg,
   input: VietnamDomesticInput,
-  parameters: MarketParameters
+  parameters: MarketParameters,
+  /**
+   * 【ENG-DS2-COST-FOUNDATION-1】原料価格捕捉指数（Scenario opt-in。既定1.00）。
+   *
+   * 需給乗数の**基準値だけ**に掛ける:
+   *   adjustedBaseMultiplier = baseMultiplier × rawPriceCaptureIndex
+   *   m = clamp(adjustedBaseMultiplier + imbalance × demandSensitivity,
+   *             floorMultiplier, 1.0)
+   *
+   * 1.00 のとき baseMultiplier × 1.0 === baseMultiplier（IEEE754で厳密に同値）で
+   * あり、現行の計算とビット単位で一致する。
+   *
+   * 【触らないもの】buyingCeiling（processingExportCost / requiredMargin）、
+   * farmerReservationPrice の式、clamp の上限 1.0、数量ラショニング分岐
+   * （ceiling < reservation）のいずれも変更しない。上限1.0を維持するため、
+   * この指数をどれだけ上げても rawPrice が buyingCeiling を超えることはない。
+   */
+  rawPriceCaptureIndex: number = 1.0
 ): VietnamDomesticResult {
+  if (!Number.isFinite(rawPriceCaptureIndex) || rawPriceCaptureIndex <= 0) {
+    throw new MarketValidationError(
+      `rawPriceCaptureIndex は0より大きい有限数である必要があります。受け取った値: ${rawPriceCaptureIndex}`
+    );
+  }
   const buyingCeiling = calculateBuyingCeiling(vietnamHosoFobPrice, input);
   const farmerReservationPrice = calculateFarmerReservationPrice(input, parameters);
   const { effectiveDemand, applied } = applyMinimumOfftakeRule(input, parameters);
@@ -113,7 +135,8 @@ export function clearVietnamRawMarket(
   const p = parameters.vietnamDomestic;
   const imbalance = clamp(rawImbalance, -p.imbalanceClamp, p.imbalanceClamp);
 
-  const multiplier = clamp(p.baseMultiplier + imbalance * p.demandSensitivity, p.floorMultiplier, 1.0);
+  const adjustedBaseMultiplier = p.baseMultiplier * rawPriceCaptureIndex;
+  const multiplier = clamp(adjustedBaseMultiplier + imbalance * p.demandSensitivity, p.floorMultiplier, 1.0);
   const supplyDemandPriceValue = ceilingValue * multiplier;
   assertFinite(supplyDemandPriceValue, "vietnamDomesticPrice");
 
@@ -121,6 +144,7 @@ export function clearVietnamRawMarket(
   let transactedValue: number;
   let reservationPriceApplied = false;
   let quantityRationed = false;
+  let appliedTradeRatio = 1;
 
   if (ceilingValue >= reservationValue) {
     // 通常領域: 価格は [留保価格, 買付上限] の範囲で需給により決まる。
@@ -139,6 +163,7 @@ export function clearVietnamRawMarket(
     priceValue = reservationValue;
     reservationPriceApplied = true;
     quantityRationed = true;
+    appliedTradeRatio = tradeRatio;
     transactedValue = Math.min(supplyValue, demandValue) * tradeRatio;
   }
 
@@ -157,6 +182,11 @@ export function clearVietnamRawMarket(
     price: usdPerHosoEqKg(Math.max(priceValue, p.absolutePriceFloorUsdPerKg)),
     buyingCeiling,
     farmerReservationPrice,
+    // 【ENG-DS2-COST-FOUNDATION-1】診断値は捕捉指数が中立でないときだけ載せる。
+    // 中立時にキーを作らないことで、既存Scenarioの保存結果を不変に保つ。
+    ...(rawPriceCaptureIndex !== 1.0
+      ? { priceMultiplier: multiplier, rawPriceCaptureIndex, tradeRatio: appliedTradeRatio }
+      : {}),
     supply: hosoEqTons(supplyValue),
     effectiveDemand,
     transactedVolume: hosoEqTons(Math.max(0, transactedValue)),

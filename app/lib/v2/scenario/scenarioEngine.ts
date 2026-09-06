@@ -41,6 +41,7 @@ import {
   ComposedVariableEffect,
 } from "./eventEngine";
 import { SCENARIO_ENGINE_PARAMETERS_V1, ScenarioEngineParameters } from "./parameters";
+import { NEUTRAL_COST_INDEX, resolveRawPriceCaptureIndex } from "./costIndex";
 
 // ---------------------------------------------------------------------
 // トレンドのルックアップ（(変数, スコープ) → LongTermTrend）
@@ -429,6 +430,9 @@ export function getScenarioTurnInput(state: ScenarioState, turn: number): Scenar
   const pdDemand = hosoEqTons(Math.max(0, totalConsumption * params.pdDemandShareOfTotalConsumption));
   const vapDemand = hosoEqTons(Math.max(0, totalConsumption * params.vapDemandShareOfTotalConsumption));
 
+  // 【ENG-DS2-COST-FOUNDATION-1】原料価格捕捉指数（唯一のSSoTである costIndex.ts で解決）。
+  const rawPriceCaptureIndex = resolveRawPriceCaptureIndex(definition, turn);
+
   return {
     turn,
     period: turnToPeriod(turn),
@@ -441,6 +445,9 @@ export function getScenarioTurnInput(state: ScenarioState, turn: number): Scenar
       ? { vietnamFarmerEconomics: definition.initialStateOverrides.vietnamFarmerEconomics }
       : {}),
     pdVapDemand: { pdDemand, vapDemand },
+    // 【ENG-DS2-COST-FOUNDATION-1】中立(1.00)ならキー自体を作らない
+    // （既存Scenarioの MarketQuarterInput・保存結果をビット単位で不変に保つ）。
+    ...(rawPriceCaptureIndex !== NEUTRAL_COST_INDEX ? { rawPriceCaptureIndex } : {}),
     activeEventIds: activeEventIdsAtTurn(state.resolvedEvents, turn),
   };
 }

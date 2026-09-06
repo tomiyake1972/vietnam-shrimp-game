@@ -7,7 +7,7 @@
 // より後）は、それぞれ最初／最後の値を保持する（外挿はしない）。
 
 import { ScenarioValidationError } from "./types";
-import type { LongTermTrend, LongTermTrendKeyframe } from "./types";
+import type { LongTermTrend, LongTermTrendKeyframe, TrendInterpolation } from "./types";
 
 /** キーフレームがturn昇順であることを検証する（重複turnも不可）。 */
 export function assertSortedKeyframes(keyframes: readonly LongTermTrendKeyframe[], label: string): void {
@@ -30,14 +30,31 @@ export function assertSortedKeyframes(keyframes: readonly LongTermTrendKeyframe[
  * - それ以外: interpolationに応じて線形補間または直前値を保持
  */
 export function interpolateTrendValue(trend: LongTermTrend, turn: number): number {
-  const keyframes = trend.keyframes;
-  assertSortedKeyframes(keyframes, `trend(${trend.trendId})`);
+  return interpolateKeyframeValue(trend.keyframes, trend.interpolation, turn, `trend(${trend.trendId})`);
+}
+
+/**
+ * 【ENG-DS2-COST-FOUNDATION-1】キーフレーム列そのものに対する補間。
+ *
+ * interpolateTrendValue の中身をそのまま切り出したものであり、補間規則
+ * （範囲外は端点保持・"step" は直前値・"linear" は線形）はこの1関数にしかない。
+ * LongTermTrend（trendId/variable/scope を持つ）以外の用途
+ * （Turn別費用指数・建設費指数・原料捕捉指数）から、規則を二重定義せずに
+ * 同じ補間を使うための入口である。
+ */
+export function interpolateKeyframeValue(
+  keyframes: readonly LongTermTrendKeyframe[],
+  interpolation: TrendInterpolation,
+  turn: number,
+  label: string
+): number {
+  assertSortedKeyframes(keyframes, label);
 
   if (turn <= keyframes[0].turn) return keyframes[0].value;
   const last = keyframes[keyframes.length - 1];
   if (turn >= last.turn) return last.value;
 
-  if (trend.interpolation === "step") {
+  if (interpolation === "step") {
     // turn以下で最も新しいキーフレームの値を返す（キーフレームのturnに到達した
     // 瞬間に値が切り替わる。境界turn自体はすでに新しい値を持つ）。
     let current = keyframes[0];
@@ -59,5 +76,5 @@ export function interpolateTrendValue(trend: LongTermTrend, turn: number): numbe
   }
 
   // assertSortedKeyframesを通過していれば到達しないが、念のため防御する。
-  throw new ScenarioValidationError(`trend(${trend.trendId}): turn=${turn} を補間できませんでした。`);
+  throw new ScenarioValidationError(`${label}: turn=${turn} を補間できませんでした。`);
 }

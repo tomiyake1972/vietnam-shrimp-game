@@ -8,6 +8,7 @@ import { COUNTRY_IDS, DEMAND_MARKET_IDS, CountryId, DemandMarketId } from "../ma
 import { PRODUCT_LIFECYCLE_PARAMETERS_V1, resolveProductLifecycleParameters } from "../market/productLifecycle";
 import { assertSortedKeyframes } from "./interpolation";
 import { ScenarioDefinition, ScenarioEvent, ScenarioValidationResult, ScenarioValidationError } from "./types";
+import type { CostIndexTrack } from "./types";
 
 const MIN_DURATION_TURNS = 20;
 const MAX_DURATION_TURNS = 40;
@@ -234,6 +235,39 @@ export function validateScenarioDefinition(definition: ScenarioDefinition): Scen
       errors.push(
         `structuralDemandAnchor.pullStrength は[0,1]の範囲である必要があります。受け取った値: ${anchor.pullStrength}`
       );
+    }
+  }
+
+  // 【ENG-DS2-COST-FOUNDATION-1】Turn別指数の数表。
+  // 補間規則そのものは interpolation.ts が持つため、ここでは
+  // 「キーフレームが2点以上・turn昇順・値が正の有限数」だけを検証する。
+  const costTracks: Array<{ readonly label: string; readonly track: CostIndexTrack }> = [];
+  const operatingCostInflation = definition.operatingCostInflation;
+  if (operatingCostInflation !== undefined) {
+    for (const [key, track] of Object.entries(operatingCostInflation.tracks)) {
+      if (track !== undefined) {
+        costTracks.push({ label: `operatingCostInflation.tracks.${key}`, track });
+      }
+    }
+  }
+  const rawMarketPricing = definition.rawMarketPricing;
+  if (rawMarketPricing?.rawPriceCaptureIndex !== undefined) {
+    costTracks.push({ label: "rawMarketPricing.rawPriceCaptureIndex", track: rawMarketPricing.rawPriceCaptureIndex });
+  }
+  for (const { label, track } of costTracks) {
+    try {
+      assertSortedKeyframes(track.keyframes, label);
+    } catch (e) {
+      errors.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+    for (const kf of track.keyframes) {
+      if (!Number.isInteger(kf.turn) || kf.turn < 1) {
+        errors.push(`${label}: キーフレームのturnは1以上の整数である必要があります。受け取った値: ${kf.turn}`);
+      }
+      if (!Number.isFinite(kf.value) || kf.value <= 0) {
+        errors.push(`${label}: 指数は0より大きい有限数である必要があります。受け取った値: ${kf.value}`);
+      }
     }
   }
 

@@ -58,7 +58,14 @@ export function calculateMarketQuarter(
   const hosoPrices = clearHosoMarket(opening, input.priorHosoFobPrice, countryIds, parameters, randomStream, costIndexByCountry);
 
   // 5. ベトナム国内未凍結原料市場（同 §10、手順9-11）
-  const vietnamDomestic = clearVietnamRawMarket(hosoPrices.VN.price, input.vietnamDomestic, parameters);
+  // 【ENG-DS2-COST-FOUNDATION-1】捕捉指数はシナリオ由来のTurn別値。未指定は中立1.0で、
+  // その場合 clearVietnamRawMarket の計算は現行とビット単位で一致する。
+  const vietnamDomestic = clearVietnamRawMarket(
+    hosoPrices.VN.price,
+    input.vietnamDomestic,
+    parameters,
+    input.vietnamDomestic.rawPriceCaptureIndex ?? 1.0
+  );
 
   // 6. PD/VAPプレミアム（全体実装計画書 v0.1 Product型・PD/VAPプレミアム定義）
   const pdPremium = calculateProductPremium(

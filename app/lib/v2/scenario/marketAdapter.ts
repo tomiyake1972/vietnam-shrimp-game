@@ -65,6 +65,11 @@ export function toMarketQuarterInput(
       ...(scenarioTurnInput.vietnamFarmerEconomics !== undefined
         ? { farmerEconomics: scenarioTurnInput.vietnamFarmerEconomics }
         : {}),
+      // 【ENG-DS2-COST-FOUNDATION-1】捕捉指数が中立でないときだけ渡す
+      // （未設定＝1.00扱い。既存Scenarioの MarketQuarterInput は不変）。
+      ...(scenarioTurnInput.rawPriceCaptureIndex !== undefined
+        ? { rawPriceCaptureIndex: scenarioTurnInput.rawPriceCaptureIndex }
+        : {}),
     },
     pdVapDemand: scenarioTurnInput.pdVapDemand,
   };
