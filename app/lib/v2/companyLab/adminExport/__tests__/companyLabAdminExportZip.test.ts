@@ -25,6 +25,19 @@ const SYNTHETIC_COMPANY_JSON: CompanyExportPayload = buildSyntheticCompanyExport
     engineVersion: "test-engine",
     dataStatus: "confirmed",
     scope: { kind: "company", companyId: "BAL" },
+    runIdentity: {
+      configuredSalesModelId: null,
+      resolvedSalesModelId: "legacy-waterfall-v1",
+      salesParametersVersion: "sales-v0.2",
+      tierParametersVersion: null,
+      sourceCommit: "UNKNOWN",
+      sourceBranch: "UNKNOWN",
+      scenarioId: "baseline-v0.1",
+      scenarioVersion: "test-scenario-v1",
+      seed: "zip-test-seed",
+      requestedTurns: 32,
+      completedTurns: 1,
+    },
   },
   financialResult: null,
 });
@@ -67,6 +80,11 @@ test("buildCompanyLabAdminExportZip: ZIP内のJSONが入力と完全一致し、
   assert.equal(manifest.turn, 1);
   assert.equal(manifest.companyId, "BAL");
   assert.equal(manifest.entries.length, 4);
+  // 【EXPORT-RUN-IDENTITY-1・指示§必須テスト5】manifest.jsonのrunIdentityは、同一ZIP内の
+  // company JSON（companyContent.meta.runIdentity）と完全一致する（同じ値を転記しただけ、
+  // manifest側で新しい判定をしていないことの確認）。
+  assert.deepEqual(manifest.runIdentity, companyContent.meta.runIdentity);
+  assert.equal(manifest.runIdentity.resolvedSalesModelId, "legacy-waterfall-v1");
 });
 
 test("buildCompanyLabAdminExportZip: includeExcel=trueならExcelファイルも含まれ、その入力はcompanyJsonのみである", async () => {

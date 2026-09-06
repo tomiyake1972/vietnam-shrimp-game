@@ -54,7 +54,15 @@ test("DB-3: 期首状態と期末状態は同じスナップショットの使�
 test("DB-4: 組み立てたentryをbuildCompanyExportPayloadへ渡しても、他社の非公開情報が一切含まれない", () => {
   const session = runTurns("db-4", 2);
   const entry = buildCompanyDatabookQuarterEntry(session, "BAL");
-  const payload = buildCompanyExportPayload({ labId: session.run.simulationRunId, companyId: "BAL", entry, generatedAt: AT, fixtures: session.fixtures });
+  const payload = buildCompanyExportPayload({
+    labId: session.run.simulationRunId,
+    companyId: "BAL",
+    entry,
+    generatedAt: AT,
+    fixtures: session.fixtures,
+    config: session.config,
+    scenarioVersion: session.run.scenarioVersion,
+  });
   const json = JSON.stringify(payload);
   assert.ok(!json.includes("otherCompaniesDecisions"), "会社スコープのpayloadに他社意思決定キーが含まれている");
   assert.ok(!json.includes("playerSubmission"), "会社スコープのpayloadに生のplayerSubmissionキーが含まれている（decisionInfo経由で絞り込むべき）");
@@ -65,7 +73,15 @@ test("DB-4: 組み立てたentryをbuildCompanyExportPayloadへ渡しても、�
 test("DB-5: payload内の会社サマリー・財務結果は、SimulationSessionの確定履歴と数値が一致する", () => {
   const session = runTurns("db-5", 3);
   const entry = buildCompanyDatabookQuarterEntry(session, "BAL");
-  const payload = buildCompanyExportPayload({ labId: session.run.simulationRunId, companyId: "BAL", entry, generatedAt: AT, fixtures: session.fixtures });
+  const payload = buildCompanyExportPayload({
+    labId: session.run.simulationRunId,
+    companyId: "BAL",
+    entry,
+    generatedAt: AT,
+    fixtures: session.fixtures,
+    config: session.config,
+    scenarioVersion: session.run.scenarioVersion,
+  });
   const record = session.state.history[session.state.history.length - 1];
   const summary = record.companySummaries.find((s) => s.companyId === "BAL");
   assert.ok(payload.companySummary !== null && summary !== undefined);
@@ -89,7 +105,15 @@ test("DB-7: latestQuarterPreProcessingSnapshotが無いSessionでは例外にな
 test("DB-8: 組み立てたpayloadから、通常プレイと同じbuildCompanyExportExcelWorkbookでxlsxが生成できる", async () => {
   const session = runTurns("db-8", 2);
   const entry = buildCompanyDatabookQuarterEntry(session, "MASS");
-  const payload = buildCompanyExportPayload({ labId: session.run.simulationRunId, companyId: "MASS", entry, generatedAt: AT, fixtures: session.fixtures });
+  const payload = buildCompanyExportPayload({
+    labId: session.run.simulationRunId,
+    companyId: "MASS",
+    entry,
+    generatedAt: AT,
+    fixtures: session.fixtures,
+    config: session.config,
+    scenarioVersion: session.run.scenarioVersion,
+  });
   const buffer = await buildCompanyExportExcelWorkbook(payload);
   assert.ok(buffer.length > 0, "Databook（xlsx）が空になっている");
 });

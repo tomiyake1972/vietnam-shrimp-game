@@ -14,6 +14,7 @@ import { CAPITAL_PROJECT_TYPES } from "../../../capex/types";
 import { STANDARD_AI_PROPOSABLE_CAPEX_TYPES } from "../../standardAi/decision/capex";
 import { SimulationAnalyticsDataset } from "../analytics/types";
 import { StoredSimulationRun } from "../persistence/types";
+import { buildExportRunIdentityFromSimulationRun } from "../../exportRunIdentity";
 import { buildMajorChanges } from "./changeLog";
 import {
   AI_ANALYSIS_PACK_SCHEMA_VERSION,
@@ -461,6 +462,21 @@ export function buildAiAnalysisPackContext(input: BuildPackContextInput): AiAnal
 
   const worldTurns = (stored.packCapture?.worldTurns ?? []).filter((w) => turns.includes(w.turn));
 
+  // 【EXPORT-RUN-IDENTITY-1】configはschemaVersion 3以降のresumePayloadでのみ取得可能
+  // （resumePayload.state.configは履歴windowingの対象外＝常に完全な値）。
+  // 旧保存Run（resumePayload無し）ではundefinedのまま渡し、salesModel関連フィールドを
+  // 「取得不能」（null）にする（legacyと決めつけない）。
+  const runIdentity = buildExportRunIdentityFromSimulationRun(
+    {
+      scenarioId: stored.run.scenarioId,
+      scenarioVersion: stored.run.scenarioVersion,
+      seed: stored.run.seed,
+      requestedTurns: stored.run.requestedTurns,
+      completedTurns: stored.run.completedTurns,
+    },
+    stored.resumePayload?.state.config
+  );
+
   // 【Phase 7・Manual Override受入】companies[].turns[].decisionOwner を1回だけ数える。
   const allCompanyTurns = Object.values(companies).flatMap((c) => c.turns.map((t) => ({ companyId: c.companyId, turn: t })));
   const decisionOwnership: PackDecisionOwnership = {
@@ -494,6 +510,10 @@ export function buildAiAnalysisPackContext(input: BuildPackContextInput): AiAnal
       exportedAt: input.exportedAt,
       sourceBranch: input.sourceBranch ?? "UNKNOWN",
       sourceCommit: input.sourceCommit ?? "UNKNOWN",
+      configuredSalesModelId: runIdentity.configuredSalesModelId,
+      resolvedSalesModelId: runIdentity.resolvedSalesModelId,
+      salesParametersVersion: runIdentity.salesParametersVersion,
+      tierParametersVersion: runIdentity.tierParametersVersion,
     },
     companySummaries: summaries,
     world: { turns: worldTurns },

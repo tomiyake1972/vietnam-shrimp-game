@@ -50,6 +50,30 @@ function buildGameInfoRows(): readonly (readonly [string, string | number])[] {
   ];
 }
 
+/**
+ * 【EXPORT-RUN-IDENTITY-1】ExportMeta.runIdentity（exportRunIdentity.ts、唯一のSSoT）を
+ * そのまま行として並べるだけ。新しい判定ロジックはここに持たない。
+ * 既存のbuildGameInfoRows()（execFileSyncによるgit実行時取得）とは別の、
+ * ビルド時env var（NEXT_PUBLIC_SOURCE_COMMIT/BRANCH）ベースのsourceCommit/sourceBranchで
+ * あることが分かるよう、ラベルを明示的に区別する（両方とも消さずに残す。既存行の
+ * 意味を変えない）。
+ */
+function buildRunIdentityRows(runIdentity: CompanyExportPayload["meta"]["runIdentity"]): readonly (readonly [string, string | number])[] {
+  return [
+    ["configuredSalesModelId（保存されたRun configの値。未指定なら「未指定＝legacy運用」）", runIdentity.configuredSalesModelId ?? "未指定＝legacy運用"],
+    ["resolvedSalesModelId（Engineが実際に使用したモデル）", runIdentity.resolvedSalesModelId ?? "取得不能"],
+    ["salesParametersVersion（実際に使用したSalesParameters.parametersVersion）", runIdentity.salesParametersVersion ?? "取得不能"],
+    ["tierParametersVersion（tiered時のみ。legacy時は非該当）", runIdentity.tierParametersVersion ?? "非該当"],
+    ["scenarioId", runIdentity.scenarioId],
+    ["scenarioVersion", runIdentity.scenarioVersion],
+    ["seed", runIdentity.seed],
+    ["requestedTurns", runIdentity.requestedTurns],
+    ["completedTurns", runIdentity.completedTurns],
+    ["sourceCommit（ビルド時env var NEXT_PUBLIC_SOURCE_COMMIT）", runIdentity.sourceCommit],
+    ["sourceBranch（ビルド時env var NEXT_PUBLIC_SOURCE_BRANCH）", runIdentity.sourceBranch],
+  ];
+}
+
 function tryGitCommand(args: readonly string[]): string | undefined {
   try {
     const out = execFileSync("git", args as string[], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
@@ -93,7 +117,7 @@ function writeMetaSheet(wb: ExcelJS.Workbook, payload: CompanyExportPayload): vo
     ["scope", JSON.stringify(meta.scope)],
     ["データ入力元", "Export API JSON のみ（Redis・Repository・画面表示値は一切参照していません）"],
   ];
-  for (const [label, value] of [...rows, ...buildGameInfoRows()]) {
+  for (const [label, value] of [...rows, ...buildRunIdentityRows(meta.runIdentity), ...buildGameInfoRows()]) {
     const row = ws.addRow([label, value]);
     row.getCell(1).font = LABEL_FONT;
     row.getCell(2).font = VALUE_FONT;
@@ -1256,7 +1280,7 @@ export async function buildAllCompaniesExportExcelWorkbook(
     ["用途", "GM用。全社の加工能力と処理見込みを確認するためのブックです（会社別ブックとは別ファイルです）"],
     ["データ入力元", "Export API JSON（全社スコープ）のみ。Redis・Repository・画面表示値は参照していません"],
   ];
-  for (const [label, value] of [...metaRows, ...buildGameInfoRows()]) {
+  for (const [label, value] of [...metaRows, ...buildRunIdentityRows(payload.meta.runIdentity), ...buildGameInfoRows()]) {
     const row = ws.addRow([label, value]);
     row.getCell(1).font = LABEL_FONT;
     row.getCell(2).font = VALUE_FONT;

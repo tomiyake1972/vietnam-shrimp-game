@@ -822,3 +822,117 @@ test("handleExportCompanyTurn呼び出し自体はhandlers.ts層では監査ロ�
   // （withExportApiContext.ts が呼び出し前後で一元的に記録する設計）。
   assert.equal(auditEntries.length, 0);
 });
+
+// -------------------------------------------------------------------
+// EXPORT-RUN-IDENTITY-1: 実際のRun Identity（販売市場モデル識別情報）が
+// lab_index / company / allCompanies / market の4Exportすべてで一致すること
+// -------------------------------------------------------------------
+
+async function setUpProcessedTurn1LabWithSalesModel(labId: string, salesModelId: "tiered-v200-candidate-v1" | undefined): Promise<CompanyLabApiDependencies> {
+  const writableDeps = makeWritableDeps();
+  await handleCreateLab(
+    writableDeps,
+    { scenarioId: "baseline", mode: "canonical", seed: "export-run-identity-seed", turns: 4, playerCompanyId: "BAL", labId, ...(salesModelId !== undefined ? { salesModelId } : {}) },
+    NOW
+  );
+  await saveAndSubmitDraft(writableDeps, labId);
+  await processQuarter(writableDeps, labId);
+  return writableDeps;
+}
+
+test("EXPORT-RUN-IDENTITY-5: tiered Runで、lab_index/company/allCompanies/marketの4Exportすべてが同一のrunIdentity（configured/resolvedSalesModelId・salesParametersVersion・tierParametersVersion）を返す", async () => {
+  const labId = "export-run-identity-tiered-lab";
+  const writableDeps = await setUpProcessedTurn1LabWithSalesModel(labId, "tiered-v200-candidate-v1");
+  const { deps } = makeExportDeps(writableDeps);
+
+  const labIndexResult = await handleExportLabIndex(deps, labId, GENERATED_AT);
+  const companyResult = await handleExportCompanyTurn(deps, labId, "1", "BAL", GENERATED_AT);
+  const allCompaniesResult = await handleExportAllCompaniesTurn(deps, labId, "1", GENERATED_AT);
+  const marketResult = await handleExportMarketTurn(deps, labId, "1", GENERATED_AT);
+  for (const r of [labIndexResult, companyResult, allCompaniesResult, marketResult]) assert.equal(r.status, 200, JSON.stringify(r.body));
+
+  const labIndexIdentity = (labIndexResult.body as { runIdentity: unknown }).runIdentity;
+  const companyIdentity = (companyResult.body as { meta: { runIdentity: unknown } }).meta.runIdentity;
+  const allCompaniesIdentity = (allCompaniesResult.body as { meta: { runIdentity: unknown } }).meta.runIdentity;
+  const marketIdentity = (marketResult.body as { meta: { runIdentity: unknown } }).meta.runIdentity;
+
+  assert.deepEqual(labIndexIdentity, companyIdentity, "lab_indexとcompanyのrunIdentityが一致しない");
+  assert.deepEqual(companyIdentity, allCompaniesIdentity, "companyとallCompaniesのrunIdentityが一致しない");
+  assert.deepEqual(allCompaniesIdentity, marketIdentity, "allCompaniesとmarketのrunIdentityが一致しない");
+
+  assert.deepEqual(companyIdentity, {
+    configuredSalesModelId: "tiered-v200-candidate-v1",
+    resolvedSalesModelId: "tiered-v200-candidate-v1",
+    salesParametersVersion: "sales-v0.2+tiered-market-allocation-v200-candidate-v1",
+    tierParametersVersion: "tiered-market-allocation-v200-candidate-v1（B-moderated-v1・プレイテスト用暫定値）",
+    sourceCommit: "UNKNOWN",
+    sourceBranch: "UNKNOWN",
+    scenarioId: "baseline",
+    scenarioVersion: (companyIdentity as { scenarioVersion: string }).scenarioVersion,
+    seed: "export-run-identity-seed",
+    requestedTurns: 4,
+    completedTurns: 1,
+  });
+});
+
+test("EXPORT-RUN-IDENTITY-2/5: salesModelId未指定Runでは、4Exportすべてでconfigured=null・resolved=legacy-waterfall-v1・tierParametersVersion=nullになる", async () => {
+  const labId = "export-run-identity-legacy-lab";
+  const writableDeps = await setUpProcessedTurn1LabWithSalesModel(labId, undefined);
+  const { deps } = makeExportDeps(writableDeps);
+
+  const labIndexResult = await handleExportLabIndex(deps, labId, GENERATED_AT);
+  const companyResult = await handleExportCompanyTurn(deps, labId, "1", "BAL", GENERATED_AT);
+  const allCompaniesResult = await handleExportAllCompaniesTurn(deps, labId, "1", GENERATED_AT);
+  const marketResult = await handleExportMarketTurn(deps, labId, "1", GENERATED_AT);
+
+  const identities = [labIndexResult, companyResult, allCompaniesResult, marketResult].map(
+    (r) => ((r.body as { runIdentity?: unknown; meta?: { runIdentity: unknown } }).runIdentity ?? (r.body as { meta: { runIdentity: unknown } }).meta.runIdentity) as {
+      configuredSalesModelId: unknown;
+      resolvedSalesModelId: unknown;
+      tierParametersVersion: unknown;
+    }
+  );
+  for (const identity of identities) {
+    assert.equal(identity.configuredSalesModelId, null);
+    assert.equal(identity.resolvedSalesModelId, "legacy-waterfall-v1");
+    assert.equal(identity.tierParametersVersion, null);
+  }
+});
+
+test("EXPORT-RUN-IDENTITY-6: 新フィールド追加前と同じ形で作成された旧Run（salesModelId未指定）でも、Exportは例外を投げず従来どおり200を返す", async () => {
+  // 【後方互換】salesModelIdフィールド自体がoptionalであるため、「フィールドが無い」状態は
+  // salesModelId: undefinedと構造的に同じ（既存のCompanyLabConfig型の後方互換設計どおり）。
+  // 新しいRun Identityフィールドを追加したことで、フィールドが無い過去Runの読み込み・
+  // Exportが壊れていないことを確認する。
+  const labId = "export-run-identity-legacy-compat-lab";
+  const writableDeps = await setUpProcessedTurn1LabWithSalesModel(labId, undefined);
+  const { deps } = makeExportDeps(writableDeps);
+  const labIndexResult = await handleExportLabIndex(deps, labId, GENERATED_AT);
+  const companyResult = await handleExportCompanyTurn(deps, labId, "1", "BAL", GENERATED_AT);
+  assert.equal(labIndexResult.status, 200);
+  assert.equal(companyResult.status, 200);
+});
+
+test("EXPORT-RUN-IDENTITY-7: 同一構成（salesModelId=tiered、同一seed・同一シナリオ・同一意思決定）の2つのRunで、financialResult・marketProductAllocations（市場配分結果）が完全に一致する（Run Identityの追加が市場配分・財務計算へ影響していないことの検算）", async () => {
+  const labIdA = "export-run-identity-determinism-a-lab";
+  const labIdB = "export-run-identity-determinism-b-lab";
+  const depsA = await setUpProcessedTurn1LabWithSalesModel(labIdA, "tiered-v200-candidate-v1");
+  const depsB = await setUpProcessedTurn1LabWithSalesModel(labIdB, "tiered-v200-candidate-v1");
+  const { deps: exportDepsA } = makeExportDeps(depsA);
+  const { deps: exportDepsB } = makeExportDeps(depsB);
+
+  const resultA = await handleExportCompanyTurn(exportDepsA, labIdA, "1", "BAL", GENERATED_AT);
+  const resultB = await handleExportCompanyTurn(exportDepsB, labIdB, "1", "BAL", GENERATED_AT);
+  assert.equal(resultA.status, 200);
+  assert.equal(resultB.status, 200);
+  // labId・runIdentity.scenarioVersion（Engineバージョン日時に依存しない）以外は
+  // 完全に一致するはず。ここではEngine計算そのものであるfinancialResult・
+  // marketProductAllocationsだけを比較する（Run Identity自体はEXPORT-RUN-IDENTITY-5で
+  // 既に一致を確認済み）。
+  const financialA = (resultA.body as { financialResult: unknown }).financialResult;
+  const financialB = (resultB.body as { financialResult: unknown }).financialResult;
+  const allocationsA = (resultA.body as { marketProductAllocations: unknown }).marketProductAllocations;
+  const allocationsB = (resultB.body as { marketProductAllocations: unknown }).marketProductAllocations;
+  assert.deepEqual(financialA, financialB, "同一構成の2つのRunでfinancialResultが一致しない");
+  assert.deepEqual(allocationsA, allocationsB, "同一構成の2つのRunでmarketProductAllocationsが一致しない");
+});

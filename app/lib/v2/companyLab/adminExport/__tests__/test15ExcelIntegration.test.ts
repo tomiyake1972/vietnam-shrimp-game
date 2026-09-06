@@ -107,6 +107,8 @@ test("Test15統合: 実際の複数四半期シミュレーション（新工場
     companyIds: fixtures.map((f) => f.companyId),
     generatedAt: new Date().toISOString(),
     fixtures,
+    config: TEST_CONFIG,
+    scenarioVersion: "test-scenario-v1",
   });
 
   const buffer = await buildAllCompaniesExportExcelWorkbook(payload);
@@ -128,6 +130,8 @@ test("Test15統合: 生産・設備・労務シートのPD稼働率・実効PD�
     companyIds: fixtures.map((f) => f.companyId),
     generatedAt: new Date().toISOString(),
     fixtures,
+    config: TEST_CONFIG,
+    scenarioVersion: "test-scenario-v1",
   });
 
   const jpqEntry = payload.companies.find((c) => c.companyId === "JPQ")!;
@@ -171,6 +175,8 @@ test("Test15統合: 監査専用情報の漏洩防止 — StandardAI入力シー
     companyIds: fixtures.map((f) => f.companyId),
     generatedAt: new Date().toISOString(),
     fixtures,
+    config: TEST_CONFIG,
+    scenarioVersion: "test-scenario-v1",
   });
 
   // Standard AIの実際の入力（generateAutoPolicyDecisionへ渡した現物のownState/publicInfo）を
@@ -267,6 +273,8 @@ function buildCompanyPayloadFor(entry: CompanyLabQuarterHistoryEntry, fixtures: 
     entry,
     generatedAt: new Date().toISOString(),
     fixtures,
+    config: TEST_CONFIG,
+    scenarioVersion: "test-scenario-v1",
   });
 }
 
@@ -277,6 +285,8 @@ function buildAllPayloadFor(entry: CompanyLabQuarterHistoryEntry, fixtures: read
     companyIds: fixtures.map((f) => f.companyId),
     generatedAt: new Date().toISOString(),
     fixtures,
+    config: TEST_CONFIG,
+    scenarioVersion: "test-scenario-v1",
   });
 }
 

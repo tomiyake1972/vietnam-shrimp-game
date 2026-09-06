@@ -9,6 +9,7 @@
 
 import JSZip from "jszip";
 import type { AllCompaniesExportPayload, CompanyExportPayload } from "../../../../api/v2/exports/_lib/exportDto";
+import { ExportRunIdentity } from "../exportRunIdentity";
 import { buildAllCompaniesExportExcelWorkbook, buildCompanyExportExcelWorkbook } from "./companyLabAdminExcelBuilder";
 
 export interface CompanyLabAdminExportManifestEntry {
@@ -25,6 +26,12 @@ export interface CompanyLabAdminExportManifest {
   readonly generatedBy: string;
   readonly note: string;
   readonly entries: readonly CompanyLabAdminExportManifestEntry[];
+  /**
+   * 【EXPORT-RUN-IDENTITY-1】companyJson.meta.runIdentity（既存の共通Run Identity生成関数、
+   * exportRunIdentity.tsのSSoT）をそのまま転記するだけ。ここで新しい判定を作らない。
+   * companyJson（同一ZIP内のcompany_*.json）とrunIdentityの内容は常に完全一致する。
+   */
+  readonly runIdentity: ExportRunIdentity;
 }
 
 export interface BuildExportZipInput {
@@ -104,6 +111,7 @@ export async function buildCompanyLabAdminExportZip(input: BuildExportZipInput):
     generatedBy: "Company Lab 管理者画面「分析データをエクスポート」機能",
     note: "このZIP内の各JSONは、読み取り専用Export API（/api/v2/exports/**）のレスポンスをそのまま保存したものです。トークン・Authorizationヘッダー・Redis内部キー等は一切含まれていません。",
     entries,
+    runIdentity: input.companyJson.meta.runIdentity,
   };
   zip.file("manifest.json", JSON.stringify(manifest, null, 2));
 

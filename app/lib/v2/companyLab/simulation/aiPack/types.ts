@@ -17,6 +17,7 @@
 //  5. 秘密情報（トークン・認証情報・接続情報）は一切含めない。
 
 import { DemandMarketId, Product } from "../../../market/types";
+import { SalesModelId } from "../../../sales/salesModels";
 
 /** Pack スキーマ版。ゲーム構造が変わっても、どの版の export か分かるようにする。 */
 export const AI_ANALYSIS_PACK_SCHEMA_VERSION = "shrimpX-ai-analysis-pack-v1";
@@ -612,6 +613,16 @@ export interface PackRunMetadata {
   /** 判明しない場合は "UNKNOWN"（捏造しない）。 */
   readonly sourceBranch: string;
   readonly sourceCommit: string;
+  /**
+   * 【EXPORT-RUN-IDENTITY-1】実際に使用された販売市場モデルの識別情報
+   * （exportRunIdentity.ts、唯一のSSoT。新しい判定ロジックはここに持たない）。
+   * schemaVersion 3未満の旧保存Run（config自体を復元できない）では、
+   * salesModelId関連の4フィールドすべてがnull（取得不能。legacyと決めつけない）。
+   */
+  readonly configuredSalesModelId: SalesModelId | null;
+  readonly resolvedSalesModelId: SalesModelId | null;
+  readonly salesParametersVersion: string | null;
+  readonly tierParametersVersion: string | null;
 }
 
 export interface PackCompanySummary {

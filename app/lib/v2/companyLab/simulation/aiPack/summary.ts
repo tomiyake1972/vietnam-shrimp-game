@@ -63,6 +63,10 @@ export function buildRunSummaryMarkdown(context: AiAnalysisPackContext): string 
   lines.push(`| startedAt | ${run.startedAt} |`);
   lines.push(`| completedAt | ${run.completedAt ?? "n/a"} |`);
   lines.push(`| exportedAt | ${run.exportedAt} |`);
+  lines.push(`| configuredSalesModelId | ${run.configuredSalesModelId ?? "n/a (legacy default)"} |`);
+  lines.push(`| resolvedSalesModelId | ${run.resolvedSalesModelId ?? "unavailable (pre-salesModelId saved run)"} |`);
+  lines.push(`| salesParametersVersion | ${run.salesParametersVersion ?? "unavailable (pre-salesModelId saved run)"} |`);
+  lines.push(`| tierParametersVersion | ${run.tierParametersVersion ?? (run.resolvedSalesModelId === null ? "unavailable (pre-salesModelId saved run)" : "n/a (not tiered)")} |`);
   lines.push("");
 
   // --- Versions ---

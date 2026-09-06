@@ -78,6 +78,8 @@ import { CapexQuarterResult } from "../../../../lib/v2/capex";
 import { CompanyQuarterSummary } from "../../../../lib/v2/companyLab/types";
 import { DEMAND_MARKET_IDS, DemandMarketId, Product } from "../../../../lib/v2/market/types";
 import { CompanyLabQuarterHistoryEntry, CompanyLabPersistedStateV1 } from "../../../../lib/v2/companyLab/persistence/types";
+import { CompanyLabConfig } from "../../../../lib/v2/companyLab/types";
+import { ExportRunIdentity, buildExportRunIdentityFromCompanyLabConfig } from "../../../../lib/v2/companyLab/exportRunIdentity";
 import { CompanyId } from "../../../../lib/v2/sales/types";
 import { PeriodV2 } from "../../../../lib/v2/core/period";
 import {
@@ -169,6 +171,12 @@ export interface ExportMeta {
   /** このAPIは常に確定済み（processedAt以降・不変）の永続化データのみを返す。未確定データは扱わない。 */
   readonly dataStatus: "confirmed";
   readonly scope: ExportScope;
+  /**
+   * 【EXPORT-RUN-IDENTITY-1】実際に使用された販売市場モデル・scenario・source commit等の
+   * 識別情報（exportRunIdentity.ts、唯一のSSoT）。既存フィールドへの後方互換な追加であり、
+   * schemaVersionは増分しない（破壊的変更ではない）。
+   */
+  readonly runIdentity: ExportRunIdentity;
 }
 
 export interface BuildExportMetaInput {
@@ -178,6 +186,7 @@ export interface BuildExportMetaInput {
   readonly engineVersion: string;
   readonly scope: ExportScope;
   readonly generatedAt: string;
+  readonly runIdentity: ExportRunIdentity;
 }
 
 export function buildExportMeta(input: BuildExportMetaInput): ExportMeta {
@@ -190,6 +199,7 @@ export function buildExportMeta(input: BuildExportMetaInput): ExportMeta {
     engineVersion: input.engineVersion,
     dataStatus: "confirmed",
     scope: input.scope,
+    runIdentity: input.runIdentity,
   };
 }
 
@@ -1168,6 +1178,14 @@ export interface BuildCompanyExportPayloadInput {
    * 省略された場合 processingCapacity は null になる。
    */
   readonly fixtures?: readonly CompanyFixture[];
+  /**
+   * 【EXPORT-RUN-IDENTITY-1】Run Identity（販売市場モデル・scenario識別情報）生成用。
+   * CompanyLabPersistedStateV1.configはtop-level必須フィールドのため常に取得できる
+   * （呼び出し元がloadCurrentStateから渡す）。
+   */
+  readonly config: CompanyLabConfig;
+  /** state.currentState.runtime.scenarioState.definition.version（唯一の出所）。 */
+  readonly scenarioVersion: string;
 }
 
 export function buildCompanyExportPayload(input: BuildCompanyExportPayloadInput): CompanyExportPayload {
@@ -1184,6 +1202,7 @@ export function buildCompanyExportPayload(input: BuildCompanyExportPayloadInput)
       engineVersion: entry.engineVersion,
       scope: { kind: "company", companyId },
       generatedAt,
+      runIdentity: buildExportRunIdentityFromCompanyLabConfig(input.config, input.scenarioVersion, entry.turn),
     }),
     financialResult: financial ? buildExportFinancialResult(financial) : null,
     financingResult: financing ? buildExportFinancingResult(financing) : null,
@@ -1259,6 +1278,9 @@ export interface BuildAllCompaniesExportPayloadInput {
   readonly generatedAt: string;
   /** ラボ作成時に確定・永続化された会社fixture。省略時 processingCapacity は null。 */
   readonly fixtures?: readonly CompanyFixture[];
+  /** 【EXPORT-RUN-IDENTITY-1】buildCompanyExportPayloadと同じ（呼び出し元がloadCurrentStateから渡す）。 */
+  readonly config: CompanyLabConfig;
+  readonly scenarioVersion: string;
 }
 
 /**
@@ -1276,6 +1298,7 @@ export function buildAllCompaniesExportPayload(input: BuildAllCompaniesExportPay
       engineVersion: entry.engineVersion,
       scope: { kind: "allCompanies" },
       generatedAt,
+      runIdentity: buildExportRunIdentityFromCompanyLabConfig(input.config, input.scenarioVersion, entry.turn),
     }),
     companies: companyIds.map((companyId) => {
       const financial = extractCompanyFinancialResult(entry.record, companyId);
@@ -1322,6 +1345,9 @@ export interface BuildMarketExportPayloadInput {
   readonly labId: string;
   readonly entry: CompanyLabQuarterHistoryEntry;
   readonly generatedAt: string;
+  /** 【EXPORT-RUN-IDENTITY-1】buildCompanyExportPayloadと同じ（呼び出し元がloadCurrentStateから渡す）。 */
+  readonly config: CompanyLabConfig;
+  readonly scenarioVersion: string;
 }
 
 export function buildMarketExportPayload(input: BuildMarketExportPayloadInput): MarketExportPayload {
@@ -1334,6 +1360,7 @@ export function buildMarketExportPayload(input: BuildMarketExportPayloadInput): 
       engineVersion: entry.engineVersion,
       scope: { kind: "allCompanies" },
       generatedAt,
+      runIdentity: buildExportRunIdentityFromCompanyLabConfig(input.config, input.scenarioVersion, entry.turn),
     }),
     market: buildExportMarketResult(entry.record.marketResult),
   };
@@ -1352,6 +1379,8 @@ export interface LabIndexExportPayload {
   readonly playerCompanyId: CompanyId;
   readonly availableTurns: readonly number[];
   readonly latestProcessedTurn: number | null;
+  /** 【EXPORT-RUN-IDENTITY-1】既存フィールドへの後方互換な追加（schemaVersion増分なし）。 */
+  readonly runIdentity: ExportRunIdentity;
 }
 
 export interface BuildLabIndexExportPayloadInput {
@@ -1364,6 +1393,7 @@ export interface BuildLabIndexExportPayloadInput {
 export function buildLabIndexExportPayload(input: BuildLabIndexExportPayloadInput): LabIndexExportPayload {
   const { labId, state, historyIndex, generatedAt } = input;
   const sorted = [...historyIndex].sort((a, b) => a - b);
+  const latestProcessedTurn = sorted.length > 0 ? sorted[sorted.length - 1] : null;
   return {
     schemaVersion: EXPORT_SCHEMA_VERSION,
     generatedAt,
@@ -1372,6 +1402,11 @@ export function buildLabIndexExportPayload(input: BuildLabIndexExportPayloadInpu
     dataStatus: "confirmed",
     playerCompanyId: state.playerCompanyId,
     availableTurns: sorted,
-    latestProcessedTurn: sorted.length > 0 ? sorted[sorted.length - 1] : null,
+    latestProcessedTurn,
+    runIdentity: buildExportRunIdentityFromCompanyLabConfig(
+      state.config,
+      state.currentState.runtime.scenarioState.definition.version,
+      latestProcessedTurn ?? 0
+    ),
   };
 }

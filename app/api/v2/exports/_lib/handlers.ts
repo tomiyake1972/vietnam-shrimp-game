@@ -74,6 +74,8 @@ export async function handleExportCompanyTurn(
       entry,
       generatedAt: now,
       fixtures: state.fixtures,
+      config: state.config,
+      scenarioVersion: state.currentState.runtime.scenarioState.definition.version,
     });
     return { status: 200, body };
   } catch (e) {
@@ -98,7 +100,15 @@ export async function handleExportAllCompaniesTurn(
     const entry = await deps.readOnlyRepository.loadHistoryEntry(labId, turn);
     const companyIds = entry.record.companySummaries.map((s) => s.companyId);
     const state = await deps.readOnlyRepository.loadCurrentState(labId);
-    const body = buildAllCompaniesExportPayload({ labId, entry, companyIds, generatedAt: now, fixtures: state.fixtures });
+    const body = buildAllCompaniesExportPayload({
+      labId,
+      entry,
+      companyIds,
+      generatedAt: now,
+      fixtures: state.fixtures,
+      config: state.config,
+      scenarioVersion: state.currentState.runtime.scenarioState.definition.version,
+    });
     return { status: 200, body };
   } catch (e) {
     return mapDomainErrorToHttp(e);
@@ -120,7 +130,16 @@ export async function handleExportMarketTurn(
 
   try {
     const entry = await deps.readOnlyRepository.loadHistoryEntry(labId, turn);
-    const body = buildMarketExportPayload({ labId, entry, generatedAt: now });
+    // 【EXPORT-RUN-IDENTITY-1】他の2つのExport（company/allCompanies）と同じRun Identityを
+    // 一貫して載せるため、こちらも同様にstateを読む（新しい判定ロジックは追加しない）。
+    const state = await deps.readOnlyRepository.loadCurrentState(labId);
+    const body = buildMarketExportPayload({
+      labId,
+      entry,
+      generatedAt: now,
+      config: state.config,
+      scenarioVersion: state.currentState.runtime.scenarioState.definition.version,
+    });
     return { status: 200, body };
   } catch (e) {
     return mapDomainErrorToHttp(e);

@@ -69,6 +69,12 @@ export async function buildAnalysisWorkbook(context: AiAnalysisPackContext, data
       ["exportedAt", context.run.exportedAt],
       ["standardAiProposableCapexTypes", context.standardAiProposableCapexTypes.join(", ")],
       ["gameCapexTypes", context.gameCapexTypes.join(", ")],
+      // 【EXPORT-RUN-IDENTITY-1】実際に使用された販売市場モデルの識別情報。
+      // 旧保存Run（config取得不能）ではnull→"（取得不能）"表示にする（推測で埋めない）。
+      ["configuredSalesModelId", context.run.configuredSalesModelId ?? "（未指定＝legacy運用）"],
+      ["resolvedSalesModelId", context.run.resolvedSalesModelId ?? "（取得不能・旧保存Run）"],
+      ["salesParametersVersion", context.run.salesParametersVersion ?? "（取得不能・旧保存Run）"],
+      ["tierParametersVersion", context.run.tierParametersVersion ?? (context.run.resolvedSalesModelId === null ? "（取得不能・旧保存Run）" : "（非該当・legacy）")],
     ]
   );
 

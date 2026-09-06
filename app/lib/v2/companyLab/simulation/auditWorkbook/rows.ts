@@ -19,6 +19,7 @@
 // meta.missingDataNotes と 00_README へ必ず残す（捏造しない）。
 
 import { StoredSimulationRun } from "../persistence/types";
+import { buildExportRunIdentityFromSimulationRun } from "../../exportRunIdentity";
 import { CompanyDecisionInput, CompanyQuarterRecord } from "../../types";
 import { CompanyId } from "../../../sales/types";
 import { DemandMarketId, Product } from "../../../market/types";
@@ -173,6 +174,15 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
     missingDataNotes.push("Standard AI six-stage traces are unavailable for this run; 05_DECISION_DIAGNOSTICS falls back to the analytics dataset aiTrace facts where present.");
   }
 
+  // 【EXPORT-RUN-IDENTITY-1】resume?.state?.configはschemaVersion 3以降でのみ取得可能
+  // （standardAiProfileMode等、既存コードが同じresume?.state?.config経由の取得をしている
+  // 箇所と同じ前提）。旧保存Runではundefinedのまま渡し、salesModel関連フィールドを
+  // 「取得不能」（null）にする。
+  const runIdentity = buildExportRunIdentityFromSimulationRun(
+    { scenarioId: run.scenarioId, scenarioVersion: run.scenarioVersion, seed: run.seed, requestedTurns: run.requestedTurns, completedTurns: run.completedTurns },
+    resume?.state?.config
+  );
+
   // ---------------- 01_RUN_SUMMARY ----------------
   const runSummary: AuditRunSummaryRow[] = [
     { field: "simulationRunId", value: run.simulationRunId },
@@ -183,6 +193,12 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
     { field: "asOfTurn", value: asOfTurn },
     { field: "requestedTurns", value: run.requestedTurns },
     { field: "completedTurns", value: run.completedTurns },
+    { field: "configuredSalesModelId", value: runIdentity.configuredSalesModelId },
+    { field: "resolvedSalesModelId", value: runIdentity.resolvedSalesModelId },
+    { field: "salesParametersVersion", value: runIdentity.salesParametersVersion },
+    { field: "tierParametersVersion", value: runIdentity.tierParametersVersion },
+    { field: "sourceCommit", value: runIdentity.sourceCommit },
+    { field: "sourceBranch", value: runIdentity.sourceBranch },
     { field: "gameEndTurn", value: run.gameEndTurn ?? null },
     { field: "gameEndedAt", value: run.gameEndedAt ?? null },
     { field: "startedAt", value: run.startedAt },

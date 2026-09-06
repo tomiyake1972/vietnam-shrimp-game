@@ -685,8 +685,13 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
  * （salesBaseAccumulation等、既定OFF＝opt-in）とは既定値の向きが異なる点に注意）。
  * 両方同時有効時はSALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1
  * （両ウェイトを保持したまま合計1.0を維持する組み合わせ版）を使う。
+ *
+ * 【EXPORT-RUN-IDENTITY-1】ExportのRun Identity（resolvedSalesModelId・
+ * salesParametersVersion・tierParametersVersion）が「実際に使用されたSalesParameters」を
+ * 一意に特定するための唯一の計算箇所として、この関数をexportする
+ * （companyLab/exportRunIdentity.tsが呼ぶ。判定ロジックをExport側で重複実装しない）。
  */
-function salesParametersFor(config: CompanyLabConfig): SalesParameters {
+export function salesParametersFor(config: CompanyLabConfig): SalesParameters {
   // 【Phase 6B】比較用の上書きが指定されていればそれを使う（既定は undefined）。
   // in-memory 専用（CLI / test / research / diagnostics）で、永続 schema には存在しない。
   if (config.salesParamsOverride) return config.salesParamsOverride;

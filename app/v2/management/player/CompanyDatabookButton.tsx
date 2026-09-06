@@ -40,6 +40,8 @@ export function CompanyDatabookButton({ session, companyId }: Props) {
           companyId,
           entry,
           fixtures: session.fixtures,
+          config: session.config,
+          scenarioVersion: session.run.scenarioVersion,
         }),
       });
       if (!response.ok) {

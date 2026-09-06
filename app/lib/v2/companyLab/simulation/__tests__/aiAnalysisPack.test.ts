@@ -14,7 +14,8 @@ import assert from "node:assert/strict";
 import { advanceSimulationTurns, createSimulationSession } from "../engine";
 import { buildDatasetFromSession } from "../analytics/dataset";
 import { reconcileSalesAllocation } from "../analytics/views";
-import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, StoredSimulationRun } from "../persistence/types";
+import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, StoredSimulationRun, SimulationResumePayload } from "../persistence/types";
+import { CompanyLabConfig } from "../../types";
 import { AI_ANALYSIS_PACK_SCHEMA_VERSION } from "../aiPack/types";
 import { buildAiAnalysisPackContext } from "../aiPack/context";
 import { buildMajorChanges, majorChangesToCsv, MAJOR_CHANGE_THRESHOLDS } from "../aiPack/changeLog";
@@ -430,6 +431,30 @@ test("PACK-27: schemaVersion 1 の古い保存データでも壊れず、不在�
   const company = Object.values(context.companies)[0];
   assert.equal(company.turns.length, 3);
   assert.equal(company.turns[0].beginningState.cashUsd, null);
+});
+
+test("EXPORT-RUN-IDENTITY-1【AI Analysis Pack】: resumePayload.state.configにtiered salesModelIdがあれば、context.runのconfigured/resolvedSalesModelIdへ反映される", () => {
+  const stored = buildStored(3);
+  const tieredConfig: CompanyLabConfig = { scenarioId: "baseline", mode: "canonical", seed: "pack-test", turns: 3, salesModelId: "tiered-v200-candidate-v1" };
+  const withResumePayload: StoredSimulationRun = {
+    ...stored,
+    resumePayload: { state: { config: tieredConfig } } as unknown as SimulationResumePayload,
+  };
+  const context = buildContext(withResumePayload);
+  assert.equal(context.run.configuredSalesModelId, "tiered-v200-candidate-v1");
+  assert.equal(context.run.resolvedSalesModelId, "tiered-v200-candidate-v1");
+  assert.equal(context.run.salesParametersVersion, "sales-v0.2+tiered-market-allocation-v200-candidate-v1");
+  assert.ok(context.run.tierParametersVersion !== null);
+});
+
+test("EXPORT-RUN-IDENTITY-6【AI Analysis Pack・後方互換】: resumePayloadが無い保存物（schemaVersion 1/2、既存のPACK-27と同じ前提）でも例外を投げず、salesModel関連フィールドはすべてnull（legacyと決めつけない）", () => {
+  const stored = buildStored(3);
+  const legacy: StoredSimulationRun = { schemaVersion: 1, run: stored.run, dataset: stored.dataset, savedAt: AT };
+  const context = buildContext(legacy);
+  assert.equal(context.run.configuredSalesModelId, null);
+  assert.equal(context.run.resolvedSalesModelId, null);
+  assert.equal(context.run.salesParametersVersion, null);
+  assert.equal(context.run.tierParametersVersion, null);
 });
 
 test("PACK-28: 生成AIを呼ばない（Pack 生成モジュールが AI SDK を import しない）", async () => {

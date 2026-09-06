@@ -20,7 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildCompanyExportPayload } from "../../exports/_lib/exportDto";
 import { buildCompanyExportExcelWorkbook } from "../../../../lib/v2/companyLab/adminExport/companyLabAdminExcelBuilder";
 import { CompanyLabQuarterHistoryEntry } from "../../../../lib/v2/companyLab/persistence/types";
-import { CompanyFixture } from "../../../../lib/v2/companyLab/types";
+import { CompanyFixture, CompanyLabConfig } from "../../../../lib/v2/companyLab/types";
 import { isProduction } from "../../../../lib/env";
 
 const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -30,6 +30,9 @@ interface CompanyDatabookRequestBody {
   readonly companyId: string;
   readonly entry: CompanyLabQuarterHistoryEntry;
   readonly fixtures: readonly CompanyFixture[];
+  /** 【EXPORT-RUN-IDENTITY-1】クライアントのSimulationSession.configをそのまま転記する。 */
+  readonly config: CompanyLabConfig;
+  readonly scenarioVersion: string;
 }
 
 function errorResponse(status: number, message: string): NextResponse {
@@ -50,7 +53,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return errorResponse(400, "リクエストボディがJSONとして解釈できません。");
   }
 
-  const { simulationRunId, companyId, entry, fixtures } = body;
+  const { simulationRunId, companyId, entry, fixtures, config, scenarioVersion } = body;
   if (typeof simulationRunId !== "string" || simulationRunId.length === 0) {
     return errorResponse(400, "simulationRunId が指定されていません。");
   }
@@ -66,6 +69,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (entry.playerSubmission?.companyId !== companyId) {
     return errorResponse(400, "entry.playerSubmission が指定されたcompanyIdと一致しません。");
   }
+  if (!config || typeof config !== "object") {
+    return errorResponse(400, "config（CompanyLabConfig）が指定されていません。");
+  }
+  if (typeof scenarioVersion !== "string" || scenarioVersion.length === 0) {
+    return errorResponse(400, "scenarioVersion が指定されていません。");
+  }
 
   try {
     const payload = buildCompanyExportPayload({
@@ -74,6 +83,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       entry,
       generatedAt: new Date().toISOString(),
       fixtures,
+      config,
+      scenarioVersion,
     });
     // 【指示B】単一Turn分のDatabook（このRun・このTurn・この会社）を出力する。
     // 通常プレイの「これまでの全Turn履歴を含むtrend付きDatabook」とは異なり、

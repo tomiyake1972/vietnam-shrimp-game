@@ -10,6 +10,7 @@ import { advanceSimulationTurns, createSimulationSession } from "../../engine";
 import { buildDatasetFromSession } from "../../analytics/dataset";
 import { buildResumePayload } from "../../persistence/resume";
 import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, StoredSimulationRun } from "../../persistence/types";
+import { CompanyLabConfig } from "../../../types";
 import { buildStandardAiAuditExport, buildStandardAiAuditWorkbookData, standardAiAuditWorkbookFileName, AUDIT_DATA_DICTIONARY } from "../index";
 import { CompanyQuarterRecord } from "../../../types";
 
@@ -371,4 +372,39 @@ test("SAI-AUDIT-XLSX-18: 生成した .xlsx が実際に開け、各シートが
     checked++;
   });
   assert.ok(checked > 0, "revenueUsd の数値セルを1つも検査できなかった");
+});
+
+test("EXPORT-RUN-IDENTITY-2/5【Standard AI Audit・実データ】: salesModelId未指定の実Run（createSimulationSession既定）では、01_RUN_SUMMARYのconfiguredSalesModelIdはnull・resolvedSalesModelIdはlegacy-waterfall-v1になる", () => {
+  const d = data(4);
+  const byField = (field: string) => d.runSummary.find((r) => r.field === field)?.value;
+  assert.equal(byField("configuredSalesModelId"), null);
+  assert.equal(byField("resolvedSalesModelId"), "legacy-waterfall-v1");
+  assert.equal(byField("tierParametersVersion"), null);
+  assert.ok(typeof byField("salesParametersVersion") === "string" && (byField("salesParametersVersion") as string).length > 0);
+});
+
+test("EXPORT-RUN-IDENTITY-1【Standard AI Audit】: resumePayload.state.configにtiered salesModelIdがあれば、01_RUN_SUMMARYへ反映される", () => {
+  const built = build(4);
+  const tieredConfig: CompanyLabConfig = { ...built.stored.resumePayload!.state.config, salesModelId: "tiered-v200-candidate-v1" };
+  const withTiered: StoredSimulationRun = {
+    ...built.stored,
+    resumePayload: { ...built.stored.resumePayload!, state: { ...built.stored.resumePayload!.state, config: tieredConfig } },
+  };
+  const d = buildStandardAiAuditWorkbookData({ stored: withTiered, generatedAt: AT, liveHistory: built.liveHistory });
+  const byField = (field: string) => d.runSummary.find((r) => r.field === field)?.value;
+  assert.equal(byField("configuredSalesModelId"), "tiered-v200-candidate-v1");
+  assert.equal(byField("resolvedSalesModelId"), "tiered-v200-candidate-v1");
+  assert.equal(byField("salesParametersVersion"), "sales-v0.2+tiered-market-allocation-v200-candidate-v1");
+  assert.notEqual(byField("tierParametersVersion"), null);
+});
+
+test("EXPORT-RUN-IDENTITY-6【Standard AI Audit・後方互換】: resumePayloadが無い旧保存Run（schemaVersion 1、既存のlegacyケースと同じ前提）でも例外を投げず、salesModel関連フィールドはすべてnull（legacyと決めつけない）", () => {
+  const built = build(4);
+  const legacy: StoredSimulationRun = { schemaVersion: 1, run: built.stored.run, dataset: built.stored.dataset, savedAt: AT };
+  const d = buildStandardAiAuditWorkbookData({ stored: legacy, generatedAt: AT, liveHistory: built.liveHistory });
+  const byField = (field: string) => d.runSummary.find((r) => r.field === field)?.value;
+  assert.equal(byField("configuredSalesModelId"), null);
+  assert.equal(byField("resolvedSalesModelId"), null);
+  assert.equal(byField("salesParametersVersion"), null);
+  assert.equal(byField("tierParametersVersion"), null);
 });
