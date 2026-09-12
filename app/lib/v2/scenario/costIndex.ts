@@ -27,6 +27,18 @@ export const NEUTRAL_COST_INDEX = 1.0;
 /** 建設費算定方式の既定（Scenario未指定時）。 */
 export const DEFAULT_CONSTRUCTION_COST_POLICY: ConstructionCostPolicyId = "legacy-requested-cost";
 
+/**
+ * 【ENG-DS2-COST-FOUNDATION-1】建設費算定方式の全列挙（この1箇所が正典）。
+ *
+ * resolveProjectBudget は "indexed-required-cost-v1" 以外をすべて legacy 扱いにするため、
+ * 綴り違いの policy は **黙って legacy へ落ちる**（指数を効かせたつもりで効かないRunが
+ * 生まれる）。validation 側がこの列挙で弾く。
+ */
+export const CONSTRUCTION_COST_POLICY_IDS: readonly ConstructionCostPolicyId[] = [
+  "legacy-requested-cost",
+  "indexed-required-cost-v1",
+];
+
 /** operatingCostInflation で宣言できるキーの全列挙（診断・テストの網羅性確認用）。 */
 export const OPERATING_COST_INDEX_KEYS: readonly OperatingCostIndexKey[] = [
   "sellingLogistics",

@@ -6,7 +6,8 @@
 
 import { COUNTRY_IDS, DEMAND_MARKET_IDS, CountryId, DemandMarketId } from "../market/types";
 import { PRODUCT_LIFECYCLE_PARAMETERS_V1, resolveProductLifecycleParameters } from "../market/productLifecycle";
-import { assertSortedKeyframes } from "./interpolation";
+import { assertSortedKeyframes, isTrendInterpolation, TREND_INTERPOLATIONS } from "./interpolation";
+import { CONSTRUCTION_COST_POLICY_IDS, OPERATING_COST_INDEX_KEYS } from "./costIndex";
 import { ScenarioDefinition, ScenarioEvent, ScenarioValidationResult, ScenarioValidationError } from "./types";
 import type { CostIndexTrack } from "./types";
 
@@ -245,6 +246,16 @@ export function validateScenarioDefinition(definition: ScenarioDefinition): Scen
   const operatingCostInflation = definition.operatingCostInflation;
   if (operatingCostInflation !== undefined) {
     for (const [key, track] of Object.entries(operatingCostInflation.tracks)) {
+      // 【受入前修正1】未知キーを黙殺しない。resolveOperatingCostIndex は
+      // OperatingCostIndexKey でしか tracks を引かないため、綴り違いのキーは
+      // エラーにも警告にもならず「宣言したのに効かない」状態になる。
+      if (!(OPERATING_COST_INDEX_KEYS as readonly string[]).includes(key)) {
+        errors.push(
+          `operatingCostInflation.tracks: 未知の指数キーです: "${key}"。` +
+            `指定できるのは ${OPERATING_COST_INDEX_KEYS.join(" / ")} のみです。`
+        );
+        continue;
+      }
       if (track !== undefined) {
         costTracks.push({ label: `operatingCostInflation.tracks.${key}`, track });
       }
@@ -255,6 +266,13 @@ export function validateScenarioDefinition(definition: ScenarioDefinition): Scen
     costTracks.push({ label: "rawMarketPricing.rawPriceCaptureIndex", track: rawMarketPricing.rawPriceCaptureIndex });
   }
   for (const { label, track } of costTracks) {
+    // 【受入前修正3】補間方式の未知値を黙って linear にしない。
+    if (!isTrendInterpolation(track.interpolation)) {
+      errors.push(
+        `${label}: interpolation は ${TREND_INTERPOLATIONS.join(" または ")} である必要があります。` +
+          `受け取った値: ${JSON.stringify(track.interpolation)}`
+      );
+    }
     try {
       assertSortedKeyframes(track.keyframes, label);
     } catch (e) {
@@ -268,6 +286,28 @@ export function validateScenarioDefinition(definition: ScenarioDefinition): Scen
       if (!Number.isFinite(kf.value) || kf.value <= 0) {
         errors.push(`${label}: 指数は0より大きい有限数である必要があります。受け取った値: ${kf.value}`);
       }
+    }
+  }
+
+  // 【受入前修正2】建設費算定方式の不正値を黙って legacy へフォールバックさせない。
+  // resolveProjectBudget は "indexed-required-cost-v1" 以外をすべて legacy として扱うため、
+  // ここで弾かないと「indexed のつもりが legacy で走ったRun」が生まれる。
+  const constructionCostPolicy: unknown = definition.constructionCostPolicy;
+  if (constructionCostPolicy !== undefined && !(CONSTRUCTION_COST_POLICY_IDS as readonly unknown[]).includes(constructionCostPolicy)) {
+    errors.push(
+      `constructionCostPolicy: ${CONSTRUCTION_COST_POLICY_IDS.join(" または ")} である必要があります。` +
+        `受け取った値: ${JSON.stringify(constructionCostPolicy)}`
+    );
+  }
+
+  // 【受入前修正3】長期トレンドも同じ補間規則（interpolation.ts）を共有しているため、
+  // 同じ未知値リスクを持つ。cost track と同一の基準で検証する。
+  for (const trend of definition.longTermTrends) {
+    if (!isTrendInterpolation(trend.interpolation)) {
+      errors.push(
+        `trend(${trend.trendId}): interpolation は ${TREND_INTERPOLATIONS.join(" または ")} である必要があります。` +
+          `受け取った値: ${JSON.stringify(trend.interpolation)}`
+      );
     }
   }
 

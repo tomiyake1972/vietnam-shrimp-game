@@ -127,7 +127,10 @@ test("COST-IDX-7: validateScenarioDefinition が数表の不正を検出する",
     operatingCostInflation: {
       settingsId: "ok",
       tracks: {
-        labor: undefined,
+        // 【受入前修正2】未指定(undefined)の track はスキップされる、という元々の意図を
+        // 保ったまま「既知キー」で表現する。未知キー（旧: labor）は誤字を黙殺しないため
+        // 拒否されるようになった（costIndexRuntimeValidation.test.ts COST-VAL-3 参照）。
+        temporaryLabor: undefined,
         regularLabor: {
           interpolation: "linear",
           keyframes: [

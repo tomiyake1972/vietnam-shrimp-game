@@ -9,6 +9,21 @@
 import { ScenarioValidationError } from "./types";
 import type { LongTermTrend, LongTermTrendKeyframe, TrendInterpolation } from "./types";
 
+/**
+ * 【ENG-DS2-COST-FOUNDATION-1】補間方式の全列挙（この1箇所が正典）。
+ *
+ * interpolateKeyframeValue は "step" を判定したあと残りを linear として扱うため、
+ * 未知の文字列が runtime に入ると **黙って linear になる**。型はコンパイル時にしか
+ * 効かないので、runtime入力（JSON復元・外部数表）を受ける経路では
+ * validation 側が isTrendInterpolation で弾く責務を持つ。
+ */
+export const TREND_INTERPOLATIONS: readonly TrendInterpolation[] = ["linear", "step"];
+
+/** runtime値が TrendInterpolation かどうかを判定する（validation から使う）。 */
+export function isTrendInterpolation(value: unknown): value is TrendInterpolation {
+  return typeof value === "string" && (TREND_INTERPOLATIONS as readonly string[]).includes(value);
+}
+
 /** キーフレームがturn昇順であることを検証する（重複turnも不可）。 */
 export function assertSortedKeyframes(keyframes: readonly LongTermTrendKeyframe[], label: string): void {
   if (keyframes.length < 2) {
