@@ -14,6 +14,7 @@ import { evaluateNewFactoryDecision, NEW_FACTORY_STRATEGY_PARAMETERS_V1 } from "
 import { StandardAiObservation } from "../../standardAi/types";
 import { PressureScores } from "../../standardAi/pressures";
 import { CompanyFixture } from "../../types";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../../standardAi/costProjection";
 
 const fixture = { companyId: "BAL" } as unknown as CompanyFixture;
 
@@ -111,6 +112,7 @@ function passingInput(overrides: Record<string, unknown> = {}) {
     strategicGrowth: growth,
     productionNeededByProductBeforeCap: { hoso: 7000, pd: 6000, vap: 4500 },
     existingExpansionProposedThisQuarter: false,
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
     ...overrides,
   };
 }

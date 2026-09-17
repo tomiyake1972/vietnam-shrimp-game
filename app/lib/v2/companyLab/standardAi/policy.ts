@@ -71,6 +71,9 @@ import { ConversionObservation, observeContractConversion } from "./commercialHi
 import { companySalesOrganizationCapacity, marketFragmentationFactor } from "../../sales/salesCapacityModel";
 import { processingCapacity } from "../../sales/salesForce";
 import { StandardAiObservation } from "./types";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION, StandardAiCostProjection, toStandardAiCostProjection } from "./costProjection";
+import { buildTurnEconomicsProjection } from "../turnEconomicsProjection";
+import { ScenarioDefinition } from "../../scenario/types";
 import { assessGrowthPressure, computeGrowthPressureCore } from "./growth";
 import { GrowthPressureAssessment } from "./growth/types";
 import {
@@ -415,7 +418,19 @@ export function generateStandardAiDecisionWithDiagnostics(
    * Vision解決は必ずvision/overrides.tsのresolveCompanyVision（唯一のSSoT）を
    * 通す。ここでdefaultVisionDocumentFor/resolveVisionAtTurnを直接呼ばない。
    */
-  visionOverrides?: CompanyLabVisionOverrides
+  visionOverrides?: CompanyLabVisionOverrides,
+  /**
+   * 【#05 費用Projection接続】そのRunのScenario definitionと当Turnから
+   * buildTurnEconomicsProjection（Engineと共通の唯一の窓口）で作った費用前提。
+   *
+   * この関数の中でProjectionを作り直すことはしない。**会社×Turnにつき1つ**を
+   * 上位（engine.ts / providerなど）で構築して渡し、以降の全経路へ同じ参照を配る。
+   * 途中で別々に作ると、同じTurnの中で費用前提が分岐しうるため。
+   *
+   * 未指定のときは NEUTRAL_STANDARD_AI_COST_PROJECTION（＝全指数1.00・legacy建設費）
+   * となり、本変更前と完全に同一の判断・数値になる（既存CLI・診断scriptの後方互換）。
+   */
+  costProjection: StandardAiCostProjection = NEUTRAL_STANDARD_AI_COST_PROJECTION
 ): StandardAiDecisionWithDiagnostics {
   const observation = buildStandardAiObservation(fixture, ownState, publicInfo, period, turn);
   const pressures = computePressureScores(observation, fixture, params);
@@ -695,6 +710,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     observation,
     pressures,
     params,
+    costProjection,
     procurementCashPlan,
     crisisState: crisisAssessment.state,
     financialRiskTolerance: vision ? vision.financialRiskTolerance : null,
@@ -808,6 +824,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     requiredRawMaterialUnconstrained,
     params,
     undefined,
+    costProjection,
     liquidityGate,
     // 【§3 PRODUCTION】Deliverability Gapが生産能力起因かつ持続的なときだけ、
     // ボトルネック判定の分子を志側へ戻す（既存のsustained / noExcess / 財務ゲートは無変更）。
@@ -845,7 +862,7 @@ export function generateStandardAiDecisionWithDiagnostics(
   // marginal economicsを確認しながらsalesForceHireCount/salesForceLayoffCountを
   // 決定する。production decision・Worker decision・procurement decision・
   // finance decisionのいずれの計算結果も変更しない（既に計算済みの値を読むだけ）。
-  const unitEconomicsResult = buildStandardAiUnitEconomics(observation);
+  const unitEconomicsResult = buildStandardAiUnitEconomics(observation, costProjection);
 
   // 【2026-08-05新設・Strategic Intent / Target Scale】三宅さんご指示により、
   // 「限界利益が正な間は増員」ではなく「この会社が目指す規模（Target Scale Band）
@@ -912,6 +929,7 @@ export function generateStandardAiDecisionWithDiagnostics(
   // 独立した戦略評価を行う。提案しなかった場合も理由コードを必ず残す。
   const newFactoryResult = evaluateNewFactoryDecision({
     turn,
+    costProjection,
     fixture,
     observation,
     pressures,
@@ -1023,7 +1041,7 @@ export function generateStandardAiDecisionWithDiagnostics(
   // 【Phase SAI-GROW-3B-1・実装指示§8・§9】借入判断は投資確定後に行う。
   // 当期に承認した新規投資の当期支払ぶんも資金需要へ含めるため、Crisis Gate適用後の
   // 最終CAPEX（finalCapexDecision）が決まってから評価する。
-  const financingResult = buildStandardAiFinancingRequest(observation, pressures, params, procurementCashPlan, {
+  const financingResult = buildStandardAiFinancingRequest(observation, pressures, params, costProjection, procurementCashPlan, {
     assessment: liquidityAssessment,
     approvedInvestmentPaymentsThisQuarterUsd: isSevereDistress ? 0 : approvedInvestmentPaymentsThisQuarterUsd,
     // 【Phase SAI-GROW-3B-1.1】当期承認した投資のうち、手元現金の余力
@@ -1456,6 +1474,13 @@ export interface StandardAiProviderOptions {
   readonly resolveParams?: (companyId: string) => StandardAiParamsResolution;
   /** 【Management Console Vision Calibration】Run固有のVision上書き（未指定なら既定Visionのみ）。 */
   readonly visionOverrides?: CompanyLabVisionOverrides;
+  /**
+   * 【#05 費用Projection接続】そのRunのScenario definition。渡された場合、
+   * providerは各Turnで buildTurnEconomicsProjection（Engineと同じ唯一の窓口）を
+   * 1回だけ呼び、そのTurnの費用前提を意思決定へ渡す。
+   * 未指定なら中立値（全指数1.00・legacy建設費）＝本接続前と完全に同一の挙動。
+   */
+  readonly scenarioDefinition?: ScenarioDefinition;
 }
 
 export function createStandardAiProvider(
@@ -1464,10 +1489,21 @@ export function createStandardAiProvider(
   readonly provider: CompanyDecisionProvider;
   readonly diagnostics: StandardAiQuarterDiagnostics[];
 } {
-  const { resolveParams, visionOverrides } = options;
+  const { resolveParams, visionOverrides, scenarioDefinition } = options;
   const salesParams = options.salesParams ?? SALES_PARAMETERS_V1;
   const diagnostics: StandardAiQuarterDiagnostics[] = [];
+  /** Turnごとに1回だけ構築し、同一Turnの全社・全判断へ同じ参照を配る（値が分岐しないように）。 */
+  const costProjectionByTurn = new Map<number, StandardAiCostProjection>();
+  const costProjectionFor = (turn: number): StandardAiCostProjection => {
+    if (scenarioDefinition === undefined) return NEUTRAL_STANDARD_AI_COST_PROJECTION;
+    const cached = costProjectionByTurn.get(turn);
+    if (cached !== undefined) return cached;
+    const built = toStandardAiCostProjection(buildTurnEconomicsProjection({ definition: scenarioDefinition, turn }));
+    costProjectionByTurn.set(turn, built);
+    return built;
+  };
   const provider: CompanyDecisionProvider = (fixture, ownState, publicInfo, period, turn) => {
+    const costProjection = costProjectionFor(turn);
     if (!resolveParams) {
       const result = generateStandardAiDecisionWithDiagnostics(
         fixture,
@@ -1477,7 +1513,8 @@ export function createStandardAiProvider(
         turn,
         STANDARD_AI_PARAMETERS_V1,
         salesParams,
-        visionOverrides
+        visionOverrides,
+        costProjection
       );
       diagnostics.push(result.diagnostics);
       return result.decision;
@@ -1492,7 +1529,8 @@ export function createStandardAiProvider(
       turn,
       resolution.params,
       salesParams,
-      visionOverrides
+      visionOverrides,
+      costProjection
     );
 
     // 【実装指示§4】バイアスが1件でも適用されている場合のみ、基準パラメータでの
@@ -1500,7 +1538,17 @@ export function createStandardAiProvider(
     // 全体の実行コストを不必要に倍増させない）。
     const baselineDecision =
       resolution.appliedBiasItems.length > 0
-        ? generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, STANDARD_AI_PARAMETERS_V1).decision
+        ? generateStandardAiDecisionWithDiagnostics(
+            fixture,
+            ownState,
+            publicInfo,
+            period,
+            turn,
+            STANDARD_AI_PARAMETERS_V1,
+            undefined,
+            undefined,
+            costProjection
+          ).decision
         : undefined;
 
     diagnostics.push({

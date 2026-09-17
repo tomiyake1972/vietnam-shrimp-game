@@ -20,6 +20,7 @@ import { DEMAND_MARKET_IDS } from "../../../market/types";
 import { captureStrategy } from "../../simulation/aiPack/capture";
 import { StandardAiQuarterDiagnostics } from "../../standardAi/policy";
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 const fixture = {
   companyId: "BAL",
@@ -147,7 +148,7 @@ function pressures(overrides: Partial<PressureScores> = {}): PressureScores {
 const NO_SHORTFALL = { hoso: 0, pd: 0, vap: 0 };
 
 test("CE1.1-1: PROFILE OFF（STANDARD_AI_PARAMETERS_V1そのまま）でもPD機械化candidateを生成・提案できる", () => {
-  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(result.diagnostics.some((d) => d.code === "PD_MECH_CONSIDERED"), "OFF相当のparamsでもconsideredされるべき");
   const proposal = result.capexDecision.newProjectProposals.find((p) => p.projectType === "pdMechanization");
   assert.ok(proposal, "OFF相当のparamsでも経済性が良ければ提案されるべき（capability自体はProfileと独立）");
@@ -155,7 +156,7 @@ test("CE1.1-1: PROFILE OFF（STANDARD_AI_PARAMETERS_V1そのまま）でもPD機
 
 test("CE1.1-2: PROFILE OFF（STANDARD_AI_PARAMETERS_V1）はstrategyFitMultiplier=1.0（neutral）で評価する", () => {
   assert.deepEqual(STANDARD_AI_PARAMETERS_V1.productOrientationMultipliers, {}, "OFF基準paramsは商品志向倍率を持たない（＝neutral 1.0扱い）");
-  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const proposed = result.diagnostics.find((d) => d.code === "PD_MECH_PROPOSED");
   assert.ok(proposed);
   assert.equal(proposed!.keyValues?.strategyFitMultiplier, 1, "OFFのstrategyFitMultiplierは1.0（neutral）であるべき");
@@ -168,7 +169,7 @@ test("CE1.1-3: PROFILE ONでは既存のCompanyOrientationProfile/ManagementProf
   assert.equal(jpqResolution.orientationProfileId, "japanQuality");
   const jpqObservation = observation({ companyId: "JPQ" });
   const jpqFixture = { ...fixture, companyId: "JPQ" } as unknown as CompanyFixture;
-  const result = buildStandardAiCapexDecision(jpqFixture, jpqObservation, pressures(), NO_SHORTFALL, 6000, jpqResolution.params);
+  const result = buildStandardAiCapexDecision(jpqFixture, jpqObservation, pressures(), NO_SHORTFALL, 6000, jpqResolution.params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const entry = result.diagnostics.find((d) => d.code === "PD_MECH_CONSIDERED" || d.code === "PD_MECH_PROPOSED" || d.code === "PD_MECH_PAYBACK_UNATTRACTIVE");
   assert.ok(entry, "JPQ ONでも何らかのPD機械化診断が記録されるはず");
 });
@@ -189,8 +190,8 @@ test("CE1.1-4: BAL（neutral profile）はPROFILE OFF≈ONでPD機械化のtimin
     "BALはcapexHurdleBiasRatio=0のため財務保守性のしきい値もOFFと同一のはず"
   );
 
-  const offResult = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
-  const onResult = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, balResolution.params);
+  const offResult = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
+  const onResult = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, balResolution.params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.deepEqual(onResult.capexDecision, offResult.capexDecision, "BALはOFF/ONで意思決定が完全に一致するべき");
 });
 
@@ -207,7 +208,7 @@ test("CE1.1-5: JPQ（PROFILE ON）でも経済性が悪ければPD機械化を�
       }),
     ],
   });
-  const result = buildStandardAiCapexDecision(jpqFixture, badEconomicsObservation, pressures(), NO_SHORTFALL, 6000, jpqResolution.params);
+  const result = buildStandardAiCapexDecision(jpqFixture, badEconomicsObservation, pressures(), NO_SHORTFALL, 6000, jpqResolution.params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(
     !result.capexDecision.newProjectProposals.some((p) => p.projectType === "pdMechanization"),
     "PD稼働率が低ければJPQ ONでも提案されないべき（strategy fitはOperational Needを迂回しない）"
@@ -221,11 +222,11 @@ test("CE1.1-6: Finance GateはPROFILE OFF・ONの両方で機能する", () => {
   const lowCashObservation = observation({ companyId: "JPQ", cashUsd: 1_000_000 });
   const gatedPressures = pressures({ targetMinimumCashUsd: 30_000_000 });
 
-  const offResult = buildStandardAiCapexDecision(fixture, lowCashObservation, gatedPressures, NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const offResult = buildStandardAiCapexDecision(fixture, lowCashObservation, gatedPressures, NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(!offResult.capexDecision.newProjectProposals.some((p) => p.projectType === "pdMechanization"), "OFFでも財務ゲートで見送るべき");
   assert.ok(offResult.diagnostics.some((d) => d.code === "PD_MECH_FINANCE_BLOCKED"));
 
-  const onResult = buildStandardAiCapexDecision(jpqFixture, lowCashObservation, gatedPressures, NO_SHORTFALL, 6000, jpqResolution.params);
+  const onResult = buildStandardAiCapexDecision(jpqFixture, lowCashObservation, gatedPressures, NO_SHORTFALL, 6000, jpqResolution.params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(!onResult.capexDecision.newProjectProposals.some((p) => p.projectType === "pdMechanization"), "ONでも財務ゲートで見送るべき");
   assert.ok(onResult.diagnostics.some((d) => d.code === "PD_MECH_FINANCE_BLOCKED"));
 });
@@ -236,7 +237,7 @@ test("CE1.1-7: Crisis GateはPROFILE OFF・ONいずれのparamsが生んだPD機
   const goodObservation = observation({ companyId: "JPQ" });
 
   for (const params of [STANDARD_AI_PARAMETERS_V1, jpqResolution.params]) {
-    const result = buildStandardAiCapexDecision(jpqFixture, goodObservation, pressures(), NO_SHORTFALL, 6000, params);
+    const result = buildStandardAiCapexDecision(jpqFixture, goodObservation, pressures(), NO_SHORTFALL, 6000, params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
     assert.ok(result.capexDecision.newProjectProposals.some((p) => p.projectType === "pdMechanization"), "前提: この入力では提案されるはず");
     const isSevereDistress = true;
     const capexDecisionAfterCrisisGate = isSevereDistress
@@ -247,7 +248,7 @@ test("CE1.1-7: Crisis GateはPROFILE OFF・ONいずれのparamsが生んだPD機
 });
 
 test("CE1.1-8: PD_MECH_PROPOSED診断はfirst-classなtargetFactoryIdフィールドを持つ（文字列parse不要）", () => {
-  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const proposed = result.diagnostics.find((d) => d.code === "PD_MECH_PROPOSED");
   assert.ok(proposed);
   assert.equal(proposed!.targetFactoryId, "BAL-F1", "targetFactoryIdはdecisionSummaryではなくfirst-classフィールドとして持つべき");
@@ -307,8 +308,8 @@ test("CE1.1-10: PD機械化を含むCAPEX判断は、PROFILE OFF・ONいずれ�
   const goodObservation = observation({ companyId: "JPQ" });
 
   for (const params of [STANDARD_AI_PARAMETERS_V1, jpqResolution.params] as StandardAiParameters[]) {
-    const run1 = buildStandardAiCapexDecision(jpqFixture, goodObservation, pressures(), NO_SHORTFALL, 6000, params);
-    const run2 = buildStandardAiCapexDecision(jpqFixture, goodObservation, pressures(), NO_SHORTFALL, 6000, params);
+    const run1 = buildStandardAiCapexDecision(jpqFixture, goodObservation, pressures(), NO_SHORTFALL, 6000, params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
+    const run2 = buildStandardAiCapexDecision(jpqFixture, goodObservation, pressures(), NO_SHORTFALL, 6000, params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
     assert.deepEqual(run1.capexDecision, run2.capexDecision);
     assert.deepEqual(run1.diagnostics, run2.diagnostics);
   }

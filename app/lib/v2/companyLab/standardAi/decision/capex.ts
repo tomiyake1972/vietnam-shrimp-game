@@ -23,7 +23,7 @@ import { computeCandidateProjectSpaceUnits } from "../../../capex/factorySpace";
 import { PD_MECHANIZATION_PARAMETERS_V1 } from "../../../capex/pdMechanization";
 import { PRODUCTION_PARAMETERS_V1 } from "../../../production/parameters";
 import { effectiveEfficiencyPerHeadTons } from "../../../production/labor";
-import { FINANCE_PARAMETERS_V1 } from "../../../finance/parameters";
+import { StandardAiCostProjection } from "../costProjection";
 import { Product } from "../../../market/types";
 import { CompanyFixture } from "../../types";
 import {
@@ -183,9 +183,17 @@ interface FinancialGateDetail {
 // capexCostSafetyRatio が純粋に『追加の余裕』を表すため、
 // 0.25 と 0.50 の比較も意味を持つ。
 
-/** 投資案件1件の標準予算（＝この四半期に出ていく現金）。 */
-function projectCostUsdFor(projectType: CapitalProjectType, capexParams: CapexParameters): number {
-  return capexParams.templatesByType[projectType]?.standardBudgetUsd ?? 0;
+/**
+ * 投資案件1件の必要工事費（＝この四半期以降に出ていく現金の総額）。
+ *
+ * 【#05 費用Projection接続】standardBudgetUsd（指数を含まない標準予算）ではなく、
+ * 承認Turnの建設費指数を適用済みの必要工事費を使う。値の算定は
+ * capex/projectLifecycle.ts:resolveProjectBudget（Engineの承認額計算と同一関数）を
+ * 通した TurnEconomicsProjection.indexedRequiredProjectCostByType であり、
+ * ここで指数を掛け直すことはしない（二重適用が構造的に起こらない）。
+ */
+function projectCostUsdFor(projectType: CapitalProjectType, costProjection: StandardAiCostProjection): number {
+  return costProjection.indexedRequiredProjectCostByType[projectType] ?? 0;
 }
 
 /**
@@ -201,26 +209,29 @@ function cashAndBorrowingSafe(
   params: StandardAiParameters,
   projectType: CapitalProjectType | undefined,
   capexParams: CapexParameters,
+  costProjection: StandardAiCostProjection,
   /**
    * 【Phase SAI-GROW-3B-1】Liquidity SSoT。渡された場合はこちらが唯一の判定基準になる。
    * 未指定なら従来式（後方互換。既存テスト・旧呼び出し元のため残す）。
    */
   liquidity?: LiquidityGateContext
 ): FinancialGateDetail {
-  const projectCostUsd = projectType !== undefined ? projectCostUsdFor(projectType, capexParams) : 0;
+  const projectCostUsd = projectType !== undefined ? projectCostUsdFor(projectType, costProjection) : 0;
 
   if (liquidity) {
     // 【新方式】「投資後もProtected Funding Requirementを満たすか」。
     // ・確定投資（承認済み案件の今後の支払）は既に protectedFundingRequirement に入っている
     // ・同一Turnに先に承認した提案の支払は alreadyApprovedThisTurnUsd として差し引く
     //   （各案件が同じ現金を満額使える旧構造をここで塞ぐ）
+    // 支払スケジュールの比率（paymentRatios）はテンプレート、支払総額は当Turnの
+    // 必要工事費（指数適用後）。比率側へ指数を掛けることはしない。
     const template = projectType !== undefined ? capexParams.templatesByType[projectType] : undefined;
     const proposedPaymentsUsd =
       template !== undefined
-        ? plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, liquidity.horizonQuarters)
+        ? plannedInvestmentPaymentsWithinHorizonUsd(projectCostUsd, template.paymentRatios, liquidity.horizonQuarters)
         : projectCostUsd;
     const thisQuarterPaymentsUsd =
-      template !== undefined ? plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, 1) : projectCostUsd;
+      template !== undefined ? plannedInvestmentPaymentsWithinHorizonUsd(projectCostUsd, template.paymentRatios, 1) : projectCostUsd;
     const affordability = evaluateInvestmentAffordability(
       liquidity.assessment,
       proposedPaymentsUsd,
@@ -338,6 +349,13 @@ export function buildStandardAiCapexDecision(
   requiredRawMaterialUnconstrained: number,
   params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
   capexParams: CapexParameters = CAPEX_PARAMETERS_V1,
+  /**
+   * 【#05 費用Projection接続】当Turnの費用前提（実効費用単価・必要工事費）。
+   * 既定値を持たない（＝呼び出し元が必ず明示的に渡す）。既定値を置くと、
+   * Scenario指数が宣言されていても黙って標準予算・FINANCE_PARAMETERS_V1 へ
+   * 落ちる経路が復活するため。
+   */
+  costProjection: StandardAiCostProjection,
   /**
    * 【Phase SAI-GROW-3B-1】Liquidity SSoT。未指定なら従来の案件単独ゲート（後方互換）。
    * 指定された場合、同一Turnに先に承認した提案の支払を差し引いて判定する。
@@ -469,7 +487,7 @@ export function buildStandardAiCapexDecision(
   let vapGrowthSignalPresent = false;
   /** 投資対象ごとの財務ゲート（必要現金が投資額に依存するため案件別に判定する）。 */
   const financialGateFor = (projectType: CapitalProjectType) =>
-    cashAndBorrowingSafe(observation, pressures, params, projectType, capexParams, liquidity);
+    cashAndBorrowingSafe(observation, pressures, params, projectType, capexParams, costProjection, liquidity);
   /**
    * 【Phase SAI-GROW-3B-1・実装指示§6】財務ゲートで落ちた場合に、
    * 「なぜ投資しなかったか」を1件のreason codeとして残す。
@@ -509,9 +527,10 @@ export function buildStandardAiCapexDecision(
     if (!liquidity) return;
     const template = capexParams.templatesByType[projectType];
     if (!template) return;
+    const requiredCostUsd = projectCostUsdFor(projectType, costProjection);
     liquidity.commit(
-      plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, liquidity.horizonQuarters),
-      plannedInvestmentPaymentsWithinHorizonUsd(template.standardBudgetUsd, template.paymentRatios, 1)
+      plannedInvestmentPaymentsWithinHorizonUsd(requiredCostUsd, template.paymentRatios, liquidity.horizonQuarters),
+      plannedInvestmentPaymentsWithinHorizonUsd(requiredCostUsd, template.paymentRatios, 1)
     );
   };
   // 【2026-08-09・Test16】持続性判定は投資対象設備ごとに行う（下の各分岐で算出）。
@@ -677,7 +696,7 @@ export function buildStandardAiCapexDecision(
     bindingPoolIsTied: currentPhysical.bindingPhysicalPool === "TIED" ? 1 : 0,
     candidateNominalCapacityAdded: nominalCapacityAddedBy(projectType).tons,
     incrementalDeliverableCapacityTons: incrementalTons,
-    candidateCostUsd: capexParams.templatesByType[projectType]?.standardBudgetUsd ?? 0,
+    candidateCostUsd: projectCostUsdFor(projectType, costProjection),
   });
 
   // 【SAI-5F】拡張判断用の公開シグナル（前四半期までの公開情報のみ。無効時は未使用）。
@@ -900,7 +919,7 @@ export function buildStandardAiCapexDecision(
     const pdMechType: CapitalProjectType = "pdMechanization";
     const pdMechGate = financialGateFor(pdMechType);
     const pdMechSpace = checkSpaceFeasible(pdMechType);
-    const investmentCostUsd = projectCostUsdFor(pdMechType, capexParams);
+    const investmentCostUsd = projectCostUsdFor(pdMechType, costProjection);
     const financialConservatismRatio =
       params.capexCurrentShortfallRatioThreshold / STANDARD_AI_PARAMETERS_V1.capexCurrentShortfallRatioThreshold;
     // 【戦略適合（指示§9・10-14）】productOrientationMultipliers（会社ごとの商品志向、
@@ -990,7 +1009,7 @@ export function buildStandardAiCapexDecision(
       const workersAfterMechanization =
         efficiencyAfterMechanization > EPSILON ? pdProductionTonsEstimate / efficiencyAfterMechanization : 0;
       const laborSavingsHeadcount = Math.max(0, workersBeforeMechanization - workersAfterMechanization);
-      const expectedQuarterlySavingUsd = laborSavingsHeadcount * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter;
+      const expectedQuarterlySavingUsd = laborSavingsHeadcount * costProjection.financeParameters.labor.regularWorkerSalaryUsdPerQuarter;
       const paybackQuarters = expectedQuarterlySavingUsd > EPSILON ? investmentCostUsd / expectedQuarterlySavingUsd : Number.POSITIVE_INFINITY;
 
       if (!(paybackQuarters <= effectiveMaxPaybackQuarters)) {
@@ -1133,7 +1152,7 @@ export function buildStandardAiCapexDecision(
     const qualityEquipType: CapitalProjectType = "qualityControlEquipment";
     const qualityEquipGate = financialGateFor(qualityEquipType);
     const qualityEquipSpace = checkSpaceFeasible(qualityEquipType);
-    const investmentCostUsd = projectCostUsdFor(qualityEquipType, capexParams);
+    const investmentCostUsd = projectCostUsdFor(qualityEquipType, costProjection);
     const financialConservatismRatio =
       params.capexCurrentShortfallRatioThreshold / STANDARD_AI_PARAMETERS_V1.capexCurrentShortfallRatioThreshold;
     // 【戦略適合（指示§12・§13）】新しいStrategyProfile型は作らない。既存の

@@ -29,6 +29,8 @@ import {
   initializeCompanyLab,
 } from "../runner";
 import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../standardAi/policy";
+import { toStandardAiCostProjection } from "../standardAi/costProjection";
+import { buildTurnEconomicsProjection } from "../turnEconomicsProjection";
 import { DEFAULT_RUNTIME_STANDARD_AI_PROFILE_MODE, resolveStandardAiProfileForMode } from "../standardAi/orientationProfile";
 import { StandardAiDiagnosticEntry } from "../standardAi/reasonCodes";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabState } from "../types";
@@ -351,6 +353,17 @@ export function advanceSimulationTurn(
     /** 【Phase 6C】その四半期の商業成長の因果と営業組織（会社別）。 */
     const diagnosticsByCompany = new Map<string, ReturnType<typeof generateStandardAiDecisionWithDiagnostics>["diagnostics"]>();
     const decisionOwnerByCompany = new Map<string, DecisionOwner>();
+    /**
+     * 【#05 費用Projection接続】そのTurnの費用前提を**Turnにつき1回だけ**構築し、
+     * 全社の意思決定へ同じ参照を配る。Scenario definitionは保存済みRunが持つ
+     * session.state.scenarioState.definition を正本とし、コード側registryの定義へ
+     * 差し替えない（保存済みRunのsnapshotと矛盾しないようにするため）。
+     * 指数未宣言のScenarioでは全指数1.00・legacy建設費となり、本接続の前後で
+     * Standard AIの判断・数値は完全に同一になる。
+     */
+    const costProjection = toStandardAiCostProjection(
+      buildTurnEconomicsProjection({ definition: session.state.scenarioState.definition, turn })
+    );
     for (const fixture of session.fixtures) {
       const ownState = buildCompanyOwnState(session.state, fixture);
       /**
@@ -379,7 +392,8 @@ export function advanceSimulationTurn(
         turn,
         effectiveParams,
         undefined,
-        session.state.config.visionOverrides
+        session.state.config.visionOverrides,
+        costProjection
       );
       /**
        * 【指示§25】バイアスが1件でも適用されている場合のみ、基準パラメータ
@@ -389,7 +403,17 @@ export function advanceSimulationTurn(
        */
       const baselineDecision =
         profileResolution.appliedBiasItems.length > 0
-          ? generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, session.state.currentPeriod, turn, STANDARD_AI_PARAMETERS_V1).decision
+          ? generateStandardAiDecisionWithDiagnostics(
+              fixture,
+              ownState,
+              publicInfo,
+              session.state.currentPeriod,
+              turn,
+              STANDARD_AI_PARAMETERS_V1,
+              undefined,
+              undefined,
+              costProjection
+            ).decision
           : undefined;
       const diagnostics = appendProfileDiagnosticEntry(
         profileResolution.mode === "OFF"

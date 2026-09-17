@@ -26,6 +26,7 @@ import { buildStandardAiSalesForceHiringDecision, SalesForceHiringDecisionInput 
 import { generateStandardAiDecisionWithDiagnostics } from "../policy";
 import { computeTargetScaleBand } from "../targetScale";
 import { STANDARD_AI_STRATEGIC_INTENT_V1 } from "../strategicIntent";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig {
   return { scenarioId: "baseline", mode: "canonical", seed: "sai-hiring-unit-001", turns: 8, ...overrides };
@@ -52,7 +53,7 @@ function setupBalContext(seed = "sai-hiring-unit-001") {
     observation.finishedGoodsByProduct
   );
   const finalProductionRequirementByProduct = computeFinalProductionRequirement(basicProductionRequirementByProduct);
-  const unitEconomics = buildStandardAiUnitEconomics(observation);
+  const unitEconomics = buildStandardAiUnitEconomics(observation, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const targetScaleResult = computeTargetScaleBand(fixture, observation, STANDARD_AI_STRATEGIC_INTENT_V1, STANDARD_AI_PARAMETERS_V1);
 
   return { fixture, observation, pressures, salesResult, finalProductionRequirementByProduct, unitEconomics, targetScaleResult };

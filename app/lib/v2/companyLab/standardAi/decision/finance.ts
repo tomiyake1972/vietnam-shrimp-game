@@ -16,6 +16,7 @@ import { StandardAiObservation } from "../types";
 import { StandardAiDiagnosticEntry } from "../reasonCodes";
 import { assessWorkingCapitalNeed, ProcurementCashPlanInput, WorkingCapitalAssessment } from "./workingCapital";
 import { LiquidityAssessment } from "./liquidity";
+import { StandardAiCostProjection } from "../costProjection";
 
 export interface FinancingPlanResult {
   readonly financingRequest: FinancingRequestInput;
@@ -28,6 +29,12 @@ export function buildStandardAiFinancingRequest(
   observation: StandardAiObservation,
   pressures: PressureScores,
   params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1,
+  /**
+   * 【#05 費用Projection接続】当Turnの費用前提（実効費用単価）。既定値は置かない。
+   * 既定値があると、Scenario指数が宣言されていても引数未指定の呼び出しが
+   * 黙って FINANCE_PARAMETERS_V1 へ落ちるため。
+   */
+  costProjection: StandardAiCostProjection,
   /**
    * 【Test16】当期の原料調達計画。**これを渡すことで初めて「原料を買うのに
    * 資金が要る」ことが借入判断へ入る。** 未指定なら従来どおり最低現金バッファ
@@ -66,7 +73,7 @@ export function buildStandardAiFinancingRequest(
   // 原料購入・人件費・買掛決済・元利返済という当面の資金使途に対し、
   // 手元現金と売掛回収見込みで足りるかを評価する。
   const workingCapital = procurementCashPlan
-    ? assessWorkingCapitalNeed(observation, procurementCashPlan, targetMinimumCashUsd)
+    ? assessWorkingCapitalNeed(observation, procurementCashPlan, targetMinimumCashUsd, costProjection.financeParameters)
     : undefined;
 
   // 借入希望額は両者の大きい方。バッファ不足のほうが大きい局面もあるため

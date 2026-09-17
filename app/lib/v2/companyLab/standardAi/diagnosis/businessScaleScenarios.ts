@@ -18,6 +18,7 @@ import { CompanySalesPlanEntry } from "../../../sales/types";
 import { CompanyFixture } from "../../../companyLab/types";
 import { buildStandardAiUnitEconomics, StandardAiUnitEconomicsResult } from "./forwardUnitEconomics";
 import { buildBusinessScaleProfile, BusinessScaleAxis, BusinessScaleProfile } from "./businessScaleProfile";
+import { StandardAiCostProjection } from "../costProjection";
 
 export type BusinessScaleScenarioId = "conservative" | "base" | "growth";
 
@@ -70,7 +71,8 @@ function buildConservativeScenario(
   pressures: PressureScores,
   unitEconomics: StandardAiUnitEconomicsResult,
   currentSalesPlans: readonly CompanySalesPlanEntry[],
-  desiredByProduct: ProductAmount
+  desiredByProduct: ProductAmount,
+  costProjection: StandardAiCostProjection
 ): BusinessScaleScenarioResult {
   const profile = buildBusinessScaleProfile({
     observation,
@@ -78,6 +80,7 @@ function buildConservativeScenario(
     unitEconomics,
     currentSalesPlans,
     desiredByProduct,
+    costProjection,
   });
   const { axes, scaleTons } = bindingAxesOf(profile);
   return {
@@ -106,7 +109,8 @@ function buildBaseScenario(
   pressures: PressureScores,
   unitEconomics: StandardAiUnitEconomicsResult,
   currentSalesPlans: readonly CompanySalesPlanEntry[],
-  desiredByProduct: ProductAmount
+  desiredByProduct: ProductAmount,
+  costProjection: StandardAiCostProjection
 ): BusinessScaleScenarioResult {
   // ConservativeとBaseの差は、Business Scale Profile自体の設計（Sales軸が既に
   // salesForceSupportedScaleTons=「現有人員を最適再配分した場合の上限」を返す）に
@@ -118,6 +122,7 @@ function buildBaseScenario(
     unitEconomics,
     currentSalesPlans,
     desiredByProduct,
+    costProjection,
   });
   const { axes, scaleTons } = bindingAxesOf(profile);
   return {
@@ -154,7 +159,8 @@ function buildGrowthScenario(
   fixture: CompanyFixture,
   observation: StandardAiObservation,
   currentSalesPlans: readonly CompanySalesPlanEntry[],
-  desiredByProduct: ProductAmount
+  desiredByProduct: ProductAmount,
+  costProjection: StandardAiCostProjection
 ): BusinessScaleScenarioResult {
   const grownSalesHeadcount = Math.round(
     observation.salesForceHeadcountTotal * (1 + GROWTH_SALES_HEADCOUNT_STEP_RATIO_PLACEHOLDER_PENDING_VISION)
@@ -168,7 +174,7 @@ function buildGrowthScenario(
     regularHeadcountTotal: grownRegularHeadcount,
   };
   const grownPressures = computePressureScores(grownObservation, fixture);
-  const unitEconomics = buildStandardAiUnitEconomics(grownObservation);
+  const unitEconomics = buildStandardAiUnitEconomics(grownObservation, costProjection);
 
   const profile = buildBusinessScaleProfile({
     observation: grownObservation,
@@ -176,6 +182,7 @@ function buildGrowthScenario(
     unitEconomics,
     currentSalesPlans,
     desiredByProduct,
+    costProjection,
   });
   const { axes, scaleTons } = bindingAxesOf(profile);
 
@@ -222,13 +229,15 @@ export function buildBusinessScaleScenarioComparison(
   observation: StandardAiObservation,
   pressures: PressureScores,
   currentSalesPlans: readonly CompanySalesPlanEntry[],
-  desiredByProduct: ProductAmount
+  desiredByProduct: ProductAmount,
+  /** 【#05 費用Projection接続】当Turnの費用前提。全シナリオへ同じ参照を配る。 */
+  costProjection: StandardAiCostProjection
 ): BusinessScaleScenarioComparison {
-  const unitEconomics = buildStandardAiUnitEconomics(observation);
+  const unitEconomics = buildStandardAiUnitEconomics(observation, costProjection);
   return {
     companyId: observation.companyId,
-    conservative: buildConservativeScenario(observation, pressures, unitEconomics, currentSalesPlans, desiredByProduct),
-    base: buildBaseScenario(observation, pressures, unitEconomics, currentSalesPlans, desiredByProduct),
-    growth: buildGrowthScenario(fixture, observation, currentSalesPlans, desiredByProduct),
+    conservative: buildConservativeScenario(observation, pressures, unitEconomics, currentSalesPlans, desiredByProduct, costProjection),
+    base: buildBaseScenario(observation, pressures, unitEconomics, currentSalesPlans, desiredByProduct, costProjection),
+    growth: buildGrowthScenario(fixture, observation, currentSalesPlans, desiredByProduct, costProjection),
   };
 }

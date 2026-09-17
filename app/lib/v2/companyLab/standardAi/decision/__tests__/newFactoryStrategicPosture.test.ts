@@ -21,6 +21,7 @@ import { CompanyFixture } from "../../../types";
 import { CAPEX_PARAMETERS_V1, CapexParameters } from "../../../../capex/parameters";
 import { CommercialAmbition } from "../../../vision/commercialAmbition";
 import { UnservedOpportunity } from "../../../vision/unservedOpportunity";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../../costProjection";
 
 const fixture = { companyId: "TESTCO" } as unknown as CompanyFixture;
 const CURRENT_SUSTAINABLE_SCALE_TONS = 10_000;
@@ -154,6 +155,7 @@ function aggressiveInput(overrides: Partial<NewFactoryDecisionInput> = {}): NewF
     commercialAmbition: commercialAmbition(1.05),
     unservedOpportunity: unservedOpportunity(500),
     persistentCapacityCausedUnserved: true,
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
     ...overrides,
   };
 }

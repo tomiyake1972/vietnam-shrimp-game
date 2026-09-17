@@ -22,6 +22,7 @@ import { PressureScores } from "../pressures";
 import { STANDARD_AI_PARAMETERS_V1 } from "../parameters";
 import { CompanyFixture } from "../../types";
 import { DEMAND_MARKET_IDS } from "../../../market/types";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 const fixture = {
   companyId: "BAL",
@@ -122,7 +123,7 @@ function pressures(overrides: Partial<PressureScores> = {}): PressureScores {
 const HOSO_SHORTFALL = { hoso: 12000, pd: 1000, vap: 500 };
 
 function capex(obs: StandardAiObservation, pr: PressureScores) {
-  return buildStandardAiCapexDecision(fixture, obs, pr, HOSO_SHORTFALL, 10000, STANDARD_AI_PARAMETERS_V1);
+  return buildStandardAiCapexDecision(fixture, obs, pr, HOSO_SHORTFALL, 10000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
 }
 
 function hosoDiagnostic(result: ReturnType<typeof capex>) {
@@ -212,8 +213,8 @@ const PROCUREMENT = { domesticDesiredQuantityTons: 10_000, importOrderedQuantity
 
 test("Test16-FIN-8: 原料調達必要額が借入判断の入力に入っている", () => {
   const obs = observation({ cashUsd: 1_000_000 });
-  const withoutPlan = buildStandardAiFinancingRequest(obs, pressures(), STANDARD_AI_PARAMETERS_V1);
-  const withPlan = buildStandardAiFinancingRequest(obs, pressures(), STANDARD_AI_PARAMETERS_V1, PROCUREMENT);
+  const withoutPlan = buildStandardAiFinancingRequest(obs, pressures(), STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION);
+  const withPlan = buildStandardAiFinancingRequest(obs, pressures(), STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, PROCUREMENT);
 
   // 原料調達コスト = 10,000t × 1000kg × 4.0 USD/kg = 40M（国内）＋ 8M（輸入）
   assert.equal(withPlan.workingCapital?.plannedDomesticRawProcurementCostUsd, 40_000_000);
@@ -227,23 +228,23 @@ test("Test16-FIN-8: 原料調達必要額が借入判断の入力に入ってい
 
 test("Test16-FIN-9: 現金が十分なら不要な借入をしない", () => {
   // 調達コスト48M・人件費等に対し、現金2億USD。全体でも国内買付枠でも足りる。
-  const r = buildStandardAiFinancingRequest(observation({ cashUsd: 200_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, PROCUREMENT);
+  const r = buildStandardAiFinancingRequest(observation({ cashUsd: 200_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, PROCUREMENT);
   assert.equal(r.financingRequest.desiredAmountUsd, 0, "十分な現金があるのに借入している");
   assert.ok((r.workingCapital?.projectedWorkingCapitalGapUsd ?? 0) <= 0);
 });
 
 test("Test16-FIN-10: 現金不足なら短期運転資金として借入を申請する", () => {
-  const r = buildStandardAiFinancingRequest(observation({ cashUsd: 5_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, PROCUREMENT);
+  const r = buildStandardAiFinancingRequest(observation({ cashUsd: 5_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, PROCUREMENT);
   assert.ok(r.financingRequest.desiredAmountUsd > 0, "資金不足なのに借入を申請していない");
   assert.equal(r.financingRequest.desiredLoanType, "workingCapital");
 });
 
 test("Test16-FIN-11: 売掛回収見込みは借入必要額を減らす", () => {
-  const base = buildStandardAiFinancingRequest(observation({ cashUsd: 5_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, PROCUREMENT);
+  const base = buildStandardAiFinancingRequest(observation({ cashUsd: 5_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, PROCUREMENT);
   const withAr = buildStandardAiFinancingRequest(
     observation({ cashUsd: 5_000_000, receivablesDueThisPeriodUsd: 20_000_000 }),
     pressures(),
-    STANDARD_AI_PARAMETERS_V1,
+    STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION,
     PROCUREMENT
   );
   assert.ok(
@@ -254,7 +255,7 @@ test("Test16-FIN-11: 売掛回収見込みは借入必要額を減らす", () =>
 });
 
 test("Test16-FIN-12: 借入希望額は運転資金不足額であり、実際の借入額は審査が決める", () => {
-  const r = buildStandardAiFinancingRequest(observation({ cashUsd: 5_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, PROCUREMENT);
+  const r = buildStandardAiFinancingRequest(observation({ cashUsd: 5_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, PROCUREMENT);
   const w = r.workingCapital!;
   // AIが申請するのは「経済的に必要な額」と「最低現金バッファ不足額」の大きい方。
   assert.equal(r.financingRequest.desiredAmountUsd, Math.max(w.economicallyDesiredBorrowingUsd, 30_000_000 - 5_000_000));
@@ -264,7 +265,7 @@ test("Test16-FIN-12: 借入希望額は運転資金不足額であり、実際�
 });
 
 test("Test16-FIN-13: 必要額を超えて借りない（運転資金が充足していれば申請ゼロ）", () => {
-  const r = buildStandardAiFinancingRequest(observation({ cashUsd: 200_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, {
+  const r = buildStandardAiFinancingRequest(observation({ cashUsd: 200_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, {
     domesticDesiredQuantityTons: 100,
     importOrderedQuantityTons: 0,
   });
@@ -273,7 +274,7 @@ test("Test16-FIN-13: 必要額を超えて借りない（運転資金が充足�
 
 test("Test16-FIN-14: 資金ゲート（国内買付へ充当できる現金割合）はPlayer・AI共通の制約として織り込まれる", () => {
   const ratio = FINANCING_PARAMETERS_V1.liquidity.domesticPurchaseCashAllocationRatio;
-  const w = assessWorkingCapitalNeed(observation({ cashUsd: 50_000_000 }), PROCUREMENT, 30_000_000);
+  const w = assessWorkingCapitalNeed(observation({ cashUsd: 50_000_000 }), PROCUREMENT, 30_000_000, NEUTRAL_STANDARD_AI_COST_PROJECTION.financeParameters);
   // 現金5,000万のうち、国内買付へ回せるのは ratio 倍だけ。
   assert.equal(w.cashUsableForDomesticProcurementUsd, 50_000_000 * ratio);
   // 40M の買付に対して 50M × ratio では足りず、その差が資金不足として現れる。
@@ -311,7 +312,7 @@ test("Test16-DIAG-15: capex diagnosticsに投資対象設備の稼働率一式�
 });
 
 test("Test16-DIAG-16: 運転資金diagnosticsに指示Hの項目一式が保存される", () => {
-  const r = buildStandardAiFinancingRequest(observation({ cashUsd: 5_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, PROCUREMENT);
+  const r = buildStandardAiFinancingRequest(observation({ cashUsd: 5_000_000 }), pressures(), STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, PROCUREMENT);
   const entry = r.diagnostics.find((d) => d.code === "WORKING_CAPITAL_ASSESSED");
   assert.ok(entry, "WORKING_CAPITAL_ASSESSED が出ていない");
   for (const key of [
@@ -333,7 +334,7 @@ test("Test16-FIN-追加: 運転資金が不足しているときは任意期限�
   const obs = observation({ cashUsd: 60_000_000, existingLoanBalanceUsd: 20_000_000 });
   // 現金6,000万は voluntaryPrepaymentMultiple 倍の閾値を超えるが、
   // 国内買付40Mに対し使える現金は 6,000万 × ratio しかなく運転資金は不足する。
-  const r = buildStandardAiFinancingRequest(obs, pressures(), STANDARD_AI_PARAMETERS_V1, PROCUREMENT);
+  const r = buildStandardAiFinancingRequest(obs, pressures(), STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, PROCUREMENT);
   assert.ok((r.workingCapital?.projectedWorkingCapitalGapUsd ?? 0) > 0, "この設定では運転資金が不足しているはず");
   assert.equal(r.financingRequest.desiredPrepaymentUsd, 0, "運転資金不足なのに期限前返済しようとしている");
 });
@@ -382,7 +383,7 @@ test("Test16-GATE-2: 必要現金ちょうど超なら投資し、下回れば�
 test("Test16-GATE-3: 旧方式は投資額と無関係に会社規模だけで必要現金を決める", () => {
   const legacy = { ...STANDARD_AI_PARAMETERS_V1, capexCashGateMode: "legacyMultiple" as const };
   const cash = requiredCashFor(8_000_000, 0.5) + 1_000_000; // 新方式なら投資できる水準
-  const r = buildStandardAiCapexDecision(fixture, observation({ cashUsd: cash }), pressures(), HOSO_SHORTFALL, 10000, legacy);
+  const r = buildStandardAiCapexDecision(fixture, observation({ cashUsd: cash }), pressures(), HOSO_SHORTFALL, 10000, legacy, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(
     !r.capexDecision.newProjectProposals.some((p) => p.projectType === "hosoLineExpansion"),
     "旧方式でも投資できてしまっており、方式の差が出ていない"

@@ -21,6 +21,7 @@ import { generateStandardAiDecisionWithDiagnostics } from "../policy";
 import { CompanyLabState } from "../../types";
 import { DYNAMIC_SCENARIO_1 } from "../../../scenario/definitions/dynamicScenario1";
 import { DYNAMIC_SCENARIO_2 } from "../../../scenario/definitions/dynamicScenario2";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 const MILLION = 1_000_000;
 
@@ -57,6 +58,7 @@ function pressures(overrides: Partial<PressureScores> = {}): PressureScores {
 
 function assess(obs: Partial<StandardAiObservation> = {}, over: Partial<Parameters<typeof assessCommittedCashRequirement>[0]> = {}) {
   return assessCommittedCashRequirement({
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
     observation: observation(obs),
     pressures: pressures(),
     params: STANDARD_AI_PARAMETERS_V1,
@@ -185,8 +187,9 @@ test("G3B1-9: Finance決定はLiquidity SSoTと同じ必要現金を使う（CAP
   const obs = observation({ cashUsd: 5 * MILLION });
   const p = pressures();
   const plan = { domesticDesiredQuantityTons: 4000, importOrderedQuantityTons: 1000 };
-  const legacy = buildStandardAiFinancingRequest(obs, p, STANDARD_AI_PARAMETERS_V1, plan);
+  const legacy = buildStandardAiFinancingRequest(obs, p, STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, plan);
   const a = assessCommittedCashRequirement({
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
     observation: obs,
     pressures: p,
     params: STANDARD_AI_PARAMETERS_V1,
@@ -194,7 +197,7 @@ test("G3B1-9: Finance決定はLiquidity SSoTと同じ必要現金を使う（CAP
     crisisState: "NORMAL",
     financialRiskTolerance: "MEDIUM",
   });
-  const withSSoT = buildStandardAiFinancingRequest(obs, p, STANDARD_AI_PARAMETERS_V1, plan, {
+  const withSSoT = buildStandardAiFinancingRequest(obs, p, STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, plan, {
     assessment: a,
     approvedInvestmentPaymentsThisQuarterUsd: 0,
   });
@@ -207,6 +210,7 @@ test("G3B1-10: 当期承認した投資は借入必要額へ反映されるが�
   const plan = { domesticDesiredQuantityTons: 4000, importOrderedQuantityTons: 1000 };
   const richObs = observation({ cashUsd: 300 * MILLION });
   const rich = assessCommittedCashRequirement({
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
     observation: richObs,
     pressures: p,
     params: STANDARD_AI_PARAMETERS_V1,
@@ -214,7 +218,7 @@ test("G3B1-10: 当期承認した投資は借入必要額へ反映されるが�
     crisisState: "NORMAL",
     financialRiskTolerance: "MEDIUM",
   });
-  const richReq = buildStandardAiFinancingRequest(richObs, p, STANDARD_AI_PARAMETERS_V1, plan, {
+  const richReq = buildStandardAiFinancingRequest(richObs, p, STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, plan, {
     assessment: rich,
     approvedInvestmentPaymentsThisQuarterUsd: 8 * MILLION,
   });
@@ -222,6 +226,7 @@ test("G3B1-10: 当期承認した投資は借入必要額へ反映されるが�
 
   const tightObs = observation({ cashUsd: 12 * MILLION });
   const tight = assessCommittedCashRequirement({
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
     observation: tightObs,
     pressures: p,
     params: STANDARD_AI_PARAMETERS_V1,
@@ -229,11 +234,11 @@ test("G3B1-10: 当期承認した投資は借入必要額へ反映されるが�
     crisisState: "NORMAL",
     financialRiskTolerance: "MEDIUM",
   });
-  const noInvest = buildStandardAiFinancingRequest(tightObs, p, STANDARD_AI_PARAMETERS_V1, plan, {
+  const noInvest = buildStandardAiFinancingRequest(tightObs, p, STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, plan, {
     assessment: tight,
     approvedInvestmentPaymentsThisQuarterUsd: 0,
   });
-  const withInvest = buildStandardAiFinancingRequest(tightObs, p, STANDARD_AI_PARAMETERS_V1, plan, {
+  const withInvest = buildStandardAiFinancingRequest(tightObs, p, STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, plan, {
     assessment: tight,
     approvedInvestmentPaymentsThisQuarterUsd: 8 * MILLION,
   });

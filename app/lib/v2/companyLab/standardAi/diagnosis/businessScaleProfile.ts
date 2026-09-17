@@ -38,6 +38,7 @@ import {
   StandardAiFinancialCapacityPlanInput,
   zeroFinancialCapacityPlan,
 } from "./financialCapacity";
+import { StandardAiCostProjection } from "../costProjection";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
@@ -423,7 +424,8 @@ function buildFinanceSupportedScale(
   observation: StandardAiObservation,
   pressures: PressureScores,
   productMixAssumption: ProductAmount,
-  domesticRawShareOfProduction: number
+  domesticRawShareOfProduction: number,
+  costProjection: StandardAiCostProjection
 ): { estimate: SupportedScaleEstimate; detail: FinanceSupportedScaleDetail } {
   const mixTotal = sumProductAmount(productMixAssumption);
   const mix: ProductAmount =
@@ -461,11 +463,11 @@ function buildFinanceSupportedScale(
   }
 
   const supportedScaleTonsWithinTargetBuffer = maxScaleWhere((tons) => {
-    const r = buildStandardAiFinancialCapacity(observation, pressures, planForScale(tons));
+    const r = buildStandardAiFinancialCapacity(observation, pressures, planForScale(tons), costProjection);
     return r.quarterLevelLiquidityHeadroomUsd >= 0;
   });
   const supportedScaleTonsBeforeCashNegative = maxScaleWhere((tons) => {
-    const r = buildStandardAiFinancialCapacity(observation, pressures, planForScale(tons));
+    const r = buildStandardAiFinancialCapacity(observation, pressures, planForScale(tons), costProjection);
     return r.projectedCashAfterPlannedFinancingUsd >= 0;
   });
 
@@ -524,6 +526,8 @@ export interface BuildBusinessScaleProfileInput {
   readonly productMixAssumption?: ProductAmount;
   /** Finance軸の二分探索に使う、生産量に対する国内原料調達量の比率（0〜1）。省略時0.9。 */
   readonly domesticRawShareOfProduction?: number;
+  /** 【#05 費用Projection接続】当Turnの費用前提。Finance軸の現金計算へそのまま渡す。 */
+  readonly costProjection: StandardAiCostProjection;
 }
 
 function inferProductMix(currentSalesPlans: readonly CompanySalesPlanEntry[]): ProductAmount {
@@ -537,14 +541,14 @@ function inferProductMix(currentSalesPlans: readonly CompanySalesPlanEntry[]): P
 }
 
 export function buildBusinessScaleProfile(input: BuildBusinessScaleProfileInput): BusinessScaleProfile {
-  const { observation, pressures, unitEconomics, currentSalesPlans, desiredByProduct } = input;
+  const { observation, pressures, unitEconomics, currentSalesPlans, desiredByProduct, costProjection } = input;
   const productMixAssumption = input.productMixAssumption ?? inferProductMix(currentSalesPlans);
   const domesticRawShareOfProduction = input.domesticRawShareOfProduction ?? 0.9;
 
   const sales = buildSalesSupportedScale(observation, unitEconomics, currentSalesPlans, desiredByProduct);
   const production = buildProductionSupportedScale(observation, productMixAssumption);
   const labor = buildLaborSupportedScale(observation, productMixAssumption);
-  const finance = buildFinanceSupportedScale(observation, pressures, productMixAssumption, domesticRawShareOfProduction);
+  const finance = buildFinanceSupportedScale(observation, pressures, productMixAssumption, domesticRawShareOfProduction, costProjection);
 
   // 【procurementNeededScaleTons算定用】Raw以外の4軸のうち、算定可能な値の最小値。
   // 1軸でも算定できていればそれを使う（全軸nullの場合のみnull）。

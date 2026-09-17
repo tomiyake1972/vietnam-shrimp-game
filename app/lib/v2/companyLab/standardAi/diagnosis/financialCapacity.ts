@@ -28,7 +28,7 @@
 //     既にundefinedとして返している値をそのまま転記する（近似しない）。
 
 import { PRODUCTION_PARAMETERS_V1 } from "../../../production/parameters";
-import { FINANCE_PARAMETERS_V1 } from "../../../finance/parameters";
+import { StandardAiCostProjection } from "../costProjection";
 import { ProductAmount, StandardAiObservation } from "../types";
 import { PressureScores } from "../pressures";
 
@@ -120,8 +120,14 @@ const LIQUIDITY_HEADROOM_NOTE =
 export function buildStandardAiFinancialCapacity(
   observation: StandardAiObservation,
   pressures: PressureScores,
-  plan: StandardAiFinancialCapacityPlanInput
+  plan: StandardAiFinancialCapacityPlanInput,
+  /**
+   * 【#05 費用Projection接続】当Turnの費用前提（指数適用後）。既定値は置かない。
+   * Engineが同一Turnで使う financeParametersForTurn の結果と同一である。
+   */
+  costProjection: StandardAiCostProjection
 ): StandardAiFinancialCapacityResult {
+  const finance = costProjection.financeParameters;
   const hosoEqKgPerTon = PRODUCTION_PARAMETERS_V1.cost.hosoEqKgPerTon;
 
   const domesticRawPriceUsdPerKg = plan.domesticRawPriceUsdPerKgOverride ?? observation.vietnamDomesticPriorPrice ?? null;
@@ -138,23 +144,23 @@ export function buildStandardAiFinancialCapacity(
   const totalProductionTons = PRODUCTS.reduce((s, p) => s + Math.max(0, plan.productionByProductTons[p]), 0);
   const numberOfFactories = observation.factories.length;
   const manufacturingCashOutUsd =
-    numberOfFactories * (FINANCE_PARAMETERS_V1.manufacturing.factoryFixedCostUsdPerQuarter + FINANCE_PARAMETERS_V1.manufacturing.factoryUtilityFixedUsdPerQuarter) +
-    totalProductionTons * FINANCE_PARAMETERS_V1.manufacturing.factoryUtilityVariableUsdPerTon +
+    numberOfFactories * (finance.manufacturing.factoryFixedCostUsdPerQuarter + finance.manufacturing.factoryUtilityFixedUsdPerQuarter) +
+    totalProductionTons * finance.manufacturing.factoryUtilityVariableUsdPerTon +
     PRODUCTS.reduce((s, p) => s + Math.max(0, plan.productionByProductTons[p]) * PRODUCTION_PARAMETERS_V1.cost.baseProcessingCostUsdPerTon[p], 0);
 
-  const regularLaborCashOutUsd = observation.regularHeadcountTotal * FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter;
+  const regularLaborCashOutUsd = observation.regularHeadcountTotal * finance.labor.regularWorkerSalaryUsdPerQuarter;
   const temporaryOvertimeCashOutUsd =
-    plan.temporaryWorkerCount * FINANCE_PARAMETERS_V1.labor.temporaryWorkerCostUsdPerQuarter +
+    plan.temporaryWorkerCount * finance.labor.temporaryWorkerCostUsdPerQuarter +
     observation.regularHeadcountTotal *
-      FINANCE_PARAMETERS_V1.labor.regularWorkerSalaryUsdPerQuarter *
+      finance.labor.regularWorkerSalaryUsdPerQuarter *
       Math.max(0, plan.overtimeRateAvg) *
-      FINANCE_PARAMETERS_V1.labor.overtimePremiumFactor;
+      finance.labor.overtimePremiumFactor;
 
   const sgaCashOutUsd =
-    observation.salesForceHeadcountTotal * FINANCE_PARAMETERS_V1.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter +
-    observation.procurementHeadcountTotal * FINANCE_PARAMETERS_V1.sellingGeneralAdmin.procurementSalaryUsdPerQuarter +
-    FINANCE_PARAMETERS_V1.sellingGeneralAdmin.adminFixedUsdPerQuarter +
-    Math.max(0, plan.totalSalesTonsThisQuarter) * FINANCE_PARAMETERS_V1.sellingGeneralAdmin.sellingLogisticsUsdPerTon;
+    observation.salesForceHeadcountTotal * finance.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter +
+    observation.procurementHeadcountTotal * finance.sellingGeneralAdmin.procurementSalaryUsdPerQuarter +
+    finance.sellingGeneralAdmin.adminFixedUsdPerQuarter +
+    Math.max(0, plan.totalSalesTonsThisQuarter) * finance.sellingGeneralAdmin.sellingLogisticsUsdPerTon;
 
   const capexCashOutUsd = plan.plannedCapexCashOutUsd;
   const interestCashOutUsd = observation.existingLoanInterestUsdThisQuarterEstimate;

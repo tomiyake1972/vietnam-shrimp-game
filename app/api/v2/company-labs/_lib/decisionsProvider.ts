@@ -35,6 +35,8 @@ import { CompanyDecisionInput, CompanyFixture, CompanyLabState } from "../../../
 import { CompanyId } from "../../../../lib/v2/sales/types";
 import { buildCompanyOwnState } from "../../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../../../lib/v2/companyLab/standardAi/policy";
+import { toStandardAiCostProjection } from "../../../../lib/v2/companyLab/standardAi/costProjection";
+import { buildTurnEconomicsProjection } from "../../../../lib/v2/companyLab/turnEconomicsProjection";
 import { resolveStandardAiProfileForMode } from "../../../../lib/v2/companyLab/standardAi/orientationProfile";
 import { CompanyLabDecisionContext, CompanyLabDecisionsProvider } from "../../../../lib/v2/companyLab/application/companyLabQuarterFlowService";
 import { CompanyLabQuarterProcessingError } from "../../../../lib/v2/companyLab/persistence/errors";
@@ -88,6 +90,13 @@ export function buildApiDecisionsProvider(labId: string): CompanyLabDecisionsPro
   return (context: CompanyLabDecisionContext): Readonly<Record<CompanyId, CompanyDecisionInput>> => {
     const { restoredState, fixtures, publicInfo, period, turn, playerCompanyId, submittedDraftBody } = context;
     const decisions: Record<CompanyId, CompanyDecisionInput> = {};
+    /**
+     * 【#05 費用Projection接続】保存済みRunのScenario snapshot（restoredState）を正本に、
+     * そのTurnの費用前提を **Turnにつき1回だけ** 構築して全社へ同じ参照を配る。
+     */
+    const costProjection = toStandardAiCostProjection(
+      buildTurnEconomicsProjection({ definition: restoredState.scenarioState.definition, turn })
+    );
     for (const fixture of fixtures) {
       if (fixture.companyId === playerCompanyId) {
         decisions[fixture.companyId] = buildPlayerDecision(labId, fixture, restoredState, submittedDraftBody);
@@ -102,7 +111,17 @@ export function buildApiDecisionsProvider(labId: string): CompanyLabDecisionsPro
          * mode未記録＝OFFのままで、過去のLabの挙動は変わらない）。
          */
         const params = resolveStandardAiProfileForMode(fixture.companyId, restoredState.config.standardAiProfileMode).params;
-        decisions[fixture.companyId] = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, period, turn, params).decision;
+        decisions[fixture.companyId] = generateStandardAiDecisionWithDiagnostics(
+          fixture,
+          ownState,
+          publicInfo,
+          period,
+          turn,
+          params,
+          undefined,
+          undefined,
+          costProjection
+        ).decision;
       }
     }
     return decisions;

@@ -15,6 +15,8 @@ import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../companyLab
 import { PeriodV2 } from "../core/period";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../companyLab/standardAi/policy";
+import { toStandardAiCostProjection } from "../companyLab/standardAi/costProjection";
+import { buildTurnEconomicsProjection } from "../companyLab/turnEconomicsProjection";
 import { resolveStandardAiProfileForMode } from "../companyLab/standardAi/orientationProfile";
 import { buildInitialDraft, CompanyDecisionDraft } from "../../../v2/company-lab/decisionDraft";
 import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult } from "../../../v2/company-lab/play/_lib/financialViewSelectors";
@@ -127,7 +129,18 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
   // confirmedPlayerDecisionsは既に確定済みTurnの決定を持つが、編集中の下書きは元々
   // サーバー保存の対象になっていない既存仕様のまま）。
   const params = resolveStandardAiProfileForMode(fixture.companyId, session.state.config.standardAiProfileMode).params;
-  const aiDecision = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, session.state.currentPeriod, turn, params).decision;
+  const aiDecision = generateStandardAiDecisionWithDiagnostics(
+    fixture,
+    ownState,
+    publicInfo,
+    session.state.currentPeriod,
+    turn,
+    params,
+    undefined,
+    undefined,
+    // 【#05 費用Projection接続】保存済みRunのScenario snapshotを正本にする。
+    toStandardAiCostProjection(buildTurnEconomicsProjection({ definition: session.state.scenarioState.definition, turn }))
+  ).decision;
   const draftSeed = buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories);
 
   const lastRecord = session.state.history[session.state.history.length - 1] ?? null;

@@ -20,6 +20,7 @@ import { computePressureScores, PressureScores } from "../app/lib/v2/companyLab/
 import { STANDARD_AI_PARAMETERS_V1 } from "../app/lib/v2/companyLab/standardAi/parameters";
 import { StandardAiObservation, sumProductAmount, ProductAmount, zeroProductAmount } from "../app/lib/v2/companyLab/standardAi/types";
 import { evaluateNewFactoryDecision, NEW_FACTORY_STRATEGY_PARAMETERS_V1 } from "../app/lib/v2/companyLab/standardAi/decision/newFactory";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../app/lib/v2/companyLab/standardAi/costProjection";
 import {
   computeEligibleCurrentPeriodDemand,
   computeNormalInventoryTargetByProduct,
@@ -304,6 +305,7 @@ function baseInput(companyId: string, turn: number) {
     commercialAmbition: d.commercialAmbition,
     unservedOpportunity: d.unservedOpportunity,
     persistentCapacityCausedUnserved: d.newFactoryAssessment?.persistentCapacityCausedUnserved ?? false,
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
   };
 }
 

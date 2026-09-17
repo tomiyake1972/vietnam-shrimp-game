@@ -26,6 +26,7 @@ import { period, nextPeriod } from "../../../core/period";
 import { hosoEqTons, ratio } from "../../../core/units";
 import { Factory } from "../../../production/types";
 import { CapexState, CapitalProject } from "../../../capex/types";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 const fixture = {
   companyId: "BAL",
@@ -178,7 +179,7 @@ function pressures(overrides: Partial<PressureScores> = {}): PressureScores {
 const NO_SHORTFALL = { hoso: 0, pd: 0, vap: 0 };
 
 test("CE3-1: PROFILE OFF（STANDARD_AI_PARAMETERS_V1）でも品質管理設備capabilityが利用できる（QUALITY_EQUIP_PROPOSEDが発火し得る）", () => {
-  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(
     result.diagnostics.some((d) => d.code === "QUALITY_EQUIP_PROPOSED"),
     "STANDARD_AI_PARAMETERS_V1（PROFILE OFF相当）でも品質管理設備が提案されるべき"
@@ -188,14 +189,14 @@ test("CE3-1: PROFILE OFF（STANDARD_AI_PARAMETERS_V1）でも品質管理設備c
 
 test("CE3-2: Quality Needが低い工場は候補にならない（QUALITY_EQUIP_LOW_NEED、提案なし）", () => {
   const obs = observation({ factories: [factoryObservation({ factoryId: "BAL-F1", qualityMetrics: LOW_NEED_METRICS })] });
-  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(result.diagnostics.some((d) => d.code === "QUALITY_EQUIP_LOW_NEED"));
   assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "qualityControlEquipment"));
   assert.ok(result.diagnostics.some((d) => d.code === "QUALITY_EQUIP_DEFERRED"));
 });
 
 test("CE3-3: 高いoperationalRisk・損失露出を持つ工場は候補になる（QUALITY_EQUIP_PROPOSED）", () => {
-  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const proposed = result.diagnostics.find((d) => d.code === "QUALITY_EQUIP_PROPOSED");
   assert.ok(proposed);
   assert.equal(proposed!.targetFactoryId, "BAL-F1");
@@ -215,8 +216,8 @@ test("CE3-4: JPQ（品質・加工志向）はneutral（BAL相当）より品質
     qualitySensitiveProductionTons: 400,
   };
   const obs = observation({ factories: [factoryObservation({ factoryId: "BAL-F1", qualityMetrics: moderateNeedMetrics })] });
-  const balResult = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, balParams);
-  const jpqResult = buildStandardAiCapexDecision({ ...fixture, companyId: "JPQ" } as CompanyFixture, obs, pressures(), NO_SHORTFALL, 6000, jpqParams);
+  const balResult = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, balParams, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
+  const jpqResult = buildStandardAiCapexDecision({ ...fixture, companyId: "JPQ" } as CompanyFixture, obs, pressures(), NO_SHORTFALL, 6000, jpqParams, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const balConsidered = balResult.diagnostics.find((d) => d.code === "QUALITY_EQUIP_CONSIDERED");
   const jpqConsidered = jpqResult.diagnostics.find((d) => d.code === "QUALITY_EQUIP_CONSIDERED");
   assert.ok(balConsidered && jpqConsidered);
@@ -228,13 +229,13 @@ test("CE3-4: JPQ（品質・加工志向）はneutral（BAL相当）より品質
 
 test("CE3-5: VAP（高付加価値志向）でも品質管理設備が自然に発生し得る（財務・Need条件を満たせば提案）", () => {
   const vapParams = resolveStandardAiProfileForMode("VAP", "ON").params;
-  const result = buildStandardAiCapexDecision({ ...fixture, companyId: "VAP" } as CompanyFixture, observation({ companyId: "VAP" }), pressures(), NO_SHORTFALL, 6000, vapParams);
+  const result = buildStandardAiCapexDecision({ ...fixture, companyId: "VAP" } as CompanyFixture, observation({ companyId: "VAP" }), pressures(), NO_SHORTFALL, 6000, vapParams, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(result.diagnostics.some((d) => d.code === "QUALITY_EQUIP_PROPOSED"));
 });
 
 test("CE3-6: MASS（コモディティ志向）はhard-blockされない（品質リスクが十分高ければ投資できる）", () => {
   const massParams = resolveStandardAiProfileForMode("MASS", "ON").params;
-  const result = buildStandardAiCapexDecision({ ...fixture, companyId: "MASS" } as CompanyFixture, observation({ companyId: "MASS" }), pressures(), NO_SHORTFALL, 6000, massParams);
+  const result = buildStandardAiCapexDecision({ ...fixture, companyId: "MASS" } as CompanyFixture, observation({ companyId: "MASS" }), pressures(), NO_SHORTFALL, 6000, massParams, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(
     result.diagnostics.some((d) => d.code === "QUALITY_EQUIP_PROPOSED"),
     "MASSでも十分高いQuality Need（HIGH_NEED_METRICS）があれば投資できるべき（hard rule禁止・指示§38）"
@@ -243,7 +244,7 @@ test("CE3-6: MASS（コモディティ志向）はhard-blockされない（品�
 
 test("CE3-7: 財務ゲート未達（現金不足）では品質管理設備を提案しない（QUALITY_EQUIP_FINANCE_BLOCKED）", () => {
   const obs = observation({ cashUsd: 0 });
-  const result = buildStandardAiCapexDecision(fixture, obs, pressures({ targetMinimumCashUsd: 30_000_000 }), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures({ targetMinimumCashUsd: 30_000_000 }), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(result.diagnostics.some((d) => d.code === "QUALITY_EQUIP_FINANCE_BLOCKED"));
   assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "qualityControlEquipment"));
 });
@@ -256,7 +257,7 @@ test("CE3-8: 品質管理設備提案もCM-1のCrisis Gate（SEVERE_DISTRESS時�
   // newProjectProposals）へ積むだけであり、この配列を経由する以上、他のCAPEX種別と
   // 完全に同じ扱いでCrisis Gateの対象になる（既存のCRISIS-6テスト・
   // crisisState.test.tsが、この一律ゲート自体を汎用的に検証・regression保護している）。
-  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(
     result.capexDecision.newProjectProposals.some((p) => p.projectType === "qualityControlEquipment"),
     "前提: この入力では品質管理設備が提案されるはず"
@@ -276,7 +277,7 @@ test("CE3-9: 既に稼働中(FULL_EFFECT)の設備がある工場は重複提案
       }),
     ],
   });
-  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(result.diagnostics.some((d) => d.code === "QUALITY_EQUIP_ALREADY_ACTIVE"));
   assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "qualityControlEquipment"));
 });
@@ -291,7 +292,7 @@ test("CE3-10: ランプ中(RAMPING)の設備を「設備なし」と誤判定せ
       }),
     ],
   });
-  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const alreadyActive = result.diagnostics.find((d) => d.code === "QUALITY_EQUIP_ALREADY_ACTIVE");
   assert.ok(alreadyActive, "ランプ中の設備を持つFactoryは「設備なし」と誤判定されてはならない");
   assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "qualityControlEquipment"));
@@ -307,7 +308,7 @@ test("CE3-10b: 導入進行中(IN_PROGRESS)の設備も重複提案しない", (
       }),
     ],
   });
-  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(result.diagnostics.some((d) => d.code === "QUALITY_EQUIP_ALREADY_ACTIVE"));
 });
 
@@ -322,7 +323,7 @@ test("CE3-11: primaryFactory固定ではなく、Need・経済性で選ばれた
       factoryObservation({ factoryId: "BAL-F2", qualityMetrics: HIGH_NEED_METRICS }),
     ],
   });
-  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const proposed = result.diagnostics.find((d) => d.code === "QUALITY_EQUIP_PROPOSED");
   assert.ok(proposed);
   assert.equal(proposed!.targetFactoryId, "BAL-F2", "主工場（BAL-F1、既に設備あり）ではなく、Needの高いBAL-F2が選ばれるべき");
@@ -333,7 +334,7 @@ test("CE3-11: primaryFactory固定ではなく、Need・経済性で選ばれた
 });
 
 test("CE3-12: QUALITY_EQUIP_PROPOSED診断はfirst-classなtargetFactoryIdフィールドを持つ（文字列parse不要）", () => {
-  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const proposed = result.diagnostics.find((d) => d.code === "QUALITY_EQUIP_PROPOSED");
   assert.ok(proposed);
   assert.equal(proposed!.targetFactoryId, "BAL-F1", "targetFactoryIdはdecisionSummaryではなくfirst-classフィールドとして持つべき");
@@ -394,8 +395,8 @@ test("CE3-15: 品質管理設備を含むCAPEX判断は、PROFILE OFF・ONいず
   const goodObservation = observation({ companyId: "JPQ" });
 
   for (const params of [STANDARD_AI_PARAMETERS_V1, jpqResolution.params] as StandardAiParameters[]) {
-    const run1 = buildStandardAiCapexDecision(jpqFixture, goodObservation, pressures(), NO_SHORTFALL, 6000, params);
-    const run2 = buildStandardAiCapexDecision(jpqFixture, goodObservation, pressures(), NO_SHORTFALL, 6000, params);
+    const run1 = buildStandardAiCapexDecision(jpqFixture, goodObservation, pressures(), NO_SHORTFALL, 6000, params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
+    const run2 = buildStandardAiCapexDecision(jpqFixture, goodObservation, pressures(), NO_SHORTFALL, 6000, params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
     assert.deepEqual(run1.capexDecision, run2.capexDecision);
     assert.deepEqual(run1.diagnostics, run2.diagnostics);
   }
@@ -459,13 +460,13 @@ test("CE3-16: 品質管理設備そのもののゲーム効果（QI-I1）はCE-3
 // ---------------------------------------------------------------------
 
 test("CE3A-ABLATION-1: qualityEquipmentCapabilityEnabled省略時（undefined）はCE-3までの挙動と完全に同一（高Needなら提案される）", () => {
-  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(result.capexDecision.newProjectProposals.some((p) => p.projectType === "qualityControlEquipment"));
 });
 
 test("CE3A-ABLATION-2: qualityEquipmentCapabilityEnabled=falseなら、高Needでも品質管理設備の候補生成そのものが発生しない（診断も提案もゼロ）", () => {
   const disabledParams: StandardAiParameters = { ...STANDARD_AI_PARAMETERS_V1, qualityEquipmentCapabilityEnabled: false };
-  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, disabledParams);
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), NO_SHORTFALL, 6000, disabledParams, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "qualityControlEquipment"));
   assert.ok(
     !result.diagnostics.some((d) => d.code.startsWith("QUALITY_EQUIP_")),
@@ -483,9 +484,9 @@ test("CE3A-ABLATION-3: qualityEquipmentCapabilityEnabled=falseでも、他のCAP
       }),
     ],
   });
-  const enabledResult = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const enabledResult = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const disabledParams: StandardAiParameters = { ...STANDARD_AI_PARAMETERS_V1, qualityEquipmentCapabilityEnabled: false };
-  const disabledResult = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, disabledParams);
+  const disabledResult = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 6000, disabledParams, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const pdMechProposalsEnabled = enabledResult.capexDecision.newProjectProposals.filter((p) => p.projectType === "pdMechanization");
   const pdMechProposalsDisabled = disabledResult.capexDecision.newProjectProposals.filter((p) => p.projectType === "pdMechanization");
   assert.deepEqual(pdMechProposalsDisabled, pdMechProposalsEnabled, "PD Mechanization判断はablation switchの影響を受けないべき");
