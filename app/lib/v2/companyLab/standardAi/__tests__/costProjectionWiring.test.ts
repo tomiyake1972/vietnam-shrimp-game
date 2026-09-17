@@ -438,13 +438,11 @@ test("PROJ-D3: 32Turn実行が決定論的であり、会計不変条件が全�
   let maxDirectIndirectDifference = 0;
   let maxInventoryFlowResidual = 0;
   let maxProfitDifferenceResidualRaw = 0;
-  let maxProfitDifferenceResidualAdjusted = 0;
 
   for (const entry of first.history) {
     for (const fin of entry.financialResults) {
       const label = `${fin.companyId}@${String(entry.period)}`;
       const rec = fin.absorptionVariableReconciliation;
-      const pl = fin.profitAndLoss;
       const cm = fin.contributionMargin;
 
       maxBalanceDifference = Math.max(maxBalanceDifference, Math.abs(Number(fin.balanceSheet.balanceDifference)));
@@ -469,35 +467,28 @@ test("PROJ-D3: 32Turn実行が決定論的であり、会計不変条件が全�
 
       // --- 検査A: profitDifference = closing − opening ---
       //
-      // 【実測事実（推測で通していません）】現行Engineでは、この等式は厳密には
-      // 成立しません。absorption側の operatingProfit には、管理会計（変動原価計算）
-      // レポートの変動費プール・固定費プールのどちらにも入っていない次の費目が
-      // 含まれているためです。
+      // 【管理会計費用範囲是正で成立するようになった】是正前は、absorption側の
+      // operatingProfit にだけ含まれ管理会計のどの区分にも入っていない費目
       //   ・costOfSales.capexMaintenanceCost
       //   ・costOfSales.factoryLifecycleCarryingCost
       //   ・SG&A のうち salesForceSeveranceCost ＋ vapProductDevelopmentSpendUsd
-      //     （＝ sellingGeneralAdmin − fixedPersonnelCost − fixedSellingAdminCost
-      //        − variableSellingCost）
-      // これらを戻したうえでの等式は厳密に閉じるため、ここでは
-      //   (1) 生の残差を計測して記録し（値は報告する）
-      //   (2) absorption専用費目を戻した調整後の等式を epsilon 0.01 USD で検証する
-      // という形にしています。なお、この生の残差は base f4ffc51 でも同一値で
-      // 発生しており（133/160件・最大 817,000 USD）、本Phaseの変更が原因では
-      // ありません。等式Aを字義どおり成立させるには Engine の費用式変更が必要で、
-      // 本Phaseでは禁止されています。
-      const sgaOnlyInAbsorption =
-        Number(pl.sellingGeneralAdmin) -
-        Number(cm.fixedPersonnelCost) -
-        Number(cm.fixedSellingAdminCost) -
-        Number(cm.variableSellingCost);
-      const absorptionOnlyCosts =
-        Number(pl.costOfSales.capexMaintenanceCost) + Number(pl.costOfSales.factoryLifecycleCarryingCost) + sgaOnlyInAbsorption;
-
+      // があったため、この等式は厳密には閉じなかった（生の残差を記録し、
+      // absorption専用費目を戻した調整後の等式だけを検証していた）。
+      //
+      // 是正後は4費目すべてが管理会計側の適切な区分へ入り、さらに未吸収変動費が
+      // 実額で1回だけ計上されるようになったため、**生の等式がそのまま閉じる**。
+      // したがって調整項は不要になり、ここでは生の残差を epsilon 0.01 USD で検証する。
       const rawResidual = Math.abs(Number(rec.profitDifference) - (closing - opening));
-      const adjustedResidual = Math.abs(Number(rec.profitDifference) + absorptionOnlyCosts - (closing - opening));
       maxProfitDifferenceResidualRaw = Math.max(maxProfitDifferenceResidualRaw, rawResidual);
-      maxProfitDifferenceResidualAdjusted = Math.max(maxProfitDifferenceResidualAdjusted, adjustedResidual);
-      if (adjustedResidual > EPSILON_USD) violations.push(`${label} 利益差(A・absorption専用費目調整後)`);
+      if (rawResidual > EPSILON_USD) violations.push(`${label} 利益差(A)`);
+
+      // 管理会計の恒等式（管理会計上の営業利益 = 限界利益 − 固定費）も閉じていること。
+      if (
+        Math.abs(Number(cm.managementOperatingProfit) - (Number(cm.contributionMargin) - Number(cm.totalFixedCost))) >
+        EPSILON_USD
+      ) {
+        violations.push(`${label} 管理会計営業利益の定義`);
+      }
 
       // profitDifference の定義そのもの（absorption − variable）も閉じていること。
       if (
@@ -514,12 +505,10 @@ test("PROJ-D3: 32Turn実行が決定論的であり、会計不変条件が全�
   assert.ok(maxBalanceDifference <= EPSILON_USD, `max|balanceDifference|=${maxBalanceDifference}`);
   assert.ok(maxDirectIndirectDifference <= EPSILON_USD, `max|directIndirectDifference|=${maxDirectIndirectDifference}`);
   assert.ok(maxInventoryFlowResidual <= EPSILON_USD, `max|在庫固定費フロー残差|=${maxInventoryFlowResidual}`);
-  assert.ok(maxProfitDifferenceResidualAdjusted <= EPSILON_USD, `max|利益差残差(調整後)|=${maxProfitDifferenceResidualAdjusted}`);
-  // 生の残差は 0.01 を超える（＝現行Engineの既知の性質。将来この性質が変わったら
-  // このテストが落ち、報告済みの事実が古くなったことに気付ける）。
+  // 【是正後】生の利益差残差が 0.01 USD 以内で閉じる（調整項なし）。
   assert.ok(
-    maxProfitDifferenceResidualRaw > EPSILON_USD,
-    `生の利益差残差が 0.01 USD 以内に収まった（Engine側の費用式が変わった可能性。max=${maxProfitDifferenceResidualRaw}）`
+    maxProfitDifferenceResidualRaw <= EPSILON_USD,
+    `生の利益差残差が 0.01 USD を超えた（管理会計の費用範囲が崩れた可能性。max=${maxProfitDifferenceResidualRaw}）`
   );
 });
 

@@ -214,6 +214,7 @@ export default function PlayerWorkspacePage() {
               disabled={status === "SUBMITTED" || status === "WAITING_FOR_GM"}
               period={context.period}
               turn={context.turn}
+              costProjection={context.costProjection}
               lastQuarterCapexEvents={context.lastQuarterCapexEvents}
               lastQuarterRejectedCapexProposals={context.lastQuarterRejectedCapexProposals}
               lastQuarterFinancialResult={context.lastQuarterFinancialResult}

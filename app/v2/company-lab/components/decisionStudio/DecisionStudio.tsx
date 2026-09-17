@@ -40,6 +40,7 @@ import WorkforcePlanningScreen from "./WorkforcePlanningScreen";
 import InvestmentPlanningScreen from "./InvestmentPlanningScreen";
 import FinancePlanningScreen from "./FinancePlanningScreen";
 import AuxiliaryPanel, { AiMeetingSource } from "./AuxiliaryPanel";
+import type { StandardAiCostProjection } from "../../../../lib/v2/companyLab/standardAi/costProjection";
 
 export interface DecisionStudioProps {
   readonly fixture: CompanyFixture;
@@ -60,6 +61,12 @@ export interface DecisionStudioProps {
   readonly lastQuarterSalesAllocations?: readonly MarketProductBasePriceReference[];
   readonly publicInfo?: PublicMarketInfo;
   readonly turn?: number;
+  /**
+   * 【管理会計是正・Player費用表示接続】当Turnの費用前提（PROCUREMENT画面の
+   * Pre-Financing Liquidity 表示専用）。当Turnの値だけを持ち、将来Turnの
+   * 指数曲線・将来費用値は含まない。省略時は中立値＝本変更前と同一表示。
+   */
+  readonly costProjection?: StandardAiCostProjection;
   /** INFO画面のBS・償却資産明細・市場情報向け（PlayerScreenClient.tsxが持つ場合のみ渡す）。 */
   readonly openingInfo?: OpeningInfoViewModel;
   /**
@@ -97,6 +104,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     lastQuarterSalesAllocations,
     publicInfo,
     turn,
+    costProjection,
     openingInfo,
     scenarioNews,
     labId,
@@ -203,6 +211,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               period={period}
               publicInfo={publicInfo}
               turn={turn}
+              costProjection={costProjection}
             />
           )}
           {activeScreen === "investment" && (

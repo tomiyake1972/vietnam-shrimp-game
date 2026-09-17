@@ -289,12 +289,22 @@ test("DYN-LIFECYCLE-4: mothballはT+1で能力が外れ、固定費基準額の2
   assert.deepEqual(obs[1].eventCodes, ["FACTORY_MOTHBALL_DECIDED"]);
   assert.equal(obs[1].carryingCost, 0);
   assert.equal(obs[1].fixedManufacturingCost, obs[0].fixedManufacturingCost);
-  // T3: 発効。休止工場は生産に使われず、固定製造費が工場1つぶん×指数だけ減る。
+  // T3: 発効。休止工場は生産に使われず、稼働中工場ぶんの固定費が外れる。
+  //
+  // 【管理会計費用範囲是正の反映】carrying cost は「完成品原価へ吸収されない
+  // 期間固定製造費」として fixedManufacturingCost に含まれるようになったため、
+  // 休止による正味の減少は
+  //   工場1つぶん×指数 × (1 − mothballCarryingCostRatio)
+  // になる（=通常固定費が外れ、その25%が維持費として戻ってくる）。
+  // 是正前は carrying cost が管理会計のどの区分にも入っていなかったため、
+  // 減少額がちょうど 工場1つぶん×指数 に見えていた。
   assert.deepEqual(obs[2].eventCodes, ["FACTORY_MOTHBALL_EFFECTIVE"]);
   assert.ok(obs[2].statuses.includes("idle"), `休止工場のstatus: ${obs[2].statuses.join(",")}`);
+  const expectedNetDecrease = NORMAL_CASH_FIXED_COST * INDEX * (1 - FACTORY_LIFECYCLE_PARAMETERS_V1.mothballCarryingCostRatio);
   assert.ok(
-    Math.abs(obs[1].fixedManufacturingCost - obs[2].fixedManufacturingCost - NORMAL_CASH_FIXED_COST * INDEX) <= 1,
-    `固定製造費の減少が NORMAL×${INDEX} と一致しない`
+    Math.abs(obs[1].fixedManufacturingCost - obs[2].fixedManufacturingCost - expectedNetDecrease) <= 1,
+    `固定製造費の正味減少が NORMAL×${INDEX}×(1−0.25) と一致しない: ` +
+      `実測 ${(obs[1].fixedManufacturingCost - obs[2].fixedManufacturingCost).toFixed(0)} / 期待 ${expectedNetDecrease.toFixed(0)}`
   );
 
   // carrying cost は「指数適用後の通常cash固定費 × 25%」。

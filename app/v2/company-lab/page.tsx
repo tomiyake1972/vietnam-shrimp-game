@@ -44,6 +44,7 @@ import ResultsPanel from "./components/ResultsPanel";
 import MarketPanel from "./components/MarketPanel";
 import ComparisonPanel from "./components/ComparisonPanel";
 import QualityDashboardPanel from "./components/QualityDashboardPanel";
+import { buildPlayerCostProjection } from "../../lib/v2/companyLab/playerCostProjection";
 
 const DEFAULT_SEED = "company-lab-seed-001";
 const MAX_TURNS = 40;
@@ -348,6 +349,7 @@ export default function CompanyLabPage() {
                     onChange={setPlayerDraft}
                     disabled={labState.isComplete}
                     period={labState.currentPeriod}
+                    costProjection={buildPlayerCostProjection(labState, labState.scenarioState.currentTurn)}
                     lastQuarterCapexEvents={lastQuarterCapexEventsForPlayer}
                     lastQuarterRejectedCapexProposals={lastQuarterRejectedCapexProposalsForPlayer}
                     lastQuarterFinancialResult={lastQuarterFinancialResultForPlayer}

@@ -36,6 +36,7 @@ import {
 } from "../../procurementPricingViewModel";
 import { buildProcurementCapacityViewModel } from "../../procurementCapacityViewModel";
 import { buildProcurementCashViewModel } from "../../procurementCashViewModel";
+import type { StandardAiCostProjection } from "../../../../lib/v2/companyLab/standardAi/costProjection";
 import { buildPlannedProcurementSummary, PlannedImportOrderInput } from "../../plannedProcurementViewModel";
 import ProductionLinkageHeader from "./ProductionLinkageHeader";
 import RawMaterialTimelineTable from "./RawMaterialTimeline";
@@ -56,9 +57,18 @@ interface ProcurementPlanningSectionProps {
   /** 省略時（例: turn1でまだ公開市場情報が無い画面）は各auto-calc表示が「－」になる。 */
   readonly publicInfo?: PublicMarketInfo;
   readonly turn?: number;
+  /**
+   * 【管理会計是正・Player費用表示接続】当Turnの費用前提。
+   *
+   * Pre-Financing Liquidity の人件費見積を、Engine・Standard AI と同じ
+   * 実効 financeParameters で計算するために渡す。中身は**当Turnの値だけ**であり、
+   * 将来Turnの指数曲線・将来費用値は含まない（StandardAiCostProjection の定義参照）。
+   * 省略時は中立値（全指数1.00）となり、本変更前の表示とビット単位で同一。
+   */
+  readonly costProjection?: StandardAiCostProjection;
 }
 
-export default function ProcurementPlanningSection({ fixture, ownState, draft, onChange, disabled, period, publicInfo, turn }: ProcurementPlanningSectionProps) {
+export default function ProcurementPlanningSection({ fixture, ownState, draft, onChange, disabled, period, publicInfo, turn, costProjection }: ProcurementPlanningSectionProps) {
   const tone = AREA_TONES.input;
 
   // decisionInputForForecastは「提出時に実際にエンジンへ渡るのと同じ形」（draftの生値ではない）。
@@ -150,6 +160,7 @@ export default function ProcurementPlanningSection({ fixture, ownState, draft, o
           turn,
           domesticDesiredQuantityTons: unwrapUnit(decisionInputForForecast.domesticPurchasePlan.desiredQuantity),
           importOrderedQuantityTons: decisionInputForForecast.importOrders.reduce((sum, o) => sum + unwrapUnit(o.orderedQuantity), 0),
+          costProjection,
         })
       : null;
 

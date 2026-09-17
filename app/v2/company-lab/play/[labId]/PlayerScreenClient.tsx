@@ -512,6 +512,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
             <h2 className="text-base font-semibold mb-3">意思決定編集（turn {viewModel.currentTurn}）</h2>
             <DomesticReferencePriceBanner reference={viewModel.openingInfo.domesticReferencePrice} turn={viewModel.currentTurn} />
             <DecisionStudio
+              costProjection={viewModel.standardAiCostProjection}
               fixture={viewModel.fixture}
               ownState={viewModel.ownState}
               draft={draft}

@@ -54,6 +54,7 @@ import { QUICK_NAVIGATION } from "../analysis/catalog";
 // 【MANAGEMENT-CONSOLE-SALES-MODEL-1】PLAYERは販売市場モデルを途中で変更できない。
 // ここは read-only 表示のみ（変更UI・setterを作らない）。
 import { salesModelDisplayLabelFor } from "../../company-lab/play/_lib/salesModelDisplay";
+import { buildPlayerCostProjection } from "../../../lib/v2/companyLab/playerCostProjection";
 
 type WorkspaceTab = "overview" | "market" | "inventory" | "decision";
 
@@ -551,6 +552,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               disabled={false}
               period={session.state.currentPeriod}
               turn={turn}
+              costProjection={buildPlayerCostProjection(session.state, turn)}
               lastQuarterCapexEvents={lastQuarterCapexResult?.events}
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
