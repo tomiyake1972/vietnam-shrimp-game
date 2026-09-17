@@ -27,6 +27,7 @@ import { ALL_SCENARIO_DEFINITIONS } from "../../../scenario/definitions";
 import { ScenarioDefinition } from "../../../scenario/types";
 import { CAPITAL_PROJECT_TYPES } from "../../../capex/types";
 import { CAPEX_PARAMETERS_V1 } from "../../../capex/parameters";
+import { resolveProjectBudget } from "../../../capex/projectLifecycle";
 import { FACTORY_LIFECYCLE_PARAMETERS_V1 } from "../../../capex/factoryLifecycle";
 import { FINANCE_PARAMETERS_V1, financeParametersForTurn } from "../../../finance/parameters";
 import { resolveAllOperatingCostIndices, resolveConstructionCostIndex } from "../../../scenario/costIndex";
@@ -414,7 +415,7 @@ test("PROJ-D2: 同一入力なら 5経路の出力も常に同一", () => {
   );
 });
 
-test("PROJ-D3: 32Turn実行が決定論的であり、会計不変条件が全四半期で 0.01 USD 以内に収まる", () => {
+test("PROJ-D3: 32Turn実行が決定論的であり、会計不変条件が全社×全Turnで epsilon 0.01 USD 以内に収まる", () => {
   const run = () => {
     let session = createSimulationSession({
       simulationRunId: "proj-d3",
@@ -431,25 +432,191 @@ test("PROJ-D3: 32Turn実行が決定論的であり、会計不変条件が全�
   assert.equal(first.history.length, 32);
   assert.deepEqual(JSON.parse(JSON.stringify(first)), JSON.parse(JSON.stringify(second)), "同一seed・同一設定の32Turn結果が一致しない");
 
+  const EPSILON_USD = 0.01;
   const violations: string[] = [];
+  let maxBalanceDifference = 0;
+  let maxDirectIndirectDifference = 0;
+  let maxInventoryFlowResidual = 0;
+  let maxProfitDifferenceResidualRaw = 0;
+  let maxProfitDifferenceResidualAdjusted = 0;
+
   for (const entry of first.history) {
     for (const fin of entry.financialResults) {
       const label = `${fin.companyId}@${String(entry.period)}`;
-      if (Math.abs(Number(fin.balanceSheet.balanceDifference)) > 0.01) violations.push(`${label} balanceDifference`);
-      if (Math.abs(Number(fin.cashFlow.directIndirectDifference)) > 0.01) violations.push(`${label} directIndirectDifference`);
-      // 【profitDifference の意味（捏造しない）】finance/quarterClose.ts の定義は
-      //   profitDifference = absorptionOperatingProfit − variableCostingOperatingProfit
-      // であり、「0に収束すべき残差」ではなく利益差そのものである（在庫中固定製造費の
-      // 増減と同符号で動き、四半期によっては数百万USDになる）。したがって
-      // 0.01 USD 以内に収まるべきなのは **突合残差**（この差が定義どおり閉じているか）
-      // であり、それをここで検証する。
       const rec = fin.absorptionVariableReconciliation;
+      const pl = fin.profitAndLoss;
+      const cm = fin.contributionMargin;
+
+      maxBalanceDifference = Math.max(maxBalanceDifference, Math.abs(Number(fin.balanceSheet.balanceDifference)));
+      maxDirectIndirectDifference = Math.max(maxDirectIndirectDifference, Math.abs(Number(fin.cashFlow.directIndirectDifference)));
+      if (Math.abs(Number(fin.balanceSheet.balanceDifference)) > EPSILON_USD) violations.push(`${label} balanceDifference`);
+      if (Math.abs(Number(fin.cashFlow.directIndirectDifference)) > EPSILON_USD) violations.push(`${label} directIndirectDifference`);
+
+      const opening = Number(rec.fixedCostInOpeningInventory);
+      const closing = Number(rec.fixedCostInClosingInventory);
+
+      // --- 検査B: 在庫中固定製造費のフロー整合 ---
+      //   closing = opening + 当期配賦 − 販売による費用化 − 廃棄による費用化
+      const inventoryFlowResidual = Math.abs(
+        closing -
+          (opening +
+            Number(rec.fixedCostAbsorbedIntoInventory) -
+            Number(rec.fixedCostReleasedThroughSales) -
+            Number(rec.fixedCostReleasedThroughWriteOff))
+      );
+      maxInventoryFlowResidual = Math.max(maxInventoryFlowResidual, inventoryFlowResidual);
+      if (inventoryFlowResidual > EPSILON_USD) violations.push(`${label} 在庫固定費フロー(B)`);
+
+      // --- 検査A: profitDifference = closing − opening ---
+      //
+      // 【実測事実（推測で通していません）】現行Engineでは、この等式は厳密には
+      // 成立しません。absorption側の operatingProfit には、管理会計（変動原価計算）
+      // レポートの変動費プール・固定費プールのどちらにも入っていない次の費目が
+      // 含まれているためです。
+      //   ・costOfSales.capexMaintenanceCost
+      //   ・costOfSales.factoryLifecycleCarryingCost
+      //   ・SG&A のうち salesForceSeveranceCost ＋ vapProductDevelopmentSpendUsd
+      //     （＝ sellingGeneralAdmin − fixedPersonnelCost − fixedSellingAdminCost
+      //        − variableSellingCost）
+      // これらを戻したうえでの等式は厳密に閉じるため、ここでは
+      //   (1) 生の残差を計測して記録し（値は報告する）
+      //   (2) absorption専用費目を戻した調整後の等式を epsilon 0.01 USD で検証する
+      // という形にしています。なお、この生の残差は base f4ffc51 でも同一値で
+      // 発生しており（133/160件・最大 817,000 USD）、本Phaseの変更が原因では
+      // ありません。等式Aを字義どおり成立させるには Engine の費用式変更が必要で、
+      // 本Phaseでは禁止されています。
+      const sgaOnlyInAbsorption =
+        Number(pl.sellingGeneralAdmin) -
+        Number(cm.fixedPersonnelCost) -
+        Number(cm.fixedSellingAdminCost) -
+        Number(cm.variableSellingCost);
+      const absorptionOnlyCosts =
+        Number(pl.costOfSales.capexMaintenanceCost) + Number(pl.costOfSales.factoryLifecycleCarryingCost) + sgaOnlyInAbsorption;
+
+      const rawResidual = Math.abs(Number(rec.profitDifference) - (closing - opening));
+      const adjustedResidual = Math.abs(Number(rec.profitDifference) + absorptionOnlyCosts - (closing - opening));
+      maxProfitDifferenceResidualRaw = Math.max(maxProfitDifferenceResidualRaw, rawResidual);
+      maxProfitDifferenceResidualAdjusted = Math.max(maxProfitDifferenceResidualAdjusted, adjustedResidual);
+      if (adjustedResidual > EPSILON_USD) violations.push(`${label} 利益差(A・absorption専用費目調整後)`);
+
+      // profitDifference の定義そのもの（absorption − variable）も閉じていること。
       if (
-        Math.abs(Number(rec.absorptionOperatingProfit) - Number(rec.variableCostingOperatingProfit) - Number(rec.profitDifference)) > 0.01
+        Math.abs(Number(rec.absorptionOperatingProfit) - Number(rec.variableCostingOperatingProfit) - Number(rec.profitDifference)) >
+        EPSILON_USD
       ) {
-        violations.push(`${label} absorptionVariableReconciliation突合残差`);
+        violations.push(`${label} profitDifference定義`);
       }
     }
   }
+
   assert.deepEqual(violations, [], `会計不変条件違反: ${violations.slice(0, 5).join(", ")}`);
+  // 実測値を残す（報告で使う数値をテスト自身が生成する）。
+  assert.ok(maxBalanceDifference <= EPSILON_USD, `max|balanceDifference|=${maxBalanceDifference}`);
+  assert.ok(maxDirectIndirectDifference <= EPSILON_USD, `max|directIndirectDifference|=${maxDirectIndirectDifference}`);
+  assert.ok(maxInventoryFlowResidual <= EPSILON_USD, `max|在庫固定費フロー残差|=${maxInventoryFlowResidual}`);
+  assert.ok(maxProfitDifferenceResidualAdjusted <= EPSILON_USD, `max|利益差残差(調整後)|=${maxProfitDifferenceResidualAdjusted}`);
+  // 生の残差は 0.01 を超える（＝現行Engineの既知の性質。将来この性質が変わったら
+  // このテストが落ち、報告済みの事実が古くなったことに気付ける）。
+  assert.ok(
+    maxProfitDifferenceResidualRaw > EPSILON_USD,
+    `生の利益差残差が 0.01 USD 以内に収まった（Engine側の費用式が変わった可能性。max=${maxProfitDifferenceResidualRaw}）`
+  );
+});
+
+// =====================================================================
+// E. 旧監査と同じ M2 Turn 32 ゲート（5費目 ＋ 全10案件 = 15項目、不一致0件）
+// =====================================================================
+
+/**
+ * 旧監査の Case M2 と同じ指数。正式Scenario値は追加せず、このテストfixture内だけで
+ * 定義する（definitions/ には何も足していない）。
+ */
+const M2_INDEX_BY_KEY = {
+  regularLabor: 1.21,
+  temporaryLabor: 1.21,
+  factoryFixed: 1.25,
+  adminFixed: 1.25,
+  construction: 1.35,
+} as const;
+
+function m2Definition(): ScenarioDefinition {
+  const tracks = Object.fromEntries(
+    Object.entries(M2_INDEX_BY_KEY).map(([key, value]) => [
+      key,
+      { interpolation: "step" as const, keyframes: [{ turn: 1, value: 1 }, { turn: 2, value }] },
+    ])
+  );
+  return {
+    ...BASELINE,
+    operatingCostInflation: { settingsId: "m2-turn32-gate", tracks },
+    constructionCostPolicy: "indexed-required-cost-v1",
+  } as ScenarioDefinition;
+}
+
+/** 旧監査の Turn 32 期待値（USD）。 */
+const M2_EXPECTED_AT_T32: readonly (readonly [string, number, (f: typeof FINANCE_PARAMETERS_V1) => number])[] = [
+  ["regularWorkerSalaryUsdPerQuarter", 1_210, (f) => f.labor.regularWorkerSalaryUsdPerQuarter],
+  ["temporaryWorkerCostUsdPerQuarter", 968, (f) => f.labor.temporaryWorkerCostUsdPerQuarter],
+  ["factoryFixedCostUsdPerQuarter", 1_500_000, (f) => f.manufacturing.factoryFixedCostUsdPerQuarter],
+  ["factoryUtilityFixedUsdPerQuarter", 312_500, (f) => f.manufacturing.factoryUtilityFixedUsdPerQuarter],
+  ["adminFixedUsdPerQuarter", 1_000_000, (f) => f.sellingGeneralAdmin.adminFixedUsdPerQuarter],
+];
+
+test("PROJ-E1: M2 Turn 32 — 5費目がEngine・Standard AI・旧監査期待値の三者で一致する（不一致0件）", () => {
+  const definition = m2Definition();
+  const ai = toStandardAiCostProjection(buildTurnEconomicsProjection({ definition, turn: 32 }));
+  const engine = financeParametersForTurn(FINANCE_PARAMETERS_V1, resolveAllOperatingCostIndices(definition, 32));
+
+  const mismatches: string[] = [];
+  for (const [label, expected, pick] of M2_EXPECTED_AT_T32) {
+    if (pick(engine) !== expected) mismatches.push(`${label}(Engine=${pick(engine)} 期待=${expected})`);
+    if (pick(ai.financeParameters) !== expected) mismatches.push(`${label}(StandardAI=${pick(ai.financeParameters)} 期待=${expected})`);
+    if (pick(engine) !== pick(ai.financeParameters)) mismatches.push(`${label}(Engine/StandardAI不一致)`);
+  }
+  assert.deepEqual(mismatches, [], mismatches.join(" / "));
+});
+
+test("PROJ-E2: M2 Turn 32 — 全10案件種別で indexedRequiredProjectCost = standardBudgetUsd × 1.35 がEngineとStandard AIで一致する（不一致0件）", () => {
+  const definition = m2Definition();
+  const ai = toStandardAiCostProjection(buildTurnEconomicsProjection({ definition, turn: 32 }));
+  const constructionIndex = resolveConstructionCostIndex(definition, 32);
+  assert.equal(constructionIndex, 1.35);
+  assert.equal(CAPITAL_PROJECT_TYPES.length, 10);
+
+  const costPolicy = { policy: "indexed-required-cost-v1" as const, constructionCostIndex: constructionIndex };
+  const mismatches: string[] = [];
+  for (const projectType of CAPITAL_PROJECT_TYPES) {
+    const template = CAPEX_PARAMETERS_V1.templatesByType[projectType];
+    // Engine の承認額計算と同一関数（resolveProjectBudget）を通した値。
+    const engineRequired = resolveProjectBudget(template, undefined, costPolicy).indexedRequiredProjectCostUsd;
+    const expected = template.standardBudgetUsd * 1.35;
+    const aiRequired = ai.indexedRequiredProjectCostByType[projectType];
+    if (engineRequired !== expected) mismatches.push(`${projectType}(Engine=${engineRequired} 期待=${expected})`);
+    if (aiRequired !== expected) mismatches.push(`${projectType}(StandardAI=${aiRequired} 期待=${expected})`);
+    if (engineRequired !== aiRequired) mismatches.push(`${projectType}(Engine/StandardAI不一致)`);
+  }
+  assert.deepEqual(mismatches, [], mismatches.join(" / "));
+});
+
+test("PROJ-E3: M2 Turn 32 — 5費目＋10案件＝15項目の不一致が0件である", () => {
+  const definition = m2Definition();
+  const ai = toStandardAiCostProjection(buildTurnEconomicsProjection({ definition, turn: 32 }));
+  const engine = financeParametersForTurn(FINANCE_PARAMETERS_V1, resolveAllOperatingCostIndices(definition, 32));
+  const costPolicy = { policy: "indexed-required-cost-v1" as const, constructionCostIndex: 1.35 };
+
+  let checked = 0;
+  let mismatched = 0;
+  for (const [, expected, pick] of M2_EXPECTED_AT_T32) {
+    checked += 1;
+    if (!(pick(engine) === expected && pick(ai.financeParameters) === expected)) mismatched += 1;
+  }
+  for (const projectType of CAPITAL_PROJECT_TYPES) {
+    checked += 1;
+    const template = CAPEX_PARAMETERS_V1.templatesByType[projectType];
+    const engineRequired = resolveProjectBudget(template, undefined, costPolicy).indexedRequiredProjectCostUsd;
+    const expected = template.standardBudgetUsd * 1.35;
+    if (!(engineRequired === expected && ai.indexedRequiredProjectCostByType[projectType] === expected)) mismatched += 1;
+  }
+  assert.equal(checked, 15, "検査項目は5費目＋10案件＝15項目でなければならない");
+  assert.equal(mismatched, 0, `不一致 ${mismatched} 件`);
 });
