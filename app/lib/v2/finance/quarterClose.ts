@@ -1435,9 +1435,26 @@ export function closeFinancialQuarter(
     rawMaterialExpiryLoss + finishedGoodsWriteOffVariable + Math.max(0, zeroProductionVariable) + salesForceSeveranceCost;
 
   // 【商品別固定費配賦】商品別へ配賦済みの直接固定費合計。totalFixedCostから
-  // これを差し引いた残りがcommonFixedCost（= idleLaborCost（遊休労務費。常に
-  // どの商品にも配賦しない）＋fixedPersonnelCost（営業・調達人件費）＋
-  // fixedSellingAdminCost（一般管理固定費）と恒等的に一致する）。
+  // これを差し引いた残りがcommonFixedCostである。
+  //
+  // computeManagementAccountingProductFixedCostAllocation が商品別へ直接配賦
+  // するのは productiveRegularLaborCost ＋ factoryFixedCost ＋ utilityFixedCost
+  // ＋ depreciationCost のみ。したがって当期に配賦が成立する四半期では
+  // commonFixedCost は恒等的に次の合計と一致する。
+  //   (a) idleLaborCost
+  //       （遊休労務費。regularLaborCost のうち productive 分を除いた未配賦分。
+  //         常にどの商品にも配賦しない）
+  //   (b) capexMaintenanceCost（設備維持費。fixedManufacturingCost に含めるが
+  //       商品別直接固定費へは配賦しない）
+  //   (c) factoryLifecycleCarryingCost（工場ライフサイクル保有費。同上）
+  //   (d) fixedPersonnelCost（営業・調達人件費）
+  //   (e) fixedSellingAdminCost（adminFixed ＋ vapProductDevelopmentSpendUsd）
+  // すなわち fixedManufacturingCost のうち商品別直接固定費へ配賦されない部分
+  // （idleLaborCost・capexMaintenanceCost・factoryLifecycleCarryingCost）は
+  // すべて commonFixedCost 側へ残る。
+  //
+  // ゼロ生産四半期（totalAdjustedTons ≤ ε）は配賦自体が成立せず
+  // totalDirectFixedCostAllocated = 0 となるため commonFixedCost = totalFixedCost。
   const totalDirectFixedCostAllocated = [...managementAccountingDirectFixedCostByProduct.values()].reduce((s, v) => s + v, 0);
 
   const contributionMargin: ContributionMarginReport = {

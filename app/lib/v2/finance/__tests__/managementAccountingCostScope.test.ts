@@ -237,3 +237,77 @@ test("MAS-8: 未吸収変動費は実額で1回だけ計上される（all-or-no
   }
   assert.ok(checked > 0, "未吸収費用が発生するTurnが検証対象に含まれること");
 });
+
+test("MAS-9: commonFixedCost の構成が実金額で閉じる（未配賦固定製造費が共通側へ残る）", () => {
+  // commonFixedCost = totalFixedCost − Σ(商品別directFixedCost)。
+  // 商品別へ直接配賦されるのは productiveRegularLaborCost + factoryFixedCost
+  // + utilityFixedCost + depreciationCost のみであるため、配賦が成立する四半期では
+  //   idleLaborCost + capexMaintenanceCost + factoryLifecycleCarryingCost
+  //   + fixedPersonnelCost + fixedSellingAdminCost
+  // と実金額で一致する。ゼロ生産四半期は配賦が成立せず commonFixedCost = totalFixedCost。
+  let checkedAllocated = 0;
+  let checkedUnallocated = 0;
+  let sawIdleLabor = 0;
+  let sawCapexMaintenance = 0;
+  let sawLifecycleCarrying = 0;
+  let sawFixedPersonnel = 0;
+  let sawFixedSellingAdmin = 0;
+  for (const { scenarioId, seed } of RUNS) {
+    for (const rec of run(scenarioId, seed).state.history) {
+      for (const fr of rec.financialResults) {
+        const cm = fr.contributionMargin;
+        const cos = fr.profitAndLoss.costOfSales;
+        const allocated = cm.byProduct.reduce((s, d) => s + n(d.directFixedCost), 0);
+
+        // 定義そのもの（実金額）
+        assert.ok(
+          Math.abs(n(cm.commonFixedCost) - (n(cm.totalFixedCost) - allocated)) <= EPS,
+          `${scenarioId}/${seed} T${rec.turn}/${fr.companyId} commonFixedCost = totalFixedCost − Σ直接固定費`
+        );
+
+        if (allocated > EPS) {
+          const expected =
+            n(cos.idleLaborCost) +
+            n(cos.capexMaintenanceCost) +
+            n(cos.factoryLifecycleCarryingCost) +
+            n(cm.fixedPersonnelCost) +
+            n(cm.fixedSellingAdminCost);
+          assert.ok(
+            Math.abs(n(cm.commonFixedCost) - expected) <= EPS,
+            `${scenarioId}/${seed} T${rec.turn}/${fr.companyId} commonFixedCost 実金額=${n(cm.commonFixedCost)} 期待=${expected}`
+          );
+          checkedAllocated++;
+          if (n(cos.idleLaborCost) > EPS) sawIdleLabor++;
+          if (n(cos.capexMaintenanceCost) > EPS) sawCapexMaintenance++;
+          if (n(cos.factoryLifecycleCarryingCost) > EPS) sawLifecycleCarrying++;
+          if (n(cm.fixedPersonnelCost) > EPS) sawFixedPersonnel++;
+          if (n(cm.fixedSellingAdminCost) > EPS) sawFixedSellingAdmin++;
+        } else {
+          assert.ok(
+            Math.abs(n(cm.commonFixedCost) - n(cm.totalFixedCost)) <= EPS,
+            `${scenarioId}/${seed} T${rec.turn}/${fr.companyId} 配賦不成立時 commonFixedCost = totalFixedCost`
+          );
+          checkedUnallocated++;
+        }
+      }
+    }
+  }
+  assert.ok(checkedAllocated > 0, "配賦が成立する会社Turnが検証対象に含まれること");
+  // 5構成要素それぞれが実額で0より大きい会社Turnを含むこと（恒等式が偶然成立していない）
+  assert.ok(sawIdleLabor > 0, "idleLaborCost > 0 の会社Turnが含まれること");
+  // factoryLifecycleCarryingCost は工場のMOTHBALLED/SALE_PENDING/再稼働が発生した
+  // 四半期にのみ計上される。本3Runでは実測0件であったため（console.log参照）、
+  // 「capexMaintenance と lifecycle の少なくとも一方が0より大きい会社Turnを含む」
+  // までを固定し、存在しない事象を期待値として書かない。
+  assert.ok(
+    sawCapexMaintenance + sawLifecycleCarrying > 0,
+    "capexMaintenanceCost または factoryLifecycleCarryingCost が0より大きい会社Turnが含まれること"
+  );
+  assert.ok(sawFixedPersonnel > 0, "fixedPersonnelCost > 0 の会社Turnが含まれること");
+  assert.ok(sawFixedSellingAdmin > 0, "fixedSellingAdminCost > 0 の会社Turnが含まれること");
+  console.log(
+    `MAS-9 実測: allocated=${checkedAllocated} unallocated=${checkedUnallocated} ` +
+      `idle=${sawIdleLabor} capexMaint=${sawCapexMaintenance} lifecycle=${sawLifecycleCarrying} ` +
+      `fixedPersonnel=${sawFixedPersonnel} fixedSellingAdmin=${sawFixedSellingAdmin}`
+  );
+});
