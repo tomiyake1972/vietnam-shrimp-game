@@ -26,11 +26,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   advanceSimulationTurn,
   applyVisionOverrideToSession,
+  applyManualBalanceScheduleToSession,
   createSimulationSession,
   resetVisionOverrideForSessionCompany,
 } from "../../../lib/v2/companyLab/simulation/engine";
 import { CompanyVisionOverrideEntry } from "../../../lib/v2/companyLab/vision/overrides";
 import { VisionCalibrationPanel } from "./VisionCalibrationPanel";
+import { BalanceAdjustmentPanel } from "./BalanceAdjustmentPanel";
+import type { ManualBalanceSchedule } from "../../../lib/v2/companyLab/manualBalance/overrides";
 import {
   CompanyControlMode,
   MANAGEMENT_CONSOLE_STANDARD_TURNS,
@@ -500,6 +503,23 @@ export function ManagementConsole() {
     (companyId: string) => {
       if (!view?.session || isGameFinished(view.run)) return;
       const updated = resetVisionOverrideForSessionCompany(view.session, companyId);
+      setView(viewFromSession(updated));
+      void persist(updated, companyControlModes, confirmedPlayerDecisions);
+    },
+    [view, companyControlModes, confirmedPlayerDecisions, persist]
+  );
+
+  /**
+   * 【MANUAL-BALANCE-1】手動バランス調整のスケジュールを適用して保存する。
+   *
+   * Vision Calibrationとまったく同じ経路をたどる（session更新 → 即persist）。
+   * 保存が成立しないまま「適用予定」と表示しないよう、保存失敗は既存の
+   * persist() の失敗表示（persistenceBlocked / 保存先の明示）がそのまま担当する。
+   */
+  const handleApplyManualBalance = useCallback(
+    (schedule: ManualBalanceSchedule) => {
+      if (!view?.session || isGameFinished(view.run)) return;
+      const updated = applyManualBalanceScheduleToSession(view.session, schedule);
       setView(viewFromSession(updated));
       void persist(updated, companyControlModes, confirmedPlayerDecisions);
     },
@@ -1181,6 +1201,16 @@ export function ManagementConsole() {
           {/* 【Management Console Vision Calibration・指示§12】実行中でもVisionを調整できる。 */}
           <Collapsible title="Vision & Strategy Calibration（実行中の編集）" testId="console-vision-calibration-toggle">
             <VisionCalibrationPanel session={view?.session ?? null} onApply={handleApplyVisionOverride} onReset={handleResetVisionOverride} />
+          </Collapsible>
+
+          {/* 【MANUAL-BALANCE-1】配当性向・販売/原料市場価格指数の手動調整。 */}
+          <Collapsible title="バランス調整（配当性向・市場価格指数）" testId="console-balance-adjustment-toggle">
+            <BalanceAdjustmentPanel
+              session={view?.session ?? null}
+              onApply={handleApplyManualBalance}
+              busy={busy || restoring}
+              locked={view ? isGameFinished(view.run) : false}
+            />
           </Collapsible>
 
           <ExportPackButton

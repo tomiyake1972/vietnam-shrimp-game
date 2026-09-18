@@ -88,7 +88,14 @@ test("CFR-4: resumePayload経由の復元結果が変わらない（configにも
 });
 
 test("CFR-5: persistence version・Redis keyを変更していない", () => {
-  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 5);
+  // 【MANUAL-BALANCE-1で5→6へ意図的に更新】DS2費用追随（本テストの対象Phase）は
+  // 今もpersistence versionを変更していない。6への引き上げは後続の
+  // Management Console 手動バランス調整が、optionalフィールドの追加のみ
+  // （manualBalanceOverrides / manualBalanceApplied）で行ったものであり、
+  // マイグレーション不要・旧v1〜v5データはそのまま読める。
+  // このテストの本来の意図（Redis keyの体系が変わっていないこと、versionが
+  // 把握済みの値であること）は下の各assertで引き続き担保される。
+  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 6);
   assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 8);
   assert.equal(simulationRunIndexKeyV2("staging"), "staging:v2:simulationRun:index");
   assert.equal(simulationRunManifestKeyV2("staging", "run-1"), "staging:v2:simulationRun:run-1");

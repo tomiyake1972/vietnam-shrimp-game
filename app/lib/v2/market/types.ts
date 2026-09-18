@@ -17,6 +17,7 @@
 
 import { HosoEqTons, UsdPerHosoEqKg, Ratio, Score0to100 } from "../core/units";
 import { PeriodV2 } from "../core/period";
+import type { ManualPriceIndexAuditWarning } from "./manualPriceIndex";
 
 export class MarketValidationError extends Error {
   constructor(message: string) {
@@ -155,6 +156,17 @@ export interface VietnamDomesticInput {
    * buyingCeiling・farmerReservationPrice・clamp上限1.0は変更しない。
    */
   readonly rawPriceCaptureIndex?: number;
+  /**
+   * 【MANUAL-BALANCE-1】管理者が Management Console で指定する原料市場価格指数。
+   * 100 = 手動補正なし（未指定時と同じ）。95 = そのTurnの補正前価格の95%。
+   *
+   * 【rawPriceCaptureIndex との違い・1本に潰さない理由】
+   * rawPriceCaptureIndex は Scenario/DS2 由来で、需給乗数の**基準値**に掛かり
+   * 市場清算の内側で働く（buyingCeiling・留保価格・clamp上限1.0の制約を受ける）。
+   * こちらは市場清算が**完了したあと**の価格へ1回だけ掛かり、再クランプされない。
+   * 効き方も監査上の意味も異なるため、両者は別フィールドのまま保存する。
+   */
+  readonly manualRawMarketPriceIndex?: number;
 }
 
 /** PD/VAP需要構成の当期入力（世界全体集計）。 */
@@ -174,6 +186,16 @@ export interface MarketQuarterInput {
   readonly demandMarkets: Readonly<Record<DemandMarketId, DemandMarketInput>>;
   readonly vietnamDomestic: VietnamDomesticInput;
   readonly pdVapDemand: PdVapDemandInput;
+  /**
+   * 【MANUAL-BALANCE-1】管理者が指定する販売市場価格指数。100 = 手動補正なし。
+   *
+   * 【適用位置】HOSO清算価格（hosoPrices）そのものには掛けない。hosoPrices は
+   * 輸入調達原価と国内原料の buyingCeiling の入力でもあるため、ここへ掛けると
+   * 「販売価格を下げたのに原料調達も安くなる」という二重作用が起きる。
+   * 代わりに market/destinationPricing.ts の**販売基準価格の導出結果**へ
+   * 1回だけ掛ける（deriveMarketReferencePrices）。
+   */
+  readonly manualSalesPriceIndex?: number;
 }
 
 // ---------------------------------------------------------------------
@@ -224,6 +246,25 @@ export interface VietnamDomesticResult {
   readonly rawPriceCaptureIndex?: number;
   /** 【ENG-DS2-COST-FOUNDATION-1・診断専用】数量調整時の取引比率（中立時は不在。通常領域では1）。 */
   readonly tradeRatio?: number;
+  /**
+   * 【MANUAL-BALANCE-1】手動原料市場価格指数の適用前価格。
+   *
+   * ★手動指数が中立(100)のときは**キー自体を作らない**（rawPriceCaptureIndex と
+   * 同じ規約）。既存Runの保存結果をビット単位で不変に保つため。
+   * 中立でないときは price === appliedRawMarketPrice であり、この値が
+   * 「通常の市場清算が確定させた、補正前の価格」を示す。
+   */
+  readonly preManualRawMarketPrice?: UsdPerHosoEqKg;
+  /** 【MANUAL-BALANCE-1】適用した手動原料市場価格指数（中立時は不在）。 */
+  readonly manualRawMarketPriceIndex?: number;
+  /** 【MANUAL-BALANCE-1】手動指数適用後の価格（中立時は不在。再クランプしていない値）。 */
+  readonly appliedRawMarketPrice?: UsdPerHosoEqKg;
+  /**
+   * 【MANUAL-BALANCE-1】適用後価格が既存の市場制約（農家留保価格・買付上限）の
+   * 外側に出たことを示す監査警告（中立時・制約内のときは不在）。
+   * 値は上書きしていない。画面と保存の双方でこの警告を提示する。
+   */
+  readonly manualPriceIndexWarnings?: readonly ManualPriceIndexAuditWarning[];
   readonly supply: HosoEqTons;
   /** プロラタ最低引取ルール適用後の実効需要。 */
   readonly effectiveDemand: HosoEqTons;
@@ -287,4 +328,16 @@ export interface MarketQuarterResult {
   readonly pdPremium: ProductPremiumResult;
   readonly vapPremium: ProductPremiumResult;
   readonly globalDrivers: readonly MarketPriceDriver[];
+  /**
+   * 【MANUAL-BALANCE-1】この四半期に適用された販売市場価格指数（中立時は不在）。
+   *
+   * 【なぜ結果へ載せるか】販売基準価格を導出する deriveMarketReferencePrices は
+   * 販売エンジン・Standard AI観測・autoPolicy・TurnEconomicsProjection の4経路から
+   * 呼ばれ、いずれも marketResult だけを入力に取る。指数を marketResult に載せて
+   * おけば、4経路すべてが引数を増やさずに同一の適用後価格を見る
+   * （プレイヤーとStandard AIが違う価格を見る事故を構造的に防ぐ）。
+   * Standard AI は前Turnの marketResult（lastMarketResult）を読むため、
+   * 「当Turnの未開示設定」を先読みすることはこの経路では起こらない。
+   */
+  readonly manualSalesPriceIndex?: number;
 }

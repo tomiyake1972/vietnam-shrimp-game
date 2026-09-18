@@ -11,7 +11,14 @@
 // レポート生成（§14）はPhase1のスコープ外（docs参照）。
 
 import { RandomStream } from "../core/random";
-import { COUNTRY_IDS, MarketQuarterInput, MarketQuarterResult, MarketPriceDriver } from "./types";
+import { unwrapUnit, usdPerHosoEqKg } from "../core/units";
+import { COUNTRY_IDS, MarketQuarterInput, MarketQuarterResult, MarketPriceDriver, VietnamDomesticResult } from "./types";
+import {
+  MANUAL_PRICE_INDEX_NEUTRAL,
+  applyManualPriceIndex,
+  detectManualRawPriceWarnings,
+  isUsableManualPriceIndex,
+} from "./manualPriceIndex";
 import { MarketParameters, MARKET_PARAMETERS_V1 } from "./parameters";
 import { calculateWorldDemand } from "./globalDemand";
 import { summarizeCountrySupply } from "./countrySupply";
@@ -60,12 +67,28 @@ export function calculateMarketQuarter(
   // 5. ベトナム国内未凍結原料市場（同 §10、手順9-11）
   // 【ENG-DS2-COST-FOUNDATION-1】捕捉指数はシナリオ由来のTurn別値。未指定は中立1.0で、
   // その場合 clearVietnamRawMarket の計算は現行とビット単位で一致する。
-  const vietnamDomestic = clearVietnamRawMarket(
+  const clearedVietnamDomestic = clearVietnamRawMarket(
     hosoPrices.VN.price,
     input.vietnamDomestic,
     parameters,
     input.vietnamDomestic.rawPriceCaptureIndex ?? 1.0
   );
+
+  // 5.5 【MANUAL-BALANCE-1】管理者手動の原料市場価格指数を、清算が完了した価格へ
+  //     **1回だけ**適用する。
+  //
+  //     適用順序（実装指示のとおり）:
+  //       Scenario/DS2 → rawPriceCaptureIndex → 既存の需給・農家留保価格・
+  //       buying ceiling による市場清算 → preManualRawMarketPrice →
+  //       手動指数 → appliedRawMarketPrice → 当Turnの新規調達
+  //
+  //     【再クランプしない】適用後価格を farmerReservationPrice / buyingCeiling で
+  //     クランプすると、管理者指定の95が厳密に95%にならない。値は丸めず、
+  //     制約の外側に出た場合は warnings として記録する（値は上書きしない）。
+  //
+  //     【複利化しない】掛ける対象は常に「そのTurnの清算価格」であり、
+  //     前Turnの適用後価格は参照しない（marketResultは毎Turn新規に構築される）。
+  const vietnamDomestic = applyManualRawMarketPriceIndexToResult(clearedVietnamDomestic, input.vietnamDomestic.manualRawMarketPriceIndex);
 
   // 6. PD/VAPプレミアム（全体実装計画書 v0.1 Product型・PD/VAPプレミアム定義）
   const pdPremium = calculateProductPremium(
@@ -98,6 +121,50 @@ export function calculateMarketQuarter(
     pdPremium,
     vapPremium,
     globalDrivers,
+    // 【MANUAL-BALANCE-1】販売市場価格指数は hosoPrices へは掛けず、結果へ載せて
+    // 運ぶだけにする。実際の適用は destinationPricing.ts の販売基準価格導出で
+    // 1回だけ行う（輸入調達原価・buyingCeilingへの二重作用を避けるため）。
+    // 中立時はキー自体を作らない（既存Runの保存結果を不変に保つ規約）。
+    ...(isUsableManualPriceIndex(input.manualSalesPriceIndex) && input.manualSalesPriceIndex !== MANUAL_PRICE_INDEX_NEUTRAL
+      ? { manualSalesPriceIndex: input.manualSalesPriceIndex }
+      : {}),
+  };
+}
+
+/**
+ * 【MANUAL-BALANCE-1】清算済みの国内原料市場結果へ、管理者手動の価格指数を
+ * 1回だけ適用した新しい結果を返す（純粋関数。入力は変更しない）。
+ *
+ * 【中立時はキーを作らない】手動指数が未指定・100のときは入力をそのまま返す。
+ * 既存Runの保存結果（marketResultはCompanyQuarterRecordとして永続化される）を
+ * ビット単位で不変に保つための規約であり、rawPriceCaptureIndex と同じ扱いである。
+ */
+function applyManualRawMarketPriceIndexToResult(
+  cleared: VietnamDomesticResult,
+  manualRawMarketPriceIndex: number | undefined
+): VietnamDomesticResult {
+  if (!isUsableManualPriceIndex(manualRawMarketPriceIndex)) return cleared;
+  if (manualRawMarketPriceIndex === MANUAL_PRICE_INDEX_NEUTRAL) return cleared;
+
+  const preManualValue = unwrapUnit(cleared.price);
+  const appliedValue = applyManualPriceIndex(preManualValue, manualRawMarketPriceIndex);
+  const warnings = detectManualRawPriceWarnings({
+    preManualRawMarketPrice: preManualValue,
+    manualRawMarketPriceIndex,
+    appliedRawMarketPrice: appliedValue,
+    farmerReservationPrice: unwrapUnit(cleared.farmerReservationPrice),
+    buyingCeiling: unwrapUnit(cleared.buyingCeiling),
+  });
+
+  return {
+    ...cleared,
+    // priceは以降の全消費者（調達・Standard AI観測・画面）が読む「当Turnの成立価格」。
+    // ここを適用後価格にすることで、表示だけ変えて実計算が変わらない事故を防ぐ。
+    price: usdPerHosoEqKg(appliedValue),
+    preManualRawMarketPrice: usdPerHosoEqKg(preManualValue),
+    manualRawMarketPriceIndex,
+    appliedRawMarketPrice: usdPerHosoEqKg(appliedValue),
+    ...(warnings.length > 0 ? { manualPriceIndexWarnings: warnings } : {}),
   };
 }
 

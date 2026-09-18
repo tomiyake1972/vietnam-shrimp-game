@@ -23,6 +23,8 @@
 import { UsdPerHosoEqKg, hosoEqTons, unwrapUnit } from "../core/units";
 import { MARKET_PARAMETERS_V1 } from "../market/parameters";
 import { clearVietnamRawMarket } from "../market/vietnamRawMarket";
+import { applyManualPriceIndex, isUsableManualPriceIndex } from "../market/manualPriceIndex";
+import { resolveManualBalanceForTurn, resolvedRawMarketPriceIndex } from "./manualBalance/overrides";
 import type { VietnamDomesticInput } from "../market/types";
 import { getScenarioTurnInput } from "../scenario/scenarioEngine";
 import { toMarketQuarterInput } from "../scenario/marketAdapter";
@@ -63,9 +65,24 @@ export function clearDomesticReferencePrice(
   vietnamHosoFobPrice: UsdPerHosoEqKg,
   vietnamDomesticInput: VietnamDomesticInput
 ): DomesticReferencePriceCore {
-  const cleared = clearVietnamRawMarket(vietnamHosoFobPrice, vietnamDomesticInput, MARKET_PARAMETERS_V1);
+  const cleared = clearVietnamRawMarket(
+    vietnamHosoFobPrice,
+    vietnamDomesticInput,
+    MARKET_PARAMETERS_V1,
+    vietnamDomesticInput.rawPriceCaptureIndex ?? 1.0
+  );
+  // 【MANUAL-BALANCE-1】参考価格は「その条件で実際に成立する価格」でなければならない。
+  // 手動指数が効いているTurnで補正前価格を参考価格として出すと、画面の参考価格と
+  // turn1の保証入札下限が実際の成立価格と食い違う（プレイヤーとStandard AIが
+  // 別の価格を見ることになる）。そのため market/index.ts と同じ適用を1回だけ行う。
+  // 再クランプしない点・複利にならない点も同じ（毎回そのTurnの清算価格に掛ける）。
+  const manualIndex = vietnamDomesticInput.manualRawMarketPriceIndex;
+  const preManualPrice = unwrapUnit(cleared.price);
+  const referencePrice = isUsableManualPriceIndex(manualIndex)
+    ? applyManualPriceIndex(preManualPrice, manualIndex)
+    : preManualPrice;
   return {
-    referencePriceUsdPerHosoEqKg: unwrapUnit(cleared.price),
+    referencePriceUsdPerHosoEqKg: referencePrice,
     buyingCeilingUsdPerHosoEqKg: unwrapUnit(cleared.buyingCeiling),
     farmerReservationPriceUsdPerHosoEqKg: unwrapUnit(cleared.farmerReservationPrice),
     domesticSupplyHosoEqTons: unwrapUnit(cleared.supply),
@@ -112,8 +129,18 @@ export function computeDomesticReferencePrice(
       domesticProcurementIntent: hosoEqTons(Math.max(0, definition.initialStateOverrides.initialDomesticProcurementIntentHosoEqTons)),
     });
 
+    // 【MANUAL-BALANCE-1】画面の参考価格も、そのTurnに適用される手動指数を反映する
+    // （Engineが使う値と画面表示が食い違わないようにする）。解決は
+    // resolveManualBalanceForTurn を通す（スケジュールをここで自前に走査しない）。
+    const manualRawMarketPriceIndex = resolvedRawMarketPriceIndex(
+      resolveManualBalanceForTurn(state.config.manualBalanceOverrides, turn)
+    );
+
     return {
-      ...clearDomesticReferencePrice(vnFobPrice, marketInput.vietnamDomestic),
+      ...clearDomesticReferencePrice(vnFobPrice, {
+        ...marketInput.vietnamDomestic,
+        manualRawMarketPriceIndex,
+      }),
       guaranteeActive: turn === DOMESTIC_PURCHASE_GUARANTEE_TURN,
     };
   } catch {

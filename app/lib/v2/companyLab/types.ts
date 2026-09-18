@@ -20,6 +20,7 @@ import { CompanyId, CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } f
 import type { SalesParameters } from "../sales/parameters";
 import type { SalesModelId } from "../sales/salesModels";
 import type { CompanyLabVisionOverrides } from "./vision/overrides";
+import type { ManualBalanceSchedule } from "./manualBalance/overrides";
 import type { ObservedMarketDemand } from "./marketDemandObservation";
 import {
   AquacultureStockingPlanEntry,
@@ -626,6 +627,19 @@ export interface CompanyLabConfig {
    * 別Runへは引き継がれない（Run単位の設定であり、defaults.ts自体は変更しない）。
    */
   readonly visionOverrides?: CompanyLabVisionOverrides;
+  /**
+   * 【Management Console 手動バランス調整・MANUAL-BALANCE-1】Run固有の手動上書き
+   * （配当性向・販売市場価格指数・原料市場価格指数）のスケジュール（optional）。
+   *
+   * 未指定なら手動補正なし＝既存Runと完全に同一挙動（回帰の基準）。
+   * UI・Engine・Standard AI・保存/再開のすべてが、manualBalance/overrides.ts の
+   * resolveManualBalanceForTurn を通してこれを読む（スケジュール配列を各所で
+   * 自前に走査する経路を作らない）。
+   *
+   * v1は全社共通・全市場共通のRun単位1系列（Vision Calibrationが会社別Recordで
+   * あるのとは異なる）。別Runへは引き継がれない。
+   */
+  readonly manualBalanceOverrides?: ManualBalanceSchedule;
   /**
    * 【Strategy Profile Quantification・Phase SP-Q1】既存の会社別ManagementProfile
    * （SAI-4）・CompanyOrientationProfile（SAI-5A）を Standard AI の意思決定へ

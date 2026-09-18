@@ -31,6 +31,7 @@ import { SimulationAiTurnTrace } from "../analytics/aiTrace";
 import { ObservedDemandSnapshot } from "../analytics/dataset";
 import { CompanyLabRuntimeSnapshot } from "../../persistence/types";
 import { EvaluationHistoryRecord } from "../../evaluation/evaluationHistory";
+import type { ManualBalanceAppliedRecord } from "../../manualBalance/application";
 
 /**
  * 保存スキーマ版。
@@ -73,8 +74,16 @@ import { EvaluationHistoryRecord } from "../../evaluation/evaluationHistory";
  *        （読み込み時にredisRepository.tsがmanifest＋各パートから組み立てて
  *        従来と同じ形へ復元する）ため、旧v1-v4データ（manifestキーに直接
  *        dataset等が埋め込まれた形）もそのまま読める。
+ *   v6 … 【MANUAL-BALANCE-1・Management Console 手動バランス調整】
+ *        (a) resumePayload.state.config.manualBalanceOverrides
+ *            （設定スケジュールと変更履歴。state経由で自動的に往復する）。
+ *        (b) resumePayload.manualBalanceApplied
+ *            （各Turnに実際に適用された値・補正前後の価格・監査警告）。
+ *        いずれもoptionalの追加のみでマイグレーション不要。旧v1-v5データは
+ *        両フィールドが存在しない状態でそのまま読め、手動補正なしのRunとして
+ *        従来と完全に同一に振る舞う（ただし画面は「未設定」と「不明」を区別する）。
  */
-export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 5;
+export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 6;
 
 /**
  * 【schemaVersion 5・Turn14以降Save/Resume停止BLOCKER修正】
@@ -174,6 +183,21 @@ export interface SimulationResumePayload {
    * 復元側は undefined ならこれまでどおり state.history へフォールバックする。
    */
   readonly evaluationHistory?: readonly EvaluationHistoryRecord[];
+  /**
+   * 【MANUAL-BALANCE-1】各Turnに実際に適用された手動バランス調整の記録
+   * （SimulationSession.manualBalanceApplied）。evaluationHistory と同じ理由で
+   * 間引かずに全Turnぶん保存する（Turnあたり数スカラーのみ）。
+   *
+   * 設定スケジュールそのもの（変更履歴を含む）は state.config.manualBalanceOverrides
+   * として state 側に載って保存・復元されるため、ここでは重複して持たない
+   * （resume.ts が session.config を resumePayload.state.config から再構築する規約に
+   * 従うことで、Vision Calibration が再開時に消えた過去のバグと同じ轍を踏まない）。
+   *
+   * このフィールド新設より前に保存された既存Runには存在しないためoptional。
+   * undefined は「この機能が無かった頃のRun」であり、画面は推測で0や100を埋めず
+   * 「不明」として扱う。
+   */
+  readonly manualBalanceApplied?: readonly ManualBalanceAppliedRecord[];
 }
 
 /**
