@@ -30,6 +30,25 @@ async function openPanel(page: Page, toggleTestId: string, anchorTestId: string)
   await expect(page.getByTestId(anchorTestId)).toBeVisible();
 }
 
+/**
+ * <details> セクションを開く。
+ *
+ * Profileの保存・再適用・持ち出しのフォームは <details> の中にあり、
+ * 閉じている間はDOMに存在しても操作できない（fillがactionability待ちで
+ * タイムアウトするまで延々リトライする）。開いているかを確認してから開く。
+ */
+async function openDetails(page: Page, summaryText: string): Promise<void> {
+  const details = page.locator("details").filter({ hasText: summaryText }).first();
+  const isOpen = await details.evaluate((el) => (el as HTMLDetailsElement).open);
+  if (!isOpen) {
+    await details.locator("summary").first().click();
+  }
+  await expect(details).toHaveJSProperty("open", true);
+}
+
+/** 失敗を30分待たずに顕在化させるための共通待ち時間。 */
+const ACTION_TIMEOUT = 20_000;
+
 test("BP-E2E: Profileを作成し、それを選んだ全社Standard AIのRunで32Turnを完走して適用実績を確認できる", async ({ page }) => {
   test.setTimeout(1_800_000);
 
@@ -41,8 +60,8 @@ test("BP-E2E: Profileを作成し、それを選んだ全社Standard AIのRunで
   await page.waitForURL(/\/v2\/management\?run=/);
 
   await openPanel(page, "console-balance-adjustment-toggle", "balance-apply");
-  await page.getByTestId("balance-sales-index").fill("95");
-  await page.getByTestId("balance-raw-index").fill("105");
+  await page.getByTestId("balance-sales-index").fill("95", { timeout: ACTION_TIMEOUT });
+  await page.getByTestId("balance-raw-index").fill("105", { timeout: ACTION_TIMEOUT });
   await page.getByTestId("balance-mode").selectOption("continuing");
   await page.getByTestId("balance-apply").click();
   await expect(page.getByTestId("balance-state-saved")).toBeVisible({ timeout: 60_000 });
@@ -52,8 +71,9 @@ test("BP-E2E: Profileを作成し、それを選んだ全社Standard AIのRunで
   // このRunはProfileを使わずに開始したので、元Profileの記録は無い。
   await expect(page.getByTestId("console-origin-profile-none")).toBeVisible();
 
-  await page.getByTestId("profile-save-name").fill(PROFILE_NAME);
-  await page.getByTestId("profile-save-description").fill("E2E用: 販売95 / 原料105 をTurn1から継続");
+  await openDetails(page, "現在の設定をBalance Profileとして保存");
+  await page.getByTestId("profile-save-name").fill(PROFILE_NAME, { timeout: ACTION_TIMEOUT });
+  await page.getByTestId("profile-save-description").fill("E2E用: 販売95 / 原料105 をTurn1から継続", { timeout: ACTION_TIMEOUT });
   await page.getByTestId("profile-save-button").click();
   await expect(page.getByTestId("profile-message")).toContainText("として保存しました");
 
