@@ -248,8 +248,11 @@ export function BalanceProfilePanel({
           </div>
         )}
         <p className="mt-1 text-[10px] leading-snug text-slate-500">
+          このRunを<strong>作成した</strong>commitは{" "}
+          <span data-testid="console-run-created-commit">{session.run.runCreatedByCommit ?? UNKNOWN_SOURCE_COMMIT}</span>、
           いま表示しているアプリのcommitは <span data-testid="console-app-commit">{appSourceCommit}</span> です。
-          これは「このRunを計算した版」とは別物であり、Calibration Logでも別の項目として出力されます。
+          いずれも「そのTurnを計算した版」とは別物です（作成しただけでまだ計算していないTurnがあり得るため）。
+          Calibration Logでも別の項目として出力されます。
         </p>
       </div>
 

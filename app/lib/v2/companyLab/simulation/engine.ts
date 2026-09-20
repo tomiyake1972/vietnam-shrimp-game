@@ -253,13 +253,15 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     // （既存Runのrun metadataと同一に保つ）。
     ...(input.appliedBalanceProfile !== undefined ? { appliedBalanceProfile: input.appliedBalanceProfile } : {}),
     /**
-     * 【Run Calculation Commit Identity】開始時点の計算commitを1件記録する。
-     * 値が "UNKNOWN" でも記録する（「分からなかった」ことを残すのが正しく、
-     * あとからExport時点のenvで補完させないため）。
+     * 【Run Calculation Commit Identity】作成commitは「作成した版」として別に持つ。
+     *
+     * 【calculationCommitHistoryへは入れない】ここで計算履歴へ1件置くと、
+     * 「Runを作っただけでまだ1Turnも計算していない」状態のcommitが、
+     * Turn1の計算commitとして残ってしまう。作成直後にdeployが変わってから
+     * Turn1を計算した場合、Turn1を計算したのは作成commitではない。
+     * 計算履歴は最初の成功Turnではじめて作られる（advanceSimulationTurn参照）。
      */
-    calculationCommitHistory: [
-      { effectiveFromTurn: state.scenarioState.currentTurn, sourceCommit: input.sourceCommit ?? resolveCurrentAppSourceCommit() },
-    ],
+    runCreatedByCommit: input.sourceCommit ?? resolveCurrentAppSourceCommit(),
   };
   return {
     run,

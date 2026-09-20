@@ -13,6 +13,7 @@
 
 import type { SimulationSession } from "../simulation/types";
 import {
+  UNKNOWN_SOURCE_COMMIT,
   isSingleCalculationCommit,
   resolveCalculationCommitForTurn,
   type CalculationCommitHistory,
@@ -28,6 +29,13 @@ export interface BalanceCalibrationLogHeader {
    * 過去Turnの計算commitは行ごとの calculationSourceCommit を見る。
    */
   readonly exportAppCommit: string;
+  /**
+   * このRunを作成したアプリのcommit。
+   * 【計算commitではない】作成しただけでまだ計算していない可能性があるため、
+   * Turnの計算commitとしては使わない（行ごとの calculationSourceCommit を見る）。
+   * 記録の無い古いRunでは "UNKNOWN"。
+   */
+  readonly runCreatedByCommit: string;
   /**
    * Runが単一commitだけで計算された場合のみ、そのcommit。
    * 複数commitにまたがる場合は null（単一値へ潰さない）。履歴が無い古いRunでも null。
@@ -98,6 +106,7 @@ export function buildBalanceCalibrationLog(
     runId: session.run.simulationRunId,
     runName: session.run.runName ?? "",
     exportAppCommit,
+    runCreatedByCommit: session.run.runCreatedByCommit ?? UNKNOWN_SOURCE_COMMIT,
     runCalculationCommit: isSingleCalculationCommit(history) ? history[0].sourceCommit : null,
     calculationCommitHistory: history,
     scenarioId: session.run.scenarioId,
@@ -176,6 +185,8 @@ export function balanceCalibrationLogToCsv(log: BalanceCalibrationLog): string {
     "runName",
     // Export実行時のアプリcommit。Runの計算commitではない（行側のcalculationSourceCommitを見る）。
     "exportAppCommit",
+    // Runを作成したcommit。これも計算commitではない。
+    "runCreatedByCommit",
     "scenarioId",
     "scenarioVersion",
     "seed",

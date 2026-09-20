@@ -24,6 +24,12 @@ export const UNKNOWN_SOURCE_COMMIT = "UNKNOWN";
 
 /**
  * 「このTurn以降を、このcommitで計算した」という区間記録。
+ *
+ * 【実際に計算が成功したTurnだけが入る】Runを作成しただけのcommitはここへ入れない
+ * （作成commitは SimulationRun.runCreatedByCommit という別metadataに持つ）。
+ * Run作成直後にdeployが変わってからTurn1を計算した場合、Turn1の計算commitは
+ * 「Turn1を実際に計算したcommit」でなければならず、作成時のcommitを混ぜると誤記録になる。
+ *
  * effectiveFromTurn は昇順に積まれ、過去entryは上書きしない。
  */
 export interface CalculationCommitEntry {
@@ -50,7 +56,8 @@ export function resolveCurrentAppSourceCommit(): string {
  */
 export function latestRecordedCommit(history: CalculationCommitHistory | undefined): string | null {
   if (!history || history.length === 0) return null;
-  return history.reduce((latest, entry) => (entry.effectiveFromTurn > latest.effectiveFromTurn ? entry : latest)).sourceCommit;
+  // 同じ effectiveFromTurn が並んだ場合は「後から記録された方」を採る（>= で後勝ち）。
+  return history.reduce((latest, entry) => (entry.effectiveFromTurn >= latest.effectiveFromTurn ? entry : latest)).sourceCommit;
 }
 
 /**
@@ -83,7 +90,12 @@ export function resolveCalculationCommitForTurn(
   if (!history || history.length === 0) return UNKNOWN_SOURCE_COMMIT;
   const applicable = history.filter((entry) => entry.effectiveFromTurn <= turn);
   if (applicable.length === 0) return UNKNOWN_SOURCE_COMMIT;
-  return applicable.reduce((latest, entry) => (entry.effectiveFromTurn > latest.effectiveFromTurn ? entry : latest)).sourceCommit;
+  /**
+   * 【同値は後勝ち】同じ effectiveFromTurn の entry が並んだ場合、後から記録された方が
+   * 「実際にそのTurnを計算したcommit」である。`>` だと先頭（古い方）が残り、
+   * 作成commitや失敗前のcommitを計算commitとして返してしまう。
+   */
+  return applicable.reduce((latest, entry) => (entry.effectiveFromTurn >= latest.effectiveFromTurn ? entry : latest)).sourceCommit;
 }
 
 /**

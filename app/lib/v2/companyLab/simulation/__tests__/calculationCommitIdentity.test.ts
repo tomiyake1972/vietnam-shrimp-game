@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createSimulationSession, advanceSimulationTurns } from "../engine";
+import { createSimulationSession, advanceSimulationTurn, advanceSimulationTurns } from "../engine";
 import { buildResumePayload, restoreSessionFromResumePayload } from "../persistence/resume";
 import type { SimulationSession } from "../types";
 import {
@@ -81,6 +81,10 @@ test("CCI-1/2/3/4: commit AでTurn1-4、resume後commit BでTurn5-8を計算し�
 // ------------------------------------------------------------------- CCI-5
 test("CCI-5: 同じcommitでresumeしても履歴entryは増えない", () => {
   let session = newSession("cci-same", COMMIT_A);
+  // 作成しただけでは計算履歴は作られない（作成commitは別metadata）。
+  assert.equal(session.run.calculationCommitHistory, undefined);
+  assert.equal(session.run.runCreatedByCommit, COMMIT_A);
+
   session = advanceSimulationTurns({ session, turns: 3, timestamp: TS, sourceCommit: COMMIT_A });
   assert.equal(session.run.calculationCommitHistory?.length, 1);
 
@@ -212,4 +216,67 @@ test("CCI-10: 計算commitの記録はゲームの経済結果を変えない", 
     JSON.stringify(withA.run.calculationCommitHistory),
     JSON.stringify(withB.run.calculationCommitHistory)
   );
+});
+
+// ------------------------------------------------------- CCI-11（Turn1境界）
+test("CCI-11: Run作成後に1Turnも計算せずcommitが変わった場合、Turn1の計算commitは実際に計算した方になる", () => {
+  // A. commit A でRunを作成する
+  const created = newSession("cci-turn1-boundary", COMMIT_A);
+  // B. 1Turnも進めない
+  assert.equal(created.run.completedTurns, 0);
+  // 作成commitは別metadataとして残るが、計算履歴は空のまま
+  // （作成しただけのcommitがTurn1の計算commitとして残ってはいけない）。
+  assert.equal(created.run.runCreatedByCommit, COMMIT_A);
+  assert.equal(created.run.calculationCommitHistory, undefined, "計算していないのに計算履歴が作られている");
+
+  // C. 保存・resume
+  const restored = saveAndRestore(created);
+  assert.equal(restored.run.runCreatedByCommit, COMMIT_A, "作成commitがresumeで失われた");
+  assert.equal(restored.run.calculationCommitHistory, undefined);
+
+  // D. commit B相当でTurn1を実行
+  const advanced = advanceSimulationTurns({ session: restored, turns: 1, timestamp: TS, sourceCommit: COMMIT_B });
+  assert.equal(advanced.run.completedTurns, 1);
+
+  // E. Turn1の計算commitがB
+  assert.equal(resolveCalculationCommitForTurn(advanced.run.calculationCommitHistory, 1), COMMIT_B);
+  assert.deepEqual(advanced.run.calculationCommitHistory, [{ effectiveFromTurn: 1, sourceCommit: COMMIT_B }]);
+
+  // F. AがTurn1の計算commitとして残らない
+  assert.ok(
+    !JSON.stringify(advanced.run.calculationCommitHistory).includes(COMMIT_A),
+    "作成commitが計算履歴へ混入している"
+  );
+
+  // Calibration Logでも同じ（作成commitは別項目として出るが、Turn行はB）。
+  const log = buildBalanceCalibrationLog(advanced, TS, COMMIT_C_EXPORT_TIME);
+  assert.equal(log.rows[0].calculationSourceCommit, COMMIT_B);
+  assert.equal(log.header.runCreatedByCommit, COMMIT_A);
+  assert.equal(log.header.exportAppCommit, COMMIT_C_EXPORT_TIME);
+  assert.equal(log.header.runCalculationCommit, COMMIT_B, "単一commitで計算されたのに単一値が出ていない");
+});
+
+// ------------------------------------------------------- CCI-12（同値の後勝ち）
+test("CCI-12: 同じeffectiveFromTurnが並んだ場合、後から記録した方を計算commitとする", () => {
+  // 構造上は作られないが、解決器そのものの規約を固定しておく
+  // （`>` のままだと古い方が残り、作成commitや失敗前のcommitを返してしまう）。
+  const history = [
+    { effectiveFromTurn: 1, sourceCommit: COMMIT_A },
+    { effectiveFromTurn: 1, sourceCommit: COMMIT_B },
+  ];
+  assert.equal(resolveCalculationCommitForTurn(history, 1), COMMIT_B);
+  assert.equal(latestRecordedCommit(history), COMMIT_B);
+});
+
+// ------------------------------------------------------- CCI-13（失敗Turn）
+test("CCI-13: 失敗したTurnでは計算履歴へ記録しない", () => {
+  const session = newSession("cci-fail", COMMIT_A, 2);
+  // 壊れたstateを渡して計算を失敗させる（isCompleteではない経路で例外にする）。
+  const broken: SimulationSession = {
+    ...session,
+    state: { ...session.state, scenarioState: { ...session.state.scenarioState, definition: null as never } },
+  };
+  const outcome = advanceSimulationTurn(broken, TS, undefined, COMMIT_B);
+  assert.equal(outcome.advanced, false, "テスト前提: このTurnは失敗すること");
+  assert.equal(outcome.session.run.calculationCommitHistory, undefined, "失敗Turnが計算履歴へ記録されている");
 });

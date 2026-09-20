@@ -100,8 +100,21 @@ export interface SimulationRun {
    */
   readonly appliedBalanceProfile?: AppliedBalanceProfileRef;
   /**
+   * 【Run Calculation Commit Identity】このRunを**作成した**アプリのsource commit。
+   *
+   * 【計算commitではない】Runを作っただけで、まだ1Turnも計算していない可能性がある。
+   * 作成直後にdeployが変わってからTurn1を計算した場合、Turn1を計算したのは
+   * この値ではない。各Turnの計算commitは必ず calculationCommitHistory を引く。
+   * この機能より前のRunには存在しない（その場合は「不明」）。
+   */
+  readonly runCreatedByCommit?: string;
+  /**
    * 【Run Calculation Commit Identity】このRunのどのTurn区間を、どのsource commitで
    * 計算したかの履歴（再現性metadata。ゲーム計算には一切影響しない）。
+   *
+   * 【実際に計算が成功したTurnだけが入る】Run作成時には何も入れない。
+   * 最初の成功Turnで最初のentryができ、以後はcommitが変わった最初の成功Turnだけが
+   * 新しい区間を作る。失敗したTurnは記録しない。
    *
    * 【アプリ現在版と分離する】Export時点の process.env.NEXT_PUBLIC_SOURCE_COMMIT は
    * 「いま動いているアプリの版」であり、過去Turnを計算した版とは限らない
