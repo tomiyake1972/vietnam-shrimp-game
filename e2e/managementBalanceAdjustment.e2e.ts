@@ -97,9 +97,6 @@ test("MB-E2E: バランス調整の入力→保存→1ターン進行→結果�
   await expect(page.getByTestId("balance-state-saved")).toBeVisible();
   await expect(page.getByTestId("balance-applied-row-1")).toBeVisible();
   await expect(page.getByTestId("balance-applied-row-1")).toContainText("×1.05");
-
-  // 管理会計の限界表示が常に出ている（結果の読み方を誤らせないため）。
-  await expect(page.getByTestId("management-accounting-limitation")).toBeVisible();
 });
 
 test("MB-E2E-2: 不正な入力（単位間違い・空欄由来の0）は保存できない", async ({ page }) => {

@@ -416,7 +416,6 @@ export function BalanceAdjustmentPanel({ session, onApply, busy, locked }: Balan
         editable={editable}
       />
 
-      <ManagementAccountingLimitationNotice />
     </div>
   );
 }
@@ -592,41 +591,6 @@ function PortablePanel({
   );
 }
 
-/**
- * 【管理会計指標の限界表示】現行Engineでは、absorption P&L に含まれる次の4費目が
- * 管理会計（変動原価計算）レポートの変動費・固定費のどちらのプールにも入っていない。
- *
- * 【原因と扱い】原因は finance/quarterClose.ts の費用式にあり、その変更は本Phaseでは
- * 禁止されている（#05 費用Projection接続Phaseで同じ判断が明記されている）。
- * したがってここでは修正せず、影響を受ける指標に限界があることを明示する。
- *
- * 【分類のみの問題であること】absorption側の営業利益・現金は4費目を正しく含んでおり、
- * 経済実態がずれているわけではない。ずれているのは管理会計レポートの
- * managementOperatingProfit・totalFixedCost・損益分岐点の側だけである。
- */
-function ManagementAccountingLimitationNotice() {
-  return (
-    <div className="rounded border border-slate-700 bg-slate-900/60 p-2" data-testid="management-accounting-limitation">
-      <p className="mb-1 text-[10px] font-semibold text-slate-300">管理会計指標の限界（既知・本機能では未修正）</p>
-      <p className="text-[10px] leading-snug text-slate-400">
-        管理会計（変動原価計算）レポートの<strong className="text-slate-300">限界利益・固定費合計・管理会計上の営業利益・損益分岐点</strong>
-        には、次の4費目が含まれていません。損益計算書（全部原価計算）側の営業利益・現金には正しく含まれているため、
-        <strong className="text-slate-300">経済実態のずれではなく分類上のずれ</strong>です。
-      </p>
-      <ul className="mt-1 list-disc pl-4 text-[10px] text-slate-400">
-        <li>capexMaintenanceCost（設備保守費）</li>
-        <li>factoryLifecycleCarryingCost（工場休止・売却保有費）</li>
-        <li>salesForceSeveranceCost（営業人員の退職費用）</li>
-        <li>vapProductDevelopmentSpendUsd（VAP商品開発費）</li>
-      </ul>
-      <p className="mt-1 text-[10px] leading-snug text-slate-500">
-        実測（baseline・32Turn・5社＝160レコード）では146レコードで発生し、1レコードあたり最大約797,000 USDでした。
-        修正にはEngineの費用式変更が必要で、本機能の範囲外です（バランス調整の結果を読むときは、
-        損益計算書側の営業利益・現金を正としてください）。
-      </p>
-    </div>
-  );
-}
 
 /**
  * 【Turn○で適用済み】実際に適用された値と、補正前／適用後の価格を並べる。
