@@ -16,6 +16,8 @@ import type { SimulationAnalyticsDataset } from "./analytics/types";
 import type { CompanyEvaluationSnapshot } from "../evaluation/evaluationSemantics";
 import type { EvaluationHistoryRecord } from "../evaluation/evaluationHistory";
 import type { ManualBalanceAppliedRecord } from "../manualBalance/application";
+import type { AppliedBalanceProfileRef } from "../manualBalance/profile";
+import type { CalculationCommitHistory } from "./calculationCommit";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -87,6 +89,46 @@ export interface SimulationRun {
   readonly companyControlModes?: Readonly<Record<string, CompanyControlMode>>;
   /** 【Phase 8・Game Setup】Setup画面で任意入力できるRun名・メモ。未入力ならundefined。 */
   readonly runName?: string;
+  /**
+   * 【BALANCE-PROFILE-1】このRunを開始したときにコピー元となったBalance Profile。
+   *
+   * 【予定であって実績ではない】Run開始後にGMが手動でバランス設定を変更しても
+   * この値は変わらない（コピー元が何だったかの記録であるため）。実際に各Turnへ
+   * 適用された値の正本は SimulationSession.manualBalanceApplied である。
+   * Neutral（手動補正なし）で開始したRun・この機能より前のRunでは undefined
+   * （画面は推測で埋めず「不明」または「Profileなし」として扱う）。
+   */
+  readonly appliedBalanceProfile?: AppliedBalanceProfileRef;
+  /**
+   * 【Run Calculation Commit Identity】このRunを**作成した**アプリのsource commit。
+   *
+   * 【計算commitではない】Runを作っただけで、まだ1Turnも計算していない可能性がある。
+   * 作成直後にdeployが変わってからTurn1を計算した場合、Turn1を計算したのは
+   * この値ではない。各Turnの計算commitは必ず calculationCommitHistory を引く。
+   * この機能より前のRunには存在しない（その場合は「不明」）。
+   */
+  readonly runCreatedByCommit?: string;
+  /**
+   * 【Run Calculation Commit Identity】このRunのどのTurn区間を、どのsource commitで
+   * 計算したかの履歴（再現性metadata。ゲーム計算には一切影響しない）。
+   *
+   * 【実際に計算が成功したTurnだけが入る】Run作成時には何も入れない。
+   * 最初の成功Turnで最初のentryができ、以後はcommitが変わった最初の成功Turnだけが
+   * 新しい区間を作る。失敗したTurnは記録しない。
+   *
+   * 【アプリ現在版と分離する】Export時点の process.env.NEXT_PUBLIC_SOURCE_COMMIT は
+   * 「いま動いているアプリの版」であり、過去Turnを計算した版とは限らない
+   * （commit AでTurn1-16 → deploy → commit BでresumeしてTurn17-32、という経路がある）。
+   * 過去Turnの計算commitを知りたいときは必ずこの履歴を引く。
+   *
+   * 新規Run作成時に startingTurn の区間が1件入る。resumeして進めるときに、
+   * 現在アプリのcommitが直近記録と異なる場合だけ、次の未実行Turnを
+   * effectiveFromTurn として追記する（同じcommitなら増えない。過去entryは上書きしない）。
+   *
+   * この機能より前に作られたRunには存在しない。その場合は推測で埋めず
+   * "UNKNOWN" として扱う（calculationCommit.ts 参照）。
+   */
+  readonly calculationCommitHistory?: CalculationCommitHistory;
   /**
    * 【Game End / Final Results・END-1】Game Masterが任意Turnでゲームを終了した日時
    * （metadata。判断には使わない）。未設定＝ゲームはまだ進行中（ACTIVE）。

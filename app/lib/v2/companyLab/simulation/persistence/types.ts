@@ -82,8 +82,26 @@ import type { ManualBalanceAppliedRecord } from "../../manualBalance/application
  *        いずれもoptionalの追加のみでマイグレーション不要。旧v1-v5データは
  *        両フィールドが存在しない状態でそのまま読め、手動補正なしのRunとして
  *        従来と完全に同一に振る舞う（ただし画面は「未設定」と「不明」を区別する）。
+ *   v7 … 【BALANCE-PROFILE-1・固定スケジュール型バランスモデル】
+ *        SimulationRun.appliedBalanceProfile を追加（Run開始時にコピー元となった
+ *        Balance Profile の由来情報：id / name / specVersion / fingerprint）。
+ *        optionalの追加のみでマイグレーション不要。Neutral（手動補正なし）で
+ *        開始したRun・v1〜v6の既存Runではキー自体が存在せず、画面は推測で
+ *        埋めずに「Profileなし／不明」として扱う。
+ *        Profile本体はRunへ保存しない（localStorage側に置く）。Runが持つのは
+ *        「どのProfileからコピーしたか」の記録だけであり、実際に各Turnへ適用
+ *        された値の正本は従来どおり resumePayload.manualBalanceApplied である。
+ *
+ *        あわせて SimulationRun.calculationCommitHistory を追加した
+ *        （そのRunのどのTurn区間をどのsource commitで計算したかの再現性metadata）。
+ *        【なぜv8へ上げないか】v7はまだどのintegration/RCへも統合されておらず
+ *        （実測: integration/v2-rc-20260830 は現在も5）、v7として保存された
+ *        永続データは本branchのローカル検証以外に存在しない。すなわちv7の契約は
+ *        まだ外部に公開されていないため、v7の定義へ追記するのが最小の変更であり、
+ *        既に配布済みの契約を破ることにはならない。どちらのフィールドも
+ *        optionalの追加のみでマイグレーション不要、旧v1〜v6データはそのまま読める。
  */
-export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 6;
+export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 7;
 
 /**
  * 【schemaVersion 5・Turn14以降Save/Resume停止BLOCKER修正】

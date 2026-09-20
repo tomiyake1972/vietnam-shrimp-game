@@ -49,6 +49,12 @@ import {
   resolvedSalesPriceIndex,
   type ManualBalanceSchedule,
 } from "../manualBalance/overrides";
+import type { AppliedBalanceProfileRef } from "../manualBalance/profile";
+import {
+  resolveCurrentAppSourceCommit,
+  withCalculationCommitRecorded,
+  type CalculationCommitHistory,
+} from "./calculationCommit";
 import type { ManualBalanceAppliedRecord, ManualPriceIndexAuditWarning } from "../manualBalance/application";
 import { deriveMarketReferencePriceBreakdowns } from "../../market/destinationPricing";
 import type { MarketQuarterResult } from "../../market/types";
@@ -151,6 +157,35 @@ export interface CreateSimulationSessionInput {
    * ビット単位で同一のconfig・同一の挙動（従来市場モデル＝legacy semantics）。
    */
   readonly salesModelId?: SalesModelId;
+  /**
+   * 【BALANCE-PROFILE-1】Run開始時にコピーする手動バランス調整スケジュール。
+   *
+   * 【snapshotコピーであり参照ではない】Balance Profile を選んで開始した場合、
+   * 呼び出し側（Setup画面）が Profile.schedule をここへ渡す。Runは以後Profileを
+   * 参照しない。したがってRun開始後にProfile本体を編集しても、進行中Runの
+   * scheduleは一切変わらない（逆にRun側で手修正してもProfileは変わらない）。
+   *
+   * 省略時（undefined）は config へキー自体を書き込まない ＝ 既存Runと
+   * ビット単位で同一のconfig。Neutral Profile を選んだ場合もここは undefined になる。
+   */
+  readonly manualBalanceOverrides?: ManualBalanceSchedule;
+  /**
+   * 【BALANCE-PROFILE-1】コピー元Balance Profileの由来情報（記録用）。
+   *
+   * 【予定であって実績ではない】ここに残るのは「開始時にコピー元となったProfile」
+   * であり、実際に各Turnへ適用された値は manualBalanceApplied を見る。
+   * Neutral（手動補正なし）で開始した場合は省略する。
+   */
+  readonly appliedBalanceProfile?: AppliedBalanceProfileRef;
+  /**
+   * 【Run Calculation Commit Identity】このRunのTurnを計算するアプリのsource commit。
+   *
+   * 省略時は現在のbuildのcommit（NEXT_PUBLIC_SOURCE_COMMIT、未設定なら"UNKNOWN"）。
+   * テストから注入できるようにしているのは、deployをまたいだresume
+   * （commit Aで前半・commit Bで後半）を実Git checkoutを変えずに再現するため。
+   * 再現性metadataのみであり、ゲーム計算には一切影響しない。
+   */
+  readonly sourceCommit?: string;
 }
 
 /**
@@ -186,6 +221,14 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
      * runner.ts:salesParametersFor が registry から SalesParameters を解決する。
      */
     ...(input.salesModelId !== undefined ? { salesModelId: input.salesModelId } : {}),
+    /**
+     * 【BALANCE-PROFILE-1】salesModelIdと同じ規約で、未指定なら**キー自体を作らない**。
+     * Balance Profile を選ばなかった（Neutral）Runのconfigが、この機能の導入前と
+     * ビット単位で同一であることを保つ。
+     */
+    ...(input.manualBalanceOverrides !== undefined && input.manualBalanceOverrides.length > 0
+      ? { manualBalanceOverrides: input.manualBalanceOverrides }
+      : {}),
   };
   const { state, fixtures } = initializeCompanyLab(config);
   const run: SimulationRun = {
@@ -206,6 +249,19 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     failedAtTurn: null,
     companyControlModes: input.companyControlModes,
     runName: input.runName,
+    // 【BALANCE-PROFILE-1】Neutralで開始したRunにはキー自体を作らない
+    // （既存Runのrun metadataと同一に保つ）。
+    ...(input.appliedBalanceProfile !== undefined ? { appliedBalanceProfile: input.appliedBalanceProfile } : {}),
+    /**
+     * 【Run Calculation Commit Identity】作成commitは「作成した版」として別に持つ。
+     *
+     * 【calculationCommitHistoryへは入れない】ここで計算履歴へ1件置くと、
+     * 「Runを作っただけでまだ1Turnも計算していない」状態のcommitが、
+     * Turn1の計算commitとして残ってしまう。作成直後にdeployが変わってから
+     * Turn1を計算した場合、Turn1を計算したのは作成commitではない。
+     * 計算履歴は最初の成功Turnではじめて作られる（advanceSimulationTurn参照）。
+     */
+    runCreatedByCommit: input.sourceCommit ?? resolveCurrentAppSourceCommit(),
   };
   return {
     run,
@@ -422,7 +478,12 @@ function captureManualBalanceApplied(
 export function advanceSimulationTurn(
   session: SimulationSession,
   completedAt: string,
-  playerDecisions?: Readonly<Record<string, CompanyDecisionInput>>
+  playerDecisions?: Readonly<Record<string, CompanyDecisionInput>>,
+  /**
+   * 【Run Calculation Commit Identity】このTurnを計算するアプリのsource commit。
+   * 省略時は現在のbuildのcommit。再現性metadataのみでゲーム計算には影響しない。
+   */
+  sourceCommit?: string
 ): SimulationTurnOutcome {
   if (session.state.isComplete) {
     return {
@@ -433,6 +494,17 @@ export function advanceSimulationTurn(
   }
 
   const turn = session.state.scenarioState.currentTurn;
+  /**
+   * 【Run Calculation Commit Identity】これから計算するTurnの計算commitを記録する。
+   * 直近記録と同じcommitなら履歴は増えない（resumeのたびに積み上がらない）。
+   * 異なる場合だけ、いま計算しようとしているTurnを effectiveFromTurn として追記する
+   * （過去の区間は書き換えない）。失敗したTurnでは記録しない（下のcatchへ抜ける）。
+   */
+  const calculationCommitHistory: CalculationCommitHistory = withCalculationCommitRecorded(
+    session.run.calculationCommitHistory,
+    turn,
+    sourceCommit ?? resolveCurrentAppSourceCommit()
+  );
   try {
     const publicInfo = buildPublicMarketInfo(session.state);
     const decisions: Record<string, CompanyDecisionInput> = {};
@@ -621,6 +693,7 @@ export function advanceSimulationTurn(
           completedTurns,
           stopReason: reachedRequested ? "completed" : nextState.isComplete ? "scenario_end" : "running",
           completedAt: reachedRequested || nextState.isComplete ? completedAt : null,
+          calculationCommitHistory,
         },
       },
       advanced: true,
@@ -654,6 +727,11 @@ export interface AdvanceManyInput {
   readonly shouldStop?: () => boolean;
   /** metadata 用のタイムスタンプ。 */
   readonly timestamp: string;
+  /**
+   * 【Run Calculation Commit Identity】これらのTurnを計算するアプリのsource commit。
+   * 省略時は現在のbuildのcommit。再現性metadataのみ。
+   */
+  readonly sourceCommit?: string;
 }
 
 /**
@@ -669,7 +747,7 @@ export function advanceSimulationTurns(input: AdvanceManyInput): SimulationSessi
     if (session.state.isComplete) {
       return { ...session, run: { ...session.run, stopReason: "scenario_end", completedAt: input.timestamp } };
     }
-    const outcome = advanceSimulationTurn(session, input.timestamp);
+    const outcome = advanceSimulationTurn(session, input.timestamp, undefined, input.sourceCommit);
     session = outcome.session;
     if (!outcome.advanced) return session;
   }

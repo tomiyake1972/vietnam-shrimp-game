@@ -115,7 +115,14 @@ function parseSettings(raw: unknown): ManualBalanceSettings | null {
   return settings;
 }
 
-function parseEntry(raw: unknown): ManualBalanceScheduleEntry | null {
+/**
+ * 【BALANCE-PROFILE-1で公開】1エントリぶんの検証付きパース。
+ *
+ * Balance Profile の export/import も**このパーサーを通す**。
+ * Profile用に第二のschedule形式・第二の検証を作らないための共有点であり、
+ * ここを変えれば両方の入口に同じ検証が効く。
+ */
+export function parseManualBalanceScheduleEntry(raw: unknown): ManualBalanceScheduleEntry | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
   if (r.source !== "MANUAL_OVERRIDE") return null;
@@ -200,7 +207,7 @@ export function parseManualBalancePortableDocument(
   }
   const entries: ManualBalanceScheduleEntry[] = [];
   for (const [index, rawEntry] of p.schedule.entries()) {
-    const entry = parseEntry(rawEntry);
+    const entry = parseManualBalanceScheduleEntry(rawEntry);
     if (!entry) {
       return { ok: false, error: `schedule[${index}] を読み取れませんでした。ファイル全体を取り込みません。` };
     }

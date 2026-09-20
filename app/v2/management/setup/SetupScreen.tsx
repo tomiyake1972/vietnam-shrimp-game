@@ -23,6 +23,15 @@ import { persistResumableRun } from "../lib/persistRun";
 import { upsertLiveSession } from "../lib/liveSessionRegistry";
 import { newRunId } from "../lib/runId";
 import { StrategicPosture } from "../../../lib/v2/companyLab/vision/types";
+import { BalanceProfileSelector } from "../components/BalanceProfileSelector";
+import { listBalanceProfiles } from "../lib/balanceProfileStore";
+import {
+  BalanceProfile,
+  NEUTRAL_BALANCE_PROFILE_ID,
+  balanceProfileScheduleForRun,
+  buildAppliedBalanceProfileRef,
+  isNeutralBalanceProfile,
+} from "../../../lib/v2/companyLab/manualBalance/profile";
 // 【MANAGEMENT-CONSOLE-SALES-MODEL-1】販売市場モデルの唯一のSSoTは
 // lib/v2/sales/salesModels.ts（immutable registry）であり、その日本語ラベル・
 // 既定値・「既定のままなら送らない」変換は Company Lab のラボ作成フォームが
@@ -92,12 +101,34 @@ export function SetupScreen() {
   const [controlModes, setControlModes] = useState<Readonly<Record<string, CompanyControlMode>>>(
     () => Object.fromEntries(COMPANY_LAB_COMPANY_IDS.map((id) => [id, "STANDARD_AI" as CompanyControlMode]))
   );
+  /**
+   * 【BALANCE-PROFILE-1】Run開始時に適用するBalance Profile。
+   * 既定は Neutral（手動補正なし）＝既存Runと完全に同一の挙動。
+   * localStorageからの読み出しはクライアント側でのみ行う（SSR時はNeutralだけ）。
+   */
+  const [balanceProfiles, setBalanceProfiles] = useState<readonly BalanceProfile[]>([]);
+  const [balanceProfileId, setBalanceProfileId] = useState<string>(NEUTRAL_BALANCE_PROFILE_ID);
   const [starting, setStarting] = useState(false);
   const [savedRuns, setSavedRuns] = useState<readonly SimulationRunSummary[] | null>(null);
   const [defaultVisionTargets] = useState<Record<string, number>>(() => defaultVisionTargetsByCompany());
   const [defaultVisionPostures] = useState<Record<string, StrategicPosture>>(() => defaultVisionPosturesByCompany());
   const [visionTargets, setVisionTargets] = useState<Record<string, number>>(() => defaultVisionTargetsByCompany());
   const [visionPostures, setVisionPostures] = useState<Record<string, StrategicPosture>>(() => defaultVisionPosturesByCompany());
+
+  // 【BALANCE-PROFILE-1】保存済みProfileの読み出しはlocalStorage依存のため
+  // クライアント側でのみ行う（SSRとhydrationの不一致を避ける）。
+  useEffect(() => {
+    // 既存の listSimulationRuns と同じ非同期パターンで読み込む
+    // （effect本体から直接setStateしない、というlintルールに合わせる）。
+    let cancelled = false;
+    void (async () => {
+      const loaded = listBalanceProfiles(nowIso());
+      if (!cancelled) setBalanceProfiles(loaded);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,6 +182,13 @@ export function SetupScreen() {
         ];
       }
     }
+    // 【BALANCE-PROFILE-1】選択したProfileのscheduleを、このRunへ**コピー**する。
+    // Runは以後Profileを参照しない（Profileを後から編集してもこのRunは変わらない）。
+    // Neutralの場合は balanceProfileScheduleForRun が undefined を返し、
+    // createSimulationSession が config へキー自体を書き込まない。
+    const selectedProfile = balanceProfiles.find((p) => p.profileId === balanceProfileId) ?? null;
+    const profileSchedule = balanceProfileScheduleForRun(selectedProfile);
+
     const session = createSimulationSession({
       simulationRunId,
       scenarioId: scenarioAlias,
@@ -163,6 +201,12 @@ export function SetupScreen() {
       // 既定（従来市場モデル）のままなら undefined ＝ createSimulationSession が
       // configへキー自体を書き込まない（既存Runとビット単位で同一のconfig）。
       salesModelId: resolveSalesModelIdForSubmission(salesModelId),
+      ...(profileSchedule !== undefined ? { manualBalanceOverrides: profileSchedule } : {}),
+      // Neutral・Profile未選択のRunには由来情報そのものを残さない
+      // （「Profileなし」と「不明」を画面側で区別できるようにするため）。
+      ...(selectedProfile !== null && !isNeutralBalanceProfile(selectedProfile)
+        ? { appliedBalanceProfile: buildAppliedBalanceProfileRef(selectedProfile) }
+        : {}),
     });
 
     // 【指示§I】既存Runは削除・上書きしない。新しいRunを1本追加するだけ。
@@ -197,6 +241,8 @@ export function SetupScreen() {
     defaultVisionTargets,
     defaultVisionPostures,
     hasInvalidVisionTarget,
+    balanceProfiles,
+    balanceProfileId,
   ]);
 
   return (
@@ -412,9 +458,18 @@ export function SetupScreen() {
           </p>
         </section>
 
+        {/* --- Balance Profile --- */}
+        <BalanceProfileSelector
+          profiles={balanceProfiles}
+          selectedProfileId={balanceProfileId}
+          onSelect={setBalanceProfileId}
+          previewTurns={MANAGEMENT_CONSOLE_STANDARD_TURNS}
+          disabled={starting}
+        />
+
         {/* --- Run name --- */}
         <section className="mb-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="setup-run-name-section">
-          <h2 className="mb-2 text-sm font-semibold">6. Run名・メモ（任意）</h2>
+          <h2 className="mb-2 text-sm font-semibold">7. Run名・メモ（任意）</h2>
           <input
             type="text"
             value={runName}
