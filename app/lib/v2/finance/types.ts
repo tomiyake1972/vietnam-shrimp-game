@@ -590,23 +590,54 @@ export interface ContributionMarginReport {
   readonly netRevenue: Usd;
   /** 変動原料費（販売分に含まれる原料費）。 */
   readonly variableRawMaterialCost: Usd;
-  /** 変動加工費（販売分の基準・追加加工費＋変動ユーティリティ）。 */
+  /**
+   * 変動加工費。次の合計（quarterClose.ts参照）。
+   * (a) 売上対応加工費（販売分の基準・追加加工費）
+   * (b) 売上対応変動用役費（販売分の変動ユーティリティ）
+   * (c) 未吸収変動用役費（unabsorbedVariableUtilityPortion。ゼロ生産四半期に
+   *     発生した変動ユーティリティのうち、在庫へ吸収されず当期費用となる分）
+   */
   readonly variableProcessingCost: Usd;
-  /** 変動労務費（販売分の臨時ワーカー費・残業費配賦）。 */
+  /**
+   * 変動労務費。次の合計（quarterClose.ts参照）。
+   * (a) 売上対応変動労務費（販売分の臨時ワーカー費・残業費配賦）
+   * (b) 未吸収変動労務費（unabsorbedVariableLaborPortion。ゼロ生産四半期・
+   *     ゼロ投入バッチで発生し、在庫へ吸収されず当期費用となる変動労務費）
+   */
   readonly variableLaborCost: Usd;
   /** 変動品質費（当期の再加工費＋廃棄損の変動費相当）。 */
   readonly variableQualityCost: Usd;
-  /** 変動販売費（販売物流費）。 */
+  /**
+   * 変動販売費。sellingLogisticsCost（販売物流費）と
+   * salesForceSeveranceCost（営業人員退職金）の合計。
+   * 退職金は既存 costRecords の意味（behavior="variable" /
+   * shortTermReducibility="reducible"）を優先して変動販売費に含めており、
+   * fixedPersonnelCost へは入れない。
+   */
   readonly variableSellingCost: Usd;
   readonly totalVariableCost: Usd;
   readonly contributionMargin: Usd;
   /** 純売上高0の場合はundefined。 */
   readonly contributionMarginRatio?: number;
-  /** 固定製造費（当期発生額: 正社員労務費＋工場固定費＋固定ユーティリティ＋減価償却）。 */
+  /**
+   * 固定製造費（当期発生額）。次の合計（quarterClose.ts参照）。
+   * regularLaborCost（常用労務費。productive分とidleLaborCostの合計であり、
+   * idleLaborCostをここへ別途加算すると二重計上になるため加算しない）
+   * ＋ factoryFixedCost ＋ utilityFixedCost ＋ depreciation
+   * ＋ capexMaintenanceCost（設備維持費）
+   * ＋ factoryLifecycleCarryingCost（工場ライフサイクル保有費）
+   */
   readonly fixedManufacturingCost: Usd;
-  /** 固定人件費（営業・調達人件費）。 */
+  /**
+   * 固定人件費（営業人件費＋調達人件費）。
+   * salesForceSeveranceCost は変動販売費側に含めるため、ここには含めない。
+   */
   readonly fixedPersonnelCost: Usd;
-  /** 固定販管費（一般管理固定費）。 */
+  /**
+   * 固定販管費。adminFixed（一般管理固定費）と
+   * vapProductDevelopmentSpendUsd（VAP商品開発費。数量にも売上にも比例せず
+   * 在庫へも吸収されない期間固定費）の合計。
+   */
   readonly fixedSellingAdminCost: Usd;
   readonly totalFixedCost: Usd;
   /** 管理会計上の営業利益（= contributionMargin - totalFixedCost）。 */
@@ -623,7 +654,16 @@ export interface ContributionMarginReport {
   readonly assumedProductMix: readonly { readonly product: Product; readonly netRevenueShare: number }[];
   readonly byProduct: readonly ContributionMarginByDimension[];
   readonly byMarket: readonly ContributionMarginByDimension[];
-  /** 商品・市場へ配賦していない共通固定費（= totalFixedCost - 各直接固定費の合計）。 */
+  /**
+   * 商品・市場へ配賦していない共通固定費（= totalFixedCost - 各直接固定費の合計）。
+   * 商品別へ直接配賦されるのは productiveRegularLaborCost ＋ factoryFixedCost
+   * ＋ utilityFixedCost ＋ depreciation のみであるため、当期に配賦が成立する
+   * 四半期では恒等的に次と一致する。
+   *   idleLaborCost（遊休労務費。常にどの商品にも配賦しない）
+   *   ＋ capexMaintenanceCost ＋ factoryLifecycleCarryingCost
+   *   ＋ fixedPersonnelCost ＋ fixedSellingAdminCost
+   * ゼロ生産四半期は配賦自体が成立しないため commonFixedCost = totalFixedCost。
+   */
   readonly commonFixedCost: Usd;
   /**
    * 商品別へ直接帰属できない共通変動費（原料の期限切れ廃棄損等）。

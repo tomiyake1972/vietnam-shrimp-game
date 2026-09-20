@@ -31,6 +31,7 @@ import { StandardAiCrisisState } from "../crisisState";
 import { FinancialRiskTolerance } from "../../vision/types";
 import { GROWTH_PRESSURE_PARAMETERS_V1, GrowthPressureParameters } from "../growth/growthPressure";
 import { assessWorkingCapitalNeed, ProcurementCashPlanInput, WorkingCapitalAssessment } from "./workingCapital";
+import { StandardAiCostProjection } from "../costProjection";
 import { NEW_FACTORY_STRATEGY_PARAMETERS_V1 } from "./newFactoryStrategyParameters";
 
 const EPSILON = 1e-6;
@@ -128,6 +129,8 @@ export interface CommittedCashRequirementInput {
   /** Visionの財務リスク許容度。Vision不在の会社はMEDIUM相当として扱う。 */
   readonly financialRiskTolerance: FinancialRiskTolerance | null;
   readonly growthParams?: GrowthPressureParameters;
+  /** 【#05 費用Projection接続】当Turnの費用前提。運転資金評価へそのまま渡す。 */
+  readonly costProjection: StandardAiCostProjection;
 }
 
 /**
@@ -196,7 +199,12 @@ export function assessCommittedCashRequirement(input: CommittedCashRequirementIn
   const growthParams = input.growthParams ?? GROWTH_PRESSURE_PARAMETERS_V1;
 
   // --- 既存の運転資金評価をそのまま再利用（二重計上を避ける唯一の方法） ---
-  const workingCapital = assessWorkingCapitalNeed(observation, input.procurementCashPlan, pressures.targetMinimumCashUsd);
+  const workingCapital = assessWorkingCapitalNeed(
+    observation,
+    input.procurementCashPlan,
+    pressures.targetMinimumCashUsd,
+    input.costProjection.financeParameters
+  );
 
   // 運転資金（debtServiceは別項目として持つため、ここでは除く）。
   const operatingWorkingCapitalRequirementUsd =

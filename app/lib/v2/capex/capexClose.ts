@@ -40,6 +40,8 @@ import {
   attemptPayment,
   buildPaymentQueue,
   evaluateProposal,
+  LEGACY_CONSTRUCTION_COST_POLICY,
+  type ConstructionCostPolicyInput,
   hasActivePdMechanizationProjectForFactory,
   hasActiveQualityControlEquipmentProjectForFactory,
   isActiveStatus,
@@ -68,6 +70,11 @@ export interface CloseQuarterWithCapexInput {
   readonly prevCapexState: CompanyCapexState;
   readonly decision: CapexDecisionInput;
   readonly approvalGate: ProposalApprovalGate;
+  /**
+   * 【ENG-DS2-COST-FOUNDATION-1】建設費算定方式（Scenario opt-in）。
+   * 省略時は "legacy-requested-cost"（現行挙動）。
+   */
+  readonly constructionCostPolicy?: ConstructionCostPolicyInput;
   /**
    * 【Phase 8D-3】当四半期の新規承認に使える工場スペース枠（全工場合計）。
    * 省略時はスペース判定を行わない（Phase 8D以前の呼び出し元・既存テストとの後方互換）。
@@ -271,7 +278,8 @@ export function closeQuarterWithCapex(
       index + 1,
       spaceGate,
       factoryCountGate,
-      mechanizationGate
+      mechanizationGate,
+      input.constructionCostPolicy ?? LEGACY_CONSTRUCTION_COST_POLICY
     );
     if ("approved" in outcome) {
       projects = [...projects, outcome.approved];

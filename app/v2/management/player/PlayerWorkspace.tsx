@@ -27,6 +27,8 @@ import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompany
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../../lib/v2/companyLab/standardAi/policy";
+import { toStandardAiCostProjection } from "../../../lib/v2/companyLab/standardAi/costProjection";
+import { buildTurnEconomicsProjection } from "../../../lib/v2/companyLab/turnEconomicsProjection";
 import { resolveStandardAiProfileForMode } from "../../../lib/v2/companyLab/standardAi/orientationProfile";
 import { CompanyFixture, CompanyOwnState } from "../../../lib/v2/companyLab/types";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
@@ -52,6 +54,7 @@ import { QUICK_NAVIGATION } from "../analysis/catalog";
 // 【MANAGEMENT-CONSOLE-SALES-MODEL-1】PLAYERは販売市場モデルを途中で変更できない。
 // ここは read-only 表示のみ（変更UI・setterを作らない）。
 import { salesModelDisplayLabelFor } from "../../company-lab/play/_lib/salesModelDisplay";
+import { buildPlayerCostProjection } from "../../../lib/v2/companyLab/playerCostProjection";
 
 type WorkspaceTab = "overview" | "market" | "inventory" | "decision";
 
@@ -148,7 +151,16 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
       publicInfo,
       session.state.currentPeriod,
       session.state.scenarioState.currentTurn,
-      params
+      params,
+      undefined,
+      undefined,
+      // 【#05 費用Projection接続】Runのscenario snapshotと現在Turnから作った費用前提。
+      toStandardAiCostProjection(
+        buildTurnEconomicsProjection({
+          definition: session.state.scenarioState.definition,
+          turn: session.state.scenarioState.currentTurn,
+        })
+      )
     ).decision;
     return { ownState, aiDecision };
   });
@@ -540,6 +552,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               disabled={false}
               period={session.state.currentPeriod}
               turn={turn}
+              costProjection={buildPlayerCostProjection(session.state, turn)}
               lastQuarterCapexEvents={lastQuarterCapexResult?.events}
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}

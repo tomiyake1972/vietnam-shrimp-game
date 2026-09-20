@@ -28,6 +28,7 @@ import { PressureScores } from "../pressures";
 import { CompanyFixture, CompanyLabConfig } from "../../types";
 import { runCompanyLabWithAutoPolicyForAllCompanies } from "../../runner";
 import { createStandardAiProvider } from "../policy";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 const fixture = {
   companyId: "BAL",
@@ -123,7 +124,7 @@ function pressures(overrides: Partial<PressureScores> = {}): PressureScores {
 const NEEDED = { hoso: 15000, pd: 7000, vap: 3000 };
 
 function capex(obs: StandardAiObservation, pr: PressureScores) {
-  return buildStandardAiCapexDecision(fixture, obs, pr, NEEDED, 25000, STANDARD_AI_PARAMETERS_V1);
+  return buildStandardAiCapexDecision(fixture, obs, pr, NEEDED, 25000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
 }
 
 // ---------------------------------------------------------------------

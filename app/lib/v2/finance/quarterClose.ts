@@ -280,6 +280,15 @@ interface ProductionCostingResult {
   readonly unabsorbedManufacturingCost: number;
   /** うち固定費部分（利益差異調整の恒等式検証に使う）。 */
   readonly unabsorbedFixedPortion: number;
+  /**
+   * 【管理会計費用範囲是正】うち変動費部分のうち**変動労務費**（臨時ワーカー＋残業）。
+   * unabsorbedVariableUtilityPortion との合計が
+   * unabsorbedManufacturingCost − unabsorbedFixedPortion に厳密に一致する。
+   * 推測配分ではなく、未吸収額を確定させた元の計算値をそのまま分けて保持している。
+   */
+  readonly unabsorbedVariableLaborPortion: number;
+  /** 【管理会計費用範囲是正】うち変動費部分のうち**変動ユーティリティ費**。 */
+  readonly unabsorbedVariableUtilityPortion: number;
   /** 当期に完成品在庫へ配賦した固定製造費。 */
   readonly fixedAbsorbedIntoInventory: number;
   readonly manufacturing: ManufacturingCostBreakdown;
@@ -464,9 +473,17 @@ function computeProductionCosting(
     addQualityCost(b.product, b.reworkTons * params.manufacturing.reworkCostUsdPerTon);
   }
 
+  // 【管理会計費用範囲是正】未吸収変動費の内訳（労務／ユーティリティ）。
+  // 管理会計側が「実際に当期費用化された未吸収変動費」だけを1回計上するために使う。
+  // どちらも下で unabsorbedVariable / unabsorbedVariableFromZeroInputBatches を
+  // 確定させているのと同じ計算値であり、新しい按分を持ち込んでいない。
+  let unabsorbedVariableLaborZeroOutput = 0;
+  let unabsorbedVariableUtilityZeroOutput = 0;
   if (totalOriginalTons <= QUANTITY_EPSILON) {
     // 実質生産ゼロ: 変動労務・変動ユーティリティも配賦先がないため期間費用とする。
     unabsorbedVariable = variableLaborTotal + utilityVariableCost;
+    unabsorbedVariableLaborZeroOutput = variableLaborTotal;
+    unabsorbedVariableUtilityZeroOutput = utilityVariableCost;
   }
 
   // --- バッチ別の配賦シェア ---
@@ -578,6 +595,13 @@ function computeProductionCosting(
     totalAdjustedTons <= QUANTITY_EPSILON ? fixedManufacturingTotal : unabsorbedRegularLaborFromZeroOutputBatches;
   const unabsorbedVariablePortion = totalOriginalTons <= QUANTITY_EPSILON ? unabsorbedVariable : unabsorbedVariableFromZeroInputBatches;
   const unabsorbedManufacturingCost = unabsorbedFixedPortion + unabsorbedVariablePortion;
+  // 【管理会計費用範囲是正】内訳も同じ排他分岐で確定する。
+  // 原料投入ゼロのバッチ由来分（unabsorbedVariableFromZeroInputBatches）は、
+  // そのバッチの batchVariableTotal が実質 allocVariableLabor（臨時＋残業）のみである
+  // （上の該当箇所のコメント参照）ため、全額を変動労務費として扱う。
+  const unabsorbedVariableLaborPortion =
+    totalOriginalTons <= QUANTITY_EPSILON ? unabsorbedVariableLaborZeroOutput : unabsorbedVariableFromZeroInputBatches;
+  const unabsorbedVariableUtilityPortion = totalOriginalTons <= QUANTITY_EPSILON ? unabsorbedVariableUtilityZeroOutput : 0;
 
   const manufacturing: ManufacturingCostBreakdown = {
     domesticRawMaterialCost: usd(rawDomestic),
@@ -608,6 +632,8 @@ function computeProductionCosting(
     reworkCost,
     unabsorbedManufacturingCost,
     unabsorbedFixedPortion,
+    unabsorbedVariableLaborPortion,
+    unabsorbedVariableUtilityPortion,
     fixedAbsorbedIntoInventory,
     manufacturing,
     discardTonsTotal,
@@ -1285,22 +1311,66 @@ export function closeFinancialQuarter(
 
   // --- 管理会計: 限界利益レポート ---
   const variableRawMaterialCost = cogsRawMaterial;
+  /**
+   * 【管理会計費用範囲是正】当期に費用化された未吸収変動製造費。
+   *
+   * 旧実装は「zeroProductionVariable > 0 なら当四半期の
+   * temporaryWorkerCost / overtimeCost / utilityVariableCost を**全額**加算する」
+   * という all-or-nothing 処理であり、実際に費用化された未吸収額と一致しなかった。
+   * その結果、生産がほぼゼロの四半期で totalVariableCost が過大になり、
+   *   profitDifference = 期末在庫固定費 − 期首在庫固定費
+   * が成立しなくなっていた（実測: DS1 seed cf-seed-b Turn8 MASS で 697,523.67 USD、
+   * cf-seed-a Turn8 MASS で 664,923.38 USD）。
+   *
+   * ここでは costing 側が確定させた実額（unabsorbedVariableLaborPortion /
+   * unabsorbedVariableUtilityPortion）をそのまま1回だけ計上する。両者の合計は
+   * zeroProductionVariable に厳密に一致し、新しい按分は導入していない。
+   * 財務会計側（unabsorbedManufacturingCost・PL・BS・CF・在庫評価）は変更しない。
+   */
   const zeroProductionVariable = costing.unabsorbedManufacturingCost - costing.unabsorbedFixedPortion;
-  const variableProcessingCost = cogsProcessing + (zeroProductionVariable > 0 ? costing.manufacturing.utilityVariableCost as number : 0);
-  const variableLaborCost = cogsLaborVariable + (zeroProductionVariable > 0 ? (costing.manufacturing.temporaryWorkerCost as number) + (costing.manufacturing.overtimeCost as number) : 0);
+  const variableProcessingCost = cogsProcessing + costing.unabsorbedVariableUtilityPortion;
+  const variableLaborCost = cogsLaborVariable + costing.unabsorbedVariableLaborPortion;
   const variableQualityCost = costing.reworkCost + costing.qualityDiscardLoss + rawMaterialExpiryLoss + finishedGoodsWriteOffVariable;
-  const variableSellingCost = sellingLogistics;
+  /**
+   * 【管理会計費用範囲是正】営業人員の退職金は既存 costRecords の意味
+   * （account="salesForceSeverance" / behavior="variable" /
+   *   shortTermReducibility="reducible"）を優先し、**変動販売費**として含める。
+   * 固定人件費（fixedPersonnelCost）へは入れない。costRecords の分類は変更しない。
+   * 商品へ帰属できない全社費用のため、commonVariableCost にも同額を含める。
+   */
+  const variableSellingCost = sellingLogistics + salesForceSeveranceCost;
   const totalVariableCost = variableRawMaterialCost + variableProcessingCost + variableLaborCost + variableQualityCost + variableSellingCost;
   const contributionMarginValue = netRevenue - totalVariableCost;
   const contributionMarginRatio = netRevenue > QUANTITY_EPSILON ? contributionMarginValue / netRevenue : undefined;
 
+  /**
+   * 【管理会計費用範囲是正】期間固定製造費。
+   *
+   * regularLaborCost は productiveRegularLaborCost と idleLaborCost の合計であり
+   * （実測で一致を確認）、idleLaborCost をここへ別途加算すると二重計上になる。
+   * したがって idleLaborCost は加算しない。
+   *
+   * 一方、capexMaintenanceCost（稼働中capex資産の固定保守費）と
+   * factoryLifecycleCarryingCost（休止・売却待ち工場の維持費＋再稼働費）は、
+   * 完成品原価・単位原価台帳・在庫へ一切吸収されず当期に全額費用化される
+   * 期間固定製造費でありながら、従来 totalFixedCost に含まれていなかった。
+   * これが profitDifference の残差の主因だったため、ここへ含める。
+   * factoryLifecycleCarryingCost は現行の集約額をそのまま使い、
+   * reactivationCostUsd の指数化は行わない。
+   */
   const fixedManufacturingCost =
     (costing.manufacturing.regularLaborCost as number) +
     (costing.manufacturing.factoryFixedCost as number) +
     (costing.manufacturing.utilityFixedCost as number) +
-    depreciationUsd;
+    depreciationUsd +
+    capexMaintenanceCostUsd +
+    factoryLifecycleCarryingCostUsd;
   const fixedPersonnelCost = salesForceCost + procurementCost;
-  const fixedSellingAdminCost = adminFixed;
+  /**
+   * 【管理会計費用範囲是正】VAP商品開発費は会社が当期に裁量で決める期間固定販管費。
+   * 数量にも売上にも比例せず、在庫へも吸収されないため fixedSellingAdminCost へ含める。
+   */
+  const fixedSellingAdminCost = adminFixed + vapProductDevelopmentSpendUsd;
   const totalFixedCost = fixedManufacturingCost + fixedPersonnelCost + fixedSellingAdminCost;
   const managementOperatingProfit = contributionMarginValue - totalFixedCost;
 
@@ -1356,12 +1426,35 @@ export function closeFinancialQuarter(
   // 商品別へ帰属できない共通変動費: 全量廃棄バッチ以外にも、商品へ帰属済みの
   // 品質費（rework+qualityDiscard、商品別Mapに帰属済み）を除いた残り。
   // = 原料期限切れ廃棄損 + 完成品在庫廃棄損の変動部分 + 生産ゼロ時の未配賦変動費。
-  const commonVariableCost = rawMaterialExpiryLoss + finishedGoodsWriteOffVariable + Math.max(0, zeroProductionVariable);
+  // 【管理会計費用範囲是正】未吸収変動費は実額（= zeroProductionVariable）で
+  // totalVariableCost へ入るようになったため、ここも同じ実額を使う（従来どおり）。
+  // 営業人員退職金は商品へ帰属できない変動販売費のためここへ含める。
+  // これにより Σ(商品別限界利益) = 全社限界利益 + commonVariableCost が
+  // 生産ゼロ四半期・退職金発生四半期でも成立する。
+  const commonVariableCost =
+    rawMaterialExpiryLoss + finishedGoodsWriteOffVariable + Math.max(0, zeroProductionVariable) + salesForceSeveranceCost;
 
   // 【商品別固定費配賦】商品別へ配賦済みの直接固定費合計。totalFixedCostから
-  // これを差し引いた残りがcommonFixedCost（= idleLaborCost（遊休労務費。常に
-  // どの商品にも配賦しない）＋fixedPersonnelCost（営業・調達人件費）＋
-  // fixedSellingAdminCost（一般管理固定費）と恒等的に一致する）。
+  // これを差し引いた残りがcommonFixedCostである。
+  //
+  // computeManagementAccountingProductFixedCostAllocation が商品別へ直接配賦
+  // するのは productiveRegularLaborCost ＋ factoryFixedCost ＋ utilityFixedCost
+  // ＋ depreciationCost のみ。したがって当期に配賦が成立する四半期では
+  // commonFixedCost は恒等的に次の合計と一致する。
+  //   (a) idleLaborCost
+  //       （遊休労務費。regularLaborCost のうち productive 分を除いた未配賦分。
+  //         常にどの商品にも配賦しない）
+  //   (b) capexMaintenanceCost（設備維持費。fixedManufacturingCost に含めるが
+  //       商品別直接固定費へは配賦しない）
+  //   (c) factoryLifecycleCarryingCost（工場ライフサイクル保有費。同上）
+  //   (d) fixedPersonnelCost（営業・調達人件費）
+  //   (e) fixedSellingAdminCost（adminFixed ＋ vapProductDevelopmentSpendUsd）
+  // すなわち fixedManufacturingCost のうち商品別直接固定費へ配賦されない部分
+  // （idleLaborCost・capexMaintenanceCost・factoryLifecycleCarryingCost）は
+  // すべて commonFixedCost 側へ残る。
+  //
+  // ゼロ生産四半期（totalAdjustedTons ≤ ε）は配賦自体が成立せず
+  // totalDirectFixedCostAllocated = 0 となるため commonFixedCost = totalFixedCost。
   const totalDirectFixedCostAllocated = [...managementAccountingDirectFixedCostByProduct.values()].reduce((s, v) => s + v, 0);
 
   const contributionMargin: ContributionMarginReport = {

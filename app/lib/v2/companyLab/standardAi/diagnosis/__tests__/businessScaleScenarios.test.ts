@@ -9,6 +9,7 @@ import { computePressureScores } from "../../pressures";
 import { buildStandardAiSalesPlans } from "../../decision/sales";
 import { CompanyLabConfig } from "../../../types";
 import { buildBusinessScaleScenarioComparison } from "../businessScaleScenarios";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../../costProjection";
 
 function setupTurn2(companyId = "BAL", seed = "business-scale-001") {
   const { state, fixtures } = initializeCompanyLab({ scenarioId: "baseline", mode: "canonical", seed, turns: 8 } as CompanyLabConfig);
@@ -36,7 +37,7 @@ test("Growth Scenarioは最大成長ではない（Sales/Labor headcountは物�
     pressures2,
     salesResult2.salesPlans,
     salesResult2.desiredByProduct
-  );
+  , NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(comparison.growth.assumptions.some((a) => a.isProvisionalIllustration));
   // Growth Scenarioのsales軸は、Conservative/Baseより大きいか等しいはず（headcountを増やしたため）。
   const growthSales = comparison.growth.profile.axes.find((a) => a.axis === "sales")!;
@@ -52,7 +53,7 @@ test("【2026-08-04修正】isPlaceholderHeuristicフラグにより、Growthの
     pressures2,
     salesResult2.salesPlans,
     salesResult2.desiredByProduct
-  );
+  , NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.equal(comparison.growth.isPlaceholderHeuristic, true);
   // Conservative/Baseは既存データからの直接算出であり、暫定ヒューリスティックではない。
   assert.equal(comparison.conservative.isPlaceholderHeuristic, false);
@@ -67,7 +68,7 @@ test("Conservative/Base/Growthのいずれも、5軸を単一値へ潰してい�
     pressures2,
     salesResult2.salesPlans,
     salesResult2.desiredByProduct
-  );
+  , NEUTRAL_STANDARD_AI_COST_PROJECTION);
   for (const scenario of [comparison.conservative, comparison.base, comparison.growth]) {
     assert.equal(scenario.profile.axes.length, 5);
   }
@@ -81,7 +82,7 @@ test("bindingAxesは実際に最小のsupportedScaleTonsを持つ軸と一致す
     pressures2,
     salesResult2.salesPlans,
     salesResult2.desiredByProduct
-  );
+  , NEUTRAL_STANDARD_AI_COST_PROJECTION);
   for (const scenario of [comparison.conservative, comparison.base, comparison.growth]) {
     const known = scenario.profile.axes.filter((a) => a.supportedScaleTons !== null);
     const trueMin = Math.min(...known.map((a) => a.supportedScaleTons!));
@@ -101,7 +102,7 @@ test("会社IDが一致し、他社データが混入しない", () => {
     pressures2,
     salesResult2.salesPlans,
     salesResult2.desiredByProduct
-  );
+  , NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.equal(comparison.companyId, "MASS");
   assert.equal(comparison.growth.profile.companyId, "MASS");
 });

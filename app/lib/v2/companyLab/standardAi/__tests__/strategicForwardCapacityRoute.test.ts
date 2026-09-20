@@ -15,6 +15,7 @@ import { evaluateNewFactoryDecision, NEW_FACTORY_STRATEGY_PARAMETERS_V1, NewFact
 import { StandardAiObservation } from "../types";
 import { PressureScores } from "../pressures";
 import { CompanyFixture } from "../../types";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 const fixture = { companyId: "TEST" } as unknown as CompanyFixture;
 
@@ -136,6 +137,7 @@ function baseInput(overrides: Partial<NewFactoryDecisionInput> = {}): NewFactory
     commercialAmbition: commercialAmbition(),
     unservedOpportunity: undefined,
     persistentCapacityCausedUnserved: false,
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
     ...overrides,
   };
 }

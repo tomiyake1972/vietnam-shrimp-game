@@ -51,7 +51,7 @@
 
 import { DemandMarketId, Product } from "../../../market/types";
 import { PRODUCTION_PARAMETERS_V1 } from "../../../production/parameters";
-import { FINANCE_PARAMETERS_V1 } from "../../../finance/parameters";
+import { StandardAiCostProjection } from "../costProjection";
 import { StandardAiObservation } from "../types";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
@@ -122,11 +122,14 @@ const FIXED_COST_ALLOCATION_NOTE =
   "憶測で加算していない）。四半期決算の実際の配賦固定費とは一致しない。";
 
 /** 商品別「原料以外の変動費」合計（USD/kg）。加工変動費＋ユーティリティ変動費＋販売物流変動費。 */
-function nonRawVariableCostUsdPerKg(product: Product): number {
+function nonRawVariableCostUsdPerKg(product: Product, costProjection: StandardAiCostProjection): number {
   const hosoEqKgPerTon = PRODUCTION_PARAMETERS_V1.cost.hosoEqKgPerTon;
   const processingUsdPerTon = PRODUCTION_PARAMETERS_V1.cost.baseProcessingCostUsdPerTon[product];
-  const utilityVariableUsdPerTon = FINANCE_PARAMETERS_V1.manufacturing.factoryUtilityVariableUsdPerTon;
-  const sellingLogisticsUsdPerTon = FINANCE_PARAMETERS_V1.sellingGeneralAdmin.sellingLogisticsUsdPerTon;
+  // 【#05 費用Projection接続】当Turnの実効単価（指数適用後）。Engineが同じTurnで
+  // 使う financeParametersForTurn の結果そのものであり、ここで指数を掛け直さない。
+  const finance = costProjection.financeParameters;
+  const utilityVariableUsdPerTon = finance.manufacturing.factoryUtilityVariableUsdPerTon;
+  const sellingLogisticsUsdPerTon = finance.sellingGeneralAdmin.sellingLogisticsUsdPerTon;
   return (processingUsdPerTon + utilityVariableUsdPerTon + sellingLogisticsUsdPerTon) / hosoEqKgPerTon;
 }
 
@@ -138,12 +141,17 @@ function nonRawVariableCostUsdPerKg(product: Product): number {
  * dataQuality側で別途明示はしないが、manufacturingFullCost全体がその場合
  * variableCostのみに近似される）。
  */
-function allocatedManufacturingFixedCostByProductUsdPerKg(observation: StandardAiObservation): Readonly<Record<Product, number>> {
+function allocatedManufacturingFixedCostByProductUsdPerKg(
+  observation: StandardAiObservation,
+  costProjection: StandardAiCostProjection
+): Readonly<Record<Product, number>> {
+  const finance = costProjection.financeParameters;
   const numberOfFactories = observation.factories.length;
   const fixedCostPoolUsd =
-    numberOfFactories *
-    (FINANCE_PARAMETERS_V1.manufacturing.factoryFixedCostUsdPerQuarter + FINANCE_PARAMETERS_V1.manufacturing.factoryUtilityFixedUsdPerQuarter);
-  const coeffs = FINANCE_PARAMETERS_V1.managementAccounting.fixedCostAllocationCoefficientByProduct;
+    numberOfFactories * (finance.manufacturing.factoryFixedCostUsdPerQuarter + finance.manufacturing.factoryUtilityFixedUsdPerQuarter);
+  // 配賦係数は費用単価ではなく管理会計上の比率であり、指数の適用対象ではない
+  // （financeParametersForTurn も managementAccounting を素通しする）。
+  const coeffs = finance.managementAccounting.fixedCostAllocationCoefficientByProduct;
   const referenceMix = observation.totalEffectiveCapacityByProduct;
   const totalWeight = PRODUCTS.reduce((sum, p) => sum + coeffs[p] * referenceMix[p], 0);
   const hosoEqKgPerTon = PRODUCTION_PARAMETERS_V1.cost.hosoEqKgPerTon;
@@ -163,10 +171,18 @@ function allocatedManufacturingFixedCostByProductUsdPerKg(observation: StandardA
  * 会社×市場×商品の全組み合わせについてForward Unit Economicsを計算する。
  * 純粋関数（observationのみを入力とし、副作用・グローバル状態を持たない）。
  */
-export function buildStandardAiUnitEconomics(observation: StandardAiObservation): StandardAiUnitEconomicsResult {
+export function buildStandardAiUnitEconomics(
+  observation: StandardAiObservation,
+  /**
+   * 【#05 費用Projection接続】当Turnの費用前提。既定値を持たない（＝呼び出し元が
+   * 必ず明示的に渡す）。既定値を置くと、Scenario指数が宣言されていても黙って
+   * FINANCE_PARAMETERS_V1 へ落ちる経路が復活するため。
+   */
+  costProjection: StandardAiCostProjection
+): StandardAiUnitEconomicsResult {
   const domesticRawPrice = observation.vietnamDomesticPriorPrice ?? null;
   const importReferenceOnly = observation.lastHosoPriceVn ?? null;
-  const allocatedFixedCostByProduct = allocatedManufacturingFixedCostByProductUsdPerKg(observation);
+  const allocatedFixedCostByProduct = allocatedManufacturingFixedCostByProductUsdPerKg(observation, costProjection);
 
   const rawMaterialCostUsdPerKg = domesticRawPrice;
   const rawMaterialCostSource: "domesticReferencePrice" | "unavailable" = domesticRawPrice !== null ? "domesticReferencePrice" : "unavailable";
@@ -176,7 +192,7 @@ export function buildStandardAiUnitEconomics(observation: StandardAiObservation)
   for (const marketEntry of observation.markets) {
     for (const product of PRODUCTS) {
       const referenceSalesPriceUsdPerKg = marketEntry.referencePriceByProduct?.[product] ?? null;
-      const nonRawCost = nonRawVariableCostUsdPerKg(product);
+      const nonRawCost = nonRawVariableCostUsdPerKg(product, costProjection);
       const allocatedFixedCost = allocatedFixedCostByProduct[product];
 
       const missingInputs: string[] = [];

@@ -23,6 +23,8 @@ import { SimulationRunRepository } from "../../../../../../../../../../../lib/v2
 import { CompanyLabRedisClient } from "../../../../../../../../../../../lib/v2/redis/companyLabTypes";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../../../../../../../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/policy";
+import { toStandardAiCostProjection } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/costProjection";
+import { buildTurnEconomicsProjection } from "../../../../../../../../../../../lib/v2/companyLab/turnEconomicsProjection";
 import { resolveStandardAiProfileForMode } from "../../../../../../../../../../../lib/v2/companyLab/standardAi/orientationProfile";
 import { CompanyDecisionInput, CompanyQuarterRecord } from "../../../../../../../../../../../lib/v2/companyLab/types";
 import { BorrowingHeadroomFact, CrisisFact, PlayerDraftSummary } from "../../../../../../../../../../../lib/v2/companyLab/aiManagementMeeting/briefing";
@@ -140,7 +142,18 @@ export async function buildSnapshotFromSimulationRun(
   // （ManagementProfile+CompanyOrientationProfile）で診断を作る。AI経営会議へ渡す
   // 診断が会社差ゼロのparams由来だと、会議の説明と実際のAI判断が食い違うため。
   const aiParams = resolveStandardAiProfileForMode(fixture.companyId, state.config.standardAiProfileMode).params;
-  const diagnostics = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, state.currentPeriod, currentTurn, aiParams).diagnostics;
+  const diagnostics = generateStandardAiDecisionWithDiagnostics(
+    fixture,
+    ownState,
+    publicInfo,
+    state.currentPeriod,
+    currentTurn,
+    aiParams,
+    undefined,
+    undefined,
+    // 【#05 費用Projection接続】保存済みRunのScenario snapshotを正本にする。
+    toStandardAiCostProjection(buildTurnEconomicsProjection({ definition: state.scenarioState.definition, turn: currentTurn }))
+  ).diagnostics;
 
   const lastRecord = state.history[state.history.length - 1] ?? null;
   const previousFinancialResult = lastRecord?.financialResults.find((r) => r.companyId === companyId) ?? null;

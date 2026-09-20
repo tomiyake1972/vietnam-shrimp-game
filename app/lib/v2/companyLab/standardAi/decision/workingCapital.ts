@@ -19,12 +19,12 @@
 //
 // 【捏造しない】
 //   ・給与・買掛・利息・元本は、いずれも既存の唯一の情報源をそのまま使う
-//     （FINANCE_PARAMETERS_V1 / observation の実データ）。
+//     （当Turnの実効FinanceParameters / observation の実データ）。
 //   ・借入可能枠（availableBorrowingHeadroomUsd）は observation 上で意図的に
 //     undefined（types.ts に理由が明記されている）。ここで近似値を作らない。
 //     実際にいくら借りられるかは financing エンジンの審査が決める。
 
-import { FINANCE_PARAMETERS_V1, FinanceParameters } from "../../../finance/parameters";
+import { FinanceParameters } from "../../../finance/parameters";
 import { FINANCING_PARAMETERS_V1, FinancingParameters } from "../../../financing/parameters";
 import { StandardAiObservation } from "../types";
 
@@ -108,7 +108,12 @@ export function assessWorkingCapitalNeed(
   observation: StandardAiObservation,
   procurement: ProcurementCashPlanInput,
   minimumCashBufferUsd: number,
-  financeParams: FinanceParameters = FINANCE_PARAMETERS_V1,
+  /**
+   * 【#05 費用Projection接続】当Turnの実効費用単価（指数適用後）。既定値を撤去した。
+   * 既定値（FINANCE_PARAMETERS_V1）があると、Scenario指数が宣言されていても
+   * 引数未指定の呼び出しが黙って基準単価へ落ちるため。
+   */
+  financeParams: FinanceParameters,
   financingParams: FinancingParameters = FINANCING_PARAMETERS_V1
 ): WorkingCapitalAssessment {
   // turn1等で前期価格が無い場合の代替値。資金ゲート（companyLab/runner.ts の

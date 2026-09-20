@@ -192,6 +192,84 @@ export interface LongTermTrend {
 }
 
 // ---------------------------------------------------------------------
+// Turn別指数（ENG-DS2-COST-FOUNDATION-1）
+// ---------------------------------------------------------------------
+//
+// 【価格を直接決めない、という不変条件は維持している】ここで宣言できるのは
+//   (a) 会社P&L上の費用単価に掛ける指数（operatingCostInflation）
+//   (b) ベトナム国内原料市場の需給乗数の基準値に掛ける指数（rawMarketPricing）
+//   (c) 建設費の標準投資額に掛ける指数（operatingCostInflation.construction）
+// であり、HOSO価格・PD/VAPプレミアム・販売基準価格そのものを指定する手段は
+// 一切用意していない（ScenarioBaseVariable に価格が無いのと同じ方針）。
+//
+// 【補間規則を二重定義しない】キーフレームの補間は
+// interpolation.ts:interpolateKeyframeValue（LongTermTrend と同一の実装）
+// だけが持つ。ここは形の宣言のみ。
+
+/** Turn別指数のキーフレーム列（LongTermTrend と同じ補間規則で解決する）。 */
+export interface CostIndexTrack {
+  readonly interpolation: TrendInterpolation;
+  /** turn昇順に2点以上。範囲外のturnは最初／最後のキーフレーム値を保持する。 */
+  readonly keyframes: readonly LongTermTrendKeyframe[];
+}
+
+/**
+ * 会社P&L上の費用単価へ掛ける指数のキー。
+ *
+ * "factoryFixed" は factoryFixedCostUsdPerQuarter と
+ * factoryUtilityFixedUsdPerQuarter の**両方**に掛かる。両者の合計が
+ * normalCashFixedFactoryCostUsdPerQuarter（finance/parameters.ts、mothball
+ * 25% / sale pending 10% の唯一の基準額）であるため、片方だけを指数化すると
+ * 休止・売却待ちの carrying cost の意味が崩れる。
+ *
+ * "construction" は会社P&Lの費用単価ではなく、CAPEX標準投資額へ掛ける指数。
+ * 費用指数と同じ数表・同じ補間で扱えるため同じ enum に含めるが、
+ * finance/parameters.ts の解決には使わない（capex 側だけが読む）。
+ */
+export type OperatingCostIndexKey =
+  | "sellingLogistics"
+  | "regularLabor"
+  | "temporaryLabor"
+  | "factoryFixed"
+  | "factoryUtilityVariable"
+  | "adminFixed"
+  | "qualityAssurance"
+  | "construction";
+
+export interface OperatingCostInflationSettings {
+  /** 数表の由来を記録するためのラベル。挙動には影響しない。 */
+  readonly settingsId: string;
+  readonly tracks: Partial<Readonly<Record<OperatingCostIndexKey, CostIndexTrack>>>;
+}
+
+/**
+ * ベトナム国内原料市場の価格捕捉設定。
+ *
+ * 会社費用（operatingCostInflation）とは概念が別である。こちらは
+ * 「原料価格が HOSO FOB をどれだけ捕捉するか」＝需給乗数の基準値に掛かる。
+ * buyingCeiling（processingExportCost / requiredMargin）も
+ * farmerReservationPrice も変更しない。
+ */
+export interface RawMarketPricingSettings {
+  /** 数表の由来を記録するためのラベル。挙動には影響しない。 */
+  readonly settingsId: string;
+  readonly rawPriceCaptureIndex?: CostIndexTrack;
+}
+
+/**
+ * 建設費の算定方式。
+ *
+ *  - "legacy-requested-cost"（既定・未指定時）
+ *      approvedBudgetUsd = requestedBudgetUsd ?? standardBudgetUsd
+ *      現行挙動そのまま（安値申請の扱いも含めて一切変更しない）。
+ *  - "indexed-required-cost-v1"
+ *      Engineが承認Turnに一度だけ
+ *      indexedRequiredProjectCost = standardBudgetUsd × constructionCostIndex(turn)
+ *      を確定させ、requestedBudgetUsd は「支払意思上限」として扱う。
+ */
+export type ConstructionCostPolicyId = "legacy-requested-cost" | "indexed-required-cost-v1";
+
+// ---------------------------------------------------------------------
 // 情報公開
 // ---------------------------------------------------------------------
 
@@ -378,6 +456,24 @@ export interface ScenarioDefinition {
   readonly requiredCapabilities?: ScenarioRequiredCapabilities;
 
   /**
+   * 【ENG-DS2-COST-FOUNDATION-1】会社P&L費用単価・建設費のTurn別指数（opt-in）。
+   * 未指定時はすべて 1.00 として解決され、既存挙動と完全に一致する。
+   */
+  readonly operatingCostInflation?: OperatingCostInflationSettings;
+
+  /**
+   * 【ENG-DS2-COST-FOUNDATION-1】ベトナム国内原料市場の価格捕捉設定（opt-in）。
+   * 未指定時は捕捉指数 1.00 として解決され、既存挙動と完全に一致する。
+   */
+  readonly rawMarketPricing?: RawMarketPricingSettings;
+
+  /**
+   * 【ENG-DS2-COST-FOUNDATION-1】建設費の算定方式（opt-in）。
+   * 未指定時は必ず "legacy-requested-cost"（現行挙動）。
+   */
+  readonly constructionCostPolicy?: ConstructionCostPolicyId;
+
+  /**
    * 会社の初期VAP加工設備能力（HOSO換算 t/四半期）の部分上書き（opt-in）。
    *
    * 【なぜシナリオが持つか】「その世界のベトナム加工業者が、ゲーム開始時点で
@@ -527,6 +623,12 @@ export interface ScenarioTurnInput {
   /** シナリオが指定した場合のみ設定される（未指定時は市場モジュール既定値）。 */
   readonly vietnamFarmerEconomics?: VietnamFarmerEconomics;
   readonly pdVapDemand: { readonly pdDemand: HosoEqTons; readonly vapDemand: HosoEqTons };
+  /**
+   * 【ENG-DS2-COST-FOUNDATION-1】このターンの原料価格捕捉指数。
+   * シナリオが rawMarketPricing を宣言し、かつ値が中立(1.00)でない場合にのみ設定される
+   * （未設定＝現行と完全一致。MarketQuarterInputへもキー自体を作らない）。
+   */
+  readonly rawPriceCaptureIndex?: number;
   /** このターンに何らかの強度（0超）で影響しているイベントのID一覧。 */
   readonly activeEventIds: readonly string[];
 }

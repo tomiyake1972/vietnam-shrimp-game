@@ -22,6 +22,7 @@
 
 import { FinanceValidationError } from "./types";
 import { Product } from "../market/types";
+import type { OperatingCostIndexKey } from "../scenario/types";
 
 /**
  * 【ENG-FAC-1・実装指示§4】通常cash factory fixed cost（1工場・1四半期あたり）。
@@ -33,6 +34,66 @@ import { Product } from "../market/types";
  */
 export function normalCashFixedFactoryCostUsdPerQuarter(params: FinanceParameters): number {
   return params.manufacturing.factoryFixedCostUsdPerQuarter + params.manufacturing.factoryUtilityFixedUsdPerQuarter;
+}
+
+/**
+ * 【ENG-DS2-COST-FOUNDATION-1】Turn別費用指数を適用した実効 FinanceParameters を返す。
+ *
+ * 【全指数1.00なら base をそのまま返す（参照同一）】この早期returnにより、
+ * 指数を宣言していないシナリオでは呼び出し前後で**同一オブジェクト**が使われ、
+ * 現行の計算とビット単位で一致する（新しい丸め・新しい乗算が一切入らない）。
+ *
+ * 【固定費のドライバーは変えない】ここが変えるのは**単価**だけである。
+ * factoryFixedCostUsdPerQuarter / factoryUtilityFixedUsdPerQuarter は
+ * finance/quarterClose.ts で activeFactoryCount に掛けられるという構造のままであり、
+ * 売上高・販売量・実処理量へ比例させることはしない。
+ *
+ * 【mothball 25% / sale pending 10% は自動追随する】両者の基準額
+ * normalCashFixedFactoryCostUsdPerQuarter は上記2単価の和として定義されており、
+ * 同じ "factoryFixed" 指数を両方へ掛けるため、比率の定義を変えずに追随する。
+ */
+export function financeParametersForTurn(
+  base: FinanceParameters,
+  indices: Readonly<Record<OperatingCostIndexKey, number>>
+): FinanceParameters {
+  const sellingLogistics = indices.sellingLogistics;
+  const regularLabor = indices.regularLabor;
+  const temporaryLabor = indices.temporaryLabor;
+  const factoryFixed = indices.factoryFixed;
+  const factoryUtilityVariable = indices.factoryUtilityVariable;
+  const adminFixed = indices.adminFixed;
+  const qualityAssurance = indices.qualityAssurance;
+
+  const allNeutral =
+    sellingLogistics === 1 &&
+    regularLabor === 1 &&
+    temporaryLabor === 1 &&
+    factoryFixed === 1 &&
+    factoryUtilityVariable === 1 &&
+    adminFixed === 1 &&
+    qualityAssurance === 1;
+  if (allNeutral) return base;
+
+  return {
+    ...base,
+    labor: {
+      ...base.labor,
+      regularWorkerSalaryUsdPerQuarter: base.labor.regularWorkerSalaryUsdPerQuarter * regularLabor,
+      temporaryWorkerCostUsdPerQuarter: base.labor.temporaryWorkerCostUsdPerQuarter * temporaryLabor,
+    },
+    manufacturing: {
+      ...base.manufacturing,
+      reworkCostUsdPerTon: base.manufacturing.reworkCostUsdPerTon * qualityAssurance,
+      factoryFixedCostUsdPerQuarter: base.manufacturing.factoryFixedCostUsdPerQuarter * factoryFixed,
+      factoryUtilityFixedUsdPerQuarter: base.manufacturing.factoryUtilityFixedUsdPerQuarter * factoryFixed,
+      factoryUtilityVariableUsdPerTon: base.manufacturing.factoryUtilityVariableUsdPerTon * factoryUtilityVariable,
+    },
+    sellingGeneralAdmin: {
+      ...base.sellingGeneralAdmin,
+      adminFixedUsdPerQuarter: base.sellingGeneralAdmin.adminFixedUsdPerQuarter * adminFixed,
+      sellingLogisticsUsdPerTon: base.sellingGeneralAdmin.sellingLogisticsUsdPerTon * sellingLogistics,
+    },
+  };
 }
 
 export interface FinanceParameters {

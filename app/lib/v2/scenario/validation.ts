@@ -6,8 +6,10 @@
 
 import { COUNTRY_IDS, DEMAND_MARKET_IDS, CountryId, DemandMarketId } from "../market/types";
 import { PRODUCT_LIFECYCLE_PARAMETERS_V1, resolveProductLifecycleParameters } from "../market/productLifecycle";
-import { assertSortedKeyframes } from "./interpolation";
+import { assertSortedKeyframes, isTrendInterpolation, TREND_INTERPOLATIONS } from "./interpolation";
+import { CONSTRUCTION_COST_POLICY_IDS, OPERATING_COST_INDEX_KEYS } from "./costIndex";
 import { ScenarioDefinition, ScenarioEvent, ScenarioValidationResult, ScenarioValidationError } from "./types";
+import type { CostIndexTrack } from "./types";
 
 const MIN_DURATION_TURNS = 20;
 const MAX_DURATION_TURNS = 40;
@@ -233,6 +235,78 @@ export function validateScenarioDefinition(definition: ScenarioDefinition): Scen
     if (!Number.isFinite(anchor.pullStrength) || anchor.pullStrength < 0 || anchor.pullStrength > 1) {
       errors.push(
         `structuralDemandAnchor.pullStrength は[0,1]の範囲である必要があります。受け取った値: ${anchor.pullStrength}`
+      );
+    }
+  }
+
+  // 【ENG-DS2-COST-FOUNDATION-1】Turn別指数の数表。
+  // 補間規則そのものは interpolation.ts が持つため、ここでは
+  // 「キーフレームが2点以上・turn昇順・値が正の有限数」だけを検証する。
+  const costTracks: Array<{ readonly label: string; readonly track: CostIndexTrack }> = [];
+  const operatingCostInflation = definition.operatingCostInflation;
+  if (operatingCostInflation !== undefined) {
+    for (const [key, track] of Object.entries(operatingCostInflation.tracks)) {
+      // 【受入前修正1】未知キーを黙殺しない。resolveOperatingCostIndex は
+      // OperatingCostIndexKey でしか tracks を引かないため、綴り違いのキーは
+      // エラーにも警告にもならず「宣言したのに効かない」状態になる。
+      if (!(OPERATING_COST_INDEX_KEYS as readonly string[]).includes(key)) {
+        errors.push(
+          `operatingCostInflation.tracks: 未知の指数キーです: "${key}"。` +
+            `指定できるのは ${OPERATING_COST_INDEX_KEYS.join(" / ")} のみです。`
+        );
+        continue;
+      }
+      if (track !== undefined) {
+        costTracks.push({ label: `operatingCostInflation.tracks.${key}`, track });
+      }
+    }
+  }
+  const rawMarketPricing = definition.rawMarketPricing;
+  if (rawMarketPricing?.rawPriceCaptureIndex !== undefined) {
+    costTracks.push({ label: "rawMarketPricing.rawPriceCaptureIndex", track: rawMarketPricing.rawPriceCaptureIndex });
+  }
+  for (const { label, track } of costTracks) {
+    // 【受入前修正3】補間方式の未知値を黙って linear にしない。
+    if (!isTrendInterpolation(track.interpolation)) {
+      errors.push(
+        `${label}: interpolation は ${TREND_INTERPOLATIONS.join(" または ")} である必要があります。` +
+          `受け取った値: ${JSON.stringify(track.interpolation)}`
+      );
+    }
+    try {
+      assertSortedKeyframes(track.keyframes, label);
+    } catch (e) {
+      errors.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+    for (const kf of track.keyframes) {
+      if (!Number.isInteger(kf.turn) || kf.turn < 1) {
+        errors.push(`${label}: キーフレームのturnは1以上の整数である必要があります。受け取った値: ${kf.turn}`);
+      }
+      if (!Number.isFinite(kf.value) || kf.value <= 0) {
+        errors.push(`${label}: 指数は0より大きい有限数である必要があります。受け取った値: ${kf.value}`);
+      }
+    }
+  }
+
+  // 【受入前修正2】建設費算定方式の不正値を黙って legacy へフォールバックさせない。
+  // resolveProjectBudget は "indexed-required-cost-v1" 以外をすべて legacy として扱うため、
+  // ここで弾かないと「indexed のつもりが legacy で走ったRun」が生まれる。
+  const constructionCostPolicy: unknown = definition.constructionCostPolicy;
+  if (constructionCostPolicy !== undefined && !(CONSTRUCTION_COST_POLICY_IDS as readonly unknown[]).includes(constructionCostPolicy)) {
+    errors.push(
+      `constructionCostPolicy: ${CONSTRUCTION_COST_POLICY_IDS.join(" または ")} である必要があります。` +
+        `受け取った値: ${JSON.stringify(constructionCostPolicy)}`
+    );
+  }
+
+  // 【受入前修正3】長期トレンドも同じ補間規則（interpolation.ts）を共有しているため、
+  // 同じ未知値リスクを持つ。cost track と同一の基準で検証する。
+  for (const trend of definition.longTermTrends) {
+    if (!isTrendInterpolation(trend.interpolation)) {
+      errors.push(
+        `trend(${trend.trendId}): interpolation は ${TREND_INTERPOLATIONS.join(" または ")} である必要があります。` +
+          `受け取った値: ${JSON.stringify(trend.interpolation)}`
       );
     }
   }

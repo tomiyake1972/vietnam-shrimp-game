@@ -9,6 +9,7 @@ import { CompanyLabConfig } from "../../../types";
 import { buildStandardAiUnitEconomics } from "../forwardUnitEconomics";
 import { buildStandardAiMarketOpportunity } from "../marketOpportunity";
 import { CompanySalesPlanEntry } from "../../../../sales/types";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../../costProjection";
 
 function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig {
   return { scenarioId: "baseline", mode: "canonical", seed: "market-opportunity-001", turns: 8, ...overrides };
@@ -34,7 +35,7 @@ function setupTurn2(companyId = "BAL", seed = "market-opportunity-001") {
 
 test("market opportunity separates demand/capacity/profitability（別々の軸として保持し、単一指標へ潰さない）", () => {
   const { observation2, currentSalesPlans } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildStandardAiMarketOpportunity(observation2, ue, currentSalesPlans);
   assert.equal(result.entries.length, observation2.markets.length * 3);
   for (const entry of result.entries) {
@@ -49,7 +50,7 @@ test("market opportunity separates demand/capacity/profitability（別々の軸�
 
 test("『市場価格が高い』ことと『営業人員を増やす価値が高い』ことを同義にしない: JPが参照価格最高でも、salesForceEffortCapacityHosoEqTonsはヘッドカウント依存でしかない（価格に依存しない）", () => {
   const { observation2, currentSalesPlans } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildStandardAiMarketOpportunity(observation2, ue, currentSalesPlans);
   // 同じヘッドカウントを持つ2市場は、参照価格が異なっていてもsalesForceEffortCapacityHosoEqTonsが同一。
   const byMarketHeadcount = new Map<string, number>();
@@ -70,7 +71,7 @@ test("『市場価格が高い』ことと『営業人員を増やす価値が�
 
 test("targetDemandTons/supplierShareCeilingTonsは常にnull（観測構造上取得不能を捏造しない）。dataQualityに理由が明記される", () => {
   const { observation2, currentSalesPlans } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildStandardAiMarketOpportunity(observation2, ue, currentSalesPlans);
   for (const e of result.entries) {
     assert.equal(e.targetDemandTons, null);
@@ -82,7 +83,7 @@ test("targetDemandTons/supplierShareCeilingTonsは常にnull（観測構造上�
 
 test("現在の営業計画に存在する市場×商品はcurrentRealisticSalesTons>0、存在しない組み合わせは0（捏造しない）", () => {
   const { observation2, currentSalesPlans } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildStandardAiMarketOpportunity(observation2, ue, currentSalesPlans);
   for (const plan of currentSalesPlans) {
     const entry = result.entries.find((e) => e.market === plan.market && e.product === plan.product)!;
@@ -96,7 +97,7 @@ test("現在の営業計画に存在する市場×商品はcurrentRealisticSales
 
 test("unservedOpportunityWithinCurrentCapacityTonsは負にならず、現在計画がゼロの市場×商品では単一商品容量上限そのものになる", () => {
   const { observation2 } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   // 意図的に「計画が一切無い」状態（headcount=0）でテストする。
   const emptyPlans: readonly CompanySalesPlanEntry[] = [];
   const result = buildStandardAiMarketOpportunity(observation2, ue, emptyPlans);
@@ -113,7 +114,7 @@ test("ctsRelatedDemandEffect/priceRelatedDemandEffectは参照価格が既知の
   const ownState1 = buildCompanyOwnState(state, fixture);
   const publicInfo1 = buildPublicMarketInfo(state);
   const observation1 = buildStandardAiObservation(fixture, ownState1, publicInfo1, state.currentPeriod, 1);
-  const ue1 = buildStandardAiUnitEconomics(observation1);
+  const ue1 = buildStandardAiUnitEconomics(observation1, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result1 = buildStandardAiMarketOpportunity(observation1, ue1, []);
   for (const e of result1.entries) {
     assert.equal(e.priceRelatedDemandEffect, null);
@@ -123,14 +124,14 @@ test("ctsRelatedDemandEffect/priceRelatedDemandEffectは参照価格が既知の
 
 test("会社IDが一致し、他社データが混入しない", () => {
   const { observation2, currentSalesPlans } = setupTurn2("MASS");
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildStandardAiMarketOpportunity(observation2, ue, currentSalesPlans);
   for (const e of result.entries) assert.equal(e.companyId, "MASS");
 });
 
 test("contributionMarginUsdPerIncrementalTon = contributionMarginUsdPerKg × 1000（単位変換のみ、新しい採算計算を作っていない）", () => {
   const { observation2, currentSalesPlans } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildStandardAiMarketOpportunity(observation2, ue, currentSalesPlans);
   for (const e of result.entries) {
     if (e.contributionMarginUsdPerKg === null) {
@@ -143,7 +144,7 @@ test("contributionMarginUsdPerIncrementalTon = contributionMarginUsdPerKg × 100
 
 test("【Phase F-6】contributionPerSalesEffortUnitUsd = contributionMarginUsdPerIncrementalTon / effort係数（VAPほど係数が大きいため、CM$/kgが同じでも実効優先度は下がりうる）", () => {
   const { observation2, currentSalesPlans } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildStandardAiMarketOpportunity(observation2, ue, currentSalesPlans);
   for (const e of result.entries) {
     assert.ok(e.salesEffortConsumptionCoefficient > 0);

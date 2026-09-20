@@ -22,6 +22,7 @@ import { CompanyFixture } from "../../types";
 import { DEMAND_MARKET_IDS } from "../../../market/types";
 import { CompanyProductionPlanEntry } from "../../../production/types";
 import { ratio } from "../../../core/units";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 const ZERO_QUALITY_METRICS: FactoryObservation["qualityMetrics"] = {
   operationalRisk: 0,
@@ -253,13 +254,13 @@ const NO_SHORTFALL = { hoso: 0, pd: 0, vap: 0 };
 
 test("FA1-9: Factory Activation診断はFinance Gateを迂回しない（現金不足では実際のCAPEX提案は発生しない）", () => {
   const obs = capexObservation({ cashUsd: 0 });
-  const result = buildStandardAiCapexDecision(capexFixture, obs, pressures({ targetMinimumCashUsd: 30_000_000 }), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(capexFixture, obs, pressures({ targetMinimumCashUsd: 30_000_000 }), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.equal(result.capexDecision.newProjectProposals.length, 0, "現金不足時はFactory Activation関連の診断があっても実際のCAPEX提案はゼロのはず");
 });
 
 test("FA1-10: SEVERE_DISTRESS時はFactory Activation由来の提案も含め、新規CAPEX提案が一律ゼロ化される", () => {
   const obs = capexObservation();
-  const result = buildStandardAiCapexDecision(capexFixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(capexFixture, obs, pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const isSevereDistress = true;
   const capexDecisionAfterCrisisGate = isSevereDistress ? { ...result.capexDecision, newProjectProposals: [] } : result.capexDecision;
   assert.equal(capexDecisionAfterCrisisGate.newProjectProposals.length, 0);
@@ -273,7 +274,7 @@ test("FA1-11: Factory Activationの診断（diagnoseFactoryActivation）自体�
 });
 
 test("FA1-14: 新設Factoryを含む観測でも、PD Mechanization候補生成（CE-1）は引き続き正常に動作する", () => {
-  const result = buildStandardAiCapexDecision(capexFixture, capexObservation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(capexFixture, capexObservation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(
     result.diagnostics.some((d) => d.code === "PD_MECH_CONSIDERED" && d.targetFactoryId === "BAL-NEWF-1"),
     "新設Factory（BAL-NEWF-1）もPD Mechanization候補として評価されるべき"
@@ -281,7 +282,7 @@ test("FA1-14: 新設Factoryを含む観測でも、PD Mechanization候補生成�
 });
 
 test("FA1-15: 新設Factoryを含む観測でも、Quality Equipment候補生成（CE-3）は引き続き正常に動作する", () => {
-  const result = buildStandardAiCapexDecision(capexFixture, capexObservation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(capexFixture, capexObservation(), pressures(), NO_SHORTFALL, 6000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(
     result.diagnostics.some((d) => d.code === "QUALITY_EQUIP_PROPOSED" && d.targetFactoryId === "BAL-NEWF-1"),
     "新設Factory（BAL-NEWF-1）が高いQuality Needを持つ場合、品質管理設備の提案対象になるべき"
@@ -293,8 +294,8 @@ test("FA1-16: Factory Activationを含むCAPEX判断は決定論的である（�
   const jpqFixture = { ...capexFixture, companyId: "JPQ" } as unknown as CompanyFixture;
   const obs = capexObservation({ companyId: "JPQ" });
   for (const params of [STANDARD_AI_PARAMETERS_V1, jpqResolution.params] as StandardAiParameters[]) {
-    const run1 = buildStandardAiCapexDecision(jpqFixture, obs, pressures(), NO_SHORTFALL, 6000, params);
-    const run2 = buildStandardAiCapexDecision(jpqFixture, obs, pressures(), NO_SHORTFALL, 6000, params);
+    const run1 = buildStandardAiCapexDecision(jpqFixture, obs, pressures(), NO_SHORTFALL, 6000, params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
+    const run2 = buildStandardAiCapexDecision(jpqFixture, obs, pressures(), NO_SHORTFALL, 6000, params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
     assert.deepEqual(run1.capexDecision, run2.capexDecision);
     assert.deepEqual(run1.diagnostics, run2.diagnostics);
   }

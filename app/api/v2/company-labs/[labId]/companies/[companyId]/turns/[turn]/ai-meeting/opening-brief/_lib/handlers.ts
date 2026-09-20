@@ -112,7 +112,18 @@ export async function handleGetOpeningBrief(
 
   const diagnostics: StandardAiQuarterDiagnostics =
     viewModel.aiProposalDiagnostics ??
-    generateStandardAiDecisionWithDiagnostics(viewModel.fixture, viewModel.ownState, viewModel.publicInfo, viewModel.period, viewModel.currentTurn).diagnostics;
+    generateStandardAiDecisionWithDiagnostics(
+      viewModel.fixture,
+      viewModel.ownState,
+      viewModel.publicInfo,
+      viewModel.period,
+      viewModel.currentTurn,
+      undefined,
+      undefined,
+      undefined,
+      // 【#05 費用Projection接続】view-modelがRunのsnapshotから作った費用前提をそのまま使う。
+      viewModel.standardAiCostProjection
+    ).diagnostics;
 
   const context = buildExplanationContext({
     labId: viewModel.labId,

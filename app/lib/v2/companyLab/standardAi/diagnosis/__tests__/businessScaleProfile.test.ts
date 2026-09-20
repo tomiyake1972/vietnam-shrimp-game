@@ -12,6 +12,7 @@ import { buildStandardAiSalesPlans } from "../../decision/sales";
 import { CompanyLabConfig } from "../../../types";
 import { buildStandardAiUnitEconomics } from "../forwardUnitEconomics";
 import { buildBusinessScaleProfile } from "../businessScaleProfile";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../../costProjection";
 
 function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig {
   return { scenarioId: "baseline", mode: "canonical", seed: "business-scale-001", turns: 8, ...overrides };
@@ -32,13 +33,14 @@ function setupTurn2(companyId = "BAL", seed = "business-scale-001") {
   const observation2 = buildStandardAiObservation(fixture, ownState2, publicInfo2, nextState.currentPeriod, 2);
   const pressures2 = computePressureScores(observation2, fixture);
   const salesResult2 = buildStandardAiSalesPlans(fixture, observation2, pressures2);
-  const unitEconomics = buildStandardAiUnitEconomics(observation2);
+  const unitEconomics = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const profile = buildBusinessScaleProfile({
     observation: observation2,
     pressures: pressures2,
     unitEconomics,
     currentSalesPlans: salesResult2.salesPlans,
     desiredByProduct: salesResult2.desiredByProduct,
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
   });
   return { fixture, observation2, pressures2, salesResult2, unitEconomics, profile };
 }
@@ -196,11 +198,12 @@ test("【本番未接続】decision/*.tsのいずれもbusinessScaleProfile.ts�
 test("Business Scale Profileの計算は本番の意思決定（sales/production plans）を変化させない（副作用が無い純関数）", () => {
   const { fixture, observation2, pressures2 } = setupTurn2();
   const before = buildStandardAiSalesPlans(fixture, observation2, pressures2);
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   buildBusinessScaleProfile({
     observation: observation2,
     pressures: pressures2,
     unitEconomics: ue,
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
     currentSalesPlans: before.salesPlans,
     desiredByProduct: before.desiredByProduct,
   });

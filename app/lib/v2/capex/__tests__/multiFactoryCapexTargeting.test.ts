@@ -23,6 +23,7 @@ import { PressureScores } from "../../companyLab/standardAi/pressures";
 import { STANDARD_AI_PARAMETERS_V1 } from "../../companyLab/standardAi/parameters";
 import { CompanyFixture } from "../../companyLab/types";
 import { DEMAND_MARKET_IDS } from "../../market/types";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../../companyLab/standardAi/costProjection";
 
 function factory(overrides: Partial<Factory> & Pick<Factory, "factoryId" | "companyId">): Factory {
   const zero = hosoEqTons(0);
@@ -234,7 +235,7 @@ function pressures(overrides: Partial<PressureScores> = {}): PressureScores {
 
 test("CAPEX-FAC-12: Standard AIがHOSOライン増設を提案する際、実効HOSO能力が最も小さいFactory（最もbindingしているFactory）をtargetFactoryIdに選ぶ", () => {
   const HOSO_SHORTFALL = { hoso: 18000, pd: 1000, vap: 500 };
-  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), HOSO_SHORTFALL, 10000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, observation(), pressures(), HOSO_SHORTFALL, 10000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const hosoProposal = result.capexDecision.newProjectProposals.find((p) => p.projectType === "hosoLineExpansion");
   assert.ok(hosoProposal, "HOSOライン増設が提案されるべき前提が崩れている");
   assert.equal(hosoProposal!.targetFactoryId, "BAL-F2", "実効HOSO能力が小さいF2が選ばれるべき");
@@ -249,7 +250,7 @@ test("CAPEX-FAC-13: 新設Factory（AGGRESSIVE_EARLY_CAPACITY完成後）がobse
       factoryObservation({ factoryId: "BAL-NEWF-BAL-CAPEX-30", effectiveCapacityByProduct: { hoso: 2000, pd: 1500, vap: 1000 } }),
     ],
   });
-  const result = buildStandardAiCapexDecision(fixture, obsWithNewFactory, pressures(), HOSO_SHORTFALL, 10000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, obsWithNewFactory, pressures(), HOSO_SHORTFALL, 10000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const hosoProposal = result.capexDecision.newProjectProposals.find((p) => p.projectType === "hosoLineExpansion");
   assert.ok(hosoProposal);
   assert.equal(hosoProposal!.targetFactoryId, "BAL-NEWF-BAL-CAPEX-30", "新設Factoryが最もbindingしているFactoryとして正しく選ばれるべき");

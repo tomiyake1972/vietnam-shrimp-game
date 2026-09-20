@@ -6,6 +6,7 @@
 // CapexAdjustment組み立て）はcapexClose.tsが行う。
 
 import { PeriodV2 } from "../core/period";
+import type { ConstructionCostPolicyId } from "../scenario/types";
 import { CompanyId } from "../sales/types";
 import { CapexParameters, CapexProjectTemplate } from "./parameters";
 import {
@@ -127,6 +128,95 @@ export function hasActiveQualityControlEquipmentProjectForFactory(
  * （会社の資金繰り・信用状態による拒否はここでは通常の業務上の判断であり、
  * 例外ではない。docs/v2/CAPITAL_INVESTMENT_ARCHITECTURE_v0.1.md §エラー処理方針参照）。
  */
+/**
+ * 【ENG-DS2-COST-FOUNDATION-1】建設費算定の入力。
+ *
+ * 省略時（＝どの呼び出し元も渡さない場合）は必ず "legacy-requested-cost" として
+ * 扱われ、現行挙動と完全に一致する。
+ */
+export interface ConstructionCostPolicyInput {
+  readonly policy: ConstructionCostPolicyId;
+  /**
+   * 承認Turnの建設費指数。policy が "indexed-required-cost-v1" のときだけ使う。
+   * 指数の解決は scenario/costIndex.ts が唯一のSSoTであり、ここでは受け取るだけ
+   * （この関数の中で再度指数を掛けることはしない＝二重適用が構造的に起こらない）。
+   */
+  readonly constructionCostIndex: number;
+}
+
+/** 承認額の確定結果（診断用に内訳を返す）。 */
+export interface ResolvedProjectBudget {
+  readonly policy: ConstructionCostPolicyId;
+  readonly standardBudgetUsd: number;
+  readonly constructionCostIndex: number;
+  /** standardBudgetUsd × constructionCostIndex（legacy policy では standardBudgetUsd と同値）。 */
+  readonly indexedRequiredProjectCostUsd: number;
+  readonly requestedBudgetUsd: number | undefined;
+  /** 確定した承認額。undefined なら申請額不足で拒否する。 */
+  readonly approvedBudgetUsd: number | undefined;
+  readonly insufficientRequest: boolean;
+}
+
+/** 申請額と必要工事費の比較に使う許容誤差（USD）。 */
+const BUDGET_COMPARISON_EPSILON_USD = 1e-6;
+
+/**
+ * 【ENG-DS2-COST-FOUNDATION-1】建設費算定方式に従って承認額を確定する唯一の関数。
+ *
+ * "legacy-requested-cost"（既定）
+ *   approvedBudgetUsd = requestedBudgetUsd ?? standardBudgetUsd
+ *   安値申請の扱いも含め、現行挙動を一切変更しない。
+ *
+ * "indexed-required-cost-v1"
+ *   indexedRequiredProjectCost = standardBudgetUsd × constructionCostIndex
+ *   requestedBudgetUsd は「支払意思上限」であり、工事原価ではない。
+ *     未指定                             → approved = indexedRequiredProjectCost
+ *     requested >= indexedRequiredCost   → approved = indexedRequiredProjectCost
+ *     requested <  indexedRequiredCost   → 申請額不足として拒否
+ *   指数は standardBudgetUsd へ**1回だけ**掛かる。requestedBudgetUsd へは
+ *   決して掛けないため index² の二重適用は起こらない。また approved が
+ *   requested を上回ることも下回ることもない形（常に必要工事費）に固定されるため、
+ *   Player / LLM / Standard AI / 診断入力のどの入口からも指数を回避できない。
+ */
+export function resolveProjectBudget(
+  template: CapexProjectTemplate,
+  requestedBudgetUsd: number | undefined,
+  costPolicy: ConstructionCostPolicyInput
+): ResolvedProjectBudget {
+  const standardBudgetUsd = template.standardBudgetUsd;
+  if (costPolicy.policy === "indexed-required-cost-v1") {
+    const indexedRequiredProjectCostUsd = standardBudgetUsd * costPolicy.constructionCostIndex;
+    const insufficientRequest =
+      requestedBudgetUsd !== undefined && requestedBudgetUsd < indexedRequiredProjectCostUsd - BUDGET_COMPARISON_EPSILON_USD;
+    return {
+      policy: costPolicy.policy,
+      standardBudgetUsd,
+      constructionCostIndex: costPolicy.constructionCostIndex,
+      indexedRequiredProjectCostUsd,
+      requestedBudgetUsd,
+      approvedBudgetUsd: insufficientRequest ? undefined : indexedRequiredProjectCostUsd,
+      insufficientRequest,
+    };
+  }
+  // legacy-requested-cost: 現行挙動そのまま。
+  const approved = requestedBudgetUsd ?? standardBudgetUsd;
+  return {
+    policy: "legacy-requested-cost",
+    standardBudgetUsd,
+    constructionCostIndex: 1,
+    indexedRequiredProjectCostUsd: standardBudgetUsd,
+    requestedBudgetUsd,
+    approvedBudgetUsd: approved,
+    insufficientRequest: false,
+  };
+}
+
+/** 呼び出し元が建設費方式を渡さない場合の既定（＝現行挙動）。 */
+export const LEGACY_CONSTRUCTION_COST_POLICY: ConstructionCostPolicyInput = {
+  policy: "legacy-requested-cost",
+  constructionCostIndex: 1,
+};
+
 export function evaluateProposal(
   companyId: CompanyId,
   proposal: CapexProjectProposalInput,
@@ -138,13 +228,21 @@ export function evaluateProposal(
   priority: number,
   spaceGate?: ProposalSpaceGate,
   factoryCountGate?: ProposalFactoryCountGate,
-  mechanizationGate?: ProposalFactoryMechanizationGate
+  mechanizationGate?: ProposalFactoryMechanizationGate,
+  /**
+   * 【ENG-DS2-COST-FOUNDATION-1】建設費算定方式。省略時は現行挙動
+   * （legacy-requested-cost）であり、既存の呼び出し元・既存テストに影響しない。
+   */
+  costPolicy: ConstructionCostPolicyInput = LEGACY_CONSTRUCTION_COST_POLICY
 ): { readonly approved: CapitalProject } | { readonly rejected: CapexRejectedProposal } {
   const template: CapexProjectTemplate | undefined = params.templatesByType[proposal.projectType];
   if (!template) {
     throw new CapexValidationError(`未知の投資案件種別です: ${proposal.projectType}`);
   }
-  const requestedBudgetUsd = proposal.requestedBudgetUsd ?? template.standardBudgetUsd;
+  const resolvedBudget = resolveProjectBudget(template, proposal.requestedBudgetUsd, costPolicy);
+  // 拒否理由DTO・既存の妥当性検証は「申請として評価された金額」を対象にする。
+  // legacy では従来どおり requested ?? standard、indexed では必要工事費。
+  const requestedBudgetUsd = resolvedBudget.approvedBudgetUsd ?? resolvedBudget.indexedRequiredProjectCostUsd;
 
   const reasons: string[] = [];
   if (gate.severelyDistressed) {
@@ -158,6 +256,15 @@ export function evaluateProposal(
   }
   if (!Number.isFinite(requestedBudgetUsd) || requestedBudgetUsd <= 0) {
     reasons.push(`要求予算が不正です（有限の正数である必要があります。受け取った値: ${requestedBudgetUsd}）。`);
+  }
+  // 【ENG-DS2-COST-FOUNDATION-1・indexed-required-cost-v1】申請額（支払意思上限）が
+  // 当Turnの必要工事費に満たない提案は拒否する。旧価格を申請して指数を回避することを
+  // 構造的に不可能にする（承認されるか、拒否されるかのどちらかしかない）。
+  if (resolvedBudget.insufficientRequest) {
+    reasons.push(
+      `申請額(${resolvedBudget.requestedBudgetUsd})が当Turnの必要工事費(${resolvedBudget.indexedRequiredProjectCostUsd}` +
+        ` = 標準投資額${resolvedBudget.standardBudgetUsd} × 建設費指数${resolvedBudget.constructionCostIndex})に満たないため承認しない。`
+    );
   }
   // 【Phase 8D-3】工場スペース不足は「不可能な案件を正常な案件として確定しない」ための
   // 承認拒否である。例外ではなく理由つきの拒否として返す（既存の資金繰り・案件数上限と

@@ -10,6 +10,7 @@ import { computePressureScores } from "../../pressures";
 import { CompanyLabConfig } from "../../../types";
 import { buildStandardAiUnitEconomics } from "../forwardUnitEconomics";
 import { buildShadowSalesAllocation, buildShadowSalesAllocationComparison } from "../shadowSalesAllocation";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../../costProjection";
 
 function baseConfig(overrides: Partial<CompanyLabConfig> = {}): CompanyLabConfig {
   return { scenarioId: "baseline", mode: "canonical", seed: "shadow-sales-001", turns: 8, ...overrides };
@@ -36,7 +37,7 @@ function setupTurn2(companyId = "BAL", seed = "shadow-sales-001") {
 
 test("shadow allocation does not over-allocate beyond the company-wide product ceiling (desiredByProduct)", () => {
   const { observation2, currentSalesPlans, desiredByProduct } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildShadowSalesAllocation(observation2, ue, desiredByProduct, currentSalesPlans, "volume");
   const totalTonsByProduct = { hoso: 0, pd: 0, vap: 0 };
   for (const step of result.steps) {
@@ -49,7 +50,7 @@ test("shadow allocation does not over-allocate beyond the company-wide product c
 
 test("shadow allocation respects sales-force saturation（marginalEffortCapacityForNextHeadcountTonsは人数が多い市場ほど小さい傾向）", () => {
   const { observation2, currentSalesPlans, desiredByProduct } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildShadowSalesAllocation(observation2, ue, desiredByProduct, currentSalesPlans, "volume");
   // ステップを市場別に振り分け、各市場のmarginalEffortCapacityTonsが単調非増加であることを確認する
   // （Michaelis-Menten型飽和曲線の性質そのもの。新しい飽和ロジックを作っていないことの確認）。
@@ -68,7 +69,7 @@ test("shadow allocation respects sales-force saturation（marginalEffortCapacity
 
 test("contribution-oriented allocation can differ from volume-oriented allocation（両者が常に同一ではない、少なくともどちらかの指標で異なる）", () => {
   const { observation2, currentSalesPlans, desiredByProduct } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const comparison = buildShadowSalesAllocationComparison(observation2, ue, desiredByProduct, currentSalesPlans);
   const volumeSteps = comparison.volumeOriented.steps.map((s) => `${s.market}:${s.assignedProduct}`);
   const contributionSteps = comparison.contributionOriented.steps.map((s) => `${s.market}:${s.assignedProduct}`);
@@ -79,7 +80,7 @@ test("contribution-oriented allocation can differ from volume-oriented allocatio
 
 test("負の貢献利益の商品はcontribution-oriented allocationでは一度も選ばれない", () => {
   const { observation2, currentSalesPlans, desiredByProduct } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildShadowSalesAllocation(observation2, ue, desiredByProduct, currentSalesPlans, "contribution");
   for (const step of result.steps) {
     if (step.assignedProduct === null) continue;
@@ -90,7 +91,7 @@ test("負の貢献利益の商品はcontribution-oriented allocationでは一度
 
 test("shadow headcountの合計はtotalHeadcountを超えない（会社全体の営業人員予算を超えて配置しない）", () => {
   const { observation2, currentSalesPlans, desiredByProduct } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildShadowSalesAllocation(observation2, ue, desiredByProduct, currentSalesPlans, "volume");
   const totalShadowHeadcount = result.marketSummaries.reduce((s, m) => s + m.shadowHeadcount, 0);
   assert.ok(totalShadowHeadcount <= result.totalHeadcount);
@@ -100,7 +101,7 @@ test("shadow headcountの合計はtotalHeadcountを超えない（会社全体�
 test("headcount総数が0なら、両方のshadowともにステップ0件・全市場headcount0", () => {
   const { observation2, currentSalesPlans, desiredByProduct } = setupTurn2();
   const zeroHeadcountObservation = { ...observation2, salesForceHeadcountTotal: 0 };
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const comparison = buildShadowSalesAllocationComparison(zeroHeadcountObservation, ue, desiredByProduct, currentSalesPlans);
   assert.equal(comparison.volumeOriented.steps.length, 0);
   assert.equal(comparison.contributionOriented.steps.length, 0);
@@ -109,7 +110,7 @@ test("headcount総数が0なら、両方のshadowともにステップ0件・全
 
 test("desiredByProductが全商品0（極端ケース）なら、どちらのshadowもステップ0件で異常終了しない（NaN・division by zeroが発生しない）", () => {
   const { observation2, currentSalesPlans } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const zeroCeiling = { hoso: 0, pd: 0, vap: 0 };
   const comparison = buildShadowSalesAllocationComparison(observation2, ue, zeroCeiling, currentSalesPlans);
   assert.equal(comparison.volumeOriented.steps.length, 0);
@@ -119,7 +120,7 @@ test("desiredByProductが全商品0（極端ケース）なら、どちらのsha
 
 test("会社IDが一致し、他社データが混入しない", () => {
   const { observation2, currentSalesPlans, desiredByProduct } = setupTurn2("MASS");
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result = buildShadowSalesAllocation(observation2, ue, desiredByProduct, currentSalesPlans, "volume");
   assert.equal(result.companyId, "MASS");
 });
@@ -148,7 +149,7 @@ test("【Phase F-15 / Batch 002更新】38人（Test14実測headcount）でJPへ
   assert.ok(jpPlan, "JP行が存在すること");
   const currentJpHeadcount = jpPlan!.salesForceHeadcount;
 
-  const ue = buildStandardAiUnitEconomics(observation38);
+  const ue = buildStandardAiUnitEconomics(observation38, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const comparison = buildShadowSalesAllocationComparison(
     observation38,
     ue,
@@ -190,7 +191,7 @@ test("本番の意思決定(decision/production.ts等)は本テストのshadow�
   // （grepではなく、実際にdecision/production.tsの出力がshadow計算の有無で変わらない
   // ことを軽量に確認する: 同一入力で2回呼び、shadow計算を挟んでも生産計画が変わらない）
   const { observation2, currentSalesPlans, desiredByProduct } = setupTurn2();
-  const ue = buildStandardAiUnitEconomics(observation2);
+  const ue = buildStandardAiUnitEconomics(observation2, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   buildShadowSalesAllocationComparison(observation2, ue, desiredByProduct, currentSalesPlans); // 呼ぶだけ（副作用が無いことの確認）
   // observationは呼び出し前後で変化しない（純関数であることの確認）。
   assert.equal(observation2.salesForceHeadcountTotal, observation2.salesForceHeadcountTotal);

@@ -108,7 +108,11 @@ async function resolveRequestContext(
       viewModel.publicInfo,
       viewModel.period,
       viewModel.currentTurn,
-      resolveStandardAiProfileForMode(viewModel.fixture.companyId, viewModel.standardAiProfileMode).params
+      resolveStandardAiProfileForMode(viewModel.fixture.companyId, viewModel.standardAiProfileMode).params,
+      undefined,
+      undefined,
+      // 【#05 費用Projection接続】view-modelがRunのsnapshotから作った費用前提をそのまま使う。
+      viewModel.standardAiCostProjection
     ).diagnostics;
 
   const context = buildExplanationContext({

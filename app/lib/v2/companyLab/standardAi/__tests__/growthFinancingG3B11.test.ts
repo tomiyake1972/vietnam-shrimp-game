@@ -16,6 +16,7 @@ import { PressureScores } from "../pressures";
 import { StandardAiObservation } from "../types";
 import { FinancialRiskTolerance } from "../../vision/types";
 import { StandardAiCrisisState } from "../crisisState";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 const MILLION = 1_000_000;
 
@@ -53,6 +54,7 @@ function assess(
   crisisState: StandardAiCrisisState = "NORMAL"
 ) {
   return assessCommittedCashRequirement({
+    costProjection: NEUTRAL_STANDARD_AI_COST_PROJECTION,
     observation: observation(obs),
     pressures: PRESSURES,
     params: STANDARD_AI_PARAMETERS_V1,
@@ -107,11 +109,11 @@ test("G3B11-C: 借入前提で承認した投資は、Financing Requestの申請
 
   // 3B-1の経路（fundingBalance + 投資額）だけでは、当期AR回収が資金に数えられるため
   // 申請額が0になり得る。Growth Financing Completionはそれを塞ぐ。
-  const withoutGrowth = buildStandardAiFinancingRequest(obs, PRESSURES, STANDARD_AI_PARAMETERS_V1, procurementCashPlan, {
+  const withoutGrowth = buildStandardAiFinancingRequest(obs, PRESSURES, STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, procurementCashPlan, {
     assessment: a,
     approvedInvestmentPaymentsThisQuarterUsd: payment,
   });
-  const withGrowth = buildStandardAiFinancingRequest(obs, PRESSURES, STANDARD_AI_PARAMETERS_V1, procurementCashPlan, {
+  const withGrowth = buildStandardAiFinancingRequest(obs, PRESSURES, STANDARD_AI_PARAMETERS_V1, NEUTRAL_STANDARD_AI_COST_PROJECTION, procurementCashPlan, {
     assessment: a,
     approvedInvestmentPaymentsThisQuarterUsd: payment,
     approvedInvestmentBorrowingThisQuarterUsd: borrowingNeededUsd,

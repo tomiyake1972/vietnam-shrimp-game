@@ -15,6 +15,8 @@ import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../companyLab
 import { PeriodV2 } from "../core/period";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../companyLab/standardAi/policy";
+import { StandardAiCostProjection, toStandardAiCostProjection } from "../companyLab/standardAi/costProjection";
+import { buildTurnEconomicsProjection } from "../companyLab/turnEconomicsProjection";
 import { resolveStandardAiProfileForMode } from "../companyLab/standardAi/orientationProfile";
 import { buildInitialDraft, CompanyDecisionDraft } from "../../../v2/company-lab/decisionDraft";
 import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult } from "../../../v2/company-lab/play/_lib/financialViewSelectors";
@@ -53,6 +55,13 @@ export interface PlayerDecisionContext {
   readonly publicInfo: PublicMarketInfo;
   readonly period: PeriodV2;
   readonly turn: number;
+  /**
+   * 【管理会計是正・Player費用表示接続】当Turnの費用前提（PROCUREMENT画面の
+   * Pre-Financing Liquidity 表示用）。保存済みRunのScenario snapshotを正本とし、
+   * 当Turnの実効financeParametersと案件別必要工事費だけを持つ。
+   * 指数そのもの・将来Turnの曲線・将来費用値は含まない。
+   */
+  readonly costProjection: StandardAiCostProjection;
   readonly draftSeed: CompanyDecisionDraft;
   readonly lastQuarterCapexEvents: readonly CapexProjectQuarterEvent[] | undefined;
   readonly lastQuarterRejectedCapexProposals: readonly CapexRejectedProposal[] | undefined;
@@ -127,7 +136,23 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
   // confirmedPlayerDecisionsは既に確定済みTurnの決定を持つが、編集中の下書きは元々
   // サーバー保存の対象になっていない既存仕様のまま）。
   const params = resolveStandardAiProfileForMode(fixture.companyId, session.state.config.standardAiProfileMode).params;
-  const aiDecision = generateStandardAiDecisionWithDiagnostics(fixture, ownState, publicInfo, session.state.currentPeriod, turn, params).decision;
+  // 【#05 費用Projection接続／Player費用表示接続】保存済みRunのScenario snapshotを正本にする。
+  // Standard AI の意思決定と Player 表示の両方がこの同一値を参照する。
+  const costProjection = toStandardAiCostProjection(
+    buildTurnEconomicsProjection({ definition: session.state.scenarioState.definition, turn })
+  );
+  const aiDecision = generateStandardAiDecisionWithDiagnostics(
+    fixture,
+    ownState,
+    publicInfo,
+    session.state.currentPeriod,
+    turn,
+    params,
+    undefined,
+    undefined,
+    // 【#05 費用Projection接続】保存済みRunのScenario snapshotを正本にする。
+    costProjection
+  ).decision;
   const draftSeed = buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories);
 
   const lastRecord = session.state.history[session.state.history.length - 1] ?? null;
@@ -162,6 +187,7 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     publicInfo,
     period: session.state.currentPeriod,
     turn,
+    costProjection,
     draftSeed,
     lastQuarterCapexEvents: lastQuarterCapexResult?.events,
     lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,

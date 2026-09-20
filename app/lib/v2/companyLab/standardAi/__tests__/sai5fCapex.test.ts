@@ -12,6 +12,7 @@ import { PressureScores } from "../pressures";
 import { STANDARD_AI_PARAMETERS_V1, StandardAiParameters } from "../parameters";
 import { CompanyFixture } from "../../types";
 import { DEMAND_MARKET_IDS } from "../../../market/types";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 // 【監査指摘H】PD_CAPACITY_MAINTAINED の判定がPD/VAPの最低受注水準を参照するため、
 // 合成fixtureにも標準ベースラインと同等の商品経済性を持たせる（CompanyFixtureの
@@ -129,7 +130,7 @@ test("SAI-5F: 拡張無効（既定パラメータ）ではresume提案・新コ
     lifecycleTrendByMarket: positiveVapTrend,
     productSupplyPressureByProduct: { pd: 1.0, vap: 3.0 },
   });
-  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.equal(result.capexDecision.resumeRequests.length, 0);
   assert.equal(result.capexDecision.newProjectProposals.length, 0);
   const codes = result.diagnostics.map((d) => d.code);
@@ -140,7 +141,7 @@ test("SAI-5F: 拡張無効（既定パラメータ）ではresume提案・新コ
 
 test("SAI-5F: 成長エントリ — 公開VAPトレンドが正・稼働率高・財務安全なら、能力不足の顕在化前にVAPライン増設を提案する", () => {
   const obs = observation({ lifecycleTrendByMarket: positiveVapTrend });
-  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams());
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams(), undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(
     result.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"),
     "VAPライン増設が提案されていない"
@@ -151,8 +152,8 @@ test("SAI-5F: 成長エントリ — 公開VAPトレンドが正・稼働率高�
 test("SAI-5F: 成長エントリは応答度が低い会社ほどしきい値が高く、同じトレンドでは動かない（保守型と積極型の投資時期差）", () => {
   const weakTrend = Object.fromEntries(DEMAND_MARKET_IDS.map((m) => [m, { hoso: -0.005, pd: 0.001, vap: 0.005 }])) as never;
   const obs = observation({ lifecycleTrendByMarket: weakTrend });
-  const aggressive = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ growthTrendResponsiveness: 0.9 }));
-  const conservative = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ growthTrendResponsiveness: 0.2 }));
+  const aggressive = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ growthTrendResponsiveness: 0.9 }), undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
+  const conservative = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ growthTrendResponsiveness: 0.2 }), undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(aggressive.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "積極型が動いていない");
   assert.ok(!conservative.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "保守型まで同時に動いている");
 });
@@ -162,7 +163,7 @@ test("SAI-5F: 過剰供給リトリート — 公開供給圧力が高止まり�
     lifecycleTrendByMarket: positiveVapTrend,
     productSupplyPressureByProduct: { pd: 1.0, vap: 2.5 },
   });
-  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams());
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams(), undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "過剰供給下でVAP投資している");
   assert.ok(result.diagnostics.some((d) => d.code === "VAP_OVERSUPPLY_RETREAT"));
 });
@@ -173,16 +174,16 @@ test("SAI-5F: 過剰供給リトリートの感度 — 追随型（低感度）�
     productSupplyPressureByProduct: { pd: 1.0, vap: 1.3 },
   });
   // 高感度(0.9): しきい値 1.15+(1-0.9)*0.3=1.18 < 1.3 → 見送り
-  const cautious = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ oversupplyRetreatSensitivity: 0.9 }));
+  const cautious = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ oversupplyRetreatSensitivity: 0.9 }), undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   // 低感度(0.1): しきい値 1.15+0.27=1.42 > 1.3 → まだ投資
-  const follower = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ oversupplyRetreatSensitivity: 0.1 }));
+  const follower = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams({ oversupplyRetreatSensitivity: 0.1 }), undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(!cautious.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"));
   assert.ok(follower.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"));
 });
 
 test("SAI-5F: resume提案 — 現金が安全水準を回復した場合のみ、中断中案件の再開を提案する", () => {
   const suspended = { suspendedCapexProjectIds: ["VAP-CAPEX-1", "VAP-CAPEX-2"] };
-  const rich = buildStandardAiCapexDecision(fixture, observation(suspended), pressures(), NO_SHORTFALL, 10000, extParams());
+  const rich = buildStandardAiCapexDecision(fixture, observation(suspended), pressures(), NO_SHORTFALL, 10000, extParams(), undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.equal(rich.capexDecision.resumeRequests.length, 2);
   assert.deepEqual(
     rich.capexDecision.resumeRequests.map((r) => r.projectId),
@@ -198,7 +199,7 @@ test("SAI-5F: resume提案 — 現金が安全水準を回復した場合のみ�
     NO_SHORTFALL,
     10000,
     extParams()
-  );
+  , undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.equal(poor.capexDecision.resumeRequests.length, 0);
 });
 
@@ -207,7 +208,7 @@ test("SAI-5F: 成長エントリは既に同一ターゲットの案件が進行
     lifecycleTrendByMarket: positiveVapTrend,
     activeCapexProjectTargets: new Set(["vap"]),
   });
-  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams());
+  const result = buildStandardAiCapexDecision(fixture, obs, pressures(), NO_SHORTFALL, 10000, extParams(), undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "進行中でも二重提案している");
 });
 
@@ -233,7 +234,7 @@ const PD_MAINTAINED_BASE = {
 const PD_IN_USE = { hoso: 5000, pd: 6000, vap: 3000 }; // pd能力8000に対し0.75
 
 test("SAI-5H: VAPが過熱していてPDが稼働中・自力採算なら、PD_CAPACITY_MAINTAINEDが発火する", () => {
-  const result = buildStandardAiCapexDecision(fixture, observation(PD_MAINTAINED_BASE), pressures(), PD_IN_USE, 10000, extParams());
+  const result = buildStandardAiCapexDecision(fixture, observation(PD_MAINTAINED_BASE), pressures(), PD_IN_USE, 10000, extParams(), undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const entry = result.diagnostics.find((d) => d.code === "PD_CAPACITY_MAINTAINED");
   assert.ok(entry, "PD_CAPACITY_MAINTAINEDが発火していない");
   // VAPへは実際に追随していない（＝判断と記録が一致している）
@@ -250,13 +251,13 @@ test("SAI-5H: VAPが過熱していなければ発火しない（過熱局面に
     PD_IN_USE,
     10000,
     extParams()
-  );
+  , undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(!result.diagnostics.some((d) => d.code === "PD_CAPACITY_MAINTAINED"), "VAPが過熱していないのに発火した");
 });
 
 test("SAI-5H: PD能力が遊んでいれば発火しない（維持する価値のある稼働があること）", () => {
   const idlePd = { hoso: 5000, pd: 800, vap: 3000 }; // pd能力8000に対し0.1
-  const result = buildStandardAiCapexDecision(fixture, observation(PD_MAINTAINED_BASE), pressures(), idlePd, 10000, extParams());
+  const result = buildStandardAiCapexDecision(fixture, observation(PD_MAINTAINED_BASE), pressures(), idlePd, 10000, extParams(), undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(!result.diagnostics.some((d) => d.code === "PD_CAPACITY_MAINTAINED"), "PD能力が遊んでいるのに『維持を選択』と記録された");
 });
 
@@ -268,7 +269,7 @@ test("SAI-5H: PDプレミアムが最低受注水準を下回れば発火しな�
     PD_IN_USE,
     10000,
     extParams()
-  );
+  , undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(!result.diagnostics.some((d) => d.code === "PD_CAPACITY_MAINTAINED"), "PDが最低受注水準を割っているのに『維持を選択』と記録された");
 });
 
@@ -281,13 +282,13 @@ test("SAI-5H: 実際にVAP増設を提案した四半期には発火しない（
     NO_SHORTFALL,
     10000,
     extParams()
-  );
+  , undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(result.capexDecision.newProjectProposals.some((p) => p.projectType === "vapLineExpansion"), "テスト前提: VAP増設が提案されていない");
   assert.ok(!result.diagnostics.some((d) => d.code === "PD_CAPACITY_MAINTAINED"), "VAP増設に追随したのにPD維持が記録された");
 });
 
 test("SAI-5H: 拡張機能が無効なら発火しない（後方互換）", () => {
-  const result = buildStandardAiCapexDecision(fixture, observation(PD_MAINTAINED_BASE), pressures(), PD_IN_USE, 10000, STANDARD_AI_PARAMETERS_V1);
+  const result = buildStandardAiCapexDecision(fixture, observation(PD_MAINTAINED_BASE), pressures(), PD_IN_USE, 10000, STANDARD_AI_PARAMETERS_V1, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(!result.diagnostics.some((d) => d.code === "PD_CAPACITY_MAINTAINED"));
 });
 
@@ -303,7 +304,7 @@ test("SAI-5H: PD側の供給圧力が見送りしきい値を超えればCAPEX_D
     pdShortfall,
     10000,
     extParams()
-  );
+  , undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(result.diagnostics.some((d) => d.code === "CAPEX_DEFERRED_OVERSUPPLY"), "PD供給過剰による投資見送りが記録されていない");
   assert.ok(!result.capexDecision.newProjectProposals.some((p) => p.projectType === "pdLineExpansion"), "供給過剰なのにPD増設を提案している");
 });

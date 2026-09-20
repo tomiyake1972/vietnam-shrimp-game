@@ -6,7 +6,7 @@
 // データとして使用し、財務側で販売量・生産量・廃棄量・価格を再計算しない。
 
 export * from "./types";
-export { FINANCE_PARAMETERS_V1 } from "./parameters";
+export { FINANCE_PARAMETERS_V1, financeParametersForTurn, normalCashFixedFactoryCostUsdPerQuarter } from "./parameters";
 export type { FinanceParameters } from "./parameters";
 export { KG_PER_HOSO_EQ_TON, amountFromTonsAndUnitPrice, amountFromPlainTonsAndUsdPerKg, usdToMillions, sumUsd } from "./money";
 export { INITIAL_FINANCE_FIXTURES_V1, buildInitialCompanyFinanceState, rawMaterialInventoryValueUsd } from "./initialState";

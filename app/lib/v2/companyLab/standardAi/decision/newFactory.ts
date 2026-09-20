@@ -19,6 +19,7 @@
 
 import { CapexProjectProposalInput } from "../../../capex/types";
 import { CAPEX_PARAMETERS_V1, CapexParameters } from "../../../capex/parameters";
+import { StandardAiCostProjection } from "../costProjection";
 import { CompanyFixture } from "../../types";
 import { evaluateInvestmentAffordability, plannedInvestmentPaymentsWithinHorizonUsd } from "./liquidity";
 import { NEW_FACTORY_STRATEGY_PARAMETERS_V1, NewFactoryStrategyParameters } from "./newFactoryStrategyParameters";
@@ -140,6 +141,12 @@ export interface NewFactoryDecisionInput {
    */
   readonly persistentCapacityCausedUnserved?: boolean;
   readonly capexParams?: CapexParameters;
+  /**
+   * 【#05 費用Projection接続】当Turnの費用前提。新工場の工事費は
+   * capexParams.templatesByType.newFactoryConstruction.standardBudgetUsd ではなく、
+   * ここが持つ indexedRequiredProjectCostByType.newFactoryConstruction を使う。
+   */
+  readonly costProjection: StandardAiCostProjection;
   readonly strategyParams?: NewFactoryStrategyParameters;
   /**
    * 【Phase SAI-GROW-3B-1】Liquidity SSoT。既存増設CAPEXとまったく同じ評価を使い、
@@ -186,12 +193,14 @@ export function describeNewFactoryBlocker(assessment: {
  * （DEMAND_CONFIRMED/VALUE_FIRSTの会社は常にこの関数の結果だけで決まる＝STRAT-1）。
  */
 function evaluateReactiveNewFactoryRoute(input: NewFactoryDecisionInput): NewFactoryDecisionResult {
-  const { fixture, observation, pressures, vision, strategicGrowth } = input;
+  const { fixture, observation, pressures, vision, strategicGrowth, costProjection } = input;
   const capexParams = input.capexParams ?? CAPEX_PARAMETERS_V1;
   const sp = input.strategyParams ?? NEW_FACTORY_STRATEGY_PARAMETERS_V1;
 
   const template = capexParams.templatesByType.newFactoryConstruction;
-  const projectCostUsd = template.standardBudgetUsd;
+  // 【#05 費用Projection接続】承認Turnの建設費指数を適用済みの必要工事費。
+  // 支払比率（paymentRatios）はテンプレートのまま（比率へ指数は掛けない）。
+  const projectCostUsd = costProjection.indexedRequiredProjectCostByType.newFactoryConstruction;
   const firstPaymentUsd = projectCostUsd * (template.paymentRatios[0] ?? 1);
 
   const gates: NewFactoryGateResult[] = [];
@@ -717,9 +726,12 @@ function evaluateStrategicForwardCapacityRoute(
     throw new Error("evaluateStrategicForwardCapacityRoute: vision/strategicGrowth must be present（呼び出し側の契約違反）。");
   }
   const capexParams = input.capexParams ?? CAPEX_PARAMETERS_V1;
+  const costProjection = input.costProjection;
   const sp = input.strategyParams ?? NEW_FACTORY_STRATEGY_PARAMETERS_V1;
   const template = capexParams.templatesByType.newFactoryConstruction;
-  const projectCostUsd = template.standardBudgetUsd;
+  // 【#05 費用Projection接続】承認Turnの建設費指数を適用済みの必要工事費。
+  // 支払比率（paymentRatios）はテンプレートのまま（比率へ指数は掛けない）。
+  const projectCostUsd = costProjection.indexedRequiredProjectCostByType.newFactoryConstruction;
   const firstPaymentUsd = projectCostUsd * (template.paymentRatios[0] ?? 1);
 
   const gates: NewFactoryGateResult[] = [];

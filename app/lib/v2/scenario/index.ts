@@ -12,7 +12,17 @@
 
 export * from "./types";
 export * from "./validation";
-export { assertSortedKeyframes, interpolateTrendValue } from "./interpolation";
+export { assertSortedKeyframes, interpolateTrendValue, interpolateKeyframeValue } from "./interpolation";
+export {
+  NEUTRAL_COST_INDEX,
+  DEFAULT_CONSTRUCTION_COST_POLICY,
+  OPERATING_COST_INDEX_KEYS,
+  resolveOperatingCostIndex,
+  resolveAllOperatingCostIndices,
+  resolveRawPriceCaptureIndex,
+  resolveConstructionCostIndex,
+  resolveConstructionCostPolicy,
+} from "./costIndex";
 export {
   calculateEventIntensity,
   eventIntensityAtTurn,

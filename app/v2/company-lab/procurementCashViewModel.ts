@@ -52,6 +52,7 @@ import { estimateTargetMinimumCashUsd, STANDARD_AI_PARAMETERS_V1 } from "../../l
 import { computeProcurementConstraint } from "../../lib/v2/financing/liquidityClose";
 import { FINANCING_PARAMETERS_V1 } from "../../lib/v2/financing/parameters";
 import { FinancialHealthTier } from "../../lib/v2/financing/types";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION, StandardAiCostProjection } from "../../lib/v2/companyLab/standardAi/costProjection";
 
 /** 「追加借入承認前」の保守ケースとして常に0を使う（Step 3のご指示どおり固定）。 */
 export const PRE_FINANCING_APPROVED_LOAN_DRAW_USD = 0;
@@ -110,6 +111,16 @@ export interface BuildProcurementCashFromObservationInput {
   readonly domesticDesiredQuantityTons: number;
   /** draft.importOrders[].orderedQuantity の合計（HOSO換算MT）。 */
   readonly importOrderedQuantityTons: number;
+  /**
+   * 【#05 費用Projection接続】当Turnの費用前提。人件費見積へそのまま渡す。
+   *
+   * このview-modelは**表示専用**であり、Standard AIの意思決定5経路には含まれない。
+   * 現在のUI階層（DecisionStudio → ProcurementPlanningSection）はRunのScenario
+   * definitionを保持していないため、省略時は中立値（全指数1.00）となる。
+   * 中立値は本変更前の表示とビット単位で同一である。UI側がdefinitionを持つように
+   * なった時点でここへ実Projectionを渡す（#05の別タスク。今回はUIを変更しない）。
+   */
+  readonly costProjection?: StandardAiCostProjection;
 }
 
 /**
@@ -129,7 +140,8 @@ export function buildProcurementCashFromObservation(input: BuildProcurementCashF
   const workingCapital = assessWorkingCapitalNeed(
     input.observation,
     { domesticDesiredQuantityTons, importOrderedQuantityTons },
-    minimumCashBufferUsd
+    minimumCashBufferUsd,
+    (input.costProjection ?? NEUTRAL_STANDARD_AI_COST_PROJECTION).financeParameters
   );
 
   // 重大延滞・支払不能の簡易判定（companyLab/runner.ts の capexApprovalGateByCompanyId.
@@ -177,6 +189,8 @@ export interface BuildProcurementCashInput {
   readonly turn: number;
   readonly domesticDesiredQuantityTons: number;
   readonly importOrderedQuantityTons: number;
+  /** 【#05 費用Projection接続】表示専用経路。省略時は中立値（上記 BuildProcurementCashFromObservationInput のコメント参照）。 */
+  readonly costProjection?: StandardAiCostProjection;
 }
 
 /**
@@ -193,5 +207,6 @@ export function buildProcurementCashViewModel(input: BuildProcurementCashInput):
     lastFinancialHealth: input.ownState.financingState.history.lastFinancialHealth,
     domesticDesiredQuantityTons: input.domesticDesiredQuantityTons,
     importOrderedQuantityTons: input.importOrderedQuantityTons,
+    costProjection: input.costProjection,
   });
 }

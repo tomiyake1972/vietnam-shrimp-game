@@ -21,6 +21,7 @@ import { calculateFactoryEffectiveCapacity } from "../../../production/capacity"
 import { hosoEqTons, ratio } from "../../../core/units";
 import { Factory } from "../../../production/types";
 import { PRODUCTION_PARAMETERS_V1 } from "../../../production/parameters";
+import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../costProjection";
 
 const RECOVERY = PRODUCTION_PARAMETERS_V1.yield.saleableRecoveryRatio;
 
@@ -327,7 +328,7 @@ const HEAVY_DEMAND = { hoso: 80000, pd: 40000, vap: 25000 };
 const HEAVY_RAW = 200000;
 
 function decide(obs: StandardAiObservation, params: StandardAiParameters = STANDARD_AI_PARAMETERS_V1) {
-  return buildStandardAiCapexDecision(fixture, obs, pressures(), HEAVY_DEMAND, HEAVY_RAW, params);
+  return buildStandardAiCapexDecision(fixture, obs, pressures(), HEAVY_DEMAND, HEAVY_RAW, params, undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
 }
 const proposedTypes = (r: ReturnType<typeof decide>) => r.capexDecision.newProjectProposals.map((p) => p.projectType);
 
@@ -379,7 +380,7 @@ test("CAP1-13: 前期実績が無いturnでは持続性が成立せず提案し�
     HEAVY_DEMAND,
     HEAVY_RAW,
     STANDARD_AI_PARAMETERS_V1
-  );
+  , undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const types = r.capexDecision.newProjectProposals.map((p) => p.projectType);
   assert.ok(!types.includes("freezingPackagingExpansion"), `前期実績が無いのに提案された: ${types.join(", ")}`);
 });
@@ -398,7 +399,7 @@ test("CAP1-14: 会社ID・シナリオIDによる分岐がソースに存在し�
     HEAVY_DEMAND,
     HEAVY_RAW,
     STANDARD_AI_PARAMETERS_V1
-  ).capexDecision.newProjectProposals.map((p) => p.projectType);
+  , undefined, NEUTRAL_STANDARD_AI_COST_PROJECTION).capexDecision.newProjectProposals.map((p) => p.projectType);
   assert.deepEqual(asConsv, asMass);
 });
 

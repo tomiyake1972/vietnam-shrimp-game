@@ -149,6 +149,12 @@ export interface VietnamDomesticInput {
    * 未指定時はMarketParameters.vietnamDomestic.farmerEconomicsDefaultsを使う。
    */
   readonly farmerEconomics?: VietnamFarmerEconomicsInput;
+  /**
+   * 【ENG-DS2-COST-FOUNDATION-1】原料価格捕捉指数（Scenario opt-in）。
+   * 未指定は 1.00（＝現行と完全一致）。需給乗数の基準値にのみ掛かり、
+   * buyingCeiling・farmerReservationPrice・clamp上限1.0は変更しない。
+   */
+  readonly rawPriceCaptureIndex?: number;
 }
 
 /** PD/VAP需要構成の当期入力（世界全体集計）。 */
@@ -205,6 +211,19 @@ export interface VietnamDomesticResult {
    * 取引数量の縮小として現れる）。
    */
   readonly farmerReservationPrice: UsdPerHosoEqKg;
+  /**
+   * 【ENG-DS2-COST-FOUNDATION-1・診断専用】当期に適用された需給乗数 m。
+   *
+   * ★rawPriceCaptureIndex が中立(1.0)のときは**キー自体を作らない**。
+   * 既存Scenarioの保存結果（marketResultはCompanyQuarterRecordとして永続化される）を
+   * ビット単位で不変に保つための規約であり、値そのものは price / buyingCeiling から
+   * いつでも再計算できる（新しい情報を state へ持ち込んでいない）。
+   */
+  readonly priceMultiplier?: number;
+  /** 【ENG-DS2-COST-FOUNDATION-1・診断専用】適用された原料価格捕捉指数（中立時は不在）。 */
+  readonly rawPriceCaptureIndex?: number;
+  /** 【ENG-DS2-COST-FOUNDATION-1・診断専用】数量調整時の取引比率（中立時は不在。通常領域では1）。 */
+  readonly tradeRatio?: number;
   readonly supply: HosoEqTons;
   /** プロラタ最低引取ルール適用後の実効需要。 */
   readonly effectiveDemand: HosoEqTons;

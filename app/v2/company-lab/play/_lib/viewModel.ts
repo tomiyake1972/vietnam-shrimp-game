@@ -19,6 +19,8 @@ import { CompanyDecisionDraft, buildInitialDraft } from "../../decisionDraft";
 import { CompanyFixture, CompanyLabState, CompanyOwnState, CompanyQuarterSummary, CompanyReasonEntry, PublicMarketInfo } from "../../../../lib/v2/companyLab/types";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics, StandardAiQuarterDiagnostics } from "../../../../lib/v2/companyLab/standardAi/policy";
+import { StandardAiCostProjection, toStandardAiCostProjection } from "../../../../lib/v2/companyLab/standardAi/costProjection";
+import { buildTurnEconomicsProjection } from "../../../../lib/v2/companyLab/turnEconomicsProjection";
 import { resolveStandardAiProfileForMode } from "../../../../lib/v2/companyLab/standardAi/orientationProfile";
 import { restoreCompanyLabStateFromRuntimeSnapshot } from "../../../../lib/v2/companyLab/persistence/snapshot";
 import { CompanyLabPersistedStateV1, CompanyLabDraftEnvelope } from "../../../../lib/v2/companyLab/persistence/types";
@@ -129,6 +131,12 @@ export interface PlayerScreenViewModel {
    * AI経営説明・AI経営会議のhandlerが、AI4社と同じ会社別paramsで診断を作り直すために使う。
    */
   readonly standardAiProfileMode: "OFF" | "ON" | undefined;
+  /**
+   * 【#05 費用Projection接続】このRunのScenario snapshotと現在Turnから作った費用前提。
+   * AI経営説明・AI経営会議のhandlerが診断を作り直すとき、Engine・decisionsProviderと
+   * 同じ費用前提を使うために渡す（handler側で作り直して値が分岐しないようにする）。
+   */
+  readonly standardAiCostProjection: StandardAiCostProjection;
   readonly totalTurns: number;
   readonly currentTurn: number;
   readonly revision: number;
@@ -269,7 +277,11 @@ function coerceDraftOrRebuild(
     publicInfo,
     restoredState.currentPeriod,
     turn,
-    params
+    params,
+    undefined,
+    undefined,
+    // 【#05 費用Projection接続】保存済みRunのScenario snapshotを正本にする。
+    toStandardAiCostProjection(buildTurnEconomicsProjection({ definition: restoredState.scenarioState.definition, turn }))
   );
   // 【Phase 8D-4】ワーカー人数の出発点は、fixtureの初期値ではなく会社状態として
   // 保持されている前期末の総人数。これを渡さないと、四半期をまたぐたびに人数が
@@ -409,6 +421,10 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       labId: stored.labId,
       playerCompanyId: stored.playerCompanyId,
       playerDisplayName: fixture.displayName,
+      // 【#05 費用Projection接続】Runのscenario snapshot＋現在Turnから1回だけ構築する。
+      standardAiCostProjection: toStandardAiCostProjection(
+        buildTurnEconomicsProjection({ definition: restoredState.scenarioState.definition, turn })
+      ),
       scenarioId: stored.config.scenarioId,
       mode: stored.config.mode,
       salesModelId: stored.config.salesModelId,
