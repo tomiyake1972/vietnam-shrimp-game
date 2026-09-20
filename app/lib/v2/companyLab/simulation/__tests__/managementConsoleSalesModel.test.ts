@@ -187,7 +187,11 @@ test("MC-SALES-8: 未知のsalesModelIdはsilent fallbackせず失敗する", ()
 
 // ---------------------------------------------------------------- MC-SALES-9
 test("MC-SALES-9: Redis schemaVersion・キー体系は変更していない", () => {
-  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 5);
+  // 【MANUAL-BALANCE-1で5→6へ意図的に更新】Sales Model選択（本テストの対象Phase）は
+  // 今もpersistence versionを変更していない。6への引き上げは後続の
+  // Management Console 手動バランス調整による、optionalフィールドの追加のみの変更。
+  // キー体系が変わっていないことは下の各assertで引き続き担保される。
+  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 6);
   assert.equal(simulationRunIndexKeyV2("staging"), "staging:v2:simulationRun:index");
   assert.equal(simulationRunManifestKeyV2("staging", "run-1"), "staging:v2:simulationRun:run-1");
   assert.equal(simulationRunSummaryKeyV2("staging", "run-1"), "staging:v2:simulationRun:run-1:summary");

@@ -50,6 +50,7 @@
 import { UsdPerHosoEqKg, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { DemandMarketId, MarketQuarterResult, MarketValidationError, Product } from "./types";
 import { DestinationMarketPriceCoefficientTable, DestinationMarketPriceCoefficients } from "./destinationPricingParameters";
+import { MANUAL_PRICE_INDEX_NEUTRAL, applyManualPriceIndex, isUsableManualPriceIndex } from "./manualPriceIndex";
 
 const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
@@ -112,8 +113,18 @@ export interface ProductMarketReferencePriceBreakdown {
   readonly pdPremiumPart: UsdPerHosoEqKg;
   /** VAPプレミアム部分 = vapIncrementalPremium × vapPremiumCoefficient（vap以外は常に0）。 */
   readonly vapPremiumPart: UsdPerHosoEqKg;
-  /** 最終市場参照価格 = hosoBaseValuePart + pdPremiumPart + vapPremiumPart。 */
+  /**
+   * 最終市場参照価格 = hosoBaseValuePart + pdPremiumPart + vapPremiumPart。
+   * 【MANUAL-BALANCE-1】手動販売市場価格指数が適用されている場合は、適用**後**の値。
+   */
   readonly marketReferencePrice: UsdPerHosoEqKg;
+  /**
+   * 【MANUAL-BALANCE-1】手動販売市場価格指数の適用**前**の参照価格
+   * （中立時・未適用時はキー自体を作らない。既存の保存結果を不変に保つ規約）。
+   */
+  readonly preManualMarketReferencePrice?: UsdPerHosoEqKg;
+  /** 【MANUAL-BALANCE-1】適用した手動販売市場価格指数（中立時は不在）。 */
+  readonly manualSalesPriceIndex?: number;
 }
 
 function assertValidCoefficients(c: DestinationMarketPriceCoefficients, market: DemandMarketId): void {
@@ -175,15 +186,57 @@ export function deriveMarketReferencePriceBreakdowns(
   coefficients: DestinationMarketPriceCoefficientTable
 ): Readonly<Record<DemandMarketId, Readonly<Record<Product, ProductMarketReferencePriceBreakdown>>>> {
   const decomposition = decomposeVietnamProductPrices(marketResult);
+  // 【MANUAL-BALANCE-1】管理者手動の販売市場価格指数。marketResultに載って運ばれてくる
+  // ため、この関数を通る4経路（販売エンジン・Standard AI観測・autoPolicy・
+  // TurnEconomicsProjection）はすべて同一の適用後価格を見る。
+  const manualSalesPriceIndex = marketResult.manualSalesPriceIndex;
+  const applyManual =
+    isUsableManualPriceIndex(manualSalesPriceIndex) && manualSalesPriceIndex !== MANUAL_PRICE_INDEX_NEUTRAL;
+
   const result = {} as Record<DemandMarketId, Record<Product, ProductMarketReferencePriceBreakdown>>;
   for (const market of DEMAND_MARKET_IDS_LOCAL) {
     const perProduct = {} as Record<Product, ProductMarketReferencePriceBreakdown>;
     for (const product of PRODUCTS) {
-      perProduct[product] = computeMarketReferencePrice(decomposition, market, product, coefficients);
+      const breakdown = computeMarketReferencePrice(decomposition, market, product, coefficients);
+      perProduct[product] = applyManual
+        ? applyManualSalesIndexToBreakdown(breakdown, manualSalesPriceIndex)
+        : breakdown;
     }
     result[market] = perProduct;
   }
   return result;
+}
+
+/**
+ * 【MANUAL-BALANCE-1】導出済みの販売基準価格へ手動指数を1回だけ適用する。
+ *
+ * 【適用位置がここである理由】販売基準価格は
+ *   HOSO清算価格 → 商品別プレミアム分解 → 仕向市場係数 → marketReferencePrice
+ * と導出される。この最終値へ掛けることで、
+ *   - 各社の価格調整・品質・顧客セグメント・成約配分の関係は一切変えない
+ *     （成約配分は basePrice に対する相対評価であり、全市場共通の倍率は
+ *      各社の相対関係を保つ）
+ *   - hosoPrices を書き換えないため、輸入調達原価・国内原料のbuyingCeilingへ
+ *     波及しない（販売と原料の二重作用を避ける）
+ *
+ * 【複利化しない】掛ける対象は常に「そのTurnの補正前基準価格」であり、
+ * marketResultはTurnごとに新規構築されるため前Turnの適用後価格は混入しない。
+ *
+ * 内訳（hosoBaseValuePart等）は補正前の導出根拠としてそのまま残し、
+ * 最終価格と適用指数のみを更新する。
+ */
+function applyManualSalesIndexToBreakdown(
+  breakdown: ProductMarketReferencePriceBreakdown,
+  manualSalesPriceIndex: number
+): ProductMarketReferencePriceBreakdown {
+  const preManualValue = unwrapUnit(breakdown.marketReferencePrice);
+  const appliedValue = applyManualPriceIndex(preManualValue, manualSalesPriceIndex);
+  return {
+    ...breakdown,
+    marketReferencePrice: usdPerHosoEqKg(appliedValue),
+    preManualMarketReferencePrice: breakdown.marketReferencePrice,
+    manualSalesPriceIndex,
+  };
 }
 
 /**

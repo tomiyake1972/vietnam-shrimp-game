@@ -221,6 +221,10 @@ export function buildResumePayload(
     // まだ evaluationHistory を持たないsession（この機能より前に作られたsessionを
     // 経由した場合）でも、その時点の state.history から復元できるぶんは拾っておく。
     evaluationHistory: mergeEvaluationHistory(session.evaluationHistory, session.state.history.map(toEvaluationHistoryRecord)),
+    // 【MANUAL-BALANCE-1】適用記録も間引かない（evaluationHistoryと同じ理由）。
+    // 設定スケジュール自体は state.config.manualBalanceOverrides として
+    // trimmedState 経由で往復するため、ここで重複して保存しない。
+    ...(session.manualBalanceApplied !== undefined ? { manualBalanceApplied: session.manualBalanceApplied } : {}),
   };
 }
 
@@ -343,6 +347,14 @@ export function restoreSessionFromResumePayload(
     visionOverrides: resumePayload.state?.config?.visionOverrides,
     standardAiProfileMode: resumePayload.state?.config?.standardAiProfileMode,
     /**
+     * 【MANUAL-BALANCE-1】visionOverridesとまったく同じ理由で、手動バランス調整の
+     * スケジュールもresumePayload.state.configを唯一の情報源として復元する。
+     * ここを run.scenarioId/seed/requestedTurns だけから組み直すと、
+     * 再開後の session.config から設定が消え、次の編集操作が不整合な状態から
+     * 出発する（visionOverridesで実際に起きた欠落バグと同型）。
+     */
+    manualBalanceOverrides: resumePayload.state?.config?.manualBalanceOverrides,
+    /**
      * 【MANAGEMENT-CONSOLE-SALES-MODEL-1】visionOverrides/standardAiProfileModeと
      * 同じ理由で、salesModelIdもresumePayload.state.config（trimStateForResumeが
      * 一切変更しないフィールド）から復元する。
@@ -376,5 +388,9 @@ export function restoreSessionFromResumePayload(
     // このフィールドを持たない既存Runでは、state.historyから作れるぶんだけになる
     // ＝これまでとまったく同じ表示になる（勝手な推測値は作らない）。
     evaluationHistory: mergeEvaluationHistory(resumePayload.evaluationHistory, (resumePayload.state?.history ?? []).map(toEvaluationHistoryRecord)),
+    // 【MANUAL-BALANCE-1】適用記録を復元する。この機能より前に保存されたRunには
+    // 存在しないため undefined のままにする（0や100で埋めない）。画面はundefinedを
+    // 「不明」として扱い、「そのTurnは手動補正なしだった」と言い切らない。
+    manualBalanceApplied: resumePayload.manualBalanceApplied,
   };
 }

@@ -45,6 +45,11 @@ import { DOMESTIC_PURCHASE_GUARANTEE_TURN, clearDomesticReferencePrice } from ".
 import { buildObservedMarketDemand } from "./marketDemandObservation";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import {
+  resolveManualBalanceForTurn,
+  resolvedRawMarketPriceIndex,
+  resolvedSalesPriceIndex,
+} from "./manualBalance/overrides";
+import {
   CONSUMER_MARKET_INVENTORY_PARAMETERS_V1,
   ConsumerMarketCarryState,
   ConsumerMarketQuarterRecord,
@@ -1173,7 +1178,28 @@ export function advanceCompanyLabQuarter(
       ? Object.fromEntries(fixtures.map((f) => [f.companyId, f.factories.reduce((sum, fac) => sum + unwrapUnit(fac.vapCapacity), 0)]))
       : undefined;
   const supplySignals = buildSupplySignalInputs(decisions, state.lastQuarterActualProduction, vapNominalCapacityByCompany);
-  const marketInput = applyProductionSupplySignalsToMarketInput(lifecycleAdjustedMarketInput, supplySignals, companyCountry);
+  const marketInputBeforeManualBalance = applyProductionSupplySignalsToMarketInput(
+    lifecycleAdjustedMarketInput,
+    supplySignals,
+    companyCountry
+  );
+
+  // --- 【MANUAL-BALANCE-1】管理者手動バランス調整の当Turn適用値 ---
+  // 解決は manualBalance/overrides.ts の resolveManualBalanceForTurn が唯一のSSoT。
+  // ここでは「そのTurnの指数」を市場入力へ載せるだけで、価格計算自体は行わない。
+  // 未設定Runでは両指数とも中立(100)となり、market/index.ts 側でキーを作らないため
+  // 既存Runの結果はビット単位で不変。
+  const resolvedManualBalance = resolveManualBalanceForTurn(state.config.manualBalanceOverrides, turn);
+  const manualSalesPriceIndex = resolvedSalesPriceIndex(resolvedManualBalance);
+  const manualRawMarketPriceIndex = resolvedRawMarketPriceIndex(resolvedManualBalance);
+  const marketInput: MarketQuarterInput = {
+    ...marketInputBeforeManualBalance,
+    vietnamDomestic: {
+      ...marketInputBeforeManualBalance.vietnamDomestic,
+      manualRawMarketPriceIndex,
+    },
+    manualSalesPriceIndex,
+  };
 
   // --- 【Phase 8F-1】消費国在庫・購買循環モデル: 当期の計画(実購買量が確定する前) ---
   // 市場価格形成（globalDemand.ts・hosoPricing.ts）は一切変更しない。ここで計算する
@@ -1366,8 +1392,13 @@ export function advanceCompanyLabQuarter(
     ...(turn === DOMESTIC_PURCHASE_GUARANTEE_TURN
       ? {
           domesticPurchaseGuaranteedBidFloor: usdPerHosoEqKg(
-            clearDomesticReferencePrice(previousMarketContext.priorHosoFobPrice.VN, baseMarketInput.vietnamDomestic)
-              .referencePriceUsdPerHosoEqKg
+            // 【MANUAL-BALANCE-1】保証入札下限も当Turnの手動指数適用後の水準にする。
+            // 補正前価格を下限にすると、価格を下げた（95等）Turnで「実際の成立価格より
+            // 高い下限」が保証されることになり、指数が調達へ効かなくなる。
+            clearDomesticReferencePrice(previousMarketContext.priorHosoFobPrice.VN, {
+              ...baseMarketInput.vietnamDomestic,
+              manualRawMarketPriceIndex,
+            }).referencePriceUsdPerHosoEqKg
           ),
         }
       : {}),

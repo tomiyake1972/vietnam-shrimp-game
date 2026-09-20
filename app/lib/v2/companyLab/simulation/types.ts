@@ -15,6 +15,7 @@ import type { CompanyLabRuntimeSnapshot } from "../persistence/types";
 import type { SimulationAnalyticsDataset } from "./analytics/types";
 import type { CompanyEvaluationSnapshot } from "../evaluation/evaluationSemantics";
 import type { EvaluationHistoryRecord } from "../evaluation/evaluationHistory";
+import type { ManualBalanceAppliedRecord } from "../manualBalance/application";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -187,6 +188,19 @@ export interface SimulationSession {
    * その場合は従来どおり state.history へフォールバックする（挙動不変）。
    */
   readonly evaluationHistory?: readonly EvaluationHistoryRecord[];
+  /**
+   * 【MANUAL-BALANCE-1】各Turnに実際に適用された手動バランス調整の記録
+   * （補正前後の価格・適用指数・配当性向・監査警告）。
+   *
+   * evaluationHistory とまったく同じ理由で、resumePayload のrolling window とは
+   * 独立に全Turnぶん保持する。Turnあたり数個のスカラーであり量は増えない。
+   * 「Turn○で適用済み」表示と、結果比較表の補正前／適用後列の唯一の入力。
+   *
+   * 本機能より前に保存された既存Runには存在しないためoptional。
+   * 未定義は「この機能が無かった頃のRun」であり、手動補正なしと同義ではあるが、
+   * 画面では推測で0や100を埋めず「不明」として扱えるようにする。
+   */
+  readonly manualBalanceApplied?: readonly ManualBalanceAppliedRecord[];
 }
 
 /** 1ターン・1社ぶんの期首／期末スナップショットと期末の投資案件。 */

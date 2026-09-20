@@ -41,6 +41,18 @@ import {
   withCompanyVisionOverrideApplied,
   withCompanyVisionOverrideReset,
 } from "../vision/overrides";
+import {
+  applyManualDividendPayoutToParams,
+  resolveManualBalanceForTurn,
+  resolvedDividendPayoutRatio,
+  resolvedRawMarketPriceIndex,
+  resolvedSalesPriceIndex,
+  type ManualBalanceSchedule,
+} from "../manualBalance/overrides";
+import type { ManualBalanceAppliedRecord, ManualPriceIndexAuditWarning } from "../manualBalance/application";
+import { deriveMarketReferencePriceBreakdowns } from "../../market/destinationPricing";
+import type { MarketQuarterResult } from "../../market/types";
+import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS } from "../../market/destinationPricingParameters";
 import { createCompanyLabRuntimeSnapshot } from "../persistence/snapshot";
 import { computeEffectiveFactories } from "../../capex/factoryConstruction";
 import { calculateFactoryEffectiveCapacity } from "../../production/capacity";
@@ -236,6 +248,29 @@ export function applyVisionOverrideToSession(
   };
 }
 
+/**
+ * 【MANUAL-BALANCE-1】実行中のRunへ手動バランス調整（配当性向・販売/原料市場価格指数）の
+ * スケジュールを適用した、新しいSimulationSessionを返す（純粋関数）。
+ *
+ * 【二重同期・Vision Calibrationと同じ規律】session.config と session.state.config の
+ * 両方を必ず同時に更新する。片方だけ更新すると、保存→再開時に設定が消える
+ * （resume.ts は resumePayload.state.config を正本として session.config を再構築する）。
+ *
+ * 【過去Turnをretroactive変更しない】config を更新するだけで、確定済みTurnの
+ * marketResult・AI captureは書き換えない。呼び出し側は必ず「次の未実行Turn」以降を
+ * effectiveFromTurn / turn として渡すこと。
+ */
+export function applyManualBalanceScheduleToSession(
+  session: SimulationSession,
+  schedule: ManualBalanceSchedule
+): SimulationSession {
+  return {
+    ...session,
+    config: { ...session.config, manualBalanceOverrides: schedule },
+    state: { ...session.state, config: { ...session.state.config, manualBalanceOverrides: schedule } },
+  };
+}
+
 /** 【指示§11「Reset to Default」】ある会社のRun内override（全履歴）を取り除く。 */
 export function resetVisionOverrideForSessionCompany(session: SimulationSession, companyId: string): SimulationSession {
   const nextOverrides = withCompanyVisionOverrideReset(session.state.config.visionOverrides, companyId);
@@ -318,6 +353,60 @@ function appendProfileDiagnosticEntry(diagnostics: StandardAiQuarterDiagnostics)
 }
 
 /**
+ * 【MANUAL-BALANCE-1】そのTurnに実際に適用された手動バランス調整を記録する。
+ *
+ * 【再計算しない】価格はすべて確定済みの marketResult から読み出す。ここで
+ * 指数を掛け直すと「記録用の値」と「Engineが実際に使った値」が別計算になり、
+ * 片方だけ直す事故が起きる。補正前価格は market/index.ts が中立でないときだけ
+ * 載せる preManualRawMarketPrice を使い、中立時は price がそのまま補正前価格である。
+ */
+function captureManualBalanceApplied(
+  turn: number,
+  schedule: ManualBalanceSchedule | undefined,
+  marketResult: MarketQuarterResult
+): ManualBalanceAppliedRecord {
+  const resolved = resolveManualBalanceForTurn(schedule, turn);
+  const vd = marketResult.vietnamDomestic;
+
+  const appliedRawMarketPrice = unwrapUnit(vd.price);
+  // 中立時は preManualRawMarketPrice キーが存在しない（＝補正前＝price そのもの）。
+  const preManualRawMarketPrice =
+    vd.preManualRawMarketPrice !== undefined ? unwrapUnit(vd.preManualRawMarketPrice) : appliedRawMarketPrice;
+
+  const breakdowns = deriveMarketReferencePriceBreakdowns(marketResult, CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS);
+  const preManualSalesReferencePrices: Record<string, Record<string, number>> = {};
+  const appliedSalesReferencePrices: Record<string, Record<string, number>> = {};
+  for (const [market, byProduct] of Object.entries(breakdowns)) {
+    const pre: Record<string, number> = {};
+    const applied: Record<string, number> = {};
+    for (const [product, breakdown] of Object.entries(byProduct)) {
+      const appliedValue = unwrapUnit(breakdown.marketReferencePrice);
+      applied[product] = appliedValue;
+      pre[product] =
+        breakdown.preManualMarketReferencePrice !== undefined
+          ? unwrapUnit(breakdown.preManualMarketReferencePrice)
+          : appliedValue;
+    }
+    preManualSalesReferencePrices[market] = pre;
+    appliedSalesReferencePrices[market] = applied;
+  }
+
+  return {
+    turn,
+    appliedSourceKind: resolved.appliedSource.kind,
+    scenarioRawPriceCaptureIndex: vd.rawPriceCaptureIndex ?? 1.0,
+    preManualRawMarketPrice,
+    manualRawMarketPriceIndex: resolvedRawMarketPriceIndex(resolved),
+    appliedRawMarketPrice,
+    manualSalesPriceIndex: resolvedSalesPriceIndex(resolved),
+    preManualSalesReferencePrices,
+    appliedSalesReferencePrices,
+    manualDividendPayoutRatio: resolvedDividendPayoutRatio(resolved),
+    warnings: (vd.manualPriceIndexWarnings ?? []).map((w: ManualPriceIndexAuditWarning) => ({ ...w, turn })),
+  };
+}
+
+/**
  * ちょうど1ターンだけ進める。通常ゲームと同じ経路だけを通る。
  *
  * 失敗した場合は state を一切変更せず（前のターンまでの状態を保つ）、
@@ -378,12 +467,20 @@ export function advanceSimulationTurn(
       // 【Standard AI CE-3A新設・監査専用】config.qualityEquipmentCapabilityDisabled
       // がtrueのときだけ、Quality Equipment候補生成を無効化するablation paramsを
       // 使う。省略時は必ずprofileResolution.paramsそのまま（既存挙動と完全に同一）。
-      const effectiveParams = {
+      const effectiveParamsBeforeManualBalance = {
         ...profileResolution.params,
         ...(session.state.config.qualityEquipmentCapabilityDisabled ? { qualityEquipmentCapabilityEnabled: false } : {}),
         ...(session.state.config.factoryActivationLaborFixDisabled ? { factoryActivationLaborFixEnabled: false } : {}),
         ...(session.state.config.vapDevelopmentTierIntensityDisabled ? { vapDevelopmentTierIntensityEnabled: false } : {}),
       };
+      // 【MANUAL-BALANCE-1】管理者が指定した配当性向は、経営性格バイアスの**後**で
+      // 上書きする。バイアスの前に入れると、20%と指定しても会社ごとに19%/21%で
+      // 実行され、画面の指定値と実行値が食い違う（実装指示の明示要件）。
+      // 手動指定が無いTurnでは同一オブジェクトがそのまま返るため挙動不変。
+      const effectiveParams = applyManualDividendPayoutToParams(
+        effectiveParamsBeforeManualBalance,
+        resolveManualBalanceForTurn(session.state.config.manualBalanceOverrides, turn)
+      );
       const { decision: aiDecision, diagnostics: rawDiagnostics } = generateStandardAiDecisionWithDiagnostics(
         fixture,
         ownState,
@@ -510,6 +607,15 @@ export function advanceSimulationTurn(
         evaluationHistory: finalizedRecord
           ? mergeEvaluationHistory(session.evaluationHistory, [toEvaluationHistoryRecord(finalizedRecord)])
           : session.evaluationHistory,
+        // 【MANUAL-BALANCE-1】このTurnに実際に適用された手動設定と、補正前後の価格を
+        // 記録する。値はすべて確定済みのmarketResultから読み出すだけで、再計算しない
+        // （画面に出す値とEngineが使った値が食い違わないようにするため）。
+        manualBalanceApplied: finalizedRecord
+          ? [
+              ...(session.manualBalanceApplied ?? []),
+              captureManualBalanceApplied(turn, session.state.config.manualBalanceOverrides, finalizedRecord.marketResult),
+            ]
+          : session.manualBalanceApplied,
         run: {
           ...session.run,
           completedTurns,
