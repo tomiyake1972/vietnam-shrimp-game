@@ -17,6 +17,7 @@ import type { CompanyEvaluationSnapshot } from "../evaluation/evaluationSemantic
 import type { EvaluationHistoryRecord } from "../evaluation/evaluationHistory";
 import type { ManualBalanceAppliedRecord } from "../manualBalance/application";
 import type { AppliedBalanceProfileRef } from "../manualBalance/profile";
+import type { CalculationCommitHistory } from "./calculationCommit";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -98,6 +99,23 @@ export interface SimulationRun {
    * （画面は推測で埋めず「不明」または「Profileなし」として扱う）。
    */
   readonly appliedBalanceProfile?: AppliedBalanceProfileRef;
+  /**
+   * 【Run Calculation Commit Identity】このRunのどのTurn区間を、どのsource commitで
+   * 計算したかの履歴（再現性metadata。ゲーム計算には一切影響しない）。
+   *
+   * 【アプリ現在版と分離する】Export時点の process.env.NEXT_PUBLIC_SOURCE_COMMIT は
+   * 「いま動いているアプリの版」であり、過去Turnを計算した版とは限らない
+   * （commit AでTurn1-16 → deploy → commit BでresumeしてTurn17-32、という経路がある）。
+   * 過去Turnの計算commitを知りたいときは必ずこの履歴を引く。
+   *
+   * 新規Run作成時に startingTurn の区間が1件入る。resumeして進めるときに、
+   * 現在アプリのcommitが直近記録と異なる場合だけ、次の未実行Turnを
+   * effectiveFromTurn として追記する（同じcommitなら増えない。過去entryは上書きしない）。
+   *
+   * この機能より前に作られたRunには存在しない。その場合は推測で埋めず
+   * "UNKNOWN" として扱う（calculationCommit.ts 参照）。
+   */
+  readonly calculationCommitHistory?: CalculationCommitHistory;
   /**
    * 【Game End / Final Results・END-1】Game Masterが任意Turnでゲームを終了した日時
    * （metadata。判断には使わない）。未設定＝ゲームはまだ進行中（ACTIVE）。

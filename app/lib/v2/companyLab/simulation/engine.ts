@@ -50,6 +50,11 @@ import {
   type ManualBalanceSchedule,
 } from "../manualBalance/overrides";
 import type { AppliedBalanceProfileRef } from "../manualBalance/profile";
+import {
+  resolveCurrentAppSourceCommit,
+  withCalculationCommitRecorded,
+  type CalculationCommitHistory,
+} from "./calculationCommit";
 import type { ManualBalanceAppliedRecord, ManualPriceIndexAuditWarning } from "../manualBalance/application";
 import { deriveMarketReferencePriceBreakdowns } from "../../market/destinationPricing";
 import type { MarketQuarterResult } from "../../market/types";
@@ -172,6 +177,15 @@ export interface CreateSimulationSessionInput {
    * Neutral（手動補正なし）で開始した場合は省略する。
    */
   readonly appliedBalanceProfile?: AppliedBalanceProfileRef;
+  /**
+   * 【Run Calculation Commit Identity】このRunのTurnを計算するアプリのsource commit。
+   *
+   * 省略時は現在のbuildのcommit（NEXT_PUBLIC_SOURCE_COMMIT、未設定なら"UNKNOWN"）。
+   * テストから注入できるようにしているのは、deployをまたいだresume
+   * （commit Aで前半・commit Bで後半）を実Git checkoutを変えずに再現するため。
+   * 再現性metadataのみであり、ゲーム計算には一切影響しない。
+   */
+  readonly sourceCommit?: string;
 }
 
 /**
@@ -238,6 +252,14 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     // 【BALANCE-PROFILE-1】Neutralで開始したRunにはキー自体を作らない
     // （既存Runのrun metadataと同一に保つ）。
     ...(input.appliedBalanceProfile !== undefined ? { appliedBalanceProfile: input.appliedBalanceProfile } : {}),
+    /**
+     * 【Run Calculation Commit Identity】開始時点の計算commitを1件記録する。
+     * 値が "UNKNOWN" でも記録する（「分からなかった」ことを残すのが正しく、
+     * あとからExport時点のenvで補完させないため）。
+     */
+    calculationCommitHistory: [
+      { effectiveFromTurn: state.scenarioState.currentTurn, sourceCommit: input.sourceCommit ?? resolveCurrentAppSourceCommit() },
+    ],
   };
   return {
     run,
@@ -454,7 +476,12 @@ function captureManualBalanceApplied(
 export function advanceSimulationTurn(
   session: SimulationSession,
   completedAt: string,
-  playerDecisions?: Readonly<Record<string, CompanyDecisionInput>>
+  playerDecisions?: Readonly<Record<string, CompanyDecisionInput>>,
+  /**
+   * 【Run Calculation Commit Identity】このTurnを計算するアプリのsource commit。
+   * 省略時は現在のbuildのcommit。再現性metadataのみでゲーム計算には影響しない。
+   */
+  sourceCommit?: string
 ): SimulationTurnOutcome {
   if (session.state.isComplete) {
     return {
@@ -465,6 +492,17 @@ export function advanceSimulationTurn(
   }
 
   const turn = session.state.scenarioState.currentTurn;
+  /**
+   * 【Run Calculation Commit Identity】これから計算するTurnの計算commitを記録する。
+   * 直近記録と同じcommitなら履歴は増えない（resumeのたびに積み上がらない）。
+   * 異なる場合だけ、いま計算しようとしているTurnを effectiveFromTurn として追記する
+   * （過去の区間は書き換えない）。失敗したTurnでは記録しない（下のcatchへ抜ける）。
+   */
+  const calculationCommitHistory: CalculationCommitHistory = withCalculationCommitRecorded(
+    session.run.calculationCommitHistory,
+    turn,
+    sourceCommit ?? resolveCurrentAppSourceCommit()
+  );
   try {
     const publicInfo = buildPublicMarketInfo(session.state);
     const decisions: Record<string, CompanyDecisionInput> = {};
@@ -653,6 +691,7 @@ export function advanceSimulationTurn(
           completedTurns,
           stopReason: reachedRequested ? "completed" : nextState.isComplete ? "scenario_end" : "running",
           completedAt: reachedRequested || nextState.isComplete ? completedAt : null,
+          calculationCommitHistory,
         },
       },
       advanced: true,
@@ -686,6 +725,11 @@ export interface AdvanceManyInput {
   readonly shouldStop?: () => boolean;
   /** metadata 用のタイムスタンプ。 */
   readonly timestamp: string;
+  /**
+   * 【Run Calculation Commit Identity】これらのTurnを計算するアプリのsource commit。
+   * 省略時は現在のbuildのcommit。再現性metadataのみ。
+   */
+  readonly sourceCommit?: string;
 }
 
 /**
@@ -701,7 +745,7 @@ export function advanceSimulationTurns(input: AdvanceManyInput): SimulationSessi
     if (session.state.isComplete) {
       return { ...session, run: { ...session.run, stopReason: "scenario_end", completedAt: input.timestamp } };
     }
-    const outcome = advanceSimulationTurn(session, input.timestamp);
+    const outcome = advanceSimulationTurn(session, input.timestamp, undefined, input.sourceCommit);
     session = outcome.session;
     if (!outcome.advanced) return session;
   }

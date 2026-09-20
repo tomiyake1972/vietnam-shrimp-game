@@ -28,6 +28,12 @@ import {
 } from "../../../lib/v2/companyLab/manualBalance/profile";
 import { newBalanceProfileId, saveBalanceProfile } from "../lib/balanceProfileStore";
 import {
+  UNKNOWN_SOURCE_COMMIT,
+  isSingleCalculationCommit,
+  latestRecordedCommit,
+  resolveCurrentAppSourceCommit,
+} from "../../../lib/v2/companyLab/simulation/calculationCommit";
+import {
   balanceCalibrationLogToCsv,
   balanceCalibrationLogToJson,
   buildBalanceCalibrationLog,
@@ -70,13 +76,23 @@ export function BalanceProfilePanel({
   const originProfile = session.run.appliedBalanceProfile;
   const drifted = isScheduleDriftedFromProfile(originProfile, schedule);
 
+  /**
+   * 【アプリ現在版】いま動いているアプリのcommit。
+   * Profileの作成元として記録してよいが、**Runの計算commitではない**。
+   * Runの計算commitは run.calculationCommitHistory から読む（下のcalcCommit系）。
+   */
+  const appSourceCommit = resolveCurrentAppSourceCommit();
   const currentConditions = {
     specVersion: BALANCE_PROFILE_SPEC_VERSION,
     scenarioId: session.run.scenarioId,
     seed: session.run.seed,
     salesModelId: session.state.config.salesModelId ?? null,
-    sourceCommit: process.env.NEXT_PUBLIC_SOURCE_COMMIT || "UNKNOWN",
+    sourceCommit: appSourceCommit,
   };
+
+  const calcHistory = session.run.calculationCommitHistory;
+  const calcLatest = latestRecordedCommit(calcHistory);
+  const calcIsSingle = isSingleCalculationCommit(calcHistory);
 
   const buildProfileFromCurrent = (profileId: string, now: string): BalanceProfile => ({
     profileId,
@@ -90,6 +106,8 @@ export function BalanceProfilePanel({
     sourceScenarioId: currentConditions.scenarioId,
     sourceSeed: currentConditions.seed,
     ...(currentConditions.salesModelId !== null ? { sourceSalesModelId: currentConditions.salesModelId } : {}),
+    // 元Runの計算commit（判明している場合のみ。推測で埋めない）。
+    ...(calcLatest !== null ? { sourceRunCalculationCommit: calcLatest } : {}),
     schedule: schedule ?? [],
   });
 
@@ -200,6 +218,38 @@ export function BalanceProfilePanel({
         <p className="mt-1 text-[10px] leading-snug text-slate-500">
           ここに出るのは「開始時にコピー元となったProfile」です。各Turnで実際に適用された値は、
           バランス調整パネルの「適用実績」を正としてください。
+        </p>
+      </div>
+
+      {/* --- このRunを計算したcommit（アプリ現在版とは別物） --- */}
+      <div className="rounded border border-slate-700 bg-slate-900/60 p-2" data-testid="console-calculation-commit">
+        <p className="mb-1 text-[10px] font-semibold text-slate-300">このRunを計算したcommit</p>
+        {calcHistory === undefined || calcHistory.length === 0 ? (
+          <p className="text-[11px] text-slate-500" data-testid="console-calculation-commit-unknown">
+            記録がありません（この機能より前に計算されたRunです）。各Turnの計算commitは<strong>不明</strong>です。
+          </p>
+        ) : calcIsSingle ? (
+          <p className="text-[11px] text-slate-200" data-testid="console-calculation-commit-single">
+            {calcHistory[0].sourceCommit}
+            {calcHistory[0].sourceCommit === UNKNOWN_SOURCE_COMMIT ? "（ビルド時にcommitが埋め込まれていません）" : ""}
+          </p>
+        ) : (
+          <div data-testid="console-calculation-commit-multi">
+            <p className="text-[11px] text-amber-300">
+              複数のcommitにまたがって計算されています（単一のcommitでは説明できません）。
+            </p>
+            <ul className="mt-0.5 list-disc pl-4 text-[10px] text-slate-400">
+              {calcHistory.map((entry) => (
+                <li key={`${entry.effectiveFromTurn}-${entry.sourceCommit}`}>
+                  Turn {entry.effectiveFromTurn} 以降: {entry.sourceCommit}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <p className="mt-1 text-[10px] leading-snug text-slate-500">
+          いま表示しているアプリのcommitは <span data-testid="console-app-commit">{appSourceCommit}</span> です。
+          これは「このRunを計算した版」とは別物であり、Calibration Logでも別の項目として出力されます。
         </p>
       </div>
 
@@ -333,7 +383,9 @@ function CalibrationLogDownload({ session }: { readonly session: SimulationSessi
 
   const download = (format: "json" | "csv"): void => {
     const exportedAt = new Date().toISOString();
-    const log = buildBalanceCalibrationLog(session, exportedAt, process.env.NEXT_PUBLIC_SOURCE_COMMIT || "UNKNOWN");
+    // 【Export時点のアプリcommit】Runの計算commitとしては使われない
+    // （buildBalanceCalibrationLog が行ごとの計算commitを履歴から解決する）。
+    const log = buildBalanceCalibrationLog(session, exportedAt, resolveCurrentAppSourceCommit());
     if (log.appliedRecordsUnavailable) {
       setNote("このRunには適用実績の記録がありません（この機能より前に計算されたRunのため、Turn別の実績は不明です）。");
       return;

@@ -61,6 +61,9 @@ function parseStoredProfile(raw: unknown): BalanceProfile | null {
     updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : "",
     ...(str(r.createdFromRunId) !== undefined ? { createdFromRunId: str(r.createdFromRunId)! } : {}),
     ...(str(r.sourceCommit) !== undefined ? { sourceCommit: str(r.sourceCommit)! } : {}),
+    ...(str(r.sourceRunCalculationCommit) !== undefined
+      ? { sourceRunCalculationCommit: str(r.sourceRunCalculationCommit)! }
+      : {}),
     ...(str(r.sourceScenarioId) !== undefined ? { sourceScenarioId: str(r.sourceScenarioId)! } : {}),
     ...(str(r.sourceSeed) !== undefined ? { sourceSeed: str(r.sourceSeed)! } : {}),
     ...(str(r.sourceSalesModelId) !== undefined ? { sourceSalesModelId: str(r.sourceSalesModelId)! } : {}),

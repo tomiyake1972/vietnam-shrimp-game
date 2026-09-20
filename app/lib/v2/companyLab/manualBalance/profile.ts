@@ -42,8 +42,21 @@ export interface BalanceProfile {
   readonly updatedAt: string;
   /** このProfileを切り出した元のRun（手動設定から保存した場合）。 */
   readonly createdFromRunId?: string;
-  /** 切り出した時点の再現情報。取得できない場合は "UNKNOWN" を入れ、推測で埋めない。 */
+  /**
+   * このProfileを**作成したアプリ**のcommit。
+   *
+   * 【Runの計算commitではない】そのProfileを使ったRunがどのcommitで計算されたかは、
+   * Run側の calculationCommitHistory（simulation/calculationCommit.ts）が持つ。
+   * 混同すると、別のdeployで回したRunの結果をProfile作成時のcommitで説明してしまう。
+   * 取得できない場合は "UNKNOWN" を入れ、推測で埋めない。
+   */
   readonly sourceCommit?: string;
+  /**
+   * このProfileを切り出した元Runの、切り出し時点で最後に計算に使われたcommit。
+   * 元Runが複数commitにまたがっていた場合は「最後に計算したcommit」であり、
+   * 元Runの全Turnを代表しない。履歴が無ければ省略する（推測で埋めない）。
+   */
+  readonly sourceRunCalculationCommit?: string;
   readonly sourceScenarioId?: string;
   readonly sourceSeed?: string;
   readonly sourceSalesModelId?: string;
@@ -327,6 +340,7 @@ export function parseBalanceProfileDocument(
   const optionals = {
     createdFromRunId: readOptionalString(r.createdFromRunId),
     sourceCommit: readOptionalString(r.sourceCommit),
+    sourceRunCalculationCommit: readOptionalString(r.sourceRunCalculationCommit),
     sourceScenarioId: readOptionalString(r.sourceScenarioId),
     sourceSeed: readOptionalString(r.sourceSeed),
     sourceSalesModelId: readOptionalString(r.sourceSalesModelId),
@@ -358,6 +372,9 @@ export function parseBalanceProfileDocument(
     updatedAt,
     ...(optionals.createdFromRunId !== undefined ? { createdFromRunId: optionals.createdFromRunId } : {}),
     ...(optionals.sourceCommit !== undefined ? { sourceCommit: optionals.sourceCommit } : {}),
+    ...(optionals.sourceRunCalculationCommit !== undefined
+      ? { sourceRunCalculationCommit: optionals.sourceRunCalculationCommit }
+      : {}),
     ...(optionals.sourceScenarioId !== undefined ? { sourceScenarioId: optionals.sourceScenarioId } : {}),
     ...(optionals.sourceSeed !== undefined ? { sourceSeed: optionals.sourceSeed } : {}),
     ...(optionals.sourceSalesModelId !== undefined ? { sourceSalesModelId: optionals.sourceSalesModelId } : {}),

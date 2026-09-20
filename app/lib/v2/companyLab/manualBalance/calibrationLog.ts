@@ -12,12 +12,29 @@
 // ダウンロードの実行は既存の Export ボタンと同じ toDownload() パターンへ任せる。
 
 import type { SimulationSession } from "../simulation/types";
+import {
+  isSingleCalculationCommit,
+  resolveCalculationCommitForTurn,
+  type CalculationCommitHistory,
+} from "../simulation/calculationCommit";
 
 /** Runの条件（全行に共通する見出し部分）。 */
 export interface BalanceCalibrationLogHeader {
   readonly runId: string;
   readonly runName: string;
-  readonly sourceCommit: string;
+  /**
+   * 【Export実行時に動いていたアプリのcommit】
+   * このRunのTurnを計算したcommitでは**ない**。混同を避けるため名前で区別する。
+   * 過去Turnの計算commitは行ごとの calculationSourceCommit を見る。
+   */
+  readonly exportAppCommit: string;
+  /**
+   * Runが単一commitだけで計算された場合のみ、そのcommit。
+   * 複数commitにまたがる場合は null（単一値へ潰さない）。履歴が無い古いRunでも null。
+   */
+  readonly runCalculationCommit: string | null;
+  /** 計算commitの区間履歴そのもの（JSON出力にはこれを含める）。 */
+  readonly calculationCommitHistory: CalculationCommitHistory;
   readonly scenarioId: string;
   readonly scenarioVersion: string;
   readonly seed: string;
@@ -34,6 +51,11 @@ export interface BalanceCalibrationLogHeader {
 /** 1Turnぶんの実績行。 */
 export interface BalanceCalibrationLogRow {
   readonly turn: number;
+  /**
+   * そのTurnを実際に計算したcommit。履歴が無い（この機能より前に計算された）Turnは
+   * "UNKNOWN"。現在アプリのcommitで埋めない。
+   */
+  readonly calculationSourceCommit: string;
   readonly manualSalesPriceIndex: number;
   readonly manualRawMarketPriceIndex: number;
   /** 手動指定が無いTurnは null（0ではない）。 */
@@ -60,12 +82,24 @@ export interface BalanceCalibrationLog {
 
 const UNKNOWN = "(なし/不明)";
 
-export function buildBalanceCalibrationLog(session: SimulationSession, exportedAt: string, sourceCommit: string): BalanceCalibrationLog {
+export function buildBalanceCalibrationLog(
+  session: SimulationSession,
+  exportedAt: string,
+  /**
+   * Export実行時に動いているアプリのcommit。
+   * 【Runの計算commitとして使わない】行ごとの計算commitは run.calculationCommitHistory
+   * からのみ解決する（この引数はheaderのexportAppCommitにしか入らない）。
+   */
+  exportAppCommit: string
+): BalanceCalibrationLog {
   const profile = session.run.appliedBalanceProfile;
+  const history = session.run.calculationCommitHistory ?? [];
   const header: BalanceCalibrationLogHeader = {
     runId: session.run.simulationRunId,
     runName: session.run.runName ?? "",
-    sourceCommit,
+    exportAppCommit,
+    runCalculationCommit: isSingleCalculationCommit(history) ? history[0].sourceCommit : null,
+    calculationCommitHistory: history,
     scenarioId: session.run.scenarioId,
     scenarioVersion: session.run.scenarioVersion,
     seed: session.run.seed,
@@ -87,6 +121,7 @@ export function buildBalanceCalibrationLog(session: SimulationSession, exportedA
     const appliedCn = record.appliedSalesReferencePrices.CN?.hoso;
     return {
       turn: record.turn,
+      calculationSourceCommit: resolveCalculationCommitForTurn(history, record.turn),
       manualSalesPriceIndex: record.manualSalesPriceIndex,
       manualRawMarketPriceIndex: record.manualRawMarketPriceIndex,
       manualDividendPayoutRatio: record.manualDividendPayoutRatio,
@@ -109,6 +144,9 @@ export function balanceCalibrationLogToJson(log: BalanceCalibrationLog): string 
 
 const CSV_COLUMNS: readonly (keyof BalanceCalibrationLogRow)[] = [
   "turn",
+  // 【各Turn行に計算commitを出す】Runが複数commitにまたがる場合でも、
+  // 行を見ればそのTurnをどのcommitで計算したかが分かる。
+  "calculationSourceCommit",
   "manualSalesPriceIndex",
   "manualRawMarketPriceIndex",
   "manualDividendPayoutRatio",
@@ -136,7 +174,8 @@ export function balanceCalibrationLogToCsv(log: BalanceCalibrationLog): string {
   const headerCols = [
     "runId",
     "runName",
-    "sourceCommit",
+    // Export実行時のアプリcommit。Runの計算commitではない（行側のcalculationSourceCommitを見る）。
+    "exportAppCommit",
     "scenarioId",
     "scenarioVersion",
     "seed",

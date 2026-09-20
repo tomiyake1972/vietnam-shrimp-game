@@ -91,6 +91,15 @@ import type { ManualBalanceAppliedRecord } from "../../manualBalance/application
  *        Profile本体はRunへ保存しない（localStorage側に置く）。Runが持つのは
  *        「どのProfileからコピーしたか」の記録だけであり、実際に各Turnへ適用
  *        された値の正本は従来どおり resumePayload.manualBalanceApplied である。
+ *
+ *        あわせて SimulationRun.calculationCommitHistory を追加した
+ *        （そのRunのどのTurn区間をどのsource commitで計算したかの再現性metadata）。
+ *        【なぜv8へ上げないか】v7はまだどのintegration/RCへも統合されておらず
+ *        （実測: integration/v2-rc-20260830 は現在も5）、v7として保存された
+ *        永続データは本branchのローカル検証以外に存在しない。すなわちv7の契約は
+ *        まだ外部に公開されていないため、v7の定義へ追記するのが最小の変更であり、
+ *        既に配布済みの契約を破ることにはならない。どちらのフィールドも
+ *        optionalの追加のみでマイグレーション不要、旧v1〜v6データはそのまま読める。
  */
 export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 7;
 

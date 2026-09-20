@@ -387,7 +387,7 @@ test("BP-LOG: Calibration LogにRun条件とTurn別実績が揃い、未記録Ru
 
   // Run条件（§11の必須項目）。
   assert.equal(log.header.runId, "bp-log");
-  assert.equal(log.header.sourceCommit, "abc1234");
+  assert.equal(log.header.exportAppCommit, "abc1234");
   assert.equal(log.header.scenarioId, SCENARIO_ID);
   assert.equal(log.header.seed, SEED);
   assert.equal(log.header.balanceProfileName, "Block-A");
@@ -410,7 +410,7 @@ test("BP-LOG: Calibration LogにRun条件とTurn別実績が揃い、未記録Ru
   const csv = balanceCalibrationLogToCsv(log);
   const lines = csv.split("\n");
   assert.equal(lines.length, 7, "ヘッダ1行 + 6Turn");
-  assert.ok(lines[0].startsWith("runId,runName,sourceCommit,"));
+  assert.ok(lines[0].startsWith("runId,runName,exportAppCommit,"));
   assert.ok(lines[1].includes("bp-log"));
   assert.ok(lines[1].includes("Block-A"));
   // 未設定の配当性向は空欄（0と書かない）。
