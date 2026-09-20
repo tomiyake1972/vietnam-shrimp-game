@@ -104,7 +104,14 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-type RunPhase = "idle" | "running" | "stopping";
+/**
+ * 【MANUAL-BALANCE-1受入前修正】"savingBalance" を追加した。
+ *
+ * バランス調整の保存中は、Turn進行ボタン（busy = phase !== "idle" で無効化）と
+ * パネルの編集を同時にロックする。保存が成立していないscheduleを持ったまま
+ * Turnが始まることを、表示上ではなく状態機械として防ぐ。
+ */
+type RunPhase = "idle" | "running" | "stopping" | "savingBalance";
 
 /** 表示に必要な最小限。実行中は session から、復元時は保存済み run から埋まる。 */
 interface ConsoleView {
@@ -181,6 +188,16 @@ export function ManagementConsole() {
    * 受けない）。
    */
   const runInProgress = useRef(false);
+
+  /**
+   * 【MANUAL-BALANCE-1受入前修正】バランス調整の保存が進行中かどうか。
+   *
+   * runInProgress とまったく同じ理由で ref にしている。phase(state)だけでは、
+   * 同一イベントティック内に「保存」→「+1」が連続で届いた場合、2つ目のハンドラーが
+   * 古い phase を見て通過し得る。保存が成立していないscheduleを持ったまま
+   * Turnが始まることを同期的に防ぐ。
+   */
+  const balanceSaveInProgress = useRef(false);
 
   // --- 【Phase 7・Manual Override】会社ごとの経営モードと、PLAYER会社の当ターン意思決定 ---
   // 未確定は STANDARD_AI 相当（指示§3「新しいSimulation Run作成時は5社すべてSTANDARD_AI」）。
@@ -510,20 +527,55 @@ export function ManagementConsole() {
   );
 
   /**
-   * 【MANUAL-BALANCE-1】手動バランス調整のスケジュールを適用して保存する。
+   * 【MANUAL-BALANCE-1受入前修正】手動バランス調整のスケジュールを保存する。
    *
-   * Vision Calibrationとまったく同じ経路をたどる（session更新 → 即persist）。
-   * 保存が成立しないまま「適用予定」と表示しないよう、保存失敗は既存の
-   * persist() の失敗表示（persistenceBlocked / 保存先の明示）がそのまま担当する。
+   * 【なぜVision Calibrationと同じ「先にsetView→あとでpersist」にしないか】
+   * このパネルは「保存済み・Turn Nで適用予定」という保証をGMへ明示的に表示する。
+   * 先にviewへ反映すると、persistが成立する前に（あるいは失敗したあとでも）
+   * その保証表示が出てしまい、実際には正本へ保存されていないscheduleを
+   * 「保存済み」と見せることになる。表示している保証の強さが違うため、
+   * 既存方式を根拠に保存前反映を許容しない。
+   *
+   * 【状態遷移】入力中 → 保存中（phase="savingBalance"）→ persist成功 →
+   * はじめて正式なviewへ確定し「保存済み・適用予定」を表示する。
+   * 失敗時はviewを一切更新しないため、正式なscheduleは保存前の値のまま残る
+   * （パネル側も入力内容を保持し「入力中」のままにする）。
+   *
+   * 【Turn進行との排他】phaseを"savingBalance"にすることでrun()の
+   * `phase !== "idle"` ガードとボタンのdisabledが同時に効く。さらに同一
+   * イベントティック内の連打に備え、run()と同じ規約で同期的なrefも立てる。
    */
   const handleApplyManualBalance = useCallback(
-    (schedule: ManualBalanceSchedule) => {
-      if (!view?.session || isGameFinished(view.run)) return;
-      const updated = applyManualBalanceScheduleToSession(view.session, schedule);
-      setView(viewFromSession(updated));
-      void persist(updated, companyControlModes, confirmedPlayerDecisions);
+    async (schedule: ManualBalanceSchedule): Promise<boolean> => {
+      if (!view?.session || isGameFinished(view.run)) return false;
+      // 実行中・保存中の再入を拒否する（refは同期的に確定するため連打にも耐える）。
+      if (phase !== "idle" || restoring || balanceSaveInProgress.current) return false;
+
+      balanceSaveInProgress.current = true;
+      setPhase("savingBalance");
+      setErrorMessage(null);
+      const candidate = applyManualBalanceScheduleToSession(view.session, schedule);
+      try {
+        const ok = await persist(candidate, companyControlModes, confirmedPlayerDecisions);
+        if (!ok) {
+          // 【保存失敗】viewを更新しない＝保存前のscheduleが正式な値として残る。
+          // persistenceBlockedもpersist()側でtrueになり、Turn進行が止まる。
+          setErrorMessage(
+            "バランス調整の保存に失敗しました。設定は適用されていません" +
+              "（入力内容は残してあります。画面下部の保存先表示を確認し、保存できる状態になってから再度お試しください）。"
+          );
+          return false;
+        }
+        // 【保存成功時のみ正式反映】ここで初めてライブsessionへ確定する。
+        // liveSessionRegistryへの反映は既存のview依存useEffectが担当する。
+        setView(viewFromSession(candidate));
+        return true;
+      } finally {
+        setPhase("idle");
+        balanceSaveInProgress.current = false;
+      }
     },
-    [view, companyControlModes, confirmedPlayerDecisions, persist]
+    [view, phase, restoring, companyControlModes, confirmedPlayerDecisions, persist]
   );
 
   const runInternal = useCallback(
@@ -689,6 +741,11 @@ export function ManagementConsole() {
   const run = useCallback(
     async (turns: number) => {
       if (phase !== "idle" || restoring) return;
+      // 【MANUAL-BALANCE-1受入前修正】バランス調整の保存中はTurnを開始しない。
+      // 保存ボタン直後に+1が連打された場合、phase(state)はまだ更新前の値を
+      // 返し得るため、同期的なrefで確実に止める（未保存scheduleを持った
+      // live sessionでTurnを開始させない）。
+      if (balanceSaveInProgress.current) return;
       // 【指示§10】run()の再入防止（stateのphaseチェックだけでは、同じイベント
       // ティック内での連打・二重クリックによる並行実行を防ぎきれない。refは
       // 同期的に確定するため、ここで即座に確保する）。

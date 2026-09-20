@@ -41,8 +41,15 @@ type ApplicationMode = "singleTurn" | "continuing" | "perTurnList";
 
 interface BalanceAdjustmentPanelProps {
   readonly session: SimulationSession | null;
-  /** 新しいスケジュールを適用して保存する。 */
-  readonly onApply: (schedule: ManualBalanceSchedule) => void;
+  /**
+   * 新しいスケジュールを保存する。
+   *
+   * 【必ず保存の成否を返すこと】このパネルは「保存済み・Turn Nで適用予定」という
+   * 保証をGMへ表示する。保存が成立したかどうかを呼び出し側から受け取らないと、
+   * 正本へ届いていない設定を「保存済み」と表示してしまう。
+   * trueを返すのは、サーバー（正本）への保存が成功し、ライブsessionへ確定した場合だけ。
+   */
+  readonly onApply: (schedule: ManualBalanceSchedule) => Promise<boolean>;
   /** 処理中は編集・保存をロックする。 */
   readonly busy: boolean;
   /** Game End後など、これ以上編集させない場合。 */
@@ -128,6 +135,11 @@ export function BalanceAdjustmentPanel({ session, onApply, busy, locked }: Balan
   const nextTurn = session ? session.state.scenarioState.currentTurn : 1;
   const [draft, setDraft] = useState<DraftState>(() => emptyDraft(nextTurn));
   const [dirty, setDirty] = useState(false);
+  /**
+   * 【受入前修正】保存要求を出してから、その成否が確定するまでの状態。
+   * この間は「保存済み・適用予定」を絶対に表示しない（保存中と明示する）。
+   */
+  const [saving, setSaving] = useState(false);
 
   if (!session) {
     return <p className="text-xs text-slate-400">Runを開始すると、ここから配当性向・市場価格指数を手動で調整できます。</p>;
@@ -136,30 +148,47 @@ export function BalanceAdjustmentPanel({ session, onApply, busy, locked }: Balan
   const schedule = session.state.config.manualBalanceOverrides;
   const applied = session.manualBalanceApplied;
   const { settings: draftSettings, error: draftError } = draftToSettings(draft);
-  const editable = !busy && !locked;
+  // 保存中も編集不可（保存要求に出したscheduleと画面の入力がずれないようにする）。
+  const editable = !busy && !locked && !saving;
 
   const update = (patch: Partial<DraftState>): void => {
     setDraft((prev) => ({ ...prev, ...patch }));
     setDirty(true);
   };
 
-  const commit = (nextSchedule: ManualBalanceSchedule): void => {
-    onApply(nextSchedule);
-    setDraft(emptyDraft(nextTurn));
-    setDirty(false);
+  /**
+   * 保存を要求し、**成功した場合にだけ**入力欄を空へ戻す。
+   *
+   * 失敗時は入力内容とdirtyを保持する。これにより
+   *   ・GMの入力が消えない
+   *   ・状態表示が「入力中（未保存）」のまま残り、「保存済み」とは絶対に出ない
+   * の両方が同時に成り立つ。
+   */
+  const commit = async (nextSchedule: ManualBalanceSchedule): Promise<void> => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const ok = await onApply(nextSchedule);
+      if (ok) {
+        setDraft(emptyDraft(nextTurn));
+        setDirty(false);
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleApply = (): void => {
+  const handleApply = async (): Promise<void> => {
     if (!editable || !draftSettings) return;
     const recordedAt = new Date().toISOString();
     const fromTurn = Math.max(nextTurn, Math.round(Number(draft.fromTurn) || nextTurn));
 
     if (draft.mode === "singleTurn") {
-      commit(withManualBalancePerTurnApplied(schedule, nextTurn, draftSettings, recordedAt));
+      await commit(withManualBalancePerTurnApplied(schedule, nextTurn, draftSettings, recordedAt));
       return;
     }
     if (draft.mode === "continuing") {
-      commit(withManualBalanceContinuingApplied(schedule, fromTurn, draftSettings, recordedAt));
+      await commit(withManualBalanceContinuingApplied(schedule, fromTurn, draftSettings, recordedAt));
       return;
     }
     // perTurnList: 指定範囲の各Turnへ個別エントリを作る（ターン別は継続より優先される）。
@@ -168,23 +197,30 @@ export function BalanceAdjustmentPanel({ session, onApply, busy, locked }: Balan
     for (let turn = fromTurn; turn <= toTurn; turn += 1) {
       next = withManualBalancePerTurnApplied(next, turn, draftSettings, recordedAt);
     }
-    commit(next);
+    await commit(next);
   };
 
-  const handleRelease = (): void => {
+  const handleRelease = async (): Promise<void> => {
     if (!editable) return;
-    commit(withManualBalanceReleased(schedule, nextTurn, new Date().toISOString()));
+    await commit(withManualBalanceReleased(schedule, nextTurn, new Date().toISOString()));
   };
 
   const resolvedNext = resolveManualBalanceForTurn(schedule, nextTurn);
   const hasPendingForNextTurn = resolvedNext.appliedSource.kind !== "none";
 
-  // 【3状態表示】入力中／保存済み・適用予定／Turn○で適用済み。
-  const stateLabel = dirty
-    ? { text: "入力中（未保存）", testId: "balance-state-editing", className: "bg-amber-900/50 text-amber-300" }
-    : hasPendingForNextTurn
-      ? { text: `保存済み・Turn ${nextTurn} で適用予定`, testId: "balance-state-saved", className: "bg-sky-900/50 text-sky-300" }
-      : { text: "手動補正なし", testId: "balance-state-none", className: "bg-slate-800 text-slate-400" };
+  // 【状態表示】保存中 ＞ 入力中 ＞ 保存済み・適用予定 ＞ 手動補正なし の優先順位。
+  //
+  // 【保存中を最優先にする理由】保存要求を出してから成否が確定するまでの間に
+  // 「保存済み・適用予定」を出すと、正本へ届いていない設定を保証済みとして
+  // 見せることになる。hasPendingForNextTurn は保存成功後に確定したsessionから
+  // 導出されるが、その確定より前にこのバッジが出ないよう saving で覆う。
+  const stateLabel = saving
+    ? { text: "保存中…", testId: "balance-state-saving", className: "bg-slate-700 text-slate-200" }
+    : dirty
+      ? { text: "入力中（未保存）", testId: "balance-state-editing", className: "bg-amber-900/50 text-amber-300" }
+      : hasPendingForNextTurn
+        ? { text: `保存済み・Turn ${nextTurn} で適用予定`, testId: "balance-state-saved", className: "bg-sky-900/50 text-sky-300" }
+        : { text: "手動補正なし", testId: "balance-state-none", className: "bg-slate-800 text-slate-400" };
 
   const previewFrom = nextTurn;
   const previewTo = Math.min(nextTurn + 7, session.run.requestedTurns);
@@ -306,7 +342,7 @@ export function BalanceAdjustmentPanel({ session, onApply, busy, locked }: Balan
         <button
           type="button"
           disabled={!editable || draftSettings === null}
-          onClick={handleApply}
+          onClick={() => void handleApply()}
           data-testid="balance-apply"
           className="rounded border border-sky-700 bg-sky-950/40 px-2 py-1 text-[11px] hover:bg-sky-900/40 disabled:opacity-40"
         >
@@ -315,7 +351,7 @@ export function BalanceAdjustmentPanel({ session, onApply, busy, locked }: Balan
         <button
           type="button"
           disabled={!editable}
-          onClick={handleRelease}
+          onClick={() => void handleRelease()}
           data-testid="balance-release"
           className="rounded border border-slate-600 px-2 py-1 text-[11px] hover:bg-slate-800 disabled:opacity-40"
         >
@@ -376,7 +412,7 @@ export function BalanceAdjustmentPanel({ session, onApply, busy, locked }: Balan
           seed: session.run.seed,
           salesModelId: session.state.config.salesModelId ?? null,
         }}
-        onImport={commit}
+        onImport={(imported) => void commit(imported)}
         editable={editable}
       />
 
