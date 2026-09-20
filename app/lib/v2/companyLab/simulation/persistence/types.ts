@@ -94,14 +94,49 @@ import type { ManualBalanceAppliedRecord } from "../../manualBalance/application
  *
  *        あわせて SimulationRun.calculationCommitHistory を追加した
  *        （そのRunのどのTurn区間をどのsource commitで計算したかの再現性metadata）。
- *        【なぜv8へ上げないか】v7はまだどのintegration/RCへも統合されておらず
- *        （実測: integration/v2-rc-20260830 は現在も5）、v7として保存された
- *        永続データは本branchのローカル検証以外に存在しない。すなわちv7の契約は
- *        まだ外部に公開されていないため、v7の定義へ追記するのが最小の変更であり、
- *        既に配布済みの契約を破ることにはならない。どちらのフィールドも
- *        optionalの追加のみでマイグレーション不要、旧v1〜v6データはそのまま読める。
+ *        どちらのフィールドもoptionalの追加のみでマイグレーション不要、
+ *        旧v1〜v6データはそのまま読める。
+ *
+ *        【当時の判断と、その後の状況変化（記録として残す）】
+ *        v7を導入した時点では、v7はまだどのintegration/RCへも統合されておらず、
+ *        v7として保存された永続データはfeature branchのローカル検証以外に
+ *        存在しなかった。そのため「まだ外部へ公開していない契約」として、
+ *        同じv7の定義へ追記する判断を取っていた。
+ *        その後 v7 は integration/v2-rc-20260830 へ統合され、Preview環境でも
+ *        利用されている。すなわち v7 の契約は既に公開済みであり、
+ *        以後は v7 へ追記せず、新しい世代（v8）を切る。
+ *   v8 … 【年間純利益ベース配当（Annual Net-Income-Based Dividend Settlement）】
+ *        年度末（Q4）の決算後に行う年間配当精算の監査情報を、確定履歴へ追加した。
+ *        追加したフィールド（いずれもoptional）:
+ *          (a) CompanyQuarterRecord.dividendResults[].annualSettlement
+ *              対象年度 / 年間純利益（Q1〜Q4の符号付き合計）/ 実際に使った配当性向 /
+ *              その率の出所（MANUAL_OVERRIDE | STANDARD_AI）/ 年間配当目標 /
+ *              同年度の既支払配当 / 年末追加目標 / 配当可能上限 / 実支払額 /
+ *              未達額 / 未達理由。
+ *          (b) CompanyQuarterRecord.dividendResults[].annualSettlementUnavailableReason
+ *              年間精算を実行できなかった理由（対象年度のQ1〜Q4が揃っていない等）。
+ *          (c) CompanyFinancialQuarterResult.cashFlow.dividendsPaid
+ *              その四半期に実際に支払った配当（財務CFの内訳。financingCashFlowには
+ *              既にマイナスとして含まれているため二重控除しない）。
+ *          (d) CompanyDecisionInput.annualDividendSettlement
+ *              Q4意思決定時点で確定した「年間精算の意思」（配当性向とその出所。
+ *              金額は含まない）。decisions経由で確定履歴へ往復する。
+ *
+ *        【なぜv8を切るのか】v7は既に integration/v2-rc-20260830 へ統合され、
+ *        Previewでも利用されている＝契約が外部へ公開済みである。追加fieldは
+ *        すべてoptionalでmigrationは不要だが、永続化契約の新しい世代として
+ *        版を分け、「v7で保存されたRunにはこれらのfieldが無い」ことを
+ *        版番号で識別できるようにする。
+ *
+ *        【互換方針】
+ *          - 旧 v1〜v7 の保存物は、そのまま v8 のコードで読める（migration不要）。
+ *          - 旧Runでは上記fieldが存在しない。これは「配当0」ではなく
+ *            「この機能が無かった頃の記録＝UNKNOWN / 未記録」であり、
+ *            画面・Export は推測で 0 や現在のparameter値を埋めない。
+ *          - 現在より新しいschema（v9以降）だけを拒否する既存方針は維持する
+ *            （前方互換はしない。知らない契約のデータを推測で解釈しないため）。
  */
-export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 7;
+export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 8;
 
 /**
  * 【schemaVersion 5・Turn14以降Save/Resume停止BLOCKER修正】

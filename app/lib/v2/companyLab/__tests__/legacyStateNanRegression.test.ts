@@ -116,11 +116,21 @@ test("INT-NA-2: Q4でも財務入力が有限でなければ配当skip（NaNを�
 });
 
 /**
- * INT-NA-2b: 確定済み四半期損益が無い（null）場合は、従来どおり
- * DIVIDEND_SKIPPED_NO_CURRENT_EARNINGS で見送る。INT-NA-2の新Gateが
- * 「Net Income未確定」という正常系まで奪っていないことの確認。
+ * INT-NA-2b: 確定済み四半期損益が無い（null）場合。
+ *
+ * 【年間純利益ベースへの変更に伴う期待値の更新】
+ * 旧契約では「直近確定四半期の純利益が正」を policy 側の Gate E が要求していたため、
+ * null は DIVIDEND_SKIPPED_NO_CURRENT_EARNINGS で見送られていた。
+ * 年間基準では、配当額の判断材料は年間純利益であり、それはQ4決算後にしか決まらない。
+ * そのため policy 段階では null を理由に打ち切らず、年間精算側が
+ * 「年度Q1〜Q4が揃わない」＝ settlement unavailable として支払わない
+ * （0で補完しない。CASE L）。
+ *
+ * ここで固定したいのは INT-NA の本来の意図、すなわち
+ * 「null を NaN 扱いして壊れた金額を生成しない」ことであり、それは維持されている
+ * （policy は金額を一切計算しないため、NaN の配当額は構造的に発生しない）。
  */
-test("INT-NA-2b: Net Income未確定(null)はNaN扱いではなく従来どおりの見送り", () => {
+test("INT-NA-2b: Net Income未確定(null)でもNaNを生成しない（年間基準では年度側で判定する）", () => {
   const result = buildStandardAiDividendDecision({
     companyId: "TEST",
     period: period(2020, 4),
@@ -132,19 +142,27 @@ test("INT-NA-2b: Net Income未確定(null)はNaN扱いではなく従来どお�
     newCapexProposalCount: 0,
     params: STANDARD_AI_PARAMETERS_V1,
   });
+  // Turn開始時の金額指定配当は行わない（年間精算はQ4決算後）。NaNの金額も生成しない。
   assert.equal(result.dividendDecision, undefined);
+  assert.equal(result.baseDividendUsd, 0);
   assert.deepEqual(
     result.diagnostics.map((d) => d.code),
-    ["DIVIDEND_SKIPPED_NO_CURRENT_EARNINGS"]
+    ["DIVIDEND_PROPOSED"],
+    "nullは policy 段階の打ち切り理由にならない（年度が揃わなければ精算側が見送る）"
   );
+  // 年間精算へ渡る率は有限であること（壊れた値を下流へ流さない）。
+  assert.equal(Number.isFinite(result.annualSettlementIntent?.payoutRatio ?? Number.NaN), true);
 });
 
 /**
- * INT-NA-3: Net Incomeが有限の正値で、stateも健全なら、DIV-4の仕様どおり
- * 有限の配当額（当期純利益×payoutRatio）が算出される。
+ * INT-NA-3: stateが健全なら、有限の配当性向が年間精算へ渡る。
  * また、有限でない配当要求は「0扱い」ではなく構造的な誤用として弾かれる。
+ *
+ * 【期待値の更新】policy段階で金額を算出しなくなったため、
+ * 「有限の配当額」の検査対象を、年間精算へ渡る有限の配当性向へ置き換えた。
+ * 金額側（年間純利益×率のクランプ）は annualDividendSettlement.test.ts が担当する。
  */
-test("INT-NA-3: 正常な入力では有限の配当額。有限でない要求額・上限は明示的に弾く", () => {
+test("INT-NA-3: 正常な入力では有限の配当性向。有限でない要求額・上限は明示的に弾く", () => {
   const healthy: CompanyFinanceState = { ...legacyFinanceState(), distributableEarnings: usd(200_000_000) };
   const result = buildStandardAiDividendDecision({
     companyId: "TEST",
@@ -157,9 +175,10 @@ test("INT-NA-3: 正常な入力では有限の配当額。有限でない要求�
     newCapexProposalCount: 0,
     params: { ...STANDARD_AI_PARAMETERS_V1, dividendBasePayoutRatio: 0.15 },
   });
-  const applied = result.dividendDecision?.dividendAmountUsd;
-  assert.equal(Number.isFinite(applied), true);
-  assert.equal(applied, 20_000_000 * 0.15);
+  const ratio = result.annualSettlementIntent?.payoutRatio;
+  assert.equal(Number.isFinite(ratio), true);
+  assert.equal(ratio, 0.15);
+  assert.equal(Number.isFinite(result.maxDividendUsd), true, "配当可能上限も有限であること");
 
   // 有限でない要求額を黙って0にせず、原因の分かる例外で止める。
   assert.throws(() => resolveDividendDecision({ dividendAmountUsd: Number.NaN }, healthy), DividendValidationError);

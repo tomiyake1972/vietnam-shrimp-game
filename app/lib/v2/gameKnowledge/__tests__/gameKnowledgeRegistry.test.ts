@@ -212,7 +212,7 @@ test("AMM-GK-15: CAPEXに建設リードタイムがあり、決定した四半�
   assert.match(entry!.explanation, /完成/);
 });
 
-test("AMM-GK-16: DIV-4の配当ルールが現行実装と一致する", () => {
+test("AMM-GK-16: 年間純利益ベースの配当ルールが現行実装と一致する", () => {
   const entry = getGameKnowledgeById("FINANCE.DIVIDEND_POLICY");
   assert.ok(entry);
   const text = entry!.explanation;
@@ -220,8 +220,13 @@ test("AMM-GK-16: DIV-4の配当ルールが現行実装と一致する", () => {
   assert.match(text, /healthy/);
   assert.match(text, /Crisis State が NORMAL/);
   assert.match(text, /新規CAPEX提案が0件/);
-  assert.match(text, /当期純利益 > 0/);
   assert.match(text, /分配可能利益 > 0/);
+  // 【年間基準であることを明示していること】
+  // 旧記述は「直近確定四半期の当期純利益 > 0」というQ3基準のgateを説明していた。
+  // 現行実装ではその判定は年間純利益へ移っているため、ここもそれに合わせる。
+  assert.match(text, /その年度Q1〜Q4の当期純利益の合計/, "配当の算定baseが年間合計だと説明されていない");
+  assert.match(text, /既に支払った配当/, "同年度の既支払を差し引くことが説明されていない");
+  assert.doesNotMatch(text, /直近確定四半期の当期純利益 > 0/, "Q3基準の旧gate説明が残っている");
   // 配当性向は現在のStandard AI parameterと一致する（Registryが別の値を持たない）。
   assert.ok(text.includes(String(STANDARD_AI_PARAMETERS_V1.dividendBasePayoutRatio)), "配当性向がparameterと一致しない");
   assert.match(text, /フロー/);

@@ -660,6 +660,7 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
       const previousFin = previousRecord?.financialResults.find((f) => f.companyId === companyId);
       const profileBias = managementProfileId ? MANAGEMENT_PROFILES[managementProfileId].dividendPropensityRatio : null;
       const dividendReasonCodes = (trace?.constrained ?? []).map((i) => i.label).filter((l) => l.includes("DIVIDEND_")).join("|");
+      const annualSettlement = dividendResult?.annualSettlement;
       dividend.push({
         companyId,
         turn,
@@ -672,13 +673,31 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
         distributableEarningsAfterUsd: dividendResult ? num(dividendResult.distributableEarningsAfterUsd) : null,
         basePayoutRatio: STANDARD_AI_PARAMETERS_V1.dividendBasePayoutRatio,
         profileBiasRatio: profileBias,
-        effectivePayoutRatio: profileBias === null ? null : STANDARD_AI_PARAMETERS_V1.dividendBasePayoutRatio * (1 + profileBias),
+        // 【参考値。当時の実効率として使わない】現在のparameterからの再計算であり、
+        // 手動指定（MANUAL_OVERRIDE）があった過去Runの率とは一致しない。
+        // 実際に使われた率は下の appliedPayoutRatio（Engineの記録）を見ること。
+        referencePayoutRatioFromCurrentParams:
+          profileBias === null ? null : STANDARD_AI_PARAMETERS_V1.dividendBasePayoutRatio * (1 + profileBias),
         maxDividendUsd: dividendResult ? num(dividendResult.maxDividendUsd) : null,
         requestedDividendUsd: dividendResult ? num(dividendResult.requestedDividendUsd) : decision ? num(decision.dividendDecision?.dividendAmountUsd) ?? 0 : null,
         appliedDividendUsd: dividendResult ? num(dividendResult.appliedDividendUsd) : null,
         rejected: dividendResult ? (dividendResult.rejected ? "TRUE" : "FALSE") : "",
         rejectionReason: dividendResult?.rejectionReason ?? "",
         cumulativeDividendUsd: dividendResult ? num(dividendResult.cumulativeDividendUsd) : null,
+        // ---- 年間純利益ベース配当の実績（Engineが記録した値の転記のみ。再計算しない） ----
+        // 記録が無い行（Q1〜Q3・精算未実行年度・この機能より前の旧Run）は
+        // null / 空欄のままにし、現在パラメータから値を捏造しない。
+        dividendTargetYear: annualSettlement ? annualSettlement.dividendTargetYear : null,
+        annualNetIncomeUsd: annualSettlement ? annualSettlement.annualNetIncomeUsd : null,
+        appliedPayoutRatio: annualSettlement ? annualSettlement.appliedPayoutRatio : null,
+        payoutRatioSource: annualSettlement ? annualSettlement.payoutRatioSource : "",
+        annualDividendTargetUsd: annualSettlement ? annualSettlement.annualDividendTargetUsd : null,
+        paidDividendEarlierInYearUsd: annualSettlement ? annualSettlement.paidDividendEarlierInYearUsd : null,
+        yearEndAdditionalTargetUsd: annualSettlement ? annualSettlement.yearEndAdditionalTargetUsd : null,
+        annualSettlementAppliedDividendUsd: annualSettlement ? annualSettlement.appliedDividendUsd : null,
+        annualDividendShortfallUsd: annualSettlement ? annualSettlement.annualDividendShortfallUsd : null,
+        shortfallReason: annualSettlement?.shortfallReason ?? "",
+        settlementUnavailableReason: dividendResult?.annualSettlementUnavailableReason ?? "",
         diagnosticReasonCodes: dividendReasonCodes,
       });
 

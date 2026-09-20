@@ -298,6 +298,127 @@ test("P2-18: 現行より新しいスキーマ版だけを拒否する（追加�
   assert.throws(() => parseStoredSimulationRun(JSON.stringify({ schemaVersion: 999, run: {}, dataset: {} }), "x"));
 });
 
+// ---------------------------------------------------------------------
+// schemaVersion v8（年間純利益ベース配当）の互換性
+//
+// 【何を守るか】v8で追加したのは annualSettlement 等のoptional fieldだけであり、
+// migrationは作っていない。したがって
+//   ・v1〜v7で保存された既存Runが、v8のコードでそのまま読めること
+//   ・新field が無い旧Runを「配当0」と誤読せず、未記録として区別できること
+//   ・現在より新しい版（v9以降）だけを拒否する既存方針が崩れていないこと
+// を、版番号を直接書いて固定する（CURRENT からの相対式だけだと、
+// 版を上げた瞬間に検査対象がずれて素通りしてしまうため）。
+// ---------------------------------------------------------------------
+
+test("P2-18b: schemaVersion は 8（年間純利益ベース配当で 7→8）", () => {
+  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 8);
+});
+
+test("P2-18c: v1〜v8 の保存物はすべて読める（migration不要・追加的変更のみ）", () => {
+  for (const version of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    assert.ok(isReadableSimulationRunSchema(version), `v${version} が読めない判定になっている`);
+  }
+});
+
+test("P2-18d: 現在より新しい schema（v9以降）は拒否する", () => {
+  for (const version of [9, 10, 999]) {
+    assert.ok(!isReadableSimulationRunSchema(version), `v${version} を読める判定にしてはいけない`);
+  }
+  // 版番号として壊れている値も拒否する（0・負数・小数・非数値）。
+  for (const broken of [0, -1, 1.5, "8", null, undefined, {}]) {
+    assert.ok(!isReadableSimulationRunSchema(broken), `${JSON.stringify(broken)} を読める判定にしてはいけない`);
+  }
+  assert.throws(() => parseStoredSimulationRun(JSON.stringify({ schemaVersion: 9, run: {}, dataset: {} }), "x"));
+});
+
+test("P2-18e: v7として保存された（annualSettlementを持たない）Runが、v8のコードでそのまま読める", () => {
+  const session = runTurns(4);
+  const dataset = buildDatasetFromSession(session);
+
+  // 実際にv7時代に保存されていた形を再現する: 確定履歴から
+  // v8で新設したfieldだけを取り除き、schemaVersion を 7 にする。
+  const v7History = session.state.history.map((record) => ({
+    ...record,
+    dividendResults: record.dividendResults?.map((d) => {
+      const copy: Record<string, unknown> = { ...d };
+      delete copy.annualSettlement;
+      delete copy.annualSettlementUnavailableReason;
+      return copy;
+    }),
+    financialResults: record.financialResults.map((f) => {
+      const cashFlow: Record<string, unknown> = { ...f.cashFlow };
+      delete cashFlow.dividendsPaid;
+      return { ...f, cashFlow };
+    }),
+  }));
+  const v7Stored = {
+    schemaVersion: 7,
+    run: session.run,
+    dataset,
+    savedAt: AT,
+    resumePayload: { state: { ...session.state, history: v7History } },
+  };
+
+  // 読める（例外を投げない）こと。
+  const parsed = parseStoredSimulationRun(JSON.stringify(v7Stored), "v7-run");
+  assert.equal(parsed.schemaVersion, 7);
+  assert.ok(parsed.run);
+  assert.ok(parsed.dataset);
+
+  // 【0で埋めない】新fieldは「未記録」であって「配当0」ではない。
+  const restoredHistory = (parsed.resumePayload as { state: { history: readonly { dividendResults?: readonly Record<string, unknown>[] }[] } }).state.history;
+  let checkedDividendRows = 0;
+  for (const record of restoredHistory) {
+    for (const d of record.dividendResults ?? []) {
+      checkedDividendRows += 1;
+      assert.equal(d.annualSettlement, undefined, "旧Runに annualSettlement が生えてはいけない");
+      assert.equal(d.annualSettlementUnavailableReason, undefined, "旧Runに未実行理由が生えてはいけない");
+      // 「未記録」を判定できること（hasOwnProperty がfalseであること）。
+      assert.equal(Object.prototype.hasOwnProperty.call(d, "annualSettlement"), false);
+    }
+  }
+  assert.ok(checkedDividendRows > 0, "配当行が1件も無く、この検査が空振りしている");
+
+  // 要約も従来どおり作れる（v7の保存物が一覧に出せなくなっていないこと）。
+  const summary = toSimulationRunSummary(parsed);
+  assert.equal(summary.simulationRunId, session.run.simulationRunId);
+});
+
+test("P2-18f: v8として保存されたRunは新fieldを保持したまま読み戻せる", () => {
+  // 年度末（Q4）まで進めて、実際に annualSettlement が載るRunを作る。
+  const session = runTurns(4);
+  const stored = {
+    schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
+    run: session.run,
+    dataset: buildDatasetFromSession(session),
+    savedAt: AT,
+    resumePayload: { state: session.state },
+  };
+  const parsed = parseStoredSimulationRun(JSON.stringify(stored), "v8-run");
+  assert.equal(parsed.schemaVersion, 8);
+
+  const history = (parsed.resumePayload as {
+    state: { history: readonly { turn: number; dividendResults?: readonly { annualSettlement?: Record<string, unknown> }[] }[] };
+  }).state.history;
+  const q4 = history.find((r) => r.turn === 4);
+  assert.ok(q4, "Q4の記録が無い");
+  const settled = (q4.dividendResults ?? []).filter((d) => d.annualSettlement !== undefined);
+  assert.ok(settled.length > 0, "v8のRunに年間精算が1件も記録されていない");
+  for (const d of settled) {
+    const a = d.annualSettlement!;
+    // JSON往復後も数値・文字列として無傷であること。
+    assert.equal(typeof a.dividendTargetYear, "number");
+    assert.equal(typeof a.annualNetIncomeUsd, "number");
+    assert.equal(typeof a.appliedPayoutRatio, "number");
+    assert.equal(typeof a.payoutRatioSource, "string");
+    assert.equal(typeof a.annualDividendTargetUsd, "number");
+    assert.equal(typeof a.paidDividendEarlierInYearUsd, "number");
+    assert.equal(typeof a.yearEndAdditionalTargetUsd, "number");
+    assert.equal(typeof a.appliedDividendUsd, "number");
+    assert.equal(typeof a.annualDividendShortfallUsd, "number");
+  }
+});
+
 test("P2-19: 要約は dataset を読まずに作れる（一覧のたびに全件読まない）", () => {
   const session = runTurns(2);
   const summary = toSimulationRunSummary({

@@ -30,6 +30,7 @@
 import { ENGINE_VERSION_V2 } from "../../core/version";
 import { PeriodV2 } from "../../core/period";
 import { CompanyId } from "../../sales/types";
+import { FISCAL_QUARTERS_PER_YEAR } from "../../finance/annualDividend";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabConfig, CompanyLabError, CompanyLabState, CompanyQuarterRecord } from "../types";
 import { advanceCompanyLabQuarter, buildPublicMarketInfo, initializeCompanyLab } from "../runner";
 import { PublicMarketInfo } from "../types";
@@ -185,13 +186,30 @@ export interface CompanyLabQuarterFlowService {
 }
 
 /**
- * 【ENG-COMPANYLAB-RESUME-HISTORY-1】resume時に注入する確定履歴record（古い→新しい）。
+ * 【ENG-COMPANYLAB-RESUME-HISTORY-1 → 年間純利益ベース配当で4件へ拡張】
+ * resume時に注入する確定履歴record（古い→新しい）。全履歴はロードしない。
  *
- * 直近2件だけを返す。全履歴はロードしない。
- * latest はすでに呼び出し側が取得済みのものを受け取り、二重readを避ける。
- * 1つ前のturnが履歴indexに存在するときだけ追加で1件読む。
+ * 【なぜ2件では足りなくなったのか】
+ * 導入当初のconsumer（marketDemandObservation の固定lag=2 等、市場系の継続処理）は
+ * 直近2件以下で足りるため、復元は直近2件に絞っていた。
+ *
+ * 年間純利益ベースの配当精算（finance/annualDividend.ts）を追加したことで、
+ * この前提は成立しなくなった。Q4のTurnを処理する時点で、同年度の
+ * **Q1・Q2・Q3の確定履歴**（各四半期のNet Incomeと実支払配当）が必要になる。
+ * ここへ当Turnで確定するQ4を加えて、はじめて年度4四半期が揃う。
+ * 2件しか復元しないと Q2・Q3 しか手元に無く、Q1欠落として年間精算が
+ * 実行されない（0補完はしないため、resume経由のRunだけ無配になる）。
+ *
+ * そのため復元は**最大4件**とする。4は会計年度の四半期数
+ * （FISCAL_QUARTERS_PER_YEAR）と一致しており、それ以上は読まない。
+ *
+ * 【read回数】latest は呼び出し側が取得済みのものを受け取り再readしない。
+ * 追加readは最大3件（latestから遡る）。history index を正本とし、
+ * index に存在するturnだけを対象にする。index上存在するのに entry が
+ * 欠損している場合は、従来どおり loadHistoryEntry 側のerrorをそのまま伝播させる
+ * （欠損を握り潰して部分的な履歴で続行しない）。
  */
-const RESUME_HISTORY_RECORD_COUNT = 2;
+const RESUME_HISTORY_RECORD_COUNT = FISCAL_QUARTERS_PER_YEAR;
 
 async function loadRecentHistoryRecords(
   repository: CompanyLabStateRepository,
@@ -201,9 +219,18 @@ async function loadRecentHistoryRecords(
   const previousTurn = latest.turn - 1;
   if (RESUME_HISTORY_RECORD_COUNT < 2 || previousTurn < 1) return [latest.record];
   const turns = await repository.loadHistoryIndex(labId);
-  if (!turns.includes(previousTurn)) return [latest.record];
-  const previous = await repository.loadHistoryEntry(labId, previousTurn);
-  return [previous.record, latest.record];
+  const indexed = new Set(turns);
+  // latest から連続して遡れるturnだけを対象にする（歯抜けがあればそこで打ち切る。
+  // 飛び越えて古いturnを拾うと、年度内の四半期が非連続になり集計の前提が崩れる）。
+  const olderTurns: number[] = [];
+  for (let turn = previousTurn; turn >= 1 && olderTurns.length < RESUME_HISTORY_RECORD_COUNT - 1; turn--) {
+    if (!indexed.has(turn)) break;
+    olderTurns.push(turn);
+  }
+  if (olderTurns.length === 0) return [latest.record];
+  // 古い→新しい順で返す（olderTurns は新しい→古い順に積んであるので反転する）。
+  const older = await Promise.all(olderTurns.reverse().map(async (turn) => (await repository.loadHistoryEntry(labId, turn)).record));
+  return [...older, latest.record];
 }
 
 export function createCompanyLabQuarterFlowService(deps: CompanyLabQuarterFlowServiceDependencies): CompanyLabQuarterFlowService {

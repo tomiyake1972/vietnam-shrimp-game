@@ -549,10 +549,12 @@ export function advanceSimulationTurn(
       // 上書きする。バイアスの前に入れると、20%と指定しても会社ごとに19%/21%で
       // 実行され、画面の指定値と実行値が食い違う（実装指示の明示要件）。
       // 手動指定が無いTurnでは同一オブジェクトがそのまま返るため挙動不変。
-      const effectiveParams = applyManualDividendPayoutToParams(
-        effectiveParamsBeforeManualBalance,
-        resolveManualBalanceForTurn(session.state.config.manualBalanceOverrides, turn)
-      );
+      const resolvedManualBalanceForTurn = resolveManualBalanceForTurn(session.state.config.manualBalanceOverrides, turn);
+      const effectiveParams = applyManualDividendPayoutToParams(effectiveParamsBeforeManualBalance, resolvedManualBalanceForTurn);
+      // 【年間純利益ベース配当・実装指示§13】実際に使った配当性向の出所をそのまま
+      // 記録へ通す（後からSTANDARD_AI_PARAMETERS_V1を再計算して「当時の率」と
+      // 表示する構造をやめるため）。手動指定が無いTurnは "STANDARD_AI"。
+      const dividendPayoutRatioSource = resolvedDividendPayoutRatio(resolvedManualBalanceForTurn) === null ? "STANDARD_AI" : "MANUAL_OVERRIDE";
       const { decision: aiDecision, diagnostics: rawDiagnostics } = generateStandardAiDecisionWithDiagnostics(
         fixture,
         ownState,
@@ -562,7 +564,8 @@ export function advanceSimulationTurn(
         effectiveParams,
         undefined,
         session.state.config.visionOverrides,
-        costProjection
+        costProjection,
+        dividendPayoutRatioSource
       );
       /**
        * 【指示§25】バイアスが1件でも適用されている場合のみ、基準パラメータ

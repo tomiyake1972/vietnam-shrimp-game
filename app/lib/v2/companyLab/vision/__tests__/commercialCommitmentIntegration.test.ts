@@ -26,6 +26,20 @@ import { Product } from "../../../market/types";
 const TURNS = 32;
 
 /**
+ * 【金額比較の浮動小数点許容差】
+ *
+ * 「現金が負にならない」を `>= 0` の厳密比較で検査すると、現金をちょうど使い切る
+ * 会社が出たときに、IEEE754の丸め残差だけで落ちる。実測では
+ * minimumCashUsd = -3.725290298461914e-9 USD（-3.7ナノドル）という値が出た。
+ * これは資金の使い過ぎではなく、四半期の入出金を積み上げた際の計算誤差である。
+ *
+ * 一方で、許容差を大きく取ると本物の資金ショートを見逃す。そのため許容差は
+ * finance側の EPS_USD と同じ 1e-6 USD に揃える（1マイクロドル）。
+ * CCI-9b で「-1 USD の資金ショートはきちんと落ちる」ことも同時に固定する。
+ */
+const EPS_USD = 1e-6;
+
+/**
  * 会社全体営業能力モデル（Phase 6B の Case B 相当）。
  *
  * 【なぜ Case C ではなく Case B なのか】Phase 6C 完了後の複数seed検証で、
@@ -247,8 +261,32 @@ test("CCI-9: 複数 seed でも 生産停止ゼロ・現金負ゼロ・在庫発
       for (const f of h.financialResults) minimumCashUsd = Math.min(minimumCashUsd, unwrapUsd(f.balanceSheet.cash));
     }
     assert.equal(zeroProductionQuarters, 0, `seed=${seed}: 生産が0の四半期が無いこと`);
-    assert.ok(minimumCashUsd >= 0, `seed=${seed}: 現金が負になる四半期が無いこと（最小 ${(minimumCashUsd / 1e6).toFixed(1)}M）`);
+    assert.ok(
+      minimumCashUsd >= -EPS_USD,
+      `seed=${seed}: 現金が負になる四半期が無いこと（最小 ${minimumCashUsd} USD / 許容差 ${EPS_USD} USD）`
+    );
     const fg = r.result.history[TURNS - 1].companySummaries.reduce((s, c) => s + unwrapUnit(c.finishedGoodsInventory), 0);
     assert.ok(fg < 60_000, `seed=${seed}: 期末完成品在庫 ${Math.round(fg)}t が発散していないこと`);
   }
+});
+
+// ---------------------------------------------------------------------
+// CCI-9b 許容差が「本物の資金ショート」を隠さないこと（negative test）
+// ---------------------------------------------------------------------
+
+test("CCI-9b: 現金判定の許容差は丸め残差だけを通し、実際のマイナス現金は通さない", () => {
+  // CCI-9 が使っているのと同じ判定式を、既知の値に対して直接評価する。
+  // 「テストを緩めた結果、資金ショートまで見逃すようになっていないか」を固定する。
+  const passes = (cashUsd: number) => cashUsd >= -EPS_USD;
+
+  // 実測された丸め残差（-3.7ナノドル）は通す。
+  assert.equal(passes(-3.725290298461914e-9), true, "丸め残差(-3.7e-9 USD)は許容されるべき");
+  assert.equal(passes(0), true, "現金ちょうど0は許容されるべき");
+  assert.equal(passes(1_000_000), true, "正の現金は当然許容されるべき");
+
+  // 金額として意味のあるマイナスは落とす。
+  assert.equal(passes(-1), false, "-1 USD の資金ショートは検出されるべき");
+  assert.equal(passes(-159_000_000), false, "-159M USD の資金枯渇は検出されるべき");
+  // 許容差のすぐ外側も落とす（境界が甘くなっていないこと）。
+  assert.equal(passes(-1e-5), false, "許容差(1e-6 USD)を超えるマイナスは検出されるべき");
 });

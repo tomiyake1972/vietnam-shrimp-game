@@ -46,6 +46,7 @@ import { TurnOrchestratorDebugInfo } from "../turn/types";
 import { BatchQualityAdjustment, MarketDeliveryObservation, QualityReliabilityState } from "../quality/types";
 import { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { CompanyDividendQuarterResult, DividendDecisionInput } from "../finance/dividend";
+import type { AnnualDividendSettlementIntent } from "./standardAi/decision/dividend";
 import { CompanyFinancingState, FinancingRequestInput, FinancingState, FinancingQuarterResult } from "../financing/types";
 import { CapexDecisionInput, CapexQuarterResult, CapexState, CompanyCapexState } from "../capex/types";
 import type { FactoryLifecycleDecisionInput, FactoryLifecycleStateTable } from "../capex/factoryLifecycle";
@@ -210,6 +211,20 @@ export interface CompanyDecisionInput {
    * 扱う（後方互換。既存の意思決定構築箇所・保存データを壊さない）。
    */
   readonly dividendDecision?: DividendDecisionInput;
+  /**
+   * 【年間純利益ベース配当】年度末（Q4）に年間精算を行う意思（配当性向とその出所）。
+   *
+   * 【金額ではない】ここには金額を入れない。Q4決算後にrunner.tsが
+   * 同年度Q1〜Q4の純利益合計へこの率を掛けて年間配当目標を確定し、
+   * 同年度の既支払配当を差し引いた額を、既存の資金制約の範囲内で支払う。
+   *
+   * dividendDecision（金額指定）とは意味が異なるため相互に変換しない。
+   * Player金額指定の配当は従来どおりdividendDecision側で処理され、
+   * その実支払額が年間精算の「既支払配当」として差し引かれる。
+   *
+   * 省略時は年間精算を行わない（既存Run・既存の意思決定構築箇所と同じ挙動）。
+   */
+  readonly annualDividendSettlement?: AnnualDividendSettlementIntent;
 }
 
 // ---------------------------------------------------------------------

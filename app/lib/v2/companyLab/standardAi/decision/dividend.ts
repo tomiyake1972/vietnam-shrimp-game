@@ -1,4 +1,21 @@
-// ShrimpX V2 — Phase DIV-4: Standard AI配当ポリシー（Flow-Based Annual Dividend Policy）
+// ShrimpX V2 — Phase DIV-4 / 年間純利益ベース配当（Annual Net-Income-Based Settlement）
+//
+// 【今回の変更（確定仕様）】配当額の算定baseを
+//   旧: max(0, 直近確定四半期の純利益) × payoutRatio   （Q4判断時は実質「Q3純利益」）
+//   新: max(0, 同年度Q1〜Q4の純利益合計) × payoutRatio − 同年度の既支払配当
+// へ変更した。新baseはQ4決算が終わるまで確定しないため、本モジュールは
+// **金額を決めない**。Q4意思決定時点で決めるのは
+//   ・配当を検討してよいか（既存の安全gate）
+//   ・適用する配当性向
+// だけであり、金額の確定と支払は runner.ts がQ4決算後に
+// finance/annualDividend.ts を使って行う（実装指示§4の A→F 構造）。
+// これにより、未確定のQ4純利益をStandard AIへ先読みさせない。
+//
+// 【安全gateは削除していない】Q4のみ・財務健全性・Crisis State・当期の新規CAPEX提案・
+// 分配可能利益・現金の各gateはそのまま残る。唯一「当期純利益が正であること」
+// （旧Gate E）だけは、判定対象が直近確定四半期（＝Q3）から年間純利益へ移るため、
+// 本モジュールではなく年間精算側の「年間純利益<=0なら目標0」へ移設した
+// （実装指示§3が定める確定仕様。gateを消したのではなく、基準を年間へ移した）。
 //
 // 【DIV-3からの設計変更（実装指示§1・§2）】DIV-3は配当額を
 //   distributableEarnings（累計利益stock）× payoutRatio
@@ -6,21 +23,15 @@
 // なり、period payout policyの基準として正しくない（DIV-3ベンチマークで、
 // ratio=10%以上ではこの取り崩しが会社の運転資金を枯渇させることも実測された）。
 //
-// DIV-4では配当額の算定baseを「当期純利益（flow）」へ変更する。
-//   baseDividendUsd = max(0, currentQuarterNetIncomeUsd) × effectivePayoutRatio
-// distributableEarningsは「算定base」ではなく「配当可能額の上限」としてのみ使う
-// （computeMaxDividendUsd = min(Cash, distributableEarnings) 経由。実装指示§2）。
+// DIV-4は配当額の算定baseを「直近確定四半期の純利益（flow）」へ変更した。
+// 本変更はさらにそれを「年間（Q1〜Q4）純利益」へ移す。
+// distributableEarningsは今回も「算定base」ではなく「配当可能額の上限」としてのみ使う
+// （computeMaxDividendUsd = min(Cash, distributableEarnings) 経由。実装指示§8）。
 //
-// 【当期純利益のsingle source（実装指示§3）】
-// CompanyOwnState.lastFinancialResult.profitAndLoss.netIncome を唯一のsourceとする。
-// これはrunner.tsが既に確定させ state.history へ保存済みの財務諸表そのものであり、
-// ここで独自のNet Income計算はしない。Operating Profit・Cash Flowで代用もしない。
-//
-// 【"current quarter" の意味】Turn N の意思決定時点では、Turn N の損益はまだ確定して
-// いない（DIV-1 finance/dividend.ts §4「当Turn利益の先取り配当はできない」）。
-// したがってStandard AIが参照できる「当期純利益」は、直近に確定した四半期
-// （= Turn N-1、Q4に判断する場合は同年Q3）のNet Incomeである。診断には実際に
-// 参照した四半期（sourcePeriod）を必ず残し、どの利益に対する配当かを追跡可能にする。
+// 【currentQuarterNetIncomeUsdの位置づけ】本モジュールは引き続き直近確定四半期の
+// Net Incomeを受け取るが、**配当額の算定には使わない**（診断表示専用）。
+// Turn N の意思決定時点では Turn N の損益がまだ確定していないため、Q4判断時に
+// 参照できるのは同年Q3までである。年間純利益はQ4決算後にrunner.ts側で確定する。
 //
 // 【年1回の配当判定（実装指示§4）】Standard AIは各年度Q4のみ配当を検討する。
 // 判定は既存のPeriodV2表現（core/period.ts の toYearQuarter）だけを使う決定論的な
@@ -35,14 +46,12 @@
 //
 // 【新しい会計・評価ロジックを追加しない】配当可能上限はPlayerとまったく同じ
 // finance/dividend.tsのcomputeMaxDividendUsdをそのまま呼ぶ。実際の配当実行・
-// 会計仕訳・拒否判定も、Playerと同じrunner.ts→resolveDividendDecision/
-// applyDividendToFinanceStateの経路を通る（本モジュールは「いくら要求するか」だけを決める）。
+// 会計仕訳も、既存のapplyDividendToFinanceStateの経路をそのまま通る。
 //
-// 【なぜ要求額を必ずクランプするのか】resolveDividendDecisionは上限超過を
-// 「部分執行せず全額拒否」する仕様（finance/dividend.ts §7）である。クランプせずに
-// 要求すると、上限を1セント超えただけで配当がまるごと消える不安定な挙動になる。
-// ここでcomputeMaxDividendUsdへ寄せることで、AIの配当は「拒否されない範囲でのみ
-// 実行される」ことが構造的に保証される。
+// 【上限超過で全額消えないようにする】resolveDividendDecisionは上限超過を
+// 「部分執行せず全額拒否」する仕様（finance/dividend.ts §7）である。年間精算側でも
+// この仕様を変えず、支払前に min(年末追加目標, computeMaxDividendUsd) へクランプする
+// ことで、上限を1セント超えただけで配当がまるごと消える挙動を避ける。
 //
 // 【「強い配当AI」を作らない】本モジュールは将来のTSVを試算しない・複数案を
 // 比較しない・配当タイミングを最適化しない。参照するのは、当期のPeriod、
@@ -50,6 +59,7 @@
 
 import { CompanyFinanceState, unwrapUsd } from "../../../finance/types";
 import { computeMaxDividendUsd, DividendDecisionInput } from "../../../finance/dividend";
+import { DividendPayoutRatioSource } from "../../../finance/annualDividend";
 import { FinancialHealthTier } from "../../../financing/types";
 import { PeriodV2, toYearQuarter } from "../../../core/period";
 import { StandardAiParameters } from "../parameters";
@@ -65,9 +75,26 @@ const EPS_USD = 1e-6;
  */
 const ANNUAL_DIVIDEND_QUARTER = 4;
 
+/**
+ * Q4意思決定時点で確定させる「年間精算の意思」。金額は含まない。
+ * runner.tsがQ4決算後に、この率で年間純利益から金額を確定する。
+ */
+export interface AnnualDividendSettlementIntent {
+  /** 年間精算に使う配当性向（0も有効な指定。未指定との区別は上位で行う）。 */
+  readonly payoutRatio: number;
+  /** その率の出所。金額指定（PLAYER）はここに現れない。 */
+  readonly payoutRatioSource: DividendPayoutRatioSource;
+}
+
 export interface StandardAiDividendDecisionResult {
-  /** CompanyDecisionInput.dividendDecisionへそのまま載せる値（配当しない場合はundefined）。 */
+  /**
+   * CompanyDecisionInput.dividendDecisionへそのまま載せる値。
+   * 【常にundefined】Standard AIはTurn開始時点の金額指定配当を行わない
+   * （年間精算はQ4決算後に別経路で実行される）。Player金額指定の経路は不変。
+   */
   readonly dividendDecision: DividendDecisionInput | undefined;
+  /** Q4に年間精算を行う意思（gateで見送った場合・Q4以外はundefined）。 */
+  readonly annualSettlementIntent: AnnualDividendSettlementIntent | undefined;
   /** 配当可能上限（min(Cash, 分配可能利益)）。診断・テスト用。 */
   readonly maxDividendUsd: number;
   /** 算定baseに使った当期純利益（直近確定四半期のP&L Net Income）。診断・テスト用。 */
@@ -114,6 +141,15 @@ export function buildStandardAiDividendDecision(input: {
   readonly newCapexProposalCount: number;
   /** 経営性格バイアス適用後のパラメータ（dividendBasePayoutRatioを読む）。 */
   readonly params: StandardAiParameters;
+  /**
+   * params.dividendBasePayoutRatio の出所。
+   * 管理者がManagement Consoleで手動指定した率なら "MANUAL_OVERRIDE"。
+   * ここを後から現在のparameterで再計算して表示に使ってはならない
+   * （実際に使った値を記録して転記する、が今回の方針。実装指示§13）。
+   *
+   * 省略時は "STANDARD_AI"（手動指定が無いRun・既存テストと同じ意味）。
+   */
+  readonly payoutRatioSource?: DividendPayoutRatioSource;
 }): StandardAiDividendDecisionResult {
   const {
     companyId,
@@ -126,6 +162,7 @@ export function buildStandardAiDividendDecision(input: {
     newCapexProposalCount,
     params,
   } = input;
+  const payoutRatioSource: DividendPayoutRatioSource = input.payoutRatioSource ?? "STANDARD_AI";
 
   const maxDividendUsd = computeMaxDividendUsd(financeState);
   const distributableEarningsUsd = unwrapUsd(financeState.distributableEarnings);
@@ -142,6 +179,7 @@ export function buildStandardAiDividendDecision(input: {
   const none = (entry: StandardAiDiagnosticEntry): StandardAiDividendDecisionResult => ({
     ...common,
     dividendDecision: undefined,
+    annualSettlementIntent: undefined,
     baseDividendUsd: 0,
     diagnostics: [entry],
   });
@@ -242,24 +280,17 @@ export function buildStandardAiDividendDecision(input: {
     });
   }
 
-  // 【Gate E・実装指示§5E】当期純利益が正であること。
-  // 赤字の年度は配当しない（過去の累計利益を取り崩して無理に配当しない＝DIV-4の
-  // 中心的な設計意図。distributableEarningsが潤沢でもここで必ず止まる）。
-  if (currentQuarterNetIncomeUsd === null || netIncomeUsd <= EPS_USD) {
-    return none({
-      code: "DIVIDEND_SKIPPED_NO_CURRENT_EARNINGS",
-      domain: "finance",
-      companyId,
-      severity: "info",
-      keyValues: { currentQuarterNetIncomeUsd: netIncomeUsd, distributableEarningsUsd, cashUsd, maxDividendUsd },
-      decisionSummary: "配当なし（当期純利益が正でない）",
-      message:
-        currentQuarterNetIncomeUsd === null
-          ? "確定済みの四半期損益がまだ無い（Turn1等）ため配当を行わない。"
-          : `直近確定四半期${netIncomeSourcePeriod ?? "(不明)"}の当期純利益が${netIncomeUsd.toFixed(0)}USDであり正ではないため配当を行わない` +
-            `（累計の分配可能利益は${(distributableEarningsUsd / 1e6).toFixed(2)}M USDあるが、これを取り崩しての配当はしない）。`,
-    });
-  }
+  // 【旧Gate E（当期純利益が正であること）の移設・実装指示§3/§6】
+  //
+  // 旧実装はここで「直近確定四半期（Q4判断時は同年Q3）の純利益が正か」を判定して
+  // いた。年間純利益ベースの確定仕様では、判定すべきは年間（Q1〜Q4）純利益であり、
+  // それはQ4決算が終わるまで確定しない。したがってこのgateは削除ではなく
+  // **年間精算側へ移設**した（finance/annualDividend.ts の
+  // 「annualNetIncome <= 0 なら annualDividendTarget = 0」がその実体）。
+  //
+  // ここでQ3の符号だけで打ち切ると、「Q3は赤字だが年間では黒字」という年度の配当が
+  // 年間基準の契約に反して0になるため、意図的に判定しない。
+  // 当期純利益の値自体は診断用に common へ残る。
 
   // 【Gate F・実装指示§5F】分配可能利益が正であること（配れる原資が無ければ配らない）。
   if (distributableEarningsUsd <= EPS_USD) {
@@ -289,90 +320,60 @@ export function buildStandardAiDividendDecision(input: {
     });
   }
 
-  // 【基準配当額（実装指示§2）】max(0, 当期純利益) × 基準配当性向（経営性格バイアス適用後）。
-  // distributableEarningsはここには一切現れない（＝算定baseではない）。
-  const baseDividendUsd = Math.max(0, netIncomeUsd) * payoutRatio;
-  if (baseDividendUsd <= EPS_USD) {
-    // dividendBasePayoutRatio=0（配当ポリシーOFF）の場合もここに入る。
+  // 【ここから先は「率」だけを確定する（実装指示§4A）】
+  // 金額はQ4決算後にrunner.tsが年間純利益から確定する。未確定のQ4損益を
+  // Standard AIへ先読みさせないため、本モジュールは金額を一切計算しない。
+  if (payoutRatio <= 0) {
+    // dividendBasePayoutRatio=0（配当ポリシーOFF）・手動で明示0%を指定した場合。
+    // 「未指定」ではなく「0%と決めた」ため、年間配当目標は0になる。
     return {
       ...common,
       dividendDecision: undefined,
-      baseDividendUsd,
+      annualSettlementIntent: undefined,
+      baseDividendUsd: 0,
       diagnostics: [
         {
           code: "DIVIDEND_SKIPPED_NO_CURRENT_EARNINGS",
           domain: "finance",
           companyId,
           severity: "info",
-          keyValues: { currentQuarterNetIncomeUsd: netIncomeUsd, payoutRatio, distributableEarningsUsd, cashUsd, maxDividendUsd },
-          decisionSummary: "配当なし（基準配当額が0）",
-          message: `基準配当性向が${(payoutRatio * 100).toFixed(1)}%であり、基準配当額が0のため配当を行わない。`,
+          keyValues: { payoutRatio, distributableEarningsUsd, cashUsd, maxDividendUsd, currentQuarterNetIncomeUsd: netIncomeUsd },
+          decisionSummary: "配当なし（配当性向0%）",
+          message: `配当性向が${(payoutRatio * 100).toFixed(1)}%のため、年間配当目標は0となり配当を行わない。`,
         },
       ],
     };
   }
 
-  // 【上限クランプ】Playerとまったく同じcomputeMaxDividendUsd（min(Cash, 分配可能利益)）。
-  const appliedUsd = Math.min(baseDividendUsd, maxDividendUsd);
-  const diagnostics: StandardAiDiagnosticEntry[] = [];
-  if (appliedUsd < baseDividendUsd - EPS_USD) {
-    // 何が上限を決めたのか（分配可能利益か現金か）を診断で区別できるようにする。
-    if (distributableEarningsUsd <= cashUsd + EPS_USD) {
-      diagnostics.push({
-        code: "DIVIDEND_LIMITED_BY_DISTRIBUTABLE_EARNINGS",
+  return {
+    ...common,
+    // 【Turn開始時の金額指定配当はしない】Standard AIの配当は年度末精算のみ。
+    dividendDecision: undefined,
+    annualSettlementIntent: { payoutRatio, payoutRatioSource },
+    // 年間基準では「クランプ前の基準配当額」は決算後にしか決まらないため0を入れる
+    // （旧フィールドは診断互換のために残すが、年間精算の根拠には使わない）。
+    baseDividendUsd: 0,
+    diagnostics: [
+      {
+        code: "DIVIDEND_PROPOSED",
         domain: "finance",
         companyId,
         severity: "info",
-        keyValues: { baseDividendUsd, distributableEarningsUsd, cashUsd, maxDividendUsd, currentQuarterNetIncomeUsd: netIncomeUsd },
-        threshold: distributableEarningsUsd,
-        decisionSummary: `配当額を分配可能利益${(distributableEarningsUsd / 1e6).toFixed(2)}M USDへ縮小`,
+        keyValues: {
+          payoutRatio,
+          maxDividendUsd,
+          distributableEarningsUsd,
+          cashUsd,
+          currentQuarterNetIncomeUsd: netIncomeUsd,
+          year,
+        },
+        threshold: payoutRatio,
+        decisionSummary: `年度末に配当性向${(payoutRatio * 100).toFixed(1)}%で年間精算`,
         message:
-          `当期純利益に基づく基準配当額${(baseDividendUsd / 1e6).toFixed(2)}M USDが、累計の分配可能利益` +
-          `${(distributableEarningsUsd / 1e6).toFixed(2)}M USDを超えるため、そこまで縮小した` +
-          "（分配可能利益は配当額の算定baseではなく、上限としてのみ働く）。",
-      });
-    }
-    diagnostics.push({
-      code: "DIVIDEND_LIMITED_BY_MAX",
-      domain: "finance",
-      companyId,
-      severity: "info",
-      keyValues: { baseDividendUsd, maxDividendUsd, cashUsd, distributableEarningsUsd, currentQuarterNetIncomeUsd: netIncomeUsd },
-      threshold: maxDividendUsd,
-      decisionSummary: `配当額を上限${(maxDividendUsd / 1e6).toFixed(2)}M USDへ縮小`,
-      message:
-        `基準配当額${(baseDividendUsd / 1e6).toFixed(2)}M USDが配当可能上限（min(現金, 分配可能利益)）` +
-        `${(maxDividendUsd / 1e6).toFixed(2)}M USDを超えるため、上限まで縮小した。`,
-    });
-  }
-  diagnostics.push({
-    code: "DIVIDEND_PROPOSED",
-    domain: "finance",
-    companyId,
-    severity: "info",
-    keyValues: {
-      appliedUsd,
-      baseDividendUsd,
-      maxDividendUsd,
-      payoutRatio,
-      currentQuarterNetIncomeUsd: netIncomeUsd,
-      distributableEarningsUsd,
-      cashUsd,
-      year,
-    },
-    threshold: payoutRatio,
-    decisionSummary: `年度配当${(appliedUsd / 1e6).toFixed(2)}M USD`,
-    message:
-      `年度末（${period}）に、財務健全性=healthy・Crisis無し・当期の新規設備投資提案なし・` +
-      `直近確定四半期${netIncomeSourcePeriod ?? "(不明)"}の当期純利益${(netIncomeUsd / 1e6).toFixed(2)}M USD>0の` +
-      `条件をすべて満たすため、基準配当性向${(payoutRatio * 100).toFixed(1)}%に基づき` +
-      `${(appliedUsd / 1e6).toFixed(2)}M USDを配当する。`,
-  });
-
-  return {
-    ...common,
-    dividendDecision: { dividendAmountUsd: appliedUsd },
-    baseDividendUsd,
-    diagnostics,
+          `年度末（${period}）に、財務健全性=healthy・Crisis無し・当期の新規設備投資提案なしの条件を満たすため、` +
+          `配当性向${(payoutRatio * 100).toFixed(1)}%（${payoutRatioSource === "MANUAL_OVERRIDE" ? "管理者の手動指定" : "Standard AIの実効値"}）で` +
+          "年度末に年間精算を行う。配当額は当年度Q1〜Q4の純利益合計が確定した後に決まるため、この時点では金額を決めない。",
+      },
+    ],
   };
 }

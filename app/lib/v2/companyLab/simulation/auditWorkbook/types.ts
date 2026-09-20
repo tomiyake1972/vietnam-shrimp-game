@@ -373,15 +373,40 @@ export interface AuditDividendRow {
   readonly netIncomeSourcePeriod: string;
   readonly netIncomeUsd: number | null;
   readonly distributableEarningsAfterUsd: number | null;
+  /**
+   * 【参考値・当時の実効率ではない】現在のStandard AI parameterと
+   * management profile biasから計算した参考値。過去Runの「当時の率」としては
+   * 使えない（手動指定があればその値が優先されるため）。
+   * 実際に使われた率は appliedPayoutRatio を見ること。
+   */
   readonly basePayoutRatio: number | null;
   readonly profileBiasRatio: number | null;
-  readonly effectivePayoutRatio: number | null;
+  readonly referencePayoutRatioFromCurrentParams: number | null;
   readonly maxDividendUsd: number | null;
   readonly requestedDividendUsd: number | null;
   readonly appliedDividendUsd: number | null;
   readonly rejected: string;
   readonly rejectionReason: string;
   readonly cumulativeDividendUsd: number | null;
+  // ---- 年間純利益ベース配当（Q4の年度末精算実績。Engineの記録をそのまま転記する） ----
+  /** 精算対象の年度。年間精算が行われていない行は空。 */
+  readonly dividendTargetYear: number | null;
+  /** 対象年度Q1〜Q4の純利益の符号付き合計（赤字四半期も含む）。 */
+  readonly annualNetIncomeUsd: number | null;
+  /** Engineが実際に使った配当性向。現在パラメータからの再計算ではない。 */
+  readonly appliedPayoutRatio: number | null;
+  /** その率の出所（MANUAL_OVERRIDE / STANDARD_AI）。金額指定（PLAYER）とは区別する。 */
+  readonly payoutRatioSource: string;
+  readonly annualDividendTargetUsd: number | null;
+  /** 同年度に既に実際に支払った配当（Player金額指定ぶんを含む実支払額）。 */
+  readonly paidDividendEarlierInYearUsd: number | null;
+  readonly yearEndAdditionalTargetUsd: number | null;
+  /** その年度末精算で実際に支払った額。 */
+  readonly annualSettlementAppliedDividendUsd: number | null;
+  readonly annualDividendShortfallUsd: number | null;
+  readonly shortfallReason: string;
+  /** 年間精算を実行できなかった理由（年度Q1〜Q4が揃わない等）。 */
+  readonly settlementUnavailableReason: string;
   readonly diagnosticReasonCodes: string;
 }
 

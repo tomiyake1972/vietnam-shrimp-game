@@ -33,6 +33,7 @@ import {
 import { CompanyVisionOverrideEntry } from "../../../lib/v2/companyLab/vision/overrides";
 import { VisionCalibrationPanel } from "./VisionCalibrationPanel";
 import { BalanceAdjustmentPanel } from "./BalanceAdjustmentPanel";
+import { AnnualDividendPanel } from "./AnnualDividendPanel";
 import { BalanceProfilePanel } from "./BalanceProfilePanel";
 import { listBalanceProfiles } from "../lib/balanceProfileStore";
 import type { BalanceProfile } from "../../../lib/v2/companyLab/manualBalance/profile";
@@ -1294,6 +1295,11 @@ export function ManagementConsole() {
               busy={busy || restoring}
               locked={view ? isGameFinished(view.run) : false}
             />
+          </Collapsible>
+
+          {/* 【年間純利益ベース配当】年度末（Q4）決算後に精算した配当の実績。 */}
+          <Collapsible title="年間配当の精算実績（年度末Q4）" testId="console-annual-dividend-toggle">
+            <AnnualDividendPanel session={view?.session ?? null} />
           </Collapsible>
 
           {/* 【MANUAL-BALANCE-1】配当性向・販売/原料市場価格指数の手動調整。 */}

@@ -1,13 +1,22 @@
-// ShrimpX V2 — ENG-COMPANYLAB-RESUME-HISTORY-1
+// ShrimpX V2 — ENG-COMPANYLAB-RESUME-HISTORY-1 → 年間純利益ベース配当で最大4件へ拡張
 //
-// resume 時に注入する確定履歴 record を直近1件 → 直近2件へ増やした変更の検証。
+// resume 時に注入する確定履歴 record の件数と、連続実行との同値性の検証。
 //
-// 【なぜ2件必要か】resume 経路の history consumer のうち最長は buildPublicMarketInfo で、
+// 【なぜ最低2件必要か（当初の理由・現在も有効）】resume 経路の市場系 consumer は
 //   - 市場×商品構成比 trend: history[length-1] と history[length-2] の差分
 //   - buildObservedMarketDemand: history[length - LAG]（LAG = 2）
 // がいずれも「末尾から2件目」を読む。1件だけ復元すると決定論的な基礎曲線へ
 // フォールバックし、連続実行と異なる公開市場情報になる。
-// 公開市場情報は Standard AI と Player 画面の双方が読む。
+//
+// 【なぜ4件へ増やしたか】年間純利益ベースの配当精算（finance/annualDividend.ts）は、
+// Q4のTurnを処理する時点で同年度 Q1・Q2・Q3 の確定履歴を必要とする
+// （そこへ当Turnで確定するQ4を足して年度4四半期が揃う）。2件だけ復元すると
+// Q2・Q3 しか手元に無く Q1 が欠落し、resume 経由のRunだけ年間配当が
+// 実行されない（0補完はしない設計のため、無配として差が出る）。
+// したがって復元件数の上限を会計年度の四半期数（4）に合わせた。
+//
+// 【それでも全履歴はロードしない】上限は4件であり、turnが増えても
+// read 件数は増えない。RH-4 がその上限を固定する。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -17,6 +26,7 @@ import { advanceCompanyLabQuarter, buildCompanyOwnState, buildPublicMarketInfo, 
 import { generateAutoPolicyDecision } from "../../autoPolicy";
 import { generateStandardAiDecisionWithDiagnostics } from "../../standardAi/policy";
 import { MARKET_DEMAND_OBSERVATION_LAG_QUARTERS } from "../../marketDemandObservation";
+import { FISCAL_QUARTERS_PER_YEAR } from "../../../finance/annualDividend";
 import { createInMemoryCompanyLabStateRepository, CompanyLabStateRepository } from "../../persistence/repository";
 import { createCompanyLabQuarterFlowService } from "../companyLabQuarterFlowService";
 
@@ -79,12 +89,21 @@ test("RH-3: 履歴2件（turn 3）は2件注入する", async () => {
   assert.deepEqual(injected[2], [1, 2]);
 });
 
-test("RH-4: 履歴3件以上でも最新2件だけ注入する（全履歴をロードしない）", async () => {
+test("RH-4: 履歴が増えても最新4件だけ注入する（全履歴をロードしない）", async () => {
   const { injected } = await runServicePath("lab-rh-4", cfg(), 6);
-  assert.deepEqual(injected[3], [2, 3]);
-  assert.deepEqual(injected[4], [3, 4]);
-  assert.deepEqual(injected[5], [4, 5]);
-  for (const turns of injected) assert.ok(turns.length <= 2, `注入件数が2件を超えている: ${turns.join(",")}`);
+  // turn4 の時点では確定履歴が3件しか無いので3件、turn5以降は上限の4件で頭打ちになる。
+  assert.deepEqual(injected[3], [1, 2, 3]);
+  assert.deepEqual(injected[4], [1, 2, 3, 4]);
+  assert.deepEqual(injected[5], [2, 3, 4, 5]);
+  for (const turns of injected) assert.ok(turns.length <= 4, `注入件数が4件を超えている: ${turns.join(",")}`);
+});
+
+test("RH-4b: 復元件数の上限は会計年度の四半期数（4）と一致している", () => {
+  // 年間配当精算は「Q4処理時に同年度Q1〜Q3が揃っていること」に依存する。
+  // ここを4未満へ下げると、resume経由のQ4で年間純利益を確定できなくなり、
+  // 年間配当が無言で実行されなくなる（0補完しない設計のため差が出る）。
+  // 将来この上限を縮めたら必ずこのテストで気づけるようにする。
+  assert.equal(FISCAL_QUARTERS_PER_YEAR, 4);
 });
 
 test("RH-5: 注入順序は古い → 新しい", async () => {

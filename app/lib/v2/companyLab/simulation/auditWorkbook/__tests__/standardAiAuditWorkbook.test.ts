@@ -208,9 +208,39 @@ test("SAI-AUDIT-XLSX-10: DIV-4 の配当診断が出力される（年1回・flo
   assert.ok(paid.length > 0, "配当が1件も出力されていない");
   for (const row of paid) {
     assert.equal(row.isAnnualEvaluationPeriod, "TRUE", "Q4以外で配当が記録されている");
-    assert.ok(row.netIncomeUsd !== null, "配当行に当期純利益（算定base）が無い");
-    assert.ok(row.effectivePayoutRatio !== null, "effectivePayoutRatio が無い");
     assert.ok(row.maxDividendUsd !== null, "maxDividendUsd が無い");
+    // 【年間純利益ベースへの変更】配当の算定baseは年間純利益であり、
+    // 実際に使われた率はEngineの記録（appliedPayoutRatio）が正本になった。
+    // 現在パラメータからの再計算（referencePayoutRatioFromCurrentParams）は
+    // 参考値であって、当時の率として使ってはいけない。
+    assert.ok(row.dividendTargetYear !== null, "配当行に精算対象年度が無い");
+    assert.ok(row.annualNetIncomeUsd !== null, "配当行に年間純利益（算定base）が無い");
+    assert.ok(row.appliedPayoutRatio !== null, "配当行に実適用配当性向が無い");
+    assert.ok(
+      row.payoutRatioSource === "STANDARD_AI" || row.payoutRatioSource === "MANUAL_OVERRIDE",
+      `payoutRatioSourceが不正: ${row.payoutRatioSource}`
+    );
+    assert.ok(row.annualDividendTargetUsd !== null, "配当行に年間配当目標が無い");
+    assert.ok(row.yearEndAdditionalTargetUsd !== null, "配当行に年末追加目標が無い");
+    // 年間目標 = max(0, 年間純利益) × 実適用率（Excel上で再計算せずに検算できること）
+    assert.ok(
+      Math.abs(row.annualDividendTargetUsd! - Math.max(0, row.annualNetIncomeUsd!) * row.appliedPayoutRatio!) < 0.01,
+      "年間配当目標が「年間純利益×実適用率」と一致しない"
+    );
+  }
+});
+
+test("SAI-AUDIT-XLSX-10b: 年間精算が無い行では、現在パラメータから実績値を捏造しない", () => {
+  const d = data();
+  // Q1〜Q3の行には年間精算の実績が一切入らない（空欄/null のまま）。
+  const nonQ4 = d.dividend.filter((r) => r.isAnnualEvaluationPeriod === "FALSE");
+  assert.ok(nonQ4.length > 0, "Q4以外の行が無く、この検査が空振りしている");
+  for (const row of nonQ4) {
+    assert.equal(row.dividendTargetYear, null, "Q4以外の行に精算対象年度が入っている");
+    assert.equal(row.annualNetIncomeUsd, null, "Q4以外の行に年間純利益が入っている");
+    assert.equal(row.appliedPayoutRatio, null, "Q4以外の行に実適用配当性向が入っている");
+    assert.equal(row.payoutRatioSource, "", "Q4以外の行に率の出所が入っている");
+    assert.equal(row.annualSettlementAppliedDividendUsd, null, "Q4以外の行に年度末精算額が入っている");
   }
 });
 

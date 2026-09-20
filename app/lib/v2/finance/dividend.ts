@@ -197,6 +197,41 @@ export interface CompanyDividendQuarterResult {
   readonly distributableEarningsAfterUsd: number;
   /** 配当実行後の現金（このTurnの調達・投資等の基準になる値）。 */
   readonly cashAfterUsd: number;
+  /**
+   * 【年間純利益ベース配当】年度末（Q4）に、同年度Q1〜Q4の純利益合計を基準として
+   * 決算後に精算した内訳。Q1〜Q3・精算を行わなかった年度・この機能より前に
+   * 確定した既存Runには存在しない（optional）。
+   *
+   * 【後から再計算しないための記録】appliedPayoutRatio はEngineが実際に使った率
+   * そのものである。表示・Excelは現在のStandard AI parameterから率を再計算せず、
+   * 必ずこの値を転記する（実装指示§13）。
+   */
+  readonly annualSettlement?: DividendAnnualSettlementRecord;
+  /**
+   * 【年間純利益ベース配当】年間精算を実行できなかった場合の理由（人間可読）。
+   * 「年度のQ1〜Q4が揃っていない」等。推測で0を埋めないための記録。
+   */
+  readonly annualSettlementUnavailableReason?: string;
+}
+
+/** 年度末精算の内訳（後から再計算せずに読めるようにするための記録）。 */
+export interface DividendAnnualSettlementRecord {
+  readonly dividendTargetYear: number;
+  /** 対象年度Q1〜Q4の純利益の符号付き合計（赤字四半期も含む）。 */
+  readonly annualNetIncomeUsd: number;
+  /** 実際に適用した配当性向（Engineが使った値そのもの）。 */
+  readonly appliedPayoutRatio: number;
+  /** その率の出所（MANUAL_OVERRIDE / STANDARD_AI）。金額指定（PLAYER）とは区別する。 */
+  readonly payoutRatioSource: string;
+  readonly annualDividendTargetUsd: number;
+  /** 同年度に既に実際に支払った配当（Player金額指定ぶんを含む実支払額）。 */
+  readonly paidDividendEarlierInYearUsd: number;
+  readonly yearEndAdditionalTargetUsd: number;
+  readonly maxDividendUsd: number;
+  /** この年度末精算で実際に支払った額。 */
+  readonly appliedDividendUsd: number;
+  readonly annualDividendShortfallUsd: number;
+  readonly shortfallReason: string | null;
 }
 
 /** 実装指示§10。過去の配当履歴からこのTurnまでの累積配当・累積weighted valueを計算する純粋関数。 */
@@ -210,24 +245,36 @@ export function buildDividendQuarterResult(params: {
   readonly distributableEarningsAfterUsd: number;
   readonly cashAfterUsd: number;
   readonly scenarioLength?: number;
+  /**
+   * 【年間純利益ベース配当】年度末精算で追加支払した額と、その内訳。
+   * appliedDividendUsd・累積・time weightedの各値は、Turn開始時の配当と
+   * この年度末精算の**合計**で計算する（その四半期に実際に支払った総額が正本）。
+   */
+  readonly annualSettlement?: DividendAnnualSettlementRecord;
+  readonly annualSettlementUnavailableReason?: string;
 }): CompanyDividendQuarterResult {
-  const { companyId, period, turn, resolution, priorCumulativeDividendUsd, priorCumulativeWeightedDividendValueUsd, distributableEarningsAfterUsd, cashAfterUsd, scenarioLength } = params;
+  const { companyId, period, turn, resolution, priorCumulativeDividendUsd, priorCumulativeWeightedDividendValueUsd, distributableEarningsAfterUsd, cashAfterUsd, scenarioLength, annualSettlement, annualSettlementUnavailableReason } = params;
   const timeWeight = getDividendTimeWeight(turn, scenarioLength);
-  const weightedDividendValueUsd = resolution.appliedUsd * timeWeight;
+  // その四半期に実際に支払った総額 = Turn開始時の配当（Player金額指定等）＋年度末精算。
+  const appliedDividendUsd = resolution.appliedUsd + (annualSettlement?.appliedDividendUsd ?? 0);
+  const weightedDividendValueUsd = appliedDividendUsd * timeWeight;
   return {
     companyId,
     period,
     turn,
-    requestedDividendUsd: resolution.requestedUsd,
-    appliedDividendUsd: resolution.appliedUsd,
+    requestedDividendUsd: resolution.requestedUsd + (annualSettlement?.yearEndAdditionalTargetUsd ?? 0),
+    appliedDividendUsd,
     rejected: resolution.rejected,
     rejectionReason: resolution.rejectionReason,
     maxDividendUsd: resolution.maxDividendUsd,
-    cumulativeDividendUsd: priorCumulativeDividendUsd + resolution.appliedUsd,
+    cumulativeDividendUsd: priorCumulativeDividendUsd + appliedDividendUsd,
     timeWeight,
     weightedDividendValueUsd,
     cumulativeWeightedDividendValueUsd: priorCumulativeWeightedDividendValueUsd + weightedDividendValueUsd,
     distributableEarningsAfterUsd,
     cashAfterUsd,
+    // 中立時（年間精算なし）はキー自体を作らず、既存Runと同一の形にする。
+    ...(annualSettlement ? { annualSettlement } : {}),
+    ...(annualSettlementUnavailableReason ? { annualSettlementUnavailableReason } : {}),
   };
 }

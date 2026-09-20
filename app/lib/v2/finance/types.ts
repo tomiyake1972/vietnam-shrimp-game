@@ -474,6 +474,16 @@ export interface CashFlowStatement {
   readonly investingCashFlow: Usd;
   /** 財務活動によるCF（Phase 8Aでは新規借入・返済なしのため0）。 */
   readonly financingCashFlow: Usd;
+  /**
+   * 【年間純利益ベース配当】当四半期に実際に支払った配当（正の額）。
+   * financingCashFlow にはこの額が**マイナスとして既に含まれている**ため、
+   * 二重に差し引かないこと（内訳の明示用フィールド）。
+   *
+   * 配当が無い四半期・この機能より前に確定した既存の決算結果には存在しない
+   * （optional）。未定義は「配当0」ではなく「この機能が無かった頃の記録」であり、
+   * 表示側は推測で0を埋めず区別できるようにする。
+   */
+  readonly dividendsPaid?: Usd;
   /** 現金増減（= CFO + CFI + CFF）。 */
   readonly netCashChange: Usd;
   readonly openingCash: Usd;

@@ -39,7 +39,7 @@
 // （PD/VAP供給増加が当期のプレミアムを引き下げる、という受入条件を満たすために
 // 必須の配線）。
 
-import { PeriodV2, previousPeriod } from "../core/period";
+import { PeriodV2, previousPeriod, toYearQuarter } from "../core/period";
 import { HosoEqTons, hosoEqTons, ratio, roundHosoEqTons, Score0to100, score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { DOMESTIC_PURCHASE_GUARANTEE_TURN, clearDomesticReferencePrice } from "./domesticReferencePrice";
 import { buildObservedMarketDemand } from "./marketDemandObservation";
@@ -180,7 +180,15 @@ import {
 import type { ConstructionCostPolicyInput } from "../capex/projectLifecycle";
 import type { CompanyFinanceState, CompanyFinancialQuarterResult, FinanceState } from "../finance/types";
 import { unwrapUsd } from "../finance/types";
-import { applyDividendToFinanceState, buildDividendQuarterResult, CompanyDividendQuarterResult, DividendResolution, resolveDividendDecision } from "../finance/dividend";
+import { applyDividendToFinanceState, buildDividendQuarterResult, CompanyDividendQuarterResult, computeMaxDividendUsd, DividendResolution, resolveDividendDecision } from "../finance/dividend";
+import {
+  aggregateAnnualDividendFacts,
+  AnnualDividendSettlement,
+  AnnualQuarterFact,
+  applyAnnualDividendToQuarterResult,
+  computeAnnualDividendSettlement,
+  isFiscalYearEnd,
+} from "../finance/annualDividend";
 import {
   FINANCING_PARAMETERS_V1,
   buildCollateralInputFromCompanyLab,
@@ -1767,6 +1775,14 @@ export function advanceCompanyLabQuarter(
   // 【Phase DIV-1追加・実装指示§10】当期の会社別配当結果（要求額・適用額・
   // 却下有無・累積配当・時間加重配当価値）。
   const dividendResults: CompanyDividendQuarterResult[] = [];
+  /**
+   * 【年間純利益ベース配当】会社別の年度末精算結果。決算後に確定するため、
+   * dividendResults を作った後に合流させる（下の補完ループ参照）。
+   */
+  const annualDividendSettlementByCompanyId = new Map<
+    CompanyId,
+    { readonly settlement: AnnualDividendSettlement | undefined; readonly unavailableReason: string | undefined }
+  >();
   /** 【ENG-FAC-1・実装指示§18】当四半期のFactory lifecycle監査イベント（全社分）。 */
   const factoryLifecycleEvents: FactoryLifecycleEvent[] = [];
   for (const f of fixtures) {
@@ -1802,41 +1818,6 @@ export function advanceCompanyLabQuarter(
         : undefined;
     if (lifecycleAccounting) factoryLifecycleEvents.push(...lifecycleAccounting.events);
     const lifecycleDecisionsForCompany = companyLifecycleState?.decisions ?? [];
-
-    // 【Phase DIV-1追加・実装指示§10・§11】配当履歴（要求額・適用額・累積・
-    // 時間加重価値）を確定する。累積は過去の確定履歴（state.history）から
-    // このturnまでの直近値を引き継ぐ（既存履歴にdividendResultsが無い旧保存
-    // データ・turn1では0から開始）。
-    {
-      const dividendResolution = dividendResolutionByCompanyId.get(f.companyId)!;
-      let priorCumulativeDividendUsd = 0;
-      let priorCumulativeWeightedDividendValueUsd = 0;
-      for (const pastRecord of state.history) {
-        const pastEntry = pastRecord.dividendResults?.find((d) => d.companyId === f.companyId);
-        if (pastEntry) {
-          priorCumulativeDividendUsd = pastEntry.cumulativeDividendUsd;
-          priorCumulativeWeightedDividendValueUsd = pastEntry.cumulativeWeightedDividendValueUsd;
-        }
-      }
-      dividendResults.push(
-        buildDividendQuarterResult({
-          companyId: f.companyId,
-          period: state.currentPeriod,
-          turn,
-          resolution: dividendResolution,
-          priorCumulativeDividendUsd,
-          priorCumulativeWeightedDividendValueUsd,
-          distributableEarningsAfterUsd: unwrapUsd(prevFinance.distributableEarnings),
-          cashAfterUsd: unwrapUsd(prevFinance.cash),
-          // 【実装指示§13・§27】time weightはこのRunの実際の終了turn（config.turns、
-          // 早期終了で変わりうる）ではなく、シナリオ本来の長さ（definition.durationTurns、
-          // 例: 32Turn）を基準にする。これにより、同じturnの評価は後から何ターンまで
-          // 実際にプレイしたか（同一シナリオを短く区切って実行したかどうか）に左右されず、
-          // 「Turn16終了でもTurn32終了でも同じ評価systemを使える」（実装指示§13）を満たす。
-          scenarioLength: definition.durationTurns,
-        })
-      );
-    }
 
     const companyLoad = productionRecord.companyLoadMetrics.find((m) => m.companyId === f.companyId);
     const companyDecision = decisions.find((d) => d.companyId === f.companyId);
@@ -1994,8 +1975,144 @@ export function advanceCompanyLabQuarter(
       CAPEX_PARAMETERS_V1,
       PRODUCTION_PARAMETERS_V1.cost.baseProcessingCostUsdPerTon
     );
-    financialResults.push(finalFinanceResult);
-    nextFinanceCompanies.push(finalNextFinanceState);
+    // 【年間純利益ベース配当・実装指示§4 B〜F】Q4決算が確定した「後」に年間精算する。
+    //
+    // ここまでで finalFinanceResult は当四半期（Q4）のPL/BS/CFを確定している。
+    // 年間純利益は「同年度Q1〜Q3の確定実績（state.history）＋ いま確定したQ4」で
+    // 初めて決まるため、この位置が精算できる最初の地点になる。
+    // Turn開始時点へは戻さない（未確定のQ4損益を先読みさせないため）。
+    const settlementIntent = companyDecision?.annualDividendSettlement;
+    let annualSettlement: AnnualDividendSettlement | undefined;
+    let settlementUnavailableReason: string | undefined;
+    let financeResultAfterSettlement = finalFinanceResult;
+    let financeStateAfterSettlement = finalNextFinanceState;
+
+    if (settlementIntent && isFiscalYearEnd(state.currentPeriod)) {
+      const { year } = toYearQuarter(state.currentPeriod);
+      // 同年度の確定四半期を集める。0で補完しない・推測しない（実装指示§10）。
+      // 既支払配当は「実際に支払った額（appliedDividendUsd）」だけを見る。
+      // 設定値から「払ったはず」と推測しない（実装指示§11）。
+      const facts: AnnualQuarterFact[] = [];
+      for (const pastRecord of state.history) {
+        if (toYearQuarter(pastRecord.period).year !== year) continue;
+        const pastFinance = pastRecord.financialResults.find((r) => r.companyId === f.companyId);
+        if (!pastFinance) continue;
+        facts.push({
+          turn: pastRecord.turn,
+          period: pastRecord.period,
+          quarter: toYearQuarter(pastRecord.period).quarter,
+          netIncomeUsd: unwrapUsd(pastFinance.profitAndLoss.netIncome),
+          appliedDividendUsd: pastRecord.dividendResults?.find((d) => d.companyId === f.companyId)?.appliedDividendUsd ?? 0,
+        });
+      }
+      // 当Turn（Q4）ぶん。配当は、このTurnの開始時に解決済みのPlayer金額指定配当
+      // （dividendResolution.appliedUsd）を「同年度の既支払」として算入する。
+      const thisTurnResolution = dividendResolutionByCompanyId.get(f.companyId)!;
+      facts.push({
+        turn,
+        period: state.currentPeriod,
+        quarter: toYearQuarter(state.currentPeriod).quarter,
+        netIncomeUsd: unwrapUsd(finalFinanceResult.profitAndLoss.netIncome),
+        appliedDividendUsd: thisTurnResolution.appliedUsd,
+      });
+
+      const aggregation = aggregateAnnualDividendFacts({ year, facts });
+      if (!aggregation.available) {
+        // 年間利益を確定できないので支払わない。0補完も推測もしない。
+        settlementUnavailableReason =
+          aggregation.reason === "INCOMPLETE_FISCAL_YEAR"
+            ? `年度${year}のQ${aggregation.missingQuarters.join("/Q")}が確定履歴に無いため年間純利益を確定できず、年間精算を実行しない。`
+            : `年度${year}の確定実績に有限でない数値が含まれるため年間純利益を確定できず、年間精算を実行しない。`;
+      } else {
+        // 【上限は既存仕様のまま】min(Cash, 分配可能利益)。決算後の残高で判定する。
+        const availableCashUsd = unwrapUsd(finalNextFinanceState.cash);
+        const distributableEarningsUsd = unwrapUsd(finalNextFinanceState.distributableEarnings);
+        annualSettlement = computeAnnualDividendSettlement({
+          year,
+          annualNetIncomeUsd: aggregation.annualNetIncomeUsd,
+          appliedPayoutRatio: settlementIntent.payoutRatio,
+          payoutRatioSource: settlementIntent.payoutRatioSource,
+          paidDividendEarlierInYearUsd: aggregation.paidDividendEarlierInYearUsd,
+          maxDividendUsd: computeMaxDividendUsd(finalNextFinanceState),
+          availableCashUsd,
+          distributableEarningsUsd,
+        });
+        if (annualSettlement.appliedDividendUsd > 0) {
+          // Cash・Retained Earnings・分配可能利益を同額だけ減らす（既存の純粋関数）。
+          financeStateAfterSettlement = applyDividendToFinanceState(finalNextFinanceState, annualSettlement.appliedDividendUsd);
+          // BS/CFを同じ額で整合させる。PLのnetIncomeは変えない。
+          financeResultAfterSettlement = applyAnnualDividendToQuarterResult(finalFinanceResult, annualSettlement.appliedDividendUsd);
+        }
+      }
+    }
+    annualDividendSettlementByCompanyId.set(f.companyId, { settlement: annualSettlement, unavailableReason: settlementUnavailableReason });
+
+    // 【Phase DIV-1・実装指示§10/§11 ＋ 年間純利益ベース配当】配当履歴を確定する。
+    //
+    // 【年度末精算の後に作る】その四半期に実際に支払った総額は
+    // 「Turn開始時の配当（Player金額指定等）＋ 年度末精算」であり、後者は
+    // Q4決算後にしか決まらない。累積配当・time weighted valueが実支払と
+    // ずれないよう、記録の確定は精算の後で行う。
+    // 累積は過去の確定履歴（state.history）からこのturnまでの直近値を引き継ぐ
+    // （既存履歴にdividendResultsが無い旧保存データ・turn1では0から開始）。
+    {
+      const dividendResolution = dividendResolutionByCompanyId.get(f.companyId)!;
+      let priorCumulativeDividendUsd = 0;
+      let priorCumulativeWeightedDividendValueUsd = 0;
+      for (const pastRecord of state.history) {
+        const pastEntry = pastRecord.dividendResults?.find((d) => d.companyId === f.companyId);
+        if (pastEntry) {
+          priorCumulativeDividendUsd = pastEntry.cumulativeDividendUsd;
+          priorCumulativeWeightedDividendValueUsd = pastEntry.cumulativeWeightedDividendValueUsd;
+        }
+      }
+      dividendResults.push(
+        buildDividendQuarterResult({
+          companyId: f.companyId,
+          period: state.currentPeriod,
+          turn,
+          resolution: dividendResolution,
+          priorCumulativeDividendUsd,
+          priorCumulativeWeightedDividendValueUsd,
+          // 【この2つはTurn開始時点の意味のまま】DIV-1の契約どおり「Turn開始時の配当を
+          // 適用した直後（当期の営業結果が確定する前）」の残高であり、当期の調達・投資の
+          // 基準になった値を記録する。年度末精算は決算後に別途行われるため、その控除後の
+          // 残高はここへ混ぜない（混ぜると「当期の経営に使えた現金」の記録でなくなる）。
+          // 年度末精算の上限・実支払は下の annualSettlement 側に記録される。
+          distributableEarningsAfterUsd: unwrapUsd(prevFinance.distributableEarnings),
+          cashAfterUsd: unwrapUsd(prevFinance.cash),
+          // 【実装指示§13・§27】time weightはこのRunの実際の終了turn（config.turns、
+          // 早期終了で変わりうる）ではなく、シナリオ本来の長さ（definition.durationTurns、
+          // 例: 32Turn）を基準にする。これにより、同じturnの評価は後から何ターンまで
+          // 実際にプレイしたか（同一シナリオを短く区切って実行したかどうか）に左右されず、
+          // 「Turn16終了でもTurn32終了でも同じ評価systemを使える」（実装指示§13）を満たす。
+          scenarioLength: definition.durationTurns,
+          // 【年間精算】実行した場合のみ内訳を残す（Q1〜Q3・未実行年度はキーを作らない）。
+          ...(annualSettlement
+            ? {
+                annualSettlement: {
+                  dividendTargetYear: annualSettlement.year,
+                  annualNetIncomeUsd: annualSettlement.annualNetIncomeUsd,
+                  appliedPayoutRatio: annualSettlement.appliedPayoutRatio,
+                  payoutRatioSource: annualSettlement.payoutRatioSource,
+                  annualDividendTargetUsd: annualSettlement.annualDividendTargetUsd,
+                  paidDividendEarlierInYearUsd: annualSettlement.paidDividendEarlierInYearUsd,
+                  yearEndAdditionalTargetUsd: annualSettlement.yearEndAdditionalTargetUsd,
+                  maxDividendUsd: annualSettlement.maxDividendUsd,
+                  appliedDividendUsd: annualSettlement.appliedDividendUsd,
+                  annualDividendShortfallUsd: annualSettlement.annualDividendShortfallUsd,
+                  shortfallReason: annualSettlement.shortfallReason,
+                },
+              }
+            : {}),
+          ...(settlementUnavailableReason ? { annualSettlementUnavailableReason: settlementUnavailableReason } : {}),
+        })
+      );
+    }
+
+
+    financialResults.push(financeResultAfterSettlement);
+    nextFinanceCompanies.push(financeStateAfterSettlement);
     nextCapexCompanies.push(nextCapexState);
     capexResults.push(capexQuarterResult);
   }

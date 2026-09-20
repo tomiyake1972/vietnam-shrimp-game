@@ -37,6 +37,7 @@ import { assessGrowthRouting, GrowthRoutingAssessment } from "./decision/growthR
 import { COMMITTED_CAPEX_HORIZON_QUARTERS } from "./observation";
 import { buildStandardAiVapProductDevelopmentDecision } from "./decision/vapProductDevelopment";
 import { buildStandardAiDividendDecision } from "./decision/dividend";
+import { DividendPayoutRatioSource } from "../../finance/annualDividend";
 import { sumProductAmount, ProductAmount, zeroProductAmount } from "./types";
 import { computeBindingProductionCapacityTons } from "./bindingCapacity";
 import { PRODUCTION_PARAMETERS_V1 } from "../../production/parameters";
@@ -430,7 +431,16 @@ export function generateStandardAiDecisionWithDiagnostics(
    * 未指定のときは NEUTRAL_STANDARD_AI_COST_PROJECTION（＝全指数1.00・legacy建設費）
    * となり、本変更前と完全に同一の判断・数値になる（既存CLI・診断scriptの後方互換）。
    */
-  costProjection: StandardAiCostProjection = NEUTRAL_STANDARD_AI_COST_PROJECTION
+  costProjection: StandardAiCostProjection = NEUTRAL_STANDARD_AI_COST_PROJECTION,
+  /**
+   * 【年間純利益ベース配当】params.dividendBasePayoutRatio が管理者の手動指定
+   * （Management Consoleのバランス調整）で上書きされた値かどうか。
+   *
+   * Audit Workbook・画面が「当時の率」を現在のparameterから再計算しないよう、
+   * Engineが実際に使った率の出所をそのまま記録へ通すために受け取る（実装指示§13）。
+   * 省略時は "STANDARD_AI"（手動指定が無いRun・既存呼び出し元と同じ意味）。
+   */
+  dividendPayoutRatioSource: DividendPayoutRatioSource = "STANDARD_AI"
 ): StandardAiDecisionWithDiagnostics {
   const observation = buildStandardAiObservation(fixture, ownState, publicInfo, period, turn);
   const pressures = computePressureScores(observation, fixture, params);
@@ -1069,6 +1079,7 @@ export function generateStandardAiDecisionWithDiagnostics(
     crisisState: crisisAssessment.state,
     newCapexProposalCount: finalCapexDecision.newProjectProposals.length,
     params,
+    payoutRatioSource: dividendPayoutRatioSource,
   });
 
   const decision: CompanyDecisionInput = {
@@ -1089,6 +1100,9 @@ export function generateStandardAiDecisionWithDiagnostics(
     // 頻度を年1回（年度末Q4のみ）へ変更した。条件を満たさないTurnは
     // undefined（＝配当0）となり、DIV-1と同一の挙動に戻る。
     dividendDecision: dividendResult.dividendDecision,
+    // 【年間純利益ベース配当】年度末（Q4）に年間精算を行う意思（率のみ。金額はここで決めない）。
+    // gateで見送った年度・Q1〜Q3ではundefinedとなり、年間精算は実行されない。
+    ...(dividendResult.annualSettlementIntent ? { annualDividendSettlement: dividendResult.annualSettlementIntent } : {}),
     // 【新工場の提案を既存 capex 提案と同じ意思決定へ合流させる】
     // 既存増設の提案内容は一切変更せず、新工場ぶんを末尾へ足すだけにする
     // （既存の設備投資判断の挙動を変えない）。
