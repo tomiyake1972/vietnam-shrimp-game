@@ -16,6 +16,7 @@ import type { SimulationAnalyticsDataset } from "./analytics/types";
 import type { CompanyEvaluationSnapshot } from "../evaluation/evaluationSemantics";
 import type { EvaluationHistoryRecord } from "../evaluation/evaluationHistory";
 import type { ManualBalanceAppliedRecord } from "../manualBalance/application";
+import type { AppliedBalanceProfileRef } from "../manualBalance/profile";
 
 /** 標準の32Q（8年）。Management Console の既定実行長。 */
 export const MANAGEMENT_CONSOLE_STANDARD_TURNS = 32;
@@ -87,6 +88,16 @@ export interface SimulationRun {
   readonly companyControlModes?: Readonly<Record<string, CompanyControlMode>>;
   /** 【Phase 8・Game Setup】Setup画面で任意入力できるRun名・メモ。未入力ならundefined。 */
   readonly runName?: string;
+  /**
+   * 【BALANCE-PROFILE-1】このRunを開始したときにコピー元となったBalance Profile。
+   *
+   * 【予定であって実績ではない】Run開始後にGMが手動でバランス設定を変更しても
+   * この値は変わらない（コピー元が何だったかの記録であるため）。実際に各Turnへ
+   * 適用された値の正本は SimulationSession.manualBalanceApplied である。
+   * Neutral（手動補正なし）で開始したRun・この機能より前のRunでは undefined
+   * （画面は推測で埋めず「不明」または「Profileなし」として扱う）。
+   */
+  readonly appliedBalanceProfile?: AppliedBalanceProfileRef;
   /**
    * 【Game End / Final Results・END-1】Game Masterが任意Turnでゲームを終了した日時
    * （metadata。判断には使わない）。未設定＝ゲームはまだ進行中（ACTIVE）。

@@ -49,6 +49,7 @@ import {
   resolvedSalesPriceIndex,
   type ManualBalanceSchedule,
 } from "../manualBalance/overrides";
+import type { AppliedBalanceProfileRef } from "../manualBalance/profile";
 import type { ManualBalanceAppliedRecord, ManualPriceIndexAuditWarning } from "../manualBalance/application";
 import { deriveMarketReferencePriceBreakdowns } from "../../market/destinationPricing";
 import type { MarketQuarterResult } from "../../market/types";
@@ -151,6 +152,26 @@ export interface CreateSimulationSessionInput {
    * ビット単位で同一のconfig・同一の挙動（従来市場モデル＝legacy semantics）。
    */
   readonly salesModelId?: SalesModelId;
+  /**
+   * 【BALANCE-PROFILE-1】Run開始時にコピーする手動バランス調整スケジュール。
+   *
+   * 【snapshotコピーであり参照ではない】Balance Profile を選んで開始した場合、
+   * 呼び出し側（Setup画面）が Profile.schedule をここへ渡す。Runは以後Profileを
+   * 参照しない。したがってRun開始後にProfile本体を編集しても、進行中Runの
+   * scheduleは一切変わらない（逆にRun側で手修正してもProfileは変わらない）。
+   *
+   * 省略時（undefined）は config へキー自体を書き込まない ＝ 既存Runと
+   * ビット単位で同一のconfig。Neutral Profile を選んだ場合もここは undefined になる。
+   */
+  readonly manualBalanceOverrides?: ManualBalanceSchedule;
+  /**
+   * 【BALANCE-PROFILE-1】コピー元Balance Profileの由来情報（記録用）。
+   *
+   * 【予定であって実績ではない】ここに残るのは「開始時にコピー元となったProfile」
+   * であり、実際に各Turnへ適用された値は manualBalanceApplied を見る。
+   * Neutral（手動補正なし）で開始した場合は省略する。
+   */
+  readonly appliedBalanceProfile?: AppliedBalanceProfileRef;
 }
 
 /**
@@ -186,6 +207,14 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
      * runner.ts:salesParametersFor が registry から SalesParameters を解決する。
      */
     ...(input.salesModelId !== undefined ? { salesModelId: input.salesModelId } : {}),
+    /**
+     * 【BALANCE-PROFILE-1】salesModelIdと同じ規約で、未指定なら**キー自体を作らない**。
+     * Balance Profile を選ばなかった（Neutral）Runのconfigが、この機能の導入前と
+     * ビット単位で同一であることを保つ。
+     */
+    ...(input.manualBalanceOverrides !== undefined && input.manualBalanceOverrides.length > 0
+      ? { manualBalanceOverrides: input.manualBalanceOverrides }
+      : {}),
   };
   const { state, fixtures } = initializeCompanyLab(config);
   const run: SimulationRun = {
@@ -206,6 +235,9 @@ export function createSimulationSession(input: CreateSimulationSessionInput): Si
     failedAtTurn: null,
     companyControlModes: input.companyControlModes,
     runName: input.runName,
+    // 【BALANCE-PROFILE-1】Neutralで開始したRunにはキー自体を作らない
+    // （既存Runのrun metadataと同一に保つ）。
+    ...(input.appliedBalanceProfile !== undefined ? { appliedBalanceProfile: input.appliedBalanceProfile } : {}),
   };
   return {
     run,

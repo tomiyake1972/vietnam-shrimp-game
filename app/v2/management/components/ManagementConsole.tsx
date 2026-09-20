@@ -33,6 +33,9 @@ import {
 import { CompanyVisionOverrideEntry } from "../../../lib/v2/companyLab/vision/overrides";
 import { VisionCalibrationPanel } from "./VisionCalibrationPanel";
 import { BalanceAdjustmentPanel } from "./BalanceAdjustmentPanel";
+import { BalanceProfilePanel } from "./BalanceProfilePanel";
+import { listBalanceProfiles } from "../lib/balanceProfileStore";
+import type { BalanceProfile } from "../../../lib/v2/companyLab/manualBalance/profile";
 import type { ManualBalanceSchedule } from "../../../lib/v2/companyLab/manualBalance/overrides";
 import {
   CompanyControlMode,
@@ -198,6 +201,27 @@ export function ManagementConsole() {
    * Turnが始まることを同期的に防ぐ。
    */
   const balanceSaveInProgress = useRef(false);
+
+  /**
+   * 【BALANCE-PROFILE-1】保存済みBalance Profile一覧（localStorage由来）。
+   * SSRでは読めないため、クライアント側のeffectで読み込む。
+   */
+  const [balanceProfiles, setBalanceProfiles] = useState<readonly BalanceProfile[]>([]);
+  const reloadBalanceProfiles = useCallback(() => {
+    setBalanceProfiles(listBalanceProfiles(nowIso()));
+  }, []);
+  useEffect(() => {
+    // localStorage読み出しはクライアント側のみ。effect本体から直接setStateしない
+    // （既存の非同期読み込みと同じ形にそろえる）。
+    let cancelled = false;
+    void (async () => {
+      const loaded = listBalanceProfiles(nowIso());
+      if (!cancelled) setBalanceProfiles(loaded);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // --- 【Phase 7・Manual Override】会社ごとの経営モードと、PLAYER会社の当ターン意思決定 ---
   // 未確定は STANDARD_AI 相当（指示§3「新しいSimulation Run作成時は5社すべてSTANDARD_AI」）。
@@ -1258,6 +1282,18 @@ export function ManagementConsole() {
           {/* 【Management Console Vision Calibration・指示§12】実行中でもVisionを調整できる。 */}
           <Collapsible title="Vision & Strategy Calibration（実行中の編集）" testId="console-vision-calibration-toggle">
             <VisionCalibrationPanel session={view?.session ?? null} onApply={handleApplyVisionOverride} onReset={handleResetVisionOverride} />
+          </Collapsible>
+
+          {/* 【BALANCE-PROFILE-1】このRunの元Profile確認・Profile保存・再適用・持ち出し。 */}
+          <Collapsible title="Balance Profile（このRunの経済バランス条件）" testId="console-balance-profile-toggle">
+            <BalanceProfilePanel
+              session={view?.session ?? null}
+              profiles={balanceProfiles}
+              onProfilesChanged={reloadBalanceProfiles}
+              onApplySchedule={handleApplyManualBalance}
+              busy={busy || restoring}
+              locked={view ? isGameFinished(view.run) : false}
+            />
           </Collapsible>
 
           {/* 【MANUAL-BALANCE-1】配当性向・販売/原料市場価格指数の手動調整。 */}
