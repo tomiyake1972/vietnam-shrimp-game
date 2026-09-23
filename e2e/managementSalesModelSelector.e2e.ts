@@ -15,6 +15,8 @@ import { test, expect, type Page } from "@playwright/test";
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 const TIERED_LABEL = "三層顧客価格モデル V2.00候補";
 const LEGACY_LABEL = "従来市場モデル";
+/** 【ENG-CROWDING-MARKDOWN-3】市場集中価格下落つきの正式P1モデル。 */
+const CROWDING_LABEL = "三層顧客価格モデル V2.00＋市場集中価格下落";
 
 async function loginAsGm(page: Page): Promise<void> {
   const returnTo = encodeURIComponent("/v2/management/setup");
@@ -143,4 +145,40 @@ test("MC-SALES-E2E-createFresh-legacy: legacyのRunからConsole内で新しく�
   await page.getByRole("button", { name: "Reset" }).click();
   await page.waitForURL((url) => /\/v2\/management\?run=/.test(url.toString()) && url.searchParams.get("run") !== runId);
   await expect(page.getByTestId("console-sales-model")).toHaveText(LEGACY_LABEL);
+});
+
+// ---------------------------------------------------------------------
+// ENG-CROWDING-MARKDOWN-3 §21: 市場集中価格下落モデルの選択・維持
+// ---------------------------------------------------------------------
+
+test("MC-SALES-E2E-crowding: 市場集中価格下落モデルを選んで作成したRunが、Turn進行・reload後も同じモデルのまま", async ({ page }) => {
+  test.setTimeout(300_000);
+
+  await loginAsGm(page);
+  const select = page.getByTestId("setup-sales-model-select");
+  // 選択肢として露出していること（registryへ追加しただけでUIに出ない、を防ぐ）。
+  await expect(select.locator("option[value='tiered-v200-crowding-v1']")).toHaveCount(1);
+  await select.selectOption("tiered-v200-crowding-v1");
+
+  await page.getByTestId("setup-start-button").click();
+  await page.waitForURL(/\/v2\/management\?run=/);
+  const runId = new URL(page.url()).searchParams.get("run");
+  expect(runId).toBeTruthy();
+  await expect(page.getByTestId("console-sales-model")).toHaveText(CROWDING_LABEL);
+
+  // Turn1を進める。
+  await page.getByTestId("run-1").click();
+  await expect(page.getByTestId("turn-counter")).toContainText("1 /", { timeout: 120_000 });
+  await expect(page.getByTestId("console-sales-model")).toHaveText(CROWDING_LABEL);
+
+  // reload / resume 後も同じRun・同じ販売市場モデル（save/resumeでCrowdingがOFFへ戻らない）。
+  await page.reload();
+  await page.waitForURL(/\/v2\/management\?run=/);
+  expect(new URL(page.url()).searchParams.get("run")).toBe(runId);
+  await expect(page.getByTestId("console-sales-model")).toHaveText(CROWDING_LABEL);
+
+  // resume後にもう1ターン進めても維持される。
+  await page.getByTestId("run-1").click();
+  await expect(page.getByTestId("turn-counter")).toContainText("2 /", { timeout: 120_000 });
+  await expect(page.getByTestId("console-sales-model")).toHaveText(CROWDING_LABEL);
 });

@@ -310,25 +310,27 @@ test("P2-18: 現行より新しいスキーマ版だけを拒否する（追加�
 // 版を上げた瞬間に検査対象がずれて素通りしてしまうため）。
 // ---------------------------------------------------------------------
 
-test("P2-18b: schemaVersion は 8（年間純利益ベース配当で 7→8）", () => {
-  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 8);
+test("P2-18b: schemaVersion は 9（ENG-CROWDING-MARKDOWN-3 で 8→9）", () => {
+  // Crowding 診断（CompanyQuarterRecord.crowdingDiagnostics）の追加による意図的な bump。
+  // optional field の追加のみで、v8 以前の保存物は migration 無しでそのまま読める（P2-18c）。
+  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 9);
 });
 
-test("P2-18c: v1〜v8 の保存物はすべて読める（migration不要・追加的変更のみ）", () => {
-  for (const version of [1, 2, 3, 4, 5, 6, 7, 8]) {
+test("P2-18c: v1〜v9 の保存物はすべて読める（migration不要・追加的変更のみ）", () => {
+  for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
     assert.ok(isReadableSimulationRunSchema(version), `v${version} が読めない判定になっている`);
   }
 });
 
-test("P2-18d: 現在より新しい schema（v9以降）は拒否する", () => {
-  for (const version of [9, 10, 999]) {
+test("P2-18d: 現在より新しい schema（v10以降）は拒否する", () => {
+  for (const version of [10, 11, 999]) {
     assert.ok(!isReadableSimulationRunSchema(version), `v${version} を読める判定にしてはいけない`);
   }
   // 版番号として壊れている値も拒否する（0・負数・小数・非数値）。
   for (const broken of [0, -1, 1.5, "8", null, undefined, {}]) {
     assert.ok(!isReadableSimulationRunSchema(broken), `${JSON.stringify(broken)} を読める判定にしてはいけない`);
   }
-  assert.throws(() => parseStoredSimulationRun(JSON.stringify({ schemaVersion: 9, run: {}, dataset: {} }), "x"));
+  assert.throws(() => parseStoredSimulationRun(JSON.stringify({ schemaVersion: 10, run: {}, dataset: {} }), "x"));
 });
 
 test("P2-18e: v7として保存された（annualSettlementを持たない）Runが、v8のコードでそのまま読める", () => {
@@ -384,7 +386,7 @@ test("P2-18e: v7として保存された（annualSettlementを持たない）Run
   assert.equal(summary.simulationRunId, session.run.simulationRunId);
 });
 
-test("P2-18f: v8として保存されたRunは新fieldを保持したまま読み戻せる", () => {
+test("P2-18f: 現行version（v9）として保存されたRunは新fieldを保持したまま読み戻せる", () => {
   // 年度末（Q4）まで進めて、実際に annualSettlement が載るRunを作る。
   const session = runTurns(4);
   const stored = {
@@ -394,8 +396,8 @@ test("P2-18f: v8として保存されたRunは新fieldを保持したまま読�
     savedAt: AT,
     resumePayload: { state: session.state },
   };
-  const parsed = parseStoredSimulationRun(JSON.stringify(stored), "v8-run");
-  assert.equal(parsed.schemaVersion, 8);
+  const parsed = parseStoredSimulationRun(JSON.stringify(stored), "current-version-run");
+  assert.equal(parsed.schemaVersion, CURRENT_SIMULATION_RUN_PERSISTED_VERSION);
 
   const history = (parsed.resumePayload as {
     state: { history: readonly { turn: number; dividendResults?: readonly { annualSettlement?: Record<string, unknown> }[] }[] };

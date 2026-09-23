@@ -31,6 +31,8 @@ import { salesModelIdForNextRun } from "../../../../../v2/management/lib/nextRun
 
 const TIERED = "tiered-v200-candidate-v1" as const;
 const LEGACY = "legacy-waterfall-v1" as const;
+/** 【ENG-CROWDING-MARKDOWN-3】正式P1（市場集中価格下落）付きモデル。 */
+const CROWDING = "tiered-v200-crowding-v1" as const;
 
 function baseInput(overrides?: Partial<CreateSimulationSessionInput>): CreateSimulationSessionInput {
   return {
@@ -191,7 +193,9 @@ test("MC-SALES-9: Redis schemaVersion・キー体系は変更していない", (
   // 今もpersistence versionを変更していない。6以降への引き上げはいずれも後続Phaseによるもので、
   // Management Console 手動バランス調整による、optionalフィールドの追加のみの変更。
   // キー体系が変わっていないことは下の各assertで引き続き担保される。
-  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 8);
+  // 【ENG-CROWDING-MARKDOWN-3で8→9】Crowding診断のoptionalフィールド追加による
+  // 意図的なbump（#04承認済み）。Sales Model選択そのものは今もversionを動かさない。
+  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 9);
   assert.equal(simulationRunIndexKeyV2("staging"), "staging:v2:simulationRun:index");
   assert.equal(simulationRunManifestKeyV2("staging", "run-1"), "staging:v2:simulationRun:run-1");
   assert.equal(simulationRunSummaryKeyV2("staging", "run-1"), "staging:v2:simulationRun:run-1:summary");
@@ -212,7 +216,9 @@ test("MC-SALES-10: baseline / dynamic-scenario-1 / dynamic-scenario-2 のlegacy 
 });
 
 test("MC-SALES-registry: Setup画面の選択肢はregistryのSALES_MODEL_IDSそのもの（別のIDリストを新設していない）", () => {
-  assert.deepEqual([...SALES_MODEL_IDS], [LEGACY, TIERED]);
+  // 新しい販売モデルは registry へ足すだけで Setup 画面の選択肢になる
+  // （画面側は SALES_MODEL_IDS を map しているだけで、別のIDリストを持たない）。
+  assert.deepEqual([...SALES_MODEL_IDS], [LEGACY, TIERED, CROWDING]);
 });
 
 // =====================================================================

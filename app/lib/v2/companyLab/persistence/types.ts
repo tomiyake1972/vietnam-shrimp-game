@@ -142,8 +142,38 @@ import type { ProductDevelopmentState } from "../productDevelopmentState";
  *        使用済みだったため、本統合作業でTest15側の変更を5→7へ再採番した
  *        （develop/v2の5・6とは意味の異なる別の変更であるため、単純な
  *        5→6への読み替えではなく、develop/v2の6の続き番号として7を採番した）。
+ *
+ *   v9 … 【ENG-CROWDING-MARKDOWN-3】市場集中による価格下落（Crowding）の
+ *        価格形成診断を CompanyQuarterRecord へ optional 保存できる世代。
+ *        追加したのは CompanyQuarterRecord.crowdingDiagnostics?（保存形は
+ *        sales/persistedCrowdingDiagnostics.ts の PersistedCrowdingDiagnosticsV1）
+ *        のみで、既存フィールドの意味は一切変えていない。
+ *
+ *        【保存内容】market × product × dueDate（bucket）ごとの
+ *        preCrowdingStructuralPrice / forwardDemandProxy / protectedExternalShare /
+ *        protectedExternalDemand / grossCompanyAddressableDemand（= pricing
+ *        contestable demand）/ existingCommittedOutstanding /
+ *        residualContestableDemand / totalDesiredOffers / totalCredibleOffers /
+ *        crowdingLoad / crowdingRatio / threshold / lambda / gamma / floor /
+ *        crowdingMultiplier / postCrowdingClearingPrice / physicalAtpMethod /
+ *        forwardDemandProxyMethod と、会社別の desiredOffer / credibleOffer /
+ *        bindingReason。
+ *
+ *        【なぜ v9 を切るのか】v8 は既に integration/v2-rc-20260830 へ統合され
+ *        Preview でも利用されている＝契約が外部へ公開済みである。追加は
+ *        optional 1 件のみで migration は不要だが、永続化契約の新しい世代として
+ *        版を分け、「v8 で保存された Run にはこの field が無い」ことを
+ *        版番号で識別できるようにする（v8 を切ったときと同じ理由）。
+ *
+ *        【互換方針】
+ *          - 旧 v1〜v8 の保存物はそのまま v9 のコードで読める（migration 不要）。
+ *          - 旧 Run ではこの field が存在しない。これは「Crowding が働いて
+ *            値下げ 0 だった」ではなく「この機能が無かった頃の記録＝未記録」であり、
+ *            画面・Export は推測で 0 や現在の parameter 値を埋めない。
+ *          - Crowding OFF のターンでも field を作らない（undefined で統一）。
+ *          - 旧 saved run を v9 へ書き換えない。Redis key 変更なし。
  */
-export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 8;
+export const CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION = 9;
 
 // ---------------------------------------------------------------------
 // 1. ランタイムスナップショット（history非包含。§2-1・§2-2）

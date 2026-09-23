@@ -123,7 +123,8 @@ test("DETAIL-LOAD-6: 実 persisted codec roundtrip（decode / schema 検証）�
   await createAndList(deps, labId);
   // redisRepository.loadCurrentState は decodeCompanyLabPersistedStateFromStored を必ず通る。
   const stored = await repository.loadCurrentState(labId);
-  assert.equal(stored.schemaVersion, 8);
+  // 【ENG-CROWDING-MARKDOWN-3で8→9】新規作成Labは現行versionで保存される。
+  assert.equal(stored.schemaVersion, 9);
   assert.equal(stored.playerCompanyId, "BAL");
   assert.ok(
     stored.fixtures.some((f) => f.companyId === stored.playerCompanyId),

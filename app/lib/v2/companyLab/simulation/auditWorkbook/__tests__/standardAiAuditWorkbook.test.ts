@@ -402,3 +402,102 @@ test("SAI-AUDIT-XLSX-18: 生成した .xlsx が実際に開け、各シートが
   });
   assert.ok(checked > 0, "revenueUsd の数値セルを1つも検査できなかった");
 });
+
+// ---------------------------------------------------------------------
+// ENG-CROWDING-MARKDOWN-3 §14: 市場集中による価格下落の監査接続
+// ---------------------------------------------------------------------
+
+/** Crowding を持つ salesModel で短いRunを回す（32Qの cache を汚さない）。 */
+function buildCrowdingRun(turns: number): Built {
+  let session = createSimulationSession({
+    simulationRunId: `audit-crowding-${turns}q`,
+    scenarioId: "baseline",
+    seed: "audit-crowding-seed",
+    requestedTurns: turns,
+    startedAt: AT,
+    salesModelId: "tiered-v200-crowding-v1",
+  });
+  session = advanceSimulationTurns({ session, turns, timestamp: AT });
+  return {
+    stored: {
+      schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
+      run: session.run,
+      dataset: buildDatasetFromSession(session),
+      packCapture: { companyTurns: session.packCompanyTurns, worldTurns: session.packWorldTurns },
+      resumePayload: buildResumePayload(session, {}, {}),
+      savedAt: AT,
+    },
+    liveHistory: session.state.history,
+  };
+}
+
+test("SAI-AUDIT-XLSX-CROWD-1: Crowding 2シートが常に存在する（Crowding無しRunでも欠落しない）", async () => {
+  const built = build(32);
+  const exported = await buildStandardAiAuditExport({ stored: built.stored, generatedAt: AT, liveHistory: built.liveHistory });
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(exported.workbook);
+  const names = workbook.worksheets.map((s) => s.name);
+  assert.ok(names.includes("20_CROWDING_DETAIL"), "20_CROWDING_DETAILが無い");
+  assert.ok(names.includes("20b_CROWDING_COMPANY_OFFERS"), "20b_CROWDING_COMPANY_OFFERSが無い");
+});
+
+test("SAI-AUDIT-XLSX-CROWD-2: Crowding無しRunでは行0件で、理由がmissingDataNotesへ残る（捏造しない）", () => {
+  const d = data(32);
+  assert.equal(d.crowdingBuckets.length, 0);
+  assert.equal(d.crowdingCompanyOffers.length, 0);
+  assert.ok(
+    d.meta.missingDataNotes.some((n) => n.includes("20_CROWDING_DETAIL")),
+    "Crowding行が無い理由がmissingDataNotesに残っていない"
+  );
+});
+
+test("SAI-AUDIT-XLSX-CROWD-3: Crowding有りRunでは診断がそのまま転記される（再計算しない）", () => {
+  const built = buildCrowdingRun(4);
+  const d = buildStandardAiAuditWorkbookData({ stored: built.stored, generatedAt: AT, liveHistory: built.liveHistory });
+
+  const recordsWithDiag = built.liveHistory.filter((r) => r.crowdingDiagnostics !== undefined);
+  assert.ok(recordsWithDiag.length > 0, "Crowding有りRunなのに診断が1件も無い");
+  const expectedBuckets = recordsWithDiag.reduce((sum, r) => sum + r.crowdingDiagnostics!.buckets.length, 0);
+  assert.equal(d.crowdingBuckets.length, expectedBuckets);
+
+  const first = recordsWithDiag[0];
+  const b = first.crowdingDiagnostics!.buckets[0];
+  const row = d.crowdingBuckets.find(
+    (r) => r.turn === first.turn && r.market === b.market && r.product === b.product && r.dueDate === b.dueDate
+  );
+  assert.ok(row, "bucketに対応する行が無い");
+  // 転記のみ：Engineが確定させた値と厳密一致（丸め直し・再計算をしていないこと）。
+  assert.equal(row.preCrowdingStructuralPriceUsdPerKg, b.preCrowdingStructuralPrice);
+  assert.equal(row.postCrowdingClearingPriceUsdPerKg, b.postCrowdingClearingPrice);
+  assert.equal(row.crowdingMultiplier, b.crowdingMultiplier);
+  assert.equal(row.crowdingRatio, b.crowdingRatio);
+  assert.equal(row.thresholdRatio, b.threshold);
+  assert.equal(row.floorRatio, b.floor);
+  assert.equal(row.physicalAtpMethod, b.physicalAtpMethod);
+  assert.equal(row.crowdingEnabled, "TRUE");
+
+  const expectedOffers = recordsWithDiag.reduce(
+    (sum, r) => sum + r.crowdingDiagnostics!.buckets.reduce((s, bb) => s + bb.companyOffers.length, 0),
+    0
+  );
+  assert.equal(d.crowdingCompanyOffers.length, expectedOffers);
+});
+
+test("SAI-AUDIT-XLSX-CROWD-4: Crowding列が17_DATA_DICTIONARYに揃っている（列の意味を推測させない）", () => {
+  const built = buildCrowdingRun(4);
+  const d = buildStandardAiAuditWorkbookData({ stored: built.stored, generatedAt: AT, liveHistory: built.liveHistory });
+  assert.ok(d.crowdingBuckets.length > 0);
+  const documented = new Set(AUDIT_DATA_DICTIONARY.map((entry) => `${entry.sheetName}#${entry.fieldName}`));
+  const commonKeys = new Set(["turn", "period", "market", "product", "companyId"]);
+  for (const field of Object.keys(d.crowdingBuckets[0])) {
+    if (commonKeys.has(field)) continue;
+    assert.ok(documented.has(`20_CROWDING_DETAIL#${field}`), `17_DATA_DICTIONARYに 20_CROWDING_DETAIL.${field} が無い`);
+  }
+  for (const field of Object.keys(d.crowdingCompanyOffers[0])) {
+    if (commonKeys.has(field) || field === "dueDate") continue;
+    assert.ok(
+      documented.has(`20b_CROWDING_COMPANY_OFFERS#${field}`),
+      `17_DATA_DICTIONARYに 20b_CROWDING_COMPANY_OFFERS.${field} が無い`
+    );
+  }
+});

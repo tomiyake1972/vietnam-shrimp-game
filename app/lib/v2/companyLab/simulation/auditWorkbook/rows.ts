@@ -40,6 +40,8 @@ import {
   AuditFactoryCapacityRow,
   AuditFinalResultRow,
   AuditFinanceRow,
+  AuditCrowdingBucketRow,
+  AuditCrowdingCompanyOfferRow,
   AuditMarketRow,
   AuditProcurementRow,
   AuditProductionRow,
@@ -50,6 +52,7 @@ import {
   AuditWorkforceRow,
   BacklogDueStatus,
   StandardAiAuditWorkbookData,
+  finiteOrNull,
   num,
 } from "./types";
 
@@ -1134,6 +1137,74 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
       : "RECOMPUTED_FROM_PARTIAL_HISTORY (this run predates the all-turn evaluationHistory projection; use 02_COMPANY_SUMMARY for all-turn cumulative KPIs)",
   }));
 
+  // ---- 20_CROWDING_DETAIL / 20b_CROWDING_COMPANY_OFFERS ----
+  // 【転記のみ】CompanyQuarterRecord.crowdingDiagnostics（Engine が確定させた bucket 診断）
+  // をそのまま並べる。multiplier も価格もここで計算し直さない。
+  // 【入手可能性】診断は full CompanyQuarterRecord にしか無いため、保存済みRunでは
+  // rolling window（直近ターン）ぶんだけ埋まる。live session を渡した場合は全Turn埋まる。
+  // Crowding を持たない salesModel（legacy / tiered-v200-candidate-v1）の Run では 0 行になる。
+  const crowdingBuckets: AuditCrowdingBucketRow[] = [];
+  const crowdingCompanyOffers: AuditCrowdingCompanyOfferRow[] = [];
+  let crowdingTurnsWithDiagnostics = 0;
+  for (const turn of turns) {
+    const record = historyByTurn.get(turn);
+    const diag = record?.crowdingDiagnostics;
+    if (!record || !diag) continue;
+    crowdingTurnsWithDiagnostics += 1;
+    for (const b of diag.buckets) {
+      crowdingBuckets.push({
+        turn,
+        period: record.period,
+        market: b.market,
+        product: b.product,
+        dueDate: b.dueDate,
+        policyVersion: diag.policyVersion,
+        crowdingEnabled: diag.enabled ? "TRUE" : "FALSE",
+        preCrowdingStructuralPriceUsdPerKg: finiteOrNull(b.preCrowdingStructuralPrice),
+        postCrowdingClearingPriceUsdPerKg: finiteOrNull(b.postCrowdingClearingPrice),
+        crowdingMultiplier: finiteOrNull(b.crowdingMultiplier),
+        crowdingRatio: finiteOrNull(b.crowdingRatio),
+        crowdingLoadHosoEqTons: finiteOrNull(b.crowdingLoad),
+        forwardDemandProxyHosoEqTons: finiteOrNull(b.forwardDemandProxy),
+        protectedExternalShareRatio: finiteOrNull(b.protectedExternalShare),
+        protectedExternalDemandHosoEqTons: finiteOrNull(b.protectedExternalDemand),
+        grossCompanyAddressableDemandHosoEqTons: finiteOrNull(b.grossCompanyAddressableDemand),
+        existingCommittedOutstandingHosoEqTons: finiteOrNull(b.existingCommittedOutstanding),
+        residualContestableDemandHosoEqTons: finiteOrNull(b.residualContestableDemand),
+        totalDesiredOffersHosoEqTons: finiteOrNull(b.totalDesiredOffers),
+        totalCredibleOffersHosoEqTons: finiteOrNull(b.totalCredibleOffers),
+        thresholdRatio: finiteOrNull(b.threshold),
+        lambda: finiteOrNull(b.lambda),
+        gamma: finiteOrNull(b.gamma),
+        floorRatio: finiteOrNull(b.floor),
+        physicalAtpMethod: b.physicalAtpMethod,
+        forwardDemandProxyMethod: b.forwardDemandProxyMethod,
+      });
+      for (const o of b.companyOffers) {
+        crowdingCompanyOffers.push({
+          turn,
+          period: record.period,
+          market: b.market,
+          product: b.product,
+          dueDate: b.dueDate,
+          companyId: o.companyId,
+          desiredOfferHosoEqTons: finiteOrNull(o.desiredOffer),
+          credibleOfferHosoEqTons: finiteOrNull(o.credibleOffer),
+          bindingReason: o.bindingReason,
+        });
+      }
+    }
+  }
+  if (crowdingBuckets.length === 0) {
+    missingDataNotes.push(
+      "20_CROWDING_DETAIL / 20b_CROWDING_COMPANY_OFFERS are empty. Either this run used a sales model without market-crowding markdown, or no CompanyQuarterRecord in the available history carries crowdingDiagnostics."
+    );
+  } else if (crowdingTurnsWithDiagnostics < turns.length) {
+    missingDataNotes.push(
+      `20_CROWDING_DETAIL covers ${crowdingTurnsWithDiagnostics} of ${turns.length} turns. Crowding diagnostics live only in the full CompanyQuarterRecord, which a saved run keeps for the most recent turns only (rolling window). Export from a live session to cover every turn.`
+    );
+  }
+
   return {
     meta: {
       simulationRunId: run.simulationRunId,
@@ -1167,5 +1238,7 @@ export function buildStandardAiAuditWorkbookData(input: BuildAuditRowsInput): St
     finalResults,
     events,
     profileVision,
+    crowdingBuckets,
+    crowdingCompanyOffers,
   };
 }

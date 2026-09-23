@@ -620,7 +620,10 @@ test("SMID-FROZEN-5: registry 内の ID に重複が無く、定義と ID が一
     assert.equal(def.salesModelId, id, "definition の salesModelId が key と一致していない");
     assert.ok(def.description.length > 0);
   }
-  assert.deepEqual([...SALES_MODEL_IDS], ["legacy-waterfall-v1", "tiered-v200-candidate-v1"]);
+  // 【ENG-CROWDING-MARKDOWN-3】tiered-v200-crowding-v1（正式P1 Crowding policy 付き）を追加。
+  // 既存2件は順序も含め不変であること自体がこのアサーションの目的である
+  // （既存 ID を書き換えず、新 ID を末尾へ足す A3 パターン）。
+  assert.deepEqual([...SALES_MODEL_IDS], ["legacy-waterfall-v1", "tiered-v200-candidate-v1", "tiered-v200-crowding-v1"]);
 });
 
 test("SMID-FROZEN-6: 未知 ID は resolve 時にも必ず失敗する（silent fallback しない）", () => {

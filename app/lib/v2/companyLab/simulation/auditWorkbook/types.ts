@@ -492,6 +492,56 @@ export interface AuditProfileVisionRow {
   readonly salesForceConstraintReason: string | null;
 }
 
+/**
+ * 20_CROWDING_DETAIL: 市場集中による価格下落（ENG-CROWDING-MARKDOWN）の bucket 診断。
+ * 1行 = 1 Turn × 市場 × 商品 × 納期（bucket）。Engine が確定させた診断の転記のみで、
+ * ここで multiplier や価格を計算し直さない。
+ */
+export interface AuditCrowdingBucketRow {
+  readonly turn: number;
+  readonly period: string;
+  readonly market: string;
+  readonly product: string;
+  readonly dueDate: string;
+  readonly policyVersion: string;
+  readonly crowdingEnabled: string;
+  readonly preCrowdingStructuralPriceUsdPerKg: number | null;
+  readonly postCrowdingClearingPriceUsdPerKg: number | null;
+  readonly crowdingMultiplier: number | null;
+  readonly crowdingRatio: number | null;
+  readonly crowdingLoadHosoEqTons: number | null;
+  readonly forwardDemandProxyHosoEqTons: number | null;
+  readonly protectedExternalShareRatio: number | null;
+  readonly protectedExternalDemandHosoEqTons: number | null;
+  readonly grossCompanyAddressableDemandHosoEqTons: number | null;
+  readonly existingCommittedOutstandingHosoEqTons: number | null;
+  readonly residualContestableDemandHosoEqTons: number | null;
+  readonly totalDesiredOffersHosoEqTons: number | null;
+  readonly totalCredibleOffersHosoEqTons: number | null;
+  readonly thresholdRatio: number | null;
+  readonly lambda: number | null;
+  readonly gamma: number | null;
+  readonly floorRatio: number | null;
+  readonly physicalAtpMethod: string;
+  readonly forwardDemandProxyMethod: string;
+}
+
+/**
+ * 20b_CROWDING_COMPANY_OFFERS: bucket ごとの会社別提示量。
+ * **Management/Admin 専用**（5社横断の監査資料。Player 導線からは呼ばない）。
+ */
+export interface AuditCrowdingCompanyOfferRow {
+  readonly turn: number;
+  readonly period: string;
+  readonly market: string;
+  readonly product: string;
+  readonly dueDate: string;
+  readonly companyId: string;
+  readonly desiredOfferHosoEqTons: number | null;
+  readonly credibleOfferHosoEqTons: number | null;
+  readonly bindingReason: string;
+}
+
 /** Workbook 1冊ぶんの全行（Excel書き出しはこの構造だけを読む）。 */
 export interface StandardAiAuditWorkbookData {
   readonly meta: {
@@ -527,4 +577,6 @@ export interface StandardAiAuditWorkbookData {
   readonly finalResults: readonly AuditFinalResultRow[];
   readonly events: readonly AuditEventRow[];
   readonly profileVision: readonly AuditProfileVisionRow[];
+  readonly crowdingBuckets: readonly AuditCrowdingBucketRow[];
+  readonly crowdingCompanyOffers: readonly AuditCrowdingCompanyOfferRow[];
 }

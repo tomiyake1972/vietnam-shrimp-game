@@ -66,13 +66,17 @@ test("SMID-PERSIST-4: 未知 ID 入りの stored JSON は decode 失敗（silent
   assert.equal(decodeCompanyLabPersistedState(JSON.stringify(withNull)).config.salesModelId, undefined);
 });
 
-test("SMID-PERSIST-5: schemaVersion は変わらない（bump なし・migration なし）", async () => {
+// 【ENG-CROWDING-MARKDOWN-3】本テストの意図は「salesModelId を保存しても a と b の
+// schemaVersion が食い違わない（salesModelId が bump を引き起こさない）」ことであり、
+// version の絶対値そのものではない。v9 は Crowding 診断 field 追加のため #04 承認のうえ
+// 別 Phase で引き上げたものなので、ここは現行定数を参照して固定する。
+test("SMID-PERSIST-5: salesModelId は schemaVersion を動かさない（bump なし・migration なし）", async () => {
   const a = await createAndRoundTrip("lab-sp-5a", cfg("baseline"));
   const b = await createAndRoundTrip("lab-sp-5b", cfg("baseline", { salesModelId: "tiered-v200-candidate-v1" }));
   assert.equal(a.stored.schemaVersion, CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION);
   assert.equal(b.stored.schemaVersion, CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION);
   assert.equal(a.decoded.schemaVersion, b.decoded.schemaVersion);
-  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 8);
+  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 9);
 });
 
 test("SMID-PERSIST-6: effective sai5（Scenario requiredCapabilities）と salesModelId が両立", async () => {

@@ -23,16 +23,24 @@
 // （既存 Run と挙動が変わってしまう）。
 
 import { SalesParameters, SALES_PARAMETERS_TIERED_V200_CANDIDATE_V1 } from "./parameters";
+import { CROWDING_POLICY_V200_P1, CrowdingPolicy } from "./crowding";
 
 /**
  * 保存・API 受理の対象となる販売モデル ID。
  *
  * - "legacy-waterfall-v1"       … 現行の水位法（legacy variant 解決ロジック）
  * - "tiered-v200-candidate-v1"  … 三層顧客＋全社同時配分 V2.00 calibrated candidate
+ *                                 （Crowding なし。既存 Run の意味を変えないため永久に据え置く）
+ * - "tiered-v200-crowding-v1"   … 上と同じ三層顧客価格モデル ＋ V2.00 正式 Crowding
+ *                                 policy（CROWDING_POLICY_V200_P1）
  */
-export type SalesModelId = "legacy-waterfall-v1" | "tiered-v200-candidate-v1";
+export type SalesModelId = "legacy-waterfall-v1" | "tiered-v200-candidate-v1" | "tiered-v200-crowding-v1";
 
-export const SALES_MODEL_IDS: readonly SalesModelId[] = ["legacy-waterfall-v1", "tiered-v200-candidate-v1"];
+export const SALES_MODEL_IDS: readonly SalesModelId[] = [
+  "legacy-waterfall-v1",
+  "tiered-v200-candidate-v1",
+  "tiered-v200-crowding-v1",
+];
 
 /** ID が registry に存在するか（API・schema の allowlist 判定に使う）。 */
 export function isSalesModelId(value: unknown): value is SalesModelId {
@@ -51,6 +59,16 @@ export interface SalesModelDefinition {
    * **一度公開した ID のこの値は書き換えない。**
    */
   readonly parameters?: SalesParameters;
+  /**
+   * 【ENG-CROWDING-MARKDOWN-3】この販売モデルが使う Crowding policy。
+   * undefined は「Crowding を使わない（OFF）」を意味する。
+   *
+   * **一度公開した ID のこの値も書き換えない**（parameters と同じ規約）。
+   * 既存 ID へ後から policy を足すと、その ID で保存済みの Run が resume 時に
+   * 別の価格で走ってしまうため禁止する。Crowding を足したい場合は
+   * "tiered-v200-crowding-v1" のように **新しい ID を追加**すること。
+   */
+  readonly crowdingPolicy?: CrowdingPolicy;
 }
 
 const SALES_MODEL_DEFINITIONS: Readonly<Record<SalesModelId, SalesModelDefinition>> = {
@@ -63,6 +81,18 @@ const SALES_MODEL_DEFINITIONS: Readonly<Record<SalesModelId, SalesModelDefinitio
     salesModelId: "tiered-v200-candidate-v1",
     description: "三層顧客＋全社同時配分 V2.00 calibrated candidate（15セル demandShare・anchor qualitySensitivity 校正済み）。",
     parameters: SALES_PARAMETERS_TIERED_V200_CANDIDATE_V1,
+    // 【ENG-CROWDING-MARKDOWN-3】**この ID へ Crowding policy を後付けしない。**
+    // 保存済み Run の salesModelId の意味が変わってしまうため（registry の immutable 規約）。
+    // Crowding 付きが必要なら "tiered-v200-crowding-v1" を使う。
+  },
+  "tiered-v200-crowding-v1": {
+    salesModelId: "tiered-v200-crowding-v1",
+    description:
+      "三層顧客＋全社同時配分 V2.00（candidate-v1 と同一の SalesParameters）＋ 市場集中による価格下落 P1。",
+    // 販売パラメータは candidate-v1 と**同一の定数をそのまま参照**する
+    // （別値を新規に作らない。三層顧客価格モデルとしての挙動は変えない）。
+    parameters: SALES_PARAMETERS_TIERED_V200_CANDIDATE_V1,
+    crowdingPolicy: CROWDING_POLICY_V200_P1,
   },
 };
 
@@ -91,4 +121,18 @@ export function salesModelDefinitionForId(salesModelId: SalesModelId): SalesMode
  */
 export function salesParametersForModelId(salesModelId: SalesModelId): SalesParameters | undefined {
   return salesModelDefinitionForId(salesModelId).parameters;
+}
+
+/**
+ * 【ENG-CROWDING-MARKDOWN-3】ID から Crowding policy を解決する。
+ *
+ * これが V2.00 正式 P1 の SSoT である。保存されるのは salesModelId だけなので、
+ * save → load → resume しても **salesModelId だけから P1 を一意に復元できる**
+ * （config へ CrowdingPolicy オブジェクトを保存する必要がない）。
+ *
+ * undefined を返すモデル（legacy-waterfall-v1 / tiered-v200-candidate-v1）は
+ * Crowding OFF であり、既存挙動がそのまま維持される。
+ */
+export function crowdingPolicyForModelId(salesModelId: SalesModelId): CrowdingPolicy | undefined {
+  return salesModelDefinitionForId(salesModelId).crowdingPolicy;
 }

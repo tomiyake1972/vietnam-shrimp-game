@@ -95,8 +95,10 @@ test("CFR-5: persistence version・Redis keyを変更していない", () => {
   // マイグレーション不要・旧v1〜v5データはそのまま読める。
   // このテストの本来の意図（Redis keyの体系が変わっていないこと、versionが
   // 把握済みの値であること）は下の各assertで引き続き担保される。
-  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 8);
-  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 8);
+  // 【ENG-CROWDING-MARKDOWN-3で8→9】Crowding診断（optionalフィールド追加のみ）。
+  // v8以前のデータは引き続きそのまま読める（後方互換。migration不要）。
+  assert.equal(CURRENT_SIMULATION_RUN_PERSISTED_VERSION, 9);
+  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 9);
   assert.equal(simulationRunIndexKeyV2("staging"), "staging:v2:simulationRun:index");
   assert.equal(simulationRunManifestKeyV2("staging", "run-1"), "staging:v2:simulationRun:run-1");
   assert.equal(simulationRunSummaryKeyV2("staging", "run-1"), "staging:v2:simulationRun:run-1:summary");

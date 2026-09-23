@@ -145,7 +145,8 @@ test("SFCOEXIST-4: 採用・減員の意思決定フィールドは、Test15のp
   const runtime = createCompanyLabRuntimeSnapshot(after);
 
   // 【ENG-FAC-1】factoryLifecycleState（optional）の追加で7→8。
-  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 8);
+  // 【ENG-CROWDING-MARKDOWN-3】crowdingDiagnostics（optional）の追加で8→9。
+  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 9);
   const stored: CompanyLabPersistedStateV1 = {
     schemaVersion: CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION,
     engineVersion: "test-v2-companyLab-engine-sfcoexist",

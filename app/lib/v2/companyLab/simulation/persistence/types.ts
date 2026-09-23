@@ -135,8 +135,24 @@ import type { ManualBalanceAppliedRecord } from "../../manualBalance/application
  *            画面・Export は推測で 0 や現在のparameter値を埋めない。
  *          - 現在より新しいschema（v9以降）だけを拒否する既存方針は維持する
  *            （前方互換はしない。知らない契約のデータを推測で解釈しないため）。
+ *
+ *   v9 … 【ENG-CROWDING-MARKDOWN-3】市場集中による価格下落（Crowding）の
+ *        価格形成診断を CompanyQuarterRecord.crowdingDiagnostics? として
+ *        optional 保存できる世代。SimulationRun 自身の構造は変えていないが、
+ *        resumePayload.state.history が運ぶ CompanyQuarterRecord の契約が
+ *        変わるため、companyLab 側（CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION）
+ *        と歩調を合わせて版を進める。
+ *
+ *        【なぜ v9 を切るのか】v8 は既に integration/v2-rc-20260830 へ統合され
+ *        Preview でも利用されている。追加は optional のみで migration は不要だが、
+ *        「v8 で保存された Run には crowdingDiagnostics が無い」ことを
+ *        版番号で識別できるようにする（v8 を切ったときと同じ理由）。
+ *
+ *        【互換方針】
+ *          - 旧 v1〜v8 の保存物はそのまま v9 のコードで読める（migration 不要）。
+ *          - 現在より新しい schema（v10 以降）だけを拒否する既存方針は維持する。
  */
-export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 8;
+export const CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 9;
 
 /**
  * 【schemaVersion 5・Turn14以降Save/Resume停止BLOCKER修正】

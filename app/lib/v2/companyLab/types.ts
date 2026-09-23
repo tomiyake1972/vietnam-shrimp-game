@@ -517,6 +517,14 @@ export interface CompanyQuarterRecord {
   readonly companySummaries: readonly CompanyQuarterSummary[];
   readonly globalReasonCodes: readonly CompanyReasonEntry[];
   readonly turnDebug: TurnOrchestratorDebugInfo;
+  /**
+   * 【ENG-CROWDING-MARKDOWN-3 / Persistence v9】市場集中による価格下落の診断。
+   * Crowding が有効だったターンにのみ設定される（OFF のターンは **undefined**）。
+   * v8 以前に保存されたデータにはこのキー自体が存在しないため optional。
+   * 保存形は sales/persistedCrowdingDiagnostics.ts の DTO であり、
+   * runtime の CrowdingLayerResult をそのまま保存しない（永続化契約を固定するため）。
+   */
+  readonly crowdingDiagnostics?: import("../sales/persistedCrowdingDiagnostics").PersistedCrowdingDiagnosticsV1;
   /** 【Phase 7A】当期の生産バッチ品質調整結果（監査・テスト・CLI表示用）。 */
   readonly qualityAdjustments: readonly BatchQualityAdjustment[];
   /** 【Phase 7A】当期の品質・信頼・納期信頼性・増産履歴の更新後状態。 */
@@ -634,9 +642,19 @@ export interface CompanyLabConfig {
    */
   readonly salesModelId?: SalesModelId;
   /**
-   * 【ENG-CROWDING-MARKDOWN-1】市場集中による価格下落（Crowding）の policy。
-   * **未指定なら Crowding 層を一切通らず、既存挙動はビット単位で不変**（CRWD-14）。
-   * 正式係数は感応度試験後に #04/#08 が決めるため、ここでは既定値を置かない。
+   * 【ENG-CROWDING-MARKDOWN-1 → 3】市場集中による価格下落（Crowding）の policy。
+   *
+   * **正式 V2.00 P1 の SSoT はここではなく salesModelId である**
+   * （"tiered-v200-crowding-v1" → sales/salesModels.ts crowdingPolicyForModelId）。
+   * このフィールドは test / 明示的な診断注入のための in-memory 専用 override であり、
+   * salesParamsOverride と同じ扱い（**永続 schema には保存されない**）。
+   *
+   * 解決の優先順位（companyLab/runner.ts crowdingPolicyFor）:
+   *   1. config.crowding（明示 override。テスト・研究用）
+   *   2. salesModelId から解決した policy（正式 P1 経路）
+   *   3. undefined（Crowding OFF）
+   *
+   * 未指定なら Crowding 層を一切通らず、既存挙動はビット単位で不変（CRWD-14）。
    */
   readonly crowding?: import("../sales/crowding").CrowdingPolicy;
   /**

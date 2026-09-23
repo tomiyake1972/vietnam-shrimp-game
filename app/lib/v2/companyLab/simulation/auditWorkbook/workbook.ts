@@ -94,12 +94,15 @@ function buildReadmeRows(data: StandardAiAuditWorkbookData): readonly { readonly
 
     { field: "aiAnalysisInstruction", value: "Use source fields directly. Do not infer missing values. Distinguish facts, diagnostics, and interpretation." },
     { field: "aiAnalysisTip.decisionChain", value: "To trace Decision -> Reason -> Actual Result -> Business Performance: join 04_STANDARD_AI_DECISIONS (decision), 05_DECISION_DIAGNOSTICS (reason codes), the matching detail sheet (06-15), and 03_TURN_KPI (performance) on companyId + turn." },
-    { field: "sheetIndex", value: "00_README, 01_RUN_SUMMARY, 02_COMPANY_SUMMARY, 03_TURN_KPI, 04_STANDARD_AI_DECISIONS, 05_DECISION_DIAGNOSTICS, 06_SALES_DETAIL, 07_PRODUCTION_DETAIL, 08_PROCUREMENT_DETAIL, 09_WORKFORCE_DETAIL, 10_CAPEX_DETAIL, 11_FINANCE_DETAIL, 12_BACKLOG_DETAIL, 13_MARKET_DETAIL, 14_DIVIDEND_DETAIL, 15_FACTORY_CAPACITY, 16_FINAL_RESULTS, 17_DATA_DICTIONARY, 18_EVENT_LOG, 19_AI_PROFILE_VISION" },
+    { field: "sheetIndex", value: "00_README, 01_RUN_SUMMARY, 02_COMPANY_SUMMARY, 03_TURN_KPI, 04_STANDARD_AI_DECISIONS, 05_DECISION_DIAGNOSTICS, 06_SALES_DETAIL, 07_PRODUCTION_DETAIL, 08_PROCUREMENT_DETAIL, 09_WORKFORCE_DETAIL, 10_CAPEX_DETAIL, 11_FINANCE_DETAIL, 12_BACKLOG_DETAIL, 13_MARKET_DETAIL, 14_DIVIDEND_DETAIL, 15_FACTORY_CAPACITY, 16_FINAL_RESULTS, 17_DATA_DICTIONARY, 18_EVENT_LOG, 19_AI_PROFILE_VISION, 20_CROWDING_DETAIL, 20b_CROWDING_COMPANY_OFFERS" },
     { field: "rowCounts", value: `03_TURN_KPI=${data.turnKpi.length}, 04_STANDARD_AI_DECISIONS=${data.decisions.length}, 05_DECISION_DIAGNOSTICS=${data.diagnostics.length}, 06_SALES_DETAIL=${data.sales.length}, 07_PRODUCTION_DETAIL=${data.production.length}, 10_CAPEX_DETAIL=${data.capex.length}, 12_BACKLOG_DETAIL=${data.backlog.length}, 14_DIVIDEND_DETAIL=${data.dividend.length}` },
 
     { field: "limitation.diagnosticDetail", value: "Standard AI diagnostics are persisted per run as a six-stage trace. The full StandardAiDiagnosticEntry structure (thresholdValue, keyValues, domain, targetFactoryId, gateName) is not stored per run, so those columns are blank. Reason codes and severities are preserved in full." },
     { field: "limitation.backlogPerTurn", value: "Per-turn backlog split by dueStatus is not persisted. 12_BACKLOG_DETAIL is a snapshot at asOfTurn; per-turn backlog and overdue totals are confirmed values in 03_TURN_KPI." },
     { field: "limitation.factoryCapacity", value: "Per-turn per-factory capacity is not persisted. Capacity columns in 15_FACTORY_CAPACITY are filled from the initial fixture; factories built during the run show factorySource=BUILT_DURING_RUN with blank capacity columns. Company-level effective capacity per turn is available in the same sheet." },
+    { field: "semantics.crowding", value: "20_CROWDING_DETAIL is one row per Turn x market x product x dueDate (a crowding bucket). postCrowdingClearingPrice = preCrowdingStructuralPrice x crowdingMultiplier. The multiplier is computed per bucket and is never averaged across dueDates, so a crowded near-term bucket does not move the price of a far-dated one. crowdingRatio compares the credible (physically backed) offers plus existing commitments against the contestable demand; it is not a market share." },
+    { field: "semantics.crowdingOffers", value: "20b_CROWDING_COMPANY_OFFERS shows, per bucket, what each company wanted to offer (desiredOffer) and what its physical available-to-promise allowed (credibleOffer). bindingReason says which constraint bound. This is a cross-company audit view and is Management/Admin only; it is never shown to a Player." },
+    { field: "limitation.crowdingHistory", value: "Crowding diagnostics are stored inside the full CompanyQuarterRecord. A saved run keeps those records for the most recent turns only (rolling window), so an export from a saved run covers only those turns unless the Management Console passes the live session. Runs on a sales model without market-crowding markdown have no crowding rows at all." },
     { field: "limitation.legacyRuns", value: "Some diagnostic fields may be unavailable for legacy runs. See missingDataNote rows below." },
   ];
   if (data.meta.missingDataNotes.length === 0) {
@@ -136,6 +139,10 @@ export async function buildStandardAiAuditWorkbook(data: StandardAiAuditWorkbook
   addObjectSheet(workbook, "17_DATA_DICTIONARY", AUDIT_DATA_DICTIONARY as never);
   addObjectSheet(workbook, "18_EVENT_LOG", data.events as never);
   addObjectSheet(workbook, "19_AI_PROFILE_VISION", data.profileVision as never);
+  // 【ENG-CROWDING-MARKDOWN-3】市場集中による価格下落の診断。Crowding を持たない
+  // salesModel の Run では行が0件になり、addObjectSheet が note 行を書く（空シートを黙って出さない）。
+  addObjectSheet(workbook, "20_CROWDING_DETAIL", data.crowdingBuckets as never);
+  addObjectSheet(workbook, "20b_CROWDING_COMPANY_OFFERS", data.crowdingCompanyOffers as never);
 
   return workbook.xlsx.writeBuffer();
 }

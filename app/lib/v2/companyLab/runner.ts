@@ -108,12 +108,13 @@ import { listScenarioAliases, resolveScenarioDefinition } from "../industryLab/c
 import { INDUSTRY_LAB_ASSUMPTIONS_V1 } from "../industryLab/assumptions";
 import { runTurn } from "../turn/runner";
 import { buildPhysicalSupplies } from "./physicalSupplySnapshot";
+import { toPersistedCrowdingDiagnostics } from "../sales/persistedCrowdingDiagnostics";
 import { TurnOrchestratorInput } from "../turn/types";
 import { applyFulfillments, updateContractStatusesForQuarterEnd } from "../sales/backlog";
 import { validateSalesForceHeadcountBudget } from "../sales/salesForce";
 import { MarketSalesEffortAdjustment } from "../sales/marketEffort";
 import { CompanyId, MarketProductAllocationResult, SalesContract } from "../sales/types";
-import { salesParametersForModelId } from "../sales/salesModels";
+import { crowdingPolicyForModelId, salesParametersForModelId } from "../sales/salesModels";
 import { AquacultureHarvestResult, DomesticPurchaseAllocationResult, RawMaterialLot } from "../rawMaterials/types";
 import {
   advanceProductionQuarter,
@@ -1393,9 +1394,19 @@ export function advanceCompanyLabQuarter(
   // スナップショットを構築する。既存の authoritative な capacity helper を
   // 再利用するだけで、advanceProductionQuarter は再実行しない
   // （第二 production simulator を作らない）。
-  const crowdingInput = state.config.crowding
+  // 【ENG-CROWDING-MARKDOWN-3】Crowding policy の解決。
+  //   1. config.crowding（test / 明示的診断注入用の in-memory override。永続化されない）
+  //   2. salesModelId から解決（正式 V2.00 P1 経路。保存されるのは ID だけなので
+  //      save → load → resume しても ID だけから P1 を一意に復元できる）
+  //   3. undefined（Crowding OFF）
+  // salesParametersFor と同じ優先順位・同じ考え方である。
+  const resolvedCrowdingPolicy =
+    state.config.crowding ??
+    (state.config.salesModelId !== undefined ? crowdingPolicyForModelId(state.config.salesModelId) : undefined);
+
+  const crowdingInput = resolvedCrowdingPolicy
     ? {
-        policy: state.config.crowding,
+        policy: resolvedCrowdingPolicy,
         physicalSupplies: buildPhysicalSupplies(
           fixtures.map((f) => ({
             companyId: f.companyId,
@@ -2227,6 +2238,12 @@ export function advanceCompanyLabQuarter(
     // 【SAI-5E】市場進化の因果ログ（機能有効時のみ。optionalのため既存の
     // 履歴形状・persistence・SAI-3Bパーサーへの影響はない）。
     ...(sai5MarketEvolutionRecord ? { sai5MarketEvolution: sai5MarketEvolutionRecord } : {}),
+    // 【ENG-CROWDING-MARKDOWN-3 / Persistence v9】市場集中による価格下落の診断。
+    // Crowding が動いたターンだけ保存し、OFF のターンはキー自体を作らない
+    // （＝v8 以前の履歴と同一の形になる）。
+    ...(turnResult.crowdingDiagnostics
+      ? { crowdingDiagnostics: toPersistedCrowdingDiagnostics(turnResult.crowdingDiagnostics) }
+      : {}),
   };
 
   const canAdvanceWithinScenario = turn < definition.durationTurns;

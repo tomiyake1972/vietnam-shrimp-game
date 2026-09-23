@@ -11,12 +11,15 @@ import { SalesModelId } from "../../../../lib/v2/sales/salesModels";
 export const SALES_MODEL_DISPLAY_LABELS: Readonly<Record<SalesModelId, string>> = {
   "legacy-waterfall-v1": "従来市場モデル",
   "tiered-v200-candidate-v1": "三層顧客価格モデル V2.00候補",
+  "tiered-v200-crowding-v1": "三層顧客価格モデル V2.00＋市場集中価格下落",
 };
 
 /** Lab作成フォームの選択肢説明文（挙動には影響しない表示専用テキスト）。 */
 export const SALES_MODEL_DESCRIPTIONS: Readonly<Record<SalesModelId, string>> = {
   "legacy-waterfall-v1": "現在の従来方式で市場配分を行います。",
   "tiered-v200-candidate-v1": "価格重視・標準・プレミアムの3種類の顧客を使い、価格・品質・差別化などから成約を配分します。",
+  "tiered-v200-crowding-v1":
+    "三層顧客価格モデルに加えて、同じ市場・商品・納期へ各社が集中したときに市場価格が下がる仕組みを有効にします。",
 };
 
 /** Lab作成フォームでの既定選択（未指定時のAPI挙動＝legacyと一致させる）。 */

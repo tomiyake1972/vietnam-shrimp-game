@@ -46,14 +46,17 @@ function buildStored(runtime: ReturnType<typeof createCompanyLabRuntimeSnapshot>
 // 1. バージョン番号そのもの
 // ---------------------------------------------------------------------
 
-test("MIG-1: 統合後の現行バージョンは8（develop/v2側で#05営業人員機能が4→5→6、Test15統合で6→7、ENG-FAC-1のfactoryLifecycleStateで7→8に再採番）", () => {
+test("MIG-1: 統合後の現行バージョンは9（develop/v2側で#05営業人員機能が4→5→6、Test15統合で6→7、ENG-FAC-1のfactoryLifecycleStateで7→8、ENG-CROWDING-MARKDOWN-3のcrowdingDiagnosticsで8→9に再採番）", () => {
   // Test15の作業ブランチ単独では4→5だったが、develop/v2側で#05（営業人員の
   // 追加採用・減員）が独立に4→5→6を使用済みで、develop/v2へ先にマージされて
   // いたため、本統合作業でTest15側の変更を5→7へ再採番した
   // （persistence/types.tsのバージョン履歴コメント参照。5→6への単純な読み替え
   // ではなく、develop/v2の6の続き番号として7を採番）。
   // 【ENG-FAC-1】factoryLifecycleState（optional）の追加で7→8。
-  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 8);
+  // 【ENG-CROWDING-MARKDOWN-3】CompanyQuarterRecord.crowdingDiagnostics（optional）
+  // の追加で8→9。v8 は既に integration/v2-rc-20260830 へ統合済み＝契約が公開済みの
+  // ため、optional 追加のみで migration は不要でも新しい世代として版を分ける。
+  assert.equal(CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION, 9);
 });
 
 // ---------------------------------------------------------------------

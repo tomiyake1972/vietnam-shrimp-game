@@ -86,6 +86,7 @@ import {
   CURRENT_COMPANY_LAB_PERSISTED_STATE_VERSION,
 } from "./types";
 import { CompanyLabPersistedStateValidationError, UnsupportedCompanyLabPersistedStateVersionError } from "./errors";
+import { validatePersistedCrowdingDiagnostics } from "../../sales/persistedCrowdingDiagnostics";
 
 const EPSILON = 1e-6;
 
@@ -1222,7 +1223,23 @@ function validateCompanyQuarterRecord(raw: unknown, path: string): CompanyQuarte
       fail(path, `CompanyQuarterRecordに必須フィールド "${key}" が存在しません`);
     }
   }
-  return { ...obj, turn, period } as unknown as CompanyQuarterRecord;
+  /**
+   * 【ENG-CROWDING-MARKDOWN-3 / v9】市場集中による価格下落の診断。
+   * v8 以前のデータにはキー自体が存在しないため、undefined はそのまま undefined
+   * （＝Crowding 無しのターン）として扱い、例外にしない。
+   * 値がある場合だけ形を検証する（NaN / Infinity / 未知バージョンを通さない）。
+   */
+  const crowdingDiagnostics = validatePersistedCrowdingDiagnostics(
+    obj.crowdingDiagnostics,
+    fail,
+    `${path}.crowdingDiagnostics`
+  );
+  return {
+    ...obj,
+    turn,
+    period,
+    ...(crowdingDiagnostics === undefined ? {} : { crowdingDiagnostics }),
+  } as unknown as CompanyQuarterRecord;
 }
 
 // ---------------------------------------------------------------------
