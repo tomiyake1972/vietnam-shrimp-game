@@ -40,6 +40,8 @@ import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { computeFinalEvaluationSnapshot, isGameFinished, lastCompletedTurn } from "../lib/gameEnd";
 import { recordGmProxySubmission } from "../lib/playerSeats";
 import { projectMarketBasePriceReferences } from "../../../lib/v2/sales/marketBasePriceReference";
+import { buildAnnualDividendGuidanceView } from "../../../lib/v2/companyLab/annualDividendGuidanceView";
+import { computeMaxDividendUsd } from "../../../lib/v2/finance/dividend";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
 import { TsvLeaderboardPanel } from "../components/TsvLeaderboardPanel";
@@ -192,6 +194,25 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
       });
     },
     [session, companyId]
+  );
+
+  /**
+   * 【D1 §8】年度中の配当参考表示。管理者がバランス調整で配当性向を明示指定していれば、
+   * この会社はQ4決算直後に自動精算されるため、その事実と年初来実績ベースの参考額を
+   * FINANCE画面へ出す。率の解決はengineと同じresolverを通す（別計算を作らない）。
+   */
+  const annualDividendGuidance = useMemo(
+    () =>
+      buildAnnualDividendGuidanceView({
+        history: session.state.history,
+        currentPeriod: session.state.currentPeriod,
+        turn: session.state.scenarioState.currentTurn,
+        companyId,
+        manualBalanceOverrides: session.state.config.manualBalanceOverrides,
+        currentCashUsd: ownState.financeState.cash as number,
+        dividendCapacityUsd: computeMaxDividendUsd(ownState.financeState),
+      }),
+    [session, companyId, ownState]
   );
 
   const handleConfirm = useCallback(() => {
@@ -557,6 +578,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
               lastQuarterDividendResult={lastQuarterDividendResult}
+              annualDividendGuidance={annualDividendGuidance}
               lastQuarterSalesAllocations={lastQuarterSalesAllocations}
               publicInfo={publicInfo}
               scenarioNews={scenarioNews}

@@ -42,20 +42,28 @@ function parseMillions(text: string): number {
   return match ? Number(match[0]) : Number.NaN;
 }
 
-/** 1行ぶんのセルを列名つきで読む（列順はパネルのthead定義と対応）。 */
+/**
+ * 1行ぶんのセルを列名つきで読む（列順はパネルのthead定義と対応）。
+ *
+ * 【D1 §9で列が増えた】「操作主体」「管理者指定」「処理状態」の3列が加わったため、
+ * 列indexを更新している（値の意味は変えていない）。
+ */
 async function readRow(page: Page, testId: string) {
   const cells = await page.getByTestId(testId).locator("td").allInnerTexts();
   return {
     year: cells[0].trim(),
     companyId: cells[1].trim(),
-    annualNetIncomeM: parseMillions(cells[2]),
-    payoutRatioText: cells[3].trim(),
-    source: cells[4].trim(),
-    annualTargetM: parseMillions(cells[5]),
-    paidEarlierM: parseMillions(cells[6]),
-    appliedM: parseMillions(cells[7]),
-    shortfallM: parseMillions(cells[8]),
-    shortfallReason: cells[9].trim(),
+    decisionOwner: cells[2].trim(),
+    adminRatioText: cells[3].trim(),
+    annualNetIncomeM: parseMillions(cells[4]),
+    payoutRatioText: cells[5].trim(),
+    source: cells[6].trim(),
+    annualTargetM: parseMillions(cells[7]),
+    paidEarlierM: parseMillions(cells[8]),
+    appliedM: parseMillions(cells[9]),
+    shortfallM: parseMillions(cells[10]),
+    shortfallReason: cells[11].trim(),
+    status: cells[12].trim(),
   };
 }
 
@@ -138,10 +146,17 @@ test("AD-E2E-1: 年度末Q4の精算実績が、Engine記録どおりの値で�
   expect(bal.shortfallM).toBe(0);
   expect(bal.shortfallReason).toBe("－");
 
-  // --- E. policy gateで見送った会社を「実支払0」として並べない ---
-  // baseline/4Turn では MASS が gate で見送りになる。行自体が出ないことを確認する
-  // （0円配当したかのように見せない）。
-  await expect(page.getByTestId("annual-dividend-row-4-MASS")).toHaveCount(0);
+  // --- E. 管理者指定がある年度は、AIの任意gateで見送られない（D1で変わった挙動） ---
+  // 【変更前の期待値】以前このテストは「MASSの行自体が出ないこと」を固定していた。
+  // baseline/4Turn ではMASSがStandard AIの任意gateで配当を見送っていたためである。
+  // D1で「管理者が明示指定した配当性向は全対象会社への配当義務」と定義したので、
+  // 管理者50%を適用した今のRunではMASSも精算対象になる。行が出ること自体が
+  // D1の受入条件であり、ここは期待値を更新している（見送りの表示契約は
+  // 「管理者設定なし」の場合として D1-23b のunit testが固定する）。
+  const mass = await readRow(page, "annual-dividend-row-4-MASS");
+  expect(mass.companyId).toBe("MASS");
+  expect(mass.payoutRatioText).toBe("50.0%");
+  expect(mass.source).toBe("管理者の手動指定");
 
   // --- F. Q1〜Q3は精算対象ではないので行が出ない ---
   for (const turn of [1, 2, 3]) {

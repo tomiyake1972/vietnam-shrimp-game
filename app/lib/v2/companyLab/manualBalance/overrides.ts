@@ -279,6 +279,45 @@ export function resolvedDividendPayoutRatio(resolved: ResolvedManualBalance): nu
 }
 
 /**
+ * 【D1・管理者指定配当の全社共通強制】
+ * 管理者がManual Balanceで明示指定した配当性向を、操作主体（PLAYER / STANDARD_AI）に
+ * 関係なく、その会社の最終意思決定へ「年度末精算の意思」として強制付与する。
+ *
+ * 【なぜ意思決定の組み立て側（draft/UI）ではなくここなのか】
+ * PLAYERの提出値を作る buildDecisionInputFromDraft は金額指定配当しか出力せず、
+ * Standard AI だけが annualDividendSettlement を出していた。そのため
+ * 「PLAYER会社は利益があっても年度末精算のコードパスに入らない」という状態だった。
+ * PLAYERのdraft側にだけ付け足すと、
+ *   ・GM代理操作 / Independent Player / Company Lab の提出経路ごとに同じ処理が要る
+ *   ・提出経路が増えるたびに付け忘れる
+ * ため、**意思決定が誰由来かを問わない1か所**（runner.ts が全経路で必ず通る
+ * 意思決定の正規化地点）で適用する。
+ *
+ * 【管理者指定は「配当義務」】管理者が率を指定した場合、Standard AI 側の任意
+ * 見送りgate（新規CAPEX提案あり・Crisis・財務健全性など）が意思を出さなかった
+ * としても、精算対象にする。管理者指定は会社の裁量ではなく外から課した条件である。
+ *
+ * 【明示0%と未指定を区別する】
+ *   ・明示0%    → payoutRatio 0 の意思を付与する。年間配当目標0として
+ *                 「精算した結果0だった」ことが記録に残る（無記録とは別物）。
+ *   ・未指定     → 何もしない。decision をそのまま返す。
+ *                 PLAYERはAIの既定率を強制されず金額指定配当だけが従来どおり効き、
+ *                 STANDARD_AIは自前の任意配当policyがそのまま残る（挙動不変）。
+ *
+ * 【Q4時点の率だけを使う】呼び出し側は当Turnの解決結果を渡す。年度内の率を平均
+ * しない。年度末（Q4）のTurnで解決された値がそのまま年間精算率になる。
+ */
+export function applyAdminAnnualDividendSettlementToDecision<
+  T extends { readonly annualDividendSettlement?: { readonly payoutRatio: number; readonly payoutRatioSource: "MANUAL_OVERRIDE" | "STANDARD_AI" } }
+>(decision: T, resolved: ResolvedManualBalance): T {
+  const payoutRatio = resolvedDividendPayoutRatio(resolved);
+  // 【未指定は素通し】同一オブジェクトをそのまま返すため、管理者指定が無いRunは
+  // 既存Runとビット単位で同じ意思決定になる（回帰の担保）。
+  if (payoutRatio === null) return decision;
+  return { ...decision, annualDividendSettlement: { payoutRatio, payoutRatioSource: "MANUAL_OVERRIDE" } };
+}
+
+/**
  * 【重要・実装指示の明示要件「手動で指定した値がAI人格によって改変されないこと」】
  * 解決済みの手動配当性向を Standard AI パラメータへ適用する。
  *

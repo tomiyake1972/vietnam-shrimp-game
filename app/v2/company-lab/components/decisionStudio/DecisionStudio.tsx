@@ -39,6 +39,7 @@ import ProductionPlanningScreen from "./ProductionPlanningScreen";
 import WorkforcePlanningScreen from "./WorkforcePlanningScreen";
 import InvestmentPlanningScreen from "./InvestmentPlanningScreen";
 import FinancePlanningScreen from "./FinancePlanningScreen";
+import { AnnualDividendGuidance } from "../../../../lib/v2/finance/annualDividendGuidance";
 import AuxiliaryPanel, { AiMeetingSource } from "./AuxiliaryPanel";
 import type { StandardAiCostProjection } from "../../../../lib/v2/companyLab/standardAi/costProjection";
 
@@ -54,6 +55,12 @@ export interface DecisionStudioProps {
   readonly lastQuarterFinancialResult?: CompanyFinancialQuarterResult | null;
   /** 【配当Decision UI接続】直近確定四半期の配当結果（累積配当・却下理由の表示用）。 */
   readonly lastQuarterDividendResult?: CompanyDividendQuarterResult | null;
+  /**
+   * 【D1 §8】年度中の配当参考表示（FINANCE画面）。管理者がバランス調整で配当性向を
+   * 明示指定している場合に、Q4決算直後の自動精算と年初来実績ベース参考額を出す。
+   * 渡さない呼び出し元（Company Lab経路）では何も表示されず、既存画面と同一。
+   */
+  readonly annualDividendGuidance?: AnnualDividendGuidance | null;
   /**
    * 【SALES基準価格参考表示・セキュリティ修正】直近確定四半期の市場×商品別「基準価格」だけの
    * 最小DTO（他社askPrice等は含まない。app/lib/v2/sales/marketBasePriceReference.ts参照）。
@@ -110,6 +117,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     labId,
     simulationRunId,
     companyName,
+    annualDividendGuidance,
   } = props;
 
   const [activeScreen, setActiveScreen] = useState<DecisionStudioScreenKey>("info");
@@ -233,6 +241,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               vm={vm}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
               lastQuarterDividendResult={lastQuarterDividendResult}
+              annualDividendGuidance={annualDividendGuidance}
             />
           )}
         </div>

@@ -15,6 +15,7 @@ import { CompanyDecisionDraft } from "../../decisionDraft";
 import { DecisionStudioViewModel } from "../../decisionStudioViewModel";
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
 import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividend";
+import { AnnualDividendGuidance } from "../../../../lib/v2/finance/annualDividendGuidance";
 import CollapsibleSection from "../CollapsibleSection";
 import { NumberCell } from "../InputCells";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INPUT_CONTROL_CLASS } from "../panelStyles";
@@ -34,6 +35,10 @@ function formatUsd(value: number): string {
   return `$${Math.round(value).toLocaleString("en-US")}`;
 }
 
+function ratioPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 interface FinancePlanningScreenProps {
   readonly draft: CompanyDecisionDraft;
   readonly onChange: (next: CompanyDecisionDraft) => void;
@@ -43,9 +48,15 @@ interface FinancePlanningScreenProps {
   readonly lastQuarterFinancialResult?: CompanyFinancialQuarterResult | null;
   /** 直近確定Turンの配当結果（累積配当・却下理由の表示用）。 */
   readonly lastQuarterDividendResult?: CompanyDividendQuarterResult | null;
+  /**
+   * 【D1 §8】年度中の配当参考表示。管理者がバランス調整で配当性向を明示指定している場合、
+   * その会社はQ4決算直後に自動精算される（Playerの追加操作は不要）。
+   * 渡されなければ何も表示しない＝この機能より前とまったく同じ画面になる。
+   */
+  readonly annualDividendGuidance?: AnnualDividendGuidance | null;
 }
 
-export default function FinancePlanningScreen({ draft, onChange, disabled, vm, lastQuarterFinancialResult, lastQuarterDividendResult }: FinancePlanningScreenProps) {
+export default function FinancePlanningScreen({ draft, onChange, disabled, vm, lastQuarterFinancialResult, lastQuarterDividendResult, annualDividendGuidance }: FinancePlanningScreenProps) {
   const {
     existingLoans,
     existingLoanBalanceUsd,
@@ -185,6 +196,71 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
           <div className="bg-rose-950/50 border border-rose-700/60 text-rose-200 rounded-lg px-3 py-2 text-xs" data-testid="dividend-last-rejection">
             前Turンの配当は却下されました：{lastQuarterDividendResult.rejectionReason}
           </div>
+        )}
+
+        {annualDividendGuidance?.kind === "ADMIN_SPECIFIED" && (
+          <div
+            className="rounded-lg border border-sky-700/60 bg-sky-950/40 px-3 py-2 text-xs text-sky-100"
+            data-testid="annual-dividend-guidance"
+          >
+            <p className="font-semibold" data-testid="annual-dividend-guidance-headline">
+              {annualDividendGuidance.figures.targetYear}年度は管理者指定の配当性向{" "}
+              {ratioPercent(annualDividendGuidance.figures.adminPayoutRatio)} が適用されます
+            </p>
+            <p className="mt-1 leading-snug text-sky-200/90">
+              Q4決算直後に、その年度Q1〜Q4の当期純利益合計をもとに自動精算されます。追加操作は不要です
+              （配当額欄へ入力しなくても精算されます）。
+            </p>
+            <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+              <div>
+                <dt className="text-sky-300/80">年初来確定純利益（{annualDividendGuidance.figures.confirmedQuarterCount}四半期）</dt>
+                <dd className="tabular-nums" data-testid="annual-dividend-guidance-ytd-net-income">
+                  {annualDividendGuidance.figures.confirmedQuarterCount === 0
+                    ? "－（確定実績なし）"
+                    : formatUsd(annualDividendGuidance.figures.ytdNetIncomeUsd)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sky-300/80">年初来実績ベース参考配当額</dt>
+                <dd className="tabular-nums" data-testid="annual-dividend-guidance-reference-dividend">
+                  {formatUsd(annualDividendGuidance.figures.ytdReferenceDividendUsd)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sky-300/80">年初来支払済み配当</dt>
+                <dd className="tabular-nums" data-testid="annual-dividend-guidance-ytd-paid">
+                  {formatUsd(annualDividendGuidance.figures.ytdPaidDividendUsd)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sky-300/80">現在残高ベースの参考支払可能額</dt>
+                <dd className="tabular-nums" data-testid="annual-dividend-guidance-payable">
+                  {formatUsd(annualDividendGuidance.figures.referencePayableUsd)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sky-300/80">現在残高ベースの参考配当後Cash</dt>
+                <dd className="tabular-nums" data-testid="annual-dividend-guidance-cash-after">
+                  {formatUsd(annualDividendGuidance.figures.referenceCashAfterUsd)}
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-2 leading-snug text-sky-300/80">
+              これは<strong>年初来実績ベース参考額</strong>です。現在の確定実績と現在残高だけを使った参考値であり、
+              Q4決算後の確定額とは異なる場合があります（まだ確定していない四半期の利益は含めていません）。
+            </p>
+          </div>
+        )}
+        {annualDividendGuidance?.kind === "NO_ADMIN_SETTING" && (
+          <p className="text-xs text-gray-500" data-testid="annual-dividend-guidance-none">
+            {annualDividendGuidance.targetYear}年度の配当性向は<strong>管理者指定なし</strong>です。
+            年度末の自動精算は行われないため、配当する場合はこの画面で金額を指定してください。
+          </p>
+        )}
+        {annualDividendGuidance?.kind === "UNKNOWN" && (
+          <p className="text-xs text-gray-500" data-testid="annual-dividend-guidance-unknown">
+            配当性向の管理者設定を確認できません（この機能より前に作成されたRunのため不明）。
+          </p>
         )}
 
         {/* 【指示§5】dt/ddをdivで1組ずつ包む（HTML5のdl content modelが許可する形）。

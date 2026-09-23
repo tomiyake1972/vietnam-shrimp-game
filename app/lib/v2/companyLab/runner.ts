@@ -45,6 +45,7 @@ import { DOMESTIC_PURCHASE_GUARANTEE_TURN, clearDomesticReferencePrice } from ".
 import { buildObservedMarketDemand } from "./marketDemandObservation";
 import { COUNTRY_IDS, CountryId, DEMAND_MARKET_IDS, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import {
+  applyAdminAnnualDividendSettlementToDecision,
   resolveManualBalanceForTurn,
   resolvedRawMarketPriceIndex,
   resolvedSalesPriceIndex,
@@ -1093,6 +1094,17 @@ export function advanceCompanyLabQuarter(
       return [f.companyId, computeEffectiveSalesForceLayoffCount(currentHeadcount, d?.salesForceLayoffCount ?? 0)];
     })
   );
+  /**
+   * 【D1】当Turnの手動バランス調整（管理者指定）を一度だけ解決する。
+   *
+   * 解決は manualBalance/overrides.ts の resolveManualBalanceForTurn が唯一のSSoT。
+   * ここで解決した同じ値を、
+   *   (a) 下の意思決定の正規化（管理者指定配当の全社共通適用）
+   *   (b) 市場入力への販売/原料価格指数の適用（後段）
+   * の両方で使い、同じTurnの中で別々に解決して食い違うことを防ぐ。
+   */
+  const resolvedManualBalance = resolveManualBalanceForTurn(state.config.manualBalanceOverrides, turn);
+
   const decisions = fixtures.map((f) => {
     const d = decisionsByCompanyId[f.companyId];
     if (!d) throw new CompanyLabError(`会社 "${f.companyId}" の当期意思決定が指定されていません。`);
@@ -1123,7 +1135,18 @@ export function advanceCompanyLabQuarter(
       const message = err instanceof Error ? err.message : String(err);
       throw new CompanyLabError(`会社 "${f.companyId}" の意思決定が不正です: ${message}`);
     }
-    return applyAuthoritativeVapCapabilityScores(state, applyAuthoritativeSalesBaseScores(state, d));
+    /**
+     * 【D1・管理者指定配当の全社共通適用】
+     * 意思決定が PLAYER 由来か STANDARD_AI 由来かを問わず、ここで同じ処理を通す。
+     * advanceCompanyLabQuarter は
+     *   ・Management Console（GM代理操作のPLAYERを含む）
+     *   ・Independent Player（提出値は confirmedPlayerDecisions 経由で同じ経路へ合流）
+     *   ・Company Lab の四半期フロー
+     * のすべてが必ず通る唯一の地点であり、提出経路ごとの付け忘れが起きない。
+     * 管理者指定が無いTurnは同一オブジェクトがそのまま返るため挙動不変。
+     */
+    const normalized = applyAuthoritativeVapCapabilityScores(state, applyAuthoritativeSalesBaseScores(state, d));
+    return applyAdminAnnualDividendSettlementToDecision(normalized, resolvedManualBalance);
   });
 
   // --- Phase2: シナリオ → 市場入力（industryLab/simulationRunner.tsと同じ手順） ---
@@ -1197,7 +1220,6 @@ export function advanceCompanyLabQuarter(
   // ここでは「そのTurnの指数」を市場入力へ載せるだけで、価格計算自体は行わない。
   // 未設定Runでは両指数とも中立(100)となり、market/index.ts 側でキーを作らないため
   // 既存Runの結果はビット単位で不変。
-  const resolvedManualBalance = resolveManualBalanceForTurn(state.config.manualBalanceOverrides, turn);
   const manualSalesPriceIndex = resolvedSalesPriceIndex(resolvedManualBalance);
   const manualRawMarketPriceIndex = resolvedRawMarketPriceIndex(resolvedManualBalance);
   const marketInput: MarketQuarterInput = {
