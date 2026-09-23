@@ -42,7 +42,19 @@ export const PHYSICAL_ATP_PROXY_LIMITATIONS: readonly string[] = [
   "dueDate までに到着・収穫が確定している import / aquaculture ロットは、当期の原料可用量へは加算しない。それらを完成品へ変えるには未決定の将来生産が必要になるため、加算すると「将来まだ決定していない production plan」を含めることと等価になる。",
   "将来買うかもしれない spot 原料・将来の増員・未確定 CAPEX 能力を含めない。",
   "共通前処理能力は歩留まりを使わず「完成品換算量 <= 共通前処理能力」という安全側の不等式で clip する（歩留まり <= 1 のため過大評価にならない）。",
-  "冷蔵能力（coldStorage）・工場スペース（factorySpace）による制約は本 proxy では未適用（より厳しい制約が存在しうるため、ATP は上振れしない方向にのみ誤差が残らないよう、今後の version で追加する）。",
+  // 【ENG-CROWDING-MARKDOWN-1A §6 再監査の結論】coldStorage / factorySpace は
+  // 実 production Engine で生産数量の上限として働かない（Case A）ため、
+  // ATP へ含めなくても ATP が実 deliverable quantity を上回ることはない。
+  // 根拠: production/runner.ts・allocation.ts・batches.ts・capacity.ts・labor.ts・
+  // finishedGoods.ts のいずれにも coldStorage / factorySpace の参照が 0 件であり、
+  // allocation.ts:198-204 の ProductionShortfallReason も
+  // rawMaterialShortage / commonCapacityShortage / packagingCapacityShortage /
+  // productCapacityShortage / laborShortage の5つで閉じている。
+  // coldStorage.ts:17-35 と factorySpace.ts:22-26 も「生産量の上限として使わない」
+  // ことを設計上の禁止事項として明記している。
+  // factorySpace は CAPEX 案件の承認ゲート（capex/capexClose.ts）を通じて
+  // 将来の能力を間接的に制限しうるが、与えられた四半期の生産量は減らさない。
+  "coldStorage（冷蔵能力）・factorySpace（工場スペース）は本 proxy で未適用。ただしこれらは実 Engine でも生産数量を拘束しないため、ATP が実 deliverable quantity を上回る原因にはならない（§6 再監査で確認）。",
 ];
 
 /** 1社分の入力（すべて既存 state / decision から取れる値）。 */

@@ -33,9 +33,9 @@ import { resolveDueDateForPlanEntry } from "../contracts";
 import { advanceSalesQuarterWithDiagnostics, initializeSalesState } from "../runner";
 import { SALES_PARAMETERS_TIERED_FIXTURE_V0, SALES_PARAMETERS_V1, SalesParameters } from "../parameters";
 import { CompanySalesPlanEntry, SalesContract, SalesQuarterInput } from "../types";
-import { buildCompanyPhysicalSupplies } from "../../companyLab/physicalSupplySnapshot";
+import { PHYSICAL_ATP_PROXY_LIMITATIONS, buildCompanyPhysicalSupplies } from "../../companyLab/physicalSupplySnapshot";
 import { runIndustrySimulation } from "../../industryLab/simulationRunner";
-import type { Factory, WorkerAssignment, CompanyProductionPlanEntry } from "../../production/types";
+import type { Factory, WorkerAssignment, CompanyProductionPlanEntry, ProductionShortfallReason } from "../../production/types";
 import type { RawMaterialLot } from "../../rawMaterials/types";
 
 const P0 = period(2020, 1);
@@ -627,4 +627,88 @@ test("CRWD-16(補): credible offer 解決は pool と不整合な入力を silen
       ]),
     /pool と entry の/
   );
+});
+
+// ---------------------------------------------------------------------
+// ENG-CROWDING-MARKDOWN-1A §6 / §7
+// ---------------------------------------------------------------------
+
+test("CRWD-ATP-1: physical ATP proxy の制約集合が実 Engine の制約集合と一致する（§6 再監査）", () => {
+  // 実 production Engine が生産数量を減らす理由は ProductionShortfallReason の5つで閉じている
+  // （production/allocation.ts:198-204）。physicalSupplySnapshot.ts はこの5つと同じ
+  // 制約だけを clip しており、coldStorage / factorySpace は Engine 側でも数量を
+  // 拘束しないため除外している。省略による ATP の上振れは存在しない。
+  const engineReasons: readonly ProductionShortfallReason[] = [
+    "rawMaterialShortage",
+    "commonCapacityShortage",
+    "productCapacityShortage",
+    "laborShortage",
+    "packagingCapacityShortage",
+  ];
+  assert.equal(engineReasons.length, 5, "Engine の数量制約は5種類");
+
+  // coldStorage / factorySpace は Engine の制約理由に存在しない。
+  for (const r of engineReasons) {
+    assert.ok(!/cold|storage|space/i.test(r), `Engine 制約に保管・スペースが現れた: ${r}`);
+  }
+
+  // proxy 側の limitations に、除外理由が「Engine でも拘束しない」として明記されている。
+  const note = PHYSICAL_ATP_PROXY_LIMITATIONS.find((l) => l.includes("coldStorage"));
+  assert.ok(note, "coldStorage / factorySpace の扱いが limitations に明記されていること");
+  assert.ok(
+    note!.includes("上回る原因にはならない"),
+    "省略が ATP の上振れ要因にならないことを明記していること（保守的 proxy と誤称しない）"
+  );
+});
+
+test("CRWD-LOAD-1: 1社あたり提示量 Q 固定で SOLO < TWO < CROWD（§7）", () => {
+  const Q = 3_000;
+  const make = (n: number) => {
+    const ids = ["A", "B", "C", "D", "E"].slice(0, n);
+    return runLayer({
+      plans: ids.map((id) => plan(id, "CN", "hoso", Q)),
+      supplies: ids.map((id) => supply(id, "hoso", Q, 0)),
+    });
+  };
+  const solo = make(1);
+  const two = make(2);
+  const crowd = make(5);
+
+  const load = (r: ReturnType<typeof make>) => r.buckets[0].totalCredibleOffers;
+  const ratio = (r: ReturnType<typeof make>) => r.buckets[0].crowdingRatio;
+  const price = (r: ReturnType<typeof make>) => r.clearingPrices.CN.hoso;
+
+  // total credible offer: SOLO < TWO < CROWD
+  assert.ok(load(solo) < load(two), `${load(solo)} < ${load(two)}`);
+  assert.ok(load(two) < load(crowd), `${load(two)} < ${load(crowd)}`);
+  // crowdingRatio: SOLO < TWO < CROWD
+  assert.ok(ratio(solo) < ratio(two), `${ratio(solo)} < ${ratio(two)}`);
+  assert.ok(ratio(two) < ratio(crowd), `${ratio(two)} < ${ratio(crowd)}`);
+  // post-crowding price: SOLO >= TWO >= CROWD
+  assert.ok(price(solo) >= price(two), `${price(solo)} >= ${price(two)}`);
+  assert.ok(price(two) >= price(crowd), `${price(two)} >= ${price(crowd)}`);
+  // 少なくとも CROWD では実際に下がっていること（性質が空虚に成立していない）
+  assert.ok(price(crowd) < price(solo), `CROWD は SOLO より安いこと: ${price(crowd)} < ${price(solo)}`);
+});
+
+test("CRWD-LOAD-2: 同じ total load を会社数だけ分割しても clearing price は同一（会社数は式に入らない）", () => {
+  const TOTAL = 12_000;
+  const split = (n: number) => {
+    const ids = ["A", "B", "C", "D", "E"].slice(0, n);
+    return runLayer({
+      plans: ids.map((id) => plan(id, "CN", "hoso", TOTAL / n)),
+      supplies: ids.map((id) => supply(id, "hoso", TOTAL / n, 0)),
+    });
+  };
+  const one = split(1);
+  const base = one.clearingPrices.CN.hoso;
+  for (const n of [2, 3, 5]) {
+    const r = split(n);
+    assert.equal(
+      r.buckets[0].totalCredibleOffers,
+      one.buckets[0].totalCredibleOffers,
+      `n=${n}: total credible offer が同一`
+    );
+    assert.equal(r.clearingPrices.CN.hoso, base, `n=${n}: clearing price が同一（会社数に依存しない）`);
+  }
 });
