@@ -55,11 +55,12 @@ test("PERSIST-B5: saveRunPartだけではloadRunに反映されない（commitRu
   const repo = createInMemorySimulationRunRepository();
   const id = "b5-run";
 
-  await repo.saveRunPart(id, 1, "dataset" as SimulationRunPart, { schemaVersion: "x", turns: [1], companies: [], companyMetrics: [], marketMetrics: [], producerCountryMetrics: [], bottlenecks: [], aiTrace: [], salesTrace: [], hiringTrace: [], investmentTrace: [], contribution: [], fixedCosts: [], salesAllocation: [] });
+  // 【O1】保存attempt（読んだ正本revision + このattemptの一意token）を渡す契約になった。
+  await repo.saveRunPart(id, { expectedBaseRevision: 0, writeToken: "b5" }, "dataset" as SimulationRunPart, { schemaVersion: "x", turns: [1], companies: [], companyMetrics: [], marketMetrics: [], producerCountryMetrics: [], bottlenecks: [], aiTrace: [], salesTrace: [], hiringTrace: [], investmentTrace: [], contribution: [], fixedCosts: [], salesAllocation: [] });
   const beforeCommit = await repo.loadRun(id);
   assert.equal(beforeCommit, null, "commitRunManifestより前にloadRunがデータを返してしまっている（partial saveが正本化されている）");
 
-  await repo.commitRunManifest(fakeManifest(id, 1, 1), manifestToSimulationRunSummary(fakeManifest(id, 1, 1)));
+  await repo.commitRunManifest(fakeManifest(id, 1, 1), manifestToSimulationRunSummary(fakeManifest(id, 1, 1)), { expectedBaseRevision: 0, writeToken: "b5" });
   const afterCommit = await repo.loadRun(id);
   assert.ok(afterCommit, "commitRunManifest後もloadRunがnullを返している");
   assert.equal(afterCommit?.run.completedTurns, 1);
@@ -70,18 +71,18 @@ test("PERSIST-B6: 新revisionのパートを書いてもcommitRunManifestを呼�
   const repo = createInMemorySimulationRunRepository();
   const id = "b6-run";
 
-  await repo.saveRunPart(id, 1, "dataset", { turns: [1], marker: "revision1" });
-  await repo.commitRunManifest(fakeManifest(id, 1, 1), manifestToSimulationRunSummary(fakeManifest(id, 1, 1)));
+  await repo.saveRunPart(id, { expectedBaseRevision: 0, writeToken: "b6-r1" }, "dataset", { turns: [1], marker: "revision1" });
+  await repo.commitRunManifest(fakeManifest(id, 1, 1), manifestToSimulationRunSummary(fakeManifest(id, 1, 1)), { expectedBaseRevision: 0, writeToken: "b6-r1" });
 
   // revision2のdatasetだけ書く（＝Turn15以降で server save が失敗し続けた状況を模す）。
-  await repo.saveRunPart(id, 2, "dataset", { turns: [1, 2], marker: "revision2" });
+  await repo.saveRunPart(id, { expectedBaseRevision: 1, writeToken: "b6-r2" }, "dataset", { turns: [1, 2], marker: "revision2" });
 
   const loaded = await repo.loadRun(id);
   assert.equal(loaded?.persistenceRevision, 1, "commitされていないrevision2がloadRunから見えてしまっている");
   assert.deepEqual((loaded?.dataset as unknown as { marker: string }).marker, "revision1");
 
   // ここでrevision2をcommitして初めて見えるようになる。
-  await repo.commitRunManifest(fakeManifest(id, 2, 2), manifestToSimulationRunSummary(fakeManifest(id, 2, 2)));
+  await repo.commitRunManifest(fakeManifest(id, 2, 2), manifestToSimulationRunSummary(fakeManifest(id, 2, 2)), { expectedBaseRevision: 1, writeToken: "b6-r2" });
   const loadedAfter = await repo.loadRun(id);
   assert.equal(loadedAfter?.persistenceRevision, 2);
   assert.deepEqual((loadedAfter?.dataset as unknown as { marker: string }).marker, "revision2");
@@ -119,8 +120,8 @@ test("PERSIST-B: saveRun便宜メソッドはsaveRunPart+commitRunManifestを合
 
   await repoA.saveRun({ schemaVersion: manifest.schemaVersion, run: manifest.run, dataset, savedAt: manifest.savedAt, persistenceRevision: 1 });
 
-  await repoB.saveRunPart(id, 1, "dataset", dataset);
-  await repoB.commitRunManifest(manifest, manifestToSimulationRunSummary(manifest));
+  await repoB.saveRunPart(id, { expectedBaseRevision: 0, writeToken: "compose" }, "dataset", dataset);
+  await repoB.commitRunManifest(manifest, manifestToSimulationRunSummary(manifest), { expectedBaseRevision: 0, writeToken: "compose" });
 
   const loadedA = await repoA.loadRun(id);
   const loadedB = await repoB.loadRun(id);

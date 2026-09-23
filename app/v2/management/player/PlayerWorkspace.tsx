@@ -174,6 +174,8 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
     if (confirmedDraft && entry.confirmedPlayerDecisions[companyId]) return confirmedDraft;
     return buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories);
   });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<boolean>(() => Boolean(entry.pendingDrafts[companyId] === undefined && entry.confirmedPlayerDecisions[companyId]));
 
   // 【Phase 9・§21根本原因】以前はここで setRevision を毎回bumpし、DecisionEditorを
@@ -194,26 +196,51 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
     [session, companyId]
   );
 
-  const handleConfirm = useCallback(() => {
+  /**
+   * 【O1 §10】保存の成否を待たずに「確定」と見せない。
+   * 以前は persistResumableRun を void で投げっぱなしにしたまま setConfirmed(true)
+   * していたため、保存が競合で失敗しても画面は「意思決定済み」と表示していた。
+   * サーバー保存が成立してから確定表示にし、失敗したら理由を出して未確定へ戻す。
+   */
+  const handleConfirm = useCallback(async () => {
     const decision = buildDecisionInputFromDraft(draft, fixture, session.state.currentPeriod);
     const current = getLiveSession(session.run.simulationRunId);
     const nextPendingDrafts = { ...(current?.pendingDrafts ?? {}) };
     delete nextPendingDrafts[companyId];
     const nextConfirmedPlayerDecisions = { ...(current?.confirmedPlayerDecisions ?? {}), [companyId]: decision };
-    upsertLiveSession(session.run.simulationRunId, {
-      session,
-      confirmedPlayerDecisions: nextConfirmedPlayerDecisions,
-      confirmedPlayerDrafts: { ...(current?.confirmedPlayerDrafts ?? {}), [companyId]: draft },
-      pendingDrafts: nextPendingDrafts,
-    });
-    setConfirmed(true);
-    // 【指示§15】PLAYER意思決定の確定は保存タイミングの1つ（WAITING_FOR_PLAYER状態を
-    // ハードリロード後も再現できるように、確定した瞬間に resumePayload ごと保存する）。
-    void persistResumableRun(session, current?.companyControlModes ?? entry.companyControlModes, nextConfirmedPlayerDecisions);
-    // 【Independent Player Flow】この会社に参加リンクが発行済みの場合、GM代理操作でも
-    // Seat側の提出記録を追いつかせる（Turn Advance gateが参照する副次情報。
-    // 決定そのものの正本は上のresumePayload保存であり、ここは失敗しても意思決定は失われない）。
-    void recordGmProxySubmission(session.run.simulationRunId, companyId, session.state.scenarioState.currentTurn);
+
+    setSaveError(null);
+    setSaving(true);
+    try {
+      // 【指示§15】PLAYER意思決定の確定は保存タイミングの1つ（WAITING_FOR_PLAYER状態を
+      // ハードリロード後も再現できるように、確定した瞬間に resumePayload ごと保存する）。
+      const result = await persistResumableRun(session, current?.companyControlModes ?? entry.companyControlModes, nextConfirmedPlayerDecisions);
+      if (!result.serverSaveSucceeded) {
+        setSaveError(
+          result.conflict
+            ? `他の保存と競合したため確定できませんでした。画面を再読み込みしてからもう一度確定してください（${result.serverError ?? ""}）。`
+            : `意思決定を保存できませんでした（${result.serverError ?? "原因不明"}）。`
+        );
+        return;
+      }
+      // 保存が成立してから、タブ内registryと確定表示を更新する。
+      upsertLiveSession(session.run.simulationRunId, {
+        session,
+        confirmedPlayerDecisions: nextConfirmedPlayerDecisions,
+        confirmedPlayerDrafts: { ...(current?.confirmedPlayerDrafts ?? {}), [companyId]: draft },
+        pendingDrafts: nextPendingDrafts,
+      });
+      setConfirmed(true);
+      /**
+       * 【Independent Player Flow・O1 §12】この会社に参加リンクが発行済みの場合、
+       * GM代理操作でもSeat側の提出記録を追いつかせる。
+       * decision保存が成立した後にだけ書く（「seatだけ提出済みで decision が無い」
+       * という不整合を作らない）。
+       */
+      void recordGmProxySubmission(session.run.simulationRunId, companyId, session.state.scenarioState.currentTurn);
+    } finally {
+      setSaving(false);
+    }
   }, [session, fixture, draft, companyId, entry.companyControlModes]);
 
   const dataset = buildDatasetFromSession(session);
@@ -537,13 +564,19 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
             <div className="mb-2 flex flex-wrap justify-end gap-1.5">
               <button
                 type="button"
-                onClick={handleConfirm}
+                onClick={() => void handleConfirm()}
+                disabled={saving}
                 data-testid="workspace-confirm-decision"
-                className="rounded bg-emerald-700 px-4 py-1.5 text-sm font-semibold hover:bg-emerald-600"
+                className="rounded bg-emerald-700 px-4 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40"
               >
-                この内容で意思決定を確定
+                {saving ? "保存中…" : "この内容で意思決定を確定"}
               </button>
             </div>
+            {saveError ? (
+              <p className="mb-2 text-right text-[11px] text-rose-400" data-testid="workspace-confirm-error">
+                {saveError}
+              </p>
+            ) : null}
             <DecisionStudio
               fixture={fixture}
               ownState={ownState}

@@ -33,6 +33,7 @@ import {
   simulationRunManifestKeyV2,
   simulationRunPackKeyV2,
   simulationRunResumeKeyV2,
+  simulationRunStagingPartKeyV2,
   simulationRunSummaryKeyV2,
 } from "../../../redis/simulationRunRedisKeys";
 import {
@@ -41,7 +42,10 @@ import {
   SimulationRunRepository,
   SimulationRunRepositoryError,
   SimulationRunSchemaError,
+  SimulationRunStaleRevisionError,
+  SimulationRunWriteAttempt,
   assertStorableSimulationRun,
+  createSimulationRunWriteToken,
   sortAndLimitSummaries,
 } from "./repository";
 import { StoredSimulationRunManifest, SimulationRunSummary, StoredSimulationRun, isReadableSimulationRunSchema, toSimulationRunSummary } from "./types";
@@ -51,7 +55,21 @@ import { StoredSimulationRunManifest, SimulationRunSummary, StoredSimulationRun,
  * manifestは小さい（run metadata + revision + flagsのみ）ため、旧実装と同じ
  * Lua一括更新パターンを維持できる（このLua自体は巨大payload問題の対象ではない）。
  */
-const SAVE_MANIFEST_SCRIPT = `
+/**
+ * 【O1・テストからの参照用にexportする】フェイククライアントがこのスクリプト定数と
+ * 一致することで本物の保存経路だと判別し、Luaと論理的に同じ手順を再現する
+ * （会社ラボ側 atomicCommit.ts が同じ理由でスクリプトをexportしているのと同じ方式）。
+ */
+export const SIMULATION_RUN_SAVE_MANIFEST_SCRIPT = `
+-- 【O1・原子的CAS + パート昇格】
+-- KEYS: 1 manifest, 2 summary, 3 index,
+--       4 staging dataset, 5 staging resume, 6 staging pack,
+--       7 canonical dataset, 8 canonical resume, 9 canonical pack
+-- ARGV: 1 manifestJson, 2 summaryJson, 3 score, 4 runId, 5 limit,
+--       6 expectedBaseRevision, 7 hasResume("1"/"0"), 8 hasPack("1"/"0")
+--
+-- 「現在公開中のrevisionを読む → 比較する → 書く」を1回のLuaで行う。
+-- 別々のnetwork callへ分けると、その隙間に他のwriterが公開してしまう。
 local manifestKey = KEYS[1]
 local summaryKey = KEYS[2]
 local indexKey = KEYS[3]
@@ -60,7 +78,44 @@ local summaryJson = ARGV[2]
 local score = tonumber(ARGV[3])
 local runId = ARGV[4]
 local limit = tonumber(ARGV[5])
+local expectedBase = tonumber(ARGV[6])
+local hasResume = ARGV[7] == '1'
+local hasPack = ARGV[8] == '1'
 
+-- 0. 【書き込み前に全部検査しきる】Redisのスクリプトは途中でエラーになっても、
+--    それまでに実行した書き込みを巻き戻さない（Luaに自動rollbackは無い）。
+--    そのため「RENAMEやSETを始めたあとでエラーになり得る要素」を、
+--    書き込みが1つも起きていないこの位置で先に弾いておく。
+if score == nil or limit == nil or expectedBase == nil then
+  return { 'INVALID_ARGS' }
+end
+
+-- 1. 現在公開中のrevisionを取得する（保存物が無い / revisionを持たない旧Runは0）。
+local published = 0
+local currentRaw = redis.call('GET', manifestKey)
+if currentRaw then
+  local ok, parsed = pcall(cjson.decode, currentRaw)
+  if ok and type(parsed) == 'table' and type(parsed.persistenceRevision) == 'number' then
+    published = parsed.persistenceRevision
+  end
+end
+
+-- 2. 基準がずれていれば何も変更しない（古い正本を新しい正本へ被せない）。
+if published ~= expectedBase then
+  return { 'CONFLICT', tostring(published) }
+end
+
+-- 3. このattemptの未公開パートが揃っているか確認する（部分保存を正本化しない）。
+if redis.call('EXISTS', KEYS[4]) == 0 then return { 'MISSING_PART', 'dataset' } end
+if hasResume and redis.call('EXISTS', KEYS[5]) == 0 then return { 'MISSING_PART', 'resume' } end
+if hasPack and redis.call('EXISTS', KEYS[6]) == 0 then return { 'MISSING_PART', 'pack' } end
+
+-- 4. このattemptのパートだけを正規キーへ昇格させる。敗者のstagingは触らない。
+redis.call('RENAME', KEYS[4], KEYS[7])
+if hasResume then redis.call('RENAME', KEYS[5], KEYS[8]) end
+if hasPack then redis.call('RENAME', KEYS[6], KEYS[9]) end
+
+-- 5. manifestを公開する（ここで初めてこのrevisionが読み込み可能になる）。
 redis.call('SET', manifestKey, manifestJson)
 redis.call('SET', summaryKey, summaryJson)
 redis.call('ZADD', indexKey, score, runId)
@@ -68,14 +123,33 @@ redis.call('ZADD', indexKey, score, runId)
 local total = redis.call('ZCARD', indexKey)
 local excess = total - limit
 if excess <= 0 then
-  return {}
+  return { 'OK' }
 end
 local evicted = redis.call('ZRANGE', indexKey, 0, excess - 1)
+local result = { 'OK' }
 for i = 1, #evicted do
   redis.call('ZREM', indexKey, evicted[i])
+  result[#result + 1] = evicted[i]
 end
-return evicted
+return result
 `;
+
+/**
+ * 【O1・孤児stagingキーの寿命】未公開パートの置き場にはTTLを付ける。
+ *
+ * CAS conflict / パート欠落 / manifest commit失敗 / クライアント切断 / retry中断 では、
+ * そのattemptのstagingキーは昇格されずに残る（＝孤児）。孤児が残ること自体は
+ * 公開正本に影響しないが、TTLが無いと無制限に溜まり続ける。
+ * 既存のRedis SET PX（processingLock.tsが使っているのと同じ仕組み）を使って寿命を切る。
+ * 新しいcleanup worker・SCAN全体処理・migrationは追加しない。
+ *
+ * 1時間: 正常な保存は数秒で完了する（パート3本のPOST＋manifest commit）。
+ * 32Qの大きなdatasetでも桁違いに短い。これを超えて未commitのまま残っている
+ * stagingは、既に失敗したattemptのものと判断してよい。
+ * 逆に短すぎると、アップロード中にTTLが切れてcommitがMISSING_PARTになるため、
+ * 「正常系が絶対に触れない」長さを取る。
+ */
+export const SIMULATION_RUN_STAGING_TTL_MS = 60 * 60 * 1000;
 
 export interface SimulationRunRepositoryDependencies {
   readonly client: CompanyLabRedisClient;
@@ -98,24 +172,27 @@ function isLegacyEmbeddedManifest(value: unknown): value is StoredSimulationRun 
 export function createRedisSimulationRunRepository(deps: SimulationRunRepositoryDependencies): SimulationRunRepository {
   const { client, appEnv } = deps;
 
-  async function saveRunPart(simulationRunId: string, revision: number, part: SimulationRunPart, value: unknown): Promise<void> {
-    const key =
-      part === "dataset"
-        ? simulationRunDatasetKeyV2(appEnv, simulationRunId, revision)
-        : part === "resume"
-          ? simulationRunResumeKeyV2(appEnv, simulationRunId, revision)
-          : simulationRunPackKeyV2(appEnv, simulationRunId, revision);
+  async function saveRunPart(simulationRunId: string, attempt: SimulationRunWriteAttempt, part: SimulationRunPart, value: unknown): Promise<void> {
+    /**
+     * 【O1】未公開パートはattempt固有のstagingキーへ書く。
+     * 正規キー（:dataset:{revision} 等）へ直接書いていた頃は、同じ正本を読んだ
+     * 2つのwriterが同じrevision番号を選んで同じキーを奪い合い、
+     * manifest CASで負けた側が勝った側のパートを壊していた。
+     * 正規キーの形・内容は変えていないため、既存Runの読み出しは不変（migration不要）。
+     */
+    const key = simulationRunStagingPartKeyV2(appEnv, simulationRunId, attempt.writeToken, part);
     assertAllowedSimulationRunKeys([key], appEnv);
     try {
-      await client.set(key, JSON.stringify(value));
+      // TTLを付けて、昇格されなかった孤児が無制限に残らないようにする。
+      await client.set(key, JSON.stringify(value), { pxMilliseconds: SIMULATION_RUN_STAGING_TTL_MS });
     } catch (e) {
       throw new SimulationRunRepositoryError(
-        `Simulation Run のパート保存に失敗しました（simulationRunId=${simulationRunId}, revision=${revision}, part=${part}）: ${toErrorMessage(e)}`
+        `Simulation Run のパート保存に失敗しました（simulationRunId=${simulationRunId}, writeToken=${attempt.writeToken}, part=${part}）: ${toErrorMessage(e)}`
       );
     }
   }
 
-  async function commitRunManifest(manifest: StoredSimulationRunManifest, summary: SimulationRunSummary): Promise<void> {
+  async function commitRunManifest(manifest: StoredSimulationRunManifest, summary: SimulationRunSummary, attempt: SimulationRunWriteAttempt): Promise<void> {
     const runId = manifest.run.simulationRunId;
     const revision = manifest.persistenceRevision;
     const manifestKey = simulationRunManifestKeyV2(appEnv, runId);
@@ -147,18 +224,54 @@ export function createRedisSimulationRunRepository(deps: SimulationRunRepository
     // 呼び出し側は、この呼び出しより前に該当revisionのパート全部をsaveRunPartで
     // 書き終えている前提。ここで失敗すれば旧revisionを指したままになり、
     // 新しいパートは「未公開」のまま残る＝指示§21 partial saveを正本化しない）。
-    let evicted: unknown;
+    const stagingKeys = (["dataset", "resume", "pack"] as const).map((part) => simulationRunStagingPartKeyV2(appEnv, runId, attempt.writeToken, part));
+    const canonicalKeys = [
+      simulationRunDatasetKeyV2(appEnv, runId, revision),
+      simulationRunResumeKeyV2(appEnv, runId, revision),
+      simulationRunPackKeyV2(appEnv, runId, revision),
+    ];
+    assertAllowedSimulationRunKeys([...stagingKeys, ...canonicalKeys], appEnv);
+
+    let outcome: unknown;
     try {
-      evicted = await client.eval(SAVE_MANIFEST_SCRIPT, [manifestKey, summaryKey, indexKey], [
-        JSON.stringify(manifest),
-        JSON.stringify(summary),
-        String(score),
-        runId,
-        String(SIMULATION_RUN_RETENTION_LIMIT),
-      ]);
+      outcome = await client.eval(
+        SIMULATION_RUN_SAVE_MANIFEST_SCRIPT,
+        [manifestKey, summaryKey, indexKey, ...stagingKeys, ...canonicalKeys],
+        [
+          JSON.stringify(manifest),
+          JSON.stringify(summary),
+          String(score),
+          runId,
+          String(SIMULATION_RUN_RETENTION_LIMIT),
+          String(attempt.expectedBaseRevision),
+          manifest.hasResumePayload ? "1" : "0",
+          manifest.hasPackCapture ? "1" : "0",
+        ]
+      );
     } catch (e) {
       throw new SimulationRunRepositoryError(`Simulation Run のmanifest保存に失敗しました（simulationRunId=${runId}, revision=${revision}）: ${toErrorMessage(e)}`);
     }
+
+    // Luaの戻り値の先頭が結果コード。CONFLICT なら公開状態は一切変わっていない。
+    const asArray = Array.isArray(outcome) ? outcome : [];
+    const status = String(asArray[0] ?? "");
+    if (status === "CONFLICT") {
+      throw new SimulationRunStaleRevisionError(runId, attempt.expectedBaseRevision, Number(asArray[1] ?? 0));
+    }
+    if (status === "INVALID_ARGS") {
+      throw new SimulationRunRepositoryError(
+        `Simulation Run のmanifest保存へ不正な引数が渡されました（simulationRunId=${runId}, revision=${revision}）。保存は行われていません。`
+      );
+    }
+    if (status === "MISSING_PART") {
+      throw new SimulationRunRepositoryError(
+        `Simulation Run の保存パートが揃っていません（simulationRunId=${runId}, revision=${revision}, part=${String(asArray[1] ?? "?")}）。`
+      );
+    }
+    if (status !== "OK") {
+      throw new SimulationRunRepositoryError(`Simulation Run のmanifest保存が想定外の結果を返しました（simulationRunId=${runId}）: ${JSON.stringify(outcome)}`);
+    }
+    const evicted = asArray.slice(1);
 
     // 旧revisionのパートキーを後始末する（ベストエフォート。失敗しても保存自体は成立している）。
     if (previousRevision !== null && previousRevision !== revision) {
@@ -205,12 +318,36 @@ export function createRedisSimulationRunRepository(deps: SimulationRunRepository
    * と同じ意味を持つ。HTTP経由の保存では、これを1回のrequestで呼ぶのではなく、
    * API層がsaveRunPart/commitRunManifestを個別のrequestとして順に呼ぶ。
    */
-  async function saveRun(stored: StoredSimulationRun): Promise<void> {
+  /**
+   * 【O1】現在公開中のrevision（保存物が無い / revisionを持たない旧Runは0）。
+   * 書き手はこれを expectedBaseRevision として保存attemptに載せる。
+   */
+  async function currentPublishedRevision(simulationRunId: string): Promise<number> {
+    const manifestKey = simulationRunManifestKeyV2(appEnv, simulationRunId);
+    let raw: unknown;
+    try {
+      raw = await client.get(manifestKey);
+    } catch (e) {
+      throw new SimulationRunRepositoryError(`Simulation Run のrevision確認に失敗しました（key=${manifestKey}）: ${toErrorMessage(e)}`);
+    }
+    if (raw === null || raw === undefined) return 0;
+    const parsed = parseJsonValue(raw) as Partial<StoredSimulationRunManifest>;
+    return typeof parsed?.persistenceRevision === "number" ? parsed.persistenceRevision : 0;
+  }
+
+  async function saveRun(stored: StoredSimulationRun, attempt?: SimulationRunWriteAttempt): Promise<void> {
     assertStorableSimulationRun(stored);
-    const revision = stored.persistenceRevision ?? 1;
-    await saveRunPart(stored.run.simulationRunId, revision, "dataset", stored.dataset);
-    if (stored.resumePayload !== undefined) await saveRunPart(stored.run.simulationRunId, revision, "resume", stored.resumePayload);
-    if (stored.packCapture !== undefined) await saveRunPart(stored.run.simulationRunId, revision, "pack", stored.packCapture);
+    const runId = stored.run.simulationRunId;
+    // 【attempt省略時】その場で公開中revisionを読み、それを基準にする（テスト・旧形式保存向け）。
+    const base = attempt?.expectedBaseRevision ?? (await currentPublishedRevision(runId));
+    const effective: SimulationRunWriteAttempt = {
+      expectedBaseRevision: base,
+      writeToken: attempt?.writeToken ?? createSimulationRunWriteToken("inline"),
+    };
+    const revision = stored.persistenceRevision ?? base + 1;
+    await saveRunPart(runId, effective, "dataset", stored.dataset);
+    if (stored.resumePayload !== undefined) await saveRunPart(runId, effective, "resume", stored.resumePayload);
+    if (stored.packCapture !== undefined) await saveRunPart(runId, effective, "pack", stored.packCapture);
     await commitRunManifest(
       {
         schemaVersion: stored.schemaVersion,
@@ -220,7 +357,8 @@ export function createRedisSimulationRunRepository(deps: SimulationRunRepository
         hasResumePayload: stored.resumePayload !== undefined,
         hasPackCapture: stored.packCapture !== undefined,
       },
-      toSimulationRunSummary(stored)
+      toSimulationRunSummary(stored),
+      effective
     );
   }
 
@@ -341,5 +479,5 @@ export function createRedisSimulationRunRepository(deps: SimulationRunRepository
     }
   }
 
-  return { saveRun, saveRunPart, commitRunManifest, loadRun, listRuns, deleteRun };
+  return { saveRun, saveRunPart, commitRunManifest, loadRun, listRuns, deleteRun, currentPublishedRevision };
 }

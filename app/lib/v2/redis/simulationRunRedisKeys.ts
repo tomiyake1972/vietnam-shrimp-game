@@ -85,6 +85,35 @@ export function simulationRunManifestKeyV2(appEnv: AppEnvV2, simulationRunId: st
 }
 
 /**
+ * 【O1・part collision防止】保存attemptごとの一時（未公開）パートキー。
+ *
+ * 【なぜ必要か】従来のパートキーは revision だけで決まるため、同じ正本revisionを
+ * 読んだ2つのwriterが同じ新revision番号を選び、同じキーへ書いていた。後から書いた
+ * 方がmanifest CASで拒否されても、先に勝ったwriterのパートを既に壊した後になる。
+ * attemptごとに一意なwriteTokenで置き場所を分け、CASに勝ったattemptのパートだけを
+ * 正規キーへ昇格させることで、この衝突を構造的に閉じる。
+ *
+ * 【名前空間は変えない】prefixは既存と同一（production: v2:simulationRun: /
+ * それ以外: staging:v2:simulationRun:）。既存の正規キー
+ * （:dataset:{revision} 等）の形も内容も変えないため、既存Runの読み出しは不変で、
+ * migrationも不要。このキーは公開前の一時置き場としてだけ使われ、
+ * CASに勝てば正規キーへRENAMEされ、負ければ孤児として残る（既存の孤児処理と同じ扱い）。
+ */
+const WRITE_TOKEN_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
+
+export function assertValidSimulationRunWriteToken(writeToken: string): void {
+  if (typeof writeToken !== "string" || !WRITE_TOKEN_PATTERN.test(writeToken)) {
+    throw new Error(`writeToken は英数字とハイフンのみ、1〜64文字である必要があります。受け取った値: ${JSON.stringify(writeToken)}`);
+  }
+}
+
+export function simulationRunStagingPartKeyV2(appEnv: AppEnvV2, simulationRunId: string, writeToken: string, part: "dataset" | "resume" | "pack"): string {
+  assertValidSimulationRunId(simulationRunId);
+  assertValidSimulationRunWriteToken(writeToken);
+  return `${prefixFor(appEnv)}${simulationRunId}:staging:${writeToken}:${part}`;
+}
+
+/**
  * 書き込み直前のキー許可検証。
  * 会社ラボ本体・本番ゲームのキー空間へ絶対に書き込まないことを構造的に保証する。
  */

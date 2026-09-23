@@ -72,7 +72,19 @@ export class PlayerAuthError extends Error {
 export class PlayerSubmitError extends Error {
   constructor(
     message: string,
-    readonly code: "RUN_NOT_FOUND" | "RUN_FINISHED" | "NOT_PLAYER_CONTROLLED" | "STALE_TURN" | "DUPLICATE_SUBMIT" | "INVALID_DECISION"
+    readonly code:
+      | "RUN_NOT_FOUND"
+      | "RUN_FINISHED"
+      | "NOT_PLAYER_CONTROLLED"
+      | "STALE_TURN"
+      | "DUPLICATE_SUBMIT"
+      | "INVALID_DECISION"
+      /**
+       * 【O1】他のwriterと保存が競合し、有限回の再試行でも安全に確定できなかった。
+       * 提出は保存されていない（＝Playerは出し直す必要がある）。
+       * 「提出できたように見えて実は消えている」状態を作らないための明示コード。
+       */
+      | "SAVE_CONFLICT"
   ) {
     super(message);
     this.name = "PlayerSubmitError";

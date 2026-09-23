@@ -18,6 +18,8 @@ const SUBMIT_ERROR_STATUS: Readonly<Record<PlayerSubmitError["code"], number>> =
   STALE_TURN: 409,
   DUPLICATE_SUBMIT: 409,
   INVALID_DECISION: 400,
+  // 【O1】保存競合。クライアントは最新Turnを読み直してから出し直す。
+  SAVE_CONFLICT: 409,
 };
 
 // POST /api/v2/play/submit — このTurnの意思決定を提出する（1Turn1回、以後は同Turn編集不可）。

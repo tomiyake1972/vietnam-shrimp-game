@@ -3,7 +3,14 @@
 // Repository を注入して受け取る純粋なハンドラー（テストではインメモリ実装を渡す）。
 // 例外を投げず、必ず {status, body} を返す。
 
-import { SimulationRunPart, SimulationRunRepository, SimulationRunSchemaError } from "../../../../lib/v2/companyLab/simulation/persistence/repository";
+import {
+  SimulationRunPart,
+  SimulationRunRepository,
+  SimulationRunSchemaError,
+  SimulationRunStaleRevisionError,
+  SimulationRunWriteAttempt,
+  createSimulationRunWriteToken,
+} from "../../../../lib/v2/companyLab/simulation/persistence/repository";
 import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, StoredSimulationRun, StoredSimulationRunManifest, manifestToSimulationRunSummary } from "../../../../lib/v2/companyLab/simulation/persistence/types";
 import { CompanyControlMode } from "../../../../lib/v2/companyLab/simulation/types";
 import { SimulationRunApiResult } from "./context";
@@ -30,6 +37,47 @@ export interface PlayerSeatSubmissionGate {
 
 function badRequest(message: string): SimulationRunApiResult {
   return { status: 400, body: { error: { code: "BAD_REQUEST", message } } };
+}
+
+/**
+ * 【O1】保存の基準revisionが古い。クライアントは最新を読み直し、
+ * 自分の変更を最新へ安全に再適用できる場合だけ作り直して再保存する
+ * （同じpayloadのrevisionだけ上げて再送してはいけない）。
+ */
+function staleRevisionConflict(e: SimulationRunStaleRevisionError): SimulationRunApiResult {
+  return {
+    status: 409,
+    body: {
+      error: {
+        code: "STALE_PERSISTENCE_REVISION",
+        message: e.message,
+        expectedBaseRevision: e.expectedBaseRevision,
+        currentPublishedRevision: e.currentPublishedRevision,
+      },
+    },
+  };
+}
+
+/**
+ * 【O1】保存attempt（expectedBaseRevision / writeToken）をリクエストから取り出す。
+ * どちらも省略不可にはしない（旧クライアント互換のため）。省略された場合は
+ * legacy pathとして扱い、その場で公開中revisionを基準に採る。
+ * ただしlegacy pathはPLAYER提出の競合を閉じられないため、V2のPLAYER保存経路
+ * （simulationRunStore.ts / submitPlayerDecision）は必ず両方を送る。
+ */
+function parseWriteAttempt(candidate: { readonly expectedBaseRevision?: unknown; readonly writeToken?: unknown }): SimulationRunWriteAttempt | "invalid" | null {
+  const hasBase = candidate.expectedBaseRevision !== undefined;
+  const hasToken = candidate.writeToken !== undefined;
+  if (!hasBase && !hasToken) return null;
+  if (typeof candidate.expectedBaseRevision !== "number" || !Number.isFinite(candidate.expectedBaseRevision) || candidate.expectedBaseRevision < 0) return "invalid";
+  if (typeof candidate.writeToken !== "string" || candidate.writeToken.length === 0) return "invalid";
+  return { expectedBaseRevision: candidate.expectedBaseRevision, writeToken: candidate.writeToken };
+}
+
+/** legacy path（attempt未指定）のための、その場読み取り基準。 */
+async function inlineAttempt(repository: SimulationRunRepository, simulationRunId: string): Promise<SimulationRunWriteAttempt> {
+  const base = await repository.currentPublishedRevision(simulationRunId);
+  return { expectedBaseRevision: base, writeToken: createSimulationRunWriteToken("legacy") };
 }
 
 function gameFinishedConflict(simulationRunId: string, gameEndedAt: string): SimulationRunApiResult {
@@ -104,7 +152,7 @@ export async function handleSaveSimulationRunPart(repository: SimulationRunRepos
   if (typeof body !== "object" || body === null) {
     return badRequest("リクエストボディが JSON オブジェクトではありません。");
   }
-  const candidate = body as { simulationRunId?: unknown; revision?: unknown; part?: unknown; value?: unknown };
+  const candidate = body as { simulationRunId?: unknown; revision?: unknown; part?: unknown; value?: unknown; expectedBaseRevision?: unknown; writeToken?: unknown };
   if (typeof candidate.simulationRunId !== "string" || candidate.simulationRunId.length === 0) {
     return badRequest("simulationRunId が空です。");
   }
@@ -117,10 +165,19 @@ export async function handleSaveSimulationRunPart(repository: SimulationRunRepos
   if (candidate.value === undefined) {
     return badRequest("value がありません。");
   }
+  const parsedAttempt = parseWriteAttempt(candidate);
+  if (parsedAttempt === "invalid") {
+    return badRequest("expectedBaseRevision（0以上の数値）と writeToken（空でない文字列）は同時に指定してください。");
+  }
   const lockConflict = await checkNotAlreadyFinished(repository, candidate.simulationRunId);
   if (lockConflict) return lockConflict;
   try {
-    await repository.saveRunPart(candidate.simulationRunId, candidate.revision, candidate.part as SimulationRunPart, candidate.value);
+    /**
+     * 【O1】未公開パートはattempt固有の置き場へ書く。attempt未指定のlegacy pathでは
+     * その場で公開中revisionを読んで基準にする（旧クライアント互換）。
+     */
+    const attempt = parsedAttempt ?? (await inlineAttempt(repository, candidate.simulationRunId));
+    await repository.saveRunPart(candidate.simulationRunId, attempt, candidate.part as SimulationRunPart, candidate.value);
   } catch (e) {
     if (e instanceof SimulationRunSchemaError) return badRequest(e.message);
     throw e;
@@ -145,7 +202,12 @@ export async function handleSaveSimulationRun(
   if (typeof body !== "object" || body === null) {
     return badRequest("リクエストボディが JSON オブジェクトではありません。");
   }
-  const candidate = body as Partial<StoredSimulationRun> & Partial<StoredSimulationRunManifest> & { readonly manifestOnly?: boolean };
+  const candidate = body as Partial<StoredSimulationRun> &
+    Partial<StoredSimulationRunManifest> & {
+      readonly manifestOnly?: boolean;
+      readonly expectedBaseRevision?: unknown;
+      readonly writeToken?: unknown;
+    };
 
   if (candidate.manifestOnly) {
     if (!candidate.run || typeof candidate.savedAt !== "string" || typeof candidate.persistenceRevision !== "number") {
@@ -165,9 +227,15 @@ export async function handleSaveSimulationRun(
       const advanceConflict = await checkPlayerSeatsSubmittedForAdvance(repository, playerSeatGate, manifest.run);
       if (advanceConflict) return advanceConflict;
     }
+    const parsedAttempt = parseWriteAttempt(candidate);
+    if (parsedAttempt === "invalid") {
+      return badRequest("expectedBaseRevision（0以上の数値）と writeToken（空でない文字列）は同時に指定してください。");
+    }
     try {
-      await repository.commitRunManifest(manifest, manifestToSimulationRunSummary(manifest));
+      const attempt = parsedAttempt ?? (await inlineAttempt(repository, manifest.run.simulationRunId));
+      await repository.commitRunManifest(manifest, manifestToSimulationRunSummary(manifest), attempt);
     } catch (e) {
+      if (e instanceof SimulationRunStaleRevisionError) return staleRevisionConflict(e);
       if (e instanceof SimulationRunSchemaError) return badRequest(e.message);
       throw e;
     }
@@ -200,9 +268,14 @@ export async function handleSaveSimulationRun(
     const advanceConflict = await checkPlayerSeatsSubmittedForAdvance(repository, playerSeatGate, stored.run);
     if (advanceConflict) return advanceConflict;
   }
+  const parsedAttempt = parseWriteAttempt(candidate as { expectedBaseRevision?: unknown; writeToken?: unknown });
+  if (parsedAttempt === "invalid") {
+    return badRequest("expectedBaseRevision（0以上の数値）と writeToken（空でない文字列）は同時に指定してください。");
+  }
   try {
-    await repository.saveRun(stored);
+    await repository.saveRun(stored, parsedAttempt ?? undefined);
   } catch (e) {
+    if (e instanceof SimulationRunStaleRevisionError) return staleRevisionConflict(e);
     if (e instanceof SimulationRunSchemaError) return badRequest(e.message);
     throw e;
   }
