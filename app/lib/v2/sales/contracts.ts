@@ -15,11 +15,29 @@ import { CompanySalesPlanEntry, MarketProductAllocationResult, SalesContract, Sa
  * 高々1件しか生成されない（成約配分が会社×市場×商品につき1件のため）ため、
  * この4値の組み合わせだけで一意性が保証される。
  */
+/**
+ * 【ENG-CROWDING-MARKDOWN-1】1件の販売計画 entry の納期を解決する。
+ * createContractsFromAllocation が使うのと同一の規則
+ * （desiredLeadTimeTurns ?? params.standardLeadTimeTurns）をそのまま使う。
+ */
+export function resolveDueDateForPlanEntry(
+  entry: { readonly desiredLeadTimeTurns?: number },
+  contractedPeriod: PeriodV2,
+  params: SalesParameters
+): PeriodV2 {
+  return resolveDueDate(contractedPeriod, entry.desiredLeadTimeTurns ?? params.standardLeadTimeTurns);
+}
+
 export function buildContractId(period: PeriodV2, market: string, product: string, companyId: string): string {
   return `SC-${period}-${market}-${product}-${companyId}`;
 }
 
-function resolveDueDate(contractedPeriod: PeriodV2, leadTimeTurns: number): PeriodV2 {
+/**
+ * 【ENG-CROWDING-MARKDOWN-1】納期解決の正本。Crowding 層（sales/crowdingLayer.ts）が
+ * bucket キーを作るときに **この同じ関数**を使う（納期解決の SSoT を増やさない）。
+ * 契約生成時の挙動は一切変更していない（export しただけ）。
+ */
+export function resolveDueDate(contractedPeriod: PeriodV2, leadTimeTurns: number): PeriodV2 {
   if (!Number.isInteger(leadTimeTurns) || leadTimeTurns < 1) {
     throw new SalesValidationError(`リードタイムは1以上の整数である必要があります。受け取った値: ${leadTimeTurns}`);
   }

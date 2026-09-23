@@ -29,7 +29,7 @@ import { MARKET_PARAMETERS_V1 } from "../market/parameters";
 import { calculateMarketQuarter } from "../market/index";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS } from "../market/destinationPricingParameters";
 import { SALES_PARAMETERS_V1 } from "../sales/parameters";
-import { advanceSalesQuarter } from "../sales/runner";
+import { advanceSalesQuarterWithDiagnostics } from "../sales/runner";
 import { CompanyId, SalesState } from "../sales/types";
 import {
   aggregateDomesticPurchaseIntent,
@@ -99,12 +99,22 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
     contracts: input.existingContracts,
     history: [],
   };
-  const salesStateAfter = advanceSalesQuarter(
+  const salesAdvance = advanceSalesQuarterWithDiagnostics(
     salesStateBefore,
-    { plans: input.salesPlans, marketResult, marketInput: overriddenMarketInput, marketWeights: input.marketWeights, marketProductMix: input.marketProductMix },
+    {
+      plans: input.salesPlans,
+      marketResult,
+      marketInput: overriddenMarketInput,
+      marketWeights: input.marketWeights,
+      marketProductMix: input.marketProductMix,
+      // 【ENG-CROWDING-MARKDOWN-1】未指定ならこの層を通らない＝既存挙動ビット単位不変。
+      crowding: input.crowding,
+    },
     salesParams,
     destinationMarketPriceCoefficients
   );
+  const salesStateAfter = salesAdvance.state;
+  const crowdingDiagnostics = salesAdvance.crowding;
   const salesRecord = salesStateAfter.history[0];
   const contracts = salesStateAfter.contracts;
 
@@ -163,6 +173,7 @@ export function runTurn(input: TurnOrchestratorInput): TurnOrchestratorResult {
     period: input.currentPeriod,
     marketResult,
     salesRecord,
+    crowdingDiagnostics,
     contracts,
     rawMaterialRequirements: rmRecord.requirements,
     domesticAllocation: rmRecord.domesticAllocation,

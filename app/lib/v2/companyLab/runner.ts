@@ -107,6 +107,7 @@ import {
 import { listScenarioAliases, resolveScenarioDefinition } from "../industryLab/cli/scenarioAliases";
 import { INDUSTRY_LAB_ASSUMPTIONS_V1 } from "../industryLab/assumptions";
 import { runTurn } from "../turn/runner";
+import { buildPhysicalSupplies } from "./physicalSupplySnapshot";
 import { TurnOrchestratorInput } from "../turn/types";
 import { applyFulfillments, updateContractStatusesForQuarterEnd } from "../sales/backlog";
 import { validateSalesForceHeadcountBudget } from "../sales/salesForce";
@@ -1388,6 +1389,33 @@ export function advanceCompanyLabQuarter(
         )
       : decisions.flatMap((d) => d.salesPlans);
 
+  // 【ENG-CROWDING-MARKDOWN-1】Crowding が有効なときだけ、会社×商品の物理供給
+  // スナップショットを構築する。既存の authoritative な capacity helper を
+  // 再利用するだけで、advanceProductionQuarter は再実行しない
+  // （第二 production simulator を作らない）。
+  const crowdingInput = state.config.crowding
+    ? {
+        policy: state.config.crowding,
+        physicalSupplies: buildPhysicalSupplies(
+          fixtures.map((f) => ({
+            companyId: f.companyId,
+            effectiveFactories: computeEffectiveFactories(
+              fixtures.flatMap((x) => x.factories),
+              state.capexState,
+              state.currentPeriod,
+              state.factoryLifecycleState
+            ).filter((factory) => factory.companyId === f.companyId),
+            productionPlans: constrainedDecisions.flatMap((d) => d.productionPlans),
+            workerAssignments: constrainedDecisions.flatMap((d) => d.workerAssignments),
+            finishedGoodsLots: state.productionState.finishedGoodsLots,
+            rawMaterialLots: state.rawMaterialLots,
+          })),
+          state.currentPeriod
+        ),
+        existingContracts: state.contracts,
+      }
+    : undefined;
+
   const turnInput: TurnOrchestratorInput = {
     currentPeriod: state.currentPeriod,
     marketInput,
@@ -1420,6 +1448,7 @@ export function advanceCompanyLabQuarter(
     aquacultureStockingPlans: constrainedDecisions.flatMap((d) => d.aquacultureStockingPlans),
     existingContracts: state.contracts,
     existingLots: state.rawMaterialLots,
+    ...(crowdingInput ? { crowding: crowdingInput } : {}),
     seed: state.config.seed,
     // 【Phase 8F-1】対象需要の市場別按分ウェイト（希望購買量ベース）と、
     // 前四半期の購買圧力・在庫逼迫度から導いた当四半期の仕向市場価格係数。

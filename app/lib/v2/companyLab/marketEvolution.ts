@@ -171,8 +171,17 @@ function clamp(v: number, lo: number, hi: number): number {
  * 【監査指摘B・構造修正の中核】1つの市場×商品について、5社が構造的に配分を
  * 受けられる需要（addressable demand）を返す。
  *
- * 成約配分は水位法（allocation.ts）で、5社と外部選択肢（他産地供給者・非購入、
- * ウェイト externalOptionWeight）が対象需要という予算を奪い合う。誰も上限に
+ * 【ENG-CROWDING-MARKDOWN-1 §13・外部選択肢の正式定義】
+ * external option =「ゲームに登場しない他Vietnam企業」＋「購買見送り」。
+ * **Ecuador / India / Indonesia 等の他産地供給者は含まない**（他産地との競争は
+ * targetDemand 算出前の産地間配分で既に決着済みであり、ここで再度競合させると
+ * 二重計上になる）。sales/allocation.ts:19-20・sales/parameters.ts:87-88・
+ * sales/tieredAllocation.ts:14-15・sales/types.ts:164 と同一の定義である。
+ * 旧コメントは「他産地供給者・非購入」と書いており sales 側と矛盾していたため是正した
+ * （計算式は一切変更していない）。
+ *
+ * 成約配分は水位法（allocation.ts）で、5社と外部選択肢（ウェイト
+ * externalOptionWeight）が対象需要という予算を奪い合う。誰も上限に
  * 当たっていない均衡では、5社の取り分は
  *
  *     targetDemand × Σᵢwᵢ / (Σᵢwᵢ + w_ext)

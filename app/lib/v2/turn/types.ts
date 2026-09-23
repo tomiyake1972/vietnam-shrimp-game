@@ -15,8 +15,9 @@ import { HosoEqTons, Ratio, UsdPerHosoEqKg } from "../core/units";
 import { CountryId, DemandMarketId, MarketQuarterInput, MarketQuarterResult, Product } from "../market/types";
 import { MarketParameters } from "../market/parameters";
 import { DestinationMarketPriceCoefficientTable } from "../market/destinationPricingParameters";
-import { CompanySalesPlanEntry, SalesContract, SalesQuarterRecord } from "../sales/types";
+import { CompanySalesPlanEntry, SalesContract, SalesCrowdingQuarterInput, SalesQuarterRecord } from "../sales/types";
 import { SalesParameters } from "../sales/parameters";
+import type { CrowdingLayerResult } from "../sales/crowdingLayer";
 import {
   AquacultureHarvestResult,
   AquacultureStockingPlanEntry,
@@ -153,6 +154,15 @@ export interface TurnOrchestratorInput {
   readonly marketProductMix?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
 
   /**
+   * 【ENG-CROWDING-MARKDOWN-1】市場集中による価格下落（Crowding）の入力を
+   * sales/types.ts の SalesQuarterInput.crowding へそのまま渡すだけ。
+   * **省略時は Crowding 層を一切通らず、既存挙動はビット単位で不変**（CRWD-14）。
+   * physical supply スナップショットは companyLab 側で構築する
+   * （turn/ は生産・在庫の正本を持たないため、ここでは素通しに徹する）。
+   */
+  readonly crowding?: SalesCrowdingQuarterInput;
+
+  /**
    * 決定論的乱数のシード（Phase1のHOSO価格ショック等に使う）。同じseed・同じ
    * currentPeriod・同じ他入力からは常に同じ結果になる（内部でMath.random()・
    * Date.now()等は一切使わない）。
@@ -214,6 +224,11 @@ export interface TurnOrchestratorResult {
 
   readonly salesRecord: SalesQuarterRecord;
   readonly contracts: readonly SalesContract[];
+  /**
+   * 【ENG-CROWDING-MARKDOWN-1】Crowding 診断（**永続化しない**。この戻り値としてのみ返す）。
+   * input.crowding を渡したときのみ設定される。
+   */
+  readonly crowdingDiagnostics?: CrowdingLayerResult;
 
   readonly rawMaterialRequirements: readonly RawMaterialRequirementEntry[];
   readonly domesticAllocation: DomesticPurchaseAllocationResult;

@@ -634,6 +634,12 @@ export interface CompanyLabConfig {
    */
   readonly salesModelId?: SalesModelId;
   /**
+   * 【ENG-CROWDING-MARKDOWN-1】市場集中による価格下落（Crowding）の policy。
+   * **未指定なら Crowding 層を一切通らず、既存挙動はビット単位で不変**（CRWD-14）。
+   * 正式係数は感応度試験後に #04/#08 が決めるため、ここでは既定値を置かない。
+   */
+  readonly crowding?: import("../sales/crowding").CrowdingPolicy;
+  /**
    * 【Management Console Vision Calibration】Run固有のVision（Q32目標規模・
    * strategicPosture）上書き（optional）。未指定ならvision/defaults.tsの既定
    * Visionをそのまま使う（挙動不変）。UI・Standard AI・Analysis Packは必ず

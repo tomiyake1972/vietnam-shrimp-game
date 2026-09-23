@@ -275,6 +275,30 @@ export interface SalesQuarterInput {
    * （省略時は既存の世界一律商品構成比へフォールバックする。後方互換）。
    */
   readonly marketProductMix?: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
+  /**
+   * 【ENG-CROWDING-MARKDOWN-1】市場集中による価格下落（Crowding）の入力。
+   * **省略時は Crowding 層を一切通らず、既存挙動はビット単位で不変**（CRWD-14）。
+   * sales モジュールは生産・在庫・原料の正本を持たないため、physical supply
+   * スナップショットは呼び出し側（companyLab）が構築して渡す。
+   */
+  readonly crowding?: SalesCrowdingQuarterInput;
+}
+
+/**
+ * 【ENG-CROWDING-MARKDOWN-1】Crowding 層への四半期入力。
+ * 型の実体は sales/crowding.ts・sales/credibleOffer.ts 側に置き、
+ * ここでは循環 import を避けるため構造だけを参照する。
+ */
+export interface SalesCrowdingQuarterInput {
+  /** Crowding policy（既定は中立＝multiplier 恒等 1）。 */
+  readonly policy: import("./crowding").CrowdingPolicy;
+  /** 会社 × 商品 の物理供給スナップショット。 */
+  readonly physicalSupplies: readonly import("./credibleOffer").CompanyProductPhysicalSupply[];
+  /**
+   * 既存契約（未完了分の集計にのみ使う。**この層は既存契約を変更しない**）。
+   * 省略時は SalesState.contracts を使う。
+   */
+  readonly existingContracts?: readonly SalesContract[];
 }
 
 /** 1四半期分の成約計算・契約生成の記録。 */
