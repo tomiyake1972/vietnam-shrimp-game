@@ -119,6 +119,78 @@ export const NEUTRAL_CROWDING_POLICY: CrowdingPolicy = {
   forwardDemandProxyMethod: FORWARD_DEMAND_PROXY_METHOD_V1,
 };
 
+/**
+ * 【ENG-CROWDING-MARKDOWN-2】V2.00 正式 Crowding policy（P1）。
+ *
+ * CAL-1（単一 seed 感応度）・CAL-2（3 seed 安定性確認）を経て #04 が採用方針とした係数。
+ * **immutable / versioned**: 一度公開したこの定数の値は今後書き換えない。
+ * 再校正する場合は CROWDING_POLICY_V200_P2 のように **新しい定数を追加**し、
+ * この定数は旧値を指したまま残す（保存済み Run の resume 結果が後から変わらないため。
+ * sales/salesModels.ts の registry と同じ A3 規約）。
+ *
+ * 【係数の意味】
+ *   threshold = 1.00  … pricing contestable demand を**超えた**ところから値下げが始まる。
+ *                       「争える需要と同量までは市場価格を壊さない」という明快な境界。
+ *   lambda    = 0.60  … 超過分に対する減衰の強さ。
+ *   gamma     = 1.00  … 関数形を指数減衰に固定（商品・市場で変えない）。
+ *   floor     = 0.82  … multiplier の下限（最大 -18%）。
+ *   protectedExternalShare = 0.20 … 下記の「価格形成上の市場規模」を決める構造係数。
+ *
+ * 【市場別・商品別 override は導入しない】HOSO 専用 parameter も持たない。
+ * CAL-2 実測では HOSO は全 seed・全市場で crowdingRatio が threshold 未満であり
+ * markdown が発動しないが、これは「争える需要に対して信頼可能提示量が小さい」という
+ * 正常な結果であって、HOSO に無理に発動させるための専用係数は置かない。
+ *
+ * 【直接効果（式からの厳密値。CAL-1/CAL-2 報告の数値は C2 のものを誤って
+ *   P1 として引用していたため、ここで正しい値を定義として固定する）】
+ *   forwardDemandProxy 10,000t / protectedExternalShare 0.20
+ *     → pricing contestable demand 8,000t
+ *   CROWD     credible load 10,000t → ratio 1.25 → multiplier 0.9749274358 → -2.5073%
+ *   OVEROFFER credible load 20,000t → ratio 2.50 → multiplier 0.8931825388 → -10.6817%
+ *   （sales/__tests__/crowdingPolicyV200.test.ts P1-2 / P1-3 が式から厳密に固定する）
+ */
+export const CROWDING_COEFFICIENTS_V200_P1: CrowdingMarkdownCoefficients = {
+  threshold: 1.0,
+  lambda: 0.6,
+  gamma: 1.0,
+  floor: 0.82,
+};
+
+/** 【ENG-CROWDING-MARKDOWN-2】V2.00 正式 policy（P1）。値は書き換えない。 */
+export const CROWDING_POLICY_V200_P1: CrowdingPolicy = {
+  policyVersion: CROWDING_POLICY_VERSION_V1,
+  enabled: true,
+  byProduct: {
+    hoso: CROWDING_COEFFICIENTS_V200_P1,
+    pd: CROWDING_COEFFICIENTS_V200_P1,
+    vap: CROWDING_COEFFICIENTS_V200_P1,
+  },
+  protectedExternalShare: { hoso: 0.2, pd: 0.2, vap: 0.2 },
+  physicalAtpMethod: PHYSICAL_ATP_METHOD_V1,
+  forwardDemandProxyMethod: FORWARD_DEMAND_PROXY_METHOD_V1,
+};
+
+/**
+ * 【ENG-CROWDING-MARKDOWN-2 §4】pricing contestable demand（価格形成上の市場規模）。
+ *
+ *   pricingContestableDemand = forwardDemandProxy × (1 − protectedExternalShare)
+ *
+ * protectedExternalShare は「外部企業へ必ず配分される数量」**ではない**。
+ * 「5社の供給集中が市場価格形成へ影響し得る需要の範囲」を定義する構造係数であり、
+ * crowdingRatio の分母にのみ使われ、数量配分には一切関与しない。
+ *
+ * 【tiered allocator の external option との役割分離】
+ *   protectedExternalShare : 価格形成上の市場規模（この層。価格 multiplier のみ）
+ *   external option        : 数量 allocation 時に5社が獲得しなかった需要
+ *                            （他Vietnam企業・購買見送り。sales/tieredAllocation.ts）
+ * 計算経路が交わらないため、同じ数量を2回差し引く mechanical double count は無い。
+ * ただし両者は「5社が取れない需要」という経済的に関連する概念であり、
+ * 完全に独立した無関係な係数ではない。externalOptionWeight は本作業で変更していない。
+ */
+export function pricingContestableDemandOf(forwardDemandProxy: number, protectedExternalShare: number): number {
+  return Math.max(0, forwardDemandProxy) * (1 - protectedExternalShare);
+}
+
 /** 市場 override を解決して、この 市場 × 商品 に効く係数を返す。 */
 export function resolveCrowdingCoefficients(
   policy: CrowdingPolicy,
