@@ -97,6 +97,13 @@ function supply(companyId: string, product: Product, onHand: number, committed: 
   };
 }
 
+/** market × product の bucket が1つだけの場合の clearing price（テスト補助）。 */
+function soleClearingPrice(r: ReturnType<typeof applyCrowdingLayer>, market: DemandMarketId, product: Product): number {
+  const bs = r.buckets.filter((b) => b.market === market && b.product === product);
+  assert.equal(bs.length, 1, `bucket が1つであること（実際は ${bs.length}）`);
+  return bs[0].postCrowdingClearingPrice;
+}
+
 function runLayer(args: {
   plans: readonly CompanySalesPlanEntry[];
   supplies: readonly CompanyProductPhysicalSupply[];
@@ -139,7 +146,7 @@ test("CRWD-1: credible offer が増えると post-crowding price は単調非増
       plans: ids.map((id) => plan(id, "CN", "hoso", 4_000)),
       supplies: ids.map((id) => supply(id, "hoso", 0, 4_000)),
     });
-    const price = r.clearingPrices.CN.hoso;
+    const price = soleClearingPrice(r, "CN", "hoso");
     assert.ok(price <= prevPrice + 1e-12, `n=${n} で価格が上がった: ${price} > ${prevPrice}`);
     prevPrice = price;
   }
@@ -157,7 +164,7 @@ test("CRWD-2: threshold 以下では structural price を維持する", () => {
     supplies: [supply("A", "hoso", 0, 1_000)],
     demand: 100_000,
   });
-  assert.equal(r.clearingPrices.CN.hoso, 4.0);
+  assert.equal(soleClearingPrice(r, "CN", "hoso"), 4.0);
   assert.equal(r.buckets[0].crowdingMultiplier, 1);
 });
 
@@ -196,7 +203,7 @@ test("CRWD-4: 極端な over-offer でも floor 未満・負価格・NaN にな�
     supplies: [supply("A", "hoso", 1e9, 0)],
     demand: 1,
   });
-  const price = r.clearingPrices.CN.hoso;
+  const price = soleClearingPrice(r, "CN", "hoso");
   assert.ok(Number.isFinite(price) && price > 0, `価格が不正: ${price}`);
   assert.ok(price >= 4.0 * ACTIVE.floor - 1e-12, `floor 未満の価格: ${price}`);
 });
@@ -229,7 +236,7 @@ test("CRWD-5: desired を10倍にしても physical ATP が同じなら credible
   assert.equal(a.totalCredibleOffers, b.totalCredibleOffers);
   assert.equal(a.crowdingRatio, b.crowdingRatio);
   assert.equal(a.crowdingMultiplier, b.crowdingMultiplier);
-  assert.equal(caseA.clearingPrices.CN.hoso, caseB.clearingPrices.CN.hoso);
+  assert.equal(soleClearingPrice(caseA, "CN", "hoso"), soleClearingPrice(caseB, "CN", "hoso"));
   // 水増し側は physical ATP が拘束していること
   assert.equal(b.companyOffers[0].bindingReason, "PHYSICAL_ATP");
 });
@@ -330,7 +337,7 @@ test("CRWD-8: 既存契約の unitPrice は後続の crowding で変化しない
     supplies: ["A", "B", "C", "D", "E"].map((id) => supply(id, "hoso", 9_000, 0)),
     contracts: [existing],
   });
-  assert.ok(r.clearingPrices.CN.hoso < 4.0, "当期の clearing price は下がっている");
+  assert.ok(soleClearingPrice(r, "CN", "hoso") < 4.0, "当期の clearing price は下がっている");
   assert.deepEqual(JSON.parse(JSON.stringify(existing)), frozen, "既存契約オブジェクトが変更されていない");
   assert.equal(existing.unitPrice as unknown as number, 4.0);
 });
@@ -676,7 +683,7 @@ test("CRWD-LOAD-1: 1社あたり提示量 Q 固定で SOLO < TWO < CROWD（§7�
 
   const load = (r: ReturnType<typeof make>) => r.buckets[0].totalCredibleOffers;
   const ratio = (r: ReturnType<typeof make>) => r.buckets[0].crowdingRatio;
-  const price = (r: ReturnType<typeof make>) => r.clearingPrices.CN.hoso;
+  const price = (r: ReturnType<typeof make>) => soleClearingPrice(r, "CN", "hoso");
 
   // total credible offer: SOLO < TWO < CROWD
   assert.ok(load(solo) < load(two), `${load(solo)} < ${load(two)}`);
@@ -701,7 +708,7 @@ test("CRWD-LOAD-2: 同じ total load を会社数だけ分割しても clearing 
     });
   };
   const one = split(1);
-  const base = one.clearingPrices.CN.hoso;
+  const base = soleClearingPrice(one, "CN", "hoso");
   for (const n of [2, 3, 5]) {
     const r = split(n);
     assert.equal(
@@ -709,6 +716,6 @@ test("CRWD-LOAD-2: 同じ total load を会社数だけ分割しても clearing 
       one.buckets[0].totalCredibleOffers,
       `n=${n}: total credible offer が同一`
     );
-    assert.equal(r.clearingPrices.CN.hoso, base, `n=${n}: clearing price が同一（会社数に依存しない）`);
+    assert.equal(soleClearingPrice(r, "CN", "hoso"), base, `n=${n}: clearing price が同一（会社数に依存しない）`);
   }
 });

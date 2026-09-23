@@ -316,30 +316,3 @@ export function computeCrowdingBucket(args: {
     forwardDemandProxyLimitations: args.forwardDemandProxyLimitations,
   };
 }
-
-/**
- * 1つの 市場 × 商品 について、複数 dueDate bucket の multiplier を
- * **信頼可能提示量で加重平均**して 1 本の実効 multiplier へまとめる。
- *
- * 【なぜ必要か】既存の allocation 単位は 市場 × 商品 であり（sales/runner.ts）、
- * 1回の allocateMarketProduct に渡せる basePrice は 1 つである。
- * Crowding の単位は 市場 × 商品 × 納期 なので、bucket が複数ある場合に
- * 1 本へ縮約する必要がある。
- *
- * 【重要な性質】
- *  - 各 bucket の crowdingRatio は独立に計算済みであり、
- *    別 dueDate の提示が互いの ratio へ混ざることはない（CRWD-6）。
- *  - 全社が同じリードタイム（既定 standardLeadTimeTurns=1）を使う通常ケースでは
- *    bucket は 1 個なので、加重平均はその bucket の multiplier と厳密に一致する。
- *  - 重みが全て 0（信頼可能提示量ゼロ）の場合は、bucket 数による単純平均へ落とす
- *    （決定論的。ゼロ除算を作らない）。
- */
-export function blendBucketMultipliers(buckets: readonly CrowdingBucketDiagnostics[]): number {
-  if (buckets.length === 0) return 1;
-  if (buckets.length === 1) return buckets[0].crowdingMultiplier;
-  const totalWeight = buckets.reduce((s, b) => s + b.totalCredibleOffers, 0);
-  if (totalWeight <= CROWDING_QUANTITY_EPSILON) {
-    return buckets.reduce((s, b) => s + b.crowdingMultiplier, 0) / buckets.length;
-  }
-  return buckets.reduce((s, b) => s + b.crowdingMultiplier * b.totalCredibleOffers, 0) / totalWeight;
-}

@@ -16,12 +16,25 @@ import {
 } from "../market/destinationPricingParameters";
 import { allocateMarketProduct } from "./allocation";
 import { createContractsFromAllocation, resolveDueDateForPlanEntry } from "./contracts";
-import { applyCrowdingLayer, CrowdingLayerResult } from "./crowdingLayer";
+import { applyCrowdingLayer, CrowdingLayerResult, findCrowdingBucket } from "./crowdingLayer";
 import { deriveTargetDemand, deriveVietnamMarketReferencePrices } from "./marketAdapter";
 import { applyMarketSalesEffortCapacity } from "./marketEffort";
 import { SALES_PARAMETERS_V1, SalesParameters } from "./parameters";
-import { SalesQuarterInput, SalesQuarterRecord, SalesState } from "./types";
-import { UsdPerHosoEqKg, usdPerHosoEqKg } from "../core/units";
+import {
+  CompanySalesPlanEntry,
+  MarketProductAllocationResult,
+  SalesQuarterInput,
+  SalesQuarterRecord,
+  SalesState,
+  SalesValidationError,
+} from "./types";
+
+/** 【X\'方式】turn 内だけで使う納期別 allocation（永続化しない）。 */
+export interface DueDateBucketAllocation {
+  readonly dueDate: PeriodV2;
+  readonly result: MarketProductAllocationResult;
+}
+import { UsdPerHosoEqKg, hosoEqTons, usdPerHosoEqKg } from "../core/units";
 
 /**
  * 【ENG-CROWDING-MARKDOWN-1】advanceSalesQuarter の戻り値（診断つき）。
@@ -77,7 +90,7 @@ export function advanceSalesQuarterWithDiagnostics(
     capacityByCompanyMarket,
   } = applyMarketSalesEffortCapacity(input.plans, params);
 
-  // 【ENG-CROWDING-MARKDOWN-1】Crowding 共通 market-clearing 層。
+  // 【ENG-CROWDING-MARKDOWN-1 / 1B・X'方式】Crowding 共通 market-clearing 層。
   // legacy / tiered の **前段**に置く共通層であり、どちらの allocation mode でも
   //   構造価格 → crowding clearing price → allocation
   // の順序を通る（§12）。input.crowding が未指定なら層自体を呼ばないため、
@@ -85,11 +98,10 @@ export function advanceSalesQuarterWithDiagnostics(
   //
   // 価格階層（§10 の必須順序）:
   //   1. preCrowdingStructuralPrice = marketReferencePrices（既存 SSoT。書き換えない）
-  //   2. crowdingMultiplier
-  //   3. postCrowdingClearingPrice = 1 × 2  ← allocation の basePrice へ渡す
+  //   2. bucket 固有 crowdingMultiplier
+  //   3. bucket 固有 postCrowdingClearingPrice  ← その bucket の allocation の basePrice
   //   4. company ask = 3 + priceAdjustmentUsdPerHosoEqKg（allocation 側の既存処理）
   let crowding: CrowdingLayerResult | undefined;
-  let clearingPrices: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>> | undefined;
   if (input.crowding) {
     crowding = applyCrowdingLayer({
       period,
@@ -105,37 +117,107 @@ export function advanceSalesQuarterWithDiagnostics(
       >,
       resolveDueDateForPlan: (entry, p) => resolveDueDateForPlanEntry(entry, p, params),
     });
-    clearingPrices = crowding.clearingPrices;
   }
 
-  const basePriceFor = (market: DemandMarketId, product: Product): UsdPerHosoEqKg =>
-    clearingPrices === undefined
-      ? marketReferencePrices[market][product]
-      : (usdPerHosoEqKg(clearingPrices[market][product]) as UsdPerHosoEqKg);
+  let allocations: readonly MarketProductAllocationResult[];
+  let bucketAllocations: readonly DueDateBucketAllocation[] | undefined;
 
-  const combos: Array<{ market: DemandMarketId; product: Product }> = [];
-  for (const market of DEMAND_MARKET_IDS) {
-    for (const product of PRODUCTS) {
-      combos.push({ market, product });
+  if (crowding === undefined) {
+    // --- 既存経路（Crowding OFF）。1行も変えない ---
+    const combos: Array<{ market: DemandMarketId; product: Product }> = [];
+    for (const market of DEMAND_MARKET_IDS) {
+      for (const product of PRODUCTS) {
+        combos.push({ market, product });
+      }
     }
+    allocations = combos
+      .filter(({ market, product }) => adjustedPlans.some((p) => p.market === market && p.product === product))
+      .map(({ market, product }) =>
+        allocateMarketProduct(
+          market,
+          product,
+          period,
+          adjustedPlans,
+          marketReferencePrices[market][product],
+          targetDemandByMarketProduct[market][product],
+          params,
+          capacityByCompanyMarket
+        )
+      );
+  } else {
+    // --- X'方式: 市場 × 商品 × 納期 ごとに独立して既存 allocator を呼ぶ ---
+    //
+    // 【なぜ納期ごとに分けるか】異なる dueDate は異なる四半期の需要である。
+    // CN VAP T+1 と CN VAP T+3 は同一 targetDemand を分け合う1つの需要枠ではない
+    // （ENG-CROWDING-MARKDOWN-1B §1 の仕様判断）。したがって bucket ごとに
+    // その納期向けの forwardDemandProxy を独立して与えてよく、
+    // T+1 の混雑が T+3 の ratio / multiplier / clearing price / allocation へ
+    // 影響してはならない（§2）。
+    //
+    // 【なぜ既存 allocator をそのまま呼べるか】allocateMarketProduct は
+    // entries を market / product で絞り込むだけで納期を見ないため、
+    // 「その bucket の plan だけ」を渡せば bucket 内の競争として正しく解ける。
+    // legacy / tiered の分岐も allocateMarketProduct 内部にあるため、
+    // Crowding 用の別実装を作る必要がない（§3）。
+    const groups = new Map<string, { market: DemandMarketId; product: Product; dueDate: PeriodV2; plans: CompanySalesPlanEntry[] }>();
+    for (const entry of adjustedPlans) {
+      const dueDate = resolveDueDateForPlanEntry(entry, period, params);
+      const key = `${entry.market}::${entry.product}::${dueDate}`;
+      const g = groups.get(key);
+      if (g) g.plans.push(entry);
+      else groups.set(key, { market: entry.market, product: entry.product, dueDate, plans: [entry] });
+    }
+
+    // 【順序】既存経路（Crowding OFF）と同じ並び順を保つ。
+    // 旧来は DEMAND_MARKET_IDS × PRODUCTS の順に allocation を作っており、
+    // SalesQuarterRecord.allocations も newContracts もこの順で並ぶ。
+    // 納期 bucket を挟んでも、市場 → 商品 → 納期 の順に並べれば
+    // 全社同一納期のとき配列の並びまで従来と完全一致する（DUE-7 / CRWD-14）。
+    const marketOrder = new Map(DEMAND_MARKET_IDS.map((m, i) => [m, i]));
+    const productOrder = new Map(PRODUCTS.map((p, i) => [p, i]));
+    const orderedKeys = [...groups.keys()].sort((ka, kb) => {
+      const a = groups.get(ka)!;
+      const b = groups.get(kb)!;
+      const dm = marketOrder.get(a.market)! - marketOrder.get(b.market)!;
+      if (dm !== 0) return dm;
+      const dp = productOrder.get(a.product)! - productOrder.get(b.product)!;
+      if (dp !== 0) return dp;
+      return a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0;
+    });
+    bucketAllocations = orderedKeys.map((key) => {
+      const g = groups.get(key)!;
+      const bucket = findCrowdingBucket(crowding!, g.market, g.product, g.dueDate);
+      // bucket は credibleOffers から作られるため、plan がある組には必ず存在する。
+      if (!bucket) {
+        throw new Error(`Crowding bucket がありません: ${g.market}/${g.product}/${g.dueDate}`);
+      }
+      return {
+        dueDate: g.dueDate,
+        result: allocateMarketProduct(
+          g.market,
+          g.product,
+          period,
+          g.plans,
+          usdPerHosoEqKg(bucket.postCrowdingClearingPrice) as UsdPerHosoEqKg,
+          // bucket 固有の対象需要。§1 のとおり「別四半期の需要をそれぞれ
+          // 当期構造需要で近似している」という意味であり、需要の二重計上ではない。
+          hosoEqTons(bucket.forwardDemandProxy),
+          params,
+          capacityByCompanyMarket
+        ),
+      };
+    });
+
+    // 契約は bucket 別 allocation から直接生成する（§4）。
+    // 同一 company は market × product につき plan を1件しか持たないため、
+    // 同一 turn で複数 bucket へ重複することはない（DUE-5 で固定）。
+    allocations = aggregateBucketAllocationsByMarketProduct(bucketAllocations);
   }
 
-  const allocations = combos
-    .filter(({ market, product }) => adjustedPlans.some((p) => p.market === market && p.product === product))
-    .map(({ market, product }) =>
-      allocateMarketProduct(
-        market,
-        product,
-        period,
-        adjustedPlans,
-        basePriceFor(market, product),
-        targetDemandByMarketProduct[market][product],
-        params,
-        capacityByCompanyMarket
-      )
-    );
-
-  const newContracts = createContractsFromAllocation(allocations, adjustedPlans, params);
+  // 契約生成は bucket 別 allocation から行う（Crowding OFF のときは allocations そのもの）。
+  const allocationsForContracts =
+    bucketAllocations === undefined ? allocations : bucketAllocations.map((b) => b.result);
+  const newContracts = createContractsFromAllocation(allocationsForContracts, adjustedPlans, params);
 
   const record: SalesQuarterRecord = { period, allocations, newContracts, salesEffortAdjustments };
 
@@ -147,6 +229,89 @@ export function advanceSalesQuarterWithDiagnostics(
     },
     crowding,
   };
+}
+
+/**
+ * 【ENG-CROWDING-MARKDOWN-1B §5・§6】納期別 allocation を
+ * market × product へ再集約する。
+ *
+ * 【なぜ再集約するか】SalesQuarterRecord.allocations は history 経由で永続化され、
+ * dashboard / analytics / audit workbook / marketEvolution / salesBase /
+ * Standard AI report・log / AI Pack / Export が「market × product につき 1 件」を
+ * 前提にしている。納期別 allocation をそのまま複数保存するとこの契約が壊れるため、
+ * **turn 内の一時的 internal result** にとどめ、保存時は 1 件へ戻す。
+ * これにより永続 schema 変更も downstream の大量改修も不要になる。
+ *
+ * 【集約の式（§6）】
+ *   targetDemand            = Σ bucket.targetDemand
+ *   externalOptionQuantity  = Σ bucket.externalOptionQuantity
+ *   companies               = 各 bucket の会社エントリをそのまま連結
+ *                             （1社は market × product につき plan を1件しか
+ *                               持たないため、複数 bucket へ重複しない。
+ *                               したがって allocatedQuantity も askPrice も
+ *                               その会社が所属する bucket の値がそのまま残る）
+ *   分子（提示・成約）と分母（需要）を同じ bucket 集合で揃えるため、
+ *   どちらも同じ Σ を取る。片方だけ1四半期分にする非対称は作らない（§7）。
+ *
+ * 【basePrice について（#04 判断を仰ぐ項目）】
+ * basePrice は market × product の**ヘッダ値**であり、bucket ごとに
+ * clearing price が異なる場合に一意な値が存在しない。§6 は「勝手に平均するな」と
+ * しているため平均は取らず、**最も近い納期（earliest dueDate）の bucket の
+ * clearing price** をヘッダとして採用する。各社の実際の提示価格は
+ * CompanyAllocationEntry.askPrice に bucket 固有の値がそのまま入っており、
+ * 契約単価も SalesContract 側が正本なので、この選択で失われる情報は無い。
+ * ただし dashboardViewModel.ts の priceDeviationRatio
+ * （= (askPrice - basePrice) / basePrice）だけは、別 bucket の会社について
+ * 基準が異なる値になる。この一点は #04 の確認事項として報告する。
+ */
+export function aggregateBucketAllocationsByMarketProduct(
+  bucketAllocations: readonly DueDateBucketAllocation[]
+): readonly MarketProductAllocationResult[] {
+  const groups = new Map<string, DueDateBucketAllocation[]>();
+  for (const b of bucketAllocations) {
+    const key = `${b.result.market}::${b.result.product}`;
+    const list = groups.get(key);
+    if (list) list.push(b);
+    else groups.set(key, [b]);
+  }
+
+  // 入力（= 既存経路と同じ 市場 → 商品 → 納期 の順）の並びをそのまま保つ。
+  // Map はキー挿入順を保持するため、ここで並べ替えない。
+  return [...groups.keys()].map((key) => {
+    // 納期の昇順（PeriodV2 は "YYYYQn" の昇順比較可能な文字列）。
+    const buckets = [...groups.get(key)!].sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
+    const first = buckets[0].result;
+
+    // bucket が1つだけなら、従来（1bucket）の結果と厳密に同一のオブジェクトを返す（DUE-7）。
+    if (buckets.length === 1) return first;
+
+    const companies = buckets.flatMap((b) => b.result.companies);
+    const seen = new Set<string>();
+    for (const c of companies) {
+      if (seen.has(c.companyId)) {
+        // 1社が同一 market × product の複数 bucket に現れるのは現行仕様では起こりえない。
+        // 起きたなら集約が一意に定義できないので、黙って合算せず明示的に失敗させる。
+        throw new SalesValidationError(
+          `同一 market × product で会社が複数の納期 bucket に現れました（集約が一意に定義できません）: ` +
+            `${first.market}/${first.product}/${c.companyId}`
+        );
+      }
+      seen.add(c.companyId);
+    }
+
+    const sum = (f: (r: MarketProductAllocationResult) => number) => buckets.reduce((t, b) => t + f(b.result), 0);
+
+    return {
+      market: first.market,
+      product: first.product,
+      period: first.period,
+      // 最も近い納期の bucket の clearing price（平均は取らない。上記コメント参照）。
+      basePrice: first.basePrice,
+      targetDemand: hosoEqTons(sum((r) => r.targetDemand as unknown as number)),
+      companies,
+      externalOptionQuantity: hosoEqTons(sum((r) => r.externalOptionQuantity as unknown as number)),
+    };
+  });
 }
 
 /**

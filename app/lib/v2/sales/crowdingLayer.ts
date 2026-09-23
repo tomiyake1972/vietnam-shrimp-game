@@ -18,7 +18,7 @@
 // dueDate は一切変更しない。
 
 import { PeriodV2 } from "../core/period";
-import { DEMAND_MARKET_IDS, DemandMarketId, Product } from "../market/types";
+import { DemandMarketId, Product } from "../market/types";
 import {
   CompanyProductPhysicalSupply,
   DesiredOfferEntry,
@@ -32,13 +32,11 @@ import {
   CrowdingBucketDiagnostics,
   CrowdingCompanyOfferDiagnostics,
   CrowdingPolicy,
-  blendBucketMultipliers,
   computeCrowdingBucket,
   crowdingBucketKey,
 } from "./crowding";
 import { CompanySalesPlanEntry, SalesContract } from "./types";
 
-const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
 
 /** Crowding 層への入力（すべて呼び出し側が確定させた値のみ）。 */
 export interface CrowdingLayerInput {
@@ -60,9 +58,14 @@ export interface CrowdingLayerInput {
 
 /** Crowding 層の出力。 */
 export interface CrowdingLayerResult {
-  /** 既存 allocation へ渡す basePrice（market × product）。 */
-  readonly clearingPrices: Readonly<Record<DemandMarketId, Readonly<Record<Product, number>>>>;
-  /** bucket（市場 × 商品 × 納期）ごとの診断。 */
+  /**
+   * bucket（市場 × 商品 × 納期）ごとの診断。
+   *
+   * 【ENG-CROWDING-MARKDOWN-1B / X\'方式】market × product の 1 本へ縮約した
+   * clearingPrices は **提供しない**。複数 dueDate の multiplier を加重平均すると
+   * T+1 の混雑が T+3 の契約価格へ波及するため、その経路自体を削除した。
+   * 呼び出し側は bucket ごとに clearing price を取り出して allocation を回す。
+   */
   readonly buckets: readonly CrowdingBucketDiagnostics[];
   /** 会社 × 市場 × 商品 × 納期 の信頼可能提示量。 */
   readonly credibleOffers: readonly ResolvedCredibleOffer[];
@@ -229,31 +232,27 @@ export function applyCrowdingLayer(input: CrowdingLayerInput): CrowdingLayerResu
     );
   }
 
-  // --- 4. 市場 × 商品 ごとに 1 本の clearing price へ縮約する ---
-  const bucketsByMarketProduct = new Map<string, CrowdingBucketDiagnostics[]>();
-  for (const b of buckets) {
-    const k = `${b.market}::${b.product}`;
-    const list = bucketsByMarketProduct.get(k);
-    if (list) list.push(b);
-    else bucketsByMarketProduct.set(k, [b]);
-  }
-
-  const clearingPrices = {} as Record<DemandMarketId, Record<Product, number>>;
-  for (const market of DEMAND_MARKET_IDS) {
-    clearingPrices[market] = {} as Record<Product, number>;
-    for (const product of PRODUCTS) {
-      const pre = preCrowdingStructuralPrices[market][product];
-      const bs = bucketsByMarketProduct.get(`${market}::${product}`);
-      const multiplier = bs && bs.length > 0 ? blendBucketMultipliers(bs) : 1;
-      clearingPrices[market][product] = pre * multiplier;
-    }
-  }
+  // --- 4. 縮約は行わない（X\'方式） ---
+  // 以前は市場 × 商品 ごとに multiplier を加重平均して 1 本の clearing price を
+  // 作っていたが、それでは T+1 の混雑が T+3 の価格を押し下げ、T+3 の非混雑が
+  // T+1 の価格を持ち上げてしまう。bucket ごとの clearing price をそのまま返し、
+  // allocation も bucket ごとに回す。
 
   return {
-    clearingPrices,
     buckets,
     credibleOffers,
     policyVersion: policy.policyVersion,
     enabled: policy.enabled,
   };
+}
+
+/** bucket（市場 × 商品 × 納期）を決定論的に引く。 */
+export function findCrowdingBucket(
+  result: CrowdingLayerResult,
+  market: DemandMarketId,
+  product: Product,
+  dueDate: PeriodV2
+): CrowdingBucketDiagnostics | undefined {
+  const key = crowdingBucketKey(market, product, dueDate);
+  return result.buckets.find((b) => crowdingBucketKey(b.market, b.product, b.dueDate) === key);
 }
