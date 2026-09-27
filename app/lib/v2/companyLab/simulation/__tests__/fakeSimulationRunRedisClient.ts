@@ -21,14 +21,37 @@ export function createFakeSimulationRunRedisClient(): CompanyLabRedisClient & {
   readonly dump: () => Map<string, string>;
   /** キーに設定されたTTL（ミリ秒）。TTL無しのキーは入らない。孤児staging keyの寿命検証用。 */
   readonly ttls: () => Map<string, number>;
+  /** 契約テスト用: RENAME単体の挙動（実Redis同様、TTLをdestinationへ引き継ぐ）。 */
+  readonly renameForContractTest: (from: string, to: string) => Promise<void>;
+  /** 契約テスト用: PERSIST単体の挙動（消したら1、元からTTL無しなら0）。 */
+  readonly persistForContractTest: (key: string) => number;
 } {
   const store = new Map<string, string>();
   const zsets = new Map<string, Map<string, number>>();
   const ttls = new Map<string, number>();
 
+  /** 実Redisと同じRENAME: 値を移し、残りTTLもdestinationへ引き継ぐ。 */
+  function renameKey(from: string, to: string): void {
+    store.set(to, store.get(from)!);
+    store.delete(from);
+    const inherited = ttls.get(from);
+    ttls.delete(from);
+    if (inherited === undefined) ttls.delete(to);
+    else ttls.set(to, inherited);
+  }
+
+  /** 実Redisと同じPERSIST: TTLを消したら1、元からTTLが無ければ0。 */
+  function persistKey(key: string): number {
+    if (!ttls.has(key)) return 0;
+    ttls.delete(key);
+    return 1;
+  }
+
   return {
     dump: () => store,
     ttls: () => ttls,
+    renameForContractTest: async (from: string, to: string) => renameKey(from, to),
+    persistForContractTest: (key: string) => persistKey(key),
     async get(key: string): Promise<unknown> {
       return store.has(key) ? store.get(key)! : null;
     },
@@ -84,17 +107,24 @@ export function createFakeSimulationRunRedisClient(): CompanyLabRedisClient & {
       if (hasResume && !store.has(stagingResume)) return ["MISSING_PART", "resume"] as unknown as TData;
       if (hasPack && !store.has(stagingPack)) return ["MISSING_PART", "pack"] as unknown as TData;
 
-      const rename = (from: string, to: string) => {
-        store.set(to, store.get(from)!);
-        store.delete(from);
-        // RENAMEでTTLは引き継がれる（Redis仕様）。正規キーは昇格後もTTLを持たない運用にしたいので、
-        // ここでは「stagingのTTLは正規キーへ移らない」ことを明示的に落とす。
-        ttls.delete(from);
-        ttls.delete(to);
-      };
-      rename(stagingDataset, canonicalDataset);
-      if (hasResume) rename(stagingResume, canonicalResume);
-      if (hasPack) rename(stagingPack, canonicalPack);
+      /**
+       * 【本物のRedisと同じ挙動にする】RENAMEは source の残りTTLを destination へ
+       * そのまま引き継ぐ（隔離ローカルRedisで PTTL=3599983 を実測して確認済み）。
+       * 以前このフェイクは rename 時に destination のTTLを勝手に消しており、
+       * 「RENAMEしただけで永続になる」という実Redisに無い挙動を再現していた。
+       * そのせいで、正規キーが約1時間で期限切れになる実経路の不具合を検出できなかった。
+       * TTLを消すのは PERSIST の役目であり、Lua側も RENAME の直後に PERSIST を呼ぶ。
+       */
+      renameKey(stagingDataset, canonicalDataset);
+      persistKey(canonicalDataset);
+      if (hasResume) {
+        renameKey(stagingResume, canonicalResume);
+        persistKey(canonicalResume);
+      }
+      if (hasPack) {
+        renameKey(stagingPack, canonicalPack);
+        persistKey(canonicalPack);
+      }
 
       store.set(manifestKey, manifestJson);
       store.set(summaryKey, summaryJson);

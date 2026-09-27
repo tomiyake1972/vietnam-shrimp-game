@@ -111,11 +111,29 @@ if hasResume and redis.call('EXISTS', KEYS[5]) == 0 then return { 'MISSING_PART'
 if hasPack and redis.call('EXISTS', KEYS[6]) == 0 then return { 'MISSING_PART', 'pack' } end
 
 -- 4. このattemptのパートだけを正規キーへ昇格させる。敗者のstagingは触らない。
+--
+-- 【RENAMEはTTLを引き継ぐ】stagingキーは孤児対策で SET PX（1時間）を持っている。
+-- RedisのRENAMEは残りTTLをそのままdestinationへ移すため、RENAMEしただけでは
+-- 正規キー（公開される正本）も約1時間で消える。実Redis（隔離ローカル）で
+-- RENAME後の PTTL が 3599983 だったことを実測して確認した。
+-- 昇格した正規キーは永続でなければならないので、RENAMEの直後に必ずPERSISTする。
+-- PERSISTの戻り値は「TTLを消したら1、元からTTLが無ければ0」で、どちらも正常。
+-- 失敗を表す値ではないため戻り値での分岐はしない（キーが無ければRENAMEの時点で
+-- エラーになるが、上の3でEXISTS確認済みなのでここには到達しない）。
 redis.call('RENAME', KEYS[4], KEYS[7])
-if hasResume then redis.call('RENAME', KEYS[5], KEYS[8]) end
-if hasPack then redis.call('RENAME', KEYS[6], KEYS[9]) end
+redis.call('PERSIST', KEYS[7])
+if hasResume then
+  redis.call('RENAME', KEYS[5], KEYS[8])
+  redis.call('PERSIST', KEYS[8])
+end
+if hasPack then
+  redis.call('RENAME', KEYS[6], KEYS[9])
+  redis.call('PERSIST', KEYS[9])
+end
 
 -- 5. manifestを公開する（ここで初めてこのrevisionが読み込み可能になる）。
+--    正規パートの永続化（PERSIST）を終えてから公開する。順序が逆だと、
+--    公開された直後のTurnでパートだけ期限切れになる窓ができる。
 redis.call('SET', manifestKey, manifestJson)
 redis.call('SET', summaryKey, summaryJson)
 redis.call('ZADD', indexKey, score, runId)

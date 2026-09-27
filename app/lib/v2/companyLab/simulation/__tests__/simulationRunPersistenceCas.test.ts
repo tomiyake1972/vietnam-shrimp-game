@@ -223,9 +223,12 @@ test("O1-lua: manifest保存Luaが「読む→比較する→書く」を1スク
   const conflictReturn = script.indexOf("return { 'CONFLICT', tostring(published) }");
   assert.ok(conflictReturn > compareIndex && conflictReturn < setIndex, "CONFLICT時にSETより前で返していない");
   // stagingから正規キーへの昇格を行っていること。
+  // 昇格（staging→正規キー）が3パートぶんあること。resume/packは条件付き。
   assert.ok(script.includes("redis.call('RENAME', KEYS[4], KEYS[7])"), "datasetのstaging→正規キー昇格が無い");
-  assert.ok(script.includes("if hasResume then redis.call('RENAME', KEYS[5], KEYS[8]) end"), "resumeの昇格が無い");
-  assert.ok(script.includes("if hasPack then redis.call('RENAME', KEYS[6], KEYS[9]) end"), "packの昇格が無い");
+  assert.ok(script.includes("redis.call('RENAME', KEYS[5], KEYS[8])"), "resumeの昇格が無い");
+  assert.ok(script.includes("redis.call('RENAME', KEYS[6], KEYS[9])"), "packの昇格が無い");
+  assert.ok(/if hasResume then[\s\S]*KEYS\[5\][\s\S]*end/.test(script), "resumeの昇格が hasResume で条件付けられていない");
+  assert.ok(/if hasPack then[\s\S]*KEYS\[6\][\s\S]*end/.test(script), "packの昇格が hasPack で条件付けられていない");
   // 無条件SETが比較の前に無いこと（旧実装の回帰防止）。
   const beforeCompare = script.slice(0, compareIndex);
   assert.ok(!beforeCompare.includes("redis.call('SET'"), "比較より前に無条件SETが残っている");
@@ -242,6 +245,24 @@ test("O1-lua: manifest保存Luaが「読む→比較する→書く」を1スク
   assert.ok(argCheckIndex < firstRedisCall, "引数検査が最初のredis.callより後にある（書き込み後に失敗し得る）");
   const writeSection = script.slice(script.indexOf("redis.call('RENAME'"));
   assert.ok(!writeSection.includes("tonumber("), "RENAME以降でtonumber変換をしている（書き込み後に失敗し得る）");
+
+  /**
+   * 【RENAMEはTTLを引き継ぐ】stagingのTTLが正規キーへ移ると、公開正本が約1時間で消える。
+   * 各RENAMEの直後にPERSISTがあり、かつそれらがmanifest公開（SET manifestKey）より
+   * 前に済んでいることを固定する。
+   */
+  const renameDataset = script.indexOf("redis.call('RENAME', KEYS[4], KEYS[7])");
+  const persistDataset = script.indexOf("redis.call('PERSIST', KEYS[7])");
+  const renameResume = script.indexOf("redis.call('RENAME', KEYS[5], KEYS[8])");
+  const persistResume = script.indexOf("redis.call('PERSIST', KEYS[8])");
+  const renamePack = script.indexOf("redis.call('RENAME', KEYS[6], KEYS[9])");
+  const persistPack = script.indexOf("redis.call('PERSIST', KEYS[9])");
+  assert.ok(persistDataset > renameDataset, "dataset: RENAMEの後にPERSISTが無い");
+  assert.ok(persistResume > renameResume, "resume: RENAMEの後にPERSISTが無い");
+  assert.ok(persistPack > renamePack, "pack: RENAMEの後にPERSISTが無い");
+  assert.ok(persistDataset < setIndex, "dataset のPERSISTがmanifest公開より後にある");
+  assert.ok(persistResume < setIndex, "resume のPERSISTがmanifest公開より後にある");
+  assert.ok(persistPack < setIndex, "pack のPERSISTがmanifest公開より後にある");
 });
 
 // ---------------------------------------------------------------------
@@ -266,10 +287,19 @@ test("O1-18: writeTokenはattemptごとに一意で、キーに使える文字�
   }
 });
 
-test("O1-19: 未公開stagingキーにはTTLが付き、昇格後の正規キーには残らない", async () => {
+/**
+ * 【O1-19系・staging TTLの昇格不具合】
+ * stagingキーは孤児対策で SET PX（1時間）を持つ。RedisのRENAMEは残りTTLを
+ * destinationへ引き継ぐため、RENAMEしただけでは公開される正規キーまで
+ * 約1時間で消える（隔離ローカルRedisで PTTL=3599983 を実測）。
+ * そのため昇格時は RENAME の直後に PERSIST が要る。
+ * ここではその契約を、フェイククライアント（実Redisと同じくRENAMEでTTLを引き継ぐ）
+ * に対して固定する。
+ */
+test("O1-19a: 未公開stagingキーにはTTLが付く", async () => {
   const client = createFakeSimulationRunRedisClient();
   const repo = createRedisSimulationRunRepository({ client, appEnv: "staging" });
-  const id = "o1-19";
+  const id = "o1-19a";
   const attempt = { expectedBaseRevision: 0, writeToken: "ttlcheck" };
 
   await repo.saveRunPart(id, attempt, "dataset", { marker: "d" });
@@ -280,15 +310,97 @@ test("O1-19: 未公開stagingキーにはTTLが付き、昇格後の正規キー
   for (const key of stagingKeys) {
     assert.equal(client.ttls().get(key), SIMULATION_RUN_STAGING_TTL_MS, `${key} のTTLが想定と違う`);
   }
+});
 
-  const manifest = manifestFor(id, 1, 1);
+test("O1-19b: RENAMEはTTLをdestinationへ引き継ぐ（実Redisと同じ挙動をfakeでも固定する）", async () => {
+  const client = createFakeSimulationRunRedisClient();
+  const from = "staging:v2:simulationRun:rename-src";
+  const to = "staging:v2:simulationRun:rename-dst";
+
+  await client.set(from, "value", { pxMilliseconds: SIMULATION_RUN_STAGING_TTL_MS });
+  assert.equal(client.ttls().get(from), SIMULATION_RUN_STAGING_TTL_MS);
+
+  // フェイクのrename（Luaエミュレート内部と同じ実装）を、契約として直接観測する。
+  await client.renameForContractTest(from, to);
+  assert.equal(client.ttls().get(to), SIMULATION_RUN_STAGING_TTL_MS, "RENAMEでTTLが引き継がれていない（実Redisと違う）");
+  assert.equal(client.ttls().has(from), false, "RENAME元のTTLが残っている");
+  assert.equal(client.dump().get(to), "value", "値が移っていない");
+
+  // PERSISTで初めてTTLが消える。戻り値はRedisと同じ（消したら1、元から無ければ0）。
+  assert.equal(client.persistForContractTest(to), 1, "TTLがあるキーへのPERSISTが1を返さない");
+  assert.equal(client.ttls().has(to), false, "PERSIST後もTTLが残っている");
+  assert.equal(client.persistForContractTest(to), 0, "TTLが無いキーへのPERSISTが0を返さない");
+});
+
+test("O1-19c: CAS成功経路では RENAME + PERSIST により正規partのTTLが無くなる", async () => {
+  const client = createFakeSimulationRunRedisClient();
+  const repo = createRedisSimulationRunRepository({ client, appEnv: "staging" });
+  const id = "o1-19c";
+  const attempt = { expectedBaseRevision: 0, writeToken: "promote" };
+
+  await repo.saveRunPart(id, attempt, "dataset", { marker: "d" });
+  await repo.saveRunPart(id, attempt, "resume", { marker: "r" });
+  await repo.saveRunPart(id, attempt, "pack", { marker: "p" });
+
+  const manifest = { ...manifestFor(id, 1, 1), hasPackCapture: true };
   await repo.commitRunManifest(manifest, manifestToSimulationRunSummary(manifest), attempt);
 
-  // 昇格後、stagingキーは消え、正規キーにTTLは残らない（公開正本が勝手に消えては困る）。
+  // stagingは消えている。
   assert.equal([...client.dump().keys()].filter((k) => k.includes(":staging:")).length, 0, "昇格後もstagingキーが残っている");
-  for (const [key, ttl] of client.ttls()) {
-    assert.ok(!key.includes(":dataset:") && !key.includes(":resume:") && !key.includes(":pack:"), `正規キーにTTLが付いている: ${key} (${ttl})`);
+
+  // 正規partが3本とも存在し、TTLを持たない（＝1時間後に消えない）。
+  const canonical = [...client.dump().keys()].filter((k) => /:(dataset|resume|pack):1$/.test(k));
+  assert.equal(canonical.length, 3, `正規partが3本揃っていない（実測 ${canonical.length}）`);
+  for (const key of canonical) {
+    assert.equal(client.ttls().has(key), false, `正規キーにTTLが残っている（約1時間で公開正本が消える）: ${key}`);
   }
+});
+
+test("O1-19d: CAS conflict時は昇格せず、敗者stagingにTTLが残る", async () => {
+  const client = createFakeSimulationRunRedisClient();
+  const repo = createRedisSimulationRunRepository({ client, appEnv: "staging" });
+  const id = "o1-19d";
+  await saveAttempt(repo, id, { expectedBaseRevision: 0, writeToken: "winner", revision: 1, completedTurns: 1, resumeMarker: "published" });
+
+  const loser = { expectedBaseRevision: 0, writeToken: "loser" };
+  await repo.saveRunPart(id, loser, "dataset", { marker: "loser" });
+  await repo.saveRunPart(id, loser, "resume", { marker: "loser" });
+  const manifest = manifestFor(id, 1, 1);
+  await assert.rejects(
+    () => repo.commitRunManifest(manifest, manifestToSimulationRunSummary(manifest), loser),
+    (e: unknown) => e instanceof SimulationRunStaleRevisionError
+  );
+
+  // 敗者のstagingは正規キーへ昇格していない。
+  const loserStaging = [...client.dump().keys()].filter((k) => k.includes(":staging:loser:"));
+  assert.equal(loserStaging.length, 2, "敗者stagingが想定と違う");
+  for (const key of loserStaging) {
+    assert.equal(client.ttls().get(key), SIMULATION_RUN_STAGING_TTL_MS, `敗者stagingにTTLが無く、自然消滅しない: ${key}`);
+  }
+  // 勝者の正規partはTTL無しのまま。
+  for (const key of [...client.dump().keys()].filter((k) => /:(dataset|resume):1$/.test(k))) {
+    assert.equal(client.ttls().has(key), false, `敗者のconflictで勝者の正規キーにTTLが付いた: ${key}`);
+  }
+});
+
+test("O1-19e: manifest公開後、loadRunが正規partを正常に読める", async () => {
+  const client = createFakeSimulationRunRedisClient();
+  const repo = createRedisSimulationRunRepository({ client, appEnv: "staging" });
+  const id = "o1-19e";
+  const attempt = { expectedBaseRevision: 0, writeToken: "readback" };
+
+  await repo.saveRunPart(id, attempt, "dataset", { marker: "dataset-value" });
+  await repo.saveRunPart(id, attempt, "resume", { marker: "resume-value" });
+  await repo.saveRunPart(id, attempt, "pack", { marker: "pack-value" });
+  const manifest = { ...manifestFor(id, 1, 1), hasPackCapture: true };
+  await repo.commitRunManifest(manifest, manifestToSimulationRunSummary(manifest), attempt);
+
+  const loaded = await repo.loadRun(id);
+  assert.ok(loaded, "公開後にloadRunがnullを返している");
+  assert.equal(loaded.persistenceRevision, 1);
+  assert.equal((loaded.dataset as unknown as { marker: string }).marker, "dataset-value");
+  assert.equal((loaded.resumePayload as unknown as { marker: string }).marker, "resume-value");
+  assert.equal((loaded.packCapture as unknown as { marker: string }).marker, "pack-value");
 });
 
 test("O1-20: 孤児stagingが残っても公開正本は読めて、内容も変わらない", async () => {
