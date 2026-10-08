@@ -1,0 +1,103 @@
+== 0. 使う port を空にする（前回の残骸があると古い接続先へ繋がるため）
+== 1. 隔離 Redis を起動（port 6406・保存なし・空の状態から）
+PONG
+== 2. Upstash REST 互換シムを起動（port 6407 -> 6406）
+== 3. dev server を起動（port 3401・保存先はシムのみ）
+== 4. 検証を実行
+# BW-1 本物の API route を通した取りこぼし検証（隔離ローカル Redis ＋ Upstash REST シムのみ）
+# app=http://127.0.0.1:3401 / shim=http://127.0.0.1:6407 / runId=bw1-prop-1791451777621 / PLAYER=BAL / 8Turn
+
+## 1. Run の保存（保存APIをそのまま使う）
+    保存 part=dataset                          GET  1回          0 B  other 0B
+    PASS  part=dataset の保存が成功する  — status=200 {"simulationRunId":"bw1-prop-1791451777621","revision":1,"part":"dataset"}
+    保存 part=resume                           GET  1回          0 B  other 0B
+    PASS  part=resume の保存が成功する  — status=200 {"simulationRunId":"bw1-prop-1791451777621","revision":1,"part":"resume"}
+    保存 part=pack                             GET  1回          0 B  other 0B
+    PASS  part=pack の保存が成功する  — status=200 {"simulationRunId":"bw1-prop-1791451777621","revision":1,"part":"pack"}
+    保存 manifest commit                       GET  4回          0 B  other 0B + other 0B + seat 0B + other 0B
+    PASS  manifest commit revision=1 が成功する  — status=200 {"simulationRunId":"bw1-prop-1791451777621","savedAt":"2026-10-08T09:29:39.218Z","persistenceRevision":1}
+    保存1回ぶん（part×3 ＋ manifest commit）の読み取り合計 0 B
+
+## 2. GM Seat 一覧（初回 → 変化なし）
+    Seat一覧 初回（known なし）                      GET  8回  2,272,517 B  other 771B + other 771B + resume 2,270,975B + seat 0B + seat 0B + seat 0B + seat 0B + seat 0B
+    PASS  初回は完全な一覧が返る  — status=200
+    PASS  PLAYER 会社 BAL が PLAYER として出る
+    PASS  currentTurn が返る  — currentTurn=9
+    Seat一覧 変化なし                              GET  6回        771 B  other 771B + seat 0B + seat 0B + seat 0B + seat 0B + seat 0B
+    PASS  変化が無ければ unchanged=true  — {"runId":"bw1-prop-1791451777621","unchanged":true,"persistenceRevision":1,"seatsVersion":"BAL:-;CONSV:-;JPQ:-;MASS:-;VAP:-"}
+    PASS  変化が無いときは dataset / resume / pack を読まない  — 771 B < 2272517 B
+
+## 3. 参加link発行（Seat だけが変わる → 取りこぼさない）
+    参加link発行                                 GET  3回  2,271,746 B  other 771B + resume 2,270,975B + seat 0B
+    PASS  参加linkが発行できる  — status=200
+    Seat一覧（発行前の known で再取得）                  GET 13回  2,273,107 B  other 771B + seat 295B + seat 0B + seat 0B + seat 0B + seat 0B + other 771B + resume 2,270,975B + seat 295B + seat 0B + seat 0B + seat 0B + seat 0B
+    PASS  Seat が変わったので unchanged=false  — {"runId":"bw1-prop-1791451777621","unchanged":false,"persistenceRevision":1,"seatsVersion":"BAL|2026-10-08T09:29:42.003Z
+    PASS  発行が一覧に現れる（joinIssued=true）
+    PASS  Run の revision は変わっていない  — 1 vs 1
+
+## 4. PLAYER の参加と意思決定context（初回 → 変化なし）
+    参加link claim                             GET  2回        385 B  other 90B + seat 295B
+    PASS  参加できる  — status=200 {"runId":"bw1-prop-1791451777621","companyId":"BAL"}
+    PASS  Player Session Cookie が発行される
+    意思決定context 初回（known なし）                 GET  7回  3,251,636 B  session 195B + session 195B + other 771B + other 771B + dataset 978,686B + resume 2,270,975B + pack 43B
+    PASS  context が返る  — status=200 {"simulationRunId":"bw1-prop-1791451777621","scenarioId":"baseline","seed":"bw1-prop","companyId":"BAL","fixture":{"companyId":"BAL","displayName":"バランス型水産","ar
+    PASS  自社のcontextである
+    PASS  提出前は hasSubmittedThisTurn=false
+    意思決定context 変化なし                         GET  3回      1,161 B  session 195B + session 195B + other 771B
+    PASS  変化が無ければ unchanged=true  — {"unchanged":true,"persistenceRevision":1}
+    PASS  変化が無いときは dataset / resume / pack を読まない  — 1161 B < 3251636 B
+
+## 5. PLAYER 提出の反映
+    提出                                       GET 14回  5,526,813 B  session 195B + session 195B + other 771B + resume 2,270,975B + other 771B + dataset 978,686B + resume 2,270,975B + pack 43B + other 771B + other 771B + other 771B + other 771B + other 771B + seat 347B
+    PASS  提出できる  — status=200 {"runId":"bw1-prop-1791451777621","companyId":"BAL","turn":9,"persistenceRevision":2}
+    意思決定context（提出前の known で再取得）             GET  7回  3,258,858 B  session 195B + session 195B + other 771B + other 771B + dataset 978,686B + resume 2,278,197B + pack 43B
+    PASS  提出で unchanged=false になる  — {"simulationRunId":"bw1-prop-1791451777621","scenarioId":"baseline","seed":"bw1-prop","companyId":"BAL","fixture":{"comp
+    PASS  提出済みが自分の画面へ現れる
+    PASS  提出で revision が上がる  — 1 → 2
+    Seat一覧（提出前の known で再取得）                  GET  8回  2,280,105 B  other 771B + other 771B + resume 2,278,197B + seat 366B + seat 0B + seat 0B + seat 0B + seat 0B
+    PASS  提出で unchanged=false になる  — {"runId":"bw1-prop-1791451777621","unchanged":false,"persistenceRevision":2,"seatsVersion":"BAL|2026-10-08T09:29:42.003Z
+    PASS  提出済みが GM の一覧へ現れる
+    PASS  参加済みが GM の一覧へ現れる
+
+## 6. Turn 進行の反映
+    保存 part=dataset                          GET  1回        771 B  other 771B
+    PASS  part=dataset の保存が成功する  — status=200 {"simulationRunId":"bw1-prop-1791451777621","revision":3,"part":"dataset"}
+    保存 part=resume                           GET  1回        771 B  other 771B
+    PASS  part=resume の保存が成功する  — status=200 {"simulationRunId":"bw1-prop-1791451777621","revision":3,"part":"resume"}
+    保存 part=pack                             GET  1回        771 B  other 771B
+    PASS  part=pack の保存が成功する  — status=200 {"simulationRunId":"bw1-prop-1791451777621","revision":3,"part":"pack"}
+    保存 manifest commit                       GET  4回      2,679 B  other 771B + other 771B + seat 366B + other 771B
+    PASS  manifest commit revision=3 が成功する  — status=200 {"simulationRunId":"bw1-prop-1791451777621","savedAt":"2026-10-08T09:29:46.982Z","persistenceRevision":3}
+    Turn進行の保存1回ぶんの読み取り合計 4,992 B
+    意思決定context（進行前の known で再取得）             GET  7回  3,382,944 B  session 195B + session 195B + other 771B + other 771B + dataset 1,100,714B + resume 2,280,255B + pack 43B
+    PASS  Turn 進行で unchanged=false になる  — {"simulationRunId":"bw1-prop-1791451777621","scenarioId":"baseline","seed":"bw1-prop","companyId":"BAL","fixture":{"comp
+    PASS  新しい Turn が PLAYER 画面へ現れる  — 9 → 10
+    Seat一覧（進行前の known で再取得）                  GET  8回  2,282,163 B  other 771B + other 771B + resume 2,280,255B + seat 366B + seat 0B + seat 0B + seat 0B + seat 0B
+    PASS  Turn 進行で unchanged=false になる  — {"runId":"bw1-prop-1791451777621","unchanged":false,"persistenceRevision":3,"seatsVersion":"BAL|2026-10-08T09:29:42.003Z
+    PASS  新しい Turn が GM の一覧へ現れる  — 9 → 10
+    PASS  新しい Turn では未提出へ戻る
+
+## 7. 参加取り消し（失効）の反映
+    参加取り消し                                   GET  2回        561 B  seat 366B + session 195B
+    PASS  取り消せる  — status=200
+    Seat一覧（取り消し前の known で再取得）                GET 13回  2,282,345 B  other 771B + seat 274B + seat 0B + seat 0B + seat 0B + seat 0B + other 771B + resume 2,280,255B + seat 274B + seat 0B + seat 0B + seat 0B + seat 0B
+    PASS  取り消しで unchanged=false になる  — {"runId":"bw1-prop-1791451777621","unchanged":false,"persistenceRevision":3,"seatsVersion":"BAL|2026-10-08T09:29:42.003Z
+    PASS  取り消しが一覧へ現れる
+
+## 8. 実プレイ1Turn ぶんの読み取り転送量（PLAYER 5社 ＋ GM 1）
+    Run の初回保存                                   0 B
+    参加link発行＋参加（5社・Turn毎には発生しない）    11,338,781 B
+    画面を開く初回取得（PLAYER5＋GM・Turn毎には発生しない）   18,473,173 B
+    提出 5回（保存側の読み取り）                27,701,950 B
+    提出による取り直し（PLAYER4人＋GM）×5回     76,706,745 B
+    Turn進行の保存                               6,909 B
+    Turn進行による取り直し（PLAYER5＋GM）      19,161,212 B
+    1Turn 合計                            123,576,816 B  = 117.9 MB
+    32Turn 換算                                        3.68 GB
+    1Turn のコマンド数                                 431 回
+    32Turn 換算                                     13,792 回
+    ※ 待機（誰も操作していない）ぶんは別。上は操作に伴う必要な取り直しのみ。
+    ※ pack は計測用の小さい代替値。本番の pack はこれより大きいので実際は増える。
+
+## 結果  39/39 PASS
+== 5. 片付け（隔離 Redis は FLUSHALL して停止）

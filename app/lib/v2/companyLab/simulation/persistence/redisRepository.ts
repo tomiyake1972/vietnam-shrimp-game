@@ -38,6 +38,7 @@ import {
 } from "../../../redis/simulationRunRedisKeys";
 import {
   SIMULATION_RUN_RETENTION_LIMIT,
+  SimulationRunLoadOptions,
   SimulationRunPart,
   SimulationRunRepository,
   SimulationRunRepositoryError,
@@ -380,7 +381,11 @@ export function createRedisSimulationRunRepository(deps: SimulationRunRepository
     );
   }
 
-  async function loadRun(simulationRunId: string): Promise<StoredSimulationRun | null> {
+  async function loadRun(simulationRunId: string, options?: SimulationRunLoadOptions): Promise<StoredSimulationRun | null> {
+    // 【BW-1】読むパートの選択。省略時は従来どおり全部読む。
+    const wantDataset = options?.include?.dataset !== false;
+    const wantResume = options?.include?.resume !== false;
+    const wantPack = options?.include?.pack !== false;
     const manifestKey = simulationRunManifestKeyV2(appEnv, simulationRunId);
     let rawManifest: unknown;
     try {
@@ -407,22 +412,25 @@ export function createRedisSimulationRunRepository(deps: SimulationRunRepository
     }
     const revision = manifest.persistenceRevision;
 
-    const datasetKey = simulationRunDatasetKeyV2(appEnv, simulationRunId, revision);
-    let rawDataset: unknown;
-    try {
-      rawDataset = await client.get(datasetKey);
-    } catch (e) {
-      throw new SimulationRunRepositoryError(`Simulation Run の dataset 読み込みに失敗しました（key=${datasetKey}）: ${toErrorMessage(e)}`);
+    let dataset: unknown;
+    if (wantDataset) {
+      const datasetKey = simulationRunDatasetKeyV2(appEnv, simulationRunId, revision);
+      let rawDataset: unknown;
+      try {
+        rawDataset = await client.get(datasetKey);
+      } catch (e) {
+        throw new SimulationRunRepositoryError(`Simulation Run の dataset 読み込みに失敗しました（key=${datasetKey}）: ${toErrorMessage(e)}`);
+      }
+      if (rawDataset === null || rawDataset === undefined) {
+        throw new SimulationRunSchemaError(
+          `manifestが指すrevision=${revision}のdatasetが見つかりません（simulationRunId=${simulationRunId}）。manifestとパートの不整合です。`
+        );
+      }
+      dataset = parseJsonValue(rawDataset);
     }
-    if (rawDataset === null || rawDataset === undefined) {
-      throw new SimulationRunSchemaError(
-        `manifestが指すrevision=${revision}のdatasetが見つかりません（simulationRunId=${simulationRunId}）。manifestとパートの不整合です。`
-      );
-    }
-    const dataset = parseJsonValue(rawDataset);
 
     let resumePayload: unknown;
-    if (manifest.hasResumePayload) {
+    if (wantResume && manifest.hasResumePayload) {
       const resumeKey = simulationRunResumeKeyV2(appEnv, simulationRunId, revision);
       const rawResume = await client.get(resumeKey).catch((e) => {
         throw new SimulationRunRepositoryError(`Simulation Run の resumePayload 読み込みに失敗しました（key=${resumeKey}）: ${toErrorMessage(e)}`);
@@ -431,7 +439,7 @@ export function createRedisSimulationRunRepository(deps: SimulationRunRepository
     }
 
     let packCapture: unknown;
-    if (manifest.hasPackCapture) {
+    if (wantPack && manifest.hasPackCapture) {
       const packKey = simulationRunPackKeyV2(appEnv, simulationRunId, revision);
       const rawPack = await client.get(packKey).catch((e) => {
         throw new SimulationRunRepositoryError(`Simulation Run の packCapture 読み込みに失敗しました（key=${packKey}）: ${toErrorMessage(e)}`);

@@ -101,7 +101,10 @@ function gameFinishedConflict(simulationRunId: string, gameEndedAt: string): Sim
  * gameEndedAtが無い）は、この関数が呼ばれる前段階なので通過する。
  */
 async function checkNotAlreadyFinished(repository: SimulationRunRepository, simulationRunId: string): Promise<SimulationRunApiResult | null> {
-  const existing = await repository.loadRun(simulationRunId);
+  // 【BW-1】見るのは run.gameEndedAt だけ。これは manifest に入っているので、
+  // dataset / resumePayload / packCapture は読まない（保存1回ごとに巨大な
+  // パートを読み直していた分の転送量を落とす）。
+  const existing = await repository.loadRun(simulationRunId, { include: { dataset: false, resume: false, pack: false } });
   const existingGameEndedAt = existing?.run.gameEndedAt ?? null;
   if (existingGameEndedAt) return gameFinishedConflict(simulationRunId, existingGameEndedAt);
   return null;
@@ -131,7 +134,8 @@ async function checkPlayerSeatsSubmittedForAdvance(
   playerSeatGate: PlayerSeatSubmissionGate,
   candidateRun: { readonly simulationRunId: string; readonly completedTurns: number; readonly companyControlModes?: Readonly<Record<string, CompanyControlMode>> }
 ): Promise<SimulationRunApiResult | null> {
-  const existing = await repository.loadRun(candidateRun.simulationRunId);
+  // 【BW-1】見るのは run.completedTurns だけ（manifest に入っている）。
+  const existing = await repository.loadRun(candidateRun.simulationRunId, { include: { dataset: false, resume: false, pack: false } });
   const existingCompletedTurns = existing?.run.completedTurns ?? 0;
   if (candidateRun.completedTurns <= existingCompletedTurns) return null;
   const gate = await playerSeatGate.checkTurnAdvanceAllowed(candidateRun.simulationRunId, candidateRun.completedTurns, candidateRun.companyControlModes);

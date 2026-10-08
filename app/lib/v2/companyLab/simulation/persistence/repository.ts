@@ -22,6 +22,22 @@ import { StoredSimulationRun, StoredSimulationRunManifest, SimulationRunSummary,
 /** saveRunPart が受け付けるパート種別。 */
 export type SimulationRunPart = "dataset" | "resume" | "pack";
 
+/**
+ * 【BW-1・転送量削減】loadRun が読むパートの選択。
+ *
+ * 省略時・個別に省略した項目は true（＝従来どおり全部読む）として扱う。
+ * false を指定したパートは読み込まず、戻り値の該当フィールドは undefined になる。
+ * dataset を false にしても「パート欠落」エラーにはしない（意図的に読んでいないため）。
+ * manifest（run metadata と revision）は常に読む。
+ */
+export interface SimulationRunLoadOptions {
+  readonly include?: {
+    readonly dataset?: boolean;
+    readonly resume?: boolean;
+    readonly pack?: boolean;
+  };
+}
+
 export class SimulationRunNotFoundError extends Error {
   constructor(readonly simulationRunId: string) {
     super(`Simulation Run が見つかりません（simulationRunId=${simulationRunId}）。`);
@@ -128,8 +144,15 @@ export interface SimulationRunRepository {
    * 旧Run（persistenceRevision 未設定）も 0 を返す。
    */
   currentPublishedRevision(simulationRunId: string): Promise<number>;
-  /** 読み込み。存在しなければ null。 */
-  loadRun(simulationRunId: string): Promise<StoredSimulationRun | null>;
+  /**
+   * 読み込み。存在しなければ null。
+   *
+   * 【BW-1・転送量削減】`options.include` で読むパートを選べる。既定は全パート
+   * （＝従来と完全に同じ挙動）。dataset / resumePayload / packCapture は
+   * いずれも大きく、これらを使わない呼び出し元（例: GM の Seat 一覧）が
+   * 毎回読むと Redis の転送量をそのぶん消費する。保存形式・保存経路は変えない。
+   */
+  loadRun(simulationRunId: string, options?: SimulationRunLoadOptions): Promise<StoredSimulationRun | null>;
   /** 一覧（保存が新しい順）。dataset 本体は読まない。 */
   listRuns(limit?: number): Promise<readonly SimulationRunSummary[]>;
   /** 削除（存在しなくてもエラーにしない）。 */
@@ -279,8 +302,22 @@ export function createInMemorySimulationRunRepository(): SimulationRunRepository
     }
   }
 
-  async function loadRun(simulationRunId: string): Promise<StoredSimulationRun | null> {
-    return runs.get(simulationRunId) ?? null;
+  async function loadRun(simulationRunId: string, options?: SimulationRunLoadOptions): Promise<StoredSimulationRun | null> {
+    const stored = runs.get(simulationRunId) ?? null;
+    if (stored === null) return null;
+    // 【BW-1】Redis 実装と同じ意味論にそろえる。読まない指定のパートは undefined で返す。
+    // こうしておかないと、インメモリ実装を使うテストが「読んでいないはずのパートに
+    // 依存した呼び出し元」を見逃す。
+    const wantDataset = options?.include?.dataset !== false;
+    const wantResume = options?.include?.resume !== false;
+    const wantPack = options?.include?.pack !== false;
+    if (wantDataset && wantResume && wantPack) return stored;
+    return {
+      ...stored,
+      dataset: (wantDataset ? stored.dataset : undefined) as StoredSimulationRun["dataset"],
+      resumePayload: wantResume ? stored.resumePayload : undefined,
+      packCapture: wantPack ? stored.packCapture : undefined,
+    };
   }
 
   async function listRuns(limit = SIMULATION_RUN_RETENTION_LIMIT): Promise<readonly SimulationRunSummary[]> {

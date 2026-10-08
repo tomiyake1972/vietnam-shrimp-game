@@ -1,0 +1,274 @@
+TAP version 13
+# Subtest: BW1-S1: 何も変わっていなければ指紋は同じ
+ok 1 - BW1-S1: 何も変わっていなければ指紋は同じ
+  ---
+  duration_ms: 1.378354
+  type: 'test'
+  ...
+# Subtest: BW1-S2: Seat の並び順・会社の渡し順では変わらない
+ok 2 - BW1-S2: Seat の並び順・会社の渡し順では変わらない
+  ---
+  duration_ms: 0.399982
+  type: 'test'
+  ...
+# Subtest: BW1-S3: Seat がまだ無い会社があっても表現でき、出来た時点で変わる
+ok 3 - BW1-S3: Seat がまだ無い会社があっても表現でき、出来た時点で変わる
+  ---
+  duration_ms: 0.23213
+  type: 'test'
+  ...
+# Subtest: BW1-S4: 参加link再発行で指紋が変わる
+ok 4 - BW1-S4: 参加link再発行で指紋が変わる
+  ---
+  duration_ms: 0.178374
+  type: 'test'
+  ...
+# Subtest: BW1-S5: PLAYER の参加（claim）で指紋が変わる
+ok 5 - BW1-S5: PLAYER の参加（claim）で指紋が変わる
+  ---
+  duration_ms: 0.249603
+  type: 'test'
+  ...
+# Subtest: BW1-S6: 失効で指紋が変わる
+ok 6 - BW1-S6: 失効で指紋が変わる
+  ---
+  duration_ms: 0.215428
+  type: 'test'
+  ...
+# Subtest: BW1-S7: 提出記録の更新で指紋が変わる
+ok 7 - BW1-S7: 提出記録の更新で指紋が変わる
+  ---
+  duration_ms: 0.240086
+  type: 'test'
+  ...
+# Subtest: BW1-S8: 指紋に secret hash は含めない（表示・漏洩対策）
+ok 8 - BW1-S8: 指紋に secret hash は含めない（表示・漏洩対策）
+  ---
+  duration_ms: 0.219374
+  type: 'test'
+  ...
+# Subtest: BW1-SV1: 保存経路の検査は manifest だけを読む（大きいパートを読まない）
+ok 9 - BW1-SV1: 保存経路の検査は manifest だけを読む（大きいパートを読まない）
+  ---
+  duration_ms: 3.667648
+  type: 'test'
+  ...
+# Subtest: BW1-SV2: 軽い読み込みでも終了済み Run の part 保存は 409 で拒否される
+ok 10 - BW1-SV2: 軽い読み込みでも終了済み Run の part 保存は 409 で拒否される
+  ---
+  duration_ms: 0.790508
+  type: 'test'
+  ...
+# Subtest: BW1-SV3: 軽い読み込みでも終了済み Run の manifest commit は 409 で拒否される
+ok 11 - BW1-SV3: 軽い読み込みでも終了済み Run の manifest commit は 409 で拒否される
+  ---
+  duration_ms: 0.567186
+  type: 'test'
+  ...
+# Subtest: BW1-SV4: 軽い読み込みでも Turn 進行の PLAYER 提出 gate は効く
+ok 12 - BW1-SV4: 軽い読み込みでも Turn 進行の PLAYER 提出 gate は効く
+  ---
+  duration_ms: 2.658852
+  type: 'test'
+  ...
+# Subtest: BW1-SV5: 軽い読み込みでも CAS（古い expectedBaseRevision）は 409 で拒否される
+ok 13 - BW1-SV5: 軽い読み込みでも CAS（古い expectedBaseRevision）は 409 で拒否される
+  ---
+  duration_ms: 1.472603
+  type: 'test'
+  ...
+# Subtest: API-1: 保存 → 読み込み → 一覧が往復する
+ok 14 - API-1: 保存 → 読み込み → 一覧が往復する
+  ---
+  duration_ms: 2.424432
+  type: 'test'
+  ...
+# Subtest: API-2: run / dataset / savedAt が欠けた保存要求は 400 で拒否する
+ok 15 - API-2: run / dataset / savedAt が欠けた保存要求は 400 で拒否する
+  ---
+  duration_ms: 0.368303
+  type: 'test'
+  ...
+# Subtest: API-3: schemaVersion はクライアントの申告を信用せずサーバー側で確定させる
+ok 16 - API-3: schemaVersion はクライアントの申告を信用せずサーバー側で確定させる
+  ---
+  duration_ms: 0.351872
+  type: 'test'
+  ...
+# Subtest: API-4: 存在しない Simulation Run は 404 を返す
+ok 17 - API-4: 存在しない Simulation Run は 404 を返す
+  ---
+  duration_ms: 0.159929
+  type: 'test'
+  ...
+# Subtest: API-5: 削除は存在しなくてもエラーにしない（冪等）
+ok 18 - API-5: 削除は存在しなくてもエラーにしない（冪等）
+  ---
+  duration_ms: 0.358323
+  type: 'test'
+  ...
+# Subtest: END-LOCK-1: gameEndedAtが未設定のRunへ、gameEndedAtを新規に設定する保存（Game Endそのもの）は成功する
+ok 19 - END-LOCK-1: gameEndedAtが未設定のRunへ、gameEndedAtを新規に設定する保存（Game Endそのもの）は成功する
+  ---
+  duration_ms: 0.383069
+  type: 'test'
+  ...
+# Subtest: END-LOCK-2: 既にgameEndedAtが設定されたRunへの以後の保存（legacy形式）は409で拒否される（Advance Turn・Decision変更の再現）
+ok 20 - END-LOCK-2: 既にgameEndedAtが設定されたRunへの以後の保存（legacy形式）は409で拒否される（Advance Turn・Decision変更の再現）
+  ---
+  duration_ms: 0.447675
+  type: 'test'
+  ...
+# Subtest: END-LOCK-3: manifestOnly形式のcommitも、既にgameEndedAt設定済みなら409で拒否される
+ok 21 - END-LOCK-3: manifestOnly形式のcommitも、既にgameEndedAt設定済みなら409で拒否される
+  ---
+  duration_ms: 0.392966
+  type: 'test'
+  ...
+# Subtest: END-LOCK-4: gameEndedAt設定済みRunへのpart保存（decision下書き相当）も409で拒否される
+ok 22 - END-LOCK-4: gameEndedAt設定済みRunへのpart保存（decision下書き相当）も409で拒否される
+  ---
+  duration_ms: 0.778487
+  type: 'test'
+  ...
+# Subtest: END-LOCK-5: gameEndedAtが無いRunへの通常の保存（Advance Turn相当）は引き続き成功する
+ok 23 - END-LOCK-5: gameEndedAtが無いRunへの通常の保存（Advance Turn相当）は引き続き成功する
+  ---
+  duration_ms: 0.745044
+  type: 'test'
+  ...
+# Subtest: PLAYER-GATE-1: playerSeatGateを渡さない（従来どおりの呼び出し）場合は挙動が変わらない
+ok 24 - PLAYER-GATE-1: playerSeatGateを渡さない（従来どおりの呼び出し）場合は挙動が変わらない
+  ---
+  duration_ms: 0.370716
+  type: 'test'
+  ...
+# Subtest: PLAYER-GATE-2: 参加リンクを発行済みのPLAYER会社が未提出のままAdvance（completedTurns増加）しようとすると409で拒否される
+ok 25 - PLAYER-GATE-2: 参加リンクを発行済みのPLAYER会社が未提出のままAdvance（completedTurns増加）しようとすると409で拒否される
+  ---
+  duration_ms: 1.214498
+  type: 'test'
+  ...
+# Subtest: PLAYER-GATE-3: 全PLAYER会社が当該Turnぶん提出済みならAdvanceは成功する
+ok 26 - PLAYER-GATE-3: 全PLAYER会社が当該Turnぶん提出済みならAdvanceは成功する
+  ---
+  duration_ms: 0.459006
+  type: 'test'
+  ...
+# Subtest: PLAYER-GATE-4: 参加リンクを一度も発行していないPLAYER会社（GM代理操作のみ）はgateの対象にならず、Advanceをブロックしない
+ok 27 - PLAYER-GATE-4: 参加リンクを一度も発行していないPLAYER会社（GM代理操作のみ）はgateの対象にならず、Advanceをブロックしない
+  ---
+  duration_ms: 0.271678
+  type: 'test'
+  ...
+# Subtest: PLAYER-GATE-5: manifestOnly保存（本番のTurn確定経路）でも同じgateが働く
+ok 28 - PLAYER-GATE-5: manifestOnly保存（本番のTurn確定経路）でも同じgateが働く
+  ---
+  duration_ms: 0.425926
+  type: 'test'
+  ...
+# Subtest: PLAYER-GATE-6: completedTurnsが増えない保存（decision下書き相当）はgateの対象にならない
+ok 29 - PLAYER-GATE-6: completedTurnsが増えない保存（decision下書き相当）はgateの対象にならない
+  ---
+  duration_ms: 0.367668
+  type: 'test'
+  ...
+# Subtest: BW1-1: options を省略すると従来どおり全パートを読む
+ok 30 - BW1-1: options を省略すると従来どおり全パートを読む
+  ---
+  duration_ms: 7.806647
+  type: 'test'
+  ...
+# Subtest: BW1-2: dataset と pack を読まない指定ができ、エラーにならない
+ok 31 - BW1-2: dataset と pack を読まない指定ができ、エラーにならない
+  ---
+  duration_ms: 1.142011
+  type: 'test'
+  ...
+# Subtest: BW1-3: 部分読みの resumePayload は全読みと一致する（内容が変わらない）
+ok 32 - BW1-3: 部分読みの resumePayload は全読みと一致する（内容が変わらない）
+  ---
+  duration_ms: 1.146787
+  type: 'test'
+  ...
+# Subtest: BW1-4: resume だけを読まない指定もできる
+ok 33 - BW1-4: resume だけを読まない指定もできる
+  ---
+  duration_ms: 0.745019
+  type: 'test'
+  ...
+# Subtest: BW1-5: 保存すれば必ず revision が上がる（変化を取りこぼさない）
+ok 34 - BW1-5: 保存すれば必ず revision が上がる（変化を取りこぼさない）
+  ---
+  duration_ms: 1.551953
+  type: 'test'
+  ...
+# Subtest: BW1-6: 存在しない Run は部分読みでも null（404 判定が変わらない）
+ok 35 - BW1-6: 存在しない Run は部分読みでも null（404 判定が変わらない）
+  ---
+  duration_ms: 0.615318
+  type: 'test'
+  ...
+# Subtest: BW1-7: 部分読みした Run をそのまま saveRun すると拒否され、既存 dataset は残る
+ok 36 - BW1-7: 部分読みした Run をそのまま saveRun すると拒否され、既存 dataset は残る
+  ---
+  duration_ms: 2.282332
+  type: 'test'
+  ...
+# Subtest: BW1-8: パートを揃えずに manifest commit すると拒否され、前の revision が残る
+ok 37 - BW1-8: パートを揃えずに manifest commit すると拒否され、前の revision が残る
+  ---
+  duration_ms: 1.573413
+  type: 'test'
+  ...
+# Subtest: BW1-P1: 非表示タブでは取得しない。表示へ戻った瞬間に1回取得する
+ok 38 - BW1-P1: 非表示タブでは取得しない。表示へ戻った瞬間に1回取得する
+  ---
+  duration_ms: 2.235965
+  type: 'test'
+  ...
+# Subtest: BW1-P2: 前の取得が終わるまで次を始めない（同時に2本飛ばない）
+ok 39 - BW1-P2: 前の取得が終わるまで次を始めない（同時に2本飛ばない）
+  ---
+  duration_ms: 0.73715
+  type: 'test'
+  ...
+# Subtest: BW1-P3: 失敗が続くと間隔が倍々に延び、上限で止まる
+ok 40 - BW1-P3: 失敗が続くと間隔が倍々に延び、上限で止まる
+  ---
+  duration_ms: 0.683509
+  type: 'test'
+  ...
+# Subtest: BW1-P4: 成功したら間隔が元へ戻る
+ok 41 - BW1-P4: 成功したら間隔が元へ戻る
+  ---
+  duration_ms: 0.50607
+  type: 'test'
+  ...
+# Subtest: BW1-P5: 認証切れを受けたら以後一切取得せず、タイマーも張らない
+ok 42 - BW1-P5: 認証切れを受けたら以後一切取得せず、タイマーも張らない
+  ---
+  duration_ms: 0.370377
+  type: 'test'
+  ...
+# Subtest: BW1-P6: stop() 後は取得せず、購読も解除する
+ok 43 - BW1-P6: stop() 後は取得せず、購読も解除する
+  ---
+  duration_ms: 0.362235
+  type: 'test'
+  ...
+# Subtest: BW1-P7: poll が例外を投げても失敗扱いで継続する（画面が黙って止まらない）
+ok 44 - BW1-P7: poll が例外を投げても失敗扱いで継続する（画面が黙って止まらない）
+  ---
+  duration_ms: 4.3205
+  type: 'test'
+  ...
+1..44
+# tests 44
+# suites 0
+# pass 44
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 934.289985

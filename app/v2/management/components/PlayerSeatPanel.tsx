@@ -10,13 +10,15 @@
 // 参加URLは発行/再発行の直後だけ画面へ表示する「reveal-once」。それ以外の一覧取得では
 // サーバーは平文URLを一切返さない（joinIdはhashのみRedisに保存される設計と対称）。
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   issueOrRegeneratePlayerJoinLink,
   listPlayerSeats,
   revokePlayerSeat,
+  type PlayerSeatListKnownState,
   type PlayerSeatStatus,
 } from "../lib/playerSeats";
+import { useVisiblePolling, type PollOutcome } from "../../lib/useVisiblePolling";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -32,31 +34,51 @@ export function PlayerSeatPanel({ runId }: Props) {
   const [busyCompanyId, setBusyCompanyId] = useState<string | null>(null);
   const [revealedJoinUrl, setRevealedJoinUrl] = useState<{ readonly companyId: string; readonly url: string } | null>(null);
 
-  const refresh = useCallback(async () => {
+  /**
+   * 【BW-1・転送量削減】前回の取得結果（revision と Seat の指紋、会社ID）。
+   * これをサーバーへ伝えると、Run も Seat も変わっていないときは
+   * 大きい resumePayload を読まずに「変化なし」だけが返る。
+   * Seat は Run の revision とは独立に変わる（参加・再発行・失効・代理提出）ため、
+   * 指紋が変われば revision が同じでも完全な一覧を受け取り直す。
+   */
+  const knownRef = useRef<PlayerSeatListKnownState | null>(null);
+
+  const refresh = useCallback(async (): Promise<PollOutcome> => {
     if (!runId) {
       setSeats(null);
-      return;
+      knownRef.current = null;
+      return "ok";
     }
-    const result = await listPlayerSeats(runId);
+    const result = await listPlayerSeats(runId, knownRef.current);
     if (!result.ok) {
       setError(result.error);
-      return;
+      // 認証切れは自動取得を止める。
+      return /HTTP (401|403)/.test(result.error) ? "unauthorized" : "error";
     }
     setError(null);
-    setSeats(result.data.companies);
-    setCurrentTurn(result.data.currentTurn);
-    setGameEndedAt(result.data.gameEndedAt);
+    const data = result.data;
+    if (data.unchanged) {
+      // 何も変わっていない。描画も更新しない。
+      knownRef.current = {
+        persistenceRevision: data.persistenceRevision,
+        seatsVersion: data.seatsVersion,
+        companyIds: knownRef.current?.companyIds ?? [],
+      };
+      return "ok";
+    }
+    const companies = data.companies ?? [];
+    setSeats(companies);
+    setCurrentTurn(data.currentTurn ?? null);
+    setGameEndedAt(data.gameEndedAt ?? null);
+    knownRef.current = {
+      persistenceRevision: data.persistenceRevision,
+      seatsVersion: data.seatsVersion,
+      companyIds: companies.map((c) => c.companyId),
+    };
+    return "ok";
   }, [runId]);
 
-  useEffect(() => {
-    if (!runId) return;
-    const initial = setTimeout(() => void refresh(), 0);
-    const timer = setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    return () => {
-      clearTimeout(initial);
-      clearInterval(timer);
-    };
-  }, [runId, refresh]);
+  useVisiblePolling({ intervalMs: POLL_INTERVAL_MS, enabled: runId !== null, poll: refresh });
 
   const handleIssue = useCallback(
     async (companyId: string) => {
@@ -70,6 +92,7 @@ export function PlayerSeatPanel({ runId }: Props) {
           return;
         }
         setRevealedJoinUrl({ companyId, url: result.data.joinUrl });
+        knownRef.current = null; // 発行直後は必ず取り直す
         await refresh();
       } finally {
         setBusyCompanyId(null);
@@ -89,6 +112,7 @@ export function PlayerSeatPanel({ runId }: Props) {
           setError(result.error);
           return;
         }
+        knownRef.current = null; // 失効直後は必ず取り直す
         await refresh();
       } finally {
         setBusyCompanyId(null);

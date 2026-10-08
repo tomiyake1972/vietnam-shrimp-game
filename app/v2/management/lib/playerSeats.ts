@@ -17,9 +17,21 @@ export interface PlayerSeatStatus {
 
 export interface PlayerSeatListResponse {
   readonly runId: string;
-  readonly currentTurn: number | null;
-  readonly gameEndedAt: string | null;
-  readonly companies: readonly PlayerSeatStatus[];
+  /** 【BW-1】true なら Run も Seat も変わっていない（companies 等は返らない）。 */
+  readonly unchanged: boolean;
+  readonly persistenceRevision: number;
+  /** Seat（参加・再発行・失効・代理提出の記録）の指紋。Run の revision とは独立に変わる。 */
+  readonly seatsVersion: string;
+  readonly currentTurn?: number | null;
+  readonly gameEndedAt?: string | null;
+  readonly companies?: readonly PlayerSeatStatus[];
+}
+
+/** 【BW-1】前回の取得結果。これを渡すと、変化が無ければサーバーは大きいパートを読まない。 */
+export interface PlayerSeatListKnownState {
+  readonly persistenceRevision: number;
+  readonly seatsVersion: string;
+  readonly companyIds: readonly string[];
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<{ readonly ok: true; readonly data: T } | { readonly ok: false; readonly error: string }> {
@@ -36,8 +48,15 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<{ readonly
   }
 }
 
-export function listPlayerSeats(runId: string) {
-  return fetchJson<PlayerSeatListResponse>(`/api/v2/management/player-seats/${encodeURIComponent(runId)}`);
+export function listPlayerSeats(runId: string, known?: PlayerSeatListKnownState | null) {
+  const base = `/api/v2/management/player-seats/${encodeURIComponent(runId)}`;
+  if (!known || known.companyIds.length === 0) return fetchJson<PlayerSeatListResponse>(base);
+  const query = new URLSearchParams({
+    knownRevision: String(known.persistenceRevision),
+    knownSeatsVersion: known.seatsVersion,
+    knownCompanyIds: known.companyIds.join(","),
+  });
+  return fetchJson<PlayerSeatListResponse>(`${base}?${query.toString()}`);
 }
 
 export function issueOrRegeneratePlayerJoinLink(runId: string, companyId: string) {

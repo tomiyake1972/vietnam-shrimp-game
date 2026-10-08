@@ -1,0 +1,35 @@
+# BW-1 Redis 転送量の実測（隔離ローカル Redis のみ。共有DBへは接続しない）
+# 127.0.0.1:6406 / appEnv=staging / schemaVersion=9
+# Seat一覧 5000ms間隔 / Player画面 4000ms間隔 / PLAYER 5人
+
+## 1. 保存物の実サイズ（8Turn 進行後）
+    dataset      976,641 B
+    resume     2,265,058 B
+    pack              43 B（本番の pack はこれより大きい。ここでは代替値）
+
+## 2. GM の Seat 一覧 1回ぶんの GET
+    修正前（loadRun 全パート）                  GET  4回    3,242,238 B   other 496B + dataset 976,641B + resume 2,265,058B + pack 43B
+    修正後・変化あり                           GET  2回    2,265,554 B   other 496B + resume 2,265,058B
+    修正後・変化なし                           GET  1回          496 B   other 496B
+
+## 3. Independent Player の意思決定画面 1回ぶんの GET
+    修正前（loadRun 全パート）                  GET  4回    3,242,238 B   other 496B + dataset 976,641B + resume 2,265,058B + pack 43B
+    修正後・変化なし                           GET  1回          496 B   other 496B
+    修正後・変化あり                   修正前と同じ（context の組み立てに全パートが要るため）
+
+## 4. 誰も操作していない1時間あたりの読み取り転送量（GM 1 ＋ PLAYER 5）
+    修正前  16140.4 MB / 時
+    修正後      2.5 MB / 時
+    削減率  99.985 %（6537 分の1）
+    ※ 非表示タブでは取得しないため、実際にはこれよりさらに減る。
+    ※ Turn が進んだ直後だけは修正後も全パートを読む（取りこぼさないため）。
+
+## 4b. Upstash Free の月間帯域 10 GB に到達するまで（開いたまま放置した場合）
+    修正前  0.63 時間
+    修正後  173 日
+    ※ 実際に 2026-10-07 に 26 GB で上限へ達している。修正前の消費速度と整合する。
+
+## 5. 更新の取りこぼしが無いこと
+    保存前 revision=1 → 保存後 revision=2  PASS 変化が revision に現れる
+    dataset/pack を読まない読み込みで resume と run が揃う  PASS
+    同じ revision なら全読みと部分読みで resume が一致          PASS

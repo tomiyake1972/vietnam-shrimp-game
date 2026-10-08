@@ -16,7 +16,7 @@
 // 受け付けており、Independent Playerセッションでの認証はまだ対応していない
 // （#04/#05/#06への引渡事項として最終報告で明記する）。
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
 import { CompanyDecisionDraft, validateDecisionDraftNumbers } from "../../company-lab/decisionDraft";
@@ -26,20 +26,35 @@ import { FinalResultsSummary } from "../../management/components/FinalResultsSum
 import { FinalResultsCharts } from "../../management/components/FinalResultsCharts";
 import { FinalDataDownloadButton } from "../../management/components/FinalDataDownloadButton";
 import type { PlayerDecisionContext } from "../../../lib/v2/player/decisionContext";
+import { useVisiblePolling, type PollOutcome } from "../../lib/useVisiblePolling";
 
 const POLL_INTERVAL_MS = 4000;
 
 type WorkspaceStatus = "JOINED" | "TURN_ACTIVE" | "EDITING" | "SUBMITTED" | "WAITING_FOR_GM" | "FINISHED" | "ERROR";
 
-async function fetchSessionContext(): Promise<{ ok: true; data: PlayerDecisionContext } | { ok: false; status: number; message: string }> {
+/**
+ * 【BW-1・転送量削減】いま持っている revision をサーバーへ伝える。
+ * 保存物が変わっていなければ server は大きいパートを読まずに
+ * { unchanged: true } だけを返す。変わっていれば従来どおり context 全体が返る。
+ */
+type SessionFetchResult =
+  | { readonly ok: true; readonly unchanged: true; readonly persistenceRevision: number }
+  | { readonly ok: true; readonly unchanged: false; readonly data: PlayerDecisionContext; readonly persistenceRevision: number }
+  | { readonly ok: false; readonly status: number; readonly message: string };
+
+async function fetchSessionContext(knownRevision: number | null): Promise<SessionFetchResult> {
   try {
-    const response = await fetch("/api/v2/play/session", { cache: "no-store" });
+    const query = knownRevision !== null ? `?knownRevision=${encodeURIComponent(String(knownRevision))}` : "";
+    const response = await fetch(`/api/v2/play/session${query}`, { cache: "no-store" });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
       const message = body && typeof body === "object" && "error" in body ? body.error?.message : undefined;
       return { ok: false, status: response.status, message: message ?? `HTTP ${response.status}` };
     }
-    return { ok: true, data: body as PlayerDecisionContext };
+    const payload = body as (PlayerDecisionContext & { readonly unchanged?: boolean; readonly persistenceRevision?: number }) | null;
+    const revision = typeof payload?.persistenceRevision === "number" ? payload.persistenceRevision : 0;
+    if (payload?.unchanged === true) return { ok: true, unchanged: true, persistenceRevision: revision };
+    return { ok: true, unchanged: false, data: payload as PlayerDecisionContext, persistenceRevision: revision };
   } catch (e) {
     return { ok: false, status: 0, message: e instanceof Error ? e.message : String(e) };
   }
@@ -64,12 +79,20 @@ export default function PlayerWorkspacePage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [justSubmitted, setJustSubmitted] = useState(false);
   const seededTurnRef = useRef<number | null>(null);
+  /** 【BW-1】いま手元にある保存物の revision。これをサーバーへ伝えて差分だけ受け取る。 */
+  const knownRevisionRef = useRef<number | null>(null);
 
-  const refresh = useCallback(async () => {
-    const result = await fetchSessionContext();
+  const refresh = useCallback(async (): Promise<PollOutcome> => {
+    const result = await fetchSessionContext(knownRevisionRef.current);
     if (!result.ok) {
       setError(result.message);
-      return;
+      // 認証切れは自動取得を止める（叩き続けない）。
+      return result.status === 401 || result.status === 403 ? "unauthorized" : "error";
+    }
+    knownRevisionRef.current = result.persistenceRevision;
+    if (result.unchanged) {
+      setError(null);
+      return "ok";
     }
     setError(null);
     setContext(result.data);
@@ -81,19 +104,10 @@ export default function PlayerWorkspacePage() {
       setTouched(false);
       setJustSubmitted(false);
     }
+    return "ok";
   }, []);
 
-  useEffect(() => {
-    // 【react-hooks/set-state-in-effect】effect本体の直下でrefresh()（setStateへ繋がる）を
-    // 直接呼ばない。setIntervalの定期呼び出しと同じ「タイマー経由の間接呼び出し」に揃え、
-    // 初回取得もsetTimeout(…, 0)でスケジュールする。
-    const initial = setTimeout(() => void refresh(), 0);
-    const timer = setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    return () => {
-      clearTimeout(initial);
-      clearInterval(timer);
-    };
-  }, [refresh]);
+  useVisiblePolling({ intervalMs: POLL_INTERVAL_MS, enabled: true, poll: refresh });
 
   const handleSubmit = useCallback(async () => {
     if (!context || !draft) return;
@@ -126,6 +140,7 @@ export default function PlayerWorkspacePage() {
         return;
       }
       setJustSubmitted(true);
+      knownRevisionRef.current = null; // 提出で保存物が変わる。次回は必ず取り直す。
       await refresh();
     } finally {
       setSubmitting(false);

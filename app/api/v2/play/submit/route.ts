@@ -37,7 +37,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return { status: 400, body: { error: { code: "BAD_REQUEST", message: "draft がありません。" } } };
     }
 
-    const stored = await simulationRunRepository.loadRun(session.runId);
+    // 【BW-1】この入力検証で見るのは run.gameEndedAt と resumePayload（fixtures と
+    // currentPeriod）だけ。dataset と packCapture は読まない。
+    // 実際の保存は submitPlayerDecision の CAS ループが最新を読み直して行うため、
+    // 保存競合対策（CAS）の経路には手を入れていない。
+    const stored = await simulationRunRepository.loadRun(session.runId, { include: { dataset: false, pack: false } });
     if (!stored) {
       return { status: 404, body: { error: { code: "RUN_NOT_FOUND", message: "この Simulation Run は見つかりません。" } } };
     }

@@ -1,0 +1,14 @@
+# npm test（全体） 2026-10-08 18:20 JST / BW-1 修正後
+# この環境での実行結果。司令塔が再実行したものではない。
+# 全文は巨大なため集計行と失敗行のみ（失敗0件）。
+
+# tests 4482
+# suites 0
+# pass 4482
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 234021.255153
+
+### NPM_TEST_EXIT=0

@@ -20,7 +20,9 @@ function nowIso(): string {
 export async function POST(req: NextRequest, context: RouteContext): Promise<NextResponse> {
   const { runId, companyId } = await context.params;
   return withPlayerSeatManagementApiContext(req, async ({ playerRepository, simulationRunRepository }) => {
-    const stored = await simulationRunRepository.loadRun(runId);
+    // 【BW-1】必要なのは resumePayload.fixtures の会社一覧だけ。dataset と
+    // packCapture は使わないので読まない。
+    const stored = await simulationRunRepository.loadRun(runId, { include: { dataset: false, pack: false } });
     if (!stored) {
       return { status: 404, body: { error: { code: "RUN_NOT_FOUND", message: `Simulation Run が見つかりません（runId=${runId}）。` } } };
     }

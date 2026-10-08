@@ -1,0 +1,23 @@
+### CMD: npx eslint <BW-1で変更/新規の19ファイル>
+### DATE: 2026-10-08 18:30 JST
+### RESULT: 0件（出力なし）
+### 対象:
+###   app/v2/lib/visiblePollingLoop.ts
+###   app/v2/lib/useVisiblePolling.ts
+###   app/v2/lib/__tests__/visiblePollingLoop.test.ts
+###   app/v2/management/components/PlayerSeatPanel.tsx
+###   app/v2/management/lib/playerSeats.ts
+###   app/v2/play/workspace/page.tsx
+###   app/api/v2/management/player-seats/[runId]/route.ts
+###   app/api/v2/management/player-seats/[runId]/[companyId]/route.ts
+###   app/api/v2/management/player-seats/__tests__/seatsFingerprint.test.ts
+###   app/api/v2/play/session/route.ts
+###   app/api/v2/play/submit/route.ts
+###   app/api/v2/simulation-runs/_lib/handlers.ts
+###   app/api/v2/simulation-runs/_lib/__tests__/bw1SavePathSafety.test.ts
+###   app/lib/v2/companyLab/simulation/persistence/repository.ts
+###   app/lib/v2/companyLab/simulation/persistence/redisRepository.ts
+###   app/lib/v2/companyLab/simulation/__tests__/bw1PartialLoad.test.ts
+###   scripts/int1/upstashRestShim.ts
+###   scripts/int1/verifyBw1Propagation.ts
+###   scripts/int1/measureBandwidth.ts
