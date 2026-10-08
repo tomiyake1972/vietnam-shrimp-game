@@ -544,6 +544,172 @@ export function buildInitialDraft(
  * NaN・負値は安全側（0）へ丸め、hosoEqTons()/ratio() のスマートコンストラクタを
  * 必ず経由させることでブランド型の境界検証を通す。
  */
+/**
+ * 【INT-1 §6】提出前に下書きの数値を検証する（無効値の無言サニタイズを止める）。
+ *
+ * 【なぜ必要か（統合候補上で実測した事象）】
+ * buildDecisionInputFromDraft は安全側に倒すため safeNonNegative / safeInRange01 で
+ * 無効値を黙って置き換え、さらに desiredQuantity が 0 以下の行を黙って落とす。
+ * 実測:
+ *   salesPlans[0].desiredQuantity = null / -5000 / "abc" → **その行が消える**
+ *   workerAssignments[0].regularHeadcount = -100         → **0 になる**（全員解雇相当）
+ *   workerAssignments[0].overtimeRate = 99               → 1 にクランプ
+ *   dividendAmountUsd = -1000000 / null                  → 0
+ * つまり「提出したはずの値が消える」「無効な値が別の値として保存される」が、
+ * 利用者に何も伝えずに起きる。研修では、消えた理由が分からないまま
+ * 意思決定が欠落したTurnが確定してしまう。
+ *
+ * 【方針】サニタイズそのものは**変更しない**（既存Runの再現性を壊さないため）。
+ * 代わりに、サニタイズが値を書き換えざるを得ない入力＝無効入力を、提出前に
+ * ここで検出して拒否する。判定条件はサニタイザと同じ範囲をそのまま写しており、
+ * 正当な 0（「売らない」「借りない」等）は通る。
+ *
+ * 戻り値は人が読めるエラー文の配列（空なら妥当）。例外は投げない
+ * （呼び出し側がUIへ出す／HTTP 400 にする等を選べるようにする）。
+ */
+export function validateDecisionDraftNumbers(draft: CompanyDecisionDraft): readonly string[] {
+  const errors: string[] = [];
+  /**
+   * 【形が壊れた下書きも400で返す】この関数はクライアントから来たJSONをそのまま受ける
+   * 経路（/api/v2/play/submit）でも呼ばれる。配列やオブジェクトが欠けていると、
+   * 従来は buildDecisionInputFromDraft が TypeError を投げて 500 になっていた。
+   * ここで形も検査し、人が読めるエラーとして返す（例外は投げない）。
+   */
+  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+  const rows = (value: unknown, label: string): readonly Record<string, unknown>[] => {
+    if (!Array.isArray(value)) {
+      errors.push(`${label}: 一覧の形が不正です（配列ではありません）。`);
+      return [];
+    }
+    const out: Record<string, unknown>[] = [];
+    value.forEach((v, i) => {
+      const r = asRecord(v);
+      if (r === undefined) errors.push(`${label} #${i}: 行の形が不正です。`);
+      else out.push(r);
+    });
+    return out;
+  };
+  const group = (value: unknown, label: string): Record<string, unknown> => {
+    const r = asRecord(value);
+    if (r === undefined) {
+      errors.push(`${label}: 入力の形が不正です。`);
+      return {};
+    }
+    return r;
+  };
+
+  // 下書きそのものがオブジェクトでない場合もここで止める（例外を投げない）。
+  if (asRecord(draft) === undefined) return ["意思決定の入力の形が不正です（オブジェクトではありません）。"];
+  const nonNegative = (value: unknown, label: string): void => {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      errors.push(`${label}: 0以上の数値を入力してください（受け取った値: ${JSON.stringify(value)}）。`);
+    }
+  };
+  const ratio01 = (value: unknown, label: string): void => {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+      errors.push(`${label}: 0〜1の数値を入力してください（受け取った値: ${JSON.stringify(value)}）。`);
+    }
+  };
+  const finite = (value: unknown, label: string): void => {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      errors.push(`${label}: 数値を入力してください（受け取った値: ${JSON.stringify(value)}）。`);
+    }
+  };
+  /**
+   * 【省略可能な項目の検証／JSON送信時の検証漏れ対策】
+   *
+   * 以前は `value !== undefined && value !== null` で検証を飛ばしていた。
+   * しかし Independent Player（app/v2/play/workspace/page.tsx）は下書きを
+   * JSON.stringify して POST するため、入力欄の空欄（NaN）は **null** になって届く。
+   * その結果、空欄が「省略」と同じ扱いで検証を通過していた（実測。再現は
+   * scripts/int1/reproJsonNullBypass.ts）。
+   *
+   * 省略と空欄は次のように区別できる。
+   *   省略  JSON.stringify は undefined のキーを落とすため、**キー自体が存在しない**
+   *   空欄  NaN は null になるため、**キーが存在して値が null**
+   * そこで「キーが無ければ検証しない／キーがあれば値を検証する」に変える。
+   * 画面内（JSONを通らない Console内PLAYER の確定経路）では
+   * `{ leadTimeTurns: undefined }` のようにキーが存在して値が undefined になる
+   * ことがあり、これは従来どおり省略として扱う（buildInitialDraft が実際にそう作る）。
+   */
+  const optional = (
+    record: Record<string, unknown>,
+    key: string,
+    label: string,
+    check: (value: unknown, label: string) => void
+  ): void => {
+    if (!(key in record)) return; // 省略（キーが無い）
+    if (record[key] === undefined) return; // 画面内の明示的なundefinedも省略として扱う
+    check(record[key], label);
+  };
+
+  rows(draft.salesPlans, "販売計画").forEach((p, i) => {
+    const at = `販売計画 ${typeof p.market === "string" ? p.market : `#${i}`}/${typeof p.product === "string" ? p.product : "?"}`;
+    nonNegative(p.desiredQuantity, `${at} の提示数量`);
+    finite(p.priceAdjustmentUsdPerHosoEqKg, `${at} の価格調整`);
+    nonNegative(p.salesForceHeadcount, `${at} の営業人員`);
+  });
+
+  const domestic = group(draft.domesticPurchase, "国内買付");
+  nonNegative(domestic.desiredQuantity, "国内買付の希望数量");
+  finite(domestic.priceAdjustmentUsdPerHosoEqKg, "国内買付の価格調整");
+  nonNegative(domestic.procurementHeadcount, "国内買付の調達人員");
+
+  rows(draft.importOrders, "輸入発注").forEach((o, i) => {
+    const at = `輸入発注 ${typeof o.originCountry === "string" ? o.originCountry : `#${i}`}`;
+    nonNegative(o.orderedQuantity, `${at} の発注量`);
+    optional(o, "leadTimeTurns", `${at} のリードタイム`, nonNegative);
+  });
+
+  rows(draft.aquacultureStockingPlans, "養殖計画").forEach((a, i) => {
+    nonNegative(a.plannedStockingQuantity, `養殖 #${i} の投入量`);
+    ratio01(a.aquacultureIntensity, `養殖 #${i} の飼育強度`);
+    ratio01(a.bioSecurityLevel, `養殖 #${i} の防疫水準`);
+  });
+
+  rows(draft.productionPlans, "生産計画").forEach((p, i) => {
+    const at = `生産計画 ${typeof p.factoryId === "string" ? p.factoryId : `#${i}`}/${typeof p.product === "string" ? p.product : "?"}`;
+    nonNegative(p.desiredQuantity, `${at} の生産数量`);
+    finite(p.priority, `${at} の優先度`);
+  });
+
+  rows(draft.workerAssignments, "人員配置").forEach((w, i) => {
+    const at = `人員配置 ${typeof w.factoryId === "string" ? w.factoryId : `#${i}`}`;
+    /**
+     * 【INT-1 §1（監査後修正）】増減差分そのものを検査する。
+     * 画面が編集するのは regularHeadcountChange であり、regularHeadcount は
+     * engine の applyHeadcountChange（変更禁止）を通して算出される。その関数は
+     * 非有限の差分を 0 として扱うため、差分が空欄でも regularHeadcount は
+     * 「前期末人数のまま」の正当な値になり、下の nonNegative では検出できない（実測）。
+     * 減員は負の差分が正当なので範囲は課さず、数値であることだけを求める。
+     */
+    optional(w, "regularHeadcountChange", `${at} の増員／減員`, finite);
+    nonNegative(w.regularHeadcount, `${at} の常用人数`);
+    nonNegative(w.temporaryHeadcount, `${at} の臨時人数`);
+    ratio01(w.overtimeRate, `${at} の残業率`);
+    ratio01(w.attendanceRate, `${at} の出勤率`);
+  });
+
+  const financing = group(draft.financingRequest, "借入申請");
+  nonNegative(financing.desiredAmountUsd, "借入の希望額");
+  nonNegative(financing.desiredTermQuarters, "借入の希望期間");
+  nonNegative(financing.desiredPrepaymentUsd, "繰上返済額");
+
+  const capex = group(draft.capexDecision, "設備投資");
+  rows(capex.newProjectProposals, "設備投資提案").forEach((p, i) => {
+    optional(p, "requestedBudgetUsd", `設備投資提案 #${i} の申請額`, nonNegative);
+    optional(p, "priority", `設備投資提案 #${i} の優先度`, finite);
+  });
+
+  if (draft.salesForceHireCount !== undefined) nonNegative(draft.salesForceHireCount, "営業人員の採用人数");
+  if (draft.salesForceLayoffCount !== undefined) nonNegative(draft.salesForceLayoffCount, "営業人員の減員人数");
+  if (draft.vapProductDevelopmentSpendUsd !== undefined) nonNegative(draft.vapProductDevelopmentSpendUsd, "VAP商品開発費");
+  if (draft.dividendAmountUsd !== undefined) nonNegative(draft.dividendAmountUsd, "配当額");
+
+  return errors;
+}
+
 export function buildDecisionInputFromDraft(draft: CompanyDecisionDraft, fixture: CompanyFixture, period: PeriodV2): CompanyDecisionInput {
   const companyId = draft.companyId;
 

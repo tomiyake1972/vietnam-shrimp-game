@@ -109,8 +109,13 @@ export function buildDecisionStudioViewModel(input: BuildDecisionStudioViewModel
   const capexCandidates = buildAllCapexCandidateViewModels(period, CAPEX_PARAMETERS_V1);
   const lastQuarterCapexEventsByProjectId = new Map((lastQuarterCapexEvents ?? []).map((e) => [e.projectId, e]));
   const capexPortfolioRows = buildCapexPortfolioViewModel(ownState.capexState.portfolio.projects, CAPEX_PARAMETERS_V1, period, lastQuarterCapexEventsByProjectId);
+  // 【INT-1 §1（監査後修正）】申請額が空欄・不正（NaN）のとき `??` では既定値へ落ちないため、
+  // そのまま合計すると見込み支払額の表示が NaN になる。表示だけ標準予算で代替し、
+  // 入力の不正そのものは validateDecisionDraftNumbers が項目名を示して提出を止める。
   const capexCandidateBudgetByType = (projectType: (typeof capexCandidates)[number]["projectType"], requestedBudgetUsd: number | undefined) =>
-    requestedBudgetUsd ?? CAPEX_PARAMETERS_V1.templatesByType[projectType].standardBudgetUsd;
+    requestedBudgetUsd !== undefined && Number.isFinite(requestedBudgetUsd)
+      ? requestedBudgetUsd
+      : CAPEX_PARAMETERS_V1.templatesByType[projectType].standardBudgetUsd;
   const capexDraftThisQuarterPaymentUsd = draft.capexDecision.newProjectProposals.reduce((sum, p) => {
     const template = CAPEX_PARAMETERS_V1.templatesByType[p.projectType];
     const budget = capexCandidateBudgetByType(p.projectType, p.requestedBudgetUsd);

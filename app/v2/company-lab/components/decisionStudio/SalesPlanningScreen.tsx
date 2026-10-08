@@ -14,6 +14,8 @@ import { DemandMarketId, Product } from "../../../../lib/v2/market/types";
 import { MarketProductBasePriceReference } from "../../../../lib/v2/sales/marketBasePriceReference";
 import { NumberCell, PriceAdjustmentCell } from "../InputCells";
 import CollapsibleSection from "../CollapsibleSection";
+import BacklogByProductPanel from "../BacklogByProductPanel";
+import { BacklogSemantics } from "../../../../lib/v2/companyLab/aiManagementMeeting/backlogSemantics";
 import { INFO_TABLE_HEAD_CLASS } from "../panelStyles";
 
 function formatUsd(value: number): string {
@@ -56,6 +58,12 @@ interface SalesPlanningScreenProps {
    * 最小DTO。省略時・turn1等は前Turン価格「－」表示。
    */
   readonly lastQuarterSalesAllocations?: readonly MarketProductBasePriceReference[];
+  /**
+   * 【INT-1 §2A】商品別受注残。DecisionStudio が既存SSoT
+   * （aiManagementMeeting/backlogSemantics.ts）から導出した値をそのまま受け取る。
+   * この画面では再集計・再分類を行わない。
+   */
+  readonly backlogSemantics?: BacklogSemantics;
 }
 
 export default function SalesPlanningScreen({
@@ -67,11 +75,20 @@ export default function SalesPlanningScreen({
   salesForceHiring,
   salesForceHireLimit,
   lastQuarterSalesAllocations,
+  backlogSemantics,
 }: SalesPlanningScreenProps) {
   const totals = computeSalesPlanTotals(draft.salesPlans);
 
   return (
     <div className="space-y-3" data-testid="decision-studio-sales-screen">
+      {/* 【INT-1 §2A】販売数量を決める前に、商品別の受注残（未履行の確定受注）を見られるようにする。 */}
+      {backlogSemantics ? (
+        <BacklogByProductPanel
+          backlog={backlogSemantics}
+          context="販売計画の参考情報です。"
+          testIdPrefix="sales"
+        />
+      ) : null}
       {/* 販売計画 */}
       <CollapsibleSection
         title="販売計画（市場×商品）"
@@ -112,7 +129,9 @@ export default function SalesPlanningScreen({
         </p>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full text-xs text-gray-300">
+          {/* 【INT-1】画面上部へ受注残パネルを追加したため、位置指定（最初のtable）での
+              要素取得が壊れないように、販売計画テーブル自身へ識別子を付ける。 */}
+          <table className="min-w-full text-xs text-gray-300" data-testid="sales-plan-table">
             <thead>
               <tr className={INFO_TABLE_HEAD_CLASS}>
                 <th className="pr-3 py-1">市場</th>

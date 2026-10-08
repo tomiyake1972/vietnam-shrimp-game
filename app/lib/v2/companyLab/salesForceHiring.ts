@@ -137,6 +137,50 @@ export function applySalesHireRampLimit(
   return { actualHireCount, limit, deferredCount: Math.max(0, desired - actualHireCount) };
 }
 
+/**
+ * 【INT-1 §3】営業人員の増減意思決定を、提出・確定の時点で検証する（純粋関数・例外を投げない）。
+ *
+ * 【なぜ必要か（統合候補上で実測した事象）】
+ * 採用上限を超えた入力は提出時に通り、confirmedPlayerDecisions へ**保存され**、
+ * GM が「1 Turn」を押した時点で初めて runner.ts が CompanyLabError を投げて止まる。
+ * 実測（baseline / BAL / 現員60人・上限18人）:
+ *   提出 19人 → 受理・保存される
+ *   GMのTurn進行 → 「営業人員の採用は1四半期あたり18人までです…入力値は19人でした」で停止
+ *   PLAYER が同じTurnへ正しい値で再提出 → DUPLICATE_SUBMIT で拒否される
+ * つまり研修中はそのTurnが進められなくなり、PLAYER 自身では直せない。
+ *
+ * 【上限計算を二重に持たない】判定は runner.ts が使うのと同じ
+ * computeMaxSalesHiresPerQuarter と、同じ「採用と減員の同時入力禁止」条件である。
+ * UI へ別式を書かない（この関数を UI とサーバの両方から呼ぶ）。
+ * エラー文も runner.ts と同じ内容を返し、利用者が見る説明が経路で変わらないようにする。
+ *
+ * 戻り値は人が読めるエラー文の配列（空なら妥当）。engine 側の throw は変更していない。
+ */
+export function validateSalesForceHiringDecision(params: {
+  readonly hireCount: number | undefined;
+  readonly layoffCount: number | undefined;
+  /** 当期に配分可能な営業人員総数（前期末時点）。runner.ts と同じ値を渡すこと。 */
+  readonly currentActiveHeadcount: number;
+}): readonly string[] {
+  const hire = params.hireCount ?? 0;
+  const layoff = params.layoffCount ?? 0;
+  const errors: string[] = [];
+
+  if (hire > 0 && layoff > 0) {
+    errors.push(
+      `営業人員の採用（${hire}人）と減員（${layoff}人）を同一四半期に同時入力することはできません。いずれか一方を0にしてください。`
+    );
+  }
+  const limit = computeMaxSalesHiresPerQuarter(params.currentActiveHeadcount);
+  if (hire > limit) {
+    errors.push(
+      `営業人員の採用は1四半期あたり${limit}人までです（現在の営業人員${params.currentActiveHeadcount}人の${Math.round(SALES_HIRE_RAMP_RATIO * 100)}%、最低${MIN_SALES_HIRES_PER_QUARTER}人）。入力値は${hire}人でした。` +
+        "営業組織を一度に大きく増やすと、顧客の引継ぎ・育成・商談情報の共有が追いつかず、増えた人数が戦力として機能しないためです。"
+    );
+  }
+  return errors;
+}
+
 /** 会社1社ぶんの当期の営業人員増減意思決定（採用数・減員数、いずれも0以上）。 */
 export interface SalesForceHiringLayoffDecision {
   readonly hireCount: number;

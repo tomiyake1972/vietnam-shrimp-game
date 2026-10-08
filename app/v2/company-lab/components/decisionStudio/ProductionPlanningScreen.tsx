@@ -16,6 +16,8 @@ import ProcessingCapacityPanel from "../ProcessingCapacityPanel";
 import ColdStoragePanel from "../ColdStoragePanel";
 import PlanningWarningsPanel from "../PlanningWarningsPanel";
 import CollapsibleSection from "../CollapsibleSection";
+import BacklogByProductPanel from "../BacklogByProductPanel";
+import { BacklogSemantics } from "../../../../lib/v2/companyLab/aiManagementMeeting/backlogSemantics";
 import { NumberCell } from "../InputCells";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INFO_VALUE_CLASS, NO_VALUE_TEXT } from "../panelStyles";
 
@@ -24,9 +26,15 @@ interface ProductionPlanningScreenProps {
   readonly onChange: (next: CompanyDecisionDraft) => void;
   readonly disabled: boolean;
   readonly vm: DecisionStudioViewModel;
+  /**
+   * 【INT-1 §2A】商品別受注残。DecisionStudio が既存SSoT
+   * （aiManagementMeeting/backlogSemantics.ts）から導出した値をそのまま受け取る。
+   * 画面上部の「未履行契約残高」は会社合計の1値であり、商品別の内訳はこちらで見る。
+   */
+  readonly backlogSemantics?: BacklogSemantics;
 }
 
-export default function ProductionPlanningScreen({ draft, onChange, disabled, vm }: ProductionPlanningScreenProps) {
+export default function ProductionPlanningScreen({ draft, onChange, disabled, vm, backlogSemantics }: ProductionPlanningScreenProps) {
   const { planning, capacityViewModel, processingForecast, freezingPackagingPool, plannedFreezingProcessingTons, coldStorageInvestmentUsdPerTon, pendingCapacityTotalTons, rawMaterialInventory, outstandingBacklog } = vm;
 
   const currentCapacityTons = (factoryId: string, pool: CapacityPoolKey): number | undefined => {
@@ -39,6 +47,15 @@ export default function ProductionPlanningScreen({ draft, onChange, disabled, vm
       <div className="rounded-lg bg-gray-900/60 border border-gray-700/60 px-3 py-2 text-xs text-gray-400">
         参考情報: 原料在庫（利用可能） {formatHosoEqTons(rawMaterialInventory)} / 未履行契約残高 {formatHosoEqTons(outstandingBacklog)} / 販売希望量・原料利用可否はSALES・PROCUREMENTタブ参照
       </div>
+
+      {/* 【INT-1 §2A】生産数量を決める前に、商品別の受注残（未履行の確定受注）を見られるようにする。 */}
+      {backlogSemantics ? (
+        <BacklogByProductPanel
+          backlog={backlogSemantics}
+          context="生産計画の参考情報です。"
+          testIdPrefix="production"
+        />
+      ) : null}
 
       {/* 【Phase 8D】現在の入力に対する警告 */}
       <CollapsibleSection

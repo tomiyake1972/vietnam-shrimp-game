@@ -40,6 +40,7 @@ export default function WorkforcePlanningScreen({ draft, onChange, disabled, vm 
       >
         <WorkforcePanel
           rows={workforceRows}
+          draftRows={draft.workerAssignments}
           disabled={disabled}
           onChangeHeadcountDelta={(factoryId, delta) => {
             const idx = draft.workerAssignments.findIndex((w) => w.factoryId === factoryId);

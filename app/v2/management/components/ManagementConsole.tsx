@@ -656,6 +656,30 @@ export function ManagementConsole() {
       setView(viewFromSession(current));
       setWaitingForPlayerCompanyIds([]);
 
+      /**
+       * 【O1 §11・不要な二重保存の除去】
+       * 以前はループ内でTurnごとに保存したあと、ループ終了後にもう一度
+       * まったく同じ内容を無条件に保存していた。この2回目の保存は
+       *   - 画面のturn counterが進んだ後に実行される
+       *   - confirmedPlayerDecisions={} を含む resumePayload 全体を書き戻す
+       * ため、その隙間に別端末のPlayerが次Turnを提出すると、その提出を消していた
+       * （実測で確認したDATA LOSSの直接の引き金）。
+       * 保存対象が本当に変わった場合（stopReason変更・game end・失敗記録など）は
+       * 最終保存が要るので、「何を保存したか」の指紋を持ち、変化が無ければ省く。
+       */
+      const persistSignature = (session: SimulationSession, confirmed: Readonly<Record<string, CompanyDecisionInput>>): string =>
+        JSON.stringify({
+          completedTurns: session.run.completedTurns,
+          currentTurn: session.state.scenarioState.currentTurn,
+          stopReason: session.run.stopReason,
+          completedAt: session.run.completedAt,
+          gameEndedAt: session.run.gameEndedAt ?? null,
+          errorMessage: session.run.errorMessage ?? null,
+          confirmed: Object.keys(confirmed).sort(),
+          controlModes: controlModesForThisRun,
+        });
+      let lastPersistedSignature: string | null = null;
+
       // このrun()呼び出しの間だけ有効な、直近のPLAYER確定意思決定。
       // ターン処理後は消費してクリアする（次のPLAYERターンでは再び未入力に戻るのが正しい）。
       let pendingPlayerDecisions: Readonly<Record<string, CompanyDecisionInput>> = continuesLiveRun ? confirmedPlayerDecisions : {};
@@ -729,6 +753,7 @@ export function ManagementConsole() {
         // （バッチの最後にまとめて1回だけ保存する旧実装は、途中の保存失敗を検知できず、
         // liveだけが先へ進んでしまう窓を作っていた）。
         const persisted = await persist(current, controlModesForThisRun, pendingPlayerDecisions);
+        if (persisted) lastPersistedSignature = persistSignature(current, pendingPlayerDecisions);
         if (!persisted) {
           setErrorMessage(
             `Turn ${turnNumber} の保存に失敗したため、これ以上Turnを進めません` +
@@ -739,11 +764,17 @@ export function ManagementConsole() {
           return;
         }
       }
-      // 完走・シナリオ終端・失敗・PLAYER待ちのいずれでも保存する（失敗の記録も残す）。
-      // 【複数工場CAPEX Targeting E2E受入で発見・修正】persist完了前にボタンを再度押せる
-      // 状態へ戻すと、hard reloadで直近ターンが保存前に失われる競合が起きる（上のSTOP分岐と
-      // 同じ理由）。
-      await persist(current, controlModesForThisRun, pendingPlayerDecisions);
+      /**
+       * 完走・シナリオ終端・失敗・PLAYER待ちのいずれでも保存する（失敗の記録も残す）。
+       * 【複数工場CAPEX Targeting E2E受入で発見・修正】persist完了前にボタンを再度押せる
+       * 状態へ戻すと、hard reloadで直近ターンが保存前に失われる競合が起きる（上のSTOP分岐と
+       * 同じ理由）。
+       * 【O1 §11】ただしループ内で保存した内容から何も変わっていないなら保存し直さない。
+       * 同じ内容の書き戻しは、その間に入った他writerの提出を消すだけで、得るものが無い。
+       */
+      if (persistSignature(current, pendingPlayerDecisions) !== lastPersistedSignature) {
+        await persist(current, controlModesForThisRun, pendingPlayerDecisions);
+      }
       setPhase("idle");
       setRunningTurn(null);
     },

@@ -22,8 +22,8 @@ import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
-import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "../../company-lab/decisionDraft";
-import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult } from "../../company-lab/play/_lib/financialViewSelectors";
+import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft, validateDecisionDraftNumbers } from "../../company-lab/decisionDraft";
+import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "../../company-lab/play/_lib/financialViewSelectors";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../../lib/v2/companyLab/standardAi/policy";
@@ -39,7 +39,10 @@ import { selectScenarioNewsForTurn } from "../lib/scenarioNews";
 import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { computeFinalEvaluationSnapshot, isGameFinished, lastCompletedTurn } from "../lib/gameEnd";
 import { recordGmProxySubmission } from "../lib/playerSeats";
+import { validateSalesForceHiringDecision } from "../../../lib/v2/companyLab/salesForceHiring";
 import { projectMarketBasePriceReferences } from "../../../lib/v2/sales/marketBasePriceReference";
+import { buildAnnualDividendGuidanceView } from "../../../lib/v2/companyLab/annualDividendGuidanceView";
+import { computeMaxDividendUsd } from "../../../lib/v2/finance/dividend";
 import { CompanyInspector } from "../components/CompanyInspector";
 import { MarketSummary } from "../components/MarketSummary";
 import { TsvLeaderboardPanel } from "../components/TsvLeaderboardPanel";
@@ -100,6 +103,13 @@ export function PlayerWorkspace() {
             Runの状態をそのまま使う画面です。別のタブで開いた・ページを再読み込みした等の理由で、
             このタブがそのRunの進行状態を持っていない可能性があります。経営管制室から「この会社を操作」を
             押して開き直してください。
+          </p>
+          {/* 【INT-1 §4】未確定入力が失われる事実と、必要な再入力を明示する
+              （新しい下書き永続化機構は追加しない。起きることを正直に伝える）。 */}
+          <p className="mt-2 text-xs leading-relaxed text-amber-200" data-testid="workspace-unconfirmed-draft-lost">
+            <strong>未確定の入力（「この内容で意思決定を確定」を押す前の下書き）は失われています。</strong>
+            開き直したあと、今回のTurnの入力をもう一度行ってください。
+            すでに確定済みの意思決定はサーバに保存されているため失われません。
           </p>
           <Link
             href={consoleHref}
@@ -174,6 +184,8 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
     if (confirmedDraft && entry.confirmedPlayerDecisions[companyId]) return confirmedDraft;
     return buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories);
   });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<boolean>(() => Boolean(entry.pendingDrafts[companyId] === undefined && entry.confirmedPlayerDecisions[companyId]));
 
   // 【Phase 9・§21根本原因】以前はここで setRevision を毎回bumpし、DecisionEditorを
@@ -194,27 +206,98 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
     [session, companyId]
   );
 
-  const handleConfirm = useCallback(() => {
+  /**
+   * 【D1 §8】年度中の配当参考表示。管理者がバランス調整で配当性向を明示指定していれば、
+   * この会社はQ4決算直後に自動精算されるため、その事実と年初来実績ベースの参考額を
+   * FINANCE画面へ出す。率の解決はengineと同じresolverを通す（別計算を作らない）。
+   */
+  const annualDividendGuidance = useMemo(
+    () =>
+      buildAnnualDividendGuidanceView({
+        history: session.state.history,
+        currentPeriod: session.state.currentPeriod,
+        turn: session.state.scenarioState.currentTurn,
+        companyId,
+        manualBalanceOverrides: session.state.config.manualBalanceOverrides,
+        currentCashUsd: ownState.financeState.cash as number,
+        dividendCapacityUsd: computeMaxDividendUsd(ownState.financeState),
+      }),
+    [session, companyId, ownState]
+  );
+
+  /**
+   * 【O1 §10】保存の成否を待たずに「確定」と見せない。
+   * 以前は persistResumableRun を void で投げっぱなしにしたまま setConfirmed(true)
+   * していたため、保存が競合で失敗しても画面は「意思決定済み」と表示していた。
+   * サーバー保存が成立してから確定表示にし、失敗したら理由を出して未確定へ戻す。
+   */
+  const handleConfirm = useCallback(async () => {
+    /**
+     * 【INT-1 §6】無効な数値を保存しない。Independent Player の提出APIと同じ検証を、
+     * Management Console内PLAYERの確定でも通す（経路によって厳しさが変わらないようにする）。
+     * buildDecisionInputFromDraft は無効値を黙って0へ置換し数量0の行を落とすため、
+     * 検証はその前に行う。
+     */
+    const draftErrors = validateDecisionDraftNumbers(draft);
+    if (draftErrors.length > 0) {
+      setSaveError(`入力に無効な値があるため確定できません（値は保存していません）。${draftErrors.slice(0, 5).join(" / ")}`);
+      return;
+    }
+    /**
+     * 【INT-1 §3】営業人員の増減も、確定の前に engine と同じ制約で確認する。
+     * これが無いと、採用上限超過の入力が保存され、GM の Turn 進行時に初めて
+     * CompanyLabError で止まる（実測）。判定は runner.ts と同じ
+     * computeMaxSalesHiresPerQuarter を使う共有関数で行い、上限式をUIへ別実装しない。
+     */
+    const hiringErrors = validateSalesForceHiringDecision({
+      hireCount: draft.salesForceHireCount,
+      layoffCount: draft.salesForceLayoffCount,
+      currentActiveHeadcount: ownState.salesForceHiringState.headcount,
+    });
+    if (hiringErrors.length > 0) {
+      setSaveError(`確定できません（値は保存していません）。${hiringErrors.join(" / ")}`);
+      return;
+    }
     const decision = buildDecisionInputFromDraft(draft, fixture, session.state.currentPeriod);
     const current = getLiveSession(session.run.simulationRunId);
     const nextPendingDrafts = { ...(current?.pendingDrafts ?? {}) };
     delete nextPendingDrafts[companyId];
     const nextConfirmedPlayerDecisions = { ...(current?.confirmedPlayerDecisions ?? {}), [companyId]: decision };
-    upsertLiveSession(session.run.simulationRunId, {
-      session,
-      confirmedPlayerDecisions: nextConfirmedPlayerDecisions,
-      confirmedPlayerDrafts: { ...(current?.confirmedPlayerDrafts ?? {}), [companyId]: draft },
-      pendingDrafts: nextPendingDrafts,
-    });
-    setConfirmed(true);
-    // 【指示§15】PLAYER意思決定の確定は保存タイミングの1つ（WAITING_FOR_PLAYER状態を
-    // ハードリロード後も再現できるように、確定した瞬間に resumePayload ごと保存する）。
-    void persistResumableRun(session, current?.companyControlModes ?? entry.companyControlModes, nextConfirmedPlayerDecisions);
-    // 【Independent Player Flow】この会社に参加リンクが発行済みの場合、GM代理操作でも
-    // Seat側の提出記録を追いつかせる（Turn Advance gateが参照する副次情報。
-    // 決定そのものの正本は上のresumePayload保存であり、ここは失敗しても意思決定は失われない）。
-    void recordGmProxySubmission(session.run.simulationRunId, companyId, session.state.scenarioState.currentTurn);
-  }, [session, fixture, draft, companyId, entry.companyControlModes]);
+
+    setSaveError(null);
+    setSaving(true);
+    try {
+      // 【指示§15】PLAYER意思決定の確定は保存タイミングの1つ（WAITING_FOR_PLAYER状態を
+      // ハードリロード後も再現できるように、確定した瞬間に resumePayload ごと保存する）。
+      const result = await persistResumableRun(session, current?.companyControlModes ?? entry.companyControlModes, nextConfirmedPlayerDecisions);
+      if (!result.serverSaveSucceeded) {
+        setSaveError(
+          result.conflict
+            ? `他の保存と競合したため確定できませんでした。画面を再読み込みしてからもう一度確定してください（${result.serverError ?? ""}）。`
+            : `意思決定を保存できませんでした（${result.serverError ?? "原因不明"}）。`
+        );
+        return;
+      }
+      // 保存が成立してから、タブ内registryと確定表示を更新する。
+      upsertLiveSession(session.run.simulationRunId, {
+        session,
+        confirmedPlayerDecisions: nextConfirmedPlayerDecisions,
+        confirmedPlayerDrafts: { ...(current?.confirmedPlayerDrafts ?? {}), [companyId]: draft },
+        pendingDrafts: nextPendingDrafts,
+      });
+      setConfirmed(true);
+      /**
+       * 【Independent Player Flow・O1 §12】この会社に参加リンクが発行済みの場合、
+       * GM代理操作でもSeat側の提出記録を追いつかせる。
+       * decision保存が成立した後にだけ書く（「seatだけ提出済みで decision が無い」
+       * という不整合を作らない）。
+       */
+      void recordGmProxySubmission(session.run.simulationRunId, companyId, session.state.scenarioState.currentTurn);
+    } finally {
+      setSaving(false);
+    }
+  // 【INT-1 §3】営業人員の上限判定に使う現員も依存に含める（古い人数で判定しない）。
+  }, [session, fixture, draft, companyId, entry.companyControlModes, ownState.salesForceHiringState.headcount]);
 
   const dataset = buildDatasetFromSession(session);
   const turn = session.state.scenarioState.currentTurn;
@@ -237,6 +320,8 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const backlog = buildBacklogDisplay(summary, previousSummary);
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
+  // 【INT-1 §2B】前Turnの借入審査・緊急融資の確定記録。既存の抽出関数をそのまま使う。
+  const lastQuarterFinancingResult = lastRecord ? extractCompanyFinancingResult(lastRecord, companyId) : null;
   const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
   // 【SALES基準価格参考表示】market/product/basePriceだけの最小DTOへ射影する
   // （decisionContext.ts・viewModel.tsと同じ関数。他社のaskPrice等は含めない）。
@@ -330,7 +415,9 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
             <h1 className="text-base font-bold tracking-tight" data-testid="workspace-heading">
               {fixture.displayName}（{companyId}）— PLAYER Company Workspace
             </h1>
-            <p className="mt-0.5 text-[11px] text-slate-400">
+            {/* 【INT-1 §6】古いTurnの内容が表示されていないかを検出できるようにする
+                （turn は session.state から毎レンダー導出している。testidは検証用）。 */}
+            <p className="mt-0.5 text-[11px] text-slate-400" data-testid="workspace-turn" data-turn={turn}>
               Turn {turn} / Scenario {session.run.scenarioId} / Seed {session.run.seed} / Run ID {session.run.simulationRunId}
             </p>
             <p className="text-[11px] text-slate-400" data-testid="workspace-sales-model">
@@ -537,13 +624,19 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
             <div className="mb-2 flex flex-wrap justify-end gap-1.5">
               <button
                 type="button"
-                onClick={handleConfirm}
+                onClick={() => void handleConfirm()}
+                disabled={saving}
                 data-testid="workspace-confirm-decision"
-                className="rounded bg-emerald-700 px-4 py-1.5 text-sm font-semibold hover:bg-emerald-600"
+                className="rounded bg-emerald-700 px-4 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40"
               >
-                この内容で意思決定を確定
+                {saving ? "保存中…" : "この内容で意思決定を確定"}
               </button>
             </div>
+            {saveError ? (
+              <p className="mb-2 text-right text-[11px] text-rose-400" data-testid="workspace-confirm-error">
+                {saveError}
+              </p>
+            ) : null}
             <DecisionStudio
               fixture={fixture}
               ownState={ownState}
@@ -556,7 +649,9 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               lastQuarterCapexEvents={lastQuarterCapexResult?.events}
               lastQuarterRejectedCapexProposals={lastQuarterCapexResult?.rejectedProposals}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
+              lastQuarterFinancingResult={lastQuarterFinancingResult}
               lastQuarterDividendResult={lastQuarterDividendResult}
+              annualDividendGuidance={annualDividendGuidance}
               lastQuarterSalesAllocations={lastQuarterSalesAllocations}
               publicInfo={publicInfo}
               scenarioNews={scenarioNews}

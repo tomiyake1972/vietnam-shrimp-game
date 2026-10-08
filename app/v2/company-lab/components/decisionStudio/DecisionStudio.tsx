@@ -25,6 +25,7 @@ import { PeriodV2 } from "../../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../../../lib/v2/companyLab";
 import { CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../../lib/v2/capex";
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
+import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
 import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividend";
 import { MarketProductBasePriceReference } from "../../../../lib/v2/sales/marketBasePriceReference";
 import { CompanyDecisionDraft } from "../../decisionDraft";
@@ -34,11 +35,14 @@ import ProcurementPlanningSection from "../procurement/ProcurementPlanningSectio
 import { AreaToneLegend } from "../CollapsibleSection";
 import DecisionStudioNavigation, { DecisionStudioScreenKey } from "./DecisionStudioNavigation";
 import InformationScreen from "./InformationScreen";
+import { computeBacklogSemantics } from "../../../../lib/v2/companyLab/aiManagementMeeting/backlogSemantics";
+import { toYearQuarter } from "../../../../lib/v2/core/period";
 import SalesPlanningScreen from "./SalesPlanningScreen";
 import ProductionPlanningScreen from "./ProductionPlanningScreen";
 import WorkforcePlanningScreen from "./WorkforcePlanningScreen";
 import InvestmentPlanningScreen from "./InvestmentPlanningScreen";
 import FinancePlanningScreen from "./FinancePlanningScreen";
+import { AnnualDividendGuidance } from "../../../../lib/v2/finance/annualDividendGuidance";
 import AuxiliaryPanel, { AiMeetingSource } from "./AuxiliaryPanel";
 import type { StandardAiCostProjection } from "../../../../lib/v2/companyLab/standardAi/costProjection";
 
@@ -52,8 +56,20 @@ export interface DecisionStudioProps {
   readonly lastQuarterCapexEvents?: readonly CapexProjectQuarterEvent[];
   readonly lastQuarterRejectedCapexProposals?: readonly CapexRejectedProposal[];
   readonly lastQuarterFinancialResult?: CompanyFinancialQuarterResult | null;
+  /**
+   * 【INT-1 §2B】前Turnの借入審査・緊急融資の確定記録。
+   * 既存の FinancingQuarterResult をそのまま渡す（新しい計算はしない）。
+   * 記録が無いRunでは undefined/null のまま渡し、画面側が「未取得」と表示する。
+   */
+  readonly lastQuarterFinancingResult?: FinancingQuarterResult | null;
   /** 【配当Decision UI接続】直近確定四半期の配当結果（累積配当・却下理由の表示用）。 */
   readonly lastQuarterDividendResult?: CompanyDividendQuarterResult | null;
+  /**
+   * 【D1 §8】年度中の配当参考表示（FINANCE画面）。管理者がバランス調整で配当性向を
+   * 明示指定している場合に、Q4決算直後の自動精算と年初来実績ベース参考額を出す。
+   * 渡さない呼び出し元（Company Lab経路）では何も表示されず、既存画面と同一。
+   */
+  readonly annualDividendGuidance?: AnnualDividendGuidance | null;
   /**
    * 【SALES基準価格参考表示・セキュリティ修正】直近確定四半期の市場×商品別「基準価格」だけの
    * 最小DTO（他社askPrice等は含まない。app/lib/v2/sales/marketBasePriceReference.ts参照）。
@@ -100,6 +116,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     lastQuarterCapexEvents,
     lastQuarterRejectedCapexProposals,
     lastQuarterFinancialResult,
+    lastQuarterFinancingResult,
     lastQuarterDividendResult,
     lastQuarterSalesAllocations,
     publicInfo,
@@ -110,6 +127,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     labId,
     simulationRunId,
     companyName,
+    annualDividendGuidance,
   } = props;
 
   const [activeScreen, setActiveScreen] = useState<DecisionStudioScreenKey>("info");
@@ -142,6 +160,21 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     sales: vm.salesForceAllocation.isOverAllocated ? 1 : 0,
     production: vm.planning.warnings.length,
   };
+
+  /**
+   * 【INT-1 §2A】商品別受注残を意思決定画面で参照できるようにする。
+   *
+   * 集計は既存SSoT（aiManagementMeeting/backlogSemantics.ts の computeBacklogSemantics）を
+   * そのまま呼ぶ。SalesContract.dueDate と outstandingQuantity だけから
+   * Healthy Forward / Due This Turn / Overdue を分離し status まで確定する関数であり、
+   * ここで新しい集計・しきい値・警告を作らない。
+   * ownState.contracts は自社の契約のみ（情報境界は既存のまま）。
+   * SALES と PRODUCTION の両画面へ同じ値を渡し、表示のズレを構造的に防ぐ。
+   */
+  const backlogSemantics = useMemo(() => {
+    const yq = toYearQuarter(period);
+    return computeBacklogSemantics(ownState.contracts, ownState.companyId, yq.year, yq.quarter);
+  }, [ownState.contracts, ownState.companyId, period]);
 
   return (
     <div className="flex flex-wrap gap-3" data-testid="decision-studio">
@@ -197,9 +230,12 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               salesForceHiring={vm.salesForceHiring}
               salesForceHireLimit={vm.salesForceHireLimit}
               lastQuarterSalesAllocations={lastQuarterSalesAllocations}
+              backlogSemantics={backlogSemantics}
             />
           )}
-          {activeScreen === "production" && <ProductionPlanningScreen draft={draft} onChange={onChange} disabled={disabled} vm={vm} />}
+          {activeScreen === "production" && (
+            <ProductionPlanningScreen draft={draft} onChange={onChange} disabled={disabled} vm={vm} backlogSemantics={backlogSemantics} />
+          )}
           {activeScreen === "worker" && <WorkforcePlanningScreen draft={draft} onChange={onChange} disabled={disabled} vm={vm} />}
           {activeScreen === "procurement" && (
             <ProcurementPlanningSection
@@ -232,7 +268,9 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               disabled={disabled}
               vm={vm}
               lastQuarterFinancialResult={lastQuarterFinancialResult}
+              lastQuarterFinancingResult={lastQuarterFinancingResult}
               lastQuarterDividendResult={lastQuarterDividendResult}
+              annualDividendGuidance={annualDividendGuidance}
             />
           )}
         </div>

@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
-import { CompanyDecisionDraft } from "../../company-lab/decisionDraft";
+import { CompanyDecisionDraft, validateDecisionDraftNumbers } from "../../company-lab/decisionDraft";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { selectScenarioNewsForTurn } from "../../management/lib/scenarioNews";
 import { FinalResultsSummary } from "../../management/components/FinalResultsSummary";
@@ -97,6 +97,21 @@ export default function PlayerWorkspacePage() {
 
   const handleSubmit = useCallback(async () => {
     if (!context || !draft) return;
+    /**
+     * 【INT-1 §3（最終監査後）】空欄・不正値を送る前にこの画面で止める。
+     *
+     * 下書きは下の fetch で JSON.stringify を通るため、入力欄の空欄（NaN）は
+     * null になって届く。server 側の検証はその null も拒否するよう直したが、
+     * ここで先に止めれば JSON 変換を経ずに同じ項目名を即座に示せる。
+     * 検証関数は Console内PLAYER（PlayerWorkspace.handleConfirm）と
+     * server（/api/v2/play/submit）と同一のものを使い、経路によって
+     * 厳しさが変わらないようにする（UIへ別実装しない）。
+     */
+    const draftErrors = validateDecisionDraftNumbers(draft);
+    if (draftErrors.length > 0) {
+      setSubmitError(`入力に無効な値があるため提出できません（値は保存していません）。${draftErrors.slice(0, 5).join(" / ")}`);
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -218,7 +233,9 @@ export default function PlayerWorkspacePage() {
               lastQuarterCapexEvents={context.lastQuarterCapexEvents}
               lastQuarterRejectedCapexProposals={context.lastQuarterRejectedCapexProposals}
               lastQuarterFinancialResult={context.lastQuarterFinancialResult}
+              lastQuarterFinancingResult={context.lastQuarterFinancingResult}
               lastQuarterDividendResult={context.lastQuarterDividendResult}
+              annualDividendGuidance={context.annualDividendGuidance}
               lastQuarterSalesAllocations={context.lastQuarterSalesAllocations}
               publicInfo={context.publicInfo}
               scenarioNews={scenarioNews}

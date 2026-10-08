@@ -35,6 +35,17 @@ async function confirmPlayerDecision(page: Page): Promise<void> {
   // 意思決定確定ボタンは「意思決定」タブにだけ描画される（実測）。
   await page.getByTestId("workspace-tab-decision").click();
   await page.getByTestId("workspace-confirm-decision").click();
+  /**
+   * 【INT-1・O1との統合で必要になった待機】O1以降、確定は非同期である
+   * （PlayerWorkspace.handleConfirm がサーバ保存の成否を await し、成功して初めて
+   *   tab内の liveSessionRegistry を更新して「意思決定済み」になる）。
+   * 確定完了を待たずに画面遷移すると、componentがunmountされて registry 更新が
+   * 走らず、GM側のTurn Advance gateが提出待ちのまま止まる（実測: Turn2で
+   * turn-counter が "1 / 32" のまま 120 秒タイムアウト）。
+   * O1自身のE2E（playerSubmitPersistenceRace.e2e.ts）と同じく、確定表示を待つ。
+   */
+  await expect(page.getByTestId("workspace-decision-status")).toContainText("意思決定済み", { timeout: 120_000 });
+  await expect(page.getByTestId("workspace-confirm-error")).toHaveCount(0);
   await page.getByTestId("workspace-back-to-console").click();
   await page.waitForURL(/\/v2\/management\?run=/);
 }

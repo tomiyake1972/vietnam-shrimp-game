@@ -10,10 +10,23 @@
 //   - 警告を色だけで表現しない（必ず不足量と理由を文章でも出す）。
 
 import { WorkforcePlanRow } from "../investmentPlanningViewModel";
-import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INFO_VALUE_CLASS, INFO_VALUE_STRONG_CLASS, INPUT_CONTROL_CLASS, NO_VALUE_TEXT } from "./panelStyles";
+import { WorkerAssignmentDraftRow } from "../decisionDraft";
+import { NumberCell, RatioCell } from "./InputCells";
+import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INFO_VALUE_CLASS, INFO_VALUE_STRONG_CLASS, NO_VALUE_TEXT } from "./panelStyles";
 
 interface WorkforcePanelProps {
   readonly rows: readonly WorkforcePlanRow[];
+  /**
+   * 【INT-1 §1（監査後修正）】編集欄が表示する値の情報源。
+   *
+   * rows（WorkforcePlanRow）は buildDecisionInputFromDraft を通した**サニタイズ後**の
+   * 値から算出されている。編集欄をそこへ bind していたため、空欄にしても
+   * 次のレンダリングでサニタイズ結果の 0 が書き戻され、「空欄にしたはずが0になる」
+   * 無言の書き換えが構造的に起きていた（実測済み）。
+   * 編集可能な3項目（増減差分・臨時人数・残業率）は下書きの生値をそのまま表示し、
+   * 読み取り専用の列（現在人数・変更後人数・必要人数・人件費）だけ rows を使う。
+   */
+  readonly draftRows: readonly WorkerAssignmentDraftRow[];
   readonly disabled: boolean;
   readonly onChangeHeadcountDelta: (factoryId: string, delta: number) => void;
   readonly onChangeTemporaryHeadcount: (factoryId: string, value: number) => void;
@@ -31,6 +44,7 @@ function formatHeadcount(value: number): string {
 
 export default function WorkforcePanel(props: WorkforcePanelProps) {
   const { rows, disabled } = props;
+  const draftByFactoryId = new Map(props.draftRows.map((r) => [r.factoryId, r]));
 
   if (rows.length === 0) {
     return <p className="text-xs text-gray-400">{NO_VALUE_TEXT} 対象となる工場がありません。</p>;
@@ -55,21 +69,27 @@ export default function WorkforcePanel(props: WorkforcePanelProps) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row) => {
+              const draftRow = draftByFactoryId.get(row.factoryId);
+              // 下書きに増減差分がまだ無い行（Phase 8D以前の保存分）だけ、view-model側の
+              // 算出値を初期表示に使う。以降は利用者が打った値をそのまま表示する。
+              const headcountChangeValue = draftRow?.regularHeadcountChange ?? row.headcountChange;
+              const temporaryHeadcountValue = draftRow?.temporaryHeadcount ?? row.temporaryHeadcount;
+              const overtimeRateValue = draftRow?.overtimeRate ?? row.overtimeRate;
+              return (
               <tr key={row.factoryId} className={INFO_TABLE_ROW_CLASS}>
                 <td className="pr-3 py-1">{row.factoryId}</td>
                 <td className={`pr-3 py-1 ${INFO_VALUE_CLASS}`}>{formatHeadcount(row.headcountBefore)}</td>
                 <td className="pr-3 py-1">
-                  <input
-                    type="number"
-                    step={10}
-                    value={row.headcountChange}
+                  {/* 減員は負の差分が正当な入力なので下限を外す。空欄・不正値は0へ丸めず、
+                      提出前検証（validateDecisionDraftNumbers）が項目名を示して止める。 */}
+                  <NumberCell
+                    value={headcountChangeValue}
                     disabled={disabled}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      props.onChangeHeadcountDelta(row.factoryId, Number.isFinite(n) ? Math.round(n) : 0);
-                    }}
-                    className={`w-24 ${INPUT_CONTROL_CLASS}`}
+                    step={10}
+                    min={null}
+                    testId={`worker-headcount-change-${row.factoryId}`}
+                    onChange={(n) => props.onChangeHeadcountDelta(row.factoryId, Number.isFinite(n) ? Math.round(n) : n)}
                   />
                 </td>
                 <td className={`pr-3 py-1 ${INFO_VALUE_STRONG_CLASS}`}>{formatHeadcount(row.headcountAfter)}</td>
@@ -82,36 +102,28 @@ export default function WorkforcePanel(props: WorkforcePanelProps) {
                   {formatUsd(row.costDeltaUsd)}
                 </td>
                 <td className="pr-3 py-1">
-                  <input
-                    type="number"
-                    min={0}
-                    step={10}
-                    value={row.temporaryHeadcount}
+                  {/* 旧実装は `n > 0 ? n : 0` だったため、空欄も負数も無言で0になっていた。 */}
+                  <NumberCell
+                    value={temporaryHeadcountValue}
                     disabled={disabled}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      props.onChangeTemporaryHeadcount(row.factoryId, Number.isFinite(n) && n > 0 ? n : 0);
-                    }}
-                    className={`w-20 ${INPUT_CONTROL_CLASS}`}
+                    step={10}
+                    testId={`worker-temporary-headcount-${row.factoryId}`}
+                    onChange={(n) => props.onChangeTemporaryHeadcount(row.factoryId, n)}
                   />
                 </td>
                 <td className="pr-3 py-1">
-                  <input
-                    type="number"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={row.overtimeRate}
+                  {/* 旧実装は Math.min(1, Math.max(0, n)) で範囲外を無言でクランプしていた
+                      （0.99を打ち間違えて99 → 1 が保存される）。範囲判定は提出前検証に任せる。 */}
+                  <RatioCell
+                    value={overtimeRateValue}
                     disabled={disabled}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      props.onChangeOvertimeRate(row.factoryId, Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0);
-                    }}
-                    className={`w-20 ${INPUT_CONTROL_CLASS}`}
+                    testId={`worker-overtime-rate-${row.factoryId}`}
+                    onChange={(n) => props.onChangeOvertimeRate(row.factoryId, n)}
                   />
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

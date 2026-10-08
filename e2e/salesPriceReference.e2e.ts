@@ -108,7 +108,14 @@ test.describe("SALES 基準価格参考表示 — Independent Player Flow経由"
       });
 
       await test.step("BAL: 価格調整を変更すると参考提示価格が即時に再計算される", async () => {
-        const priceInput = balPage.locator("table tbody tr").first().locator('input[type="number"]').nth(1);
+        // 【INT-1】「最初のtable」ではなく販売計画テーブルを明示して取得する
+        // （画面上部に受注残パネルが追加されたため、位置指定では別のtableを拾ってしまう）。
+        const priceInput = balPage
+          .getByTestId("sales-plan-table")
+          .locator("tbody tr")
+          .first()
+          .locator('input[type="number"]')
+          .nth(1);
         const askCell = balPage.locator('[data-testid^="sales-price-reference-ask-"]').first();
         const baseCell = balPage.locator('[data-testid^="sales-price-reference-prior-base-"]').first();
         const baseText = (await baseCell.textContent())?.trim() ?? "";

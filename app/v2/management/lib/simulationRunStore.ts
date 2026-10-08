@@ -92,6 +92,12 @@ export interface SaveSimulationRunResult {
   readonly serverSaveSucceeded: boolean;
   /** この保存に採番されたpersistenceRevision。 */
   readonly persistenceRevision: number;
+  /**
+   * 【O1】他のwriterが先に公開していたため拒否された（409 STALE_PERSISTENCE_REVISION）。
+   * 保存内容が壊れたわけではないので、呼び出し側は最新を読み直し、自分の変更を
+   * 安全に再適用できる場合だけ作り直して保存し直す（revisionだけ上げた再送は禁止）。
+   */
+  readonly conflict: boolean;
 }
 
 function hasWindow(): boolean {
@@ -131,23 +137,36 @@ function cleanupLegacyFullRunEntries(): void {
 // ---------------------------------------------------------------------
 
 /**
- * タブ内でのみ有効な単調増加カウンタ（simulationRunId ごと）。
- * サーバー側の原子的カウンタは持たない（指示§48「大規模なlockingは今回必須ではない」）。
- * resumeで既存の保存物を読んだ時点でその値へ底上げしておくことで、reload後の採番が
- * 既存の保存物より古くならないようにする（seedRevisionCounter）。
+ * 【O1・意味を変更】以前は「タブ内でのみ有効な単調増加カウンタ」だった。
+ * それが原因で、GMは他のwriter（Independent Player）のrevision bumpを知らないまま
+ * 採番し、古い内容で新しい正本を上書きできてしまっていた。
+ *
+ * いまは「このタブが最後に確認した、サーバーで公開中のrevision」を保持する。
+ * 保存はこの値を expectedBaseRevision として申告し、サーバーが公開中revisionと
+ * 一致しなければ 409 で拒否する。保存に成功したとき・サーバーから読んだとき・
+ * 409で現在値を教えられたときに、この値を更新する。
  */
 const revisionCounters = new Map<string, number>();
 
-function nextRevisionFor(id: string): number {
-  const next = (revisionCounters.get(id) ?? 0) + 1;
-  revisionCounters.set(id, next);
-  return next;
+/** このタブが最後に確認した「サーバーで公開中のrevision」。未確認なら0（＝旧Run相当）。 */
+function knownPublishedRevision(id: string): number {
+  return revisionCounters.get(id) ?? 0;
+}
+
+/** 公開中revisionの確認値を更新する（保存成功・読み込み・409通知のいずれでも呼ぶ）。 */
+function rememberPublishedRevision(id: string, publishedRevision: number): void {
+  revisionCounters.set(id, publishedRevision);
 }
 
 /** 保存物を読んだ側（loadSimulationRun）が、以後の採番をその保存物より古くしないために呼ぶ。 */
 function seedRevisionCounter(id: string, knownRevision: number): void {
   const current = revisionCounters.get(id) ?? 0;
   if (knownRevision > current) revisionCounters.set(id, knownRevision);
+}
+
+/** 保存attemptごとに一意なwriteToken（未公開パートを他writerと混ぜない）。 */
+function newWriteToken(): string {
+  return `gm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 // ---------------------------------------------------------------------
@@ -253,7 +272,9 @@ async function readErrorBody(response: Response): Promise<string | null> {
   }
 }
 
-async function postJson(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
+type PostJsonResult = { ok: true } | { ok: false; error: string; stale: boolean; currentPublishedRevision: number | null };
+
+async function postJson(body: unknown): Promise<PostJsonResult> {
   try {
     const response = await fetchWithTimeout("/api/v2/simulation-runs", {
       method: "POST",
@@ -263,11 +284,23 @@ async function postJson(body: unknown): Promise<{ ok: true } | { ok: false; erro
     if (!response.ok) {
       const bodyText = await readErrorBody(response);
       const base = describeHttpError(response.status);
-      return { ok: false, error: bodyText ? `${base} — ${bodyText}` : base };
+      /**
+       * 【O1】409 STALE_PERSISTENCE_REVISION は「他のwriterが先に公開した」という意味で、
+       * 保存内容が壊れたわけではない。呼び出し側が最新を読み直して作り直すための情報
+       * （現在公開中のrevision）をここで拾っておく。
+       */
+      let stale = false;
+      let currentPublishedRevision: number | null = null;
+      if (response.status === 409 && (bodyText ?? "").includes("STALE_PERSISTENCE_REVISION")) {
+        stale = true;
+        const matched = (bodyText ?? "").match(/"currentPublishedRevision"\s*:\s*(\d+)/);
+        if (matched) currentPublishedRevision = Number(matched[1]);
+      }
+      return { ok: false, error: bodyText ? `${base} — ${bodyText}` : base, stale, currentPublishedRevision };
     }
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, error: e instanceof Error ? e.message : String(e), stale: false, currentPublishedRevision: null };
   }
 }
 
@@ -286,30 +319,32 @@ async function postJson(body: unknown): Promise<{ ok: true } | { ok: false; erro
  * （部分的に書けた新しいパートは「未公開」のまま＝次にこのrevisionで再送すれば
  * 上書きされる。孤立した未公開パートがユーザーに見えることはない）。
  */
-async function saveToServer(stored: StoredSimulationRun): Promise<string | null> {
+type SaveToServerOutcome = { ok: true } | { ok: false; error: string; stale: boolean };
+
+async function saveToServer(stored: StoredSimulationRun, attempt: { expectedBaseRevision: number; writeToken: string }): Promise<SaveToServerOutcome> {
   const simulationRunId = stored.run.simulationRunId;
   const revision = stored.persistenceRevision;
   if (typeof revision !== "number") {
-    return "サーバー保存に失敗しました（persistenceRevisionが未設定です。呼び出し側の実装ミスの可能性があります）。";
+    return { ok: false, error: "サーバー保存に失敗しました（persistenceRevisionが未設定です。呼び出し側の実装ミスの可能性があります）。", stale: false };
   }
 
   const datasetSizeError = checkPartSize("dataset", stored.dataset);
-  if (datasetSizeError) return `サーバー保存に失敗しました（${datasetSizeError}）`;
-  const datasetResult = await postJson({ simulationRunId, revision, part: "dataset", value: stored.dataset });
-  if (!datasetResult.ok) return `サーバー保存に失敗しました（dataset: ${datasetResult.error}）`;
+  if (datasetSizeError) return { ok: false, error: `サーバー保存に失敗しました（${datasetSizeError}）`, stale: false };
+  const datasetResult = await postJson({ simulationRunId, revision, part: "dataset", value: stored.dataset, ...attempt });
+  if (!datasetResult.ok) return { ok: false, error: `サーバー保存に失敗しました（dataset: ${datasetResult.error}）`, stale: datasetResult.stale };
 
   if (stored.resumePayload !== undefined) {
     const resumeSizeError = checkPartSize("resume", stored.resumePayload);
-    if (resumeSizeError) return `サーバー保存に失敗しました（${resumeSizeError}）`;
-    const resumeResult = await postJson({ simulationRunId, revision, part: "resume", value: stored.resumePayload });
-    if (!resumeResult.ok) return `サーバー保存に失敗しました（resume: ${resumeResult.error}）`;
+    if (resumeSizeError) return { ok: false, error: `サーバー保存に失敗しました（${resumeSizeError}）`, stale: false };
+    const resumeResult = await postJson({ simulationRunId, revision, part: "resume", value: stored.resumePayload, ...attempt });
+    if (!resumeResult.ok) return { ok: false, error: `サーバー保存に失敗しました（resume: ${resumeResult.error}）`, stale: resumeResult.stale };
   }
 
   if (stored.packCapture !== undefined) {
     const packSizeError = checkPartSize("pack", stored.packCapture);
-    if (packSizeError) return `サーバー保存に失敗しました（${packSizeError}）`;
-    const packResult = await postJson({ simulationRunId, revision, part: "pack", value: stored.packCapture });
-    if (!packResult.ok) return `サーバー保存に失敗しました（pack: ${packResult.error}）`;
+    if (packSizeError) return { ok: false, error: `サーバー保存に失敗しました（${packSizeError}）`, stale: false };
+    const packResult = await postJson({ simulationRunId, revision, part: "pack", value: stored.packCapture, ...attempt });
+    if (!packResult.ok) return { ok: false, error: `サーバー保存に失敗しました（pack: ${packResult.error}）`, stale: packResult.stale };
   }
 
   const manifestResult = await postJson({
@@ -319,9 +354,10 @@ async function saveToServer(stored: StoredSimulationRun): Promise<string | null>
     persistenceRevision: revision,
     hasResumePayload: stored.resumePayload !== undefined,
     hasPackCapture: stored.packCapture !== undefined,
+    ...attempt,
   });
-  if (!manifestResult.ok) return `サーバー保存に失敗しました（manifest: ${manifestResult.error}）`;
-  return null;
+  if (!manifestResult.ok) return { ok: false, error: `サーバー保存に失敗しました（manifest: ${manifestResult.error}）`, stale: manifestResult.stale };
+  return { ok: true };
 }
 
 async function loadFromServer(simulationRunId: string): Promise<StoredSimulationRun | null> {
@@ -359,10 +395,21 @@ async function listFromServer(): Promise<readonly SimulationRunSummary[]> {
  * ゲーム進行はブロックしない。
  */
 export async function saveSimulationRun(stored: StoredSimulationRun): Promise<SaveSimulationRunResult> {
-  const persistenceRevision = nextRevisionFor(stored.run.simulationRunId);
+  const runId = stored.run.simulationRunId;
+  /**
+   * 【O1】このタブが最後に確認した公開中revisionを基準として申告する。
+   * 新しいrevisionは「基準 + 1」。サーバーが公開中revisionと基準の不一致を見つければ
+   * 409 STALE_PERSISTENCE_REVISION で拒否され、古い内容が正本化されることはない。
+   */
+  const expectedBaseRevision = knownPublishedRevision(runId);
+  const persistenceRevision = expectedBaseRevision + 1;
+  const attempt = { expectedBaseRevision, writeToken: newWriteToken() };
   const stamped: StoredSimulationRun = { ...stored, persistenceRevision };
   const browserError = saveBrowserCache(stamped);
-  const serverError = await saveToServer(stamped);
+  const outcome = await saveToServer(stamped, attempt);
+  const serverError = outcome.ok ? null : outcome.error;
+  const conflict = outcome.ok ? false : outcome.stale;
+  if (outcome.ok) rememberPublishedRevision(runId, persistenceRevision);
   const savedTo: SimulationRunStorageLocation[] = [];
   if (browserError === null) savedTo.push("browser");
   if (serverError === null) savedTo.push("server");
@@ -373,6 +420,7 @@ export async function saveSimulationRun(stored: StoredSimulationRun): Promise<Sa
     degraded: browserError !== null || serverError !== null,
     serverSaveSucceeded: serverError === null,
     persistenceRevision,
+    conflict,
   };
 }
 

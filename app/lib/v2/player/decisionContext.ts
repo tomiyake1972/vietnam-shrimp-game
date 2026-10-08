@@ -19,7 +19,7 @@ import { StandardAiCostProjection, toStandardAiCostProjection } from "../company
 import { buildTurnEconomicsProjection } from "../companyLab/turnEconomicsProjection";
 import { resolveStandardAiProfileForMode } from "../companyLab/standardAi/orientationProfile";
 import { buildInitialDraft, CompanyDecisionDraft } from "../../../v2/company-lab/decisionDraft";
-import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult } from "../../../v2/company-lab/play/_lib/financialViewSelectors";
+import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "../../../v2/company-lab/play/_lib/financialViewSelectors";
 import { restoreSessionFromResumePayload } from "../companyLab/simulation/persistence/resume";
 import { StoredSimulationRun } from "../companyLab/simulation/persistence/types";
 import { CompanyEvaluationSnapshot, computeAllCompaniesEvaluationSnapshot } from "../companyLab/evaluation/evaluationSemantics";
@@ -27,7 +27,10 @@ import { EvaluationHistoryRecord, resolveEvaluationHistory } from "../companyLab
 import { CompanyId } from "../sales/types";
 import { MarketProductBasePriceReference, projectMarketBasePriceReferences } from "../sales/marketBasePriceReference";
 import { CompanyFinancialQuarterResult } from "../finance/types";
-import { CompanyDividendQuarterResult } from "../finance/dividend";
+import { FinancingQuarterResult } from "../financing/types";
+import { CompanyDividendQuarterResult, computeMaxDividendUsd } from "../finance/dividend";
+import { AnnualDividendGuidance } from "../finance/annualDividendGuidance";
+import { buildAnnualDividendGuidanceView } from "../companyLab/annualDividendGuidanceView";
 import { CapexProjectQuarterEvent, CapexRejectedProposal } from "../capex";
 import { buildDatasetFromSession } from "../companyLab/simulation/analytics/dataset";
 import { SimulationAnalyticsDataset } from "../companyLab/simulation/analytics/types";
@@ -66,7 +69,23 @@ export interface PlayerDecisionContext {
   readonly lastQuarterCapexEvents: readonly CapexProjectQuarterEvent[] | undefined;
   readonly lastQuarterRejectedCapexProposals: readonly CapexRejectedProposal[] | undefined;
   readonly lastQuarterFinancialResult: CompanyFinancialQuarterResult | null;
+  /**
+   * 【INT-1 §2B】前Turnの資金繰り結果（借入審査・緊急融資の確定記録）。
+   * 借入の申請額・実行額・減額/否認理由・緊急融資の実行有無と適用金利は
+   * すべてこの記録に入っている。記録が無いRun（この機能より前の保存物）では null
+   * となり、画面は「未取得」と表示する。借入残高の差から推測しない。
+   */
+  readonly lastQuarterFinancingResult: FinancingQuarterResult | null;
   readonly lastQuarterDividendResult: CompanyDividendQuarterResult | null;
+  /**
+   * 【D1 §8】年度中の配当参考表示。管理者がバランス調整で配当性向を明示指定している場合、
+   * この会社はQ4決算直後に年間純利益ベースで自動精算される（Playerの追加操作は不要）。
+   *
+   * 【なぜサーバーで作るか】Independent Playerのブラウザへは全知stateを返さないため、
+   * Manual Balanceの設定も年初来の確定実績もclientには無い。ここで確定実績と
+   * 現在残高だけから参考値を組み立てて渡す。将来の利益・市場真値は一切含まない。
+   */
+  readonly annualDividendGuidance: AnnualDividendGuidance;
   /**
    * 【SALES基準価格参考表示・セキュリティ修正】直近確定四半期の市場×商品別「基準価格」だけの
    * 最小DTO（market・product・basePriceのみ）。
@@ -158,7 +177,20 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
   const lastRecord = session.state.history[session.state.history.length - 1] ?? null;
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
+  // 【INT-1 §2B】既存の確定記録をそのまま渡すだけ（新しい計算・推測はしない）。
+  const lastQuarterFinancingResult = lastRecord ? extractCompanyFinancingResult(lastRecord, companyId) : null;
   const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
+
+  // 【D1 §8】管理者指定配当の年度中参考表示。率の解決はengineと同じresolverを通す。
+  const annualDividendGuidance = buildAnnualDividendGuidanceView({
+    history: session.state.history,
+    currentPeriod: session.state.currentPeriod,
+    turn,
+    companyId,
+    manualBalanceOverrides: session.state.config.manualBalanceOverrides,
+    currentCashUsd: ownState.financeState.cash as number,
+    dividendCapacityUsd: computeMaxDividendUsd(ownState.financeState),
+  });
 
   const gameEndedAt = session.run.gameEndedAt ?? null;
   const gameEndTurn = session.run.gameEndTurn ?? null;
@@ -191,8 +223,10 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     draftSeed,
     lastQuarterCapexEvents: lastQuarterCapexResult?.events,
     lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,
+    lastQuarterFinancingResult,
     lastQuarterFinancialResult,
     lastQuarterDividendResult,
+    annualDividendGuidance,
     lastQuarterSalesAllocations: projectMarketBasePriceReferences(lastRecord?.salesRecord.allocations),
     hasSubmittedThisTurn,
     isPlayerControlled,

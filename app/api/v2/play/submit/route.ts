@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { withPlayerApiContext, parseJsonBody } from "../_lib/context";
-import { buildDecisionInputFromDraft, CompanyDecisionDraft } from "../../../../v2/company-lab/decisionDraft";
+import { buildDecisionInputFromDraft, CompanyDecisionDraft, validateDecisionDraftNumbers } from "../../../../v2/company-lab/decisionDraft";
 import { submitPlayerDecision } from "../../../../lib/v2/player/submit";
 import { PlayerSubmitError } from "../../../../lib/v2/player/types";
 
@@ -18,6 +18,8 @@ const SUBMIT_ERROR_STATUS: Readonly<Record<PlayerSubmitError["code"], number>> =
   STALE_TURN: 409,
   DUPLICATE_SUBMIT: 409,
   INVALID_DECISION: 400,
+  // 【O1】保存競合。クライアントは最新Turnを読み直してから出し直す。
+  SAVE_CONFLICT: 409,
 };
 
 // POST /api/v2/play/submit — このTurnの意思決定を提出する（1Turn1回、以後は同Turn編集不可）。
@@ -55,6 +57,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const draft = { ...(candidate.draft as CompanyDecisionDraft), companyId: session.companyId };
+    /**
+     * 【INT-1 §6】無効な数値を保存しない。
+     * buildDecisionInputFromDraft は安全側に倒して無効値を黙って0へ置換し、
+     * 数量0以下の行を黙って落とす（実測済み）。そのままでは
+     * 「提出したはずの販売計画が消える」「人員が0になる」が無警告で保存される。
+     * サニタイズ自体は変えず、無効入力はここで 400 として拒否する。
+     */
+    const draftErrors = validateDecisionDraftNumbers(draft);
+    if (draftErrors.length > 0) {
+      return {
+        status: 400,
+        body: {
+          error: {
+            code: "INVALID_DECISION",
+            message: `入力に無効な値があるため提出できません（値は保存していません）。${draftErrors.slice(0, 5).join(" / ")}`,
+          },
+        },
+      };
+    }
     const decision = buildDecisionInputFromDraft(draft, fixture, stored.resumePayload.state.currentPeriod);
 
     try {

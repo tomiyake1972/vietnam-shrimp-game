@@ -717,6 +717,44 @@ export function buildCompanyInvestmentPlanningViewModel(
     } else if (targetPoolKey === "coldStorage") {
       noEffectReason =
         "冷凍・冷蔵保管能力は在庫を置ける量（ストック）であり、四半期あたりの処理量（フロー）の上限ではありません。したがって処理見込みは増えません。";
+    } else if (template.newFactoryEffect !== undefined) {
+      /**
+       * 【INT-1 §6】新工場建設カードの「生産能力を増加させません」誤表示の修正。
+       *
+       * 【原因】新工場建設は targetProduct 方式の単一プール加算ではないため、
+       * capex/parameters.ts で futureCapacityEffect を
+       * （targetProduct省略・capacityIncreaseTonsPerQuarter=0）にしている。
+       * その結果ここの else 分岐へ落ち、能力を増やさない案件（品質検査機器・
+       * 環境対応設備・PD省人化）と同じ文言が出ていた。実際には工場を1つ新設する
+       * 案件であり、研修でプレイヤーが工場建設そのものを避ける判断へ誘導してしまう。
+       *
+       * 【修正方針】UI側で能力値を独自に決め打ちしない。Engineが稼働開始時に
+       * 実際に使う newFactoryEffect（capex/factoryConstruction.ts が参照する
+       * fullCapacities と rampMultipliers）をそのまま読んで文言にする。
+       * incrementalProcessableTonsPerQuarter は 0 のまま据え置く
+       * （新工場はまだ存在せず、当期の処理見込みは増えない。ここで架空の
+       *  処理見込みを作ると「今期から増える」という別の誤解になる）。
+       */
+      const effect = template.newFactoryEffect;
+      const rampLabel = effect.rampMultipliers
+        .map((m, i) => `稼働${i}四半期目 ${Math.round(m * 100)}%`)
+        .join(" → ");
+      const poolLabel = (key: keyof typeof effect.fullCapacities): string => TARGET_PRODUCT_LABELS[key] ?? key;
+      const flowPools: readonly (keyof typeof effect.fullCapacities)[] = [
+        "commonProcessing",
+        "hoso",
+        "pd",
+        "vap",
+        "freezingPackaging",
+      ];
+      const flowText = flowPools
+        .map((key) => `${poolLabel(key)} ${Math.round(effect.fullCapacities[key]).toLocaleString()}t/四半期`)
+        .join("、");
+      noEffectReason =
+        `この投資は工場を1つ新設します。完成・操業準備の完了後に稼働を開始し、` +
+        `フルランプ時には ${flowText}、${poolLabel("coldStorage")} ${Math.round(effect.fullCapacities.coldStorage).toLocaleString()}t（同時保管）が加わります。` +
+        `稼働開始直後は能力が段階的に立ち上がります（${rampLabel}。以降はフルランプ）。` +
+        `当期の処理見込みは増えません（稼働開始は完成後です）。`;
     } else {
       noEffectReason = "この投資は生産能力を増加させません。";
     }

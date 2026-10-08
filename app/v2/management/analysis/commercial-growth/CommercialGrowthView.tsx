@@ -68,14 +68,34 @@ export function CommercialGrowthView() {
   const totalTurns = Math.max(MANAGEMENT_CONSOLE_STANDARD_TURNS, stored?.dataset.turns.length ?? 0);
   const recorded = rows.some((r) => r.commercialGrowth?.availability === "AVAILABLE");
 
+  /**
+   * 【INT-1 §6】AIの参考判断とPLAYER実績の混在を解消する。
+   *
+   * 【混在していた理由（コードで確認した事実）】
+   *   ①Vision ②Ambition ③Commitment は standardAi/diagnosis/commercialGrowth.ts が
+   *     作る Standard AI の内部判断である。
+   *   ④Submitted は aiPack/capture.ts が diagnostics.decision.salesPlans から集計した
+   *     「Standard AI 自身の提示量」である。**PLAYERが実際に提出した量ではない。**
+   *   ⑤Contracts ⑥Production は CompanyQuarterSummary（エンジンの確定実績）である。
+   * つまり PLAYER が決めたTurnでは ①〜④ がAIの参考値、⑤⑥が実績であり、
+   * 同じチャートに並ぶと「このPLAYERはこれだけ提示した」と誤読される。
+   *
+   * 【対応】系列名で参考値と実績を区別し、PLAYERが決めたTurnを明示する。
+   * PLAYERの実提出量はこの保存記録（packCapture）に含まれないため、
+   * 推測で作らず「未取得」と書く。値そのものは一切書き換えない。
+   */
+  const playerTurns = rows.filter((r) => r.decisionOwner === "PLAYER").map((r) => r.turn);
+  const hasPlayerTurn = playerTurns.length > 0;
+  const aiRefSuffix = hasPlayerTurn ? "（AI参考値）" : "";
+
   // 【§11】同一チャートで6系列を比較する（単位はすべて HOSO換算トン/四半期）。
   const series = [
-    { key: "vision", label: "① Vision 参考軌道", color: "#a855f7", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.visionReferenceScaleTons ?? null })) },
-    { key: "ambition", label: "② 売りたい量（Ambition）", color: "#f472b6", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.commercialAmbitionTons ?? null })) },
-    { key: "commitment", label: "③ 取りに行く量（Commitment）", color: "#fbbf24", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.commercialCommitmentTons ?? null })) },
-    { key: "submitted", label: "④ 市場へ提示（Submitted）", color: "#38bdf8", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.submittedSalesTons ?? null })) },
-    { key: "contracted", label: "⑤ 成約（Contracts）", color: "#34d399", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.contractedSalesTons ?? null })) },
-    { key: "produced", label: "⑥ 生産（Production）", color: "#94a3b8", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.actualProductionTons ?? null })) },
+    { key: "vision", label: `① Vision 参考軌道${aiRefSuffix}`, color: "#a855f7", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.visionReferenceScaleTons ?? null })) },
+    { key: "ambition", label: `② 売りたい量（Ambition）${aiRefSuffix}`, color: "#f472b6", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.commercialAmbitionTons ?? null })) },
+    { key: "commitment", label: `③ 取りに行く量（Commitment）${aiRefSuffix}`, color: "#fbbf24", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.commercialCommitmentTons ?? null })) },
+    { key: "submitted", label: hasPlayerTurn ? "④ 市場へ提示（AI参考値・PLAYER実提出量は未取得）" : "④ 市場へ提示（Submitted）", color: "#38bdf8", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.submittedSalesTons ?? null })) },
+    { key: "contracted", label: "⑤ 成約（Contracts・実績）", color: "#34d399", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.contractedSalesTons ?? null })) },
+    { key: "produced", label: "⑥ 生産（Production・実績）", color: "#94a3b8", points: rows.map((r) => ({ turn: r.turn, value: r.commercialGrowth?.actualProductionTons ?? null })) },
   ];
 
   return (
@@ -111,6 +131,18 @@ export function CommercialGrowthView() {
             ))}
           </div>
 
+          {hasPlayerTurn ? (
+            <div
+              className="mb-2 rounded border border-amber-700/60 bg-amber-950/30 px-2.5 py-1.5 text-[11px] leading-snug text-amber-200"
+              data-testid="commercial-growth-player-notice"
+            >
+              この会社は PLAYER が意思決定したTurnを含みます（Turn {playerTurns.join(", ")}）。
+              ①〜④ は Standard AI の参考判断（AI参考値）であり、PLAYER が実際に提出した量ではありません。
+              PLAYER の実提出量はこの保存記録に含まれないため<strong>未取得</strong>です（推測で補完していません）。
+              ⑤成約・⑥生産はエンジンの確定実績であり、PLAYER の意思決定の結果です。
+            </div>
+          ) : null}
+
           <SeriesChart
             title="Vision → Ambition → Commitment → Submitted → Contracts → Production"
             series={series}
@@ -128,6 +160,7 @@ export function CommercialGrowthView() {
               <thead className="bg-slate-900 text-slate-400">
                 <tr>
                   <th className="px-2 py-1">Q</th>
+                  <th className="px-2 py-1">決定者</th>
                   <th className="px-2 py-1">主因</th>
                   <th className="px-2 py-1">未充足計</th>
                   {CONSTRAINT_KEYS.map((k) => (
@@ -144,6 +177,9 @@ export function CommercialGrowthView() {
                   return (
                     <tr key={r.turn} className="border-t border-slate-800 text-slate-300">
                       <td className="px-2 py-1 tabular-nums">{r.turn}</td>
+                      <td className="px-2 py-1" data-testid={`commercial-growth-owner-${r.turn}`}>
+                        {r.decisionOwner === "PLAYER" ? "PLAYER" : "AI"}
+                      </td>
                       <td className="px-2 py-1">
                         {g?.primaryGrowthConstraint === null || g?.primaryGrowthConstraint === undefined
                           ? DASH
