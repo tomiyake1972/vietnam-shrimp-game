@@ -1,0 +1,10 @@
+### CMD: npx tsx scripts/int1/reproSalesHireStall.ts
+# 現在の営業人員 = 60人 / 1四半期の採用上限 = 18人
+# 提出する採用人数 = 19人（上限+1）
+# INT-1の数値検証（validateDecisionDraftNumbers）: []
+# buildDecisionInputFromDraft 後の salesForceHireCount = 19
+# 提出結果: PlayerSubmitError: 提出できません（値は保存していません）。営業人員の採用は1四半期あたり18人までです（現在の営業人員60人の30%、最低3人）。入力値は19人でした。営業組織を一度に大きく増やすと、顧客の引継ぎ・育成・商談情報の共有が追いつかず、増えた人数
+# 保存された BAL の salesForceHireCount = undefined
+# GMのTurn進行: 成功
+# 同じTurnへ正しい値で再提出: 成功
+### EXIT: 0

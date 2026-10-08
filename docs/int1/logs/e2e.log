@@ -1,0 +1,78 @@
+### CMD: npx playwright test --config=e2e/playwright.config.ts
+### DATE: 2026-10-08 10:08 JST
+[WebServer] ⚠ Self-signed certificates are currently an experimental feature, use with caution.
+[WebServer] ⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+[WebServer]  We detected multiple lockfiles and selected the directory of /home/user/vietnam-shrimp-game/package-lock.json as the root directory.
+[WebServer]  To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+[WebServer]    See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+[WebServer]  Detected additional lockfiles: 
+[WebServer]    * /home/user/vietnam-shrimp-game/.worktrees/int1/package-lock.json
+[WebServer] 
+
+Running 37 tests using 1 worker
+
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=e2e-detail-ascii company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=e2e-detail-ascii company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=e2e-detail-ascii company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=e2e-detail-ascii company=BAL turn=1
+  ✓   1 e2e/companyLabDetailLoad.e2e.ts:49:9 › COMPANYLAB-DETAIL-LOAD-404-1 — 保存済みLabの詳細画面へ入れる › ASCII labId / tiered: 作成直後 → 一覧 → 再開 → reload のすべてで詳細が開ける (7.6s)
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=e2e detail ascii space company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=e2e detail ascii space company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=e2e detail ascii space company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=e2e detail ascii space company=BAL turn=1
+  ✓   2 e2e/companyLabDetailLoad.e2e.ts:49:9 › COMPANYLAB-DETAIL-LOAD-404-1 — 保存済みLabの詳細画面へ入れる › ASCII+空白 labId / legacy（既定）: 作成直後 → 一覧 → 再開 → reload のすべてで詳細が開ける (3.6s)
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=E2E 詳細テスト company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=E2E 詳細テスト company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=E2E 詳細テスト company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=E2E 詳細テスト company=BAL turn=1
+  ✓   3 e2e/companyLabDetailLoad.e2e.ts:49:9 › COMPANYLAB-DETAIL-LOAD-404-1 — 保存済みLabの詳細画面へ入れる › 日本語+空白 labId / legacy（既定）: 作成直後 → 一覧 → 再開 → reload のすべてで詳細が開ける (3.0s)
+  ✓   4 e2e/companyLabDetailLoad.e2e.ts:77:7 › COMPANYLAB-DETAIL-LOAD-404-1 — 保存済みLabの詳細画面へ入れる › 存在しない labId だけが「ラボが見つかりません」になる (1.1s)
+[WebServer] [browser] Encountered two children with the same key, `0`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 
+[WebServer] [browser] Encountered two children with the same key, `0`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 
+[WebServer] [browser] Encountered two children with the same key, `0`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 
+[WebServer] [browser] Encountered two children with the same key, `0`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 
+  ✓   5 e2e/independentPlayerFlow.e2e.ts:98:7 › Independent Player Flow — GM / BAL / MASS › GM Run作成 → BAL/MASS参加 → 提出・Advance gating → Turn進行 → セッション復帰 → Game End → Final Results → 以後Submit拒否 (18.4s)
+  ✓   6 e2e/int1AuthExpiryAndInput.e2e.ts:46:5 › INT1-AUTH-1/2/3: 保存時の403で誤表示せず、再ログインで同じRun/Turnへ戻り、確定済み提出が残る (6.1s)
+  ✓   7 e2e/int1AuthExpiryAndInput.e2e.ts:146:5 › INT1-AUTH-4: 未確定入力が失われる場合、その事実と必要な再入力が画面に明示される (4.0s)
+  ✓   8 e2e/int1BlankInputGuard.e2e.ts:72:5 › INT1-BLANK-1: Console内PLAYER — 販売数量の 0／空欄／打ち直し (3.4s)
+  ✓   9 e2e/int1BlankInputGuard.e2e.ts:119:5 › INT1-BLANK-2: Console内PLAYER — 人員配置の空欄と比率の範囲外 (3.2s)
+  ✓  10 e2e/int1BlankInputGuard.e2e.ts:182:5 › INT1-BLANK-3: Independent Player — 空欄のまま提出すると項目名を示して止まり、直せば提出できる (4.3s)
+  ✓  11 e2e/int1PlayerInputIntegrity.e2e.ts:61:5 › INT1-E2E-1/2: 無効な値を含む提出はserverが拒否し保存せず、正しい値で提出し直せる (4.3s)
+  ✓  12 e2e/int1PlayerInputIntegrity.e2e.ts:121:5 › INT1-E2E-3/4: Console内PLAYER画面が古いTurnを表示せず、確定した提出値がTurn計算に使われる (3.8s)
+  ✓  13 e2e/managementAnnualDividend.e2e.ts:101:5 › AD-E2E-1: 年度末Q4の精算実績が、Engine記録どおりの値で表示される（手動50%） (4.9s)
+  ✓  14 e2e/managementAnnualDividend.e2e.ts:174:5 › AD-E2E-2: 資金制約で年間目標に届かない場合、未達額と理由が表示される（CASH_LIMIT） (4.1s)
+  ✓  15 e2e/managementBalanceAdjustment.e2e.ts:35:5 › MB-E2E: バランス調整の入力→保存→1ターン進行→結果確認が、全社Standard AIのまま成立する (3.5s)
+  ✓  16 e2e/managementBalanceAdjustment.e2e.ts:102:5 › MB-E2E-2: 不正な入力（単位間違い・空欄由来の0）は保存できない (1.9s)
+  ✓  17 e2e/managementBalanceAdjustment.e2e.ts:150:5 › MB-E2E-3: persist成功が解決するまで「保存済み・適用予定」と表示されない (2.3s)
+  ✓  18 e2e/managementBalanceAdjustment.e2e.ts:191:5 › MB-E2E-4: persist失敗時は保存済みと表示されず、設定も保存されず、Turnも進められない (3.0s)
+  ✓  19 e2e/managementBalanceAdjustment.e2e.ts:227:5 › MB-E2E-5: persist成功時のみ正式反映され、reload/resume後も同値が残る (3.3s)
+  ✓  20 e2e/managementBalanceAdjustment.e2e.ts:266:5 › MB-E2E-6: 保存直後に+1を連打しても、保存完了前にTurnが始まらない (2.6s)
+  ✓  21 e2e/managementBalanceProfile.e2e.ts:52:5 › BP-E2E: Profileを作成し、それを選んだ全社Standard AIのRunで32Turnを完走して適用実績を確認できる (27.0s)
+  ✓  22 e2e/managementBalanceProfile.e2e.ts:146:5 › BP-E2E-2: Neutralを選んだRunにはProfileの記録が残らない (1.9s)
+  ✓  23 e2e/managementSalesModelSelector.e2e.ts:53:5 › MC-SALES-E2E: Setupでtieredを選んで作成したRunが、Console表示・Turn進行・reload/resumeを通じてtieredを維持する (5.9s)
+  ✓  24 e2e/managementSalesModelSelector.e2e.ts:97:5 › MC-SALES-E2E-legacy: 既定（従来市場モデル）のまま作成したRunは従来市場モデルと表示される (1.9s)
+  ✓  25 e2e/managementSalesModelSelector.e2e.ts:106:5 › MC-SALES-E2E-createFresh: tieredのRunからManagement Console内で新しく始めても三層顧客価格モデルのまま (2.6s)
+  ✓  26 e2e/managementSalesModelSelector.e2e.ts:149:5 › MC-SALES-E2E-createFresh-legacy: legacyのRunからConsole内で新しく始めても従来市場モデルのまま (2.0s)
+  ✓  27 e2e/managementSalesModelSelector.e2e.ts:165:5 › MC-SALES-E2E-crowding: 市場集中価格下落モデルを選んで作成したRunが、Turn進行・reload後も同じモデルのまま (3.7s)
+  ✓  28 e2e/playerAdminDividendD1.e2e.ts:152:5 › D1-21: Management Console内PLAYERが配当欄を触らなくても、管理者50%でQ4に自動精算される (9.3s)
+  ✓  29 e2e/playerAdminDividendD1.e2e.ts:205:5 › D1-22: 別端末のIndependent Playerでも、管理者50%がそのまま届きQ4に自動精算される (8.3s)
+  ✓  30 e2e/playerSubmitPersistenceRace.e2e.ts:69:5 › O1-E2E-A: GMがTurnを公開した直後にPlayerが提出しても、その提出が消えずGMが次Turnで使える (7.2s)
+  ✓  31 e2e/playerSubmitPersistenceRace.e2e.ts:119:5 › O1-E2E-B: BALとMASSが同じTurnへほぼ同時に提出しても、両方が残りGMが進められる (6.9s)
+  ✓  32 e2e/playerSubmitPersistenceRace.e2e.ts:170:5 › O1-E2E-C: Console内PLAYERの確定とIndependent Playerの提出が、互いを消さない (7.3s)
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=lab-h4kjvl company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=lab-h4kjvl company=BAL turn=1
+  ✓  33 e2e/playerUiPlaytestFix1.e2e.ts:41:7 › PLAYER-UI-PLAYTEST-FIX-1 — 製品別在庫表示 / CEO summary非捏造確認 › ① 製品在庫（商品別）: turn1でHOSO/PD/VAPすべて0 tと明示され、合計と一致する (1.8s)
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=lab-1oa9dc company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=lab-1oa9dc company=BAL turn=1
+  ✓  34 e2e/playerUiPlaytestFix1.e2e.ts:70:7 › PLAYER-UI-PLAYTEST-FIX-1 — 製品別在庫表示 / CEO summary非捏造確認 › ④ CEO summary: AI説明パネルは捏造せず、失敗時は既存のエラー表示のまま（成功時の表示順序はコード確認済み・本環境では未実測） (1.9s)
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=lab-cesjit company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=lab-cesjit company=BAL turn=1
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=lab-cesjit company=BAL turn=2
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=lab-cesjit company=BAL turn=2
+  ✓  35 e2e/salesModelSelector.e2e.ts:56:7 › UI-SALES-MODEL-SELECT-1 — 管理者用 Sales Model 選択・表示 UI › (1)-(7) tiered選択でラボ作成 → 作成後表示 → turn進行 → resumeでも表示保持 (4.5s)
+[WebServer] [claudeClient] ANTHROPIC_API_KEY未設定 lab=lab-u0wp3k company=BAL turn=1
+  ✓  36 e2e/salesModelSelector.e2e.ts:85:7 › UI-SALES-MODEL-SELECT-1 — 管理者用 Sales Model 選択・表示 UI › legacy（既定値のまま）で作成すると従来市場モデル表示のまま (1.6s)
+  ✓  37 e2e/salesPriceReference.e2e.ts:56:7 › SALES 基準価格参考表示 — Independent Player Flow経由 › Turn1は前Turn「－」表示、Turn2以降は実際の前Turn基準価格が表示され価格調整で参考提示価格が即時更新される (8.0s)
+
+  37 passed (3.2m)
+### EXIT: 0

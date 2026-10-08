@@ -1,0 +1,13 @@
+### CMD: INT1_REDIS_PORT=6405 npx tsx scripts/int1/verifyRecoveryPaths.ts
+# isolated redis 127.0.0.1:6405 / schemaVersion=9
+# 保存したrevision: 1, 2, 3, 4, 5, 6 / completedTurns=3
+PASS  R2 最新revisionが正本として読める  公開中revision=6 / loadRun schemaVersion=9 / completedTurns=3
+PASS  R1 保存済み状態から再開して次Turnを進められる  復元後 history=3Turn / salesModelId=tiered-v200-crowding-v1 / 次Turn進行=成功
+PASS  R1b dataset / resume / pack がすべて復元される  dataset=true resume=true pack=true
+PASS  R1c 最新revisionのresumeに保存時点の確定提出が入っている（Turn実行後は消費済みで空）  最新revision 6 の確定提出: []（直前にTurnを実行したため消費済み）
+PASS  R3 旧revisionのパートは公開時に削除される（＝1つ前へ戻す保存物は残らない）  revision 5 の dataset/resume/pack EXISTS = 0 / 0 / 0（0 = 削除済み）
+PASS  R4 旧revisionへ戻す公開APIは存在しない（制限として明記が必要）  simulation-runs API の公開関数: handleSaveSimulationRunPart, handleSaveSimulationRun, handleLoadSimulationRun, handleListSimulationRuns, handleDeleteSimulationRun
+PASS  R5 監査Excelはxlsxバイナリであり、Runを復元する保存物ではない  先頭4バイト=504b0304（504b…=ZIP/xlsx）/ サイズ=214,464 bytes / ファイル名=ShrimpX_StandardAI_Audit_int1-recovery_Turn3_PARTIAL.xlsx
+
+# INT-1 §5 復旧経路の検証: FAIL=0
+### EXIT: 0

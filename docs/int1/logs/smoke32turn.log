@@ -1,0 +1,24 @@
+### CMD: npx tsx scripts/int1/smoke32Turn.ts
+# scenario=dynamic-scenario-2 seed=int1-smoke-32 salesModelId=tiered-v200-crowding-v1 turns=32 player=BAL
+# crowding policy enabled=true version=crowding-markdown-v1
+# CURRENT_SIMULATION_RUN_PERSISTED_VERSION=9
+PASS  resume  T17 で save → resume を実行（history 16 → 4、salesModelId=tiered-v200-crowding-v1）
+PASS  crashなし  32Turn完走（1.4秒）
+PASS  32Turn完走  completedTurns=32, isComplete=true, stopReason=completed
+PASS  Crowding診断  crowdingDiagnostics を持つTurn = 20 / history 20
+PASS  result generation (dataset)  dataset.turns = 32（1〜32）
+PASS  Final Results  Final Results 生成: 5社（BAL, MASS, JPQ, VAP, CONSV）
+PASS  Final Results が T32精算後の状態  T32で精算支払のあった会社 5社、うちFinal Results(asOfTurn=32)へ反映 5社
+PASS  Audit Workbook  xlsx 1,745,646 bytes / fileName=ShrimpX_StandardAI_Audit_int1-smoke-32_32Q.xlsx
+PASS  persistence schemaVersion  保存schemaVersion=9
+PASS  accounting invariant: 貸借一致  違反 0 件 / 最大貸借差額 0.002000 USD（20Turn × 5社）
+PASS  accounting invariant: D1年間精算  Q4 5回 × 5社 = 25 行、違反 0 件
+PASS  production constraint invariant  稼働率違反 0 件 / 負数ロット 0 件 / 最大設備稼働率 91.67% / 最大労働稼働率 100.00%
+PASS  32Turn全履歴Run (resumeなし)  history=32Turn, completedTurns=32
+PASS  accounting invariant: 貸借一致（32Turn全履歴）  違反 0 件 / 最大貸借差額 0.002000 USD（32Turn × 5社）
+PASS  accounting invariant: D1年間精算（32Turn全履歴）  Q4 8回 × 5社 = 40 行、違反 0 件
+PASS  production constraint invariant（32Turn全履歴・設備/労働/原料）  違反 0 件（稼働率・原料質量保存・在庫非負）/ 負数ロット 0 件
+PASS  Crowding診断（32Turn全履歴）  crowdingDiagnostics を持つTurn = 32 / 32
+
+# INT-1 §9 32Turnスモーク: FAIL=0 / 実行時間 1.4秒
+### EXIT: 0

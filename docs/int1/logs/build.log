@@ -1,0 +1,99 @@
+### CMD: npm run build （隔離環境・ローカルplaceholder環境変数。実Stagingの検証ではない）
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /home/user/vietnam-shrimp-game/package-lock.json as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /home/user/vietnam-shrimp-game/.worktrees/int1/package-lock.json
+
+▲ Next.js 16.2.10 (Turbopack)
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 20.0s
+  Running TypeScript ...
+  Finished TypeScript in 24.9s ...
+  Collecting page data using 3 workers ...
+  Generating static pages using 3 workers (0/14) ...
+  Generating static pages using 3 workers (3/14) 
+  Generating static pages using 3 workers (6/14) 
+  Generating static pages using 3 workers (10/14) 
+✓ Generating static pages using 3 workers (14/14) in 217ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /api/game
+├ ƒ /api/game/[gameCode]
+├ ƒ /api/game/[gameCode]/admin
+├ ƒ /api/game/[gameCode]/admin/clone
+├ ƒ /api/game/[gameCode]/admin/reset
+├ ƒ /api/game/[gameCode]/decisions
+├ ƒ /api/game/[gameCode]/process-turn
+├ ƒ /api/game/[gameCode]/results
+├ ƒ /api/game/[gameCode]/snapshots
+├ ƒ /api/game/[gameCode]/snapshots/[snapshotId]
+├ ƒ /api/game/[gameCode]/snapshots/[snapshotId]/restore
+├ ƒ /api/game/[gameCode]/submission-status
+├ ƒ /api/v2/admin/export-download/[labId]/[turn]
+├ ƒ /api/v2/company-lab/session-status
+├ ƒ /api/v2/company-labs
+├ ƒ /api/v2/company-labs/[labId]
+├ ƒ /api/v2/company-labs/[labId]/companies/[companyId]/ai-meeting/memory
+├ ƒ /api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/ai-explanation
+├ ƒ /api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/ai-meeting/messages
+├ ƒ /api/v2/company-labs/[labId]/companies/[companyId]/turns/[turn]/ai-meeting/opening-brief
+├ ƒ /api/v2/company-labs/[labId]/draft
+├ ƒ /api/v2/company-labs/[labId]/draft/submit
+├ ƒ /api/v2/company-labs/[labId]/draft/withdraw
+├ ƒ /api/v2/company-labs/[labId]/history
+├ ƒ /api/v2/company-labs/[labId]/history/[turn]
+├ ƒ /api/v2/company-labs/[labId]/process-quarter
+├ ƒ /api/v2/exports/company-labs/[labId]
+├ ƒ /api/v2/exports/company-labs/[labId]/turns/[turn]
+├ ƒ /api/v2/exports/company-labs/[labId]/turns/[turn]/companies/[companyId]
+├ ƒ /api/v2/exports/company-labs/[labId]/turns/[turn]/market
+├ ƒ /api/v2/management/company-databook
+├ ƒ /api/v2/management/player-seats/[runId]
+├ ƒ /api/v2/management/player-seats/[runId]/[companyId]
+├ ƒ /api/v2/management/player-seats/[runId]/[companyId]/record-submission
+├ ƒ /api/v2/play/join/[joinId]
+├ ƒ /api/v2/play/session
+├ ƒ /api/v2/play/submit
+├ ƒ /api/v2/simulation-runs
+├ ƒ /api/v2/simulation-runs/[simulationRunId]
+├ ƒ /api/v2/simulation-runs/[simulationRunId]/companies/[companyId]/turns/[turn]/ai-meeting/messages
+├ ƒ /company/[id]
+├ ƒ /gm
+├ ƒ /gm/[gameCode]
+├ ƒ /lobby/[gameCode]
+├ ƒ /v2/company-lab
+├ ƒ /v2/company-lab/play
+├ ƒ /v2/company-lab/play/[labId]
+├ ƒ /v2/company-lab/play/export
+├ ƒ /v2/company-lab/play/export/[labId]
+├ ƒ /v2/company-lab/play/login
+├ ƒ /v2/company-lab/play/new
+├ ƒ /v2/industry-lab
+├ ƒ /v2/management
+├ ƒ /v2/management/analysis
+├ ƒ /v2/management/analysis/ai-trace
+├ ƒ /v2/management/analysis/bottleneck
+├ ƒ /v2/management/analysis/commercial-growth
+├ ƒ /v2/management/analysis/contribution
+├ ƒ /v2/management/analysis/fixed-cost
+├ ƒ /v2/management/analysis/market
+├ ƒ /v2/management/analysis/overview
+├ ƒ /v2/management/analysis/prices
+├ ƒ /v2/management/analysis/sales-allocation
+├ ƒ /v2/management/analysis/sales-headcount
+├ ƒ /v2/management/analysis/strategy
+├ ƒ /v2/management/player
+├ ƒ /v2/management/setup
+├ ƒ /v2/play/join/[joinId]
+└ ƒ /v2/play/workspace
+
+
+ƒ  (Dynamic)  server-rendered on demand
+
+### EXIT: 0

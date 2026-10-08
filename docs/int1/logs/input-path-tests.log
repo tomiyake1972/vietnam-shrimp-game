@@ -1,0 +1,122 @@
+### CMD: npx tsx --test app/v2/company-lab/__tests__/int1InputPathIntegrity.test.ts
+### DATE: 2026-10-08 11:08 JST
+### NOTE: 最終監査後修正を含む最終コードに対する実行（INT1-IP-1〜18）
+TAP version 13
+# Subtest: INT1-IP-1: 明示的な0は受理し、空欄・非数は0へ変換しない
+ok 1 - INT1-IP-1: 明示的な0は受理し、空欄・非数は0へ変換しない
+  ---
+  duration_ms: 1.653355
+  type: 'test'
+  ...
+# Subtest: INT1-IP-2: UI経由でも負数は提出前検証で止まる（丸められて検出不能にならない）
+ok 2 - INT1-IP-2: UI経由でも負数は提出前検証で止まる（丸められて検出不能にならない）
+  ---
+  duration_ms: 56.244333
+  type: 'test'
+  ...
+# Subtest: INT1-IP-3: UI経由でも負の人員は提出前検証で止まる
+ok 3 - INT1-IP-3: UI経由でも負の人員は提出前検証で止まる
+  ---
+  duration_ms: 9.427011
+  type: 'test'
+  ...
+# Subtest: INT1-IP-4: UI経由でも範囲外の残業率は提出前検証で止まる
+ok 4 - INT1-IP-4: UI経由でも範囲外の残業率は提出前検証で止まる
+  ---
+  duration_ms: 4.433443
+  type: 'test'
+  ...
+# Subtest: INT1-IP-5: engine直前のサニタイズは変更していない（不正値はengineへ届かない）
+ok 5 - INT1-IP-5: engine直前のサニタイズは変更していない（不正値はengineへ届かない）
+  ---
+  duration_ms: 4.706467
+  type: 'test'
+  ...
+# Subtest: INT1-IP-6: 正常な下書きは今までどおり通る（回帰）
+ok 6 - INT1-IP-6: 正常な下書きは今までどおり通る（回帰）
+  ---
+  duration_ms: 9.545646
+  type: 'test'
+  ...
+# Subtest: INT1-IP-7: 空欄の販売数量は提出前検証で止まる（0として確定しない）
+ok 7 - INT1-IP-7: 空欄の販売数量は提出前検証で止まる（0として確定しない）
+  ---
+  duration_ms: 3.302731
+  type: 'test'
+  ...
+# Subtest: INT1-IP-8: 明示的な0の販売数量は受理される（0は正当な意思決定）
+ok 8 - INT1-IP-8: 明示的な0の販売数量は受理される（0は正当な意思決定）
+  ---
+  duration_ms: 3.285234
+  type: 'test'
+  ...
+# Subtest: INT1-IP-9: 空欄の増員／減員は提出前検証で止まる（engineのapplyHeadcountChangeでは検出できない）
+ok 9 - INT1-IP-9: 空欄の増員／減員は提出前検証で止まる（engineのapplyHeadcountChangeでは検出できない）
+  ---
+  duration_ms: 3.034243
+  type: 'test'
+  ...
+# Subtest: INT1-IP-10: 空欄の残業率は提出前検証で止まる
+ok 10 - INT1-IP-10: 空欄の残業率は提出前検証で止まる
+  ---
+  duration_ms: 4.767347
+  type: 'test'
+  ...
+# Subtest: INT1-IP-11: 不正値を直せば再度通る（修正後の再提出）
+ok 11 - INT1-IP-11: 不正値を直せば再度通る（修正後の再提出）
+  ---
+  duration_ms: 2.58218
+  type: 'test'
+  ...
+# Subtest: INT1-IP-12: JSON送信でNaNがnullへ変わっても検証は項目名を示して止める（Independent Player経路）
+ok 12 - INT1-IP-12: JSON送信でNaNがnullへ変わっても検証は項目名を示して止める（Independent Player経路）
+  ---
+  duration_ms: 1.851602
+  type: 'test'
+  ...
+# Subtest: INT1-IP-13: 空欄の増員／減員はJSON変換後も項目名付きで拒否される
+ok 13 - INT1-IP-13: 空欄の増員／減員はJSON変換後も項目名付きで拒否される
+  ---
+  duration_ms: 1.737588
+  type: 'test'
+  ...
+# Subtest: INT1-IP-14: 空欄の設備投資申請額・優先度はJSON変換後も項目名付きで拒否される
+ok 14 - INT1-IP-14: 空欄の設備投資申請額・優先度はJSON変換後も項目名付きで拒否される
+  ---
+  duration_ms: 1.936896
+  type: 'test'
+  ...
+# Subtest: INT1-IP-15: 空欄の輸入リードタイムもJSON変換後に拒否される（同じ検証漏れの他項目）
+ok 15 - INT1-IP-15: 空欄の輸入リードタイムもJSON変換後に拒否される（同じ検証漏れの他項目）
+  ---
+  duration_ms: 1.740036
+  type: 'test'
+  ...
+# Subtest: INT1-IP-16: 省略可能な項目の『省略』はJSON変換後も通る（意味を壊していない）
+ok 16 - INT1-IP-16: 省略可能な項目の『省略』はJSON変換後も通る（意味を壊していない）
+  ---
+  duration_ms: 2.866037
+  type: 'test'
+  ...
+# Subtest: INT1-IP-17: 明示的な0と正当な減員（負の増減）はJSON変換後も通る
+ok 17 - INT1-IP-17: 明示的な0と正当な減員（負の増減）はJSON変換後も通る
+  ---
+  duration_ms: 1.877045
+  type: 'test'
+  ...
+# Subtest: INT1-IP-18: 画面内の明示的なundefinedは従来どおり省略として扱う（buildInitialDraftが実際に作る形）
+ok 18 - INT1-IP-18: 画面内の明示的なundefinedは従来どおり省略として扱う（buildInitialDraftが実際に作る形）
+  ---
+  duration_ms: 1.554707
+  type: 'test'
+  ...
+1..18
+# tests 18
+# suites 0
+# pass 18
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 784.681998
+### EXIT: 0

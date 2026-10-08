@@ -1,0 +1,172 @@
+### CMD: npx tsx --test app/v2/company-lab/__tests__/int1InputPathIntegrity.test.ts （負の対照）
+### DATE: 2026-10-08 11:08 JST
+### NOTE: decisionDraft.ts の optional を修正前の挙動（nullも省略として検証を飛ばす）へ
+###       一時的に戻した状態。JSON送信経路のテストが失敗することを確認し、直後に復元した。
+
+TAP version 13
+# Subtest: INT1-IP-1: 明示的な0は受理し、空欄・非数は0へ変換しない
+ok 1 - INT1-IP-1: 明示的な0は受理し、空欄・非数は0へ変換しない
+  ---
+  duration_ms: 1.245544
+  type: 'test'
+  ...
+# Subtest: INT1-IP-2: UI経由でも負数は提出前検証で止まる（丸められて検出不能にならない）
+ok 2 - INT1-IP-2: UI経由でも負数は提出前検証で止まる（丸められて検出不能にならない）
+  ---
+  duration_ms: 47.512781
+  type: 'test'
+  ...
+# Subtest: INT1-IP-3: UI経由でも負の人員は提出前検証で止まる
+ok 3 - INT1-IP-3: UI経由でも負の人員は提出前検証で止まる
+  ---
+  duration_ms: 5.951963
+  type: 'test'
+  ...
+# Subtest: INT1-IP-4: UI経由でも範囲外の残業率は提出前検証で止まる
+ok 4 - INT1-IP-4: UI経由でも範囲外の残業率は提出前検証で止まる
+  ---
+  duration_ms: 4.970475
+  type: 'test'
+  ...
+# Subtest: INT1-IP-5: engine直前のサニタイズは変更していない（不正値はengineへ届かない）
+ok 5 - INT1-IP-5: engine直前のサニタイズは変更していない（不正値はengineへ届かない）
+  ---
+  duration_ms: 4.423923
+  type: 'test'
+  ...
+# Subtest: INT1-IP-6: 正常な下書きは今までどおり通る（回帰）
+ok 6 - INT1-IP-6: 正常な下書きは今までどおり通る（回帰）
+  ---
+  duration_ms: 5.119369
+  type: 'test'
+  ...
+# Subtest: INT1-IP-7: 空欄の販売数量は提出前検証で止まる（0として確定しない）
+ok 7 - INT1-IP-7: 空欄の販売数量は提出前検証で止まる（0として確定しない）
+  ---
+  duration_ms: 2.845743
+  type: 'test'
+  ...
+# Subtest: INT1-IP-8: 明示的な0の販売数量は受理される（0は正当な意思決定）
+ok 8 - INT1-IP-8: 明示的な0の販売数量は受理される（0は正当な意思決定）
+  ---
+  duration_ms: 3.718678
+  type: 'test'
+  ...
+# Subtest: INT1-IP-9: 空欄の増員／減員は提出前検証で止まる（engineのapplyHeadcountChangeでは検出できない）
+ok 9 - INT1-IP-9: 空欄の増員／減員は提出前検証で止まる（engineのapplyHeadcountChangeでは検出できない）
+  ---
+  duration_ms: 3.32857
+  type: 'test'
+  ...
+# Subtest: INT1-IP-10: 空欄の残業率は提出前検証で止まる
+ok 10 - INT1-IP-10: 空欄の残業率は提出前検証で止まる
+  ---
+  duration_ms: 4.765645
+  type: 'test'
+  ...
+# Subtest: INT1-IP-11: 不正値を直せば再度通る（修正後の再提出）
+ok 11 - INT1-IP-11: 不正値を直せば再度通る（修正後の再提出）
+  ---
+  duration_ms: 2.597637
+  type: 'test'
+  ...
+# Subtest: INT1-IP-12: JSON送信でNaNがnullへ変わっても検証は項目名を示して止める（Independent Player経路）
+ok 12 - INT1-IP-12: JSON送信でNaNがnullへ変わっても検証は項目名を示して止める（Independent Player経路）
+  ---
+  duration_ms: 1.986237
+  type: 'test'
+  ...
+# Subtest: INT1-IP-13: 空欄の増員／減員はJSON変換後も項目名付きで拒否される
+not ok 13 - INT1-IP-13: 空欄の増員／減員はJSON変換後も項目名付きで拒否される
+  ---
+  duration_ms: 5.297959
+  type: 'test'
+  location: '/home/user/vietnam-shrimp-game/.worktrees/int1/app/v2/company-lab/__tests__/int1InputPathIntegrity.test.ts:2:11909'
+  failureType: 'testCodeFailure'
+  error: 'JSON変換後に空欄の増減差分が通過している'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (/home/user/vietnam-shrimp-game/.worktrees/int1/app/v2/company-lab/__tests__/int1InputPathIntegrity.test.ts:185:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: INT1-IP-14: 空欄の設備投資申請額・優先度はJSON変換後も項目名付きで拒否される
+not ok 14 - INT1-IP-14: 空欄の設備投資申請額・優先度はJSON変換後も項目名付きで拒否される
+  ---
+  duration_ms: 4.675052
+  type: 'test'
+  location: '/home/user/vietnam-shrimp-game/.worktrees/int1/app/v2/company-lab/__tests__/int1InputPathIntegrity.test.ts:2:12830'
+  failureType: 'testCodeFailure'
+  error: 'JSON変換後に空欄の requestedBudgetUsd が通過している'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (/home/user/vietnam-shrimp-game/.worktrees/int1/app/v2/company-lab/__tests__/int1InputPathIntegrity.test.ts:203:12)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: INT1-IP-15: 空欄の輸入リードタイムもJSON変換後に拒否される（同じ検証漏れの他項目）
+not ok 15 - INT1-IP-15: 空欄の輸入リードタイムもJSON変換後に拒否される（同じ検証漏れの他項目）
+  ---
+  duration_ms: 1.933819
+  type: 'test'
+  location: '/home/user/vietnam-shrimp-game/.worktrees/int1/app/v2/company-lab/__tests__/int1InputPathIntegrity.test.ts:2:13911'
+  failureType: 'testCodeFailure'
+  error: 'JSON変換後に空欄のリードタイムが通過している'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (/home/user/vietnam-shrimp-game/.worktrees/int1/app/v2/company-lab/__tests__/int1InputPathIntegrity.test.ts:213:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: INT1-IP-16: 省略可能な項目の『省略』はJSON変換後も通る（意味を壊していない）
+ok 16 - INT1-IP-16: 省略可能な項目の『省略』はJSON変換後も通る（意味を壊していない）
+  ---
+  duration_ms: 2.445831
+  type: 'test'
+  ...
+# Subtest: INT1-IP-17: 明示的な0と正当な減員（負の増減）はJSON変換後も通る
+ok 17 - INT1-IP-17: 明示的な0と正当な減員（負の増減）はJSON変換後も通る
+  ---
+  duration_ms: 2.099207
+  type: 'test'
+  ...
+# Subtest: INT1-IP-18: 画面内の明示的なundefinedは従来どおり省略として扱う（buildInitialDraftが実際に作る形）
+ok 18 - INT1-IP-18: 画面内の明示的なundefinedは従来どおり省略として扱う（buildInitialDraftが実際に作る形）
+  ---
+  duration_ms: 1.700857
+  type: 'test'
+  ...
+1..18
+# tests 18
+# suites 0
+# pass 15
+# fail 3
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 835.926711
+### EXIT: 1

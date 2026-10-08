@@ -1,0 +1,108 @@
+### CMD: npx playwright test --config=e2e/playwright.config.ts e2e/int1BlankInputGuard.e2e.ts
+### DATE: 2026-10-08 10:0x JST
+### NOTE: 負の対照: InputCellsを旧挙動（空欄→0・比率クランプ）へ一時的に戻した状態。3件すべて失敗することを確認し、直後に復元
+[WebServer] ⚠ Self-signed certificates are currently an experimental feature, use with caution.
+[WebServer] ⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+[WebServer]  We detected multiple lockfiles and selected the directory of /home/user/vietnam-shrimp-game/package-lock.json as the root directory.
+[WebServer]  To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+[WebServer]    See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+[WebServer]  Detected additional lockfiles: 
+[WebServer]    * /home/user/vietnam-shrimp-game/.worktrees/int1/package-lock.json
+[WebServer] 
+
+Running 3 tests using 1 worker
+
+  ✘  1 e2e/int1BlankInputGuard.e2e.ts:72:5 › INT1-BLANK-1: Console内PLAYER — 販売数量の 0／空欄／打ち直し (27.9s)
+  ✘  2 e2e/int1BlankInputGuard.e2e.ts:119:5 › INT1-BLANK-2: Console内PLAYER — 人員配置の空欄と比率の範囲外 (18.0s)
+  ✘  3 e2e/int1BlankInputGuard.e2e.ts:182:5 › INT1-BLANK-3: Independent Player — 空欄のまま提出すると項目名を示して止まり、直せば提出できる (23.7s)
+
+
+  1) e2e/int1BlankInputGuard.e2e.ts:72:5 › INT1-BLANK-1: Console内PLAYER — 販売数量の 0／空欄／打ち直し › (b) 空欄にしても0へ書き換わらず、空欄のまま保たれる 
+
+    Error: expect(locator).toHaveValue(expected) failed
+
+    Locator:  getByTestId('sales-plan-desired-quantity-CN-hoso')
+    Expected: ""
+    Received: "0"
+    Timeout:  15000ms
+
+    Call log:
+      - Expect "toHaveValue" with timeout 15000ms
+      - waiting for getByTestId('sales-plan-desired-quantity-CN-hoso')
+        34 × locator resolved to <input min="0" step="1" value="0" type="number" data-testid="sales-plan-desired-quantity-CN-hoso" class="w-24 bg-sky-900/70 border border-sky-500/70 rounded px-2 py-1 text-sm text-sky-50 focus:outline-none focus:border-sky-300 focus:ring-1 focus:ring-sky-400 disabled:opacity-50 disabled:bg-gray-800 disabled:border-gray-600 disabled:text-gray-400 "/>
+           - unexpected value "0"
+
+
+      93 |   await test.step("(b) 空欄にしても0へ書き換わらず、空欄のまま保たれる", async () => {
+      94 |     await clearCell(quantity);
+    > 95 |     await expect(quantity).toHaveValue("");
+         |                            ^
+      96 |     await expect(quantity).toHaveAttribute("data-invalid", "true");
+      97 |   });
+      98 |
+        at /home/user/vietnam-shrimp-game/.worktrees/int1/e2e/int1BlankInputGuard.e2e.ts:95:28
+        at /home/user/vietnam-shrimp-game/.worktrees/int1/e2e/int1BlankInputGuard.e2e.ts:93:3
+
+    Error Context: test-results/int1BlankInputGuard.e2e.ts-5cdc1-le内PLAYER-—-販売数量の-0／空欄／打ち直し/error-context.md
+
+  2) e2e/int1BlankInputGuard.e2e.ts:119:5 › INT1-BLANK-2: Console内PLAYER — 人員配置の空欄と比率の範囲外 › 人員配置（増員／減員）を空欄にしても0へ書き換わらない 
+
+    Error: expect(locator).toHaveValue(expected) failed
+
+    Locator:  getByTestId('worker-headcount-change-BAL-F1')
+    Expected: ""
+    Received: "0"
+    Timeout:  15000ms
+
+    Call log:
+      - Expect "toHaveValue" with timeout 15000ms
+      - waiting for getByTestId('worker-headcount-change-BAL-F1')
+        34 × locator resolved to <input step="10" value="0" type="number" data-testid="worker-headcount-change-BAL-F1" class="w-24 bg-sky-900/70 border border-sky-500/70 rounded px-2 py-1 text-sm text-sky-50 focus:outline-none focus:border-sky-300 focus:ring-1 focus:ring-sky-400 disabled:opacity-50 disabled:bg-gray-800 disabled:border-gray-600 disabled:text-gray-400 "/>
+           - unexpected value "0"
+
+
+      133 |   await test.step("人員配置（増員／減員）を空欄にしても0へ書き換わらない", async () => {
+      134 |     await clearCell(headcountChange);
+    > 135 |     await expect(headcountChange).toHaveValue("");
+          |                                   ^
+      136 |     await expect(headcountChange).toHaveAttribute("data-invalid", "true");
+      137 |   });
+      138 |
+        at /home/user/vietnam-shrimp-game/.worktrees/int1/e2e/int1BlankInputGuard.e2e.ts:135:35
+        at /home/user/vietnam-shrimp-game/.worktrees/int1/e2e/int1BlankInputGuard.e2e.ts:133:3
+
+    Error Context: test-results/int1BlankInputGuard.e2e.ts-aa688-ole内PLAYER-—-人員配置の空欄と比率の範囲外/error-context.md
+
+  3) e2e/int1BlankInputGuard.e2e.ts:182:5 › INT1-BLANK-3: Independent Player — 空欄のまま提出すると項目名を示して止まり、直せば提出できる › 空欄のまま提出すると、対象項目を示して止まる 
+
+    Error: expect(locator).toHaveValue(expected) failed
+
+    Locator:  getByTestId('sales-plan-desired-quantity-CN-hoso')
+    Expected: ""
+    Received: "0"
+    Timeout:  15000ms
+
+    Call log:
+      - Expect "toHaveValue" with timeout 15000ms
+      - waiting for getByTestId('sales-plan-desired-quantity-CN-hoso')
+        34 × locator resolved to <input min="0" step="1" value="0" type="number" data-testid="sales-plan-desired-quantity-CN-hoso" class="w-24 bg-sky-900/70 border border-sky-500/70 rounded px-2 py-1 text-sm text-sky-50 focus:outline-none focus:border-sky-300 focus:ring-1 focus:ring-sky-400 disabled:opacity-50 disabled:bg-gray-800 disabled:border-gray-600 disabled:text-gray-400 "/>
+           - unexpected value "0"
+
+
+      199 |   await test.step("空欄のまま提出すると、対象項目を示して止まる", async () => {
+      200 |     await clearCell(quantity);
+    > 201 |     await expect(quantity).toHaveValue("");
+          |                            ^
+      202 |     await balPage.getByTestId("play-submit-decision").click();
+      203 |     const error = balPage.getByTestId("play-submit-error");
+      204 |     await expect(error).toBeVisible({ timeout: 30_000 });
+        at /home/user/vietnam-shrimp-game/.worktrees/int1/e2e/int1BlankInputGuard.e2e.ts:201:28
+        at /home/user/vietnam-shrimp-game/.worktrees/int1/e2e/int1BlankInputGuard.e2e.ts:199:3
+
+    Error Context: test-results/int1BlankInputGuard.e2e.ts-d60e6-のまま提出すると項目名を示して止まり、直せば提出できる/error-context.md
+
+  3 failed
+    e2e/int1BlankInputGuard.e2e.ts:72:5 › INT1-BLANK-1: Console内PLAYER — 販売数量の 0／空欄／打ち直し ───────────
+    e2e/int1BlankInputGuard.e2e.ts:119:5 › INT1-BLANK-2: Console内PLAYER — 人員配置の空欄と比率の範囲外 ───────────
+    e2e/int1BlankInputGuard.e2e.ts:182:5 › INT1-BLANK-3: Independent Player — 空欄のまま提出すると項目名を示して止まり、直せば提出できる 
+### EXIT: 1

@@ -1,0 +1,184 @@
+# INT-1 統合候補 — 証拠マニフェスト（SHA-256・64桁）
+#
+# 生成: scripts/int1/buildEvidenceManifest.sh
+# 更新: 2026-10-08 11:13 JST
+# 自己参照を避けるため、次の2ファイルだけ対象外:
+#   docs/int1/evidence_manifest.txt（このファイル自身）
+#   docs/int1/logs/restore-verification.log（このマニフェストで照合した結果の出力）
+#
+# 候補の識別子（commit SHA ではない）:
+#   製品コード＋テスト tree（docs/int1・scripts/int1 を除く）  3c5a616897e28ece9dab09b4d2c037f2a86a10d7
+#   基点 commit                                              a79ec99a477c0f13765856cf63666436fac8e014
+#   ローカル branch                                          local/int1-candidate-20261006（追加commit 0本）
+#
+# 取り込み元（full SHA）:
+#   基準RC    integration/v2-rc-20260830                    728b3416028dabd44556a55de3f8abd84726817d
+#   D1        feature/v2-player-admin-dividend-settlement    c55b81ec23c9396e420c90ed59f2770d44da5003
+#   O1        feature/v2-player-submit-persistence-race-fix  408c3ddf5116cbce6bb8740b1d6cdb2e52511636
+#   Crowding  feature/v2-eng-crowding-markdown-1             a79ec99a477c0f13765856cf63666436fac8e014
+#   ※ Git ancestry に含まれるのは Crowding の5commitのみ。
+#     D1・O1 は差分として適用した成果であり、元commitはancestryに含まれない
+#     （区別と対応表は docs/int1/contribution_map.md）。
+#
+# 復元手順（適用元と順序。詳細は scripts/int1/rebuildAuditDiffs.sh）:
+#   1. git archive 728b3416028dabd44556a55de3f8abd84726817d | tar -x -C <空ディレクトリ>
+#   2. git apply docs/int1/attachments/candidate_tracked.diff
+#   3. git apply docs/int1/attachments/candidate_untracked.diff
+#   Crowding HEAD へ RC 比の差分を重ねないこと（Crowding分が二重になる）。
+#
+# 列: SHA-256(64桁)  由来  パス
+#   CR / O1 / D1      その成果branchの差分として取り込んだファイル
+#   D1+O1 / D1+CR     2成果が触り、統合候補で手統合したファイル
+#   INT1-FIX          INT-1で手を入れた製品コードとその受入テスト（commit 1 対象）
+#   INT1-EVIDENCE     検証スクリプト・運用文書・ログ（commit 2 対象。製品コードではない）
+#   INT1-ATTACH       別添。巨大な生成物のためどちらの commit にも含めない
+#
+# 秘密情報・認証トークン・環境変数の値は含まれていない。
+# 唯一のトークン文字列は candidate_untracked.diff / e2e 内の "e2e-test-token" で、
+# 隔離テスト環境専用の既存ダミー値（実環境の認証情報ではない）。
+
+7b1daee7314ee646664ce44a470516a4e35c226e5d37d98cc26bab125a25fd7a  O1             app/api/v2/play/submit/route.ts
+4d3d2e837430bed0fe716c9856747c525c8daf9ac866e32f8fd7d3fff52b26ed  O1             app/api/v2/simulation-runs/_lib/handlers.ts
+1e3c9884ec6ae3c37b533467bfb75a1a8c41998990cea0ef7c6a6250944b90c4  CR             app/lib/v2/companyLab/__tests__/crowdingEndToEnd.test.ts
+35281ae3bd27f885641348300e9afc29f23c012ed6a38f2507bc79755aaacb52  INT1-FIX       app/lib/v2/companyLab/__tests__/int1SalesForceHiringValidation.test.ts
+acb22ef017df2c2af8b25f59a79146b7ead9d3623ca7ba4a2f2ffa3d591da9a5  CR             app/lib/v2/companyLab/__tests__/test15SalesForceHiringCoexistence.test.ts
+05b96ca4734a9c72546160556bc08bc82fcd4901fd50610a6dd908da60e47ed5  D1             app/lib/v2/companyLab/annualDividendGuidanceView.ts
+2d7a89aa0bc0c6f938fde05dc9fed89af135284cfc076a4468ec13119172904a  CR             app/lib/v2/companyLab/application/__tests__/salesModelIdPersistence.test.ts
+7ced9b1f3d1391a78f37ba562cec7461cab66ae9bbbce44ca26f4f3852312bf5  D1             app/lib/v2/companyLab/manualBalance/overrides.ts
+cf99f79ed6ba741e0afe148c60d0c6b1091d4e798fb58d62c2e42751f64ebe59  CR             app/lib/v2/companyLab/marketEvolution.ts
+af7c73516159a660ebfbc2d73b2398ca3b7888f2ec9850c415b7eb40b4b9fa30  CR             app/lib/v2/companyLab/persistence/__tests__/crowdingPersistenceV9.test.ts
+3e3f24c691d194c424fbe26d1cc7765c61cb344acdbc8e3c59970071a30e138d  CR             app/lib/v2/companyLab/persistence/__tests__/phase8dPersistence.test.ts
+3e068ba5be75b85d74cdf164e71362360578562fdccfc3de850fcf4453415fbb  CR             app/lib/v2/companyLab/persistence/__tests__/test15Migration.test.ts
+e6bebd6042a3577a56762cee6937af90be80fbf291b1eaef37460e56c00de00a  CR             app/lib/v2/companyLab/persistence/schema.ts
+b0f485d4d238c2e82fbcf343e7d6a6a92c191328d89d897923e1a257919109d5  CR             app/lib/v2/companyLab/persistence/types.ts
+83d90dc3592379141f07d48a125e5b816d951febc778e4c80168ce6b11617fde  CR             app/lib/v2/companyLab/physicalSupplySnapshot.ts
+c7e63ea489000c8ed35e3e841a175d4bc759224cb310822fb86bfbe84bf99c57  D1+CR          app/lib/v2/companyLab/runner.ts
+711cb33f151d9c66e64a39c84bf9c60f36fcc443ba75b996fa4af93283073812  INT1-FIX       app/lib/v2/companyLab/salesForceHiring.ts
+88c7ea389741d5eaac22766d3d92076726c400c44ccfac4eb688dc332e572d58  CR             app/lib/v2/companyLab/simulation/__tests__/costFoundationRegression.test.ts
+954081482006333f73548e44a2efbc2827c24eef788e85ee9822dbd04731f5f5  O1             app/lib/v2/companyLab/simulation/__tests__/fakeSimulationRunRedisClient.ts
+4516f16edf364d5a81be63a895d77a1bcc2388636b0b323b3cb1a40c677046ef  INT1-FIX       app/lib/v2/companyLab/simulation/__tests__/int1CrossCuttingIntegration.test.ts
+831c3c242fe19d397f5b952a7474fa7550241e515e8b1c2dad1bbe86afde5503  CR             app/lib/v2/companyLab/simulation/__tests__/managementConsoleSalesModel.test.ts
+31d4c057ab0bf5c7340949ab41e9d53dc69acf41718ebeb8f0c8f1865718064b  D1             app/lib/v2/companyLab/simulation/__tests__/playerAdminDividendD1.test.ts
+d4b37b19eb7fecc4cdf486e3a2ef798f263487e5f89874d59e2a794f5a80a4b3  D1             app/lib/v2/companyLab/simulation/__tests__/playerAdminDividendDisplayD1.test.ts
+a73944e0e4a8d3abaff21ce9f753f56ee63b3c47e506aab085cde794ee7f5b87  CR             app/lib/v2/companyLab/simulation/__tests__/simulationPersistence.test.ts
+0b3db755fabc4ab05bf78e1c9191e48d67e7b12cccaaf1499028d56019c18559  O1             app/lib/v2/companyLab/simulation/__tests__/simulationRunPersistenceCas.test.ts
+00c18d4dabcfe7ca9418468938c7a3d8351aebe821e4284252213f31b1fd1314  O1             app/lib/v2/companyLab/simulation/__tests__/simulationRunSplitStorage.test.ts
+5156f09132a0dbe57a66d74763c60c8dcfd4d71290654b76a7b1f4d0fc1090f5  D1             app/lib/v2/companyLab/simulation/annualDividendPanelRows.ts
+944a5e64c36664e2e3ddbf562ed503d7d98e064d7117a0ad59182682388b7478  CR             app/lib/v2/companyLab/simulation/auditWorkbook/__tests__/standardAiAuditWorkbook.test.ts
+e1467173fa46e5ca0d059db7ecd431cb0e182bbb9c959fff653f9373d5cb6262  CR             app/lib/v2/companyLab/simulation/auditWorkbook/dictionary.ts
+178df43ff9c3adc2ed08f43ace868028544c17b0b2f47d47f7ddca18d1913923  CR             app/lib/v2/companyLab/simulation/auditWorkbook/rows.ts
+da7fb4ba1e9ae7458ab794ecf2ec1a267dfa2363665433e51bedb3d9cee06bb7  CR             app/lib/v2/companyLab/simulation/auditWorkbook/types.ts
+34493c3cc22da3def091c49cac7b76d757953413f423985a1982232c65d2a22c  CR             app/lib/v2/companyLab/simulation/auditWorkbook/workbook.ts
+e47f8246b842a92dcde6e3fa3e1bdfb1fa98189b6451806dd83dfb99b5bde774  O1             app/lib/v2/companyLab/simulation/persistence/redisRepository.ts
+c0843105b1e990759dd38abd649d02f980cb8d4d3e95682b3ea31bff3cb13f06  O1             app/lib/v2/companyLab/simulation/persistence/repository.ts
+9f71fb49ac60feb0da23491673cb68bb3842c48e2feeb529d15ff2df5cbd1d65  CR             app/lib/v2/companyLab/simulation/persistence/types.ts
+e08a13c668e69738d32c65b1c97736563843d6e90f5003e97287d10cdd02115f  CR             app/lib/v2/companyLab/types.ts
+7d8a41086c0c47e314863774113b9da93be2a8a949387859952a5440f8e871f9  D1             app/lib/v2/finance/annualDividendGuidance.ts
+536cd235de326cf9ae25064c31a67597918ab209293e9791175ec511c858b8f4  O1             app/lib/v2/player/__tests__/playerSubmitRace.test.ts
+4acf44a9aaa1f4cb37abe8b994a81d3f529865fd59d608117869748a87232602  D1             app/lib/v2/player/decisionContext.ts
+342de7456d4fb8bc83764d286adcd5069566faafd38c6bd661135b3bd5644f18  O1             app/lib/v2/player/submit.ts
+9fe91823bddcdb2ac87149b2ca72ec30fae42b69a24f13bee87519e52184566d  O1             app/lib/v2/player/types.ts
+efb47dcd12d4822cab5fcc3551765cab91867acf26d7611ceae737da6d67a473  O1             app/lib/v2/redis/simulationRunRedisKeys.ts
+d5fa243c1da0e610d9fefff4c408ca8b67c1622b80e6c321b929e406e4ecede5  CR             app/lib/v2/sales/__tests__/crowdingDueDateSeparation.test.ts
+a0a554a81739e3e87260bece1473a753c8938529887b5ac920e0763f0e618af2  CR             app/lib/v2/sales/__tests__/crowdingMarkdown.test.ts
+899064b8eb349a6e1974858f821a5a97d8ecf61aaeb9f7a45b1c68115d8e4dc7  CR             app/lib/v2/sales/__tests__/crowdingPolicyV200.test.ts
+cb2e8219f74e672491aa35b1df64484118484e392d96fdc52e7cb1423cf7cb9e  CR             app/lib/v2/sales/__tests__/salesModelsFrozen.test.ts
+4d3d15c87c9f0c356a80bddd50a49e34a2cedb05703bbe70fdb8007f69269ed1  CR             app/lib/v2/sales/contracts.ts
+575459cd71ea247404501eb5e0556564f64b31187ba4580bf1eb24747adc6cdf  CR             app/lib/v2/sales/credibleOffer.ts
+524942975029eff52fd97ab1ef7f7b8dbee7c17f4286bda22f22c9b1e14f9eb5  CR             app/lib/v2/sales/crowding.ts
+fbb169e0ca60a6298034e6fd6cd9edb740c5656837673f71efc1155db29add6b  CR             app/lib/v2/sales/crowdingLayer.ts
+69c88d95ec046bbdf397b054eb919fa641d6b300605da7727dd41ae491b9ee76  CR             app/lib/v2/sales/persistedCrowdingDiagnostics.ts
+eb94726fefac74e68c7cd4281b5dc4c6feb49cd0318b9285e729dc29e1c5e610  CR             app/lib/v2/sales/runner.ts
+ec663de6280fb41c9c44eb552ef09c7faa5e46417cff19343d07b0ecd9f0a4d2  CR             app/lib/v2/sales/salesModels.ts
+ce0555b5c82b595b6e0925b1bc2aeafb1348dca867a7acd839f38dca02e5e71b  CR             app/lib/v2/sales/types.ts
+2df407e79c26d025fba25bca8068cfb845cb094678d2aa2373ab699b28507324  CR             app/lib/v2/turn/runner.ts
+41209c7fd7ebad5100d328c83e901490efafecd320cfbd12c950f772eb76577a  CR             app/lib/v2/turn/types.ts
+f25e7259e41bc87f08873a3183cdf27c2665577aa7bd403595af2f1e7761529b  INT1-FIX       app/v2/company-lab/__tests__/int1BacklogByProduct.test.ts
+1c97a48e1ddbe1028be00e971992efaeb4bfa9cffc503295c4112636942323b7  INT1-FIX       app/v2/company-lab/__tests__/int1DraftValidation.test.ts
+f01dac036de9c8d8cf5bec52747a406fcb299bddc132a0b845209162f051a5ff  INT1-FIX       app/v2/company-lab/__tests__/int1FinancingDisclosure.test.ts
+6ef0f73d5508584f3afac3e0a68f85214a2083ae56a1913ae3b84de359a5c458  INT1-FIX       app/v2/company-lab/__tests__/int1InputPathIntegrity.test.ts
+4ee059a5361aa339c97cfc8852da828412927d363225d715b133fb4e6b17f7ce  INT1-FIX       app/v2/company-lab/__tests__/int1NewFactoryCardDisclosure.test.ts
+015f00c81950cb6477d459dda10c5d6bff655f5048f8b233b0d1a6245c7d7e0d  INT1-FIX       app/v2/company-lab/components/BacklogByProductPanel.tsx
+5ccbf40e2c8a51f4960f3685d27007547c79336618bf08094c8c7efa40927754  INT1-FIX       app/v2/company-lab/components/InputCells.tsx
+625518ac92a86ec550264bce22ff6de15a12ab6111f85a3790217ad5a8035ecf  INT1-FIX       app/v2/company-lab/components/LastQuarterFinancingResultPanel.tsx
+257746128e646746a057aaeed9614d55fef80e635052edad153b45c99fe0f824  INT1-FIX       app/v2/company-lab/components/WorkforcePanel.tsx
+45cc2d5b171f8ed926a5c0820b9f43e09aa49524da507f52fa7650d8ffbfcfea  D1             app/v2/company-lab/components/decisionStudio/DecisionStudio.tsx
+ac0d61c85a1e84cc96a5fb241fd3a9e97781e4329634bbf4754876d1a426d75f  D1             app/v2/company-lab/components/decisionStudio/FinancePlanningScreen.tsx
+d194a0e89c2ae71d977f867bfa7df00d062fc7df70f521f747212aed941d51f6  INT1-FIX       app/v2/company-lab/components/decisionStudio/ProductionPlanningScreen.tsx
+dad2eecbdefcc2387f281dba5f2b1ee882873e2442df881f3f27c1e0de5635bc  INT1-FIX       app/v2/company-lab/components/decisionStudio/SalesPlanningScreen.tsx
+39fbfa329ac1428b5c0b47600b96d53515512e5c1482fd56dc0e9dfc874510ff  INT1-FIX       app/v2/company-lab/components/decisionStudio/WorkforcePlanningScreen.tsx
+aa0c760b1d33b3672adedc074b2b16d70b675e9eb32a655c961eaff863286cfc  INT1-FIX       app/v2/company-lab/decisionDraft.ts
+25a01fb39f3220807c221c4d0971324f2053d249e7e4c677db2949ae7fa266ad  INT1-FIX       app/v2/company-lab/decisionStudioViewModel.ts
+36500de8498b61924c0867434e3d5a3095a30224159cdd5bb78ce5a0a45a7842  INT1-FIX       app/v2/company-lab/investmentPlanningViewModel.ts
+d92a49cfdf11844de875097c7dc65d7f64a4641836745b15a1963fd787768e14  CR             app/v2/company-lab/play/_lib/__tests__/detailLoad404.test.ts
+e4cb011bd6d24a2bbd16196cb14145d0074daf8faa117f5c727c5101281c834c  CR             app/v2/company-lab/play/_lib/salesModelDisplay.ts
+f0b78cac80021ad7ab404558e8b483d455121ca0878f71fe8f64c85c15972afb  INT1-FIX       app/v2/management/analysis/commercial-growth/CommercialGrowthView.tsx
+07d9cffbbf1557d8c93ad8850da62a37de211c3e69a86f1a041210928d23e9e8  D1             app/v2/management/components/AnnualDividendPanel.tsx
+508cf00bdf2a42c3524628a9c61caced6b2e0b6ddd54ca53a543c2174ea11e6b  O1             app/v2/management/components/ManagementConsole.tsx
+d8f4edf46e484a05141b0317b7438fed16bb9e1dcf5f165f1329665890e4888e  O1             app/v2/management/lib/persistRun.ts
+5638d9d327f9568c6a830b6260f2412b876c53fdd3337c34a9af72e7056e4c8f  O1             app/v2/management/lib/simulationRunStore.ts
+1381dbf64a08a1b6181456bcf64ecffe2cfdaa3d46e405ba9bbb1df6d456470c  D1+O1          app/v2/management/player/PlayerWorkspace.tsx
+a74e00bdd5852d592c6d67cc5f783b0231dcb3c41b9e2cf03f71f91d10accaf5  D1             app/v2/play/workspace/page.tsx
+f03d5004950bfbaaad17d305541e87892c63cae5e39433e74d8de7b68ab99f4c  INT1-EVIDENCE  docs/int1/README_AUDIT_BUNDLE.md
+90a621bb7fad965eb668bdac397f6862137b2cc1e52217faec7d3a5cc454173b  INT1-ATTACH    docs/int1/attachments/candidate_tracked.diff
+be25f419f02ff1b19900808241f3c786f60a64fbf03867a7f2588ed18d0c27f5  INT1-ATTACH    docs/int1/attachments/candidate_untracked.diff
+1c55b8f38ec7bd441f407ba6d34ca808b4efdfd3f2c185550485e26848dca6d0  INT1-ATTACH    docs/int1/attachments/npm-test-full.log
+7917d74f47ca9506385058f68dfa769b1f1bbc7e8bbea06e392013347b3205e8  INT1-EVIDENCE  docs/int1/candidate_identity.md
+d9ba24c3072f94e136c0a76e2c2f33de6139e2b8eb9f1a90dd160a5130e47a66  INT1-EVIDENCE  docs/int1/candidate_release_notes.md
+5296f23eb8d8c9a1456aa4e3165707aa3b411242f3735bea5b6137945ab2ccdd  INT1-EVIDENCE  docs/int1/commit_plan.md
+edd15c8c24f0d8039bfa8409d8cc99c6ec6803d8809a9e40509d4a9400a2797b  INT1-EVIDENCE  docs/int1/contribution_map.md
+6ee60044f1e007c4656518c045400fc566016aad61717718295a504c2982b524  INT1-EVIDENCE  docs/int1/file_count_reconciliation.md
+cee8f6ce176ab9de40614ead53f8e4147bed3fe84b8c0de576f98a1178b96645  INT1-EVIDENCE  docs/int1/logs/build.log
+e69b8653e73cc62d20270c6d490fcdc4647116cdcb256374c812bbab625a8c44  INT1-EVIDENCE  docs/int1/logs/e2e-blank-input-guard.log
+25b3d076bbb8eb0f324b70eede386c5c6def98a5097cf1f93d3d8c31c59baf69  INT1-EVIDENCE  docs/int1/logs/e2e-blank-input-negative-control.log
+6692e10a97c6120da6992030b856b3991f83494b1a83db527ba0dbca8c06a95e  INT1-EVIDENCE  docs/int1/logs/e2e.log
+68876289ffd46ac56b6ffae20524e201e8d0f0887505bd2f6c37031dc7894bf7  INT1-EVIDENCE  docs/int1/logs/eslint-changed.log
+3e415b45e9738add25e22c7b14fde9ea99ed8ae716d7fa6c6ad71c3328a80314  INT1-EVIDENCE  docs/int1/logs/eslint-project.log
+e16199626b9f4c0aa1df6eeb601ca6b3b7eb409ba6b075d994b3e0d94514eef3  INT1-EVIDENCE  docs/int1/logs/input-path-audit.log
+bcd1d8684d4ecdc39750a8e23a01651b646a06d123e25572cfcccc4996322343  INT1-EVIDENCE  docs/int1/logs/input-path-tests.log
+086bbfa38a14a216ea94437a92a71ff110cc1473de44232755f53e3428a4ce1b  INT1-EVIDENCE  docs/int1/logs/int1-unit-tests.log
+b17197dfef69490b98eb80be5fc4647b4dc991303fe04b5462eea00cc2073732  INT1-EVIDENCE  docs/int1/logs/json-null-bypass.log
+3fbbd3f08b38c6a073c00bbd620742173ab5d0671fd6ae3354e849edf21d3cc6  INT1-EVIDENCE  docs/int1/logs/npm-test.log
+c36c533bdfe49761ba8ca12bb691b517a9a36dc851fae32270aa6fe21b152716  INT1-EVIDENCE  docs/int1/logs/recovery-paths.log
+11e25e3ad5372acf58422379e84e786e1daa845323409e5a4b5396f1dfdf00d4  INT1-EVIDENCE  docs/int1/logs/run32turn-unchanged.log
+6a60ec94eb3936b74a46b1671aeccf00e34b6a06f63d3b05919e58b3b9a53c56  INT1-EVIDENCE  docs/int1/logs/run32turn.log
+36e0e98c0e4772872092eab13e714146e63ddd16b0a40eaa4ca2922ac58a9c45  INT1-EVIDENCE  docs/int1/logs/sales-hire-stall.log
+3520cd657cd74117deea9e72e34a2875cae1bf398c4d223c729859b58c86185b  INT1-EVIDENCE  docs/int1/logs/smoke32turn.log
+19592626d3be09814e39fc2483a04fdceecbf9ea374d3c995e51c136452a7a30  INT1-EVIDENCE  docs/int1/logs/tsc.log
+103726875cd02e1bd8f6173e2858d0c3bfa4926bb5d15154697ee3e8f1716f56  INT1-EVIDENCE  docs/int1/logs/ttl-isolated-redis.log
+cf626e6b3bbaa27282af540eb268df2d850fa0721e981925e6268bd6d7dcc8c3  INT1-EVIDENCE  docs/int1/logs/ttl-negative-control.log
+ba087cfe4fb14fed86cb44c1b29b0951a8ac477301221cd792e43734f9af2ae1  INT1-EVIDENCE  docs/int1/logs/unit-jsonnull-negative-control.log
+f45356f10a6c461562f6b0efddc3ed4c82ae87e381f410ba4c5f0a0d5139dd19  INT1-EVIDENCE  docs/int1/manual_change_points.md
+2036e049e8aa7ea3c2dc8d88fea3c9b7ca14e24df000a3a3df5d21bbfd1a2fbd  INT1-EVIDENCE  docs/int1/operating_procedures.md
+0a02c0f8320d39bf7e1cf29a996429e4004e1c868765ca74a1313377c0508e23  INT1-EVIDENCE  docs/int1/pre_training_checklist.md
+33692c64ed80445be70692123d184e17a5dc012aa709768e025b15ae5bdbb968  INT1-EVIDENCE  docs/int1/run32turn_regression.txt
+d70356ee5c95709c3cfb77d3131df38cc95ca718e2d39214c018741846ae5d9b  INT1-EVIDENCE  docs/int1/staging_deployment_plan.md
+00dd0705cb671bf00d8284df7bf84fea3b4796eb6183f0b304e97c628b4315d1  INT1-EVIDENCE  docs/int1/ui_issues.md
+f834d66a0c9fbd19921b9db2613ff43234f30903487f50d0d27dacbba37489ee  INT1-EVIDENCE  docs/int1/zero_value_handling.md
+d08705a81eeb8ca457773e40443ed017dff678c7a0be3b2ad6992daedf23a194  INT1-FIX       e2e/int1AuthExpiryAndInput.e2e.ts
+45279275f9eb1b97f29239bbf36f29f83e17f6e7efed33321483f2256ca57c60  INT1-FIX       e2e/int1BlankInputGuard.e2e.ts
+3c1a97cc115b778c72bcd1a18a0808dfb4a1c29db396e401ee275c78d4680958  INT1-FIX       e2e/int1PlayerInputIntegrity.e2e.ts
+2825d928e36cb102508bffa3be1125cf9d0adaf0f243e3506a6c5d2a0a586307  D1             e2e/managementAnnualDividend.e2e.ts
+e93a9666d51761980dc43095f0f54e738f976813f8e886da8e1dcfd14a95fa21  CR             e2e/managementSalesModelSelector.e2e.ts
+8ee67a23db5f31e0596b27b432c82f61a05ef4dcb49bbe0e3290155a11002cca  D1             e2e/playerAdminDividendD1.e2e.ts
+03e92788b69dc7a5da95506a210bc102f13146b76ff4f76b755a0abf60de9556  O1             e2e/playerSubmitPersistenceRace.e2e.ts
+08fb73e55f8c9f8ae4fd53f2dcc19a9dec95d8c2940f8075d0ed11c631730615  INT1-FIX       e2e/salesPriceReference.e2e.ts
+219fd84f4da4734a566357bcf6dbd62073ebc596eea1cfa639cef476991900e7  INT1-EVIDENCE  scripts/int1/auditInputPath.ts
+995d081702d6e9e09fb023db83942f944780f08b5105c7dd2251c273903cb469  INT1-EVIDENCE  scripts/int1/buildEvidenceManifest.sh
+fc03c4c5e7e2e850ca86a4529c4dacac75ebc2fade2de0fa0ace0e7419b6ec37  INT1-EVIDENCE  scripts/int1/probeCoercion.ts
+5562d05d42f71ef7458a68f9c1084f574eb32a17191dae7157b1ed691ce9c732  INT1-EVIDENCE  scripts/int1/probeDraftShape.ts
+341a9caa2b313cffa4198d0e9ace62e7436975fc51032fb162d17d7095e31b87  INT1-EVIDENCE  scripts/int1/rebuildAuditDiffs.sh
+115d06e595589cbda3dcffb30d0e8777103495676846d3dc9329aad3e1e67d5c  INT1-EVIDENCE  scripts/int1/reproInvalidDraft.ts
+b205f27b90e9dbe7e16438cf05a093ba3aef216c783441aa6e6a87b6b10aea58  INT1-EVIDENCE  scripts/int1/reproInvalidSubmit.ts
+bc674f0b922126c8cd21a377286ac757a2d52a1e4e8089ce340c062c8f0c0777  INT1-EVIDENCE  scripts/int1/reproJsonNullBypass.ts
+75f68e2858e49f1d6236703cf5d558f9ec96d4ce89360c64ae1de748717ddfa9  INT1-EVIDENCE  scripts/int1/reproSalesHireStall.ts
+6255fa177a5c50dc4c31181c053cfcea4d2bc3da20f66b2f941ffd3c13477ae4  INT1-EVIDENCE  scripts/int1/respClient.ts
+d64bdba9685c79c78e046fe68f3825e9b7590e3dc0c991b0dd86fef8bf6baa32  INT1-EVIDENCE  scripts/int1/run32TurnRegression.ts
+2557efe7a93c31adf6506c633dbd54add338d0e28b7a9c2e51853c107a56a005  INT1-EVIDENCE  scripts/int1/showNewFactoryCard.ts
+827408c6841b5161f9d706562d402bd3cb34a5a49d647b5f50a6d772eee0df30  INT1-EVIDENCE  scripts/int1/smoke32Turn.ts
+5bca9892883e6f8e66e9e9bf897aba57c9633b131a828c0e24a12e93d717f879  INT1-EVIDENCE  scripts/int1/ttlIsolatedRedis.ts
+f3963929754978148204d8e95dbcf59afd3d662a81d0b2e9bfdd2ef51f22fd14  INT1-EVIDENCE  scripts/int1/ttlNegativeControl.ts
+1506038f7a19eb01325ef3099c81dfa690c9bbf6860db07a1b613308851e3c13  INT1-EVIDENCE  scripts/int1/verifyRecoveryPaths.ts
+5007ab272dcf8993b220f2aba986b711174452440fd397d4b513b81bdea7c1c3  INT1-EVIDENCE  scripts/int1/verifyRestore.sh
+
+# 合計 143 ファイル（INT1-ATTACH 3 件は commit 対象外 / INT1-EVIDENCE 50 件は commit 2）

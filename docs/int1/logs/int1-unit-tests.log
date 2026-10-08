@@ -1,0 +1,12 @@
+### CMD: npx tsx --test <INT-1 unit test 7本>
+### DATE: 2026-10-08 11:12 JST
+### NOTE: 最終監査後修正を含む最終コードに対する実行
+app/lib/v2/companyLab/__tests__/int1SalesForceHiringValidation.test.ts           # tests 4 # pass 4 # fail 0 
+app/lib/v2/companyLab/simulation/__tests__/int1CrossCuttingIntegration.test.ts   # tests 10 # pass 10 # fail 0 
+app/v2/company-lab/__tests__/int1BacklogByProduct.test.ts                        # tests 4 # pass 4 # fail 0 
+app/v2/company-lab/__tests__/int1DraftValidation.test.ts                         # tests 13 # pass 13 # fail 0 
+app/v2/company-lab/__tests__/int1FinancingDisclosure.test.ts                     # tests 3 # pass 3 # fail 0 
+app/v2/company-lab/__tests__/int1InputPathIntegrity.test.ts                      # tests 18 # pass 18 # fail 0 
+app/v2/company-lab/__tests__/int1NewFactoryCardDisclosure.test.ts                # tests 4 # pass 4 # fail 0 
+合計 実行件数: 56
+### EXIT: 0

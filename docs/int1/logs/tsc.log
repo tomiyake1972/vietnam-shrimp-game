@@ -1,0 +1,4 @@
+### CMD: rm -rf .next && npx tsc --noEmit -p .
+### DATE: 2026-10-08 11:08 JST
+### NOTE: 最終監査後修正（JSON送信時の空欄検証漏れ）を含む最終コードに対する実行
+### EXIT: 0

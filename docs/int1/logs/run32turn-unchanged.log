@@ -1,0 +1,12 @@
+### CMD: npx tsx scripts/int1/run32TurnRegression.ts （監査後修正の前後比較）
+### DATE: 2026-10-08 10:27 JST
+### NOTE: 32Turn試験は「有効な意思決定・計算経路が変わらなければ再実行不要」だが、
+###       不変であることを主張ではなく実測で示すために再実行してバイト比較した。
+
+保存済み出力  docs/int1/run32turn_regression.txt   22573 bytes  sha256 33692c64ed80445be70692123d184e17a5dc012aa709768e025b15ae5bdbb968
+再実行出力    （一時ファイル）                      22573 bytes  sha256 33692c64ed80445be70692123d184e17a5dc012aa709768e025b15ae5bdbb968
+
+diff -q 結果: 差分なし（バイト単位で一致）
+結論: 今回の変更（入力欄の表示・提出前検証・表示用view-modelのNaN回避）は
+      意思決定の値も計算経路も変えていない。
+### EXIT: 0

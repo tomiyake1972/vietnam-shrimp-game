@@ -1,0 +1,21 @@
+### CMD: npx playwright test --config=e2e/playwright.config.ts e2e/int1BlankInputGuard.e2e.ts
+### DATE: 2026-10-08 11:06 JST
+### NOTE: 最終監査後修正（JSON送信時の空欄検証漏れ）を含む最終コードに対する実行。並走処理なし・.next クリーン
+[WebServer] ⚠ Self-signed certificates are currently an experimental feature, use with caution.
+[WebServer] ⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+[WebServer]  We detected multiple lockfiles and selected the directory of /home/user/vietnam-shrimp-game/package-lock.json as the root directory.
+[WebServer]  To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+[WebServer]    See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+[WebServer]  Detected additional lockfiles: 
+[WebServer]    * /home/user/vietnam-shrimp-game/.worktrees/int1/package-lock.json
+[WebServer] 
+
+Running 4 tests using 1 worker
+
+  ✓  1 e2e/int1BlankInputGuard.e2e.ts:81:5 › INT1-BLANK-1: Console内PLAYER — 販売数量の 0／空欄／打ち直し (15.4s)
+  ✓  2 e2e/int1BlankInputGuard.e2e.ts:128:5 › INT1-BLANK-2: Console内PLAYER — 人員配置の空欄と比率の範囲外 (4.0s)
+  ✓  3 e2e/int1BlankInputGuard.e2e.ts:191:5 › INT1-BLANK-3: Independent Player — 空欄のまま提出すると項目名を示して止まり、直せば提出できる (11.6s)
+  ✓  4 e2e/int1BlankInputGuard.e2e.ts:230:5 › INT1-BLANK-4: Independent Player — JSON送信経路でも空欄が項目名付きで拒否され、未保存のまま直して提出できる (5.5s)
+
+  4 passed (42.6s)
+### EXIT: 0

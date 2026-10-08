@@ -1,0 +1,31 @@
+### CMD: INT1_REDIS_PORT=6405 npx tsx scripts/int1/ttlIsolatedRedis.ts
+# isolated redis 127.0.0.1:6405 / appEnv=staging
+# product SIMULATION_RUN_STAGING_TTL_MS = 3600000 (未変更)
+# CURRENT_SIMULATION_RUN_PERSISTED_VERSION = 9
+PASS  試験1 stagingにTTLがある  staging PTTL = 3599999 / 3599999 / 3599999 ms
+PASS  試験2 RENAMEはTTLをdestinationへ継承する  src PTTL=3600000 → RENAME後 dst PTTL=3599999（-1ではない）
+PASS  試験3 PERSISTでTTLが消える  PERSIST戻り値=1, 直後のPTTL=-1
+PASS  試験3b TTLが無いキーへのPERSISTは0を返す（失敗ではない）  PERSIST戻り値=0
+PASS  試験5 昇格後のcanonicalはTTLを持たない  canonical PTTL = -1 / -1 / -1（-1 = TTLなし）
+PASS  試験5b manifest自体もTTLを持たない  manifest PTTL = -1
+PASS  試験5c 昇格済みstagingキーは消えている  staging PTTL = -2 / -2 / -2（-2 = キー無し）
+PASS  試験6 manifest公開後にloadRunできる  loadRun marker=ds-A, completedTurns=4, schemaVersion=9
+PASS  試験6b 読み出したschemaVersionがv9である  schemaVersion=9
+PASS  試験4 CAS敗者はStaleRevisionErrorで拒否される  SimulationRunStaleRevisionError (expected=1, current=2)
+PASS  試験4b 敗者stagingはTTL付きのまま残る  敗者 staging PTTL = 3599999 / 3599999 ms
+PASS  試験4c 勝者canonicalは無傷（敗者に壊されない）  loadRun marker=ds-W, completedTurns=8
+PASS  試験4d 勝者canonicalはTTL無し  勝者canonical dataset PTTL = -1
+#  試験7: staging TTLをテスト専用の 1500ms へ外部短縮（実測 PTTL=1500）
+PASS  試験7a 短縮TTLでもcanonicalは昇格直後にTTL無し  canonical PTTL = -1 / -1 / -1
+#  試験7: 2700ms 待機（短縮TTLを確実に超える）…
+PASS  試験7b 元staging TTL超過後もcanonicalパートが存在する  EXISTS合計=3/3, PTTL = -1 / -1 / -1
+PASS  試験7c 元staging TTL超過後もloadRunできる  loadRun marker=ds-B, completedTurns=12
+PASS  試験7d resume / pack も残っている  resume.marker=rs-B, pack.marker=pk-B
+PASS  試験7e 孤児回収の仕組みは生きている（昇格済みstagingは消滅）  staging PTTL = -2（-2 = キー無し）
+PASS  旧版互換 v1 をv9コードで読める  schemaVersion=1, marker=ds-v1
+PASS  旧版互換 v7 をv9コードで読める  schemaVersion=7, marker=ds-v7
+PASS  旧版互換 v8 をv9コードで読める  schemaVersion=8, marker=ds-v8
+PASS  前方互換なし: v10は読まない/受けない  SimulationRunSchemaError
+
+# INT-1 §5 TTL試験: FAIL=0
+### EXIT: 0

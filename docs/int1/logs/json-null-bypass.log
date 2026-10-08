@@ -1,0 +1,33 @@
+### CMD: npx tsx scripts/int1/reproJsonNullBypass.ts
+### DATE: 2026-10-08 11:08 JST
+### NOTE: 最終監査後修正を適用した状態での実行（4項目すべてJSON変換後も拒否される）
+
+# INT-1 最終監査: JSON送信時の空欄検証漏れの再現
+# 対象は validateDecisionDraftNumbers 内で `!== null` により検証を飛ばしている4項目。
+# 『JSON変換後』が『エラーなし（通過）』なら検証漏れ。
+
+--- 人員配置の増員／減員を空欄（workerAssignments[].regularHeadcountChange）
+    NaNのまま（Console内PLAYERの確定経路）   拒否: 人員配置 BAL-F1 の増員／減員: 数値を入力してください（受け取った値: null）。
+    JSON変換後（Independent Playerの提出経路） 拒否: 人員配置 BAL-F1 の増員／減員: 数値を入力してください（受け取った値: null）。
+
+--- 設備投資の申請額を空欄（capexDecision.newProjectProposals[].requestedBudgetUsd）
+    NaNのまま（Console内PLAYERの確定経路）   拒否: 設備投資提案 #0 の申請額: 0以上の数値を入力してください（受け取った値: null）。
+    JSON変換後（Independent Playerの提出経路） 拒否: 設備投資提案 #0 の申請額: 0以上の数値を入力してください（受け取った値: null）。
+
+--- 設備投資の優先度を空欄（capexDecision.newProjectProposals[].priority）
+    NaNのまま（Console内PLAYERの確定経路）   拒否: 設備投資提案 #0 の優先度: 数値を入力してください（受け取った値: null）。
+    JSON変換後（Independent Playerの提出経路） 拒否: 設備投資提案 #0 の優先度: 数値を入力してください（受け取った値: null）。
+
+--- 輸入発注のリードタイムを空欄（importOrders[].leadTimeTurns）
+    NaNのまま（Console内PLAYERの確定経路）   拒否: 輸入発注 EC のリードタイム: 0以上の数値を入力してください（受け取った値: null）。
+    JSON変換後（Independent Playerの提出経路） 拒否: 輸入発注 EC のリードタイム: 0以上の数値を入力してください（受け取った値: null）。
+
+# 省略（キー自体が無い）は正当な意思決定なので、通過しなければならない。
+    増員／減員のキーを削除                                        通過（正しい）
+    リードタイムのキーを削除（標準リードタイムを使う意思決定）                      通過（正しい）
+    申請額なしの設備投資提案（標準予算を使う意思決定）                          通過（正しい）
+
+# 明示的な0と正当な減員（負の増減）は通過しなければならない。
+    増員／減員 = 明示的な0                                    通過（正しい）
+    増員／減員 = 減員 -30（正当な負値）                            通過（正しい）
+### EXIT: 0

@@ -1,0 +1,17 @@
+### CMD: bash scripts/int1/verifyRestore.sh
+### DATE: 2026-10-08 12:34 JST
+### NOTE: このログだけはマニフェスト対象外（マニフェストを読んだ結果の出力）
+
+適用元 RC   728b3416028dabd44556a55de3f8abd84726817d
+候補 branch local/int1-candidate-20261006 / 基点 commit a79ec99a477c0f13765856cf63666436fac8e014
+
+1. git archive $RC | tar -x
+2. git apply docs/int1/attachments/candidate_tracked.diff
+   OK (68 files)
+3. git apply docs/int1/attachments/candidate_untracked.diff
+   OK (39 files)
+
+照合件数 143（うち docs/int1 の監査資料 36 件はZIP内実ファイルと照合）
+一致 143 / 不一致 0 / 欠落 0
+OK: 提出差分から最終候補を完全に再現できる
+### EXIT: 0

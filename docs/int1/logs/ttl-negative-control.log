@@ -1,0 +1,7 @@
+### CMD: INT1_REDIS_PORT=6405 npx tsx scripts/int1/ttlNegativeControl.ts
+# productのLuaから外したPERSIST行数 = 3
+# PERSIST無しLuaの戻り値: ["OK"]
+# 昇格直後 canonical PTTL = 1498 / 1499 / 1498
+# 2700ms 後: canonical EXISTS合計 = 0/3, manifest EXISTS = 1
+PASS  対照実験: PERSISTが無いとcanonicalが消え、manifestだけが残る（＝試験7はvacuousでない）
+### EXIT: 0
