@@ -1,0 +1,15 @@
+# 裏タブ進行遅延（フェーズ0）: 全体 npm test
+# 日時: 2026-10-10 17:34 JST
+# 基点: 75e503b84a57ce61aecf574742ff2bde0a015ee7
+# 全文は巨大なため集計行のみ（失敗0件）。前回4,523件＋今回の新規6件＝4,529件。
+
+# tests 4529
+# suites 0
+# pass 4529
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 154345.46343
+
+### NPM_EXIT=0

@@ -1,0 +1,25 @@
+# 裏タブ進行遅延（フェーズ0）: 待機方式の実測
+# 日時: 2026-10-10 17:26 JST
+# CMD: npx tsx scripts/int1/measureTabYield.ts
+# 共有DB・Preview へは接続していない（about:blank 上で待機機構だけを測る）
+
+# 1回の待機を 32 回繰り返したときの合計時間（32Turn ぶんに相当）
+
+## 前面タブ（visibilityState=visible）
+   requestAnimationFrame  522.1 ms
+   MessageChannel         1.3 ms
+   setTimeout(0)          109.7 ms
+
+## 1Turn あたりの待機（前面タブ）
+   requestAnimationFrame  16.3 ms
+   MessageChannel         0.0 ms
+   setTimeout(0)          3.4 ms
+
+## 裏タブ: この環境では実測できなかった（取得不能）
+   headless Chromium は別タブを前面に出しても visibilityState が visible のままで、
+   CDP にも visibilityState を hidden へ強制する手段が無い（上記コメント参照）。
+   よって裏タブでの改善幅は、この環境では **未実測** である。
+   裏タブで requestAnimationFrame が止まること自体は、
+   三宅さんの実測（1Turn 約110秒／前面なら数秒）が示している。
+   配備後に実機ブラウザで再確認が必要。
+### EXIT=0

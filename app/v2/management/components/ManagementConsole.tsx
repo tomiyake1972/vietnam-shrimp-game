@@ -50,6 +50,7 @@ import { CompanyDecisionDraft } from "../../company-lab/decisionDraft";
 import { CompanyControlPanel } from "./CompanyControlPanel";
 import { PlayerSeatPanel } from "./PlayerSeatPanel";
 import { getLiveSession, upsertLiveSession } from "../lib/liveSessionRegistry";
+import { yieldToBrowser } from "../../lib/yieldToBrowser";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
 import { SimulationAnalyticsDataset } from "../../../lib/v2/companyLab/simulation/analytics/types";
 import { toCompanySeries } from "../../../lib/v2/companyLab/simulation/analytics/views";
@@ -733,7 +734,12 @@ export function ManagementConsole() {
         const turnNumber = current.state.scenarioState.currentTurn;
         setRunningTurn(turnNumber);
         // ブラウザへ制御を戻し、進捗表示を実際に描画させる。
-        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        // 【裏タブ進行遅延の修正】ここは以前 requestAnimationFrame で待っていた。
+        // タブが非表示のあいだブラウザが発火を止めるため、計算ではなくこの待機だけで
+        // 1Turn が数秒〜十数秒に伸びていた（実測: 裏タブで1Turn 約110秒／前面なら数秒）。
+        // yieldToBrowser は MessageChannel で待つので非表示タブでも間引かれない。
+        // 前面タブでの描画はこれまでどおり行われる（app/v2/lib/yieldToBrowser.ts 参照）。
+        await yieldToBrowser();
 
         const outcome = advanceSimulationTurn(current, nowIso(), pendingPlayerDecisions);
         current = { ...outcome.session, run: { ...outcome.session.run, companyControlModes: controlModesForThisRun } };
