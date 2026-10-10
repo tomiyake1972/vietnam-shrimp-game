@@ -9,6 +9,7 @@
 // 共有Redisは使わない（V2_API_E2E_IN_MEMORY=1 の隔離環境）。
 
 import { test, expect, type Browser, type Page } from "@playwright/test";
+import { confirmConsolePlayerDecision, submitIndependentPlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 
@@ -107,7 +108,7 @@ test("INT1-E2E-1/2: 無効な値を含む提出はserverが拒否し保存せず
 
   await test.step("拒否は保存されていないため、同じTurnへ正しい値で提出できる", async () => {
     await expect(balPage.getByTestId("play-workspace-status")).toHaveAttribute("data-status", "TURN_ACTIVE");
-    await balPage.getByTestId("play-submit-decision").click();
+    await submitIndependentPlayerDecision(balPage);
     await expect(balPage.getByTestId("play-waiting-for-gm")).toBeVisible();
   });
 
@@ -128,7 +129,7 @@ test("INT1-E2E-3/4: Console内PLAYER画面が古いTurnを表示せず、確定�
   await page.waitForURL(/\/v2\/management\/player/);
   await expect(page.getByTestId("workspace-turn")).toHaveAttribute("data-turn", "1");
   await page.getByTestId("workspace-tab-decision").click();
-  await page.getByTestId("workspace-confirm-decision").click();
+  await confirmConsolePlayerDecision(page);
   // O1契約: サーバ保存が成立してから「意思決定済み」になる。
   await expect(page.getByTestId("workspace-decision-status")).toContainText("意思決定済み", { timeout: 120_000 });
   await expect(page.getByTestId("workspace-confirm-error")).toHaveCount(0);

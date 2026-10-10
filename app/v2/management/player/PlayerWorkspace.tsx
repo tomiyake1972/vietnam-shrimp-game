@@ -23,6 +23,9 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft, validateDecisionDraftNumbers } from "../../company-lab/decisionDraft";
+import { buildDecisionSummary } from "../../company-lab/decisionSummary";
+import DecisionConfirmationScreen from "../../company-lab/components/decisionStudio/DecisionConfirmationScreen";
+import type { DecisionStudioScreenKey } from "../../company-lab/components/decisionStudio/DecisionStudioNavigation";
 import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "../../company-lab/play/_lib/financialViewSelectors";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
@@ -187,6 +190,14 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<boolean>(() => Boolean(entry.pendingDrafts[companyId] === undefined && entry.confirmedPlayerDecisions[companyId]));
+  /**
+   * 【UI-TRIAL-1 §5】入力 →「意思決定を確認」→ 最終確認 →「この内容で確定」。
+   * phase は表示状態だけを持つ。サーバー保存は最終確認画面のボタン（handleConfirm）だけが行う。
+   */
+  const [phase, setPhase] = useState<"input" | "confirm">("input");
+  const [activeScreen, setActiveScreen] = useState<DecisionStudioScreenKey>("info");
+  /** 確認画面へ入った時点のTurn。確認中にGMがTurnを進めたら古い内容を確定させない。 */
+  const [confirmedAtTurn, setConfirmedAtTurn] = useState<number | null>(null);
 
   // 【Phase 9・§21根本原因】以前はここで setRevision を毎回bumpし、DecisionEditorを
   // key={revision} で毎回remountしていた。draftはcontrolled propとして渡しているため
@@ -198,6 +209,9 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
     (next: CompanyDecisionDraft) => {
       setDraftState(next);
       setConfirmed(false);
+      // 入力が変わったら、最終確認した内容と提出する内容が食い違わないよう再確認させる。
+      setPhase("input");
+      setConfirmedAtTurn(null);
       upsertLiveSession(session.run.simulationRunId, {
         session,
         pendingDrafts: { ...(getLiveSession(session.run.simulationRunId)?.pendingDrafts ?? {}), [companyId]: next },
@@ -231,6 +245,40 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
    * していたため、保存が競合で失敗しても画面は「意思決定済み」と表示していた。
    * サーバー保存が成立してから確定表示にし、失敗したら理由を出して未確定へ戻す。
    */
+  /**
+   * 【UI-TRIAL-1 §6】確認へ進む前と最終確定時に、同じ共通検証を通す。
+   * handleConfirm の中で使っているものと同一の関数を使う（経路で厳しさを変えない）。
+   */
+  const collectValidationErrors = useCallback(
+    (target: CompanyDecisionDraft): readonly string[] => [
+      ...validateDecisionDraftNumbers(target),
+      ...validateSalesForceHiringDecision({
+        hireCount: target.salesForceHireCount,
+        layoffCount: target.salesForceLayoffCount,
+        currentActiveHeadcount: ownState.salesForceHiringState.headcount,
+      }),
+    ],
+    [ownState.salesForceHiringState.headcount]
+  );
+
+  const handleGoToConfirm = useCallback(() => {
+    const errors = collectValidationErrors(draft);
+    if (errors.length > 0) {
+      // 入力欄のある画面に留めて、項目名と理由を示す（入力は保持する）。
+      setSaveError(`入力に無効な値があるため確認へ進めません（値は保存していません）。${errors.slice(0, 5).join(" / ")}`);
+      return;
+    }
+    setSaveError(null);
+    setConfirmedAtTurn(session.state.scenarioState.currentTurn);
+    setPhase("confirm");
+  }, [draft, collectValidationErrors, session.state.scenarioState.currentTurn]);
+
+  const handleEditFromConfirm = useCallback((screen: DecisionStudioScreenKey) => {
+    // 入力内容（draft）には触れない。表示する画面だけを戻す。
+    setActiveScreen(screen);
+    setPhase("input");
+  }, []);
+
   const handleConfirm = useCallback(async () => {
     /**
      * 【INT-1 §6】無効な数値を保存しない。Independent Player の提出APIと同じ検証を、
@@ -286,6 +334,8 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
         pendingDrafts: nextPendingDrafts,
       });
       setConfirmed(true);
+      setPhase("input");
+      setConfirmedAtTurn(null);
       /**
        * 【Independent Player Flow・O1 §12】この会社に参加リンクが発行済みの場合、
        * GM代理操作でもSeat側の提出記録を追いつかせる。
@@ -621,23 +671,55 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
 
         {tab === "decision" ? (
           <div className="mx-auto max-w-5xl">
-            <div className="mb-2 flex flex-wrap justify-end gap-1.5">
-              <button
-                type="button"
-                onClick={() => void handleConfirm()}
-                disabled={saving}
-                data-testid="workspace-confirm-decision"
-                className="rounded bg-emerald-700 px-4 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40"
-              >
-                {saving ? "保存中…" : "この内容で意思決定を確定"}
-              </button>
-            </div>
+            {/* 【UI-TRIAL-1 §5】確定は最終確認画面のボタンだけが行う。
+                ここでは確認画面へ進むだけで、サーバーへは何も送らない。 */}
+            {phase === "input" ? (
+              <div className="mb-2 flex flex-wrap justify-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleGoToConfirm}
+                  data-testid="workspace-review-decision"
+                  className="rounded bg-sky-700 px-4 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40"
+                >
+                  意思決定を確認
+                </button>
+              </div>
+            ) : null}
             {saveError ? (
               <p className="mb-2 text-right text-[11px] text-rose-400" data-testid="workspace-confirm-error">
                 {saveError}
               </p>
             ) : null}
+            {phase === "confirm" ? (
+              <DecisionConfirmationScreen
+                summary={buildDecisionSummary({ draft, annualDividendGuidance })}
+                companyName={fixture.displayName}
+                companyId={companyId}
+                turnLabel={`Turn ${turn}（${session.state.currentPeriod}）`}
+                copy={{
+                  heading: "確定内容の最終確認",
+                  commitLabel: "この内容で確定",
+                  committingLabel: "保存中…",
+                  description:
+                    "下の一覧が、いまから確定する意思決定のすべてです。分野ごとの「修正する」で入力画面へ戻れます（入力内容はそのまま残ります）。",
+                }}
+                validationErrors={collectValidationErrors(draft)}
+                onEdit={handleEditFromConfirm}
+                onBack={() => setPhase("input")}
+                onCommit={() => void handleConfirm()}
+                committing={saving}
+                commitError={saveError}
+                staleNotice={
+                  confirmedAtTurn !== null && confirmedAtTurn !== turn
+                    ? `確認中にTurnが進みました（確認したのは Turn ${confirmedAtTurn}、現在は Turn ${turn}）。古い内容は確定できません。「入力へ戻る」から入力を見直して、もう一度確認してください。`
+                    : null
+                }
+              />
+            ) : null}
+            <div className={phase === "confirm" ? "hidden" : undefined}>
             <DecisionStudio
+              activeScreen={activeScreen}
+              onActiveScreenChange={setActiveScreen}
               fixture={fixture}
               ownState={ownState}
               draft={draft}
@@ -661,6 +743,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               simulationRunId={runId}
               companyName={fixture.displayName}
             />
+            </div>
           </div>
         ) : null}
 

@@ -1,0 +1,28 @@
+### CMD: npx playwright test <UI-TRIAL-1で手を入れた既存E2E 8本>
+### DATE: 2026-10-09 09:11 JST
+### 目的: 提出フローの2段化で既存の検証が壊れていないことの確認
+
+  ✓   1 e2e/independentPlayerFlow.e2e.ts:99:7 › Independent Player Flow — GM / BAL / MASS › GM Run作成 → BAL/MASS参加 → 提出・Advance gating → Turn進行 → セッション復帰 → Game End → Final Results → 以後Submit拒否 (20.9s)
+  ✓   2 e2e/int1AuthExpiryAndInput.e2e.ts:47:5 › INT1-AUTH-1/2/3: 保存時の403で誤表示せず、再ログインで同じRun/Turnへ戻り、確定済み提出が残る (6.0s)
+  ✓   3 e2e/int1AuthExpiryAndInput.e2e.ts:147:5 › INT1-AUTH-4: 未確定入力が失われる場合、その事実と必要な再入力が画面に明示される (3.6s)
+  ✓   4 e2e/int1BlankInputGuard.e2e.ts:82:5 › INT1-BLANK-1: Console内PLAYER — 販売数量の 0／空欄／打ち直し (3.2s)
+  ✓   5 e2e/int1BlankInputGuard.e2e.ts:129:5 › INT1-BLANK-2: Console内PLAYER — 人員配置の空欄と比率の範囲外 (3.2s)
+  ✓   6 e2e/int1BlankInputGuard.e2e.ts:192:5 › INT1-BLANK-3: Independent Player — 空欄のまま提出すると項目名を示して止まり、直せば提出できる (3.6s)
+  ✓   7 e2e/int1BlankInputGuard.e2e.ts:231:5 › INT1-BLANK-4: Independent Player — JSON送信経路でも空欄が項目名付きで拒否され、未保存のまま直して提出できる (3.9s)
+  ✓   8 e2e/int1PlayerInputIntegrity.e2e.ts:62:5 › INT1-E2E-1/2: 無効な値を含む提出はserverが拒否し保存せず、正しい値で提出し直せる (3.7s)
+  ✓   9 e2e/int1PlayerInputIntegrity.e2e.ts:122:5 › INT1-E2E-3/4: Console内PLAYER画面が古いTurnを表示せず、確定した提出値がTurn計算に使われる (3.3s)
+  ✓  10 e2e/playerSubmitPersistenceRace.e2e.ts:70:5 › O1-E2E-A: GMがTurnを公開した直後にPlayerが提出しても、その提出が消えずGMが次Turnで使える (6.0s)
+  ✓  11 e2e/playerSubmitPersistenceRace.e2e.ts:120:5 › O1-E2E-B: BALとMASSが同じTurnへほぼ同時に提出しても、両方が残りGMが進められる (5.6s)
+  ✓  12 e2e/playerSubmitPersistenceRace.e2e.ts:171:5 › O1-E2E-C: Console内PLAYERの確定とIndependent Playerの提出が、互いを消さない (6.4s)
+  ✓  13 e2e/salesPriceReference.e2e.ts:57:7 › SALES 基準価格参考表示 — Independent Player Flow経由 › Turn1は前Turn「－」表示、Turn2以降は実際の前Turn基準価格が表示され価格調整で参考提示価格が即時更新される (9.0s)
+  13 passed (1.4m)
+
+  ✓  1 e2e/managementSalesModelSelector.e2e.ts:54:5 › MC-SALES-E2E: Setupでtieredを選んで作成したRunが、Console表示・Turn進行・reload/resumeを通じてtieredを維持する (6.1s)
+  ✓  2 e2e/managementSalesModelSelector.e2e.ts:98:5 › MC-SALES-E2E-legacy: 既定（従来市場モデル）のまま作成したRunは従来市場モデルと表示される (1.5s)
+  ✓  3 e2e/managementSalesModelSelector.e2e.ts:107:5 › MC-SALES-E2E-createFresh: tieredのRunからManagement Console内で新しく始めても三層顧客価格モデルのまま (2.0s)
+  ✓  4 e2e/managementSalesModelSelector.e2e.ts:150:5 › MC-SALES-E2E-createFresh-legacy: legacyのRunからConsole内で新しく始めても従来市場モデルのまま (2.0s)
+  ✓  5 e2e/managementSalesModelSelector.e2e.ts:166:5 › MC-SALES-E2E-crowding: 市場集中価格下落モデルを選んで作成したRunが、Turn進行・reload後も同じモデルのまま (2.8s)
+  ✓  6 e2e/playerAdminDividendD1.e2e.ts:153:5 › D1-21: Management Console内PLAYERが配当欄を触らなくても、管理者50%でQ4に自動精算される (8.1s)
+  ✓  7 e2e/playerAdminDividendD1.e2e.ts:206:5 › D1-22: 別端末のIndependent Playerでも、管理者50%がそのまま届きQ4に自動精算される (8.9s)
+  ✓  8 e2e/uiTrial1Screenshots.e2e.ts:22:5 › UI-TRIAL-1 スクリーンショット（Console内PLAYER） (3.8s)
+  8 passed (38.1s)

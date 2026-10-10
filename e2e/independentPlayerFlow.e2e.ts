@@ -11,6 +11,7 @@
 // 手段が無い。それでも参加・復帰・提出が成立することが、この検証そのものになる。
 
 import { test, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { submitIndependentPlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 
@@ -59,7 +60,7 @@ async function joinAsPlayer(page: Page, joinUrl: string, companyId: string): Pro
 
 async function submitCurrentTurn(page: Page): Promise<void> {
   await expect(page.getByTestId("play-workspace-status")).toHaveAttribute("data-status", "TURN_ACTIVE");
-  await page.getByTestId("play-submit-decision").click();
+  await submitIndependentPlayerDecision(page);
   await expect(page.getByTestId("play-waiting-for-gm")).toBeVisible();
   // 提出直後はjustSubmitted=trueのためSUBMITTED表示。ページを再訪問/再読み込みした後は
   // WAITING_FOR_GM表示に切り替わる（PlayerWorkspacePage側のstatus導出ロジック通り）。
@@ -174,7 +175,8 @@ test.describe("Independent Player Flow — GM / BAL / MASS", () => {
     });
 
     await test.step("BAL: Game End後のSubmitはserver側でも拒否される（UIのボタン自体も既に無い）", async () => {
-      await expect(balPage.getByTestId("play-submit-decision")).toHaveCount(0);
+      // 【UI-TRIAL-1】提出は確認画面経由になったため、入口（意思決定を確認）が消えていることを見る。
+      await expect(balPage.getByTestId("play-review-decision")).toHaveCount(0);
       const response = await balPage.request.post("/api/v2/play/submit", {
         data: { turn: 3, draft: {} },
       });

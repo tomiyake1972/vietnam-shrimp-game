@@ -16,6 +16,7 @@ import ProcessingCapacityPanel from "../ProcessingCapacityPanel";
 import ColdStoragePanel from "../ColdStoragePanel";
 import PlanningWarningsPanel from "../PlanningWarningsPanel";
 import CollapsibleSection from "../CollapsibleSection";
+import { ColumnHeader } from "../FieldAnnotations";
 import BacklogByProductPanel from "../BacklogByProductPanel";
 import { BacklogSemantics } from "../../../../lib/v2/companyLab/aiManagementMeeting/backlogSemantics";
 import { NumberCell } from "../InputCells";
@@ -122,12 +123,14 @@ export default function ProductionPlanningScreen({ draft, onChange, disabled, vm
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs text-gray-300">
             <thead>
-              <tr className={INFO_TABLE_HEAD_CLASS}>
-                <th className="pr-3 py-1">工場</th>
-                <th className="pr-3 py-1">商品</th>
-                <th className="pr-3 py-1">商品別能力(t)</th>
-                <th className="pr-3 py-1">生産希望量(t)</th>
-                <th className="pr-3 py-1">優先度(小=優先)</th>
+              {/* 【UI-TRIAL-1 §4】1行の中に入力列と読み取り専用列が混ざるため、
+                  どの列が入力かを見出しに文言で書く。 */}
+              <tr className={INFO_TABLE_HEAD_CLASS} data-testid="production-plan-table-head">
+                <th className="pr-3 py-1 align-bottom">工場</th>
+                <th className="pr-3 py-1 align-bottom">商品</th>
+                <th className="pr-3 py-1 align-bottom"><ColumnHeader name="商品別能力" unit="t" kind="current" testId="production-col-capacity" /></th>
+                <th className="pr-3 py-1 align-bottom"><ColumnHeader name="生産希望量" unit="t" kind="input" testId="production-col-desired-quantity" /></th>
+                <th className="pr-3 py-1 align-bottom"><ColumnHeader name="優先度" unit="小さいほど優先" kind="input" testId="production-col-priority" /></th>
               </tr>
             </thead>
             <tbody>
@@ -143,6 +146,8 @@ export default function ProductionPlanningScreen({ draft, onChange, disabled, vm
                         value={row.desiredQuantity}
                         disabled={disabled}
                         warn={capacityNum !== undefined && row.desiredQuantity > capacityNum * 1.5}
+                        testId={`production-plan-desired-quantity-${row.factoryId}-${row.product}`}
+                        ariaLabel={`${row.factoryId} ${row.product} の生産希望量（t）`}
                         onChange={(n) => {
                           const next = [...draft.productionPlans];
                           next[idx] = { ...row, desiredQuantity: n };
@@ -154,6 +159,8 @@ export default function ProductionPlanningScreen({ draft, onChange, disabled, vm
                       <NumberCell
                         value={row.priority}
                         disabled={disabled}
+                        testId={`production-plan-priority-${row.factoryId}-${row.product}`}
+                        ariaLabel={`${row.factoryId} ${row.product} の生産の優先度（小さいほど優先）`}
                         onChange={(n) => {
                           const next = [...draft.productionPlans];
                           next[idx] = { ...row, priority: Math.round(n) };

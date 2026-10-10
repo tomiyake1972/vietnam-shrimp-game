@@ -33,6 +33,7 @@ import { buildDecisionStudioViewModel } from "../../decisionStudioViewModel";
 import type { OpeningInfoViewModel, ScenarioNewsItem } from "../../play/_lib/openingInfoViewModel";
 import ProcurementPlanningSection from "../procurement/ProcurementPlanningSection";
 import { AreaToneLegend } from "../CollapsibleSection";
+import { AiInitialProposalNote, DecisionAreaHeading } from "../FieldAnnotations";
 import DecisionStudioNavigation, { DecisionStudioScreenKey } from "./DecisionStudioNavigation";
 import InformationScreen from "./InformationScreen";
 import { computeBacklogSemantics } from "../../../../lib/v2/companyLab/aiManagementMeeting/backlogSemantics";
@@ -103,6 +104,13 @@ export interface DecisionStudioProps {
    */
   readonly simulationRunId?: string;
   readonly companyName?: string;
+  /**
+   * 【UI-TRIAL-1 §5】表示する画面を外から指定する（controlled）。
+   * 最終確認画面の「修正する」から該当の入力画面へ戻すために使う。
+   * 省略時は従来どおりこのcomponentが内部stateで持つ（既存の呼び出し元は無変更で動く）。
+   */
+  readonly activeScreen?: DecisionStudioScreenKey;
+  readonly onActiveScreenChange?: (screen: DecisionStudioScreenKey) => void;
 }
 
 export default function DecisionStudio(props: DecisionStudioProps) {
@@ -128,9 +136,17 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     simulationRunId,
     companyName,
     annualDividendGuidance,
+    activeScreen: activeScreenProp,
+    onActiveScreenChange,
   } = props;
 
-  const [activeScreen, setActiveScreen] = useState<DecisionStudioScreenKey>("info");
+  // controlled（外から指定）と uncontrolled（従来）の両方を受ける。
+  const [internalActiveScreen, setInternalActiveScreen] = useState<DecisionStudioScreenKey>("info");
+  const activeScreen = activeScreenProp ?? internalActiveScreen;
+  const setActiveScreen = (screen: DecisionStudioScreenKey): void => {
+    if (activeScreenProp === undefined) setInternalActiveScreen(screen);
+    onActiveScreenChange?.(screen);
+  };
   const [auxiliaryPanelOpen, setAuxiliaryPanelOpen] = useState(false);
 
   // どちらの経路でAI会議へ繋ぐか。両方未指定なら会議の入口自体を出さない。
@@ -204,6 +220,16 @@ export default function DecisionStudio(props: DecisionStudioProps) {
             </button>
           )}
         </div>
+
+        {/* 【UI-TRIAL-1 §4】「どこを入力するか」を画面の先頭で一度だけ明示する。
+            対象Turn／四半期も併記し、計画と実績の混同を防ぐ。
+            disabled（すでに進行済みの四半期）のときは入力の案内を出さない。 */}
+        {!disabled && (
+          <>
+            <DecisionAreaHeading turnLabel={turn !== undefined ? `Turn ${turn}（${period}）` : `${period}`} testId="decision-studio-decision-heading" />
+            <AiInitialProposalNote testId="decision-studio-ai-initial-note" />
+          </>
+        )}
 
         <AreaToneLegend />
 

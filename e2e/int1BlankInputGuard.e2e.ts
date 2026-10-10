@@ -14,6 +14,7 @@
 // 共有Redisは使わない（V2_API_E2E_IN_MEMORY=1 の隔離環境）。
 
 import { test, expect, type Browser, type Locator, type Page } from "@playwright/test";
+import { confirmConsolePlayerDecision, submitIndependentPlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 const SALES_QUANTITY_CELL = "sales-plan-desired-quantity-CN-hoso";
@@ -106,7 +107,7 @@ test("INT1-BLANK-1: Console内PLAYER — 販売数量の 0／空欄／打ち直�
   });
 
   await test.step("(d) 空欄のまま確定すると、対象項目を示して止まる", async () => {
-    await page.getByTestId("workspace-confirm-decision").click();
+    await confirmConsolePlayerDecision(page);
     const error = page.getByTestId("workspace-confirm-error");
     await expect(error).toBeVisible({ timeout: 30_000 });
     await expect(error).toContainText("提示数量");
@@ -120,7 +121,7 @@ test("INT1-BLANK-1: Console内PLAYER — 販売数量の 0／空欄／打ち直�
     await quantity.fill("1500");
     await quantity.blur();
     await expect(quantity).toHaveValue("1500");
-    await page.getByTestId("workspace-confirm-decision").click();
+    await confirmConsolePlayerDecision(page);
     await expect(page.getByTestId("workspace-decision-status")).toContainText("意思決定済み", { timeout: 120_000 });
   });
 });
@@ -146,7 +147,7 @@ test("INT1-BLANK-2: Console内PLAYER — 人員配置の空欄と比率の範囲
   });
 
   await test.step("空欄のまま確定すると、増員／減員を示して止まる", async () => {
-    await page.getByTestId("workspace-confirm-decision").click();
+    await confirmConsolePlayerDecision(page);
     const error = page.getByTestId("workspace-confirm-error");
     await expect(error).toBeVisible({ timeout: 30_000 });
     await expect(error).toContainText("増員／減員");
@@ -164,7 +165,7 @@ test("INT1-BLANK-2: Console内PLAYER — 人員配置の空欄と比率の範囲
   });
 
   await test.step("範囲外の比率は残業率を示して止まる", async () => {
-    await page.getByTestId("workspace-confirm-decision").click();
+    await confirmConsolePlayerDecision(page);
     const error = page.getByTestId("workspace-confirm-error");
     await expect(error).toBeVisible({ timeout: 30_000 });
     await expect(error).toContainText("残業率");
@@ -175,7 +176,7 @@ test("INT1-BLANK-2: Console内PLAYER — 人員配置の空欄と比率の範囲
     await clearCell(overtimeRate);
     await expect(overtimeRate).toHaveValue("");
     await expect(overtimeRate).toHaveAttribute("data-invalid", "true");
-    await page.getByTestId("workspace-confirm-decision").click();
+    await confirmConsolePlayerDecision(page);
     await expect(page.getByTestId("workspace-confirm-error")).toContainText("残業率", { timeout: 30_000 });
   });
 
@@ -183,7 +184,7 @@ test("INT1-BLANK-2: Console内PLAYER — 人員配置の空欄と比率の範囲
     await overtimeRate.fill("0.1");
     await overtimeRate.blur();
     await expect(overtimeRate).toHaveValue("0.1");
-    await page.getByTestId("workspace-confirm-decision").click();
+    await confirmConsolePlayerDecision(page);
     await expect(page.getByTestId("workspace-decision-status")).toContainText("意思決定済み", { timeout: 120_000 });
   });
 });
@@ -208,7 +209,7 @@ test("INT1-BLANK-3: Independent Player — 空欄のまま提出すると項目�
   await test.step("空欄のまま提出すると、対象項目を示して止まる", async () => {
     await clearCell(quantity);
     await expect(quantity).toHaveValue("");
-    await balPage.getByTestId("play-submit-decision").click();
+    await submitIndependentPlayerDecision(balPage);
     const error = balPage.getByTestId("play-submit-error");
     await expect(error).toBeVisible({ timeout: 30_000 });
     await expect(error).toContainText("提示数量");
@@ -220,7 +221,7 @@ test("INT1-BLANK-3: Independent Player — 空欄のまま提出すると項目�
   await test.step("打ち直せば提出できる", async () => {
     await quantity.fill("1200");
     await quantity.blur();
-    await balPage.getByTestId("play-submit-decision").click();
+    await submitIndependentPlayerDecision(balPage);
     await expect(balPage.getByTestId("play-waiting-for-gm")).toBeVisible({ timeout: 60_000 });
   });
 
@@ -249,7 +250,7 @@ test("INT1-BLANK-4: Independent Player — JSON送信経路でも空欄が項目
     await clearCell(headcountChange);
     await expect(headcountChange).toHaveValue("");
     await expect(headcountChange).toHaveAttribute("data-invalid", "true");
-    await balPage.getByTestId("play-submit-decision").click();
+    await submitIndependentPlayerDecision(balPage);
     const error = balPage.getByTestId("play-submit-error");
     await expect(error).toBeVisible({ timeout: 30_000 });
     await expect(error).toContainText("増員／減員");
@@ -267,7 +268,7 @@ test("INT1-BLANK-4: Independent Player — JSON送信経路でも空欄が項目
     await headcountChange.fill("-10");
     await headcountChange.blur();
     await expect(headcountChange).toHaveValue("-10");
-    await balPage.getByTestId("play-submit-decision").click();
+    await submitIndependentPlayerDecision(balPage);
     await expect(balPage.getByTestId("play-waiting-for-gm")).toBeVisible({ timeout: 60_000 });
     await expect(balPage.getByTestId("play-submit-error")).toHaveCount(0);
   });

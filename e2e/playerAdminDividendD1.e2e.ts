@@ -11,6 +11,7 @@
 // Turn4が年度末Q4であり、年間精算が1回発生する最小の長さ。
 
 import { test, expect, type Browser, type Page } from "@playwright/test";
+import { confirmConsolePlayerDecision, submitIndependentPlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 const ADMIN_PAYOUT_PERCENT = "50";
@@ -179,7 +180,7 @@ test("D1-21: Management Console内PLAYERが配当欄を触らなくても、管�
       await expect(page.getByTestId("workspace-heading")).toBeVisible({ timeout: 120_000 });
       await page.getByTestId("workspace-tab-decision").click();
     }
-    await page.getByTestId("workspace-confirm-decision").click();
+    await confirmConsolePlayerDecision(page);
     await page.getByTestId("workspace-back-to-console").click();
     await expect(page.getByTestId("run-id")).toHaveText(runId, { timeout: 120_000 });
     await advanceOneTurn(page, turn);
@@ -237,7 +238,7 @@ test("D1-22: 別端末のIndependent Playerでも、管理者50%がそのまま�
     // --- C. 配当欄を触らずに4Turn提出する ---
     for (let turn = 1; turn <= 4; turn += 1) {
       await expect(playerPage.getByTestId("play-workspace-status")).toHaveAttribute("data-status", "TURN_ACTIVE", { timeout: 120_000 });
-      await playerPage.getByTestId("play-submit-decision").click();
+      await submitIndependentPlayerDecision(playerPage);
       await expect(playerPage.getByTestId("play-waiting-for-gm")).toBeVisible();
 
       await advanceOneTurn(gmPage, turn);

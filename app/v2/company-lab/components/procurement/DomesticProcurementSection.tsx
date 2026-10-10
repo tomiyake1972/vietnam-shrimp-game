@@ -15,6 +15,7 @@ import { formatHosoEqTons, formatUsdPerHosoEqKg } from "../../../../lib/v2/indus
 import { DomesticPricingViewModel } from "../../procurementPricingViewModel";
 import { ProcurementCapacityBindingConstraint, ProcurementCapacityViewModel } from "../../procurementCapacityViewModel";
 import { NumberCell, PriceAdjustmentCell } from "../InputCells";
+import { InputFieldLabel, ReferenceBadge } from "../FieldAnnotations";
 import { AREA_TONES, INFO_TABLE_ROW_CLASS, NO_VALUE_TEXT } from "../panelStyles";
 
 interface DomesticProcurementSectionProps {
@@ -53,39 +54,47 @@ export default function DomesticProcurementSection({
         <span className={`text-sm font-semibold ${tone.heading}`}>Domestic Procurement（国内原料買付）</span>
       </div>
 
-      <div className="mb-3 flex flex-wrap gap-4 text-xs text-gray-300">
-        <label className="flex flex-col gap-1">
-          Desired Quantity 買付希望量(t)
+      {/* 【UI-TRIAL-1 §4】項目名・単位・対象を明記する（下の灰色の枠は読むだけの情報）。 */}
+      <div className="mb-3 flex flex-wrap gap-4 text-xs text-gray-300" data-testid="domestic-purchase-inputs">
+        <div className="flex flex-col gap-1">
+          <InputFieldLabel name="買付希望量 Desired Quantity" unit="t" target="国内" htmlFor="domestic-desired-quantity-input" />
           <NumberCell
             value={draft.domesticPurchase.desiredQuantity}
             disabled={disabled}
             warn={draft.domesticPurchase.desiredQuantity > 20000}
             testId="domestic-desired-quantity-input"
+            ariaLabel="国内買付の希望量（t）"
             onChange={(n) => onChange(updateDomesticPurchaseDraft(draft, { desiredQuantity: n }))}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          Price Adjustment 価格調整($/kg)
+        </div>
+        <div className="flex flex-col gap-1">
+          <InputFieldLabel name="価格調整 Price Adjustment" unit="$/kg" target="国内" />
           <PriceAdjustmentCell
             value={draft.domesticPurchase.priceAdjustmentUsdPerHosoEqKg}
             disabled={disabled}
+            testId="domestic-price-adjustment-input"
+            ariaLabel="国内買付の価格調整（$/kg）"
             onChange={(n) => onChange(updateDomesticPurchaseDraft(draft, { priceAdjustmentUsdPerHosoEqKg: n }))}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          Procurement Headcount 調達人員
+        </div>
+        <div className="flex flex-col gap-1">
+          <InputFieldLabel name="調達人員 Procurement Headcount" unit="人" target="国内" htmlFor="domestic-headcount-input" />
           <NumberCell
             value={draft.domesticPurchase.procurementHeadcount}
             disabled={disabled}
             testId="domestic-headcount-input"
+            ariaLabel="国内買付の調達人員（人）"
             onChange={(n) => onChange(updateDomesticPurchaseDraft(draft, { procurementHeadcount: Math.round(n) }))}
           />
-        </label>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div className="rounded border border-gray-700/60 bg-gray-900/40 p-2.5">
-          <h4 className="mb-1 text-xs font-semibold text-gray-300">価格（Pricing）</h4>
+          <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-gray-300">
+            価格（Pricing）
+            <ReferenceBadge kind="current" testId="domestic-pricing-reference-badge" />
+          </h4>
           {pricing ? (
             <table className="min-w-full text-xs text-gray-300">
               <tbody>

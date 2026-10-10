@@ -1,0 +1,84 @@
+# managementSalesModelSelector E2E の既存flakiness — 基点対照（negative control）
+# 日時: 2026-10-09 12:43 JST
+#
+# 目的: UI-TRIAL-1 全体E2Eで残った2件の失敗が、UI-TRIAL-1 の変更によるものか切り分ける。
+# 対照の基点: e7c92839ab26b21bf98d029cdd52e37e7c34c419
+#   = INT-1承認基点。BW-1もUI-TRIAL-1も入っていない、変更前のtree。
+#   別worktree（.worktrees/bw1base・detached）に checkout して実行した。
+# CMD: npx playwright test --config e2e/playwright.config.ts \
+#        e2e/managementSalesModelSelector.e2e.ts --repeat-each 3
+#   （この config の workers は 1。並列負荷ではなく逐次実行で再現した。）
+#
+# 結果: 1 failed / 14 passed（3.0m）
+#   失敗: MC-SALES-E2E-crowding（e2e/managementSalesModelSelector.e2e.ts:165）
+#   症状: GMのTurn Advance後 turn-counter が "1 / 32" のまま 120 秒タイムアウト
+#        （期待 "2 /"）。UI-TRIAL-1 後の全体E2Eで出た2件と同一の症状。
+#   同じtestが repeat 2回目・3回目では成功している（5.1s / 4.9s）。
+#
+# 結論: この失敗は UI-TRIAL-1 の変更でも BW-1 の変更でもなく、INT-1基点から存在する
+#      既存のflakiness。単体実行では数秒で成功し、連続実行の一部で再現する。
+#      根本原因は未特定。UI-TRIAL-1 の範囲外として残件に記録する。
+
+===== 実行ログ（全文） =====
+
+[WebServer] ⚠ Self-signed certificates are currently an experimental feature, use with caution.
+[WebServer] ⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+[WebServer]  We detected multiple lockfiles and selected the directory of /home/user/vietnam-shrimp-game/package-lock.json as the root directory.
+[WebServer]  To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+[WebServer]    See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+[WebServer]  Detected additional lockfiles: 
+[WebServer]    * /home/user/vietnam-shrimp-game/.worktrees/bw1base/package-lock.json
+[WebServer] 
+
+Running 15 tests using 1 worker
+
+  ✓   1 e2e/managementSalesModelSelector.e2e.ts:53:5 › MC-SALES-E2E: Setupでtieredを選んで作成したRunが、Console表示・Turn進行・reload/resumeを通じてtieredを維持する (15.8s)
+  ✓   2 e2e/managementSalesModelSelector.e2e.ts:97:5 › MC-SALES-E2E-legacy: 既定（従来市場モデル）のまま作成したRunは従来市場モデルと表示される (2.0s)
+  ✓   3 e2e/managementSalesModelSelector.e2e.ts:106:5 › MC-SALES-E2E-createFresh: tieredのRunからManagement Console内で新しく始めても三層顧客価格モデルのまま (3.0s)
+  ✓   4 e2e/managementSalesModelSelector.e2e.ts:149:5 › MC-SALES-E2E-createFresh-legacy: legacyのRunからConsole内で新しく始めても従来市場モデルのまま (2.2s)
+  ✘   5 e2e/managementSalesModelSelector.e2e.ts:165:5 › MC-SALES-E2E-crowding: 市場集中価格下落モデルを選んで作成したRunが、Turn進行・reload後も同じモデルのまま (2.0m)
+  ✓   6 e2e/managementSalesModelSelector.e2e.ts:53:5 › MC-SALES-E2E: Setupでtieredを選んで作成したRunが、Console表示・Turn進行・reload/resumeを通じてtieredを維持する (5.1s)
+  ✓   7 e2e/managementSalesModelSelector.e2e.ts:97:5 › MC-SALES-E2E-legacy: 既定（従来市場モデル）のまま作成したRunは従来市場モデルと表示される (1.6s)
+  ✓   8 e2e/managementSalesModelSelector.e2e.ts:106:5 › MC-SALES-E2E-createFresh: tieredのRunからManagement Console内で新しく始めても三層顧客価格モデルのまま (2.6s)
+  ✓   9 e2e/managementSalesModelSelector.e2e.ts:149:5 › MC-SALES-E2E-createFresh-legacy: legacyのRunからConsole内で新しく始めても従来市場モデルのまま (1.7s)
+  ✓  10 e2e/managementSalesModelSelector.e2e.ts:165:5 › MC-SALES-E2E-crowding: 市場集中価格下落モデルを選んで作成したRunが、Turn進行・reload後も同じモデルのまま (2.9s)
+  ✓  11 e2e/managementSalesModelSelector.e2e.ts:53:5 › MC-SALES-E2E: Setupでtieredを選んで作成したRunが、Console表示・Turn進行・reload/resumeを通じてtieredを維持する (4.9s)
+  ✓  12 e2e/managementSalesModelSelector.e2e.ts:97:5 › MC-SALES-E2E-legacy: 既定（従来市場モデル）のまま作成したRunは従来市場モデルと表示される (1.7s)
+  ✓  13 e2e/managementSalesModelSelector.e2e.ts:106:5 › MC-SALES-E2E-createFresh: tieredのRunからManagement Console内で新しく始めても三層顧客価格モデルのまま (2.3s)
+  ✓  14 e2e/managementSalesModelSelector.e2e.ts:149:5 › MC-SALES-E2E-createFresh-legacy: legacyのRunからConsole内で新しく始めても従来市場モデルのまま (1.7s)
+  ✓  15 e2e/managementSalesModelSelector.e2e.ts:165:5 › MC-SALES-E2E-crowding: 市場集中価格下落モデルを選んで作成したRunが、Turn進行・reload後も同じモデルのまま (3.0s)
+
+
+  1) e2e/managementSalesModelSelector.e2e.ts:165:5 › MC-SALES-E2E-crowding: 市場集中価格下落モデルを選んで作成したRunが、Turn進行・reload後も同じモデルのまま 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('turn-counter')
+    Expected substring: "2 /"
+    Received string:    "1 / 32"
+    Timeout: 120000ms
+
+    Call log:
+      - Expect "toContainText" with timeout 120000ms
+      - waiting for getByTestId('turn-counter')
+        2 × locator resolved to <dd data-testid="turn-counter" class="font-mono font-semibold">…</dd>
+          - unexpected value "0 / 32"
+        239 × locator resolved to <dd data-testid="turn-counter" class="font-mono font-semibold">…</dd>
+            - unexpected value "1 / 32"
+
+
+      191 |   // resume後にもう1ターン進めても維持される。
+      192 |   await page.getByTestId("run-1").click();
+    > 193 |   await expect(page.getByTestId("turn-counter")).toContainText("2 /", { timeout: 120_000 });
+          |                                                  ^
+      194 |   await expect(page.getByTestId("console-sales-model")).toHaveText(CROWDING_LABEL);
+      195 | });
+      196 |
+        at /home/user/vietnam-shrimp-game/.worktrees/bw1base/e2e/managementSalesModelSelector.e2e.ts:193:50
+
+    Error Context: test-results/managementSalesModelSelect-7e43f-unが、Turn進行・reload後も同じモデルのまま/error-context.md
+
+  1 failed
+    e2e/managementSalesModelSelector.e2e.ts:165:5 › MC-SALES-E2E-crowding: 市場集中価格下落モデルを選んで作成したRunが、Turn進行・reload後も同じモデルのまま 
+  14 passed (3.0m)
+### EXIT=1

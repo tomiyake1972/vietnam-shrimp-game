@@ -13,6 +13,7 @@ import { HosoEqTons, unwrapUnit } from "../../../../lib/v2/core/units";
 import { formatHosoEqTons, formatUsdPerHosoEqKg } from "../../../../lib/v2/industryLab/ui/formatters";
 import { AquacultureStockingDraft, CompanyDecisionDraft, updateAquacultureStockingDraft } from "../../decisionDraft";
 import { NumberCell, RatioCell } from "../InputCells";
+import { InputFieldLabel, ReferenceBadge } from "../FieldAnnotations";
 import { AREA_TONES, INFO_TABLE_ROW_CLASS, NO_VALUE_TEXT } from "../panelStyles";
 
 interface AquacultureSectionProps {
@@ -48,29 +49,46 @@ export default function AquacultureSection({
         <span className="text-[11px] text-gray-400 ml-auto">自社養殖能力上限 {formatHosoEqTons(capacityTons)}</span>
       </div>
 
-      <div className="mb-3 flex flex-wrap gap-4 text-xs text-gray-300">
-        <label className="flex flex-col gap-1">
-          Planned Stocking Quantity 池入れ予定量(t)
+      {/* 【UI-TRIAL-1 §4】項目名・単位・対象を明記する（下の灰色の枠は読むだけの情報）。 */}
+      <div className="mb-3 flex flex-wrap gap-4 text-xs text-gray-300" data-testid="aquaculture-inputs">
+        <div className="flex flex-col gap-1">
+          <InputFieldLabel name="池入れ予定量 Planned Stocking Quantity" unit="t" target="自社養殖" htmlFor="aquaculture-stocking-quantity-input" />
           <NumberCell
             value={entry.plannedStockingQuantity}
             disabled={disabled}
             warn={entry.plannedStockingQuantity > capacityTons}
             testId="aquaculture-stocking-quantity-input"
+            ariaLabel="自社養殖の池入れ予定量（t）"
             onChange={(n) => update({ plannedStockingQuantity: n })}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          Aquaculture Intensity 養殖強度(0〜1)
-          <RatioCell value={entry.aquacultureIntensity} disabled={disabled} onChange={(n) => update({ aquacultureIntensity: n })} />
-        </label>
-        <label className="flex flex-col gap-1">
-          Bio Security Level バイオセキュリティ(0〜1)
-          <RatioCell value={entry.bioSecurityLevel} disabled={disabled} onChange={(n) => update({ bioSecurityLevel: n })} />
-        </label>
+        </div>
+        <div className="flex flex-col gap-1">
+          <InputFieldLabel name="養殖強度 Aquaculture Intensity" unit="0〜1" target="自社養殖" />
+          <RatioCell
+            value={entry.aquacultureIntensity}
+            disabled={disabled}
+            testId="aquaculture-intensity-input"
+            ariaLabel="自社養殖の養殖強度（0〜1）"
+            onChange={(n) => update({ aquacultureIntensity: n })}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <InputFieldLabel name="バイオセキュリティ Bio Security Level" unit="0〜1" target="自社養殖" />
+          <RatioCell
+            value={entry.bioSecurityLevel}
+            disabled={disabled}
+            testId="aquaculture-biosecurity-input"
+            ariaLabel="自社養殖のバイオセキュリティ水準（0〜1）"
+            onChange={(n) => update({ bioSecurityLevel: n })}
+          />
+        </div>
       </div>
 
       <div className="rounded border border-gray-700/60 bg-gray-900/40 p-2.5">
-        <h4 className="mb-1 text-xs font-semibold text-gray-300">参考情報（Expected — 疾病圧力適用前）</h4>
+        <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-gray-300">
+          参考情報（Expected — 疾病圧力適用前）
+          <ReferenceBadge kind="reference" testId="aquaculture-expected-reference-badge" />
+        </h4>
         <table className="min-w-full text-xs text-gray-300">
           <tbody>
             <tr className={INFO_TABLE_ROW_CLASS}>

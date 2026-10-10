@@ -17,6 +17,7 @@ import { ImportPricingRow } from "../../procurementPricingViewModel";
 import { resolveImportArrivalBucket } from "../../plannedProcurementViewModel";
 import { TIMELINE_BUCKET_LABELS } from "../../rawMaterialTimelineViewModel";
 import { NumberCell } from "../InputCells";
+import { ColumnHeader } from "../FieldAnnotations";
 import { AREA_TONES, INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INPUT_CONTROL_CLASS, NO_VALUE_TEXT } from "../panelStyles";
 
 interface ImportProcurementSectionProps {
@@ -54,6 +55,7 @@ function ImportOrderRow({
           value={row.orderedQuantity}
           disabled={disabled}
           testId={`import-ordered-quantity-input-${row.originCountry}`}
+          ariaLabel={`${row.originCountry} からの輸入発注量（t）`}
           onChange={(n) => onChange({ orderedQuantity: n })}
         />
       </td>
@@ -66,6 +68,7 @@ function ImportOrderRow({
           disabled={disabled}
           placeholder="標準"
           data-testid={`import-lead-time-input-${row.originCountry}`}
+          aria-label={`${row.originCountry} からの輸入リードタイム（ターン・空欄で標準）`}
           onChange={(e) => {
             const raw = e.target.value;
             onChange({ leadTimeTurns: raw === "" ? undefined : Math.max(1, Math.round(Number(raw) || 1)) });
@@ -101,13 +104,14 @@ export default function ImportProcurementSection({ draft, onChange, disabled, pr
       <div className="overflow-x-auto">
         <table className="min-w-full text-xs text-gray-300">
           <thead>
-            <tr className={INFO_TABLE_HEAD_CLASS}>
-              <th className="pr-3 py-1">Origin</th>
-              <th className="pr-3 py-1 text-right">Origin Price</th>
-              <th className="pr-3 py-1">Ordered Quantity(t)</th>
-              <th className="pr-3 py-1">Lead Time(ターン)</th>
-              <th className="pr-3 py-1 text-right">Expected Arrival Quarter</th>
-              <th className="pr-3 py-1 text-right font-semibold">Indicative Landed Cost</th>
+            {/* 【UI-TRIAL-1 §4】入力列と読み取り専用列が混ざるため、見出しに文言で書く。 */}
+            <tr className={INFO_TABLE_HEAD_CLASS} data-testid="import-order-table-head">
+              <th className="pr-3 py-1 align-bottom">Origin 原産国</th>
+              <th className="pr-3 py-1 align-bottom text-right"><ColumnHeader name="Origin Price 原産国価格" kind="current" testId="import-col-origin-price" /></th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="Ordered Quantity 発注量" unit="t" kind="input" testId="import-col-ordered-quantity" /></th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="Lead Time 輸送期間" unit="ターン・空欄で標準" kind="input" testId="import-col-lead-time" /></th>
+              <th className="pr-3 py-1 align-bottom text-right"><ColumnHeader name="Expected Arrival 到着見込み" kind="derived" testId="import-col-arrival" /></th>
+              <th className="pr-3 py-1 align-bottom text-right"><ColumnHeader name="Indicative Landed Cost 着地価格の目安" kind="reference" testId="import-col-landed-cost" /></th>
             </tr>
           </thead>
           <tbody>

@@ -11,6 +11,7 @@
 //  H. salesModelIdが維持されていること（reload後・Turn2後も表示が変わらない）
 
 import { test, expect, type Page } from "@playwright/test";
+import { confirmConsolePlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 const TIERED_LABEL = "三層顧客価格モデル V2.00候補";
@@ -34,7 +35,7 @@ async function confirmPlayerDecision(page: Page): Promise<void> {
   await expect(page.getByTestId("workspace-sales-model")).toContainText(TIERED_LABEL);
   // 意思決定確定ボタンは「意思決定」タブにだけ描画される（実測）。
   await page.getByTestId("workspace-tab-decision").click();
-  await page.getByTestId("workspace-confirm-decision").click();
+  await confirmConsolePlayerDecision(page);
   /**
    * 【INT-1・O1との統合で必要になった待機】O1以降、確定は非同期である
    * （PlayerWorkspace.handleConfirm がサーバ保存の成否を await し、成功して初めて

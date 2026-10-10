@@ -11,6 +11,7 @@
 // 共有Redisは使わない（V2_API_E2E_IN_MEMORY=1 の隔離環境）。
 
 import { test, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { confirmConsolePlayerDecision, submitIndependentPlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 
@@ -51,7 +52,7 @@ async function joinAsPlayer(page: Page, joinUrl: string, companyId: string): Pro
 /** 「提出できる状態になった瞬間」に提出する。固定sleepを挟まない。 */
 async function submitAsSoonAsPossible(page: Page): Promise<void> {
   await expect(page.getByTestId("play-workspace-status")).toHaveAttribute("data-status", "TURN_ACTIVE", { timeout: 120_000 });
-  await page.getByTestId("play-submit-decision").click();
+  await submitIndependentPlayerDecision(page);
   await expect(page.getByTestId("play-waiting-for-gm")).toBeVisible();
 }
 
@@ -139,7 +140,7 @@ test("O1-E2E-B: BALとMASSが同じTurnへほぼ同時に提出しても、両�
     // 2社が同じTurnへ同時に提出する（クリックを並行に発火させる）。
     await expect(balPage.getByTestId("play-workspace-status")).toHaveAttribute("data-status", "TURN_ACTIVE", { timeout: 120_000 });
     await expect(massPage.getByTestId("play-workspace-status")).toHaveAttribute("data-status", "TURN_ACTIVE", { timeout: 120_000 });
-    await Promise.all([balPage.getByTestId("play-submit-decision").click(), massPage.getByTestId("play-submit-decision").click()]);
+    await Promise.all([submitIndependentPlayerDecision(balPage), submitIndependentPlayerDecision(massPage)]);
     await expect(balPage.getByTestId("play-waiting-for-gm")).toBeVisible();
     await expect(massPage.getByTestId("play-waiting-for-gm")).toBeVisible();
 
@@ -152,7 +153,7 @@ test("O1-E2E-B: BALとMASSが同じTurnへほぼ同時に提出しても、両�
     await massPage.reload();
     await expect(balPage.getByTestId("play-workspace-status")).toHaveAttribute("data-status", "TURN_ACTIVE", { timeout: 120_000 });
     await expect(massPage.getByTestId("play-workspace-status")).toHaveAttribute("data-status", "TURN_ACTIVE", { timeout: 120_000 });
-    await Promise.all([balPage.getByTestId("play-submit-decision").click(), massPage.getByTestId("play-submit-decision").click()]);
+    await Promise.all([submitIndependentPlayerDecision(balPage), submitIndependentPlayerDecision(massPage)]);
     await expect(balPage.getByTestId("play-waiting-for-gm")).toBeVisible();
     await expect(massPage.getByTestId("play-waiting-for-gm")).toBeVisible();
     await gmAdvanceOneTurn(gmPage, 2);
@@ -192,7 +193,7 @@ test("O1-E2E-C: Console内PLAYERの確定とIndependent Playerの提出が、互
     await gmPage.getByTestId("company-control-operate-BAL").click();
     await expect(gmPage.getByTestId("workspace-heading")).toBeVisible({ timeout: 120_000 });
     await gmPage.getByTestId("workspace-tab-decision").click();
-    await gmPage.getByTestId("workspace-confirm-decision").click();
+    await confirmConsolePlayerDecision(gmPage);
     // 保存の成否を待ってから確定表示になる（O1 §10）。エラー表示が出ていないこと。
     await expect(gmPage.getByTestId("workspace-decision-status")).toContainText("意思決定済み", { timeout: 120_000 });
     await expect(gmPage.getByTestId("workspace-confirm-error")).toHaveCount(0);
@@ -206,7 +207,7 @@ test("O1-E2E-C: Console内PLAYERの確定とIndependent Playerの提出が、互
     await gmPage.getByTestId("company-control-operate-BAL").click();
     await expect(gmPage.getByTestId("workspace-heading")).toBeVisible({ timeout: 120_000 });
     await gmPage.getByTestId("workspace-tab-decision").click();
-    await gmPage.getByTestId("workspace-confirm-decision").click();
+    await confirmConsolePlayerDecision(gmPage);
     await expect(gmPage.getByTestId("workspace-decision-status")).toContainText("意思決定済み", { timeout: 120_000 });
     await gmPage.getByTestId("workspace-back-to-console").click();
 

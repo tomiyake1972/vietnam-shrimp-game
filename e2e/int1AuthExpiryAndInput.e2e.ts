@@ -10,6 +10,7 @@
 // 共有Redisは使わない（V2_API_E2E_IN_MEMORY=1 の隔離環境）。
 
 import { test, expect, type Page } from "@playwright/test";
+import { confirmConsolePlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 const ADMIN_COOKIE = "shrimpx_company_lab_ui_session";
@@ -36,7 +37,7 @@ async function confirmBalDecision(page: Page, runId: string): Promise<void> {
   await page.getByTestId("company-control-operate-BAL").click();
   await page.waitForURL(/\/v2\/management\/player/);
   await page.getByTestId("workspace-tab-decision").click();
-  await page.getByTestId("workspace-confirm-decision").click();
+  await confirmConsolePlayerDecision(page);
   await expect(page.getByTestId("workspace-decision-status")).toContainText("意思決定済み", { timeout: 120_000 });
   await expect(page.getByTestId("workspace-confirm-error")).toHaveCount(0);
   await page.getByTestId("workspace-back-to-console").click();

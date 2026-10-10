@@ -13,6 +13,7 @@ import { WorkforcePlanRow } from "../investmentPlanningViewModel";
 import { WorkerAssignmentDraftRow } from "../decisionDraft";
 import { NumberCell, RatioCell } from "./InputCells";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INFO_VALUE_CLASS, INFO_VALUE_STRONG_CLASS, NO_VALUE_TEXT } from "./panelStyles";
+import { ColumnHeader } from "./FieldAnnotations";
 
 interface WorkforcePanelProps {
   readonly rows: readonly WorkforcePlanRow[];
@@ -55,17 +56,19 @@ export default function WorkforcePanel(props: WorkforcePanelProps) {
       <div className="overflow-x-auto">
         <table className="min-w-full text-xs text-gray-300">
           <thead>
-            <tr className={INFO_TABLE_HEAD_CLASS}>
-              <th className="pr-3 py-1">工場</th>
-              <th className="pr-3 py-1">現在人数</th>
-              <th className="pr-3 py-1">増員／減員</th>
-              <th className="pr-3 py-1">変更後人数</th>
-              <th className="pr-3 py-1">必要人数（目安）</th>
-              <th className="pr-3 py-1">過不足</th>
-              <th className="pr-3 py-1">四半期人件費</th>
-              <th className="pr-3 py-1">増減</th>
-              <th className="pr-3 py-1">臨時人数</th>
-              <th className="pr-3 py-1">残業率(0〜1)</th>
+            {/* 【UI-TRIAL-1 §4】1行の中に入力列と読み取り専用列が混ざるため、
+                どの列が入力かを見出しに文言で書く（彩度の違いだけに頼らない）。 */}
+            <tr className={INFO_TABLE_HEAD_CLASS} data-testid="worker-assignment-table-head">
+              <th className="pr-3 py-1 align-bottom">工場</th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="現在人数" kind="current" /></th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="増員／減員" unit="人" kind="input" testId="worker-col-headcount-change" /></th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="変更後人数" kind="derived" /></th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="必要人数（目安）" kind="reference" /></th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="過不足" kind="derived" /></th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="四半期人件費" kind="derived" /></th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="増減" kind="derived" /></th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="臨時人数" unit="人" kind="input" testId="worker-col-temporary-headcount" /></th>
+              <th className="pr-3 py-1 align-bottom"><ColumnHeader name="残業率" unit="0〜1" kind="input" testId="worker-col-overtime-rate" /></th>
             </tr>
           </thead>
           <tbody>
@@ -89,6 +92,7 @@ export default function WorkforcePanel(props: WorkforcePanelProps) {
                     step={10}
                     min={null}
                     testId={`worker-headcount-change-${row.factoryId}`}
+                    ariaLabel={`${row.factoryId} の常用人数 増員／減員（人）`}
                     onChange={(n) => props.onChangeHeadcountDelta(row.factoryId, Number.isFinite(n) ? Math.round(n) : n)}
                   />
                 </td>
@@ -108,6 +112,7 @@ export default function WorkforcePanel(props: WorkforcePanelProps) {
                     disabled={disabled}
                     step={10}
                     testId={`worker-temporary-headcount-${row.factoryId}`}
+                    ariaLabel={`${row.factoryId} の臨時人数（人）`}
                     onChange={(n) => props.onChangeTemporaryHeadcount(row.factoryId, n)}
                   />
                 </td>
@@ -118,6 +123,7 @@ export default function WorkforcePanel(props: WorkforcePanelProps) {
                     value={overtimeRateValue}
                     disabled={disabled}
                     testId={`worker-overtime-rate-${row.factoryId}`}
+                    ariaLabel={`${row.factoryId} の残業率（0〜1）`}
                     onChange={(n) => props.onChangeOvertimeRate(row.factoryId, n)}
                   />
                 </td>

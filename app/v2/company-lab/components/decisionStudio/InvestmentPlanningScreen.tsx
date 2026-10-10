@@ -28,6 +28,7 @@ import { DecisionStudioViewModel } from "../../decisionStudioViewModel";
 import CapexDraftList from "../CapexDraftList";
 import CapexPortfolioList from "../CapexPortfolioList";
 import CollapsibleSection from "../CollapsibleSection";
+import { ColumnHeader, InputFieldLabel, ReferenceBadge } from "../FieldAnnotations";
 import FactorySpacePanel from "../FactorySpacePanel";
 import InvestmentCardList from "../InvestmentCardList";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INPUT_CONTROL_CLASS, NO_VALUE_TEXT } from "../panelStyles";
@@ -139,7 +140,10 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
 
         {/* 【Phase 8D-3】工場スペース（投資判断の物理的な制約） */}
         <div className="space-y-1.5">
-          <h4 className="text-xs font-semibold text-gray-300">工場スペース</h4>
+          <h4 className="flex items-center gap-1.5 text-xs font-semibold text-gray-300">
+            工場スペース
+            <ReferenceBadge kind="current" testId="investment-factory-space-badge" />
+          </h4>
           <FactorySpacePanel state={planning.factorySpace} />
         </div>
 
@@ -192,7 +196,7 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
           </p>
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1 text-xs text-gray-300">
-              対象工場
+              <InputFieldLabel name="対象工場" target="PD省人化投資" />
               <select
                 value={pdMechanizationTargetFactoryId}
                 disabled={disabled}
@@ -258,13 +262,14 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
           <div className="overflow-x-auto mt-2">
             <table className="min-w-full text-xs text-gray-300">
               <thead>
-                <tr className={INFO_TABLE_HEAD_CLASS}>
-                  <th className="pr-3 py-1">工場</th>
-                  <th className="pr-3 py-1">前四半期PD稼働率</th>
-                  <th className="pr-3 py-1">進行中案件</th>
-                  <th className="pr-3 py-1">現在のmechanizationLevel</th>
-                  <th className="pr-3 py-1">現在の実効PD係数（基準1.2）</th>
-                  <th className="pr-3 py-1">削減率</th>
+                {/* 【UI-TRIAL-1 §4】この表はすべて読むだけ（入力欄ではない）。 */}
+                <tr className={INFO_TABLE_HEAD_CLASS} data-testid="pd-mechanization-table-head">
+                  <th className="pr-3 py-1 align-bottom">工場</th>
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="前四半期PD稼働率" kind="actual" testId="investment-col-pd-utilization" /></th>
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="進行中案件" kind="current" /></th>
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="現在のmechanizationLevel" kind="current" /></th>
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="現在の実効PD係数（基準1.2）" kind="derived" /></th>
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="削減率" kind="derived" /></th>
                 </tr>
               </thead>
               <tbody>
@@ -298,7 +303,10 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
         </div>
 
         <div className="space-y-1.5">
-          <h4 className="text-xs font-semibold text-gray-300">今期の設備投資ドラフト（提出内容の確認）</h4>
+          <h4 className="flex items-center gap-1.5 text-xs font-semibold text-gray-300">
+            今期の設備投資ドラフト（提出内容の確認）
+            <ReferenceBadge kind="derived" testId="investment-draft-list-badge" />
+          </h4>
           <CapexDraftList
             newProjectProposals={draft.capexDecision.newProjectProposals}
             cancelRequestProjectIds={draft.capexDecision.cancelRequests.map((c) => c.projectId)}
@@ -311,7 +319,10 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
         </div>
 
         <div className="space-y-1.5">
-          <h4 className="text-xs font-semibold text-gray-300">投資案件ポートフォリオ（この会社の全案件）</h4>
+          <h4 className="flex items-center gap-1.5 text-xs font-semibold text-gray-300">
+            投資案件ポートフォリオ（この会社の全案件）
+            <ReferenceBadge kind="current" testId="investment-portfolio-badge" />
+          </h4>
           <CapexPortfolioList
             rows={capexPortfolioRows}
             cancelRequestedProjectIds={new Set(draft.capexDecision.cancelRequests.map((c) => c.projectId))}
@@ -335,7 +346,7 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
         </p>
         <div className="flex flex-wrap items-end gap-4">
           <label className="flex flex-col gap-1 text-xs text-gray-300">
-            今四半期のVAP商品開発費
+            <InputFieldLabel name="VAP商品開発費" unit="USD・4段階から選択" target="全社・当四半期" />
             <select
               value={draft.vapProductDevelopmentSpendUsd}
               disabled={disabled}

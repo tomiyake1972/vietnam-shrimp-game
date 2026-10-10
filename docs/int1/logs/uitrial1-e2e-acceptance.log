@@ -1,0 +1,11 @@
+### CMD: npx playwright test e2e/uiTrial1PlayerUi.e2e.ts
+### DATE: 2026-10-09 09:11 JST
+
+Running 3 tests using 1 worker
+
+  ✓  1 e2e/uiTrial1PlayerUi.e2e.ts:80:7 › UI-TRIAL-1 — Player UI整理の受入確認 › UIT1-E2E-1: Console内PLAYER — 営業配員は市場ごとに1つ・入力と参照の区別・確認画面の往復 (4.6s)
+  ✓  2 e2e/uiTrial1PlayerUi.e2e.ts:212:7 › UI-TRIAL-1 — Player UI整理の受入確認 › UIT1-E2E-2: Independent Player — 確認画面経由の提出・二重提出防止・提出内容の一致 (10.4s)
+  ✓  3 e2e/uiTrial1PlayerUi.e2e.ts:306:7 › UI-TRIAL-1 — Player UI整理の受入確認 › UIT1-E2E-3: 複数工場でも確認画面に工場別の項目が揃う (2.8s)
+
+  3 passed (21.1s)
+### E2E_EXIT=0

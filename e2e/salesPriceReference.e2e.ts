@@ -8,6 +8,7 @@
 // （independentPlayerFlow.e2e.tsと同じ最小限のヘルパー）を使う。
 
 import { test, expect, type Page } from "@playwright/test";
+import { submitIndependentPlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 
@@ -42,8 +43,8 @@ async function joinAsPlayer(page: Page, joinUrl: string, companyId: string): Pro
 }
 
 async function submitCurrentTurn(page: Page): Promise<void> {
-  await expect(page.getByTestId("play-submit-decision")).toBeEnabled();
-  await page.getByTestId("play-submit-decision").click();
+  await expect(page.getByTestId("play-review-decision")).toBeEnabled();
+  await submitIndependentPlayerDecision(page);
   await expect(page.getByTestId("play-waiting-for-gm")).toBeVisible();
 }
 
@@ -108,16 +109,15 @@ test.describe("SALES 基準価格参考表示 — Independent Player Flow経由"
       });
 
       await test.step("BAL: 価格調整を変更すると参考提示価格が即時に再計算される", async () => {
-        // 【INT-1】「最初のtable」ではなく販売計画テーブルを明示して取得する
-        // （画面上部に受注残パネルが追加されたため、位置指定では別のtableを拾ってしまう）。
-        const priceInput = balPage
-          .getByTestId("sales-plan-table")
-          .locator("tbody tr")
-          .first()
-          .locator('input[type="number"]')
-          .nth(1);
-        const askCell = balPage.locator('[data-testid^="sales-price-reference-ask-"]').first();
-        const baseCell = balPage.locator('[data-testid^="sales-price-reference-prior-base-"]').first();
+        /**
+         * 【UI-TRIAL-1】位置指定（最初のtable → 最初の行 → n番目のinput）をやめ、
+         * 市場×商品で一意な testid で取得する。営業配員を市場ごとに1つへまとめた
+         * 組み替えで行の中身が変わっても、この取得方法なら壊れない
+         * （以前も受注残パネルの追加で位置指定が壊れている）。
+         */
+        const priceInput = balPage.getByTestId("sales-plan-price-adjustment-CN-hoso");
+        const askCell = balPage.getByTestId("sales-price-reference-ask-CN-hoso");
+        const baseCell = balPage.getByTestId("sales-price-reference-prior-base-CN-hoso");
         const baseText = (await baseCell.textContent())?.trim() ?? "";
         if (baseText !== "－") {
           const baseValue = Number(baseText.replace("$", ""));

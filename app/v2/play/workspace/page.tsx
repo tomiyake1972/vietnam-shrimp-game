@@ -20,6 +20,10 @@ import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
 import { CompanyDecisionDraft, validateDecisionDraftNumbers } from "../../company-lab/decisionDraft";
+import { buildDecisionSummary } from "../../company-lab/decisionSummary";
+import DecisionConfirmationScreen from "../../company-lab/components/decisionStudio/DecisionConfirmationScreen";
+import type { DecisionStudioScreenKey } from "../../company-lab/components/decisionStudio/DecisionStudioNavigation";
+import { validateSalesForceHiringDecision } from "../../../lib/v2/companyLab/salesForceHiring";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { selectScenarioNewsForTurn } from "../../management/lib/scenarioNews";
 import { FinalResultsSummary } from "../../management/components/FinalResultsSummary";
@@ -78,6 +82,14 @@ export default function PlayerWorkspacePage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [justSubmitted, setJustSubmitted] = useState(false);
+  /**
+   * 【UI-TRIAL-1 §5】入力 →「意思決定を確認」→ 最終確認 →「この内容で提出」。
+   * phase は画面の表示状態だけを持ち、サーバーへの提出は confirm 画面のボタンだけが行う。
+   */
+  const [phase, setPhase] = useState<"input" | "confirm">("input");
+  const [activeScreen, setActiveScreen] = useState<DecisionStudioScreenKey>("info");
+  /** 確認画面へ入った時点のTurn。確認中にTurnが進んだら古い内容を提出させない。 */
+  const [confirmedAtTurn, setConfirmedAtTurn] = useState<number | null>(null);
   const seededTurnRef = useRef<number | null>(null);
   /** 【BW-1】いま手元にある保存物の revision。これをサーバーへ伝えて差分だけ受け取る。 */
   const knownRevisionRef = useRef<number | null>(null);
@@ -108,6 +120,45 @@ export default function PlayerWorkspacePage() {
   }, []);
 
   useVisiblePolling({ intervalMs: POLL_INTERVAL_MS, enabled: true, poll: refresh });
+
+  /**
+   * 【UI-TRIAL-1 §6】確認へ進む前と最終提出時に、同じ共通検証を通す。
+   * 検証関数は Console内PLAYER（PlayerWorkspace）と server（/api/v2/play/submit）と
+   * 同一のものを使う（経路によって厳しさが変わらないようにする）。
+   */
+  const collectValidationErrors = useCallback(
+    (target: CompanyDecisionDraft | null): readonly string[] => {
+      if (!target || !context) return [];
+      return [
+        ...validateDecisionDraftNumbers(target),
+        ...validateSalesForceHiringDecision({
+          hireCount: target.salesForceHireCount,
+          layoffCount: target.salesForceLayoffCount,
+          currentActiveHeadcount: context.ownState.salesForceHiringState.headcount,
+        }),
+      ];
+    },
+    [context]
+  );
+
+  const handleGoToConfirm = useCallback(() => {
+    if (!context || !draft) return;
+    const errors = collectValidationErrors(draft);
+    if (errors.length > 0) {
+      // 入力欄のある画面に留めて、項目名と理由を示す（入力は保持する）。
+      setSubmitError(`入力に無効な値があるため確認へ進めません（値は保存していません）。${errors.slice(0, 5).join(" / ")}`);
+      return;
+    }
+    setSubmitError(null);
+    setConfirmedAtTurn(context.turn);
+    setPhase("confirm");
+  }, [context, draft, collectValidationErrors]);
+
+  const handleEditFromConfirm = useCallback((screen: DecisionStudioScreenKey) => {
+    // 入力内容（draft）には触れない。表示する画面だけを戻す。
+    setActiveScreen(screen);
+    setPhase("input");
+  }, []);
 
   const handleSubmit = useCallback(async () => {
     if (!context || !draft) return;
@@ -140,6 +191,8 @@ export default function PlayerWorkspacePage() {
         return;
       }
       setJustSubmitted(true);
+      setPhase("input");
+      setConfirmedAtTurn(null);
       knownRevisionRef.current = null; // 提出で保存物が変わる。次回は必ず取り直す。
       await refresh();
     } finally {
@@ -202,22 +255,26 @@ export default function PlayerWorkspacePage() {
       <div className="p-3">
         <div className="mx-auto max-w-5xl">
           {status !== "SUBMITTED" && status !== "WAITING_FOR_GM" ? (
-            <div className="mb-2 flex flex-wrap justify-end gap-1.5">
-              {submitError ? (
-                <p className="mr-auto text-xs text-rose-400" data-testid="play-submit-error">
-                  {submitError}
-                </p>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => void handleSubmit()}
-                disabled={submitting || !draft}
-                data-testid="play-submit-decision"
-                className="rounded bg-emerald-700 px-4 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40"
-              >
-                {submitting ? "提出中…" : "この内容で意思決定を提出"}
-              </button>
-            </div>
+            /* 【UI-TRIAL-1 §5】提出は最終確認画面のボタンだけが行う。
+                ここでは確認画面へ進むだけで、サーバーへは何も送らない。 */
+            phase === "input" ? (
+              <div className="mb-2 flex flex-wrap justify-end gap-1.5">
+                {submitError ? (
+                  <p className="mr-auto text-xs text-rose-400" data-testid="play-submit-error">
+                    {submitError}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={handleGoToConfirm}
+                  disabled={!draft}
+                  data-testid="play-review-decision"
+                  className="rounded bg-sky-700 px-4 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40"
+                >
+                  意思決定を確認
+                </button>
+              </div>
+            ) : null
           ) : (
             <div className="mb-2 rounded-lg border border-emerald-800/60 bg-emerald-950/20 p-3 text-sm text-emerald-200" data-testid="play-waiting-for-gm">
               Turn {context.turn} の意思決定を提出しました。GMが全社の提出を確認してTurnを進めると、自動的に次のTurnへ切り替わります
@@ -232,8 +289,39 @@ export default function PlayerWorkspacePage() {
               既に提供しているものをそのまま渡すだけで、ここに新しい配当計算・
               推奨額・将来キャッシュ予測などは一切持たない（配当SSoTは
               app/lib/v2/finance/dividend.ts のまま）。 */}
-          {draft ? (
+          {draft && phase === "confirm" ? (
+            <DecisionConfirmationScreen
+              summary={buildDecisionSummary({ draft, annualDividendGuidance: context.annualDividendGuidance })}
+              companyName={context.companyDisplayName}
+              companyId={context.companyId}
+              turnLabel={`Turn ${context.turn}（${context.period}）`}
+              copy={{
+                heading: "提出内容の最終確認",
+                commitLabel: "この内容で提出",
+                committingLabel: "提出中…",
+                description:
+                  "下の一覧が、いまから提出する意思決定のすべてです。分野ごとの「修正する」で入力画面へ戻れます（入力内容はそのまま残ります）。",
+              }}
+              validationErrors={collectValidationErrors(draft)}
+              onEdit={handleEditFromConfirm}
+              onBack={() => setPhase("input")}
+              onCommit={() => void handleSubmit()}
+              committing={submitting}
+              commitError={submitError}
+              staleNotice={
+                confirmedAtTurn !== null && confirmedAtTurn !== context.turn
+                  ? `確認中にTurnが進みました（確認したのは Turn ${confirmedAtTurn}、現在は Turn ${context.turn}）。古い内容は提出できません。「入力へ戻る」から入力を見直して、もう一度確認してください。`
+                  : context.hasSubmittedThisTurn
+                    ? "このTurnの意思決定はすでに提出済みです。二重に提出することはできません。"
+                    : null
+              }
+            />
+          ) : null}
+
+          {draft && phase === "input" ? (
             <DecisionStudio
+              activeScreen={activeScreen}
+              onActiveScreenChange={setActiveScreen}
               fixture={context.fixture}
               ownState={context.ownState}
               draft={draft}

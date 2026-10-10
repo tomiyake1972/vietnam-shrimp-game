@@ -20,6 +20,7 @@ import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividen
 import { AnnualDividendGuidance } from "../../../../lib/v2/finance/annualDividendGuidance";
 import CollapsibleSection from "../CollapsibleSection";
 import { NumberCell } from "../InputCells";
+import { ColumnHeader, InputFieldLabel } from "../FieldAnnotations";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INPUT_CONTROL_CLASS } from "../panelStyles";
 
 const LOAN_TYPE_LABELS: Record<CompanyDecisionDraft["financingRequest"]["desiredLoanType"], string> = {
@@ -97,12 +98,13 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
             <table className="min-w-full text-xs text-gray-300">
               <thead>
                 <tr className={INFO_TABLE_HEAD_CLASS}>
-                  <th className="pr-3 py-1">借入ID</th>
-                  <th className="pr-3 py-1">種別</th>
-                  <th className="pr-3 py-1">残高</th>
-                  <th className="pr-3 py-1">年率</th>
-                  <th className="pr-3 py-1">返済方式</th>
-                  <th className="pr-3 py-1">満期</th>
+                  {/* 【UI-TRIAL-1 §4】この表はすべて読むだけ（今の借入の状態）。 */}
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="借入ID" kind="current" testId="finance-col-loan-id" /></th>
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="種別" kind="current" /></th>
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="残高" kind="current" /></th>
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="年率" kind="current" /></th>
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="返済方式" kind="current" /></th>
+                  <th className="pr-3 py-1 align-bottom"><ColumnHeader name="満期" kind="current" /></th>
                 </tr>
               </thead>
               <tbody>
@@ -121,17 +123,21 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
           </div>
         )}
         <div className="flex flex-wrap gap-4 text-xs text-gray-300">
-          <label className="flex flex-col gap-1">
-            追加希望借入額(USD)
+          <div className="flex flex-col gap-1">
+            <InputFieldLabel name="追加希望借入額" unit="USD" target="全社・当四半期">
+              申請額です。銀行審査で減額・否認されることがあります（実行額ではありません）。
+            </InputFieldLabel>
             <NumberCell
               value={draft.financingRequest.desiredAmountUsd}
               disabled={disabled}
               step={100000}
+              testId="finance-desired-amount-input"
+              ariaLabel="追加希望借入額（USD・全社）"
               onChange={(n) => onChange({ ...draft, financingRequest: { ...draft.financingRequest, desiredAmountUsd: n } })}
             />
-          </label>
+          </div>
           <label className="flex flex-col gap-1">
-            借入種別
+            <InputFieldLabel name="借入種別" target="全社・当四半期" />
             <select
               value={draft.financingRequest.desiredLoanType}
               disabled={disabled}
@@ -145,16 +151,18 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
               <option value="emergency">緊急融資</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1">
-            希望期間(四半期)
+          <div className="flex flex-col gap-1">
+            <InputFieldLabel name="希望期間" unit="四半期" target="全社・当四半期" />
             <NumberCell
               value={draft.financingRequest.desiredTermQuarters}
               disabled={disabled}
+              testId="finance-desired-term-input"
+              ariaLabel="借入の希望期間（四半期）"
               onChange={(n) => onChange({ ...draft, financingRequest: { ...draft.financingRequest, desiredTermQuarters: Math.max(1, Math.round(n)) } })}
             />
-          </label>
+          </div>
           <label className="flex flex-col gap-1">
-            返済方式
+            <InputFieldLabel name="返済方式" target="全社・当四半期" />
             <select
               value={draft.financingRequest.desiredRepaymentMethod}
               disabled={disabled}
@@ -170,16 +178,18 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
               <option value="equalPrincipal">元金均等</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1">
-            任意期限前返済希望額(USD)
+          <div className="flex flex-col gap-1">
+            <InputFieldLabel name="任意期限前返済希望額" unit="USD" target="全社・当四半期" />
             <NumberCell
               value={draft.financingRequest.desiredPrepaymentUsd}
               disabled={disabled}
               step={100000}
               warn={draft.financingRequest.desiredPrepaymentUsd > existingLoanBalanceUsd}
+              testId="finance-prepayment-input"
+              ariaLabel="任意の期限前返済希望額（USD）"
               onChange={(n) => onChange({ ...draft, financingRequest: { ...draft.financingRequest, desiredPrepaymentUsd: n } })}
             />
-          </label>
+          </div>
           <label className="flex flex-col gap-1 justify-end">
             <span className="flex items-center gap-2">
               <input
@@ -334,17 +344,20 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
           </div>
         </dl>
 
-        <label className="flex flex-col gap-1 text-xs text-gray-300">
-          配当額(USD)
+        <div className="flex flex-col gap-1 text-xs text-gray-300">
+          <InputFieldLabel name="配当額（あなたの指示）" unit="USD" target="全社・当四半期">
+            申請額です。配当可能額を超える場合は全額が拒否されます（実行額ではありません）。
+          </InputFieldLabel>
           <NumberCell
             value={dividendAmountUsd}
             disabled={disabled}
             step={100000}
             warn={dividendAmountUsd > maxDividendUsd}
             testId="dividend-amount-input"
+            ariaLabel="当四半期の配当額（USD・あなたの指示）"
             onChange={(n) => onChange({ ...draft, dividendAmountUsd: n })}
           />
-        </label>
+        </div>
       </CollapsibleSection>
     </div>
   );

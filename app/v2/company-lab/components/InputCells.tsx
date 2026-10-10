@@ -81,6 +81,11 @@ export function NumberCell(props: {
    * （min属性はブラウザのスピナー・検証に効くだけで、提出前検証の代わりにはならない）。
    */
   readonly min?: number | null;
+  /**
+   * 【UI-TRIAL-1 §4】この入力欄が何の値かを、対象（市場・商品・工場）込みで示す読み上げ名。
+   * 表の中の数値欄は見出しが離れているため、ラベルが無いと「何の人数か」が分からない。
+   */
+  readonly ariaLabel?: string;
 }) {
   const buffer = useNumericInputBuffer(props.value, props.onChange, parseNumberInput);
   return (
@@ -95,6 +100,7 @@ export function NumberCell(props: {
       aria-invalid={buffer.invalid || undefined}
       data-invalid={buffer.invalid ? "true" : undefined}
       data-testid={props.testId}
+      aria-label={props.ariaLabel}
       className={`w-24 ${INPUT_CONTROL_CLASS} ${props.warn === true || buffer.invalid ? INPUT_CONTROL_WARN_CLASS : ""}`}
     />
   );
@@ -105,6 +111,8 @@ export function RatioCell(props: {
   readonly onChange: (n: number) => void;
   readonly disabled: boolean;
   readonly testId?: string;
+  /** 【UI-TRIAL-1 §4】対象込みの読み上げ名（NumberCell と同じ理由）。 */
+  readonly ariaLabel?: string;
 }) {
   const buffer = useNumericInputBuffer(props.value, props.onChange, parseRatioInput);
   return (
@@ -120,6 +128,7 @@ export function RatioCell(props: {
       aria-invalid={buffer.invalid || undefined}
       data-invalid={buffer.invalid ? "true" : undefined}
       data-testid={props.testId}
+      aria-label={props.ariaLabel}
       className={`w-20 ${INPUT_CONTROL_CLASS} ${buffer.invalid ? INPUT_CONTROL_WARN_CLASS : ""}`}
     />
   );
@@ -130,6 +139,8 @@ export function PriceAdjustmentCell(props: {
   readonly onChange: (n: number) => void;
   readonly disabled: boolean;
   readonly testId?: string;
+  /** 【UI-TRIAL-1 §4】対象込みの読み上げ名（NumberCell と同じ理由）。 */
+  readonly ariaLabel?: string;
 }) {
   const buffer = useNumericInputBuffer(props.value, props.onChange, parseNumberInput);
   return (
@@ -143,6 +154,7 @@ export function PriceAdjustmentCell(props: {
       aria-invalid={buffer.invalid || undefined}
       data-invalid={buffer.invalid ? "true" : undefined}
       data-testid={props.testId}
+      aria-label={props.ariaLabel}
       className={`w-24 ${INPUT_CONTROL_CLASS} ${buffer.invalid ? INPUT_CONTROL_WARN_CLASS : ""}`}
     />
   );

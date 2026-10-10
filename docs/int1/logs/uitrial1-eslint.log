@@ -1,0 +1,37 @@
+### DATE: 2026-10-09 12:41 JST
+### BASE: d45b0bfe52cffb8f0f8031a4f7205b7dd7896cae (BW-1)
+### CMD: npx eslint <UI-TRIAL-1で変更/新規の .ts/.tsx 全件>
+### FILES:
+  app/v2/company-lab/components/InputCells.tsx
+  app/v2/company-lab/components/WorkforcePanel.tsx
+  app/v2/company-lab/components/decisionStudio/DecisionStudio.tsx
+  app/v2/company-lab/components/decisionStudio/FinancePlanningScreen.tsx
+  app/v2/company-lab/components/decisionStudio/InvestmentPlanningScreen.tsx
+  app/v2/company-lab/components/decisionStudio/ProductionPlanningScreen.tsx
+  app/v2/company-lab/components/decisionStudio/SalesPlanningScreen.tsx
+  app/v2/company-lab/components/procurement/AquacultureSection.tsx
+  app/v2/company-lab/components/procurement/DomesticProcurementSection.tsx
+  app/v2/company-lab/components/procurement/ImportProcurementSection.tsx
+  app/v2/management/player/PlayerWorkspace.tsx
+  app/v2/play/workspace/page.tsx
+  e2e/independentPlayerFlow.e2e.ts
+  e2e/int1AuthExpiryAndInput.e2e.ts
+  e2e/int1BlankInputGuard.e2e.ts
+  e2e/int1PlayerInputIntegrity.e2e.ts
+  e2e/managementSalesModelSelector.e2e.ts
+  e2e/playerAdminDividendD1.e2e.ts
+  e2e/playerSubmitPersistenceRace.e2e.ts
+  e2e/salesPriceReference.e2e.ts
+  app/v2/company-lab/__tests__/uiTrial1AllScreensAnnotation.test.ts
+  app/v2/company-lab/__tests__/uiTrial1Confirmation.test.ts
+  app/v2/company-lab/__tests__/uiTrial1InputVsReference.test.ts
+  app/v2/company-lab/__tests__/uiTrial1SalesStaffing.test.ts
+  app/v2/company-lab/components/FieldAnnotations.tsx
+  app/v2/company-lab/components/decisionStudio/DecisionConfirmationScreen.tsx
+  app/v2/company-lab/decisionSummary.ts
+  e2e/uiTrial1PlayerUi.e2e.ts
+  e2e/uiTrial1Screenshots.e2e.ts
+  scripts/int1/probeSalesForceZeroRows.ts
+  e2e/_lib/decisionFlow.ts
+
+### EXIT=0
