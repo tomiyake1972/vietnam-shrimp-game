@@ -18,6 +18,7 @@
 
 import { formatHosoEqTons } from "../../../lib/v2/industryLab/ui/formatters";
 import { CompanyProcessingForecast, CONSTRAINT_ORDER_TEXTS } from "../processingForecastViewModel";
+import { RAW_MATERIAL_FORECAST_EXCLUSION_TEXT } from "../processingForecastViewModel";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INFO_VALUE_CLASS, INFO_VALUE_STRONG_CLASS } from "./panelStyles";
 
 export interface ProcessingForecastPanelProps {
@@ -102,6 +103,12 @@ export default function ProcessingForecastPanel(props: ProcessingForecastPanelPr
           </ul>
         </div>
       )}
+
+      {/* 【UI-CLARITY-2 D1】原料の扱いは折りたたみの中ではなく常に見える場所へ出す。
+          以前は「計算方法」を開かないと読めず、原料在庫0のときに見込み0tだけが見えていた。 */}
+      <p className="mt-1 text-[11px] text-amber-300/90" data-testid="processing-forecast-raw-material-note">
+        ※ {RAW_MATERIAL_FORECAST_EXCLUSION_TEXT}
+      </p>
 
       <details className="mt-1">
         <summary className="text-[11px] text-teal-400 hover:text-teal-300 cursor-pointer">この見込みの計算方法（能力が適用される順序・優先度の扱い）</summary>

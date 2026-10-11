@@ -8,14 +8,7 @@
 // ?run= へ持たせられるため、2つのタブで別々の実行を並べても互いを壊さない。
 
 import { SimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
-
-const STOP_REASON_LABELS: Readonly<Record<string, string>> = {
-  completed: "完走",
-  stopped_by_user: "途中停止",
-  error: "失敗",
-  scenario_end: "シナリオ終端",
-  running: "実行中",
-};
+import { formatStopReason } from "../lib/runStatusLabels";
 
 /**
  * 【Phase 9・§17 Run History状態表示】
@@ -58,7 +51,7 @@ export function RunSelector({ runs, selectedRunId, onSelect, label = "Simulation
         {runs.map((r, index) => (
           <option key={r.simulationRunId} value={r.simulationRunId}>
             {index === 0 ? "Current" : `Previous ${index}`}: {r.completedTurns}/{r.requestedTurns}Q ・{" "}
-            {STOP_REASON_LABELS[r.stopReason] ?? r.stopReason} ・[{STATUS_LABELS[runResumeStatus(r)]}]・{" "}
+            {formatStopReason(r.stopReason)} ・[{STATUS_LABELS[runResumeStatus(r)]}]・{" "}
             {r.savedAt.slice(0, 19).replace("T", " ")}
           </option>
         ))}

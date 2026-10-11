@@ -10,16 +10,9 @@
 // 変わるだけで、active run（他のタブが見ている run）は書き換わらない。
 
 import Link from "next/link";
+import { formatStopReason } from "../../lib/runStatusLabels";
 import { StoredSimulationRun, SimulationRunSummary } from "../../../../lib/v2/companyLab/simulation/persistence/types";
 import { analysisHref } from "../lib/useAnalysisRun";
-
-const STOP_REASON_LABELS: Readonly<Record<string, string>> = {
-  completed: "完走",
-  stopped_by_user: "途中停止",
-  error: "失敗",
-  scenario_end: "シナリオ終端",
-  running: "実行中",
-};
 
 interface Props {
   readonly title: string;
@@ -54,7 +47,7 @@ export function AnalysisPageShell({ title, description, stored, runs, loading, n
           {loading
             ? "読み込み中…"
             : stored
-              ? `${stored.run.scenarioId} ・ seed ${stored.run.seed} ・ ${stored.dataset.turns.length} / ${stored.run.requestedTurns} Turns（${STOP_REASON_LABELS[stored.run.stopReason] ?? stored.run.stopReason}） ・ ${stored.run.simulationRunId}`
+              ? `${stored.run.scenarioId} ・ seed ${stored.run.seed} ・ ${stored.dataset.turns.length} / ${stored.run.requestedTurns} Turns（${formatStopReason(stored.run.stopReason)}） ・ ${stored.run.simulationRunId}`
               : "保存済みの Simulation Run がありません"}
         </span>
       </header>

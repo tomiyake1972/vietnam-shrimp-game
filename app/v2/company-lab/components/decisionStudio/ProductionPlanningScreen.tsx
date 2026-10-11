@@ -15,6 +15,7 @@ import ProcessingForecastPanel from "../ProcessingForecastPanel";
 import ProcessingCapacityPanel from "../ProcessingCapacityPanel";
 import ColdStoragePanel from "../ColdStoragePanel";
 import PlanningWarningsPanel from "../PlanningWarningsPanel";
+import { planningWarningsFor } from "../../investmentPlanningViewModel";
 import CollapsibleSection from "../CollapsibleSection";
 import { ColumnHeader } from "../FieldAnnotations";
 import BacklogByProductPanel from "../BacklogByProductPanel";
@@ -37,6 +38,8 @@ interface ProductionPlanningScreenProps {
 
 export default function ProductionPlanningScreen({ draft, onChange, disabled, vm, backlogSemantics }: ProductionPlanningScreenProps) {
   const { planning, capacityViewModel, processingForecast, freezingPackagingPool, plannedFreezingProcessingTons, coldStorageInvestmentUsdPerTon, pendingCapacityTotalTons, rawMaterialInventory, outstandingBacklog } = vm;
+  // 【UI-CLARITY-2 D4】生産の入力で直せる警告だけをこの画面に出す。
+  const productionWarnings = planningWarningsFor(planning.warnings, "production");
 
   const currentCapacityTons = (factoryId: string, pool: CapacityPoolKey): number | undefined => {
     const factory = capacityViewModel.factories.find((f) => f.factoryId === factoryId);
@@ -58,14 +61,17 @@ export default function ProductionPlanningScreen({ draft, onChange, disabled, vm
         />
       ) : null}
 
-      {/* 【Phase 8D】現在の入力に対する警告 */}
+      {/* 【Phase 8D】現在の入力に対する警告。
+          【UI-CLARITY-2 D4】ここには生産計画の入力で直せるものだけを出す。
+          投資案件そのものの話（排水設備の未接続・完成前の投資など）は
+          INVESTMENT 画面へ移した。 */}
       <CollapsibleSection
         title="現在の入力に対する警告"
         tone="info"
         testId="planning-warnings-section"
-        summaryRight={planning.warnings.length > 0 ? `${planning.warnings.length}件` : "なし"}
+        summaryRight={productionWarnings.length > 0 ? `${productionWarnings.length}件` : "なし"}
       >
-        <PlanningWarningsPanel warnings={planning.warnings} />
+        <PlanningWarningsPanel warnings={productionWarnings} />
         <details className="mt-2">
           <summary className="text-[11px] text-teal-400 hover:text-teal-300 cursor-pointer">
             生産計画 → 必要能力 → 必要Worker → 必要スペース → 不足 → 投資 のつながり

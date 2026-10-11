@@ -127,7 +127,7 @@ export default function InformationScreen({ fixture, ownState, turn, publicInfo,
         </>
       ) : (
         <p className="text-xs text-gray-500">
-          この画面では償却資産明細・市場情報の詳細を組み立てるための情報（CompanyLabState全体）が渡されていません。BS（上記）と以下の自社状態要約のみ表示します。
+          この画面では、償却資産明細・市場情報の詳細を表示するための情報がこの画面へ渡されていません。貸借対照表（上記）と、以下の自社状態の要約のみを表示します。
           {publicInfo && ` （参考: 国内原料前期価格 $${publicInfo.vietnamDomesticPriorPrice.toFixed(2)}/kg）`}
         </p>
       )}

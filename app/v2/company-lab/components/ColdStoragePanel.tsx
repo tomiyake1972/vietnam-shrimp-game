@@ -63,7 +63,7 @@ export default function ColdStoragePanel(props: ColdStoragePanelProps) {
             </tbody>
           </table>
         </div>
-        <p className="text-[11px] text-gray-500 mt-1">こちらが生産量の上限として実際に働きます（生産エンジンの段階3）。</p>
+        <p className="text-[11px] text-gray-500 mt-1">こちらが生産量の上限として実際に働きます（凍結・包装の能力。原料 → 共通前処理 → 凍結・包装 → 商品別 → 人員 の順に上限が適用され、その3番目です）。</p>
       </div>
 
       {/* ストック: 冷凍・冷蔵保管能力 */}

@@ -14,18 +14,11 @@
 // 表示中の run は URL の `?run=` を読むだけで、active run は書き換えない。
 
 import Link from "next/link";
+import { formatStopReason } from "../lib/runStatusLabels";
 import { ANALYSIS_CATEGORIES, QUICK_NAVIGATION } from "./catalog";
 import { Collapsible } from "../components/Collapsible";
 import { ExportPackButton } from "../components/ExportPackButton";
 import { analysisHref, useAnalysisRun } from "./lib/useAnalysisRun";
-
-const STOP_REASON_LABELS: Readonly<Record<string, string>> = {
-  completed: "完走",
-  stopped_by_user: "途中停止",
-  error: "失敗",
-  scenario_end: "シナリオ終端",
-  running: "実行中",
-};
 
 export function AnalysisHome() {
   const { stored, runs, loading, notFoundRunId } = useAnalysisRun();
@@ -42,7 +35,7 @@ export function AnalysisHome() {
           {loading
             ? "読み込み中…"
             : stored
-              ? `${stored.dataset.turns.length} / ${stored.run.requestedTurns} Turns（${STOP_REASON_LABELS[stored.run.stopReason] ?? stored.run.stopReason}） ・ ${stored.run.simulationRunId}`
+              ? `${stored.dataset.turns.length} / ${stored.run.requestedTurns} Turns（${formatStopReason(stored.run.stopReason)}） ・ ${stored.run.simulationRunId}`
               : "保存済みの Simulation Run がありません"}
         </span>
       </header>
@@ -130,7 +123,7 @@ export function AnalysisHome() {
                     {index === 0 ? "Current" : `Previous ${index}`}: {r.simulationRunId}
                   </Link>
                   <span className="text-slate-500">
-                    {r.completedTurns}/{r.requestedTurns}Q ・ {STOP_REASON_LABELS[r.stopReason] ?? r.stopReason} ・ {r.savedAt.slice(0, 19).replace("T", " ")}
+                    {r.completedTurns}/{r.requestedTurns}Q ・ {formatStopReason(r.stopReason)} ・ {r.savedAt.slice(0, 19).replace("T", " ")}
                   </span>
                 </li>
               ))}

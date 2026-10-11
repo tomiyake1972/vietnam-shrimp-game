@@ -272,6 +272,11 @@ export interface PaybackEstimate {
   readonly isComputable: boolean;
   /** 算定できない理由（isComputable=falseのときのみ）。 */
   readonly notComputableReason?: string;
+  /**
+   * 【UI-CLARITY-2 D2】算定できない理由が「前四半期の実績がまだ無い」だけである場合に true。
+   * この場合は実装上の制限ではなく、Turn 2 以降なら表示できる。画面はそう案内する。
+   */
+  readonly requiresPriorQuarterResult?: boolean;
   /** 投資完成後に追加で処理できる見込み量（完成品HOSO換算トン/四半期）。 */
   readonly incrementalProcessableTonsPerQuarter: number;
   /** 直近確定四半期の実績に基づく限界利益（USD/販売トン）。 */
@@ -327,6 +332,11 @@ export interface InvestmentCardViewModel {
    * 対応する商品が無い案件・記録が無いときは undefined。
    */
   readonly targetProductMarginUsdPerProducedTon?: number;
+  /**
+   * 【UI-CLARITY-2 D2】限界利益・回収年数が空欄なのは前四半期の実績がまだ無いためか。
+   * true のとき、画面は「－」ではなく「Turn 2 以降に表示されます」と案内する。
+   */
+  readonly metricsRequirePriorQuarterResult?: boolean;
   /**
    * 【UI-CLARITY-1 A-4】能力1tあたり投資額が、何年ぶんの限界利益にあたるか。
    * フル稼働を前提にした目安であり、他の制約で稼働しなければこれより悪くなる。
@@ -386,6 +396,17 @@ export const PLANNING_WARNING_LABELS: Readonly<Record<PlanningWarningKind, strin
   engineNotConnected: "エンジン未接続の効果",
 };
 
+/**
+ * 【UI-CLARITY-2 D4】その警告を、どの画面で読むべきか。
+ *
+ * 実機プレイテストで「PRODUCTIONの警告が1件と出るのに、中身は排水設備への
+ * 投資の話で、生産の入力では直せない」という指摘を受けた。警告の出し先を
+ * 行き先ごとに分け、PRODUCTION には生産の入力で直せるものだけを出す。
+ *   production  生産計画の入力（希望量・優先度・人員配置）で解消できる
+ *   investment  投資の選択に関わる話であり、生産の入力では直せない
+ */
+export type PlanningWarningAudience = "production" | "investment";
+
 export interface PlanningWarning {
   readonly kind: PlanningWarningKind;
   readonly label: string;
@@ -394,6 +415,16 @@ export interface PlanningWarning {
   /** 数値で示せる不足量（単位は kind により異なる。示せない場合はundefined）。 */
   readonly shortfallAmount?: number;
   readonly shortfallUnitLabel?: string;
+  /** 読むべき画面。省略時は従来どおり生産計画側として扱う。 */
+  readonly audience?: PlanningWarningAudience;
+}
+
+/** 【UI-CLARITY-2 D4】画面ごとに警告を絞る。audience 未設定は生産計画側とみなす。 */
+export function planningWarningsFor(
+  warnings: readonly PlanningWarning[],
+  audience: PlanningWarningAudience
+): readonly PlanningWarning[] {
+  return warnings.filter((w) => (w.audience ?? "production") === audience);
 }
 
 // ---------------------------------------------------------------------
@@ -860,6 +891,9 @@ export function buildCompanyInvestmentPlanningViewModel(
       description: candidate.description,
       ...(targetProductMarginUsdPerProducedTon !== undefined ? { targetProductMarginUsdPerProducedTon } : {}),
       ...(unitCostYearsOfMargin !== undefined ? { unitCostYearsOfMargin } : {}),
+      // 【UI-CLARITY-2 D2】空欄の理由が「前四半期の実績がまだ無い」だけなら、画面で
+      // 「Turn 2 以降に表示されます」と案内する（実装の制限と区別する）。
+      ...(input.lastQuarterFinancialResult === undefined ? { metricsRequirePriorQuarterResult: true } : {}),
       targetPoolKey,
       targetPoolLabel: targetPoolKey !== undefined ? TARGET_PRODUCT_LABELS[targetPoolKey] : undefined,
       currentCapacityTons,
@@ -954,6 +988,7 @@ export function buildCompanyInvestmentPlanningViewModel(
 
   if (factorySpace.reservedByPendingSpaceUnits > 0) {
     warnings.push({
+      audience: "investment",
       kind: "investmentNotAvailableYet",
       label: PLANNING_WARNING_LABELS.investmentNotAvailableYet,
       sentence:
@@ -964,6 +999,8 @@ export function buildCompanyInvestmentPlanningViewModel(
   }
 
   warnings.push({
+    // 【UI-CLARITY-2 D4】投資案件そのものの話であり、生産計画の入力では直せない。
+    audience: "investment",
     kind: "engineNotConnected",
     label: PLANNING_WARNING_LABELS.engineNotConnected,
     sentence:
@@ -1059,8 +1096,9 @@ export function buildPaybackEstimate(input: {
     return {
       ...base,
       isComputable: false,
+      requiresPriorQuarterResult: true,
       notComputableReason:
-        "直近の確定四半期の販売実績がまだないため、1トンあたりの限界利益を実績から求められません。現在の実装では算定対象外です（推測値は使いません）。",
+        "直近の確定四半期の販売実績がまだないため、1トンあたりの限界利益を実績から求められません。Turn 2 以降（1四半期ぶんの実績が出てから）に表示されます（推測値は使いません）。",
     };
   }
 

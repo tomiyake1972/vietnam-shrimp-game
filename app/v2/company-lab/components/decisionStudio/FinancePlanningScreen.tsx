@@ -22,6 +22,7 @@ import CollapsibleSection from "../CollapsibleSection";
 import { buildBorrowingCapacityGuide } from "../../borrowingCapacityGuide";
 import { NumberCell } from "../InputCells";
 import { ColumnHeader, InputFieldLabel } from "../FieldAnnotations";
+import { humanizeFinanceReason } from "../../financeReasonText";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INPUT_CONTROL_CLASS } from "../panelStyles";
 
 const LOAN_TYPE_LABELS: Record<CompanyDecisionDraft["financingRequest"]["desiredLoanType"], string> = {
@@ -48,7 +49,7 @@ interface FinancePlanningScreenProps {
   readonly onChange: (next: CompanyDecisionDraft) => void;
   readonly disabled: boolean;
   readonly vm: DecisionStudioViewModel;
-  /** 前Turンの純利益表示用（意思決定には使わない、参考情報）。 */
+  /** 前ターンの純利益表示用（意思決定には使わない、参考情報）。 */
   readonly lastQuarterFinancialResult?: CompanyFinancialQuarterResult | null;
   /**
    * 【INT-1 §2B】前Turnの借入審査・緊急融資の確定記録。
@@ -56,7 +57,7 @@ interface FinancePlanningScreenProps {
    * 記録が無いRunでは null/undefined のまま渡り、「未取得」と表示される。
    */
   readonly lastQuarterFinancingResult?: FinancingQuarterResult | null;
-  /** 直近確定Turンの配当結果（累積配当・却下理由の表示用）。 */
+  /** 直近確定ターンの配当結果（累積配当・却下理由の表示用）。 */
   readonly lastQuarterDividendResult?: CompanyDividendQuarterResult | null;
   /**
    * 【D1 §8】年度中の配当参考表示。管理者がバランス調整で配当性向を明示指定している場合、
@@ -270,11 +271,11 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
           配当希望額をdraftへ入れるだけ。Projected Ending Cash・自動の「最適配当額」は
           作らない（Player自身が資金余力を判断する設計を維持する）。 */}
       <CollapsibleSection title="配当" tone="input" testId="dividend-section" summaryRight={`配当可能額 ${formatUsd(maxDividendUsd)}`}>
-        <p className="text-xs text-gray-400">今Turンに株主へ支払う配当額を決定します。前Turンまでに確定した現金・分配可能利益が上限です。</p>
+        <p className="text-xs text-gray-400">今ターンに株主へ支払う配当額を決定します。前ターンまでに確定した現金・分配可能利益が上限です。</p>
 
         {lastQuarterDividendResult?.rejected && lastQuarterDividendResult.rejectionReason && (
           <div className="bg-rose-950/50 border border-rose-700/60 text-rose-200 rounded-lg px-3 py-2 text-xs" data-testid="dividend-last-rejection">
-            前Turンの配当は却下されました：{lastQuarterDividendResult.rejectionReason}
+            前ターンの配当は却下されました：{humanizeFinanceReason(lastQuarterDividendResult.rejectionReason)}
           </div>
         )}
 
@@ -373,7 +374,7 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
             </dd>
           </div>
           <div>
-            <dt className="text-gray-500">前Turン純利益</dt>
+            <dt className="text-gray-500">前ターン純利益</dt>
             <dd className="tabular-nums" data-testid="dividend-info-last-net-income">
               {lastQuarterNetIncomeUsd === undefined ? "－" : formatUsd(lastQuarterNetIncomeUsd)}
             </dd>
@@ -385,7 +386,7 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
             </dd>
           </div>
           <div>
-            <dt className="text-gray-500">今Turンの借入希望額</dt>
+            <dt className="text-gray-500">今ターンの借入希望額</dt>
             <dd className="tabular-nums" data-testid="dividend-info-planned-borrowing">
               {formatUsd(draft.financingRequest.desiredAmountUsd)}
             </dd>

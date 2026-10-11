@@ -50,7 +50,7 @@ export default function ProductionLinkageHeader({ vm }: ProductionLinkageHeaderP
           <div className="text-[11px] text-gray-400">Confirmed のみ（養殖の期待収穫を含まない・保守値）</div>
           <div className={`mt-0.5 text-sm font-semibold tabular-nums ${vm.isConfirmedShortage ? "text-rose-300" : "text-gray-100"}`}>
             {vm.isConfirmedShortage
-              ? `Confirmed Shortage: ${formatHosoEqTons(vm.confirmedShortageTons)}`
+              ? `確定不足量: ${formatHosoEqTons(vm.confirmedShortageTons)}`
               : `Confirmed Surplus: ${formatHosoEqTons(vm.confirmedSurplusTons)}`}
           </div>
         </div>

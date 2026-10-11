@@ -31,6 +31,8 @@ import CollapsibleSection from "../CollapsibleSection";
 import { ColumnHeader, InputFieldLabel, ReferenceBadge } from "../FieldAnnotations";
 import FactorySpacePanel from "../FactorySpacePanel";
 import InvestmentCardList from "../InvestmentCardList";
+import PlanningWarningsPanel from "../PlanningWarningsPanel";
+import { planningWarningsFor } from "../../investmentPlanningViewModel";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INPUT_CONTROL_CLASS, NO_VALUE_TEXT } from "../panelStyles";
 
 interface InvestmentPlanningScreenProps {
@@ -114,8 +116,24 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
     return entry ? unwrapUnit(entry.score) : PRODUCT_DEVELOPMENT_PARAMETERS_V1.neutralScore;
   };
 
+  // 【UI-CLARITY-2 D4】投資の選択に関わる警告は、生産計画ではなくこの画面で読む。
+  const investmentWarnings = planningWarningsFor(planning.warnings, "investment");
+
   return (
     <div className="space-y-3" data-testid="decision-studio-investment-screen">
+      {/* 【UI-CLARITY-2 D4】以前は PRODUCTION 画面に出ていたが、生産の入力では
+          直せない内容（投資案件そのものの話）なのでこちらへ移した。 */}
+      {investmentWarnings.length > 0 ? (
+        <CollapsibleSection
+          title="投資を選ぶ前に知っておくこと"
+          tone="info"
+          testId="investment-warnings-section"
+          summaryRight={`${investmentWarnings.length}件`}
+        >
+          <PlanningWarningsPanel warnings={investmentWarnings} />
+        </CollapsibleSection>
+      ) : null}
+
       {/* 【Phase 8B-3】設備投資 */}
       <CollapsibleSection title="設備投資" tone="input" description={CAPEX_EXPLANATION_TEXT} testId="capex-section">
         <details className="mt-1">

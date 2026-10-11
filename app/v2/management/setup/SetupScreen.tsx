@@ -11,6 +11,7 @@
 // （指示§H）。
 
 import { useCallback, useEffect, useState } from "react";
+import { formatStopReason } from "../lib/runStatusLabels";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { listScenarioAliases } from "../../../lib/v2/industryLab/cli/scenarioAliases";
@@ -76,18 +77,6 @@ function nowIso(): string {
 /** ランダムなseed候補を作る（UIの便宜のためだけの提案値。ここに決定論を依存させない）。 */
 function suggestSeed(): string {
   return `seed-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function formatStopReason(stopReason: SimulationRunSummary["stopReason"]): string {
-  const labels: Readonly<Record<string, string>> = {
-    completed: "完了",
-    stopped_by_user: "停止中",
-    error: "エラー",
-    scenario_end: "シナリオ終端",
-    waiting_for_player: "PLAYER待ち",
-    running: "実行中",
-  };
-  return labels[stopReason] ?? stopReason;
 }
 
 export function SetupScreen() {

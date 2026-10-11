@@ -8,6 +8,7 @@
 // （DecisionEditor.tsxの資金調達セクションと同じデータソース）から表示する。
 
 import { CompanyFinancingState } from "../../../../lib/v2/financing/types";
+import { humanizeFinanceReasons } from "../../financeReasonText";
 import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
 import { formatUsd, formatRatioAsPercent } from "../../../../lib/v2/industryLab/ui/formatters";
 import { Badge, NoDataNotice, ReasonList, TextRow } from "./financialTableParts";
@@ -141,7 +142,7 @@ export default function FinancingTab({ current, previous, ownFinancingState }: P
                 <TextRow label="返済方法" current={current.underwriting.repaymentMethod === "bulletAtMaturity" ? "満期一括" : "元金均等"} />
               </tbody>
             </table>
-            <ReasonList reasons={current.underwriting.reasons} />
+            <ReasonList reasons={humanizeFinanceReasons(current.underwriting.reasons)} />
           </div>
 
           <div>

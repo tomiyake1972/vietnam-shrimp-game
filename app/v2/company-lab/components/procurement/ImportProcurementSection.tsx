@@ -166,7 +166,7 @@ export default function ImportProcurementSection({ draft, onChange, disabled, pr
       )}
 
       <p className="mt-2 text-[11px] text-gray-500">
-        Ordered Quantity（発注量） ≠ Confirmed Import Allocation（原産国別供給上限に対する水位法配分後の確定輸入量）。他社との競合発注・原産国側の供給上限次第で、発注量どおりに満額到着するとは限りません。
+        発注量 ≠ 確定輸入量。確定輸入量は、原産国の供給上限を各社の発注量に応じて分け合った後の量です。他社との競合発注・原産国側の供給上限次第で、発注量どおりに満額到着するとは限りません。
       </p>
     </div>
   );

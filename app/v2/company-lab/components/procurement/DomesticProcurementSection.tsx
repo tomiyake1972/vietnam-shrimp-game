@@ -147,7 +147,7 @@ export default function DomesticProcurementSection({
                 </td>
               </tr>
               <tr>
-                <td className="pr-3 py-1 text-gray-400">Binding Constraint</td>
+                <td className="pr-3 py-1 text-gray-400">効いている制約</td>
                 <td className="pr-3 py-1 text-right text-[11px] text-gray-200" data-testid="capacity-binding-constraint">
                   {referenceSupplyKnown ? BINDING_LABEL[capacity.bindingConstraint] : `${NO_VALUE_TEXT}（基準供給量未確定）`}
                 </td>

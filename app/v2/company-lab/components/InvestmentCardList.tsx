@@ -12,6 +12,12 @@ import { InvestmentCardViewModel, capexUnitCostUsdPerCapacityTon } from "../inve
 import { CapitalProjectType } from "../../../lib/v2/capex";
 import { INFO_VALUE_CLASS, INFO_VALUE_STRONG_CLASS, NO_VALUE_TEXT } from "./panelStyles";
 
+/**
+ * 【UI-CLARITY-2 D2】前四半期の実績がまだ無いだけで算定できない項目の表示。
+ * 「算定対象外」（実装としてそもそも出せない）とは意味が違うので文言を分ける。
+ */
+const AVAILABLE_FROM_TURN2_TEXT = "Turn 2 以降に表示されます";
+
 interface InvestmentCardListProps {
   readonly cards: readonly InvestmentCardViewModel[];
   readonly currentCashUsd: number;
@@ -126,18 +132,28 @@ export default function InvestmentCardList(props: InvestmentCardListProps) {
               {/* 【UI-CLARITY-1 A-4】単価だけを見ると、限界利益率の高い商品の案件が
                   不当に割高に見える（実測でVAPは単価12倍だが回収は PD より良い）。
                   稼ぎ側を必ず並べる。 */}
+              {/* 【UI-CLARITY-2 D2】Turn 1 は前四半期の実績が無いため算定できない。
+                  「－」だけでは実装の制限と区別がつかないので、理由を書く。 */}
               <Field
                 label="前四半期の限界利益（生産1tあたり）"
                 value={
-                  card.targetProductMarginUsdPerProducedTon === undefined
-                    ? NO_VALUE_TEXT
-                    : `${usd(card.targetProductMarginUsdPerProducedTon)} / t`
+                  card.targetProductMarginUsdPerProducedTon !== undefined
+                    ? `${usd(card.targetProductMarginUsdPerProducedTon)} / t`
+                    : card.metricsRequirePriorQuarterResult === true
+                      ? AVAILABLE_FROM_TURN2_TEXT
+                      : NO_VALUE_TEXT
                 }
                 testId={`capex-margin-per-ton-${card.projectType}`}
               />
               <Field
                 label="単価の回収年数（目安）"
-                value={card.unitCostYearsOfMargin === undefined ? NO_VALUE_TEXT : `${card.unitCostYearsOfMargin.toFixed(1)} 年`}
+                value={
+                  card.unitCostYearsOfMargin !== undefined
+                    ? `${card.unitCostYearsOfMargin.toFixed(1)} 年`
+                    : card.metricsRequirePriorQuarterResult === true
+                      ? AVAILABLE_FROM_TURN2_TEXT
+                      : NO_VALUE_TEXT
+                }
                 testId={`capex-unit-cost-years-${card.projectType}`}
               />
 
@@ -171,7 +187,9 @@ export default function InvestmentCardList(props: InvestmentCardListProps) {
                 value={
                   card.payback.isComputable && card.payback.paybackYears !== undefined
                     ? `約${card.payback.paybackYears.toFixed(1)}年`
-                    : "現在の実装では算定対象外"
+                    : card.payback.requiresPriorQuarterResult === true
+                      ? AVAILABLE_FROM_TURN2_TEXT
+                      : "現在の実装では算定対象外"
                 }
                 emphasis={card.payback.isComputable}
               />

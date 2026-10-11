@@ -30,6 +30,7 @@ import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividen
 import { MarketProductBasePriceReference } from "../../../../lib/v2/sales/marketBasePriceReference";
 import { CompanyDecisionDraft } from "../../decisionDraft";
 import { buildDecisionStudioViewModel } from "../../decisionStudioViewModel";
+import { planningWarningsFor } from "../../investmentPlanningViewModel";
 import type { OpeningInfoViewModel, ScenarioNewsItem } from "../../play/_lib/openingInfoViewModel";
 import ProcurementPlanningSection from "../procurement/ProcurementPlanningSection";
 import { AreaToneLegend } from "../CollapsibleSection";
@@ -172,9 +173,12 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     lastQuarterFinancialResult,
   });
 
+  // 【UI-CLARITY-2 D4】警告は読むべき画面ごとに数える。以前は投資の話まで
+  // PRODUCTION の件数に入っており、「生産で1件」と出るのに生産では直せなかった。
   const badgeCounts: Partial<Record<DecisionStudioScreenKey, number>> = {
     sales: vm.salesForceAllocation.isOverAllocated ? 1 : 0,
-    production: vm.planning.warnings.length,
+    production: planningWarningsFor(vm.planning.warnings, "production").length,
+    investment: planningWarningsFor(vm.planning.warnings, "investment").length,
   };
 
   /**

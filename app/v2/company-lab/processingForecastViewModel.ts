@@ -79,9 +79,22 @@ export const FORECAST_HEADING_TEXT = "現在の入力に基づく処理見込み
 /** 名目能力→実効能力の計算式（画面・Excelの両方に明示する）。 */
 export const EFFECTIVE_CAPACITY_FORMULA_TEXT = "実効能力 ＝ 名目能力 × 基準稼働率 × 設備利用可能率";
 
+/**
+ * 【UI-CLARITY-2 D1】見込みの原料は「現時点の在庫」だけで計算する、という既存仕様の注記。
+ *
+ * 実機プレイテストで「原料在庫が0だと処理見込みが0tと出るが、実際には当期の
+ * 国内買付で生産できている」という指摘を受けた。見込みの計算方法（在庫のみを見る）は
+ * 仕様どおりで変更しないと決めたため（D1 案1）、代わりにこの注記を折りたたみの
+ * 中ではなく常に見える場所へ出す。以前は「計算方法」の details の中にあり、
+ * 開かないと読めなかった。
+ */
+export const RAW_MATERIAL_FORECAST_EXCLUSION_TEXT =
+  "この見込みの原料は「現時点の在庫」だけで計算しています。当期の国内買付・輸入到着ぶんは含みません" +
+  "（買付・入庫は四半期処理の中で確定するため）。実際の処理量はこの見込みより増えることがあります。";
+
 /** 優先順位の解釈（エンジン実装どおりの説明）。 */
 export const PRIORITY_RULE_TEXT =
-  "優先度は数字が小さいほど優先されます。同じ優先度の商品は先着順ではなく、希望量に比例して配分されます（水位法）。上位優先度で使い切らなかった能力だけが下位優先度へ回ります。";
+  "優先度は数字が小さいほど優先されます。同じ優先度の商品は先着順ではなく、希望量に比例して配分されます（少ない希望量から順に満たし、残りを比例配分する方式）。上位優先度で使い切らなかった能力だけが下位優先度へ回ります。";
 
 /** 能力プールが適用される順序（エンジン実装どおり。直感的な順序とは異なるため明示する）。 */
 export const CONSTRAINT_ORDER_TEXTS: readonly string[] = [
@@ -340,7 +353,11 @@ function sentenceFor(
   const head = role === "primary" ? "主因" : "補足要因";
   switch (reason) {
     case "rawMaterialShortage":
-      return `${head}: 原料在庫の配分が ${formatHosoEqTons(limitTons)} までのため、${formatHosoEqTons(reducedTons)} 不足`;
+      // 【UI-CLARITY-2】不足していることだけでなく、どこで解消できるかを書く。
+      return (
+        `${head}: 原料在庫の配分が ${formatHosoEqTons(limitTons)} までのため、${formatHosoEqTons(reducedTons)} 不足` +
+        `（PROCUREMENT で国内買付・輸入を増やすと解消します。当期の買付予定はこの見込みに含まれていません）`
+      );
     case "commonCapacityShortage":
       return `${head}: 共通処理能力の配分が ${formatHosoEqTons(limitTons)} までのため、${formatHosoEqTons(reducedTons)} 不足（優先度${priority}のため、より優先度の高い商品の配分後の残りを使用します）`;
     case "packagingCapacityShortage":
@@ -492,7 +509,6 @@ export function buildCompanyProcessingForecast(input: BuildCompanyProcessingFore
   const caveatTexts: readonly string[] = [
     "この表は確定結果ではありません。現在の入力値をそのまま生産処理エンジンへ渡した場合の見込みです。",
     "生産希望量が0の行は生産計画として送信されないため、この表には出ません。",
-    "原料在庫は「現時点の在庫」で計算しています。当期の国内買付・輸入到着ぶんは、四半期処理の中で買付・入庫が確定してから原料在庫へ加わるため、この見込みには含まれていません（実際の処理量は増える可能性があります）。",
     PRIORITY_RULE_TEXT,
     YIELD_APPLICATION_TEXT,
   ];
