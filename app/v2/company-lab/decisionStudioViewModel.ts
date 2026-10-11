@@ -97,6 +97,7 @@ export function buildDecisionStudioViewModel(input: BuildDecisionStudioViewModel
     rawMaterialLots: ownState.rawMaterialLots,
     finishedGoodsLots: ownState.finishedGoodsLots,
     lastQuarterFinancialResult,
+    lastQuarterActualProductionByProduct: ownState.lastQuarterActualProductionByProduct,
     capexParams: CAPEX_PARAMETERS_V1,
   });
 

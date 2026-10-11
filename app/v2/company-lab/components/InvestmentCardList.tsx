@@ -8,7 +8,7 @@
 //   - 未実装の効果を、実装済みの効果と同じ並びで見せない。
 //   - 算定できない投資回収を、それらしい数字で埋めない。
 
-import { InvestmentCardViewModel } from "../investmentPlanningViewModel";
+import { InvestmentCardViewModel, capexUnitCostUsdPerCapacityTon } from "../investmentPlanningViewModel";
 import { CapitalProjectType } from "../../../lib/v2/capex";
 import { INFO_VALUE_CLASS, INFO_VALUE_STRONG_CLASS, NO_VALUE_TEXT } from "./panelStyles";
 
@@ -47,13 +47,21 @@ function units(value: number): string {
   return Math.round(value).toLocaleString("en-US");
 }
 
-function Field(props: { readonly label: string; readonly value: string; readonly emphasis?: boolean; readonly tone?: "warn" | "bad" | "good" }) {
+function Field(props: {
+  readonly label: string;
+  readonly value: string;
+  readonly emphasis?: boolean;
+  readonly tone?: "warn" | "bad" | "good";
+  readonly testId?: string;
+}) {
   const toneClass =
     props.tone === "bad" ? "text-rose-300" : props.tone === "warn" ? "text-amber-300" : props.tone === "good" ? "text-teal-300" : undefined;
   return (
     <div className="flex flex-col">
       <span className="text-[10px] text-gray-500">{props.label}</span>
-      <span className={`text-[11px] ${toneClass ?? (props.emphasis ? INFO_VALUE_STRONG_CLASS : INFO_VALUE_CLASS)}`}>{props.value}</span>
+      <span className={`text-[11px] ${toneClass ?? (props.emphasis ? INFO_VALUE_STRONG_CLASS : INFO_VALUE_CLASS)}`} data-testid={props.testId}>
+        {props.value}
+      </span>
     </div>
   );
 }
@@ -103,6 +111,34 @@ export default function InvestmentCardList(props: InvestmentCardListProps) {
                 label="投資完成後能力"
                 value={card.capacityAfterTons !== undefined ? tons(card.capacityAfterTons) : NO_VALUE_TEXT}
                 emphasis
+              />
+
+              {/* 【UI-CLARITY-1 A-4】案件どうしの割高・割安を比べられるようにする。
+                  能力が増えない案件は割り算が意味を持たないため「—」。 */}
+              <Field
+                label="能力1t（四半期）あたり投資額"
+                value={(() => {
+                  const unitCost = capexUnitCostUsdPerCapacityTon(c.totalInvestmentUsd, card.capacityIncreaseTons);
+                  return unitCost === undefined ? NO_VALUE_TEXT : `${usd(unitCost)} / t`;
+                })()}
+                testId={`capex-unit-cost-${card.projectType}`}
+              />
+              {/* 【UI-CLARITY-1 A-4】単価だけを見ると、限界利益率の高い商品の案件が
+                  不当に割高に見える（実測でVAPは単価12倍だが回収は PD より良い）。
+                  稼ぎ側を必ず並べる。 */}
+              <Field
+                label="前四半期の限界利益（生産1tあたり）"
+                value={
+                  card.targetProductMarginUsdPerProducedTon === undefined
+                    ? NO_VALUE_TEXT
+                    : `${usd(card.targetProductMarginUsdPerProducedTon)} / t`
+                }
+                testId={`capex-margin-per-ton-${card.projectType}`}
+              />
+              <Field
+                label="単価の回収年数（目安）"
+                value={card.unitCostYearsOfMargin === undefined ? NO_VALUE_TEXT : `${card.unitCostYearsOfMargin.toFixed(1)} 年`}
+                testId={`capex-unit-cost-years-${card.projectType}`}
               />
 
               <Field label="必要工場スペース" value={units(card.requiredSpaceUnits)} tone={card.fitsInFactorySpace ? undefined : "bad"} />

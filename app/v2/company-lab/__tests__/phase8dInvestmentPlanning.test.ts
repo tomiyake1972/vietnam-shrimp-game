@@ -294,14 +294,36 @@ test("IP-7（必須11）: 品質設備・環境設備は、能力増加も投資
   }
 });
 
-test("IP-8（必須11）: 品質設備の未実装効果には、格落ち率・再加工率・廃棄率・重大事故率・顧客信頼が含まれる", () => {
+// 【UI-CLARITY-1 A-3で書き換え】この検査は Phase 8D 当時の「品質管理設備はエンジンへ未接続」
+// という前提で書かれていた。その後 Phase QI-I1 で効果が接続され、前提が実態と合わなくなっていた。
+//   接続の実体（コードで確認した経路）:
+//     capex/qualityControlEquipmentEffect.ts computeQualityEquipmentRiskMultiplier
+//       → companyLab/qualityControlEquipmentState.ts
+//       → companyLab/runner.ts:1567 が工場別の乗数を組み立て、1615 で品質計算へ渡す
+//       → quality/batchAdjustment.ts が effectiveOperationalRisk を乗算的に下げる
+//          （＝格落ち・再加工・廃棄の割合と重大事故確率が下がる）
+//     companyLab/qualityEquipmentMarketBonus.ts（companyLab/runner.ts:176 が呼ぶ）
+//       → 三層顧客価格モデルのときだけ、販売時の品質評価へ最大 +4 point
+// 画面が「便益はありません」と説明し続けていたため、実態に合わせて書き換えた。
+test("IP-8（必須11・UI-CLARITY-1で更新）: 品質設備は、実際に接続されている効果を実装済みとして説明する", () => {
   const disclosure = PROJECT_EFFECT_DISCLOSURES.qualityControlEquipment;
-  const joined = disclosure.notImplementedEffects.join(" ");
-  for (const keyword of ["格落ち", "再加工", "廃棄", "重大品質事故", "顧客信頼"]) {
-    assert.ok(joined.includes(keyword), `未実装効果の一覧に「${keyword}」が含まれていません`);
+  const implemented = disclosure.implementedEffects.join(" ");
+  for (const keyword of ["格落ち", "再加工", "廃棄", "重大品質事故"]) {
+    assert.ok(implemented.includes(keyword), `実装済み効果の一覧に「${keyword}」が含まれていません`);
   }
-  // 実装済みの効果に、品質への効果が紛れ込んでいないこと。
-  assert.ok(!disclosure.implementedEffects.join(" ").includes("品質スコア"));
+  assert.ok(implemented.includes("三層顧客価格モデル"), "市場評価への加点とその適用条件が書かれていません");
+
+  // 【設計上あえてやっていないこと】乗数は outcome 算出にだけ掛かり、Quality Score へ直接加点しない。
+  // 実装済み欄に「品質スコア」を書くと、この設計判断を取り違えた説明になる。
+  assert.ok(!implemented.includes("品質スコア"), "Quality Scoreへの直接加点があるかのように書かれています");
+  assert.ok(
+    disclosure.notImplementedEffects.join(" ").includes("Quality Score への直接の加点"),
+    "直接加点を行わないことが未実装側に明示されていません"
+  );
+
+  // 否定対照: 以前の誤った説明が残っていないこと。
+  const all = `${implemented} ${disclosure.notImplementedEffects.join(" ")} ${disclosure.notImplementedNote ?? ""}`;
+  assert.ok(!all.includes("操業上の便益はありません"), "品質管理設備に便益が無いという誤った説明が残っています");
 });
 
 test("IP-9（必須11）: 環境設備の未実装効果には、排水処理能力・環境事故・行政処分・監査が含まれる", () => {

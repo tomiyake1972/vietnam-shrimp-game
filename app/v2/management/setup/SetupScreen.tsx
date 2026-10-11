@@ -19,6 +19,7 @@ import { createSimulationSession } from "../../../lib/v2/companyLab/simulation/e
 import { CompanyControlMode, MANAGEMENT_CONSOLE_STANDARD_TURNS } from "../../../lib/v2/companyLab/simulation/types";
 import { SimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
 import { listSimulationRuns } from "../lib/simulationRunStore";
+import { buildRunRetentionNotice } from "../lib/runRetentionNotice";
 import { persistResumableRun } from "../lib/persistRun";
 import { upsertLiveSession } from "../lib/liveSessionRegistry";
 import { newRunId } from "../lib/runId";
@@ -481,6 +482,33 @@ export function SetupScreen() {
         </section>
 
         {/* --- Start --- */}
+        {/* 【UI-CLARITY-1 A-6】保存上限に達していると、ゲームを開始した時点で
+            最も古いRunが自動的に削除される。保存APIは成功を返すだけで何も知らせないため、
+            作る前にここで知らせる。削除そのものの挙動は変えていない。 */}
+        {(() => {
+          const notice = buildRunRetentionNotice(savedRuns);
+          if (notice === null) return null;
+          const toneClass =
+            notice.level === "atLimit"
+              ? "border-rose-600/70 bg-rose-950/40 text-rose-100"
+              : notice.level === "nearLimit"
+                ? "border-amber-600/70 bg-amber-950/40 text-amber-100"
+                : "border-slate-700 bg-slate-900/60 text-slate-300";
+          return (
+            <div
+              className={`mb-2 rounded border px-3 py-2 text-xs ${toneClass}`}
+              data-testid="setup-run-retention-notice"
+              data-level={notice.level}
+            >
+              {notice.message}
+              {notice.runIdToBeEvicted !== undefined && (
+                <div className="mt-1 text-[11px] opacity-90" data-testid="setup-run-retention-evicted">
+                  次に削除されるRun: {notice.runNameToBeEvicted ?? "（名前なし）"}（{notice.runIdToBeEvicted}）
+                </div>
+              )}
+            </div>
+          );
+        })()}
         <button
           type="button"
           onClick={handleStart}

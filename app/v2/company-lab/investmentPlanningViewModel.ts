@@ -111,19 +111,29 @@ export const PROJECT_EFFECT_DISCLOSURES: Readonly<Record<CapitalProjectType, Pro
       "取得原価の固定資産振替と、機械コンポーネントの減価償却",
       "稼働開始後の四半期固定保守費",
       "工場スペースの占有",
+      // 【UI-CLARITY-1 A-3】ここから下は実際にエンジンへ接続されている効果である。
+      // 以前この2つを「未接続」と書いていたが誤りだった。接続箇所:
+      //   capex/qualityControlEquipmentEffect.ts computeQualityEquipmentRiskMultiplier
+      //     → companyLab/qualityControlEquipmentState.ts
+      //     → companyLab/runner.ts:1567 が工場別の乗数を組み立て、1615 で品質計算へ渡す
+      //     → quality/batchAdjustment.ts が operationalRisk を乗算的に下げる
+      //   companyLab/qualityEquipmentMarketBonus.ts（companyLab/runner.ts:176 が呼ぶ）
+      "工場の操業リスクを乗算的に下げる（結果として格落ち率・再加工率・廃棄率と、重大品質事故の確率が下がる）",
+      "三層顧客価格モデルのとき、設備の保有そのものが販売時の品質評価へ加点される（上限 +4 point）",
     ],
     notImplementedEffects: [
-      "格落ち率の低下",
-      "再加工率の低下",
-      "廃棄率の低下",
-      "重大品質事故率の低下",
-      "品質スコア・顧客信頼の向上",
-      "品質検査関連指標の改善",
+      // 【設計上あえてやっていないこと】docs/v2/quality_control_equipment_design_qi_d1.md の方針どおり、
+      // 乗数は outcome 算出に使う effectiveOperationalRisk にだけ掛かり、Quality Score へ直接は加点しない。
+      "Quality Score への直接の加点（意図的に行っていません。効果は格落ち・再加工・廃棄・重大事故の減少を通じて間接的に現れます）",
+      "品質検査関連指標そのものの改善（検査合格率・検査工数などの指標はエンジンに存在しません）",
+      "規制・認証イベントへの対応（そうしたイベント自体がエンジンに存在しません）",
     ],
     notImplementedNote:
-      NOT_CONNECTED_NOTE +
-      "品質エンジンの入力は、設備の有無ではなく操業リスク（稼働ストレス・残業・臨時工比率・商品構成の複雑さ・原料滞留・立ち上がり）だけで決まります。" +
-      "したがって現時点でこの投資は、減価償却費と保守費というコストだけが発生し、操業上の便益はありません。",
+      "【効果の出かたに注意】上の2つの効果は実際に働きますが、どちらも間接的です。" +
+      "操業リスクの低減は確率を下げるだけで、結果が品質スコアへ出るまでに時間がかかります。" +
+      "市場評価への加点は、販売市場モデルが「三層顧客価格モデル」のときだけ適用されます" +
+      "（従来市場モデルのRunでは働きません）。" +
+      "投資した四半期にすぐ数字が動く種類の投資ではありません。",
   },
   environmentalEquipment: {
     implementedEffects: [
@@ -139,9 +149,13 @@ export const PROJECT_EFFECT_DISCLOSURES: Readonly<Record<CapitalProjectType, Pro
       "生産計画に対する排水処理の使用率",
     ],
     notImplementedNote:
+      "【この投資に便益はありません】" +
       NOT_CONNECTED_NOTE +
       "環境・排水に関するロジックは、現時点のエンジンにひとつも実装されていません（能力・事故・行政処分・監査のいずれも存在しません）。" +
-      "したがって現時点でこの投資は、減価償却費と保守費というコストだけが発生し、操業上の便益はありません。",
+      "コードを全て追って確認した結果、この設備を参照しているのは" +
+      "「投資額の支払い」「減価償却」「保守費」「工場スペースの消費」だけです。" +
+      "したがってこの投資を行うと、現金と工場スペースを失うだけで、得るものがありません。" +
+      "研修では、この設備には投資しないでください。",
   },
   // 【Test15新設】既存工場の能力増強ではなく、完成・稼働開始後（操業準備期間経過後）に
   // 会社のFactory[]へ新しいFactoryそのものを1つ追加する（capex/factoryConstruction.ts参照）。
@@ -307,6 +321,17 @@ export interface InvestmentCardViewModel {
   readonly currentCapacityTons?: number;
   /** 追加能力（対象プール、名目トン）。 */
   readonly capacityIncreaseTons: number;
+  /**
+   * 【UI-CLARITY-1 A-4】この案件が増やす能力に対応する商品の、
+   * 前四半期の「生産1トンあたり限界利益」（USD/t/四半期）。
+   * 対応する商品が無い案件・記録が無いときは undefined。
+   */
+  readonly targetProductMarginUsdPerProducedTon?: number;
+  /**
+   * 【UI-CLARITY-1 A-4】能力1tあたり投資額が、何年ぶんの限界利益にあたるか。
+   * フル稼働を前提にした目安であり、他の制約で稼働しなければこれより悪くなる。
+   */
+  readonly unitCostYearsOfMargin?: number;
   /** 投資完成後の能力（現在＋追加）。 */
   readonly capacityAfterTons?: number;
   // --- 工場スペース ---
@@ -414,6 +439,12 @@ export interface BuildCompanyInvestmentPlanningInput {
   readonly finishedGoodsLots: readonly FinishedGoodsLot[];
   /** 直近確定四半期の財務結果（投資回収の限界利益に使う）。無ければ回収年数は算定対象外。 */
   readonly lastQuarterFinancialResult?: CompanyFinancialQuarterResult | null;
+  /**
+   * 【UI-CLARITY-1 A-4】前四半期の商品別生産量（HOSO換算トン）。
+   * 商品別の「生産1トンあたり限界利益」の分母に使う。
+   * 渡されない場合はその表示を出さない（推測で埋めない）。
+   */
+  readonly lastQuarterActualProductionByProduct?: Readonly<Partial<Record<Product, number>>>;
   readonly capexParams?: CapexParameters;
 }
 
@@ -808,10 +839,27 @@ export function buildCompanyInvestmentPlanningViewModel(
       noEffectReason,
     });
 
+    // 【UI-CLARITY-1 A-4】単価だけでは割高・割安を取り違えるため、稼ぎ側も並べる。
+    const targetProduct = capexTargetProductOf(projectType);
+    const targetProductMarginUsdPerProducedTon =
+      targetProduct === undefined
+        ? undefined
+        : productContributionMarginUsdPerProducedTon(
+            input.lastQuarterFinancialResult,
+            input.lastQuarterActualProductionByProduct,
+            targetProduct
+          );
+    const unitCostYearsOfMargin = capexYearsOfMarginToRecoverUnitCost(
+      capexUnitCostUsdPerCapacityTon(candidate.totalInvestmentUsd, capacityIncreaseTons),
+      targetProductMarginUsdPerProducedTon
+    );
+
     return {
       projectType,
       candidate,
       description: candidate.description,
+      ...(targetProductMarginUsdPerProducedTon !== undefined ? { targetProductMarginUsdPerProducedTon } : {}),
+      ...(unitCostYearsOfMargin !== undefined ? { unitCostYearsOfMargin } : {}),
       targetPoolKey,
       targetPoolLabel: targetPoolKey !== undefined ? TARGET_PRODUCT_LABELS[targetPoolKey] : undefined,
       currentCapacityTons,
@@ -919,7 +967,12 @@ export function buildCompanyInvestmentPlanningViewModel(
     kind: "engineNotConnected",
     label: PLANNING_WARNING_LABELS.engineNotConnected,
     sentence:
-      "品質管理設備・排水環境設備は、現時点では資産と費用としてのみ実装されており、品質・事故・行政処分への効果はエンジンへ未接続です。冷凍・冷蔵保管能力も、超過時の強制的な制約は未接続です。各投資カードの「未実装の効果」欄を必ず確認してください。",
+      // 【UI-CLARITY-1 A-2/A-3】以前はここで品質管理設備も「未接続」と書いていたが誤りだった。
+      // 品質管理設備は操業リスク低減と市場評価加点の2経路で実際に働く（カード内の説明を参照）。
+      "排水環境設備は、現時点では資産と費用としてのみ実装されており、環境・事故・行政処分への効果はエンジンへ未接続です（投資しても得るものがありません）。" +
+      "品質管理設備は効果が働きますが、どちらの経路も間接的で、効果が出るまでに時間がかかります。" +
+      "冷凍・冷蔵保管能力は、超過時の強制的な制約が未接続です。" +
+      "各投資カードの「実装済みの効果」「未実装の効果」欄を必ず確認してください。",
   });
 
   return {
@@ -1036,4 +1089,87 @@ export function buildPaybackEstimate(input: {
     incrementalCashFlowUsdPerQuarter,
     paybackYears: Number.isFinite(paybackYears) && paybackYears > 0 ? paybackYears : undefined,
   };
+}
+
+/**
+ * 【UI-CLARITY-1 A-4】投資案件の「能力1トン（四半期）あたりの投資額」。
+ *
+ * 【なぜ要るか】画面は投資額と追加能力を別々に出していたため、案件どうしの
+ * 割高・割安が比べられなかった。実データでは1 t/四半期あたり
+ * HOSO $2,000 / PD $11,429 / VAP $24,000 と12倍の開きがある。
+ * この単価が並べば、投資判断を数字で議論できる。
+ *
+ * 【新しい計算を作らない】投資額も追加能力も、既に画面が表示している値
+ * （CapexCandidateViewModel.totalInvestmentUsd と
+ *   InvestmentCardViewModel.capacityIncreaseTons）をそのまま割るだけである。
+ * ゲーム計算には一切使わない（表示専用）。
+ *
+ * 能力が増えない案件（品質管理設備・排水環境設備・PD省人化・新工場建設）は
+ * 割り算が意味を持たないため undefined を返す。推測値で埋めない。
+ */
+export function capexUnitCostUsdPerCapacityTon(
+  totalInvestmentUsd: number,
+  capacityIncreaseTons: number
+): number | undefined {
+  if (!Number.isFinite(totalInvestmentUsd) || !Number.isFinite(capacityIncreaseTons)) return undefined;
+  if (capacityIncreaseTons <= 0) return undefined;
+  return totalInvestmentUsd / capacityIncreaseTons;
+}
+
+/** 案件種別が増やす能力に対応する商品。対応が無い案件は undefined。 */
+export function capexTargetProductOf(projectType: CapitalProjectType): Product | undefined {
+  if (projectType === "hosoLineExpansion") return "hoso";
+  if (projectType === "pdLineExpansion") return "pd";
+  if (projectType === "vapLineExpansion") return "vap";
+  return undefined;
+}
+
+/**
+ * 【UI-CLARITY-1 A-4】商品別の「生産1トンあたり限界利益」（前四半期の実績）。
+ *
+ * 【なぜ単価だけでは足りないか】能力1tあたりの投資額だけを並べると、VAPがHOSOの
+ * 12倍割高に見える。しかし32Turnの実測では、商品別の限界利益率が
+ * HOSO 22.2% / PD 31.1% / VAP 53.5% と大きく違い、回収年数相当では
+ * HOSO 0.4年 / PD 1.4年 / VAP 1.0年 で、VAPはPDより良い
+ * （docs/int1/logs/vap-investment-economics.log）。
+ * 単価だけを見せると判断を誤らせるため、稼ぎ側も並べる。
+ *
+ * 【分母の基準をごまかさない】限界利益は販売から生じ、ここで割る数量は
+ * 前四半期の「生産量」である（商品別の販売トン数は財務結果に無い）。
+ * 在庫が大きく動いた四半期では両者がずれる。画面には必ず基準を明記する。
+ *
+ * 【新しい会計を作らない】限界利益は管理会計の正本
+ * （CompanyFinancialQuarterResult.contributionMargin.byProduct）をそのまま使う。
+ * 記録が無い・生産量が0のときは undefined を返し、推測値で埋めない。
+ */
+export function productContributionMarginUsdPerProducedTon(
+  lastQuarterFinancialResult: CompanyFinancialQuarterResult | null | undefined,
+  lastQuarterActualProductionByProduct: Readonly<Partial<Record<Product, number>>> | undefined,
+  product: Product
+): number | undefined {
+  if (!lastQuarterFinancialResult) return undefined;
+  const row = lastQuarterFinancialResult.contributionMargin.byProduct.find((r) => String(r.key).toLowerCase() === product);
+  if (!row) return undefined;
+  const margin = row.contributionMargin as unknown as number;
+  const producedTons = lastQuarterActualProductionByProduct?.[product];
+  if (!Number.isFinite(margin)) return undefined;
+  if (producedTons === undefined || !Number.isFinite(producedTons) || producedTons <= 0) return undefined;
+  return margin / producedTons;
+}
+
+/**
+ * 【UI-CLARITY-1 A-4】能力1tを買う費用が、何年ぶんの限界利益にあたるか。
+ *
+ * フル稼働を前提にした上限の良さであり、実際には他の制約（原料・人員）で
+ * 稼働しないぶん、これより悪くなる。画面には必ずその但し書きを添える。
+ */
+export function capexYearsOfMarginToRecoverUnitCost(
+  unitCostUsdPerCapacityTon: number | undefined,
+  marginUsdPerProducedTonPerQuarter: number | undefined
+): number | undefined {
+  if (unitCostUsdPerCapacityTon === undefined || marginUsdPerProducedTonPerQuarter === undefined) return undefined;
+  const perYear = marginUsdPerProducedTonPerQuarter * 4;
+  if (!Number.isFinite(perYear) || perYear <= 0) return undefined;
+  const years = unitCostUsdPerCapacityTon / perYear;
+  return Number.isFinite(years) && years > 0 ? years : undefined;
 }

@@ -19,6 +19,7 @@ import LastQuarterFinancingResultPanel from "../LastQuarterFinancingResultPanel"
 import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividend";
 import { AnnualDividendGuidance } from "../../../../lib/v2/finance/annualDividendGuidance";
 import CollapsibleSection from "../CollapsibleSection";
+import { buildBorrowingCapacityGuide } from "../../borrowingCapacityGuide";
 import { NumberCell } from "../InputCells";
 import { ColumnHeader, InputFieldLabel } from "../FieldAnnotations";
 import { INFO_TABLE_HEAD_CLASS, INFO_TABLE_ROW_CLASS, INPUT_CONTROL_CLASS } from "../panelStyles";
@@ -93,6 +94,65 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
           既存借入残高合計 {formatUsd(existingLoanBalanceUsd)}
           {accruedInterestPayableUsd > 0 && <span className="ml-2">未払利息 {formatUsd(accruedInterestPayableUsd)}</span>}
         </div>
+        {/* 【UI-CLARITY-1 A-7】いつ資金が入るかが画面のどこにも書かれていなかった。
+            実際の順序は financing/liquidityClose.ts が決めている:
+            当四半期の実績が確定したあとに審査と実行が行われ、実行額はその四半期の
+            国内買付の資金として数えられる（computeProcurementConstraint が
+            「前期末現金×配分比 ＋ 当期の承認実行額」を買付可能額にしている）。 */}
+        {/* 【UI-CLARITY-1 A-1】申請する前に「いくらまで借りられそうか」と
+            「何がその上限を決めているか」を出す。前四半期末の確定記録であり、
+            今期の審査結果を約束するものではない（記録が無いTurnでは出さない）。 */}
+        {(() => {
+          const guide = buildBorrowingCapacityGuide(lastQuarterFinancingResult);
+          if (guide === null) {
+            return (
+              <p className="text-[11px] text-gray-400" data-testid="borrowing-capacity-guide-unavailable">
+                借入余力の記録がまだありません（前四半期の審査記録が無いため）。残高などから推測した額は表示しません。
+              </p>
+            );
+          }
+          return (
+            <div
+              className="rounded border border-gray-700/60 bg-gray-900/40 px-2 py-1 text-[11px] text-gray-200"
+              data-testid="borrowing-capacity-guide"
+            >
+              <div className="font-semibold text-gray-100">
+                借入余力の目安 <span className="font-normal text-gray-400">（前四半期末の記録。今期の審査を約束するものではありません）</span>
+              </div>
+              <dl className="mt-0.5 grid grid-cols-2 gap-x-4 gap-y-0.5">
+                <dt className="text-gray-400">これ以上借りられるとされた額</dt>
+                <dd className="text-right tabular-nums" data-testid="borrowing-capacity-available">
+                  {formatUsd(guide.availableAdditionalCapacityUsd)}
+                </dd>
+                <dt className="text-gray-400">上限を決めている要因</dt>
+                <dd className="text-right" data-testid="borrowing-capacity-binding">
+                  {guide.bindingConstraintLabel}
+                </dd>
+                <dt className="text-gray-400">信用区分</dt>
+                <dd className="text-right" data-testid="borrowing-capacity-tier">
+                  {guide.creditTier}
+                </dd>
+              </dl>
+              {guide.underwritingFrozen && (
+                <p className="mt-0.5 text-rose-300" data-testid="borrowing-capacity-frozen">
+                  新規の通常融資は現在停止しています。申請しても実行されません。
+                </p>
+              )}
+              {guide.covenantBreach && (
+                <p className="mt-0.5 text-amber-300" data-testid="borrowing-capacity-covenant">
+                  財務制限条項に違反しているため、金利が上乗せされます。
+                </p>
+              )}
+            </div>
+          );
+        })()}
+        <p className="rounded border border-sky-800/60 bg-sky-950/30 px-2 py-1 text-[11px] text-sky-100" data-testid="financing-timing-note">
+          <span className="font-semibold">いつ資金が入るか:</span>{" "}
+          申請した四半期のうちに審査され、承認された額はその四半期の資金として使えます（翌四半期まで待つ必要はありません）。
+          ただし審査は当四半期の業績が確定したあとに行われるため、<span className="font-semibold">実行額は申請額と異なることがあります</span>。
+          国内買付に使える資金は「前四半期末の現金の一部 ＋ 今回実行された借入額」で決まります。
+          実際に実行された額と理由は、次の四半期にこの画面の上部へ表示されます。
+        </p>
         {existingLoans.length > 0 && (
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs text-gray-300">
