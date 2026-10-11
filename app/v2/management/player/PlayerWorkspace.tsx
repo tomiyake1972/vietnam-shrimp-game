@@ -47,6 +47,8 @@ import { resolveMarketBasePriceReferences } from "../../../lib/v2/sales/marketBa
 import { buildAnnualDividendGuidanceView } from "../../../lib/v2/companyLab/annualDividendGuidanceView";
 import { computeMaxDividendUsd } from "../../../lib/v2/finance/dividend";
 import { CompanyInspector } from "../components/CompanyInspector";
+import { unwrapUnit } from "../../../lib/v2/core/units";
+import type { Product } from "../../../lib/v2/market/types";
 import LastTurnReviewPanel from "../../company-lab/components/LastTurnReviewPanel";
 import { buildLastTurnReview } from "../../company-lab/lastTurnReviewViewModel";
 import { MarketSummary } from "../components/MarketSummary";
@@ -372,10 +374,18 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const backlog = buildBacklogDisplay(summary, previousSummary);
   // 【UI-CLARITY-2 B-5】Overviewの先頭に出す「前Turnに出した指示 → その結果」。
   // 確定記録からの転記だけで、新しい計算はしない（lastTurnReviewViewModel 参照）。
+  // 【実機プレイの指摘】在庫の中身が分からないと値付けできない。現在の完成品在庫を
+  // 商品別に数えて渡す（ownState の available ロットを足すだけ。新しい計算はしない）。
+  const finishedGoodsTonsByProduct = ownState.finishedGoodsLots.reduce<Partial<Record<Product, number>>>((acc, lot) => {
+    if (lot.status !== "available") return acc;
+    acc[lot.product] = (acc[lot.product] ?? 0) + (unwrapUnit(lot.remainingQuantity) as number);
+    return acc;
+  }, {});
   const lastTurnReview = buildLastTurnReview({
     companyId,
     record: lastRecord ?? undefined,
     ...(previousRecord ? { previousRecord } : {}),
+    finishedGoodsTonsByProduct,
   });
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;

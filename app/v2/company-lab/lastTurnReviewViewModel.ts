@@ -164,7 +164,8 @@ function buildPerformanceSection(
 function buildSalesSection(
   record: CompanyQuarterRecord,
   decision: CompanyDecisionInput | undefined,
-  companyId: CompanyId
+  companyId: CompanyId,
+  finishedGoodsTonsByProduct: Readonly<Partial<Record<Product, number>>> | undefined
 ): ReviewSection | undefined {
   const summary = record.companySummaries.find((s) => s.companyId === companyId);
   if (summary === undefined) return undefined;
@@ -189,6 +190,17 @@ function buildSalesSection(
     headcountByMarket.set(plan.market, plan.salesForceHeadcount);
   }
   const markets = Array.from(new Set([...instructedByMarket.keys(), ...contractedByMarket.keys()]));
+
+  // 【実機プレイの指摘】値付けの判断には市場別だけでなく商品別の成約率も要る。
+  const contractedByProduct = new Map<Product, number>();
+  for (const contract of record.salesRecord.newContracts) {
+    if (contract.companyId !== companyId) continue;
+    contractedByProduct.set(contract.product, (contractedByProduct.get(contract.product) ?? 0) + unwrapUnit(contract.originalQuantity));
+  }
+  const instructedByProduct = new Map<Product, number>();
+  for (const plan of decision?.salesPlans ?? []) {
+    instructedByProduct.set(plan.product, (instructedByProduct.get(plan.product) ?? 0) + unwrapUnit(plan.desiredQuantity));
+  }
 
   const lines: ReviewLine[] = [
     {
@@ -215,6 +227,27 @@ function buildSalesSection(
       testId: "review-sales-overdue",
     },
   ];
+
+  for (const product of PRODUCTS) {
+    const instructedTons = instructedByProduct.get(product) ?? 0;
+    const contractedTons = contractedByProduct.get(product) ?? 0;
+    if (instructedTons <= 0 && contractedTons <= 0) continue;
+    const productRatio = achievementRatio(contractedTons, instructedTons);
+    const stock = finishedGoodsTonsByProduct?.[product];
+    lines.push({
+      label: `${PRODUCT_LABELS[product]} 商品計`,
+      instructed: decision === undefined ? undefined : tons(instructedTons),
+      result: tons(contractedTons),
+      note: [
+        productRatio === undefined ? undefined : `成約率 ${percent(productRatio)}`,
+        stock === undefined ? undefined : `完成品在庫 ${tons(stock)}`,
+      ]
+        .filter((n): n is string => n !== undefined)
+        .join(" ／ "),
+      tone: productRatio !== undefined && productRatio < 0.8 ? "warn" : "neutral",
+      testId: `review-sales-product-${product}`,
+    });
+  }
 
   for (const market of markets) {
     const instructedTons = instructedByMarket.get(market) ?? 0;
@@ -492,16 +525,26 @@ function buildInvestmentSection(
   if (capex === undefined) return undefined;
 
   const proposals = decision?.capexDecision.newProjectProposals ?? [];
+  const rejected = capex.rejectedProposals;
+  // 【実機プレイの指摘】申請が却下されたのに画面から黙って消えるのが一番困る。
+  // 提案件数から却下件数を引くと、提出記録に載らない却下（資金繰り事由など）で
+  // 負の件数になり得るため、引き算で「受理」を作らず、却下の有無をそのまま出す。
+  const newlyApproved = capex.events.filter((e) => e.statusBefore === "approved").length;
   const lines: ReviewLine[] = [
     {
-      label: "新規の投資提案 → 受理",
-      instructed: decision === undefined ? undefined : proposals.length > 0 ? proposals.map((p) => p.projectType).join(" / ") : "提案なし",
-      result: `受理 ${proposals.length - capex.rejectedProposals.length}件 ／ 却下 ${capex.rejectedProposals.length}件`,
+      label: "新規の投資提案 → 結果",
+      instructed: decision === undefined ? undefined : proposals.length > 0 ? proposals.map((p) => p.projectType).join(" / ") : "申請なし",
+      result:
+        rejected.length > 0
+          ? `却下 ${rejected.length}件（着手 ${newlyApproved}件）`
+          : proposals.length === 0 && newlyApproved === 0
+            ? "申請なし"
+            : `着手 ${newlyApproved}件 ／ 却下 0件`,
       note:
-        capex.rejectedProposals.length > 0
-          ? capex.rejectedProposals.map((r) => `${r.projectType}: ${r.reasons.join(" ")}`).join(" / ")
+        rejected.length > 0
+          ? rejected.map((r) => `${r.projectType}（$${Math.round(r.requestedBudgetUsd).toLocaleString("en-US")}）: ${r.reasons.join(" ")}`).join(" / ")
           : undefined,
-      tone: capex.rejectedProposals.length > 0 ? "warn" : "neutral",
+      tone: rejected.length > 0 ? "warn" : "neutral",
       testId: "review-investment-proposals",
     },
     {
@@ -552,6 +595,11 @@ export function buildLastTurnReview(input: {
   readonly companyId: CompanyId;
   readonly record: CompanyQuarterRecord | undefined;
   readonly previousRecord?: CompanyQuarterRecord;
+  /**
+   * 【実機プレイの指摘】在庫1万トンの中身が分からないと値付けできない、という指摘への対応。
+   * 現在の自社の完成品在庫を商品別に渡す（画面側が持っている ownState から転記するだけ）。
+   */
+  readonly finishedGoodsTonsByProduct?: Readonly<Partial<Record<Product, number>>>;
 }): LastTurnReview | null {
   const { companyId, record, previousRecord } = input;
   if (record === undefined) return null;
@@ -559,7 +607,7 @@ export function buildLastTurnReview(input: {
   const decision = record.decisions.find((d) => d.companyId === companyId);
   const sections = [
     buildPerformanceSection(record, previousRecord, companyId),
-    buildSalesSection(record, decision, companyId),
+    buildSalesSection(record, decision, companyId, input.finishedGoodsTonsByProduct),
     buildProductionSection(record, decision, companyId),
     buildProcurementSection(record, decision, companyId),
     buildFinanceSection(record, decision, companyId),

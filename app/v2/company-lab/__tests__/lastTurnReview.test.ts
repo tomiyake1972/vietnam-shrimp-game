@@ -141,3 +141,67 @@ test("B5-11: 1Turnだけ回した記録でも組み立てられる（前Turn比�
   assert.equal(review!.turn, 1);
   assert.equal(review!.sections.length, 6);
 });
+
+// --- 実機28Turnプレイの指摘を受けた追加分 ---
+
+test("B5-12: 商品別の成約率が出る（市場別だけでは値付けの判断ができない）", () => {
+  const review = buildLastTurnReview({ companyId: "BAL", record, previousRecord })!;
+  const sales = review.sections.find((s) => s.key === "sales")!;
+  for (const product of ["hoso", "pd", "vap"] as const) {
+    const line = sales.lines.find((l) => l.testId === `review-sales-product-${product}`);
+    assert.ok(line !== undefined, `${product} の商品計の行が必要`);
+    assert.ok(line!.note?.includes("成約率"), `${product}: ${line!.note}`);
+  }
+});
+
+test("B5-13: 完成品在庫を渡すと、商品別の内訳が成約率の隣に出る", () => {
+  const review = buildLastTurnReview({
+    companyId: "BAL",
+    record,
+    previousRecord,
+    finishedGoodsTonsByProduct: { hoso: 1111, pd: 2222, vap: 333 },
+  })!;
+  const sales = review.sections.find((s) => s.key === "sales")!;
+  assert.ok(sales.lines.find((l) => l.testId === "review-sales-product-pd")!.note?.includes("完成品在庫 2,222 t"));
+});
+
+test("B5-14: 却下された投資提案は件数と理由が必ず出る（黙って消えない）", () => {
+  // 提出記録に載らない却下（資金繰り事由など）でも負の件数にならないことを固定する。
+  // 実機28Turnプレイの Turn 16 で、pdMechanization が
+  // 「重大な資金繰り状態のため新規承認を見送り」として却下されていた。
+  const capex = record.capexResults.find((c) => c.companyId === "BAL")!;
+  const withRejection: typeof record = {
+    ...record,
+    capexResults: record.capexResults.map((c) =>
+      c.companyId === "BAL"
+        ? {
+            ...c,
+            rejectedProposals: [
+              { projectType: "pdMechanization" as const, requestedBudgetUsd: 2_500_000, reasons: ["重大な資金繰り状態（支払不能・債務超過等）のため新規承認を見送り。"] },
+            ],
+          }
+        : c
+    ),
+  };
+  const review = buildLastTurnReview({ companyId: "BAL", record: withRejection, previousRecord })!;
+  const line = review.sections.find((s) => s.key === "investment")!.lines.find((l) => l.testId === "review-investment-proposals")!;
+  assert.ok(line.result?.includes("却下 1件"), line.result);
+  assert.ok(!/却下 -\d/.test(line.result ?? ""), `件数が負になってはいけない: ${line.result}`);
+  assert.ok(line.note?.includes("重大な資金繰り状態"), line.note);
+  assert.ok(line.note?.includes("$2,500,000"), line.note);
+  assert.equal(capex.companyId, "BAL");
+});
+
+test("B5-15: 投資の申請も着手も無い四半期は「申請なし」と出る（空欄にしない）", () => {
+  const empty: typeof record = {
+    ...record,
+    decisions: record.decisions.map((d) =>
+      d.companyId === "BAL" ? { ...d, capexDecision: { ...d.capexDecision, newProjectProposals: [] } } : d
+    ),
+    capexResults: record.capexResults.map((c) => (c.companyId === "BAL" ? { ...c, events: [], rejectedProposals: [] } : c)),
+  };
+  const review = buildLastTurnReview({ companyId: "BAL", record: empty, previousRecord })!;
+  const line = review.sections.find((s) => s.key === "investment")!.lines.find((l) => l.testId === "review-investment-proposals")!;
+  assert.equal(line.instructed, "申請なし");
+  assert.equal(line.result, "申請なし");
+});
