@@ -47,6 +47,8 @@ import { resolveMarketBasePriceReferences } from "../../../lib/v2/sales/marketBa
 import { buildAnnualDividendGuidanceView } from "../../../lib/v2/companyLab/annualDividendGuidanceView";
 import { computeMaxDividendUsd } from "../../../lib/v2/finance/dividend";
 import { CompanyInspector } from "../components/CompanyInspector";
+import LastTurnReviewPanel from "../../company-lab/components/LastTurnReviewPanel";
+import { buildLastTurnReview } from "../../company-lab/lastTurnReviewViewModel";
 import { MarketSummary } from "../components/MarketSummary";
 import { TsvLeaderboardPanel } from "../components/TsvLeaderboardPanel";
 import { ExportPackButton } from "../components/ExportPackButton";
@@ -368,6 +370,13 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   // 【指示A/B/C/D】受注残（Backlog）はSales（Overview）・Inventoryの両方で使う。
   // 同じsummary/previousSummaryから同じ関数で作ることで、表示のズレを構造的に防ぐ。
   const backlog = buildBacklogDisplay(summary, previousSummary);
+  // 【UI-CLARITY-2 B-5】Overviewの先頭に出す「前Turnに出した指示 → その結果」。
+  // 確定記録からの転記だけで、新しい計算はしない（lastTurnReviewViewModel 参照）。
+  const lastTurnReview = buildLastTurnReview({
+    companyId,
+    record: lastRecord ?? undefined,
+    ...(previousRecord ? { previousRecord } : {}),
+  });
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
   // 【INT-1 §2B】前Turnの借入審査・緊急融資の確定記録。既存の抽出関数をそのまま使う。
@@ -557,59 +566,39 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
       <div className="p-3">
         {tab === "overview" ? (
           <div className="mx-auto max-w-3xl">
-            {/* 【指示A/B/E/F/G】成約→納品→受注残の関係を一目で分かるように、
-                Overviewの先頭にSalesカードを置く。他社の受注残は表示しない
-                （このsummaryは対象会社1社ぶんのCompanyQuarterSummaryのみ）。 */}
-            <section className="mb-3 rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="workspace-sales-backlog">
-              <h2 className="mb-2 text-sm font-semibold">Sales（成約・納品・受注残）</h2>
-              {backlog === null ? (
-                <p className="text-xs text-slate-400">まだ確定した実績がありません。</p>
-              ) : (
-                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
-                  <div>
-                    <dt className="text-[11px] text-slate-400">新規成約（Contracts）</dt>
-                    <dd className="tabular-nums font-semibold" data-testid="sales-new-contracted">
-                      {tons(backlog.newContractedTons)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[11px] text-slate-400">納品数量（Delivered）</dt>
-                    <dd className="tabular-nums font-semibold" data-testid="sales-fulfilled">
-                      {tons(backlog.fulfilledTons)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[11px] text-slate-400">受注残（Backlog）</dt>
-                    <dd className="tabular-nums font-semibold" data-testid="sales-backlog">
-                      {tons(backlog.backlogTons)}
-                      {backlog.previousBacklogTons !== null ? (
-                        <span className="ml-1.5 text-[10px] font-normal text-slate-500">（前期 {tons(backlog.previousBacklogTons)}）</span>
-                      ) : null}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[11px] text-slate-400">納期超過（Overdue）</dt>
-                    <dd
-                      className={`tabular-nums font-semibold ${backlog.overdueIsSignificant ? "text-amber-300" : ""}`}
-                      data-testid="sales-overdue"
-                    >
-                      {tons(backlog.overdueTons)}
-                    </dd>
-                  </div>
-                </dl>
-              )}
-            </section>
+            {/* 【UI-CLARITY-2 B-5】ターンが変わって最初に見る場所は、志の再掲ではなく
+                「前期に出した指示が、どう実行され、どういう結果になったか」にする。
+                財務・投資・販売・調達・生産を活動ごとに、指示と結果を並べて出す。 */}
+            {lastTurnReview !== null ? (
+              <LastTurnReviewPanel review={lastTurnReview} />
+            ) : (
+              <section className="mb-3 rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="last-turn-review-empty">
+                <h2 className="mb-1 text-sm font-semibold">まだ確定した四半期がありません</h2>
+                <p className="text-xs text-slate-400">
+                  Turn 1 の意思決定を提出し、GMが四半期を進めると、ここに「出した指示とその結果」が出ます。
+                </p>
+              </section>
+            )}
 
-            {/* 【指示§10】新しい表示ロジックを作らず、既存のCompanyInspectorをそのまま埋め込む
-                （財務・販売・生産・在庫の一部・市場ボトルネック・投資状況を一括カバーする）。 */}
-            <CompanyInspector
-              dataset={dataset}
-              fixtures={[fixture]}
-              selectedCompanyId={companyId}
-              onSelect={() => {}}
-              strategyDocs={strategyDocs}
-              strategyTurns={session.packCompanyTurns}
-            />
+            {/* 会社のプロフィール・長期の志・Standard AI の戦略説明は、ふりかえりの後ろへ置く。
+                毎ターン読み直すものではないため、既定では畳んでおく。 */}
+            <details className="rounded-lg border border-slate-700 bg-slate-900/40" data-testid="workspace-company-profile">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-200">
+                会社のプロフィールと長期の志（参考・毎ターン見る必要はありません）
+              </summary>
+              <div className="border-t border-slate-800 px-1 py-2">
+                {/* 【指示§10】新しい表示ロジックを作らず、既存のCompanyInspectorをそのまま埋め込む
+                    （財務・販売・生産・在庫の一部・市場ボトルネック・投資状況を一括カバーする）。 */}
+                <CompanyInspector
+                  dataset={dataset}
+                  fixtures={[fixture]}
+                  selectedCompanyId={companyId}
+                  onSelect={() => {}}
+                  strategyDocs={strategyDocs}
+                  strategyTurns={session.packCompanyTurns}
+                />
+              </div>
+            </details>
           </div>
         ) : null}
 

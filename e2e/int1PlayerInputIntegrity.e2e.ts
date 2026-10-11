@@ -147,9 +147,19 @@ test("INT1-E2E-3/4: Console内PLAYER画面が古いTurnを表示せず、確定�
   });
 
   await test.step("INT1-E2E-4: 確定した提出値が実際のTurn計算に使われている（Turn1の実績が記録されている）", async () => {
-    // Overviewタブに前四半期の実績（Sales/Backlog）が出る＝Turn1が計算され記録された。
+    // Overviewタブに前四半期のふりかえり（指示→結果）が出る＝Turn1が計算され記録された。
+    // 【UI-CLARITY-2 B-5】以前は独立したSalesカード（workspace-sales-backlog）を見ていたが、
+    // 同じ4つの数値がふりかえりの販売セクションに「指示 → 結果」の形で入ったため、
+    // カードを置かずふりかえり側を確認する。
     await page.getByTestId("workspace-tab-overview").click();
-    await expect(page.getByTestId("workspace-sales-backlog")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("last-turn-review")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("review-section-sales")).toBeVisible();
+    await expect(page.getByTestId("review-sales-contracted-result")).toBeVisible();
+    // 全セクションを開いた状態の見た目を証跡として残す。
+    for (const key of ["production", "procurement", "finance", "investment"]) {
+      await page.getByTestId(`review-section-${key}`).getByRole("button").click();
+    }
+    await page.getByTestId("last-turn-review").screenshot({ path: "docs/int1/attachments/uiClarity2/b5-overview-review.png" });
     await page.getByTestId("workspace-back-to-console").click();
     await expect(page.getByTestId("run-id")).toHaveText(runId, { timeout: 120_000 });
     // GM側のTurnカウンタも1completedのまま（提出待ちで止まっていない）。
