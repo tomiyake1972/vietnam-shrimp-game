@@ -98,6 +98,30 @@ test.describe("SALES 基準価格参考表示 — Independent Player Flow経由"
         });
       });
 
+      await test.step("BAL: 入力欄の誤操作防止 — 負値はその場で知らせ、ホイールでは値が変わらない", async () => {
+        /**
+         * 【UI-CLARITY-2 B-1】実機のプレイテストで見つかった2件。
+         *   (1) 販売希望量に -100 を入れても画面上は何も言われない
+         *       （提出前検証では止まるが、入力の時点では分からなかった）
+         *   (2) 入力欄にカーソルが載ったままページをスクロールすると値が動く
+         *       （価格調整が 0 → 0.01 に変わる）
+         */
+        const quantity = balPage.getByTestId("sales-plan-desired-quantity-CN-hoso");
+        await quantity.fill("-100");
+        await expect(balPage.getByTestId("sales-plan-desired-quantity-CN-hoso-notice")).toHaveText("0以上で入力してください。");
+        await expect(quantity).toHaveAttribute("data-out-of-range", "true");
+        await quantity.fill("1000");
+        await expect(balPage.getByTestId("sales-plan-desired-quantity-CN-hoso-notice")).toHaveCount(0);
+
+        const priceAdjustment = balPage.getByTestId("sales-plan-price-adjustment-CN-hoso");
+        await priceAdjustment.fill("0");
+        await priceAdjustment.focus();
+        await priceAdjustment.hover();
+        await balPage.mouse.wheel(0, 200);
+        await balPage.mouse.wheel(0, -200);
+        await expect(priceAdjustment).toHaveValue("0");
+      });
+
       await test.step("BAL: Turn1を提出し、GMがAdvanceする", async () => {
         await submitCurrentTurn(balPage);
         await runOneTurn(gmPage);

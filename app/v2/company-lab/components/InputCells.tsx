@@ -8,8 +8,41 @@
 // Procurement Planningの入力セクション（国内買付・輸入・養殖）を独立component化する際、
 // 同じ入力セルをコピーせずに済むよう、共有ファイルへ引き上げた。
 
-import { useState } from "react";
+import { useState, type ReactNode, type WheelEvent } from "react";
 import { INPUT_CONTROL_CLASS, INPUT_CONTROL_WARN_CLASS } from "./panelStyles";
+
+/**
+ * 【UI-CLARITY-2 B-1】入力欄にカーソルが載ったままページをスクロールすると、
+ * ブラウザの既定動作で type="number" の値が勝手に増減する（実機で価格調整が
+ * 0 → 0.01 に変わる事象を確認）。意思決定の値が無言で書き換わるため、
+ * ホイール操作では必ず focus を外し、値が動かないようにする。
+ * スクロール自体は妨げない（preventDefaultはしない）。
+ */
+function blurOnWheel(event: WheelEvent<HTMLInputElement>): void {
+  event.currentTarget.blur();
+}
+
+/**
+ * 【UI-CLARITY-2 B-1】入力欄のすぐ下に、その場で理由を出す。
+ * 以前は赤枠にするだけで、何がいけないのかは「この内容で確定」を押すまで
+ * 分からなかった（販売希望量に -100 を入れても画面上は何も言われない）。
+ * 提出前検証 validateDecisionDraftNumbers の判定条件と同じ条件をここで表示する
+ * （新しい検証を足すのではなく、既存の検証結果を先に見せるだけ）。
+ */
+function CellWithNotice(props: { readonly input: ReactNode; readonly notice: string | null; readonly testId?: string }) {
+  if (props.notice === null) return <>{props.input}</>;
+  return (
+    <span className="inline-flex flex-col gap-0.5 align-top">
+      {props.input}
+      <span
+        className="text-[10px] leading-tight text-rose-300"
+        data-testid={props.testId === undefined ? undefined : `${props.testId}-notice`}
+      >
+        {props.notice}
+      </span>
+    </span>
+  );
+}
 
 /**
  * 【INT-1 §1（監査後修正）】空欄・不正な数値を、利用者へ知らせずに0として確定しない。
@@ -88,20 +121,35 @@ export function NumberCell(props: {
   readonly ariaLabel?: string;
 }) {
   const buffer = useNumericInputBuffer(props.value, props.onChange, parseNumberInput);
+  const lowerBound = props.min === null ? null : props.min ?? 0;
+  const belowBound = lowerBound !== null && Number.isFinite(props.value) && props.value < lowerBound;
+  const notice = buffer.invalid
+    ? "数値を入力してください。"
+    : belowBound
+      ? `${lowerBound}以上で入力してください。`
+      : null;
   return (
-    <input
-      type="number"
-      {...(props.min === null ? {} : { min: props.min ?? 0 })}
-      step={props.step ?? 1}
-      value={buffer.displayValue}
-      disabled={props.disabled}
-      onChange={(e) => buffer.handleChange(e.target.value)}
-      onBlur={buffer.handleBlur}
-      aria-invalid={buffer.invalid || undefined}
-      data-invalid={buffer.invalid ? "true" : undefined}
-      data-testid={props.testId}
-      aria-label={props.ariaLabel}
-      className={`w-24 ${INPUT_CONTROL_CLASS} ${props.warn === true || buffer.invalid ? INPUT_CONTROL_WARN_CLASS : ""}`}
+    <CellWithNotice
+      testId={props.testId}
+      notice={notice}
+      input={
+        <input
+          type="number"
+          {...(lowerBound === null ? {} : { min: lowerBound })}
+          step={props.step ?? 1}
+          value={buffer.displayValue}
+          disabled={props.disabled}
+          onChange={(e) => buffer.handleChange(e.target.value)}
+          onBlur={buffer.handleBlur}
+          onWheel={blurOnWheel}
+          aria-invalid={buffer.invalid || belowBound || undefined}
+          data-invalid={buffer.invalid ? "true" : undefined}
+          data-out-of-range={belowBound ? "true" : undefined}
+          data-testid={props.testId}
+          aria-label={props.ariaLabel}
+          className={`w-24 ${INPUT_CONTROL_CLASS} ${props.warn === true || buffer.invalid || belowBound ? INPUT_CONTROL_WARN_CLASS : ""}`}
+        />
+      }
     />
   );
 }
@@ -115,21 +163,31 @@ export function RatioCell(props: {
   readonly ariaLabel?: string;
 }) {
   const buffer = useNumericInputBuffer(props.value, props.onChange, parseRatioInput);
+  const outOfRange = Number.isFinite(props.value) && (props.value < 0 || props.value > 1);
+  const notice = buffer.invalid ? "数値を入力してください。" : outOfRange ? "0〜1で入力してください（0.2＝20%）。" : null;
   return (
-    <input
-      type="number"
-      min={0}
-      max={1}
-      step={0.05}
-      value={buffer.displayValue}
-      disabled={props.disabled}
-      onChange={(e) => buffer.handleChange(e.target.value)}
-      onBlur={buffer.handleBlur}
-      aria-invalid={buffer.invalid || undefined}
-      data-invalid={buffer.invalid ? "true" : undefined}
-      data-testid={props.testId}
-      aria-label={props.ariaLabel}
-      className={`w-20 ${INPUT_CONTROL_CLASS} ${buffer.invalid ? INPUT_CONTROL_WARN_CLASS : ""}`}
+    <CellWithNotice
+      testId={props.testId}
+      notice={notice}
+      input={
+        <input
+          type="number"
+          min={0}
+          max={1}
+          step={0.05}
+          value={buffer.displayValue}
+          disabled={props.disabled}
+          onChange={(e) => buffer.handleChange(e.target.value)}
+          onBlur={buffer.handleBlur}
+          onWheel={blurOnWheel}
+          aria-invalid={buffer.invalid || outOfRange || undefined}
+          data-invalid={buffer.invalid ? "true" : undefined}
+          data-out-of-range={outOfRange ? "true" : undefined}
+          data-testid={props.testId}
+          aria-label={props.ariaLabel}
+          className={`w-20 ${INPUT_CONTROL_CLASS} ${buffer.invalid || outOfRange ? INPUT_CONTROL_WARN_CLASS : ""}`}
+        />
+      }
     />
   );
 }
@@ -143,19 +201,28 @@ export function PriceAdjustmentCell(props: {
   readonly ariaLabel?: string;
 }) {
   const buffer = useNumericInputBuffer(props.value, props.onChange, parseNumberInput);
+  // 価格調整は値引き（負値）も正当な入力なので、下限の判定は行わない。
+  const notice = buffer.invalid ? "数値を入力してください。" : null;
   return (
-    <input
-      type="number"
-      step={0.01}
-      value={buffer.displayValue}
-      disabled={props.disabled}
-      onChange={(e) => buffer.handleChange(e.target.value)}
-      onBlur={buffer.handleBlur}
-      aria-invalid={buffer.invalid || undefined}
-      data-invalid={buffer.invalid ? "true" : undefined}
-      data-testid={props.testId}
-      aria-label={props.ariaLabel}
-      className={`w-24 ${INPUT_CONTROL_CLASS} ${buffer.invalid ? INPUT_CONTROL_WARN_CLASS : ""}`}
+    <CellWithNotice
+      testId={props.testId}
+      notice={notice}
+      input={
+        <input
+          type="number"
+          step={0.01}
+          value={buffer.displayValue}
+          disabled={props.disabled}
+          onChange={(e) => buffer.handleChange(e.target.value)}
+          onBlur={buffer.handleBlur}
+          onWheel={blurOnWheel}
+          aria-invalid={buffer.invalid || undefined}
+          data-invalid={buffer.invalid ? "true" : undefined}
+          data-testid={props.testId}
+          aria-label={props.ariaLabel}
+          className={`w-24 ${INPUT_CONTROL_CLASS} ${buffer.invalid ? INPUT_CONTROL_WARN_CLASS : ""}`}
+        />
+      }
     />
   );
 }
