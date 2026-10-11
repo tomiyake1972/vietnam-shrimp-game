@@ -1,0 +1,97 @@
+# BW-1 実機検証（配備済み Preview ＋ 共有 Redis）— 1回目
+# 日時: 2026-10-09 18:04 JST（UTC 09:04）
+# 注意: この実行の 6件の FAIL はスクリプト側の判定の誤りで、製品の不具合ではない（2回目で修正し 44/44）。
+# 重要: この実行の保存が Run 保持上限（20本）を超え、最古の Run 1本が退避削除された。
+#       docs/int1/separate_issue_run_retention_eviction.md 参照。
+
+# BW-1 実機検証（配備済み Preview ＋ 共有 Redis）
+# app=<Preview URL>
+# 検証用 runId=bw1-live-verify-2026-10-09T090455299Z / PLAYER=BAL / 4Turn 進めた状態から開始
+# 既存 Run は読み書きしない。作った検証 Run は最後に消す。
+
+## 1. 共有 DB の疎通（Active かどうか）
+    Run 一覧 1件（読み取りのみ）                            200     11,694 B    703 ms
+    PASS  共有 DB から読み取れる（＝停止していない）  — status=200 {"runs":[{"simulationRunId":"run-dynamic-scenario-2-claude-balance-01-20261007T022232775Z","scenarioId":"dynamic-scenario-2","seed":"claude-balance-01","requestedTurns":32,"completedTurns":32,"stopRea
+    既存 Run は読み取りのみ（1件だけ取得して疎通確認に使用。件数=20）
+
+## 2. 保存（part×3 ＋ manifest commit）
+    保存 part=dataset                              200         89 B    361 ms
+    PASS  part=dataset の保存が成功する  — status=200 {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","revision":1,"part":"dataset"}
+    保存 part=resume                               200         88 B    494 ms
+    PASS  part=resume の保存が成功する  — status=200 {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","revision":1,"part":"resume"}
+    保存 part=pack                                 200         86 B    120 ms
+    PASS  part=pack の保存が成功する  — status=200 {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","revision":1,"part":"pack"}
+    保存 manifest commit                           200        120 B    149 ms
+    PASS  manifest commit revision=1 が成功する  — status=200 {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","savedAt":"2026-10-09T09:04:57.481Z","persistenceRevision":1}
+
+## 3. 再開（保存したものを読み直して復元できる）
+    Run 1件を読み直す                                  200  2,501,501 B    306 ms
+    PASS  保存した Run が読める  — status=200
+    FAIL  completedTurns が保存した値と一致する  — undefined vs 4
+    FAIL  persistenceRevision が 1 である  — undefined
+    FAIL  resumePayload が復元される
+    FAIL  BAL が PLAYER として復元される  — {}
+    FAIL  dataset が復元される
+
+## 4. GM Seat 一覧（初回 → 変化なし → 参加link発行）
+    Seat一覧 初回（known なし）                          200      1,274 B    246 ms
+    PASS  初回は完全な一覧が返る  — status=200
+    PASS  BAL が PLAYER として出る
+    Seat一覧 変化なし                                  200        140 B     81 ms
+    PASS  変化が無ければ unchanged=true  — {"runId":"bw1-live-verify-2026-10-09T090455299Z","unchanged":true,"persistenceRevision":1,"seatsVersion":"BAL:-;CONSV:-;JPQ:-;MASS:-;VAP:-"}
+    FAIL  変化が無いときは応答が小さい（BW-1 が効いている）  — 140 B vs 初回 1274 B
+    参加link発行                                     200        240 B    159 ms
+    PASS  参加linkが発行できる  — status=200
+    Seat一覧（発行前の known で再取得）                      200      1,300 B    134 ms
+    PASS  Seat が変わったので unchanged=false  — {"runId":"bw1-live-verify-2026-10-09T090455299Z","unchanged":false,"persistenceRevision":1,"seatsVersion":"BAL|2026-10-0
+    PASS  発行が一覧に現れる
+    PASS  Run の revision は変わっていない  — 1 vs 1
+
+## 5. PLAYER の参加と意思決定context（初回 → 変化なし）
+    参加link claim                                 200         67 B     88 ms
+    PASS  参加できる  — status=200 {"runId":"bw1-live-verify-2026-10-09T090455299Z","companyId":"BAL"}
+    PASS  Player Session Cookie が発行される
+    意思決定context 初回（known なし）                     200     95,094 B    338 ms
+    PASS  context が返る  — status=200 {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","scenarioId":"baseline","seed":"bw1-live","companyId":"BAL","fixture":{"companyId":"BAL","displayName":"バランス型水産","archetype":"balanced","desc
+    PASS  自社のcontextである
+    PASS  提出前は hasSubmittedThisTurn=false
+    意思決定context 変化なし                             200         42 B     73 ms
+    PASS  変化が無ければ unchanged=true  — {"unchanged":true,"persistenceRevision":1}
+    PASS  変化が無いときは応答が小さい（BW-1 が効いている）  — 42 B vs 初回 95094 B
+
+## 6. PLAYER 提出の反映
+    提出                                           200        100 B    403 ms
+    PASS  提出できる  — status=200 {"runId":"bw1-live-verify-2026-10-09T090455299Z","companyId":"BAL","turn":5,"persistenceRevision":2}
+    意思決定context（提出前の known で再取得）                 200     95,093 B    181 ms
+    PASS  提出で unchanged=false になる  — {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","scenarioId":"baseline","seed":"bw1-live","companyId":"BAL","
+    PASS  提出済みが自分の画面へ現れる
+    PASS  提出で revision が上がる  — 1 → 2
+    Seat一覧（提出前の known で再取得）                      200      1,342 B    142 ms
+    PASS  提出で unchanged=false になる  — {"runId":"bw1-live-verify-2026-10-09T090455299Z","unchanged":false,"persistenceRevision":2,"seatsVersion":"BAL|2026-10-0
+    PASS  提出済みが GM の一覧へ現れる
+    PASS  参加済みが GM の一覧へ現れる
+
+## 7. Turn 進行の反映
+    保存 part=dataset                              200         89 B    235 ms
+    PASS  part=dataset の保存が成功する  — status=200 {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","revision":3,"part":"dataset"}
+    保存 part=resume                               200         88 B    393 ms
+    PASS  part=resume の保存が成功する  — status=200 {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","revision":3,"part":"resume"}
+    保存 part=pack                                 200         86 B     88 ms
+    PASS  part=pack の保存が成功する  — status=200 {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","revision":3,"part":"pack"}
+    保存 manifest commit                           200        120 B     96 ms
+    PASS  manifest commit revision=3 が成功する  — status=200 {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","savedAt":"2026-10-09T09:05:00.597Z","persistenceRevision":3}
+    意思決定context（進行前の known で再取得）                 200    101,365 B    182 ms
+    PASS  Turn 進行で unchanged=false になる  — {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","scenarioId":"baseline","seed":"bw1-live","companyId":"BAL","
+    PASS  新しい Turn が PLAYER 画面へ現れる  — 5 → 6
+    Seat一覧（進行前の known で再取得）                      200      1,343 B    121 ms
+    PASS  Turn 進行で unchanged=false になる  — {"runId":"bw1-live-verify-2026-10-09T090455299Z","unchanged":false,"persistenceRevision":3,"seatsVersion":"BAL|2026-10-0
+    PASS  新しい Turn が GM の一覧へ現れる  — 5 → 6
+    PASS  新しい Turn では未提出へ戻る
+
+## 8. 後片付け（作った検証 Run を消す）
+    検証 Run の削除                                   200         74 B     84 ms
+    PASS  検証 Run を消せる  — status=200 {"simulationRunId":"bw1-live-verify-2026-10-09T090455299Z","deleted":true}
+    削除後に読めないこと                                   404        144 B     66 ms
+    PASS  削除後は読めない  — status=404
+
+## 結果  38/44 PASS

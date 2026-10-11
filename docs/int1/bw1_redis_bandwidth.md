@@ -125,7 +125,7 @@ Free の 10 GB は **0.63 時間**で尽きる。実際に 26 GB で上限へ達
 | Turn 進行の保存 | 6,909 B |
 | Turn 進行による取り直し（PLAYER 5＋GM） | 19,161,212 B |
 | **1Turn 合計** | **123,576,816 B ＝ 117.9 MB** |
-| 32Turn 換算 | **3.68 GB** |
+| 32Turn 換算（線形・訂正あり → §10-2） | 3.68 GB |
 | 1Turn のコマンド数 | 431 回（32Turn 換算 13,792 回） |
 
 別途、研修の最初に1回だけ発生するもの: 参加link発行＋参加（5社）11,338,781 B。
@@ -208,7 +208,7 @@ V1既存route `/api/game/[gameCode]/admin/clone` が `STAGING_KV_REST_API_URL` �
 
    | Vercel プロジェクト | Redis の環境変数 | API から分かること |
    |---|---|---|
-   | `vietnam-shrimp-game`（Production、本番ブランチ `main`） | `KV_REST_API_URL` / `KV_REST_API_TOKEN` / `KV_URL` / `REDIS_URL` / `KV_REST_API_READ_ONLY_TOKEN` | 5変数すべてに `contentHint` があり `storeId = store_dWq3rBUjQTXYltGG`（Upstash 連携 `oac_V3R1GIpkoJorr6fqyiwdhl17` / 製品 `iap_gpfB8wWHssmOi6P1` / 設定 `icfg_40n0ZxVQYPOAjPaL9yS2KjGB`）に紐づく。対象は production と preview |
+   | `vietnam-shrimp-game`（Production、本番ブランチ `main`） | `KV_REST_API_URL` / `KV_REST_API_TOKEN` / `KV_URL` / `REDIS_URL` / `KV_REST_API_READ_ONLY_TOKEN` | 5変数すべてに `contentHint` があり `storeId = store_…（ID省略）`（Upstash 連携 `oac_…（ID省略）` / 製品 `iap_…（ID省略）` / 設定 `icfg_…（ID省略）`）に紐づく。対象は production と preview |
    | `vietnam-shrimp-game-staging`（本番ブランチ `feature/staging-test-environment`） | `STAGING_KV_REST_API_URL` / `STAGING_KV_REST_API_TOKEN` | `contentHint` 無し＝手入力。store への紐づけ情報を持たない。`type: "sensitive"` のため値は読めない |
 
    Staging の実行時エラーは `ERR This database has reached current Fixed plan limits` で、
@@ -258,16 +258,19 @@ Upstash Redis の公開料金（2026-10-08 時点）。
 |---|---|---|
 | 待機（タブを開いて放置、GM1＋PLAYER5） | 2.5 MB/時 | 1か月つけっぱなしで約 1.8 GB。無料帯域の内。 |
 | 実プレイ 1Turn（PLAYER5＋GM） | 117.9 MB / 431 コマンド | 帯域は無料枠内。コマンドは約 $0.0009 |
-| 実プレイ 32Turn ＝ 研修1回ぶん | 3.68 GB / 13,792 コマンド | 帯域は無料枠内。コマンドは約 **$0.03** |
-| 無料帯域 200 GB で回せる研修回数 | 200 GB ÷ 3.68 GB | **約 54 回/月**。これを超えた分は $0.03/GB |
+| 実プレイ 32Turn ＝ 研修1回ぶん | **約 4.93 GB（見積り）** / 13,792 コマンド | 帯域は無料枠内。コマンドは約 **$0.03** |
+| 無料帯域 200 GB で回せる研修回数 | 200 GB ÷ 4.93 GB | **約 40 回/月**。これを超えた分は $0.03/GB |
 
 読み取り方:
-- **研修を月に数回なら、帯域もコマンドも無料枠の内側で収まる見込み。**
+- **研修を月に数回なら、帯域・コマンド・容量のどれも Pay-as-you-go の無料枠の内側で収まる見込み。**
 - 費用が増えるのは回数が増えたとき。月 54 回を超えたあたりから帯域の超過課金が始まる。
-- Free プランのままでは、10 GB ＝ 研修 **約 2.7 回ぶん**しか回せない（3.68 GB × 2.7 ≈ 10 GB）。
+- Free プランのままでは、帯域 10 GB ＝ 研修 **2 回ぶん**しか回せない（4.93 GB × 2 ≈ 9.9 GB）。
   待機ぶんも乗るので実際はさらに少ない。**だから Free では研修を回せない。**
+  Free で先に尽きるのは帯域であって、コマンド（500K ÷ 13,792 ≒ 36 回ぶん）と
+  容量（256 MB ÷ 6.4 MB ≒ 40 本ぶん）はそれより余裕がある（§10-3）。
 - 上記は `pack` が小さい代替値での計測なので、実際の消費はこれより増える。
-- 保存容量は Run 1本あたり約 3.3 MB で、無料枠 1 GB に対して十分小さい。
+- 保存容量は Run 1本あたり 8Turn 時点で約 3.2 MB、32Turn 時点で約 6.4 MB（§10-2 の実測）。
+  Pay-as-you-go の無料枠 1 GB、Free の 256 MB のどちらに対しても十分小さい。
 - 上の実測はすべて V2（Staging プロジェクト）の経路。同一 DB を使う Production は
   V1 のみで、その消費は測っていない（V2 の Console / Player 画面が無いため、
   今回のポーリング問題の対象外。§6 参照）。
@@ -323,6 +326,96 @@ DB を再開した直後にそれが残っていると、再開した帯域を�
 
 Free のまま月初のリセットを待つ選択もあるが、翌月までは Staging も Production も
 使えない（同一 DB のため）。研修日程が今月中なら選べない。
+
+---
+
+## 10. 訂正（2026-10-09・司令塔の指摘による）
+
+BW-1 は commit `d45b0bfe52cffb8f0f8031a4f7205b7dd7896cae` としてコード監査 ACCEPTED。
+そのうえで、報告の次の4点を訂正する。**コード自体の訂正は無い**（全て記述と見積りの訂正）。
+
+### 10-1. 配備の段階（3つを区別する）
+
+Vercel REST API で直接確認した事実（2026-10-09）。
+
+| 段階 | 状態 | 根拠 |
+|---|---|---|
+| Staging プロジェクトの **Preview 配備** | **済**。`dpl_DRWgcZMZwv7h6RqZd647nKPwEjEH` / project `vietnam-shrimp-game-staging` / state `READY` / target `null`（＝Preview） / commit `d45b0bf` / branch `integration-prep/v2-int1-training-candidate` / 2026-10-09 08:23 JST 作成 | `list_deployments(sha=d45b0bf)` |
+| **固定 Staging への昇格** | **未実施**。固定 Staging（staging プロジェクトの target `production`）の現行は `dpl_GdVFUEENm1fb9nPGvwoQNTMDz33x` / commit `77bedace3ca43cc720e105d77f46ba961167172f` / branch `feature/staging-test-environment` / 2026-08-01 14:27 JST。BW-1 も INT-1 も入っていない | `list_deployments(app=vietnam-shrimp-game-staging, target=production)` |
+| **実機（共有DB）での動作確認** | **未実施**。共有 DB `upstash-kv-lime-arrow` が帯域超過で停止中のため | — |
+
+予行演習前の確認には、上の **Preview** を使う方針（司令塔決定）。
+固定 Staging の URL から入ると BW-1 の入っていない古い版に当たるため、
+入口は Preview の URL に限る。
+
+付随して判明した事実: 同じ commit は Production プロジェクト `vietnam-shrimp-game` でも
+Preview build が走り、**失敗している**（`dpl_EuEZeGwTAJbwBQHA9anS5312jkHg` / state `ERROR` /
+target `null`）。これは Production 環境そのものではなく Preview の build。
+Production プロジェクトに V2 の環境変数が揃っていないことが原因と見られ、
+`separate_issue_production_app_env.md` の別件と同じ性質。今回は変更しない。
+
+### 10-2. 「32Turn 3.68 GB」は実測ではなく線形換算だった
+
+§3-3 の 117.9 MB は「**8Turn 進行後の Run** で 1Turn ぶんを実測した値」であり、
+3.68 GB はそれを単純に 32 倍した換算値。32Turn を通した実測ではない。
+
+1Turn ぶんの転送量は「保存物の大きさ × その Turn で全体を取り直す回数（研修では一定）」で
+ほぼ決まる。保存物は Turn とともに増えるため、8Turn の値で 32 倍すると**過小**になる。
+増え方を実測した（`scripts/int1/probeRunGrowth.ts`。共有 DB も HTTP も使わず、
+engine と保存物の組み立てだけを呼ぶ。`pack` は §3-3 と同じく含めない）。
+
+| Turn | dataset | resume | 合計 | 8Turn 比 |
+|---|---|---|---|---|
+| 1 | 121,912 B | 521,911 B | 643,823 B | — |
+| 8 | 963,876 B | 2,255,541 B | 3,219,417 B | 1.000 |
+| 16 | 1,957,174 B | 2,407,192 B | 4,364,366 B | 1.356 |
+| 24 | 2,930,597 B | 2,520,198 B | 5,450,795 B | 1.693 |
+| 32 | 3,931,193 B | 2,744,229 B | 6,675,422 B | **2.073** |
+
+- Turn1..32 の保存物の総和: 137,939,780 B
+- 8Turn 固定で 32 倍した場合: 103,021,344 B
+- 補正係数: **1.339**
+
+→ 32Turn の見積り: 117.9 MB × 32 × 1.339 ＝ **約 4.93 GB**。
+**これも見積りであり、32Turn を通した実測ではない。** 実測するには共有DBまたは
+隔離環境で 32Turn を実際に通す必要があり、未実施。
+また `pack` は計測用の小さい代替値なので、本番の実際の消費はこれより増える。
+
+### 10-3. 無料運用の可否は帯域・コマンド・容量の3つで見る
+
+1研修（32Turn・PLAYER5＋GM1）あたりの実測/見積り:
+帯域 約 4.93 GB（見積り） / コマンド 13,792 回（実測 431回/Turn × 32） /
+容量 6.4 MB（32Turn 時点の実測。`pack` 除く）。
+
+| 軸 | Free の枠 | 1研修あたり | Free で何回ぶんか | Free で先に尽きるか |
+|---|---|---|---|---|
+| 帯域 | 10 GB/月で停止 | 約 4.93 GB | **約 2.0 回** | **これが最初に尽きる** |
+| コマンド | 500K/月 | 13,792 回 | 約 36 回 | 尽きない |
+| 容量 | 256 MB | 6.4 MB/Run | 約 40 本 | 尽きない |
+
+- Free で制約になるのは**帯域だけ**。コマンドと容量はそれより1桁余裕がある。
+- ただし帯域が 2 回ぶんしかないため、**Free プランでの研修運用は成り立たない**と判断する。
+  待機ぶん（1.8 GB/月）と本番 `pack` のぶんが上に乗るので、実際は 2 回より少ない。
+- 「月1〜2回なら Free で可能」とは**断定しない**。1回で約半分を使い、
+  予行演習・やり直し・待機が加われば1回で尽き得る。
+- Pay-as-you-go では帯域の無料枠が 200 GB/月になり、約 40 回/月ぶん。
+  超過は $0.03/GB、コマンドは1研修あたり約 $0.03。
+- 上記の単価は検索結果経由の値（§7 冒頭の注記のとおり）。操作前に画面の表示金額で確認が必要。
+
+### 10-4. テスト件数がどの差分に対応するか
+
+| 件数 | 対応する差分 | 実行日時 | ログ |
+|---|---|---|---|
+| **4,482 件 / 4,482 成功** | **commit `d45b0bf` そのもの（BW-1・ACCEPTED 対象）** | 2026-10-08 18:20 JST | `logs/bw1-npm-test.log` |
+| 4,523 件 / 4,523 成功 | `d45b0bf` ＋ **UI-TRIAL-1 の未commit差分** | 2026-10-09 12:37 JST | `logs/uitrial1-npm-test.log` |
+
+差 41 件は UI-TRIAL-1 で新規追加した単体テストの件数と一致する
+（`uiTrial1SalesStaffing` 8 ＋ `uiTrial1InputVsReference` 8 ＋
+`uiTrial1Confirmation` 20 ＋ `uiTrial1AllScreensAnnotation` 5 ＝ 41）。
+
+→ **ACCEPTED 対象 `d45b0bf` の件数は 4,482 件**。4,523 件は UI-TRIAL-1 を含んだ別の状態の値で、
+ACCEPTED 対象の証跡としては使えない。いずれもこの作業環境での実行結果であり、
+司令塔が再実行したものではない。
 
 ---
 
