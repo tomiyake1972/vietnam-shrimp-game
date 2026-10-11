@@ -108,7 +108,13 @@ test("unservedOpportunityWithinCurrentCapacityTonsは負にならず、現在計
   }
 });
 
-test("ctsRelatedDemandEffect/priceRelatedDemandEffectは参照価格が既知の場合のみ計算され、未観測（turn1）ではpriceRelatedDemandEffectがnull", () => {
+test("turn1でもpriceRelatedDemandEffectが計算される（参照価格がゲーム開始時点の既知市場情報として与えられるため）", () => {
+  /**
+   * 【UI-CLARITY-1 A-8による仕様変更】turn1は以前「参照価格が未観測」だったため
+   * priceRelatedDemandEffect が null だった。A-8でプレイヤー画面・Standard AIの
+   * 両方へ開始時点の市場基準価格を渡すようにしたため、turn1でも算出される。
+   * 価格調整はまだ全て0なので、価格起因の需要効果は中立（0）になる。
+   */
   const { state, fixtures } = initializeCompanyLab(baseConfig());
   const fixture = fixtures.find((f) => f.companyId === "BAL")!;
   const ownState1 = buildCompanyOwnState(state, fixture);
@@ -117,8 +123,18 @@ test("ctsRelatedDemandEffect/priceRelatedDemandEffectは参照価格が既知の
   const ue1 = buildStandardAiUnitEconomics(observation1, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   const result1 = buildStandardAiMarketOpportunity(observation1, ue1, []);
   for (const e of result1.entries) {
-    assert.equal(e.priceRelatedDemandEffect, null);
-    assert.equal(e.ctsRelatedDemandEffect, 0);
+    assert.notEqual(e.priceRelatedDemandEffect, null, `${e.market}/${e.product} でpriceRelatedDemandEffectが算出されるべき`);
+    // 価格要因・CTS要因はいずれも競争力の寄与度（priceContribution 等）であり、
+    // 参照価格が与えられて初めて分解できる。turn1でも有限な正の実数になる
+    // （参照価格どおりに提示した場合＝deviation=0 を基準にした中立の寄与度）。
+    assert.ok(
+      Number.isFinite(e.priceRelatedDemandEffect!) && e.priceRelatedDemandEffect! > 0,
+      `${e.market}/${e.product} の価格要因が算出されるべき: ${e.priceRelatedDemandEffect}`
+    );
+    assert.ok(
+      Number.isFinite(e.ctsRelatedDemandEffect) && e.ctsRelatedDemandEffect > 0,
+      `${e.market}/${e.product} のCTS要因が算出されるべき: ${e.ctsRelatedDemandEffect}`
+    );
   }
 });
 

@@ -43,7 +43,7 @@ import { SimulationSession } from "../../../lib/v2/companyLab/simulation/types";
 import { computeFinalEvaluationSnapshot, isGameFinished, lastCompletedTurn } from "../lib/gameEnd";
 import { recordGmProxySubmission } from "../lib/playerSeats";
 import { validateSalesForceHiringDecision } from "../../../lib/v2/companyLab/salesForceHiring";
-import { projectMarketBasePriceReferences } from "../../../lib/v2/sales/marketBasePriceReference";
+import { resolveMarketBasePriceReferences } from "../../../lib/v2/sales/marketBasePriceReference";
 import { buildAnnualDividendGuidanceView } from "../../../lib/v2/companyLab/annualDividendGuidanceView";
 import { computeMaxDividendUsd } from "../../../lib/v2/finance/dividend";
 import { CompanyInspector } from "../components/CompanyInspector";
@@ -375,7 +375,8 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
   // 【SALES基準価格参考表示】market/product/basePriceだけの最小DTOへ射影する
   // （decisionContext.ts・viewModel.tsと同じ関数。他社のaskPrice等は含めない）。
-  const lastQuarterSalesAllocations = projectMarketBasePriceReferences(lastRecord?.salesRecord.allocations);
+  // 【UI-CLARITY-1 A-8】Turn1（前四半期が存在しない）ではゲーム開始時点の既知市場情報を返す。
+  const lastQuarterSalesAllocations = resolveMarketBasePriceReferences(lastRecord?.salesRecord.allocations);
   const controlMode = entry.companyControlModes[companyId] ?? "STANDARD_AI";
 
   // 【Game End / Final Results・指示§5】FINISHED（gameEndedAt設定済み）なら、

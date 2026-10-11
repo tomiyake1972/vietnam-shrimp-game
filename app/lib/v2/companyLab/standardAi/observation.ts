@@ -10,6 +10,7 @@
 import { hosoEqTons, unwrapUnit } from "../../core/units";
 import { DEMAND_MARKET_IDS, MarketQuarterResult, Product } from "../../market/types";
 import { deriveMarketReferencePrices } from "../../market/destinationPricing";
+import { buildGameStartMarketReferencePrice } from "../../market/gameStartReferencePrice";
 import { CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS } from "../../market/destinationPricingParameters";
 import { PeriodV2, nextPeriod } from "../../core/period";
 import { unwrapUsd } from "../../finance/types";
@@ -138,10 +139,22 @@ function finishedGoodsByProduct(ownState: CompanyOwnState): ProductAmount {
   return result;
 }
 
-function referencePricesByMarketProduct(
+/** 【UI-CLARITY-1 A-8】Turn1フォールバックを検査できるようexportする（計算内容は変えていない）。 */
+export function referencePricesByMarketProduct(
   lastMarketResult: MarketQuarterResult | undefined
 ): Partial<Record<(typeof DEMAND_MARKET_IDS)[number], ProductAmount>> | undefined {
-  if (!lastMarketResult) return undefined;
+  // 【UI-CLARITY-1 A-8】前四半期が存在しないTurn1では、ゲーム開始時点の既知市場情報
+  // （market/gameStartReferencePrice.ts）を使う。プレイヤーの販売計画画面も同じ関数を
+  // 参照するため、Turn1の価格情報はプレイヤーとStandard AIで同一である
+  // （どちらか一方だけが価格の手がかりを持つことを構造的に防ぐ、既存の情報境界の原則）。
+  if (!lastMarketResult) {
+    const gameStart = buildGameStartMarketReferencePrice();
+    const initial: Partial<Record<(typeof DEMAND_MARKET_IDS)[number], ProductAmount>> = {};
+    for (const market of DEMAND_MARKET_IDS) {
+      initial[market] = { ...gameStart.byMarketProduct[market] };
+    }
+    return initial;
+  }
   const breakdown = deriveMarketReferencePrices(lastMarketResult, CURRENT_DESTINATION_MARKET_PRICE_COEFFICIENTS);
   const result: Partial<Record<(typeof DEMAND_MARKET_IDS)[number], ProductAmount>> = {};
   for (const market of DEMAND_MARKET_IDS) {

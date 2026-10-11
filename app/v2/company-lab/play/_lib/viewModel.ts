@@ -41,7 +41,7 @@ import { ConsumerMarketQuarterRecord } from "../../../../lib/v2/market/consumerI
 import { CapexProjectQuarterEvent, CapexQuarterResult, CapexRejectedProposal } from "../../../../lib/v2/capex";
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
 import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividend";
-import { MarketProductBasePriceReference, projectMarketBasePriceReferences } from "../../../../lib/v2/sales/marketBasePriceReference";
+import { MarketProductBasePriceReference, resolveMarketBasePriceReferences } from "../../../../lib/v2/sales/marketBasePriceReference";
 import { computeCurrentDividendValueUsd } from "../../../../lib/v2/companyLab/evaluation/evaluationSemantics";
 import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
 import { CompanyLabApiDependencies } from "../../../../api/v2/company-labs/_lib/dependencies";
@@ -167,7 +167,7 @@ export interface PlayerScreenViewModel {
    * 【SALES基準価格参考表示・セキュリティ修正】直近確定四半期の市場×商品別「基準価格」だけの
    * 最小DTO（market・product・basePriceのみ）。元のMarketProductAllocationResultが持つ
    * 各社askPrice等の内訳（companies配列）は含めない（decisionContext.ts・
-   * PlayerWorkspace.tsxと同一のprojectMarketBasePriceReferencesを使う）。
+   * PlayerWorkspace.tsxと同一のresolveMarketBasePriceReferencesを使う）。
    * 前四半期が存在しない（turn===1）場合はundefinedのままとし、画面側は「－」表示にする。
    */
   readonly lastQuarterSalesAllocations: readonly MarketProductBasePriceReference[] | undefined;
@@ -445,7 +445,8 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
       lastQuarterResult,
       lastQuarterCapexEvents: lastQuarterCapexResult?.events,
       lastQuarterDividendResult,
-      lastQuarterSalesAllocations: projectMarketBasePriceReferences(latestEntry?.record.salesRecord.allocations),
+      // 【UI-CLARITY-1 A-8】Turn1ではゲーム開始時点の既知市場情報へフォールバックする。
+      lastQuarterSalesAllocations: resolveMarketBasePriceReferences(latestEntry?.record.salesRecord.allocations),
       currentDividendValueUsd,
       lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,
       previousQuarterFinancials,

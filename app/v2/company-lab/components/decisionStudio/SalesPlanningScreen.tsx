@@ -22,6 +22,7 @@ import { computeSalesPlanTotals } from "../../salesPlanTotals";
 import { unwrapUnit } from "../../../../lib/v2/core/units";
 import { DemandMarketId, Product } from "../../../../lib/v2/market/types";
 import { MarketProductBasePriceReference } from "../../../../lib/v2/sales/marketBasePriceReference";
+import { MarketReferencePriceSource } from "../../../../lib/v2/market/gameStartReferencePrice";
 import { NumberCell, PriceAdjustmentCell } from "../InputCells";
 import CollapsibleSection from "../CollapsibleSection";
 import BacklogByProductPanel from "../BacklogByProductPanel";
@@ -46,6 +47,11 @@ export function formatPricePerKgPlain(value: number): string {
  * 【SALES基準価格参考表示】前四半期の確定済みMarketProductAllocationResultから
  * 該当market×productのbasePriceを読み取るだけ（新しい価格計算・予測は一切しない）。
  * 見つからない（前四半期データ自体が無い・当該組合せの配分結果が無い）場合はnull。
+ *
+ * 【UI-CLARITY-1 A-8】Turn1では、呼び出し側が
+ * sales/marketBasePriceReference.ts の resolveMarketBasePriceReferences を通して
+ * 「ゲーム開始時点の既知市場情報」を渡してくる。その場合もこの関数は値をそのまま
+ * 読むだけで、どちらの出どころかは source（下の findBasePriceSource）で判別する。
  */
 export function findLastQuarterBasePrice(
   allocations: readonly MarketProductBasePriceReference[] | undefined,
@@ -55,6 +61,27 @@ export function findLastQuarterBasePrice(
   const found = allocations?.find((a) => a.market === market && a.product === product);
   return found ? unwrapUnit(found.basePrice) : null;
 }
+
+/**
+ * 【UI-CLARITY-1 A-8】その基準価格が「前四半期の確定結果」か
+ * 「ゲーム開始時点の既知市場情報」かを返す。source が付いていない
+ * （既存の保存データ・既存テスト由来の）エントリは従来どおり前四半期扱いにする。
+ */
+export function findBasePriceSource(
+  allocations: readonly MarketProductBasePriceReference[] | undefined,
+  market: DemandMarketId,
+  product: Product
+): MarketReferencePriceSource | null {
+  const found = allocations?.find((a) => a.market === market && a.product === product);
+  if (!found) return null;
+  return found.source ?? "LAST_QUARTER_MARKET_RESULT";
+}
+
+/** 基準価格の出どころごとの表示ラベル（画面の見出しと注意書きで共用する）。 */
+export const BASE_PRICE_SOURCE_LABEL: Readonly<Record<MarketReferencePriceSource, string>> = {
+  LAST_QUARTER_MARKET_RESULT: "前Turn市場基準",
+  GAME_START_MARKET_INFORMATION: "開始時点の市場基準（目安）",
+};
 
 interface SalesPlanRowRef {
   readonly index: number;
@@ -138,6 +165,9 @@ export default function SalesPlanningScreen({
 }: SalesPlanningScreenProps) {
   const totals = computeSalesPlanTotals(draft.salesPlans);
   const marketGroups = groupSalesPlansByMarket(draft.salesPlans);
+  // 【UI-CLARITY-1 A-8】基準価格がゲーム開始時点の既知市場情報（Turn1）かどうか。
+  const showsGameStartBasePrice =
+    lastQuarterSalesAllocations?.some((a) => a.source === "GAME_START_MARKET_INFORMATION") ?? false;
 
   return (
     <div className="space-y-3" data-testid="decision-studio-sales-screen">
@@ -222,6 +252,14 @@ export default function SalesPlanningScreen({
         <p className="text-[11px] text-amber-300/90" data-testid="sales-price-reference-disclaimer">
           ※ 今Turnの実際の市場基準価格は、全社の意思決定確定後に決まります。ここに表示する参考提示価格は、前Turnの確定基準価格を使った参考値です。
         </p>
+        {/* 【UI-CLARITY-1 A-8】Turn1は前Turnが存在しない。以前はここが全セル「－」になり、
+            基準価格が分からないまま調整額だけを入れることになっていた。 */}
+        {showsGameStartBasePrice ? (
+          <p className="text-[11px] text-amber-300/90" data-testid="sales-price-reference-game-start-note">
+            ※ Turn1はまだ前Turnの確定結果がありません。表示している「{BASE_PRICE_SOURCE_LABEL.GAME_START_MARKET_INFORMATION}」は、
+            ゲーム開始時点で各社が既に結んでいる契約の単価から求めた開始時点の市場水準です。今Turnの確定価格ではありません。
+          </p>
+        ) : null}
 
         {/* 市場ごとのブロック。狭い画面でも、どの市場の入力欄かが見出しと各行のラベルで分かる。 */}
         <div className="space-y-2" data-testid="sales-plan-market-blocks">
@@ -279,6 +317,10 @@ export default function SalesPlanningScreen({
                     {group.rows.map((row) => {
                       const lastQuarterBasePrice = findLastQuarterBasePrice(lastQuarterSalesAllocations, group.market, row.product);
                       const referenceAskPrice = lastQuarterBasePrice !== null ? lastQuarterBasePrice + row.priceAdjustmentUsdPerHosoEqKg : null;
+                      // 【UI-CLARITY-1 A-8】Turn1は前四半期が無いためゲーム開始時点の既知市場情報が入る。
+                      // 見出しを出どころで切り替え、確定値と目安を混同させない。
+                      const basePriceSource = findBasePriceSource(lastQuarterSalesAllocations, group.market, row.product);
+                      const isGameStartBasePrice = basePriceSource === "GAME_START_MARKET_INFORMATION";
                       return (
                         <tr key={`${group.market}-${row.product}`} className="border-t border-gray-700/60" data-testid={`sales-plan-row-${group.market}-${row.product}`}>
                           <td className="pr-3 py-1">
@@ -315,10 +357,14 @@ export default function SalesPlanningScreen({
                             />
                           </td>
                           <td className="pr-3 py-1">
-                            <div className="space-y-0.5" data-testid={`sales-price-reference-${group.market}-${row.product}`}>
+                            <div
+                              className="space-y-0.5"
+                              data-testid={`sales-price-reference-${group.market}-${row.product}`}
+                              data-base-price-source={basePriceSource ?? "none"}
+                            >
                               <ReferenceValue
-                                label="前Turn市場基準"
-                                kind="actual"
+                                label={basePriceSource !== null ? BASE_PRICE_SOURCE_LABEL[basePriceSource] : "前Turn市場基準"}
+                                kind={isGameStartBasePrice ? "reference" : "actual"}
                                 value={
                                   <span data-testid={`sales-price-reference-prior-base-${group.market}-${row.product}`}>
                                     {lastQuarterBasePrice !== null ? formatPricePerKgPlain(lastQuarterBasePrice) : "－"}

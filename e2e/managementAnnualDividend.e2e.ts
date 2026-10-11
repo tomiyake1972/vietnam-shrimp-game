@@ -175,33 +175,49 @@ test("AD-E2E-2: 資金制約で年間目標に届かない場合、未達額と�
   test.setTimeout(600_000);
 
   // 配当性向100%にすると、年間配当目標＝年間純利益となり、
-  // 現金の方が小さい会社で資金制約が発生する（実測で JPQ / VAP が該当）。
+  // 現金の方が小さい会社で資金制約が発生する。
+  //
+  // 【UI-CLARITY-1 A-8による修正】以前はこのテストが「JPQで現金上限に当たる」ことを
+  // 会社名まで固定していた。A-8（Turn1の市場基準価格をプレイヤー・Standard AIの
+  // 双方へ渡す）で各社の4Turnの結果が動き、現在この条件で現金上限に当たるのはVAPである
+  // （scripts/int1/probeA8AnnualDividend.ts の実測。BAL/CONSV/JPQ/MASSはPAID_IN_FULL）。
+  // 会社名を固定し直すと同じ脆さが残るため、「現金上限に当たった会社が1社以上あり、
+  // 当たっていない会社も1社以上ある」という、このパネルが固定すべき契約そのものを検証する。
   await loginAsGm(page);
   await startRun(page);
   await applyPayoutAndAdvanceToQ4(page, "100");
   await openAnnualDividendPanel(page);
   await expect(page.getByTestId("annual-dividend-panel")).toBeVisible();
 
-  const jpq = await readRow(page, "annual-dividend-row-4-JPQ");
-  expect(jpq.payoutRatioText).toBe("100.0%");
-  expect(jpq.source).toBe("管理者の手動指定");
+  const companies = ["BAL", "MASS", "JPQ", "VAP", "CONSV"] as const;
+  const rows = [];
+  for (const companyId of companies) {
+    rows.push(await readRow(page, `annual-dividend-row-4-${companyId}`));
+  }
 
-  // 【再計算していないことの証拠2】目標と実支払が別の値として出ている。
-  // UIが「目標」を実支払から逆算していたり、実支払を目標で置き換えていたりすれば、
-  // この2つは一致してしまう。
-  expect(jpq.annualTargetM).toBeGreaterThan(jpq.appliedM);
+  const cashLimited = rows.filter((r) => r.shortfallReason === "現金の上限に達した");
+  const unconstrained = rows.filter((r) => r.shortfallReason === "－");
+  expect(cashLimited.length).toBeGreaterThan(0);
+  expect(unconstrained.length).toBeGreaterThan(0);
 
-  // 未達額 = 年間配当目標 − 今回実支払（同年度支払済みは0）。
-  expect(jpq.shortfallM).toBeGreaterThan(0);
-  expect(Math.abs(jpq.shortfallM - (jpq.annualTargetM - jpq.appliedM))).toBeLessThan(0.02);
+  for (const row of cashLimited) {
+    expect(row.payoutRatioText).toBe("100.0%");
+    expect(row.source).toBe("管理者の手動指定");
 
-  // 理由が現金上限であることが日本語で示される。
-  expect(jpq.shortfallReason).toBe("現金の上限に達した");
+    // 【再計算していないことの証拠2】目標と実支払が別の値として出ている。
+    // UIが「目標」を実支払から逆算していたり、実支払を目標で置き換えていたりすれば、
+    // この2つは一致してしまう。
+    expect(row.annualTargetM).toBeGreaterThan(row.appliedM);
 
-  // 対照: 資金制約に当たっていない会社では未達0・理由「－」のまま
+    // 未達額 = 年間配当目標 − 今回実支払（同年度支払済みは0）。
+    expect(row.shortfallM).toBeGreaterThan(0);
+    expect(Math.abs(row.shortfallM - (row.annualTargetM - row.appliedM))).toBeLessThan(0.02);
+  }
+
+  // 対照: 資金制約に当たっていない会社では未達0・目標＝実支払のまま
   // （常に未達が表示されるわけではないことを固定する）。
-  const bal = await readRow(page, "annual-dividend-row-4-BAL");
-  expect(bal.shortfallM).toBe(0);
-  expect(bal.shortfallReason).toBe("－");
-  expect(Math.abs(bal.appliedM - bal.annualTargetM)).toBeLessThan(0.02);
+  for (const row of unconstrained) {
+    expect(row.shortfallM).toBe(0);
+    expect(Math.abs(row.appliedM - row.annualTargetM)).toBeLessThan(0.02);
+  }
 });

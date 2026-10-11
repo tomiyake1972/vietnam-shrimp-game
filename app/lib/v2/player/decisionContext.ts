@@ -25,7 +25,7 @@ import { StoredSimulationRun } from "../companyLab/simulation/persistence/types"
 import { CompanyEvaluationSnapshot, computeAllCompaniesEvaluationSnapshot } from "../companyLab/evaluation/evaluationSemantics";
 import { EvaluationHistoryRecord, resolveEvaluationHistory } from "../companyLab/evaluation/evaluationHistory";
 import { CompanyId } from "../sales/types";
-import { MarketProductBasePriceReference, projectMarketBasePriceReferences } from "../sales/marketBasePriceReference";
+import { MarketProductBasePriceReference, resolveMarketBasePriceReferences } from "../sales/marketBasePriceReference";
 import { CompanyFinancialQuarterResult } from "../finance/types";
 import { FinancingQuarterResult } from "../financing/types";
 import { CompanyDividendQuarterResult, computeMaxDividendUsd } from "../finance/dividend";
@@ -93,7 +93,7 @@ export interface PlayerDecisionContext {
    * 【重要】元データのMarketProductAllocationResultには各社のaskPrice・allocatedQuantity・
    * processingCapacity・competitivenessWeight等の非公開情報を含むcompanies配列があるため、
    * それを絶対にそのまま渡してはならない（このcontextは/api/v2/play/session経由でPlayerの
-   * ブラウザへ返る）。必ずprojectMarketBasePriceReferences経由で射影済みの値だけを保持する。
+   * ブラウザへ返る）。必ずresolveMarketBasePriceReferences経由で射影済みの値だけを保持する。
    * 新しい価格計算は行わない。turn===1等で前四半期が存在しない場合はundefined。
    */
   readonly lastQuarterSalesAllocations: readonly MarketProductBasePriceReference[] | undefined;
@@ -227,7 +227,8 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     lastQuarterFinancialResult,
     lastQuarterDividendResult,
     annualDividendGuidance,
-    lastQuarterSalesAllocations: projectMarketBasePriceReferences(lastRecord?.salesRecord.allocations),
+    // 【UI-CLARITY-1 A-8】Turn1ではゲーム開始時点の既知市場情報へフォールバックする。
+    lastQuarterSalesAllocations: resolveMarketBasePriceReferences(lastRecord?.salesRecord.allocations),
     hasSubmittedThisTurn,
     isPlayerControlled,
     gameEndedAt,

@@ -54,7 +54,7 @@ async function runOneTurn(page: Page): Promise<void> {
 }
 
 test.describe("SALES 基準価格参考表示 — Independent Player Flow経由", () => {
-  test("Turn1は前Turn「－」表示、Turn2以降は実際の前Turn基準価格が表示され価格調整で参考提示価格が即時更新される", async ({ browser }) => {
+  test("Turn1は開始時点の市場基準（目安）、Turn2以降は実際の前Turn基準価格が表示され価格調整で参考提示価格が即時更新される", async ({ browser }) => {
     const gmContext = await browser.newContext();
     const balContext = await browser.newContext();
     const gmPage = await gmContext.newPage();
@@ -71,18 +71,31 @@ test.describe("SALES 基準価格参考表示 — Independent Player Flow経由"
         balJoinUrl = await issueJoinUrl(gmPage, "BAL");
       });
 
-      await test.step("BAL: 別contextで参加 → SALESタブでTurn1は前Turn市場基準・参考提示ともに実際に「－」表示であることを確認", async () => {
+      await test.step("BAL: 別contextで参加 → SALESタブでTurn1は「開始時点の市場基準（目安）」が全15セルに表示されることを確認", async () => {
+        /**
+         * 【UI-CLARITY-1 A-8】以前はTurn1に前四半期が無いため、この15セルすべてが
+         * 「－」だった。基準価格が見えないまま調整額だけを入れる状態だったので、
+         * ゲーム開始時点の既知市場情報（market/gameStartReferencePrice.ts）を
+         * 表示するようにした。ここではその値が実際に出ていることを確認する。
+         */
         await joinAsPlayer(balPage, balJoinUrl, "BAL");
         await balPage.getByTestId("decision-studio-tab-sales").click();
         await expect(balPage.getByTestId("sales-price-reference-disclaimer")).toBeVisible();
+        await expect(balPage.getByTestId("sales-price-reference-game-start-note")).toBeVisible();
         const priorBaseCells = balPage.locator('[data-testid^="sales-price-reference-prior-base-"]');
         const askCells = balPage.locator('[data-testid^="sales-price-reference-ask-"]');
         const rowCount = await priorBaseCells.count();
-        expect(rowCount).toBeGreaterThan(0);
+        expect(rowCount).toBe(15);
         for (let i = 0; i < rowCount; i++) {
-          await expect(priorBaseCells.nth(i)).toHaveText("－");
-          await expect(askCells.nth(i)).toHaveText("－");
+          await expect(priorBaseCells.nth(i)).toHaveText(/^\$\d+\.\d{2}$/);
+          await expect(askCells.nth(i)).toHaveText(/^\$\d+\.\d{2}\/kg$/);
         }
+        // 出どころがゲーム開始時点の既知市場情報であることを、セルの属性でも確認する。
+        const gameStartCells = balPage.locator('[data-base-price-source="GAME_START_MARKET_INFORMATION"]');
+        expect(await gameStartCells.count()).toBe(15);
+        await balPage.getByTestId("sales-plan-market-blocks").screenshot({
+          path: "docs/int1/attachments/uiClarity1/a8-turn1-base-price.png",
+        });
       });
 
       await test.step("BAL: Turn1を提出し、GMがAdvanceする", async () => {
@@ -91,7 +104,7 @@ test.describe("SALES 基準価格参考表示 — Independent Player Flow経由"
         await expect(gmPage.getByTestId("turn-counter")).toHaveText("1 / 32");
       });
 
-      await test.step("BAL: Turn2で前Turn市場基準価格が実際の確定値（－ではない）で表示される", async () => {
+      await test.step("BAL: Turn2では出どころが前Turnの確定結果へ切り替わる", async () => {
         await expect(balPage.getByText(/Turn 2 \//)).toBeVisible({ timeout: 15_000 });
         await balPage.getByTestId("decision-studio-tab-sales").click();
         const priorBaseCells = balPage.locator('[data-testid^="sales-price-reference-prior-base-"]');
@@ -106,6 +119,9 @@ test.describe("SALES 基準価格参考表示 — Independent Player Flow経由"
           }
         }
         expect(sawRealPrice).toBe(true);
+        // 【UI-CLARITY-1 A-8】Turn2以降は開始時点の目安ではなく前Turnの確定結果を使う。
+        await expect(balPage.getByTestId("sales-price-reference-game-start-note")).toHaveCount(0);
+        expect(await balPage.locator('[data-base-price-source="LAST_QUARTER_MARKET_RESULT"]').count()).toBeGreaterThan(0);
       });
 
       await test.step("BAL: 価格調整を変更すると参考提示価格が即時に再計算される", async () => {

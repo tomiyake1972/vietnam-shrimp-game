@@ -35,7 +35,12 @@ function assertNoCompetitorLeakageInSalesAllocations(context: PlayerDecisionCont
     "externalOptionQuantity",
   ];
   for (const entry of allocations) {
-    assert.deepEqual(Object.keys(entry).sort(), ["basePrice", "market", "product"], "基準価格DTOはmarket/product/basePrice以外のキーを持たない");
+    // 【UI-CLARITY-1 A-8】sourceは出どころの列挙値のみ（他社の非公開情報は含まない）。
+    assert.deepEqual(
+      Object.keys(entry).sort(),
+      ["basePrice", "market", "product", "source"],
+      "基準価格DTOはmarket/product/basePrice/source以外のキーを持たない"
+    );
   }
   const serialized = JSON.stringify(allocations);
   for (const forbidden of forbiddenSubstrings) {

@@ -78,7 +78,9 @@ test("SALES-PRICE-4: 価格調整=+0.30のとき、参考提示価格は基準�
 test("SALES-PRICE-11【セキュリティ修正】: SalesPlanningScreenへ渡る最小DTOはmarket/product/basePrice以外のキーを持たない", () => {
   const { allocations } = runTurnOne();
   for (const entry of allocations) {
-    assert.deepEqual(Object.keys(entry).sort(), ["basePrice", "market", "product"]);
+    // 【UI-CLARITY-1 A-8】sourceは「前四半期の確定結果」か「ゲーム開始時点の既知市場情報」かを
+    // 示す列挙値のみで、他社の非公開情報は含まない。許可キーはこの3+1に限る。
+    assert.deepEqual(Object.keys(entry).sort(), ["basePrice", "market", "product", "source"]);
   }
   const serialized = JSON.stringify(allocations);
   for (const forbidden of ["companies", "askPrice", "allocatedQuantity", "processingCapacity", "competitivenessWeight", "competitivenessBreakdown", "targetDemand", "externalOptionQuantity"]) {
@@ -144,7 +146,9 @@ test("PRICE-UI-5【legacy】: salesModelId未指定（従来モデル）でも�
   const found = findLastQuarterBasePrice(allocations, sample.market, sample.product);
   assert.equal(found, unwrapUnit(sample.basePrice));
   for (const entry of allocations) {
-    assert.deepEqual(Object.keys(entry).sort(), ["basePrice", "market", "product"]);
+    // 【UI-CLARITY-1 A-8】sourceは「前四半期の確定結果」か「ゲーム開始時点の既知市場情報」かを
+    // 示す列挙値のみで、他社の非公開情報は含まない。許可キーはこの3+1に限る。
+    assert.deepEqual(Object.keys(entry).sort(), ["basePrice", "market", "product", "source"]);
   }
 });
 
@@ -155,6 +159,8 @@ test("PRICE-UI-5【tiered】: salesModelId=tiered-v200-candidate-v1でも同じ�
   const found = findLastQuarterBasePrice(allocations, sample.market, sample.product);
   assert.equal(found, unwrapUnit(sample.basePrice));
   for (const entry of allocations) {
-    assert.deepEqual(Object.keys(entry).sort(), ["basePrice", "market", "product"]);
+    // 【UI-CLARITY-1 A-8】sourceは「前四半期の確定結果」か「ゲーム開始時点の既知市場情報」かを
+    // 示す列挙値のみで、他社の非公開情報は含まない。許可キーはこの3+1に限る。
+    assert.deepEqual(Object.keys(entry).sort(), ["basePrice", "market", "product", "source"]);
   }
 });

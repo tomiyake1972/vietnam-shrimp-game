@@ -13,6 +13,7 @@ import { generateStandardAiDecisionWithDiagnostics } from "../../policy";
 import { buildStandardAiObservation } from "../../observation";
 import { CompanyLabConfig } from "../../../types";
 import { buildStandardAiUnitEconomics } from "../forwardUnitEconomics";
+import { buildGameStartMarketReferencePrice } from "../../../../market/gameStartReferencePrice";
 import { PRODUCTION_PARAMETERS_V1 } from "../../../../production/parameters";
 import { FINANCE_PARAMETERS_V1 } from "../../../../finance/parameters";
 import { NEUTRAL_STANDARD_AI_COST_PROJECTION } from "../../costProjection";
@@ -41,15 +42,29 @@ function setupTurn1And2(companyId = "BAL", seed = "unit-economics-001") {
   return { observation1, observation2 };
 }
 
-test("turn1では前期市場データが無いため、全エントリのreferenceSalesPriceUsdPerKgがnullで、profitabilityClassもnull（憶測しない）", () => {
+test("turn1の参照売価はゲーム開始時点の既知市場情報そのもの（憶測せず、プレイヤー画面と同じ値を使う）", () => {
+  /**
+   * 【UI-CLARITY-1 A-8による仕様変更】
+   * 以前はturn1に前期市場データが無いため、ここは全エントリ null で
+   * 「憶測しない」ことを検査していた。しかしプレイヤー側も同じ理由で
+   * 販売計画画面の基準価格が全セル「－」になり、調整額しか入れられない状態で
+   * 価格を決めることになっていた（＝経営判断として成立しない）。
+   * そのため market/gameStartReferencePrice.ts に「ゲーム開始時点の既知市場情報」
+   * （実在する初期契約の単価から逆算した価格分解）を置き、プレイヤー画面と
+   * Standard AI の両方へ同じ値を渡すようにした。
+   * ここで検査するのは「値を発明していないこと」＝開始時点の表と完全一致すること。
+   */
   const { observation1 } = setupTurn1And2();
   const result = buildStandardAiUnitEconomics(observation1, NEUTRAL_STANDARD_AI_COST_PROJECTION);
   assert.ok(result.entries.length > 0);
+  const gameStart = buildGameStartMarketReferencePrice();
   for (const entry of result.entries) {
-    assert.equal(entry.referenceSalesPriceUsdPerKg, null);
-    assert.equal(entry.profitabilityClass, null);
-    assert.equal(entry.dataQuality.hasMissingCriticalInput, true);
-    assert.ok(entry.dataQuality.missingInputs.includes("referenceSalesPriceUsdPerKg"));
+    assert.equal(
+      entry.referenceSalesPriceUsdPerKg,
+      gameStart.byMarketProduct[entry.market][entry.product],
+      `${entry.market}/${entry.product} の参照売価は開始時点の表と一致するべき`
+    );
+    assert.ok(!entry.dataQuality.missingInputs.includes("referenceSalesPriceUsdPerKg"));
   }
 });
 
