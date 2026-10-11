@@ -1,0 +1,26 @@
+# UI-TRIAL-1 実機ブラウザ確認 — Run ID 一覧（作成後）
+# 日時: 2026-10-10 10:36 JST
+# 対象: 配備済み Preview（commit 75e503b84a57ce61aecf574742ff2bde0a015ee7）
+
+件数: 20
+
+ 1  2026-08-29T13:01:13.340Z  run-dynamic-scenario-2-management-console-32q-20260829T130036534Z       test57
+ 2  2026-08-29T15:02:35.490Z  run-dynamic-scenario-2-management-console-32q-20260829T150056866Z       Test58 JPQ
+ 3  2026-09-05T12:32:26.061Z  run-dynamic-scenario-2-management-console-32q-20260905T122708999Z       test61
+ 4  2026-09-17T22:17:44.822Z  run-dynamic-scenario-2-management-console-32q-20260917T221310745Z       test72：9/18
+ 5  2026-09-20T07:37:15.087Z  run-dynamic-scenario-2-management-console-32q-20260920T064501673Z       Test73
+ 6  2026-09-20T14:20:33.949Z  run-dynamic-scenario-2-management-console-32q-20260920T073806561Z       Test74
+ 7  2026-09-22T09:06:25.838Z  run-dynamic-scenario-2-management-console-32q-20260920T082231197Z       Test75 Claude Play
+ 8  2026-09-22T15:06:18.713Z  run-dynamic-scenario-2-management-console-32q-20260922T150618711Z       Test77 Claude Play
+ 9  2026-09-23T00:26:30.681Z  run-dynamic-scenario-2-management-console-32q-20260922T152227242Z       20260923_Claude Play
+10  2026-09-23T07:52:20.232Z  run-dynamic-scenario-2-seed-b5wktxwk-20260923T002715777Z                20260923-2_Claude Play
+11  2026-10-04T07:19:08.307Z  run-dynamic-scenario-2-management-console-32q-20261004T063743193Z       20261004　自分プレイ
+12  2026-10-07T00:16:37.051Z  run-dynamic-scenario-2-management-console-32q-20261007T001311965Z       20261007 auto play
+13  2026-10-07T00:21:33.220Z  run-dynamic-scenario-2-claude-balance-01-20261007T001753854Z            20261006 Claudeテスト（Neutral・全社AI）
+14  2026-10-07T01:31:51.701Z  run-dynamic-scenario-2-claude-balance-01-20261007T011355853Z            20261006 Claudeプレイ（VAP・Neutral・seed同一）
+15  2026-10-07T02:21:37.733Z  run-dynamic-scenario-2-claude-balance-01-20261007T021051515Z            20261006 調整案テスト1（全社AI・価格指数スケジュール・配当40%）
+16  2026-10-07T02:44:24.834Z  run-dynamic-scenario-2-claude-balance-01-20261007T022232775Z            20261006 調整案テスト2（全社Claudeプレイ・同条件）
+17  2026-10-10T00:35:15.119Z  run-dynamic-scenario-2-management-console-32q-20261010T003029482Z       20241010 新画面テスト
+18  2026-10-10T00:41:21.976Z  run-dynamic-scenario-2-claude-balance-01-20261010T003655343Z            20261009 修正版テスト（全社AI・集中価格下落・Claude調整案）
+19  2026-10-10T00:50:59.325Z  run-dynamic-scenario-2-claude-balance-01-20261010T004555466Z            20261009 集中テスト（全社PLAYER・全量US HOSO・集中価格下落）
+20  2026-10-10T01:36:10.116Z  run-baseline-management-console-32q-20261010T013533653Z                 (名前なし)

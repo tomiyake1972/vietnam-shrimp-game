@@ -1,0 +1,14 @@
+[WebServer] ⚠ Self-signed certificates are currently an experimental feature, use with caution.
+[WebServer] ⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+[WebServer]  We detected multiple lockfiles and selected the directory of /home/user/vietnam-shrimp-game/package-lock.json as the root directory.
+[WebServer]  To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+[WebServer]    See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+[WebServer]  Detected additional lockfiles: 
+[WebServer]    * /home/user/vietnam-shrimp-game/.worktrees/int1/package-lock.json
+[WebServer] 
+
+Running 1 test using 1 worker
+
+  ✓  1 e2e/salesPriceReference.e2e.ts:57:7 › SALES 基準価格参考表示 — Independent Player Flow経由 › Turn1は開始時点の市場基準（目安）、Turn2以降は実際の前Turn基準価格が表示され価格調整で参考提示価格が即時更新される (11.9s)
+
+  1 passed (15.7s)

@@ -1,0 +1,57 @@
+# UI-TRIAL-1 実機ブラウザ確認（配備済み Preview ＋ 共有 Redis）
+# 日時: 2026-10-10 10:36 JST
+# 配備: commit 75e503b84a57ce61aecf574742ff2bde0a015ee7 / dpl_8xkSdjNrrtKzTKaivLdz1GMF3kFX
+# CMD: INT1_LIVE_URL=<Preview URL> STAGING_ADMIN_TOKEN=<秘密値> \
+#        npx playwright test --config e2e/live/playwright.live.config.ts
+# 結果: 1 passed（指示§5の9項目を Console内PLAYER と Independent Player の両経路で確認）
+#
+# 到達までに5回失敗している。いずれもこの検証スクリプト側の誤りで、製品の不具合ではない:
+#   1回目 項目7の期待が誤り（確定後の再確定は d45b0bf 以前からの意図された挙動）
+#   2回目 二度押しの2回目のクリックが actionability 待ちで刺さり test timeout
+#   3回目 同じ刺さり（2回目は短いtimeoutで諦める形に変更し解消）
+#   4回目 Independent Player 画面に存在しない play-tab-decision を押していた
+#   5回目 入力に触った後の状態は TURN_ACTIVE ではなく EDITING（期待が誤り）
+# 各回で作られた検証用 Run は毎回削除してから次を実行した（退避を増やさないため）。
+
+
+Running 1 test using 1 worker
+
+
+## 0. 検証用 Run の作成（1本のみ）
+    作成した検証用 Run: run-baseline-management-console-32q-20261010T013533653Z
+    BAL = Console内PLAYER 経路 / MASS = Independent Player 経路
+
+## 1. Console内PLAYER（BAL）
+    OK  項目2 入力と参照の区別（Console内PLAYER）  — 6画面すべてに参照種別が出る。種別=actual,current,derived,reference
+    OK  項目1 営業配員は市場ごとに1つ（Console内PLAYER）  — 編集欄 5 個 / 商品行 15 個
+    OK  項目6 無効入力が止まる（Console内PLAYER）  — 残業率99で確認画面へ進まず、確定もされない
+    OK  項目4 確認画面を開くだけでは確定・提出されない（Console内PLAYER）  — 状態は「意思決定はまだ確定していません」のまま
+    OK  項目3 確認→修正へ戻って入力値が保持される（Console内PLAYER）  — CN配員=7・残業率=0.1 がそのまま残る
+    OK  項目5 最終ボタンから確定でき、反映される（Console内PLAYER）  — 確定後の表示が「意思決定済み」になる
+    OK  項目6 修正後に提出できる（Console内PLAYER）  — 残業率を0.1へ直したら確定できた
+    （2回目のクリック: 押せなかった）
+    OK  項目7 二重提出を防ぐ（Console内PLAYER）  — 確定ボタンをほぼ同時に2回押しても保存POSTは 4 回（1回ぶん＝最大4回）
+    OK  注記（Console内PLAYER）  — 確定後に入力を直して出し直すことは従来どおり可能。d45b0bf 以前から変わらない。
+
+## 2. Independent Player（MASS）
+    OK  項目2 入力と参照の区別（Independent Player）  — 6画面すべてに参照種別が出る。種別=actual,current,derived,reference
+    OK  項目1 営業配員は市場ごとに1つ（Independent Player）  — 編集欄 5 個 / 商品行 15 個
+    OK  項目9 自動更新が入力途中の値を上書きしない（Independent Player）  — 15秒（取得3周以上）待っても US配員=13 のまま
+    OK  項目6 無効入力が止まる（Independent Player）  — 空欄のままでは確認画面へ進まず、提出もされない（状態は入力中のまま）
+    OK  項目4 確認画面を開くだけでは提出されない（Independent Player）  — 状態は入力中のまま（SUBMITTED にならない）
+    OK  項目3 確認→修正へ戻って入力値が保持される（Independent Player）  — US配員=13・残業率=0.2 がそのまま残る
+    OK  項目5 最終ボタンから提出でき、反映される（Independent Player）  — 提出後の状態が SUBMITTED になる
+    OK  項目6 修正後に提出できる（Independent Player）  — 残業率を0.2へ直したら提出できた
+    OK  項目7 二重提出を防ぐ（Independent Player）  — 提出後は「意思決定を確認」ボタンが描画されない
+
+## 3. GM 側への反映と Turn 進行
+    OK  項目8 GM側へ両PLAYERの提出が反映される  — Advance Turn の判定が「提出待ち」ではなくなる
+    OK  項目8 Turn 進行（1回目）  — turn-counter が 1 / 32 になる
+    OK  項目8 Turn 進行が Independent Player へ反映される  — 提出済みから未提出（新しいTurnの入力可）へ戻る
+    OK  項目8 Turn 進行（2回目）  — turn-counter が 2 / 32 になる
+
+## 使用した検証用 Run: run-baseline-management-console-32q-20261010T013533653Z
+  ✓  1 e2e/live/uiTrial1Live.live.ts:69:5 › UI-TRIAL-1 実機ブラウザ確認（Console内PLAYER ＋ Independent Player） (39.9s)
+
+  1 passed (41.0s)
+### EXIT=0
