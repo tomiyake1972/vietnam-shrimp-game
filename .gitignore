@@ -72,3 +72,11 @@ certificates
 /e2e/test-results/
 /playwright-report/
 /e2e/playwright-report/
+
+# INT-1/BW-1 監査バンドル（三宅さんへZIPで手渡しする資料一式）。
+# 「ZIP本体や秘密情報はGitHubへ含めない」という指示によりリポジトリへは入れない。
+/docs/int1/attachments/shrimpx-bw1-audit.zip
+/docs/int1/attachments/BW1_*.txt
+/docs/int1/attachments/BW1_README.md
+/docs/int1/attachments/*.diff
+/docs/int1/attachments/npm-test-full.log
