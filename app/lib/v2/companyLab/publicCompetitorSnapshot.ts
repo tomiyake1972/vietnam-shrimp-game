@@ -171,8 +171,12 @@ function roundToTen(value: number): number {
 /** 会社×市場×商品の数量表。 */
 type QuantityTable = Map<string, Map<CompanyId, number>>;
 
-function cellKey(market: DemandMarketId, product: Product): string {
+export function crowdingCellKey(market: DemandMarketId, product: Product): string {
   return `${market}|${product}`;
+}
+
+function cellKey(market: DemandMarketId, product: Product): string {
+  return crowdingCellKey(market, product);
 }
 
 function addQuantity(table: QuantityTable, market: DemandMarketId, product: Product, companyId: CompanyId, quantity: number): void {
@@ -203,12 +207,28 @@ function quantityTableFromContracts(contracts: readonly SalesContract[]): Quanti
   return table;
 }
 
-/** 市場×商品ごとの crowding ratio（診断がある四半期のみ）。 */
-function crowdingRatioByCell(record: CompanyQuarterRecord | null): Map<string, number> {
+/**
+ * 市場×商品ごとの crowding ratio（診断がある四半期のみ）。
+ *
+ * 【公開情報の単一の出どころ】受講者画面の混雑度帯と Standard AI の観測値は、
+ * どちらもこの関数の戻り値から作る。どちらか一方だけが違う値を見ることを
+ * 構造的に防ぐため、抽出はここ1箇所に集約する（A-8 の基準価格と同じ方針）。
+ */
+export function crowdingRatioByCell(record: CompanyQuarterRecord | null): Map<string, number> {
   const result = new Map<string, number>();
   for (const bucket of record?.crowdingDiagnostics?.buckets ?? []) {
     const ratio = bucket.crowdingRatio;
     if (!Number.isFinite(ratio)) continue;
+    // 【中立 policy では公開しない】lambda=0 / floor>=1 の係数では
+    // crowdingMultiplier が恒等的に 1 になり、混み合っても成約価格は一切
+    // 下がらない（sales/crowding.ts の NEUTRAL_CROWDING_COEFFICIENTS）。
+    // 価格への影響が無い混雑を公開すると、
+    //   ・受講者には「混雑のマスは価格が下押しされます」と嘘を伝えることになり
+    //   ・Standard AI は避ける理由の無いマスを避けるようになって
+    //     「中立 policy を明示しても結果は Crowding 未指定と同一」（CRWD-14）
+    //     という既存の不変条件を壊す
+    // ため、markdown が実際に効きうるときだけ公開する。
+    if (!(bucket.lambda > 0) || bucket.floor >= 1) continue;
     // 同じ市場×商品が複数の納期バケツに分かれることがある。
     // 受講者に出すのは「そのマスがどれだけ混んでいるか」なので、最も混んだ値を採る
     // （平均にすると、一部の納期だけ強く混んでいる状況が薄まって見えなくなる）。

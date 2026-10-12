@@ -173,8 +173,18 @@ function buildMarkets(publicInfo: PublicMarketInfo): readonly MarketObservationE
   // 既知市場情報）。publicInfo（＝プレイヤー画面が見るのと同一の公開情報）から
   // そのまま転記するだけで、当期の実需要・将来の需要には一切アクセスしない。
   const observed = publicInfo.observedMarketDemand;
+  // 【PUBLIC-COMPETITOR-3】前四半期の混雑度。プレイヤー画面の混雑度帯と
+  // 同じ publicInfo の値から転記するだけで、ここで計算し直さない。
+  const crowding = publicInfo.observedCrowdingRatioByCell;
   return DEMAND_MARKET_IDS.map((market) => {
     const entry = observed?.entries.find((e) => e.market === market);
+    const crowdingByProduct: Partial<Record<Product, number>> = {};
+    if (crowding) {
+      for (const product of ["hoso", "pd", "vap"] as const) {
+        const ratio = crowding[`${market}|${product}`];
+        if (typeof ratio === "number" && Number.isFinite(ratio)) crowdingByProduct[product] = ratio;
+      }
+    }
     return {
       market,
       referencePriceByProduct: byMarket ? byMarket[market] : undefined,
@@ -187,6 +197,7 @@ function buildMarkets(publicInfo: PublicMarketInfo): readonly MarketObservationE
             },
           }
         : {}),
+      ...(Object.keys(crowdingByProduct).length > 0 ? { observedCrowdingRatioByProduct: crowdingByProduct } : {}),
     };
   });
 }

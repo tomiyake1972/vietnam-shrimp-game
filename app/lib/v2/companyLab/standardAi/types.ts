@@ -146,6 +146,16 @@ export interface MarketObservationEntry {
    * 公開情報が存在しない旧スナップショット等ではundefined。
    */
   readonly observedDemandByProduct?: ProductAmount;
+  /**
+   * 【PUBLIC-COMPETITOR-3】前四半期の商品別混雑度（crowding ratio）。
+   * 5社の提示が需要に対してどれだけ集中していたか。1.0 を超えると成約価格が
+   * 下押しされる。プレイヤー画面が見る混雑度帯と同じ値から作られており、
+   * Standard AI だけが違う精度で見ることはない。
+   *
+   * crowding が無効な販売モデルのターン・前期が無いターンでは undefined
+   * （0 で埋めない）。
+   */
+  readonly observedCrowdingRatioByProduct?: Readonly<Partial<Record<Product, number>>>;
 }
 
 /**

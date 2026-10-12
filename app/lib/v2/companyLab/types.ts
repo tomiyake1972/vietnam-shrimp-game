@@ -403,6 +403,16 @@ export interface PublicMarketInfo {
    * 旧スナップショットからの復元では未設定になり得るためオプショナル。
    */
   readonly observedMarketDemand?: ObservedMarketDemand;
+  /**
+   * 【PUBLIC-COMPETITOR-3】前四半期の市場×商品別の混雑度（crowding ratio）。
+   * 5社の提示が需要に対してどれだけ集中していたかで、1.0 を超えると成約価格が
+   * 下押しされる。キーは "市場|商品"。
+   *
+   * プレイヤー画面の混雑度帯と Standard AI の観測値は、必ずこの同一の値から
+   * 作る（どちらか一方だけが違う値を見ることを構造的に防ぐ）。
+   * crowding が無効な販売モデルのターンでは undefined（0 で埋めない）。
+   */
+  readonly observedCrowdingRatioByCell?: Readonly<Record<string, number>>;
 }
 
 /** 【SAI-5C】前四半期までのライフサイクル構成比と四半期トレンド（公開情報）。 */

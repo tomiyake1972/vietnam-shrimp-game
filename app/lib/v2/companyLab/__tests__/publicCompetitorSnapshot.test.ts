@@ -41,7 +41,9 @@ function makeRecord(input: {
   }));
   const buckets = Object.entries(input.crowdingRatioByCell ?? {}).map(([key, ratio]) => {
     const [market, product] = key.split("|");
-    return { market, product, crowdingRatio: ratio };
+    // lambda/floor は「markdown が実際に効く policy」を表す（中立 policy では
+    // 混雑度を公開しない仕様のため、テストでも明示する必要がある）。
+    return { market, product, crowdingRatio: ratio, lambda: 0.6, floor: 0.82 };
   });
   const decisions = COMPANIES.map((companyId) => ({
     companyId,
@@ -180,8 +182,8 @@ test("PC-7: 同じ市場×商品が複数の納期バケツに分かれる場合
       ...makeRecord({ turn: 2, cells: [["US", "pd", [["BAL", 600], ["MASS", 400]]]] }),
       crowdingDiagnostics: {
         buckets: [
-          { market: "US", product: "pd", crowdingRatio: 0.5 },
-          { market: "US", product: "pd", crowdingRatio: 1.4 },
+          { market: "US", product: "pd", crowdingRatio: 0.5, lambda: 0.6, floor: 0.82 },
+          { market: "US", product: "pd", crowdingRatio: 1.4, lambda: 0.6, floor: 0.82 },
         ],
       },
     } as unknown as CompanyQuarterRecord,

@@ -340,6 +340,22 @@ export interface StandardAiParameters {
    * GROW-1以前と完全に同一のCommercial判断になる（ベンチマーク比較用）。
    */
   readonly growthPressure?: GrowthPressureParameters;
+  /**
+   * 【PUBLIC-COMPETITOR-3】混雑した市場×商品を避ける強さ（0以上）。
+   *
+   * 市場配分の機会スコアに `1 / (1 + weight × max(0, 混雑度 - 1))` を掛ける。
+   * 混雑度が 1.0 以下（需要に対して提示が集中していない）のマスには一切影響せず、
+   * 1.0 を超えたぶんにだけ効く。
+   *
+   * **0 を指定すると、この機能を入れる前と完全に同一の配分になる**
+   * （補正係数が恒等的に 1 になるため）。混雑度が観測できないターン
+   * （crowding 無効の販売モデル・前期なし）も同じく無補正。
+   *
+   * 既定値 0.6 は「混雑度 1.5 のマスの機会スコアを約 77% に下げる」水準。
+   * 既存の供給圧力ブレーキ（growthPressure.supplyPressureFullBrake = 1.5）が
+   * 増設を止め始める水準と揃えてある。
+   */
+  readonly crowdingAvoidanceWeight: number;
 }
 
 /**
@@ -379,6 +395,7 @@ export const STANDARD_AI_PARAMETERS_V1: StandardAiParameters = {
 
   cashBufferQuarters: 0.6,
   voluntaryPrepaymentMultiple: 2.5,
+  crowdingAvoidanceWeight: 0.6,
   minimumCashBufferFloorUsd: 5_000_000,
   desiredTermQuarters: 4,
   defaultExpectedRawPriceUsdPerKg: 2.5,

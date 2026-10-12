@@ -39,6 +39,7 @@
 // （PD/VAP供給増加が当期のプレミアムを引き下げる、という受入条件を満たすために
 // 必須の配線）。
 
+import { crowdingRatioByCell } from "./publicCompetitorSnapshot";
 import { PeriodV2, previousPeriod, toYearQuarter } from "../core/period";
 import { HosoEqTons, hosoEqTons, ratio, roundHosoEqTons, Score0to100, score0to100, unwrapUnit, usdPerHosoEqKg } from "../core/units";
 import { DOMESTIC_PURCHASE_GUARANTEE_TURN, clearDomesticReferencePrice } from "./domesticReferencePrice";
@@ -878,6 +879,13 @@ export function buildPublicMarketInfo(state: CompanyLabState): PublicMarketInfo 
     // ゲーム開始時点の既知市場情報）。プレイヤーUIとStandard AI Observationは
     // 必ずこの同一の値を参照する（information setの同一性）。
     observedMarketDemand: buildObservedMarketDemand(state, state.scenarioState.currentTurn),
+    // 【PUBLIC-COMPETITOR-3】前四半期の市場×商品別の混雑度。抽出は
+    // publicCompetitorSnapshot.crowdingRatioByCell へ集約してあり、
+    // プレイヤー画面と Standard AI は必ず同じ値を見る。
+    ...(() => {
+      const crowding = crowdingRatioByCell(lastRecord ?? null);
+      return crowding.size > 0 ? { observedCrowdingRatioByCell: Object.fromEntries(crowding) } : {};
+    })(),
     ...(productLifecycleOutlook ? { productLifecycleOutlook } : {}),
     // 【SAI-5E】前四半期末までの商品別供給圧力EWMA（公開の業界需給統計に相当）。
     ...(state.marketEvolutionState

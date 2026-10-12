@@ -211,10 +211,26 @@ export function computeOrientationWeightedOpportunity(
   return { weightedAttainableProfitableTons: weighted, orientationActive };
 }
 
+/**
+ * 【PUBLIC-COMPETITOR-3】混雑したマスの機会スコアを下げる補正係数。
+ *
+ * 混雑度が 1.0 以下のマス、混雑度が観測できないマス、weight が 0 のときは
+ * 必ず 1（＝無補正）を返す。したがってこの機能を入れる前の挙動は
+ * crowdingAvoidanceWeight = 0 で完全に再現できる。
+ */
+export function crowdingOpportunityFactor(crowdingRatio: number | undefined, weight: number): number {
+  if (crowdingRatio === undefined || !Number.isFinite(crowdingRatio)) return 1;
+  if (!Number.isFinite(weight) || weight <= 0) return 1;
+  const excess = Math.max(0, crowdingRatio - 1);
+  if (excess <= 0) return 1;
+  return 1 / (1 + weight * excess);
+}
+
 function buildMarketOpportunityWeights(
   observation: StandardAiObservation,
   markets: readonly DemandMarketId[],
   salesParams: SalesParameters,
+  crowdingAvoidanceWeight: number,
   componentsOut?: MarketOpportunityComponent[]
 ): Record<Product, number[]> | undefined {
   const hasObservedDemand = observation.markets.some((m) => m.observedDemandByProduct !== undefined);
@@ -227,13 +243,17 @@ function buildMarketOpportunityWeights(
       // 【Phase 6】獲得可能需要・期待貢献・機会スコアの計算は
       // observableOpportunityCell へ一本化した（Commercial Ambition と同一の式）。
       const cell = observableOpportunityCell(observation, market, product, salesParams);
+      // 【PUBLIC-COMPETITOR-3】前四半期に提示が集中していたマスは、
+      // 同じ採算でも成約価格が下押しされる。機会スコアをそのぶん割り引く。
+      const crowdingRatio = observation.markets.find((m) => m.market === market)?.observedCrowdingRatioByProduct?.[product];
+      const factor = crowdingOpportunityFactor(crowdingRatio, crowdingAvoidanceWeight);
       return {
         market,
         observedDemand: cell.observedDemand,
         obtainable: cell.attainableDemand,
         referencePrice: cell.referencePrice,
         contributionPerKg: cell.contributionPerKg,
-        score: cell.score,
+        score: cell.score * factor,
       };
     });
     const scores = detail.map((d) => d.score);
@@ -568,7 +588,13 @@ export function buildStandardAiSalesPlans(
   // 市場規模と採算性の両方を反映した機会スコアで按分する。
   // 観測需要が無い場合（旧スナップショット等）は従来の重みへフォールバックする。
   const opportunityComponents: MarketOpportunityComponent[] = [];
-  const opportunityWeights = buildMarketOpportunityWeights(observation, markets, salesParams, opportunityComponents);
+  const opportunityWeights = buildMarketOpportunityWeights(
+    observation,
+    markets,
+    salesParams,
+    params.crowdingAvoidanceWeight,
+    opportunityComponents
+  );
   const legacyWeights = markets.map((_, idx) => (idx === 0 ? 0.5 : 0.5 / (markets.length - 1 || 1)));
   if (opportunityWeights) {
     diagnostics.push({
