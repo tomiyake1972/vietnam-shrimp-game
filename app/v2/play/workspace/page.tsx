@@ -23,6 +23,11 @@ import { CompanyDecisionDraft, validateDecisionDraftNumbers } from "../../compan
 import { buildDecisionSummary } from "../../company-lab/decisionSummary";
 import DecisionConfirmationScreen from "../../company-lab/components/decisionStudio/DecisionConfirmationScreen";
 import type { DecisionStudioScreenKey } from "../../company-lab/components/decisionStudio/DecisionStudioNavigation";
+// 【PLAYER-SURFACE-1】受講者が実際に使うこの画面には Overview / Market / Inventory が
+// 無く、意思決定タブしか無かった（GM コンソール側の PlayerWorkspace にしか存在せず、
+// あちらは GM のブラウザタブ内キャッシュを正本にしているため受講者からは開けない）。
+// 表示用の値はすべてサーバー（PlayerDecisionContext）が組み立てたものをそのまま出す。
+import { PlayerInventoryPanel, PlayerMarketPanel, PlayerOverviewPanel } from "./WorkspacePanels";
 import { validateSalesForceHiringDecision } from "../../../lib/v2/companyLab/salesForceHiring";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { selectScenarioNewsForTurn } from "../../management/lib/scenarioNews";
@@ -33,6 +38,15 @@ import type { PlayerDecisionContext } from "../../../lib/v2/player/decisionConte
 import { useVisiblePolling, type PollOutcome } from "../../lib/useVisiblePolling";
 
 const POLL_INTERVAL_MS = 4000;
+
+type WorkspaceTab = "overview" | "market" | "inventory" | "decision";
+
+const TABS: readonly { readonly id: WorkspaceTab; readonly label: string }[] = [
+  { id: "overview", label: "Overview（前Turnのふりかえり）" },
+  { id: "market", label: "Market（市場情報）" },
+  { id: "inventory", label: "Inventory（在庫）" },
+  { id: "decision", label: "Decision（意思決定）" },
+];
 
 type WorkspaceStatus = "JOINED" | "TURN_ACTIVE" | "EDITING" | "SUBMITTED" | "WAITING_FOR_GM" | "FINISHED" | "ERROR";
 
@@ -88,6 +102,7 @@ export default function PlayerWorkspacePage() {
    */
   const [phase, setPhase] = useState<"input" | "confirm">("input");
   const [activeScreen, setActiveScreen] = useState<DecisionStudioScreenKey>("info");
+  const [tab, setTab] = useState<WorkspaceTab>("overview");
   /** 確認画面へ入った時点のTurn。確認中にTurnが進んだら古い内容を提出させない。 */
   const [confirmedAtTurn, setConfirmedAtTurn] = useState<number | null>(null);
   const seededTurnRef = useRef<number | null>(null);
@@ -252,35 +267,65 @@ export default function PlayerWorkspacePage() {
         </div>
       </header>
 
+      {/* 【PLAYER-SURFACE-1】確認画面を開いている間はタブを出さない
+          （提出直前に別タブへ移動して確認内容を見失うのを防ぐ）。 */}
+      {phase === "input" ? (
+        <nav className="flex flex-wrap gap-1 border-b border-slate-800 bg-slate-900/60 px-3 py-1.5" data-testid="play-workspace-tabs">
+          {TABS.map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                data-testid={`play-workspace-tab-${t.id}`}
+                aria-current={active ? "page" : undefined}
+                className={`rounded px-2.5 py-1 text-xs ${active ? "bg-slate-700 font-semibold text-slate-100" : "text-slate-400 hover:bg-slate-800"}`}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </nav>
+      ) : null}
+
       <div className="p-3">
         <div className="mx-auto max-w-5xl">
-          {status !== "SUBMITTED" && status !== "WAITING_FOR_GM" ? (
-            /* 【UI-TRIAL-1 §5】提出は最終確認画面のボタンだけが行う。
-                ここでは確認画面へ進むだけで、サーバーへは何も送らない。 */
-            phase === "input" ? (
-              <div className="mb-2 flex flex-wrap justify-end gap-1.5">
-                {submitError ? (
-                  <p className="mr-auto text-xs text-rose-400" data-testid="play-submit-error">
-                    {submitError}
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={handleGoToConfirm}
-                  disabled={!draft}
-                  data-testid="play-review-decision"
-                  className="rounded bg-sky-700 px-4 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40"
-                >
-                  意思決定を確認
-                </button>
-              </div>
-            ) : null
-          ) : (
+          {/* 【PLAYER-SURFACE-1】提出済みの案内はタブに関係なく必ず出す。
+              タブの内側に置くと、Overview を見ている受講者に提出状態が伝わらない。 */}
+          {status === "SUBMITTED" || status === "WAITING_FOR_GM" ? (
             <div className="mb-2 rounded-lg border border-emerald-800/60 bg-emerald-950/20 p-3 text-sm text-emerald-200" data-testid="play-waiting-for-gm">
               Turn {context.turn} の意思決定を提出しました。GMが全社の提出を確認してTurnを進めると、自動的に次のTurnへ切り替わります
               （このページを開いたままお待ちください）。
             </div>
-          )}
+          ) : null}
+
+          {phase === "input" && tab === "overview" ? <PlayerOverviewPanel review={context.lastTurnReview} /> : null}
+          {phase === "input" && tab === "market" ? <PlayerMarketPanel view={context.marketView} /> : null}
+          {phase === "input" && tab === "inventory" ? <PlayerInventoryPanel view={context.inventoryView} /> : null}
+
+          {phase === "confirm" || tab === "decision" ? (
+          <>
+          {status !== "SUBMITTED" && status !== "WAITING_FOR_GM" && phase === "input" ? (
+            /* 【UI-TRIAL-1 §5】提出は最終確認画面のボタンだけが行う。
+                ここでは確認画面へ進むだけで、サーバーへは何も送らない。 */
+            <div className="mb-2 flex flex-wrap justify-end gap-1.5">
+              {submitError ? (
+                <p className="mr-auto text-xs text-rose-400" data-testid="play-submit-error">
+                  {submitError}
+                </p>
+              ) : null}
+              <button
+                type="button"
+                onClick={handleGoToConfirm}
+                disabled={!draft}
+                data-testid="play-review-decision"
+                className="rounded bg-sky-700 px-4 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40"
+              >
+                意思決定を確認
+              </button>
+            </div>
+          ) : null}
 
           {/* 【配当Decision UI接続】lastQuarterDividendResult は GM代理の
               PlayerWorkspace.tsx と同一のpropであり、Independent Player側の
@@ -344,6 +389,8 @@ export default function PlayerWorkspacePage() {
               scenarioNews={scenarioNews}
               companyName={context.companyDisplayName}
             />
+          ) : null}
+          </>
           ) : null}
         </div>
       </div>

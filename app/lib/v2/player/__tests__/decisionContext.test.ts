@@ -188,3 +188,114 @@ test("CTX-10【SALES基準価格参考表示・セキュリティ修正・Releas
   const context = buildPlayerDecisionContext(stored, "BAL");
   assertNoCompetitorLeakageInSalesAllocations(context);
 });
+
+// ---------------------------------------------------------------------------
+// PLAYER-SURFACE-1: Overview / Market / Inventory の3ビュー
+//
+// 受講者が実際に使う /v2/play/workspace には、これまで意思決定タブしか無かった。
+// Overview / Market / Inventory は GM コンソール側の PlayerWorkspace にしか存在せず、
+// あちらは GM のブラウザタブ内キャッシュを正本にしているため受講者の端末からは
+// 原理的に開けない。3ビューをサーバー側で組み立てて返すようにしたぶんについて、
+// 「出るべきものが出る」ことと「他社の非公開値が混ざらない」ことを固定する。
+// ---------------------------------------------------------------------------
+
+/** 1Turn進めたStoredSimulationRunを作る（CTX-10と同じ組み立て方）。 */
+function buildStoredRunAfterOneTurn(simulationRunId: string): StoredSimulationRun {
+  const session = createSimulationSession({ simulationRunId, scenarioId: "baseline", seed: `${simulationRunId}-seed`, requestedTurns: 32, startedAt: AT });
+  const controlModes = { BAL: "PLAYER" as const };
+  const outcome = advanceSimulationTurn(session, AT);
+  assert.equal(outcome.advanced, true, "テストの前提としてTurn1が正常に確定しているはず");
+  const advanced = outcome.session;
+  return {
+    schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
+    run: { ...advanced.run, companyControlModes: controlModes },
+    dataset: buildDatasetFromSession(advanced),
+    packCapture: { companyTurns: advanced.packCompanyTurns, worldTurns: advanced.packWorldTurns },
+    resumePayload: buildResumePayload(advanced, controlModes, {}),
+    savedAt: AT,
+    persistenceRevision: 1,
+  };
+}
+
+test("PS-1: Turnを1期進めると Overview（前Turnのふりかえり）が自社ぶんだけ返る", () => {
+  const context = buildPlayerDecisionContext(buildStoredRunAfterOneTurn("run-ps-1"), "BAL");
+  assert.notEqual(context.lastTurnReview, null, "1Turn確定後はふりかえりが返るはず");
+  assert.equal(context.lastTurnReview?.companyId, "BAL");
+});
+
+test("PS-2: 1Turnも確定していなければ Overview・Inventory は null（0で埋めない）", () => {
+  const context = buildPlayerDecisionContext(buildStoredRun("run-ps-2"), "BAL");
+  assert.equal(context.lastTurnReview, null);
+  assert.equal(context.inventoryView, null);
+});
+
+test("PS-3: Inventory は自社の確定サマリーの値を返し、稼働率は取得できなければ null になる", () => {
+  const context = buildPlayerDecisionContext(buildStoredRunAfterOneTurn("run-ps-3"), "BAL");
+  const inventory = context.inventoryView;
+  assert.notEqual(inventory, null, "1Turn確定後は在庫ビューが返るはず");
+  for (const key of ["backlogTons", "overdueTons", "finishedGoodsInventoryTons", "rawMaterialInventoryTons"] as const) {
+    assert.equal(typeof inventory![key], "number", `${key} は数値であるはず`);
+    assert.ok(Number.isFinite(inventory![key]), `${key} が有限値でない: ${inventory![key]}`);
+  }
+  for (const key of ["equipmentUtilizationRate", "laborUtilizationRate"] as const) {
+    const value = inventory![key];
+    assert.ok(value === null || Number.isFinite(value), `${key} は null か有限値であるはず: ${value}`);
+  }
+});
+
+test("PS-4: Market は Turn 1 でも15マスの基準価格を返す（A-8 の開始時市場情報へフォールバックする）", () => {
+  const context = buildPlayerDecisionContext(buildStoredRun("run-ps-4"), "BAL");
+  const priced = context.marketView.cells.filter((c) => c.basePriceUsdPerKg !== null);
+  assert.equal(priced.length, 15, `Turn1で基準価格が出るのは15マスのはず: ${priced.length}`);
+  assert.ok(
+    priced.every((c) => c.basePriceSource === "GAME_START_MARKET_INFORMATION"),
+    "Turn1の基準価格はすべてゲーム開始時の市場情報が出所であるはず"
+  );
+});
+
+test("PS-5【情報境界】: Market の需要は遅行公開値であり、当期の真の需要（trueWorld）を含まない", () => {
+  const stored = buildStoredRunAfterOneTurn("run-ps-5");
+  const context = buildPlayerDecisionContext(stored, "BAL");
+  const view = context.marketView;
+
+  // 出所（どのTurnの実績か）を必ず添えていること。これが無いと受講者は
+  // 当期の確定需要だと誤解する。
+  assert.ok(
+    view.observedDemandSourceQuarter === null || Number.isFinite(view.observedDemandSourceQuarter),
+    "需要の基準Turnは null か数値であるはず"
+  );
+  assert.ok(view.sourceNote.length > 0, "出所の説明文を必ず添えるはず");
+
+  // dataset.marketMetrics（trueWorld）の当期需要そのものが混ざっていないこと。
+  const trueWorldDemands = (stored.dataset?.marketMetrics ?? [])
+    .filter((f) => f.visibility === "trueWorld" && f.metric === "demandQuantity" && f.turn === 1)
+    .map((f) => f.value)
+    .filter((v) => Number.isFinite(v) && v > 0);
+  const exposedDemands = view.cells.map((c) => c.observedDemandTons).filter((v): v is number => v !== null && v > 0);
+  if (trueWorldDemands.length > 0 && exposedDemands.length > 0) {
+    const leaked = exposedDemands.filter((v) => trueWorldDemands.some((t) => Math.abs(t - v) < 1e-6));
+    assert.equal(leaked.length, 0, `当期のtrueWorld需要がそのまま露出している: ${leaked.slice(0, 3).join(", ")}`);
+  }
+});
+
+test("PS-6【情報境界】: Market が公開するのはTSVランキングまでで、他社の内部数値は含まない", () => {
+  const context = buildPlayerDecisionContext(buildStoredRunAfterOneTurn("run-ps-6"), "BAL");
+  const rows = context.marketView.tsvRanking;
+  assert.ok(rows.length >= 2, "5社ぶんのランキングが返るはず");
+  assert.equal(rows.filter((r) => r.isOwnCompany).length, 1, "自社の行はちょうど1つであるはず");
+
+  // 各行が持ってよいキーを固定する。現金・利益・原価・在庫などが
+  // 将来うっかり足されたらこのテストが落ちる。
+  const allowed = ["companyId", "displayName", "totalShareholderValueUsd", "isOwnCompany"];
+  for (const row of rows) {
+    assert.deepEqual(Object.keys(row).sort(), [...allowed].sort(), `TSV行のキーが増えている: ${Object.keys(row).join(", ")}`);
+  }
+
+  // 市場セルについても同様に固定する。
+  const allowedCellKeys = ["market", "product", "observedDemandTons", "basePriceUsdPerKg", "basePriceSource"];
+  for (const cell of context.marketView.cells) {
+    for (const key of Object.keys(cell)) {
+      assert.ok(allowedCellKeys.includes(key), `市場セルに想定外のキーがある: ${key}`);
+    }
+  }
+});

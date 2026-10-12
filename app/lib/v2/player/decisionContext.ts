@@ -20,12 +20,20 @@ import { buildTurnEconomicsProjection } from "../companyLab/turnEconomicsProject
 import { resolveStandardAiProfileForMode } from "../companyLab/standardAi/orientationProfile";
 import { buildInitialDraft, CompanyDecisionDraft } from "../../../v2/company-lab/decisionDraft";
 import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "../../../v2/company-lab/play/_lib/financialViewSelectors";
+// 【PLAYER-SURFACE-1】受講者が実際に使う /v2/play/workspace には Overview / Market /
+// Inventory が無く、意思決定タブしか無かった。GM コンソール側の PlayerWorkspace は
+// GM のブラウザタブ内キャッシュを正本にしているため受講者の端末からは開けない。
+// そこで「受講者へ返してよい値だけ」をここで組み立てて返す。
+import { buildLastTurnReview, LastTurnReview } from "../../../v2/company-lab/lastTurnReviewViewModel";
+import { buildPlayerInventoryView, buildPlayerMarketView, PlayerInventoryView, PlayerMarketView } from "./workspaceViews";
 import { restoreSessionFromResumePayload } from "../companyLab/simulation/persistence/resume";
 import { StoredSimulationRun } from "../companyLab/simulation/persistence/types";
 import { CompanyEvaluationSnapshot, computeAllCompaniesEvaluationSnapshot } from "../companyLab/evaluation/evaluationSemantics";
 import { EvaluationHistoryRecord, resolveEvaluationHistory } from "../companyLab/evaluation/evaluationHistory";
 import { CompanyId } from "../sales/types";
 import { MarketProductBasePriceReference, resolveMarketBasePriceReferences } from "../sales/marketBasePriceReference";
+import { Product } from "../market/types";
+import { unwrapUnit } from "../core/units";
 import { CompanyFinancialQuarterResult } from "../finance/types";
 import { FinancingQuarterResult } from "../financing/types";
 import { CompanyDividendQuarterResult, computeMaxDividendUsd } from "../finance/dividend";
@@ -98,6 +106,19 @@ export interface PlayerDecisionContext {
    */
   readonly lastQuarterSalesAllocations: readonly MarketProductBasePriceReference[] | undefined;
   /** resumePayload.confirmedPlayerDecisions[companyId]が既に埋まっているか（=このTurnは提出済み）。GMの提出済み判定と同じ信号。 */
+  /**
+   * 【PLAYER-SURFACE-1】Overview タブ（前Turnに出した指示 → その結果）。
+   * 自社ぶんのみ。確定記録からの転記だけで新しい計算はしない。
+   * 1Turnも確定していなければ null。
+   */
+  readonly lastTurnReview: LastTurnReview | null;
+  /** 【PLAYER-SURFACE-1】Inventory タブ。自社ぶんのみ。 */
+  readonly inventoryView: PlayerInventoryView | null;
+  /**
+   * 【PLAYER-SURFACE-1】Market タブ。公開情報のみ。
+   * GM 向け MarketSummary が読む trueWorld 系の値は含まない。
+   */
+  readonly marketView: PlayerMarketView;
   readonly hasSubmittedThisTurn: boolean;
   /** この会社が現在companyControlModesでPLAYERとして扱われているか。falseならGMがStandard AIへ戻した後。 */
   readonly isPlayerControlled: boolean;
@@ -181,6 +202,37 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
   const lastQuarterFinancingResult = lastRecord ? extractCompanyFinancingResult(lastRecord, companyId) : null;
   const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
 
+  // 【PLAYER-SURFACE-1】Overview / Inventory / Market の3タブぶんのビューを
+  // サーバー側で組み立てる。クライアントへ session や dataset をそのまま渡すと
+  // 他社の非公開値まで届いてしまうため、ここで公開してよい値だけに絞る。
+  const previousRecord = session.state.history[session.state.history.length - 2] ?? null;
+  // 【UI-CLARITY-1 A-8】Turn1ではゲーム開始時点の既知市場情報へフォールバックする。
+  // Market タブと SALES 画面が必ず同じ値を見るよう、解決は1箇所だけで行う。
+  const basePriceReferences = resolveMarketBasePriceReferences(lastRecord?.salesRecord.allocations);
+  const finishedGoodsTonsByProduct = ownState.finishedGoodsLots.reduce<Partial<Record<Product, number>>>((acc, lot) => {
+    if (lot.status !== "available") return acc;
+    acc[lot.product] = (acc[lot.product] ?? 0) + (unwrapUnit(lot.remainingQuantity) as number);
+    return acc;
+  }, {});
+  const lastTurnReview = buildLastTurnReview({
+    companyId,
+    record: lastRecord ?? undefined,
+    ...(previousRecord ? { previousRecord } : {}),
+    finishedGoodsTonsByProduct,
+  });
+  const inventoryView = buildPlayerInventoryView(lastRecord, previousRecord, companyId);
+  const marketView = buildPlayerMarketView({
+    publicInfo,
+    evaluationSnapshots: computeAllCompaniesEvaluationSnapshot(
+      session.state.history,
+      session.fixtures.map((f) => f.companyId),
+      turn
+    ),
+    displayNameByCompanyId: new Map(session.fixtures.map((f) => [f.companyId, f.displayName])),
+    companyId,
+    basePriceReferences,
+  });
+
   // 【D1 §8】管理者指定配当の年度中参考表示。率の解決はengineと同じresolverを通す。
   const annualDividendGuidance = buildAnnualDividendGuidanceView({
     history: session.state.history,
@@ -227,8 +279,10 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     lastQuarterFinancialResult,
     lastQuarterDividendResult,
     annualDividendGuidance,
-    // 【UI-CLARITY-1 A-8】Turn1ではゲーム開始時点の既知市場情報へフォールバックする。
-    lastQuarterSalesAllocations: resolveMarketBasePriceReferences(lastRecord?.salesRecord.allocations),
+    lastQuarterSalesAllocations: basePriceReferences,
+    lastTurnReview,
+    inventoryView,
+    marketView,
     hasSubmittedThisTurn,
     isPlayerControlled,
     gameEndedAt,
