@@ -26,6 +26,11 @@ import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompany
 // そこで「受講者へ返してよい値だけ」をここで組み立てて返す。
 import { buildLastTurnReview, LastTurnReview } from "../../../v2/company-lab/lastTurnReviewViewModel";
 import { buildPlayerInventoryView, buildPlayerMarketView, PlayerInventoryView, PlayerMarketView } from "./workspaceViews";
+import {
+  buildGameStartCompetitorSnapshot,
+  buildPublicCompetitorSnapshot,
+  PublicCompetitorSnapshot,
+} from "../companyLab/publicCompetitorSnapshot";
 import { restoreSessionFromResumePayload } from "../companyLab/simulation/persistence/resume";
 import { StoredSimulationRun } from "../companyLab/simulation/persistence/types";
 import { CompanyEvaluationSnapshot, computeAllCompaniesEvaluationSnapshot } from "../companyLab/evaluation/evaluationSemantics";
@@ -119,6 +124,11 @@ export interface PlayerDecisionContext {
    * GM 向け MarketSummary が読む trueWorld 系の値は含まない。
    */
   readonly marketView: PlayerMarketView;
+  /**
+   * 【PUBLIC-COMPETITOR-1】公開競合情報（前四半期の結果を帯・概数へ丸めたもの）。
+   * 他社の正確な数値は含まない。自社の行にだけ正確なシェアが付く。
+   */
+  readonly competitorSnapshot: PublicCompetitorSnapshot;
   readonly hasSubmittedThisTurn: boolean;
   /** この会社が現在companyControlModesでPLAYERとして扱われているか。falseならGMがStandard AIへ戻した後。 */
   readonly isPlayerControlled: boolean;
@@ -221,6 +231,31 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     finishedGoodsTonsByProduct,
   });
   const inventoryView = buildPlayerInventoryView(lastRecord, previousRecord, companyId);
+
+  // 【PUBLIC-COMPETITOR-1】公開してよい粒度に丸めた競合情報。
+  // Turn 1 は前四半期が無いので、開始時点の受注残を勢力図として使う。
+  const allCompanyIds = session.fixtures.map((f) => f.companyId);
+  const salesForceHeadcountByCompanyId = new Map(
+    (session.state.salesForceHiringState?.companies ?? []).map((c) => [c.companyId, c.headcount])
+  );
+  const competitorSnapshot =
+    lastRecord !== null
+      ? buildPublicCompetitorSnapshot({
+          record: lastRecord,
+          previousRecord,
+          companyIds: allCompanyIds,
+          ownCompanyId: companyId,
+          salesForceHeadcountByCompanyId,
+        })
+      : buildGameStartCompetitorSnapshot({
+          contracts: session.state.contracts,
+          companyIds: allCompanyIds,
+          ownCompanyId: companyId,
+          salesForceHeadcountByCompanyId:
+            salesForceHeadcountByCompanyId.size > 0
+              ? salesForceHeadcountByCompanyId
+              : new Map(session.fixtures.map((f) => [f.companyId, f.salesForceHeadcountTotal])),
+        });
   const marketView = buildPlayerMarketView({
     publicInfo,
     evaluationSnapshots: computeAllCompaniesEvaluationSnapshot(
@@ -283,6 +318,7 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     lastTurnReview,
     inventoryView,
     marketView,
+    competitorSnapshot,
     hasSubmittedThisTurn,
     isPlayerControlled,
     gameEndedAt,

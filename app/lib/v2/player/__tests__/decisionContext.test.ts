@@ -299,3 +299,46 @@ test("PS-6【情報境界】: Market が公開するのはTSVランキングま�
     }
   }
 });
+
+test("PS-7: Turn 1 でも公開競合情報が返り、出所は開始時点の受注残だと明示される", () => {
+  const context = buildPlayerDecisionContext(buildStoredRun("run-ps-7"), "BAL");
+  const snapshot = context.competitorSnapshot;
+  assert.equal(snapshot.source, "GAME_START_BACKLOG");
+  assert.equal(snapshot.salesForce.length, 5, "5社ぶんの営業人員が返るはず");
+  for (const entry of snapshot.salesForce) {
+    assert.equal(entry.approximateHeadcount % 10, 0, `営業人員が10人単位に丸められていない: ${entry.approximateHeadcount}`);
+    assert.equal(entry.approximateChange, null, "Turn 1 は比較対象が無いので増減は null");
+  }
+});
+
+test("PS-8: Turnを1期進めると公開競合情報が前Turnの結果に切り替わる", () => {
+  const context = buildPlayerDecisionContext(buildStoredRunAfterOneTurn("run-ps-8"), "BAL");
+  const snapshot = context.competitorSnapshot;
+  assert.equal(snapshot.source, "LAST_QUARTER_RESULT");
+  assert.equal(snapshot.sourceTurn, 1);
+  assert.ok(snapshot.cells.length > 0, "成約のあったマスが返るはず");
+});
+
+test("PS-9【情報境界】: 公開競合情報には自社以外の正確なシェアが含まれない", () => {
+  const context = buildPlayerDecisionContext(buildStoredRunAfterOneTurn("run-ps-9"), "BAL");
+  const snapshot = context.competitorSnapshot;
+
+  let ownEntries = 0;
+  for (const cell of snapshot.cells) {
+    for (const share of cell.shares) {
+      if (share.companyId === "BAL") {
+        if (share.exactShare !== undefined) ownEntries += 1;
+      } else {
+        assert.ok(!("exactShare" in share), `他社 ${share.companyId} に exactShare がある（${cell.market}/${cell.product}）`);
+      }
+      // 行が持ってよいキーを固定する。他社の数量・価格・利益が将来足されたら落ちる。
+      for (const key of Object.keys(share)) {
+        assert.ok(
+          ["companyId", "band", "trend", "exactShare"].includes(key),
+          `シェア行に想定外のキーがある: ${key}`
+        );
+      }
+    }
+  }
+  assert.ok(ownEntries > 0, "自社の正確なシェアが1つも出ていない（前提が崩れている）");
+});

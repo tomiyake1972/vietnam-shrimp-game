@@ -27,7 +27,7 @@ import type { DecisionStudioScreenKey } from "../../company-lab/components/decis
 // 無く、意思決定タブしか無かった（GM コンソール側の PlayerWorkspace にしか存在せず、
 // あちらは GM のブラウザタブ内キャッシュを正本にしているため受講者からは開けない）。
 // 表示用の値はすべてサーバー（PlayerDecisionContext）が組み立てたものをそのまま出す。
-import { PlayerInventoryPanel, PlayerMarketPanel, PlayerOverviewPanel } from "./WorkspacePanels";
+import { PlayerCompetitorPanel, PlayerInventoryPanel, PlayerMarketPanel, PlayerOverviewPanel } from "./WorkspacePanels";
 import { validateSalesForceHiringDecision } from "../../../lib/v2/companyLab/salesForceHiring";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { selectScenarioNewsForTurn } from "../../management/lib/scenarioNews";
@@ -301,7 +301,12 @@ export default function PlayerWorkspacePage() {
           ) : null}
 
           {phase === "input" && tab === "overview" ? <PlayerOverviewPanel review={context.lastTurnReview} /> : null}
-          {phase === "input" && tab === "market" ? <PlayerMarketPanel view={context.marketView} /> : null}
+          {phase === "input" && tab === "market" ? (
+            <div className="space-y-3">
+              <PlayerMarketPanel view={context.marketView} />
+              <PlayerCompetitorPanel snapshot={context.competitorSnapshot} />
+            </div>
+          ) : null}
           {phase === "input" && tab === "inventory" ? <PlayerInventoryPanel view={context.inventoryView} /> : null}
 
           {phase === "confirm" || tab === "decision" ? (
