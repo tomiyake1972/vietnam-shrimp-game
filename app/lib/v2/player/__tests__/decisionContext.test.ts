@@ -270,7 +270,7 @@ test("PS-5【情報境界】: Market の需要は遅行公開値であり、当�
   const trueWorldDemands = (stored.dataset?.marketMetrics ?? [])
     .filter((f) => f.visibility === "trueWorld" && f.metric === "demandQuantity" && f.turn === 1)
     .map((f) => f.value)
-    .filter((v) => Number.isFinite(v) && v > 0);
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
   const exposedDemands = view.cells.map((c) => c.observedDemandTons).filter((v): v is number => v !== null && v > 0);
   if (trueWorldDemands.length > 0 && exposedDemands.length > 0) {
     const leaked = exposedDemands.filter((v) => trueWorldDemands.some((t) => Math.abs(t - v) < 1e-6));
