@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+
+      "Bash(npm test)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(npx eslint *)",
+      "Bash(npx tsx *)",
+      "Bash(npx playwright test *)",
+
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git show*)",
+      "Bash(git branch*)",
+      "Bash(git ls-files*)",
+      "Bash(git ls-tree*)",
+      "Bash(git ls-remote*)",
+      "Bash(git for-each-ref*)",
+      "Bash(git rev-parse*)",
+      "Bash(git cat-file*)",
+      "Bash(git fetch*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push -u origin *)",
+
+      "mcp__Google_Drive__search_files",
+      "mcp__Google_Drive__list_recent_files",
+      "mcp__Google_Drive__get_file_metadata",
+      "mcp__Google_Drive__read_file_content",
+      "mcp__Google_Drive__download_file_content",
+      "mcp__Google_Drive__create_file",
+      "mcp__Google_Drive__copy_file",
+      "mcp__Google_Drive__update_file",
+
+      "mcp__github__get_me",
+      "mcp__github__get_file_contents",
+      "mcp__github__get_commit",
+      "mcp__github__list_commits",
+      "mcp__github__list_branches",
+      "mcp__github__list_tags",
+      "mcp__github__list_issues",
+      "mcp__github__issue_read",
+      "mcp__github__list_pull_requests",
+      "mcp__github__pull_request_read",
+      "mcp__github__search_code",
+      "mcp__github__actions_list",
+      "mcp__github__get_job_logs",
+      "mcp__github__get_check_run",
+
+      "mcp__Vercel__list_projects",
+      "mcp__Vercel__list_deployments",
+      "mcp__Vercel__get_deployment",
+      "mcp__Vercel__list_deployment_aliases",
+      "mcp__Vercel__list_deployment_events",
+
+      "mcp__Claude_Code_Remote__get_session",
+      "mcp__Claude_Code_Remote__read_documentation",
+      "mcp__Claude_Code_Remote__list_repos"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -fd*)",
+      "mcp__Google_Drive__trash_file",
+      "mcp__Google_Drive__share_file",
+      "mcp__github__merge_pull_request",
+      "mcp__github__delete_file"
+    ]
+  }
+}
