@@ -26,6 +26,8 @@ import { CompanyId } from "../sales/types";
 import { DemandMarketId, Product } from "../market/types";
 import { SalesContract } from "../sales/types";
 import { CompanyQuarterRecord } from "./types";
+import { CapitalProjectType } from "../capex/types";
+import { CapexProjectTemplate } from "../capex/parameters";
 import { unwrapUnit } from "../core/units";
 
 export const PRODUCTS: readonly Product[] = ["hoso", "pd", "vap"];
@@ -150,6 +152,10 @@ export interface PublicCompetitorSnapshot {
   readonly source: "GAME_START_BACKLOG" | "LAST_QUARTER_RESULT";
   readonly cells: readonly CompetitorMarketCell[];
   readonly salesForce: readonly CompetitorSalesForceEntry[];
+  /** 公開してよい大型投資の発表（着工・稼働）。 */
+  readonly investments: readonly PublicInvestmentAnnouncement[];
+  /** 各社の工場数（稼働中＋建設中）。 */
+  readonly factoryCounts: readonly CompanyFactoryCount[];
 }
 
 // ---------------------------------------------------------------------
@@ -306,6 +312,10 @@ export function buildPublicCompetitorSnapshot(input: {
   readonly ownCompanyId: CompanyId;
   /** 会社ごとの現在の営業人員（CompanyLabState.salesForceHiringState 由来）。 */
   readonly salesForceHeadcountByCompanyId: ReadonlyMap<CompanyId, number>;
+  /** 公開投資発表。省略は「該当なし」を意味する。 */
+  readonly investments?: readonly PublicInvestmentAnnouncement[];
+  /** 各社の工場数。省略は「未取得」ではなく「集計対象なし」を意味する。 */
+  readonly factoryCounts?: readonly CompanyFactoryCount[];
 }): PublicCompetitorSnapshot {
   const { record, previousRecord, companyIds, ownCompanyId } = input;
   return {
@@ -319,6 +329,8 @@ export function buildPublicCompetitorSnapshot(input: {
       ownCompanyId,
     }),
     salesForce: buildSalesForce(record, companyIds, input.salesForceHeadcountByCompanyId),
+    investments: input.investments ?? [],
+    factoryCounts: input.factoryCounts ?? [],
   };
 }
 
@@ -334,6 +346,7 @@ export function buildGameStartCompetitorSnapshot(input: {
   readonly companyIds: readonly CompanyId[];
   readonly ownCompanyId: CompanyId;
   readonly salesForceHeadcountByCompanyId: ReadonlyMap<CompanyId, number>;
+  readonly factoryCounts?: readonly CompanyFactoryCount[];
 }): PublicCompetitorSnapshot {
   const { contracts, companyIds, ownCompanyId, salesForceHeadcountByCompanyId } = input;
   return {
@@ -348,5 +361,136 @@ export function buildGameStartCompetitorSnapshot(input: {
       ownCompanyId,
     }),
     salesForce: buildSalesForce(null, companyIds, salesForceHeadcountByCompanyId),
+    // 開始時点ではまだ1件も着工・稼働していない。
+    investments: [],
+    factoryCounts: input.factoryCounts ?? [],
   };
+}
+
+// ---------------------------------------------------------------------
+// 5. 大型投資の発表（公開情報②）
+// ---------------------------------------------------------------------
+
+/**
+ * 公開対象の投資案件。
+ *
+ * 【この5種だけにする理由】品質管理設備・排水環境設備・保管庫増設などは
+ * 小型で、毎ターン流れると本当に効く情報（新工場・ライン増設）が埋もれる。
+ * 共通加工能力増設・凍結包装能力増設も、仕様で公開対象に挙げられていないため
+ * 出さない（勝手に公開範囲を広げない）。
+ */
+export const PUBLIC_INVESTMENT_PROJECT_TYPES: readonly CapitalProjectType[] = [
+  "newFactoryConstruction",
+  "hosoLineExpansion",
+  "pdLineExpansion",
+  "vapLineExpansion",
+  "pdMechanization",
+];
+
+export type PublicInvestmentKind = "constructionStarted" | "operational";
+
+export interface PublicInvestmentAnnouncement {
+  readonly companyId: CompanyId;
+  readonly projectType: CapitalProjectType;
+  readonly kind: PublicInvestmentKind;
+  /** 対象商品（ライン増設のみ）。新工場・省人化では null。 */
+  readonly product: Product | null;
+  /**
+   * 概数の投資額（USD）。**新工場のみ公開する**。
+   * 値は capex カタログの標準額であり、その会社が実際に承認した金額ではない
+   * （実額を出すと他社の資金規模が推測できてしまう）。
+   */
+  readonly approximateInvestmentUsd: number | null;
+  /** 概数の追加能力（HOSO換算トン/四半期）。カタログ標準値。無い案件は null。 */
+  readonly approximateCapacityTonsPerQuarter: number | null;
+  /** 着工時点から稼働開始までの見込み四半期数（カタログの工期＋稼働準備）。 */
+  readonly expectedQuartersToOperational: number | null;
+}
+
+/** 各社の工場数（稼働中＋建設中）。 */
+export interface CompanyFactoryCount {
+  readonly companyId: CompanyId;
+  readonly operating: number;
+  readonly underConstruction: number;
+}
+
+function roundToMillions(value: number): number {
+  return Math.round(value / 1_000_000) * 1_000_000;
+}
+
+function roundToHundreds(value: number): number {
+  return Math.round(value / 100) * 100;
+}
+
+/**
+ * 確定した四半期の capex イベントから、公開してよい投資発表を抜き出す。
+ *
+ * 【却下・取り下げは出さない】statusAfter が cancelled の案件、および
+ * rejectedProposals は公開対象にしない（仕様どおり。検討しただけの案件が
+ * 他社に見えると、意思決定前の情報が漏れるのと同じことになる）。
+ *
+ * 【着工のタイミング】statusBefore === "approved" のイベントが
+ * 「前のターンに承認され、いま着工した」案件にあたる。承認の翌ターンに
+ * 公開する、という仕様はこれで満たされる。
+ */
+export function buildPublicInvestmentAnnouncements(input: {
+  readonly record: CompanyQuarterRecord;
+  readonly templatesByType: Readonly<Record<CapitalProjectType, CapexProjectTemplate>>;
+}): readonly PublicInvestmentAnnouncement[] {
+  const announcements: PublicInvestmentAnnouncement[] = [];
+  for (const capex of input.record.capexResults) {
+    for (const event of capex.events) {
+      if (!PUBLIC_INVESTMENT_PROJECT_TYPES.includes(event.projectType)) continue;
+
+      const started = event.statusBefore === "approved" && event.statusAfter !== "cancelled";
+      const operational = event.statusAfter === "completed";
+      if (!started && !operational) continue;
+
+      const template = input.templatesByType[event.projectType];
+      const isNewFactory = event.projectType === "newFactoryConstruction";
+      const effect = template?.futureCapacityEffect;
+      const newFactory = template?.newFactoryEffect;
+
+      const capacity = isNewFactory
+        ? (newFactory?.fullCapacities.commonProcessing ?? null)
+        : typeof effect?.capacityIncreaseTonsPerQuarter === "number" && effect.capacityIncreaseTonsPerQuarter > 0
+          ? effect.capacityIncreaseTonsPerQuarter
+          : null;
+
+      const targetProduct = effect?.targetProduct;
+      announcements.push({
+        companyId: capex.companyId,
+        projectType: event.projectType,
+        kind: operational ? "operational" : "constructionStarted",
+        product: targetProduct === "hoso" || targetProduct === "pd" || targetProduct === "vap" ? targetProduct : null,
+        // 投資額は新工場だけ、しかもカタログ標準額の概数だけを出す。
+        approximateInvestmentUsd: isNewFactory && template ? roundToMillions(template.standardBudgetUsd) : null,
+        approximateCapacityTonsPerQuarter: capacity === null ? null : roundToHundreds(capacity),
+        expectedQuartersToOperational:
+          operational || !template ? null : template.standardConstructionQuarters + template.postCompletionReadinessQuarters,
+      });
+    }
+  }
+  // 会社・案件種別で安定した順序にする（確定記録の並び順に依存させない）。
+  return [...announcements].sort((a, b) =>
+    a.companyId !== b.companyId ? a.companyId.localeCompare(b.companyId) : a.projectType.localeCompare(b.projectType)
+  );
+}
+
+/**
+ * 各社の工場数。稼働中は現在の Factory 一覧から、建設中は capex の
+ * 新工場案件（underConstruction）から数える。能力値は公開しない。
+ */
+export function buildCompanyFactoryCounts(input: {
+  readonly factories: readonly { readonly companyId: CompanyId }[];
+  readonly capexProjectsByCompanyId: ReadonlyMap<CompanyId, readonly { readonly projectType: CapitalProjectType; readonly status: string }[]>;
+  readonly companyIds: readonly CompanyId[];
+}): readonly CompanyFactoryCount[] {
+  return input.companyIds.map((companyId) => ({
+    companyId,
+    operating: input.factories.filter((f) => f.companyId === companyId).length,
+    underConstruction: (input.capexProjectsByCompanyId.get(companyId) ?? []).filter(
+      (p) => p.projectType === "newFactoryConstruction" && (p.status === "underConstruction" || p.status === "approved")
+    ).length,
+  }));
 }
