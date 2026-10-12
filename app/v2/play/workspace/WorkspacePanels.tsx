@@ -22,6 +22,7 @@ import {
   type ShareBand,
   type ShareBandTrend,
 } from "../../../lib/v2/companyLab/publicCompetitorSnapshot";
+import type { CompetitorNewsConfidence, CompetitorNewsItem } from "../../../lib/v2/companyLab/competitorNews";
 
 const PRODUCTS = ["hoso", "pd", "vap"] as const;
 
@@ -374,6 +375,139 @@ export function PlayerCompetitorPanel({ snapshot }: { readonly snapshot: PublicC
         営業人員は10人単位の概数で、市場別の配置は公開されません。
         混雑度は5社の提示が需要に対してどれだけ集中していたかで、「混雑」のマスは価格が下押しされます。
       </p>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------
+// 各社の投資案件（公開分）／競合ニュース
+// ---------------------------------------------------------------------
+
+const PROJECT_LABEL: Readonly<Record<string, string>> = {
+  newFactoryConstruction: "新工場建設",
+  hosoLineExpansion: "HOSOライン増設",
+  pdLineExpansion: "PDライン増設",
+  vapLineExpansion: "VAPライン増設",
+  pdMechanization: "PD省人化",
+};
+
+export function PlayerInvestmentAnnouncementPanel({ snapshot }: { readonly snapshot: PublicCompetitorSnapshot }) {
+  return (
+    <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="play-investments">
+      <h2 className="mb-1.5 text-sm font-semibold">各社の投資案件（公開分）</h2>
+
+      <div className="mb-2 flex flex-wrap gap-2 text-[11px]">
+        {snapshot.factoryCounts.map((count) => (
+          <span key={count.companyId} className="rounded border border-slate-700 bg-slate-900/40 px-2 py-0.5" data-testid={`play-factory-count-${count.companyId}`}>
+            {count.companyId} {count.operating}
+            {count.underConstruction > 0 ? `＋${count.underConstruction}` : ""}
+          </span>
+        ))}
+      </div>
+
+      {snapshot.investments.length === 0 ? (
+        <p className="text-xs text-slate-400" data-testid="play-investments-empty">
+          前四半期に公開された大型投資はありません。
+        </p>
+      ) : (
+        <ul className="space-y-1.5" data-testid="play-investments-list">
+          {snapshot.investments.map((investment, index) => (
+            <li
+              key={`${investment.companyId}-${investment.projectType}-${investment.kind}-${index}`}
+              className="rounded border border-slate-700 bg-slate-900/40 p-2 text-[11px]"
+            >
+              <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
+                <span className={`rounded px-1.5 py-0.5 text-[10px] ${investment.kind === "operational" ? "bg-emerald-900/70 text-emerald-200" : "bg-sky-900/70 text-sky-200"}`}>
+                  {investment.kind === "operational" ? "稼働" : "着工"}
+                </span>
+                <span className="font-semibold text-slate-100">{investment.companyId}</span>
+                <span className="text-slate-300">{PROJECT_LABEL[investment.projectType] ?? investment.projectType}</span>
+              </div>
+              <div className="text-slate-400">
+                {investment.approximateCapacityTonsPerQuarter !== null
+                  ? `追加能力 約${investment.approximateCapacityTonsPerQuarter.toLocaleString()}t／四半期`
+                  : "追加能力の公表なし"}
+                {investment.approximateInvestmentUsd !== null
+                  ? ` ／ 投資額 約${Math.round(investment.approximateInvestmentUsd / 1_000_000).toLocaleString()}百万ドル`
+                  : ""}
+                {investment.kind === "constructionStarted" && investment.expectedQuartersToOperational !== null
+                  ? ` ／ 稼働まで約${investment.expectedQuartersToOperational}四半期`
+                  : ""}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className="mt-2 text-[11px] leading-snug text-slate-500">
+        公開されるのは新工場建設・加工ライン増設・PD省人化だけで、承認されて着工した案件に限ります。
+        却下・取り下げになった案件は出ません。投資額・追加能力は業界で一般に知られている標準値の概数であり、各社が実際に支出した金額ではありません。
+        会社名の横の数字は工場数（稼働中＋建設中）です。
+      </p>
+    </section>
+  );
+}
+
+const NEWS_CONFIDENCE_LABEL: Readonly<Record<CompetitorNewsConfidence, string>> = {
+  confirmed: "確報",
+  rumored: "観測・噂",
+};
+
+const NEWS_CONFIDENCE_CLASS: Readonly<Record<CompetitorNewsConfidence, string>> = {
+  confirmed: "bg-slate-700 text-slate-200",
+  rumored: "bg-amber-900/70 text-amber-200",
+};
+
+export function PlayerCompetitorNewsPanel({
+  news,
+  compact = false,
+}: {
+  readonly news: readonly CompetitorNewsItem[];
+  /** true なら見出しだけを出す（Overview 用）。 */
+  readonly compact?: boolean;
+}) {
+  if (news.length === 0) {
+    return compact ? null : (
+      <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="play-competitor-news-empty">
+        <h2 className="mb-1 text-sm font-semibold">競合動向</h2>
+        <p className="text-xs text-slate-400">前四半期に目立った競合の動きはありません。</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="play-competitor-news">
+      <h2 className="mb-1.5 text-sm font-semibold">競合動向</h2>
+      <ul className="space-y-1.5">
+        {news.map((item) => (
+          <li key={item.newsId} className="rounded border border-slate-700 bg-slate-900/40 p-2" data-testid={`play-competitor-news-${item.newsId}`}>
+            <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${NEWS_CONFIDENCE_CLASS[item.confidence]}`}>
+                {NEWS_CONFIDENCE_LABEL[item.confidence]}
+              </span>
+              <span className="text-xs font-semibold text-slate-100">{item.headline}</span>
+            </div>
+            {compact ? null : (
+              <>
+                <p className="text-[11px] leading-snug text-slate-300">{item.body}</p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {item.tags.map((tag) => (
+                    <span key={tag} className="rounded bg-slate-800 px-1 py-0.5 text-[10px] text-slate-400">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      {compact ? null : (
+        <p className="mt-2 text-[11px] leading-snug text-slate-500">
+          「確報」は前四半期の確定結果にもとづく事実です。「観測・噂」は業界で流れている話であり、裏付けが取れていません。
+          そのまま信じず、次の四半期の実績と照らして判断してください。
+        </p>
+      )}
     </section>
   );
 }

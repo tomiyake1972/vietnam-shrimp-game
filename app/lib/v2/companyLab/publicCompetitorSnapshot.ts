@@ -494,3 +494,69 @@ export function buildCompanyFactoryCounts(input: {
     ).length,
   }));
 }
+
+// ---------------------------------------------------------------------
+// 6. 競合ニュースの発火条件に使う事実
+// ---------------------------------------------------------------------
+
+/**
+ * 確定記録から、競合ニュースの発火条件に必要な事実だけを取り出す。
+ *
+ * ここで出すのは「条件を満たしたかどうか」を判定するための比率であり、
+ * **記事本文へそのまま書いてよい値ではない**（本文は帯・概数だけを使う。
+ * competitorNews.ts 側の責務）。
+ */
+export interface CompetitorSignalFacts {
+  readonly companyId: CompanyId;
+  readonly priceDiscountRatio: number | null;
+  readonly gainedShare: boolean;
+  readonly overdueRatio: number | null;
+  readonly usedEmergencyLoan: boolean;
+}
+
+export function buildCompetitorSignals(
+  record: CompanyQuarterRecord,
+  snapshot: PublicCompetitorSnapshot,
+  companyIds: readonly CompanyId[]
+): readonly CompetitorSignalFacts[] {
+  // 会社ごとの「成約額の加重平均が基準価格をどれだけ下回ったか」。
+  const weightedAsk = new Map<CompanyId, { discountedWeight: number; weight: number }>();
+  for (const allocation of record.salesRecord.allocations) {
+    const basePrice = unwrapUnit(allocation.basePrice);
+    if (!Number.isFinite(basePrice) || basePrice <= 0) continue;
+    for (const entry of allocation.companies) {
+      const quantity = unwrapUnit(entry.allocatedQuantity);
+      if (!Number.isFinite(quantity) || quantity <= 0) continue;
+      const ask = unwrapUnit(entry.askPrice);
+      if (!Number.isFinite(ask)) continue;
+      const accumulator = weightedAsk.get(entry.companyId) ?? { discountedWeight: 0, weight: 0 };
+      accumulator.discountedWeight += ((basePrice - ask) / basePrice) * quantity;
+      accumulator.weight += quantity;
+      weightedAsk.set(entry.companyId, accumulator);
+    }
+  }
+
+  const gained = new Set<CompanyId>();
+  for (const cell of snapshot.cells) {
+    for (const share of cell.shares) {
+      if (share.trend === "up") gained.add(share.companyId);
+    }
+  }
+
+  return companyIds.map((companyId) => {
+    const summary = record.companySummaries.find((c) => c.companyId === companyId);
+    const outstanding = summary ? unwrapUnit(summary.outstandingQuantity) : 0;
+    const overdue = summary ? unwrapUnit(summary.overdueQuantity) : 0;
+    const ask = weightedAsk.get(companyId);
+    const financing = record.financingResults?.find((f) => f.companyId === companyId);
+    return {
+      companyId,
+      priceDiscountRatio: ask && ask.weight > 0 ? ask.discountedWeight / ask.weight : null,
+      gainedShare: gained.has(companyId),
+      overdueRatio: outstanding > 0 ? overdue / outstanding : null,
+      // 緊急融資は「承認額が正のとき」だけ使ったとみなす
+      // （審査はしたが0円承認、というケースを資金繰り不安として流さない）。
+      usedEmergencyLoan: (financing?.emergencyLoan?.approvedUsd ?? 0) > 0,
+    };
+  });
+}

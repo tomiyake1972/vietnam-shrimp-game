@@ -27,10 +27,15 @@ import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompany
 import { buildLastTurnReview, LastTurnReview } from "../../../v2/company-lab/lastTurnReviewViewModel";
 import { buildPlayerInventoryView, buildPlayerMarketView, PlayerInventoryView, PlayerMarketView } from "./workspaceViews";
 import {
+  buildCompanyFactoryCounts,
   buildGameStartCompetitorSnapshot,
   buildPublicCompetitorSnapshot,
+  buildCompetitorSignals,
+  buildPublicInvestmentAnnouncements,
   PublicCompetitorSnapshot,
 } from "../companyLab/publicCompetitorSnapshot";
+import { buildCompetitorNews, CompetitorNewsItem } from "../companyLab/competitorNews";
+import { CAPEX_PARAMETERS_V1 } from "../capex/parameters";
 import { restoreSessionFromResumePayload } from "../companyLab/simulation/persistence/resume";
 import { StoredSimulationRun } from "../companyLab/simulation/persistence/types";
 import { CompanyEvaluationSnapshot, computeAllCompaniesEvaluationSnapshot } from "../companyLab/evaluation/evaluationSemantics";
@@ -129,6 +134,11 @@ export interface PlayerDecisionContext {
    * 他社の正確な数値は含まない。自社の行にだけ正確なシェアが付く。
    */
   readonly competitorSnapshot: PublicCompetitorSnapshot;
+  /**
+   * 【PUBLIC-COMPETITOR-2】前Turnの競合ニュース（最大3本＋年間配当の別枠）。
+   * 「観測・噂」の一部は意図的に事実と食い違う（isMisleading は画面へ出さない）。
+   */
+  readonly competitorNews: readonly CompetitorNewsItem[];
   readonly hasSubmittedThisTurn: boolean;
   /** この会社が現在companyControlModesでPLAYERとして扱われているか。falseならGMがStandard AIへ戻した後。 */
   readonly isPlayerControlled: boolean;
@@ -238,6 +248,16 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
   const salesForceHeadcountByCompanyId = new Map(
     (session.state.salesForceHiringState?.companies ?? []).map((c) => [c.companyId, c.headcount])
   );
+  // 工場数は、capex で増えた新工場も反映された実効 Factory 一覧から数える
+  // （fixture.factories は作成時点の静的な初期一覧なので、新工場が反映されない）。
+  const allEffectiveFactories = session.fixtures.flatMap((f) => buildCompanyOwnState(session.state, f).effectiveFactories);
+  const factoryCounts = buildCompanyFactoryCounts({
+    factories: allEffectiveFactories,
+    capexProjectsByCompanyId: new Map(
+      (session.state.capexState?.companies ?? []).map((c) => [c.companyId, c.portfolio.projects])
+    ),
+    companyIds: allCompanyIds,
+  });
   const competitorSnapshot =
     lastRecord !== null
       ? buildPublicCompetitorSnapshot({
@@ -246,8 +266,14 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
           companyIds: allCompanyIds,
           ownCompanyId: companyId,
           salesForceHeadcountByCompanyId,
+          investments: buildPublicInvestmentAnnouncements({
+            record: lastRecord,
+            templatesByType: CAPEX_PARAMETERS_V1.templatesByType,
+          }),
+          factoryCounts,
         })
       : buildGameStartCompetitorSnapshot({
+          factoryCounts,
           contracts: session.state.contracts,
           companyIds: allCompanyIds,
           ownCompanyId: companyId,
@@ -267,6 +293,19 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     companyId,
     basePriceReferences,
   });
+
+  // 【PUBLIC-COMPETITOR-2】競合ニュース。確定記録から決定論的に生成する
+  // （LLM も Math.random() も使わない。同じ Run を再表示しても内容が変わらない）。
+  const competitorNews =
+    lastRecord === null
+      ? []
+      : buildCompetitorNews({
+          runId: stored.run.simulationRunId,
+          turn,
+          snapshot: competitorSnapshot,
+          signals: buildCompetitorSignals(lastRecord, competitorSnapshot, allCompanyIds),
+          displayNameByCompanyId: new Map(session.fixtures.map((f) => [f.companyId, f.displayName])),
+        });
 
   // 【D1 §8】管理者指定配当の年度中参考表示。率の解決はengineと同じresolverを通す。
   const annualDividendGuidance = buildAnnualDividendGuidanceView({
@@ -319,6 +358,7 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     inventoryView,
     marketView,
     competitorSnapshot,
+    competitorNews,
     hasSubmittedThisTurn,
     isPlayerControlled,
     gameEndedAt,

@@ -342,3 +342,38 @@ test("PS-9【情報境界】: 公開競合情報には自社以外の正確な�
   }
   assert.ok(ownEntries > 0, "自社の正確なシェアが1つも出ていない（前提が崩れている）");
 });
+
+test("PS-10: 競合ニュースは Turn 1 では空、Turnを進めると決定論的に生成される", () => {
+  const turn1 = buildPlayerDecisionContext(buildStoredRun("run-ps-10a"), "BAL");
+  assert.deepEqual(turn1.competitorNews, [], "前四半期が無い Turn 1 では記事を作らない");
+
+  const stored = buildStoredRunAfterOneTurn("run-ps-10b");
+  const first = buildPlayerDecisionContext(stored, "BAL");
+  const second = buildPlayerDecisionContext(stored, "BAL");
+  assert.deepEqual(first.competitorNews, second.competitorNews, "同じ保存データからは必ず同じ記事になる");
+  assert.ok(first.competitorNews.length <= 4, `記事が多すぎる（上限3本＋年間配当1本）: ${first.competitorNews.length}`);
+});
+
+test("PS-11: 工場数は5社ぶん返り、建設中は負にならない", () => {
+  const context = buildPlayerDecisionContext(buildStoredRunAfterOneTurn("run-ps-11"), "BAL");
+  const counts = context.competitorSnapshot.factoryCounts;
+  assert.equal(counts.length, 5);
+  for (const count of counts) {
+    assert.ok(count.operating >= 1, `${count.companyId} の稼働中工場が0件`);
+    assert.ok(count.underConstruction >= 0);
+  }
+});
+
+test("PS-12【情報境界】: 投資発表には承認実額が出ず、公開対象外の案件種別も現れない", () => {
+  const context = buildPlayerDecisionContext(buildStoredRunAfterOneTurn("run-ps-12"), "BAL");
+  const allowedTypes = ["newFactoryConstruction", "hosoLineExpansion", "pdLineExpansion", "vapLineExpansion", "pdMechanization"];
+  for (const investment of context.competitorSnapshot.investments) {
+    assert.ok(allowedTypes.includes(investment.projectType), `公開対象外の案件が出ている: ${investment.projectType}`);
+    if (investment.projectType !== "newFactoryConstruction") {
+      assert.equal(investment.approximateInvestmentUsd, null, "新工場以外で投資額が出ている");
+    }
+    if (investment.approximateInvestmentUsd !== null) {
+      assert.equal(investment.approximateInvestmentUsd % 1_000_000, 0, "投資額が百万ドル単位に丸められていない");
+    }
+  }
+});
