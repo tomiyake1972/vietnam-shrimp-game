@@ -547,3 +547,97 @@ test("受入確認EM-6（バグ修正の影響範囲確認・回帰）: 緊急�
   assert.ok(Math.abs((output.nextFinanceState.cash as number) - -765_000) < EPS, "この既知シナリオでの期末現金は修正前後で変化しない（-765,000USD）");
   assertThreeStatementIdentities(output);
 });
+
+// ---------------------------------------------------------------------------
+// 任意期限前返済（VP-1〜VP-5）
+//
+// 修正前は、任意期限前返済の原資を「必須元本の原資の払い残り」から取っていた。
+// 必須元本の原資は呼び出し側で min(現金, 予定返済額) と上限されているため、
+// 予定返済を全額払えた場合の払い残りは常にほぼ0になり、繰上返済は請求額に
+// かかわらず一度も実行されなかった。以下はその経路が実際に機能することと、
+// 機能させたうえで守るべき境界（必須分が先・原資上限・当期実行分の除外）を固定する。
+// ---------------------------------------------------------------------------
+
+test("受入確認VP-1: 繰上返済を希望すると、予定返済に加えて元本が追加返済される", () => {
+  const loan = makeLoan({ currentPrincipalUsd: 40_000_000, originalPrincipalUsd: 40_000_000, repaymentMethod: "equalPrincipal", equalPrincipalInstallmentUsd: 2_000_000, maturityPeriod: period(2019, 4) });
+  const financeState = makeFinanceState({ cash: 60_000_000, shortTermLoans: 40_000_000 });
+  const financingState = makeFinancingState([loan]);
+
+  const withoutPrepayment = closeWithFinancing(financeState, financingState, makeRequest({ desiredPrepaymentUsd: 0 }));
+  const withPrepayment = closeWithFinancing(financeState, financingState, makeRequest({ desiredPrepaymentUsd: 5_000_000 }));
+
+  const endingWithout = withoutPrepayment.nextFinancingState.loanPortfolio.loans.reduce((s, l) => s + l.currentPrincipalUsd, 0);
+  const endingWith = withPrepayment.nextFinancingState.loanPortfolio.loans.reduce((s, l) => s + l.currentPrincipalUsd, 0);
+
+  assert.ok(Math.abs(endingWithout - 38_000_000) < EPS, `繰上返済なしの期末残高: ${endingWithout}`);
+  assert.ok(Math.abs(endingWith - 33_000_000) < EPS, `繰上返済5Mありの期末残高: ${endingWith}`);
+  assert.equal(withPrepayment.financingQuarterResult.arrearsEvents.length, 0, "繰上返済をしても延滞は発生しない");
+  assertThreeStatementIdentities(withPrepayment);
+});
+
+test("受入確認VP-2: 繰上返済の希望額を増やすと、実際の元本支払も単調に増える（請求額が結果へ反映される）", () => {
+  const loan = makeLoan({ currentPrincipalUsd: 40_000_000, originalPrincipalUsd: 40_000_000, repaymentMethod: "equalPrincipal", equalPrincipalInstallmentUsd: 2_000_000, maturityPeriod: period(2019, 4) });
+  const financeState = makeFinanceState({ cash: 60_000_000, shortTermLoans: 40_000_000 });
+  const financingState = makeFinancingState([loan]);
+
+  const paid = [0, 5_000_000, 22_500_000, 38_000_000].map(
+    (req) => closeWithFinancing(financeState, financingState, makeRequest({ desiredPrepaymentUsd: req })).financingQuarterResult.principalPaidCashUsd
+  );
+
+  assert.ok(Math.abs(paid[0] - 2_000_000) < EPS, `請求0の元本支払: ${paid[0]}`);
+  assert.ok(Math.abs(paid[1] - 7_000_000) < EPS, `請求5Mの元本支払: ${paid[1]}`);
+  assert.ok(Math.abs(paid[2] - 24_500_000) < EPS, `請求22.5Mの元本支払: ${paid[2]}`);
+  assert.ok(Math.abs(paid[3] - 40_000_000) < EPS, `請求38Mの元本支払: ${paid[3]}`);
+  for (let i = 1; i < paid.length; i++) assert.ok(paid[i] > paid[i - 1], `請求額の増加に対して元本支払が増えていない: ${paid.join(" / ")}`);
+});
+
+test("受入確認VP-3: 繰上返済は手元現金を超えない（原資上限を守り、現金はマイナスにならない）", () => {
+  const loan = makeLoan({ currentPrincipalUsd: 40_000_000, originalPrincipalUsd: 40_000_000, repaymentMethod: "equalPrincipal", equalPrincipalInstallmentUsd: 2_000_000, maturityPeriod: period(2019, 4) });
+  const financeState = makeFinanceState({ cash: 12_000_000, shortTermLoans: 40_000_000 });
+  const financingState = makeFinancingState([loan]);
+
+  // 残高全額（40M）の繰上返済を希望しても、現金12Mが上限になる。
+  const output = closeWithFinancing(financeState, financingState, makeRequest({ desiredPrepaymentUsd: 40_000_000 }));
+
+  const endingCash = output.nextFinanceState.cash as number;
+  const endingPrincipal = output.nextFinancingState.loanPortfolio.loans.reduce((s, l) => s + l.currentPrincipalUsd, 0);
+  assert.ok(endingCash >= -EPS, `繰上返済で現金がマイナスになっている: ${endingCash}`);
+  assert.ok(endingPrincipal > 0, "現金を超える繰上返済が実行され借入が消えてしまっている");
+  assert.ok(output.financingQuarterResult.principalPaidCashUsd <= 12_000_000 + EPS, `元本支払が手元現金を超えている: ${output.financingQuarterResult.principalPaidCashUsd}`);
+  assertThreeStatementIdentities(output);
+});
+
+test("受入確認VP-4: 必須の利息・予定元本を払いきれない期は、繰上返済を希望しても実行されない", () => {
+  const loan = makeLoan({ currentPrincipalUsd: 40_000_000, originalPrincipalUsd: 40_000_000, repaymentMethod: "equalPrincipal", equalPrincipalInstallmentUsd: 2_000_000, maturityPeriod: period(2019, 4) });
+  const financeState = makeFinanceState({ cash: 500_000, shortTermLoans: 40_000_000 });
+  const financingState = makeFinancingState([loan]);
+
+  const output = closeWithFinancing(financeState, financingState, makeRequest({ desiredPrepaymentUsd: 20_000_000, emergencyAcceptable: false }));
+
+  assert.ok(output.financingQuarterResult.arrearsEvents.length > 0, "この条件では必須分に延滞が発生するはず");
+  // 延滞がある期は繰上返済を行わない＝元本支払は予定返済の範囲に収まる。
+  assert.ok(
+    output.financingQuarterResult.principalPaidCashUsd <= 2_000_000 + EPS,
+    `延滞発生時に繰上返済が実行されている: ${output.financingQuarterResult.principalPaidCashUsd}`
+  );
+  assertThreeStatementIdentities(output);
+});
+
+test("受入確認VP-5: 当期に実行した融資は繰上返済の対象外（借りて即返す無コストの資金循環を作らない）", () => {
+  // 期首の融資は持たず、当期に新規融資だけを実行する。
+  const financeState = makeFinanceState({ cash: 60_000_000 });
+  const financingState = makeFinancingState([]);
+  const request = makeRequest({ desiredAmountUsd: 10_000_000, desiredPrepaymentUsd: 10_000_000 });
+
+  const output = closeWithFinancing(financeState, financingState, request);
+  const drawn = output.financingQuarterResult.loanDrawUsd;
+
+  assert.ok(drawn > 0, "この条件では新規融資が実行されるはず（前提が崩れている）");
+  assert.ok(
+    Math.abs(output.financingQuarterResult.principalPaidCashUsd) < EPS,
+    `当期実行分が同一四半期に繰上返済されている: ${output.financingQuarterResult.principalPaidCashUsd}`
+  );
+  const endingPrincipal = output.nextFinancingState.loanPortfolio.loans.reduce((s, l) => s + l.currentPrincipalUsd, 0);
+  assert.ok(Math.abs(endingPrincipal - drawn) < EPS, `当期実行分が残っていない: ${endingPrincipal} vs ${drawn}`);
+  assertThreeStatementIdentities(output);
+});

@@ -419,13 +419,27 @@ function sortByRateDescending(loans: readonly LoanRecord[]): LoanRecord[] {
   return [...loans].sort((a, b) => b.annualInterestRate - a.annualInterestRate);
 }
 
-/** ポートフォリオ全体へ、利用可能現金を高金利融資から優先して利息・元本へ配分する。 */
+/**
+ * ポートフォリオ全体へ、利用可能現金を高金利融資から優先して利息・元本へ配分する。
+ *
+ * 【任意期限前返済の原資について（2026-10-12 修正）】
+ * 必須元本の原資（availableForMandatoryPrincipalUsd）と、任意期限前返済の原資
+ * （availableForVoluntaryPrincipalUsd）は**別枠で受け取る**。
+ *
+ * 修正前は任意返済の原資を「必須元本の原資の払い残り」から取っていた。しかし
+ * 必須元本の原資は呼び出し側で `min(現金, 予定返済額)` と予定返済額ちょうどに
+ * 上限されているため、予定返済を全額払えた場合の払い残りは常にほぼ0になり、
+ * その結果 **任意期限前返済は何を要求しても一度も実行されなかった**
+ * （請求額を4通り変えても結果が同一であることを実測で確認済み）。
+ * 必須分を払い切ったあとに残る現金を別枠で渡すことで、この経路を実際に機能させる。
+ */
 function applyWaterfallAcrossPortfolio(
   loans: readonly LoanRecord[],
   period: PeriodV2,
   availableForInterestUsd: number,
   availableForMandatoryPrincipalUsd: number,
-  voluntaryPrepaymentRequestUsd: number
+  voluntaryPrepaymentRequestUsd: number,
+  availableForVoluntaryPrincipalUsd: number
 ): {
   readonly updatedLoans: LoanRecord[];
   readonly totalInterestPaidUsd: number;
@@ -461,13 +475,21 @@ function applyWaterfallAcrossPortfolio(
     };
   });
 
-  // 任意期限前返済: 必須の利息・元本を全額払えた場合のみ、残り現金から高金利融資を追加返済する。
+  // 任意期限前返済: 必須の利息・元本を全額払えた場合のみ、必須分を払ったあとに
+  // 残る現金（availableForVoluntaryPrincipalUsd）から高金利融資を追加返済する。
   const allMandatoryMet = arrearsEvents.length === 0;
-  let voluntaryRemaining = allMandatoryMet ? Math.max(0, Math.min(voluntaryPrepaymentRequestUsd, remainingPrincipal)) : 0;
+  let voluntaryRemaining = allMandatoryMet
+    ? Math.max(0, Math.min(voluntaryPrepaymentRequestUsd, Math.max(0, availableForVoluntaryPrincipalUsd)))
+    : 0;
 
   const finalLoans: LoanRecord[] = updated.map((u) => {
     let extraPrincipal = 0;
-    if (voluntaryRemaining > 1e-6 && u.loan.currentPrincipalUsd - u.principalPaid > 1e-6) {
+    // 【当期実行分を除外する理由】当期に実行した融資には当期の利息が付かない
+    //（fullAccruedInterest は期首時点の融資からのみ算出される）。当期実行分を
+    // 同じ四半期に期限前返済できてしまうと、借りて即返すだけで無コストの
+    // 資金循環が成立してしまう。経済的な意味を持たないため対象外とする。
+    const drawnThisPeriod = u.loan.originationPeriod === period;
+    if (!drawnThisPeriod && voluntaryRemaining > 1e-6 && u.loan.currentPrincipalUsd - u.principalPaid > 1e-6) {
       extraPrincipal = Math.min(voluntaryRemaining, u.loan.currentPrincipalUsd - u.principalPaid);
       voluntaryRemaining -= extraPrincipal;
       totalPrincipalPaid += extraPrincipal;
@@ -638,12 +660,24 @@ export function closeQuarterWithFinancing(
   const availableForInterest = Math.max(0, Math.min(availableForDebtService, fullAccruedInterest));
   const availableForPrincipal = Math.max(0, availableForDebtService - availableForInterest);
 
+  const mandatoryPrincipalBudget = Math.min(availableForPrincipal, scheduledPrincipalDue);
+  /**
+   * 任意期限前返済の原資＝必須元本を払ったあとに残る現金。
+   *
+   * 【緊急融資を引いた期は0にする理由】緊急融資は「利息＋予定元本を自力で
+   * 払いきれない」ときにだけ実行される（shortfallBeforeEmergency > 0）。
+   * その期に任意の繰上返済を行うのは定義上あり得ないため、明示的に封じる。
+   * （数式上も残余はほぼ0になるが、意図を不変条件として残す。）
+   */
+  const voluntaryPrincipalBudget = emergencyDrawUsd > 0 ? 0 : Math.max(0, availableForPrincipal - mandatoryPrincipalBudget);
+
   const waterfall = applyWaterfallAcrossPortfolio(
     portfolioAfterDraws,
     period,
     availableForInterest,
-    Math.min(availableForPrincipal, scheduledPrincipalDue),
-    input.financingRequest.desiredPrepaymentUsd
+    mandatoryPrincipalBudget,
+    input.financingRequest.desiredPrepaymentUsd,
+    voluntaryPrincipalBudget
   );
 
   const interestPaidCashUsd = waterfall.totalInterestPaidUsd;
