@@ -32,6 +32,7 @@ import { CompanyDecisionDraft } from "../../decisionDraft";
 import { buildDecisionStudioViewModel } from "../../decisionStudioViewModel";
 import { planningWarningsFor } from "../../investmentPlanningViewModel";
 import type { OpeningInfoViewModel, ScenarioNewsItem } from "../../play/_lib/openingInfoViewModel";
+import type { CompetitorNewsItem } from "../../../../lib/v2/companyLab/competitorNews";
 import ProcurementPlanningSection from "../procurement/ProcurementPlanningSection";
 import { AreaToneLegend } from "../CollapsibleSection";
 import { AiInitialProposalNote, DecisionAreaHeading } from "../FieldAnnotations";
@@ -93,6 +94,11 @@ export interface DecisionStudioProps {
    */
   readonly scenarioNews?: readonly ScenarioNewsItem[];
   /**
+   * 【PUBLIC-COMPETITOR-2】前Turnの競合ニュース。INFOタブのニュース一覧へ
+   * 「競合動向」カテゴリとして混ぜる。無ければカテゴリ自体を出さない。
+   */
+  readonly competitorNews?: readonly CompetitorNewsItem[];
+  /**
    * AI Management Meeting panel接続用（Company Lab 経路。companyIdはfixture.companyIdを使う）。
    * labId・simulationRunId のどちらも無い場合は、AuxiliaryPanelのトグル自体を表示しない
    * （backendへ接続できないため）。
@@ -133,6 +139,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     costProjection,
     openingInfo,
     scenarioNews,
+    competitorNews,
     labId,
     simulationRunId,
     companyName,
@@ -248,6 +255,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               publicInfo={publicInfo}
               openingInfo={openingInfo}
               scenarioNews={scenarioNews}
+              competitorNews={competitorNews}
             />
           )}
           {activeScreen === "sales" && (

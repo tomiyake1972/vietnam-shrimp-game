@@ -31,7 +31,10 @@
 // 経由で組み立てた同じ形のscenarioNewsをそのまま使う。ここでは新しいNews取得・
 // 変換ロジックを作らない。
 
+import { useState } from "react";
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../../../lib/v2/companyLab";
+import type { CompetitorNewsItem } from "../../../../lib/v2/companyLab/competitorNews";
+import { CompetitorNewsFeed } from "./CompetitorNewsFeed";
 import CollapsibleSection from "../CollapsibleSection";
 import OpeningCompanyStatePanel from "../OpeningCompanyStatePanel";
 import { DepreciableAssetsPanel, ObservedMarketDemandPanel, OpeningBalanceSheetPanel, OpeningMarketInfoPanel } from "../OpeningInfoPanels";
@@ -58,15 +61,38 @@ interface InformationScreenProps {
    * openingInfoがある場合はopeningInfo.scenarioNewsを優先し、こちらは無視する。
    */
   readonly scenarioNews?: readonly ScenarioNewsItem[];
+  /** 【PUBLIC-COMPETITOR-2】前Turnの競合ニュース。無ければカテゴリを出さない。 */
+  readonly competitorNews?: readonly CompetitorNewsItem[];
 }
 
-export default function InformationScreen({ fixture, ownState, turn, publicInfo, openingInfo, scenarioNews }: InformationScreenProps) {
+type NewsCategory = "all" | "world" | "competitor";
+
+const NEWS_CATEGORY_LABEL: Readonly<Record<NewsCategory, string>> = {
+  all: "すべて",
+  world: "世界情勢",
+  competitor: "競合動向",
+};
+
+export default function InformationScreen({
+  fixture,
+  ownState,
+  turn,
+  publicInfo,
+  openingInfo,
+  scenarioNews,
+  competitorNews,
+}: InformationScreenProps) {
+  // 【カテゴリ絞り込み】世界情勢と競合動向を同じ場所に置き、どちらを見るか選べるようにする。
+  // 競合ニュースが1本も無いTurnでは選択肢自体を出さない（空のタブを作らない）。
+  const [newsCategory, setNewsCategory] = useState<NewsCategory>("all");
+  const hasCompetitorNews = (competitorNews?.length ?? 0) > 0;
   const tone = AREA_TONES.info;
   // openingInfoがあればその中のBS（同一計算結果）を再利用し、無ければownStateから
   // 直接組み立てる。どちらもbuildOpeningBalanceSheetの結果であり、計算式は1箇所のまま。
   const bs = openingInfo?.balanceSheet ?? buildOpeningBalanceSheet(ownState);
   const bsTurn = openingInfo?.turn ?? turn;
   const news = openingInfo?.scenarioNews ?? scenarioNews;
+  const displayTurn = bsTurn ?? turn;
 
   return (
     <div className="space-y-3" data-testid="decision-studio-info-screen">
@@ -101,7 +127,35 @@ export default function InformationScreen({ fixture, ownState, turn, publicInfo,
       {/* 【Turn Start / INFOタブ上部に常時表示】Dynamic Scenarioでは世界のニュースが
           主要な情報源のため、期初BSのすぐ下・詳細パネル類より前に置く。News一覧は
           「Turn開始時に必ず見せたい概要情報」として今回のdefault collapsed化の対象外。 */}
-      {news !== undefined && bsTurn !== undefined && <ScenarioNewsFeed news={news} turn={bsTurn} />}
+      {/* 【PUBLIC-COMPETITOR-2】世界情勢と競合動向を同じ位置に並べ、カテゴリで絞り込める
+          ようにする。競合ニュースが無いTurnでは絞り込みUI自体を出さない。 */}
+      {hasCompetitorNews ? (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="info-news-category-filter">
+          <span className="text-[11px] text-gray-500">ニュースの種類:</span>
+          {(["all", "world", "competitor"] as const).map((category) => (
+            <button
+              key={category}
+              type="button"
+              onClick={() => setNewsCategory(category)}
+              data-testid={`info-news-category-${category}`}
+              aria-pressed={newsCategory === category}
+              className={`rounded px-2 py-0.5 text-[11px] ${
+                newsCategory === category ? "bg-slate-700 font-semibold text-slate-100" : "text-slate-400 hover:bg-slate-800"
+              }`}
+            >
+              {NEWS_CATEGORY_LABEL[category]}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {hasCompetitorNews && newsCategory !== "world" && displayTurn !== undefined ? (
+        <CompetitorNewsFeed news={competitorNews ?? []} turn={displayTurn} />
+      ) : null}
+
+      {news !== undefined && bsTurn !== undefined && newsCategory !== "competitor" && (
+        <ScenarioNewsFeed news={news} turn={bsTurn} />
+      )}
 
       {/* 【表示調整】詳細な貸借対照表は情報閲覧用パネルのため、既定で折り畳む
           （上のBS一目summaryで主要4項目は常に見えているため、内訳は必要な人だけ

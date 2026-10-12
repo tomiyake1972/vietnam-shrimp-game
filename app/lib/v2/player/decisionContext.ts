@@ -30,6 +30,7 @@ import {
   buildCompanyFactoryCounts,
   buildGameStartCompetitorSnapshot,
   buildPublicCompetitorSnapshot,
+  buildAnnualDividendNewsInput,
   buildCompetitorSignals,
   buildPublicInvestmentAnnouncements,
   PublicCompetitorSnapshot,
@@ -292,6 +293,7 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     displayNameByCompanyId: new Map(session.fixtures.map((f) => [f.companyId, f.displayName])),
     companyId,
     basePriceReferences,
+    turn,
   });
 
   // 【PUBLIC-COMPETITOR-2】競合ニュース。確定記録から決定論的に生成する
@@ -305,6 +307,11 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
           snapshot: competitorSnapshot,
           signals: buildCompetitorSignals(lastRecord, competitorSnapshot, allCompanyIds),
           displayNameByCompanyId: new Map(session.fixtures.map((f) => [f.companyId, f.displayName])),
+          // 【年間配当】Q4 が確定した翌Turnにだけ、別枠で必ず1本出す。
+          ...(() => {
+            const annual = buildAnnualDividendNewsInput(session.state.history, allCompanyIds);
+            return annual ? { annualDividend: annual } : {};
+          })(),
         });
 
   // 【D1 §8】管理者指定配当の年度中参考表示。率の解決はengineと同じresolverを通す。

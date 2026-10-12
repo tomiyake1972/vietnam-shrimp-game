@@ -12,6 +12,7 @@ import { buildResumePayload } from "../../companyLab/simulation/persistence/resu
 import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION } from "../../companyLab/simulation/persistence/types";
 import { buildDatasetFromSession } from "../../companyLab/simulation/analytics/dataset";
 import { buildPlayerDecisionContext, PlayerDecisionContext, PlayerDecisionContextError } from "../decisionContext";
+import { buildPlayerMarketView, TSV_RANKING_VISIBLE_FROM_TURN } from "../workspaceViews";
 import { StoredSimulationRun } from "../../companyLab/simulation/persistence/types";
 
 /**
@@ -278,25 +279,42 @@ test("PS-5【情報境界】: Market の需要は遅行公開値であり、当�
   }
 });
 
-test("PS-6【情報境界】: Market が公開するのはTSVランキングまでで、他社の内部数値は含まない", () => {
+test("PS-6【情報境界】: 市場セルが持ってよいキーは固定されている（他社の内部数値が混入したら落ちる）", () => {
   const context = buildPlayerDecisionContext(buildStoredRunAfterOneTurn("run-ps-6"), "BAL");
-  const rows = context.marketView.tsvRanking;
-  assert.ok(rows.length >= 2, "5社ぶんのランキングが返るはず");
-  assert.equal(rows.filter((r) => r.isOwnCompany).length, 1, "自社の行はちょうど1つであるはず");
-
-  // 各行が持ってよいキーを固定する。現金・利益・原価・在庫などが
-  // 将来うっかり足されたらこのテストが落ちる。
-  const allowed = ["companyId", "displayName", "totalShareholderValueUsd", "isOwnCompany"];
-  for (const row of rows) {
-    assert.deepEqual(Object.keys(row).sort(), [...allowed].sort(), `TSV行のキーが増えている: ${Object.keys(row).join(", ")}`);
-  }
-
-  // 市場セルについても同様に固定する。
   const allowedCellKeys = ["market", "product", "observedDemandTons", "basePriceUsdPerKg", "basePriceSource"];
   for (const cell of context.marketView.cells) {
     for (const key of Object.keys(cell)) {
       assert.ok(allowedCellKeys.includes(key), `市場セルに想定外のキーがある: ${key}`);
     }
+  }
+});
+
+test("PS-6b【情報境界】: TSV を出すTurnでも、行が持つのは会社名と TSV だけ", () => {
+  // TSV の表示開始Turnまで実際に進めるのは重いので、ビューモデルを直接組み立てて
+  // 行の形だけを固定する（情報境界の検査が目的であり、値の正しさは別テスト）。
+  const view = buildPlayerMarketView({
+    publicInfo: { vietnamDomesticPriorPrice: 0 } as never,
+    evaluationSnapshots: [
+      { companyId: "BAL", totalShareholderValueUsd: 100 },
+      { companyId: "MASS", totalShareholderValueUsd: 200 },
+    ] as never,
+    displayNameByCompanyId: new Map([
+      ["BAL", "バランス型水産"],
+      ["MASS", "大量生産水産"],
+    ]),
+    companyId: "BAL",
+    basePriceReferences: undefined,
+    turn: TSV_RANKING_VISIBLE_FROM_TURN,
+  });
+
+  assert.equal(view.tsvRankingHiddenReason, null, "表示開始Turnでは理由を出さない");
+  assert.equal(view.tsvRanking.length, 2);
+  assert.equal(view.tsvRanking[0]?.companyId, "MASS", "TSV降順で並ぶ");
+  assert.equal(view.tsvRanking.filter((r) => r.isOwnCompany).length, 1);
+
+  const allowed = ["companyId", "displayName", "totalShareholderValueUsd", "isOwnCompany"];
+  for (const row of view.tsvRanking) {
+    assert.deepEqual(Object.keys(row).sort(), [...allowed].sort(), `TSV行のキーが増えている: ${Object.keys(row).join(", ")}`);
   }
 });
 
@@ -376,4 +394,20 @@ test("PS-12【情報境界】: 投資発表には承認実額が出ず、公開�
       assert.equal(investment.approximateInvestmentUsd % 1_000_000, 0, "投資額が百万ドル単位に丸められていない");
     }
   }
+});
+
+test("PS-13: TSV ランキングは序盤では出さず、理由を添える", () => {
+  const context = buildPlayerDecisionContext(buildStoredRunAfterOneTurn("run-ps-13"), "BAL");
+  assert.deepEqual(context.marketView.tsvRanking, [], "序盤は行そのものを作らない（画面で隠すだけにしない）");
+  assert.notEqual(context.marketView.tsvRankingHiddenReason, null, "出さない理由を必ず添える");
+  assert.ok(
+    context.marketView.tsvRankingHiddenReason!.includes(String(TSV_RANKING_VISIBLE_FROM_TURN)),
+    "何Turnから出るのかを文言に含める"
+  );
+});
+
+test("PS-14【情報境界】: TSV を出さないTurnでは、他社の評価額がレスポンスに一切含まれない", () => {
+  const context = buildPlayerDecisionContext(buildStoredRunAfterOneTurn("run-ps-14"), "BAL");
+  const serialized = JSON.stringify(context.marketView);
+  assert.ok(!serialized.includes("totalShareholderValueUsd"), "TSV の値がレスポンスに残っている");
 });

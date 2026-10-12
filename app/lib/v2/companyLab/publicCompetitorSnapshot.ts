@@ -580,3 +580,53 @@ export function buildCompetitorSignals(
     };
   });
 }
+
+// ---------------------------------------------------------------------
+// 7. 年間配当（Q4 確定後に別枠で出す記事の材料）
+// ---------------------------------------------------------------------
+
+/**
+ * 直近の確定四半期が Q4 のとき、その年度の年間配当額が最大だった会社を返す。
+ * Q4 でなければ undefined（記事を出さない）。
+ *
+ * 【年度のまとめ方】その年度に属する4四半期ぶんの実際の配当支払額
+ * （appliedDividendUsd）を会社ごとに合計する。Q4 の年間精算だけを見ると、
+ * 期中に四半期配当を出していた会社の支払が落ちてしまう。
+ *
+ * 【公開してよい理由】配当額は株主への分配であり、企業として対外公表される
+ * 情報にあたる。記事側では百万ドル単位の概数に丸めて出す。
+ */
+export function buildAnnualDividendNewsInput(
+  history: readonly CompanyQuarterRecord[],
+  companyIds: readonly CompanyId[]
+): { readonly fiscalYearLabel: string; readonly topCompanyId: CompanyId; readonly topApproximateUsd: number } | undefined {
+  const lastRecord = history[history.length - 1];
+  if (!lastRecord) return undefined;
+
+  const period = String(lastRecord.period);
+  const match = /^(\d{4})Q(\d)$/.exec(period);
+  if (!match || match[2] !== "4") return undefined;
+  const year = match[1];
+
+  // その年度（同じ西暦のQ1〜Q4）の記録だけを集める。
+  const yearRecords = history.filter((r) => String(r.period).startsWith(`${year}Q`));
+
+  let topCompanyId: CompanyId | undefined;
+  let topTotal = 0;
+  for (const companyId of companyIds) {
+    let total = 0;
+    for (const record of yearRecords) {
+      const entry = (record.dividendResults ?? []).find((d) => d.companyId === companyId);
+      const applied = entry?.appliedDividendUsd;
+      if (typeof applied === "number" && Number.isFinite(applied) && applied > 0) total += applied;
+    }
+    if (total > topTotal) {
+      topTotal = total;
+      topCompanyId = companyId;
+    }
+  }
+
+  // 1社も配当していない年度は記事にしない（「最大は0ドル」は情報にならない）。
+  if (topCompanyId === undefined || topTotal <= 0) return undefined;
+  return { fiscalYearLabel: `${year}年度`, topCompanyId, topApproximateUsd: topTotal };
+}

@@ -47,25 +47,31 @@ export default function ProductionLinkageHeader({ vm }: ProductionLinkageHeaderP
           }`}
           data-testid="pl-confirmed-balance"
         >
-          <div className="text-[11px] text-gray-400">Confirmed のみ（養殖の期待収穫を含まない・保守値）</div>
+          <div className="text-[11px] text-gray-400">確定分のみで計算（養殖の期待収穫を含まない・保守的な見方）</div>
           <div className={`mt-0.5 text-sm font-semibold tabular-nums ${vm.isConfirmedShortage ? "text-rose-300" : "text-gray-100"}`}>
+            {/* 【文言】「確定不足量」は不足そのものが確定している意味に読めてしまう。
+                確定しているのは数え方（確定供給だけで数えたこと）であり、不足量ではない。
+                保守的に見た場合の値であることが分かる表現にする。 */}
             {vm.isConfirmedShortage
-              ? `確定不足量: ${formatHosoEqTons(vm.confirmedShortageTons)}`
-              : `Confirmed Surplus: ${formatHosoEqTons(vm.confirmedSurplusTons)}`}
+              ? `保守的に見た不足量: ${formatHosoEqTons(vm.confirmedShortageTons)}`
+              : `保守的に見た余剰量: ${formatHosoEqTons(vm.confirmedSurplusTons)}`}
           </div>
         </div>
         <div
           className={`rounded-lg border px-3 py-2 ${vm.isShortage ? "border-amber-700/60 bg-amber-950/30" : "border-gray-700/60 bg-gray-900/40"}`}
           data-testid="pl-optimistic-balance"
         >
-          <div className="text-[11px] text-gray-400">Including Expected（養殖の期待収穫を含む・楽観値）</div>
+          <div className="text-[11px] text-gray-400">期待収穫を含めて計算（養殖の当期収穫見込みを含む・楽観的な見方）</div>
           <div className={`mt-0.5 text-sm font-semibold tabular-nums ${vm.isShortage ? "text-amber-300" : "text-gray-100"}`}>
-            {vm.isShortage ? `Including Expected Shortage: ${formatHosoEqTons(vm.shortageTons)}` : `Including Expected Surplus: ${formatHosoEqTons(vm.surplusTons)}`}
+            {vm.isShortage
+              ? `期待収穫を含めた不足量: ${formatHosoEqTons(vm.shortageTons)}`
+              : `期待収穫を含めた余剰量: ${formatHosoEqTons(vm.surplusTons)}`}
           </div>
         </div>
       </div>
       <p className="mt-2 text-[11px] text-gray-500">
-        Confirmed（手持ち在庫＋当期到着輸入）と Expected（養殖の当期収穫見込み。疾病圧力等により収穫時に変動しうる）は別の確実性を持つため、混ぜて1つの数値にしていません。
+        確定分（手持ち在庫＋当期到着輸入）と期待収穫（養殖の当期収穫見込み。疾病圧力等により収穫時に変動しうる）は別の確実性を持つため、混ぜて1つの数値にしていません。
+        どちらも「いま分かっている範囲での見通し」であり、不足そのものが確定しているという意味ではありません。
       </p>
     </div>
   );

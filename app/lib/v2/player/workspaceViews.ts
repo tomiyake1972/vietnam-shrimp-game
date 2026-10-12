@@ -120,13 +120,44 @@ export interface PlayerTsvRow {
   readonly isOwnCompany: boolean;
 }
 
+/**
+ * TSV ランキングを受講者へ出し始める Turn。
+ *
+ * 【この値の根拠（実測）】TSV の会社価値は「直近3四半期の平均キャッシュフローを
+ * 年換算し、10年DCFで割り引いた値」である（evaluationSemantics.ts）。序盤は
+ * 立ち上げ途中の数四半期を10年ぶんへ外挿するため、符号ごと大きく振れる。
+ *
+ * baseline / seed=management-console-32q で Turn1〜16 を実測した結果（百万USD）:
+ *
+ *   Turn 1   BAL 260 / MASS -388 / JPQ -302 / VAP -35 / CONSV -646   （5社中4社がマイナス）
+ *   Turn 3   BAL  85 / MASS -217 / JPQ -168 / VAP -72 / CONSV -219   （4社がマイナス）
+ *   Turn 8   BAL 299 / MASS  249 / JPQ  284 / VAP 176 / CONSV  280   （0社）
+ *   Turn 9   BAL 322 / MASS -200 / JPQ  274 / VAP 165 / CONSV  293   （1社が再びマイナス）
+ *   Turn 11  BAL 366 / MASS  -91 / JPQ  277 / VAP 262 / CONSV  317   （1社）
+ *   Turn 12  BAL 311 / MASS   74 / JPQ  291 / VAP 281 / CONSV  290   （0社・以降16まで0社）
+ *
+ * Turn 8 時点ではまだ翌ターンに符号が反転する社があったため、
+ * 全社が安定して非負になった Turn 12 を開始点とした。
+ *
+ * 【限界】1シナリオ・1seedでの実測である。またこの不安定さは序盤固有ではなく、
+ * 途中で3四半期続けてキャッシュフローが落ち込めば中盤以降でも負になりうる。
+ * Turn のしきい値はその最も起きやすい序盤を塞ぐだけで、根本解決ではない。
+ */
+export const TSV_RANKING_VISIBLE_FROM_TURN = 12;
+
 export interface PlayerMarketView {
   /** 公開需要情報が「どのTurnの実績か」。初期情報のときは null。 */
   readonly observedDemandSourceQuarter: number | null;
   /** 観測遅延（四半期）。 */
   readonly observationLagQuarters: number | null;
   readonly cells: readonly PlayerMarketCell[];
+  /**
+   * TSV ランキング。TSV_RANKING_VISIBLE_FROM_TURN より前のTurnでは空配列。
+   * 「まだ出せない」ことは tsvRankingHiddenReason が持つ。
+   */
   readonly tsvRanking: readonly PlayerTsvRow[];
+  /** ランキングを出していない理由（出している間は null）。 */
+  readonly tsvRankingHiddenReason: string | null;
   /** ベトナム国内原料の前期価格（USD/kg）。 */
   readonly vietnamDomesticPriorPrice: number;
   /**
@@ -157,6 +188,8 @@ export function buildPlayerMarketView(input: {
    * をそのまま渡す。ここで価格を計算し直さない。
    */
   readonly basePriceReferences: readonly MarketProductBasePriceReference[] | undefined;
+  /** 現在のTurn。TSV ランキングを出してよいかの判定にだけ使う。 */
+  readonly turn: number;
 }): PlayerMarketView {
   const { publicInfo, evaluationSnapshots, displayNameByCompanyId, companyId } = input;
 
@@ -182,20 +215,31 @@ export function buildPlayerMarketView(input: {
     }
   }
 
-  const tsvRanking: PlayerTsvRow[] = [...evaluationSnapshots]
-    .sort((a, b) => (b.totalShareholderValueUsd ?? -Infinity) - (a.totalShareholderValueUsd ?? -Infinity))
-    .map((s) => ({
-      companyId: s.companyId,
-      displayName: displayNameByCompanyId.get(s.companyId) ?? s.companyId,
-      totalShareholderValueUsd: s.totalShareholderValueUsd,
-      isOwnCompany: s.companyId === companyId,
-    }));
+  // 【序盤はTSVを出さない】根拠は TSV_RANKING_VISIBLE_FROM_TURN のコメント参照。
+  // 出さないTurnでは行そのものを作らない（画面で隠すだけにすると、
+  // APIレスポンスには他社の評価額が載り続けてしまう）。
+  const tsvVisible = input.turn >= TSV_RANKING_VISIBLE_FROM_TURN;
+  const tsvRanking: PlayerTsvRow[] = !tsvVisible
+    ? []
+    : [...evaluationSnapshots]
+        .sort((a, b) => (b.totalShareholderValueUsd ?? -Infinity) - (a.totalShareholderValueUsd ?? -Infinity))
+        .map((s) => ({
+          companyId: s.companyId,
+          displayName: displayNameByCompanyId.get(s.companyId) ?? s.companyId,
+          totalShareholderValueUsd: s.totalShareholderValueUsd,
+          isOwnCompany: s.companyId === companyId,
+        }));
 
   return {
     observedDemandSourceQuarter: observed?.sourceQuarter ?? null,
     observationLagQuarters: observed?.observationLagQuarters ?? null,
     cells,
     tsvRanking,
+    tsvRankingHiddenReason: tsvVisible
+      ? null
+      : `株主価値（TSV）のランキングは Turn ${TSV_RANKING_VISIBLE_FROM_TURN} から表示されます。` +
+        "TSV は直近3四半期のキャッシュフローを10年ぶんへ引き伸ばして算出するため、" +
+        "立ち上げ途中の序盤は会社ごとに大きく振れ、順位として意味を持ちません。",
     vietnamDomesticPriorPrice: publicInfo.vietnamDomesticPriorPrice,
     sourceNote: PLAYER_MARKET_SOURCE_NOTE,
   };

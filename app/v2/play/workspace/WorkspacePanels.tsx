@@ -143,6 +143,12 @@ export function PlayerMarketPanel({ view }: { readonly view: PlayerMarketView })
 
       <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
         <h2 className="mb-1.5 text-sm font-semibold">TSV ランキング（株主価値）</h2>
+        {view.tsvRankingHiddenReason !== null ? (
+          <p className="text-[11px] leading-snug text-slate-400" data-testid="play-tsv-hidden">
+            {view.tsvRankingHiddenReason}
+          </p>
+        ) : (
+        <>
         <table className="w-full text-xs" data-testid="play-tsv-table">
           <thead>
             <tr className="border-b border-slate-700 text-slate-400">
@@ -171,6 +177,8 @@ export function PlayerMarketPanel({ view }: { readonly view: PlayerMarketView })
         <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
           TSV は暫定的な参考指標です。各社の現金・利益・原価などの内部数値は公開されません。
         </p>
+        </>
+        )}
       </section>
     </div>
   );

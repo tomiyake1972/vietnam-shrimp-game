@@ -408,6 +408,7 @@ export default function PlayerWorkspacePage() {
               lastQuarterSalesAllocations={context.lastQuarterSalesAllocations}
               publicInfo={context.publicInfo}
               scenarioNews={scenarioNews}
+              competitorNews={context.competitorNews}
               companyName={context.companyDisplayName}
             />
           ) : null}

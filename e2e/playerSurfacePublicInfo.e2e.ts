@@ -188,6 +188,24 @@ test.describe("受講者画面 — 3タブと公開競合情報", () => {
     ).toBeLessThanOrEqual(1);
   });
 
+  test("PSE-5: 序盤は TSV ランキングを出さず、理由を出す", async () => {
+    await openTab(playerPage, "market");
+    await expect(playerPage.getByTestId("play-tsv-hidden")).toBeVisible();
+    await expect(playerPage.getByTestId("play-tsv-hidden")).toContainText("Turn 12");
+    await expect(playerPage.getByTestId("play-tsv-table")).toHaveCount(0);
+  });
+
+  test("PSE-6: PROCUREMENT の不足量は「確定不足量」と言い切らない表現になっている", async () => {
+    await openTab(playerPage, "decision");
+    await playerPage.getByTestId("decision-studio-tab-procurement").click();
+    const balance = playerPage.getByTestId("pl-confirmed-balance");
+    await expect(balance).toBeVisible();
+    const text = (await balance.innerText()) ?? "";
+    expect(text.includes("確定不足量"), "不足そのものが確定していると読める表現が残っている").toBe(false);
+    expect(/保守的に見た(不足量|余剰量)/.test(text), `期待した表現が無い: ${text}`).toBe(true);
+    await shoot(playerPage, "procurement-shortage-label");
+  });
+
   test("PSE-4【情報境界】: 受講者画面に Analysis リンク・会社切替が無い", async () => {
     const html = await playerPage.content();
     expect(html.includes("/v2/management/analysis"), "受講者画面に Analysis へのリンクがある").toBe(false);
