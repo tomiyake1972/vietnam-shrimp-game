@@ -267,6 +267,10 @@ const CROWDING_CHIP: Readonly<Record<CrowdingBand, string>> = {
 export function PlayerCompetitorPanel({ snapshot }: { readonly snapshot: PublicCompetitorSnapshot }) {
   const markets = [...new Set(snapshot.cells.map((c) => c.market))];
   const cellByKey = new Map(snapshot.cells.map((c) => [`${c.market}|${c.product}`, c]));
+  // 【実機確認で判明】既定の販売モデル（legacy-waterfall-v1）には crowding が
+  // 無いため、全15マスに「混雑度 取得不能」が並んで本来の情報が埋もれていた。
+  // 1マスも混雑度が取れないときは、チップも説明文もまとめて出さない。
+  const hasAnyCrowding = snapshot.cells.some((c) => c.crowding !== null);
 
   return (
     <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="play-competitor">
@@ -307,15 +311,17 @@ export function PlayerCompetitorPanel({ snapshot }: { readonly snapshot: PublicC
                     }
                     return (
                       <td key={product} className="px-1 py-1.5" data-testid={`play-competitor-cell-${market}-${product}`}>
-                        <div className="mb-1">
-                          {cell.crowding === null ? (
-                            <span className="rounded bg-slate-800 px-1 py-0.5 text-[10px] text-slate-500">混雑度 取得不能</span>
-                          ) : (
-                            <span className={`rounded px-1 py-0.5 text-[10px] ${CROWDING_CHIP[cell.crowding]}`}>
-                              {CROWDING_BAND_LABEL[cell.crowding]}
-                            </span>
-                          )}
-                        </div>
+                        {hasAnyCrowding ? (
+                          <div className="mb-1">
+                            {cell.crowding === null ? (
+                              <span className="rounded bg-slate-800 px-1 py-0.5 text-[10px] text-slate-500">混雑度 －</span>
+                            ) : (
+                              <span className={`rounded px-1 py-0.5 text-[10px] ${CROWDING_CHIP[cell.crowding]}`}>
+                                {CROWDING_BAND_LABEL[cell.crowding]}
+                              </span>
+                            )}
+                          </div>
+                        ) : null}
                         <ul className="space-y-0.5">
                           {cell.shares.map((share) => (
                             <li key={share.companyId} className="flex items-center gap-1">
@@ -373,7 +379,9 @@ export function PlayerCompetitorPanel({ snapshot }: { readonly snapshot: PublicC
         シェアは5社の中での割合で、帯（{SHARE_BAND_DOTS.leader} 首位級40%以上／{SHARE_BAND_DOTS.large} 大25%以上／
         {SHARE_BAND_DOTS.medium} 中10%以上／{SHARE_BAND_DOTS.small} 小）に丸めてあります。自社の行だけ正確な割合を併記しています。
         営業人員は10人単位の概数で、市場別の配置は公開されません。
-        混雑度は5社の提示が需要に対してどれだけ集中していたかで、「混雑」のマスは価格が下押しされます。
+        {hasAnyCrowding
+          ? "混雑度は5社の提示が需要に対してどれだけ集中していたかで、「混雑」のマスは価格が下押しされます。"
+          : "この Run の販売モデルでは市場集中による価格下落が働かないため、混雑度は表示していません。"}
       </p>
     </section>
   );
