@@ -8,6 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildAnnualDividendNewsInput,
   buildGameStartCompetitorSnapshot,
   buildPublicCompetitorSnapshot,
   classifyCrowdingBand,
@@ -288,4 +289,68 @@ test("PC-12: 前四半期と比べて帯が上がったマスは up になる", 
   assert.ok(cell);
   assert.equal(entryFor(cell.shares, "BAL").trend, "up");
   assert.equal(entryFor(cell.shares, "MASS").trend, "down");
+});
+
+// ---------------------------------------------------------------------
+// 年間配当（記事の材料の選び方）
+// ---------------------------------------------------------------------
+
+/** 配当だけを持つ最小の四半期記録。 */
+function makeDividendRecord(turn: number, period: string, paid: Readonly<Record<string, number>>): CompanyQuarterRecord {
+  return {
+    turn,
+    period,
+    dividendResults: Object.entries(paid).map(([companyId, appliedDividendUsd]) => ({ companyId, appliedDividendUsd })),
+  } as unknown as CompanyQuarterRecord;
+}
+
+test("AD-1: 直近の確定四半期が Q4 でなければ記事を出さない", () => {
+  const history = [
+    makeDividendRecord(1, "2015Q1", { BAL: 1_000_000 }),
+    makeDividendRecord(2, "2015Q2", { BAL: 1_000_000 }),
+    makeDividendRecord(3, "2015Q3", { BAL: 1_000_000 }),
+  ];
+  assert.equal(buildAnnualDividendNewsInput(history, [...COMPANIES]), undefined);
+});
+
+test("AD-2: Q4 が確定したら、その年度4四半期ぶんの合計が最大の会社を選ぶ", () => {
+  // JPQ は Q4 の一括だけで 5.0M。BAL は期中に分散して合計 6.0M。
+  // Q4 だけを見ると JPQ が最大に見えるが、年度合計では BAL が最大。
+  const history = [
+    makeDividendRecord(1, "2015Q1", { BAL: 2_000_000 }),
+    makeDividendRecord(2, "2015Q2", { BAL: 2_000_000 }),
+    makeDividendRecord(3, "2015Q3", { BAL: 2_000_000 }),
+    makeDividendRecord(4, "2015Q4", { JPQ: 5_000_000 }),
+  ];
+  const result = buildAnnualDividendNewsInput(history, [...COMPANIES]);
+  assert.ok(result, "Q4 確定時は記事の材料が返るはず");
+  assert.equal(result.fiscalYearLabel, "2015年度");
+  assert.equal(result.topCompanyId, "BAL", "年度合計で選ぶ（Q4単発の最大ではない）");
+  assert.equal(result.topApproximateUsd, 6_000_000);
+});
+
+test("AD-3: 前年度の配当は混ぜない（同じ西暦の4四半期だけを数える）", () => {
+  const history = [
+    makeDividendRecord(1, "2015Q1", { MASS: 50_000_000 }),
+    makeDividendRecord(4, "2015Q4", { MASS: 1_000_000 }),
+    makeDividendRecord(5, "2016Q1", { BAL: 3_000_000 }),
+    makeDividendRecord(8, "2016Q4", { BAL: 1_000_000 }),
+  ];
+  const result = buildAnnualDividendNewsInput(history, [...COMPANIES]);
+  assert.ok(result);
+  assert.equal(result.fiscalYearLabel, "2016年度");
+  assert.equal(result.topCompanyId, "BAL");
+  assert.equal(result.topApproximateUsd, 4_000_000, "2015年度の MASS 50M を混ぜてはいけない");
+});
+
+test("AD-4: 1社も配当していない年度は記事にしない（「最大は0ドル」を出さない）", () => {
+  const history = [
+    makeDividendRecord(1, "2015Q1", {}),
+    makeDividendRecord(4, "2015Q4", { BAL: 0, MASS: 0 }),
+  ];
+  assert.equal(buildAnnualDividendNewsInput(history, [...COMPANIES]), undefined);
+});
+
+test("AD-5: 記録がまだ1件も無ければ記事を出さない", () => {
+  assert.equal(buildAnnualDividendNewsInput([], [...COMPANIES]), undefined);
 });

@@ -206,6 +206,47 @@ test.describe("受講者画面 — 3タブと公開競合情報", () => {
     await shoot(playerPage, "procurement-shortage-label");
   });
 
+  test("PSE-7: Turn 4（2015Q4）が確定すると、年間配当ニュースが別枠で出る", async () => {
+    // 現在 Turn 2。Turn 5 の画面で「Turn 4 までの結果」が見えるので、3回進める。
+    for (let i = 0; i < 3; i++) {
+      await openTab(playerPage, "decision");
+      await submitIndependentPlayerDecision(playerPage);
+      await expect(playerPage.getByTestId("play-waiting-for-gm")).toBeVisible();
+      await gmPage.getByTestId("run-1").click();
+      await expect(gmPage.getByTestId("run-1")).toBeEnabled({ timeout: 60_000 });
+      await playerPage.reload();
+      await expect(playerPage.getByTestId("play-workspace-status")).toHaveAttribute("data-status", "TURN_ACTIVE", {
+        timeout: 30_000,
+      });
+    }
+
+    // Turn 5 に居ること（＝直近の確定四半期が Turn 4 = 2015Q4）。
+    await expect(playerPage.locator("body")).toContainText("Turn 5");
+
+    // Market タブの競合動向に年間配当の記事が出る。
+    await openTab(playerPage, "market");
+    const newsPanel = playerPage.getByTestId("play-competitor-news");
+    await expect(newsPanel).toBeVisible();
+    await expect(newsPanel).toContainText("2015年度");
+    await expect(newsPanel).toContainText("年間配当");
+    await shoot(playerPage, "turn5-annual-dividend-news");
+
+    // INFO タブのニュース一覧にも「競合動向」カテゴリとして出る。
+    await openTab(playerPage, "decision");
+    await playerPage.getByTestId("decision-studio-tab-info").click();
+    await expect(playerPage.getByTestId("info-news-category-filter")).toBeVisible();
+    await expect(playerPage.getByTestId("decision-studio-competitor-news")).toContainText("2015年度");
+    await shoot(playerPage, "turn5-info-news-all");
+
+    // 「世界情勢」だけに絞ると競合動向は消え、「競合動向」だけに絞ると世界情勢が消える。
+    await playerPage.getByTestId("info-news-category-world").click();
+    await expect(playerPage.getByTestId("decision-studio-competitor-news")).toHaveCount(0);
+    await playerPage.getByTestId("info-news-category-competitor").click();
+    await expect(playerPage.getByTestId("decision-studio-competitor-news")).toBeVisible();
+    await expect(playerPage.getByTestId("decision-studio-scenario-news")).toHaveCount(0);
+    await shoot(playerPage, "turn5-info-news-competitor-only");
+  });
+
   test("PSE-4【情報境界】: 受講者画面に Analysis リンク・会社切替が無い", async () => {
     const html = await playerPage.content();
     expect(html.includes("/v2/management/analysis"), "受講者画面に Analysis へのリンクがある").toBe(false);
