@@ -411,3 +411,62 @@ test("PS-14【情報境界】: TSV を出さないTurnでは、他社の評価�
   const serialized = JSON.stringify(context.marketView);
   assert.ok(!serialized.includes("totalShareholderValueUsd"), "TSV の値がレスポンスに残っている");
 });
+
+test("PS-15: Turnを進めると公開情報が凍結され、保存→復元しても同じ内容で返る", () => {
+  const stored = buildStoredRunAfterOneTurn("run-ps-15");
+  const frozen = stored.resumePayload?.publicCompetitorTurns ?? [];
+  assert.equal(frozen.length, 1, "1Turn進めたら1件凍結されるはず");
+  assert.equal(frozen[0]?.viewedAtTurn, 2, "Turn 1 の結果は Turn 2 の画面で見る");
+  assert.equal(frozen[0]?.snapshot.sourceTurn, 1);
+
+  const context = buildPlayerDecisionContext(stored, "BAL");
+  assert.equal(context.competitorSnapshot.sourceTurn, 1);
+  assert.deepEqual(context.competitorNews, frozen[0]?.news, "保存した記事がそのまま返るはず");
+});
+
+test("PS-16【凍結の意味】: 凍結済みが使われ、確定記録からの再構築に差し替わらない", () => {
+  const stored = buildStoredRunAfterOneTurn("run-ps-16");
+  const frozen = stored.resumePayload!.publicCompetitorTurns!;
+
+  // 保存済みの帯を人為的に書き換える。再構築していたらこの変更は無視され、
+  // 凍結済みを読んでいれば書き換えた値がそのまま出る。
+  const tampered: typeof stored = {
+    ...stored,
+    resumePayload: {
+      ...stored.resumePayload!,
+      publicCompetitorTurns: [
+        {
+          ...frozen[0]!,
+          snapshot: {
+            ...frozen[0]!.snapshot,
+            salesForce: frozen[0]!.snapshot.salesForce.map((entry) => ({ ...entry, approximateHeadcount: 999 })),
+          },
+        },
+      ],
+    },
+  };
+
+  const context = buildPlayerDecisionContext(tampered, "BAL");
+  assert.ok(
+    context.competitorSnapshot.salesForce.every((e) => e.approximateHeadcount === 999),
+    "凍結済みではなく確定記録から作り直している（パラメータを変えると過去Turnの表示も変わってしまう）"
+  );
+});
+
+test("PS-17【後方互換】: 凍結済みが無い古いRunでも、確定記録から組み立てて表示できる", () => {
+  const stored = buildStoredRunAfterOneTurn("run-ps-17");
+  const withoutFrozen: typeof stored = {
+    ...stored,
+    resumePayload: { ...stored.resumePayload!, publicCompetitorTurns: undefined },
+  };
+
+  const context = buildPlayerDecisionContext(withoutFrozen, "BAL");
+  assert.equal(context.competitorSnapshot.source, "LAST_QUARTER_RESULT");
+  assert.ok(context.competitorSnapshot.cells.length > 0, "再構築のフォールバックが働いていない");
+  // 他社の正確なシェアが混ざらないことはフォールバック経路でも保たれる。
+  for (const cell of context.competitorSnapshot.cells) {
+    for (const share of cell.shares.filter((s) => s.companyId !== "BAL")) {
+      assert.ok(!("exactShare" in share), `フォールバック経路で他社の exactShare が漏れている: ${share.companyId}`);
+    }
+  }
+});

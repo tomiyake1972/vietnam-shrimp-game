@@ -225,6 +225,10 @@ export function buildResumePayload(
     // 設定スケジュール自体は state.config.manualBalanceOverrides として
     // trimmedState 経由で往復するため、ここで重複して保存しない。
     ...(session.manualBalanceApplied !== undefined ? { manualBalanceApplied: session.manualBalanceApplied } : {}),
+    // 【PUBLIC-COMPETITOR-4】受講者が実際に見た公開情報とニュースを凍結する。
+    // evaluationHistory と同じ理由で間引かない（state.history は rolling window の
+    // ため、過去Turnの公開情報をそこから復元できない）。
+    ...(session.publicCompetitorTurns !== undefined ? { publicCompetitorTurns: session.publicCompetitorTurns } : {}),
   };
 }
 
@@ -392,5 +396,10 @@ export function restoreSessionFromResumePayload(
     // 存在しないため undefined のままにする（0や100で埋めない）。画面はundefinedを
     // 「不明」として扱い、「そのTurnは手動補正なしだった」と言い切らない。
     manualBalanceApplied: resumePayload.manualBalanceApplied,
+    // 【PUBLIC-COMPETITOR-4】凍結済みの公開情報を復元する。この機能より前に保存された
+    // Run には存在しないため undefined のままにする（空配列で埋めない）。undefined は
+    // 「保存されていない」であって「そのTurnに公開情報が無かった」ではないため、
+    // 読み出し側は確定記録からの再構築へフォールバックする。
+    publicCompetitorTurns: resumePayload.publicCompetitorTurns,
   };
 }

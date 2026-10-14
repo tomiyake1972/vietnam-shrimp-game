@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 import {
   buildAnnualDividendNewsInput,
   buildGameStartCompetitorSnapshot,
+  buildPersistedPublicTurnSnapshot,
+  projectPublicSnapshotForViewer,
   buildPublicCompetitorSnapshot,
   classifyCrowdingBand,
   classifyShareBand,
@@ -353,4 +355,98 @@ test("AD-4: 1社も配当していない年度は記事にしない（「最大�
 
 test("AD-5: 記録がまだ1件も無ければ記事を出さない", () => {
   assert.equal(buildAnnualDividendNewsInput([], [...COMPANIES]), undefined);
+});
+
+// ---------------------------------------------------------------------
+// 保存と射影（PUBLIC-COMPETITOR-4）
+// ---------------------------------------------------------------------
+
+test("PP-1: 保存用スナップショットは会社に依らず、全社の正確なシェアを持つ", () => {
+  const persisted = buildPersistedPublicTurnSnapshot({
+    record: makeRecord({ turn: 2, cells: [["US", "pd", [["BAL", 300], ["MASS", 700]]]] }),
+    previousRecord: null,
+    companyIds: [...COMPANIES],
+    salesForceHeadcountByCompanyId: HEADCOUNTS,
+    investments: [],
+    factoryCounts: [],
+  });
+  const cell = persisted.cells[0];
+  assert.ok(cell);
+  for (const share of cell.shares) {
+    assert.equal(typeof share.exactShare, "number", `${share.companyId} の正確なシェアが保存されていない`);
+  }
+  assert.ok(Math.abs(cell.shares.find((s) => s.companyId === "BAL")!.exactShare - 0.3) < 1e-9);
+  assert.ok(Math.abs(cell.shares.find((s) => s.companyId === "MASS")!.exactShare - 0.7) < 1e-9);
+});
+
+test("PP-2【情報境界】: 射影すると自社以外の exactShare はキーごと消える", () => {
+  const persisted = buildPersistedPublicTurnSnapshot({
+    record: makeRecord({ turn: 2, cells: [["US", "pd", [["BAL", 274], ["MASS", 726]]]] }),
+    previousRecord: null,
+    companyIds: [...COMPANIES],
+    salesForceHeadcountByCompanyId: HEADCOUNTS,
+    investments: [],
+    factoryCounts: [],
+  });
+
+  const projected = projectPublicSnapshotForViewer(persisted, "BAL");
+  const cell = projected.cells[0];
+  assert.ok(cell);
+
+  const own = cell.shares.find((s) => s.companyId === "BAL");
+  assert.ok(own?.exactShare !== undefined, "自社の正確なシェアは残るはず");
+  for (const other of cell.shares.filter((s) => s.companyId !== "BAL")) {
+    assert.ok(!("exactShare" in other), `他社 ${other.companyId} に exactShare のキーが残っている`);
+  }
+  assert.ok(!JSON.stringify(projected).includes("726"), "他社の正確なシェアが射影後にも現れている");
+});
+
+test("PP-3: 射影は閲覧者ごとに自社だけが変わり、帯・混雑度・営業人員は同じ", () => {
+  const persisted = buildPersistedPublicTurnSnapshot({
+    record: makeRecord({
+      turn: 2,
+      cells: [["US", "pd", [["BAL", 300], ["MASS", 700]]]],
+      crowdingRatioByCell: { "US|pd": 1.3 },
+    }),
+    previousRecord: null,
+    companyIds: [...COMPANIES],
+    salesForceHeadcountByCompanyId: HEADCOUNTS,
+    investments: [],
+    factoryCounts: [],
+  });
+
+  const forBal = projectPublicSnapshotForViewer(persisted, "BAL");
+  const forMass = projectPublicSnapshotForViewer(persisted, "MASS");
+
+  assert.deepEqual(forBal.salesForce, forMass.salesForce, "営業人員は閲覧者で変わらない");
+  assert.equal(forBal.cells[0]?.crowding, forMass.cells[0]?.crowding, "混雑度は閲覧者で変わらない");
+  assert.deepEqual(
+    forBal.cells[0]?.shares.map((s) => [s.companyId, s.band, s.trend]),
+    forMass.cells[0]?.shares.map((s) => [s.companyId, s.band, s.trend]),
+    "帯と↑↓は閲覧者で変わらない"
+  );
+  assert.ok(forBal.cells[0]?.shares.find((s) => s.companyId === "BAL")?.exactShare !== undefined);
+  assert.ok(forMass.cells[0]?.shares.find((s) => s.companyId === "MASS")?.exactShare !== undefined);
+  assert.ok(forBal.cells[0]?.shares.find((s) => s.companyId === "MASS")?.exactShare === undefined);
+});
+
+test("PP-4: 射影した結果は、その場で組み立てた場合と同じ内容になる", () => {
+  const record = makeRecord({
+    turn: 2,
+    cells: [["US", "pd", [["BAL", 300], ["MASS", 700]]]],
+    crowdingRatioByCell: { "US|pd": 1.3 },
+    hires: { BAL: 20 },
+  });
+  const common = {
+    record,
+    previousRecord: null,
+    companyIds: [...COMPANIES],
+    salesForceHeadcountByCompanyId: HEADCOUNTS,
+  };
+  const direct = buildPublicCompetitorSnapshot({ ...common, ownCompanyId: "BAL" });
+  const viaPersisted = projectPublicSnapshotForViewer(
+    buildPersistedPublicTurnSnapshot({ ...common, investments: [], factoryCounts: [] }),
+    "BAL"
+  );
+  assert.deepEqual(viaPersisted, direct, "保存経由と直接組み立てで内容が食い違ってはいけない");
 });

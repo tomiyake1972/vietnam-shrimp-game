@@ -239,6 +239,18 @@ export function crowdingRatioByCell(record: CompanyQuarterRecord | null): Map<st
   return result;
 }
 
+/** 1マスぶんの会社別シェア（0〜1）。合計が0のマスは空を返す（0で埋めない）。 */
+function sharesForCell(table: QuantityTable, key: string): Map<CompanyId, number> {
+  const row = table.get(key);
+  const result = new Map<CompanyId, number>();
+  if (!row) return result;
+  let total = 0;
+  for (const value of row.values()) total += value;
+  if (total <= 0) return result;
+  for (const [companyId, value] of row) result.set(companyId, value / total);
+  return result;
+}
+
 function buildCells(input: {
   readonly current: QuantityTable;
   readonly previous: QuantityTable | null;
@@ -248,22 +260,11 @@ function buildCells(input: {
 }): readonly CompetitorMarketCell[] {
   const { current, previous, crowding, companyIds, ownCompanyId } = input;
 
-  function sharesFor(table: QuantityTable, key: string): Map<CompanyId, number> {
-    const row = table.get(key);
-    const result = new Map<CompanyId, number>();
-    if (!row) return result;
-    let total = 0;
-    for (const value of row.values()) total += value;
-    if (total <= 0) return result;
-    for (const [companyId, value] of row) result.set(companyId, value / total);
-    return result;
-  }
-
   const cells: CompetitorMarketCell[] = [];
   for (const key of [...current.keys()].sort()) {
     const [market, product] = key.split("|") as [DemandMarketId, Product];
-    const currentShares = sharesFor(current, key);
-    const previousShares = previous ? sharesFor(previous, key) : null;
+    const currentShares = sharesForCell(current, key);
+    const previousShares = previous ? sharesForCell(previous, key) : null;
 
     const shares: CompetitorShareEntry[] = companyIds.map((companyId) => {
       const share = currentShares.get(companyId) ?? 0;
@@ -629,4 +630,126 @@ export function buildAnnualDividendNewsInput(
   // 1社も配当していない年度は記事にしない（「最大は0ドル」は情報にならない）。
   if (topCompanyId === undefined || topTotal <= 0) return undefined;
   return { fiscalYearLabel: `${year}年度`, topCompanyId, topApproximateUsd: topTotal };
+}
+
+// ---------------------------------------------------------------------
+// 8. ターン単位の保存（PUBLIC-COMPETITOR-4）
+// ---------------------------------------------------------------------
+
+/**
+ * 保存用の公開情報スナップショット（会社に依らない正本）。
+ *
+ * 【なぜ保存するのか】これまでは表示のたびに確定記録から決定論的に再構築して
+ * いた。同じコードで同じ記録を読む限り結果は同じだが、帯のしきい値・混雑度の
+ * 区分・噂の外れ率・記事テンプレートはいずれも今後の調整対象である。
+ * 再構築方式のままだと、パラメータを変えた瞬間に**過去のターンで受講者が
+ * 実際に見た内容まで遡って変わってしまう**。研修の記録としても、リプレイの
+ * 再現性としても望ましくないため、確定時点の内容をそのまま凍結する。
+ *
+ * 【会社に依らない形で持つ理由】シェア帯・混雑度・営業人員・投資発表・
+ * ニュースはどれも全社共通で、閲覧者によって変わるのは「自社の行にだけ
+ * 正確なシェアを出す」ところだけである。5社ぶん別々に保存せず、正本を1つ
+ * 持って閲覧時に射影する（projectPublicSnapshotForViewer）。
+ *
+ * 【保存物には全社の正確なシェアが入る】これはサーバー側だけで保持する値で
+ * あり、プレイヤーへ返す前に必ず射影を通して他社ぶんを落とす。射影は1箇所
+ * だけにして、そこをテストで固定する。
+ */
+export interface PersistedPublicTurnSnapshotCell {
+  readonly market: DemandMarketId;
+  readonly product: Product;
+  readonly crowding: CrowdingBand | null;
+  readonly shares: readonly {
+    readonly companyId: CompanyId;
+    readonly band: ShareBand;
+    readonly trend: ShareBandTrend | null;
+    /** 正確なシェア（0〜1）。**サーバー側専用**。射影で自社ぶん以外を落とす。 */
+    readonly exactShare: number;
+  }[];
+}
+
+export interface PersistedPublicTurnSnapshot {
+  /** この内容が「どのTurnの結果か」。 */
+  readonly sourceTurn: number;
+  readonly source: PublicCompetitorSnapshot["source"];
+  readonly cells: readonly PersistedPublicTurnSnapshotCell[];
+  readonly salesForce: readonly CompetitorSalesForceEntry[];
+  readonly investments: readonly PublicInvestmentAnnouncement[];
+  readonly factoryCounts: readonly CompanyFactoryCount[];
+}
+
+/**
+ * 会社に依らない保存用スナップショットを作る。
+ *
+ * 実装は buildPublicCompetitorSnapshot と同じ組み立てを使い、
+ * ownCompanyId には「どの会社にも一致しない値」を渡さず、全社ぶんの
+ * 正確なシェアを残す点だけが異なる。
+ */
+export function buildPersistedPublicTurnSnapshot(input: {
+  readonly record: CompanyQuarterRecord;
+  readonly previousRecord: CompanyQuarterRecord | null;
+  readonly companyIds: readonly CompanyId[];
+  readonly salesForceHeadcountByCompanyId: ReadonlyMap<CompanyId, number>;
+  readonly investments: readonly PublicInvestmentAnnouncement[];
+  readonly factoryCounts: readonly CompanyFactoryCount[];
+}): PersistedPublicTurnSnapshot {
+  const current = quantityTableFromRecord(input.record);
+  const previous = input.previousRecord ? quantityTableFromRecord(input.previousRecord) : null;
+  const crowding = crowdingRatioByCell(input.record);
+
+  const cells: PersistedPublicTurnSnapshotCell[] = [];
+  for (const key of [...current.keys()].sort()) {
+    const [market, product] = key.split("|") as [DemandMarketId, Product];
+    const currentShares = sharesForCell(current, key);
+    const previousShares = previous ? sharesForCell(previous, key) : null;
+    const ratio = crowding.get(key);
+    cells.push({
+      market,
+      product,
+      crowding: ratio === undefined ? null : classifyCrowdingBand(ratio),
+      shares: input.companyIds.map((companyId) => {
+        const share = currentShares.get(companyId) ?? 0;
+        const band = classifyShareBand(share);
+        const previousBand = previousShares ? classifyShareBand(previousShares.get(companyId) ?? 0) : null;
+        return { companyId, band, trend: compareShareBand(band, previousBand), exactShare: share };
+      }),
+    });
+  }
+
+  return {
+    sourceTurn: input.record.turn,
+    source: "LAST_QUARTER_RESULT",
+    cells,
+    salesForce: buildSalesForce(input.record, input.companyIds, input.salesForceHeadcountByCompanyId),
+    investments: input.investments,
+    factoryCounts: input.factoryCounts,
+  };
+}
+
+/**
+ * 保存済みスナップショットを、ある会社の画面へ返してよい形へ射影する。
+ *
+ * **他社の行からは exactShare のキー自体を落とす**（undefined を入れるのではなく
+ * キーを作らない）。ここが情報境界の唯一の実施点であり、テストで固定する。
+ */
+export function projectPublicSnapshotForViewer(
+  persisted: PersistedPublicTurnSnapshot,
+  ownCompanyId: CompanyId
+): PublicCompetitorSnapshot {
+  return {
+    sourceTurn: persisted.sourceTurn,
+    source: persisted.source,
+    cells: persisted.cells.map((cell) => ({
+      market: cell.market,
+      product: cell.product,
+      crowding: cell.crowding,
+      shares: cell.shares.map((share) => {
+        const base: CompetitorShareEntry = { companyId: share.companyId, band: share.band, trend: share.trend };
+        return share.companyId === ownCompanyId ? { ...base, exactShare: share.exactShare } : base;
+      }),
+    })),
+    salesForce: persisted.salesForce,
+    investments: persisted.investments,
+    factoryCounts: persisted.factoryCounts,
+  };
 }

@@ -15,6 +15,8 @@ import type { CompanyLabRuntimeSnapshot } from "../persistence/types";
 import type { SimulationAnalyticsDataset } from "./analytics/types";
 import type { CompanyEvaluationSnapshot } from "../evaluation/evaluationSemantics";
 import type { EvaluationHistoryRecord } from "../evaluation/evaluationHistory";
+import type { PersistedPublicTurnSnapshot } from "../publicCompetitorSnapshot";
+import type { CompetitorNewsItem } from "../competitorNews";
 import type { ManualBalanceAppliedRecord } from "../manualBalance/application";
 import type { AppliedBalanceProfileRef } from "../manualBalance/profile";
 import type { CalculationCommitHistory } from "./calculationCommit";
@@ -150,6 +152,14 @@ export interface SimulationRun {
 }
 
 /** 実行中のセッション（状態 + fixtures + run メタデータ）。 */
+/** 【PUBLIC-COMPETITOR-4】1Turnぶんの公開情報と、そのTurnに流した競合ニュース。 */
+export interface PersistedPublicCompetitorTurn {
+  /** この公開情報を見ることになるTurn（＝snapshot.sourceTurn + 1）。 */
+  readonly viewedAtTurn: number;
+  readonly snapshot: PersistedPublicTurnSnapshot;
+  readonly news: readonly CompetitorNewsItem[];
+}
+
 export interface SimulationSession {
   readonly run: SimulationRun;
   readonly state: CompanyLabState;
@@ -230,6 +240,19 @@ export interface SimulationSession {
    * その場合は従来どおり state.history へフォールバックする（挙動不変）。
    */
   readonly evaluationHistory?: readonly EvaluationHistoryRecord[];
+  /**
+   * 【PUBLIC-COMPETITOR-4】Turnごとの公開競合情報スナップショットと競合ニュース。
+   * evaluationHistory とまったく同じ理由で、resumePayload の rolling window とは
+   * 別に Turn1 から積み上げる（state.history は間引かれるため、過去Turnの
+   * 公開情報をそこから復元できない）。
+   *
+   * 保存する理由は「受講者が実際に見た内容を凍結する」こと。帯のしきい値・
+   * 噂の外れ率・記事テンプレートは今後の調整対象であり、再構築方式のままだと
+   * パラメータを変えた瞬間に過去のターンの表示内容まで遡って変わってしまう。
+   *
+   * この機能より前に作られた session には存在しないためオプショナル。
+   */
+  readonly publicCompetitorTurns?: readonly PersistedPublicCompetitorTurn[];
   /**
    * 【MANUAL-BALANCE-1】各Turnに実際に適用された手動バランス調整の記録
    * （補正前後の価格・適用指数・配当性向・監査警告）。

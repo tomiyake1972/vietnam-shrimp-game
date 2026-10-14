@@ -24,7 +24,7 @@
 // （どちらも記録に残らず消えてしまう値）に限る。
 
 import { SimulationAnalyticsDataset } from "../analytics/types";
-import { CapacitySnapshot, CompanyControlMode, PackCompanyTurnCapture, SimulationRun } from "../types";
+import { CapacitySnapshot, CompanyControlMode, PackCompanyTurnCapture, PersistedPublicCompetitorTurn, SimulationRun } from "../types";
 import { PackWorldTurn } from "../aiPack/types";
 import { CompanyDecisionInput, CompanyFixture, CompanyLabState } from "../../types";
 import { SimulationAiTurnTrace } from "../analytics/aiTrace";
@@ -267,6 +267,12 @@ export interface SimulationResumePayload {
    * 「不明」として扱う。
    */
   readonly manualBalanceApplied?: readonly ManualBalanceAppliedRecord[];
+  /**
+   * 【PUBLIC-COMPETITOR-4】Turnごとの公開競合情報と競合ニュース。
+   * evaluationHistory と同じく間引かない。この機能より前に保存された
+   * データには存在しないためオプショナル（schemaVersion は上げない）。
+   */
+  readonly publicCompetitorTurns?: readonly PersistedPublicCompetitorTurn[];
 }
 
 /**

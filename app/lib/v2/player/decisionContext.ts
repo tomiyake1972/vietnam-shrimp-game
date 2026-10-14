@@ -33,6 +33,7 @@ import {
   buildAnnualDividendNewsInput,
   buildCompetitorSignals,
   buildPublicInvestmentAnnouncements,
+  projectPublicSnapshotForViewer,
   PublicCompetitorSnapshot,
 } from "../companyLab/publicCompetitorSnapshot";
 import { buildCompetitorNews, CompetitorNewsItem } from "../companyLab/competitorNews";
@@ -259,30 +260,41 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     ),
     companyIds: allCompanyIds,
   });
+  // 【PUBLIC-COMPETITOR-4】凍結済みの公開情報があればそれを使う。
+  // 保存されていない場合（この機能より前に作られた Run）だけ、確定記録から
+  // 再構築する。再構築は「同じコードで同じ記録を読む限り同じ結果」であって、
+  // パラメータを変えれば過去Turnの内容も変わる。凍結済みを優先するのはそのため。
+  const frozenTurn = (session.publicCompetitorTurns ?? []).find((t) => t.viewedAtTurn === turn);
+
   const competitorSnapshot =
-    lastRecord !== null
-      ? buildPublicCompetitorSnapshot({
-          record: lastRecord,
-          previousRecord,
-          companyIds: allCompanyIds,
-          ownCompanyId: companyId,
-          salesForceHeadcountByCompanyId,
-          investments: buildPublicInvestmentAnnouncements({
+    frozenTurn !== undefined
+      ? projectPublicSnapshotForViewer(frozenTurn.snapshot, companyId)
+      : lastRecord !== null
+        ? buildPublicCompetitorSnapshot({
             record: lastRecord,
-            templatesByType: CAPEX_PARAMETERS_V1.templatesByType,
-          }),
-          factoryCounts,
-        })
-      : buildGameStartCompetitorSnapshot({
-          factoryCounts,
-          contracts: session.state.contracts,
-          companyIds: allCompanyIds,
-          ownCompanyId: companyId,
-          salesForceHeadcountByCompanyId:
-            salesForceHeadcountByCompanyId.size > 0
-              ? salesForceHeadcountByCompanyId
-              : new Map(session.fixtures.map((f) => [f.companyId, f.salesForceHeadcountTotal])),
-        });
+            previousRecord,
+            companyIds: allCompanyIds,
+            ownCompanyId: companyId,
+            salesForceHeadcountByCompanyId,
+            investments: buildPublicInvestmentAnnouncements({
+              record: lastRecord,
+              templatesByType: CAPEX_PARAMETERS_V1.templatesByType,
+            }),
+            factoryCounts,
+          })
+        : buildGameStartCompetitorSnapshot({
+            factoryCounts,
+            contracts: session.state.contracts,
+            companyIds: allCompanyIds,
+            ownCompanyId: companyId,
+            salesForceHeadcountByCompanyId:
+              salesForceHeadcountByCompanyId.size > 0
+                ? salesForceHeadcountByCompanyId
+                : new Map(session.fixtures.map((f) => [f.companyId, f.salesForceHeadcountTotal])),
+          });
+
+  // 【PUBLIC-COMPETITOR-2】競合ニュース。確定記録から決定論的に生成する
+  // （LLM も Math.random() も使わない。同じ Run を再表示しても内容が変わらない）。
   const marketView = buildPlayerMarketView({
     publicInfo,
     evaluationSnapshots: computeAllCompaniesEvaluationSnapshot(
@@ -296,23 +308,22 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     turn,
   });
 
-  // 【PUBLIC-COMPETITOR-2】競合ニュース。確定記録から決定論的に生成する
-  // （LLM も Math.random() も使わない。同じ Run を再表示しても内容が変わらない）。
   const competitorNews =
-    lastRecord === null
-      ? []
-      : buildCompetitorNews({
-          runId: stored.run.simulationRunId,
-          turn,
-          snapshot: competitorSnapshot,
-          signals: buildCompetitorSignals(lastRecord, competitorSnapshot, allCompanyIds),
-          displayNameByCompanyId: new Map(session.fixtures.map((f) => [f.companyId, f.displayName])),
-          // 【年間配当】Q4 が確定した翌Turnにだけ、別枠で必ず1本出す。
-          ...(() => {
-            const annual = buildAnnualDividendNewsInput(session.state.history, allCompanyIds);
-            return annual ? { annualDividend: annual } : {};
-          })(),
-        });
+    frozenTurn !== undefined
+      ? frozenTurn.news
+      : lastRecord === null
+        ? []
+        : buildCompetitorNews({
+            runId: stored.run.simulationRunId,
+            turn,
+            snapshot: competitorSnapshot,
+            signals: buildCompetitorSignals(lastRecord, competitorSnapshot, allCompanyIds),
+            displayNameByCompanyId: new Map(session.fixtures.map((f) => [f.companyId, f.displayName])),
+            ...(() => {
+              const annual = buildAnnualDividendNewsInput(session.state.history, allCompanyIds);
+              return annual ? { annualDividend: annual } : {};
+            })(),
+          });
 
   // 【D1 §8】管理者指定配当の年度中参考表示。率の解決はengineと同じresolverを通す。
   const annualDividendGuidance = buildAnnualDividendGuidanceView({

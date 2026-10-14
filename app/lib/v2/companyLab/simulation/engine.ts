@@ -80,6 +80,7 @@ import {
 } from "./aiPack/capture";
 import type { ObservedDemandSnapshot } from "./analytics/dataset";
 import { mergeEvaluationHistory, toEvaluationHistoryRecord } from "../evaluation/evaluationHistory";
+import { buildPublicCompetitorTurn } from "../publicCompetitorTurn";
 import type { PublicMarketInfo } from "../types";
 
 /** ゲームパラメータの版（再現性の記録用。複数モジュールの版を連結する）。 */
@@ -685,6 +686,19 @@ export function advanceSimulationTurn(
         // 【MANUAL-BALANCE-1】このTurnに実際に適用された手動設定と、補正前後の価格を
         // 記録する。値はすべて確定済みのmarketResultから読み出すだけで、再計算しない
         // （画面に出す値とEngineが使った値が食い違わないようにするため）。
+        // 【PUBLIC-COMPETITOR-4】このTurnで確定した公開情報と、そこから生成した
+        // 競合ニュースを凍結する。表示のたびに作り直すと、しきい値や記事テンプレートを
+        // 調整した瞬間に過去Turnの表示内容まで遡って変わってしまうため。
+        publicCompetitorTurns: finalizedRecord
+          ? [
+              ...(session.publicCompetitorTurns ?? []),
+              buildPublicCompetitorTurn({
+                session,
+                record: finalizedRecord,
+                previousRecord: session.state.history[session.state.history.length - 1] ?? null,
+              }),
+            ]
+          : session.publicCompetitorTurns,
         manualBalanceApplied: finalizedRecord
           ? [
               ...(session.manualBalanceApplied ?? []),
