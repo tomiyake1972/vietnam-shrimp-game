@@ -17,7 +17,6 @@
 // （#04/#05/#06への引渡事項として最終報告で明記する）。
 
 import { useCallback, useRef, useState } from "react";
-import Link from "next/link";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
 import { CompanyDecisionDraft, validateDecisionDraftNumbers } from "../../company-lab/decisionDraft";
 import { buildDecisionSummary } from "../../company-lab/decisionSummary";
@@ -480,9 +479,13 @@ function ErrorScreen({ message, detail }: { readonly message: string; readonly d
           {message}
         </h1>
         <p className="text-sm leading-relaxed text-slate-200">{detail}</p>
-        <Link href="/" className="inline-block text-xs text-sky-300 underline underline-offset-2">
-          トップへ戻る
-        </Link>
+        {/* 【PLAYER-SURFACE-2】受講者の画面から「/」へは送らない。
+            「/」は V1 のゲームコード入力画面であり、しかも
+            「GMコンソール（ゲームマスター専用）→」へのリンクを出している。
+            受講者を管理者向けの入口へ案内してしまうため、導線を置かない。 */}
+        <p className="text-xs text-slate-400">
+          この画面から先へは進めません。GM（進行役）に状況を伝えて、参加リンクの再発行を依頼してください。
+        </p>
       </div>
     </div>
   );

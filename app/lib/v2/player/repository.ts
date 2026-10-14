@@ -137,9 +137,22 @@ export function createInMemoryPlayerRepository(): PlayerRepository {
     if (!seat || seat.currentJoinSecretHash !== hash) {
       throw new PlayerAuthError("この参加リンクは失効しています（GMが新しいリンクを発行した可能性があります）。", "JOIN_REVOKED");
     }
-    if (claimLocks.has(key)) {
-      throw new PlayerAuthError("この会社の参加枠は既に使用されています。GMに新しい参加リンクの発行を依頼してください。", "JOIN_ALREADY_CLAIMED");
-    }
+    // 【PLAYER-SURFACE-2】参加リンクは再利用できる。
+    //
+    // 以前は1回 claim したら JOIN_ALREADY_CLAIMED で弾いていたが、研修の実運用では
+    //   ・受講者が参加リンクをブックマークして翌日開く
+    //   ・PC から スマホ・別ブラウザ へ移る
+    //   ・Cookie が消える（シークレットウィンドウ・設定・期限切れ）
+    // のいずれでも復帰できず、そのたびに GM の再発行が必要だった。
+    //
+    // 同じリンクを開いたら、そのたびに新しいセッションを発行する。
+    // 以前のセッションは失効させない（PC とスマホを併用できるようにするため。
+    // 同一Turnの二重提出は hasSubmittedThisTurn 側で既に弾かれる）。
+    //
+    // 【引き換えに受け入れたこと】リンクを知っている人は誰でもその会社として
+    // 参加できる。リンク自体が資格情報であるという元々の設計は変えていないが、
+    // 「1回使ったら無効」という保護は無くなる。失効させたいときは GM が
+    // Management Console から再発行（＝旧リンクを失効）する。
     claimLocks.add(key);
 
     const sessionId = generateSessionId();

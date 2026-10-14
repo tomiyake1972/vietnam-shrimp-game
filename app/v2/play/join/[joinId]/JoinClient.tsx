@@ -79,9 +79,13 @@ function ErrorScreen({ message }: { readonly message: string }) {
         <p className="text-sm leading-relaxed text-slate-200" data-testid="join-error-message">
           {message}
         </p>
-        <p className="text-xs text-slate-400">GM（Game Master）に、参加リンクの再発行を依頼してください。</p>
-        <Link href="/" className="inline-block text-xs text-sky-300 underline underline-offset-2">
-          トップへ戻る
+        {/* 【PLAYER-SURFACE-2】「/」へは送らない（GMコンソールへのリンクが出ているため）。 */}
+        <p className="text-xs text-slate-400">GM（進行役）に、参加リンクの再発行を依頼してください。</p>
+        <p className="text-xs text-slate-500">
+          すでに参加済みで、同じ端末・同じブラウザを使っている場合は、ワークスペースを直接開けることがあります。
+        </p>
+        <Link href="/v2/play/workspace" className="inline-block text-xs text-sky-300 underline underline-offset-2" data-testid="join-open-workspace">
+          ワークスペースを開いてみる
         </Link>
       </div>
     </div>

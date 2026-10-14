@@ -40,14 +40,31 @@ test("PLAYER-REPO-2: 存在しないjoin secretのclaimはJOIN_NOT_FOUNDで拒�
   );
 });
 
-test("PLAYER-REPO-3【二重claim拒否】: 一度claimされたSeatへの2人目のclaimはJOIN_ALREADY_CLAIMEDで拒否される", async () => {
+test("PLAYER-REPO-3【参加リンクの再利用】: 同じリンクを開き直すと、新しいセッションが発行される", async () => {
+  // 【方針変更】以前は1回 claim したら JOIN_ALREADY_CLAIMED で弾いていた。
+  // 研修の実運用では、ブックマークからの再訪問・PCからスマホへの移動・Cookie消失の
+  // いずれでも復帰できず、そのたびに GM の再発行が必要になっていたため再利用可能にした。
   const repo = createInMemoryPlayerRepository();
   const { joinSecret } = await repo.issueJoinCredential("run-1", "BAL", AT);
-  await repo.claimJoinSecret(joinSecret, AT);
-  await assert.rejects(
-    () => repo.claimJoinSecret(joinSecret, AT2),
-    (e: unknown) => e instanceof PlayerAuthError && e.code === "JOIN_ALREADY_CLAIMED"
-  );
+
+  const first = await repo.claimJoinSecret(joinSecret, AT);
+  const second = await repo.claimJoinSecret(joinSecret, AT2);
+
+  assert.notEqual(first.session.sessionId, second.session.sessionId, "開き直すたびに別のセッションになる");
+  assert.equal(second.session.companyId, "BAL", "同じ会社の席に入る");
+  assert.equal(second.seat.claimedSessionId, second.session.sessionId, "Seatは直近のセッションを指す");
+});
+
+test("PLAYER-REPO-3b【併用できる】: 開き直しても以前のセッションは失効しない（PCとスマホを併用できる）", async () => {
+  const repo = createInMemoryPlayerRepository();
+  const { joinSecret } = await repo.issueJoinCredential("run-1", "BAL", AT);
+
+  const first = await repo.claimJoinSecret(joinSecret, AT);
+  await repo.claimJoinSecret(joinSecret, AT2);
+
+  const previous = await repo.loadSession(first.session.sessionId);
+  assert.notEqual(previous, null, "以前のセッションが消えている");
+  assert.equal(previous?.revokedAt, null, "以前のセッションが失効させられている（先に開いた端末が落ちる）");
 });
 
 test("PLAYER-REPO-4【旧credential失効】: GMが参加リンクを再発行すると、旧secretでのclaimは拒否される", async () => {
