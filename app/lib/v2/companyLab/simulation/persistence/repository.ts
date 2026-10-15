@@ -130,6 +130,31 @@ export interface SimulationRunRepository {
    */
   saveRunPart(simulationRunId: string, attempt: SimulationRunWriteAttempt, part: SimulationRunPart, value: unknown): Promise<void>;
   /**
+   * 【FOT-1・送信量削減】公開中（正本）のパートを1本だけ読む。
+   * 差分追記（append）でマージの土台にするためだけに使う。
+   * revision が公開中のものと違う／そのパートが無い場合は undefined。
+   */
+  readPublishedPart(simulationRunId: string, part: SimulationRunPart, revision: number): Promise<unknown>;
+  /**
+   * 【FOT-1・送信量削減】公開中（正本）のパートを、このattemptの未公開パート置き場へ
+   * そのままコピーする（＝「このパートは前のrevisionから変わっていない」の実現）。
+   *
+   * 【なぜブラウザから送り直さないのか】dataset / pack は T32 で約4.0MB / 約1.7MB あり、
+   * 5社PLAYERでは1Turnに6回の保存が走る。そのうち5回（PLAYER意思決定の確定）は
+   * これらを一切変更しない。変わっていない値を6回送るのが Fast Origin Transfer 超過の
+   * 主因だったため、変わっていないパートはサーバー側（Redis内）でコピーする。
+   *
+   * 保存形式は変えない。コピー後は従来と同じく commitRunManifest が正規キーへ昇格させる。
+   *
+   * @returns コピー元が見つからなければ false（呼び出し側は完全な値で送り直させる）。
+   */
+  stagePartFromPublished(
+    simulationRunId: string,
+    attempt: SimulationRunWriteAttempt,
+    part: SimulationRunPart,
+    fromRevision: number
+  ): Promise<boolean>;
+  /**
    * 【Turn14以降Save/Resume停止BLOCKER修正】manifestを更新し、指定revisionを
    * 「読み込み可能な完全な状態」として公開する。呼び出し側は、この呼び出しより前に
    * 該当revisionのdataset（必須）・resume（hasResumePayloadがtrueなら必須）・
@@ -257,6 +282,31 @@ export function createInMemorySimulationRunRepository(): SimulationRunRepository
     pendingParts.set(simulationRunId, byToken);
   }
 
+  /**
+   * 【FOT-1】インメモリ実装は revision ごとの履歴を持たないため、公開中の revision と
+   * 一致する場合だけ返す（Redis 実装の `:dataset:{revision}` 読みと同じ意味論）。
+   */
+  async function readPublishedPart(simulationRunId: string, part: SimulationRunPart, revision: number): Promise<unknown> {
+    const stored = runs.get(simulationRunId);
+    if (!stored) return undefined;
+    if ((stored.persistenceRevision ?? 0) !== revision) return undefined;
+    if (part === "dataset") return stored.dataset;
+    if (part === "resume") return stored.resumePayload;
+    return stored.packCapture;
+  }
+
+  async function stagePartFromPublished(
+    simulationRunId: string,
+    attempt: SimulationRunWriteAttempt,
+    part: SimulationRunPart,
+    fromRevision: number
+  ): Promise<boolean> {
+    const value = await readPublishedPart(simulationRunId, part, fromRevision);
+    if (value === undefined) return false;
+    await saveRunPart(simulationRunId, attempt, part, value);
+    return true;
+  }
+
   async function commitRunManifest(manifest: StoredSimulationRunManifest, summary: SimulationRunSummary, attempt: SimulationRunWriteAttempt): Promise<void> {
     const runId = manifest.run.simulationRunId;
     // 【CAS】公開中のrevisionが、このwriterが読んだrevisionと違えば正本化しない。
@@ -329,5 +379,5 @@ export function createInMemorySimulationRunRepository(): SimulationRunRepository
     pendingParts.delete(simulationRunId);
   }
 
-  return { saveRun, saveRunPart, commitRunManifest, loadRun, listRuns, deleteRun, currentPublishedRevision };
+  return { saveRun, saveRunPart, readPublishedPart, stagePartFromPublished, commitRunManifest, loadRun, listRuns, deleteRun, currentPublishedRevision };
 }

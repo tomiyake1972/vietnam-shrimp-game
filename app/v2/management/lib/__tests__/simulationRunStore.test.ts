@@ -21,6 +21,14 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { gunzipSync } from "node:zlib";
+import type { SimulationRunPart } from "../../../../lib/v2/companyLab/simulation/persistence/repository";
+import {
+  SIMULATION_RUN_BODY_ENCODING_GZIP,
+  SIMULATION_RUN_BODY_ENCODING_HEADER,
+  maxTurnOfSimulationRunPart,
+  mergeSimulationRunPart,
+} from "../../../../lib/v2/companyLab/simulation/persistence/partWire";
 
 interface FakeStorage {
   getItem(key: string): string | null;
@@ -67,6 +75,20 @@ function createFakeLocalStorage(quotaBytes: number | null): FakeStorage {
  * simulationRunId→StoredSimulationRun-shapeで保持する（テストがGET結果を直接
  * 差し替えたい場合に使う。PERSIST-D9参照）。
  */
+/**
+ * 【FOT-1】POSTされたボディを読む。クライアントは gzip 圧縮して
+ * `x-shrimpx-body-encoding: gzip` を付けて送るため、実物のサーバー
+ * （simulation-runs/_lib/context.ts の parseJsonBody）と同じ手順で展開する。
+ * 圧縮ヘッダが無ければ従来どおりJSON文字列として読む。
+ */
+function readPostedBody(init: RequestInit): unknown {
+  const headers = (init.headers ?? {}) as Record<string, string>;
+  if (headers[SIMULATION_RUN_BODY_ENCODING_HEADER] === SIMULATION_RUN_BODY_ENCODING_GZIP) {
+    return JSON.parse(gunzipSync(Buffer.from(init.body as Uint8Array)).toString("utf8"));
+  }
+  return JSON.parse(String(init.body));
+}
+
 function installFakeServer(initial: Map<string, unknown> = new Map()) {
   const store = initial;
   let serverUp = true;
@@ -77,12 +99,23 @@ function installFakeServer(initial: Map<string, unknown> = new Map()) {
     return `${id}:${revision}`;
   }
 
+  /** 公開済み（manifest commit 済み）のパート。revisionが一致しなければ undefined。 */
+  function publishedPart(id: string, part: SimulationRunPart, revision: number): unknown {
+    const found = store.get(id) as
+      | { persistenceRevision?: number; dataset?: unknown; resumePayload?: unknown; packCapture?: unknown }
+      | undefined;
+    if (!found || found.persistenceRevision !== revision) return undefined;
+    if (part === "dataset") return found.dataset;
+    if (part === "resume") return found.resumePayload;
+    return found.packCapture;
+  }
+
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     if (!serverUp) return new Response(null, { status: 500 });
     if (forcedStatus !== null) return new Response(JSON.stringify({ error: { code: "FORCED", message: "forced" } }), { status: forcedStatus });
     if (url === "/api/v2/simulation-runs" && init?.method === "POST") {
-      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      const body = readPostedBody(init) as Record<string, unknown>;
       if (body.manifestOnly) {
         const run = body.run as { simulationRunId: string };
         const revision = body.persistenceRevision as number;
@@ -101,10 +134,33 @@ function installFakeServer(initial: Map<string, unknown> = new Map()) {
       }
       const simulationRunId = body.simulationRunId as string;
       const revision = body.revision as number;
-      const part = body.part as string;
+      const part = body.part as SimulationRunPart;
       const key = partsKey(simulationRunId, revision);
       const parts = partsByRunAndRevision.get(key) ?? {};
-      parts[part] = body.value;
+      /**
+       * 【FOT-1】実物のハンドラー（simulation-runs/_lib/handlers.ts）と同じ3経路を
+       * 再現する。ここを再現しないと、クライアントが「変わっていないので送らない」
+       * と判断したパートがフェイク側で欠落し、テストが実物と違う結論を出す。
+       */
+      if (body.reuseFromRevision !== undefined) {
+        const published = publishedPart(simulationRunId, part, body.reuseFromRevision as number);
+        if (published === undefined) {
+          return new Response(JSON.stringify({ error: { code: "DELTA_BASE_MISMATCH", message: "no base" } }), { status: 409 });
+        }
+        parts[part] = published;
+      } else if (body.appendFromRevision !== undefined) {
+        const published = publishedPart(simulationRunId, part, body.appendFromRevision as number);
+        if (published === undefined) {
+          return new Response(JSON.stringify({ error: { code: "DELTA_BASE_MISMATCH", message: "no base" } }), { status: 409 });
+        }
+        const merged = mergeSimulationRunPart(part, published, body.value);
+        if (maxTurnOfSimulationRunPart(part, merged) !== (body.expectedMaxTurn as number)) {
+          return new Response(JSON.stringify({ error: { code: "DELTA_BASE_MISMATCH", message: "turn mismatch" } }), { status: 409 });
+        }
+        parts[part] = merged;
+      } else {
+        parts[part] = body.value;
+      }
       partsByRunAndRevision.set(key, parts);
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     }

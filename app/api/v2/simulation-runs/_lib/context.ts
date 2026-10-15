@@ -18,6 +18,10 @@
 // 無しで検証できるようにする（実Redisの代わりであり、実環境の検証を置き換えるものではない）。
 
 import { NextRequest, NextResponse } from "next/server";
+import {
+  SIMULATION_RUN_BODY_ENCODING_GZIP,
+  SIMULATION_RUN_BODY_ENCODING_HEADER,
+} from "../../../../lib/v2/companyLab/simulation/persistence/partWire";
 import { assertStagingAdmin } from "../../../../lib/stagingAdmin";
 import { hasValidStagingSession } from "../../../../lib/companyLabUiSession";
 import { isProduction } from "../../../../lib/env";
@@ -98,10 +102,32 @@ export async function withSimulationRunApiContext(
   }
 }
 
+/**
+ * リクエストボディを JSON として読む。
+ *
+ * 【FOT-1・送信量削減】`x-shrimpx-body-encoding: gzip` が付いている場合は、
+ * ボディを gzip として展開してから JSON にする。保存のたびに dataset / resume を
+ * 無圧縮で送っていたことが Fast Origin Transfer 超過の主因だったため、
+ * 送信側で圧縮し、ここで展開する（実測で本文は約10〜12%まで縮む）。
+ *
+ * 【ヘッダが無ければ従来どおり】旧クライアント（圧縮しない）からの保存も
+ * そのまま受け付ける（後方互換）。
+ */
 export async function parseJsonBody(req: NextRequest): Promise<unknown> {
+  const encoding = req.headers.get(SIMULATION_RUN_BODY_ENCODING_HEADER);
+  if (encoding !== SIMULATION_RUN_BODY_ENCODING_GZIP) {
+    try {
+      return await req.json();
+    } catch {
+      return undefined;
+    }
+  }
   try {
-    return await req.json();
-  } catch {
+    const compressed = Buffer.from(await req.arrayBuffer());
+    const { gunzipSync } = await import("node:zlib");
+    return JSON.parse(gunzipSync(compressed).toString("utf8"));
+  } catch (e) {
+    console.error("[simulation-runs api] gzip ボディの展開に失敗しました:", e);
     return undefined;
   }
 }
