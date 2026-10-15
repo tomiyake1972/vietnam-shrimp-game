@@ -170,34 +170,6 @@ return result
  */
 export const SIMULATION_RUN_STAGING_TTL_MS = 60 * 60 * 1000;
 
-/**
- * 【FOT-1・送信量削減】公開中（正本）のパートを、このattemptのstagingキーへ Redis 内でコピーする。
- *
- * 【なぜ Lua なのか】「読んで、関数側へ運んで、書き戻す」とすると、変わっていない
- * dataset（T32で約4.0MB）が Redis ↔ Vercel Functions 間を往復する。往復させずに
- * Redis の中だけで複製するために1本のスクリプトで GET→SET する。
- * これによりブラウザからの送信（Fast Origin Transfer）だけでなく、
- * Redis の転送量も増やさずに「送り直さない」を実現する。
- *
- * 【COPY を使わない理由】Redis 6.2 の COPY は destination の TTL を引き継がないため
- * 別途 PEXPIRE が必要になるうえ、serverless Redis 実装によって Lua 内での可否が
- * 揃っていない。GET/SET は本ファイルの既存 Lua（manifest の CAS）でも使っており、
- * 同じ前提で動くことが確かめられている手段である。
- *
- * stagingキーには既存と同じ PX（SIMULATION_RUN_STAGING_TTL_MS）を付ける。
- * 昇格時に commit 側の Lua が RENAME → PERSIST するため、正規キーは永続になる。
- */
-export const SIMULATION_RUN_COPY_PART_TO_STAGING_SCRIPT = `
--- KEYS: 1 canonical part key (コピー元), 2 staging part key (コピー先)
--- ARGV: 1 pxMilliseconds
-local value = redis.call('GET', KEYS[1])
-if not value then
-  return 0
-end
-redis.call('SET', KEYS[2], value, 'PX', ARGV[1])
-return 1
-`;
-
 export interface SimulationRunRepositoryDependencies {
   readonly client: CompanyLabRedisClient;
   readonly appEnv: AppEnvV2;
@@ -237,50 +209,6 @@ export function createRedisSimulationRunRepository(deps: SimulationRunRepository
         `Simulation Run のパート保存に失敗しました（simulationRunId=${simulationRunId}, writeToken=${attempt.writeToken}, part=${part}）: ${toErrorMessage(e)}`
       );
     }
-  }
-
-  /** パート種別 → そのrevisionの正規キー。loadRun が読んでいるのと同じキーを使う。 */
-  function canonicalPartKey(simulationRunId: string, part: SimulationRunPart, revision: number): string {
-    if (part === "dataset") return simulationRunDatasetKeyV2(appEnv, simulationRunId, revision);
-    if (part === "resume") return simulationRunResumeKeyV2(appEnv, simulationRunId, revision);
-    return simulationRunPackKeyV2(appEnv, simulationRunId, revision);
-  }
-
-  /**
-   * 【FOT-1】公開中（正本）のパートを1本だけ読む。差分追記（append）の土台専用。
-   * 指定revisionのキーが無ければ undefined（＝クライアントへ完全な値での再送を促す）。
-   */
-  async function readPublishedPart(simulationRunId: string, part: SimulationRunPart, revision: number): Promise<unknown> {
-    const key = canonicalPartKey(simulationRunId, part, revision);
-    assertAllowedSimulationRunKeys([key], appEnv);
-    let raw: unknown;
-    try {
-      raw = await client.get(key);
-    } catch (e) {
-      throw new SimulationRunRepositoryError(`Simulation Run のパート読み込みに失敗しました（key=${key}）: ${toErrorMessage(e)}`);
-    }
-    if (raw === null || raw === undefined) return undefined;
-    return parseJsonValue(raw);
-  }
-
-  async function stagePartFromPublished(
-    simulationRunId: string,
-    attempt: SimulationRunWriteAttempt,
-    part: SimulationRunPart,
-    fromRevision: number
-  ): Promise<boolean> {
-    const sourceKey = canonicalPartKey(simulationRunId, part, fromRevision);
-    const stagingKey = simulationRunStagingPartKeyV2(appEnv, simulationRunId, attempt.writeToken, part);
-    assertAllowedSimulationRunKeys([sourceKey, stagingKey], appEnv);
-    let outcome: unknown;
-    try {
-      outcome = await client.eval(SIMULATION_RUN_COPY_PART_TO_STAGING_SCRIPT, [sourceKey, stagingKey], [String(SIMULATION_RUN_STAGING_TTL_MS)]);
-    } catch (e) {
-      throw new SimulationRunRepositoryError(
-        `Simulation Run のパート再利用に失敗しました（simulationRunId=${simulationRunId}, part=${part}, fromRevision=${fromRevision}）: ${toErrorMessage(e)}`
-      );
-    }
-    return Number(outcome) === 1;
   }
 
   async function commitRunManifest(manifest: StoredSimulationRunManifest, summary: SimulationRunSummary, attempt: SimulationRunWriteAttempt): Promise<void> {
@@ -577,5 +505,5 @@ export function createRedisSimulationRunRepository(deps: SimulationRunRepository
     }
   }
 
-  return { saveRun, saveRunPart, readPublishedPart, stagePartFromPublished, commitRunManifest, loadRun, listRuns, deleteRun, currentPublishedRevision };
+  return { saveRun, saveRunPart, commitRunManifest, loadRun, listRuns, deleteRun, currentPublishedRevision };
 }

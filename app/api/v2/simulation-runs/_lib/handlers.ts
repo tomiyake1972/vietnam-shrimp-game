@@ -11,13 +11,6 @@ import {
   SimulationRunWriteAttempt,
   createSimulationRunWriteToken,
 } from "../../../../lib/v2/companyLab/simulation/persistence/repository";
-import {
-  SIMULATION_RUN_DELTA_BASE_MISMATCH,
-  SimulationRunPartMergeError,
-  maxTurnOfSimulationRunPart,
-  mergeSimulationRunPart,
-  parseSimulationRunPartSource,
-} from "../../../../lib/v2/companyLab/simulation/persistence/partWire";
 import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, StoredSimulationRun, StoredSimulationRunManifest, manifestToSimulationRunSummary } from "../../../../lib/v2/companyLab/simulation/persistence/types";
 import { CompanyControlMode } from "../../../../lib/v2/companyLab/simulation/types";
 import { SimulationRunApiResult } from "./context";
@@ -51,28 +44,6 @@ function badRequest(message: string): SimulationRunApiResult {
  * 自分の変更を最新へ安全に再適用できる場合だけ作り直して再保存する
  * （同じpayloadのrevisionだけ上げて再送してはいけない）。
  */
-/**
- * 【FOT-1】差分追記・再利用の土台（基準 revision のパート）が噛み合わない。
- *
- * STALE_PERSISTENCE_REVISION とは意味が違う（あちらは「他のwriterが先に公開した」）。
- * こちらは「送り方を軽くしようとしたが土台が無い／ずれている」であり、
- * クライアントは同じ内容を**完全な値**で送り直せば解決する。混同させないため
- * 別コードにする。
- */
-function deltaBaseMismatch(part: SimulationRunPart, fromRevision: number, message: string): SimulationRunApiResult {
-  return {
-    status: 409,
-    body: {
-      error: {
-        code: SIMULATION_RUN_DELTA_BASE_MISMATCH,
-        message: `${message} 完全な値で保存し直してください。`,
-        part,
-        fromRevision,
-      },
-    },
-  };
-}
-
 function staleRevisionConflict(e: SimulationRunStaleRevisionError): SimulationRunApiResult {
   return {
     status: 409,
@@ -185,20 +156,7 @@ export async function handleSaveSimulationRunPart(repository: SimulationRunRepos
   if (typeof body !== "object" || body === null) {
     return badRequest("リクエストボディが JSON オブジェクトではありません。");
   }
-  const candidate = body as {
-    simulationRunId?: unknown;
-    revision?: unknown;
-    part?: unknown;
-    value?: unknown;
-    expectedBaseRevision?: unknown;
-    writeToken?: unknown;
-    /** 【FOT-1】このパートは前の revision から変わっていない（value は送らない）。 */
-    reuseFromRevision?: unknown;
-    /** 【FOT-1】この revision のパートへ value（差分）を turn キーで追記する。 */
-    appendFromRevision?: unknown;
-    /** 【FOT-1】追記後に期待する最大 turn（土台ずれの検知用）。 */
-    expectedMaxTurn?: unknown;
-  };
+  const candidate = body as { simulationRunId?: unknown; revision?: unknown; part?: unknown; value?: unknown; expectedBaseRevision?: unknown; writeToken?: unknown };
   if (typeof candidate.simulationRunId !== "string" || candidate.simulationRunId.length === 0) {
     return badRequest("simulationRunId が空です。");
   }
@@ -208,14 +166,8 @@ export async function handleSaveSimulationRunPart(repository: SimulationRunRepos
   if (typeof candidate.part !== "string" || !VALID_PARTS.includes(candidate.part as SimulationRunPart)) {
     return badRequest(`part は ${VALID_PARTS.join(" / ")} のいずれかである必要があります。`);
   }
-  const part = candidate.part as SimulationRunPart;
-  /**
-   * 【FOT-1・送信量削減】value（完全な値）のほかに reuse（変わっていない）と
-   * append（増えた行だけ）を受け付ける。どれで来たかはここで1回だけ判定する。
-   */
-  const source = parseSimulationRunPartSource(part, candidate);
-  if ("error" in source) {
-    return badRequest(source.error);
+  if (candidate.value === undefined) {
+    return badRequest("value がありません。");
   }
   const parsedAttempt = parseWriteAttempt(candidate);
   if (parsedAttempt === "invalid") {
@@ -229,46 +181,8 @@ export async function handleSaveSimulationRunPart(repository: SimulationRunRepos
      * その場で公開中revisionを読んで基準にする（旧クライアント互換）。
      */
     const attempt = parsedAttempt ?? (await inlineAttempt(repository, candidate.simulationRunId));
-    const runId = candidate.simulationRunId;
-
-    if (source.kind === "value") {
-      await repository.saveRunPart(runId, attempt, part, source.value);
-    } else if (source.kind === "reuse") {
-      /**
-       * 変わっていないパートは Redis 内でコピーする（ブラウザからは数十バイトしか出ない）。
-       * コピー元が無ければ差分の土台が崩れているため、正本化せずクライアントへ
-       * 「完全な値で送り直せ」と返す。
-       */
-      const copied = await repository.stagePartFromPublished(runId, attempt, part, source.fromRevision);
-      if (!copied) {
-        return deltaBaseMismatch(part, source.fromRevision, `再利用元（revision=${source.fromRevision}）の ${part} が見つかりません。`);
-      }
-    } else {
-      const published = await repository.readPublishedPart(runId, part, source.fromRevision);
-      if (published === undefined) {
-        return deltaBaseMismatch(part, source.fromRevision, `差分追記の土台（revision=${source.fromRevision}）の ${part} が見つかりません。`);
-      }
-      const merged = mergeSimulationRunPart(part, published, source.delta);
-      /**
-       * 【差分が噛み合っていないまま正本化しない】マージ結果の最大turnが
-       * クライアントの申告と違えば、土台がずれている（＝取りこぼしがある）。
-       * ここで止めなければ、あとで ExportPackButton の findStaleness に
-       * 引っかかって AI Analysis Pack が出せない Run になる。
-       */
-      const mergedMaxTurn = maxTurnOfSimulationRunPart(part, merged);
-      if (mergedMaxTurn !== source.expectedMaxTurn) {
-        return deltaBaseMismatch(
-          part,
-          source.fromRevision,
-          `差分追記の結果が期待と一致しません（期待する最大turn=${source.expectedMaxTurn}, 実際=${mergedMaxTurn}）。`
-        );
-      }
-      await repository.saveRunPart(runId, attempt, part, merged);
-    }
+    await repository.saveRunPart(candidate.simulationRunId, attempt, candidate.part as SimulationRunPart, candidate.value);
   } catch (e) {
-    if (e instanceof SimulationRunPartMergeError) {
-      return deltaBaseMismatch(part, -1, e.message);
-    }
     if (e instanceof SimulationRunSchemaError) return badRequest(e.message);
     throw e;
   }

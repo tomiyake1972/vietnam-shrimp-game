@@ -77,51 +77,6 @@ test("SUBMIT-1: 正常な提出はconfirmedPlayerDecisionsへ保存され、Seat
   assert.equal(seat?.lastSubmittedTurn, session.state.scenarioState.currentTurn);
 });
 
-/**
- * 【FOT-1】提出で変わるのは resumePayload だけである。dataset と pack を
- * 読んだまま書き戻していたため、1Turnに5社ぶんの提出があると、変わらない
- * 約5.7MB（T32実測: dataset 約4.0MB + pack 約1.7MB）を毎回 Redis へ
- * 書き直していた。公開済みパートの再利用へ切り替えたことを固定する。
- *
- * 【中身は変わってはいけない】再利用に切り替えても、保存される dataset / pack は
- * 従来とまったく同じでなければならない（AI Analysis Pack の出力一致の前提）。
- */
-test("SUBMIT-FOT-1: 提出は dataset / pack を書き戻さず、公開済みパートを再利用する", async () => {
-  const base = createInMemorySimulationRunRepository();
-  const savedParts: string[] = [];
-  const reusedParts: string[] = [];
-  const simulationRunRepository: SimulationRunRepository = {
-    ...base,
-    saveRunPart: async (id, attempt, part, value) => {
-      savedParts.push(part);
-      return base.saveRunPart(id, attempt, part, value);
-    },
-    stagePartFromPublished: async (id, attempt, part, fromRevision) => {
-      reusedParts.push(part);
-      return base.stagePartFromPublished(id, attempt, part, fromRevision);
-    },
-  };
-  // seedResumableRun は base.saveRun を通るため、ここの spy には記録されない。
-  const session = await seedResumableRun(simulationRunRepository, "run-submit-fot1");
-  const before = await simulationRunRepository.loadRun("run-submit-fot1");
-  const decision = buildBalDecision(session);
-
-  await submitPlayerDecision(simulationRunRepository, createInMemoryPlayerRepository(), {
-    runId: "run-submit-fot1",
-    companyId: "BAL",
-    claimedTurn: session.state.scenarioState.currentTurn,
-    decision,
-  });
-
-  assert.deepEqual(savedParts, ["resume"], "resume 以外のパートを書き戻している");
-  assert.deepEqual([...reusedParts].sort(), ["dataset", "pack"], "dataset / pack が再利用されていない");
-
-  const after = await simulationRunRepository.loadRun("run-submit-fot1");
-  assert.equal(JSON.stringify(after?.dataset), JSON.stringify(before?.dataset), "dataset の中身が変わってしまっている");
-  assert.equal(JSON.stringify(after?.packCapture), JSON.stringify(before?.packCapture), "pack の中身が変わってしまっている");
-  assert.deepEqual(after?.resumePayload?.confirmedPlayerDecisions.BAL, decision);
-});
-
 test("SUBMIT-2【存在しないRun】: RUN_NOT_FOUNDで拒否される", async () => {
   const simulationRunRepository = createInMemorySimulationRunRepository();
   const playerRepository = createInMemoryPlayerRepository();

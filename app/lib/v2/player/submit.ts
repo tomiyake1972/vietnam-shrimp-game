@@ -113,42 +113,15 @@ export async function submitPlayerDecision(
 
     const attempt = { expectedBaseRevision, writeToken };
 
-    /**
-     * 【FOT-1・変わらないパートを書き戻さない】提出で変わるのは resumePayload の
-     * confirmedPlayerDecisions だけで、dataset と pack は読んだものをそのまま
-     * 書き戻していた（T32 実測で dataset 約4.0MB・pack 約1.7MB）。
-     * 1Turnに5社ぶんの提出があるため、変わらない値を何度も Redis へ書いていたことになる。
-     *
-     * reuseFromRevision を使うと、サーバー側（Redis 内）でのコピーになり、
-     * 値が Redis と関数のあいだを往復しない。保存される中身は従来と完全に同一である
-     * （fot1SavePayload.test.ts / scripts/int1/fot1IsolatedRedisReuse.ts で実測確認）。
-     *
-     * 【revision を持たない旧Runでは使えない】公開中 revision が 0 の場合は
-     * コピー元の正規キーが無いため、従来どおり完全な値を書く。
-     */
-    const canReusePublishedParts = expectedBaseRevision > 0;
-
     // 既存のGM保存経路とまったく同じ関数（part保存→manifest commit、FINISHED lock込み）を呼ぶ。
-    const datasetResult = await handleSaveSimulationRunPart(simulationRunRepository, {
-      simulationRunId: runId,
-      revision: nextRevision,
-      part: "dataset",
-      ...(canReusePublishedParts ? { reuseFromRevision: expectedBaseRevision } : { value: stored.dataset }),
-      ...attempt,
-    });
+    const datasetResult = await handleSaveSimulationRunPart(simulationRunRepository, { simulationRunId: runId, revision: nextRevision, part: "dataset", value: stored.dataset, ...attempt });
     if (datasetResult.status !== 200) throw new PlayerSubmitError("提出の保存に失敗しました（dataset）。", "INVALID_DECISION");
 
     const resumeResult = await handleSaveSimulationRunPart(simulationRunRepository, { simulationRunId: runId, revision: nextRevision, part: "resume", value: updatedResumePayload, ...attempt });
     if (resumeResult.status !== 200) throw new PlayerSubmitError("提出の保存に失敗しました（resume）。", "INVALID_DECISION");
 
     if (stored.packCapture) {
-      const packResult = await handleSaveSimulationRunPart(simulationRunRepository, {
-        simulationRunId: runId,
-        revision: nextRevision,
-        part: "pack",
-        ...(canReusePublishedParts ? { reuseFromRevision: expectedBaseRevision } : { value: stored.packCapture }),
-        ...attempt,
-      });
+      const packResult = await handleSaveSimulationRunPart(simulationRunRepository, { simulationRunId: runId, revision: nextRevision, part: "pack", value: stored.packCapture, ...attempt });
       if (packResult.status !== 200) throw new PlayerSubmitError("提出の保存に失敗しました（pack）。", "INVALID_DECISION");
     }
 

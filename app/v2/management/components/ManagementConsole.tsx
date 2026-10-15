@@ -105,22 +105,6 @@ const SCENARIO_OPTIONS = listScenarioAliases().map((e) => ({
 }));
 
 /** metadata 用のタイムスタンプ。ゲーム判断には一切渡さない。 */
-/**
- * 【FOT-1・保存回数の削減】「待たない保存」をまとめる窓。
- *
- * GMが複数社の経営モードを続けて変えるときの体感（1社ずつ数百ミリ秒）より長く、
- * かつ「変更したのに保存されていないのでは」と不安にならない程度に短い値にする。
- * Turn進行の保存はこの窓を通らない（即時）。
- */
-const CONSOLE_PERSIST_DEBOUNCE_MS = 600;
-
-/** まとめ待ちの保存1件ぶんの引数。 */
-interface ScheduledPersistArgs {
-  readonly session: SimulationSession;
-  readonly controlModes: Readonly<Record<string, CompanyControlMode>>;
-  readonly playerDecisions: Readonly<Record<string, CompanyDecisionInput>>;
-}
-
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -481,38 +465,12 @@ export function ManagementConsole() {
    * このTurnの保存が成立したかどうかを見て次のTurnへ進めるかどうかを決められるよう、
    * 真偽値を返す（旧実装はvoidで、呼び出し側は結果を見ずに次のTurnへ進んでいた）。
    */
-  /**
-   * 【FOT-1・保存回数の削減】「待たない保存」をまとめて1回にする。
-   *
-   * 経営モードの変更やVision overrideは、GMが複数社ぶんを続けて操作することが多い。
-   * これまでは1操作ごとに保存（dataset/resume/packの送信）が走っていた。
-   * 送る内容が同じ正本に対する連続更新なので、短い時間でまとめて最後の1回だけ送る。
-   *
-   * 【Turn進行の保存はまとめない】Turn完了・ゲーム終了の保存は呼び出し側が
-   * await して「保存できたら次へ進む」を判断している。ここで遅延させると
-   * その契約が壊れるため、persist() 自体は従来どおり即時に実行する
-   * （まとめるのはこの schedulePersist を通した経路だけ）。
-   */
-  const scheduledPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduledPersistArgsRef = useRef<ScheduledPersistArgs | null>(null);
-
   const persist = useCallback(
     async (
       session: SimulationSession,
       controlModes: Readonly<Record<string, CompanyControlMode>>,
       playerDecisions: Readonly<Record<string, CompanyDecisionInput>>
     ): Promise<boolean> => {
-      /**
-       * 【FOT-1・保存回数の削減】待たない保存（経営モード変更・Vision override）が
-       * デバウンス待ちで残っていたら破棄する。いまから走るこの保存は、その変更を
-       * 反映した**より新しい**session/modes/decisionsを持っているため、あとから
-       * 古い内容が着地して上書きするのを防ぐ必要がある。
-       */
-      if (scheduledPersistTimerRef.current !== null) {
-        clearTimeout(scheduledPersistTimerRef.current);
-        scheduledPersistTimerRef.current = null;
-      }
-      scheduledPersistArgsRef.current = null;
       const result = await persistResumableRun(session, controlModes, playerDecisions);
       setSavedRuns(await listSimulationRuns());
       setStorageNote(
@@ -534,40 +492,6 @@ export function ManagementConsole() {
     },
     []
   );
-
-  const schedulePersist = useCallback(
-    (
-      session: SimulationSession,
-      controlModes: Readonly<Record<string, CompanyControlMode>>,
-      playerDecisions: Readonly<Record<string, CompanyDecisionInput>>
-    ): void => {
-      scheduledPersistArgsRef.current = { session, controlModes, playerDecisions };
-      if (scheduledPersistTimerRef.current !== null) clearTimeout(scheduledPersistTimerRef.current);
-      scheduledPersistTimerRef.current = setTimeout(() => {
-        scheduledPersistTimerRef.current = null;
-        const args = scheduledPersistArgsRef.current;
-        scheduledPersistArgsRef.current = null;
-        if (args) void persist(args.session, args.controlModes, args.playerDecisions);
-      }, CONSOLE_PERSIST_DEBOUNCE_MS);
-    },
-    [persist]
-  );
-
-  /**
-   * 画面を離れるときに、まとめ待ちの保存が残っていたら取りこぼさず送る
-   * （デバウンスで保存が消えてしまうことがないようにする）。
-   */
-  useEffect(() => {
-    return () => {
-      if (scheduledPersistTimerRef.current !== null) {
-        clearTimeout(scheduledPersistTimerRef.current);
-        scheduledPersistTimerRef.current = null;
-      }
-      const args = scheduledPersistArgsRef.current;
-      scheduledPersistArgsRef.current = null;
-      if (args) void persistResumableRun(args.session, args.controlModes, args.playerDecisions);
-    };
-  }, []);
 
   /**
    * 【Game End / Final Results・END-1】GMが確認ダイアログで確定した瞬間に呼ぶ。
@@ -613,10 +537,9 @@ export function ManagementConsole() {
       if (!view?.session || isGameFinished(view.run)) return;
       const updated = applyVisionOverrideToSession(view.session, companyId, entry);
       setView(viewFromSession(updated));
-      // 【FOT-1】連続操作をまとめて1回だけ保存する（Turn進行の保存は従来どおり即時）。
-      schedulePersist(updated, companyControlModes, confirmedPlayerDecisions);
+      void persist(updated, companyControlModes, confirmedPlayerDecisions);
     },
-    [view, companyControlModes, confirmedPlayerDecisions, schedulePersist]
+    [view, companyControlModes, confirmedPlayerDecisions, persist]
   );
 
   const handleResetVisionOverride = useCallback(
@@ -624,9 +547,9 @@ export function ManagementConsole() {
       if (!view?.session || isGameFinished(view.run)) return;
       const updated = resetVisionOverrideForSessionCompany(view.session, companyId);
       setView(viewFromSession(updated));
-      schedulePersist(updated, companyControlModes, confirmedPlayerDecisions);
+      void persist(updated, companyControlModes, confirmedPlayerDecisions);
     },
-    [view, companyControlModes, confirmedPlayerDecisions, schedulePersist]
+    [view, companyControlModes, confirmedPlayerDecisions, persist]
   );
 
   /**
@@ -924,13 +847,12 @@ export function ManagementConsole() {
         const next = { ...prev, [companyId]: mode };
         const session = view?.session;
         if (session) {
-          // 【FOT-1】複数社のモードを続けて変えたときに、保存を1回にまとめる。
-          schedulePersist(session, next, confirmedPlayerDecisions);
+          void persist(session, next, confirmedPlayerDecisions);
         }
         return next;
       });
     },
-    [view, schedulePersist, confirmedPlayerDecisions]
+    [view, persist, confirmedPlayerDecisions]
   );
 
   /** 【PLAYER Company Workspace】「この会社を操作」は、モーダルではなく専用routeへ遷移する。 */
