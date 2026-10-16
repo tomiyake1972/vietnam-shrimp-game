@@ -30,6 +30,11 @@
 //                             「browserだけで32Q完全復元を無理に維持しない」）。
 
 import { StoredSimulationRun, SimulationRunSummary, toSimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
+import {
+  SIMULATION_RUN_REUSE_BASE_MISMATCH,
+  isReusableSimulationRunPart,
+  maxTurnOfSimulationRunPart,
+} from "../../../lib/v2/companyLab/simulation/persistence/partReuse";
 
 /**
  * 【Q25→Q26 authoritative persistence停止BLOCKER修正・指示§22/§23】
@@ -272,14 +277,76 @@ async function readErrorBody(response: Response): Promise<string | null> {
   }
 }
 
-type PostJsonResult = { ok: true } | { ok: false; error: string; stale: boolean; currentPublishedRevision: number | null };
+// ---------------------------------------------------------------------
+// 2-a. 【REUSE-1】変更していないパートを送り直さない
+// ---------------------------------------------------------------------
+
+/**
+ * 【REUSE-1】このタブが「公開中revisionに入っている」と把握しているパートの最大turn。
+ * -1 は「基準なし（完全な値で送る）」。
+ */
+interface PublishedPartTurns {
+  readonly dataset: number;
+  readonly pack: number;
+}
+
+const publishedPartTurns = new Map<string, PublishedPartTurns>();
+
+function knownPublishedPartTurns(runId: string): PublishedPartTurns | null {
+  return publishedPartTurns.get(runId) ?? null;
+}
+
+function rememberPublishedPartTurns(runId: string, turns: PublishedPartTurns): void {
+  publishedPartTurns.set(runId, turns);
+}
+
+/**
+ * パートの最大turn。形が想定と違えば null を返す（例外にしない）。
+ * null のときは再利用せず、従来どおり完全な値で送る。
+ */
+function safeMaxTurn(part: "dataset" | "pack", value: unknown): number | null {
+  try {
+    return maxTurnOfSimulationRunPart(part, value);
+  } catch {
+    return null;
+  }
+}
+
+/** 保存1回ぶんの送信量の明細（計測用）。 */
+export interface SavePartTransfer {
+  readonly part: "dataset" | "resume" | "pack" | "manifest";
+  /** value（完全な値を送った）か reuse（送らずサーバー側でコピーさせた）か。 */
+  readonly mode: "value" | "reuse";
+  /** 実際にネットワークへ出たリクエストボディのバイト数。 */
+  readonly sentBytes: number;
+}
+
+let lastSaveTransfers: readonly SavePartTransfer[] = [];
+
+/**
+ * 直近1回の保存で実際に送ったバイト数の明細。
+ * 転送量の実測をテスト・計測スクリプトから取るために公開する。
+ */
+export function getLastSaveTransfers(): readonly SavePartTransfer[] {
+  return lastSaveTransfers;
+}
+
+function utf8Length(text: string): number {
+  return typeof TextEncoder !== "undefined" ? new TextEncoder().encode(text).length : text.length;
+}
+
+type PostJsonResult =
+  | { ok: true; sentBytes: number }
+  | { ok: false; error: string; stale: boolean; reuseBaseMismatch: boolean; currentPublishedRevision: number | null; sentBytes: number };
 
 async function postJson(body: unknown): Promise<PostJsonResult> {
+  const json = JSON.stringify(body);
+  const sentBytes = utf8Length(json);
   try {
     const response = await fetchWithTimeout("/api/v2/simulation-runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: json,
     });
     if (!response.ok) {
       const bodyText = await readErrorBody(response);
@@ -296,11 +363,23 @@ async function postJson(body: unknown): Promise<PostJsonResult> {
         const matched = (bodyText ?? "").match(/"currentPublishedRevision"\s*:\s*(\d+)/);
         if (matched) currentPublishedRevision = Number(matched[1]);
       }
-      return { ok: false, error: bodyText ? `${base} — ${bodyText}` : base, stale, currentPublishedRevision };
+      /**
+       * 【REUSE-1】再利用元が無かった。保存内容が壊れたわけではなく、同じ内容を
+       * 完全な値で送り直せば解決する（呼び出し側が1回だけ再送する）。
+       */
+      const reuseBaseMismatch = response.status === 409 && (bodyText ?? "").includes(SIMULATION_RUN_REUSE_BASE_MISMATCH);
+      return { ok: false, error: bodyText ? `${base} — ${bodyText}` : base, stale, reuseBaseMismatch, currentPublishedRevision, sentBytes };
     }
-    return { ok: true };
+    return { ok: true, sentBytes };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e), stale: false, currentPublishedRevision: null };
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      stale: false,
+      reuseBaseMismatch: false,
+      currentPublishedRevision: null,
+      sentBytes,
+    };
   }
 }
 
@@ -328,23 +407,78 @@ async function saveToServer(stored: StoredSimulationRun, attempt: { expectedBase
     return { ok: false, error: "サーバー保存に失敗しました（persistenceRevisionが未設定です。呼び出し側の実装ミスの可能性があります）。", stale: false };
   }
 
-  const datasetSizeError = checkPartSize("dataset", stored.dataset);
-  if (datasetSizeError) return { ok: false, error: `サーバー保存に失敗しました（${datasetSizeError}）`, stale: false };
-  const datasetResult = await postJson({ simulationRunId, revision, part: "dataset", value: stored.dataset, ...attempt });
-  if (!datasetResult.ok) return { ok: false, error: `サーバー保存に失敗しました（dataset: ${datasetResult.error}）`, stale: datasetResult.stale };
+  const transfers: SavePartTransfer[] = [];
+  /**
+   * 【REUSE-1】このattemptで正本へ入る turn。保存成功後にこの値を
+   * 「公開中revisionが含んでいる最大turn」として覚え、次の保存の再利用判定の基準にする。
+   * 捏造を避けるため、実際に送った／再利用した内容から計算した値だけを使う。
+   */
+  let committedDatasetTurn: number | null = null;
+  let committedPackTurn: number | null = null;
+
+  /**
+   * 1パートを送る。前回保存したときから変わっていなければ reuse、それ以外は
+   * 従来どおり完全な値（value）。REUSE_BASE_MISMATCH が返ったときは、
+   * 同じパートを完全な値で1回だけ送り直す（自己修復）。
+   */
+  async function sendPart(part: "dataset" | "resume" | "pack", fullValue: unknown): Promise<SaveToServerOutcome> {
+    const base = knownPublishedPartTurns(simulationRunId);
+    let mode: SavePartTransfer["mode"] = "value";
+    let body: Record<string, unknown> | null = null;
+
+    if (base !== null && attempt.expectedBaseRevision > 0 && isReusableSimulationRunPart(part)) {
+      const publishedTurn = part === "dataset" ? base.dataset : base.pack;
+      const liveTurn = safeMaxTurn(part, fullValue);
+      /**
+       * liveTurn が null（形を判定できない）か publishedTurn < 0（基準が無い）なら
+       * 完全な値を送る＝判定できないときは確実に動く方へ倒す。
+       */
+      if (liveTurn !== null && publishedTurn >= 0 && liveTurn === publishedTurn) {
+        body = { simulationRunId, revision, part, reuseFromRevision: attempt.expectedBaseRevision, ...attempt };
+        mode = "reuse";
+      }
+    }
+
+    if (body === null) {
+      /**
+       * 【指示§31-35・変更しない】完全な値を送るときのサイズ検査は従来どおり、
+       * 送信前に行う。閾値・判定対象（圧縮しないJSONのバイト数）も変えていない。
+       */
+      const sizeError = checkPartSize(part, fullValue);
+      if (sizeError) return { ok: false, error: `サーバー保存に失敗しました（${sizeError}）`, stale: false };
+      body = { simulationRunId, revision, part, value: fullValue, ...attempt };
+      mode = "value";
+    }
+
+    let result = await postJson(body);
+    if (!result.ok && result.reuseBaseMismatch && mode === "reuse") {
+      // 土台が無い ⇒ 完全な値で送り直す（1回だけ）。
+      transfers.push({ part, mode, sentBytes: result.sentBytes });
+      const sizeError = checkPartSize(part, fullValue);
+      if (sizeError) return { ok: false, error: `サーバー保存に失敗しました（${sizeError}）`, stale: false };
+      mode = "value";
+      result = await postJson({ simulationRunId, revision, part, value: fullValue, ...attempt });
+    }
+    transfers.push({ part, mode, sentBytes: result.sentBytes });
+    if (!result.ok) {
+      return { ok: false, error: `サーバー保存に失敗しました（${part}: ${result.error}）`, stale: result.stale };
+    }
+    if (part === "dataset") committedDatasetTurn = safeMaxTurn("dataset", fullValue);
+    if (part === "pack") committedPackTurn = safeMaxTurn("pack", fullValue);
+    return { ok: true };
+  }
+
+  const datasetOutcome = await sendPart("dataset", stored.dataset);
+  if (!datasetOutcome.ok) return datasetOutcome;
 
   if (stored.resumePayload !== undefined) {
-    const resumeSizeError = checkPartSize("resume", stored.resumePayload);
-    if (resumeSizeError) return { ok: false, error: `サーバー保存に失敗しました（${resumeSizeError}）`, stale: false };
-    const resumeResult = await postJson({ simulationRunId, revision, part: "resume", value: stored.resumePayload, ...attempt });
-    if (!resumeResult.ok) return { ok: false, error: `サーバー保存に失敗しました（resume: ${resumeResult.error}）`, stale: resumeResult.stale };
+    const resumeOutcome = await sendPart("resume", stored.resumePayload);
+    if (!resumeOutcome.ok) return resumeOutcome;
   }
 
   if (stored.packCapture !== undefined) {
-    const packSizeError = checkPartSize("pack", stored.packCapture);
-    if (packSizeError) return { ok: false, error: `サーバー保存に失敗しました（${packSizeError}）`, stale: false };
-    const packResult = await postJson({ simulationRunId, revision, part: "pack", value: stored.packCapture, ...attempt });
-    if (!packResult.ok) return { ok: false, error: `サーバー保存に失敗しました（pack: ${packResult.error}）`, stale: packResult.stale };
+    const packOutcome = await sendPart("pack", stored.packCapture);
+    if (!packOutcome.ok) return packOutcome;
   }
 
   const manifestResult = await postJson({
@@ -356,7 +490,15 @@ async function saveToServer(stored: StoredSimulationRun, attempt: { expectedBase
     hasPackCapture: stored.packCapture !== undefined,
     ...attempt,
   });
+  transfers.push({ part: "manifest", mode: "value", sentBytes: manifestResult.sentBytes });
+  lastSaveTransfers = transfers;
   if (!manifestResult.ok) return { ok: false, error: `サーバー保存に失敗しました（manifest: ${manifestResult.error}）`, stale: manifestResult.stale };
+
+  // 公開に成功したので、次回の再利用判定の基準を更新する。
+  rememberPublishedPartTurns(simulationRunId, {
+    dataset: committedDatasetTurn ?? -1,
+    pack: stored.packCapture !== undefined ? committedPackTurn ?? -1 : -1,
+  });
   return { ok: true };
 }
 
@@ -441,6 +583,16 @@ export async function loadSimulationRun(simulationRunId: string): Promise<Stored
   const server = await loadFromServer(simulationRunId);
   if (!server) return null;
   seedRevisionCounter(simulationRunId, server.persistenceRevision ?? 0);
+  /**
+   * 【REUSE-1】読み込んだ正本が「どの turn まで含んでいるか」を覚える。これが次の
+   * 保存での再利用判定の基準になる。読み込み直後に覚えておかないと、resume 直後や
+   * ページ再読み込み直後の保存が毎回全量送信に戻る。
+   * 【捏造しない】実際に読めたパートから計算する。読んでいないパートは -1（基準なし）。
+   */
+  rememberPublishedPartTurns(simulationRunId, {
+    dataset: server.dataset !== undefined ? safeMaxTurn("dataset", server.dataset) ?? -1 : -1,
+    pack: server.packCapture !== undefined ? safeMaxTurn("pack", server.packCapture) ?? -1 : -1,
+  });
   saveBrowserCache(server);
   return server;
 }

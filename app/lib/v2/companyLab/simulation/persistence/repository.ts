@@ -130,6 +130,26 @@ export interface SimulationRunRepository {
    */
   saveRunPart(simulationRunId: string, attempt: SimulationRunWriteAttempt, part: SimulationRunPart, value: unknown): Promise<void>;
   /**
+   * 【REUSE-1・送信量削減】公開中（正本）のパートを、このattemptの未公開パート置き場へ
+   * そのままコピーする（＝「このパートは前のrevisionから変わっていない」の実現）。
+   *
+   * 【なぜブラウザから送り直さないのか】dataset / pack は T32 で約4.0MB / 約1.7MB あり、
+   * 5社PLAYERでは1Turnに6回の保存が走る。そのうち5回（PLAYER意思決定の確定）は
+   * これらを一切変更しない。変わっていない値を6回送っていたのが送信量の主因だった。
+   *
+   * 保存形式は変えない。コピー後は従来と同じく commitRunManifest が正規キーへ昇格させる
+   * （昇格時の CAS・パート欠落検査・TTLの扱いはいずれも変更していない）。
+   *
+   * @returns コピー元が見つからなければ false（呼び出し側は完全な値で送り直させる）。
+   *          見つからないまま正本化してはいけないため、例外ではなく真偽値で返す。
+   */
+  stagePartFromPublished(
+    simulationRunId: string,
+    attempt: SimulationRunWriteAttempt,
+    part: SimulationRunPart,
+    fromRevision: number
+  ): Promise<boolean>;
+  /**
    * 【Turn14以降Save/Resume停止BLOCKER修正】manifestを更新し、指定revisionを
    * 「読み込み可能な完全な状態」として公開する。呼び出し側は、この呼び出しより前に
    * 該当revisionのdataset（必須）・resume（hasResumePayloadがtrueなら必須）・
@@ -257,6 +277,26 @@ export function createInMemorySimulationRunRepository(): SimulationRunRepository
     pendingParts.set(simulationRunId, byToken);
   }
 
+  /**
+   * 【REUSE-1】インメモリ実装は revision ごとの履歴を持たないため、公開中の revision と
+   * 一致する場合だけコピーできる（Redis 実装が `:dataset:{revision}` を読むのと同じ意味論）。
+   * 公開中でない revision を土台にしようとした場合は false を返す。
+   */
+  async function stagePartFromPublished(
+    simulationRunId: string,
+    attempt: SimulationRunWriteAttempt,
+    part: SimulationRunPart,
+    fromRevision: number
+  ): Promise<boolean> {
+    const stored = runs.get(simulationRunId);
+    if (!stored) return false;
+    if ((stored.persistenceRevision ?? 0) !== fromRevision) return false;
+    const value = part === "dataset" ? stored.dataset : part === "resume" ? stored.resumePayload : stored.packCapture;
+    if (value === undefined) return false;
+    await saveRunPart(simulationRunId, attempt, part, value);
+    return true;
+  }
+
   async function commitRunManifest(manifest: StoredSimulationRunManifest, summary: SimulationRunSummary, attempt: SimulationRunWriteAttempt): Promise<void> {
     const runId = manifest.run.simulationRunId;
     // 【CAS】公開中のrevisionが、このwriterが読んだrevisionと違えば正本化しない。
@@ -329,5 +369,5 @@ export function createInMemorySimulationRunRepository(): SimulationRunRepository
     pendingParts.delete(simulationRunId);
   }
 
-  return { saveRun, saveRunPart, commitRunManifest, loadRun, listRuns, deleteRun, currentPublishedRevision };
+  return { saveRun, saveRunPart, stagePartFromPublished, commitRunManifest, loadRun, listRuns, deleteRun, currentPublishedRevision };
 }

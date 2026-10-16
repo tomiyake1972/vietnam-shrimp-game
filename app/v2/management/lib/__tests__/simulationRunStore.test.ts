@@ -77,6 +77,20 @@ function installFakeServer(initial: Map<string, unknown> = new Map()) {
     return `${id}:${revision}`;
   }
 
+  /**
+   * 【REUSE-1】公開済み（manifest commit 済み）のパート。revisionが一致しなければ undefined。
+   * 実物（repository.stagePartFromPublished）と同じ意味論にそろえる。
+   */
+  function publishedPart(id: string, part: string, revision: number): unknown {
+    const found = store.get(id) as
+      | { persistenceRevision?: number; dataset?: unknown; resumePayload?: unknown; packCapture?: unknown }
+      | undefined;
+    if (!found || found.persistenceRevision !== revision) return undefined;
+    if (part === "dataset") return found.dataset;
+    if (part === "resume") return found.resumePayload;
+    return found.packCapture;
+  }
+
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     if (!serverUp) return new Response(null, { status: 500 });
@@ -104,7 +118,20 @@ function installFakeServer(initial: Map<string, unknown> = new Map()) {
       const part = body.part as string;
       const key = partsKey(simulationRunId, revision);
       const parts = partsByRunAndRevision.get(key) ?? {};
-      parts[part] = body.value;
+      /**
+       * 【REUSE-1】実物のハンドラー（simulation-runs/_lib/handlers.ts）と同じ2経路を
+       * 再現する。ここを再現しないと、クライアントが「変わっていないので送らない」と
+       * 判断したパートがフェイク側で欠落したまま通り、テストが実物と違う結論を出す。
+       */
+      if (body.reuseFromRevision !== undefined) {
+        const base = publishedPart(simulationRunId, part, body.reuseFromRevision as number);
+        if (base === undefined) {
+          return new Response(JSON.stringify({ error: { code: "REUSE_BASE_MISMATCH", message: "no base" } }), { status: 409 });
+        }
+        parts[part] = base;
+      } else {
+        parts[part] = body.value;
+      }
       partsByRunAndRevision.set(key, parts);
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     }

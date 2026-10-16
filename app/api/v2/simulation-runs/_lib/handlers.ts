@@ -11,6 +11,10 @@ import {
   SimulationRunWriteAttempt,
   createSimulationRunWriteToken,
 } from "../../../../lib/v2/companyLab/simulation/persistence/repository";
+import {
+  SIMULATION_RUN_REUSE_BASE_MISMATCH,
+  parseSimulationRunPartSource,
+} from "../../../../lib/v2/companyLab/simulation/persistence/partReuse";
 import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION, StoredSimulationRun, StoredSimulationRunManifest, manifestToSimulationRunSummary } from "../../../../lib/v2/companyLab/simulation/persistence/types";
 import { CompanyControlMode } from "../../../../lib/v2/companyLab/simulation/types";
 import { SimulationRunApiResult } from "./context";
@@ -44,6 +48,28 @@ function badRequest(message: string): SimulationRunApiResult {
  * 自分の変更を最新へ安全に再適用できる場合だけ作り直して再保存する
  * （同じpayloadのrevisionだけ上げて再送してはいけない）。
  */
+/**
+ * 【REUSE-1】再利用元（基準 revision のパート）が無い／公開中でない。
+ *
+ * STALE_PERSISTENCE_REVISION とは意味が違う（あちらは「他のwriterが先に公開した」）。
+ * こちらは「送らずに済ませようとしたが土台が無い」であり、クライアントは同じ内容を
+ * **完全な値**で送り直せば解決する。混同させないため別コードにする。
+ */
+function reuseBaseMismatch(part: SimulationRunPart, fromRevision: number): SimulationRunApiResult {
+  return {
+    status: 409,
+    body: {
+      error: {
+        code: SIMULATION_RUN_REUSE_BASE_MISMATCH,
+        message:
+          `再利用元（revision=${fromRevision}）の ${part} が見つかりません。完全な値で保存し直してください。`,
+        part,
+        fromRevision,
+      },
+    },
+  };
+}
+
 function staleRevisionConflict(e: SimulationRunStaleRevisionError): SimulationRunApiResult {
   return {
     status: 409,
@@ -156,7 +182,16 @@ export async function handleSaveSimulationRunPart(repository: SimulationRunRepos
   if (typeof body !== "object" || body === null) {
     return badRequest("リクエストボディが JSON オブジェクトではありません。");
   }
-  const candidate = body as { simulationRunId?: unknown; revision?: unknown; part?: unknown; value?: unknown; expectedBaseRevision?: unknown; writeToken?: unknown };
+  const candidate = body as {
+    simulationRunId?: unknown;
+    revision?: unknown;
+    part?: unknown;
+    value?: unknown;
+    expectedBaseRevision?: unknown;
+    writeToken?: unknown;
+    /** 【REUSE-1】このパートは前の revision から変わっていない（value は送らない）。 */
+    reuseFromRevision?: unknown;
+  };
   if (typeof candidate.simulationRunId !== "string" || candidate.simulationRunId.length === 0) {
     return badRequest("simulationRunId が空です。");
   }
@@ -166,13 +201,20 @@ export async function handleSaveSimulationRunPart(repository: SimulationRunRepos
   if (typeof candidate.part !== "string" || !VALID_PARTS.includes(candidate.part as SimulationRunPart)) {
     return badRequest(`part は ${VALID_PARTS.join(" / ")} のいずれかである必要があります。`);
   }
-  if (candidate.value === undefined) {
-    return badRequest("value がありません。");
+  const part = candidate.part as SimulationRunPart;
+  /**
+   * 【REUSE-1】完全な値（value）のほかに、「変わっていないので前の revision を使え」
+   * （reuseFromRevision）を受け付ける。どちらで来たかはここで1回だけ判定する。
+   */
+  const source = parseSimulationRunPartSource(candidate);
+  if ("error" in source) {
+    return badRequest(source.error);
   }
   const parsedAttempt = parseWriteAttempt(candidate);
   if (parsedAttempt === "invalid") {
     return badRequest("expectedBaseRevision（0以上の数値）と writeToken（空でない文字列）は同時に指定してください。");
   }
+  /** 【終了済みRun保護】reuse 経路でも従来と同じ位置で検査する（順序を変えない）。 */
   const lockConflict = await checkNotAlreadyFinished(repository, candidate.simulationRunId);
   if (lockConflict) return lockConflict;
   try {
@@ -181,7 +223,20 @@ export async function handleSaveSimulationRunPart(repository: SimulationRunRepos
      * その場で公開中revisionを読んで基準にする（旧クライアント互換）。
      */
     const attempt = parsedAttempt ?? (await inlineAttempt(repository, candidate.simulationRunId));
-    await repository.saveRunPart(candidate.simulationRunId, attempt, candidate.part as SimulationRunPart, candidate.value);
+    if (source.kind === "value") {
+      await repository.saveRunPart(candidate.simulationRunId, attempt, part, source.value);
+    } else {
+      /**
+       * 変わっていないパートは Redis 内でコピーする（ブラウザからは数十バイトしか出ない）。
+       * コピー元が無い／公開中でない場合は、**正本化せずに**クライアントへ
+       * 「完全な値で送り直せ」と返す。ここで黙って通すと、パートが欠けた
+       * revision を公開してしまい、あとで読み込み・Pack出力が壊れる。
+       */
+      const copied = await repository.stagePartFromPublished(candidate.simulationRunId, attempt, part, source.fromRevision);
+      if (!copied) {
+        return reuseBaseMismatch(part, source.fromRevision);
+      }
+    }
   } catch (e) {
     if (e instanceof SimulationRunSchemaError) return badRequest(e.message);
     throw e;
