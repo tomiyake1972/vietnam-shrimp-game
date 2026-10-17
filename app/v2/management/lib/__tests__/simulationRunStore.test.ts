@@ -342,3 +342,113 @@ test("PERSIST-D7: 旧形式のfull-run localStorageエントリは、新しい�
     assert.equal(storage.getItem("shrimpx:v2:simulationRun:legacy-run-id"), null, "旧形式のfull-runエントリが掃除されていない");
   });
 });
+
+/**
+ * 【REUSE-1 受入前の指摘1】再利用の判定を「最大Turnの一致」だけで行うと、
+ * 同じ最大Turnのまま内容が変わった保存で、その変更が送られず失われる。
+ *
+ * dataset / pack は turn が進んだときにだけ増える、というのは観察であって
+ * 保証ではない。たとえば過去Turnの行が再計算で値だけ変わる場合、
+ * 最大Turnは動かない。変更が静かに消えるのは保存機構として許容できない。
+ */
+function datasetWithTurns(maxTurn: number, metricValue: number) {
+  const turns = Array.from({ length: maxTurn }, (_, i) => i + 1);
+  return {
+    schemaVersion: "simulationAnalytics-v1",
+    turns,
+    companies: [{ companyId: "BAL", displayName: "BAL", color: "#000" }],
+    companyMetrics: turns.map((turn) => ({ turn, companyId: "BAL", metric: "revenue", value: metricValue })),
+    marketMetrics: [],
+    producerCountryMetrics: [],
+    bottlenecks: [],
+    aiTrace: [],
+    salesTrace: [],
+    hiringTrace: [],
+    investmentTrace: [],
+    contribution: [],
+    fixedCosts: [],
+    salesAllocation: [],
+  };
+}
+
+function runWithDataset(id: string, completedTurns: number, dataset: unknown) {
+  return { ...stubRun(id, completedTurns), dataset };
+}
+
+test("REUSE-STORE-1: 最大Turnが同じでも内容が変われば、その変更を失わず保存する", async () => {
+  const server = installFakeServer();
+  await withFreshStore(null, async (mod) => {
+    const id = "run-reuse-content";
+    const first = await mod.saveSimulationRun(runWithDataset(id, 3, datasetWithTurns(3, 1)) as never);
+    assert.equal(first.serverSaveSucceeded, true, `1回目の保存が失敗した: ${first.serverError}`);
+
+    // 最大Turnは3のまま、値だけ 1 → 999 に変える。
+    const changed = datasetWithTurns(3, 999);
+    const second = await mod.saveSimulationRun(runWithDataset(id, 3, changed) as never);
+    assert.equal(second.serverSaveSucceeded, true, `2回目の保存が失敗した: ${second.serverError}`);
+
+    const stored = server.store.get(id) as { dataset?: unknown } | undefined;
+    assert.equal(
+      JSON.stringify(stored?.dataset),
+      JSON.stringify(changed),
+      "最大Turnが同じため再利用され、変更が保存されずに失われている"
+    );
+  });
+});
+
+test("REUSE-STORE-2: 内容が変わっていなければ再利用され、保存される中身は同一のまま", async () => {
+  const server = installFakeServer();
+  await withFreshStore(null, async (mod) => {
+    const id = "run-reuse-same";
+    const dataset = datasetWithTurns(3, 7);
+    const first = await mod.saveSimulationRun(runWithDataset(id, 3, dataset) as never);
+    assert.equal(first.serverSaveSucceeded, true);
+
+    // まったく同じ dataset を渡す（別インスタンスだが内容は同一）。
+    const second = await mod.saveSimulationRun(runWithDataset(id, 3, datasetWithTurns(3, 7)) as never);
+    assert.equal(second.serverSaveSucceeded, true);
+
+    const stored = server.store.get(id) as { dataset?: unknown } | undefined;
+    assert.equal(JSON.stringify(stored?.dataset), JSON.stringify(dataset), "再利用で中身が変わってしまっている");
+
+    const modes = mod.getLastSaveTransfers().filter((t) => t.part === "dataset").map((t) => t.mode);
+    assert.deepEqual(modes, ["reuse"], `内容が同一なのに再利用されていない: ${JSON.stringify(mod.getLastSaveTransfers())}`);
+  });
+});
+
+/**
+ * 【REUSE-1 受入前の指摘1・後半】別writerが新しい revision を公開したあと、
+ * 手元の比較基準（フィンガープリント）が指している revision と、再利用元として
+ * 申告する revision が対応していなければ再利用してはいけない。
+ *
+ * ここでは、保存成功後にサーバー側の正本だけを別writerが進めた状況を作る。
+ * このタブの基準は revision 1 のままだが、公開中は revision 2 になっている。
+ * 再利用は拒否され（REUSE_BASE_MISMATCH）、完全な値で送り直されるため、
+ * 保存される内容は手元の最新と一致しなければならない。
+ */
+test("REUSE-STORE-3: 別writerが公開を進めたあとは再利用せず、完全な値で送り直す", async () => {
+  const server = installFakeServer();
+  await withFreshStore(null, async (mod) => {
+    const id = "run-reuse-other-writer";
+    const dataset = datasetWithTurns(3, 11);
+    const first = await mod.saveSimulationRun(runWithDataset(id, 3, dataset) as never);
+    assert.equal(first.serverSaveSucceeded, true);
+    assert.equal(first.persistenceRevision, 1);
+
+    // 別writerが revision 2 を公開した状況（このタブは知らない）。
+    const published = server.store.get(id) as Record<string, unknown>;
+    server.store.set(id, { ...published, persistenceRevision: 2, dataset: datasetWithTurns(3, 22) });
+
+    const next = datasetWithTurns(3, 11);
+    const second = await mod.saveSimulationRun(runWithDataset(id, 3, next) as never);
+    assert.equal(second.serverSaveSucceeded, true, `2回目の保存が失敗した: ${second.serverError}`);
+
+    const transfers = mod.getLastSaveTransfers().filter((t: { part: string }) => t.part === "dataset");
+    assert.ok(
+      transfers.some((t: { mode: string }) => t.mode === "value"),
+      `完全な値で送り直していない: ${JSON.stringify(mod.getLastSaveTransfers())}`
+    );
+    const stored = server.store.get(id) as { dataset?: unknown } | undefined;
+    assert.equal(JSON.stringify(stored?.dataset), JSON.stringify(next), "手元の最新が保存されていない");
+  });
+});

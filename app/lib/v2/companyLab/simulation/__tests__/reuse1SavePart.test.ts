@@ -15,9 +15,8 @@ import { handleSaveSimulationRun, handleSaveSimulationRunPart } from "../../../.
 import { createInMemorySimulationRunRepository } from "../persistence/repository";
 import {
   SIMULATION_RUN_REUSE_BASE_MISMATCH,
-  SimulationRunPartShapeError,
+  fingerprintSimulationRunPart,
   isReusableSimulationRunPart,
-  maxTurnOfSimulationRunPart,
   parseSimulationRunPartSource,
 } from "../persistence/partReuse";
 import { CURRENT_SIMULATION_RUN_PERSISTED_VERSION } from "../persistence/types";
@@ -134,16 +133,38 @@ test("REUSE-1: value と reuseFromRevision は排他で、どちらも無けれ�
   assert.ok("error" in parseSimulationRunPartSource({ reuseFromRevision: 1.5 }), "非整数が通っている");
 });
 
-test("REUSE-2: 最大turnの判定対象は dataset / pack だけで、resume は例外になる", () => {
+test("REUSE-2: 再利用の対象は dataset / pack だけで、resume は対象外", () => {
   assert.equal(isReusableSimulationRunPart("dataset"), true);
   assert.equal(isReusableSimulationRunPart("pack"), true);
   assert.equal(isReusableSimulationRunPart("resume"), false);
+});
 
-  assert.equal(maxTurnOfSimulationRunPart("dataset", datasetThrough(4)), 4);
-  assert.equal(maxTurnOfSimulationRunPart("pack", packThrough(7)), 7);
-  assert.equal(maxTurnOfSimulationRunPart("dataset", datasetThrough(0)), 0, "行が無ければ0");
-  assert.throws(() => maxTurnOfSimulationRunPart("resume", { marker: "x" }), SimulationRunPartShapeError);
-  assert.throws(() => maxTurnOfSimulationRunPart("dataset", { nope: true }), SimulationRunPartShapeError);
+/**
+ * 【受入前の指摘1】判定は内容そのもので行う。最大turnが同じでも内容が違えば
+ * フィンガープリントは必ず違わなければならない（違わなければ変更が静かに失われる）。
+ */
+test("REUSE-2b: フィンガープリントは内容で決まる（最大turnが同じでも内容が違えば別になる）", async () => {
+  const a = await fingerprintSimulationRunPart(datasetThrough(3));
+  const same = await fingerprintSimulationRunPart(datasetThrough(3));
+  assert.notEqual(a, null, "この環境では crypto.subtle が使えずフィンガープリントが取れない");
+  assert.equal(a, same, "同じ内容なのに別のフィンガープリントになっている");
+
+  // 最大turnは3のまま、値だけ変える。
+  const changed = { ...datasetThrough(3), companyMetrics: datasetThrough(3).companyMetrics.map((m) => ({ ...m, value: 999 })) };
+  const b = await fingerprintSimulationRunPart(changed);
+  assert.notEqual(a, b, "最大turnが同じで内容が違うのに同じフィンガープリントになっている");
+
+  // turn が増えた場合も当然違う。
+  const longer = await fingerprintSimulationRunPart(datasetThrough(4));
+  assert.notEqual(a, longer);
+
+  // pack も同様。
+  const p3 = await fingerprintSimulationRunPart(packThrough(3));
+  const p3changed = await fingerprintSimulationRunPart({
+    ...packThrough(3),
+    worldTurns: packThrough(3).worldTurns.map((w) => ({ ...w, marker: "changed" })),
+  });
+  assert.notEqual(p3, p3changed, "pack の内容変更が検出できていない");
 });
 
 // ---------------------------------------------------------------------
@@ -323,4 +344,63 @@ test("REUSE-8: 同じ基準を読んだ2つのwriterのうち、commitに成功�
   // 再利用したパートは、どちらが勝っても従来方式と同じ中身である。
   assert.equal(JSON.stringify(stored?.dataset), JSON.stringify(datasetThrough(3)));
   assert.equal(JSON.stringify(stored?.packCapture), JSON.stringify(packThrough(3)));
+});
+
+/**
+ * 【受入前の指摘2】stagePartFromPublished の契約を両実装でそろえた。
+ * インメモリ側をここで固定し、Redis 側は scripts/int1/reuse1IsolatedRedis.ts
+ * （REUSE-R10〜R15）で実Redisに対して固定している。
+ *
+ * 契約: 公開中revision・fromRevision・expectedBaseRevision の三者が一致し、
+ * そのパートが実在するときだけ true。
+ */
+test("REUSE-9: 三者（公開中revision / fromRevision / expectedBaseRevision）が一致しなければ再利用しない", async () => {
+  const repository = createInMemorySimulationRunRepository();
+  const published = await saveFull(repository, { base: 0, token: "t1", maxTurn: 3 });
+  assert.equal(published, 1);
+
+  // 三者一致 → true
+  const ok = await repository.stagePartFromPublished(RUN_ID, attemptFor(published, "ok"), "dataset", published);
+  assert.equal(ok, true, "三者が一致しているのに再利用できていない");
+
+  // fromRevision だけ食い違う
+  const a = await repository.stagePartFromPublished(RUN_ID, attemptFor(published, "a"), "dataset", published + 1);
+  assert.equal(a, false, "fromRevision が公開中と違うのに再利用できてしまっている");
+
+  // expectedBaseRevision だけ食い違う
+  const bMismatch = await repository.stagePartFromPublished(RUN_ID, attemptFor(published + 1, "b"), "dataset", published);
+  assert.equal(bMismatch, false, "expectedBaseRevision が公開中と違うのに再利用できてしまっている");
+
+  // 両方古い（互いには一致しているが公開中と違う）
+  const c = await repository.stagePartFromPublished(RUN_ID, attemptFor(published - 1, "c"), "dataset", published - 1);
+  assert.equal(c, false, "両方が公開中と違うのに再利用できてしまっている");
+
+  // そのRun自体が無い
+  const d = await repository.stagePartFromPublished("no-such-run", attemptFor(published, "d"), "dataset", published);
+  assert.equal(d, false);
+});
+
+test("REUSE-10: 公開中revisionに存在しないパートは再利用しない", async () => {
+  const repository = createInMemorySimulationRunRepository();
+  const revision = 1;
+  const attempt = attemptFor(0, "t1");
+  // pack を持たない Run を公開する。
+  await handleSaveSimulationRunPart(repository, { simulationRunId: RUN_ID, revision, part: "dataset", value: datasetThrough(2), ...attempt });
+  await handleSaveSimulationRunPart(repository, { simulationRunId: RUN_ID, revision, part: "resume", value: { marker: "r" }, ...attempt });
+  const commit = await handleSaveSimulationRun(repository, {
+    manifestOnly: true,
+    run: runMetadata(2),
+    savedAt: SAVED_AT,
+    persistenceRevision: revision,
+    hasResumePayload: true,
+    hasPackCapture: false,
+    schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
+    ...attempt,
+  });
+  assert.equal(commit.status, 200);
+
+  const dataset = await repository.stagePartFromPublished(RUN_ID, attemptFor(revision, "x"), "dataset", revision);
+  assert.equal(dataset, true, "存在する dataset が再利用できていない");
+  const pack = await repository.stagePartFromPublished(RUN_ID, attemptFor(revision, "y"), "pack", revision);
+  assert.equal(pack, false, "存在しない pack が再利用できてしまっている");
 });

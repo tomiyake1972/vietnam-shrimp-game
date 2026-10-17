@@ -5,10 +5,18 @@
 //   dataset / resume / pack を丸ごと送っている。5社PLAYERでは1Turnに6回保存が走るが、
 //   そのうち5回（PLAYER意思決定の確定）は dataset と pack を一切変更しない。
 //   実測（5社PLAYER×32Turn、tiered-v200-crowding-v1）で T32 の1保存は
-//   dataset 4,002,162 B / pack 1,682,483 B あり、変わっていない値を6回送っていた。
+//   dataset 約4.0MB / pack 約1.7MB あり、変わっていない値を6回送っていた。
 //
 // 【保存形式は変えない】変えるのは送り方（wire）だけで、Redis 上の正規キーに
 //   完全な JSON を置く形は不変。既存Runの読み出し経路・migration は不要のまま。
+//
+// 【「変わっていない」の判定は内容そのもので行う（受入前の指摘1）】
+//   当初は「パートが含む最大 turn が一致すれば同じ内容」と判定していた。
+//   dataset / pack は turn が進んだときにだけ増える、というのは観察であって
+//   保証ではない。過去Turnの行が再計算で値だけ変わる場合、最大 turn は動かず、
+//   変更が送られないまま静かに失われる（simulationRunStore.test.ts の
+//   REUSE-STORE-1 がこの事故を固定している）。
+//   そのため判定は保存する JSON そのもののハッシュで行う。
 //
 // 【この版に含めないもの（意図的な限定）】
 //   - gzip 圧縮
@@ -18,8 +26,6 @@
 //   いずれも別の修正として切り離して審査するため、ここには入れない。
 
 import type { SimulationRunPart } from "./repository";
-import type { SimulationPackCapture } from "./types";
-import type { SimulationAnalyticsDataset } from "../analytics/types";
 
 /**
  * 再利用元として申告した revision のパートが、公開中のものと食い違う／存在しない。
@@ -65,52 +71,35 @@ export function parseSimulationRunPartSource(candidate: {
   return { kind: "value", value: candidate.value };
 }
 
-export class SimulationRunPartShapeError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SimulationRunPartShapeError";
-  }
-}
-
-function isDatasetLike(value: unknown): value is SimulationAnalyticsDataset {
-  return typeof value === "object" && value !== null && Array.isArray((value as { turns?: unknown }).turns);
-}
-
-function isPackLike(value: unknown): value is SimulationPackCapture {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as { companyTurns?: unknown; worldTurns?: unknown };
-  return Array.isArray(candidate.companyTurns) && Array.isArray(candidate.worldTurns);
-}
-
-/**
- * パートが含んでいる最大 turn（行が無ければ0）。
- *
- * 【用途はひとつだけ】クライアントが「このパートは前回保存したときから
- * 変わっていないか」を判定するために使う。dataset / pack はいずれも
- * turn が進んだときにだけ行が増えるため、最大 turn が一致していれば
- * 内容も同一である。
- *
- * 【捏造しない】turn を持たないパート（resume）では例外にする。
- */
-export function maxTurnOfSimulationRunPart(part: SimulationRunPart, value: unknown): number {
-  if (part === "dataset") {
-    if (!isDatasetLike(value)) throw new SimulationRunPartShapeError("dataset の形が不正で最大turnを判定できません。");
-    return value.turns.length > 0 ? Math.max(...value.turns) : 0;
-  }
-  if (part === "pack") {
-    if (!isPackLike(value)) throw new SimulationRunPartShapeError("pack の形が不正で最大turnを判定できません。");
-    const turns = [...value.companyTurns.map((t) => t.turn), ...value.worldTurns.map((t) => t.turn)];
-    return turns.length > 0 ? Math.max(...turns) : 0;
-  }
-  throw new SimulationRunPartShapeError(`part=${part} は turn を持ちません。`);
-}
-
-/**
- * 再利用の判定に使えるパート（turn が進んだときにだけ増えるもの）。
- *
- * 型述語にしてあるのは、呼び出し側が「resume を最大turn判定へ渡してしまう」
- * 取り違えを型で弾けるようにするため（resume は turn を持たない）。
- */
+/** 再利用の対象にするパート。resume は毎回変わるため対象にしない。 */
 export function isReusableSimulationRunPart(part: SimulationRunPart): part is "dataset" | "pack" {
   return part === "dataset" || part === "pack";
+}
+
+function toHex(buffer: ArrayBuffer): string {
+  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * 保存するパートの内容そのもののフィンガープリント。
+ *
+ * 【SHA-256 を使う理由】フィンガープリントが衝突すると、変更が送られずに
+ * 静かに失われる。自作の短いハッシュでは衝突確率を自分で保証できないため、
+ * 標準の SHA-256 を使い、長さも併記する。
+ *
+ * 【取れない環境では null を返す】`crypto.subtle` は secure context でしか
+ * 使えない（HTTP の開発サーバー等では存在しない）。その場合は null を返し、
+ * 呼び出し側は再利用せず完全な値を送る。判定できないときは確実に動く方へ倒す
+ * ＝「たぶん同じ」で送らない、ということをしない。
+ */
+export async function fingerprintSimulationRunPart(value: unknown): Promise<string | null> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return null;
+  try {
+    const json = JSON.stringify(value);
+    const digest = await subtle.digest("SHA-256", new TextEncoder().encode(json));
+    return `${json.length}:${toHex(digest)}`;
+  } catch {
+    return null;
+  }
 }

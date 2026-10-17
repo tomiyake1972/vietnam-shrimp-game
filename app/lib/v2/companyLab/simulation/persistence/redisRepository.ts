@@ -190,14 +190,52 @@ export const SIMULATION_RUN_STAGING_TTL_MS = 60 * 60 * 1000;
  * scripts/int1/reuse1IsolatedRedis.ts が PTTL で確認する）。
  */
 export const SIMULATION_RUN_COPY_PART_TO_STAGING_SCRIPT = `
--- KEYS: 1 canonical part key (コピー元), 2 staging part key (コピー先)
--- ARGV: 1 pxMilliseconds
-local value = redis.call('GET', KEYS[1])
-if not value then
-  return 0
+-- 【REUSE-1・受入前の指摘2】再利用元の検証をこのスクリプトの中で行う。
+-- KEYS: 1 manifest, 2 canonical part key (コピー元), 3 staging part key (コピー先)
+-- ARGV: 1 fromRevision, 2 expectedBaseRevision, 3 pxMilliseconds
+--
+-- 【コピー元キーの存在だけで判断してはいけない】commitRunManifest は旧revisionの
+-- パートキーをベストエフォートで削除する（失敗しても保存は成立し、孤児キーが残る）。
+-- そのためコピー元キーの存在は「その revision が公開中であること」を意味しない。
+-- 孤児キーからコピーすると、別writerが進めたあとの古い内容を土台にしてしまう。
+-- 公開中revision を manifest から読み、fromRevision と expectedBaseRevision の
+-- 三者が一致するときだけコピーする。インメモリ実装と同じ意味論にそろえる。
+--
+-- 【1回のスクリプトで読んで比べて書く】別々の呼び出しに分けると、その隙間に
+-- 他のwriterが公開してしまう。manifest の CAS（別スクリプト）は変更していない。
+local manifestKey = KEYS[1]
+local sourceKey = KEYS[2]
+local stagingKey = KEYS[3]
+local fromRevision = tonumber(ARGV[1])
+local expectedBase = tonumber(ARGV[2])
+
+if fromRevision == nil or expectedBase == nil then
+  return { 'INVALID_ARGS' }
 end
-redis.call('SET', KEYS[2], value, 'PX', ARGV[1])
-return 1
+
+local published = 0
+local rawManifest = redis.call('GET', manifestKey)
+if rawManifest then
+  local ok, parsed = pcall(cjson.decode, rawManifest)
+  if ok and type(parsed) == 'table' and type(parsed.persistenceRevision) == 'number' then
+    published = parsed.persistenceRevision
+  end
+end
+
+if published ~= fromRevision then
+  return { 'REVISION_MISMATCH', tostring(published) }
+end
+if published ~= expectedBase then
+  return { 'REVISION_MISMATCH', tostring(published) }
+end
+
+local value = redis.call('GET', sourceKey)
+if not value then
+  return { 'MISSING_SOURCE', tostring(published) }
+end
+
+redis.call('SET', stagingKey, value, 'PX', ARGV[3])
+return { 'OK', tostring(published) }
 `;
 
 export interface SimulationRunRepositoryDependencies {
@@ -254,18 +292,29 @@ export function createRedisSimulationRunRepository(deps: SimulationRunRepository
     part: SimulationRunPart,
     fromRevision: number
   ): Promise<boolean> {
+    const manifestKey = simulationRunManifestKeyV2(appEnv, simulationRunId);
     const sourceKey = canonicalPartKey(simulationRunId, part, fromRevision);
     const stagingKey = simulationRunStagingPartKeyV2(appEnv, simulationRunId, attempt.writeToken, part);
-    assertAllowedSimulationRunKeys([sourceKey, stagingKey], appEnv);
+    assertAllowedSimulationRunKeys([manifestKey, sourceKey, stagingKey], appEnv);
     let outcome: unknown;
     try {
-      outcome = await client.eval(SIMULATION_RUN_COPY_PART_TO_STAGING_SCRIPT, [sourceKey, stagingKey], [String(SIMULATION_RUN_STAGING_TTL_MS)]);
+      outcome = await client.eval(
+        SIMULATION_RUN_COPY_PART_TO_STAGING_SCRIPT,
+        [manifestKey, sourceKey, stagingKey],
+        [String(fromRevision), String(attempt.expectedBaseRevision), String(SIMULATION_RUN_STAGING_TTL_MS)]
+      );
     } catch (e) {
       throw new SimulationRunRepositoryError(
         `Simulation Run のパート再利用に失敗しました（simulationRunId=${simulationRunId}, part=${part}, fromRevision=${fromRevision}）: ${toErrorMessage(e)}`
       );
     }
-    return Number(outcome) === 1;
+    /**
+     * REVISION_MISMATCH / MISSING_SOURCE / INVALID_ARGS はいずれも
+     * 「再利用できなかった」であり、例外にしない。呼び出し側（API層）が
+     * 409 REUSE_BASE_MISMATCH を返し、クライアントが完全な値で送り直す。
+     */
+    const status = Array.isArray(outcome) ? String(outcome[0]) : String(outcome);
+    return status === "OK";
   }
 
   async function commitRunManifest(manifest: StoredSimulationRunManifest, summary: SimulationRunSummary, attempt: SimulationRunWriteAttempt): Promise<void> {

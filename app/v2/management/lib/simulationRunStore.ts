@@ -32,8 +32,8 @@
 import { StoredSimulationRun, SimulationRunSummary, toSimulationRunSummary } from "../../../lib/v2/companyLab/simulation/persistence/types";
 import {
   SIMULATION_RUN_REUSE_BASE_MISMATCH,
+  fingerprintSimulationRunPart,
   isReusableSimulationRunPart,
-  maxTurnOfSimulationRunPart,
 } from "../../../lib/v2/companyLab/simulation/persistence/partReuse";
 
 /**
@@ -282,34 +282,31 @@ async function readErrorBody(response: Response): Promise<string | null> {
 // ---------------------------------------------------------------------
 
 /**
- * 【REUSE-1】このタブが「公開中revisionに入っている」と把握しているパートの最大turn。
- * -1 は「基準なし（完全な値で送る）」。
+ * 【REUSE-1】このタブが「公開中のこの revision に、この内容が入っている」と
+ * 把握している記録。
+ *
+ * 【revision と必ず組で持つ理由（受入前の指摘1）】フィンガープリントだけを
+ * 覚えていると、別のwriterが新しい revision を公開したあとも「手元の基準」が
+ * そのまま使われ、どの revision の内容と比べているのか分からなくなる。
+ * revision を一緒に持ち、再利用を申告する revision（expectedBaseRevision）と
+ * 一致しなければ再利用しない。
+ *
+ * null のフィンガープリントは「判定できない」を意味し、再利用しない。
  */
-interface PublishedPartTurns {
-  readonly dataset: number;
-  readonly pack: number;
+interface PublishedPartFingerprints {
+  readonly revision: number;
+  readonly dataset: string | null;
+  readonly pack: string | null;
 }
 
-const publishedPartTurns = new Map<string, PublishedPartTurns>();
+const publishedPartFingerprints = new Map<string, PublishedPartFingerprints>();
 
-function knownPublishedPartTurns(runId: string): PublishedPartTurns | null {
-  return publishedPartTurns.get(runId) ?? null;
+function knownPublishedFingerprints(runId: string): PublishedPartFingerprints | null {
+  return publishedPartFingerprints.get(runId) ?? null;
 }
 
-function rememberPublishedPartTurns(runId: string, turns: PublishedPartTurns): void {
-  publishedPartTurns.set(runId, turns);
-}
-
-/**
- * パートの最大turn。形が想定と違えば null を返す（例外にしない）。
- * null のときは再利用せず、従来どおり完全な値で送る。
- */
-function safeMaxTurn(part: "dataset" | "pack", value: unknown): number | null {
-  try {
-    return maxTurnOfSimulationRunPart(part, value);
-  } catch {
-    return null;
-  }
+function rememberPublishedFingerprints(runId: string, value: PublishedPartFingerprints): void {
+  publishedPartFingerprints.set(runId, value);
 }
 
 /** 保存1回ぶんの送信量の明細（計測用）。 */
@@ -413,8 +410,8 @@ async function saveToServer(stored: StoredSimulationRun, attempt: { expectedBase
    * 「公開中revisionが含んでいる最大turn」として覚え、次の保存の再利用判定の基準にする。
    * 捏造を避けるため、実際に送った／再利用した内容から計算した値だけを使う。
    */
-  let committedDatasetTurn: number | null = null;
-  let committedPackTurn: number | null = null;
+  let committedDatasetFingerprint: string | null = null;
+  let committedPackFingerprint: string | null = null;
 
   /**
    * 1パートを送る。前回保存したときから変わっていなければ reuse、それ以外は
@@ -422,18 +419,31 @@ async function saveToServer(stored: StoredSimulationRun, attempt: { expectedBase
    * 同じパートを完全な値で1回だけ送り直す（自己修復）。
    */
   async function sendPart(part: "dataset" | "resume" | "pack", fullValue: unknown): Promise<SaveToServerOutcome> {
-    const base = knownPublishedPartTurns(simulationRunId);
+    const base = knownPublishedFingerprints(simulationRunId);
     let mode: SavePartTransfer["mode"] = "value";
     let body: Record<string, unknown> | null = null;
+    let liveFingerprint: string | null = null;
 
-    if (base !== null && attempt.expectedBaseRevision > 0 && isReusableSimulationRunPart(part)) {
-      const publishedTurn = part === "dataset" ? base.dataset : base.pack;
-      const liveTurn = safeMaxTurn(part, fullValue);
+    if (isReusableSimulationRunPart(part)) {
+      liveFingerprint = await fingerprintSimulationRunPart(fullValue);
+      const publishedFingerprint = base === null ? null : part === "dataset" ? base.dataset : base.pack;
       /**
-       * liveTurn が null（形を判定できない）か publishedTurn < 0（基準が無い）なら
-       * 完全な値を送る＝判定できないときは確実に動く方へ倒す。
+       * 再利用するのは、次のすべてが揃ったときだけ。
+       *   1. 手元の基準が、いまから申告する revision のものであること
+       *      （別writerが先に公開していれば一致しない）
+       *   2. 公開済みの内容のフィンガープリントが取れていること
+       *   3. 今回保存する内容のフィンガープリントが取れていること
+       *   4. 両者が一致すること（＝内容が本当に変わっていない）
+       * どれか欠けたら完全な値を送る。判定できないときは確実に動く方へ倒す。
        */
-      if (liveTurn !== null && publishedTurn >= 0 && liveTurn === publishedTurn) {
+      if (
+        base !== null &&
+        attempt.expectedBaseRevision > 0 &&
+        base.revision === attempt.expectedBaseRevision &&
+        publishedFingerprint !== null &&
+        liveFingerprint !== null &&
+        publishedFingerprint === liveFingerprint
+      ) {
         body = { simulationRunId, revision, part, reuseFromRevision: attempt.expectedBaseRevision, ...attempt };
         mode = "reuse";
       }
@@ -463,8 +473,8 @@ async function saveToServer(stored: StoredSimulationRun, attempt: { expectedBase
     if (!result.ok) {
       return { ok: false, error: `サーバー保存に失敗しました（${part}: ${result.error}）`, stale: result.stale };
     }
-    if (part === "dataset") committedDatasetTurn = safeMaxTurn("dataset", fullValue);
-    if (part === "pack") committedPackTurn = safeMaxTurn("pack", fullValue);
+    if (part === "dataset") committedDatasetFingerprint = liveFingerprint;
+    if (part === "pack") committedPackFingerprint = liveFingerprint;
     return { ok: true };
   }
 
@@ -494,10 +504,14 @@ async function saveToServer(stored: StoredSimulationRun, attempt: { expectedBase
   lastSaveTransfers = transfers;
   if (!manifestResult.ok) return { ok: false, error: `サーバー保存に失敗しました（manifest: ${manifestResult.error}）`, stale: manifestResult.stale };
 
-  // 公開に成功したので、次回の再利用判定の基準を更新する。
-  rememberPublishedPartTurns(simulationRunId, {
-    dataset: committedDatasetTurn ?? -1,
-    pack: stored.packCapture !== undefined ? committedPackTurn ?? -1 : -1,
+  /**
+   * 公開に成功したので、次回の再利用判定の基準を「いま公開した revision の内容」へ更新する。
+   * 送った／再利用したのと同じ内容のフィンガープリントなので、捏造にはならない。
+   */
+  rememberPublishedFingerprints(simulationRunId, {
+    revision,
+    dataset: committedDatasetFingerprint,
+    pack: stored.packCapture !== undefined ? committedPackFingerprint : null,
   });
   return { ok: true };
 }
@@ -589,9 +603,10 @@ export async function loadSimulationRun(simulationRunId: string): Promise<Stored
    * ページ再読み込み直後の保存が毎回全量送信に戻る。
    * 【捏造しない】実際に読めたパートから計算する。読んでいないパートは -1（基準なし）。
    */
-  rememberPublishedPartTurns(simulationRunId, {
-    dataset: server.dataset !== undefined ? safeMaxTurn("dataset", server.dataset) ?? -1 : -1,
-    pack: server.packCapture !== undefined ? safeMaxTurn("pack", server.packCapture) ?? -1 : -1,
+  rememberPublishedFingerprints(simulationRunId, {
+    revision: server.persistenceRevision ?? 0,
+    dataset: server.dataset !== undefined ? await fingerprintSimulationRunPart(server.dataset) : null,
+    pack: server.packCapture !== undefined ? await fingerprintSimulationRunPart(server.packCapture) : null,
   });
   saveBrowserCache(server);
   return server;

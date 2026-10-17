@@ -140,8 +140,20 @@ export interface SimulationRunRepository {
    * 保存形式は変えない。コピー後は従来と同じく commitRunManifest が正規キーへ昇格させる
    * （昇格時の CAS・パート欠落検査・TTLの扱いはいずれも変更していない）。
    *
-   * @returns コピー元が見つからなければ false（呼び出し側は完全な値で送り直させる）。
-   *          見つからないまま正本化してはいけないため、例外ではなく真偽値で返す。
+   * 【契約（両実装で同一・受入前の指摘2）】次のすべてが成り立つときだけコピーし true を返す。
+   *   1. その Simulation Run に公開中の正本がある
+   *   2. 公開中の revision が fromRevision と一致する
+   *   3. 公開中の revision が attempt.expectedBaseRevision と一致する
+   *   4. その revision の該当パートが実在する
+   * ひとつでも欠ければ false。例外にはしない（呼び出し側が完全な値で送り直させる）。
+   *
+   * 2 と 3 を両方見るのは、コピー元キーの存在だけでは「その revision が公開中」と
+   * 言えないためである。commitRunManifest は旧revisionのパートキーをベストエフォートで
+   * 削除し、失敗しても保存は成立する（孤児キーが残る）。孤児からコピーすると、
+   * 別writerが公開を進めたあとの古い内容を土台にしてしまう。
+   * Redis 実装はこの3値の比較を1本の Lua の中で行う（読んで比べて書くまでを原子的にする）。
+   *
+   * manifest 公開時の CAS（commitRunManifest）はこの変更では一切触っていない。
    */
   stagePartFromPublished(
     simulationRunId: string,
@@ -278,9 +290,9 @@ export function createInMemorySimulationRunRepository(): SimulationRunRepository
   }
 
   /**
-   * 【REUSE-1】インメモリ実装は revision ごとの履歴を持たないため、公開中の revision と
-   * 一致する場合だけコピーできる（Redis 実装が `:dataset:{revision}` を読むのと同じ意味論）。
-   * 公開中でない revision を土台にしようとした場合は false を返す。
+   * 【REUSE-1】契約は SimulationRunRepository の宣言側に書いたとおり。
+   * インメモリ実装は revision ごとの履歴を持たないため「公開中の revision」が
+   * そのまま判定対象になる。Redis 実装（Lua）と同じ3値の比較を行う。
    */
   async function stagePartFromPublished(
     simulationRunId: string,
@@ -290,7 +302,9 @@ export function createInMemorySimulationRunRepository(): SimulationRunRepository
   ): Promise<boolean> {
     const stored = runs.get(simulationRunId);
     if (!stored) return false;
-    if ((stored.persistenceRevision ?? 0) !== fromRevision) return false;
+    const published = stored.persistenceRevision ?? 0;
+    if (published !== fromRevision) return false;
+    if (published !== attempt.expectedBaseRevision) return false;
     const value = part === "dataset" ? stored.dataset : part === "resume" ? stored.resumePayload : stored.packCapture;
     if (value === undefined) return false;
     await saveRunPart(simulationRunId, attempt, part, value);

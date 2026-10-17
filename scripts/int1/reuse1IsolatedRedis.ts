@@ -25,9 +25,11 @@ import {
 } from "../../app/lib/v2/companyLab/simulation/persistence/types";
 import {
   simulationRunDatasetKeyV2,
+  simulationRunManifestKeyV2,
   simulationRunPackKeyV2,
   simulationRunStagingPartKeyV2,
 } from "../../app/lib/v2/redis/simulationRunRedisKeys";
+import { SimulationRunStaleRevisionError } from "../../app/lib/v2/companyLab/simulation/persistence/repository";
 import { SimulationRun } from "../../app/lib/v2/companyLab/simulation/types";
 
 const PORT = Number(process.env.INT1_REDIS_PORT ?? 6403);
@@ -193,6 +195,87 @@ async function main(): Promise<void> {
     );
     const chainedPttl = await client.raw("PTTL", simulationRunDatasetKeyV2(APP_ENV, RUN_ID, 5));
     check("REUSE-R9", Number(chainedPttl) === -1, `連鎖後の正規キーも永続 PTTL=${String(chainedPttl)}`);
+
+    /**
+     * 【受入前の指摘2】古いパートのキーが残っていても、公開中revisionと食い違えば
+     * 再利用を拒否すること。commitRunManifest の旧revision削除はベストエフォートなので
+     * 孤児キーは現実に残り得る。ここでは孤児を意図的に作って検証する。
+     * （product コードは変更していない。テスト側から外部的にキーを置くだけ。）
+     */
+    const published = 5;
+    const orphanRevision = published - 1;
+    const orphanKey = simulationRunDatasetKeyV2(APP_ENV, RUN_ID, orphanRevision);
+    await client.set(orphanKey, JSON.stringify(datasetThrough(99)));
+    const orphanExists = Number(await client.raw("EXISTS", orphanKey)) === 1;
+
+    const aOrphan = { expectedBaseRevision: orphanRevision, writeToken: createSimulationRunWriteToken("reuse1") };
+    const fromOrphan = await repository.stagePartFromPublished(RUN_ID, aOrphan, "dataset", orphanRevision);
+    check(
+      "REUSE-R10",
+      orphanExists && fromOrphan === false,
+      `孤児キーが存在（EXISTS=${orphanExists}）しても、公開中revision(${published})と違う${orphanRevision}からの再利用は false（実際=${fromOrphan}）`
+    );
+
+    /**
+     * fromRevision は公開中と一致するが expectedBaseRevision が食い違う場合も拒否すること
+     * （三者一致を要求する契約）。
+     */
+    const aMixed = { expectedBaseRevision: orphanRevision, writeToken: createSimulationRunWriteToken("reuse1") };
+    const mixed = await repository.stagePartFromPublished(RUN_ID, aMixed, "dataset", published);
+    check("REUSE-R11", mixed === false, `fromRevision=${published} / expectedBaseRevision=${orphanRevision} の不整合は false（実際=${mixed}）`);
+
+    /** 逆向きの不整合（expectedBaseRevision は公開中と一致、fromRevision が古い）も拒否。 */
+    const aMixed2 = { expectedBaseRevision: published, writeToken: createSimulationRunWriteToken("reuse1") };
+    const mixed2 = await repository.stagePartFromPublished(RUN_ID, aMixed2, "dataset", orphanRevision);
+    check("REUSE-R12", mixed2 === false, `fromRevision=${orphanRevision} / expectedBaseRevision=${published} の不整合は false（実際=${mixed2}）`);
+
+    /** 孤児キーの内容が正本へ混入していないこと（拒否されたので当然だが明示して確認する）。 */
+    const afterOrphan = await repository.loadRun(RUN_ID);
+    check(
+      "REUSE-R13",
+      JSON.stringify(afterOrphan?.dataset) === JSON.stringify(datasetThrough(3)) && afterOrphan?.persistenceRevision === published,
+      `孤児の内容が正本へ混入していない（revision=${afterOrphan?.persistenceRevision}）`
+    );
+    await client.del(orphanKey);
+
+    /**
+     * 【manifest公開時のCASが維持されていること】再利用でパートを置いたあとでも、
+     * 基準がずれた commit は拒否される。
+     */
+    const aWin = { expectedBaseRevision: published, writeToken: createSimulationRunWriteToken("reuse1") };
+    const aLose = { expectedBaseRevision: published, writeToken: createSimulationRunWriteToken("reuse1") };
+    for (const a of [aWin, aLose]) {
+      const okD = await repository.stagePartFromPublished(RUN_ID, a, "dataset", published);
+      const okP = await repository.stagePartFromPublished(RUN_ID, a, "pack", published);
+      if (!okD || !okP) {
+        check("REUSE-R14", false, "CAS検証の準備で再利用に失敗した");
+        break;
+      }
+      await repository.saveRunPart(RUN_ID, a, "resume", { marker: a.writeToken });
+    }
+    const mWin = manifestFor(published + 1, 3);
+    await repository.commitRunManifest(mWin, manifestToSimulationRunSummary(mWin), aWin);
+    let loserRejected = false;
+    try {
+      await repository.commitRunManifest(mWin, manifestToSimulationRunSummary(mWin), aLose);
+    } catch (e) {
+      loserRejected = e instanceof SimulationRunStaleRevisionError;
+    }
+    const afterCas = await repository.loadRun(RUN_ID);
+    check(
+      "REUSE-R14",
+      loserRejected && JSON.stringify(afterCas?.resumePayload) === JSON.stringify({ marker: aWin.writeToken }),
+      `再利用後も manifest CAS は維持（敗者を拒否=${loserRejected}、正本は勝者の内容）`
+    );
+
+    /** manifest が壊れている／無い場合も再利用しないこと（捏造した revision で通さない）。 */
+    const manifestKey = simulationRunManifestKeyV2(APP_ENV, RUN_ID);
+    const savedManifest = await client.get(manifestKey);
+    await client.set(manifestKey, "{not json");
+    const aBroken = { expectedBaseRevision: published + 1, writeToken: createSimulationRunWriteToken("reuse1") };
+    const broken = await repository.stagePartFromPublished(RUN_ID, aBroken, "dataset", published + 1);
+    check("REUSE-R15", broken === false, `manifest が壊れている場合の再利用は false（実際=${broken}）`);
+    await client.set(manifestKey, String(savedManifest));
   } finally {
     await client.close();
   }
