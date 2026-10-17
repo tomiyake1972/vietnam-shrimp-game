@@ -25,6 +25,7 @@ import { gunzipSync } from "node:zlib";
 import {
   SIMULATION_RUN_BODY_ENCODING_GZIP,
   SIMULATION_RUN_BODY_ENCODING_HEADER,
+  SIMULATION_RUN_MAX_DECOMPRESSED_BODY_BYTES,
 } from "../../../../lib/v2/companyLab/simulation/persistence/partBodyEncoding";
 
 interface FakeStorage {
@@ -88,10 +89,14 @@ function describeRequest(init: RequestInit): SentRequest {
   return { gzipped, contentType: headers["Content-Type"], sentBytes };
 }
 
+/** 実サーバーが上限超過で返すのと同じ意味のエラー（偽サーバー内の目印）。 */
+class FakeBodyTooLargeError extends Error {}
+
 /**
- * 【COMP-1】実サーバー（app/api/v2/simulation-runs/_lib/context.ts の parseJsonBody）と
- * 同じ受け取り方をする。x-shrimpx-body-encoding: gzip が付いていれば展開してから
- * JSON にし、無ければ素の JSON として読む。偽サーバーが実物と違う読み方をすると、
+ * 【COMP-1 / COMP-2】実サーバー（app/api/v2/simulation-runs/_lib/context.ts の
+ * parseJsonBody）と同じ受け取り方をする。x-shrimpx-body-encoding: gzip が付いて
+ * いれば展開してから JSON にし、無ければ素の JSON として読む。どちらの経路でも
+ * 展開後サイズの上限を同じ値で強制する。偽サーバーが実物と違う読み方をすると、
  * 実物では壊れる変更がテストでは通ってしまう。
  */
 function parseRequestBody(init: RequestInit): unknown {
@@ -99,9 +104,21 @@ function parseRequestBody(init: RequestInit): unknown {
   const encoding = headers[SIMULATION_RUN_BODY_ENCODING_HEADER];
   if ((encoding ?? "").trim().toLowerCase() === SIMULATION_RUN_BODY_ENCODING_GZIP) {
     const view = init.body as unknown as Uint8Array;
-    return JSON.parse(gunzipSync(Buffer.from(view)).toString("utf8"));
+    try {
+      const json = gunzipSync(Buffer.from(view), { maxOutputLength: SIMULATION_RUN_MAX_DECOMPRESSED_BODY_BYTES }).toString("utf8");
+      return JSON.parse(json);
+    } catch (e) {
+      if (typeof e === "object" && e !== null && (e as { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE") {
+        throw new FakeBodyTooLargeError("展開後の本文が上限を超えました");
+      }
+      throw e;
+    }
   }
-  return JSON.parse(String(init.body));
+  const text = String(init.body);
+  if (Buffer.byteLength(text, "utf8") > SIMULATION_RUN_MAX_DECOMPRESSED_BODY_BYTES) {
+    throw new FakeBodyTooLargeError("本文が上限を超えました");
+  }
+  return JSON.parse(text);
 }
 
 function installFakeServer(initial: Map<string, unknown> = new Map()) {
@@ -135,7 +152,16 @@ function installFakeServer(initial: Map<string, unknown> = new Map()) {
     if (forcedStatus !== null) return new Response(JSON.stringify({ error: { code: "FORCED", message: "forced" } }), { status: forcedStatus });
     if (url === "/api/v2/simulation-runs" && init?.method === "POST") {
       posts.push(describeRequest(init));
-      const body = parseRequestBody(init) as Record<string, unknown>;
+      let body: Record<string, unknown>;
+      try {
+        body = parseRequestBody(init) as Record<string, unknown>;
+      } catch (e) {
+        // 実サーバーと同じく、上限超過は 413 で返し、保存は一切行わない。
+        if (e instanceof FakeBodyTooLargeError) {
+          return new Response(JSON.stringify({ error: { code: "REQUEST_BODY_TOO_LARGE", message: e.message } }), { status: 413 });
+        }
+        return new Response(JSON.stringify({ error: { code: "INVALID_REQUEST_BODY", message: "読めません" } }), { status: 400 });
+      }
       if (body.manifestOnly) {
         const run = body.run as { simulationRunId: string };
         const revision = body.persistenceRevision as number;

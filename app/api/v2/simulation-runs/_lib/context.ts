@@ -30,6 +30,9 @@ import { createRedisPlayerRepository } from "../../../../lib/v2/player/redisRepo
 import { createInMemoryPlayerRepository, PlayerRepository } from "../../../../lib/v2/player/repository";
 import {
   SIMULATION_RUN_BODY_ENCODING_HEADER,
+  SIMULATION_RUN_INVALID_REQUEST_BODY,
+  SIMULATION_RUN_MAX_DECOMPRESSED_BODY_BYTES,
+  SIMULATION_RUN_REQUEST_BODY_TOO_LARGE,
   isGzipBodyEncoding,
 } from "../../../../lib/v2/companyLab/simulation/persistence/partBodyEncoding";
 
@@ -104,26 +107,82 @@ export async function withSimulationRunApiContext(
 }
 
 /**
+ * 本文の読み取り結果。失敗を undefined で表すと「本文が無い」「壊れている」
+ * 「大きすぎる」の区別が呼び出し側へ伝わらず、理由を出せないため、
+ * 成否と理由を持つ値で返す。
+ */
+export type ParsedRequestBody =
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
+function tooLarge(message: string): ParsedRequestBody {
+  return { ok: false, code: SIMULATION_RUN_REQUEST_BODY_TOO_LARGE, message };
+}
+
+function invalidBody(message: string): ParsedRequestBody {
+  return { ok: false, code: SIMULATION_RUN_INVALID_REQUEST_BODY, message };
+}
+
+/** zlib が「出力が上限に達した」として投げたエラーかどうか。 */
+function isOutputLimitError(e: unknown): boolean {
+  return typeof e === "object" && e !== null && (e as { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE";
+}
+
+const LIMIT_MIB = (SIMULATION_RUN_MAX_DECOMPRESSED_BODY_BYTES / 1024 / 1024).toFixed(0);
+
+/**
  * 【COMP-1・送信量削減】`x-shrimpx-body-encoding: gzip` が付いている場合は、ボディを
  * gzip として展開してから JSON にする。保存のたびに dataset / resume / pack を
  * 丸ごと送る経路があり、そこが送信量の大半を占めるため、送る前に縮める。
  *
  * ヘッダが無ければ従来どおり素の JSON として読む。旧クライアント（圧縮を知らない
  * ブラウザ・CompressionStream が無い環境）からの保存を壊さないための後方互換である。
+ *
+ * 【COMP-2・展開後サイズの上限】圧縮本文は小さくても、展開すると何十倍にもなり得る
+ * （実測で、101,941 B の gzip が 104,857,600 B へ＝1029:1）。そのため
+ *   1. 展開しきってから大きさを検査するのではなく、展開処理自体を上限で止める
+ *      （zlib の maxOutputLength。上限に達した時点で ERR_BUFFER_TOO_LARGE を投げ、
+ *        残りを展開しない。上の1029:1の本文は 8.2 ms・heap 増加 0.2 MB で拒否される）
+ *   2. 未圧縮の経路にも同じ上限を、JSON として解釈する前に適用する
+ * とする。上限を超えた場合は理由つきで失敗を返し、保存は一切行わない
+ * （この関数は repository へ触れる前に呼ばれるため、既存の正本は変化しない）。
  */
-export async function parseJsonBody(req: NextRequest): Promise<unknown> {
+export async function parseJsonBody(req: NextRequest): Promise<ParsedRequestBody> {
   if (isGzipBodyEncoding(req.headers.get(SIMULATION_RUN_BODY_ENCODING_HEADER))) {
+    let json: string;
     try {
       const compressed = Buffer.from(await req.arrayBuffer());
-      return JSON.parse(gunzipSync(compressed).toString("utf8"));
+      json = gunzipSync(compressed, { maxOutputLength: SIMULATION_RUN_MAX_DECOMPRESSED_BODY_BYTES }).toString("utf8");
     } catch (e) {
+      if (isOutputLimitError(e)) {
+        return tooLarge(
+          `展開後の本文が上限（${LIMIT_MIB}MiB）を超えたため、展開を中止しました。保存は行っていません。`
+        );
+      }
       console.error("[simulation-runs api] gzip ボディの展開に失敗しました:", e);
-      return undefined;
+      return invalidBody("gzip ボディを展開できませんでした。保存は行っていません。");
+    }
+    try {
+      return { ok: true, value: JSON.parse(json) };
+    } catch {
+      return invalidBody("展開したボディを JSON として読めませんでした。保存は行っていません。");
     }
   }
+
+  let raw: Buffer;
   try {
-    return await req.json();
+    raw = Buffer.from(await req.arrayBuffer());
   } catch {
-    return undefined;
+    return invalidBody("ボディを読み取れませんでした。保存は行っていません。");
+  }
+  if (raw.byteLength > SIMULATION_RUN_MAX_DECOMPRESSED_BODY_BYTES) {
+    return tooLarge(
+      `本文が上限（${LIMIT_MIB}MiB）を超えています（${raw.byteLength} B）。保存は行っていません。`
+    );
+  }
+  try {
+    return { ok: true, value: JSON.parse(raw.toString("utf8")) };
+  } catch {
+    return invalidBody("ボディを JSON として読めませんでした。保存は行っていません。");
   }
 }

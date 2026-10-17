@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createPlayerRepository, parseJsonBody, withSimulationRunApiContext } from "./_lib/context";
 import { handleListSimulationRuns, handleSaveSimulationRun, handleSaveSimulationRunPart } from "./_lib/handlers";
 import { createPlayerSeatSubmissionGate } from "../../../lib/v2/player/turnAdvanceGate";
+import { SIMULATION_RUN_REQUEST_BODY_TOO_LARGE } from "../../../lib/v2/companyLab/simulation/persistence/partBodyEncoding";
 
 /**
  * POST /api/v2/simulation-runs — Simulation Run の保存。
@@ -16,7 +17,17 @@ import { createPlayerSeatSubmissionGate } from "../../../lib/v2/player/turnAdvan
  * 小さいpayload・テスト・後方互換用）として扱う。
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const body = await parseJsonBody(req);
+  /**
+   * 【COMP-2】本文の読み取りが上限超過・破損で失敗したら、ここで理由つきで返す。
+   * repository へ触れる前なので、拒否された保存で既存の正本が変わることはない。
+   * 成功したことにしない（呼び出し側は serverSaveSucceeded=false を受け取る）。
+   */
+  const parsed = await parseJsonBody(req);
+  if (!parsed.ok) {
+    const status = parsed.code === SIMULATION_RUN_REQUEST_BODY_TOO_LARGE ? 413 : 400;
+    return NextResponse.json({ error: { code: parsed.code, message: parsed.message } }, { status });
+  }
+  const body = parsed.value;
   const hasPart = typeof body === "object" && body !== null && "part" in body;
   return withSimulationRunApiContext(req, async (repository) => {
     if (hasPart) return handleSaveSimulationRunPart(repository, body);
