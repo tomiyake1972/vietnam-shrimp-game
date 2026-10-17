@@ -377,6 +377,33 @@ export interface WorkerTypeCostComparison {
   readonly notes: readonly string[];
 }
 
+/**
+ * 【このバージョンでの臨時Workerの位置づけ】
+ * 常用Workerの解雇には退職金・解雇費・人数制限・採用のリードタイムが
+ * いずれもモデル化されていない（companyLab/workforce.ts の
+ * WORKFORCE_NOT_MODELED_NOTE が唯一の情報源）。そのため常用はいつでも必要な
+ * 人数だけ雇い、いつでも減らせる。
+ *
+ * 一方で1トンあたりの人件費は常用のほうが安いため、現在のバージョンでは
+ * 臨時Workerを使う金銭的な理由がほとんど無い。この事実を画面で隠さずに書く
+ * （受講者が自分で気づいたときに、説明と食い違わないようにするため）。
+ *
+ * 文言はここに1つだけ持ち、導入画面と意思決定画面の両方が同じものを使う。
+ */
+export const TEMPORARY_WORKER_LIMITATION_NOTE =
+  "このバージョンでは、臨時Workerを使う金銭的な理由はほとんどありません。" +
+  "常用Workerのほうが1トンあたりの人件費が安く、しかも解雇に退職金や手続き費用がかからず、" +
+  "採用もその四半期からすぐ反映されるためです。必要な人数の常用Workerをそのつど雇う、という進め方ができます。";
+
+/**
+ * 上の注記に添える、現実とのちがい。
+ * 「このゲームでそうだから現実でもそうだ」と受け取られないようにする。
+ */
+export const TEMPORARY_WORKER_REALITY_NOTE =
+  "実際の経営では、解雇に退職金や法令上の手続きが必要で、採用にも時間がかかります。" +
+  "だからこそ現実には臨時雇用に意味があります。このゲームではその部分を省いているため、" +
+  "人員の増減が実際よりも軽い判断になっている点に注意してください。";
+
 export interface LaborCostBaselines {
   readonly regularWorkerPerHead: BaselineItem;
   readonly temporaryWorkerPerHead: BaselineItem;

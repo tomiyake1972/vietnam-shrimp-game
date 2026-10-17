@@ -16,6 +16,8 @@ import { useMemo, useState } from "react";
 import type { Product } from "../../../lib/v2/market/types";
 import {
   BaselineItem,
+  TEMPORARY_WORKER_LIMITATION_NOTE,
+  TEMPORARY_WORKER_REALITY_NOTE,
   buildHeadcountChangeRules,
   buildLaborCostBaselines,
   buildSalesBaselines,
@@ -188,6 +190,7 @@ export function BaselineHint({
       `ただし1トンあたりで見ると 常用 ${fmt0(reg?.costPerTon.value)} USD／t に対して 臨時 ${fmt0(tmp?.costPerTon.value)} USD／t です。臨時は単価が安いぶん1人あたりの生産量も少ないため、トンあたりでは割高になります。`
     );
     lines.push("Workerの増減はこの四半期からすぐ反映されます。ただし設備や原料が足りなければ、人数を増やしても生産量は増えません。");
+    lines.push(TEMPORARY_WORKER_LIMITATION_NOTE);
   } else if (screen === "production") {
     lines.push(YIELD_ASSUMPTION_SHORT_NOTE);
     lines.push("生産できる量は、原料・工場共通工程・冷凍/包装・商品別設備・労働のうち、いちばん小さいものが上限になります。人数×1人あたり能力がそのまま生産量になるわけではありません。");
@@ -451,6 +454,15 @@ export function ManagementBaselinesPanel({ context }: ManagementBaselinesProps) 
             <strong>1トンあたりで見ると常用より割高</strong>になります。単価だけで判断しないでください。
           </p>
           <p className="mt-1 text-[11px] text-slate-500">HOSO を担当した場合・残業なしの基準値どうしの比較です。</p>
+          {/* 【このバージョンの制約】受講者が自分で気づいたときに説明と食い違わないよう、
+              臨時雇用の意味が薄いという事実をそのまま書く。 */}
+          <div
+            className="mt-2 rounded border border-amber-700/60 bg-amber-950/20 p-2"
+            data-testid="play-baselines-temporary-worker-note"
+          >
+            <p className="text-[11px] font-semibold leading-relaxed text-amber-200">{TEMPORARY_WORKER_LIMITATION_NOTE}</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-300">{TEMPORARY_WORKER_REALITY_NOTE}</p>
+          </div>
           {b.laborCost.workerTypeComparison.map((c) => (
             <div key={c.workerType} className="mt-1.5">
               <p className="text-[11px] font-semibold text-slate-200">{c.label}</p>

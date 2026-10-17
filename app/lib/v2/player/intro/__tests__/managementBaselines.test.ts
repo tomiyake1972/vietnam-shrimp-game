@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  TEMPORARY_WORKER_LIMITATION_NOTE,
+  TEMPORARY_WORKER_REALITY_NOTE,
   buildHeadcountChangeRules,
   buildLaborCostBaselines,
   buildSalesBaselines,
@@ -341,4 +343,19 @@ test("INTRO-COST-7: 常用は配置しなくても満額・残業可、臨時は
   assert.ok(reg.notes.some((n) => n.includes("残業をさせられるのは常用Workerだけ")), "残業の説明が無い");
   assert.ok(tmp.notes.some((n) => n.includes("使った人数ぶんだけ")), "臨時が使った分のみである説明が無い");
   assert.ok(tmp.notes.some((n) => n.includes("残業はできません")), "臨時が残業不可である説明が無い");
+});
+
+test("INTRO-COST-8: このバージョンで臨時雇用の意味が薄い事実と、現実とのちがいの両方を書いている", () => {
+  // 受講者が自分で「常用を雇って解雇し続ければよい」と気づいたときに、
+  // 画面の説明と食い違わないようにする。
+  assert.match(TEMPORARY_WORKER_LIMITATION_NOTE, /臨時Workerを使う金銭的な理由はほとんどありません/);
+  assert.match(TEMPORARY_WORKER_LIMITATION_NOTE, /解雇に退職金や手続き費用がかからず/);
+  // 「このゲームでそうだから現実でもそう」と受け取らせない。
+  assert.match(TEMPORARY_WORKER_REALITY_NOTE, /実際の経営では/);
+  assert.match(TEMPORARY_WORKER_REALITY_NOTE, /退職金/);
+
+  // 退職金が未実装であるという事実は、Engine 側の記述とも一致している必要がある。
+  const workerRule = buildHeadcountChangeRules({ currentSalesHeadcount: 20 }).find((r) => r.subject === "worker")!;
+  assert.match(workerRule.notModeled, /退職金/);
+  assert.equal(workerRule.oneTimeCost, null, "Worker に一時費用がある状態で「費用がかからない」と書いてはいけない");
 });

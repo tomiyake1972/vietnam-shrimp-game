@@ -136,6 +136,11 @@ test.describe("PLAYER-INTRO-1 受講者向け導入", () => {
       await expect(cost).toContainText("常用Worker と 臨時Worker の違い（お金の面）");
       await expect(cost).toContainText("1トンあたりの人件費");
       await expect(cost).toContainText("1トンあたりで見ると常用より割高");
+      // このバージョンでは臨時雇用の意味が薄いという事実と、現実とのちがいを書く。
+      const tmpNote = playerPage.getByTestId("play-baselines-temporary-worker-note");
+      await expect(tmpNote).toContainText("臨時Workerを使う金銭的な理由はほとんどありません");
+      await expect(tmpNote).toContainText("解雇に退職金や手続き費用がかからず");
+      await expect(tmpNote).toContainText("実際の経営では、解雇に退職金や法令上の手続きが必要");
       await playerPage.screenshot({ path: `${SHOTS}/intro-02-baselines-desktop.png`, fullPage: true });
 
       // --- G. 閉じて画面へ戻る ---
@@ -158,6 +163,7 @@ test.describe("PLAYER-INTRO-1 受講者向け導入", () => {
       await expect(workerHint).toBeVisible();
       await expect(workerHint).toContainText("／人／四半期");
       await expect(workerHint).toContainText("トンあたりでは割高");
+      await expect(workerHint).toContainText("臨時Workerを使う金銭的な理由はほとんどありません");
 
       await playerPage.getByTestId("decision-studio-tab-production").click();
       await expect(playerPage.getByTestId("play-baseline-hint-production")).toContainText("加工歩留まりは100％");
