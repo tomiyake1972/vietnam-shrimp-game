@@ -192,7 +192,11 @@ export function AiInitialProposalNote({ testId }: { readonly testId?: string }) 
       入力欄には <strong className="text-gray-100">AI提案を初期入力済み</strong> です。そのまま使っても、書き換えても構いません。
       <span className="ml-1 text-amber-300">まだ提出していません。</span>
       提出は「意思決定を確認」→ 最終確認画面 で行います。
-      <span className="ml-1 text-gray-400">（どの項目をAIが入れ、どこを自分で変えたかの記録は保存していないため、項目ごとの由来は表示しません。）</span>
+      {/* 【PLAYER-INTRO-1】初参加者が「AI案＝正解」と受け取らないよう、保証しない旨を明示する。 */}
+      <span className="ml-1 text-gray-400">
+        この案は標準的な経営判断のたたき台であり、最適な判断や平均順位・利益を保証するものではありません。
+        （どの項目をAIが入れ、どこを自分で変えたかの記録は保存していないため、項目ごとの由来は表示しません。）
+      </span>
     </p>
   );
 }

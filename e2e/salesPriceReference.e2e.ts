@@ -8,7 +8,7 @@
 // （independentPlayerFlow.e2e.tsと同じ最小限のヘルパー）を使う。
 
 import { test, expect, type Page } from "@playwright/test";
-import { submitIndependentPlayerDecision } from "./_lib/decisionFlow";
+import { dismissPlayerIntroIfPresent, submitIndependentPlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 
@@ -40,6 +40,8 @@ async function joinAsPlayer(page: Page, joinUrl: string, companyId: string): Pro
   await page.goto(joinUrl);
   await page.waitForURL(/\/v2\/play\/workspace/);
   await expect(page.getByTestId("play-workspace-heading")).toContainText(companyId);
+  // 【PLAYER-INTRO-1】初回は導入が全画面で出るため、以降の操作の前に閉じる。
+  await dismissPlayerIntroIfPresent(page);
 }
 
 async function submitCurrentTurn(page: Page): Promise<void> {

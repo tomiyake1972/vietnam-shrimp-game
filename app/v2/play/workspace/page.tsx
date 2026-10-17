@@ -35,6 +35,10 @@ import {
   PlayerOverviewPanel,
 } from "./WorkspacePanels";
 import { validateSalesForceHiringDecision } from "../../../lib/v2/companyLab/salesForceHiring";
+// 【PLAYER-INTRO-1】受講者向けの導入・基本目安。表示専用の独立部品であり、
+// draft・提出状態・保存スキーマには一切触れない。
+import { PlayerIntro, shouldAutoOpenIntro, YieldAssumptionCard } from "../_intro/PlayerIntro";
+import { BaselineHint } from "../_intro/ManagementBaselines";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import { selectScenarioNewsForTurn } from "../../management/lib/scenarioNews";
 import { FinalResultsSummary } from "../../management/components/FinalResultsSummary";
@@ -114,6 +118,17 @@ export default function PlayerWorkspacePage() {
   const seededTurnRef = useRef<number | null>(null);
   /** 【BW-1】いま手元にある保存物の revision。これをサーバーへ伝えて差分だけ受け取る。 */
   const knownRevisionRef = useRef<number | null>(null);
+  /**
+   * 【PLAYER-INTRO-1 §8】導入の表示状態。
+   *  - null       … 出していない
+   *  - "auto"     … 初回（まだ読んでいない／歩留まり前提を確認していない）
+   *  - "reopened" … 「遊び方」から開き直した
+   *  - "baselines"… 意思決定中のヒントから「経営の基本目安」を開いた
+   * draft には触れないため、開閉で入力が失われることはない。
+   */
+  const [introView, setIntroView] = useState<null | "auto" | "reopened" | "baselines">(null);
+  /** 初回自動表示は、contextを取得した最初の1回だけ判定する（ポーリングで開き直さない）。 */
+  const introAutoCheckedRef = useRef(false);
 
   const refresh = useCallback(async (): Promise<PollOutcome> => {
     const result = await fetchSessionContext(knownRevisionRef.current);
@@ -129,6 +144,16 @@ export default function PlayerWorkspacePage() {
     }
     setError(null);
     setContext(result.data);
+    /**
+     * 【PLAYER-INTRO-1 §8】初回だけ自動で導入を開く。
+     * 判定はここ（サーバー応答を受け取った時点）で1回だけ行う。
+     * 再訪時は長い説明を強制しない（この端末に読んだ記録があれば開かない）。
+     * ゲーム終了後は結果画面を優先するため開かない。
+     */
+    if (!introAutoCheckedRef.current && !result.data.gameEndedAt) {
+      introAutoCheckedRef.current = true;
+      if (shouldAutoOpenIntro(result.data)) setIntroView("auto");
+    }
     // 新しいTurnへ進んだ、または初回取得時だけdraftを作り直す（編集中の内容を
     // ポーリングのたびに上書きしない）。
     if (!result.data.gameEndedAt && seededTurnRef.current !== result.data.turn) {
@@ -141,6 +166,7 @@ export default function PlayerWorkspacePage() {
   }, []);
 
   useVisiblePolling({ intervalMs: POLL_INTERVAL_MS, enabled: true, poll: refresh });
+
 
   /**
    * 【UI-TRIAL-1 §6】確認へ進む前と最終提出時に、同じ共通検証を通す。
@@ -261,15 +287,34 @@ export default function PlayerWorkspacePage() {
               Turn {context.turn} / Scenario {context.scenarioId} / Run ID {context.simulationRunId}
             </p>
           </div>
-          <span
-            className={`rounded px-2 py-1 text-[11px] font-medium ${
-              status === "TURN_ACTIVE" || status === "EDITING" ? "bg-amber-900/60 text-amber-300" : "bg-emerald-900/60 text-emerald-300"
-            }`}
-            data-testid="play-workspace-status"
-            data-status={status}
-          >
-            {STATUS_LABELS[status]}
-          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {/* 【PLAYER-INTRO-1 §8】いつでも開き直せる導線。押しても入力は保持される。 */}
+            <button
+              type="button"
+              onClick={() => setIntroView("reopened")}
+              data-testid="play-open-how-to-play"
+              className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
+            >
+              遊び方
+            </button>
+            <button
+              type="button"
+              onClick={() => setIntroView("baselines")}
+              data-testid="play-open-baselines"
+              className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
+            >
+              経営の基本目安
+            </button>
+            <span
+              className={`rounded px-2 py-1 text-[11px] font-medium ${
+                status === "TURN_ACTIVE" || status === "EDITING" ? "bg-amber-900/60 text-amber-300" : "bg-emerald-900/60 text-emerald-300"
+              }`}
+              data-testid="play-workspace-status"
+              data-status={status}
+            >
+              {STATUS_LABELS[status]}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -311,6 +356,8 @@ export default function PlayerWorkspacePage() {
               {/* 【PUBLIC-COMPETITOR-2】ターン開始直後に「この間に何が起きたか」を
                   掴めるよう、競合ニュースの見出しだけを先に出す（本文は Market タブ）。 */}
               <PlayerCompetitorNewsPanel news={context.competitorNews} compact />
+              {/* 【PLAYER-INTRO-1 §3】導入を閉じたあとも前提が見えるようにする。 */}
+              <YieldAssumptionCard compact />
               <PlayerOverviewPanel review={context.lastTurnReview} />
             </div>
           ) : null}
@@ -409,12 +456,26 @@ export default function PlayerWorkspacePage() {
               scenarioNews={scenarioNews}
               competitorNews={context.competitorNews}
               companyName={context.companyDisplayName}
+              /* 【PLAYER-INTRO-1 §6】いま開いている入力画面に合わせた目安を差し込む。 */
+              screenHint={(screen) => (
+                <BaselineHint context={context} screen={screen} onOpenDetails={() => setIntroView("baselines")} />
+              )}
             />
           ) : null}
           </>
           ) : null}
         </div>
       </div>
+
+      {/* 【PLAYER-INTRO-1】導入・基本目安。最後にマウントして他の要素の上へ重ねる。 */}
+      {introView !== null ? (
+        <PlayerIntro
+          context={context}
+          mode={introView === "auto" ? "firstVisit" : "reopened"}
+          initialSection={introView === "baselines" ? "baselines" : undefined}
+          onClose={() => setIntroView(null)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -17,6 +17,28 @@
 
 import { expect, type Page } from "@playwright/test";
 
+/**
+ * 【PLAYER-INTRO-1】受講者画面は初回だけ導入を全画面で出す。
+ * 歩留まり100％の前提を確認するまで閉じられないため、提出手順の前に必ず閉じる。
+ * すでに読み終えている（導入が出ていない）場合は何もしない。
+ */
+export async function dismissPlayerIntroIfPresent(page: Page): Promise<void> {
+  const intro = page.getByTestId("play-intro");
+  /**
+   * 【描画前に判定しない】導入はサーバー応答を受け取ってから出る。
+   * 参加直後に即 isVisible() を見ると「まだ無い」と判定してしまい、
+   * その後に出た導入が以降のクリックを遮って原因の分かりにくい
+   * タイムアウトになる（実測）。まず画面本体かこの導入のどちらかが
+   * 描画されるまで待ってから判定する。
+   */
+  await intro.or(page.getByTestId("play-workspace-tabs")).first().waitFor({ timeout: 60_000 });
+  if (!(await intro.isVisible().catch(() => false))) return;
+  const ack = page.getByTestId("play-intro-yield-ack-button");
+  if (await ack.isVisible().catch(() => false)) await ack.click();
+  await page.getByTestId("play-intro-close").click();
+  await expect(intro).toBeHidden();
+}
+
 /** クリック後に「確認画面」と「エラー表示」のどちらが出たかを、待ってから判定する。 */
 async function waitForConfirmOrError(page: Page, errorTestId: string): Promise<"confirm" | "error"> {
   const screen = page.getByTestId("decision-confirmation-screen");
@@ -27,11 +49,24 @@ async function waitForConfirmOrError(page: Page, errorTestId: string): Promise<"
 }
 
 /**
+ * 受講者画面は Overview / Market / Inventory / Decision のタブ構成であり、
+ * 「意思決定を確認」ボタンは Decision タブにしか描画されない。
+ * どのタブから呼ばれても提出できるよう、必要なときだけ Decision タブへ移る。
+ */
+async function openPlayerDecisionTabIfNeeded(page: Page): Promise<void> {
+  if (await page.getByTestId("play-review-decision").isVisible().catch(() => false)) return;
+  const tab = page.getByTestId("play-workspace-tab-decision");
+  if (await tab.isVisible().catch(() => false)) await tab.click();
+}
+
+/**
  * Independent Player の提出。
  * 入力が有効なら確認画面を経て提出まで行う。無効なら確認画面へ進まずに戻る
  * （呼び出し側の既存のエラー表示アサーションがそのまま通る）。
  */
 export async function submitIndependentPlayerDecision(page: Page): Promise<void> {
+  await dismissPlayerIntroIfPresent(page);
+  await openPlayerDecisionTabIfNeeded(page);
   await page.getByTestId("play-review-decision").click();
   if ((await waitForConfirmOrError(page, "play-submit-error")) === "error") return;
   await page.getByTestId("decision-confirmation-commit").click();

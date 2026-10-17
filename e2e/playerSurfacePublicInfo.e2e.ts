@@ -16,7 +16,7 @@
 
 import path from "node:path";
 import { test, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { submitIndependentPlayerDecision } from "./_lib/decisionFlow";
+import { dismissPlayerIntroIfPresent, submitIndependentPlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 const SHOT_DIR = path.resolve(__dirname, "../docs/int1/screenshots");
@@ -83,6 +83,8 @@ test.describe("受講者画面 — 3タブと公開競合情報", () => {
     await playerPage.goto(joinUrl);
     await playerPage.waitForURL(/\/v2\/play\/workspace/);
     await expect(playerPage.getByTestId("play-workspace-heading")).toContainText("BAL");
+    // 【PLAYER-INTRO-1】初回は導入が全画面で出るため、以降の操作の前に閉じる。
+    await dismissPlayerIntroIfPresent(playerPage);
 
     // タブが4つ出ていること。
     await expect(playerPage.getByTestId("play-workspace-tabs")).toBeVisible();

@@ -118,6 +118,13 @@ export interface DecisionStudioProps {
    */
   readonly activeScreen?: DecisionStudioScreenKey;
   readonly onActiveScreenChange?: (screen: DecisionStudioScreenKey) => void;
+  /**
+   * 【PLAYER-INTRO-1 §6】いま開いている入力画面の上に差し込む、短い参照情報。
+   * 中身は呼び出し側（受講者画面）が組み立てる。このcomponentは受け取った
+   * ReactNodeをそのまま置くだけで、目安の計算も文言も持たない
+   * （GM側の既存呼び出し元は渡さないため、表示はこれまでと変わらない）。
+   */
+  readonly screenHint?: (screen: DecisionStudioScreenKey) => React.ReactNode;
 }
 
 export default function DecisionStudio(props: DecisionStudioProps) {
@@ -146,6 +153,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     annualDividendGuidance,
     activeScreen: activeScreenProp,
     onActiveScreenChange,
+    screenHint,
   } = props;
 
   // controlled（外から指定）と uncontrolled（従来）の両方を受ける。
@@ -245,6 +253,10 @@ export default function DecisionStudio(props: DecisionStudioProps) {
         <AreaToneLegend />
 
         <DecisionStudioNavigation active={activeScreen} onSelect={setActiveScreen} badgeCounts={badgeCounts} />
+
+        {/* 【PLAYER-INTRO-1 §6】意思決定中にも目安を参照できるようにする差し込み口。
+            渡されなければ何も描画しない（既存の呼び出し元の表示は不変）。 */}
+        {screenHint ? <div className="pt-2">{screenHint(activeScreen)}</div> : null}
 
         <div className="pt-2">
           {activeScreen === "info" && (

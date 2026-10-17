@@ -11,7 +11,7 @@
 // 共有Redisは使わない（V2_API_E2E_IN_MEMORY=1 の隔離環境）。
 
 import { test, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { confirmConsolePlayerDecision, submitIndependentPlayerDecision } from "./_lib/decisionFlow";
+import { dismissPlayerIntroIfPresent, confirmConsolePlayerDecision, submitIndependentPlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 
@@ -47,6 +47,8 @@ async function joinAsPlayer(page: Page, joinUrl: string, companyId: string): Pro
   await page.goto(joinUrl);
   await page.waitForURL(/\/v2\/play\/workspace/);
   await expect(page.getByTestId("play-workspace-heading")).toContainText(companyId);
+  // 【PLAYER-INTRO-1】初回は導入が全画面で出るため、以降の操作の前に閉じる。
+  await dismissPlayerIntroIfPresent(page);
 }
 
 /** 「提出できる状態になった瞬間」に提出する。固定sleepを挟まない。 */

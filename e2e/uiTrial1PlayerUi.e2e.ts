@@ -18,7 +18,7 @@
 // 複数工場（fixtureが持つ工場数）と全分野の節が揃うことを確認する。
 
 import { test, expect, type Browser, type Page } from "@playwright/test";
-import { submitIndependentPlayerDecision } from "./_lib/decisionFlow";
+import { dismissPlayerIntroIfPresent, submitIndependentPlayerDecision } from "./_lib/decisionFlow";
 
 const STAGING_ADMIN_TOKEN = "e2e-test-token";
 
@@ -59,6 +59,8 @@ async function openIndependentPlayer(gmPage: Page, browser: Browser, companyId: 
   await page.goto(joinUrl);
   await page.waitForURL(/\/v2\/play\/workspace/);
   await expect(page.getByTestId("play-workspace-heading")).toContainText(companyId);
+  // 【PLAYER-INTRO-1】初回は導入が全画面で出るため、以降の操作の前に閉じる。
+  await dismissPlayerIntroIfPresent(page);
   return page;
 }
 
