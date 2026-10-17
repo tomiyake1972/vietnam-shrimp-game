@@ -83,11 +83,37 @@ export async function persistResumableRun(
   let confirmed = confirmedPlayerDecisions;
   let lastResult: SaveSimulationRunResult | null = null;
 
+  /**
+   * 【SEAT-1】経営モードは run にも載せる。
+   *
+   * 参加枠API（app/api/v2/management/player-seats/[runId]/route.ts）は
+   * stored.run.companyControlModes を唯一の情報源として「どの会社が PLAYER か」を
+   * 決める。Turn進行ゲート（simulation-runs/_lib/handlers.ts）も同じ値を見る。
+   * ところが以前は run へ書いていたのが Turn 進行の経路だけで
+   * （ManagementConsole.tsx）、経営モードの切替で走る保存ではモードが
+   * resumePayload にしか入らなかった。そのため「画面では自分で操作なのに、
+   * サーバーの run はまだ STANDARD_AI」という状態が次の Turn 進行まで続き、
+   * 参加リンクを発行できない・提出待ち社数が合わない、という形で表に出ていた
+   * （2026-10-17 の staging 実機確認で観測）。
+   *
+   * 呼び出し元3箇所（Console・Setup・PLAYER Workspace）はいずれも、その時点の
+   * 完全な経営モードの対応表を渡すため、ここで一括して載せてよい。
+   *
+   * 【既存Runの形を変えない】PLAYER が1社も居ないRunでは**キー自体を作らない**
+   * （salesModelId と同じ規約）。ただし、すでにキーを持つRunでは空になっても
+   * 書き戻す。そうしないと、PLAYER会社を全部 Standard AI へ戻したときに
+   * 古い対応表が run に残り続ける。
+   */
+  const runToSave =
+    Object.keys(companyControlModes).length > 0 || session.run.companyControlModes !== undefined
+      ? { ...session.run, companyControlModes }
+      : session.run;
+
   for (let attempt = 0; attempt < MAX_SAVE_ATTEMPTS; attempt += 1) {
     const resumePayload = buildResumePayload(session, companyControlModes, confirmed);
     const result = await saveSimulationRun({
       schemaVersion: CURRENT_SIMULATION_RUN_PERSISTED_VERSION,
-      run: session.run,
+      run: runToSave,
       dataset,
       packCapture: { companyTurns: session.packCompanyTurns, worldTurns: session.packWorldTurns },
       resumePayload,
