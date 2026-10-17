@@ -17,6 +17,7 @@
 // dev serverへ繋いだときに「別contextでも同じRunへ復帰できる」ことを実credentials
 // 無しで検証できるようにする（実Redisの代わりであり、実環境の検証を置き換えるものではない）。
 
+import { gunzipSync } from "zlib";
 import { NextRequest, NextResponse } from "next/server";
 import { assertStagingAdmin } from "../../../../lib/stagingAdmin";
 import { hasValidStagingSession } from "../../../../lib/companyLabUiSession";
@@ -27,6 +28,10 @@ import { createRedisSimulationRunRepository } from "../../../../lib/v2/companyLa
 import { createInMemorySimulationRunRepository, SimulationRunRepository } from "../../../../lib/v2/companyLab/simulation/persistence/repository";
 import { createRedisPlayerRepository } from "../../../../lib/v2/player/redisRepository";
 import { createInMemoryPlayerRepository, PlayerRepository } from "../../../../lib/v2/player/repository";
+import {
+  SIMULATION_RUN_BODY_ENCODING_HEADER,
+  isGzipBodyEncoding,
+} from "../../../../lib/v2/companyLab/simulation/persistence/partBodyEncoding";
 
 const GENERIC_DEPENDENCY_ERROR = "サーバー内部でエラーが発生しました（保存先の初期化に失敗しました）。";
 const GENERIC_UNEXPECTED_ERROR = "サーバー内部で予期しないエラーが発生しました。";
@@ -98,7 +103,24 @@ export async function withSimulationRunApiContext(
   }
 }
 
+/**
+ * 【COMP-1・送信量削減】`x-shrimpx-body-encoding: gzip` が付いている場合は、ボディを
+ * gzip として展開してから JSON にする。保存のたびに dataset / resume / pack を
+ * 丸ごと送る経路があり、そこが送信量の大半を占めるため、送る前に縮める。
+ *
+ * ヘッダが無ければ従来どおり素の JSON として読む。旧クライアント（圧縮を知らない
+ * ブラウザ・CompressionStream が無い環境）からの保存を壊さないための後方互換である。
+ */
 export async function parseJsonBody(req: NextRequest): Promise<unknown> {
+  if (isGzipBodyEncoding(req.headers.get(SIMULATION_RUN_BODY_ENCODING_HEADER))) {
+    try {
+      const compressed = Buffer.from(await req.arrayBuffer());
+      return JSON.parse(gunzipSync(compressed).toString("utf8"));
+    } catch (e) {
+      console.error("[simulation-runs api] gzip ボディの展開に失敗しました:", e);
+      return undefined;
+    }
+  }
   try {
     return await req.json();
   } catch {

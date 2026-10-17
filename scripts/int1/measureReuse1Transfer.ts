@@ -18,6 +18,11 @@
  *
  * 共有 Redis へは接続しない（fetch をフェイクへ差し替える）。
  */
+import { gunzipSync } from "node:zlib";
+import {
+  SIMULATION_RUN_BODY_ENCODING_GZIP,
+  SIMULATION_RUN_BODY_ENCODING_HEADER,
+} from "../../app/lib/v2/companyLab/simulation/persistence/partBodyEncoding";
 import { createSimulationSession, advanceSimulationTurn } from "../../app/lib/v2/companyLab/simulation/engine";
 import { buildDatasetFromSession } from "../../app/lib/v2/companyLab/simulation/analytics/dataset";
 import { buildResumePayload, restoreSessionFromResumePayload } from "../../app/lib/v2/companyLab/simulation/persistence/resume";
@@ -63,8 +68,21 @@ function installFakeServer(stats: Stats) {
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url === "/api/v2/simulation-runs" && init?.method === "POST") {
-      const text = String(init.body);
-      stats.receivedBytes += Buffer.byteLength(text, "utf8");
+      /**
+       * 【COMP-1】実サーバーと同じく、gzip ヘッダが付いていれば展開してから JSON に
+       * する。受信バイト数は「実際にネットワークへ出た本文」＝圧縮後で数える。
+       */
+      const headers = (init.headers ?? {}) as Record<string, string>;
+      const gzipped = (headers[SIMULATION_RUN_BODY_ENCODING_HEADER] ?? "").trim().toLowerCase() === SIMULATION_RUN_BODY_ENCODING_GZIP;
+      let text: string;
+      if (gzipped) {
+        const view = init.body as unknown as Uint8Array;
+        stats.receivedBytes += view.byteLength;
+        text = gunzipSync(Buffer.from(view)).toString("utf8");
+      } else {
+        text = String(init.body);
+        stats.receivedBytes += Buffer.byteLength(text, "utf8");
+      }
       const body = JSON.parse(text) as Record<string, unknown>;
       const token = body.writeToken as string;
 

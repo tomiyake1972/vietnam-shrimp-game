@@ -21,6 +21,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { gunzipSync } from "node:zlib";
+import {
+  SIMULATION_RUN_BODY_ENCODING_GZIP,
+  SIMULATION_RUN_BODY_ENCODING_HEADER,
+} from "../../../../lib/v2/companyLab/simulation/persistence/partBodyEncoding";
 
 interface FakeStorage {
   getItem(key: string): string | null;
@@ -67,7 +72,40 @@ function createFakeLocalStorage(quotaBytes: number | null): FakeStorage {
  * simulationRunId→StoredSimulationRun-shapeで保持する（テストがGET結果を直接
  * 差し替えたい場合に使う。PERSIST-D9参照）。
  */
+/** 【COMP-1】1回のPOSTについて、実際に送られた形を記録する（検証用）。 */
+interface SentRequest {
+  readonly gzipped: boolean;
+  readonly contentType: string | undefined;
+  readonly sentBytes: number;
+}
+
+function describeRequest(init: RequestInit): SentRequest {
+  const headers = (init.headers ?? {}) as Record<string, string>;
+  const gzipped = (headers[SIMULATION_RUN_BODY_ENCODING_HEADER] ?? "").trim().toLowerCase() === SIMULATION_RUN_BODY_ENCODING_GZIP;
+  const sentBytes = gzipped
+    ? (init.body as unknown as Uint8Array).byteLength
+    : Buffer.byteLength(String(init.body), "utf8");
+  return { gzipped, contentType: headers["Content-Type"], sentBytes };
+}
+
+/**
+ * 【COMP-1】実サーバー（app/api/v2/simulation-runs/_lib/context.ts の parseJsonBody）と
+ * 同じ受け取り方をする。x-shrimpx-body-encoding: gzip が付いていれば展開してから
+ * JSON にし、無ければ素の JSON として読む。偽サーバーが実物と違う読み方をすると、
+ * 実物では壊れる変更がテストでは通ってしまう。
+ */
+function parseRequestBody(init: RequestInit): unknown {
+  const headers = (init.headers ?? {}) as Record<string, string>;
+  const encoding = headers[SIMULATION_RUN_BODY_ENCODING_HEADER];
+  if ((encoding ?? "").trim().toLowerCase() === SIMULATION_RUN_BODY_ENCODING_GZIP) {
+    const view = init.body as unknown as Uint8Array;
+    return JSON.parse(gunzipSync(Buffer.from(view)).toString("utf8"));
+  }
+  return JSON.parse(String(init.body));
+}
+
 function installFakeServer(initial: Map<string, unknown> = new Map()) {
+  const posts: SentRequest[] = [];
   const store = initial;
   let serverUp = true;
   let forcedStatus: number | null = null;
@@ -96,7 +134,8 @@ function installFakeServer(initial: Map<string, unknown> = new Map()) {
     if (!serverUp) return new Response(null, { status: 500 });
     if (forcedStatus !== null) return new Response(JSON.stringify({ error: { code: "FORCED", message: "forced" } }), { status: forcedStatus });
     if (url === "/api/v2/simulation-runs" && init?.method === "POST") {
-      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      posts.push(describeRequest(init));
+      const body = parseRequestBody(init) as Record<string, unknown>;
       if (body.manifestOnly) {
         const run = body.run as { simulationRunId: string };
         const revision = body.persistenceRevision as number;
@@ -151,7 +190,7 @@ function installFakeServer(initial: Map<string, unknown> = new Map()) {
     }
     return new Response(null, { status: 404 });
   }) as typeof fetch;
-  return { store, setServerUp: (up: boolean) => (serverUp = up), forceStatus: (status: number | null) => (forcedStatus = status) };
+  return { store, posts, setServerUp: (up: boolean) => (serverUp = up), forceStatus: (status: number | null) => (forcedStatus = status) };
 }
 
 function stubRun(id: string, completedTurns: number, extraCompanyMetricsCount = 0) {
@@ -450,5 +489,109 @@ test("REUSE-STORE-3: 別writerが公開を進めたあとは再利用せず、�
     );
     const stored = server.store.get(id) as { dataset?: unknown } | undefined;
     assert.equal(JSON.stringify(stored?.dataset), JSON.stringify(next), "手元の最新が保存されていない");
+  });
+});
+
+// ---------------------------------------------------------------------
+// COMP-1: 保存リクエスト本文の圧縮
+// ---------------------------------------------------------------------
+
+test("COMP-STORE-1: 保存は gzip ヘッダ付きで送られ、本文は無圧縮より小さい", async () => {
+  const server = installFakeServer();
+  await withFreshStore(null, async (mod) => {
+    const id = "run-comp-header";
+    /**
+     * 圧縮の効きを見るので、実際の dataset と同じくらいの大きさにする。
+     * 数百バイトの本文では gzip のヘッダ分で逆に大きくなり、何も確かめられない。
+     */
+    const dataset = {
+      schemaVersion: 3,
+      turns: [1, 2, 3],
+      rows: Array.from({ length: 5000 }, (_, i) => ({ turn: (i % 3) + 1, companyId: "BAL", value: i })),
+    };
+    const result = await mod.saveSimulationRun(runWithDataset(id, 3, dataset) as never);
+    assert.equal(result.serverSaveSucceeded, true, `保存が失敗した: ${result.serverError}`);
+
+    assert.ok(server.posts.length > 0, "POSTが1件も記録されていない");
+    assert.ok(
+      server.posts.every((p) => p.gzipped),
+      `gzip で送られていないリクエストがある: ${JSON.stringify(server.posts)}`
+    );
+    assert.ok(
+      server.posts.every((p) => p.contentType === "application/octet-stream"),
+      "圧縮して送るときの Content-Type が application/octet-stream になっていない"
+    );
+
+    // 保存された中身は、圧縮しない場合と同じでなければならない。
+    const stored = server.store.get(id) as { dataset?: unknown } | undefined;
+    assert.equal(JSON.stringify(stored?.dataset), JSON.stringify(dataset), "圧縮経由で保存した中身が元と違う");
+
+    /**
+     * いちばん大きい本文＝dataset パートが、無圧縮の dataset JSON より小さいこと。
+     * 送信合計と比べると、他パートぶんが混ざって比較にならない。
+     */
+    const rawBytes = Buffer.byteLength(JSON.stringify(dataset), "utf8");
+    const largestSent = server.posts.reduce((max, p) => Math.max(max, p.sentBytes), 0);
+    assert.ok(largestSent > 0, "送信記録が取れていない");
+    assert.ok(
+      largestSent < rawBytes,
+      `圧縮が効いていない（最大の送信本文 ${largestSent} B >= dataset 無圧縮 ${rawBytes} B）`
+    );
+  });
+});
+
+test("COMP-STORE-2: CompressionStream が無い環境では素の JSON で送り、保存内容は変わらない", async () => {
+  const server = installFakeServer();
+  const original = (globalThis as unknown as { CompressionStream?: unknown }).CompressionStream;
+  delete (globalThis as unknown as { CompressionStream?: unknown }).CompressionStream;
+  try {
+    await withFreshStore(null, async (mod) => {
+      const id = "run-comp-fallback";
+      const dataset = datasetWithTurns(3, 8);
+      const result = await mod.saveSimulationRun(runWithDataset(id, 3, dataset) as never);
+      assert.equal(result.serverSaveSucceeded, true, `保存が失敗した: ${result.serverError}`);
+      assert.ok(
+        server.posts.every((p) => !p.gzipped),
+        `圧縮できない環境なのに gzip ヘッダが付いている: ${JSON.stringify(server.posts)}`
+      );
+      assert.ok(
+        server.posts.every((p) => p.contentType === "application/json"),
+        "非圧縮時の Content-Type が application/json になっていない"
+      );
+      const stored = server.store.get(id) as { dataset?: unknown } | undefined;
+      assert.equal(JSON.stringify(stored?.dataset), JSON.stringify(dataset), "非圧縮経路で保存した中身が元と違う");
+    });
+  } finally {
+    (globalThis as unknown as { CompressionStream?: unknown }).CompressionStream = original;
+  }
+});
+
+test("COMP-STORE-3: 送信前サイズ検査は圧縮後のバイト数で判定する", async () => {
+  const server = installFakeServer();
+  await withFreshStore(null, async (mod) => {
+    const id = "run-comp-guard";
+    /**
+     * 無圧縮では 4MB の閾値を超えるが、よく圧縮できる dataset を作る。
+     * 旧実装（無圧縮のJSONで判定）なら PERSISTENCE_PAYLOAD_TOO_LARGE で止まる。
+     * 実際に送るのは圧縮後なので、プラットフォームの上限には当たらない。
+     */
+    const rows = Array.from({ length: 120000 }, (_, i) => ({ turn: (i % 32) + 1, companyId: "BAL", value: 1000 }));
+    const dataset = { schemaVersion: 3, turns: [1, 2, 3], rows };
+    const rawBytes = Buffer.byteLength(JSON.stringify(dataset), "utf8");
+    assert.ok(rawBytes > 4 * 1024 * 1024, `前提が崩れている: 無圧縮で ${rawBytes} B しかなく 4MB を超えていない`);
+
+    const result = await mod.saveSimulationRun(runWithDataset(id, 3, dataset) as never);
+    assert.equal(
+      result.serverSaveSucceeded,
+      true,
+      `圧縮後は閾値以下なのに保存が止まった: ${result.serverError}`
+    );
+    const datasetBytes = server.posts.reduce((max, p) => Math.max(max, p.sentBytes), 0);
+    assert.ok(
+      datasetBytes <= 4 * 1024 * 1024,
+      `実際に送った本文が閾値を超えている: ${datasetBytes} B`
+    );
+    const stored = server.store.get(id) as { dataset?: unknown } | undefined;
+    assert.equal(JSON.stringify(stored?.dataset), JSON.stringify(dataset), "保存された中身が元と違う");
   });
 });

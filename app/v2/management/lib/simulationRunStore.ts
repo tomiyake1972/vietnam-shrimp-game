@@ -35,6 +35,10 @@ import {
   fingerprintSimulationRunPart,
   isReusableSimulationRunPart,
 } from "../../../lib/v2/companyLab/simulation/persistence/partReuse";
+import {
+  SIMULATION_RUN_BODY_ENCODING_GZIP,
+  SIMULATION_RUN_BODY_ENCODING_HEADER,
+} from "../../../lib/v2/companyLab/simulation/persistence/partBodyEncoding";
 
 /**
  * 【Q25→Q26 authoritative persistence停止BLOCKER修正・指示§22/§23】
@@ -233,11 +237,16 @@ function loadBrowserCacheSummary(simulationRunId: string): SimulationRunSummary 
  */
 const PERSISTENCE_PAYLOAD_TOO_LARGE_THRESHOLD_BYTES = 4 * 1024 * 1024;
 
-function checkPartSize(part: string, value: unknown): string | null {
-  const bytes = typeof TextEncoder !== "undefined" ? new TextEncoder().encode(JSON.stringify(value)).length : JSON.stringify(value).length;
-  if (bytes <= PERSISTENCE_PAYLOAD_TOO_LARGE_THRESHOLD_BYTES) return null;
+/**
+ * 【COMP-1】検査するのは「実際にネットワークへ出るバイト数」＝圧縮後の大きさにする。
+ * プラットフォームの request body 上限にかかるのは圧縮後の本文だからである。
+ * 閾値（4MB）は変えていない。圧縮が使えない環境では sentBytes が無圧縮のバイト数に
+ * なるため、その場合の判定は従来と同じになる（安全側に倒れる）。
+ */
+function checkPartSize(part: string, sentBytes: number): string | null {
+  if (sentBytes <= PERSISTENCE_PAYLOAD_TOO_LARGE_THRESHOLD_BYTES) return null;
   return (
-    `PERSISTENCE_PAYLOAD_TOO_LARGE: ${part}が${(bytes / 1024 / 1024).toFixed(2)}MBあり、安全threshold` +
+    `PERSISTENCE_PAYLOAD_TOO_LARGE: ${part}が${(sentBytes / 1024 / 1024).toFixed(2)}MBあり、安全threshold` +
     `（${(PERSISTENCE_PAYLOAD_TOO_LARGE_THRESHOLD_BYTES / 1024 / 1024).toFixed(1)}MB）を超えています。送信を中止しました。`
   );
 }
@@ -336,14 +345,52 @@ type PostJsonResult =
   | { ok: true; sentBytes: number }
   | { ok: false; error: string; stale: boolean; reuseBaseMismatch: boolean; currentPublishedRevision: number | null; sentBytes: number };
 
-async function postJson(body: unknown): Promise<PostJsonResult> {
+/**
+ * 【COMP-1】JSON文字列を gzip 圧縮する。`CompressionStream` が無い環境
+ * （古いブラウザ・一部のテスト環境）では null を返し、呼び出し側は素の JSON を
+ * 送る。圧縮できないことを失敗として扱わない（従来どおり動くことを優先する）。
+ */
+async function gzipUtf8(json: string): Promise<Uint8Array | null> {
+  if (typeof CompressionStream === "undefined" || typeof Blob === "undefined" || typeof Response === "undefined") return null;
+  try {
+    const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+/** 送信直前の本文。sentBytes は実際にネットワークへ出るバイト数（圧縮できたら圧縮後）。 */
+interface EncodedBody {
+  readonly json: string;
+  readonly compressed: Uint8Array | null;
+  readonly sentBytes: number;
+}
+
+/**
+ * 本文を1度だけ組み立てる。サイズ検査と送信の両方で同じ結果を使い、
+ * 同じ本文を2度圧縮しない（dataset は数MBになり得るため）。
+ */
+async function encodeBody(body: unknown): Promise<EncodedBody> {
   const json = JSON.stringify(body);
-  const sentBytes = utf8Length(json);
+  const compressed = await gzipUtf8(json);
+  return { json, compressed, sentBytes: compressed ? compressed.byteLength : utf8Length(json) };
+}
+
+async function postJson(body: unknown): Promise<PostJsonResult> {
+  return postEncoded(await encodeBody(body));
+}
+
+async function postEncoded(encoded: EncodedBody): Promise<PostJsonResult> {
+  const { json, compressed, sentBytes } = encoded;
   try {
     const response = await fetchWithTimeout("/api/v2/simulation-runs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: json,
+      headers: compressed
+        ? { "Content-Type": "application/octet-stream", [SIMULATION_RUN_BODY_ENCODING_HEADER]: SIMULATION_RUN_BODY_ENCODING_GZIP }
+        : { "Content-Type": "application/json" },
+      // 【型】BodyInit は ArrayBufferView を受け付ける。Uint8Array をそのまま渡す。
+      body: compressed ? (compressed as unknown as BodyInit) : json,
     });
     if (!response.ok) {
       const bodyText = await readErrorBody(response);
@@ -450,24 +497,30 @@ async function saveToServer(stored: StoredSimulationRun, attempt: { expectedBase
     }
 
     if (body === null) {
-      /**
-       * 【指示§31-35・変更しない】完全な値を送るときのサイズ検査は従来どおり、
-       * 送信前に行う。閾値・判定対象（圧縮しないJSONのバイト数）も変えていない。
-       */
-      const sizeError = checkPartSize(part, fullValue);
-      if (sizeError) return { ok: false, error: `サーバー保存に失敗しました（${sizeError}）`, stale: false };
       body = { simulationRunId, revision, part, value: fullValue, ...attempt };
       mode = "value";
     }
 
-    let result = await postJson(body);
+    /**
+     * 【指示§31-35】完全な値を送るときはサイズ検査を送信前に行う。閾値は従来どおり
+     * 4MB。【COMP-1】判定対象だけを「実際に送るバイト数」＝圧縮後へ変えた。
+     * 再利用のときは本文が数百バイトなので検査しない。
+     */
+    let encoded = await encodeBody(body);
+    if (mode === "value") {
+      const sizeError = checkPartSize(part, encoded.sentBytes);
+      if (sizeError) return { ok: false, error: `サーバー保存に失敗しました（${sizeError}）`, stale: false };
+    }
+
+    let result = await postEncoded(encoded);
     if (!result.ok && result.reuseBaseMismatch && mode === "reuse") {
       // 土台が無い ⇒ 完全な値で送り直す（1回だけ）。
       transfers.push({ part, mode, sentBytes: result.sentBytes });
-      const sizeError = checkPartSize(part, fullValue);
+      encoded = await encodeBody({ simulationRunId, revision, part, value: fullValue, ...attempt });
+      const sizeError = checkPartSize(part, encoded.sentBytes);
       if (sizeError) return { ok: false, error: `サーバー保存に失敗しました（${sizeError}）`, stale: false };
       mode = "value";
-      result = await postJson({ simulationRunId, revision, part, value: fullValue, ...attempt });
+      result = await postEncoded(encoded);
     }
     transfers.push({ part, mode, sentBytes: result.sentBytes });
     if (!result.ok) {
