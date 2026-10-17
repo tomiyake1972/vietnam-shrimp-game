@@ -229,13 +229,18 @@ export function PlayerIntro({ context, mode, initialSection, onClose }: PlayerIn
             <li>・あなたはベトナムのエビ加工・輸出会社の経営チームです。</li>
             <li>・原料を買う → 工場で加工する → 売って納品する → 代金を回収する、という流れを回します。</li>
             <li>・1Turn＝1四半期（3か月）です。いまは Turn {context.turn}（{context.period}）です。</li>
-            {/* 【PLAYER-INTRO-1 §4A】終了Turnは、確定している場合だけ出す。
-                進行中のRunでは受講者画面がこの値を受け取っていないため、
-                推測した数字を出さずに「取得できていない」と書く。 */}
+            {/* 【PLAYER-INTRO-1 §4A】終了Turnは参加中Runの設定から出す。
+                終了後は確定した gameEndTurn を、進行中は GM が設定した予定Turn数を
+                使う（どちらも推測値ではない）。 */}
             {context.gameEndTurn !== null ? (
-              <li>・このゲームは全 {context.gameEndTurn} Turn です。</li>
+              <li>
+                ・このゲームは全 {context.gameEndTurn} Turn（{(context.gameEndTurn / 4).toFixed(context.gameEndTurn % 4 === 0 ? 0 : 1)}年）で終了しました。
+              </li>
             ) : (
-              <li>・何Turnで終わるかは、この画面では取得できていません。進行役（GM）にご確認ください。</li>
+              <li>
+                ・このゲームは全 {context.requestedTurns} Turn（{(context.requestedTurns / 4).toFixed(context.requestedTurns % 4 === 0 ? 0 : 1)}年）の予定です。
+                残りは {Math.max(0, context.requestedTurns - context.turn + 1)} Turn です。
+              </li>
             )}
             <li>・各社が意思決定を提出し、進行役（GM）がそろったことを確認してTurnを進めます。</li>
             <li>・成長・利益・資金繰りの3つを結びつけて判断します。どれか1つだけを追うとうまくいきません。</li>

@@ -146,6 +146,15 @@ export interface PlayerDecisionContext {
   readonly isPlayerControlled: boolean;
   readonly gameEndedAt: string | null;
   readonly gameEndTurn: number | null;
+  /**
+   * 【PLAYER-INTRO-1 §4A】このRunが何Turn続く予定か（GMがSetupで設定した値）。
+   *
+   * 受講者の導入画面が「このゲームは全◯Turnです」と案内するために必要。
+   * gameEndTurn は終了後にしか入らないため、進行中はこの値を使う。
+   * 公開ルールそのもの（進行役が参加者へ口頭で伝える内容と同じ）であり、
+   * 他社の非公開情報も将来のScenario値も含まない。
+   */
+  readonly requestedTurns: number;
   /** 【指示§8/§17】Final Results用。既存finalEvaluationSnapshotをそのまま返す（自社・公開範囲は既存FinalResultsSummary等が担保する）。 */
   readonly finalEvaluationSnapshot: readonly CompanyEvaluationSnapshot[] | null;
   /**
@@ -355,6 +364,7 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
   return {
     simulationRunId: session.run.simulationRunId,
     scenarioId: session.run.scenarioId,
+    requestedTurns: session.run.requestedTurns,
     seed: session.run.seed,
     companyId,
     fixture,

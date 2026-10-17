@@ -68,6 +68,9 @@ test.describe("PLAYER-INTRO-1 受講者向け導入", () => {
       const intro = playerPage.getByTestId("play-intro");
       await expect(intro).toBeVisible({ timeout: 30_000 });
       await expect(intro).toHaveAttribute("data-mode", "firstVisit");
+      // 【§4A】終了Turnを参加中Runの設定から出す（「取得できていません」で済ませない）。
+      await expect(playerPage.getByTestId("play-intro-overview")).toContainText("このゲームは全 32 Turn（8年）の予定です");
+      await expect(playerPage.getByTestId("play-intro-overview")).toContainText("残りは 32 Turn です");
 
       // --- B. 歩留まり100％のカードが折りたたまれずに出ている ---
       const yieldCard = playerPage.getByTestId("play-intro-yield-card");
