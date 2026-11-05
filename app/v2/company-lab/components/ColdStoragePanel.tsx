@@ -11,7 +11,15 @@ interface ColdStoragePanelProps {
   readonly state: CompanyColdStorageState;
   /** 凍結・包装処理能力（フロー）の内訳。会社合計の行をそのまま渡す。 */
   readonly freezingPackagingPool: CapacityPoolBreakdown | undefined;
-  /** 現在の凍結・包装の処理計画（見込み処理量の合計、トン/四半期）。 */
+  /**
+   * 凍結・包装の「処理見込み」（トン/四半期）。
+   *
+   * 【テストプレイ指摘③・2026-11】これは計画生産量ではなく、
+   * processingForecastViewModel が制約（原料 → 共通前処理 → 凍結・包装 → 商品別 → 人員）を
+   * 適用したあとの見込み処理量の合計である（forecast.rows の forecastProcessedTons の和）。
+   * PROCUREMENT タブの「Planned Production 計画生産量」は制約適用前の計画値なので、
+   * 両者が一致しないのは正常。以前は見出しが「現在の処理計画」で、計画値と誤解された。
+   */
   readonly plannedProcessingTons: number;
   /** 追加保管1トンあたりの投資額（USD）。算定できなければundefined。 */
   readonly investmentUsdPerStorageTon: number | undefined;
@@ -45,8 +53,8 @@ export default function ColdStoragePanel(props: ColdStoragePanelProps) {
               <tr className={INFO_TABLE_HEAD_CLASS}>
                 <th className="pr-3 py-1">現在の名目能力</th>
                 <th className="pr-3 py-1">現在の実効能力</th>
-                <th className="pr-3 py-1">現在の処理計画</th>
-                <th className="pr-3 py-1">処理能力使用率</th>
+                <th className="pr-3 py-1">現在の処理見込み（制約適用後）</th>
+                <th className="pr-3 py-1">処理能力使用率（見込み÷実効能力）</th>
               </tr>
             </thead>
             <tbody>
@@ -64,6 +72,9 @@ export default function ColdStoragePanel(props: ColdStoragePanelProps) {
           </table>
         </div>
         <p className="text-[11px] text-gray-500 mt-1">こちらが生産量の上限として実際に働きます（凍結・包装の能力。原料 → 共通前処理 → 凍結・包装 → 商品別 → 人員 の順に上限が適用され、その3番目です）。</p>
+        <p className="text-[11px] text-amber-300/80 mt-1" data-testid="cold-storage-forecast-note">
+          「処理見込み」は上の制約をすべて適用したあとに実際に処理できる見込み量です。PROCUREMENT タブの「Planned Production 計画生産量」は制約を適用する前の計画値なので、原料在庫などが足りないときは両者が一致しません。
+        </p>
       </div>
 
       {/* ストック: 冷凍・冷蔵保管能力 */}

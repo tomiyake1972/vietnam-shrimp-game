@@ -13,6 +13,8 @@
 
 import LastTurnReviewPanel from "../../company-lab/components/LastTurnReviewPanel";
 import type { LastTurnReview } from "../../company-lab/lastTurnReviewViewModel";
+import ProfitAndLossBreakdownPanel from "../../company-lab/components/ProfitAndLossBreakdownPanel";
+import type { ProfitAndLossBreakdown } from "../../company-lab/profitAndLossBreakdownViewModel";
 import type { PlayerInventoryView, PlayerMarketView } from "../../../lib/v2/player/workspaceViews";
 import {
   CROWDING_BAND_LABEL,
@@ -42,7 +44,20 @@ function millionsUsd(value: number | null): string {
 // Overview
 // ---------------------------------------------------------------------
 
-export function PlayerOverviewPanel({ review }: { readonly review: LastTurnReview | null }) {
+export function PlayerOverviewPanel({
+  review,
+  profitAndLoss,
+  profitAndLossPeriodLabel,
+}: {
+  readonly review: LastTurnReview | null;
+  /**
+   * 【前期PL費用内訳・2026-11】確定済みの前四半期のPL内訳。
+   * コスト構造を学ぶゲームなのに Overview に純売上・営業利益・純利益しか無く、
+   * 費用を逆算するしかなかったため追加した。確定四半期が無ければ undefined。
+   */
+  readonly profitAndLoss?: ProfitAndLossBreakdown;
+  readonly profitAndLossPeriodLabel?: string;
+}) {
   if (review === null) {
     return (
       <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="play-overview-empty">
@@ -56,6 +71,9 @@ export function PlayerOverviewPanel({ review }: { readonly review: LastTurnRevie
   return (
     <div data-testid="play-overview">
       <LastTurnReviewPanel review={review} />
+      {profitAndLoss ? (
+        <ProfitAndLossBreakdownPanel breakdown={profitAndLoss} periodLabel={profitAndLossPeriodLabel ?? `Turn ${review.turn}（${review.period}）`} />
+      ) : null}
     </div>
   );
 }

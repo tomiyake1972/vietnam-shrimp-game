@@ -36,18 +36,23 @@ const GENERIC_DEPENDENCY_ERROR = "サーバー内部でエラーが発生しま�
 const GENERIC_UNEXPECTED_ERROR = "サーバー内部で予期しないエラーが発生しました。";
 
 /**
- * Cookieからsessionidを取り出し、PlayerRepositoryで現在の有効性（revokedAt）を
- * 確認したうえでhandlerFnを呼ぶ。本番では常に401（Player機能自体を提供しない）。
+ * 認証の結果。解決できたらcontext、できなければそのまま返すべきエラー。
+ *
+ * 【PLAY-PARITY-1】Excel等のバイナリを返すrouteでも、JSONを返すrouteと
+ * まったく同じ認証・失効確認を通すために切り出した。認証の分岐をここ1箇所に
+ * 保ち、route側で書き直さない（query parameterのcompanyを信頼しない、という
+ * 既存の原則もここで守られる）。
  */
-export async function withPlayerApiContext(handlerFn: (ctx: PlayerApiContext) => Promise<PlayerApiResult>): Promise<NextResponse> {
+export type PlayerApiAuth = { readonly ok: true; readonly context: PlayerApiContext } | { readonly ok: false; readonly result: PlayerApiResult };
+
+export async function resolvePlayerApiContext(): Promise<PlayerApiAuth> {
   if (isProduction) {
-    return NextResponse.json({ error: { code: "NOT_AVAILABLE", message: "この機能は本番環境では利用できません。" } }, { status: 403 });
+    return { ok: false, result: { status: 403, body: { error: { code: "NOT_AVAILABLE", message: "この機能は本番環境では利用できません。" } } } };
   }
 
   const sessionId = await readPlayerSessionIdFromCookie();
   if (!sessionId) {
-    const result = authError("NO_SESSION_COOKIE", "ログインセッションが見つかりません。参加リンクから再度参加してください。");
-    return NextResponse.json(result.body, { status: result.status });
+    return { ok: false, result: authError("NO_SESSION_COOKIE", "ログインセッションが見つかりません。参加リンクから再度参加してください。") };
   }
 
   let playerRepository: PlayerRepository;
@@ -57,22 +62,37 @@ export async function withPlayerApiContext(handlerFn: (ctx: PlayerApiContext) =>
     simulationRunRepository = await createSimulationRunRepository();
   } catch (e) {
     console.error("[play api] 保存先の初期化に失敗しました:", e);
-    return NextResponse.json({ error: { code: "INTERNAL_ERROR", message: GENERIC_DEPENDENCY_ERROR } }, { status: 500 });
+    return { ok: false, result: { status: 500, body: { error: { code: "INTERNAL_ERROR", message: GENERIC_DEPENDENCY_ERROR } } } };
   }
 
   const session = await playerRepository.loadSession(sessionId);
   if (!session) {
-    const result = authError("SESSION_NOT_FOUND", "このセッションは見つかりません。参加リンクから再度参加してください。");
-    return NextResponse.json(result.body, { status: result.status });
+    return { ok: false, result: authError("SESSION_NOT_FOUND", "このセッションは見つかりません。参加リンクから再度参加してください。") };
   }
   if (session.revokedAt) {
-    const result = authError("SESSION_REVOKED", "このセッションは無効化されています（GMが参加リンクを再発行したか、参加を取り消した可能性があります）。参加リンクから再度参加してください。");
-    return NextResponse.json(result.body, { status: result.status });
+    return {
+      ok: false,
+      result: authError(
+        "SESSION_REVOKED",
+        "このセッションは無効化されています（GMが参加リンクを再発行したか、参加を取り消した可能性があります）。参加リンクから再度参加してください。"
+      ),
+    };
   }
 
+  void playerRepository.touchSession(sessionId, new Date().toISOString()); // best-effort、失敗しても本処理を止めない
+  return { ok: true, context: { session, playerRepository, simulationRunRepository } };
+}
+
+/**
+ * Cookieからsessionidを取り出し、PlayerRepositoryで現在の有効性（revokedAt）を
+ * 確認したうえでhandlerFnを呼ぶ。本番では常に401（Player機能自体を提供しない）。
+ */
+export async function withPlayerApiContext(handlerFn: (ctx: PlayerApiContext) => Promise<PlayerApiResult>): Promise<NextResponse> {
+  const auth = await resolvePlayerApiContext();
+  if (!auth.ok) return NextResponse.json(auth.result.body, { status: auth.result.status });
+
   try {
-    void playerRepository.touchSession(sessionId, new Date().toISOString()); // best-effort、失敗しても本処理を止めない
-    const result = await handlerFn({ session, playerRepository, simulationRunRepository });
+    const result = await handlerFn(auth.context);
     return NextResponse.json(result.body, { status: result.status });
   } catch (e) {
     console.error("[play api] ハンドラーで予期しないエラーが発生しました:", e);

@@ -2,8 +2,9 @@
 
 // ShrimpX V2 — 32Q Management Console: 経営モード切替（Phase 7・Manual Override）
 //
-// 会社ごとに STANDARD_AI / PLAYER を切り替えるための最小UI。
-// スマホでも操作しやすいよう横スクロールさせず、縦積みで表示する（指示§31/§32）。
+// 会社ごとの割り当てと、そのTurnの意思決定状況を示す参照表示。
+// 【SEAT-UI】編集の入口は画面上部の「参加管理」へ集約したため、ここからは
+// 切り替え・GM代理入力のボタンを外してある。
 
 import { CompanyControlMode } from "../../../lib/v2/companyLab/simulation/types";
 import { CompanyFixture } from "../../../lib/v2/companyLab/types";
@@ -11,23 +12,20 @@ import { CompanyFixture } from "../../../lib/v2/companyLab/types";
 interface Props {
   readonly fixtures: readonly CompanyFixture[];
   readonly controlModes: Readonly<Record<string, CompanyControlMode>>;
-  readonly onChangeMode: (companyId: string, mode: CompanyControlMode) => void;
   /** そのターンぶんの意思決定が既に確定しているPLAYER会社。 */
   readonly decidedCompanyIds: ReadonlySet<string>;
   /** 現在Consoleが意思決定待ちで停止している会社（いなければ空）。 */
   readonly waitingCompanyIds: readonly string[];
-  readonly onOperate: (companyId: string) => void;
-  readonly disabled: boolean;
   readonly currentTurn: number;
 }
 
-export function CompanyControlPanel({ fixtures, controlModes, onChangeMode, decidedCompanyIds, waitingCompanyIds, onOperate, disabled, currentTurn }: Props) {
+export function CompanyControlPanel({ fixtures, controlModes, decidedCompanyIds, waitingCompanyIds, currentTurn }: Props) {
   const hasAnyPlayerCompany = fixtures.some((f) => (controlModes[f.companyId] ?? "STANDARD_AI") === "PLAYER");
   return (
     <section className="rounded-md border border-slate-700 bg-slate-900/50 p-2.5" data-testid="company-control-panel">
       <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-300">経営モード（Manual Override）</h3>
       <p className="mb-2 text-[11px] leading-snug text-slate-500">
-        会社ごとに Standard AI / 自分で操作 を切り替えられます。切り替えは次のTurnから適用されます。今すでに確定済みのTurnの意思決定は上書きしません。
+        いまの割り当ての一覧です（表示のみ）。切り替え・参加リンクの発行・GM代理入力は、画面上部の「参加管理」で行います。切り替えは次のTurnから適用され、今すでに確定済みのTurnの意思決定は上書きしません。
       </p>
       {/* 【受入指示§6-8】PLAYER会社が存在する場合だけ、小さな補足として表示する
           （全社AI利用時には邪魔しない）。既に実行済みのTurn結果は失われないことを明記する。 */}
@@ -51,16 +49,15 @@ export function CompanyControlPanel({ fixtures, controlModes, onChangeMode, deci
             >
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-slate-100">{f.companyId}</span>
-                <select
-                  value={mode}
-                  disabled={disabled}
-                  onChange={(e) => onChangeMode(f.companyId, e.target.value as CompanyControlMode)}
+                {/* 【SEAT-UI】編集の入口は画面上部の「参加管理」へ集約した。
+                    ここは参照表示にする（同じ操作が2箇所にあると、どちらで
+                    変えたのか分からなくなり、保存状態の出し分けも二重になる）。 */}
+                <span
                   data-testid={`company-control-mode-${f.companyId}`}
-                  className="rounded border border-slate-600 bg-slate-900 px-1.5 py-1 text-[11px] disabled:opacity-40"
+                  className="rounded border border-slate-700 bg-slate-900 px-1.5 py-1 text-[11px] text-slate-300"
                 >
-                  <option value="STANDARD_AI">Standard AI</option>
-                  <option value="PLAYER">自分で操作</option>
-                </select>
+                  {mode === "PLAYER" ? "自分で操作" : "Standard AI"}
+                </span>
               </div>
 
               <div className="flex items-center gap-2">
@@ -76,16 +73,7 @@ export function CompanyControlPanel({ fixtures, controlModes, onChangeMode, deci
                     AI 自動
                   </span>
                 )}
-                {mode === "PLAYER" ? (
-                  <button
-                    type="button"
-                    onClick={() => onOperate(f.companyId)}
-                    data-testid={`company-control-operate-${f.companyId}`}
-                    className="rounded bg-sky-700 px-3 py-1.5 text-xs font-semibold hover:bg-sky-600"
-                  >
-                    この会社を操作
-                  </button>
-                ) : null}
+
               </div>
             </li>
           );

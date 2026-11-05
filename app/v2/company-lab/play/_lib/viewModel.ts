@@ -465,7 +465,12 @@ export async function loadPlayerScreenViewModel(deps: CompanyLabApiDependencies,
  * getScenarioTurnInput（純粋関数）から読み出す。シナリオ側で取得に失敗した場合でも
  * 画面全体を壊さないよう、その項目だけundefinedにして続行する（0で埋めない）。
  */
-function buildOpeningInfo(
+/**
+ * 【INFOタブ・2026-11】期初情報（償却資産明細・市場情報・観測需要・参考価格）。
+ * 受講者の Decision Studio（/v2/play/workspace）の INFO 画面へも同じ値を届けるため、
+ * decisionContext.ts から呼べるように export した。中身・引数は変更していない。
+ */
+export function buildOpeningInfo(
   ownState: CompanyOwnState,
   publicInfo: PublicMarketInfo,
   restoredState: CompanyLabState,

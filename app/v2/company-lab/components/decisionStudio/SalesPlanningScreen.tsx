@@ -27,7 +27,7 @@ import { NumberCell, PriceAdjustmentCell } from "../InputCells";
 import CollapsibleSection from "../CollapsibleSection";
 import BacklogByProductPanel from "../BacklogByProductPanel";
 import { BacklogSemantics } from "../../../../lib/v2/companyLab/aiManagementMeeting/backlogSemantics";
-import { INFO_TABLE_HEAD_CLASS } from "../panelStyles";
+import { INFO_TABLE_HEAD_CLASS, NO_VALUE_TEXT } from "../panelStyles";
 import { InputFieldLabel, ReferenceValue } from "../FieldAnnotations";
 
 function formatUsd(value: number): string {
@@ -150,6 +150,20 @@ interface SalesPlanningScreenProps {
    * この画面では再集計・再分類を行わない。
    */
   readonly backlogSemantics?: BacklogSemantics;
+  /**
+   * 【テストプレイ指摘④・2026-10-29】商品別の実効加工能力（HOSO換算t/四半期）。
+   *
+   * Standard AI の販売提示は「名目（設備）能力 × salesUtilizationTarget」を供給側の
+   * アンカーにしており（standardAi/decision/sales.ts）、ワーカー等の制約を織り込んだ
+   * 実効能力は見ていない。そのため実効能力が名目を大きく下回る会社（VAP特化水産など）
+   * では、初期値として入るAI提案がそのまま実効能力を超えることが構造的に起こる。
+   *
+   * ここで渡すのは DecisionStudio が既に計算済みの値
+   * （processingForecastViewModel の companyRateTable）であり、この画面では
+   * 新しい計算を一切行わない。AIの提案値そのものにも手を加えない（表示だけ）。
+   * 省略時は比較を表示しない。
+   */
+  readonly effectiveCapacityByProduct?: Readonly<Partial<Record<Product, number>>>;
 }
 
 export default function SalesPlanningScreen({
@@ -162,8 +176,19 @@ export default function SalesPlanningScreen({
   salesForceHireLimit,
   lastQuarterSalesAllocations,
   backlogSemantics,
+  effectiveCapacityByProduct,
 }: SalesPlanningScreenProps) {
   const totals = computeSalesPlanTotals(draft.salesPlans);
+  /**
+   * 【テストプレイ指摘④】販売希望数量が実効加工能力を超えている商品。
+   * 新しい計算はしない（既に算出済みの合計と、渡された実効能力を比べるだけ）。
+   */
+  const overCapacityProducts = effectiveCapacityByProduct
+    ? totals.products.filter((product) => {
+        const capacity = effectiveCapacityByProduct[product as Product];
+        return capacity !== undefined && totals.productTotalTons(product) > capacity;
+      })
+    : [];
   const marketGroups = groupSalesPlansByMarket(draft.salesPlans);
   // 【UI-CLARITY-1 A-8】基準価格がゲーム開始時点の既知市場情報（Turn1）かどうか。
   const showsGameStartBasePrice =
@@ -440,9 +465,35 @@ export default function SalesPlanningScreen({
                     {formatHosoEqTons(totals.grandTotalTons)}
                   </td>
                 </tr>
+                {effectiveCapacityByProduct ? (
+                  <tr className="border-t border-gray-700/60 text-gray-400">
+                    <td className="pr-3 py-1">実効加工能力（参考）</td>
+                    {totals.products.map((product) => {
+                      const capacity = effectiveCapacityByProduct[product as Product];
+                      const over = capacity !== undefined && totals.productTotalTons(product) > capacity;
+                      return (
+                        <td
+                          key={product}
+                          className={`pr-3 py-1 text-right tabular-nums ${over ? "text-amber-300" : ""}`}
+                          data-testid={`sales-plan-effective-capacity-${product}`}
+                        >
+                          {capacity === undefined ? NO_VALUE_TEXT : formatHosoEqTons(capacity)}
+                        </td>
+                      );
+                    })}
+                    <td className="pr-3 py-1" />
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
+          {overCapacityProducts.length > 0 ? (
+            <p className="mt-2 text-[11px] leading-snug text-amber-300" role="alert" data-testid="sales-plan-over-effective-capacity-warning">
+              {overCapacityProducts.map((p) => p.toUpperCase()).join("・")} の販売希望数量が、今の実効加工能力を超えています。
+              初期値として入っているAIの提案は名目（設備）能力を基準にしているため、実効能力を超えることがあります。
+              提示したぶんを作りきれない場合は納品できません。
+            </p>
+          ) : null}
         </div>
       </CollapsibleSection>
 

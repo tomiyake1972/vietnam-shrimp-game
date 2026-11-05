@@ -48,7 +48,7 @@ import {
 import { CompanyDecisionInput } from "../../../lib/v2/companyLab/types";
 import { CompanyDecisionDraft } from "../../company-lab/decisionDraft";
 import { CompanyControlPanel } from "./CompanyControlPanel";
-import { PlayerSeatPanel } from "./PlayerSeatPanel";
+import { PlayerParticipationPanel } from "./PlayerParticipationPanel";
 import { getLiveSession, upsertLiveSession } from "../lib/liveSessionRegistry";
 import { yieldToBrowser } from "../../lib/yieldToBrowser";
 import { buildDatasetFromSession } from "../../../lib/v2/companyLab/simulation/analytics/dataset";
@@ -744,15 +744,36 @@ export function ManagementConsole() {
         const outcome = advanceSimulationTurn(current, nowIso(), pendingPlayerDecisions);
         current = { ...outcome.session, run: { ...outcome.session.run, companyControlModes: controlModesForThisRun } };
         setView(viewFromSession(current));
-        // このターンで使った確定済みPLAYER意思決定は消費済み。次のターンはまた未入力から。
-        pendingPlayerDecisions = {};
-        setConfirmedPlayerDecisions({});
-        setConfirmedPlayerDrafts({});
 
+        /**
+         * 【テストプレイ指摘②・2026-10-29】確定済みPLAYER意思決定を捨てるのは、
+         * **Turnが成立したときだけ**にする。
+         *
+         * 以前はこの消費処理が outcome.advanced の判定より前にあった。engine は
+         * 失敗したTurnでは状態を進めず advanced=false を返す設計（engine.ts）なのに、
+         * 画面側が成功・失敗を区別せず確定済み提出と下書きを捨てていたため、
+         * 実行されなかったTurnの提出まで消えていた。さらに break 後の最終保存が
+         * confirmedPlayerDecisions={} をサーバーへ書き戻すので、別端末の受講者が
+         * 出した提出も正本から消えた。
+         *
+         * 実測（ローカル・V2_API_E2E_IN_MEMORY=1）: VAPへ池入れ50,000t（能力4,000t）を
+         * 提出して1 Turn進めると
+         *   Simulation stopped at Turn 1: …池入れ予定生産量（34854.16）が養殖能力（4000）を超えています。
+         *   completedTurns=0（Turnは実行されていない）なのに confirmedPlayerDecisions=[]
+         *   GM画面は「未提出」「あと 1社の提出待ち」
+         * となり、提出だけが失われていた。
+         *
+         * 失敗時は提出を保持したまま抜ける。GMが入力を直して進め直せるようにするため。
+         */
         if (!outcome.advanced) {
           if (outcome.error) setErrorMessage(`Simulation stopped at Turn ${turnNumber}: ${outcome.error.message}`);
           break;
         }
+
+        // このターンで使った確定済みPLAYER意思決定は消費済み。次のターンはまた未入力から。
+        pendingPlayerDecisions = {};
+        setConfirmedPlayerDecisions({});
+        setConfirmedPlayerDrafts({});
 
         // 【指示§9/§10/§12】このTurnの保存が成立して初めて、次のTurnへ進む。
         // 4Turns/32Turnsのようなバッチでも、Turn境界ごとにここを通る
@@ -839,20 +860,55 @@ export function ManagementConsole() {
    * 変更直後のSimulation Sessionが無ければ（保存済みRunの閲覧のみ・実行前）保存しない
    * （resumePayloadはSimulation Sessionが無いと組み立てられない）。
    */
+  /**
+   * 【SEAT-UI・409の原因】以前はこの保存を setCompanyControlModes の updater の
+   * 中で呼んでいた。updater は「前の値から次の値を計算するだけ」の純粋な関数で
+   * なければならず、React の StrictMode（Next.js の既定）は開発時にわざと2回
+   * 実行して不純さを表に出す。そのため1回の切替で同じ revision・同じ writeToken の
+   * 保存が2組走り、後から commit した方が CAS に弾かれて 409 になっていた
+   * （実測: dataset/resume/pack/commit が各2回、2本目の commit だけ 409、
+   *   その後 persistRun の再試行が revision を1つ進めて成功）。
+   * 保存は updater の外で1回だけ呼ぶ。CAS 側は何も緩めていない。
+   *
+   * 【保存結果を返す理由】参加管理パネルが「保存中・保存成功・保存失敗」を
+   * 出し分け、サーバーへ保存できたことを確認してから参加リンクの発行を
+   * 許可するため。
+   */
   const handleChangeControlMode = useCallback(
-    (companyId: string, mode: CompanyControlMode) => {
+    async (companyId: string, mode: CompanyControlMode): Promise<boolean> => {
       // 【Game End / Final Results・指示§5】終了後は経営モードも変更しない。
-      if (isGameFinished(view?.run)) return;
-      setCompanyControlModes((prev) => {
-        const next = { ...prev, [companyId]: mode };
-        const session = view?.session;
-        if (session) {
-          void persist(session, next, confirmedPlayerDecisions);
-        }
-        return next;
-      });
+      if (isGameFinished(view?.run)) return false;
+      const previousMode = companyControlModes[companyId];
+      const next = { ...companyControlModes, [companyId]: mode };
+      setCompanyControlModes(next);
+      const session = view?.session;
+      if (!session) return false;
+      const ok = await persist(session, next, confirmedPlayerDecisions);
+      /**
+       * 【SEAT-UI 追加確認①】サーバー保存が成立しなかった切替は、画面にも残さない。
+       *
+       * 以前はここで楽観的に立てた state をそのままにしていた。そのため保存が
+       * 失敗すると、行は PLAYER 側の表示（発行ボタンはサーバー未確認なので
+       * disabled）のまま固まり、同じ「受講者に操作してもらう」ボタンが消えて
+       * 1クリックでの再試行ができなかった（実測: 保存失敗後に再試行するには
+       * 「Standard AI へ戻す」→「受講者に操作してもらう」の2操作が必要だった）。
+       * サーバーが受け取っていない以上、巻き戻した方が画面とサーバーも一致する。
+       * 失敗したこと自体は参加管理パネルの「保存失敗（サーバー未反映）」が示す。
+       *
+       * 巻き戻しは「この会社だけ」を直前の値へ戻す（保存を待つあいだに別の会社を
+       * 切り替えていた場合、その操作まで消さないため）。
+       */
+      if (!ok) {
+        setCompanyControlModes((current) => {
+          const restored = { ...current };
+          if (previousMode === undefined) delete restored[companyId];
+          else restored[companyId] = previousMode;
+          return restored;
+        });
+      }
+      return ok;
     },
-    [view, persist, confirmedPlayerDecisions]
+    [view, persist, confirmedPlayerDecisions, companyControlModes]
   );
 
   /** 【PLAYER Company Workspace】「この会社を操作」は、モーダルではなく専用routeへ遷移する。 */
@@ -1219,6 +1275,22 @@ export function ManagementConsole() {
         ) : null}
       </header>
 
+      {/* ---------------- 参加管理（SEAT-UI） ----------------
+          【最上部・全幅に置く理由】旧配置は右カラムの3番目で、スマホ幅では
+          本体カラム（チャート・Market Summary・TSV・Vision・Balance・AI Pack・
+          5社サマリー）のあとに積まれるため、長くスクロールしないと到達しなかった。
+          研修当日にGMが最初にやるのは参加の手配なので、本体より前に置く。 */}
+      <div className="px-3 pt-3">
+        <PlayerParticipationPanel
+          runId={view?.run.simulationRunId ?? null}
+          fixtures={fixtures}
+          controlModes={companyControlModes}
+          onChangeMode={handleChangeControlMode}
+          onOperate={openPlayerWorkspace}
+          disabled={busy || view?.session === null}
+        />
+      </div>
+
       {/* ---------------- BODY ---------------- */}
       <div className="flex flex-col gap-3 p-3 lg:flex-row">
         {/* LEFT: Game Overview 約65% */}
@@ -1411,11 +1483,8 @@ export function ManagementConsole() {
             <CompanyControlPanel
               fixtures={fixtures}
               controlModes={companyControlModes}
-              onChangeMode={handleChangeControlMode}
               decidedCompanyIds={new Set(Object.keys(confirmedPlayerDecisions))}
               waitingCompanyIds={waitingForPlayerCompanyIds}
-              onOperate={openPlayerWorkspace}
-              disabled={busy || view?.session === null}
               currentTurn={view?.session?.state.scenarioState.currentTurn ?? view?.run.startingTurn ?? 1}
             />
           ) : null}
@@ -1424,7 +1493,6 @@ export function ManagementConsole() {
               保存済みの実行を表示しているため、経営モードの切替・PLAYER操作はできません（実行ボタンで新しい実行を開始してください）。
             </p>
           ) : null}
-          {fixtures.length > 0 ? <PlayerSeatPanel runId={view?.run.simulationRunId ?? null} /> : null}
 
           <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-2.5">
             <h2 className="mb-2 text-sm font-semibold">Company Inspector</h2>

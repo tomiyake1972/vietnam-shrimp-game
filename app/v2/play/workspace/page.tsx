@@ -36,6 +36,9 @@ import {
 } from "./WorkspacePanels";
 import { validateSalesForceHiringDecision } from "../../../lib/v2/companyLab/salesForceHiring";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
+import ScenarioNewsFeed from "../../company-lab/components/decisionStudio/ScenarioNewsFeed";
+import { buildProfitAndLossBreakdown } from "../../company-lab/profitAndLossBreakdownViewModel";
+import { PlayerCompanyDatabookButton } from "./PlayerCompanyDatabookButton";
 import { selectScenarioNewsForTurn } from "../../management/lib/scenarioNews";
 import { FinalResultsSummary } from "../../management/components/FinalResultsSummary";
 import { FinalResultsCharts } from "../../management/components/FinalResultsCharts";
@@ -248,6 +251,16 @@ export default function PlayerWorkspacePage() {
 
   const status: WorkspaceStatus = context.hasSubmittedThisTurn ? (justSubmitted ? "SUBMITTED" : "WAITING_FOR_GM") : touched ? "EDITING" : "TURN_ACTIVE";
   const scenarioNews = toScenarioNewsItems(selectScenarioNewsForTurn(context.scenarioId, context.turn).releases);
+  /**
+   * 【前期PL費用内訳・2026-11】確定済みの前四半期のPL内訳。
+   * エンジンの確定値（lastQuarterFinancialResult）と確定販売数量をそのまま渡すだけ。
+   */
+  const profitAndLossBreakdown = context.lastQuarterFinancialResult
+    ? buildProfitAndLossBreakdown({
+        result: context.lastQuarterFinancialResult,
+        ...(context.lastQuarterSoldQuantityHosoEqTons !== null ? { soldQuantityHosoEqTons: context.lastQuarterSoldQuantityHosoEqTons } : {}),
+      })
+    : undefined;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -311,11 +324,20 @@ export default function PlayerWorkspacePage() {
               {/* 【PUBLIC-COMPETITOR-2】ターン開始直後に「この間に何が起きたか」を
                   掴めるよう、競合ニュースの見出しだけを先に出す（本文は Market タブ）。 */}
               <PlayerCompetitorNewsPanel news={context.competitorNews} compact />
-              <PlayerOverviewPanel review={context.lastTurnReview} />
+              <PlayerOverviewPanel
+                review={context.lastTurnReview}
+                profitAndLoss={profitAndLossBreakdown}
+                profitAndLossPeriodLabel={context.lastQuarterFinancialResult?.period}
+              />
             </div>
           ) : null}
           {phase === "input" && tab === "market" ? (
             <div className="space-y-3">
+              {/* 【PLAY-PARITY-1】世界のニュースは Decision > INFO にもあるが、
+                  そこまで入らないと読めなかった。市場情報のタブからも読めるようにする
+                  （同じ ScenarioNewsFeed・同じ scenarioNews を渡すだけで、
+                  ニュースの取得・本文生成はしていない）。 */}
+              <ScenarioNewsFeed news={scenarioNews} turn={context.turn} />
               <PlayerMarketPanel view={context.marketView} />
               <PlayerCompetitorPanel snapshot={context.competitorSnapshot} />
               <PlayerInvestmentAnnouncementPanel snapshot={context.competitorSnapshot} />
@@ -406,6 +428,7 @@ export default function PlayerWorkspacePage() {
               annualDividendGuidance={context.annualDividendGuidance}
               lastQuarterSalesAllocations={context.lastQuarterSalesAllocations}
               publicInfo={context.publicInfo}
+              openingInfo={context.openingInfo}
               scenarioNews={scenarioNews}
               competitorNews={context.competitorNews}
               companyName={context.companyDisplayName}
@@ -413,6 +436,18 @@ export default function PlayerWorkspacePage() {
           ) : null}
           </>
           ) : null}
+
+          {/* 【PLAY-PARITY-1】この会社1社だけのDatabook。GMが管制室から入る個社
+              オペレーション画面にはあって受講者の画面に無かったため、同じものを
+              同じ文言・同じ testid で出す。タブに関係なく常に見えるようにするのも
+              GM側と同じ（出力内容は他社の非公開情報を含まない既存のフィルタのまま）。 */}
+          <div className="mt-4 rounded-lg border border-emerald-800/60 bg-emerald-950/20 p-3" data-testid="play-company-databook">
+            <h2 className="mb-1 text-sm font-semibold text-emerald-300">会社Databook（{context.companyId}だけの意思決定用データ）</h2>
+            <p className="mb-2 text-[11px] text-slate-400">
+              PL・BS・CF・契約・在庫・工場・借入等、通常プレイと同じ内容をこの会社ぶんだけ出力します。他社の非公開情報は含みません。
+            </p>
+            <PlayerCompanyDatabookButton companyId={context.companyId} />
+          </div>
         </div>
       </div>
     </div>

@@ -27,6 +27,7 @@ import { CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../../lib
 import { CompanyFinancialQuarterResult } from "../../../../lib/v2/finance/types";
 import { FinancingQuarterResult } from "../../../../lib/v2/financing/types";
 import { CompanyDividendQuarterResult } from "../../../../lib/v2/finance/dividend";
+import { Product } from "../../../../lib/v2/market/types";
 import { MarketProductBasePriceReference } from "../../../../lib/v2/sales/marketBasePriceReference";
 import { CompanyDecisionDraft } from "../../decisionDraft";
 import { buildDecisionStudioViewModel } from "../../decisionStudioViewModel";
@@ -203,6 +204,18 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     return computeBacklogSemantics(ownState.contracts, ownState.companyId, yq.year, yq.quarter);
   }, [ownState.contracts, ownState.companyId, period]);
 
+  /**
+   * 【テストプレイ指摘④・2026-10-29】販売画面で「販売希望数量 vs 実効加工能力」を
+   * 並べて見せるための値。vm が既に計算済みの実効率テーブルから商品別の実効能力を
+   * 読み出すだけで、ここでは何も計算し直さない（能力プールの hoso / pd / vap のみ。
+   * commonProcessing・freezingPackaging は商品別ではないので対象外）。
+   */
+  const effectiveCapacityByProduct: Readonly<Partial<Record<Product, number>>> = Object.fromEntries(
+    vm.processingForecast.companyRateTable.rows
+      .filter((row): row is typeof row & { poolKey: Product } => row.poolKey === "hoso" || row.poolKey === "pd" || row.poolKey === "vap")
+      .map((row) => [row.poolKey, row.effectiveTons])
+  );
+
   return (
     <div className="flex flex-wrap gap-3" data-testid="decision-studio">
       {/* MainDecisionArea — 固定幅にしない（flex-1）。AuxiliaryPanelが開いてもレイアウトが崩れない。 */}
@@ -269,6 +282,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               salesForceHireLimit={vm.salesForceHireLimit}
               lastQuarterSalesAllocations={lastQuarterSalesAllocations}
               backlogSemantics={backlogSemantics}
+              effectiveCapacityByProduct={effectiveCapacityByProduct}
             />
           )}
           {activeScreen === "production" && (

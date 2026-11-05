@@ -25,6 +25,8 @@ import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompany
 // GM のブラウザタブ内キャッシュを正本にしているため受講者の端末からは開けない。
 // そこで「受講者へ返してよい値だけ」をここで組み立てて返す。
 import { buildLastTurnReview, LastTurnReview } from "../../../v2/company-lab/lastTurnReviewViewModel";
+import { buildOpeningInfo } from "../../../v2/company-lab/play/_lib/viewModel";
+import type { OpeningInfoViewModel } from "../../../v2/company-lab/play/_lib/openingInfoViewModel";
 import { buildPlayerInventoryView, buildPlayerMarketView, PlayerInventoryView, PlayerMarketView } from "./workspaceViews";
 import {
   buildCompanyFactoryCounts,
@@ -89,6 +91,21 @@ export interface PlayerDecisionContext {
   readonly lastQuarterCapexEvents: readonly CapexProjectQuarterEvent[] | undefined;
   readonly lastQuarterRejectedCapexProposals: readonly CapexRejectedProposal[] | undefined;
   readonly lastQuarterFinancialResult: CompanyFinancialQuarterResult | null;
+  /**
+   * 【前期PL費用内訳・2026-11】直近確定四半期に履行（販売）した数量（HOSO換算トン）。
+   * kgあたり指標（平均販売単価・kgあたり原料費等）の分母にそのまま使う。
+   * エンジンの確定値（CompanyQuarterSummary.fulfilledQuantity）をそのまま渡すだけで、
+   * 画面側では推計しない。記録が無ければ null。
+   */
+  readonly lastQuarterSoldQuantityHosoEqTons: number | null;
+  /**
+   * 【INFOタブ・2026-11】期初情報（貸借対照表・償却資産明細・市場情報・観測需要・
+   * Turn1の国内原料参考価格）。これが無いと INFO 画面が
+   * 「償却資産明細・市場情報の詳細を表示するための情報がこの画面へ渡されていません」
+   * としか出せなかった。旧画面（/v2/company-lab/play/[labId]）が使っているのと
+   * 同じ buildOpeningInfo の結果をそのまま渡すだけで、新しい計算はしない。
+   */
+  readonly openingInfo: OpeningInfoViewModel;
   /**
    * 【INT-1 §2B】前Turnの資金繰り結果（借入審査・緊急融資の確定記録）。
    * 借入の申請額・実行額・減額/否認理由・緊急融資の実行有無と適用金利は
@@ -220,6 +237,9 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
   const lastRecord = session.state.history[session.state.history.length - 1] ?? null;
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
   const lastQuarterFinancialResult = lastRecord ? extractCompanyFinancialResult(lastRecord, companyId) : null;
+  const openingInfo = buildOpeningInfo(ownState, publicInfo, session.state, turn);
+  const lastQuarterSummary = lastRecord?.companySummaries.find((s) => s.companyId === companyId) ?? null;
+  const lastQuarterSoldQuantityHosoEqTons = lastQuarterSummary ? (unwrapUnit(lastQuarterSummary.fulfilledQuantity) as number) : null;
   // 【INT-1 §2B】既存の確定記録をそのまま渡すだけ（新しい計算・推測はしない）。
   const lastQuarterFinancingResult = lastRecord ? extractCompanyFinancingResult(lastRecord, companyId) : null;
   const lastQuarterDividendResult = lastRecord ? extractCompanyDividendResult(lastRecord, companyId) : null;
@@ -369,6 +389,8 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,
     lastQuarterFinancingResult,
     lastQuarterFinancialResult,
+    lastQuarterSoldQuantityHosoEqTons,
+    openingInfo,
     lastQuarterDividendResult,
     annualDividendGuidance,
     lastQuarterSalesAllocations: basePriceReferences,

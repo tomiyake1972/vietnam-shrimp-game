@@ -38,6 +38,19 @@ export default function AquacultureSection({
   const tone = AREA_TONES.input;
   const entry = draft.aquacultureStockingPlans[0];
   const capacityTons = unwrapUnit(aquacultureCapacityTons);
+  /**
+   * 【テストプレイ指摘①・2026-10-29】養殖能力を超えた池入れは、入力時には何も言われず、
+   * GMがTurnを進めた瞬間に engine 側（rawMaterials/aquaculture.ts の
+   * assertValidStockingPlan）で停止する。これまで入力欄にあった合図は枠の色だけで、
+   * 超えていることが読み取れなかった。
+   *
+   * 【止めない理由】実際に停止するかどうかは、この時点では判定できない。
+   * companyLab/runner.ts は池入れ計画に資金制約（constraint.scaleRatio）を掛けてから
+   * 検証へ渡すため、能力を超える入力でも縮小後に収まれば通る（実測: 5,000t入力・
+   * 能力4,000tのRunは通り、50,000t入力は縮小後34,854.16tで停止した）。
+   * そのため「超えている事実」だけを示し、入力の可否は変えない。
+   */
+  const overCapacity = Number.isFinite(entry.plannedStockingQuantity) && entry.plannedStockingQuantity > capacityTons;
 
   const update = (patch: Partial<AquacultureStockingDraft>) => onChange(updateAquacultureStockingDraft(draft, patch));
 
@@ -56,11 +69,16 @@ export default function AquacultureSection({
           <NumberCell
             value={entry.plannedStockingQuantity}
             disabled={disabled}
-            warn={entry.plannedStockingQuantity > capacityTons}
+            warn={overCapacity}
             testId="aquaculture-stocking-quantity-input"
             ariaLabel="自社養殖の池入れ予定量（t）"
             onChange={(n) => update({ plannedStockingQuantity: n })}
           />
+          {overCapacity ? (
+            <p className="max-w-[18rem] text-[11px] leading-snug text-amber-300" role="alert" data-testid="aquaculture-over-capacity-warning">
+              自社養殖能力 {formatHosoEqTons(capacityTons)} を超えています。このままだとTurnを進めたときに処理が止まることがあります。
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-col gap-1">
           <InputFieldLabel name="養殖強度 Aquaculture Intensity" unit="0〜1" target="自社養殖" />

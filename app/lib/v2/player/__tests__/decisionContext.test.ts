@@ -470,3 +470,36 @@ test("PS-17【後方互換】: 凍結済みが無い古いRunでも、確定記�
     }
   }
 });
+
+/**
+ * 【テストプレイ指摘④・2026-11】INFO画面が「償却資産明細・市場情報の詳細を
+ * 表示するための情報がこの画面へ渡されていません」としか出せなかったのは、
+ * openingInfo が受講者のcontextに入っていなかったためである。
+ * 期初情報が context に載ること、そこに償却資産明細・市場情報が含まれることを固定する。
+ */
+test("CTX-OPENING-1【INFO画面の期初情報】: contextにopeningInfo（償却資産明細・市場情報・観測需要）が載る", () => {
+  const stored = buildStoredRun("run-ctx-opening-1");
+  const context = buildPlayerDecisionContext(stored, "BAL");
+  assert.ok(context.openingInfo, "openingInfo が context に載っていない");
+  assert.ok(context.openingInfo.depreciableAssets, "償却資産明細が無い");
+  assert.ok(context.openingInfo.marketInfo, "市場情報が無い");
+  assert.ok(context.openingInfo.balanceSheet, "貸借対照表が無い");
+  assert.equal(typeof context.openingInfo.turn, "number");
+});
+
+/**
+ * 【前期PL費用内訳・2026-11】kgあたり指標の分母は、エンジンの確定値
+ * （CompanyQuarterSummary.fulfilledQuantity）でなければならない。
+ * 画面側で販売数量を推計しないよう、contextに載ることを固定する。
+ */
+test("CTX-SOLDQTY-1【kgあたり指標の分母】: 確定四半期があれば販売数量が数値で載り、無ければnullになる", () => {
+  const stored = buildStoredRun("run-ctx-soldqty-1");
+  const context = buildPlayerDecisionContext(stored, "BAL");
+  const hasConfirmedQuarter = context.lastQuarterFinancialResult !== null;
+  if (hasConfirmedQuarter) {
+    assert.equal(typeof context.lastQuarterSoldQuantityHosoEqTons, "number");
+    assert.ok((context.lastQuarterSoldQuantityHosoEqTons as number) >= 0);
+  } else {
+    assert.equal(context.lastQuarterSoldQuantityHosoEqTons, null);
+  }
+});
