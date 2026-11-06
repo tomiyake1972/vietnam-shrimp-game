@@ -230,6 +230,21 @@ export interface ProductionAllocationEntry {
   readonly shortfallQuantity: HosoEqTons;
   /** 生産できなかった理由（複数該当しうる。desiredQuantityと一致した場合は空配列）。 */
   readonly shortfallReasons: readonly ProductionShortfallReason[];
+  /**
+   * 【減産原因の二重計上の修正・2026-11】理由ごとの減産量（HOSO換算トン）。
+   *
+   * shortfallQuantity は減産量の合計で、shortfallReasons は「どの段階で削られたか」を
+   * 並べただけだった。そのため集計側（companyLab/runner.ts）が理由ごとに
+   * shortfallQuantity を丸ごと足し込み、複数の制約に当たった計画では同じ量が
+   * 二重に計上されていた（画面で「原料不足 2,393t」「設備能力不足 2,393t」と
+   * 同額が並び、合計が実際の減産量を超える）。
+   *
+   * ここでは制約の適用順（原料 → 共通前処理 → 凍結・包装 → 商品別 → 人員）に沿って、
+   * 各段階で落ちた量だけをその段階の理由へ割り当てる。合計は必ず
+   * shortfallQuantity と一致する（丸め差は最大の落ち込みを持つ段階で吸収する）。
+   * 減産が無い計画では空オブジェクトになる。
+   */
+  readonly shortfallByReason: Readonly<Partial<Record<ProductionShortfallReason, HosoEqTons>>>;
   /** この配分が要求する原料消費量（allocatedQuantity / saleableRecoveryRatio）。 */
   readonly requiredRawMaterialQuantity: HosoEqTons;
   /**

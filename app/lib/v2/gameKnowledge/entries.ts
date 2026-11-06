@@ -187,6 +187,46 @@ export const GAME_KNOWLEDGE_ENTRIES: readonly KnowledgeEntry[] = [
   // FINANCE（実装指示§11・§12・§21）
   // =====================================================================
   {
+    id: "FINANCE.FIRST_QUARTER_LOAN_INTEREST",
+    domain: "FINANCE",
+    title: "最初の四半期は既存借入の利息が発生しない",
+    summary:
+      "融資は実行した四半期には利息が付かない。初期借入もゲーム開始の四半期に実行された扱いなので、Turn 1 の支払利息は0になる。元本の返済はTurn 1から発生する。",
+    explanation: [
+      "【ルール】1件の融資について、実行した四半期（originationPeriod）には当四半期の利息を計上しない。",
+      "借りて同じ四半期に返すだけで無コストの資金循環が成立してしまうことを防ぐための決まりである。",
+      "【初期借入への適用】ゲーム開始時の短期借入・長期借入は、ゲーム開始の四半期に実行されたものとして作られる。",
+      "そのため Turn 1 だけは、借入残高があっても支払利息が $0 になる。Turn 2 以降は通常どおり計上される。",
+      "【元本は別】予定元本返済にはこの除外が無いため、Turn 1 から元本返済は発生する。",
+      "「残高があるのに利息が0」は不具合ではなく、この決まりによるものである。",
+    ].join("\n"),
+    ruleType: "TIMING",
+    sourceType: "CODE",
+    sourceReference:
+      "app/lib/v2/financing/loanSchedule.ts (computeLoanQuarterlyInterest の originationPeriod 除外), app/lib/v2/financing/initialPortfolio.ts (初期借入の originationPeriod = 開始四半期)",
+    appliesToRoles: ["CFO", "CEO"],
+    keywords: [
+      "支払利息",
+      "利息",
+      "金利",
+      "初回",
+      "Turn1",
+      "第1四半期",
+      "0",
+      "ゼロ",
+      "初期借入",
+      "interest",
+      "first quarter",
+      "origination",
+      "loan",
+    ],
+    semanticWarnings: [
+      "Turn 1 の支払利息が0なのは計上漏れではない。実行四半期には利息を付けない決まりが、初期借入にも適用されている。",
+      "元本返済は Turn 1 から発生するため、「元本だけ減って利息が0」は正常な状態である。",
+    ],
+    version: V,
+  },
+  {
     id: "FINANCE.AR_SETTLEMENT",
     domain: "FINANCE",
     title: "売掛金（AR）の回収タイミング",

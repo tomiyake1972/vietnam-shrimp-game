@@ -65,9 +65,14 @@ interface FinancePlanningScreenProps {
    * 渡されなければ何も表示しない＝この機能より前とまったく同じ画面になる。
    */
   readonly annualDividendGuidance?: AnnualDividendGuidance | null;
+  /**
+   * 【初期借入の利息が初回四半期だけ無料であることの説明・2026-11】
+   * 現在のTurn番号。Turn1のときだけ、その四半期の注記を出す。
+   */
+  readonly turn?: number;
 }
 
-export default function FinancePlanningScreen({ draft, onChange, disabled, vm, lastQuarterFinancialResult, lastQuarterFinancingResult, lastQuarterDividendResult, annualDividendGuidance }: FinancePlanningScreenProps) {
+export default function FinancePlanningScreen({ draft, onChange, disabled, vm, lastQuarterFinancialResult, lastQuarterFinancingResult, lastQuarterDividendResult, annualDividendGuidance, turn }: FinancePlanningScreenProps) {
   const {
     existingLoans,
     existingLoanBalanceUsd,
@@ -95,6 +100,15 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
           既存借入残高合計 {formatUsd(existingLoanBalanceUsd)}
           {accruedInterestPayableUsd > 0 && <span className="ml-2">未払利息 {formatUsd(accruedInterestPayableUsd)}</span>}
         </div>
+        {/* 【ゲーム設定の明示・2026-11】融資は「実行した四半期には利息が付かない」。
+            初期借入もゲーム開始四半期に実行された扱いなので、Turn1だけ支払利息が$0になる。
+            これは不具合ではなく設定だが、残高があるのに利息が0だと誤解されるため明記する。 */}
+        {turn === 1 ? (
+          <p className="mt-1 text-[11px] leading-snug text-amber-300" data-testid="finance-first-quarter-interest-note">
+            このTurn（最初の四半期）は、上の既存借入に対する支払利息が発生しません。融資は実行した四半期には利息が付かない決まりで、
+            初期借入もゲーム開始の四半期に実行された扱いになるためです。利息はTurn 2から計上されます（元本の返済はTurn 1から発生します）。
+          </p>
+        ) : null}
         {/* 【UI-CLARITY-1 A-7】いつ資金が入るかが画面のどこにも書かれていなかった。
             実際の順序は financing/liquidityClose.ts が決めている:
             当四半期の実績が確定したあとに審査と実行が行われ、実行額はその四半期の

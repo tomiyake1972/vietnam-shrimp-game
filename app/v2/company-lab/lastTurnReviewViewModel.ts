@@ -330,17 +330,26 @@ function buildProductionSection(
   const rawShortfall = unwrapUnit(summary.rawMaterialShortfall);
   const equipmentShortfall = unwrapUnit(summary.equipmentShortfall);
   const laborShortfall = unwrapUnit(summary.laborShortfall);
-  const shortfalls: { readonly label: string; readonly value: number; readonly remedy: string }[] = [
-    { label: "原料不足", value: rawShortfall, remedy: "PROCUREMENT で国内買付・輸入を増やすと解消します。" },
-    { label: "設備能力不足", value: equipmentShortfall, remedy: "INVESTMENT で該当する加工能力を増やすと解消します。" },
-    { label: "労働力不足", value: laborShortfall, remedy: "WORKER で人員を増やすか、残業率を上げると解消します。" },
+  /**
+   * 【減産原因の表示・2026-11】どの商品のラインで制約が掛かったかを添える。
+   * エンジンが既に記録している理由コード（商品名が頭に付いた文章）を拾うだけで、
+   * 新しい判定・按分はしていない。該当が無ければ従来どおり対処方法だけを出す。
+   */
+  const productLines = (code: string): string => {
+    const messages = summary.reasonCodes.filter((r) => r.code === code).map((r) => r.message);
+    return messages.length > 0 ? ` 制約が掛かったライン: ${messages.join(" ")}` : "";
+  };
+  const shortfalls: { readonly label: string; readonly value: number; readonly remedy: string; readonly code: string }[] = [
+    { label: "原料不足", value: rawShortfall, remedy: "PROCUREMENT で国内買付・輸入を増やすと解消します。", code: "RAW_MATERIAL_SHORTAGE" },
+    { label: "設備能力不足", value: equipmentShortfall, remedy: "INVESTMENT で該当する加工能力を増やすと解消します。", code: "EQUIPMENT_CAPACITY_SHORTAGE" },
+    { label: "労働力不足", value: laborShortfall, remedy: "WORKER で人員を増やすか、残業率を上げると解消します。", code: "LABOR_SHORTAGE" },
   ];
   for (const shortfall of shortfalls) {
     if (shortfall.value <= 0) continue;
     lines.push({
       label: `減産の原因: ${shortfall.label}`,
       result: tons(shortfall.value),
-      note: shortfall.remedy,
+      note: `${shortfall.remedy}${productLines(shortfall.code)}`,
       tone: "warn",
       testId: `review-production-shortfall-${shortfall.label}`,
     });
@@ -483,10 +492,23 @@ function buildFinanceSection(
       note: `信用区分 ${financing.creditScore.tier}（スコア ${financing.creditScore.score0to100.toFixed(1)}）`,
       testId: "review-finance-capacity",
     });
+    /**
+     * 【ゲーム設定の明示・2026-11】融資は実行した四半期には利息が付かない決まりで、
+     * 初期借入もゲーム開始の四半期に実行された扱いになる。そのため最初の四半期だけ
+     * 支払利息が$0になる。残高があるのに0だと不具合に見えるため、その四半期に限り
+     * 理由を添える（金額の計算は何も変えていない）。
+     */
+    const firstQuarterInterestNote =
+      record.turn === 1 && financing.interestPaidCashUsd === 0
+        ? "最初の四半期は、融資を実行した四半期に利息が付かない決まりのため支払利息が0です（初期借入もゲーム開始の四半期に実行された扱いになります）。利息はTurn 2から計上されます。"
+        : undefined;
     lines.push({
       label: "利息・元本返済",
       result: `支払利息 ${usd(financing.interestPaidCashUsd)} ／ 元本返済 ${usd(financing.principalPaidCashUsd)}`,
-      note: financing.arrearsEvents.length > 0 ? `延滞 ${financing.arrearsEvents.length}件` : undefined,
+      note:
+        financing.arrearsEvents.length > 0
+          ? `延滞 ${financing.arrearsEvents.length}件${firstQuarterInterestNote ? ` ${firstQuarterInterestNote}` : ""}`
+          : firstQuarterInterestNote,
       tone: financing.arrearsEvents.length > 0 ? "warn" : "neutral",
       testId: "review-finance-interest",
     });

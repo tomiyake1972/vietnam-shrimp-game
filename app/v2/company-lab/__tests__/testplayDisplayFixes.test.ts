@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ProductionPlanningScreen from "../components/decisionStudio/ProductionPlanningScreen";
+import FinancePlanningScreen from "../components/decisionStudio/FinancePlanningScreen";
 import { buildInitialDraft } from "../decisionDraft";
 import { buildDecisionStudioViewModel } from "../decisionStudioViewModel";
 import { buildCompanyOwnState, buildPublicMarketInfo, initializeCompanyLab } from "../../../lib/v2/companyLab";
@@ -49,4 +50,40 @@ test("DISPLAY-3b【違いを本文で説明する】: 計画生産量との違�
 test("DISPLAY-3c【使用率の分母を明示する】: 処理能力使用率の見出しに分母が書いてある", () => {
   const html = renderProduction();
   assert.ok(html.includes("処理能力使用率（見込み÷実効能力）"), "使用率の分母が見出しに書かれていない");
+});
+
+/**
+ * 【Turn1の支払利息が0である理由の明示・2026-11】
+ * 「融資は実行した四半期には利息が付かない」という決まりはゲーム設定として維持する。
+ * 初期借入もゲーム開始の四半期に実行された扱いになるため Turn1 だけ利息が0になるが、
+ * 残高があるのに0だと不具合に見えるので、その四半期に限り画面で理由を示す。
+ */
+function renderFinance(turn: number | undefined): string {
+  const { state, fixtures } = initializeCompanyLab({ scenarioId: "baseline", mode: "canonical", seed: "testplay-display-fixes", turns: 6 });
+  const fixture = fixtures.find((f) => f.companyId === "BAL")!;
+  const ownState = buildCompanyOwnState(state, fixture);
+  const publicInfo = buildPublicMarketInfo(state);
+  const ai = generateStandardAiDecision(fixture, ownState, publicInfo, state.currentPeriod, 1);
+  const draft = buildInitialDraft(fixture, ai, ownState.workforceState, ownState.effectiveFactories);
+  const vm = buildDecisionStudioViewModel({ fixture, ownState, draft, period: state.currentPeriod });
+  return renderToStaticMarkup(
+    React.createElement(FinancePlanningScreen, { draft, onChange: () => {}, disabled: false, vm, ...(turn === undefined ? {} : { turn }) })
+  );
+}
+
+test("DISPLAY-5a【Turn1だけ理由を出す】: FINANCE画面のTurn1に、最初の四半期は利息が発生しない説明が出る", () => {
+  const html = renderFinance(1);
+  assert.ok(html.includes('data-testid="finance-first-quarter-interest-note"'), "Turn1の注記が出ていない");
+  assert.ok(html.includes("支払利息が発生しません"), "利息が発生しないことが書かれていない");
+  assert.ok(html.includes("元本の返済はTurn 1から発生します"), "元本返済は発生することが書かれていない");
+});
+
+test("DISPLAY-5b【Turn2以降は出さない】: Turn2のFINANCE画面には注記が出ない", () => {
+  const html = renderFinance(2);
+  assert.ok(!html.includes('data-testid="finance-first-quarter-interest-note"'), "Turn2でも注記が出ている");
+});
+
+test("DISPLAY-5c【turn未指定なら出さない】: turnを渡さない呼び出し元では従来と同じ画面になる", () => {
+  const html = renderFinance(undefined);
+  assert.ok(!html.includes('data-testid="finance-first-quarter-interest-note"'));
 });

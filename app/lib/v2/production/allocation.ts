@@ -25,7 +25,7 @@
 // （殻・頭の除去等による物理的重量減少の参考値）はHOSO換算数量の計算には
 // 一切使わない（yieldConversion.ts参照。二重換算を避ける）。
 
-import { hosoEqTons, roundHosoEqTons, unwrapUnit } from "../core/units";
+import { HosoEqTons, hosoEqTons, roundHosoEqTons, unwrapUnit } from "../core/units";
 import { PeriodV2 } from "../core/period";
 import { Product } from "../market/types";
 import { RawMaterialLot } from "../rawMaterials/types";
@@ -203,12 +203,42 @@ export function allocateProductionPlans(
       { value: laborLimited[i], reason: "laborShortage" },
     ];
     const reasons: ProductionShortfallReason[] = [];
+    /**
+     * 【減産原因の二重計上の修正・2026-11】各段階で「いくら落ちたか」を同時に記録する。
+     * 判定は従来どおり「直前の値より小さくなったか」で変えていない（reasons の中身は
+     * 従来と一致する）。落ち込み幅だけを新しく持たせる。
+     *
+     * prev を min で更新するのは、万一ある段階の値が直前より大きく出ても
+     * 負の落ち込みを作らないため（上限の適用順という意味は変わらない）。
+     */
+    const dropByReason = new Map<ProductionShortfallReason, number>();
     let prev = desired;
     for (const stage of stageValues) {
       if (stage.value < prev - epsilon) {
         reasons.push(stage.reason);
+        dropByReason.set(stage.reason, (dropByReason.get(stage.reason) ?? 0) + (prev - stage.value));
       }
-      prev = stage.value;
+      prev = Math.min(prev, stage.value);
+    }
+
+    /**
+     * 丸めたうえで合計を shortfallQuantity へ正確に合わせる。
+     * 各段階の落ち込みは丸め前の値から出しているため、単純に丸めると
+     * 合計が shortfall と1桁ずれうる。差は最大の落ち込みを持つ段階に寄せる
+     * （按分して新しい数字を作らない）。
+     */
+    const shortfallByReason: Partial<Record<ProductionShortfallReason, HosoEqTons>> = {};
+    if (shortfall > 0 && dropByReason.size > 0) {
+      const rounded = [...dropByReason.entries()].map(([reason, value]) => ({ reason, value: roundHosoEqTons(Math.max(0, value)) }));
+      const roundedTotal = rounded.reduce((sum, r) => sum + r.value, 0);
+      const residual = roundHosoEqTons(shortfall - roundedTotal);
+      if (residual !== 0) {
+        const largest = rounded.reduce((a, b) => (b.value > a.value ? b : a));
+        largest.value = roundHosoEqTons(Math.max(0, largest.value + residual));
+      }
+      for (const r of rounded) {
+        if (r.value > 0) shortfallByReason[r.reason] = hosoEqTons(r.value);
+      }
     }
 
     const requiredRawMaterialQuantity = roundHosoEqTons(roundedAllocated / recoveryRatios[i]);
@@ -223,6 +253,7 @@ export function allocateProductionPlans(
       allocatedQuantity: hosoEqTons(roundedAllocated),
       shortfallQuantity: hosoEqTons(shortfall),
       shortfallReasons: reasons,
+      shortfallByReason,
       requiredRawMaterialQuantity: hosoEqTons(requiredRawMaterialQuantity),
       stages: {
         rawMaterialLimited: hosoEqTons(roundHosoEqTons(Math.max(0, rawMaterialLimitedOutput[i]))),

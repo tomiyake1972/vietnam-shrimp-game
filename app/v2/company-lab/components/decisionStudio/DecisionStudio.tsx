@@ -323,6 +323,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               lastQuarterFinancingResult={lastQuarterFinancingResult}
               lastQuarterDividendResult={lastQuarterDividendResult}
               annualDividendGuidance={annualDividendGuidance}
+              turn={turn}
             />
           )}
         </div>

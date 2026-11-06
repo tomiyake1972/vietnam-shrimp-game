@@ -28,6 +28,7 @@ function makeAllocationEntry(overrides: Partial<ProductionAllocationEntry> = {})
     desiredQuantity: hosoEqTons(100),
     allocatedQuantity: hosoEqTons(100),
     shortfallQuantity: hosoEqTons(0),
+    shortfallByReason: {},
     shortfallReasons: [],
     requiredRawMaterialQuantity: hosoEqTons(100),
     stages: {

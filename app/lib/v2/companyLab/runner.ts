@@ -139,6 +139,7 @@ import {
   ProductionBatch,
   ProductionQuarterInput,
   ProductionSupplySignalInput,
+  ProductionShortfallReason,
 } from "../production/types";
 import {
   applyQualityToBatches,
@@ -987,11 +988,24 @@ function buildCompanySummary(
     .filter((l) => l.companyId === companyId && l.status === "available")
     .reduce((sum, l) => sum + unwrapUnit(l.remainingQuantity), 0);
 
-  const rawMaterialShortfall = companyEntries.filter((e) => e.shortfallReasons.includes("rawMaterialShortage")).reduce((sum, e) => sum + unwrapUnit(e.shortfallQuantity), 0);
-  const equipmentShortfall = companyEntries
-    .filter((e) => e.shortfallReasons.some((r) => r === "commonCapacityShortage" || r === "productCapacityShortage" || r === "packagingCapacityShortage"))
-    .reduce((sum, e) => sum + unwrapUnit(e.shortfallQuantity), 0);
-  const laborShortfall = companyEntries.filter((e) => e.shortfallReasons.includes("laborShortage")).reduce((sum, e) => sum + unwrapUnit(e.shortfallQuantity), 0);
+  /**
+   * 【減産原因の二重計上の修正・2026-11】理由ごとの減産量を、理由ごとの値から足す。
+   *
+   * 以前はここで「その理由を含む計画の shortfallQuantity（＝減産量の合計）」を
+   * 理由ごとに丸ごと足していた。1つの計画が複数の制約に当たると同じ量が各理由へ
+   * 二重に入り、原料不足と設備能力不足が同額になり、合計が実際の減産量を超えていた
+   * （2026-11 のテストプレイで observed: 計画16,500t→実績14,006t、減産2,494t に対し
+   *  原料不足2,393t・設備能力不足2,393t）。
+   *
+   * production/allocation.ts が制約の適用順（原料 → 共通前処理 → 凍結・包装 →
+   * 商品別 → 人員）で段階ごとの落ち込みを shortfallByReason に記録するようにしたので、
+   * ここはそれを理由ごとに足すだけでよい。3つの合計は会社の減産量合計と一致する。
+   */
+  const sumByReasons = (reasons: readonly ProductionShortfallReason[]): number =>
+    companyEntries.reduce((sum, e) => sum + reasons.reduce((inner, r) => inner + unwrapUnit(e.shortfallByReason[r] ?? hosoEqTons(0)), 0), 0);
+  const rawMaterialShortfall = sumByReasons(["rawMaterialShortage"]);
+  const equipmentShortfall = sumByReasons(["commonCapacityShortage", "productCapacityShortage", "packagingCapacityShortage"]);
+  const laborShortfall = sumByReasons(["laborShortage"]);
 
   const salesReasonCodes = salesAllocations.flatMap((allocation) => {
     const entry = allocation.companies.find((c) => c.companyId === companyId);
