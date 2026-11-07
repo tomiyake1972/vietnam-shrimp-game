@@ -465,6 +465,7 @@ export default function PlayerWorkspacePage() {
               scenarioNews={scenarioNews}
               competitorNews={context.competitorNews}
               companyName={context.companyDisplayName}
+              initialDraftAdjustments={context.initialDraftAdjustments}
             />
           ) : null}
           </>

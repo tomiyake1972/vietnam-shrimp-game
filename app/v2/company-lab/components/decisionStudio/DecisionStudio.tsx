@@ -33,6 +33,8 @@ import { MarketProductBasePriceReference } from "../../../../lib/v2/sales/market
 import { CompanyDecisionDraft } from "../../decisionDraft";
 import { buildDecisionStudioViewModel } from "../../decisionStudioViewModel";
 import { planningWarningsFor } from "../../investmentPlanningViewModel";
+import InitialDraftAdjustmentNotice from "./InitialDraftAdjustmentNotice";
+import type { InitialDraftAdjustment } from "../../initialDraftFeasibility";
 import type { OpeningInfoViewModel, ScenarioNewsItem } from "../../play/_lib/openingInfoViewModel";
 import type { CompetitorNewsItem } from "../../../../lib/v2/companyLab/competitorNews";
 import ProcurementPlanningSection from "../procurement/ProcurementPlanningSection";
@@ -64,6 +66,11 @@ export interface DecisionStudioProps {
    * 事実に合う理由をここで渡せるようにする。
    */
   readonly disabledNotice?: string;
+  /**
+   * 【テストプレイ指摘①の続き・2026-11】初期値を実行可能な範囲へ
+   * 丸めた記録（initialDraftFeasibility.ts の結果）。省略時・空のときは何も出さない。
+   */
+  readonly initialDraftAdjustments?: readonly InitialDraftAdjustment[];
   readonly period: PeriodV2;
   readonly lastQuarterCapexEvents?: readonly CapexProjectQuarterEvent[];
   readonly lastQuarterRejectedCapexProposals?: readonly CapexRejectedProposal[];
@@ -137,6 +144,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     onChange,
     disabled,
     disabledNotice,
+    initialDraftAdjustments,
     period,
     lastQuarterCapexEvents,
     lastQuarterRejectedCapexProposals,
@@ -287,6 +295,12 @@ export default function DecisionStudio(props: DecisionStudioProps) {
             <AiInitialProposalNote testId="decision-studio-ai-initial-note" />
           </>
         )}
+
+        {/* 【テストプレイ指摘①の続き・2026-11】初期値を書き換えたときは、
+            どのタブを開いていても気づけるよう画面先頭に出す。 */}
+        {!disabled && initialDraftAdjustments !== undefined ? (
+          <InitialDraftAdjustmentNotice adjustments={initialDraftAdjustments} />
+        ) : null}
 
         <AreaToneLegend />
 

@@ -19,6 +19,7 @@ import { StandardAiCostProjection, toStandardAiCostProjection } from "../company
 import { buildTurnEconomicsProjection } from "../companyLab/turnEconomicsProjection";
 import { resolveStandardAiProfileForMode } from "../companyLab/standardAi/orientationProfile";
 import { buildInitialDraft, CompanyDecisionDraft } from "../../../v2/company-lab/decisionDraft";
+import { applyInitialDraftFeasibility, type InitialDraftAdjustment } from "../../../v2/company-lab/initialDraftFeasibility";
 import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "../../../v2/company-lab/play/_lib/financialViewSelectors";
 // 【PLAYER-SURFACE-1】受講者が実際に使う /v2/play/workspace には Overview / Market /
 // Inventory が無く、意思決定タブしか無かった。GM コンソール側の PlayerWorkspace は
@@ -88,6 +89,12 @@ export interface PlayerDecisionContext {
    */
   readonly costProjection: StandardAiCostProjection;
   readonly draftSeed: CompanyDecisionDraft;
+  /**
+   * 【テストプレイ指摘①の続き・2026-11】draftSeed は Standard AI の提案そのままではなく、
+   * 実行可能な範囲（販売可能量の上限・買い足す必要がある量）へ丸めてある。
+   * 何をどう変えたかを画面で必ず示すため、その記録を一緒に渡す。
+   */
+  readonly initialDraftAdjustments: readonly InitialDraftAdjustment[];
   readonly lastQuarterCapexEvents: readonly CapexProjectQuarterEvent[] | undefined;
   readonly lastQuarterRejectedCapexProposals: readonly CapexRejectedProposal[] | undefined;
   readonly lastQuarterFinancialResult: CompanyFinancialQuarterResult | null;
@@ -232,7 +239,16 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     // 【#05 費用Projection接続】保存済みRunのScenario snapshotを正本にする。
     costProjection
   ).decision;
-  const draftSeed = buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories);
+  // 【テストプレイ指摘①の続き・2026-11】AIの提案をそのまま初期値にすると、
+  // 実効能力・製品在庫・受注残を超えた販売希望量と、使える原料を無視した
+  // 国内買付が入っていた。人が編集する画面の初期値だけを実行可能な範囲へ
+  // 丸める（Standard AI の意思決定には一切触れない）。
+  const initialDraftFeasibility = applyInitialDraftFeasibility({
+    draft: buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories),
+    ownState,
+    period: session.state.currentPeriod,
+  });
+  const draftSeed = initialDraftFeasibility.draft;
 
   const lastRecord = session.state.history[session.state.history.length - 1] ?? null;
   const lastQuarterCapexResult = lastRecord ? extractCompanyCapexResult(lastRecord, companyId) : null;
@@ -385,6 +401,7 @@ export function buildPlayerDecisionContext(stored: StoredSimulationRun, companyI
     turn,
     costProjection,
     draftSeed,
+    initialDraftAdjustments: initialDraftFeasibility.adjustments,
     lastQuarterCapexEvents: lastQuarterCapexResult?.events,
     lastQuarterRejectedCapexProposals: lastQuarterCapexResult?.rejectedProposals,
     lastQuarterFinancingResult,

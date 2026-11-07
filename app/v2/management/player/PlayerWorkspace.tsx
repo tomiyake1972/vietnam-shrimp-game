@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import DecisionStudio from "../../company-lab/components/decisionStudio/DecisionStudio";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft, validateDecisionDraftNumbers } from "../../company-lab/decisionDraft";
+import { applyInitialDraftFeasibility } from "../../company-lab/initialDraftFeasibility";
 import { buildDecisionSummary } from "../../company-lab/decisionSummary";
 import DecisionConfirmationScreen from "../../company-lab/components/decisionStudio/DecisionConfirmationScreen";
 import type { DecisionStudioScreenKey } from "../../company-lab/components/decisionStudio/DecisionStudioNavigation";
@@ -182,6 +183,18 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
     return { ownState, aiDecision };
   });
 
+  // 初期値の丸めは、下書きを作る前に1回だけ求める
+  // （調整の記録を画面へ渡すためにも使う）。
+  const initialDraftFeasibility = useMemo(
+    () =>
+      applyInitialDraftFeasibility({
+        draft: buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories),
+        ownState,
+        period: session.state.currentPeriod,
+      }),
+    [fixture, aiDecision, ownState, session.state.currentPeriod]
+  );
+
   // 下書きの初期値：レジストリに残っている未確定下書き（pendingDrafts）があればそれを、
   // 無ければ確定済みPLAYER決定（confirmedPlayerDrafts）、それも無ければAI決定から作った初期値を使う。
   const [draft, setDraftState] = useState<CompanyDecisionDraft>(() => {
@@ -189,7 +202,9 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
     if (pending) return pending;
     const confirmedDraft = entry.confirmedPlayerDrafts[companyId];
     if (confirmedDraft && entry.confirmedPlayerDecisions[companyId]) return confirmedDraft;
-    return buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories);
+    // 【テストプレイ指摘①の続き・2026-11】AIの提案をそのまま初期値にせず、
+    // 実行可能な範囲（販売可能量の上限・買い足す必要がある量）へ丸める。
+    return initialDraftFeasibility.draft;
   });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -742,6 +757,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               // 会社の数値をclientから送らない。
               simulationRunId={runId}
               companyName={fixture.displayName}
+              initialDraftAdjustments={initialDraftFeasibility.adjustments}
             />
             </div>
           </div>

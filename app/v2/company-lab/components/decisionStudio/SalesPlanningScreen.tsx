@@ -494,6 +494,29 @@ export default function SalesPlanningScreen({
                     {formatHosoEqTons(totals.grandTotalTons)}
                   </td>
                 </tr>
+                {/* 【テストプレイ指摘①の続き・2026-11】初期値を上限へ丸めたあとも
+                    上限が読めるよう、合計表にも「販売可能量（上限）」の行を置く。
+                    値は画面先頭の供給上限パネルと同じ supplyCeiling から読むため、
+                    両方の数字がずれることはない。 */}
+                <tr className="border-t border-gray-600/70 text-sky-200">
+                  <td className="pr-3 py-1 font-semibold">販売可能量（上限）</td>
+                  {totals.products.map((product) => {
+                    const row = supplyCeiling.rows.find((r) => r.product === (product as Product));
+                    const over = row?.exceedsAvailableForNewSales ?? false;
+                    return (
+                      <td
+                        key={product}
+                        className={`pr-3 py-1 text-right font-semibold tabular-nums ${over ? "text-amber-300" : ""}`}
+                        data-testid={`sales-plan-sellable-ceiling-${product}`}
+                      >
+                        {row?.availableForNewSalesTons === null || row?.availableForNewSalesTons === undefined
+                          ? NO_VALUE_TEXT
+                          : formatHosoEqTons(row.availableForNewSalesTons)}
+                      </td>
+                    );
+                  })}
+                  <td className="pr-3 py-1" />
+                </tr>
                 {effectiveCapacityByProduct ? (
                   <tr className="border-t border-gray-700/60 text-gray-400">
                     <td className="pr-3 py-1">実効加工能力（参考）</td>

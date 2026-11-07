@@ -37,6 +37,7 @@ import {
   initializeCompanyLab,
 } from "../../lib/v2/companyLab";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "./decisionDraft";
+import { applyInitialDraftFeasibility, type InitialDraftAdjustment } from "./initialDraftFeasibility";
 import LabBanner from "./components/LabBanner";
 import ScenarioControls, { CompanyOption, ScenarioOption } from "./components/ScenarioControls";
 import DecisionStudio from "./components/decisionStudio/DecisionStudio";
@@ -73,8 +74,15 @@ function describeError(e: unknown): string {
   return "予期しないエラーが発生しました。";
 }
 
-/** プレイヤー操作会社の当四半期ドラフトを、自動方針の出力から再構築する（完了済みならnull）。 */
-function buildDraftForState(state: CompanyLabState, fixtures: readonly CompanyFixture[], playerCompanyId: string): CompanyDecisionDraft | null {
+/**
+ * プレイヤー操作会社の当四半期ドラフトを、自動方針の出力から再構築する（完了済みならnull）。
+ * 【テストプレイ指摘①の続き・2026-11】初期値を実行可能な範囲へ丸め、何を変えたかも返す。
+ */
+function buildDraftForState(
+  state: CompanyLabState,
+  fixtures: readonly CompanyFixture[],
+  playerCompanyId: string
+): { readonly draft: CompanyDecisionDraft; readonly adjustments: readonly InitialDraftAdjustment[] } | null {
   if (state.isComplete) return null;
   const fixture = fixtures.find((f) => f.companyId === playerCompanyId);
   if (!fixture) return null;
@@ -85,7 +93,13 @@ function buildDraftForState(state: CompanyLabState, fixtures: readonly CompanyFi
   // 【Test15・develop/v2統合（Required fix 2）】生産計画・ワーカー配置の入力行は
   // ownState.effectiveFactories（稼働開始済みの新設Factoryを含む実効Factory[]）を
   // 基準に生成する。
-  return buildInitialDraft(fixture, autoDecision, ownState.workforceState, ownState.effectiveFactories);
+  // 【テストプレイ指摘①の続き・2026-11】人が編集する初期値を実行可能な範囲へ丸める。
+  const feasibility = applyInitialDraftFeasibility({
+    draft: buildInitialDraft(fixture, autoDecision, ownState.workforceState, ownState.effectiveFactories),
+    ownState,
+    period: state.currentPeriod,
+  });
+  return { draft: feasibility.draft, adjustments: feasibility.adjustments };
 }
 
 export default function CompanyLabPage() {
@@ -103,6 +117,14 @@ export default function CompanyLabPage() {
 
   // --- プレイヤー操作会社の当四半期・編集中ドラフト ---
   const [playerDraft, setPlayerDraft] = useState<CompanyDecisionDraft | null>(null);
+  /** 【テストプレイ指摘①の続き・2026-11】初期値を上限へ丸めた記録（画面で必ず示す）。 */
+  const [playerDraftAdjustments, setPlayerDraftAdjustments] = useState<readonly InitialDraftAdjustment[]>([]);
+  const applyBuiltDraft = (
+    built: { readonly draft: CompanyDecisionDraft; readonly adjustments: readonly InitialDraftAdjustment[] } | null
+  ): void => {
+    setPlayerDraft(built?.draft ?? null);
+    setPlayerDraftAdjustments(built?.adjustments ?? []);
+  };
 
   // --- 表示切替 ---
   const [viewMode, setViewMode] = useState<ViewMode>("self");
@@ -127,7 +149,7 @@ export default function CompanyLabPage() {
       setSelectedTurn(null);
       setViewMode("self");
       setActiveTab("decision");
-      setPlayerDraft(buildDraftForState(state, builtFixtures, draftPlayerCompanyId));
+      applyBuiltDraft(buildDraftForState(state, builtFixtures, draftPlayerCompanyId));
       setDashboardCompanyId(draftPlayerCompanyId);
     } catch (e) {
       setRunError(describeError(e));
@@ -151,7 +173,7 @@ export default function CompanyLabPage() {
       setLabState(nextState);
       setSelectedTurn(null);
       setRunError(null);
-      setPlayerDraft(buildDraftForState(nextState, fixtures, draftPlayerCompanyId));
+      applyBuiltDraft(buildDraftForState(nextState, fixtures, draftPlayerCompanyId));
     } catch (e) {
       setRunError(describeError(e));
     }
@@ -174,7 +196,7 @@ export default function CompanyLabPage() {
         setLabState(state);
         setSelectedTurn(null);
         setRunError(null);
-        setPlayerDraft(buildDraftForState(state, fixtures, draftPlayerCompanyId));
+        applyBuiltDraft(buildDraftForState(state, fixtures, draftPlayerCompanyId));
       } catch (e) {
         setRunError(describeError(e));
       }
@@ -188,6 +210,7 @@ export default function CompanyLabPage() {
     setRunError(null);
     setSelectedTurn(null);
     setPlayerDraft(null);
+    setPlayerDraftAdjustments([]);
     setViewMode("self");
     setActiveTab("decision");
     setDashboardCompanyId(COMPANY_OPTIONS[0].companyId);
@@ -356,6 +379,7 @@ export default function CompanyLabPage() {
                     lastQuarterDividendResult={lastQuarterDividendResultForPlayer}
                     publicInfo={publicInfoForEditor}
                     turn={turnForEditor}
+                    initialDraftAdjustments={playerDraftAdjustments}
                   />
                 ) : (
                   <div className="text-sm text-gray-400">このシナリオはすでに完了しています。</div>

@@ -173,6 +173,27 @@ export function DepreciableAssetsPanel({ assets }: { readonly assets: Depreciabl
   );
 }
 
+/**
+ * 【テストプレイ指摘⑧・2026-11】ウェイトのキーはエンジンの変数名そのままで、
+ * 受講者の画面に英語の識別子が並んでいた。日本語の項目名を与える
+ * （未知のキーは推測で訳さずそのまま出す）。
+ */
+const COMPETITIVENESS_WEIGHT_LABELS: Readonly<Record<string, string>> = {
+  price: "価格",
+  coverage: "営業カバレッジ（営業人員）",
+  relationship: "顧客関係",
+  quality: "品質",
+  deliveryReliability: "納期信頼性",
+  salesBase: "営業基盤（踄積）",
+  vapCapability: "VAP能力（VAPの行のみ）",
+};
+
+const CUSTOMER_TIER_LABELS: Readonly<Record<string, string>> = {
+  PRICE_SENSITIVE: "価格重視層",
+  STANDARD: "標準層",
+  PREMIUM: "プレミアム層",
+};
+
 export function OpeningMarketInfoPanel({
   info,
   referencePrice,
@@ -325,26 +346,83 @@ export function OpeningMarketInfoPanel({
               </table>
               <p className="text-[10px] text-gray-500 mt-1">産地FOB初期価格の世界影響度加重平均をHOSO基準とし、PD/VAPは市場エンジンと同じプレミアム率を適用した参考値です。</p>
             </div>
-            <div>
-              <h5 className="text-[11px] font-semibold text-gray-400 mb-1">成約競争力の需要ウェイト</h5>
-              <table className="w-full text-xs">
-                <tbody>
-                  {Object.entries(info.competitivenessWeights).map(([k, v]) => (
-                    <tr key={k}>
-                      <td className="py-0.5 pr-2 text-gray-300">{k}</td>
-                      <td className="py-0.5 text-right tabular-nums">{pct(v, 0)}</td>
-                    </tr>
-                  ))}
-                  <tr className="border-t border-gray-700">
-                    <td className="py-0.5 pr-2 text-gray-400">外部選択肢のウェイト</td>
-                    <td className="py-0.5 text-right tabular-nums">{ratio(info.externalOptionWeight)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-0.5 pr-2 text-gray-400">1社の最大成約シェア</td>
-                    <td className="py-0.5 text-right tabular-nums">{pct(info.maximumSupplierShare, 0)}</td>
-                  </tr>
-                </tbody>
-              </table>
+            {/* 【テストプレイ指摘⑥追訿・2026-11】この表は従来、Run の販売モデルに
+                関係なく既定定数（SALES_PARAMETERS_V1）を表示していた。そのため
+                三層顧客価格モデルの Run でも vapCapability 0% と出てしまい、
+                「VAPに投資しても効かない」と誤読された。
+                今は Run の実効パラメータを正本にし、三層顧客価格モデルの Run では
+                実際に成約を決めている層ごとの感応度を表示する。 */}
+            <div data-testid="opening-market-competitiveness">
+              {info.marketAllocationMode === "tieredSimultaneousAllocation" && info.customerTiers !== undefined ? (
+                <>
+                  <h5 className="text-[11px] font-semibold text-gray-400 mb-1">成約を決める要素（三層顧客価格モデル）</h5>
+                  <p className="text-[10px] leading-snug text-gray-500 mb-1" data-testid="opening-market-tiered-note">
+                    この Run は顧客を「価格重視・標準・プレミアム」の3層に分けて成約を配分します。
+                    層ごとに何を重く見るかが違い、下の感応度がその強さです（数字が大きいほど強く効きます）。
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs" data-testid="opening-market-tier-table">
+                      <thead>
+                        <tr className="text-gray-400 border-b border-gray-700">
+                          <th className="text-left py-1 pr-2">顧客層</th>
+                          <th className="text-right py-1 pr-2">需要比</th>
+                          <th className="text-right py-1 pr-2">価格</th>
+                          <th className="text-right py-1 pr-2">品質</th>
+                          <th className="text-right py-1 pr-2">差別化(VAP)</th>
+                          <th className="text-right py-1 pr-2">関係・納期等</th>
+                          <th className="text-right py-1 pr-2">留保価格倍率</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {info.customerTiers.map((t) => (
+                          <tr key={t.tierId} data-testid={`opening-market-tier-${t.tierId}`}>
+                            <td className="py-0.5 pr-2 text-gray-300">{CUSTOMER_TIER_LABELS[t.tierId] ?? t.tierId}</td>
+                            <td className="py-0.5 pr-2 text-right tabular-nums">{pct(t.demandShare, 0)}</td>
+                            <td className="py-0.5 pr-2 text-right tabular-nums">{ratio(t.priceSensitivity, 1)}</td>
+                            <td className="py-0.5 pr-2 text-right tabular-nums">{ratio(t.qualitySensitivity, 1)}</td>
+                            <td className="py-0.5 pr-2 text-right tabular-nums">{ratio(t.differentiationSensitivity, 1)}</td>
+                            <td className="py-0.5 pr-2 text-right tabular-nums">{ratio(t.nonPriceSensitivity, 1)}</td>
+                            <td className="py-0.5 pr-2 text-right tabular-nums">×{ratio(t.reservationPriceMultiplier, 2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[10px] leading-snug text-amber-300/90 mt-1" data-testid="opening-market-weights-not-used">
+                    この Run では、従来市場モデルの「需要ウェイト（price / coverage / vapCapability 等）」は
+                    成約配分に使われていません。VAP商品開発スコアは上の「差別化(VAP)」の列を通して成約に効きます。
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h5 className="text-[11px] font-semibold text-gray-400 mb-1">成約競争力の需要ウェイト</h5>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {Object.entries(info.competitivenessWeights).map(([k, v]) => (
+                        <tr key={k}>
+                          <td className="py-0.5 pr-2 text-gray-300">{COMPETITIVENESS_WEIGHT_LABELS[k] ?? k}</td>
+                          <td className="py-0.5 text-right tabular-nums" data-testid={`opening-market-weight-${k}`}>
+                            {pct(v, 0)}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="border-t border-gray-700">
+                        <td className="py-0.5 pr-2 text-gray-400">外部選択肢のウェイト</td>
+                        <td className="py-0.5 text-right tabular-nums">{ratio(info.externalOptionWeight)}</td>
+                      </tr>
+                      <tr>
+                        <td className="py-0.5 pr-2 text-gray-400">1社の最大成約シェア</td>
+                        <td className="py-0.5 text-right tabular-nums">{pct(info.maximumSupplierShare, 0)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </>
+              )}
+              <p className="text-[10px] text-gray-500 mt-1" data-testid="opening-market-weights-source">
+                {info.salesModelSource === "RUN_EFFECTIVE_PARAMETERS"
+                  ? "この Run が当期実際に使っている値です。"
+                  : "既定の設定値です（この Run の実効値をこの画面へ渡せていません）。"}
+              </p>
             </div>
             <div>
               <h5 className="text-[11px] font-semibold text-gray-400 mb-1">商品別 営業工数係数</h5>

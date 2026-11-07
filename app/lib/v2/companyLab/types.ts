@@ -246,6 +246,40 @@ export interface SalesModelFacts {
   readonly vapCapabilityCompetitivenessWeight: number;
   /** 市場集中による価格下落（Crowding）が有効か。 */
   readonly crowdingPriceMarkdownActive: boolean;
+  /**
+   * 【テストプレイ指摘⑥追訿・2026-11】INFO タブの「成約競争力の需要ウェイト」表を
+   * Run の実効パラメータで描くための輬記。従来は画面が
+   * SALES_PARAMETERS_V1（既定の定数）を直接読んでいたため、どの Run でも
+   * 同じ値（price 35% / coverage 25% / … / vapCapability 0%）を表示していた。
+   *
+   * これを読めば「この Run の実際のウェイト」が分かる。ただし
+   * marketAllocationMode === "tieredSimultaneousAllocation" の Run では
+   * このウェイト自体が成約配分に使われない（customerTiers が正本）。
+   */
+  readonly competitivenessWeights: Readonly<Record<string, number>>;
+  readonly externalOptionWeight: number;
+  readonly maximumSupplierShare: number;
+  readonly salesEffortCoefficients: Readonly<Record<string, number>>;
+  /**
+   * 三層顧客価格モデルの Run で、実際に成約配分を決めている層ごとの
+   * 感応度。従来市場モデルの Run では undefined。
+   */
+  readonly customerTiers?: readonly SalesModelCustomerTierFacts[];
+}
+
+/** 三層顧客価格モデルの1層ぶんの感応度（表示専用の輬記）。 */
+export interface SalesModelCustomerTierFacts {
+  readonly tierId: string;
+  /** この層が market×product の対象需要に占める比率（3層合計 = 1.0）。 */
+  readonly demandShare: number;
+  readonly priceSensitivity: number;
+  readonly qualitySensitivity: number;
+  /** 差別化（VAP商品開発スコア等）への感応度。 */
+  readonly differentiationSensitivity: number;
+  /** 顧客関係・納期信頼性・営業基盤への感応度（集約値）。 */
+  readonly nonPriceSensitivity: number;
+  /** 留保価格 = 参照価格 × この倍率。 */
+  readonly reservationPriceMultiplier: number;
 }
 
 /** 自動方針（autoPolicy.ts）が参照してよい、当該会社ぶんの状態（自社のみ）。 */

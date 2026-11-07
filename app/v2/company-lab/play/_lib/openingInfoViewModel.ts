@@ -23,6 +23,7 @@ import { PRODUCT_LIFECYCLE_PARAMETERS_V1, ProductLifecycleParameters } from "../
 import { InformationRelease } from "../../../../lib/v2/scenario/types";
 import { DEMAND_MARKET_IDS, DemandMarketId } from "../../../../lib/v2/market/types";
 import { SALES_PARAMETERS_V1 } from "../../../../lib/v2/sales/parameters";
+import type { SalesModelCustomerTierFacts, SalesModelFacts } from "../../../../lib/v2/companyLab/types";
 import type { CapitalProject } from "../../../../lib/v2/capex/types";
 import type { DomesticReferencePrice } from "../../../../lib/v2/companyLab/domesticReferencePrice";
 import type { ObservedMarketDemand } from "../../../../lib/v2/companyLab/marketDemandObservation";
@@ -302,8 +303,31 @@ export interface SalesMarketInfoRow {
 export interface OpeningMarketInfo {
   readonly rawMaterial: RawMaterialMarketInfo;
   readonly salesMarkets: readonly SalesMarketInfoRow[];
-  /** 成約競争力の需要ウェイト（価格・営業カバレッジ・顧客関係・品質・納期・営業基盤）。 */
+  /**
+   * 成約競争力の需要ウェイト（価格・営業カバレッジ・顧客関係・品質・納期・営業基盤）。
+   *
+   * 【テストプレイ指摘⑥追訿・2026-11】従来は SALES_PARAMETERS_V1（既定定数）を
+   * 直接読んでおり、Run の販売モデルに関係なく同じ値を表示していた
+   * （price 35% / coverage 25% / relationship 15% / quality 15% /
+   *   deliveryReliability 10% / salesBase 0% / vapCapability 0%、
+   *   外部選択肢 0.35、最大成約シェア 35%）。
+   * 現在は salesModelFacts（Run の実効パラメータ）が渡されたときは
+   * そちらを正本にする。渡されない呼び出し元（旧スナップショット等）では
+   * 従来どおり既定定数を使い、その旨を salesModelSource で区別できる。
+   */
   readonly competitivenessWeights: Readonly<Record<string, number>>;
+  /**
+   * この表示値が「Run の実効パラメータ」か「既定定数」か。
+   * 画面はこれを必ず併記する（どっちの数字を見ているのかを取り違えないため）。
+   */
+  readonly salesModelSource: "RUN_EFFECTIVE_PARAMETERS" | "DEFAULT_PARAMETERS";
+  /** 成約配分の方式。undefined は未取得（旧呼び出し元）。 */
+  readonly marketAllocationMode?: "legacyWaterfall" | "tieredSimultaneousAllocation";
+  /**
+   * 三層顧客価格モデルの Run で、実際に成約配分を決めている層ごとの感応度。
+   * 従来市場モデルの Run では undefined。
+   */
+  readonly customerTiers?: readonly SalesModelCustomerTierFacts[];
   /** 1社が1市場×商品の需要から成約できる最大シェア。 */
   readonly maximumSupplierShare: number;
   /** 5社以外の外部選択肢の競争力ウェイト（これを上回らないと成約が取れない）。 */
@@ -354,7 +378,13 @@ export function buildOpeningMarketInfo(
    * 【Dynamic Scenario 1】市場別の初期/成熟構成比を表示するための実効
    * ライフサイクルパラメータ。省略時は市場モジュール既定値（＝従来表示）。
    */
-  lifecycleParameters: ProductLifecycleParameters = PRODUCT_LIFECYCLE_PARAMETERS_V1
+  lifecycleParameters: ProductLifecycleParameters = PRODUCT_LIFECYCLE_PARAMETERS_V1,
+  /**
+   * 【テストプレイ指摘⑥追訿・2026-11】Run が当期実際に使っている
+   * 販売モデルの実効パラメータ（CompanyOwnState.salesModelFacts）。
+   * 省略時は従来とまったく同じ表示（既定定数）になる。
+   */
+  salesModelFacts?: SalesModelFacts
 ): OpeningMarketInfo {
   const farmer = MARKET_PARAMETERS_V1.vietnamDomestic.farmerEconomicsDefaults;
   const premium = MARKET_PARAMETERS_V1.pdVapPremium;
@@ -407,11 +437,14 @@ export function buildOpeningMarketInfo(
         characteristics: MARKET_CHARACTERISTICS[market],
       };
     }),
-    competitivenessWeights: { ...SALES_PARAMETERS_V1.competitivenessWeights },
-    maximumSupplierShare: SALES_PARAMETERS_V1.maximumSupplierShare,
-    externalOptionWeight: SALES_PARAMETERS_V1.externalOptionWeight,
+    competitivenessWeights: { ...(salesModelFacts?.competitivenessWeights ?? SALES_PARAMETERS_V1.competitivenessWeights) },
+    maximumSupplierShare: salesModelFacts?.maximumSupplierShare ?? SALES_PARAMETERS_V1.maximumSupplierShare,
+    externalOptionWeight: salesModelFacts?.externalOptionWeight ?? SALES_PARAMETERS_V1.externalOptionWeight,
+    salesModelSource: salesModelFacts === undefined ? "DEFAULT_PARAMETERS" : "RUN_EFFECTIVE_PARAMETERS",
+    ...(salesModelFacts === undefined ? {} : { marketAllocationMode: salesModelFacts.marketAllocationMode }),
+    ...(salesModelFacts?.customerTiers === undefined ? {} : { customerTiers: salesModelFacts.customerTiers }),
     productPremiumRatio: { pd: premium.pdBasePremiumRatio, vap: premium.vapBasePremiumRatio },
-    salesEffortCoefficients: { ...SALES_PARAMETERS_V1.salesEffortCoefficients },
+    salesEffortCoefficients: { ...(salesModelFacts?.salesEffortCoefficients ?? SALES_PARAMETERS_V1.salesEffortCoefficients) },
     referencePriceByProduct: {
       hoso: hosoReference,
       pd: hosoReference * (1 + premium.pdBasePremiumRatio),

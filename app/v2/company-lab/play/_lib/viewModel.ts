@@ -289,6 +289,10 @@ function coerceDraftOrRebuild(
   // 【Test15・develop/v2統合（Required fix 2）】生産計画・ワーカー配置の入力行は
   // ownState.effectiveFactories（稼働開始済みの新設Factoryを含む実効Factory[]）を
   // 基準に生成する。
+  // 【テストプレイ指摘①の続き・2026-11】ここは丸めない。
+  // loadPlayerScreenViewModel の呼び出し元は AI経営会議・AI経営説明の API だけで、
+  // 人が入力する画面ではない。初期値の丸めは「人が編集する入力欄の初期表示」に
+  // 限る指示なので、LLM へ渡す文脈（AIが実際に提案した値）はそのまま保つ。
   return { draft: buildInitialDraft(fixture, aiDecision, ownState.workforceState, ownState.effectiveFactories), diagnostics };
 }
 
@@ -511,7 +515,10 @@ export function buildOpeningInfo(
     marketInfo: buildOpeningMarketInfo(
       publicInfo.vietnamDomesticPriorPrice,
       priorByMarket,
-      resolveScenarioProductLifecycleParameters(definition)
+      resolveScenarioProductLifecycleParameters(definition),
+      // 【テストプレイ指摘⑥追補・2026-11】需要ウェイト表は従来、Run の販売モデルに
+      // 関係なく既定定数を表示していた。Run の実効パラメータを渡して正本にする。
+      ownState.salesModelFacts
     ),
     scenarioNews,
   };

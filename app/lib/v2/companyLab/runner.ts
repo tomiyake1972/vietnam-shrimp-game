@@ -75,6 +75,7 @@ import {
 } from "./productDevelopmentState";
 import { calculateCompanyCapabilityCoefficient } from "./premiumPolicy";
 import {
+  CUSTOMER_TIER_IDS,
   SALES_PARAMETERS_SAI5_SALES_BASE_V1,
   SALES_PARAMETERS_TEST15_VAP_CAPABILITY_AND_SALES_BASE_V1,
   SALES_PARAMETERS_TEST15_VAP_CAPABILITY_V1,
@@ -720,10 +721,35 @@ function buildSalesModelFacts(config: CompanyLabConfig): SalesModelFacts {
   const params = salesParametersFor(config);
   const crowdingPolicy =
     config.crowding ?? (config.salesModelId !== undefined ? crowdingPolicyForModelId(config.salesModelId) : undefined);
+  const mode = params.marketAllocationMode === "tieredSimultaneousAllocation" ? "tieredSimultaneousAllocation" : "legacyWaterfall";
+  // 【テストプレイ指摘⑥追補・2026-11】三層顧客価格モデルの Run では、成約配分を
+  // 実際に決めているのは層ごとの感応度（tieredMarketAllocation.tiers）であり、
+  // competitivenessWeights ではない。画面がどちらを描くか選べるよう、両方を転記する。
+  const tiers = params.tieredMarketAllocation?.tiers;
   return {
-    marketAllocationMode: params.marketAllocationMode === "tieredSimultaneousAllocation" ? "tieredSimultaneousAllocation" : "legacyWaterfall",
+    marketAllocationMode: mode,
     vapCapabilityCompetitivenessWeight: params.competitivenessWeights.vapCapability,
     crowdingPriceMarkdownActive: crowdingPolicy !== undefined,
+    competitivenessWeights: { ...params.competitivenessWeights },
+    externalOptionWeight: params.externalOptionWeight,
+    maximumSupplierShare: params.maximumSupplierShare,
+    salesEffortCoefficients: { ...params.salesEffortCoefficients },
+    ...(mode === "tieredSimultaneousAllocation" && tiers !== undefined
+      ? {
+          customerTiers: CUSTOMER_TIER_IDS.map((tierId) => {
+            const t = tiers[tierId];
+            return {
+              tierId,
+              demandShare: t.demandShare,
+              priceSensitivity: t.priceSensitivity,
+              qualitySensitivity: t.qualitySensitivity,
+              differentiationSensitivity: t.differentiationSensitivity,
+              nonPriceSensitivity: t.nonPriceSensitivity,
+              reservationPriceMultiplier: t.reservationPriceMultiplier,
+            };
+          }),
+        }
+      : {}),
   };
 }
 

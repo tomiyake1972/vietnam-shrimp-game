@@ -37,7 +37,7 @@ export default function SalesSupplyCeilingPanel({ ceiling }: { readonly ceiling:
                 <th className="pr-3 py-1 text-right">当期の実効加工能力</th>
                 <th className="pr-3 py-1 text-right font-semibold">納められる上限</th>
                 <th className="pr-3 py-1 text-right">受注残</th>
-                <th className="pr-3 py-1 text-right font-semibold">新規販売に回せる量</th>
+                <th className="pr-3 py-1 text-right font-semibold">販売可能量（上限）</th>
                 <th className="pr-3 py-1 text-right">今の販売計画</th>
               </tr>
             </thead>
@@ -87,13 +87,14 @@ export default function SalesSupplyCeilingPanel({ ceiling }: { readonly ceiling:
       ) : null}
       {ceiling.productsOverAvailableForNewSales.length > 0 ? (
         <p className="mt-1.5 text-[11px] leading-snug text-amber-300" role="alert" data-testid="sales-supply-ceiling-backlog-warning">
-          {ceiling.productsOverAvailableForNewSales.map((p) => p.toUpperCase()).join("・")} の販売計画は上限内ですが、受注残を先に納めると足りません。
+          {ceiling.productsOverAvailableForNewSales.map((p) => p.toUpperCase()).join("・")} の販売計画が「販売可能量（上限）」を超えています（納められる上限の内側ですが、受注残を先に納めると足りません）。
           受注残の納品が遅れると納期信頼性が下がります。
         </p>
       ) : null}
 
       <p className="mt-1.5 text-[11px] leading-snug text-gray-500">
-        「納められる上限」＝ 完成品在庫 ＋ 当期の実効加工能力。「新規販売に回せる量」＝ その上限 − 受注残。
+        「納められる上限」＝ 完成品在庫 ＋ 当期の実効加工能力。「販売可能量（上限）」＝ その上限 − 受注残。
+        入力欄の初期値もこの「販売可能量（上限）」に収まるよう調整してあります。
         いずれも目安です。実効加工能力は現時点の原料在庫を前提にした見込みで、当期の買付・輸入到着ぶんは含みません。
         提示した量がそのまま成約するわけでもありません（成約量は5社の競争で決まります）。
       </p>
