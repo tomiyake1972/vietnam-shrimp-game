@@ -79,6 +79,7 @@ test("WEIGHTS-5【実効値を渡せないときは断定しない】: 既定定
 
 test("WEIGHTS-6【英語の識別子を並べない】: ウェイトの項目名が日本語になっている", () => {
   const html = render(factsFor({ salesModelId: "legacy-waterfall-v1" }));
+  assert.ok(html.includes("営業基盤（蓄積）"), "salesBase の日本語名が誤字のまま、または出ていない");
   assert.ok(html.includes("営業カバレッジ"), "coverage の日本語名が出ていない");
   assert.ok(html.includes("納期信頼性"), "deliveryReliability の日本語名が出ていない");
   assert.ok(html.includes("VAP能力"), "vapCapability の日本語名が出ていない");

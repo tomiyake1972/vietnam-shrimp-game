@@ -29,6 +29,7 @@ import DecisionConfirmationScreen from "../../company-lab/components/decisionStu
 import type { DecisionStudioScreenKey } from "../../company-lab/components/decisionStudio/DecisionStudioNavigation";
 import { extractCompanyCapexResult, extractCompanyDividendResult, extractCompanyFinancialResult, extractCompanyFinancingResult } from "../../company-lab/play/_lib/financialViewSelectors";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
+import { buildOpeningInfo } from "../../company-lab/play/_lib/viewModel";
 import { buildCompanyOwnState, buildPublicMarketInfo } from "../../../lib/v2/companyLab/runner";
 import { generateStandardAiDecisionWithDiagnostics } from "../../../lib/v2/companyLab/standardAi/policy";
 import { toStandardAiCostProjection } from "../../../lib/v2/companyLab/standardAi/costProjection";
@@ -380,6 +381,8 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
   // 【Procurement Planning情報ブロック・Step 4】turnと同様、毎レンダーでsession.stateから
   // 素直に組み立てる（buildPublicMarketInfoは既存のpure function。新しい計算はしない）。
   const publicInfo = buildPublicMarketInfo(session.state);
+  // 【2026-11】参加者画面と同じ「開始時点の情報」（償却資産明細・市場情報・観測需要）。
+  const openingInfo = buildOpeningInfo(ownState, publicInfo, session.state, turn);
   const lastRecord = session.state.history[session.state.history.length - 1] ?? null;
   const previousRecord = session.state.history[session.state.history.length - 2] ?? null;
   const summary = lastRecord?.companySummaries.find((c) => c.companyId === companyId) ?? null;
@@ -751,6 +754,10 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
               annualDividendGuidance={annualDividendGuidance}
               lastQuarterSalesAllocations={lastQuarterSalesAllocations}
               publicInfo={publicInfo}
+              /* 【2026-11】INFO タブの「市場情報（原料・販売市場の初期条件）」は
+                 openingInfo が渡らないと出ない。GM代理の画面にも渡して、参加者画面と
+                 同じ情報が見えるようにする（値はサーバーと同じ純粋関数で組み立てる）。 */
+              openingInfo={openingInfo}
               scenarioNews={scenarioNews}
               // AI経営会議は、このSimulation Runの同じ会社・同じturnの状態で開く（別Labを作らない）。
               // サーバー側は保存済みRunから会社状態を読むため、ここではrunIdを渡すだけで、

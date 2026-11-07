@@ -38,6 +38,7 @@ import {
 } from "../../lib/v2/companyLab";
 import { buildDecisionInputFromDraft, buildInitialDraft, CompanyDecisionDraft } from "./decisionDraft";
 import { applyInitialDraftFeasibility, type InitialDraftAdjustment } from "./initialDraftFeasibility";
+import { buildOpeningInfo } from "./play/_lib/viewModel";
 import LabBanner from "./components/LabBanner";
 import ScenarioControls, { CompanyOption, ScenarioOption } from "./components/ScenarioControls";
 import DecisionStudio from "./components/decisionStudio/DecisionStudio";
@@ -242,6 +243,12 @@ export default function CompanyLabPage() {
   // handleStepOnce等が既に使っているpure function）をレンダー時にも呼ぶだけ。新しい計算はしない。
   const publicInfoForEditor = labState ? buildPublicMarketInfo(labState) : undefined;
   const turnForEditor = labState?.scenarioState.currentTurn;
+  // 【2026-11】INFO タブの「市場情報（原料・販売市場の初期条件）」は openingInfo が
+  // 渡らないと出ない。この画面にも渡して、参加者画面と同じ情報が見えるようにする。
+  const openingInfoForEditor =
+    labState && ownStateForEditor && publicInfoForEditor && turnForEditor !== undefined
+      ? buildOpeningInfo(ownStateForEditor, publicInfoForEditor, labState, turnForEditor)
+      : undefined;
   const playerSummary = displayedRecord?.companySummaries.find((s) => s.companyId === draftPlayerCompanyId);
   // 【Phase 8B-3】設備投資ポートフォリオ表示の「直近四半期の実際の支払額」参考情報用。
   // 選択中の表示四半期（displayedRecord）ではなく、常に「実際に最後に確定した四半期」を使う
@@ -378,6 +385,7 @@ export default function CompanyLabPage() {
                     lastQuarterFinancialResult={lastQuarterFinancialResultForPlayer}
                     lastQuarterDividendResult={lastQuarterDividendResultForPlayer}
                     publicInfo={publicInfoForEditor}
+                    openingInfo={openingInfoForEditor}
                     turn={turnForEditor}
                     initialDraftAdjustments={playerDraftAdjustments}
                   />

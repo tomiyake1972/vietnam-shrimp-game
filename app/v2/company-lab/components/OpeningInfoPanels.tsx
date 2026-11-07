@@ -184,7 +184,7 @@ const COMPETITIVENESS_WEIGHT_LABELS: Readonly<Record<string, string>> = {
   relationship: "顧客関係",
   quality: "品質",
   deliveryReliability: "納期信頼性",
-  salesBase: "営業基盤（踄積）",
+  salesBase: "営業基盤（蓄積）",
   vapCapability: "VAP能力（VAPの行のみ）",
 };
 
