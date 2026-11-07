@@ -100,6 +100,14 @@ test("AUDIT-1b【3つの数字を並べる】: 完成品在庫・実効加工能
   }
 });
 
+test("AUDIT-1d【納期の決まりを画面に書く】: 新規成約は翌期納期だが当期納入もあり得ることと、受注残を全額引く理由が出る", () => {
+  const html = renderSales();
+  assert.ok(html.includes('data-testid="sales-supply-ceiling-due-rule"'), "納期の決まりの説明が出ていない");
+  assert.ok(html.includes("納期は翌期"), "新規成約の納期が翌期であることが書かれていない");
+  assert.ok(html.includes("当期中に出荷できる分は当期に納入されます"), "当期納入もあり得ることが書かれていない");
+  assert.ok(html.includes("受注残を全額差し引いています"), "受注残を全額引く理由が書かれていない");
+});
+
 test("AUDIT-1c【超過は警告する】: 実効加工能力を大きく超える販売計画では上限超過の警告が出る", () => {
   const s = setup();
   const overDraft = {

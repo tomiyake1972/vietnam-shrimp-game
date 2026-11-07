@@ -92,6 +92,18 @@ export default function SalesSupplyCeilingPanel({ ceiling }: { readonly ceiling:
         </p>
       ) : null}
 
+      {/* 【納期ルールの明示・2026-11】実測（dynamic-scenario-2 / BAL / Turn1）:
+          当期に成約した 10,194t はすべて納期が翌期だが、そのうち 8,295t は当期中に納入された。
+          初期受注残 3,100t のうち 2,800t も、納期（翌期・翌々期）より前に当期中に納入された。
+          契約の充当は納期で絞らず、在庫がある分だけ古い契約から順に出荷する実装である
+          （sales/backlog.ts applyFulfillments）。したがって受注残は納期が先の分も
+          当期の在庫・生産能力を取り合うため、上限からは全額を差し引く。 */}
+      <p className="mt-1.5 text-[11px] leading-snug text-gray-400" data-testid="sales-supply-ceiling-due-rule">
+        <span className="font-semibold">納期の決まり:</span>{" "}
+        いま新しく成約する分の納期は翌期です。ただし当期中に出荷できる分は当期に納入されます。
+        受注残も、納期が先のぶんであっても在庫があれば当期に出荷されるため、当期の在庫・生産能力を取り合います。
+        だから上限からは受注残を全額差し引いています。
+      </p>
       <p className="mt-1.5 text-[11px] leading-snug text-gray-500">
         「納められる上限」＝ 完成品在庫 ＋ 当期の実効加工能力。「販売可能量（上限）」＝ その上限 − 受注残。
         入力欄の初期値もこの「販売可能量（上限）」に収まるよう調整してあります。
