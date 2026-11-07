@@ -252,6 +252,7 @@ import {
   CompanyQuarterSummary,
   CompanyReasonEntry,
   PublicMarketInfo,
+  SalesModelFacts,
   Sai5FeatureFlags,
 } from "./types";
 
@@ -672,6 +673,11 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // 【監査指摘G】営業基盤が当期の成約へ実際にどれだけ効くか（ウェイト）。
     // 機能OFFなら0＝「基盤の高低は成約に一切影響しない」ことが判断側から分かる。
     salesBaseCompetitivenessWeight: salesParametersFor(state.config).competitivenessWeights.salesBase,
+    // 【テストプレイ指摘⑥⑦・2026-11】画面が「VAP商品開発費は成約に効くのか」
+    // 「市場集中による価格下落は働くのか」をRunの設定どおりに説明できるようにする。
+    // 解決の優先順位は salesParametersFor・resolvedCrowdingPolicy と同一であり、
+    // ここで新しい既定値・新しい判定を作っていない（転記のみ）。
+    salesModelFacts: buildSalesModelFacts(state.config),
     // 【Test15新設・develop/v2統合（Required fix 2）】前四半期末までの自社工場
     // ごとのPD稼働率（実効Factory[]、＝稼働開始済みの新設Factoryを含む一覧を
     // 基準にする。fixture.factoriesのままだと新設FactoryのPD省人化投資対象
@@ -698,6 +704,26 @@ export function buildCompanyOwnState(state: CompanyLabState, fixture: CompanyFix
     // 意思決定側（Standard AI observation）が納期時点など当期以外のperiodで
     // computeEffectiveFactoriesを呼ぶ場合にも、同じlifecycleを適用させるために渡す。
     ...(state.factoryLifecycleState ? { factoryLifecycleState: state.factoryLifecycleState } : {}),
+  };
+}
+
+/**
+ * 【テストプレイ指摘⑥⑦・2026-11】画面の説明文のための「いま効いている販売モデルの事実」。
+ *
+ * 【新しい解決規則を作らない】marketAllocationMode と vapCapability ウェイトは
+ * salesParametersFor が返す SalesParameters から、Crowding の有無は
+ * advanceCompanyLabQuarter 内の resolvedCrowdingPolicy と同じ優先順位
+ * （config.crowding → salesModelId → OFF）から読む。どちらもここでは判定を
+ * 作らず転記するだけなので、エンジンの挙動へは影響しない。
+ */
+function buildSalesModelFacts(config: CompanyLabConfig): SalesModelFacts {
+  const params = salesParametersFor(config);
+  const crowdingPolicy =
+    config.crowding ?? (config.salesModelId !== undefined ? crowdingPolicyForModelId(config.salesModelId) : undefined);
+  return {
+    marketAllocationMode: params.marketAllocationMode === "tieredSimultaneousAllocation" ? "tieredSimultaneousAllocation" : "legacyWaterfall",
+    vapCapabilityCompetitivenessWeight: params.competitivenessWeights.vapCapability,
+    crowdingPriceMarkdownActive: crowdingPolicy !== undefined,
   };
 }
 

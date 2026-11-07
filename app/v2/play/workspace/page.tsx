@@ -35,6 +35,8 @@ import {
   PlayerOverviewPanel,
 } from "./WorkspacePanels";
 import { validateSalesForceHiringDecision } from "../../../lib/v2/companyLab/salesForceHiring";
+import { unwrapUnit } from "../../../lib/v2/core/units";
+import type { PlayerOpeningInventory } from "./WorkspacePanels";
 import { toScenarioNewsItems } from "../../company-lab/play/_lib/openingInfoViewModel";
 import ScenarioNewsFeed from "../../company-lab/components/decisionStudio/ScenarioNewsFeed";
 import { buildProfitAndLossBreakdown } from "../../company-lab/profitAndLossBreakdownViewModel";
@@ -250,6 +252,26 @@ export default function PlayerWorkspacePage() {
   }
 
   const status: WorkspaceStatus = context.hasSubmittedThisTurn ? (justSubmitted ? "SUBMITTED" : "WAITING_FOR_GM") : touched ? "EDITING" : "TURN_ACTIVE";
+  /**
+   * 【テストプレイ指摘③⑦⑨・2026-11】画面に渡す補助値。
+   * いずれもサーバーが組み立てた PlayerDecisionContext の確定値を
+   * 読む・足すだけで、新しい推計・予測は行わない。
+   */
+  const domesticReferencePriceUsdPerKg = context.openingInfo?.domesticReferencePrice?.referencePriceUsdPerHosoEqKg ?? null;
+  const crowdingPriceMarkdownActive = context.ownState.salesModelFacts?.crowdingPriceMarkdownActive ?? null;
+  const openingInventory: PlayerOpeningInventory = {
+    finishedGoodsTons: context.ownState.finishedGoodsLots
+      .filter((lot) => lot.status === "available")
+      .reduce((sum, lot) => sum + unwrapUnit(lot.remainingQuantity), 0),
+    rawMaterialAvailableTons: context.ownState.rawMaterialLots
+      .filter((lot) => lot.status === "available")
+      .reduce((sum, lot) => sum + unwrapUnit(lot.remainingQuantity), 0),
+    rawMaterialPendingTons: context.ownState.rawMaterialLots
+      .filter((lot) => lot.status !== "available")
+      .reduce((sum, lot) => sum + unwrapUnit(lot.remainingQuantity), 0),
+    backlogTons: context.ownState.contracts.reduce((sum, c) => sum + unwrapUnit(c.outstandingQuantity), 0),
+  };
+
   const scenarioNews = toScenarioNewsItems(selectScenarioNewsForTurn(context.scenarioId, context.turn).releases);
   /**
    * 【前期PL費用内訳・2026-11】確定済みの前四半期のPL内訳。
@@ -338,13 +360,15 @@ export default function PlayerWorkspacePage() {
                   （同じ ScenarioNewsFeed・同じ scenarioNews を渡すだけで、
                   ニュースの取得・本文生成はしていない）。 */}
               <ScenarioNewsFeed news={scenarioNews} turn={context.turn} />
-              <PlayerMarketPanel view={context.marketView} />
-              <PlayerCompetitorPanel snapshot={context.competitorSnapshot} />
+              <PlayerMarketPanel view={context.marketView} domesticReferencePriceUsdPerKg={domesticReferencePriceUsdPerKg} />
+              <PlayerCompetitorPanel snapshot={context.competitorSnapshot} crowdingPriceMarkdownActive={crowdingPriceMarkdownActive} />
               <PlayerInvestmentAnnouncementPanel snapshot={context.competitorSnapshot} />
               <PlayerCompetitorNewsPanel news={context.competitorNews} />
             </div>
           ) : null}
-          {phase === "input" && tab === "inventory" ? <PlayerInventoryPanel view={context.inventoryView} /> : null}
+          {phase === "input" && tab === "inventory" ? (
+            <PlayerInventoryPanel view={context.inventoryView} opening={openingInventory} />
+          ) : null}
 
           {phase === "confirm" || tab === "decision" ? (
           <>
@@ -417,6 +441,15 @@ export default function PlayerWorkspacePage() {
                 setTouched(true);
               }}
               disabled={status === "SUBMITTED" || status === "WAITING_FOR_GM"}
+              /* 【テストプレイ指摘⑨・2026-11】提出直後でも入力欄を封じるために
+                  disabled を立てているが、Decision Studio の既定文言は
+                  「この四半期はすでに進行済みです」で、まだ GM が Turn を進めていない
+                  時点では事実と違う。この画面での正しい理由を渡す。 */
+              disabledNotice={
+                status === "SUBMITTED" || status === "WAITING_FOR_GM"
+                  ? "提出済み・GMの進行待ち"
+                  : undefined
+              }
               period={context.period}
               turn={context.turn}
               costProjection={context.costProjection}

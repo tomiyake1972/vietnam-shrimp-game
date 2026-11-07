@@ -279,6 +279,16 @@ export interface SalesForceHiringPreview {
   readonly severanceCostUsd: number;
   /** 採用予定・減員予定の両方が>0（同一四半期の同時入力、禁止事項）。 */
   readonly hasMutualExclusionConflict: boolean;
+  /**
+   * 【テストプレイ指摘②・2026-11】営業人員1人あたりの四半期給与
+   * （finance/parameters.ts の salesForceSalaryUsdPerQuarter をそのまま）。
+   * 減員を入力する前から「減員にいくらかかるか」を画面へ出すために公開する。
+   */
+  readonly quarterlySalaryUsdPerPerson: number;
+  /** 退職金の単価（1人あたり。四半期給与 × 2四半期分）。減員数に依らず常に同じ。 */
+  readonly severanceUnitCostUsd: number;
+  /** 退職金が四半期給与の何四半期分か（2）。画面の説明文に使う。 */
+  readonly severanceQuarters: number;
 }
 
 const SALES_FORCE_SEVERANCE_QUARTERS = 2;
@@ -301,6 +311,9 @@ export function summarizeSalesForceHiring(
     nextQuarterHeadcount: Math.max(0, safeCurrentHeadcount + plannedHireCount - effectiveLayoffCount),
     severanceCostUsd,
     hasMutualExclusionConflict: plannedHireCount > 0 && plannedLayoffCount > 0,
+    quarterlySalaryUsdPerPerson: FINANCE_PARAMETERS_V1.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter,
+    severanceUnitCostUsd: SALES_FORCE_SEVERANCE_QUARTERS * FINANCE_PARAMETERS_V1.sellingGeneralAdmin.salesForceSalaryUsdPerQuarter,
+    severanceQuarters: SALES_FORCE_SEVERANCE_QUARTERS,
   };
 }
 

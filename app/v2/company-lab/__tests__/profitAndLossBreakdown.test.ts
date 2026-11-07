@@ -207,3 +207,66 @@ test("PL-8: 販売数量が渡されればkgあたり指標を出し、渡され
   assert.equal(withoutQuantity.perKilogram.find((m) => m.key === "price")?.valueUsdPerKg, null);
   assert.ok(withoutQuantity.unavailableItems.some((i) => i.includes("kgあたり")));
 });
+
+/**
+ * 【テストプレイ指摘⑥・2026-11】VAP商品開発費は勘定科目を持たないため、
+ * 従来は全額が「その他（内訳に現れない差分）」へ落ちていた。
+ * contributionMargin.fixedSellingAdminCost − adminFixed で一意に決まるので、
+ * その差を明示行にする（合計は変えない）。
+ */
+function buildResultWithVapSpend(vapSpendUsd: number): CompanyFinancialQuarterResult {
+  const base = buildResult();
+  const adminFixed = 160_000;
+  return {
+    ...base,
+    profitAndLoss: {
+      ...base.profitAndLoss,
+      sellingGeneralAdmin: usd((base.profitAndLoss.sellingGeneralAdmin as unknown as number) + vapSpendUsd),
+    },
+    contributionMargin: { fixedSellingAdminCost: usd(adminFixed + vapSpendUsd) } as CompanyFinancialQuarterResult["contributionMargin"],
+  } as CompanyFinancialQuarterResult;
+}
+
+test("PL-9: VAP商品開発費が明示行として出、差分行へ落ちない", () => {
+  const vm = buildProfitAndLossBreakdown({ result: buildResultWithVapSpend(250_000) });
+  const row = vm.rows.find((r) => r.key === "sga-vap-product-development");
+  assert.ok(row, "VAP商品開発費の行が出ていない");
+  assert.ok(Math.abs((row.amountUsd as number) - 250_000) < 0.01, `金額が違う: ${row.amountUsd}`);
+  assert.equal(vm.rows.find((r) => r.key === "sga-residual"), undefined, "全額説明できたのに差分行が残っている");
+});
+
+test("PL-10: VAP商品開発費を含めても販管費の内訳合計は確定値と一致する", () => {
+  const vm = buildProfitAndLossBreakdown({ result: buildResultWithVapSpend(250_000) });
+  const sum = vm.rows.filter((r) => r.key.startsWith("sga-")).reduce((acc, r) => acc + (r.amountUsd ?? 0), 0);
+  assert.ok(Math.abs(sum - vm.totals.sellingGeneralAdminUsd) < 0.01, `販管費内訳 ${sum} ≠ ${vm.totals.sellingGeneralAdminUsd}`);
+});
+
+test("PL-11: VAP商品開発費が0の四半期には行を出さない", () => {
+  const vm = buildProfitAndLossBreakdown({ result: buildResultWithVapSpend(0) });
+  assert.equal(vm.rows.find((r) => r.key === "sga-vap-product-development"), undefined);
+});
+
+test("PL-12: 古い保存データ（fixedSellingAdminCost が無い）では推計を作らず従来どおりにする", () => {
+  const vm = buildProfitAndLossBreakdown({ result: buildResult() });
+  assert.equal(vm.rows.find((r) => r.key === "sga-vap-product-development"), undefined);
+});
+
+/**
+ * 【テストプレイ指摘⑤・2026-11】この行は「当期の買付額」ではなく
+ * 「当期に投入消費した原料の原価（期首在庫からの投入を含む）」である。
+ * 「国内買付」というラベルのために、買付額と突き合わせて差額を不具合と読まれた。
+ */
+test("PL-13: 原料費の参考欄は「買付」と名乗らず、投入消費額であることを明記する", () => {
+  const vm = buildProfitAndLossBreakdown({ result: buildResult() });
+  const heading = vm.rows.find((r) => r.key === "raw-incurred-heading");
+  assert.ok(heading);
+  assert.ok(!heading.label.includes("買付"), `見出しがまだ「買付」と読める: ${heading.label}`);
+  assert.ok(heading.label.includes("投入"), "投入した原料の原価であることが見出しに無い");
+  assert.ok((heading.note ?? "").includes("当期の買付額ではありません"), "買付額でないことが注記されていない");
+  assert.ok((heading.note ?? "").includes("期首在庫"), "期首在庫が含まれることが注記されていない");
+
+  const domestic = vm.rows.find((r) => r.key === "mfg-domestic");
+  assert.ok(domestic);
+  assert.ok(!domestic.label.includes("買付"), `行のラベルがまだ「国内買付」のまま: ${domestic.label}`);
+  assert.ok(domestic.label.includes("期首在庫"), "期首在庫からの投入を含むことが行に書かれていない");
+});

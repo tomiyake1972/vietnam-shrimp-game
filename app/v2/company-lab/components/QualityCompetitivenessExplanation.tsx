@@ -43,7 +43,7 @@ export default function QualityCompetitivenessExplanation(props: QualityCompetit
     <div className="bg-gray-800 rounded-2xl p-4 sm:p-5 space-y-4">
       <h3 className="text-base font-semibold text-gray-100">成約競争力の説明</h3>
       <p className="text-[11px] text-gray-500">
-        競争力ウェイトの内訳（価格・カバレッジ・顧客関係・品質・納期信頼性の5要素）は、成約配分計算（sales/allocation.ts）が実際に使った値をそのまま表示しています。UI側での再計算は行っていません。
+        競争力ウェイトの内訳（価格・カバレッジ・顧客関係・品質・納期信頼性の5要素）は、成約配分計算が実際に使った値をそのまま表示しています。画面側での再計算は行っていません。
       </p>
 
       {rows.map((r) => {

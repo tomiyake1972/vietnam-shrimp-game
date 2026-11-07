@@ -182,7 +182,11 @@ export default function InformationScreen({
       ) : (
         <p className="text-xs text-gray-500">
           この画面では、償却資産明細・市場情報の詳細を表示するための情報がこの画面へ渡されていません。貸借対照表（上記）と、以下の自社状態の要約のみを表示します。
-          {publicInfo && ` （参考: 国内原料前期価格 $${publicInfo.vietnamDomesticPriorPrice.toFixed(2)}/kg）`}
+          {/* 【テストプレイ指摘③・2026-11】Turn1 はこの値が 0 なので、"$0.00/kg" と書かない。 */}
+          {publicInfo &&
+            (publicInfo.vietnamDomesticPriorPrice > 0
+              ? ` （参考: 国内原料前期価格 $${publicInfo.vietnamDomesticPriorPrice.toFixed(2)}/kg）`
+              : " （国内原料の前期価格は未確定です。最初の四半期は前期がありません）")}
         </p>
       )}
 

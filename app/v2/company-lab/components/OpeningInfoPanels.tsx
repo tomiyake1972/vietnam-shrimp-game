@@ -110,7 +110,7 @@ export function DepreciableAssetsPanel({ assets }: { readonly assets: Depreciabl
   return (
     <CollapsibleSection
       title="償却資産明細"
-      description="既存資産は建物・機械の2区分へ簡便配分した簡略モデルです（finance/parameters.ts）。個別の取得履歴は保持されていないため、区分より細かい内訳は表示しません。"
+      description="既存資産は建物・機械の2区分へ簡便配分した簡略モデルです。個別の取得履歴は保持されていないため、区分より細かい内訳は表示しません。"
       tone="info"
       defaultOpen={false}
       testId="depreciable-assets"
@@ -181,6 +181,8 @@ export function OpeningMarketInfoPanel({
   readonly referencePrice: DomesticReferencePrice | null;
 }) {
   const rm = info.rawMaterial;
+  /** 前四半期の国内原料価格が実在するか（Turn1 は 0 = 未確定）。 */
+  const rawMaterialPriorPriceKnown = rm.vietnamDomesticPriorPrice > 0;
   return (
     <CollapsibleSection
       title="市場情報（原料・販売市場の初期条件）"
@@ -189,8 +191,20 @@ export function OpeningMarketInfoPanel({
       defaultOpen={false}
       testId="opening-market-info"
       summaryRight={
+        /* 【テストプレイ指摘③・2026-11】Turn1は前四半期が無いため
+           vietnamDomesticPriorPrice は 0 である。見出しに "$0.00/kg" と出すと
+           「国内原料はタダ」と読めてしまい、同じパネルの中に出ている
+           国内原料参考価格（$3.16等）と食い違って見えた。
+           前期実績が無いときは、金額ではなく「前期実績なし」と書き、
+           代わりに参考価格を併記する（どちらの数字も新たに作らない）。 */
         <span className="text-xs text-gray-400">
-          国内原料 ${rm.vietnamDomesticPriorPrice.toFixed(2)}/kg ／ HOSO参考 ${info.referencePriceByProduct.hoso.toFixed(2)}/kg
+          国内原料{" "}
+          {rawMaterialPriorPriceKnown
+            ? `前期 $${rm.vietnamDomesticPriorPrice.toFixed(2)}/kg`
+            : referencePrice
+              ? `前期実績なし（開始時の参考価格 $${referencePrice.referencePriceUsdPerHosoEqKg.toFixed(2)}/kg）`
+              : "前期実績なし"}{" "}
+          ／ HOSO参考 ${info.referencePriceByProduct.hoso.toFixed(2)}/kg
         </span>
       }
     >
@@ -213,7 +227,11 @@ export function OpeningMarketInfoPanel({
             <tbody>
               <tr>
                 <td className="py-0.5 pr-2 text-gray-300">前期のベトナム国内原料価格</td>
-                <td className="py-0.5 text-right tabular-nums">${rm.vietnamDomesticPriorPrice.toFixed(4)} /HOSO換算kg</td>
+                <td className="py-0.5 text-right tabular-nums" data-testid="opening-market-domestic-prior-price">
+                  {rawMaterialPriorPriceKnown
+                    ? `$${rm.vietnamDomesticPriorPrice.toFixed(4)} /HOSO換算kg`
+                    : "－（最初の四半期は前期がないため実績がありません）"}
+                </td>
               </tr>
               <tr>
                 <td className="py-0.5 pr-2 text-gray-300">

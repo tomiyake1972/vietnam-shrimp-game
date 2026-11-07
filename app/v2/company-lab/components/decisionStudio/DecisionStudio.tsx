@@ -21,6 +21,7 @@
 // トグル状態だけを持ち、AI prompt・会話state・role定義には一切関与しない）。
 
 import { useMemo, useState } from "react";
+import { unwrapUnit } from "../../../../lib/v2/core/units";
 import { PeriodV2 } from "../../../../lib/v2/core/period";
 import { CompanyFixture, CompanyOwnState, PublicMarketInfo } from "../../../../lib/v2/companyLab";
 import { CapexProjectQuarterEvent, CapexRejectedProposal } from "../../../../lib/v2/capex";
@@ -56,6 +57,13 @@ export interface DecisionStudioProps {
   readonly draft: CompanyDecisionDraft;
   readonly onChange: (next: CompanyDecisionDraft) => void;
   readonly disabled: boolean;
+  /**
+   * 【テストプレイ指摘⑨・2026-11】disabled のときに出すバッジの文言。
+   * 省略時は従来どおり「この四半期はすでに進行済みです」。参加者画面は
+   * 提出直後（GMがまだTurnを進めていない状態）でも disabled になるため、
+   * 事実に合う理由をここで渡せるようにする。
+   */
+  readonly disabledNotice?: string;
   readonly period: PeriodV2;
   readonly lastQuarterCapexEvents?: readonly CapexProjectQuarterEvent[];
   readonly lastQuarterRejectedCapexProposals?: readonly CapexRejectedProposal[];
@@ -128,6 +136,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
     draft,
     onChange,
     disabled,
+    disabledNotice,
     period,
     lastQuarterCapexEvents,
     lastQuarterRejectedCapexProposals,
@@ -216,6 +225,22 @@ export default function DecisionStudio(props: DecisionStudioProps) {
       .map((row) => [row.poolKey, row.effectiveTons])
   );
 
+  /**
+   * 【テストプレイ指摘①・2026-11】商品別の出荷可能な完成品在庫。
+   * SALES 画面の供給上限の目安にだけ使う。ownState の確定ロットを
+   * status==="available" で絞って足すだけで、評価・単価計算はしない
+   * （decisionContext.ts の finishedGoodsTonsByProduct と同じ絞り込み）。
+   */
+  const finishedGoodsTonsByProduct = useMemo<Readonly<Partial<Record<Product, number>>>>(
+    () =>
+      ownState.finishedGoodsLots.reduce<Partial<Record<Product, number>>>((acc, lot) => {
+        if (lot.status !== "available") return acc;
+        acc[lot.product] = (acc[lot.product] ?? 0) + unwrapUnit(lot.remainingQuantity);
+        return acc;
+      }, {}),
+    [ownState.finishedGoodsLots]
+  );
+
   return (
     <div className="flex flex-wrap gap-3" data-testid="decision-studio">
       {/* MainDecisionArea — 固定幅にしない（flex-1）。AuxiliaryPanelが開いてもレイアウトが崩れない。 */}
@@ -229,7 +254,15 @@ export default function DecisionStudio(props: DecisionStudioProps) {
           <span className="text-xs text-gray-300">{turn !== undefined ? `Turn ${turn}` : period}</span>
           <span className="text-gray-600">/</span>
           {disabled ? (
-            <span className="text-[11px] rounded px-1.5 py-0.5 bg-gray-800 text-gray-400 border border-gray-600/70">この四半期はすでに進行済みです</span>
+            /* 【テストプレイ指摘⑨・2026-11】disabled の理由は呼び出し元によって違う。
+               参加者画面は「提出済み・GMの進行待ち」であって、「すでに進行済み」ではない。
+               渡されない場合は従来どおりの文言を使う（GM側の挙動を変えない）。 */
+            <span
+              className="text-[11px] rounded px-1.5 py-0.5 bg-gray-800 text-gray-400 border border-gray-600/70"
+              data-testid="decision-studio-disabled-notice"
+            >
+              {disabledNotice ?? "この四半期はすでに進行済みです"}
+            </span>
           ) : (
             <span className="text-[11px] rounded px-1.5 py-0.5 bg-sky-900/70 text-sky-200 border border-sky-700/70">DRAFT・未提出</span>
           )}
@@ -283,6 +316,7 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               lastQuarterSalesAllocations={lastQuarterSalesAllocations}
               backlogSemantics={backlogSemantics}
               effectiveCapacityByProduct={effectiveCapacityByProduct}
+              finishedGoodsTonsByProduct={finishedGoodsTonsByProduct}
             />
           )}
           {activeScreen === "production" && (
@@ -300,6 +334,10 @@ export default function DecisionStudio(props: DecisionStudioProps) {
               publicInfo={publicInfo}
               turn={turn}
               costProjection={costProjection}
+              /* 【テストプレイ指摘③・2026-11】国内原料価格の表示が画面ごとに違っていた。
+                 PROCUREMENT が「未確定」とだけ言っていたのを、INFO タブと同じ開始時の
+                 参考価格を指し示せるようにする（値は openingInfo の確定値をそのまま渡すだけ）。 */
+              domesticOpeningReferencePriceUsdPerHosoEqKg={openingInfo?.domesticReferencePrice?.referencePriceUsdPerHosoEqKg}
             />
           )}
           {activeScreen === "investment" && (

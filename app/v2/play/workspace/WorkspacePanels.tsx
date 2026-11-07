@@ -82,7 +82,18 @@ export function PlayerOverviewPanel({
 // Market
 // ---------------------------------------------------------------------
 
-export function PlayerMarketPanel({ view }: { readonly view: PlayerMarketView }) {
+export function PlayerMarketPanel({
+  view,
+  domesticReferencePriceUsdPerKg,
+}: {
+  readonly view: PlayerMarketView;
+  /**
+   * 【テストプレイ指摘③・2026-11】開始時の国内原料参考価格（USD/kg）。
+   * 前四半期の実績が無い Turn1 で "0.000" と表示していたのを、
+   * INFO タブと同じ参考価格で記述するために受け取る（無ければ null）。
+   */
+  readonly domesticReferencePriceUsdPerKg?: number | null;
+}) {
   const markets = [...new Set(view.cells.map((c) => c.market))];
   const cellByKey = new Map(view.cells.map((c) => [`${c.market}|${c.product}`, c]));
   const hasGameStartPrice = view.cells.some((c) => c.basePriceSource === "GAME_START_MARKET_INFORMATION");
@@ -92,10 +103,19 @@ export function PlayerMarketPanel({ view }: { readonly view: PlayerMarketView })
       <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
         <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">市場の公開情報</h2>
-          <span className="rounded bg-sky-900/60 px-1.5 py-0.5 text-[10px] font-semibold text-sky-200" data-testid="play-market-source-badge">
-            {view.observedDemandSourceQuarter === null
-              ? "開始時の市場情報"
-              : `Turn ${view.observedDemandSourceQuarter} の実績（遅行${view.observationLagQuarters ?? "?"}四半期）`}
+          {/* 【テストプレイ指摘⑦・2026-11】このパットには「需要」と「基準価格」という
+              出所の異なる2種類の数字が並んでいる。従来は需要側の出所だけを見出しに
+              出していたため、需要の観測遅延が残っている Turn2 でも「開始時の市場情報」の
+              ままに見え、前 Turn の市場実績から来ている基準価格も古いと誤解された。 */}
+          <span className="flex flex-wrap gap-1">
+            <span className="rounded bg-sky-900/60 px-1.5 py-0.5 text-[10px] font-semibold text-sky-200" data-testid="play-market-source-badge">
+              {view.observedDemandSourceQuarter === null
+                ? "需要: 開始時の市場情報"
+                : `需要: Turn ${view.observedDemandSourceQuarter} の実績（遅行${view.observationLagQuarters ?? "?"}四半期）`}
+            </span>
+            <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-slate-300" data-testid="play-market-price-source-badge">
+              {hasGameStartPrice ? "基準価格: 開始時の市場情報" : "基準価格: 前 Turn の市場実績"}
+            </span>
           </span>
         </div>
         {markets.length === 0 ? (
@@ -154,8 +174,16 @@ export function PlayerMarketPanel({ view }: { readonly view: PlayerMarketView })
             基準価格はゲーム開始時点の市場情報です（まだ前四半期の市場実績がないため）。
           </p>
         ) : null}
-        <p className="mt-1 text-[11px] text-slate-500">
-          ベトナム国内原料の前期価格: {view.vietnamDomesticPriorPrice.toFixed(3)} USD/kg
+        {/* 【テストプレイ指摘③・2026-11】Turn1 は前四半期が無くこの値は 0 になる。
+            "0.000 USD/kg" と出すと価格が0だと読め、PROCUREMENT の「未確定」・
+            INFO の「参考 $3.16」と三すくみになっていた。未確定は未確定と書く。 */}
+        <p className="mt-1 text-[11px] text-slate-500" data-testid="play-market-domestic-raw-price">
+          ベトナム国内原料の前期価格:{" "}
+          {view.vietnamDomesticPriorPrice > 0
+            ? `${view.vietnamDomesticPriorPrice.toFixed(3)} USD/kg`
+            : domesticReferencePriceUsdPerKg !== null && domesticReferencePriceUsdPerKg !== undefined
+              ? `未確定（最初の四半期は前期がありません。開始時の参考価格は ${domesticReferencePriceUsdPerKg.toFixed(2)} USD/kg）`
+              : "未確定（最初の四半期は前期がありません）"}
         </p>
       </section>
 
@@ -206,12 +234,59 @@ export function PlayerMarketPanel({ view }: { readonly view: PlayerMarketView })
 // Inventory
 // ---------------------------------------------------------------------
 
-export function PlayerInventoryPanel({ view }: { readonly view: PlayerInventoryView | null }) {
+/**
+ * 【テストプレイ指摘⑨・2026-11】確定した四半期がまだ無い Turn1 向けの期首在庫。
+ * 値は CompanyOwnState の確定ロット・確定契約を呼び出し側が集計したものをそのまま出す。
+ */
+export interface PlayerOpeningInventory {
+  readonly finishedGoodsTons: number;
+  /** 今期の生産に使える原料（status==="available"）。 */
+  readonly rawMaterialAvailableTons: number;
+  /** 輸送中・養殖中の原料（今期は使えない）。 */
+  readonly rawMaterialPendingTons: number;
+  readonly backlogTons: number;
+}
+
+export function PlayerInventoryPanel({
+  view,
+  opening,
+}: {
+  readonly view: PlayerInventoryView | null;
+  readonly opening?: PlayerOpeningInventory | null;
+}) {
   if (view === null) {
     return (
       <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="play-inventory-empty">
-        <h2 className="mb-1 text-sm font-semibold">在庫</h2>
-        <p className="text-xs text-slate-400">まだ確定した実績がありません。</p>
+        <h2 className="mb-1 text-sm font-semibold">在庫（期首時点）</h2>
+        <p className="mb-2 text-xs text-slate-400">
+          まだ確定した四半期が無いため、実績の在庫・稼働率は表示できません。下は現時点で手元にある在庫です。
+        </p>
+        {opening ? (
+          <div className="rounded border border-slate-700 bg-slate-900/40 p-2.5" data-testid="play-inventory-opening">
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <dt className="text-slate-400">完成品在庫</dt>
+              <dd className="text-right tabular-nums" data-testid="play-inventory-opening-finished-goods">
+                {tons(opening.finishedGoodsTons)}
+              </dd>
+              <dt className="text-slate-400">原料在庫（今期使える分）</dt>
+              <dd className="text-right tabular-nums" data-testid="play-inventory-opening-raw-available">
+                {tons(opening.rawMaterialAvailableTons)}
+              </dd>
+              <dt className="text-slate-400">原料在庫（輸送中・養殖中）</dt>
+              <dd className="text-right tabular-nums" data-testid="play-inventory-opening-raw-pending">
+                {tons(opening.rawMaterialPendingTons)}
+              </dd>
+              <dt className="text-slate-400">未履行残高（backlog）</dt>
+              <dd className="text-right tabular-nums" data-testid="play-inventory-opening-backlog">
+                {tons(opening.backlogTons)}
+              </dd>
+            </dl>
+            <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+              「今期使える分」と「輸送中・養殖中」は別です。Decision の INFO タブに出る「原料在庫 合計」は
+              この2つの合計であり、うち今期の生産に使えるのは前者だけです。
+            </p>
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -226,7 +301,9 @@ export function PlayerInventoryPanel({ view }: { readonly view: PlayerInventoryV
             <dd className="text-right tabular-nums" data-testid="play-inventory-finished-goods">
               {tons(view.finishedGoodsInventoryTons)}
             </dd>
-            <dt className="text-slate-400">原料在庫</dt>
+            {/* 【テストプレイ指摘④・2026-11】この値は status==="available" のロットだけの
+                合計で、輸送中・養殖中を含まない（INFO タブの「原料在庫 合計」とは別の意味）。 */}
+            <dt className="text-slate-400">原料在庫（使用可能分のみ）</dt>
             <dd className="text-right tabular-nums" data-testid="play-inventory-raw-material">
               {tons(view.rawMaterialInventoryTons)}
             </dd>
@@ -284,19 +361,51 @@ const SHARE_BAND_DOTS: Readonly<Record<ShareBand, string>> = {
 
 const TREND_MARK: Readonly<Record<ShareBandTrend, string>> = { up: "↑", down: "↓", flat: "→" };
 
+/** 混雑度が実際に価格へ効いている Run での説明文（従来の文言をそのまま使う）。 */
+const CROWDING_ACTIVE_NOTE =
+  "混雑度は5社の提示が需要に対してどれだけ集中していたかで、「混雑」のマスは価格が下押しされます。";
+
 const CROWDING_CHIP: Readonly<Record<CrowdingBand, string>> = {
   loose: "bg-emerald-900/60 text-emerald-200",
   normal: "bg-slate-800 text-slate-300",
   tight: "bg-amber-900/70 text-amber-200",
 };
 
-export function PlayerCompetitorPanel({ snapshot }: { readonly snapshot: PublicCompetitorSnapshot }) {
+export function PlayerCompetitorPanel({
+  snapshot,
+  crowdingPriceMarkdownActive,
+}: {
+  readonly snapshot: PublicCompetitorSnapshot;
+  /**
+   * 【テストプレイ指摘⑦・2026-11】この Run で市場集中による価格下落
+   * （Crowding）が有効か。従来は「混雑度のデータが1マスも無い」ことから
+   * 「この Run では価格下落が働かない」と書いていたが、Turn1 はそもそも前四半期の
+   * 市場結果が無いため混雑度が無いだけで、市場集中価格下落モデルの Run でも
+   * 誤った説明が出ていた。モデルの事実を渡して判定を差し替える
+   * （渡されない場合は従来どおりデータの有無で説明を出し分ける）。
+   */
+  readonly crowdingPriceMarkdownActive?: boolean | null;
+}) {
   const markets = [...new Set(snapshot.cells.map((c) => c.market))];
   const cellByKey = new Map(snapshot.cells.map((c) => [`${c.market}|${c.product}`, c]));
   // 【実機確認で判明】既定の販売モデル（legacy-waterfall-v1）には crowding が
   // 無いため、全15マスに「混雑度 取得不能」が並んで本来の情報が埋もれていた。
   // 1マスも混雑度が取れないときは、チップも説明文もまとめて出さない。
   const hasAnyCrowding = snapshot.cells.some((c) => c.crowding !== null);
+  /**
+   * 混雑度の説明文。Run の設定（crowdingPriceMarkdownActive）が渡されているときは
+   * それを根拠にする。「いまデータが無い」ことを「モデルに無い」と書き換えない。
+   */
+  const crowdingNote =
+    crowdingPriceMarkdownActive === true
+      ? hasAnyCrowding
+        ? CROWDING_ACTIVE_NOTE
+        : "この Run では市場集中による価格下落が働きますが、まだ市場結果が無いため混雑度を表示できません（次の Turn から表示されます）。"
+      : crowdingPriceMarkdownActive === false
+        ? "この Run の販売モデルでは、市場集中による価格下落は働きません。"
+        : hasAnyCrowding
+          ? CROWDING_ACTIVE_NOTE
+          : "混雑度の記録がこの Turn には無いため、表示していません。";
 
   return (
     <section className="rounded-lg border border-slate-700 bg-slate-900/60 p-3" data-testid="play-competitor">
@@ -405,9 +514,7 @@ export function PlayerCompetitorPanel({ snapshot }: { readonly snapshot: PublicC
         シェアは5社の中での割合で、帯（{SHARE_BAND_DOTS.leader} 首位級40%以上／{SHARE_BAND_DOTS.large} 大25%以上／
         {SHARE_BAND_DOTS.medium} 中10%以上／{SHARE_BAND_DOTS.small} 小）に丸めてあります。自社の行だけ正確な割合を併記しています。
         営業人員は10人単位の概数で、市場別の配置は公開されません。
-        {hasAnyCrowding
-          ? "混雑度は5社の提示が需要に対してどれだけ集中していたかで、「混雑」のマスは価格が下押しされます。"
-          : "この Run の販売モデルでは市場集中による価格下落が働かないため、混雑度は表示していません。"}
+        {crowdingNote}
       </p>
     </section>
   );

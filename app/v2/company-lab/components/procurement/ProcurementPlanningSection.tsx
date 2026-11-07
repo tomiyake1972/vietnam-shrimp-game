@@ -66,9 +66,28 @@ interface ProcurementPlanningSectionProps {
    * 省略時は中立値（全指数1.00）となり、本変更前の表示とビット単位で同一。
    */
   readonly costProjection?: StandardAiCostProjection;
+  /**
+   * 【テストプレイ指摘③・2026-11】開始時の国内原料参考価格（USD/HOSO換算kg）。
+   * 前四半期の清算価格がまだ無い Turn1 で、「未確定」としか書いていなかったのを
+   * INFO タブと同じ参考価格で記述するために受け取る。
+   * この値を Reference Price / Implied Offer Price の計算には使わない
+   * （置き換えると「前四半期実績」という意味が変わってしまうため、記述にしか使わない）。
+   */
+  readonly domesticOpeningReferencePriceUsdPerHosoEqKg?: number;
 }
 
-export default function ProcurementPlanningSection({ fixture, ownState, draft, onChange, disabled, period, publicInfo, turn, costProjection }: ProcurementPlanningSectionProps) {
+export default function ProcurementPlanningSection({
+  fixture,
+  ownState,
+  draft,
+  onChange,
+  disabled,
+  period,
+  publicInfo,
+  turn,
+  costProjection,
+  domesticOpeningReferencePriceUsdPerHosoEqKg,
+}: ProcurementPlanningSectionProps) {
   const tone = AREA_TONES.input;
 
   // decisionInputForForecastは「提出時に実際にエンジンへ渡るのと同じ形」（draftの生値ではない）。
@@ -171,7 +190,9 @@ export default function ProcurementPlanningSection({ fixture, ownState, draft, o
         <h2 className={`text-base font-bold ${tone.heading}`}>PROCUREMENT PLANNING</h2>
         {disabled ? (
           <span className="text-[11px] rounded px-1.5 py-0.5 bg-gray-800 text-gray-400 border border-gray-600/70" data-testid="procurement-planning-status-badge">
-            この四半期はすでに進行済みです。編集内容は次の四半期に反映されます。
+            {/* 【テストプレイ指摘⑨・2026-11】提出直後はまだ「進行済み」ではない。
+                入力が閉じている事実だけを書き、進行状況を断定しない。 */}
+            入力は締め切られています（編集できません）
           </span>
         ) : (
           <span className="text-[11px] rounded px-1.5 py-0.5 bg-sky-900/70 text-sky-200 border border-sky-700/70" data-testid="procurement-planning-status-badge">
@@ -194,6 +215,7 @@ export default function ProcurementPlanningSection({ fixture, ownState, draft, o
         pricing={procurementDomesticPricing}
         capacity={procurementCapacity}
         referenceSupplyKnown={procurementReferenceSupplyKnown}
+        openingReferencePriceUsdPerHosoEqKg={domesticOpeningReferencePriceUsdPerHosoEqKg}
       />
 
       {/* 4. Import Procurement */}
@@ -214,6 +236,7 @@ export default function ProcurementPlanningSection({ fixture, ownState, draft, o
         aquacultureCapacityTons={fixture.aquacultureCapacity}
         expectedProductionTons={aquacultureExpectedProductionTons}
         unitCostUsdPerHosoEqKg={procurementAquaculturePricing.unitCostUsdPerHosoEqKg}
+        intensityYieldBonusMax={RAW_MATERIALS_PARAMETERS_V1.aquaculture.intensityYieldBonusMax}
       />
 
       {/* 6. Auto Calculated Impact */}

@@ -231,6 +231,23 @@ export interface CompanyDecisionInput {
 // 3. 自動方針への入力（公開情報＋自社状態のみ。他社非公開計画・将来シナリオは一切含まない）
 // ---------------------------------------------------------------------
 
+/**
+ * 【テストプレイ指摘⑥⑦・2026-11】当期の成約配分で実際に効いている販売モデルの事実。
+ * 値はすべて runner.ts が解決済みの SalesParameters / CrowdingPolicy から転記する。
+ * 画面の説明文（VAP商品開発費が効くか・市場集中価格下落が働くか）の唯一の根拠。
+ */
+export interface SalesModelFacts {
+  /** 成約配分の方式。undefined の SalesParameters は legacyWaterfall として扱われる。 */
+  readonly marketAllocationMode: "legacyWaterfall" | "tieredSimultaneousAllocation";
+  /**
+   * 従来市場モデル（legacyWaterfall）での VAP能力の競争力ウェイト。
+   * 三層顧客価格モデルでは参照されない（差別化評価として別経路で効く）。
+   */
+  readonly vapCapabilityCompetitivenessWeight: number;
+  /** 市場集中による価格下落（Crowding）が有効か。 */
+  readonly crowdingPriceMarkdownActive: boolean;
+}
+
 /** 自動方針（autoPolicy.ts）が参照してよい、当該会社ぶんの状態（自社のみ）。 */
 export interface CompanyOwnState {
   readonly companyId: CompanyId;
@@ -312,6 +329,18 @@ export interface CompanyOwnState {
    * エンジンの実値で確認できるようにするために公開する。
    */
   readonly salesBaseCompetitivenessWeight?: number;
+  /**
+   * 【テストプレイ指摘⑥・2026-11】当期の成約配分で実際に使われる販売モデルの事実。
+   * salesBaseCompetitivenessWeight とまったく同じ規約で、runner.ts が
+   * salesParametersFor(state.config) / crowdingPolicyForModelId から読んだ値を
+   * そのまま公開するだけであり、ここで新しい判定・既定値を作らない。
+   *
+   * 【なぜ必要か】VAP商品開発費が成約に効くかどうか、市場集中による価格下落が
+   * 働くかどうかは、Run の販売モデルで決まる。画面側はそれを知る手段を持たず、
+   * 「データが無いこと」から誤った説明文（例:「このRunでは価格下落が働かない」）を
+   * 出していた。実値を渡して、画面がRunの設定どおりに説明できるようにする。
+   */
+  readonly salesModelFacts?: SalesModelFacts;
   /**
    * 【Test15新設】前四半期末までの自社工場ごとのPD稼働率（pdMechanizationState.ts
    * findPreviousQuarterPdUtilizationと同じ値。エントリが無い工場は既定値

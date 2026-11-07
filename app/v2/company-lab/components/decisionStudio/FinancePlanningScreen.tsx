@@ -79,6 +79,7 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
     accruedInterestPayableUsd,
     currentCashUsd,
     retainedEarningsUsd,
+    distributableEarningsUsd,
     maxDividendUsd,
     capexDraftThisQuarterPaymentUsd,
   } = vm;
@@ -147,7 +148,37 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
                 <dd className="text-right" data-testid="borrowing-capacity-tier">
                   {guide.creditTier}
                 </dd>
+                {/* 【テストプレイ指摘⑨・2026-11】「信用区分 A なのに余力 $0」の理由が
+                    画面で読めなかった。計算の内訳をそのまま並べる（すべて前四半期の確定記録）。 */}
+                <dt className="text-gray-400">担保による上限</dt>
+                <dd className="text-right tabular-nums" data-testid="borrowing-capacity-collateral-limit">
+                  {formatUsd(guide.collateralBasedLimitUsd)}
+                </dd>
+                <dt className="text-gray-400">稼ぐ力による上限</dt>
+                <dd className="text-right tabular-nums" data-testid="borrowing-capacity-earnings-limit">
+                  {formatUsd(guide.earningsBasedLimitUsd)}
+                </dd>
+                <dt className="text-gray-400">信用区分による自己資本倍率の上限</dt>
+                <dd className="text-right tabular-nums" data-testid="borrowing-capacity-tier-cap">
+                  {formatUsd(guide.creditTierCapUsd)}
+                </dd>
+                <dt className="text-gray-400">総枠（上記から決まる全体の上限）</dt>
+                <dd className="text-right tabular-nums" data-testid="borrowing-capacity-gross-limit">
+                  {formatUsd(guide.grossLimitUsd)}
+                </dd>
+                <dt className="text-gray-400">引く: すでに借りている残高</dt>
+                <dd className="text-right tabular-nums" data-testid="borrowing-capacity-existing-balance">
+                  {formatUsd(guide.existingLoanBalanceUsd)}
+                </dd>
               </dl>
+              {!guide.underwritingFrozen && guide.availableAdditionalCapacityUsd <= 0 ? (
+                <p className="mt-0.5 text-amber-300" data-testid="borrowing-capacity-zero-reason">
+                  総枠 {formatUsd(guide.grossLimitUsd)} をすでに借りている残高 {formatUsd(guide.existingLoanBalanceUsd)} が
+                  使い切っているため、追加で借りられる額は $0 です。信用区分が良くてもこの点は変わりません
+                  （信用区分は「自己資本倍率の上限」にしか関与しません）。残高を返済するか、担保（売掛金・在庫）と
+                  収益を増やすと総枠が上がります。
+                </p>
+              ) : null}
               {guide.underwritingFrozen && (
                 <p className="mt-0.5 text-rose-300" data-testid="borrowing-capacity-frozen">
                   新規の通常融資は現在停止しています。申請しても実行されません。
@@ -286,6 +317,18 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
           作らない（Player自身が資金余力を判断する設計を維持する）。 */}
       <CollapsibleSection title="配当" tone="input" testId="dividend-section" summaryRight={`配当可能額 ${formatUsd(maxDividendUsd)}`}>
         <p className="text-xs text-gray-400">今ターンに株主へ支払う配当額を決定します。前ターンまでに確定した現金・分配可能利益が上限です。</p>
+        {/* 【テストプレイ指摘⑨・2026-11】配当可能額が $0 のとき、理由がどこにも書いていなかった。
+            現金と分配可能利益のどちらが縛っているのかを、値をそのまま使って示す。 */}
+        {maxDividendUsd <= 0 ? (
+          <p className="rounded border border-amber-800/60 bg-amber-950/20 px-2 py-1 text-[11px] leading-snug text-amber-200" data-testid="dividend-zero-reason">
+            配当可能額は $0 です。
+            {distributableEarningsUsd <= 0
+              ? turn === 1
+                ? "分配可能利益が $0 のためです。最初の四半期はまだ利益が1四半期も確定していないため、配当に回せる利益がありません（現金があっても配当はできません）。"
+                : "分配可能利益が $0 以下のためです（過去の損失を埋め戻すまでは配当できません）。"
+              : "現金が $0 以下のためです。"}
+          </p>
+        ) : null}
 
         {lastQuarterDividendResult?.rejected && lastQuarterDividendResult.rejectionReason && (
           <div className="bg-rose-950/50 border border-rose-700/60 text-rose-200 rounded-lg px-3 py-2 text-xs" data-testid="dividend-last-rejection">
@@ -381,6 +424,15 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
               {formatUsd(existingLoanBalanceUsd)}
             </dd>
           </div>
+          {/* 【テストプレイ指摘⑨・2026-11】Turn1 の配当可能額が $0 になる理由が
+              画面で読めなかった。決まり方は min(現金, 分配可能利益) であり、
+              分配可能利益自体を並べればどちらが縛っているかが分かる。 */}
+          <div>
+            <dt className="text-gray-500">分配可能利益</dt>
+            <dd className="tabular-nums" data-testid="dividend-info-distributable-earnings">
+              {formatUsd(distributableEarningsUsd)}
+            </dd>
+          </div>
           <div>
             <dt className="text-gray-500">配当可能額（現金・分配可能利益の小さい方）</dt>
             <dd className="tabular-nums" data-testid="dividend-info-max-dividend">
@@ -406,13 +458,13 @@ export default function FinancePlanningScreen({ draft, onChange, disabled, vm, l
             </dd>
           </div>
           <div>
-            <dt className="text-gray-500">今Turンの早期返済希望額</dt>
+            <dt className="text-gray-500">今Turnの早期返済希望額</dt>
             <dd className="tabular-nums" data-testid="dividend-info-planned-prepayment">
               {formatUsd(draft.financingRequest.desiredPrepaymentUsd)}
             </dd>
           </div>
           <div>
-            <dt className="text-gray-500">今Turンの設備投資支払予定</dt>
+            <dt className="text-gray-500">今Turnの設備投資支払予定</dt>
             <dd className="tabular-nums" data-testid="dividend-info-planned-capex">
               {formatUsd(capexDraftThisQuarterPaymentUsd)}
             </dd>

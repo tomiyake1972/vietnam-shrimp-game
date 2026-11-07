@@ -46,6 +46,17 @@ export interface BorrowingCapacityGuide {
   readonly covenantBreach: boolean;
   /** 既存借入残高。 */
   readonly existingLoanBalanceUsd: number;
+  /**
+   * 【テストプレイ指摘⑨・2026-11】「信用区分は A なのに余力が $0」の理由を
+   * 画面で読めるようにするための内訳。いずれも financing/borrowingCapacity.ts が
+   * 記録した確定値をそのまま輬記する。信用区分は「自己資本倍率の上限」にしか
+   * 関与せず、総枠そのものは担保・収益・自己資本倍率のいずれかで決まる。
+   */
+  readonly collateralBasedLimitUsd: number;
+  readonly earningsBasedLimitUsd: number;
+  readonly creditTierCapUsd: number;
+  /** 既存借入控除前の総枠。 */
+  readonly grossLimitUsd: number;
 }
 
 /**
@@ -66,5 +77,9 @@ export function buildBorrowingCapacityGuide(
     underwritingFrozen: capacity.underwritingFrozen,
     covenantBreach: financingResult.covenant.anyBreach,
     existingLoanBalanceUsd: capacity.existingLoanBalanceUsd,
+    collateralBasedLimitUsd: capacity.collateralBasedLimitUsd,
+    earningsBasedLimitUsd: capacity.earningsBasedLimitUsd,
+    creditTierCapUsd: capacity.creditTierCapUsd,
+    grossLimitUsd: capacity.grossLimitUsd,
   };
 }

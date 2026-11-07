@@ -56,6 +56,16 @@ export default function OpeningCompanyStatePanel({ ownState, fixture, turn }: Op
   const backlogByMarketProduct = computeBacklogByMarketProduct(ownState.contracts, ownState.companyId);
   const rawMaterialGroups = groupRawMaterialLotsByAvailability(ownState.rawMaterialLots, ownState.companyId);
   const rawMaterialTotalTons = rawMaterialGroups.reduce((sum, g) => sum + g.quantityTons, 0);
+  /**
+   * 【テストプレイ指摘④・2026-11】このパネルの「原料在庫」は輸送中・養殖中を含む
+   * 全ロットの合計である一方、ふりかえりの「期末の原料在庫」は
+   * 使用可能（status==="available"）のぶんだけである。同じ語で別の意味を
+   * 指していたため、ここで内訳を分けて表示する（集計のしかたは変えない）。
+   */
+  const rawMaterialAvailableTons = rawMaterialGroups
+    .filter((g) => g.statuses.includes("available"))
+    .reduce((sum, g) => sum + g.quantityTons, 0);
+  const rawMaterialPendingTons = rawMaterialTotalTons - rawMaterialAvailableTons;
   const finishedGoodsByProduct = computeFinishedGoodsByProduct(ownState.finishedGoodsLots, ownState.companyId);
   const finishedGoodsTons = finishedGoodsByProduct.reduce((sum, g) => sum + g.quantityTons, 0);
 
@@ -69,7 +79,9 @@ export default function OpeningCompanyStatePanel({ ownState, fixture, turn }: Op
     { label: "未払利息", value: formatUsd(bs.accruedInterestPayableUsd) },
     { label: "利益剰余金", value: formatUsd(bs.retainedEarningsUsd) },
     { label: "受注残（未履行契約）", value: formatTons(backlogTons) },
-    { label: "原料在庫（合計）", value: formatTons(rawMaterialTotalTons) },
+    { label: "原料在庫 合計（使用可能＋輸送中・養殖中）", value: formatTons(rawMaterialTotalTons) },
+    { label: "うち 今期使用可能", value: formatTons(rawMaterialAvailableTons) },
+    { label: "うち 輸送中・養殖中（今期使えない）", value: formatTons(rawMaterialPendingTons) },
     { label: "完成品在庫", value: formatTons(finishedGoodsTons) },
   ];
 
@@ -228,7 +240,7 @@ export default function OpeningCompanyStatePanel({ ownState, fixture, turn }: Op
           <div>
             <h4 className="text-xs font-semibold text-gray-300 mb-1">② 正社員Worker 1人あたりの生産力（商品別）</h4>
             <p className="text-[11px] text-gray-500 mb-1">
-              1人あたりトン/四半期 = 基礎効率(6t、production/parameters.ts) × 出勤率 × 商品別技能水準。
+              1人あたりトン/四半期 = 基礎効率（6t） × 出勤率 × 商品別技能水準。
               残業・設備能力の上限は加味しない参考値（実際の生産はこれと設備能力の両方で制約される）。
             </p>
             <div className="overflow-x-auto">
@@ -273,9 +285,9 @@ export default function OpeningCompanyStatePanel({ ownState, fixture, turn }: Op
           <div>
             <h4 className="text-xs font-semibold text-gray-300 mb-1">④ 工場増設の基本ルール</h4>
             <p className="text-[11px] text-gray-500">
-              設備投資（新規案件の提案・支払スケジュール・完成後の固定資産振替）のロジックは
-              <code className="text-gray-400"> app/lib/v2/capex/** </code>
-              （特に <code className="text-gray-400">capex/projectLifecycle.ts</code>・<code className="text-gray-400">capex/parameters.ts</code>）を参照。
+              設備投資は、新規案件の提案 → 案件ごとの支払スケジュールに従った現金支出 →
+              完成・稼働開始後の固定資産振替と減価償却、という順序で処理されます。案件ごとの期間・金額・効果は
+              INVESTMENT タブの各カードに表示されます。
             </p>
           </div>
 
@@ -283,8 +295,8 @@ export default function OpeningCompanyStatePanel({ ownState, fixture, turn }: Op
           <div>
             <h4 className="text-xs font-semibold text-gray-300 mb-1">⑤ 財務ルール・現行のAR/AP決済サイト・借入返済スケジュール</h4>
             <p className="text-[11px] text-gray-500 mb-1">
-              資金繰り・与信・利息計算の詳細ロジックは <code className="text-gray-400">app/lib/v2/financing/**</code>
-              （<code className="text-gray-400">financing/bankUnderwriting.ts</code>・<code className="text-gray-400">financing/liquidityClose.ts</code>）を参照。
+              資金繰りは、当四半期の業績が確定したあとに銀行審査が行われ、承認された額がその四半期の資金として
+              使える、という順序で処理されます。審査の結果と理由は FINANCE タブに表示されます。
             </p>
             <ul className="text-[11px] text-gray-300 space-y-1 mb-2">
               <li>

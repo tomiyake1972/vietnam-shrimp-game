@@ -28,6 +28,8 @@ import CollapsibleSection from "../CollapsibleSection";
 import BacklogByProductPanel from "../BacklogByProductPanel";
 import { BacklogSemantics } from "../../../../lib/v2/companyLab/aiManagementMeeting/backlogSemantics";
 import { INFO_TABLE_HEAD_CLASS, NO_VALUE_TEXT } from "../panelStyles";
+import SalesSupplyCeilingPanel from "./SalesSupplyCeilingPanel";
+import { buildSalesSupplyCeiling } from "../../salesSupplyCeilingViewModel";
 import { InputFieldLabel, ReferenceValue } from "../FieldAnnotations";
 
 function formatUsd(value: number): string {
@@ -164,6 +166,12 @@ interface SalesPlanningScreenProps {
    * 省略時は比較を表示しない。
    */
   readonly effectiveCapacityByProduct?: Readonly<Partial<Record<Product, number>>>;
+  /**
+   * 【テストプレイ指摘①・2026-11】商品別の出荷可能な完成品在庫（HOSO換算t）。
+   * CompanyOwnState.finishedGoodsLots（status==="available"）の合計を呼び出し側が
+   * 渡す。供給上限の目安を出すためだけに使い、この画面では再集計しない。
+   */
+  readonly finishedGoodsTonsByProduct?: Readonly<Partial<Record<Product, number>>>;
 }
 
 export default function SalesPlanningScreen({
@@ -177,6 +185,7 @@ export default function SalesPlanningScreen({
   lastQuarterSalesAllocations,
   backlogSemantics,
   effectiveCapacityByProduct,
+  finishedGoodsTonsByProduct,
 }: SalesPlanningScreenProps) {
   const totals = computeSalesPlanTotals(draft.salesPlans);
   /**
@@ -189,6 +198,22 @@ export default function SalesPlanningScreen({
         return capacity !== undefined && totals.productTotalTons(product) > capacity;
       })
     : [];
+  /**
+   * 【テストプレイ指摘①・2026-11】入力欄のすぐ上に出す供給上限の目安。
+   * 在庫・実効能力・受注残・販売計画はいずれも既に確定・算出済みの値であり、
+   * ここでは足し引きの組み立てを salesSupplyCeilingViewModel へ委ねるだけ。
+   */
+  const supplyCeiling = buildSalesSupplyCeiling({
+    products: totals.products as readonly Product[],
+    plannedTonsByProduct: Object.fromEntries(totals.products.map((p) => [p, totals.productTotalTons(p)])),
+    finishedGoodsTonsByProduct: finishedGoodsTonsByProduct ?? {},
+    effectiveCapacityByProduct,
+    backlogByProduct: (backlogSemantics?.byProduct ?? []).map((b) => ({
+      product: b.product,
+      totalTons: b.totalTons,
+      dueNowTons: b.dueThisTurnTons + b.overdueTons,
+    })),
+  });
   const marketGroups = groupSalesPlansByMarket(draft.salesPlans);
   // 【UI-CLARITY-1 A-8】基準価格がゲーム開始時点の既知市場情報（Turn1）かどうか。
   const showsGameStartBasePrice =
@@ -217,6 +242,10 @@ export default function SalesPlanningScreen({
             : `営業人員 配員済み ${salesForceAllocation.assignedTotal}人 / 配員可能 ${salesForceAllocation.availableTotal}人`
         }
       >
+        {/* 【テストプレイ指摘①・2026-11】上限は入力欄より先に読めないと意味がない。
+            合計表（セクション最下部）ではなく、ここに置く。 */}
+        <SalesSupplyCeilingPanel ceiling={supplyCeiling} />
+
         {/* 営業人員の全体像。採用（次期から効く）と配員（当期の割り振り）を分けて示す。 */}
         <div
           data-testid="sales-force-allocation-summary"
@@ -530,7 +559,28 @@ export default function SalesPlanningScreen({
                 unit="人"
               />
               <ReferenceValue label="採用・減員の反映時期" kind="reference" value="次の四半期から" />
+              {/* 【テストプレイ指摘②・2026-11】減員の費用は、減員数を入れたあとにしか
+                  出ていなかった。「減員にはコストがかからない」と読めてしまうため、
+                  入力前から単価を常に出す（値は finance/parameters.ts の確定値）。 */}
+              <ReferenceValue
+                label="営業人員1人あたりの四半期給与"
+                kind="reference"
+                value={<span data-testid="sales-force-quarterly-salary">{formatUsd(salesForceHiring.quarterlySalaryUsdPerPerson)}</span>}
+                unit="／人・四半期"
+              />
+              <ReferenceValue
+                label={`退職金の単価（四半期給与${salesForceHiring.severanceQuarters}四半期分）`}
+                kind="reference"
+                value={<span data-testid="sales-force-severance-unit-cost">{formatUsd(salesForceHiring.severanceUnitCostUsd)}</span>}
+                unit="／人（減員を決めた四半期に一括）"
+              />
             </div>
+            <p className="mt-1 text-[11px] leading-snug text-amber-300/90" data-testid="sales-force-layoff-cost-note">
+              減員は無料ではありません。減員を決めた四半期に1人あたり {formatUsd(salesForceHiring.severanceUnitCostUsd)} の退職金が
+              販管費と現金支出として一括で発生し、さらにその四半期は減員対象者の給与 {formatUsd(salesForceHiring.quarterlySalaryUsdPerPerson)} も
+              満額かかります（＝減員を決めた四半期の負担は1人あたり {formatUsd(salesForceHiring.severanceUnitCostUsd + salesForceHiring.quarterlySalaryUsdPerPerson)}）。
+              人数が減って給与が下がるのは次の四半期からです。
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -589,7 +639,7 @@ export default function SalesPlanningScreen({
             {salesForceHiring.plannedLayoffCount > 0 && (
               <div className="rounded-lg border border-gray-700/60 bg-gray-900/50 px-3 py-2">
                 <ReferenceValue
-                  label="今回発生する退職金（当期一括）"
+                  label={`今回発生する退職金（当期一括・${formatUsd(salesForceHiring.severanceUnitCostUsd)}／人 × ${salesForceHiring.effectiveLayoffCount}人）`}
                   kind="derived"
                   value={
                     <span data-testid="sales-force-hiring-severance-cost">

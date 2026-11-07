@@ -58,12 +58,17 @@ export default function PreFinancingLiquidityPanel({ cash, effectivePurchaseInte
               </div>
             </div>
             <div className="rounded border border-gray-700/60 bg-gray-900/40 px-2.5 py-2">
-              <div className="text-[11px] text-gray-400">Funding Gap</div>
+              {/* 【テストプレイ指摘⑨・2026-11】この値は「買付予定額 − 買付へ回せる資金」なので、
+                  資金が足りているときは構造的にマイナスになる。「Funding Gap −$12,345」という表示は
+                  不足なのか余裕なのか読めないため、符号ではなく言葉で書く（値の計算は変えない）。 */}
+              <div className="text-[11px] text-gray-400">資金不足額（国内買付）</div>
               <div
                 className={`mt-0.5 text-sm tabular-nums ${cash.domesticProcurementFundingGapUsd > 0 ? "text-rose-300" : "text-gray-100"}`}
                 data-testid="pre-financing-funding-gap"
               >
-                {formatUsd(cash.domesticProcurementFundingGapUsd)}
+                {cash.domesticProcurementFundingGapUsd > 0
+                  ? formatUsd(cash.domesticProcurementFundingGapUsd)
+                  : `不足なし（余裕 ${formatUsd(-cash.domesticProcurementFundingGapUsd)}）`}
               </div>
             </div>
             <div className="rounded border border-gray-700/60 bg-gray-900/40 px-2.5 py-2">

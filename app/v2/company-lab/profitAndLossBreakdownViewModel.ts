@@ -109,9 +109,14 @@ export function buildProfitAndLossBreakdown(input: BuildProfitAndLossBreakdownIn
    * 勝手に按分すると推計になるため、発生ベースであることを明記して別掲する。
    */
   const rawMaterialIncurredRows: ProfitAndLossRow[] = [
-    { key: "mfg-domestic", label: "国内買付", amountUsd: unwrapUsd(mfg.domesticRawMaterialCost), indent: true },
-    { key: "mfg-import", label: "輸入", amountUsd: unwrapUsd(mfg.importedRawMaterialCost), indent: true },
-    { key: "mfg-aquaculture", label: "自社養殖", amountUsd: unwrapUsd(mfg.aquacultureRawMaterialCost), indent: true },
+    {
+      key: "mfg-domestic",
+      label: "うち 国内原料（期首在庫からの投入を含む）",
+      amountUsd: unwrapUsd(mfg.domesticRawMaterialCost),
+      indent: true,
+    },
+    { key: "mfg-import", label: "うち 輸入原料", amountUsd: unwrapUsd(mfg.importedRawMaterialCost), indent: true },
+    { key: "mfg-aquaculture", label: "うち 自社養殖原料", amountUsd: unwrapUsd(mfg.aquacultureRawMaterialCost), indent: true },
   ];
   const laborIncurredRows: ProfitAndLossRow[] = [
     { key: "mfg-regular", label: "正規", amountUsd: unwrapUsd(mfg.regularLaborCost), indent: true },
@@ -124,13 +129,40 @@ export function buildProfitAndLossBreakdown(input: BuildProfitAndLossBreakdownIn
   const sgaLogistics = sumCostRecords(result, ["sellingLogistics"]);
   const sgaProcurement = sumCostRecords(result, ["procurementSalary"]);
   const sgaAdmin = sumCostRecords(result, ["adminFixed"]);
-  const sgaResidual = sga - (sgaSalesForce + sgaLogistics + sgaProcurement + sgaAdmin);
+  /**
+   * 【テストプレイ指摘⑥・2026-11】VAP商品開発費は販管費に入っているが、
+   * コスト記録（costRecords）の勘定科目を持たない（finance/types.ts の CostAccount に
+   * 該当する値が無い）。そのため従来は全額が「その他（内訳に現れない差分）」へ
+   * 落ち、$250k の投資がどこへ行ったのか読めなかった。
+   *
+   * この額はエンジンが確定値として持っている2つの値の差で一意に決まる:
+   *   contributionMargin.fixedSellingAdminCost = adminFixed + vapProductDevelopmentSpendUsd
+   *   （finance/quarterClose.ts）
+   * よって vapProductDevelopmentSpendUsd = fixedSellingAdminCost − adminFixed。
+   * 按分・推計はしていない（確定値同じの引き算のみ）。古い保存データで
+   * fixedSellingAdminCost が無い場合は行を出さず、従来どおり差分行へ残す。
+   */
+  const fixedSellingAdminCostRaw = result.contributionMargin?.fixedSellingAdminCost;
+  const fixedSellingAdminCost = fixedSellingAdminCostRaw === undefined ? null : unwrapUsd(fixedSellingAdminCostRaw);
+  const sgaVapProductDevelopment = fixedSellingAdminCost === null ? null : fixedSellingAdminCost - sgaAdmin;
+  const sgaVapProductDevelopmentShown = sgaVapProductDevelopment !== null && Math.abs(sgaVapProductDevelopment) > 0.005;
+  const sgaResidual =
+    sga - (sgaSalesForce + sgaLogistics + sgaProcurement + sgaAdmin + (sgaVapProductDevelopmentShown ? (sgaVapProductDevelopment as number) : 0));
   const sgaRows: ProfitAndLossRow[] = [
     { key: "sga-salesforce", label: "営業人件費（退職金を含む）", amountUsd: sgaSalesForce, indent: true },
     { key: "sga-logistics", label: "物流・輸出費用", amountUsd: sgaLogistics, indent: true },
     { key: "sga-procurement", label: "調達人件費", amountUsd: sgaProcurement, indent: true },
     { key: "sga-admin", label: "一般管理固定費", amountUsd: sgaAdmin, indent: true },
   ];
+  if (sgaVapProductDevelopmentShown) {
+    sgaRows.push({
+      key: "sga-vap-product-development",
+      label: "VAP商品開発費",
+      amountUsd: sgaVapProductDevelopment as number,
+      indent: true,
+      note: "全額が当期の販管費・現金支出です（資産計上・償却はありません）。",
+    });
+  }
   if (Math.abs(sgaResidual) > 0.005) {
     sgaRows.push({
       key: "sga-residual",
@@ -162,9 +194,9 @@ export function buildProfitAndLossBreakdown(input: BuildProfitAndLossBreakdownIn
     ...costOfSalesRows,
     {
       key: "raw-incurred-heading",
-      label: "（参考）当期に発生した原料費の内訳 — 発生ベース",
+      label: "（参考）当期に投入した原料の原価（調達元別）",
       amountUsd: unwrapUsd(mfg.domesticRawMaterialCost) + unwrapUsd(mfg.importedRawMaterialCost) + unwrapUsd(mfg.aquacultureRawMaterialCost),
-      note: "在庫を挟むため、上の「原料費（販売分）」とは一致しません。",
+      note: "当期の買付額ではありません。当期に生産へ投入した原料の原価で、期首在庫から投入したぶんも含みます。在庫を挟むため「原料費（販売分）」とも一致しません。",
     },
     ...rawMaterialIncurredRows,
     {

@@ -62,6 +62,26 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
   const [pdMechanizationTargetFactoryId, setPdMechanizationTargetFactoryId] = useState<string>(ownState.effectiveFactories[0]?.factoryId ?? "");
   const pdMechanizationBlockedForSelectedFactory =
     pdMechanizationTargetFactoryId !== "" && isPdMechanizationBlockedForFactory(draft, ownState.capexState.portfolio.projects, pdMechanizationTargetFactoryId);
+  /**
+   * 【テストプレイ指摘⑥・2026-11】VAP商品開発費がこの Run で成約に効くか。
+   *
+   * 従来の画面は「成約競争力（vapCapability）へ接続します」とだけ書いていた。
+   * しかし vapCapability ウェイトは従来市場モデルだけの経路であり、三層顧客価格モデルの
+   * Run ではこのウェイトは 0 である一方、VAPの「差別化」評価として別経路で効く。
+   * ウェイトだけを読んで「投資しても無意味」と誤読されたため、どの経路で効くのかを書く。
+   */
+  const vapCapabilityEffectNote = ((): string | null => {
+    const facts = ownState.salesModelFacts;
+    if (facts === undefined) return null;
+    if (facts.marketAllocationMode === "tieredSimultaneousAllocation") {
+      return "この Run は三層顧客価格モデルです。VAP商品開発スコアは、VAPの「差別化」評価として成約配分に効きます（プレミアム層ほど強く効きます）。HOSO・PDの成約には効きません。";
+    }
+    if (facts.vapCapabilityCompetitivenessWeight <= 0) {
+      return "この Run は従来市場モデルで、VAP能力の成約競争力ウェイトが 0% です。この Run では、VAP商品開発スコアを上げても成約配分は変わりません（販管費と現金流出だけが発生します）。";
+    }
+    return `この Run は従来市場モデルで、VAP能力の成約競争力ウェイトは ${(facts.vapCapabilityCompetitivenessWeight * 100).toFixed(1)}% です（VAPの行にのみ効きます）。`;
+  })();
+
   const pdMechanizationExistingProjectForFactory = (factoryId: string) =>
     ownState.capexState.portfolio.projects.find((p) => p.projectType === "pdMechanization" && p.targetFactoryId === factoryId && p.status !== "cancelled");
 
@@ -359,9 +379,17 @@ export default function InvestmentPlanningScreen({ fixture, ownState, draft, onC
         summaryRight={`現在スコア ${currentVapProductDevelopmentScore.toFixed(1)} / 100`}
       >
         <p className="text-[11px] text-gray-400">
-          VAP商品開発スコアは、成約競争力（vapCapability）へのみ接続します（市場価格観測等の他の共有データは書き換えません）。
+          VAP商品開発スコアは、VAPの成約競争力へのみ接続します（市場価格観測等の他の共有データは書き換えません）。
           $0を選択した場合でも、毎四半期一定割合で中立値50へ向かって減衰します（投資を止めると徐々にスコアが下がります）。
         </p>
+        {/* 【テストプレイ指摘⑥・2026-11】「この Run では効くのか」が画面で分からなかった。
+            効き方は販売モデルで変わるため、エンジンが当期実際に使っている事実
+            （ownState.salesModelFacts）をそのまま読んで記述する。渡されていない旧データでは何も書かない。 */}
+        {vapCapabilityEffectNote ? (
+          <p className="text-[11px] leading-snug text-amber-300/90" data-testid="vap-capability-effect-note">
+            {vapCapabilityEffectNote}
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-end gap-4">
           <label className="flex flex-col gap-1 text-xs text-gray-300">
             <InputFieldLabel name="VAP商品開発費" unit="USD・4段階から選択" target="全社・当四半期" />

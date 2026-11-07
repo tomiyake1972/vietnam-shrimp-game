@@ -440,13 +440,23 @@ function buildProcurementSection(
       note: unwrapUnit(summary.aquacultureGrowingQuantity) > 0 ? `育成中 ${tons(unwrapUnit(summary.aquacultureGrowingQuantity))}` : undefined,
       testId: "review-procurement-aquaculture",
     },
-    { label: "期末の原料在庫", result: tons(unwrapUnit(summary.rawMaterialInventory)), testId: "review-procurement-inventory" },
+    {
+      /**
+       * 【テストプレイ指摘④・2026-11】summary.rawMaterialInventory は
+       * status==="available" のロットだけの合計であり、輸送中・養殖中を含まない
+       * （runner.ts 参照）。INFO タブの「原料在庫 合計」とは別の意味なので、
+       * 同じ語で呼ばない。値自体はそのままで、ラベルを正確にする。
+       */
+      label: "期末の原料在庫（使用可能分のみ。輸送中・養殖中を含みません）",
+      result: tons(unwrapUnit(summary.rawMaterialInventory)),
+      testId: "review-procurement-inventory",
+    },
   ];
 
   return {
     key: "procurement",
     title: "調達活動（指示 → 結果）",
-    headline: `国内買付 ${tons(domesticActual)} ／ 輸入到着 ${tons(importArrived)} ／ 期末原料在庫 ${tons(unwrapUnit(summary.rawMaterialInventory))}`,
+    headline: `国内買付 ${tons(domesticActual)} ／ 輸入到着 ${tons(importArrived)} ／ 期末原料在庫（使用可能分） ${tons(unwrapUnit(summary.rawMaterialInventory))}`,
     tone: domesticRatio !== undefined && domesticRatio < 0.95 ? "warn" : "neutral",
     lines,
   };

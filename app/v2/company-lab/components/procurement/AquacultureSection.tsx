@@ -24,6 +24,13 @@ interface AquacultureSectionProps {
   /** rawMaterials/aquaculture.ts の calculateExpectedProduction の結果。行が無ければundefined。 */
   readonly expectedProductionTons: number | undefined;
   readonly unitCostUsdPerHosoEqKg: number;
+  /**
+   * 【テストプレイ指摘⑨・2026-11】養殖強度による歩留まりの上限割合
+   * （rawMaterials/parameters.ts の intensityYieldBonusMax）。
+   * 「池入れ 4,000t がなぜ収穫 5,200t になるのか」が画面で分からなかったため、
+   * 式をそのまま書くために受け取る。計算はここで行わない（表示専用）。
+   */
+  readonly intensityYieldBonusMax?: number;
 }
 
 export default function AquacultureSection({
@@ -33,6 +40,7 @@ export default function AquacultureSection({
   aquacultureCapacityTons,
   expectedProductionTons,
   unitCostUsdPerHosoEqKg,
+  intensityYieldBonusMax,
 }: AquacultureSectionProps) {
   if (draft.aquacultureStockingPlans.length === 0) return null;
   const tone = AREA_TONES.input;
@@ -124,6 +132,17 @@ export default function AquacultureSection({
           </tbody>
         </table>
       </div>
+      {/* 【テストプレイ指摘⑨・2026-11】換算の式を実値で書く。
+          値はすでに画面上にある入力値とパラメータだけで、新しい計算はしない。 */}
+      {intensityYieldBonusMax !== undefined ? (
+        <p className="mt-2 text-[11px] leading-snug text-gray-400" data-testid="aquaculture-expected-formula">
+          期待生産量の求め方: 池入れ予定量 {formatHosoEqTons(entry.plannedStockingQuantity)} × （1 ＋{" "}
+          {intensityYieldBonusMax.toFixed(2)} × 養殖強度 {entry.aquacultureIntensity.toFixed(2)}） ={" "}
+          {expectedProductionTons !== undefined ? formatHosoEqTons(expectedProductionTons) : NO_VALUE_TEXT}。
+          養殖強度を上げると歩留まりが最大 {(intensityYieldBonusMax * 100).toFixed(0)}% まで増えますが、
+          同時に疾病に弱くなり、収穫時の生残率が下がります（上の期待生産量にはその影響がまだ入っていません）。
+        </p>
+      ) : null}
       <p className="mt-2 text-[11px] text-gray-500">
         Expected Production / Harvestは池入れ予定量・養殖強度から求めた疾病圧力適用前の期待生産量です。実際の収穫量は収穫時点の疾病圧力・バイオセキュリティ水準によって変動するため、Confirmedではありません。
       </p>

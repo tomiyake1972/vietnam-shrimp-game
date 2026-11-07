@@ -25,6 +25,11 @@ interface DomesticProcurementSectionProps {
   readonly pricing: DomesticPricingViewModel | null;
   readonly capacity: ProcurementCapacityViewModel;
   readonly referenceSupplyKnown: boolean;
+  /**
+   * 【テストプレイ指摘③・2026-11】開始時の国内原料参考価格。
+   * pricing が null（前四半期の清算価格がまだ無い）のときの案内にだけ使う。
+   */
+  readonly openingReferencePriceUsdPerHosoEqKg?: number;
 }
 
 const BINDING_LABEL: Readonly<Record<ProcurementCapacityBindingConstraint, string>> = {
@@ -45,6 +50,7 @@ export default function DomesticProcurementSection({
   pricing,
   capacity,
   referenceSupplyKnown,
+  openingReferencePriceUsdPerHosoEqKg,
 }: DomesticProcurementSectionProps) {
   const tone = AREA_TONES.input;
   return (
@@ -120,7 +126,19 @@ export default function DomesticProcurementSection({
               </tbody>
             </table>
           ) : (
-            <p className="text-xs text-gray-500">参考国内原料価格が未確定です（turn1等）。{NO_VALUE_TEXT}</p>
+            /* 【テストプレイ指摘③・2026-11】従来は「未確定です（turn1等）」だけで、
+               INFO タブには参考価格が出ていたため画面間で話が合わなかった。
+               なぜ未確定なのかと、どこを見ればよいかを書く。 */
+            <div className="space-y-1 text-xs text-gray-500" data-testid="pricing-domestic-unavailable">
+              <p>前四半期の国内原料清算価格がまだありません（最初の四半期は前期がないためです）。{NO_VALUE_TEXT}</p>
+              {openingReferencePriceUsdPerHosoEqKg !== undefined ? (
+                <p className="text-teal-300" data-testid="pricing-domestic-opening-reference">
+                  最初の四半期の目安は「国内原料参考価格 {formatUsdPerHosoEqKg(openingReferencePriceUsdPerHosoEqKg)}」です。
+                  この価格以上を提示すれば、通常条件で必要量を購入できます（供給量・調達処理能力・
+                  シェア上限の範囲内）。詳しい条件は INFO タブの「市場情報」にあります。
+                </p>
+              ) : null}
+            </div>
           )}
         </div>
 

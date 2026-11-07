@@ -78,7 +78,13 @@ test("UIC1-3 (A-4): 投資カードに単価が描画される", () => {
 test("UIC1-4 (A-2): 排水・環境設備は便益が無いことを明言する", () => {
   const note = PROJECT_EFFECT_DISCLOSURES.environmentalEquipment.notImplementedNote ?? "";
   assert.ok(note.includes("この投資に便益はありません"), "便益が無いことが明言されていない");
-  assert.ok(note.includes("投資しないでください"), "研修での扱いが書かれていない");
+  assert.ok(note.includes("見込める効果はありません"), "結論（効果が無い）が書かれていない");
+  /**
+   * 【テストプレイ指摘⑧・2026-11】従来はここに「研修では、この設備には投資しないで
+   * ください。」という運営向けの指示文が入っており、受講者の画面にそのまま出ていた。
+   * 事実（効果が無いこと）は残し、運営の指示は画面から外す。
+   */
+  assert.ok(!note.includes("研修"), "運営向けの指示文が受講者に見える文言へ戻っている");
   assert.ok(renderInvestment().includes("この投資に便益はありません"), "画面に描画されていない");
 });
 
