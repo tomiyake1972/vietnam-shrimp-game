@@ -139,16 +139,16 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
   };
 
   if (error && !session) {
-    return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center"><p className="text-red-400">{error}</p></div>;
+    return <div className="min-h-screen bg-gray-900 text-ink flex items-center justify-center"><p className="text-red-400">{error}</p></div>;
   }
-  if (!session) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center"><p>読み込み中...</p></div>;
+  if (!session) return <div className="min-h-screen bg-gray-900 text-ink flex items-center justify-center"><p>読み込み中...</p></div>;
 
   const showGmTestOperations = !isProduction && session.isTestGame;
   const submittedCount = submissionStatus?.submittedCount ?? 0;
   const allSubmitted = submissionStatus?.allSubmitted ?? false;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="min-h-screen bg-gray-900 text-ink p-8">
       <div className="max-w-4xl mx-auto">
         <div className="flex flex-wrap justify-between items-center gap-2 mb-6">
           <div>
@@ -162,7 +162,7 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
             </div>
             <p className="text-gray-400 text-sm">{session.title} ｜ {session.currentYear}年 第{session.currentQuarter}四半期</p>
           </div>
-          <Link href="/gm" className="text-gray-400 hover:text-white text-sm">← GMコンソール</Link>
+          <Link href="/gm" className="text-gray-400 hover:text-ink text-sm">← GMコンソール</Link>
         </div>
 
         {showGmTestOperations && (
@@ -174,7 +174,7 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
                 <Link
                   key={id}
                   href={`/company/${id}?game=${gameCode}&mode=gm-test`}
-                  className="px-4 py-2 bg-purple-700 hover:bg-purple-600 rounded-lg text-sm font-semibold"
+                  className="px-4 py-2 bg-purple-700 hover:bg-purple-600 rounded-lg text-sm font-semibold text-white"
                 >
                   {COMPANIES[id].name}を操作
                 </Link>
@@ -192,7 +192,7 @@ export default function GmGameConsole({ gameCode, isProduction }: Props) {
               <span className={`text-sm font-semibold ${allSubmitted ? "text-green-400" : "text-gray-400"}`}>
                 {submittedCount} / {COMPANY_IDS.length} 社提出済み
               </span>
-              <button onClick={() => setRefreshTick((t) => t + 1)} className="text-xs text-gray-400 hover:text-white">🔄 更新</button>
+              <button onClick={() => setRefreshTick((t) => t + 1)} className="text-xs text-gray-400 hover:text-ink">🔄 更新</button>
             </div>
           </div>
           {allSubmitted && (
@@ -417,7 +417,7 @@ function CompanyDetailCard({ id, r, decision }: { id: CompanyId; r: CompanyTurnR
                 <PLRow label="営業CF（当期純利益）" value={signed(r.netIncome)} />
                 <PLRow label="財務CF（借入±返済±増資）" value={signed(financingCF)} />
                 <tr><td colSpan={2} className="border-t border-gray-700 pt-1" /></tr>
-                <PLRow label="期末現金" value={money(s.cash)} bold color={cashNeg ? "text-red-400" : "text-white"} />
+                <PLRow label="期末現金" value={money(s.cash)} bold color={cashNeg ? "text-red-400" : "text-ink"} />
                 <PLRow label="　現金増減" value={signed(cashChange)} color={cashChange >= 0 ? "text-green-300" : "text-red-400"} />
               </tbody>
             </table>
@@ -511,7 +511,7 @@ function CompanyDetailCard({ id, r, decision }: { id: CompanyId; r: CompanyTurnR
                   <tr className="border-t border-gray-700">
                     <td className="text-gray-300 font-semibold pt-1">合計</td>
                     <td />
-                    <td className="text-right text-white font-semibold pt-1">{money(r.revenue)}</td>
+                    <td className="text-right text-ink font-semibold pt-1">{money(r.revenue)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -635,7 +635,7 @@ function PLRow({ label, value, bold, sub, color }: { label: string; value: strin
   return (
     <tr>
       <td className={`py-0.5 ${sub ? "pl-3 text-gray-500" : bold ? "text-gray-300 font-semibold" : "text-gray-400"}`}>{label}</td>
-      <td className={`text-right py-0.5 ${color ?? (bold ? "text-white font-semibold" : "text-gray-300")}`}>{value}</td>
+      <td className={`text-right py-0.5 ${color ?? (bold ? "text-ink font-semibold" : "text-gray-300")}`}>{value}</td>
     </tr>
   );
 }
@@ -643,7 +643,7 @@ function BSRow({ label, value, bold, neg, alert }: { label: string; value: strin
   return (
     <div className="flex justify-between py-0.5">
       <span className={bold ? "text-gray-300 font-semibold" : "text-gray-500"}>{label}</span>
-      <span className={alert ? "text-red-400 font-semibold" : neg ? "text-orange-400" : bold ? "text-white font-semibold" : "text-gray-300"}>{neg ? `△${value}` : value}</span>
+      <span className={alert ? "text-red-400 font-semibold" : neg ? "text-orange-400" : bold ? "text-ink font-semibold" : "text-gray-300"}>{neg ? `△${value}` : value}</span>
     </div>
   );
 }
@@ -724,7 +724,7 @@ function GameLogEntry({ quarterKey, result, decisions }: { quarterKey: string; r
                             </td>
                           );
                         })}
-                        <td className="py-1.5 px-2 text-white font-semibold">${r2(r.revenue).toFixed(2)}M</td>
+                        <td className="py-1.5 px-2 text-ink font-semibold">${r2(r.revenue).toFixed(2)}M</td>
                         <td className={`py-1.5 px-2 font-semibold ${r.netIncome >= 0 ? "text-green-400" : "text-red-400"}`}>
                           {r.netIncome >= 0 ? "+" : ""}${r2(r.netIncome).toFixed(2)}M
                         </td>

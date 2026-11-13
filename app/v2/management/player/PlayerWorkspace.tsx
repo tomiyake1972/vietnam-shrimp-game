@@ -123,7 +123,7 @@ export function PlayerWorkspace() {
           <Link
             href={consoleHref}
             data-testid="workspace-back-to-console-fallback"
-            className="mt-3 inline-block rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600"
+            className="mt-3 inline-block rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600 text-white"
           >
             経営管制室へ戻る
           </Link>
@@ -697,7 +697,7 @@ function PlayerWorkspaceReady({ runId, companyId, session, fixture, entry, conso
                   type="button"
                   onClick={handleGoToConfirm}
                   data-testid="workspace-review-decision"
-                  className="rounded bg-sky-700 px-4 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40"
+                  className="rounded bg-sky-700 px-4 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40 text-white"
                 >
                   意思決定を確認
                 </button>

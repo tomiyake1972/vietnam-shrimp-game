@@ -285,7 +285,7 @@ export function SetupScreen() {
                 >
                   <p className="text-sm font-semibold text-slate-100">
                     {s.definition.title}
-                    {isBaseline ? <span className="ml-1.5 rounded bg-sky-700 px-1.5 py-0.5 text-[10px] font-semibold">標準Scenario</span> : null}
+                    {isBaseline ? <span className="ml-1.5 rounded bg-sky-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">標準Scenario</span> : null}
                   </p>
                   <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{s.definition.publicBackground}</p>
                   <p className="mt-1 text-[10px] text-slate-500">
@@ -503,7 +503,7 @@ export function SetupScreen() {
           onClick={handleStart}
           disabled={starting || hasInvalidVisionTarget}
           data-testid="setup-start-button"
-          className="w-full rounded bg-emerald-700 px-4 py-3 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40"
+          className="w-full rounded bg-emerald-700 px-4 py-3 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40 text-white"
         >
           この条件でゲーム開始
         </button>

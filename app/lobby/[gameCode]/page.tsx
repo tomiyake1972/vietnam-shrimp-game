@@ -15,10 +15,10 @@ export default function LobbyPage({ params }: { params: Promise<{ gameCode: stri
       fetch(`/api/game/${gameCode}`).then(r => r.json()).then(d => setSession(d.session));
     });
   }, [params]);
-  if (!session) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center"><p>読み込み中...</p></div>;
+  if (!session) return <div className="min-h-screen bg-gray-900 text-ink flex items-center justify-center"><p>読み込み中...</p></div>;
   const humanCompanies = Object.entries(session.players).filter(([,type]) => type === "human").map(([id]) => id as CompanyId);
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-8">
+    <div className="min-h-screen bg-gray-900 text-ink flex flex-col items-center justify-center p-8">
       <div className="max-w-lg w-full">
         <div className="text-center mb-8">
           <p className="text-gray-400 text-sm mb-1">ゲームコード</p>
@@ -34,8 +34,8 @@ export default function LobbyPage({ params }: { params: Promise<{ gameCode: stri
               return (
                 <button key={id} onClick={() => router.push(`/company/${id}?game=${gameCode}`)} className={`w-full ${colorMap[company.color]} rounded-xl p-4 text-left transition-colors`}>
                   <div className="flex justify-between items-center">
-                    <div><span className="font-bold text-lg">{company.name}</span><span className="ml-3 text-white/80">{company.fullName}</span></div>
-                    <span className="text-white/70 text-sm">現金 ${company.cash}M</span>
+                    <div><span className="font-bold text-lg">{company.name}</span><span className="ml-3 text-ink/80">{company.fullName}</span></div>
+                    <span className="text-ink/70 text-sm">現金 ${company.cash}M</span>
                   </div>
                 </button>
               );

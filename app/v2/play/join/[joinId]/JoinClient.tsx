@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import ShrimpMark from "../../../../components/ShrimpMark";
 
 interface JoinClientProps {
   readonly joinId: string;
@@ -63,7 +64,8 @@ export default function JoinClient({ joinId }: JoinClientProps) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center gap-3 px-4">
+      <ShrimpMark size={72} />
       <p className="text-sm text-slate-400" data-testid="play-workspace-status" data-status="JOINED">
         参加処理中…
       </p>

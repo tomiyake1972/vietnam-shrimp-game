@@ -549,7 +549,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
                   <button
                     onClick={handleSaveDraft}
                     disabled={busy}
-                    className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-2 text-sm"
+                    className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed text-ink font-semibold rounded-lg px-4 py-2 text-sm"
                   >
                     {savePending ? "保存中…" : "下書きを保存"}
                   </button>
@@ -603,7 +603,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
                   <button
                     onClick={() => setConfirmingProcess(false)}
                     disabled={busy}
-                    className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 text-white font-semibold rounded-lg px-4 py-2 text-sm"
+                    className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 text-ink font-semibold rounded-lg px-4 py-2 text-sm"
                   >
                     キャンセル
                   </button>
@@ -623,7 +623,7 @@ function PlayerScreenClientInner({ viewModel }: PlayerScreenClientProps) {
               <button
                 onClick={handleWithdrawSubmission}
                 disabled={busy}
-                className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-2 text-sm"
+                className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed text-ink font-semibold rounded-lg px-4 py-2 text-sm"
               >
                 {withdrawPending ? "取り消し中…" : "編集に戻す（提出を取り消す）"}
               </button>

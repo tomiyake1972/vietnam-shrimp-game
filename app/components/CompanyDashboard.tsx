@@ -99,17 +99,17 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
     : "/";
   const periodLabel = session ? `${session.currentYear}年 第${session.currentQuarter}四半期` : "2015年 第1四半期";
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-screen bg-gray-900 text-ink">
       <div className={`${colorBg[profile.color]} px-6 py-4`}>
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           <div>
-            <p className="text-white/55 text-xs font-semibold uppercase tracking-widest mb-0.5">企業経営画面</p>
+            <p className="text-ink/55 text-xs font-semibold uppercase tracking-widest mb-0.5">企業経営画面</p>
             <h1 className="text-2xl font-bold">{profile.name} — {profile.fullName}</h1>
-            <p className="text-white/80 text-sm">{periodLabel}{gameCode && ` | ゲーム: ${gameCode}`}</p>
+            <p className="text-ink/80 text-sm">{periodLabel}{gameCode && ` | ゲーム: ${gameCode}`}</p>
           </div>
           <div className="flex items-center gap-4">
-            {gameCode && <button onClick={load} className="text-white/70 hover:text-white text-sm">🔄 更新</button>}
-            <Link href={backUrl} className="text-white/70 hover:text-white text-sm">← 戻る</Link>
+            {gameCode && <button onClick={load} className="text-ink/70 hover:text-ink text-sm">🔄 更新</button>}
+            <Link href={backUrl} className="text-ink/70 hover:text-ink text-sm">← 戻る</Link>
           </div>
         </div>
       </div>
@@ -219,7 +219,7 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
               <h2 className="text-xl font-bold mb-2">意思決定を提出しました</h2>
               <p className="text-gray-400 mb-6">ゲームマスターがターンを処理するまでお待ちください。</p>
               {isGmTestMode && gameCode && (
-                <Link href={`/gm/${gameCode}`} className="inline-block px-6 py-2 bg-purple-700 hover:bg-purple-600 rounded-lg text-sm font-semibold">
+                <Link href={`/gm/${gameCode}`} className="inline-block px-6 py-2 bg-purple-700 hover:bg-purple-600 rounded-lg text-sm font-semibold text-white">
                   ← GMコンソールに戻る
                 </Link>
               )}
@@ -228,7 +228,7 @@ export default function CompanyDashboard({ profile, phases, gameCode, isGmTestMo
             <div className="bg-gray-800 rounded-xl p-5">
               <div className="flex flex-wrap gap-2 mb-5">
                 {phases.map((p) => (
-                  <button key={p.id} onClick={() => setCurrentPhase(p.id)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${currentPhase===p.id ? `${colorBg[profile.color]} text-white` : "bg-gray-700 text-gray-400 hover:bg-gray-600"}`}>
+                  <button key={p.id} onClick={() => setCurrentPhase(p.id)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${currentPhase===p.id ? `${colorBg[profile.color]} text-ink` : "bg-gray-700 text-gray-400 hover:bg-gray-600"}`}>
                     F{p.id}: {p.title}
                   </button>
                 ))}
@@ -257,20 +257,20 @@ function BSRow({ label, value, highlight, bold, sub }: { label: string; value: n
   return (
     <div className="flex justify-between">
       <span className={sub ? "text-gray-500 pl-2" : "text-gray-400"}>{label}</span>
-      <span className={`${highlight ? "text-yellow-400 font-semibold" : bold ? "text-white font-semibold" : "text-gray-300"} ${isNeg ? "text-orange-400" : ""}`}>
+      <span className={`${highlight ? "text-yellow-400 font-semibold" : bold ? "text-ink font-semibold" : "text-gray-300"} ${isNeg ? "text-orange-400" : ""}`}>
         {isNeg ? `△${fmt(value)}` : fmt(value)}
       </span>
     </div>
   );
 }
 function Row({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
-  return <div className="flex justify-between"><span className="text-gray-400">{label}</span><span className={highlight ? "text-yellow-400 font-semibold" : "text-white"}>{value}</span></div>;
+  return <div className="flex justify-between"><span className="text-gray-400">{label}</span><span className={highlight ? "text-yellow-400 font-semibold" : "text-ink"}>{value}</span></div>;
 }
 function PLRow({ label, value, highlight, bold, indent }: { label: string; value: string; highlight?: boolean; bold?: boolean; indent?: boolean }) {
   return (
     <div className="flex justify-between">
       <span className={`${indent ? "pl-3 text-gray-500" : "text-gray-300"}`}>{label}</span>
-      <span className={`${highlight ? "text-red-400 font-semibold" : bold ? "text-white font-semibold" : "text-gray-300"}`}>{value}</span>
+      <span className={`${highlight ? "text-red-400 font-semibold" : bold ? "text-ink font-semibold" : "text-gray-300"}`}>{value}</span>
     </div>
   );
 }
@@ -293,15 +293,15 @@ function Phase0Panel({ liveState, lastResult, prevDecisions, confirmedOrders }: 
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-gray-800/60 rounded-lg p-2 text-center">
             <p className="text-gray-400 text-xs mb-1">原料在庫<br/><span className="text-gray-500">（冷凍生エビ）</span></p>
-            <p className="text-white font-bold text-base">{((liveState?.rawInventoryQty ?? 0)).toLocaleString()} t</p>
+            <p className="text-ink font-bold text-base">{((liveState?.rawInventoryQty ?? 0)).toLocaleString()} t</p>
           </div>
           <div className="bg-gray-800/60 rounded-lg p-2 text-center">
             <p className="text-gray-400 text-xs mb-1">バルク製品<br/>在庫</p>
-            <p className="text-white font-bold text-base">{((liveState?.bulkInventoryQty ?? 0)).toLocaleString()} t</p>
+            <p className="text-ink font-bold text-base">{((liveState?.bulkInventoryQty ?? 0)).toLocaleString()} t</p>
           </div>
           <div className="bg-gray-800/60 rounded-lg p-2 text-center">
             <p className="text-gray-400 text-xs mb-1">VAP製品<br/>在庫</p>
-            <p className="text-white font-bold text-base">{((liveState?.vapInventoryQty ?? 0)).toLocaleString()} t</p>
+            <p className="text-ink font-bold text-base">{((liveState?.vapInventoryQty ?? 0)).toLocaleString()} t</p>
           </div>
         </div>
       </div>

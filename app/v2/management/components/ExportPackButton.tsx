@@ -198,7 +198,7 @@ export function ExportPackButton({ simulationRunId, scenarioId, seed, completedT
         onClick={exportPack}
         disabled={disabled}
         data-testid="export-pack"
-        className="rounded bg-indigo-700 px-3 py-1.5 text-sm font-semibold hover:bg-indigo-600 disabled:opacity-40"
+        className="rounded bg-indigo-700 px-3 py-1.5 text-sm font-semibold hover:bg-indigo-600 disabled:opacity-40 text-white"
       >
         AI Analysis Pack を出力
       </button>

@@ -198,21 +198,21 @@ export default function TestGameManagement({ gameCode, onChanged }: Props) {
         <button
           onClick={() => setConfirmStep("reset")}
           disabled={isBusy}
-          className="px-4 py-2 bg-orange-700 hover:bg-orange-600 rounded-lg text-sm font-semibold disabled:opacity-50"
+          className="px-4 py-2 bg-orange-700 hover:bg-orange-600 rounded-lg text-sm font-semibold disabled:opacity-50 text-white"
         >
           初期状態に戻す
         </button>
         <button
           onClick={() => { setConfirmStep(null); handleClone(); }}
           disabled={isBusy}
-          className="px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded-lg text-sm font-semibold disabled:opacity-50"
+          className="px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded-lg text-sm font-semibold disabled:opacity-50 text-white"
         >
           {busy === "clone" ? "複製中..." : "このゲームを複製"}
         </button>
         <button
           onClick={() => { setDeleteConfirmInput(""); setConfirmStep("delete"); }}
           disabled={isBusy}
-          className="px-4 py-2 bg-red-800 hover:bg-red-700 rounded-lg text-sm font-semibold disabled:opacity-50"
+          className="px-4 py-2 bg-red-800 hover:bg-red-700 rounded-lg text-sm font-semibold disabled:opacity-50 text-white"
         >
           このテストゲームを削除
         </button>
@@ -241,7 +241,7 @@ export default function TestGameManagement({ gameCode, onChanged }: Props) {
           <p className="text-gray-400 mb-3">意思決定とターン結果は削除されます。スナップショットは維持されます。</p>
           <div className="flex gap-2">
             <button onClick={() => setConfirmStep(null)} disabled={isBusy} className="px-3 py-1.5 bg-gray-700 rounded-lg text-sm">キャンセル</button>
-            <button onClick={handleReset} disabled={isBusy} className="px-3 py-1.5 bg-orange-700 hover:bg-orange-600 rounded-lg text-sm font-semibold disabled:opacity-50">
+            <button onClick={handleReset} disabled={isBusy} className="px-3 py-1.5 bg-orange-700 hover:bg-orange-600 rounded-lg text-sm font-semibold disabled:opacity-50 text-white">
               {busy === "reset" ? "実行中..." : "実行する"}
             </button>
           </div>
@@ -263,7 +263,7 @@ export default function TestGameManagement({ gameCode, onChanged }: Props) {
             <button
               onClick={handleDelete}
               disabled={isBusy || deleteConfirmInput !== gameCode}
-              className="px-3 py-1.5 bg-red-700 hover:bg-red-600 rounded-lg text-sm font-semibold disabled:opacity-50"
+              className="px-3 py-1.5 bg-red-700 hover:bg-red-600 rounded-lg text-sm font-semibold disabled:opacity-50 text-white"
             >
               {busy === "delete" ? "削除中..." : "削除する"}
             </button>
@@ -285,7 +285,7 @@ export default function TestGameManagement({ gameCode, onChanged }: Props) {
           <button
             onClick={handleCreateSnapshot}
             disabled={isBusy}
-            className="px-4 py-2 bg-green-700 hover:bg-green-600 rounded-lg text-sm font-semibold disabled:opacity-50"
+            className="px-4 py-2 bg-green-700 hover:bg-green-600 rounded-lg text-sm font-semibold disabled:opacity-50 text-white"
           >
             {busy === "snapshot-create" ? "保存中..." : "現在の状態を保存"}
           </button>
@@ -307,7 +307,7 @@ export default function TestGameManagement({ gameCode, onChanged }: Props) {
                     <button
                       onClick={() => setConfirmStep({ type: "restore", snapshotId: s.id, label: s.label })}
                       disabled={isBusy}
-                      className="text-xs px-3 py-1 bg-blue-700 hover:bg-blue-600 rounded disabled:opacity-50"
+                      className="text-xs px-3 py-1 bg-blue-700 hover:bg-blue-600 rounded disabled:opacity-50 text-white"
                     >
                       この状態に戻す
                     </button>
@@ -326,7 +326,7 @@ export default function TestGameManagement({ gameCode, onChanged }: Props) {
                     <p className="mb-2">現在の状態は自動保存された後、選択したスナップショット（{s.label || "（ラベルなし）"}）へ戻ります。</p>
                     <div className="flex gap-2">
                       <button onClick={() => setConfirmStep(null)} disabled={isBusy} className="px-3 py-1 bg-gray-700 rounded">キャンセル</button>
-                      <button onClick={() => handleRestore(s.id)} disabled={isBusy} className="px-3 py-1 bg-blue-700 hover:bg-blue-600 rounded font-semibold disabled:opacity-50">
+                      <button onClick={() => handleRestore(s.id)} disabled={isBusy} className="px-3 py-1 bg-blue-700 hover:bg-blue-600 rounded font-semibold disabled:opacity-50 text-white">
                         {busy === `restore-${s.id}` ? "復元中..." : "復元する"}
                       </button>
                     </div>

@@ -57,7 +57,7 @@ export function PlayerCompanyDatabookButton({ companyId }: Props) {
         onClick={download}
         disabled={loading}
         data-testid="company-databook-download"
-        className="rounded bg-emerald-700 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40"
+        className="rounded bg-emerald-700 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40 text-white"
       >
         {loading ? "生成中…" : `会社Databookをダウンロード（${companyId}）`}
       </button>

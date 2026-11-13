@@ -1,8 +1,280 @@
 @import "tailwindcss";
 
+/*
+ * ShrimpX V2 — 明るい配色（Bright Shrimp テーマ）
+ * ---------------------------------------------------------------------------
+ * 【背景】
+ * 画面は149個のtsxで `bg-gray-900 text-gray-100` `bg-slate-950 text-slate-100`
+ * のように暗い配色が直接書かれている。受講者から「背景が真っ黒で読みにくい」と
+ * いう声があり、明るい配色へ変更する必要が出た。
+ *
+ * 【方針】
+ * 各tsxのclassNameを書き換えるのではなく、Tailwind v4のテーマ変数
+ * （`bg-gray-900` は `background-color: var(--color-gray-900)` に展開される）を
+ * ここで再定義して、アプリ全体の配色を一括で差し替える。
+ *  - 画面側のコードを触らないので、配色の差し戻しはこのファイルだけで済む。
+ *  - 「どの数字が背景でどの数字が文字か」という既存コードの前提を壊さないよう、
+ *    数字の意味を入れ替える（下記）。
+ *
+ * 【数字の意味の入れ替え】
+ * 暗い配色では「数字が大きいほど暗い＝背景、小さいほど明るい＝文字」だった。
+ * 明るい配色ではこれを逆にする。
+ *   ニュートラル（gray / slate）: 完全に反転する
+ *     950〜700 → 背景・面・枠（明るい）   400〜50 → 文字（暗い）   500〜600 → 中間
+ *   アクセント（amber / sky / rose / teal など）: 両端だけ反転する
+ *     950〜800 → 淡い色面（注意書きパネルの背景など）
+ *     700〜500 → 彩度の高い中〜濃色。白文字のボタンに使われているため暗いまま残す
+ *     400〜50  → 明るい面の上で読める濃いアクセント文字
+ *   そのため 50〜950 は単調に並ばない。これは意図的な割り当てである。
+ *
+ * 【白文字】
+ * `text-white` は暗い面の上の文字として使われていた。ニュートラル面が明るく
+ * なると読めなくなるため、`text-ink`（濃い墨色）へ置き換えてある。
+ * 彩度の高いボタン（bg-teal-600 など）の上の `text-white` はそのまま残す。
+ */
+
+@theme {
+  /* ---- 文字色・紙色（text-white の置き換え先）---- */
+  --color-ink: #3a2a2c;
+  --color-paper: #fffdfb;
+
+  /* ---- gray: 暖色系ニュートラル（エビ色の紙）---- */
+  --color-gray-50: #2b1e20;
+  --color-gray-100: #3a2a2c;
+  --color-gray-200: #4a3639;
+  --color-gray-300: #5b4346;
+  --color-gray-400: #7a5c60;
+  --color-gray-500: #82656a;
+  --color-gray-600: #dcc3bb;
+  --color-gray-700: #f6e6dc;
+  --color-gray-800: #fffaf6;
+  --color-gray-900: #fdf2ea;
+  --color-gray-950: #f8e8dc;
+
+  /* ---- slate: 寒色系ニュートラル（海の色）---- */
+  --color-slate-50: #1d2430;
+  --color-slate-100: #2a3342;
+  --color-slate-200: #394455;
+  --color-slate-300: #4b5768;
+  --color-slate-400: #5d6a83;
+  --color-slate-500: #68748c;
+  --color-slate-600: #c8d4e4;
+  --color-slate-700: #e6eef7;
+  --color-slate-800: #f3f8fd;
+  --color-slate-900: #fbfdff;
+  --color-slate-950: #eef4fb;
+
+  /* ---- zinc / neutral / stone: gray と同じ扱いにする ---- */
+  --color-zinc-50: #2b1e20;
+  --color-zinc-100: #3a2a2c;
+  --color-zinc-200: #4a3639;
+  --color-zinc-300: #5b4346;
+  --color-zinc-400: #7a5c60;
+  --color-zinc-500: #8c6e72;
+  --color-zinc-600: #dcc3bb;
+  --color-zinc-700: #f6e6dc;
+  --color-zinc-800: #fffaf6;
+  --color-zinc-900: #fdf2ea;
+  --color-zinc-950: #f8e8dc;
+  --color-neutral-50: #2b1e20;
+  --color-neutral-100: #3a2a2c;
+  --color-neutral-200: #4a3639;
+  --color-neutral-300: #5b4346;
+  --color-neutral-400: #7a5c60;
+  --color-neutral-500: #8c6e72;
+  --color-neutral-600: #dcc3bb;
+  --color-neutral-700: #f6e6dc;
+  --color-neutral-800: #fffaf6;
+  --color-neutral-900: #fdf2ea;
+  --color-neutral-950: #f8e8dc;
+  --color-stone-50: #2b1e20;
+  --color-stone-100: #3a2a2c;
+  --color-stone-200: #4a3639;
+  --color-stone-300: #5b4346;
+  --color-stone-400: #7a5c60;
+  --color-stone-500: #8c6e72;
+  --color-stone-600: #dcc3bb;
+  --color-stone-700: #f6e6dc;
+  --color-stone-800: #fffaf6;
+  --color-stone-900: #fdf2ea;
+  --color-stone-950: #f8e8dc;
+
+  /* ---- amber: 注意・強調（最頻出のアクセント）---- */
+  --color-amber-50: #4a2c05;
+  --color-amber-100: #5a360a;
+  --color-amber-200: #7a4a0d;
+  --color-amber-300: #8f5a10;
+  --color-amber-400: #a86c14;
+  --color-amber-500: #e8a33c;
+  --color-amber-600: #c8821c;
+  --color-amber-700: #a96c12;
+  --color-amber-800: #fdeccd;
+  --color-amber-900: #fef4e2;
+  --color-amber-950: #fff9ef;
+
+  /* ---- yellow ---- */
+  --color-yellow-50: #4a3a05;
+  --color-yellow-100: #5a470a;
+  --color-yellow-200: #745c0d;
+  --color-yellow-300: #8a6e10;
+  --color-yellow-400: #a38414;
+  --color-yellow-500: #e3bb33;
+  --color-yellow-600: #c49c1c;
+  --color-yellow-700: #a38214;
+  --color-yellow-800: #fbf0cc;
+  --color-yellow-900: #fdf7e0;
+  --color-yellow-950: #fffced;
+
+  /* ---- orange ---- */
+  --color-orange-50: #4d2408;
+  --color-orange-100: #5e2d0b;
+  --color-orange-200: #7d3d0f;
+  --color-orange-300: #954a12;
+  --color-orange-400: #ad5916;
+  --color-orange-500: #e8793c;
+  --color-orange-600: #cc5f1f;
+  --color-orange-700: #ab4d15;
+  --color-orange-800: #ffe6d5;
+  --color-orange-900: #fff1e7;
+  --color-orange-950: #fff7f2;
+
+  /* ---- sky: 情報・リンク ---- */
+  --color-sky-50: #0a2f47;
+  --color-sky-100: #0d3a57;
+  --color-sky-200: #114c72;
+  --color-sky-300: #145b88;
+  --color-sky-400: #176b9f;
+  --color-sky-500: #2b92cc;
+  --color-sky-600: #1d7ab2;
+  --color-sky-700: #176693;
+  --color-sky-800: #d8edfa;
+  --color-sky-900: #e9f5fd;
+  --color-sky-950: #f4fafe;
+
+  /* ---- blue ---- */
+  --color-blue-50: #11284d;
+  --color-blue-100: #16315e;
+  --color-blue-200: #1d417c;
+  --color-blue-300: #224e94;
+  --color-blue-400: #285bad;
+  --color-blue-500: #3f7fd6;
+  --color-blue-600: #2f6ac0;
+  --color-blue-700: #2659a1;
+  --color-blue-800: #ddeafb;
+  --color-blue-900: #ecf3fd;
+  --color-blue-950: #f5f9fe;
+
+  /* ---- teal: 実行ボタン ---- */
+  --color-teal-50: #06342f;
+  --color-teal-100: #08413b;
+  --color-teal-200: #0b554d;
+  --color-teal-300: #0d665c;
+  --color-teal-400: #0f786c;
+  --color-teal-500: #17a192;
+  --color-teal-600: #12887b;
+  --color-teal-700: #0e7064;
+  --color-teal-800: #d6f1ec;
+  --color-teal-900: #e8f8f5;
+  --color-teal-950: #f3fcfa;
+
+  /* ---- emerald: 良い結果 ---- */
+  --color-emerald-50: #07331f;
+  --color-emerald-100: #0a4028;
+  --color-emerald-200: #0d5434;
+  --color-emerald-300: #0f653e;
+  --color-emerald-400: #127849;
+  --color-emerald-500: #1ba264;
+  --color-emerald-600: #158854;
+  --color-emerald-700: #107046;
+  --color-emerald-800: #d7f2e3;
+  --color-emerald-900: #e9f9f0;
+  --color-emerald-950: #f3fcf7;
+
+  /* ---- green ---- */
+  --color-green-50: #0b3317;
+  --color-green-100: #0e401d;
+  --color-green-200: #135427;
+  --color-green-300: #17652f;
+  --color-green-400: #1b7838;
+  --color-green-500: #2aa250;
+  --color-green-600: #228843;
+  --color-green-700: #1b7037;
+  --color-green-800: #daf3e0;
+  --color-green-900: #ebfaee;
+  --color-green-950: #f4fcf6;
+
+  /* ---- rose: 警告・マイナス ---- */
+  --color-rose-50: #4a0d1c;
+  --color-rose-100: #5c1124;
+  --color-rose-200: #7a172f;
+  --color-rose-300: #921c39;
+  --color-rose-400: #ad2143;
+  --color-rose-500: #d94f6c;
+  --color-rose-600: #c23355;
+  --color-rose-700: #a22845;
+  --color-rose-800: #fde0e6;
+  --color-rose-900: #feeef1;
+  --color-rose-950: #fff6f8;
+
+  /* ---- red: エラー ---- */
+  --color-red-50: #4d1010;
+  --color-red-100: #5f1414;
+  --color-red-200: #7e1b1b;
+  --color-red-300: #972020;
+  --color-red-400: #b32626;
+  --color-red-500: #dc5252;
+  --color-red-600: #c73636;
+  --color-red-700: #a72b2b;
+  --color-red-800: #fde1e1;
+  --color-red-900: #feeeee;
+  --color-red-950: #fff6f6;
+
+  /* ---- purple / violet / indigo ---- */
+  --color-purple-50: #33104d;
+  --color-purple-100: #3f145e;
+  --color-purple-200: #531b7c;
+  --color-purple-300: #632094;
+  --color-purple-400: #7426ad;
+  --color-purple-500: #9c4fd6;
+  --color-purple-600: #8733c0;
+  --color-purple-700: #7029a1;
+  --color-purple-800: #efdffb;
+  --color-purple-900: #f7eefd;
+  --color-purple-950: #fbf6fe;
+  --color-violet-50: #2a1360;
+  --color-violet-100: #341873;
+  --color-violet-200: #442095;
+  --color-violet-300: #5127b1;
+  --color-violet-400: #5f2ecc;
+  --color-violet-500: #8257e0;
+  --color-violet-600: #6d3cd4;
+  --color-violet-700: #5a30b4;
+  --color-violet-800: #e7dffc;
+  --color-violet-900: #f3eefe;
+  --color-violet-950: #f9f6ff;
+  --color-indigo-50: #1b2060;
+  --color-indigo-100: #222873;
+  --color-indigo-200: #2d3495;
+  --color-indigo-300: #363eb1;
+  --color-indigo-400: #4049cc;
+  --color-indigo-500: #6670e0;
+  --color-indigo-600: #4f59d4;
+  --color-indigo-700: #4049b4;
+  --color-indigo-800: #e0e2fc;
+  --color-indigo-900: #eeeffe;
+  --color-indigo-950: #f6f7ff;
+
+  /* ---- 角を少しだけ丸くする ---- */
+  --radius-sm: 0.3rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fdf2ea;
+  --foreground: #3a2a2c;
 }
 
 @theme inline {
@@ -12,15 +284,14 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-shrimpx-ui), "Hiragino Maru Gothic ProN", "Hiragino Sans",
+    "Yu Gothic", system-ui, sans-serif;
+}
+
+/* 数表は桁をそろえる（この画面は数字を読み比べる場面が多い） */
+table {
+  font-variant-numeric: tabular-nums;
 }

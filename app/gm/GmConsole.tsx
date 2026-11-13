@@ -44,11 +44,11 @@ export default function GmConsole({ isProduction, appEnvironment }: Props) {
     }
   };
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="min-h-screen bg-gray-900 text-ink p-8">
       <div className="max-w-3xl mx-auto">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">🎮 GMコンソール</h1>
-          <Link href="/" className="text-gray-400 hover:text-white text-sm">← プレイヤー画面</Link>
+          <Link href="/" className="text-gray-400 hover:text-ink text-sm">← プレイヤー画面</Link>
         </div>
         <div className="bg-gray-800 rounded-2xl p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">
@@ -88,7 +88,7 @@ export default function GmConsole({ isProduction, appEnvironment }: Props) {
           {newGame && (
             <div className="mt-4 bg-green-900/40 border border-green-500 rounded-xl p-4 text-center">
               <p className="text-green-400 text-sm mb-1">ゲームが作成されました！</p>
-              <p className="text-4xl font-bold tracking-widest text-white mb-2">{newGame.gameCode}</p>
+              <p className="text-4xl font-bold tracking-widest text-ink mb-2">{newGame.gameCode}</p>
               <p className="text-gray-400 text-xs">このコードをプレイヤーに伝えてください</p>
               <p className="text-gray-400 text-xs mt-1">参加URL: <span className="text-blue-400">{typeof window !== "undefined" ? window.location.origin : ""}/lobby/{newGame.gameCode}</span></p>
             </div>

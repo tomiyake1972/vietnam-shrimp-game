@@ -23,7 +23,7 @@ function ContributionBar(props: { readonly label: string; readonly value: number
     <div className="flex items-center gap-2">
       <span className="w-24 text-[10px] text-gray-500 shrink-0">{label}</span>
       <div className="flex-1 bg-gray-900/60 rounded h-2 overflow-hidden">
-        <div className="h-2 bg-teal-500/80" style={{ width: `${pct}%` }} />
+        <div className="h-2 bg-teal-500/80 text-white" style={{ width: `${pct}%` }} />
       </div>
       <span className="w-14 text-[10px] text-gray-400 text-right shrink-0">{value.toFixed(3)}</span>
     </div>

@@ -89,6 +89,7 @@ import { salesModelDisplayLabelFor } from "../../company-lab/play/_lib/salesMode
 import { SalesModelId } from "../../../lib/v2/sales/salesModels";
 import { salesModelIdForNextRun } from "../lib/nextRunSalesModel";
 import { newRunId } from "../lib/runId";
+import ShrimpMark from "../../../components/ShrimpMark";
 
 const DEFAULT_SCENARIO_ID = "baseline";
 const DEFAULT_SEED = "management-console-32q";
@@ -1030,7 +1031,7 @@ export function ManagementConsole() {
       <header className="sticky top-0 z-10 border-b border-slate-700 bg-slate-900/95 px-4 py-2.5 backdropblur">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <div>
-            <h1 className="text-base font-bold tracking-tight">ShrimpX 経営管制室</h1>
+            <h1 className="flex items-center gap-2 text-base font-bold tracking-tight"><ShrimpMark size={26} className="shrink-0" />ShrimpX 経営管制室</h1>
             <p className="text-[11px] text-slate-400">Game Owner / test environment 専用</p>
           </div>
 
@@ -1063,19 +1064,19 @@ export function ManagementConsole() {
 
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             <button type="button" onClick={() => run(1)} disabled={busy || restoring || persistenceBlocked || finished} data-testid="run-1"
-              className="rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40">
+              className="rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40 text-white">
               1 Turn
             </button>
             <button type="button" onClick={() => run(4)} disabled={busy || restoring || persistenceBlocked || finished} data-testid="run-4"
-              className="rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40">
+              className="rounded bg-sky-700 px-3 py-1.5 text-sm font-semibold hover:bg-sky-600 disabled:opacity-40 text-white">
               4 Turns
             </button>
             <button type="button" onClick={() => run(MANAGEMENT_CONSOLE_STANDARD_TURNS)} disabled={busy || restoring || persistenceBlocked || finished} data-testid="run-32"
-              className="rounded bg-emerald-700 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40">
+              className="rounded bg-emerald-700 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-40 text-white">
               32 Turns
             </button>
             <button type="button" onClick={() => { stopRequested.current = true; setPhase("stopping"); }} disabled={phase !== "running"} data-testid="stop"
-              className="rounded bg-rose-700 px-3 py-1.5 text-sm font-semibold hover:bg-rose-600 disabled:opacity-40">
+              className="rounded bg-rose-700 px-3 py-1.5 text-sm font-semibold hover:bg-rose-600 disabled:opacity-40 text-white">
               STOP
             </button>
             {/* 【Game End / Final Results・指示§3】通常のTurn進行ボタンとは視覚的に
@@ -1229,7 +1230,7 @@ export function ManagementConsole() {
                 )}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-semibold text-rose-100 underline underline-offset-2 hover:text-white"
+                className="font-semibold text-rose-100 underline underline-offset-2 hover:text-ink"
                 data-testid="persistence-relogin-link"
               >
                 こちらから再ログイン

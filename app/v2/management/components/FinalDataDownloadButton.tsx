@@ -80,7 +80,7 @@ export function FinalDataDownloadButton({ run, fixtures, session }: Props) {
         onClick={download}
         disabled={!run.gameEndedAt}
         data-testid="final-data-download"
-        className="rounded bg-indigo-700 px-3 py-1.5 text-sm font-semibold hover:bg-indigo-600 disabled:opacity-40"
+        className="rounded bg-indigo-700 px-3 py-1.5 text-sm font-semibold hover:bg-indigo-600 disabled:opacity-40 text-white"
       >
         Final Snapshot / TSV・配当推移 を出力（JSON）
       </button>

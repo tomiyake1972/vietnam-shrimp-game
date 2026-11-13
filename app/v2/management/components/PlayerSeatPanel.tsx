@@ -178,7 +178,7 @@ export function PlayerSeatPanel({ runId }: Props) {
                 onClick={() => void handleIssue(s.companyId)}
                 disabled={busyCompanyId === s.companyId}
                 data-testid={`player-seat-issue-${s.companyId}`}
-                className="rounded bg-sky-700 px-2.5 py-1 text-[11px] font-semibold hover:bg-sky-600 disabled:opacity-40"
+                className="rounded bg-sky-700 px-2.5 py-1 text-[11px] font-semibold hover:bg-sky-600 disabled:opacity-40 text-white"
               >
                 {s.joinIssued ? "参加リンク再発行" : "参加リンク発行"}
               </button>

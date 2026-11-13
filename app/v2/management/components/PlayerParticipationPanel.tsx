@@ -339,7 +339,7 @@ export function PlayerParticipationPanel({ runId, fixtures, controlModes, onChan
                           onClick={() => void handleIssue(f.companyId)}
                           disabled={busy || disabled || !confirmedPlayer}
                           data-testid={`participation-issue-${f.companyId}`}
-                          className="rounded bg-sky-700 px-2.5 py-1 text-[11px] font-semibold hover:bg-sky-600 disabled:opacity-40"
+                          className="rounded bg-sky-700 px-2.5 py-1 text-[11px] font-semibold hover:bg-sky-600 disabled:opacity-40 text-white"
                         >
                           {seat?.joinIssued ? "参加リンクを再発行" : "参加リンクを発行"}
                         </button>
@@ -380,7 +380,7 @@ export function PlayerParticipationPanel({ runId, fixtures, controlModes, onChan
                         onClick={() => void handleSetMode(f.companyId, "PLAYER")}
                         disabled={disabled || save === "saving"}
                         data-testid={`participation-to-player-${f.companyId}`}
-                        className="rounded bg-sky-700 px-2.5 py-1 text-[11px] font-semibold hover:bg-sky-600 disabled:opacity-40"
+                        className="rounded bg-sky-700 px-2.5 py-1 text-[11px] font-semibold hover:bg-sky-600 disabled:opacity-40 text-white"
                       >
                         受講者に操作してもらう
                       </button>
@@ -401,7 +401,7 @@ export function PlayerParticipationPanel({ runId, fixtures, controlModes, onChan
                           type="button"
                           onClick={() => void handleCopy(f.companyId, revealed)}
                           data-testid={`participation-copy-${f.companyId}`}
-                          className="rounded bg-sky-700 px-2 py-0.5 text-[11px] font-semibold hover:bg-sky-600"
+                          className="rounded bg-sky-700 px-2 py-0.5 text-[11px] font-semibold hover:bg-sky-600 text-white"
                         >
                           コピー
                         </button>

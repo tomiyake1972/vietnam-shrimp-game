@@ -107,7 +107,7 @@ export function StandardAiAuditWorkbookButton({ simulationRunId, completedTurns,
         onClick={exportWorkbook}
         disabled={disabled}
         data-testid="export-standard-ai-audit"
-        className="rounded bg-teal-700 px-3 py-1.5 text-sm font-semibold hover:bg-teal-600 disabled:opacity-40"
+        className="rounded bg-teal-700 px-3 py-1.5 text-sm font-semibold hover:bg-teal-600 disabled:opacity-40 text-white"
       >
         {label}
       </button>

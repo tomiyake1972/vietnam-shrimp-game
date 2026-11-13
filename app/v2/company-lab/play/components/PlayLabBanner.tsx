@@ -9,7 +9,7 @@
 
 export default function PlayLabBanner() {
   return (
-    <div className="sticky top-0 z-50 w-full bg-sky-800 text-white px-3 py-2 text-center text-xs sm:text-sm font-bold tracking-wide shadow-md">
+    <div className="sticky top-0 z-50 w-full bg-sky-800 text-ink px-3 py-2 text-center text-xs sm:text-sm font-bold tracking-wide shadow-md">
       🎮 ShrimpX V2 Company Labテストプレイ（Phase 8C・GM/開発者専用） — 本番会社画面ではありません・サーバー保存あり（Redisへ永続化・リロード後も再開可能）
     </div>
   );
